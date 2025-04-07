@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 bevy = "0.15.3"
+reqwest = { version = "0.12.15", features = ["blocking"] }
 
 [profile.dev]
 opt-level = 1
