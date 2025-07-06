@@ -5,7 +5,7 @@ use std::f32::consts::PI;
 use crate::camera::{CAMERA_DISTANCE, CAMERA_HEIGHT, CameraState, MainCamera};
 use crate::player::{PLAYER_SIZE, Player};
 
-const USE_CUSTOM_MODEL: bool = true;
+const USE_CUSTOM_MODEL: bool = false;
 
 pub struct SetupPlugin;
 
@@ -64,7 +64,7 @@ fn setup_scene(
 
     if USE_CUSTOM_MODEL {
         let glb_scene = load_scene_from_ipfs(
-            "https://ipfs.io/ipfs/QmWMYVUF2pa4GkoMgquyY8nmYjQJDP9yxnSBvjVqH7EJQr",
+            "https://ekza.io/ipfs/QmWMYVUF2pa4GkoMgquyY8nmYjQJDP9yxnSBvjVqH7EJQr",
             &asset_server,
         );
 
