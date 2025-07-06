@@ -119,6 +119,7 @@ fn move_player(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn animate_jump(
     time: Res<Time>,
     mut query: Query<(&mut Transform, &mut Jumping), (With<Player>, With<MovementTarget>)>,

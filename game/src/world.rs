@@ -19,7 +19,7 @@ pub fn load_scene_from_ipfs(url: &str, asset_server: &AssetServer) -> Handle<Sce
     use reqwest::blocking as req_blocking;
     use std::fs;
 
-    let last_segment = url.split('/').last().unwrap_or("downloaded_scene.glb");
+    let last_segment = url.rsplit('/').next().unwrap_or("downloaded_scene.glb");
 
     let filename = if last_segment.ends_with(".glb") {
         last_segment.to_string()
@@ -42,9 +42,9 @@ pub fn load_scene_from_ipfs(url: &str, asset_server: &AssetServer) -> Handle<Sce
         .unwrap_or_else(|e| panic!("Failed to read bytes from {url}: {e}"));
 
     fs::write(&final_path, &bytes)
-        .unwrap_or_else(|e| panic!("Failed to write asset file {:?}: {e}", final_path));
+        .unwrap_or_else(|e| panic!("Failed to write asset file {final_path:?}: {e}"));
 
-    let relative_path = format!("downloaded/{}#Scene0", filename);
+    let relative_path = format!("downloaded/{filename}#Scene0");
     let scene_handle: Handle<Scene> = asset_server.load(&relative_path);
 
     scene_handle
