@@ -7,6 +7,13 @@ use crate::player::{PLAYER_SIZE, Player};
 
 const USE_CUSTOM_MODEL: bool = true;
 
+#[derive(Resource, Clone)]
+pub struct PlayerAssets {
+    pub scene: Option<Handle<Scene>>,
+    pub mesh: Handle<Mesh>,
+    pub material: Handle<StandardMaterial>,
+}
+
 pub struct SetupPlugin;
 
 impl Plugin for SetupPlugin {
@@ -18,6 +25,7 @@ impl Plugin for SetupPlugin {
 pub fn load_scene_from_ipfs(url: &str, asset_server: &AssetServer) -> Handle<Scene> {
     use reqwest::blocking as req_blocking;
     use std::fs;
+    use std::path::PathBuf;
 
     let last_segment = url.split('/').last().unwrap_or("downloaded_scene.glb");
 
@@ -27,8 +35,7 @@ pub fn load_scene_from_ipfs(url: &str, asset_server: &AssetServer) -> Handle<Sce
         format!("{last_segment}.glb")
     };
 
-    let assets_dir = std::env::current_dir()
-        .expect("Could not get current directory")
+    let assets_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("assets")
         .join("downloaded");
     fs::create_dir_all(&assets_dir).expect("Failed to create ./assets/downloaded folder");
@@ -62,12 +69,29 @@ fn setup_scene(
     let ground_material_handle: Handle<StandardMaterial> =
         materials.add(StandardMaterial::from(Color::srgb(0.3, 0.5, 0.3)));
 
-    if USE_CUSTOM_MODEL {
-        let glb_scene = load_scene_from_ipfs(
+    let player_mesh_handle: Handle<Mesh> = meshes.add(Mesh::from(Cuboid::new(
+        PLAYER_SIZE,
+        PLAYER_SIZE,
+        PLAYER_SIZE,
+    )));
+    let player_material_handle: Handle<StandardMaterial> =
+        materials.add(StandardMaterial::from(Color::srgb(0.8, 0.7, 0.6)));
+    let scene_handle = if USE_CUSTOM_MODEL {
+        Some(load_scene_from_ipfs(
             "https://ipfs.io/ipfs/QmWMYVUF2pa4GkoMgquyY8nmYjQJDP9yxnSBvjVqH7EJQr",
             &asset_server,
-        );
+        ))
+    } else {
+        None
+    };
 
+    commands.insert_resource(PlayerAssets {
+        scene: scene_handle.clone(),
+        mesh: player_mesh_handle.clone(),
+        material: player_material_handle.clone(),
+    });
+
+    if let Some(glb_scene) = scene_handle {
         commands.spawn((
             SceneRoot(glb_scene),
             Transform {
@@ -81,14 +105,6 @@ fn setup_scene(
             Name::new("Player"),
         ));
     } else {
-        let player_mesh_handle: Handle<Mesh> = meshes.add(Mesh::from(Cuboid::new(
-            PLAYER_SIZE,
-            PLAYER_SIZE,
-            PLAYER_SIZE,
-        )));
-        let player_material_handle: Handle<StandardMaterial> =
-            materials.add(StandardMaterial::from(Color::srgb(0.8, 0.7, 0.6)));
-
         let player_transform = Transform::from_xyz(0.0, PLAYER_SIZE / 2.0, 0.0);
         commands.spawn((
             Mesh3d(player_mesh_handle),

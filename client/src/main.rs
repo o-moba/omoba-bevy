@@ -1,17 +1,22 @@
-use bevy::{app::AppExit, prelude::*};
+use bevy::{app::AppExit, asset::AssetPlugin, prelude::*};
 
 mod camera;
+mod net;
 mod player;
 mod world;
 
 use camera::CameraPlugin;
+use net::NetworkingPlugin;
 use player::PlayerPlugin;
 use world::SetupPlugin;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
-        .add_plugins((CameraPlugin, PlayerPlugin, SetupPlugin))
+        .add_plugins(DefaultPlugins.set(AssetPlugin {
+            file_path: format!("{}/assets", env!("CARGO_MANIFEST_DIR")),
+            ..default()
+        }))
+        .add_plugins((CameraPlugin, PlayerPlugin, SetupPlugin, NetworkingPlugin))
         .add_systems(Update, handle_exit_input)
         .run();
 }
