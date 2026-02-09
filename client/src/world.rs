@@ -3,7 +3,7 @@ use bevy::scene::SceneRoot;
 use std::f32::consts::PI;
 
 use crate::camera::{CAMERA_DISTANCE, CAMERA_HEIGHT, CameraState, MainCamera};
-use crate::player::{PLAYER_SIZE, Player};
+use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
 
 const USE_CUSTOM_MODEL: bool = true;
 
@@ -102,6 +102,8 @@ fn setup_scene(
             GlobalTransform::default(),
             Visibility::default(),
             Player,
+            PlayerBody,
+            VerticalVelocity::default(),
             Name::new("Player"),
         ));
     } else {
@@ -111,6 +113,8 @@ fn setup_scene(
             MeshMaterial3d(player_material_handle),
             player_transform,
             Player,
+            PlayerBody,
+            VerticalVelocity::default(),
             Name::new("Player"),
         ));
     }

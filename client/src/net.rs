@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::player::Player;
+use crate::player::{Player, PlayerBody};
 use crate::world::PlayerAssets;
 
 const DEFAULT_SERVER_ADDR: &str = "127.0.0.1:4000";
@@ -241,6 +241,7 @@ fn apply_server_snapshot(
         let mut entity_commands = commands.spawn((
             SpatialBundle::from_transform(Transform::from_xyz(player.x, player.y, player.z)),
             RemotePlayer,
+            PlayerBody,
             Name::new(format!("RemotePlayer-{}", player.id)),
         ));
         entity_commands.with_children(|parent| {

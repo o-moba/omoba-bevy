@@ -8,4 +8,5 @@ game:
 
 start:
 	cargo run -p server &
+	cargo run -p client &
 	cargo run -p client
