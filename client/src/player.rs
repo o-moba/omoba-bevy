@@ -7,6 +7,7 @@ use bevy::{
 use std::f32::consts::PI;
 
 use crate::camera::{CameraState, MainCamera};
+use crate::maps::MapLayout;
 
 pub const PLAYER_SPEED: f32 = 5.0;
 pub const PLAYER_SIZE: f32 = 1.0;
@@ -19,8 +20,11 @@ pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (handle_player_input, animate_jump, move_player).chain())
-            .add_systems(PostUpdate, apply_gravity);
+        app.add_systems(
+            Update,
+            (handle_player_input, animate_jump, move_player).chain(),
+        )
+        .add_systems(PostUpdate, apply_gravity);
     }
 }
 
@@ -51,6 +55,7 @@ fn handle_player_input(
     window_query: Query<&Window, With<PrimaryWindow>>,
     player_query: Query<Entity, With<Player>>,
     cam_state: Res<CameraState>,
+    map_layout: Option<Res<MapLayout>>,
 ) {
     if !cam_state.locked {
         return;
@@ -70,7 +75,10 @@ fn handle_player_input(
                     let infinite_plane = InfinitePlane3d::new(plane_normal);
                     if let Some(distance) = ray.intersect_plane(plane_origin, infinite_plane) {
                         if distance >= 0.0 {
-                            let target_pos = ray.get_point(distance);
+                            let mut target_pos = ray.get_point(distance);
+                            if let Some(map_layout) = map_layout.as_ref() {
+                                target_pos = map_layout.clamp_position(target_pos);
+                            }
                             if let Ok(player_entity) = player_query.get_single() {
                                 commands
                                     .entity(player_entity)
@@ -95,6 +103,7 @@ fn move_player(
     time: Res<Time>,
     mut query: Query<(Entity, &mut Transform, &MovementTarget), With<Player>>,
     other_players: Query<&Transform, (With<PlayerBody>, Without<Player>)>,
+    map_layout: Option<Res<MapLayout>>,
 ) {
     for (entity, mut transform, movement_target) in query.iter_mut() {
         let current_pos = transform.translation;
@@ -115,6 +124,9 @@ fn move_player(
                 movement_target.target.z,
             );
             desired = resolve_player_collisions(desired, &other_players);
+            if let Some(map_layout) = map_layout.as_ref() {
+                desired = map_layout.clamp_position(desired);
+            }
             transform.translation.x = desired.x;
             transform.translation.z = desired.z;
             commands.entity(entity).remove::<MovementTarget>();
@@ -122,6 +134,9 @@ fn move_player(
         } else {
             let mut desired = current_pos + direction * move_delta;
             desired = resolve_player_collisions(desired, &other_players);
+            if let Some(map_layout) = map_layout.as_ref() {
+                desired = map_layout.clamp_position(desired);
+            }
             transform.translation.x = desired.x;
             transform.translation.z = desired.z;
 

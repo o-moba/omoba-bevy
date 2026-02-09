@@ -3,6 +3,8 @@ use bevy::scene::SceneRoot;
 use std::f32::consts::PI;
 
 use crate::camera::{CAMERA_DISTANCE, CAMERA_HEIGHT, CameraState, MainCamera};
+use crate::combat::CombatStats;
+use crate::maps::MapLayout;
 use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
 
 const USE_CUSTOM_MODEL: bool = true;
@@ -42,8 +44,8 @@ pub fn load_scene_from_ipfs(url: &str, asset_server: &AssetServer) -> Handle<Sce
 
     let final_path = assets_dir.join(&filename);
 
-    let response = req_blocking::get(url)
-        .unwrap_or_else(|e| panic!("Failed to download {url}: {e}"));
+    let response =
+        req_blocking::get(url).unwrap_or_else(|e| panic!("Failed to download {url}: {e}"));
     let bytes = response
         .bytes()
         .unwrap_or_else(|e| panic!("Failed to read bytes from {url}: {e}"));
@@ -63,11 +65,10 @@ fn setup_scene(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut cam_state: ResMut<CameraState>,
     asset_server: Res<AssetServer>,
+    map_layout: Res<MapLayout>,
 ) {
-    let ground_mesh_handle: Handle<Mesh> =
-        meshes.add(Mesh::from(Plane3d::default().mesh().size(50.0, 50.0)));
-    let ground_material_handle: Handle<StandardMaterial> =
-        materials.add(StandardMaterial::from(Color::srgb(0.3, 0.5, 0.3)));
+    let map_layout = *map_layout;
+    let player_spawn = map_layout.home_spawn;
 
     let player_mesh_handle: Handle<Mesh> = meshes.add(Mesh::from(Cuboid::new(
         PLAYER_SIZE,
@@ -95,7 +96,7 @@ fn setup_scene(
         commands.spawn((
             SceneRoot(glb_scene),
             Transform {
-                translation: Vec3::new(0.0, PLAYER_SIZE / 2.0, 0.0),
+                translation: player_spawn,
                 rotation: Quat::IDENTITY,
                 scale: Vec3::splat(1.0),
             },
@@ -103,28 +104,23 @@ fn setup_scene(
             Visibility::default(),
             Player,
             PlayerBody,
+            CombatStats::default(),
             VerticalVelocity::default(),
             Name::new("Player"),
         ));
     } else {
-        let player_transform = Transform::from_xyz(0.0, PLAYER_SIZE / 2.0, 0.0);
+        let player_transform = Transform::from_translation(player_spawn);
         commands.spawn((
             Mesh3d(player_mesh_handle),
             MeshMaterial3d(player_material_handle),
             player_transform,
             Player,
             PlayerBody,
+            CombatStats::default(),
             VerticalVelocity::default(),
             Name::new("Player"),
         ));
     }
-
-    commands.spawn((
-        Mesh3d(ground_mesh_handle),
-        MeshMaterial3d(ground_material_handle),
-        Transform::from_xyz(0.0, 0.5, 0.0),
-        Name::new("Ground"),
-    ));
 
     let light_transform =
         Transform::from_rotation(Quat::from_euler(EulerRot::ZYX, 0.0, PI / 4.0, -PI / 4.0));
@@ -137,9 +133,9 @@ fn setup_scene(
         Name::new("Light"),
     ));
 
-    let initial_cam_pos = Vec3::new(0.0, CAMERA_HEIGHT, CAMERA_DISTANCE);
+    let initial_cam_pos = player_spawn + Vec3::new(0.0, CAMERA_HEIGHT, CAMERA_DISTANCE);
     let initial_cam_transform =
-        Transform::from_translation(initial_cam_pos).looking_at(Vec3::ZERO, Vec3::Y);
+        Transform::from_translation(initial_cam_pos).looking_at(player_spawn, Vec3::Y);
 
     let (_yaw, pitch, _roll) = initial_cam_transform.rotation.to_euler(EulerRot::YXZ);
     cam_state.pitch = pitch;
