@@ -32,8 +32,7 @@ impl DebugConsole {
     }
 
     fn text(&self) -> String {
-        self
-            .lines
+        self.lines
             .iter()
             .map(|line| line.as_str())
             .collect::<Vec<_>>()
@@ -94,7 +93,7 @@ fn update_debug_console_ui(
     if !console.dirty {
         return;
     }
-    if let Ok(mut text) = text_query.get_single_mut() {
+    if let Ok(mut text) = text_query.single_mut() {
         text.0 = console.text();
     }
     console.dirty = false;

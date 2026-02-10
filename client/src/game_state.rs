@@ -62,10 +62,10 @@ fn update_game_state_ui(
     mut overlay_query: Query<(&mut Visibility, &mut BackgroundColor), With<GameStateOverlay>>,
     mut text_query: Query<&mut Text, With<GameStateLabel>>,
 ) {
-    let Ok((mut visibility, mut background)) = overlay_query.get_single_mut() else {
+    let Ok((mut visibility, mut background)) = overlay_query.single_mut() else {
         return;
     };
-    let Ok(mut label) = text_query.get_single_mut() else {
+    let Ok(mut label) = text_query.single_mut() else {
         return;
     };
 
@@ -77,7 +77,7 @@ fn update_game_state_ui(
         }
         GameState::Victory { winner } => {
             *visibility = Visibility::Visible;
-            let is_winner = local_team.get_single().is_ok_and(|team| *team == winner);
+            let is_winner = local_team.single().is_ok_and(|team| *team == winner);
             *background = BackgroundColor(if is_winner { WIN_COLOR } else { LOSE_COLOR });
             label.0 = if is_winner {
                 format!(

@@ -79,25 +79,33 @@ fn setup_team_select_ui(mut commands: Commands) {
             Name::new("TeamSelectOverlay"),
         ))
         .with_children(|parent| {
-            spawn_team_button(parent, Team::Green, "TeamGreenButton");
-            spawn_team_button(parent, Team::Blue, "TeamBlueButton");
+            parent.spawn((
+                Button,
+                Node {
+                    width: Val::Px(TEAM_BUTTON_SIZE),
+                    height: Val::Px(TEAM_BUTTON_SIZE),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(Team::Green.ui_color()),
+                TeamSelectButton { team: Team::Green },
+                Name::new("TeamGreenButton"),
+            ));
+            parent.spawn((
+                Button,
+                Node {
+                    width: Val::Px(TEAM_BUTTON_SIZE),
+                    height: Val::Px(TEAM_BUTTON_SIZE),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(Team::Blue.ui_color()),
+                TeamSelectButton { team: Team::Blue },
+                Name::new("TeamBlueButton"),
+            ));
         });
-}
-
-fn spawn_team_button(parent: &mut ChildBuilder, team: Team, name: &'static str) {
-    parent.spawn((
-        Button,
-        Node {
-            width: Val::Px(TEAM_BUTTON_SIZE),
-            height: Val::Px(TEAM_BUTTON_SIZE),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            ..default()
-        },
-        BackgroundColor(team.ui_color()),
-        TeamSelectButton { team },
-        Name::new(name),
-    ));
 }
 
 fn team_select_ui_system(
@@ -108,7 +116,7 @@ fn team_select_ui_system(
         (Changed<Interaction>, With<Button>),
     >,
     overlay_query: Query<Entity, With<TeamSelectRoot>>,
-    mut command_writer: EventWriter<NetworkCommand>,
+    mut command_writer: MessageWriter<NetworkCommand>,
 ) {
     if selection.team.is_some() {
         return;
@@ -118,9 +126,12 @@ fn team_select_ui_system(
         match *interaction {
             Interaction::Pressed => {
                 selection.team = Some(button.team);
-                command_writer.send(NetworkCommand::Join { team: button.team });
-                if let Ok(overlay) = overlay_query.get_single() {
-                    commands.entity(overlay).despawn_recursive();
+                command_writer.write(NetworkCommand::Join { team: button.team });
+                if let Ok(overlay) = overlay_query.single() {
+                    commands
+                        .entity(overlay)
+                        .despawn_related::<Children>()
+                        .despawn();
                 }
             }
             Interaction::Hovered => {

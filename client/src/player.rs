@@ -94,14 +94,14 @@ fn handle_player_input(
     if !cam_state.locked {
         return;
     }
-    let Ok(window) = window_query.get_single() else {
+    let Ok(window) = window_query.single() else {
         return;
     };
-    let Ok((camera, camera_transform)) = camera_query.get_single() else {
+    let Ok((camera, camera_transform)) = camera_query.single() else {
         return;
     };
 
-    let Ok((player_entity, stats)) = player_query.get_single() else {
+    let Ok((player_entity, stats)) = player_query.single() else {
         return;
     };
     if !stats.is_alive() {
@@ -313,12 +313,11 @@ fn respawn_countdown_system(
             return;
         }
     }
-    let Ok((entity, mut transform, stats, team, mut velocity)) = player_query.get_single_mut()
-    else {
+    let Ok((entity, mut transform, stats, team, mut velocity)) = player_query.single_mut() else {
         return;
     };
 
-    let Ok((mut text, mut visibility)) = text_query.get_single_mut() else {
+    let Ok((mut text, mut visibility)) = text_query.single_mut() else {
         return;
     };
 

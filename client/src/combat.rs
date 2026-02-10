@@ -226,7 +226,7 @@ fn select_target_system(
             return;
         }
     }
-    let Ok((local_transform, local_team)) = local_player.get_single() else {
+    let Ok((local_transform, local_team)) = local_player.single() else {
         return;
     };
 
@@ -241,10 +241,10 @@ fn select_target_system(
     }
 
     if mouse_input.just_pressed(MouseButton::Middle) {
-        let Ok(window) = window_query.get_single() else {
+        let Ok(window) = window_query.single() else {
             return;
         };
-        let Ok((camera, camera_transform)) = camera_query.get_single() else {
+        let Ok((camera, camera_transform)) = camera_query.single() else {
             return;
         };
         let Some(cursor_pos) = window.cursor_position() else {
@@ -332,7 +332,7 @@ fn auto_select_target_system(
     if target_state.selected_entity.is_some() {
         return;
     }
-    let Ok((local_transform, local_team)) = local_player.get_single() else {
+    let Ok((local_transform, local_team)) = local_player.single() else {
         return;
     };
     if let Some((entity, target_id)) = find_nearest_enemy_target(
@@ -367,7 +367,7 @@ fn cast_spell_system(
         With<NetworkStructure>,
     >,
     mut target_state: ResMut<TargetState>,
-    mut command_writer: EventWriter<NetworkCommand>,
+    mut command_writer: MessageWriter<NetworkCommand>,
     mut console: ResMut<DebugConsole>,
 ) {
     if let Some(game_state) = game_state.as_ref() {
@@ -379,17 +379,17 @@ fn cast_spell_system(
         return;
     }
 
-    let Ok(local_stats) = local_stats_query.get_single() else {
+    let Ok(local_stats) = local_stats_query.single() else {
         return;
     };
     let target = resolve_cast_target(
         &mut target_state,
-        local_player.get_single().ok(),
+        local_player.single().ok(),
         &player_candidates,
         &structure_candidates,
     );
     if let Some(target) = target {
-        command_writer.send(NetworkCommand::Cast { target });
+        command_writer.write(NetworkCommand::Cast { target });
         let message = format!(
             "Cast -> {} {} (mana {:.0})",
             match target.kind {
@@ -432,7 +432,7 @@ fn skill_button_system(
         With<NetworkStructure>,
     >,
     mut target_state: ResMut<TargetState>,
-    mut command_writer: EventWriter<NetworkCommand>,
+    mut command_writer: MessageWriter<NetworkCommand>,
     mut console: ResMut<DebugConsole>,
 ) {
     if let Some(game_state) = game_state.as_ref() {
@@ -444,16 +444,16 @@ fn skill_button_system(
         match *interaction {
             Interaction::Pressed => {
                 *color = SKILL_BUTTON_PRESS_COLOR.into();
-                let Ok(local_stats) = local_stats_query.get_single() else {
+                let Ok(local_stats) = local_stats_query.single() else {
                     continue;
                 };
                 if let Some(target) = resolve_cast_target(
                     &mut target_state,
-                    local_player.get_single().ok(),
+                    local_player.single().ok(),
                     &player_candidates,
                     &structure_candidates,
                 ) {
-                    command_writer.send(NetworkCommand::Cast { target });
+                    command_writer.write(NetworkCommand::Cast { target });
                     let message = format!(
                         "Cast -> {} {} (mana {:.0})",
                         match target.kind {

@@ -43,10 +43,10 @@ fn main() {
 
 fn handle_exit_input(
     keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut app_exit_writer: EventWriter<AppExit>,
+    mut app_exit_writer: MessageWriter<AppExit>,
 ) {
     if keyboard_input.just_pressed(KeyCode::Escape) {
         info!("Escape pressed, exiting application.");
-        app_exit_writer.send(AppExit::Success);
+        app_exit_writer.write(AppExit::Success);
     }
 }

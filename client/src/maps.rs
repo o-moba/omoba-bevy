@@ -352,11 +352,8 @@ mod tests {
     #[test]
     fn clamp_position_stays_in_bounds() {
         let layout = MapLayout::default();
-        let clamped = layout.clamp_position(Vec3::new(
-            layout.max.x + 10.0,
-            5.0,
-            layout.min.y - 10.0,
-        ));
+        let clamped =
+            layout.clamp_position(Vec3::new(layout.max.x + 10.0, 5.0, layout.min.y - 10.0));
         assert!(clamped.x <= layout.max.x + EPSILON);
         assert!(clamped.z >= layout.min.y - EPSILON);
         assert_eq!(clamped.y, 5.0);

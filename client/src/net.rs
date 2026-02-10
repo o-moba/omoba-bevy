@@ -33,7 +33,7 @@ pub struct NetworkingPlugin;
 
 impl Plugin for NetworkingPlugin {
     fn build(&self, app: &mut App) {
-        app.add_event::<NetworkCommand>()
+        app.add_message::<NetworkCommand>()
             .init_resource::<NetworkState>()
             .init_resource::<GameStateSnapshot>()
             .insert_resource(LocalStateSendTimer(Timer::from_seconds(
@@ -53,7 +53,7 @@ impl Plugin for NetworkingPlugin {
     }
 }
 
-#[derive(Event, Clone, Copy, Debug)]
+#[derive(Message, Clone, Copy, Debug)]
 pub enum NetworkCommand {
     Cast { target: TargetId },
     Join { team: Team },
@@ -441,7 +441,7 @@ fn send_local_state(
         return;
     }
 
-    let Ok(player_transform) = player_query.get_single() else {
+    let Ok(player_transform) = player_query.single() else {
         return;
     };
 
@@ -456,7 +456,7 @@ fn send_local_state(
 }
 
 fn send_network_commands(
-    mut command_events: EventReader<NetworkCommand>,
+    mut command_events: MessageReader<NetworkCommand>,
     channels: Option<Res<NetworkChannels>>,
 ) {
     let Some(channels) = channels else {
@@ -538,7 +538,7 @@ fn apply_server_snapshot(
     game_state_snapshot.state = game_state;
 
     let local_player_state = players.iter().find(|player| player.id == your_id);
-    if let Ok(local_entity) = local_player_query.get_single() {
+    if let Ok(local_entity) = local_player_query.single() {
         commands
             .entity(local_entity)
             .insert(NetworkPlayerId(your_id));
@@ -593,7 +593,7 @@ fn apply_server_snapshot(
         };
 
         network_state.local_team = Some(local_player_state.team);
-        if let Ok(mut camera_transform) = transform_sets.p1().get_single_mut() {
+        if let Ok(mut camera_transform) = transform_sets.p1().single_mut() {
             cam_state.locked = true;
             let zoom = cam_state.zoom;
             camera_transform.translation =
@@ -670,7 +670,10 @@ fn apply_server_snapshot(
     for player_id in stale_ids {
         if let Some(entity) = network_state.remote_players.remove(&player_id) {
             if remote_query.get(entity).is_ok() {
-                commands.entity(entity).despawn_recursive();
+                commands
+                    .entity(entity)
+                    .despawn_related::<Children>()
+                    .despawn();
             }
         }
     }
@@ -717,7 +720,10 @@ fn apply_server_snapshot(
     for projectile_id in stale_projectile_ids {
         if let Some(entity) = network_state.projectiles.remove(&projectile_id) {
             if projectile_query.get(entity).is_ok() {
-                commands.entity(entity).despawn_recursive();
+                commands
+                    .entity(entity)
+                    .despawn_related::<Children>()
+                    .despawn();
             }
         }
     }
@@ -775,7 +781,10 @@ fn apply_server_snapshot(
     for structure_id in stale_structure_ids {
         if let Some(entity) = network_state.structures.remove(&structure_id) {
             if structure_query.get(entity).is_ok() {
-                commands.entity(entity).despawn_recursive();
+                commands
+                    .entity(entity)
+                    .despawn_related::<Children>()
+                    .despawn();
             }
         }
     }
@@ -841,7 +850,10 @@ fn apply_server_snapshot(
     for minion_id in stale_minion_ids {
         if let Some(entity) = network_state.minions.remove(&minion_id) {
             if minion_query.get(entity).is_ok() {
-                commands.entity(entity).despawn_recursive();
+                commands
+                    .entity(entity)
+                    .despawn_related::<Children>()
+                    .despawn();
             }
         }
     }

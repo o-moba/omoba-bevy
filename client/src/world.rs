@@ -126,8 +126,7 @@ fn setup_scene(
 
     let map_center = Vec3::new(0.0, PLAYER_SIZE * 0.5, 0.0);
     let zoom = cam_state.zoom;
-    let initial_cam_pos =
-        map_center + Vec3::new(0.0, CAMERA_HEIGHT * zoom, CAMERA_DISTANCE * zoom);
+    let initial_cam_pos = map_center + Vec3::new(0.0, CAMERA_HEIGHT * zoom, CAMERA_DISTANCE * zoom);
     let initial_cam_transform =
         Transform::from_translation(initial_cam_pos).looking_at(map_center, Vec3::Y);
 
@@ -165,7 +164,7 @@ fn spawn_local_player_on_team(
     };
 
     spawn_player_entity(&mut commands, &player_assets, spawn, team);
-    if let Ok(mut camera_transform) = camera_query.get_single_mut() {
+    if let Ok(mut camera_transform) = camera_query.single_mut() {
         cam_state.locked = true;
         let zoom = cam_state.zoom;
         camera_transform.translation =
@@ -175,12 +174,7 @@ fn spawn_local_player_on_team(
     }
 }
 
-fn spawn_player_entity(
-    commands: &mut Commands,
-    assets: &PlayerAssets,
-    spawn: Vec3,
-    team: Team,
-) {
+fn spawn_player_entity(commands: &mut Commands, assets: &PlayerAssets, spawn: Vec3, team: Team) {
     if let Some(glb_scene) = assets.scene.clone() {
         commands.spawn((
             SceneRoot(glb_scene),

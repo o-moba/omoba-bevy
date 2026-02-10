@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace.dependencies]
-bevy = "0.15.3"
+bevy = "0.18.0"
 crossbeam-channel = "0.5.14"
 reqwest = { version = "0.12.15", features = ["blocking"] }
 serde = { version = "1.0.219", features = ["derive"] }
