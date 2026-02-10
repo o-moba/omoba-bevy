@@ -51,6 +51,8 @@ const MINION_RADIUS: f32 = 0.55;
 const MINION_SPAWN_HEIGHT: f32 = 0.5;
 const MINION_WAVE_INTERVAL: Duration = Duration::from_secs(60);
 const MINIONS_PER_WAVE: usize = 3;
+const MINION_KILL_GOLD: u32 = 18;
+const MINION_KILL_XP: u32 = 32;
 
 const TARGET_BASE_RUN_TIME_SECONDS: f32 = 45.0;
 const PLAYER_SPEED: f32 = 5.0;
@@ -109,6 +111,8 @@ struct PlayerState {
     max_hp: f32,
     mana: f32,
     max_mana: f32,
+    gold: u32,
+    xp: u32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -141,6 +145,26 @@ struct MinionState {
     yaw: f32,
     hp: f32,
     max_hp: f32,
+    state: MinionBrainState,
+    target_kind: Option<MinionTargetKind>,
+    target_id: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum MinionBrainState {
+    Marching,
+    Chasing,
+    Attacking,
+    Dead,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum MinionTargetKind {
+    Player,
+    Minion,
+    Structure,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -274,6 +298,21 @@ enum MinionAggroTarget {
     Minion(u64),
 }
 
+impl MinionAggroTarget {
+    fn id(self) -> u64 {
+        match self {
+            MinionAggroTarget::Player(id) | MinionAggroTarget::Minion(id) => id,
+        }
+    }
+
+    fn kind(self) -> MinionTargetKind {
+        match self {
+            MinionAggroTarget::Player(_) => MinionTargetKind::Player,
+            MinionAggroTarget::Minion(_) => MinionTargetKind::Minion,
+        }
+    }
+}
+
 fn main() -> io::Result<()> {
     let bind_addr = std::env::var("SERVER_ADDR").unwrap_or_else(|_| DEFAULT_BIND_ADDR.to_owned());
     let socket = UdpSocket::bind(&bind_addr)?;
@@ -385,7 +424,7 @@ fn main() -> io::Result<()> {
             now,
         );
         simulate_tower_attacks(
-            &players,
+            &mut players,
             &mut minions,
             &mut projectiles,
             &mut structures,
@@ -430,24 +469,31 @@ fn main() -> io::Result<()> {
         minions.retain(|_, minion| minion.state.hp > 0.0);
 
         if now.duration_since(last_snapshot_at) >= SNAPSHOT_INTERVAL {
-            let players_snapshot = players
+            let mut players_snapshot = players
                 .values()
                 .map(|player| player.state.clone())
                 .collect::<Vec<_>>();
-            let projectiles_snapshot = projectiles
+            players_snapshot.sort_unstable_by_key(|player| player.id);
+
+            let mut projectiles_snapshot = projectiles
                 .values()
                 .map(|projectile| projectile.state.clone())
                 .collect::<Vec<_>>();
-            let structures_snapshot = structures
+            projectiles_snapshot.sort_unstable_by_key(|projectile| projectile.id);
+
+            let mut structures_snapshot = structures
                 .values()
                 .filter(|structure| structure.state.hp > 0.0)
                 .map(|structure| structure.state.clone())
                 .collect::<Vec<_>>();
-            let minions_snapshot = minions
+            structures_snapshot.sort_unstable_by_key(|structure| structure.id);
+
+            let mut minions_snapshot = minions
                 .values()
                 .filter(|minion| minion.state.hp > 0.0)
                 .map(|minion| minion.state.clone())
                 .collect::<Vec<_>>();
+            minions_snapshot.sort_unstable_by_key(|minion| minion.id);
 
             for (addr, player) in &players {
                 let packet = ServerPacket::Snapshot {
@@ -500,6 +546,8 @@ fn ensure_player_connected(
                 max_hp: MAX_HP,
                 mana: MAX_MANA,
                 max_mana: MAX_MANA,
+                gold: 0,
+                xp: 0,
             },
             last_seen: now,
             last_cast_at: None,
@@ -535,6 +583,8 @@ fn handle_join_request(player: &mut ConnectedPlayer, team: Team, map_layout: &Ma
     player.state.max_hp = MAX_HP;
     player.state.mana = MAX_MANA;
     player.state.max_mana = MAX_MANA;
+    player.state.gold = 0;
+    player.state.xp = 0;
     player.last_cast_at = None;
     player.respawn_at = None;
 }
@@ -999,6 +1049,9 @@ fn spawn_minion_wave_for_team_lane(
                     yaw,
                     hp: MINION_MAX_HP,
                     max_hp: MINION_MAX_HP,
+                    state: MinionBrainState::Marching,
+                    target_kind: None,
+                    target_id: None,
                 },
                 path: path.clone(),
                 next_waypoint: 1,
@@ -1013,6 +1066,63 @@ fn structure_radius(kind: StructureKind) -> f32 {
     match kind {
         StructureKind::Tower => TOWER_SIZE * 0.5,
         StructureKind::BaseTower => BASE_TOWER_SIZE * 0.5,
+    }
+}
+
+fn apply_minion_damage(
+    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+    minions: &mut HashMap<u64, Minion>,
+    target_id: u64,
+    damage: f32,
+    attacker_team: Team,
+) {
+    let Some(target_minion) = minions.get_mut(&target_id) else {
+        return;
+    };
+    if target_minion.state.hp <= 0.0 {
+        return;
+    }
+    target_minion.state.hp = (target_minion.state.hp - damage).max(0.0);
+    if target_minion.state.hp <= 0.0 {
+        target_minion.state.state = MinionBrainState::Dead;
+        target_minion.state.target_kind = None;
+        target_minion.state.target_id = None;
+        award_minion_kill_rewards(players, attacker_team);
+    }
+}
+
+fn award_minion_kill_rewards(
+    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+    attacker_team: Team,
+) {
+    let recipients = players
+        .iter()
+        .filter(|(_, player)| player.state.team == attacker_team)
+        .map(|(addr, _)| *addr)
+        .collect::<Vec<_>>();
+    if recipients.is_empty() {
+        return;
+    }
+
+    let per_player_gold = MINION_KILL_GOLD / recipients.len() as u32;
+    let per_player_xp = MINION_KILL_XP / recipients.len() as u32;
+    let bonus_gold_receivers = MINION_KILL_GOLD % recipients.len() as u32;
+    let bonus_xp_receivers = MINION_KILL_XP % recipients.len() as u32;
+
+    for (index, addr) in recipients.into_iter().enumerate() {
+        let Some(player) = players.get_mut(&addr) else {
+            continue;
+        };
+        let mut gold = per_player_gold;
+        if (index as u32) < bonus_gold_receivers {
+            gold += 1;
+        }
+        let mut xp = per_player_xp;
+        if (index as u32) < bonus_xp_receivers {
+            xp += 1;
+        }
+        player.state.gold = player.state.gold.saturating_add(gold);
+        player.state.xp = player.state.xp.saturating_add(xp);
     }
 }
 
@@ -1052,14 +1162,20 @@ fn simulate_minions(
         .collect::<Vec<_>>();
 
     let mut player_damage_events: Vec<(u64, f32)> = Vec::new();
-    let mut minion_damage_events: Vec<(u64, f32)> = Vec::new();
+    let mut minion_damage_events: Vec<(u64, f32, Team)> = Vec::new();
     let mut structure_damage_events: Vec<(u64, f32, Team)> = Vec::new();
     let minion_vision_sq = MINION_VISION_RANGE * MINION_VISION_RANGE;
 
     for minion in minions.values_mut() {
         if minion.state.hp <= 0.0 {
+            minion.state.state = MinionBrainState::Dead;
+            minion.state.target_kind = None;
+            minion.state.target_id = None;
             continue;
         }
+        minion.state.state = MinionBrainState::Marching;
+        minion.state.target_kind = None;
+        minion.state.target_id = None;
 
         let minion_position = Vec3f::new(minion.state.x, minion.state.y, minion.state.z);
 
@@ -1140,11 +1256,14 @@ fn simulate_minions(
 
         if let Some((target, target_pos, target_radius)) = aggro_target {
             minion.aggro_target = Some(target);
+            minion.state.target_kind = Some(target.kind());
+            minion.state.target_id = Some(target.id());
             let dir_x = target_pos.x - minion.state.x;
             let dir_z = target_pos.z - minion.state.z;
             let distance_sq = dir_x * dir_x + dir_z * dir_z;
             let attack_distance = MINION_ATTACK_RANGE + target_radius;
             if distance_sq <= attack_distance * attack_distance {
+                minion.state.state = MinionBrainState::Attacking;
                 let can_attack = minion
                     .last_attack_at
                     .is_none_or(|last| now.duration_since(last) >= MINION_ATTACK_COOLDOWN);
@@ -1155,11 +1274,16 @@ fn simulate_minions(
                             player_damage_events.push((target_id, MINION_ATTACK_DAMAGE));
                         }
                         MinionAggroTarget::Minion(target_id) => {
-                            minion_damage_events.push((target_id, MINION_ATTACK_DAMAGE));
+                            minion_damage_events.push((
+                                target_id,
+                                MINION_ATTACK_DAMAGE,
+                                minion.state.team,
+                            ));
                         }
                     }
                 }
             } else {
+                minion.state.state = MinionBrainState::Chasing;
                 let distance = distance_sq.sqrt();
                 let travel = (MINION_SPEED * dt).min(distance);
                 if distance > 0.0001 {
@@ -1206,8 +1330,11 @@ fn simulate_minions(
             });
 
         if let Some((target_id, target_kind, target_pos, distance_sq)) = target {
+            minion.state.target_kind = Some(MinionTargetKind::Structure);
+            minion.state.target_id = Some(target_id);
             let attack_distance = MINION_ATTACK_RANGE + structure_radius(target_kind);
             if distance_sq <= attack_distance * attack_distance {
+                minion.state.state = MinionBrainState::Attacking;
                 let can_attack = minion
                     .last_attack_at
                     .is_none_or(|last| now.duration_since(last) >= MINION_ATTACK_COOLDOWN);
@@ -1226,6 +1353,7 @@ fn simulate_minions(
                 }
                 continue;
             }
+            minion.state.state = MinionBrainState::Chasing;
         }
 
         while minion.next_waypoint < minion.path.len() {
@@ -1263,14 +1391,8 @@ fn simulate_minions(
         }
     }
 
-    for (target_id, damage) in minion_damage_events {
-        let Some(target_minion) = minions.get_mut(&target_id) else {
-            continue;
-        };
-        if target_minion.state.hp <= 0.0 {
-            continue;
-        }
-        target_minion.state.hp = (target_minion.state.hp - damage).max(0.0);
+    for (target_id, damage, attacker_team) in minion_damage_events {
+        apply_minion_damage(players, minions, target_id, damage, attacker_team);
     }
 
     for (target_id, damage, attacker_team) in structure_damage_events {
@@ -1292,7 +1414,7 @@ fn simulate_minions(
 }
 
 fn simulate_tower_attacks(
-    players: &HashMap<SocketAddr, ConnectedPlayer>,
+    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
     minions: &mut HashMap<u64, Minion>,
     projectiles: &mut HashMap<u64, Projectile>,
     structures: &mut HashMap<u64, Structure>,
@@ -1304,7 +1426,7 @@ fn simulate_tower_attacks(
         return;
     }
     let mut towers_to_fire: Vec<(Team, Vec3f, u64, Vec3f, f32, f32)> = Vec::new();
-    let mut minion_damage_events: Vec<(u64, f32)> = Vec::new();
+    let mut minion_damage_events: Vec<(u64, f32, Team)> = Vec::new();
 
     for structure in structures.values_mut() {
         if structure.state.hp <= 0.0 {
@@ -1339,7 +1461,7 @@ fn simulate_tower_attacks(
 
         if let Some((target_id, _, _)) = best_minion {
             structure.last_attack_at = Some(now);
-            minion_damage_events.push((target_id, structure.attack_damage));
+            minion_damage_events.push((target_id, structure.attack_damage, structure.state.team));
             continue;
         }
 
@@ -1374,14 +1496,8 @@ fn simulate_tower_attacks(
         }
     }
 
-    for (target_id, damage) in minion_damage_events {
-        let Some(target_minion) = minions.get_mut(&target_id) else {
-            continue;
-        };
-        if target_minion.state.hp <= 0.0 {
-            continue;
-        }
-        target_minion.state.hp = (target_minion.state.hp - damage).max(0.0);
+    for (target_id, damage, attacker_team) in minion_damage_events {
+        apply_minion_damage(players, minions, target_id, damage, attacker_team);
     }
 
     for (team, tower_position, target_id, target_pos, damage, shot_height) in towers_to_fire {

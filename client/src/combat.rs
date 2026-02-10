@@ -52,7 +52,7 @@ impl Plugin for CombatPlugin {
                     .chain(),
             );
         app.add_systems(
-            Update,
+            PostUpdate,
             (spawn_combat_bars_system, update_combat_bars_system),
         );
     }

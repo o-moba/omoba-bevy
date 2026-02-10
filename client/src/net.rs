@@ -48,7 +48,8 @@ impl Plugin for NetworkingPlugin {
                     send_network_commands,
                     apply_server_snapshot,
                 ),
-            );
+            )
+            .add_systems(Update, interpolate_minions.after(apply_server_snapshot));
     }
 }
 
@@ -97,6 +98,10 @@ struct PlayerState {
     mana: f32,
     #[serde(default = "default_max_mana")]
     max_mana: f32,
+    #[serde(default)]
+    gold: u32,
+    #[serde(default)]
+    xp: u32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -148,6 +153,29 @@ struct MinionState {
     yaw: f32,
     hp: f32,
     max_hp: f32,
+    #[serde(default = "default_minion_brain_state")]
+    state: MinionBrainState,
+    #[serde(default)]
+    target_kind: Option<MinionTargetKind>,
+    #[serde(default)]
+    target_id: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum MinionBrainState {
+    Marching,
+    Chasing,
+    Attacking,
+    Dead,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum MinionTargetKind {
+    Player,
+    Minion,
+    Structure,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -221,6 +249,16 @@ pub struct NetworkStructure;
 
 #[derive(Component)]
 pub struct NetworkMinion;
+
+#[derive(Component, Clone, Copy, Debug)]
+struct MinionInterpolation {
+    from_translation: Vec3,
+    to_translation: Vec3,
+    from_rotation: Quat,
+    to_rotation: Quat,
+    elapsed: f32,
+    duration: f32,
+}
 
 #[derive(Resource)]
 struct NetworkVisualAssets {
@@ -745,11 +783,20 @@ fn apply_server_snapshot(
     let mut seen_minion_ids = HashSet::new();
     for minion in &minions {
         seen_minion_ids.insert(minion.id);
+        let target_translation = Vec3::new(minion.x, minion.y, minion.z);
+        let target_rotation = Quat::from_rotation_y(minion.yaw);
 
         if let Some(entity) = network_state.minions.get(&minion.id).copied() {
-            if let Ok(mut transform) = transform_sets.p0().get_mut(entity) {
-                transform.translation = Vec3::new(minion.x, minion.y, minion.z);
-                transform.rotation = Quat::from_rotation_y(minion.yaw);
+            if let Ok(transform) = transform_sets.p0().get_mut(entity) {
+                let interpolation = MinionInterpolation {
+                    from_translation: transform.translation,
+                    to_translation: target_translation,
+                    from_rotation: transform.rotation,
+                    to_rotation: target_rotation,
+                    elapsed: 0.0,
+                    duration: UPDATE_INTERVAL_SECONDS.max(0.001),
+                };
+                commands.entity(entity).insert(interpolation);
             }
             commands
                 .entity(entity)
@@ -766,10 +813,17 @@ fn apply_server_snapshot(
             .spawn((
                 Mesh3d(visuals.minion_mesh.clone()),
                 MeshMaterial3d(material),
-                Transform::from_xyz(minion.x, minion.y, minion.z)
-                    .with_rotation(Quat::from_rotation_y(minion.yaw)),
+                Transform::from_translation(target_translation).with_rotation(target_rotation),
                 Visibility::default(),
                 NetworkMinion,
+                MinionInterpolation {
+                    from_translation: target_translation,
+                    to_translation: target_translation,
+                    from_rotation: target_rotation,
+                    to_rotation: target_rotation,
+                    elapsed: UPDATE_INTERVAL_SECONDS,
+                    duration: UPDATE_INTERVAL_SECONDS.max(0.001),
+                },
                 minion.team,
                 minion_state_to_combat_stats(minion),
                 Name::new(format!("Minion-{}-{:?}", minion.id, minion.lane)),
@@ -790,6 +844,23 @@ fn apply_server_snapshot(
                 commands.entity(entity).despawn_recursive();
             }
         }
+    }
+}
+
+fn interpolate_minions(
+    time: Res<Time>,
+    mut minion_query: Query<(&mut Transform, &mut MinionInterpolation), With<NetworkMinion>>,
+) {
+    for (mut transform, mut interpolation) in &mut minion_query {
+        let duration = interpolation.duration.max(0.001);
+        interpolation.elapsed = (interpolation.elapsed + time.delta_secs()).min(duration);
+        let t = (interpolation.elapsed / duration).clamp(0.0, 1.0);
+        transform.translation = interpolation
+            .from_translation
+            .lerp(interpolation.to_translation, t);
+        transform.rotation = interpolation
+            .from_rotation
+            .slerp(interpolation.to_rotation, t);
     }
 }
 
@@ -838,4 +909,8 @@ fn default_mana() -> f32 {
 
 fn default_max_mana() -> f32 {
     MAX_MANA
+}
+
+fn default_minion_brain_state() -> MinionBrainState {
+    MinionBrainState::Marching
 }
