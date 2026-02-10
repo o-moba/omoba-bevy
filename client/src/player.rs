@@ -262,30 +262,31 @@ fn apply_gravity(
 }
 
 fn setup_respawn_ui(mut commands: Commands) {
-    commands.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(0.0),
-            right: Val::Px(0.0),
-            top: Val::Px(20.0),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            ..default()
-        },
-        Name::new("RespawnCountdown"),
-    ))
-    .with_children(|parent| {
-        parent.spawn((
-            Text::new(""),
-            TextFont {
-                font_size: 36.0,
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(20.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
                 ..default()
             },
-            TextColor::WHITE,
-            Visibility::Hidden,
-            RespawnCountdownText,
-        ));
-    });
+            Name::new("RespawnCountdown"),
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Text::new(""),
+                TextFont {
+                    font_size: 36.0,
+                    ..default()
+                },
+                TextColor::WHITE,
+                Visibility::Hidden,
+                RespawnCountdownText,
+            ));
+        });
 }
 
 fn respawn_countdown_system(
@@ -293,7 +294,16 @@ fn respawn_countdown_system(
     map_layout: Res<MapLayout>,
     mut commands: Commands,
     mut state: ResMut<RespawnCountdown>,
-    mut player_query: Query<(Entity, &mut Transform, &CombatStats, &Team, &mut VerticalVelocity), With<Player>>,
+    mut player_query: Query<
+        (
+            Entity,
+            &mut Transform,
+            &CombatStats,
+            &Team,
+            &mut VerticalVelocity,
+        ),
+        With<Player>,
+    >,
     mut text_query: Query<(&mut Text, &mut Visibility), With<RespawnCountdownText>>,
     mut console: ResMut<DebugConsole>,
     game_state: Option<Res<GameStateSnapshot>>,
@@ -303,8 +313,7 @@ fn respawn_countdown_system(
             return;
         }
     }
-    let Ok((entity, mut transform, stats, team, mut velocity)) =
-        player_query.get_single_mut()
+    let Ok((entity, mut transform, stats, team, mut velocity)) = player_query.get_single_mut()
     else {
         return;
     };
@@ -380,11 +389,14 @@ fn resolve_player_collisions(
     for &(obstacle_pos, kind) in structures.iter() {
         let obstacle_radius = match kind {
             StructureKind::Tower => 1.3,
-            StructureKind::Nexus => 4.0,
+            StructureKind::BaseTower => 3.2,
         };
         let min_distance = player_radius + obstacle_radius;
-        let delta =
-            Vec3::new(resolved.x - obstacle_pos.x, 0.0, resolved.z - obstacle_pos.z);
+        let delta = Vec3::new(
+            resolved.x - obstacle_pos.x,
+            0.0,
+            resolved.z - obstacle_pos.z,
+        );
         let distance = delta.length();
         if distance < min_distance {
             let push_dir = if distance > 0.0001 {

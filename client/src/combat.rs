@@ -8,7 +8,7 @@ use bevy::{
 use crate::camera::MainCamera;
 use crate::debug_console::DebugConsole;
 use crate::net::{
-    GameState, GameStateSnapshot, NetworkCommand, NetworkPlayerId, NetworkStructure,
+    GameState, GameStateSnapshot, NetworkCommand, NetworkMinion, NetworkPlayerId, NetworkStructure,
     NetworkStructureId, RemotePlayer, StructureKind, TargetId, TargetKind,
 };
 use crate::player::Player;
@@ -16,13 +16,12 @@ use crate::team::Team;
 
 pub const MAX_HP: f32 = 100.0;
 pub const MAX_MANA: f32 = 100.0;
-pub const SPELL_MANA_COST: f32 = 20.0;
 
 const BAR_WIDTH: f32 = 1.45;
 const BAR_HEIGHT: f32 = 0.09;
 const BAR_DEPTH: f32 = 0.09;
 const TOWER_BAR_Y: f32 = 3.6;
-const NEXUS_BAR_Y: f32 = 4.8;
+const BASE_TOWER_BAR_Y: f32 = 4.8;
 const TARGET_PICK_RADIUS: f32 = 4.0;
 const TARGET_MARKER_SIZE: f32 = 2.0;
 const TARGET_MARKER_THICKNESS: f32 = 0.08;
@@ -274,7 +273,10 @@ fn select_target_system(
     if let Some((entity, target_id)) = select_entity {
         target_state.selected_entity = Some(entity);
         target_state.selected_target = Some(target_id);
-        info!("Target selected: id={} ({:?})", target_id.id, target_id.kind);
+        info!(
+            "Target selected: id={} ({:?})",
+            target_id.id, target_id.kind
+        );
     }
 }
 
@@ -450,8 +452,7 @@ fn skill_button_system(
                     local_player.get_single().ok(),
                     &player_candidates,
                     &structure_candidates,
-                )
-                {
+                ) {
                     command_writer.send(NetworkCommand::Cast { target });
                     let message = format!(
                         "Cast -> {} {} (mana {:.0})",
@@ -465,8 +466,7 @@ fn skill_button_system(
                     console.push_line(message.clone());
                     info!("{message}");
                 } else {
-                    let message =
-                        "No target available. Use TAB or middle mouse click to select.";
+                    let message = "No target available. Use TAB or middle mouse click to select.";
                     console.push_line(message);
                     info!("{message}");
                 }
@@ -484,14 +484,18 @@ fn skill_button_system(
 fn spawn_combat_bars_system(
     mut commands: Commands,
     assets: Res<CombatVisualAssets>,
-    players_without_bars: Query<(Entity, Option<&StructureKind>), (With<CombatStats>, Without<CombatBars>)>,
+    players_without_bars: Query<
+        (Entity, Option<&StructureKind>, Option<&NetworkMinion>),
+        (With<CombatStats>, Without<CombatBars>),
+    >,
 ) {
-    for (entity, structure_kind) in players_without_bars.iter() {
+    for (entity, structure_kind, minion_marker) in players_without_bars.iter() {
         let bar_y = match structure_kind.copied() {
             Some(StructureKind::Tower) => TOWER_BAR_Y,
-            Some(StructureKind::Nexus) => NEXUS_BAR_Y,
+            Some(StructureKind::BaseTower) => BASE_TOWER_BAR_Y,
             None => 2.1,
         };
+        let show_mana_bar = structure_kind.is_none() && minion_marker.is_none();
         let mut bars = CombatBars::default();
         commands.entity(entity).with_children(|parent| {
             parent.spawn((
@@ -510,24 +514,25 @@ fn spawn_combat_bars_system(
                 ))
                 .id();
 
-            parent.spawn((
-                Mesh3d(assets.bar_mesh.clone()),
-                MeshMaterial3d(assets.mana_bg_material.clone()),
-                Transform::from_xyz(0.0, bar_y - 0.15, 0.0),
-                Name::new("ManaBarBg"),
-            ));
-
-            let mana_fill = parent
-                .spawn((
-                    Mesh3d(assets.bar_mesh.clone()),
-                    MeshMaterial3d(assets.mana_fill_material.clone()),
-                    Transform::from_xyz(0.0, bar_y - 0.15, 0.06),
-                    Name::new("ManaBarFill"),
-                ))
-                .id();
-
             bars.hp_fill = Some(hp_fill);
-            bars.mana_fill = Some(mana_fill);
+            if show_mana_bar {
+                parent.spawn((
+                    Mesh3d(assets.bar_mesh.clone()),
+                    MeshMaterial3d(assets.mana_bg_material.clone()),
+                    Transform::from_xyz(0.0, bar_y - 0.15, 0.0),
+                    Name::new("ManaBarBg"),
+                ));
+
+                let mana_fill = parent
+                    .spawn((
+                        Mesh3d(assets.bar_mesh.clone()),
+                        MeshMaterial3d(assets.mana_fill_material.clone()),
+                        Transform::from_xyz(0.0, bar_y - 0.15, 0.06),
+                        Name::new("ManaBarFill"),
+                    ))
+                    .id();
+                bars.mana_fill = Some(mana_fill);
+            }
         });
         commands.entity(entity).insert(bars);
     }

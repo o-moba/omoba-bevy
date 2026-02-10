@@ -10,9 +10,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::camera::{CameraState, MainCamera, CAMERA_DISTANCE, CAMERA_HEIGHT};
+use crate::camera::{CAMERA_DISTANCE, CAMERA_HEIGHT, CameraState, MainCamera};
 use crate::combat::{CombatStats, MAX_HP, MAX_MANA};
-use crate::player::{Player, PlayerBody, VerticalVelocity, PLAYER_SIZE};
+use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
 use crate::team::Team;
 use crate::world::PlayerAssets;
 
@@ -25,7 +25,9 @@ const MAX_PACKET_SIZE: usize = 8 * 1024;
 const PROJECTILE_RADIUS: f32 = 0.22;
 const TOWER_SIZE: f32 = 2.6;
 const TOWER_HEIGHT: f32 = 6.0;
-const NEXUS_SIZE: f32 = 8.0;
+const BASE_TOWER_SIZE: f32 = 6.0;
+const BASE_TOWER_HEIGHT: f32 = 8.0;
+const MINION_RADIUS: f32 = 0.55;
 
 pub struct NetworkingPlugin;
 
@@ -97,6 +99,14 @@ struct PlayerState {
     max_mana: f32,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Lane {
+    Top,
+    Mid,
+    Bot,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ProjectileState {
     id: u64,
@@ -112,7 +122,7 @@ struct ProjectileState {
 #[serde(rename_all = "snake_case")]
 pub enum StructureKind {
     Tower,
-    Nexus,
+    BaseTower,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,6 +138,19 @@ struct StructureState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct MinionState {
+    id: u64,
+    team: Team,
+    lane: Lane,
+    x: f32,
+    y: f32,
+    z: f32,
+    yaw: f32,
+    hp: f32,
+    max_hp: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ServerPacket {
     Snapshot {
@@ -137,6 +160,8 @@ enum ServerPacket {
         projectiles: Vec<ProjectileState>,
         #[serde(default)]
         structures: Vec<StructureState>,
+        #[serde(default)]
+        minions: Vec<MinionState>,
         #[serde(default)]
         game_state: GameState,
     },
@@ -173,6 +198,7 @@ struct NetworkState {
     remote_players: HashMap<u64, Entity>,
     projectiles: HashMap<u64, Entity>,
     structures: HashMap<u64, Entity>,
+    minions: HashMap<u64, Entity>,
 }
 
 #[derive(Resource)]
@@ -193,15 +219,21 @@ pub struct NetworkStructureId(pub u64);
 #[derive(Component)]
 pub struct NetworkStructure;
 
+#[derive(Component)]
+pub struct NetworkMinion;
+
 #[derive(Resource)]
 struct NetworkVisualAssets {
     projectile_mesh: Handle<Mesh>,
     friendly_projectile_material: Handle<StandardMaterial>,
     hostile_projectile_material: Handle<StandardMaterial>,
     tower_mesh: Handle<Mesh>,
-    nexus_mesh: Handle<Mesh>,
+    base_tower_mesh: Handle<Mesh>,
+    minion_mesh: Handle<Mesh>,
     green_structure_material: Handle<StandardMaterial>,
     blue_structure_material: Handle<StandardMaterial>,
+    green_minion_material: Handle<StandardMaterial>,
+    blue_minion_material: Handle<StandardMaterial>,
 }
 
 fn setup_network_visual_assets(
@@ -215,11 +247,12 @@ fn setup_network_visual_assets(
         TOWER_HEIGHT,
         TOWER_SIZE,
     )));
-    let nexus_mesh = meshes.add(Mesh::from(Cuboid::new(
-        NEXUS_SIZE,
-        NEXUS_SIZE,
-        NEXUS_SIZE,
+    let base_tower_mesh = meshes.add(Mesh::from(Cuboid::new(
+        BASE_TOWER_SIZE,
+        BASE_TOWER_HEIGHT,
+        BASE_TOWER_SIZE,
     )));
+    let minion_mesh = meshes.add(Mesh::from(Sphere::new(MINION_RADIUS)));
     let friendly_projectile_material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.35, 0.92, 1.0),
         unlit: true,
@@ -240,15 +273,28 @@ fn setup_network_visual_assets(
         perceptual_roughness: 0.75,
         ..default()
     });
+    let green_minion_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.24, 0.72, 0.32),
+        perceptual_roughness: 0.75,
+        ..default()
+    });
+    let blue_minion_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.32, 0.48, 0.92),
+        perceptual_roughness: 0.75,
+        ..default()
+    });
 
     commands.insert_resource(NetworkVisualAssets {
         projectile_mesh,
         friendly_projectile_material,
         hostile_projectile_material,
         tower_mesh,
-        nexus_mesh,
+        base_tower_mesh,
+        minion_mesh,
         green_structure_material,
         blue_structure_material,
+        green_minion_material,
+        blue_minion_material,
     });
 }
 
@@ -397,10 +443,14 @@ fn apply_server_snapshot(
     mut commands: Commands,
     channels: Option<Res<NetworkChannels>>,
     mut network_state: ResMut<NetworkState>,
-    mut transform_sets: ParamSet<(Query<&mut Transform>, Query<&mut Transform, With<MainCamera>>)>,
+    mut transform_sets: ParamSet<(
+        Query<&mut Transform>,
+        Query<&mut Transform, With<MainCamera>>,
+    )>,
     remote_query: Query<&RemotePlayer>,
     projectile_query: Query<&NetworkProjectile>,
     structure_query: Query<&NetworkStructure>,
+    minion_query: Query<&NetworkMinion>,
     local_player_query: Query<Entity, With<Player>>,
     player_assets: Res<PlayerAssets>,
     visuals: Res<NetworkVisualAssets>,
@@ -416,6 +466,7 @@ fn apply_server_snapshot(
         Vec<PlayerState>,
         Vec<ProjectileState>,
         Vec<StructureState>,
+        Vec<MinionState>,
         GameState,
     )> = None;
     while let Ok(packet) = channels.incoming.try_recv() {
@@ -425,14 +476,23 @@ fn apply_server_snapshot(
                 players,
                 projectiles,
                 structures,
+                minions,
                 game_state,
             } => {
-                latest_snapshot = Some((your_id, players, projectiles, structures, game_state));
+                latest_snapshot = Some((
+                    your_id,
+                    players,
+                    projectiles,
+                    structures,
+                    minions,
+                    game_state,
+                ));
             }
         }
     }
 
-    let Some((your_id, players, projectiles, structures, game_state)) = latest_snapshot else {
+    let Some((your_id, players, projectiles, structures, minions, game_state)) = latest_snapshot
+    else {
         return;
     };
 
@@ -445,16 +505,18 @@ fn apply_server_snapshot(
             .entity(local_entity)
             .insert(NetworkPlayerId(your_id));
         if let Some(local_player_state) = local_player_state {
-            commands
-                .entity(local_entity)
-                .insert((
-                    local_player_state.team,
-                    player_state_to_combat_stats(local_player_state),
-                ));
+            commands.entity(local_entity).insert((
+                local_player_state.team,
+                player_state_to_combat_stats(local_player_state),
+            ));
             network_state.local_team = Some(local_player_state.team);
         }
     } else if let Some(local_player_state) = local_player_state {
-        let spawn = Vec3::new(local_player_state.x, local_player_state.y, local_player_state.z);
+        let spawn = Vec3::new(
+            local_player_state.x,
+            local_player_state.y,
+            local_player_state.z,
+        );
         let entity = if let Some(scene_handle) = player_assets.scene.clone() {
             commands
                 .spawn((
@@ -495,8 +557,9 @@ fn apply_server_snapshot(
         network_state.local_team = Some(local_player_state.team);
         if let Ok(mut camera_transform) = transform_sets.p1().get_single_mut() {
             cam_state.locked = true;
+            let zoom = cam_state.zoom;
             camera_transform.translation =
-                spawn + Vec3::new(0.0, CAMERA_HEIGHT, CAMERA_DISTANCE);
+                spawn + Vec3::new(0.0, CAMERA_HEIGHT * zoom, CAMERA_DISTANCE * zoom);
             let look_target = Vec3::new(spawn.x, PLAYER_SIZE * 0.5, spawn.z);
             *camera_transform = camera_transform.looking_at(look_target, Vec3::Y);
         }
@@ -644,7 +707,7 @@ fn apply_server_snapshot(
         };
         let mesh = match structure.kind {
             StructureKind::Tower => visuals.tower_mesh.clone(),
-            StructureKind::Nexus => visuals.nexus_mesh.clone(),
+            StructureKind::BaseTower => visuals.base_tower_mesh.clone(),
         };
 
         let entity = commands
@@ -678,6 +741,56 @@ fn apply_server_snapshot(
             }
         }
     }
+
+    let mut seen_minion_ids = HashSet::new();
+    for minion in &minions {
+        seen_minion_ids.insert(minion.id);
+
+        if let Some(entity) = network_state.minions.get(&minion.id).copied() {
+            if let Ok(mut transform) = transform_sets.p0().get_mut(entity) {
+                transform.translation = Vec3::new(minion.x, minion.y, minion.z);
+                transform.rotation = Quat::from_rotation_y(minion.yaw);
+            }
+            commands
+                .entity(entity)
+                .insert((minion.team, minion_state_to_combat_stats(minion)));
+            continue;
+        }
+
+        let material = match minion.team {
+            Team::Green => visuals.green_minion_material.clone(),
+            Team::Blue => visuals.blue_minion_material.clone(),
+        };
+
+        let entity = commands
+            .spawn((
+                Mesh3d(visuals.minion_mesh.clone()),
+                MeshMaterial3d(material),
+                Transform::from_xyz(minion.x, minion.y, minion.z)
+                    .with_rotation(Quat::from_rotation_y(minion.yaw)),
+                Visibility::default(),
+                NetworkMinion,
+                minion.team,
+                minion_state_to_combat_stats(minion),
+                Name::new(format!("Minion-{}-{:?}", minion.id, minion.lane)),
+            ))
+            .id();
+        network_state.minions.insert(minion.id, entity);
+    }
+
+    let stale_minion_ids = network_state
+        .minions
+        .keys()
+        .copied()
+        .filter(|id| !seen_minion_ids.contains(id))
+        .collect::<Vec<_>>();
+    for minion_id in stale_minion_ids {
+        if let Some(entity) = network_state.minions.remove(&minion_id) {
+            if minion_query.get(entity).is_ok() {
+                commands.entity(entity).despawn_recursive();
+            }
+        }
+    }
 }
 
 fn player_state_to_combat_stats(player: &PlayerState) -> CombatStats {
@@ -693,6 +806,15 @@ fn structure_state_to_combat_stats(structure: &StructureState) -> CombatStats {
     CombatStats {
         hp: structure.hp,
         max_hp: structure.max_hp.max(1.0),
+        mana: 0.0,
+        max_mana: 1.0,
+    }
+}
+
+fn minion_state_to_combat_stats(minion: &MinionState) -> CombatStats {
+    CombatStats {
+        hp: minion.hp,
+        max_hp: minion.max_hp.max(1.0),
         mana: 0.0,
         max_mana: 1.0,
     }

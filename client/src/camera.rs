@@ -1,10 +1,17 @@
-use bevy::{input::mouse::MouseMotion, prelude::*, window::PrimaryWindow};
+use bevy::{
+    input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel},
+    prelude::*,
+    window::PrimaryWindow,
+};
 use std::f32::consts::PI;
 
 use crate::player::{PLAYER_SIZE, Player};
 
 pub const CAMERA_DISTANCE: f32 = 15.0;
 pub const CAMERA_HEIGHT: f32 = 12.0;
+const CAMERA_MIN_ZOOM: f32 = 0.4;
+const CAMERA_MAX_ZOOM: f32 = 2.5;
+const CAMERA_ZOOM_SPEED: f32 = 0.1;
 
 pub struct CameraPlugin;
 
@@ -18,11 +25,23 @@ impl Plugin for CameraPlugin {
 #[derive(Component)]
 pub struct MainCamera;
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct CameraState {
     pub locked: bool,
     pub pitch: f32,
     pub yaw: f32,
+    pub zoom: f32,
+}
+
+impl Default for CameraState {
+    fn default() -> Self {
+        Self {
+            locked: false,
+            pitch: 0.0,
+            yaw: 0.0,
+            zoom: 1.0,
+        }
+    }
 }
 
 fn toggle_camera_lock(
@@ -57,15 +76,29 @@ fn update_camera(
     player_query: Query<&Transform, (With<Player>, Without<MainCamera>)>,
     mut cam_state: ResMut<CameraState>,
     mut mouse_motion_events: EventReader<MouseMotion>,
+    mut mouse_wheel_events: EventReader<MouseWheel>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
 ) {
     let Ok(mut camera_transform) = camera_query.get_single_mut() else {
         return;
     };
     if cam_state.locked {
+        let mut scroll_delta = 0.0;
+        for event in mouse_wheel_events.read() {
+            let scale = match event.unit {
+                MouseScrollUnit::Line => 1.0,
+                MouseScrollUnit::Pixel => 0.02,
+            };
+            scroll_delta += event.y * scale;
+        }
+        if scroll_delta.abs() > 0.001 {
+            cam_state.zoom =
+                (cam_state.zoom - scroll_delta * CAMERA_ZOOM_SPEED).clamp(CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM);
+        }
         if let Ok(player_transform) = player_query.get_single() {
+            let zoom = cam_state.zoom;
             let target_position =
-                player_transform.translation + Vec3::new(0.0, CAMERA_HEIGHT, CAMERA_DISTANCE);
+                player_transform.translation + Vec3::new(0.0, CAMERA_HEIGHT * zoom, CAMERA_DISTANCE * zoom);
             let lerp_factor = (time.delta_secs() * 2.0).min(1.0);
             camera_transform.translation = camera_transform
                 .translation
