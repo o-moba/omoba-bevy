@@ -2,16 +2,22 @@ use bevy::{app::AppExit, asset::AssetPlugin, prelude::*};
 
 mod camera;
 mod combat;
+mod debug_console;
+mod game_state;
 mod maps;
 mod net;
 mod player;
+mod team;
 mod world;
 
 use camera::CameraPlugin;
 use combat::CombatPlugin;
+use debug_console::DebugConsolePlugin;
+use game_state::GameStateUiPlugin;
 use maps::MapsPlugin;
 use net::NetworkingPlugin;
 use player::PlayerPlugin;
+use team::TeamSelectPlugin;
 use world::SetupPlugin;
 
 fn main() {
@@ -27,6 +33,9 @@ fn main() {
             SetupPlugin,
             NetworkingPlugin,
             CombatPlugin,
+            TeamSelectPlugin,
+            GameStateUiPlugin,
+            DebugConsolePlugin,
         ))
         .add_systems(Update, handle_exit_input)
         .run();

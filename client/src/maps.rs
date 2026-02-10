@@ -223,73 +223,6 @@ fn setup_moba_map(
         "AwayBasePad",
     );
 
-    spawn_box(
-        &mut commands,
-        &mut meshes,
-        &home_base_material,
-        Vec3::new(layout.home_spawn.x, 4.0, layout.home_spawn.z),
-        Vec3::new(8.0, 8.0, 8.0),
-        "HomeNexus",
-    );
-    spawn_box(
-        &mut commands,
-        &mut meshes,
-        &away_base_material,
-        Vec3::new(layout.away_spawn.x, 4.0, layout.away_spawn.z),
-        Vec3::new(8.0, 8.0, 8.0),
-        "AwayNexus",
-    );
-
-    let mid_towers = [
-        (0.2, "TowerMidA"),
-        (0.4, "TowerMidA2"),
-        (0.6, "TowerMidB2"),
-        (0.8, "TowerMidB"),
-    ];
-    for (t, name) in mid_towers {
-        let position = home.lerp(away, t);
-        spawn_box(
-            &mut commands,
-            &mut meshes,
-            &lane_material,
-            Vec3::new(position.x, 3.0, position.z),
-            Vec3::new(2.6, 6.0, 2.6),
-            name,
-        );
-    }
-
-    let lane_span_x = right_x - left_x;
-    let top_towers = [
-        (
-            Vec3::new(left_x + lane_span_x * 0.25, 3.0, top_z),
-            "TowerTopA",
-        ),
-        (
-            Vec3::new(left_x + lane_span_x * 0.75, 3.0, top_z),
-            "TowerTopB",
-        ),
-    ];
-    let bot_towers = [
-        (
-            Vec3::new(left_x + lane_span_x * 0.25, 3.0, bottom_z),
-            "TowerBotA",
-        ),
-        (
-            Vec3::new(left_x + lane_span_x * 0.75, 3.0, bottom_z),
-            "TowerBotB",
-        ),
-    ];
-    for (position, name) in top_towers.into_iter().chain(bot_towers) {
-        spawn_box(
-            &mut commands,
-            &mut meshes,
-            &lane_material,
-            position,
-            Vec3::new(2.6, 6.0, 2.6),
-            name,
-        );
-    }
-
     let jungle_outer = map_size.x * 0.34;
     let jungle_inner = map_size.x * 0.22;
     let jungle_mid = map_size.x * 0.28;
@@ -399,4 +332,33 @@ fn spawn_box(
         MapStatic,
         Name::new(name.to_owned()),
     ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const EPSILON: f32 = 0.0001;
+
+    #[test]
+    fn layout_is_square_and_symmetric() {
+        let layout = MapLayout::default();
+        let size = layout.size();
+        assert!((size.x - size.y).abs() < EPSILON);
+        assert!((layout.home_spawn.x + layout.away_spawn.x).abs() < EPSILON);
+        assert!((layout.home_spawn.z + layout.away_spawn.z).abs() < EPSILON);
+    }
+
+    #[test]
+    fn clamp_position_stays_in_bounds() {
+        let layout = MapLayout::default();
+        let clamped = layout.clamp_position(Vec3::new(
+            layout.max.x + 10.0,
+            5.0,
+            layout.min.y - 10.0,
+        ));
+        assert!(clamped.x <= layout.max.x + EPSILON);
+        assert!(clamped.z >= layout.min.y - EPSILON);
+        assert_eq!(clamped.y, 5.0);
+    }
 }

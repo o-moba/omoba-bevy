@@ -6,8 +6,13 @@ use bevy::{
 };
 
 use crate::camera::MainCamera;
-use crate::net::{NetworkCommand, NetworkPlayerId, RemotePlayer};
+use crate::debug_console::DebugConsole;
+use crate::net::{
+    GameState, GameStateSnapshot, NetworkCommand, NetworkPlayerId, NetworkStructure,
+    NetworkStructureId, RemotePlayer, StructureKind, TargetId, TargetKind,
+};
 use crate::player::Player;
+use crate::team::Team;
 
 pub const MAX_HP: f32 = 100.0;
 pub const MAX_MANA: f32 = 100.0;
@@ -16,6 +21,8 @@ pub const SPELL_MANA_COST: f32 = 20.0;
 const BAR_WIDTH: f32 = 1.45;
 const BAR_HEIGHT: f32 = 0.09;
 const BAR_DEPTH: f32 = 0.09;
+const TOWER_BAR_Y: f32 = 3.6;
+const NEXUS_BAR_Y: f32 = 4.8;
 const TARGET_PICK_RADIUS: f32 = 4.0;
 const TARGET_MARKER_SIZE: f32 = 2.0;
 const TARGET_MARKER_THICKNESS: f32 = 0.08;
@@ -89,7 +96,7 @@ struct CombatVisualAssets {
 #[derive(Resource, Default)]
 struct TargetState {
     selected_entity: Option<Entity>,
-    selected_player_id: Option<u64>,
+    selected_target: Option<TargetId>,
     marker_entity: Option<Entity>,
 }
 
@@ -120,21 +127,25 @@ fn setup_combat_visual_assets(
     let hp_bg_material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.15, 0.02, 0.02),
         perceptual_roughness: 1.0,
+        unlit: true,
         ..default()
     });
     let hp_fill_material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.85, 0.15, 0.18),
         perceptual_roughness: 0.9,
+        unlit: true,
         ..default()
     });
     let mana_bg_material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.04, 0.06, 0.18),
         perceptual_roughness: 1.0,
+        unlit: true,
         ..default()
     });
     let mana_fill_material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.16, 0.52, 0.95),
         perceptual_roughness: 0.6,
+        unlit: true,
         ..default()
     });
     let target_material = materials.add(StandardMaterial {
@@ -190,34 +201,44 @@ fn setup_combat_ui(mut commands: Commands) {
 fn select_target_system(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mouse_input: Res<ButtonInput<MouseButton>>,
-    local_player: Query<&Transform, With<Player>>,
+    game_state: Option<Res<GameStateSnapshot>>,
+    local_player: Query<(&Transform, &Team), With<Player>>,
     camera_query: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
-    candidates: Query<
-        (Entity, &Transform, &NetworkPlayerId, &CombatStats),
+    player_candidates: Query<
+        (Entity, &Transform, &NetworkPlayerId, &CombatStats, &Team),
         (With<RemotePlayer>, Without<Player>),
+    >,
+    structure_candidates: Query<
+        (
+            Entity,
+            &Transform,
+            &NetworkStructureId,
+            &CombatStats,
+            &Team,
+            &StructureKind,
+        ),
+        With<NetworkStructure>,
     >,
     mut target_state: ResMut<TargetState>,
 ) {
-    let Ok(local_transform) = local_player.get_single() else {
+    if let Some(game_state) = game_state.as_ref() {
+        if !matches!(game_state.state, GameState::Running) {
+            return;
+        }
+    }
+    let Ok((local_transform, local_team)) = local_player.get_single() else {
         return;
     };
 
-    let mut select_entity: Option<(Entity, u64)> = None;
+    let mut select_entity: Option<(Entity, TargetId)> = None;
     if keyboard_input.just_pressed(KeyCode::Tab) {
-        select_entity = candidates
-            .iter()
-            .filter(|(_, _, _, stats)| stats.is_alive())
-            .min_by(|(_, a_transform, _, _), (_, b_transform, _, _)| {
-                let a_dist = a_transform
-                    .translation
-                    .distance_squared(local_transform.translation);
-                let b_dist = b_transform
-                    .translation
-                    .distance_squared(local_transform.translation);
-                a_dist.total_cmp(&b_dist)
-            })
-            .map(|(entity, _, id, _)| (entity, id.0));
+        select_entity = find_nearest_enemy_target(
+            local_transform.translation,
+            *local_team,
+            &player_candidates,
+            &structure_candidates,
+        );
     }
 
     if mouse_input.just_pressed(MouseButton::Middle) {
@@ -242,25 +263,18 @@ fn select_target_system(
         };
         let click_point = ray.get_point(distance);
 
-        select_entity = candidates
-            .iter()
-            .filter(|(_, _, _, stats)| stats.is_alive())
-            .filter_map(|(entity, transform, player_id, _)| {
-                let planar_dist = transform.translation.xz().distance(click_point.xz());
-                if planar_dist <= TARGET_PICK_RADIUS {
-                    Some((entity, player_id.0, planar_dist))
-                } else {
-                    None
-                }
-            })
-            .min_by(|a, b| a.2.total_cmp(&b.2))
-            .map(|(entity, id, _)| (entity, id));
+        select_entity = find_target_near_point(
+            click_point,
+            *local_team,
+            &player_candidates,
+            &structure_candidates,
+        );
     }
 
-    if let Some((entity, player_id)) = select_entity {
+    if let Some((entity, target_id)) = select_entity {
         target_state.selected_entity = Some(entity);
-        target_state.selected_player_id = Some(player_id);
-        info!("Target selected: player_id={player_id}");
+        target_state.selected_target = Some(target_id);
+        info!("Target selected: id={} ({:?})", target_id.id, target_id.kind);
     }
 }
 
@@ -271,69 +285,94 @@ fn clear_invalid_target_system(
 ) {
     if keyboard_input.just_pressed(KeyCode::Backspace) {
         target_state.selected_entity = None;
-        target_state.selected_player_id = None;
+        target_state.selected_target = None;
         return;
     }
 
     if let Some(entity) = target_state.selected_entity {
         let Ok(stats) = combat_stats_query.get(entity) else {
             target_state.selected_entity = None;
-            target_state.selected_player_id = None;
+            target_state.selected_target = None;
             return;
         };
         if !stats.is_alive() {
             target_state.selected_entity = None;
-            target_state.selected_player_id = None;
+            target_state.selected_target = None;
         }
     }
 }
 
 fn auto_select_target_system(
-    local_player: Query<&Transform, With<Player>>,
-    candidates: Query<
-        (Entity, &Transform, &NetworkPlayerId, &CombatStats),
+    game_state: Option<Res<GameStateSnapshot>>,
+    local_player: Query<(&Transform, &Team), With<Player>>,
+    player_candidates: Query<
+        (Entity, &Transform, &NetworkPlayerId, &CombatStats, &Team),
         (With<RemotePlayer>, Without<Player>),
+    >,
+    structure_candidates: Query<
+        (
+            Entity,
+            &Transform,
+            &NetworkStructureId,
+            &CombatStats,
+            &Team,
+            &StructureKind,
+        ),
+        With<NetworkStructure>,
     >,
     mut target_state: ResMut<TargetState>,
 ) {
+    if let Some(game_state) = game_state.as_ref() {
+        if !matches!(game_state.state, GameState::Running) {
+            return;
+        }
+    }
     if target_state.selected_entity.is_some() {
         return;
     }
-    let Ok(local_transform) = local_player.get_single() else {
+    let Ok((local_transform, local_team)) = local_player.get_single() else {
         return;
     };
-
-    let selected = candidates
-        .iter()
-        .filter(|(_, _, _, stats)| stats.is_alive())
-        .min_by(|(_, a_transform, _, _), (_, b_transform, _, _)| {
-            let a_dist = a_transform
-                .translation
-                .distance_squared(local_transform.translation);
-            let b_dist = b_transform
-                .translation
-                .distance_squared(local_transform.translation);
-            a_dist.total_cmp(&b_dist)
-        })
-        .map(|(entity, _, id, _)| (entity, id.0));
-
-    if let Some((entity, id)) = selected {
+    if let Some((entity, target_id)) = find_nearest_enemy_target(
+        local_transform.translation,
+        *local_team,
+        &player_candidates,
+        &structure_candidates,
+    ) {
         target_state.selected_entity = Some(entity);
-        target_state.selected_player_id = Some(id);
+        target_state.selected_target = Some(target_id);
     }
 }
 
 fn cast_spell_system(
     keyboard_input: Res<ButtonInput<KeyCode>>,
+    game_state: Option<Res<GameStateSnapshot>>,
     local_stats_query: Query<&CombatStats, With<Player>>,
-    local_player: Query<&Transform, With<Player>>,
-    candidates: Query<
-        (Entity, &Transform, &NetworkPlayerId, &CombatStats),
+    local_player: Query<(&Transform, &Team), With<Player>>,
+    player_candidates: Query<
+        (Entity, &Transform, &NetworkPlayerId, &CombatStats, &Team),
         (With<RemotePlayer>, Without<Player>),
+    >,
+    structure_candidates: Query<
+        (
+            Entity,
+            &Transform,
+            &NetworkStructureId,
+            &CombatStats,
+            &Team,
+            &StructureKind,
+        ),
+        With<NetworkStructure>,
     >,
     mut target_state: ResMut<TargetState>,
     mut command_writer: EventWriter<NetworkCommand>,
+    mut console: ResMut<DebugConsole>,
 ) {
+    if let Some(game_state) = game_state.as_ref() {
+        if !matches!(game_state.state, GameState::Running) {
+            return;
+        }
+    }
     if !keyboard_input.just_pressed(KeyCode::KeyQ) {
         return;
     }
@@ -341,18 +380,29 @@ fn cast_spell_system(
     let Ok(local_stats) = local_stats_query.get_single() else {
         return;
     };
-    if local_stats.mana < SPELL_MANA_COST {
-        info!(
-            "Not enough mana to cast. Need {:.0}, current {:.0}",
-            SPELL_MANA_COST, local_stats.mana
+    let target = resolve_cast_target(
+        &mut target_state,
+        local_player.get_single().ok(),
+        &player_candidates,
+        &structure_candidates,
+    );
+    if let Some(target) = target {
+        command_writer.send(NetworkCommand::Cast { target });
+        let message = format!(
+            "Cast -> {} {} (mana {:.0})",
+            match target.kind {
+                TargetKind::Player => "player",
+                TargetKind::Structure => "structure",
+            },
+            target.id,
+            local_stats.mana
         );
-        return;
-    };
-    let target_id = resolve_cast_target(&mut target_state, local_player.get_single().ok(), &candidates);
-    if let Some(target_id) = target_id {
-        command_writer.send(NetworkCommand::Cast { target_id });
+        console.push_line(message.clone());
+        info!("{message}");
     } else {
-        info!("No target available. Use TAB or middle mouse click to select.");
+        let message = "No target available. Use TAB or middle mouse click to select.";
+        console.push_line(message);
+        info!("{message}");
     }
 }
 
@@ -361,15 +411,33 @@ fn skill_button_system(
         (&Interaction, &mut BackgroundColor),
         (Changed<Interaction>, With<SkillButton>),
     >,
+    game_state: Option<Res<GameStateSnapshot>>,
     local_stats_query: Query<&CombatStats, With<Player>>,
-    local_player: Query<&Transform, With<Player>>,
-    candidates: Query<
-        (Entity, &Transform, &NetworkPlayerId, &CombatStats),
+    local_player: Query<(&Transform, &Team), With<Player>>,
+    player_candidates: Query<
+        (Entity, &Transform, &NetworkPlayerId, &CombatStats, &Team),
         (With<RemotePlayer>, Without<Player>),
+    >,
+    structure_candidates: Query<
+        (
+            Entity,
+            &Transform,
+            &NetworkStructureId,
+            &CombatStats,
+            &Team,
+            &StructureKind,
+        ),
+        With<NetworkStructure>,
     >,
     mut target_state: ResMut<TargetState>,
     mut command_writer: EventWriter<NetworkCommand>,
+    mut console: ResMut<DebugConsole>,
 ) {
+    if let Some(game_state) = game_state.as_ref() {
+        if !matches!(game_state.state, GameState::Running) {
+            return;
+        }
+    }
     for (interaction, mut color) in interactions.iter_mut() {
         match *interaction {
             Interaction::Pressed => {
@@ -377,13 +445,30 @@ fn skill_button_system(
                 let Ok(local_stats) = local_stats_query.get_single() else {
                     continue;
                 };
-                if local_stats.mana < SPELL_MANA_COST {
-                    continue;
-                }
-                if let Some(target_id) =
-                    resolve_cast_target(&mut target_state, local_player.get_single().ok(), &candidates)
+                if let Some(target) = resolve_cast_target(
+                    &mut target_state,
+                    local_player.get_single().ok(),
+                    &player_candidates,
+                    &structure_candidates,
+                )
                 {
-                    command_writer.send(NetworkCommand::Cast { target_id });
+                    command_writer.send(NetworkCommand::Cast { target });
+                    let message = format!(
+                        "Cast -> {} {} (mana {:.0})",
+                        match target.kind {
+                            TargetKind::Player => "player",
+                            TargetKind::Structure => "structure",
+                        },
+                        target.id,
+                        local_stats.mana
+                    );
+                    console.push_line(message.clone());
+                    info!("{message}");
+                } else {
+                    let message =
+                        "No target available. Use TAB or middle mouse click to select.";
+                    console.push_line(message);
+                    info!("{message}");
                 }
             }
             Interaction::Hovered => {
@@ -399,15 +484,20 @@ fn skill_button_system(
 fn spawn_combat_bars_system(
     mut commands: Commands,
     assets: Res<CombatVisualAssets>,
-    players_without_bars: Query<Entity, (With<CombatStats>, Without<CombatBars>)>,
+    players_without_bars: Query<(Entity, Option<&StructureKind>), (With<CombatStats>, Without<CombatBars>)>,
 ) {
-    for entity in players_without_bars.iter() {
+    for (entity, structure_kind) in players_without_bars.iter() {
+        let bar_y = match structure_kind.copied() {
+            Some(StructureKind::Tower) => TOWER_BAR_Y,
+            Some(StructureKind::Nexus) => NEXUS_BAR_Y,
+            None => 2.1,
+        };
         let mut bars = CombatBars::default();
         commands.entity(entity).with_children(|parent| {
             parent.spawn((
                 Mesh3d(assets.bar_mesh.clone()),
                 MeshMaterial3d(assets.hp_bg_material.clone()),
-                Transform::from_xyz(0.0, 2.1, 0.0),
+                Transform::from_xyz(0.0, bar_y, 0.0),
                 Name::new("HpBarBg"),
             ));
 
@@ -415,7 +505,7 @@ fn spawn_combat_bars_system(
                 .spawn((
                     Mesh3d(assets.bar_mesh.clone()),
                     MeshMaterial3d(assets.hp_fill_material.clone()),
-                    Transform::from_xyz(0.0, 2.1, 0.06),
+                    Transform::from_xyz(0.0, bar_y, 0.06),
                     Name::new("HpBarFill"),
                 ))
                 .id();
@@ -423,7 +513,7 @@ fn spawn_combat_bars_system(
             parent.spawn((
                 Mesh3d(assets.bar_mesh.clone()),
                 MeshMaterial3d(assets.mana_bg_material.clone()),
-                Transform::from_xyz(0.0, 1.95, 0.0),
+                Transform::from_xyz(0.0, bar_y - 0.15, 0.0),
                 Name::new("ManaBarBg"),
             ));
 
@@ -431,7 +521,7 @@ fn spawn_combat_bars_system(
                 .spawn((
                     Mesh3d(assets.bar_mesh.clone()),
                     MeshMaterial3d(assets.mana_fill_material.clone()),
-                    Transform::from_xyz(0.0, 1.95, 0.06),
+                    Transform::from_xyz(0.0, bar_y - 0.15, 0.06),
                     Name::new("ManaBarFill"),
                 ))
                 .id();
@@ -508,36 +598,160 @@ fn update_target_marker_system(
     marker_transform.scale = Vec3::new(pulse, 1.0, pulse);
 }
 
-fn resolve_cast_target(
-    target_state: &mut TargetState,
-    local_transform: Option<&Transform>,
-    candidates: &Query<
-        (Entity, &Transform, &NetworkPlayerId, &CombatStats),
+fn find_nearest_enemy_target(
+    local_pos: Vec3,
+    local_team: Team,
+    player_candidates: &Query<
+        (Entity, &Transform, &NetworkPlayerId, &CombatStats, &Team),
         (With<RemotePlayer>, Without<Player>),
     >,
-) -> Option<u64> {
-    if let Some(selected_id) = target_state.selected_player_id {
-        return Some(selected_id);
-    }
-    let local_transform = local_transform?;
-    let selected = candidates
-        .iter()
-        .filter(|(_, _, _, stats)| stats.is_alive())
-        .min_by(|(_, a_transform, _, _), (_, b_transform, _, _)| {
-            let a_dist = a_transform
-                .translation
-                .distance_squared(local_transform.translation);
-            let b_dist = b_transform
-                .translation
-                .distance_squared(local_transform.translation);
-            a_dist.total_cmp(&b_dist)
-        })
-        .map(|(entity, _, id, _)| (entity, id.0));
+    structure_candidates: &Query<
+        (
+            Entity,
+            &Transform,
+            &NetworkStructureId,
+            &CombatStats,
+            &Team,
+            &StructureKind,
+        ),
+        With<NetworkStructure>,
+    >,
+) -> Option<(Entity, TargetId)> {
+    let mut best: Option<(Entity, TargetId, f32)> = None;
 
-    if let Some((entity, id)) = selected {
+    for (entity, transform, id, stats, team) in player_candidates.iter() {
+        if !stats.is_alive() || *team == local_team {
+            continue;
+        }
+        let dist_sq = transform.translation.distance_squared(local_pos);
+        if best.map_or(true, |(_, _, best_dist)| dist_sq < best_dist) {
+            best = Some((
+                entity,
+                TargetId {
+                    kind: TargetKind::Player,
+                    id: id.0,
+                },
+                dist_sq,
+            ));
+        }
+    }
+
+    for (entity, transform, id, stats, team, _kind) in structure_candidates.iter() {
+        if !stats.is_alive() || *team == local_team {
+            continue;
+        }
+        let dist_sq = transform.translation.distance_squared(local_pos);
+        if best.map_or(true, |(_, _, best_dist)| dist_sq < best_dist) {
+            best = Some((
+                entity,
+                TargetId {
+                    kind: TargetKind::Structure,
+                    id: id.0,
+                },
+                dist_sq,
+            ));
+        }
+    }
+
+    best.map(|(entity, target, _)| (entity, target))
+}
+
+fn find_target_near_point(
+    click_point: Vec3,
+    local_team: Team,
+    player_candidates: &Query<
+        (Entity, &Transform, &NetworkPlayerId, &CombatStats, &Team),
+        (With<RemotePlayer>, Without<Player>),
+    >,
+    structure_candidates: &Query<
+        (
+            Entity,
+            &Transform,
+            &NetworkStructureId,
+            &CombatStats,
+            &Team,
+            &StructureKind,
+        ),
+        With<NetworkStructure>,
+    >,
+) -> Option<(Entity, TargetId)> {
+    let mut best: Option<(Entity, TargetId, f32)> = None;
+
+    for (entity, transform, id, stats, team) in player_candidates.iter() {
+        if !stats.is_alive() || *team == local_team {
+            continue;
+        }
+        let dist = transform.translation.xz().distance(click_point.xz());
+        if dist <= TARGET_PICK_RADIUS {
+            if best.map_or(true, |(_, _, best_dist)| dist < best_dist) {
+                best = Some((
+                    entity,
+                    TargetId {
+                        kind: TargetKind::Player,
+                        id: id.0,
+                    },
+                    dist,
+                ));
+            }
+        }
+    }
+
+    for (entity, transform, id, stats, team, _kind) in structure_candidates.iter() {
+        if !stats.is_alive() || *team == local_team {
+            continue;
+        }
+        let dist = transform.translation.xz().distance(click_point.xz());
+        if dist <= TARGET_PICK_RADIUS {
+            if best.map_or(true, |(_, _, best_dist)| dist < best_dist) {
+                best = Some((
+                    entity,
+                    TargetId {
+                        kind: TargetKind::Structure,
+                        id: id.0,
+                    },
+                    dist,
+                ));
+            }
+        }
+    }
+
+    best.map(|(entity, target, _)| (entity, target))
+}
+
+fn resolve_cast_target(
+    target_state: &mut TargetState,
+    local: Option<(&Transform, &Team)>,
+    player_candidates: &Query<
+        (Entity, &Transform, &NetworkPlayerId, &CombatStats, &Team),
+        (With<RemotePlayer>, Without<Player>),
+    >,
+    structure_candidates: &Query<
+        (
+            Entity,
+            &Transform,
+            &NetworkStructureId,
+            &CombatStats,
+            &Team,
+            &StructureKind,
+        ),
+        With<NetworkStructure>,
+    >,
+) -> Option<TargetId> {
+    if let Some(selected) = target_state.selected_target {
+        return Some(selected);
+    }
+    let (local_transform, local_team) = local?;
+    let selected = find_nearest_enemy_target(
+        local_transform.translation,
+        *local_team,
+        player_candidates,
+        structure_candidates,
+    );
+
+    if let Some((entity, target_id)) = selected {
         target_state.selected_entity = Some(entity);
-        target_state.selected_player_id = Some(id);
-        return Some(id);
+        target_state.selected_target = Some(target_id);
+        return Some(target_id);
     }
 
     None

@@ -10,8 +10,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::camera::{CameraState, MainCamera, CAMERA_DISTANCE, CAMERA_HEIGHT};
 use crate::combat::{CombatStats, MAX_HP, MAX_MANA};
-use crate::player::{Player, PlayerBody};
+use crate::player::{Player, PlayerBody, VerticalVelocity, PLAYER_SIZE};
+use crate::team::Team;
 use crate::world::PlayerAssets;
 
 const DEFAULT_SERVER_ADDR: &str = "127.0.0.1:4000";
@@ -21,6 +23,9 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 const NETWORK_LOOP_SLEEP: Duration = Duration::from_millis(16);
 const MAX_PACKET_SIZE: usize = 8 * 1024;
 const PROJECTILE_RADIUS: f32 = 0.22;
+const TOWER_SIZE: f32 = 2.6;
+const TOWER_HEIGHT: f32 = 6.0;
+const NEXUS_SIZE: f32 = 8.0;
 
 pub struct NetworkingPlugin;
 
@@ -28,6 +33,7 @@ impl Plugin for NetworkingPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<NetworkCommand>()
             .init_resource::<NetworkState>()
+            .init_resource::<GameStateSnapshot>()
             .insert_resource(LocalStateSendTimer(Timer::from_seconds(
                 UPDATE_INTERVAL_SECONDS,
                 TimerMode::Repeating,
@@ -46,15 +52,30 @@ impl Plugin for NetworkingPlugin {
 
 #[derive(Event, Clone, Copy, Debug)]
 pub enum NetworkCommand {
-    Cast { target_id: u64 },
+    Cast { target: TargetId },
+    Join { team: Team },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ClientPacket {
     Transform { x: f32, y: f32, z: f32, yaw: f32 },
-    Cast { target_id: u64 },
+    Cast { target: TargetId },
+    Join { team: Team },
     Ping,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TargetKind {
+    Player,
+    Structure,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TargetId {
+    pub kind: TargetKind,
+    pub id: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,6 +85,8 @@ struct PlayerState {
     y: f32,
     z: f32,
     yaw: f32,
+    #[serde(default = "default_team")]
+    team: Team,
     #[serde(default = "default_hp")]
     hp: f32,
     #[serde(default = "default_max_hp")]
@@ -78,9 +101,30 @@ struct PlayerState {
 struct ProjectileState {
     id: u64,
     owner_id: u64,
+    #[serde(default = "default_team")]
+    owner_team: Team,
     x: f32,
     y: f32,
     z: f32,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Component)]
+#[serde(rename_all = "snake_case")]
+pub enum StructureKind {
+    Tower,
+    Nexus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StructureState {
+    id: u64,
+    kind: StructureKind,
+    team: Team,
+    x: f32,
+    y: f32,
+    z: f32,
+    hp: f32,
+    max_hp: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,7 +135,29 @@ enum ServerPacket {
         players: Vec<PlayerState>,
         #[serde(default)]
         projectiles: Vec<ProjectileState>,
+        #[serde(default)]
+        structures: Vec<StructureState>,
+        #[serde(default)]
+        game_state: GameState,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum GameState {
+    Running,
+    Victory { winner: Team },
+}
+
+impl Default for GameState {
+    fn default() -> Self {
+        GameState::Running
+    }
+}
+
+#[derive(Resource, Default, Clone)]
+pub struct GameStateSnapshot {
+    pub state: GameState,
 }
 
 #[derive(Resource)]
@@ -103,8 +169,10 @@ struct NetworkChannels {
 #[derive(Resource, Default)]
 struct NetworkState {
     local_id: Option<u64>,
+    local_team: Option<Team>,
     remote_players: HashMap<u64, Entity>,
     projectiles: HashMap<u64, Entity>,
+    structures: HashMap<u64, Entity>,
 }
 
 #[derive(Resource)]
@@ -119,11 +187,21 @@ pub struct NetworkPlayerId(pub u64);
 #[derive(Component)]
 struct NetworkProjectile;
 
+#[derive(Component, Clone, Copy, Debug)]
+pub struct NetworkStructureId(pub u64);
+
+#[derive(Component)]
+pub struct NetworkStructure;
+
 #[derive(Resource)]
 struct NetworkVisualAssets {
     projectile_mesh: Handle<Mesh>,
     friendly_projectile_material: Handle<StandardMaterial>,
     hostile_projectile_material: Handle<StandardMaterial>,
+    tower_mesh: Handle<Mesh>,
+    nexus_mesh: Handle<Mesh>,
+    green_structure_material: Handle<StandardMaterial>,
+    blue_structure_material: Handle<StandardMaterial>,
 }
 
 fn setup_network_visual_assets(
@@ -132,6 +210,16 @@ fn setup_network_visual_assets(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let projectile_mesh = meshes.add(Mesh::from(Sphere::new(PROJECTILE_RADIUS)));
+    let tower_mesh = meshes.add(Mesh::from(Cuboid::new(
+        TOWER_SIZE,
+        TOWER_HEIGHT,
+        TOWER_SIZE,
+    )));
+    let nexus_mesh = meshes.add(Mesh::from(Cuboid::new(
+        NEXUS_SIZE,
+        NEXUS_SIZE,
+        NEXUS_SIZE,
+    )));
     let friendly_projectile_material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.35, 0.92, 1.0),
         unlit: true,
@@ -142,11 +230,25 @@ fn setup_network_visual_assets(
         unlit: true,
         ..default()
     });
+    let green_structure_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.14, 0.55, 0.22),
+        perceptual_roughness: 0.75,
+        ..default()
+    });
+    let blue_structure_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.18, 0.35, 0.75),
+        perceptual_roughness: 0.75,
+        ..default()
+    });
 
     commands.insert_resource(NetworkVisualAssets {
         projectile_mesh,
         friendly_projectile_material,
         hostile_projectile_material,
+        tower_mesh,
+        nexus_mesh,
+        green_structure_material,
+        blue_structure_material,
     });
 }
 
@@ -279,10 +381,13 @@ fn send_network_commands(
 
     for command in command_events.read() {
         match command {
-            NetworkCommand::Cast { target_id } => {
-                let _ = channels.outgoing.send(ClientPacket::Cast {
-                    target_id: *target_id,
-                });
+            NetworkCommand::Cast { target } => {
+                let _ = channels
+                    .outgoing
+                    .send(ClientPacket::Cast { target: *target });
+            }
+            NetworkCommand::Join { team } => {
+                let _ = channels.outgoing.send(ClientPacket::Join { team: *team });
             }
         }
     }
@@ -292,45 +397,111 @@ fn apply_server_snapshot(
     mut commands: Commands,
     channels: Option<Res<NetworkChannels>>,
     mut network_state: ResMut<NetworkState>,
-    mut transforms: Query<&mut Transform>,
+    mut transform_sets: ParamSet<(Query<&mut Transform>, Query<&mut Transform, With<MainCamera>>)>,
     remote_query: Query<&RemotePlayer>,
     projectile_query: Query<&NetworkProjectile>,
+    structure_query: Query<&NetworkStructure>,
     local_player_query: Query<Entity, With<Player>>,
     player_assets: Res<PlayerAssets>,
     visuals: Res<NetworkVisualAssets>,
+    mut game_state_snapshot: ResMut<GameStateSnapshot>,
+    mut cam_state: ResMut<CameraState>,
 ) {
     let Some(channels) = channels else {
         return;
     };
 
-    let mut latest_snapshot: Option<(u64, Vec<PlayerState>, Vec<ProjectileState>)> = None;
+    let mut latest_snapshot: Option<(
+        u64,
+        Vec<PlayerState>,
+        Vec<ProjectileState>,
+        Vec<StructureState>,
+        GameState,
+    )> = None;
     while let Ok(packet) = channels.incoming.try_recv() {
         match packet {
             ServerPacket::Snapshot {
                 your_id,
                 players,
                 projectiles,
+                structures,
+                game_state,
             } => {
-                latest_snapshot = Some((your_id, players, projectiles));
+                latest_snapshot = Some((your_id, players, projectiles, structures, game_state));
             }
         }
     }
 
-    let Some((your_id, players, projectiles)) = latest_snapshot else {
+    let Some((your_id, players, projectiles, structures, game_state)) = latest_snapshot else {
         return;
     };
 
     network_state.local_id = Some(your_id);
+    game_state_snapshot.state = game_state;
 
+    let local_player_state = players.iter().find(|player| player.id == your_id);
     if let Ok(local_entity) = local_player_query.get_single() {
         commands
             .entity(local_entity)
             .insert(NetworkPlayerId(your_id));
-        if let Some(local_player_state) = players.iter().find(|player| player.id == your_id) {
+        if let Some(local_player_state) = local_player_state {
             commands
                 .entity(local_entity)
-                .insert(player_state_to_combat_stats(local_player_state));
+                .insert((
+                    local_player_state.team,
+                    player_state_to_combat_stats(local_player_state),
+                ));
+            network_state.local_team = Some(local_player_state.team);
         }
+    } else if let Some(local_player_state) = local_player_state {
+        let spawn = Vec3::new(local_player_state.x, local_player_state.y, local_player_state.z);
+        let entity = if let Some(scene_handle) = player_assets.scene.clone() {
+            commands
+                .spawn((
+                    SceneRoot(scene_handle),
+                    Transform {
+                        translation: spawn,
+                        rotation: Quat::IDENTITY,
+                        scale: Vec3::splat(1.0),
+                    },
+                    GlobalTransform::default(),
+                    Visibility::default(),
+                    Player,
+                    PlayerBody,
+                    VerticalVelocity::default(),
+                    local_player_state.team,
+                    NetworkPlayerId(your_id),
+                    player_state_to_combat_stats(local_player_state),
+                    Name::new("Player"),
+                ))
+                .id()
+        } else {
+            commands
+                .spawn((
+                    Mesh3d(player_assets.mesh.clone()),
+                    MeshMaterial3d(player_assets.material.clone()),
+                    Transform::from_translation(spawn),
+                    Player,
+                    PlayerBody,
+                    VerticalVelocity::default(),
+                    local_player_state.team,
+                    NetworkPlayerId(your_id),
+                    player_state_to_combat_stats(local_player_state),
+                    Name::new("Player"),
+                ))
+                .id()
+        };
+
+        network_state.local_team = Some(local_player_state.team);
+        if let Ok(mut camera_transform) = transform_sets.p1().get_single_mut() {
+            cam_state.locked = true;
+            camera_transform.translation =
+                spawn + Vec3::new(0.0, CAMERA_HEIGHT, CAMERA_DISTANCE);
+            let look_target = Vec3::new(spawn.x, PLAYER_SIZE * 0.5, spawn.z);
+            *camera_transform = camera_transform.looking_at(look_target, Vec3::Y);
+        }
+
+        commands.entity(entity);
     }
 
     let mut seen_remote_ids = HashSet::new();
@@ -342,12 +513,13 @@ fn apply_server_snapshot(
         seen_remote_ids.insert(player.id);
 
         if let Some(entity) = network_state.remote_players.get(&player.id).copied() {
-            if let Ok(mut transform) = transforms.get_mut(entity) {
+            if let Ok(mut transform) = transform_sets.p0().get_mut(entity) {
                 transform.translation = Vec3::new(player.x, player.y, player.z);
                 transform.rotation = Quat::from_rotation_y(player.yaw);
             }
             commands.entity(entity).insert((
                 NetworkPlayerId(player.id),
+                player.team,
                 player_state_to_combat_stats(player),
             ));
             continue;
@@ -361,6 +533,7 @@ fn apply_server_snapshot(
             Visibility::default(),
             RemotePlayer,
             PlayerBody,
+            player.team,
             NetworkPlayerId(player.id),
             player_state_to_combat_stats(player),
             Name::new(format!("RemotePlayer-{}", player.id)),
@@ -406,13 +579,16 @@ fn apply_server_snapshot(
         seen_projectile_ids.insert(projectile.id);
 
         if let Some(entity) = network_state.projectiles.get(&projectile.id).copied() {
-            if let Ok(mut transform) = transforms.get_mut(entity) {
+            if let Ok(mut transform) = transform_sets.p0().get_mut(entity) {
                 transform.translation = Vec3::new(projectile.x, projectile.y, projectile.z);
             }
             continue;
         }
 
-        let material = if projectile.owner_id == your_id {
+        let is_friendly = network_state
+            .local_team
+            .is_some_and(|team| team == projectile.owner_team);
+        let material = if is_friendly {
             visuals.friendly_projectile_material.clone()
         } else {
             visuals.hostile_projectile_material.clone()
@@ -444,6 +620,64 @@ fn apply_server_snapshot(
             }
         }
     }
+
+    let mut seen_structure_ids = HashSet::new();
+    for structure in &structures {
+        seen_structure_ids.insert(structure.id);
+
+        if let Some(entity) = network_state.structures.get(&structure.id).copied() {
+            if let Ok(mut transform) = transform_sets.p0().get_mut(entity) {
+                transform.translation = Vec3::new(structure.x, structure.y, structure.z);
+            }
+            commands.entity(entity).insert((
+                structure.kind,
+                structure.team,
+                NetworkStructureId(structure.id),
+                structure_state_to_combat_stats(structure),
+            ));
+            continue;
+        }
+
+        let material = match structure.team {
+            Team::Green => visuals.green_structure_material.clone(),
+            Team::Blue => visuals.blue_structure_material.clone(),
+        };
+        let mesh = match structure.kind {
+            StructureKind::Tower => visuals.tower_mesh.clone(),
+            StructureKind::Nexus => visuals.nexus_mesh.clone(),
+        };
+
+        let entity = commands
+            .spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                Transform::from_xyz(structure.x, structure.y, structure.z),
+                Visibility::default(),
+                NetworkStructure,
+                NetworkStructureId(structure.id),
+                structure.kind,
+                structure.team,
+                structure_state_to_combat_stats(structure),
+                Name::new(format!("Structure-{}", structure.id)),
+            ))
+            .id();
+
+        network_state.structures.insert(structure.id, entity);
+    }
+
+    let stale_structure_ids = network_state
+        .structures
+        .keys()
+        .copied()
+        .filter(|id| !seen_structure_ids.contains(id))
+        .collect::<Vec<_>>();
+    for structure_id in stale_structure_ids {
+        if let Some(entity) = network_state.structures.remove(&structure_id) {
+            if structure_query.get(entity).is_ok() {
+                commands.entity(entity).despawn_recursive();
+            }
+        }
+    }
 }
 
 fn player_state_to_combat_stats(player: &PlayerState) -> CombatStats {
@@ -455,8 +689,21 @@ fn player_state_to_combat_stats(player: &PlayerState) -> CombatStats {
     }
 }
 
+fn structure_state_to_combat_stats(structure: &StructureState) -> CombatStats {
+    CombatStats {
+        hp: structure.hp,
+        max_hp: structure.max_hp.max(1.0),
+        mana: 0.0,
+        max_mana: 1.0,
+    }
+}
+
 fn default_hp() -> f32 {
     MAX_HP
+}
+
+fn default_team() -> Team {
+    Team::Green
 }
 
 fn default_max_hp() -> f32 {

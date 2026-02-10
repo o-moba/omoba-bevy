@@ -1,0 +1,134 @@
+use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
+
+use crate::net::NetworkCommand;
+
+const TEAM_BUTTON_SIZE: f32 = 140.0;
+const TEAM_BUTTON_GAP: f32 = 28.0;
+const TEAM_OVERLAY_COLOR: Color = Color::srgba(0.02, 0.02, 0.02, 0.55);
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Team {
+    Green,
+    Blue,
+}
+
+impl Team {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Team::Green => "Green",
+            Team::Blue => "Blue",
+        }
+    }
+
+    pub fn ui_color(self) -> Color {
+        match self {
+            Team::Green => Color::srgba(0.14, 0.55, 0.22, 0.95),
+            Team::Blue => Color::srgba(0.18, 0.35, 0.75, 0.95),
+        }
+    }
+
+    pub fn ui_hover_color(self) -> Color {
+        match self {
+            Team::Green => Color::srgba(0.18, 0.65, 0.28, 0.98),
+            Team::Blue => Color::srgba(0.22, 0.45, 0.85, 0.98),
+        }
+    }
+}
+
+#[derive(Resource, Default)]
+pub struct TeamSelection {
+    pub team: Option<Team>,
+}
+
+pub struct TeamSelectPlugin;
+
+impl Plugin for TeamSelectPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<TeamSelection>()
+            .add_systems(Startup, setup_team_select_ui)
+            .add_systems(Update, team_select_ui_system);
+    }
+}
+
+#[derive(Component)]
+struct TeamSelectRoot;
+
+#[derive(Component)]
+struct TeamSelectButton {
+    team: Team,
+}
+
+fn setup_team_select_ui(mut commands: Commands) {
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(TEAM_BUTTON_GAP),
+                ..default()
+            },
+            BackgroundColor(TEAM_OVERLAY_COLOR),
+            TeamSelectRoot,
+            Name::new("TeamSelectOverlay"),
+        ))
+        .with_children(|parent| {
+            spawn_team_button(parent, Team::Green, "TeamGreenButton");
+            spawn_team_button(parent, Team::Blue, "TeamBlueButton");
+        });
+}
+
+fn spawn_team_button(parent: &mut ChildBuilder, team: Team, name: &'static str) {
+    parent.spawn((
+        Button,
+        Node {
+            width: Val::Px(TEAM_BUTTON_SIZE),
+            height: Val::Px(TEAM_BUTTON_SIZE),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        },
+        BackgroundColor(team.ui_color()),
+        TeamSelectButton { team },
+        Name::new(name),
+    ));
+}
+
+fn team_select_ui_system(
+    mut commands: Commands,
+    mut selection: ResMut<TeamSelection>,
+    mut interactions: Query<
+        (&Interaction, &TeamSelectButton, &mut BackgroundColor),
+        (Changed<Interaction>, With<Button>),
+    >,
+    overlay_query: Query<Entity, With<TeamSelectRoot>>,
+    mut command_writer: EventWriter<NetworkCommand>,
+) {
+    if selection.team.is_some() {
+        return;
+    }
+
+    for (interaction, button, mut color) in interactions.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                selection.team = Some(button.team);
+                command_writer.send(NetworkCommand::Join { team: button.team });
+                if let Ok(overlay) = overlay_query.get_single() {
+                    commands.entity(overlay).despawn_recursive();
+                }
+            }
+            Interaction::Hovered => {
+                *color = button.team.ui_hover_color().into();
+            }
+            Interaction::None => {
+                *color = button.team.ui_color().into();
+            }
+        }
+    }
+}
