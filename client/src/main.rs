@@ -5,6 +5,7 @@ mod combat;
 mod debug_console;
 mod game_state;
 mod maps;
+mod minimap;
 mod net;
 mod player;
 mod team;
@@ -15,6 +16,7 @@ use combat::CombatPlugin;
 use debug_console::DebugConsolePlugin;
 use game_state::GameStateUiPlugin;
 use maps::MapsPlugin;
+use minimap::MinimapPlugin;
 use net::NetworkingPlugin;
 use player::PlayerPlugin;
 use team::TeamSelectPlugin;
@@ -32,6 +34,7 @@ fn main() {
             MapsPlugin,
             SetupPlugin,
             NetworkingPlugin,
+            MinimapPlugin,
             CombatPlugin,
             TeamSelectPlugin,
             GameStateUiPlugin,

@@ -1585,6 +1585,29 @@ mod tests {
         assert!((green.last().unwrap().x - layout.away.x).abs() < EPSILON);
         assert!((blue.last().unwrap().x - layout.home.x).abs() < EPSILON);
     }
+
+    #[test]
+    fn mana_regenerates_and_is_clamped() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:34567".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let player = players.get_mut(&addr).unwrap();
+        player.state.mana = 10.0;
+        player.state.max_mana = MAX_MANA;
+
+        regenerate_mana(&mut players, 2.5);
+        let expected = 10.0 + MANA_REGEN_PER_SECOND * 2.5;
+        let current = players.get(&addr).unwrap().state.mana;
+        assert!((current - expected).abs() < EPSILON);
+
+        regenerate_mana(&mut players, 100.0);
+        let clamped = players.get(&addr).unwrap().state.mana;
+        assert!((clamped - MAX_MANA).abs() < EPSILON);
+    }
 }
 
 fn handle_respawns(

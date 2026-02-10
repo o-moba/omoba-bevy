@@ -1,6 +1,9 @@
 use bevy::{
     input::mouse::MouseButton,
-    math::{Dir3, primitives::InfinitePlane3d},
+    math::{
+        Dir3,
+        primitives::{InfinitePlane3d, Rectangle},
+    },
     prelude::*,
     window::PrimaryWindow,
 };
@@ -19,7 +22,8 @@ pub const MAX_MANA: f32 = 100.0;
 
 const BAR_WIDTH: f32 = 1.45;
 const BAR_HEIGHT: f32 = 0.09;
-const BAR_DEPTH: f32 = 0.09;
+const BAR_LAYER_OFFSET: f32 = 0.01;
+const MANA_BAR_OFFSET_Y: f32 = -0.15;
 const TOWER_BAR_Y: f32 = 3.6;
 const BASE_TOWER_BAR_Y: f32 = 4.8;
 const TARGET_PICK_RADIUS: f32 = 4.0;
@@ -53,7 +57,12 @@ impl Plugin for CombatPlugin {
             );
         app.add_systems(
             PostUpdate,
-            (spawn_combat_bars_system, update_combat_bars_system),
+            (
+                spawn_combat_bars_system,
+                update_combat_bars_system,
+                sync_combat_bar_transforms_system,
+            )
+                .chain(),
         );
     }
 }
@@ -111,12 +120,21 @@ struct TargetMarker;
 #[derive(Component)]
 struct SkillButton;
 
+#[derive(Component)]
+struct CombatBarRoot;
+
+#[derive(Component)]
+struct CombatBarAnchor {
+    target: Entity,
+    y_offset: f32,
+}
+
 fn setup_combat_visual_assets(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let bar_mesh = meshes.add(Mesh::from(Cuboid::new(BAR_WIDTH, BAR_HEIGHT, BAR_DEPTH)));
+    let bar_mesh = meshes.add(Mesh::from(Rectangle::new(BAR_WIDTH, BAR_HEIGHT)));
     let marker_mesh = meshes.add(Mesh::from(Cuboid::new(
         TARGET_MARKER_SIZE,
         TARGET_MARKER_THICKNESS,
@@ -497,11 +515,24 @@ fn spawn_combat_bars_system(
         };
         let show_mana_bar = structure_kind.is_none() && minion_marker.is_none();
         let mut bars = CombatBars::default();
-        commands.entity(entity).with_children(|parent| {
+        let bar_root = commands
+            .spawn((
+                Transform::from_xyz(0.0, bar_y, 0.0),
+                Visibility::default(),
+                CombatBarRoot,
+                CombatBarAnchor {
+                    target: entity,
+                    y_offset: bar_y,
+                },
+                Name::new("CombatBarRoot"),
+            ))
+            .id();
+
+        commands.entity(bar_root).with_children(|parent| {
             parent.spawn((
                 Mesh3d(assets.bar_mesh.clone()),
                 MeshMaterial3d(assets.hp_bg_material.clone()),
-                Transform::from_xyz(0.0, bar_y, 0.0),
+                Transform::from_xyz(0.0, 0.0, 0.0),
                 Name::new("HpBarBg"),
             ));
 
@@ -509,7 +540,7 @@ fn spawn_combat_bars_system(
                 .spawn((
                     Mesh3d(assets.bar_mesh.clone()),
                     MeshMaterial3d(assets.hp_fill_material.clone()),
-                    Transform::from_xyz(0.0, bar_y, 0.06),
+                    Transform::from_xyz(0.0, 0.0, BAR_LAYER_OFFSET),
                     Name::new("HpBarFill"),
                 ))
                 .id();
@@ -519,7 +550,7 @@ fn spawn_combat_bars_system(
                 parent.spawn((
                     Mesh3d(assets.bar_mesh.clone()),
                     MeshMaterial3d(assets.mana_bg_material.clone()),
-                    Transform::from_xyz(0.0, bar_y - 0.15, 0.0),
+                    Transform::from_xyz(0.0, MANA_BAR_OFFSET_Y, 0.0),
                     Name::new("ManaBarBg"),
                 ));
 
@@ -527,7 +558,7 @@ fn spawn_combat_bars_system(
                     .spawn((
                         Mesh3d(assets.bar_mesh.clone()),
                         MeshMaterial3d(assets.mana_fill_material.clone()),
-                        Transform::from_xyz(0.0, bar_y - 0.15, 0.06),
+                        Transform::from_xyz(0.0, MANA_BAR_OFFSET_Y, BAR_LAYER_OFFSET),
                         Name::new("ManaBarFill"),
                     ))
                     .id();
@@ -567,6 +598,30 @@ fn update_combat_bars_system(
                 transform.translation.x = (mana_ratio - 1.0) * BAR_WIDTH * 0.5;
             }
         }
+    }
+}
+
+fn sync_combat_bar_transforms_system(
+    mut commands: Commands,
+    camera_query: Query<&GlobalTransform, With<MainCamera>>,
+    target_query: Query<&GlobalTransform>,
+    mut bar_query: Query<(Entity, &CombatBarAnchor, &mut Transform), With<CombatBarRoot>>,
+) {
+    let Ok(camera_transform) = camera_query.single() else {
+        return;
+    };
+    let camera_rotation = camera_transform.compute_transform().rotation;
+
+    for (bar_entity, anchor, mut bar_transform) in bar_query.iter_mut() {
+        let Ok(target_transform) = target_query.get(anchor.target) else {
+            commands
+                .entity(bar_entity)
+                .despawn_related::<Children>()
+                .despawn();
+            continue;
+        };
+        bar_transform.translation = target_transform.translation() + Vec3::Y * anchor.y_offset;
+        bar_transform.rotation = camera_rotation;
     }
 }
 
