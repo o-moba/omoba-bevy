@@ -30,6 +30,13 @@ const TARGET_PICK_RADIUS: f32 = 4.0;
 const TARGET_MARKER_SIZE: f32 = 2.0;
 const TARGET_MARKER_THICKNESS: f32 = 0.08;
 const TARGET_MARKER_Y: f32 = 0.24;
+const TARGET_MARKER_EDGE: f32 = 0.18;
+const TARGET_MARKER_PULSE_AMPLITUDE: f32 = 0.09;
+const TARGET_MARKER_BOB_AMPLITUDE: f32 = 0.06;
+const PLAYER_MARKER_RADIUS: f32 = 1.25;
+const MINION_MARKER_RADIUS: f32 = 1.05;
+const TOWER_MARKER_RADIUS: f32 = 2.0;
+const BASE_TOWER_MARKER_RADIUS: f32 = 3.75;
 const SKILL_BUTTON_SIZE: f32 = 80.0;
 const SKILL_BUTTON_MARGIN: f32 = 20.0;
 const SKILL_BUTTON_COLOR: Color = Color::srgba(0.12, 0.12, 0.12, 0.75);
@@ -135,11 +142,7 @@ fn setup_combat_visual_assets(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let bar_mesh = meshes.add(Mesh::from(Rectangle::new(BAR_WIDTH, BAR_HEIGHT)));
-    let marker_mesh = meshes.add(Mesh::from(Cuboid::new(
-        TARGET_MARKER_SIZE,
-        TARGET_MARKER_THICKNESS,
-        TARGET_MARKER_SIZE,
-    )));
+    let marker_segment_mesh = meshes.add(Mesh::from(Cuboid::new(1.0, 1.0, 1.0)));
 
     let hp_bg_material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.15, 0.02, 0.02),
@@ -174,13 +177,56 @@ fn setup_combat_visual_assets(
 
     let marker_entity = commands
         .spawn((
-            Mesh3d(marker_mesh.clone()),
-            MeshMaterial3d(target_material.clone()),
             Transform::from_xyz(0.0, -50.0, 0.0),
             Visibility::Hidden,
             TargetMarker,
             Name::new("TargetMarker"),
         ))
+        .with_children(|parent| {
+            // Four thin segments form a ring-like selection outline.
+            let horizontal_scale = Vec3::new(1.0, TARGET_MARKER_THICKNESS, TARGET_MARKER_EDGE);
+            let vertical_scale = Vec3::new(TARGET_MARKER_EDGE, TARGET_MARKER_THICKNESS, 1.0);
+            parent.spawn((
+                Mesh3d(marker_segment_mesh.clone()),
+                MeshMaterial3d(target_material.clone()),
+                Transform {
+                    translation: Vec3::new(0.0, 0.0, 0.5),
+                    scale: horizontal_scale,
+                    ..default()
+                },
+                Name::new("TargetMarker-North"),
+            ));
+            parent.spawn((
+                Mesh3d(marker_segment_mesh.clone()),
+                MeshMaterial3d(target_material.clone()),
+                Transform {
+                    translation: Vec3::new(0.0, 0.0, -0.5),
+                    scale: horizontal_scale,
+                    ..default()
+                },
+                Name::new("TargetMarker-South"),
+            ));
+            parent.spawn((
+                Mesh3d(marker_segment_mesh.clone()),
+                MeshMaterial3d(target_material.clone()),
+                Transform {
+                    translation: Vec3::new(0.5, 0.0, 0.0),
+                    scale: vertical_scale,
+                    ..default()
+                },
+                Name::new("TargetMarker-East"),
+            ));
+            parent.spawn((
+                Mesh3d(marker_segment_mesh),
+                MeshMaterial3d(target_material),
+                Transform {
+                    translation: Vec3::new(-0.5, 0.0, 0.0),
+                    scale: vertical_scale,
+                    ..default()
+                },
+                Name::new("TargetMarker-West"),
+            ));
+        })
         .id();
 
     commands.insert_resource(CombatVisualAssets {
@@ -629,6 +675,9 @@ fn update_target_marker_system(
     time: Res<Time>,
     target_state: Res<TargetState>,
     targets: Query<&Transform, Without<TargetMarker>>,
+    structure_kinds: Query<&StructureKind, With<NetworkStructure>>,
+    minions: Query<(), With<NetworkMinion>>,
+    players: Query<(), Or<(With<Player>, With<RemotePlayer>)>>,
     mut marker_query: Query<(&mut Transform, &mut Visibility), With<TargetMarker>>,
 ) {
     let Some(marker_entity) = target_state.marker_entity else {
@@ -649,13 +698,26 @@ fn update_target_marker_system(
     };
 
     *marker_visibility = Visibility::Visible;
+    let marker_radius = if let Ok(kind) = structure_kinds.get(target_entity) {
+        match kind {
+            StructureKind::Tower => TOWER_MARKER_RADIUS,
+            StructureKind::BaseTower => BASE_TOWER_MARKER_RADIUS,
+        }
+    } else if minions.get(target_entity).is_ok() {
+        MINION_MARKER_RADIUS
+    } else if players.get(target_entity).is_ok() {
+        PLAYER_MARKER_RADIUS
+    } else {
+        TARGET_MARKER_SIZE * 0.5
+    };
+    let pulse = 1.0 + TARGET_MARKER_PULSE_AMPLITUDE * (time.elapsed_secs() * 7.5).sin();
+    let bob = TARGET_MARKER_BOB_AMPLITUDE * (time.elapsed_secs() * 5.0).sin();
     marker_transform.translation = Vec3::new(
         target_transform.translation.x,
-        TARGET_MARKER_Y,
+        TARGET_MARKER_Y + bob,
         target_transform.translation.z,
     );
-    let pulse = 1.0 + 0.08 * (time.elapsed_secs() * 7.5).sin();
-    marker_transform.scale = Vec3::new(pulse, 1.0, pulse);
+    marker_transform.scale = Vec3::new(marker_radius * pulse, 1.0, marker_radius * pulse);
 }
 
 fn find_nearest_enemy_target(

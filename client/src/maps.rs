@@ -1,12 +1,14 @@
 use bevy::prelude::*;
 
 use crate::player::{PLAYER_SIZE, PLAYER_SPEED};
+use crate::team::Team;
 
 pub const TARGET_BASE_RUN_TIME_SECONDS: f32 = 45.0;
 pub const TARGET_BASE_DISTANCE: f32 = PLAYER_SPEED * TARGET_BASE_RUN_TIME_SECONDS;
 const BASE_PAD_SIZE: f32 = 46.0;
 const BASE_PAD_HEIGHT: f32 = 0.7;
 const BASE_EDGE_MARGIN: f32 = 6.0;
+const PLAYER_SPAWN_OFFSET: f32 = 7.0;
 const LANE_WIDTH: f32 = 12.0;
 const LANE_THICKNESS: f32 = 0.2;
 const LANE_EDGE_PADDING: f32 = 6.0;
@@ -53,6 +55,20 @@ impl MapLayout {
             world_pos.y,
             world_pos.z.clamp(self.min.y, self.max.y),
         )
+    }
+
+    pub fn team_spawn(self, team: Team) -> Vec3 {
+        let base = match team {
+            Team::Green => self.home_spawn,
+            Team::Blue => self.away_spawn,
+        };
+        let mut dir = Vec3::new(-base.x, 0.0, -base.z);
+        if dir.length_squared() > 0.0001 {
+            dir = dir.normalize();
+        } else {
+            dir = Vec3::ZERO;
+        }
+        base + Vec3::new(dir.x * PLAYER_SPAWN_OFFSET, 0.0, dir.z * PLAYER_SPAWN_OFFSET)
     }
 
     pub fn center_lane_distance(self) -> f32 {

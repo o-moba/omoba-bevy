@@ -29,6 +29,7 @@ impl Plugin for PlayerPlugin {
             Update,
             (handle_player_input, animate_jump, move_player).chain(),
         )
+        .add_systems(Update, resolve_player_structure_overlap.after(move_player))
         .add_systems(PostUpdate, apply_gravity)
         .init_resource::<RespawnCountdown>()
         .add_systems(Startup, setup_respawn_ui)
@@ -327,10 +328,7 @@ fn respawn_countdown_system(
             state.last_shown = -1;
             *visibility = Visibility::Hidden;
             text.0.clear();
-            let spawn = match team {
-                Team::Green => map_layout.home_spawn,
-                Team::Blue => map_layout.away_spawn,
-            };
+            let spawn = map_layout.team_spawn(*team);
             transform.translation = spawn;
             velocity.0 = 0.0;
             commands.entity(entity).remove::<MovementTarget>();
@@ -409,4 +407,41 @@ fn resolve_player_collisions(
     }
 
     resolved
+}
+
+fn resolve_player_structure_overlap(
+    mut player_query: Query<&mut Transform, With<Player>>,
+    structures: Query<(&Transform, &StructureKind), (With<NetworkStructure>, Without<Player>)>,
+) {
+    let Ok(mut player_transform) = player_query.single_mut() else {
+        return;
+    };
+    let player_radius = PLAYER_SIZE * 0.5;
+    let mut resolved = player_transform.translation;
+
+    for (structure_transform, kind) in structures.iter() {
+        let obstacle_radius = match kind {
+            StructureKind::Tower => 1.3,
+            StructureKind::BaseTower => 3.2,
+        };
+        let min_distance = player_radius + obstacle_radius;
+        let delta = Vec3::new(
+            resolved.x - structure_transform.translation.x,
+            0.0,
+            resolved.z - structure_transform.translation.z,
+        );
+        let distance = delta.length();
+        if distance < min_distance {
+            let push_dir = if distance > 0.0001 {
+                delta / distance
+            } else {
+                Vec3::X
+            };
+            resolved.x = structure_transform.translation.x + push_dir.x * min_distance;
+            resolved.z = structure_transform.translation.z + push_dir.z * min_distance;
+        }
+    }
+
+    player_transform.translation.x = resolved.x;
+    player_transform.translation.z = resolved.z;
 }

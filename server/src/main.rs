@@ -53,6 +53,7 @@ const MINION_WAVE_INTERVAL: Duration = Duration::from_secs(60);
 const MINIONS_PER_WAVE: usize = 3;
 const MINION_KILL_GOLD: u32 = 18;
 const MINION_KILL_XP: u32 = 32;
+const PLAYER_SPAWN_OFFSET: f32 = 7.0;
 
 const TARGET_BASE_RUN_TIME_SECONDS: f32 = 45.0;
 const PLAYER_SPEED: f32 = 5.0;
@@ -533,13 +534,14 @@ fn ensure_player_connected(
         let player_id = *next_player_id;
         *next_player_id += 1;
         println!("Player {player_id} connected from {addr}");
+        let spawn = spawn_position_for_team(map_layout, Team::Green);
 
         ConnectedPlayer {
             state: PlayerState {
                 id: player_id,
-                x: map_layout.home.x,
+                x: spawn.x,
                 y: 0.5,
-                z: map_layout.home.z,
+                z: spawn.z,
                 yaw: 0.0,
                 team: Team::Green,
                 hp: MAX_HP,
@@ -571,10 +573,7 @@ fn regenerate_mana(players: &mut HashMap<SocketAddr, ConnectedPlayer>, dt: f32) 
 
 fn handle_join_request(player: &mut ConnectedPlayer, team: Team, map_layout: &MapLayoutState) {
     player.state.team = team;
-    let spawn = match team {
-        Team::Green => map_layout.home,
-        Team::Blue => map_layout.away,
-    };
+    let spawn = spawn_position_for_team(map_layout, team);
     player.state.x = spawn.x;
     player.state.y = 0.5;
     player.state.z = spawn.z;
@@ -916,6 +915,19 @@ struct MapLayoutState {
     right_x: f32,
     top_z: f32,
     bottom_z: f32,
+}
+
+fn spawn_position_for_team(map_layout: &MapLayoutState, team: Team) -> Vec3f {
+    let base = match team {
+        Team::Green => map_layout.home,
+        Team::Blue => map_layout.away,
+    };
+    let dir = Vec3f::new(-base.x, 0.0, -base.z).normalize_or_zero();
+    Vec3f::new(
+        base.x + dir.x * PLAYER_SPAWN_OFFSET,
+        base.y,
+        base.z + dir.z * PLAYER_SPAWN_OFFSET,
+    )
 }
 
 fn lane_control_points(layout: &MapLayoutState, lane: Lane) -> Vec<Vec3f> {
@@ -1626,10 +1638,7 @@ fn handle_respawns(
         if now < respawn_at {
             continue;
         }
-        let spawn = match player.state.team {
-            Team::Green => map_layout.home,
-            Team::Blue => map_layout.away,
-        };
+        let spawn = spawn_position_for_team(map_layout, player.state.team);
         player.state.x = spawn.x;
         player.state.y = 0.5;
         player.state.z = spawn.z;

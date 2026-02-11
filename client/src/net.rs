@@ -10,10 +10,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::camera::{CAMERA_DISTANCE, CAMERA_HEIGHT, CameraState, MainCamera};
+use crate::camera::{CameraState, MainCamera, locked_camera_offset};
 use crate::combat::{CombatStats, MAX_HP, MAX_MANA};
 use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
 use crate::team::Team;
+use crate::team::TeamSelection;
 use crate::world::PlayerAssets;
 
 const DEFAULT_SERVER_ADDR: &str = "127.0.0.1:4000";
@@ -28,6 +29,7 @@ const TOWER_HEIGHT: f32 = 6.0;
 const BASE_TOWER_SIZE: f32 = 6.0;
 const BASE_TOWER_HEIGHT: f32 = 8.0;
 const MINION_RADIUS: f32 = 0.55;
+const LOCAL_SNAP_DISTANCE: f32 = 4.0;
 
 pub struct NetworkingPlugin;
 
@@ -49,7 +51,8 @@ impl Plugin for NetworkingPlugin {
                     apply_server_snapshot,
                 ),
             )
-            .add_systems(Update, interpolate_minions.after(apply_server_snapshot));
+            .add_systems(Update, interpolate_minions.after(apply_server_snapshot))
+            .add_systems(Update, interpolate_remote_players.after(apply_server_snapshot));
     }
 }
 
@@ -252,6 +255,16 @@ pub struct NetworkMinion;
 
 #[derive(Component, Clone, Copy, Debug)]
 struct MinionInterpolation {
+    from_translation: Vec3,
+    to_translation: Vec3,
+    from_rotation: Quat,
+    to_rotation: Quat,
+    elapsed: f32,
+    duration: f32,
+}
+
+#[derive(Component, Clone, Copy, Debug)]
+struct RemotePlayerInterpolation {
     from_translation: Vec3,
     to_translation: Vec3,
     from_rotation: Quat,
@@ -494,6 +507,7 @@ fn apply_server_snapshot(
     visuals: Res<NetworkVisualAssets>,
     mut game_state_snapshot: ResMut<GameStateSnapshot>,
     mut cam_state: ResMut<CameraState>,
+    team_selection: Res<TeamSelection>,
 ) {
     let Some(channels) = channels else {
         return;
@@ -543,6 +557,22 @@ fn apply_server_snapshot(
             .entity(local_entity)
             .insert(NetworkPlayerId(your_id));
         if let Some(local_player_state) = local_player_state {
+            let server_translation = Vec3::new(
+                local_player_state.x,
+                local_player_state.y,
+                local_player_state.z,
+            );
+            if let Ok(mut local_transform) = transform_sets.p0().get_mut(local_entity) {
+                // Snap on meaningful server corrections (first team spawn, respawn, etc.)
+                if local_transform
+                    .translation
+                    .distance_squared(server_translation)
+                    > LOCAL_SNAP_DISTANCE * LOCAL_SNAP_DISTANCE
+                {
+                    local_transform.translation = server_translation;
+                    local_transform.rotation = Quat::from_rotation_y(local_player_state.yaw);
+                }
+            }
             commands.entity(local_entity).insert((
                 local_player_state.team,
                 player_state_to_combat_stats(local_player_state),
@@ -550,6 +580,13 @@ fn apply_server_snapshot(
             network_state.local_team = Some(local_player_state.team);
         }
     } else if let Some(local_player_state) = local_player_state {
+        // Wait for server ack of selected team to avoid first spawn on default Green.
+        let Some(selected_team) = team_selection.team else {
+            return;
+        };
+        if local_player_state.team != selected_team {
+            return;
+        }
         let spawn = Vec3::new(
             local_player_state.x,
             local_player_state.y,
@@ -596,8 +633,7 @@ fn apply_server_snapshot(
         if let Ok(mut camera_transform) = transform_sets.p1().single_mut() {
             cam_state.locked = true;
             let zoom = cam_state.zoom;
-            camera_transform.translation =
-                spawn + Vec3::new(0.0, CAMERA_HEIGHT * zoom, CAMERA_DISTANCE * zoom);
+            camera_transform.translation = spawn + locked_camera_offset(zoom);
             let look_target = Vec3::new(spawn.x, PLAYER_SIZE * 0.5, spawn.z);
             *camera_transform = camera_transform.looking_at(look_target, Vec3::Y);
         }
@@ -614,9 +650,16 @@ fn apply_server_snapshot(
         seen_remote_ids.insert(player.id);
 
         if let Some(entity) = network_state.remote_players.get(&player.id).copied() {
-            if let Ok(mut transform) = transform_sets.p0().get_mut(entity) {
-                transform.translation = Vec3::new(player.x, player.y, player.z);
-                transform.rotation = Quat::from_rotation_y(player.yaw);
+            if let Ok(transform) = transform_sets.p0().get_mut(entity) {
+                let interpolation = RemotePlayerInterpolation {
+                    from_translation: transform.translation,
+                    to_translation: Vec3::new(player.x, player.y, player.z),
+                    from_rotation: transform.rotation,
+                    to_rotation: Quat::from_rotation_y(player.yaw),
+                    elapsed: 0.0,
+                    duration: UPDATE_INTERVAL_SECONDS.max(0.001),
+                };
+                commands.entity(entity).insert(interpolation);
             }
             commands.entity(entity).insert((
                 NetworkPlayerId(player.id),
@@ -629,14 +672,24 @@ fn apply_server_snapshot(
         let scene_handle = player_assets.scene.clone();
         let mesh_handle = player_assets.mesh.clone();
         let material_handle = player_assets.material.clone();
+        let spawn_translation = Vec3::new(player.x, player.y, player.z);
+        let spawn_rotation = Quat::from_rotation_y(player.yaw);
         let mut entity_commands = commands.spawn((
-            Transform::from_xyz(player.x, player.y, player.z),
+            Transform::from_translation(spawn_translation).with_rotation(spawn_rotation),
             Visibility::default(),
             RemotePlayer,
             PlayerBody,
             player.team,
             NetworkPlayerId(player.id),
             player_state_to_combat_stats(player),
+            RemotePlayerInterpolation {
+                from_translation: spawn_translation,
+                to_translation: spawn_translation,
+                from_rotation: spawn_rotation,
+                to_rotation: spawn_rotation,
+                elapsed: UPDATE_INTERVAL_SECONDS,
+                duration: UPDATE_INTERVAL_SECONDS.max(0.001),
+            },
             Name::new(format!("RemotePlayer-{}", player.id)),
         ));
         entity_commands.with_children(|parent| {
@@ -864,6 +917,23 @@ fn interpolate_minions(
     mut minion_query: Query<(&mut Transform, &mut MinionInterpolation), With<NetworkMinion>>,
 ) {
     for (mut transform, mut interpolation) in &mut minion_query {
+        let duration = interpolation.duration.max(0.001);
+        interpolation.elapsed = (interpolation.elapsed + time.delta_secs()).min(duration);
+        let t = (interpolation.elapsed / duration).clamp(0.0, 1.0);
+        transform.translation = interpolation
+            .from_translation
+            .lerp(interpolation.to_translation, t);
+        transform.rotation = interpolation
+            .from_rotation
+            .slerp(interpolation.to_rotation, t);
+    }
+}
+
+fn interpolate_remote_players(
+    time: Res<Time>,
+    mut player_query: Query<(&mut Transform, &mut RemotePlayerInterpolation), With<RemotePlayer>>,
+) {
+    for (mut transform, mut interpolation) in &mut player_query {
         let duration = interpolation.duration.max(0.001);
         interpolation.elapsed = (interpolation.elapsed + time.delta_secs()).min(duration);
         let t = (interpolation.elapsed / duration).clamp(0.0, 1.0);

@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::scene::SceneRoot;
 use std::f32::consts::PI;
 
-use crate::camera::{CAMERA_DISTANCE, CAMERA_HEIGHT, CameraState, MainCamera};
+use crate::camera::{CameraState, MainCamera, locked_camera_offset};
 use crate::combat::CombatStats;
 use crate::maps::MapLayout;
 use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
@@ -126,7 +126,7 @@ fn setup_scene(
 
     let map_center = Vec3::new(0.0, PLAYER_SIZE * 0.5, 0.0);
     let zoom = cam_state.zoom;
-    let initial_cam_pos = map_center + Vec3::new(0.0, CAMERA_HEIGHT * zoom, CAMERA_DISTANCE * zoom);
+    let initial_cam_pos = map_center + locked_camera_offset(zoom);
     let initial_cam_transform =
         Transform::from_translation(initial_cam_pos).looking_at(map_center, Vec3::Y);
 
@@ -158,17 +158,13 @@ fn spawn_local_player_on_team(
         return;
     }
     let team = team_selection.team.unwrap();
-    let spawn = match team {
-        Team::Green => map_layout.home_spawn,
-        Team::Blue => map_layout.away_spawn,
-    };
+    let spawn = map_layout.team_spawn(team);
 
     spawn_player_entity(&mut commands, &player_assets, spawn, team);
     if let Ok(mut camera_transform) = camera_query.single_mut() {
         cam_state.locked = true;
         let zoom = cam_state.zoom;
-        camera_transform.translation =
-            spawn + Vec3::new(0.0, CAMERA_HEIGHT * zoom, CAMERA_DISTANCE * zoom);
+        camera_transform.translation = spawn + locked_camera_offset(zoom);
         let look_target = Vec3::new(spawn.x, PLAYER_SIZE * 0.5, spawn.z);
         *camera_transform = camera_transform.looking_at(look_target, Vec3::Y);
     }

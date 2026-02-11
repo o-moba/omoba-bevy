@@ -12,6 +12,8 @@ pub const CAMERA_HEIGHT: f32 = 12.0;
 const CAMERA_MIN_ZOOM: f32 = 0.4;
 const CAMERA_MAX_ZOOM: f32 = 2.5;
 const CAMERA_ZOOM_SPEED: f32 = 0.1;
+const CAMERA_ISO_X: f32 = -1.0;
+const CAMERA_ISO_Z: f32 = -1.0;
 
 pub struct CameraPlugin;
 
@@ -42,6 +44,15 @@ impl Default for CameraState {
             zoom: 1.0,
         }
     }
+}
+
+pub fn locked_camera_offset(zoom: f32) -> Vec3 {
+    let iso_dir = Vec2::new(CAMERA_ISO_X, CAMERA_ISO_Z).normalize_or_zero();
+    Vec3::new(
+        iso_dir.x * CAMERA_DISTANCE * zoom,
+        CAMERA_HEIGHT * zoom,
+        iso_dir.y * CAMERA_DISTANCE * zoom,
+    )
 }
 
 fn toggle_camera_lock(
@@ -97,8 +108,7 @@ fn update_camera(
         }
         if let Ok(player_transform) = player_query.single() {
             let zoom = cam_state.zoom;
-            let target_position = player_transform.translation
-                + Vec3::new(0.0, CAMERA_HEIGHT * zoom, CAMERA_DISTANCE * zoom);
+            let target_position = player_transform.translation + locked_camera_offset(zoom);
             let lerp_factor = (time.delta_secs() * 2.0).min(1.0);
             camera_transform.translation = camera_transform
                 .translation
@@ -110,7 +120,9 @@ fn update_camera(
             );
             let look_direction = look_target - camera_transform.translation;
             if look_direction.length_squared() > 0.0001 {
-                let target_transform = Transform::default().looking_at(look_direction, Vec3::Y);
+                let target_transform =
+                    Transform::from_translation(camera_transform.translation)
+                        .looking_at(look_target, Vec3::Y);
                 camera_transform.rotation = camera_transform
                     .rotation
                     .slerp(target_transform.rotation, lerp_factor);
