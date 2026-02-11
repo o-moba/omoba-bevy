@@ -14,13 +14,15 @@ const CAMERA_MAX_ZOOM: f32 = 2.5;
 const CAMERA_ZOOM_SPEED: f32 = 0.1;
 const CAMERA_ISO_X: f32 = -1.0;
 const CAMERA_ISO_Z: f32 = -1.0;
+const CAMERA_FREE_FLY_SPEED: f32 = 18.0;
+const CAMERA_FREE_FLY_SPRINT_MULTIPLIER: f32 = 2.2;
 
 pub struct CameraPlugin;
 
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CameraState>()
-            .add_systems(Update, (update_cursor_grab, update_camera, toggle_camera_lock));
+            .add_systems(Update, (update_cursor_grab, toggle_camera_lock, update_camera));
     }
 }
 
@@ -56,12 +58,16 @@ pub fn locked_camera_offset(zoom: f32) -> Vec3 {
 }
 
 fn toggle_camera_lock(
+    mouse_button_input: Res<ButtonInput<MouseButton>>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut cam_state: ResMut<CameraState>,
     window_query: Query<&Window, With<PrimaryWindow>>,
 ) {
     if window_query.single().is_ok() {
         let mut toggled = false;
+        if mouse_button_input.just_pressed(MouseButton::Right) {
+            toggled = true;
+        }
         if keyboard_input.just_pressed(KeyCode::AltLeft)
             || keyboard_input.just_pressed(KeyCode::AltRight)
         {
@@ -113,6 +119,13 @@ fn update_camera(
     let Ok(mut camera_transform) = camera_query.single_mut() else {
         return;
     };
+
+    // Always drain mouse motion events to avoid delta bursts after mode switches.
+    let mut delta_xy = Vec2::ZERO;
+    for event in mouse_motion_events.read() {
+        delta_xy += event.delta;
+    }
+
     if cam_state.locked {
         let mut scroll_delta: f32 = 0.0;
         for event in mouse_wheel_events.read() {
@@ -148,13 +161,9 @@ fn update_camera(
                     .slerp(target_transform.rotation, lerp_factor);
             }
             cam_state.yaw = camera_transform.rotation.to_euler(EulerRot::YXZ).0;
-            cam_state.pitch = -camera_transform.rotation.to_euler(EulerRot::YXZ).1;
+            cam_state.pitch = camera_transform.rotation.to_euler(EulerRot::YXZ).1;
         }
     } else {
-        let mut delta_xy = Vec2::ZERO;
-        for event in mouse_motion_events.read() {
-            delta_xy += event.delta;
-        }
         let sensitivity = 0.002;
         cam_state.yaw -= delta_xy.x * sensitivity;
         cam_state.pitch -= delta_xy.y * sensitivity;
@@ -183,11 +192,14 @@ fn update_camera(
         if keyboard_input.pressed(KeyCode::KeyQ) || keyboard_input.pressed(KeyCode::ShiftLeft) {
             move_direction -= camera_up;
         }
-        let move_speed = 10.0;
+        let sprinting = keyboard_input.pressed(KeyCode::ShiftLeft)
+            || keyboard_input.pressed(KeyCode::ShiftRight);
+        let move_speed = if sprinting {
+            CAMERA_FREE_FLY_SPEED * CAMERA_FREE_FLY_SPRINT_MULTIPLIER
+        } else {
+            CAMERA_FREE_FLY_SPEED
+        };
         camera_transform.translation +=
             move_direction.normalize_or_zero() * move_speed * time.delta_secs();
-    }
-    if !cam_state.locked {
-        mouse_motion_events.clear();
     }
 }

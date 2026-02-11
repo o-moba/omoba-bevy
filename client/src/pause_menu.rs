@@ -1,4 +1,8 @@
-use bevy::{app::AppExit, prelude::*};
+use bevy::{
+    app::AppExit,
+    prelude::*,
+    window::{CursorGrabMode, CursorOptions, PrimaryWindow},
+};
 
 const OVERLAY_ALPHA: f32 = 0.7;
 const PANEL_WIDTH: f32 = 320.0;
@@ -136,16 +140,26 @@ fn sync_pause_menu_visibility(
 }
 
 fn handle_exit_button(
+    mut commands: Commands,
     mut interaction_query: Query<
         (&Interaction, &mut BackgroundColor),
         (Changed<Interaction>, With<Button>, With<ExitButton>),
     >,
+    mut cursor_query: Query<&mut CursorOptions, With<PrimaryWindow>>,
+    window_query: Query<Entity, With<PrimaryWindow>>,
     mut app_exit_writer: MessageWriter<AppExit>,
 ) {
     for (interaction, mut color) in &mut interaction_query {
         match *interaction {
             Interaction::Pressed => {
                 info!("Exit selected from pause menu.");
+                if let Ok(mut cursor) = cursor_query.single_mut() {
+                    cursor.grab_mode = CursorGrabMode::None;
+                    cursor.visible = true;
+                }
+                if let Ok(primary_window) = window_query.single() {
+                    commands.entity(primary_window).despawn();
+                }
                 app_exit_writer.write(AppExit::Success);
             }
             Interaction::Hovered => {

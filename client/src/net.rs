@@ -389,6 +389,7 @@ fn run_udp_client(
 
     let mut recv_buf = [0_u8; MAX_PACKET_SIZE];
     let mut last_heartbeat_at = Instant::now();
+    let mut last_receive_error_log_at: Option<Instant> = None;
 
     let _ = send_packet(&socket, &ClientPacket::Ping);
 
@@ -422,7 +423,13 @@ fn run_udp_client(
                 },
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
                 Err(error) => {
-                    eprintln!("Client socket receive error: {error}");
+                    let now = Instant::now();
+                    if last_receive_error_log_at
+                        .is_none_or(|last| now.duration_since(last) >= Duration::from_secs(1))
+                    {
+                        eprintln!("Client socket receive error: {error}");
+                        last_receive_error_log_at = Some(now);
+                    }
                     break;
                 }
             }
