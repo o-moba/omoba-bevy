@@ -1,4 +1,4 @@
-use bevy::{app::AppExit, asset::AssetPlugin, prelude::*};
+use bevy::{asset::AssetPlugin, prelude::*};
 
 mod camera;
 mod combat;
@@ -7,6 +7,7 @@ mod game_state;
 mod maps;
 mod minimap;
 mod net;
+mod pause_menu;
 mod player;
 mod team;
 mod world;
@@ -18,6 +19,7 @@ use game_state::GameStateUiPlugin;
 use maps::MapsPlugin;
 use minimap::MinimapPlugin;
 use net::NetworkingPlugin;
+use pause_menu::PauseMenuPlugin;
 use player::PlayerPlugin;
 use team::TeamSelectPlugin;
 use world::SetupPlugin;
@@ -39,17 +41,7 @@ fn main() {
             TeamSelectPlugin,
             GameStateUiPlugin,
             DebugConsolePlugin,
+            PauseMenuPlugin,
         ))
-        .add_systems(Update, handle_exit_input)
         .run();
-}
-
-fn handle_exit_input(
-    keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut app_exit_writer: MessageWriter<AppExit>,
-) {
-    if keyboard_input.just_pressed(KeyCode::Escape) {
-        info!("Escape pressed, exiting application.");
-        app_exit_writer.write(AppExit::Success);
-    }
 }
