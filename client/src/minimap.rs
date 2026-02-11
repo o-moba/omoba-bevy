@@ -262,9 +262,26 @@ fn world_to_minimap(layout: MapLayout, world_pos: Vec3, icon_size: f32) -> (f32,
     let normalized_x = ((world_pos.x - layout.min.x) / map_size.x.max(0.001)).clamp(0.0, 1.0);
     let normalized_z = ((world_pos.z - layout.min.y) / map_size.y.max(0.001)).clamp(0.0, 1.0);
 
-    let left = (normalized_x * MINIMAP_INNER_SIZE - icon_size * 0.5)
+    // Base orientation chosen to match team side placement and movement direction.
+    let base_x = 1.0 - normalized_x;
+    let base_y = 1.0 - normalized_z;
+
+    // Rotate minimap projection 90 degrees clockwise around the minimap center.
+    let theta = std::f32::consts::FRAC_PI_2;
+    let cos_t = theta.cos();
+    let sin_t = theta.sin();
+
+    let centered_x = base_x - 0.5;
+    let centered_y_up = 0.5 - base_y;
+    let rotated_x = centered_x * cos_t + centered_y_up * sin_t;
+    let rotated_y_up = -centered_x * sin_t + centered_y_up * cos_t;
+
+    let rotated_x_norm = rotated_x + 0.5;
+    let rotated_y_norm = 0.5 - rotated_y_up;
+
+    let left = (rotated_x_norm * MINIMAP_INNER_SIZE - icon_size * 0.5)
         .clamp(0.0, MINIMAP_INNER_SIZE - icon_size);
-    let top = ((1.0 - normalized_z) * MINIMAP_INNER_SIZE - icon_size * 0.5)
+    let top = (rotated_y_norm * MINIMAP_INNER_SIZE - icon_size * 0.5)
         .clamp(0.0, MINIMAP_INNER_SIZE - icon_size);
 
     (left, top)

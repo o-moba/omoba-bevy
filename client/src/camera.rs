@@ -1,7 +1,7 @@
 use bevy::{
     input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel},
     prelude::*,
-    window::PrimaryWindow,
+    window::{CursorGrabMode, CursorOptions, PrimaryWindow},
 };
 use std::f32::consts::PI;
 
@@ -20,7 +20,7 @@ pub struct CameraPlugin;
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CameraState>()
-            .add_systems(Update, (update_camera, toggle_camera_lock));
+            .add_systems(Update, (update_cursor_grab, update_camera, toggle_camera_lock));
     }
 }
 
@@ -56,16 +56,12 @@ pub fn locked_camera_offset(zoom: f32) -> Vec3 {
 }
 
 fn toggle_camera_lock(
-    mouse_button_input: Res<ButtonInput<MouseButton>>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut cam_state: ResMut<CameraState>,
     window_query: Query<&Window, With<PrimaryWindow>>,
 ) {
     if window_query.single().is_ok() {
         let mut toggled = false;
-        if mouse_button_input.just_pressed(MouseButton::Right) {
-            toggled = true;
-        }
         if keyboard_input.just_pressed(KeyCode::AltLeft)
             || keyboard_input.just_pressed(KeyCode::AltRight)
         {
@@ -78,6 +74,30 @@ fn toggle_camera_lock(
         }
     } else {
         warn!("No primary window found.");
+    }
+}
+
+fn update_cursor_grab(
+    mouse_button_input: Res<ButtonInput<MouseButton>>,
+    mut cursor_query: Query<&mut CursorOptions, With<PrimaryWindow>>,
+) {
+    let Ok(mut cursor_options) = cursor_query.single_mut() else {
+        return;
+    };
+
+    let should_grab = mouse_button_input.pressed(MouseButton::Right);
+    let target_grab_mode = if should_grab {
+        CursorGrabMode::Locked
+    } else {
+        CursorGrabMode::None
+    };
+    let target_visibility = !should_grab;
+
+    if cursor_options.grab_mode != target_grab_mode {
+        cursor_options.grab_mode = target_grab_mode;
+    }
+    if cursor_options.visible != target_visibility {
+        cursor_options.visible = target_visibility;
     }
 }
 
