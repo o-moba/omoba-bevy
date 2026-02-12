@@ -671,27 +671,30 @@ fn sync_combat_bar_transforms_system(
                 .despawn();
             continue;
         };
-        let dynamic_offset = compute_bar_offset_for_entity(
+        let bar_world_y = compute_bar_world_y_for_entity(
             anchor.target,
-            anchor.y_offset,
+            target_transform.translation().y + anchor.y_offset,
             &children_query,
             &aabb_query,
             &global_query,
         );
-        bar_transform.translation = target_transform.translation() + Vec3::Y * dynamic_offset;
+        bar_transform.translation = Vec3::new(
+            target_transform.translation().x,
+            bar_world_y,
+            target_transform.translation().z,
+        );
         bar_transform.rotation = camera_rotation;
     }
 }
 
-fn compute_bar_offset_for_entity(
+fn compute_bar_world_y_for_entity(
     entity: Entity,
-    fallback_offset: f32,
+    fallback_world_y: f32,
     children_query: &Query<&Children>,
     aabb_query: &Query<&Aabb>,
     global_query: &Query<&GlobalTransform>,
 ) -> f32 {
     let mut max_y = f32::NEG_INFINITY;
-    let mut min_y = f32::INFINITY;
     let mut has_bounds = false;
 
     let mut sample_entity = |sample: Entity| {
@@ -706,7 +709,6 @@ fn compute_bar_offset_for_entity(
                     let local_corner = center + Vec3::new(half.x * sx, half.y * sy, half.z * sz);
                     let world_corner = global.transform_point(local_corner);
                     max_y = max_y.max(world_corner.y);
-                    min_y = min_y.min(world_corner.y);
                     has_bounds = true;
                 }
             }
@@ -719,19 +721,10 @@ fn compute_bar_offset_for_entity(
     }
 
     if !has_bounds {
-        return fallback_offset;
+        return fallback_world_y;
     }
 
-    let Ok(root_global) = global_query.get(entity) else {
-        return fallback_offset;
-    };
-    let root_y = root_global.translation().y;
-    let extents_above_root = (max_y - root_y).max(0.0);
-    let full_height = (max_y - min_y).max(0.0);
-
-    (extents_above_root + BAR_HEAD_CLEARANCE)
-        .max(full_height * 0.5 + BAR_HEAD_CLEARANCE)
-        .max(MIN_PLAYER_BAR_Y)
+    (max_y + BAR_HEAD_CLEARANCE).max(MIN_PLAYER_BAR_Y)
 }
 
 fn update_target_marker_system(
