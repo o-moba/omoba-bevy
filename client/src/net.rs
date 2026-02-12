@@ -15,7 +15,7 @@ use crate::combat::{CombatStats, MAX_HP, MAX_MANA};
 use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
 use crate::team::Team;
 use crate::team::TeamSelection;
-use crate::world::PlayerAssets;
+use crate::world::{NormalizeModelScale, PlayerAssets};
 
 const DEFAULT_SERVER_ADDR: &str = "127.0.0.1:4000";
 const LOCAL_BIND_ADDR: &str = "0.0.0.0:0";
@@ -614,6 +614,7 @@ fn apply_server_snapshot(
                     PlayerBody,
                     VerticalVelocity::default(),
                     local_player_state.team,
+                    NormalizeModelScale::for_player_model(),
                     NetworkPlayerId(your_id),
                     player_state_to_combat_stats(local_player_state),
                     Name::new("Player"),
@@ -688,6 +689,7 @@ fn apply_server_snapshot(
             PlayerBody,
             player.team,
             NetworkPlayerId(player.id),
+            NormalizeModelScale::for_player_model(),
             player_state_to_combat_stats(player),
             RemotePlayerInterpolation {
                 from_translation: spawn_translation,

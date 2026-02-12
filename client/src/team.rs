@@ -5,7 +5,13 @@ use crate::net::NetworkCommand;
 
 const TEAM_BUTTON_SIZE: f32 = 140.0;
 const TEAM_BUTTON_GAP: f32 = 28.0;
+const CHARACTER_BUTTON_WIDTH: f32 = 120.0;
+const CHARACTER_BUTTON_HEIGHT: f32 = 42.0;
+const CHARACTER_BUTTON_GAP: f32 = 12.0;
 const TEAM_OVERLAY_COLOR: Color = Color::srgba(0.02, 0.02, 0.02, 0.55);
+const CHARACTER_BUTTON_COLOR: Color = Color::srgba(0.18, 0.18, 0.18, 0.95);
+const CHARACTER_BUTTON_HOVER_COLOR: Color = Color::srgba(0.25, 0.25, 0.25, 0.98);
+const CHARACTER_BUTTON_SELECTED_COLOR: Color = Color::srgba(0.78, 0.62, 0.18, 0.98);
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -37,9 +43,35 @@ impl Team {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CharacterChoice {
+    Ipfs,
+    Toka,
+    Wang,
+    Cube,
+}
+
+impl CharacterChoice {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CharacterChoice::Ipfs => "IPFS",
+            CharacterChoice::Toka => "Toka",
+            CharacterChoice::Wang => "Wang",
+            CharacterChoice::Cube => "Cube",
+        }
+    }
+}
+
 #[derive(Resource, Default)]
 pub struct TeamSelection {
     pub team: Option<Team>,
+    pub character: CharacterChoice,
+}
+
+impl Default for CharacterChoice {
+    fn default() -> Self {
+        Self::Ipfs
+    }
 }
 
 pub struct TeamSelectPlugin;
@@ -53,14 +85,23 @@ impl Plugin for TeamSelectPlugin {
 }
 
 #[derive(Component)]
-struct TeamSelectRoot;
+pub struct TeamSelectRoot;
 
 #[derive(Component)]
 struct TeamSelectButton {
     team: Team,
 }
 
-fn setup_team_select_ui(mut commands: Commands) {
+#[derive(Component)]
+struct CharacterSelectButton {
+    choice: CharacterChoice,
+}
+
+fn setup_team_select_ui(selection: Res<TeamSelection>, mut commands: Commands) {
+    spawn_team_select_ui(&mut commands, selection.character);
+}
+
+pub fn spawn_team_select_ui(commands: &mut Commands, selected_character: CharacterChoice) {
     commands
         .spawn((
             Node {
@@ -71,7 +112,8 @@ fn setup_team_select_ui(mut commands: Commands) {
                 bottom: Val::Px(0.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                column_gap: Val::Px(TEAM_BUTTON_GAP),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(20.0),
                 ..default()
             },
             BackgroundColor(TEAM_OVERLAY_COLOR),
@@ -80,40 +122,129 @@ fn setup_team_select_ui(mut commands: Commands) {
         ))
         .with_children(|parent| {
             parent.spawn((
-                Button,
-                Node {
-                    width: Val::Px(TEAM_BUTTON_SIZE),
-                    height: Val::Px(TEAM_BUTTON_SIZE),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
+                Text::new("Choose Character"),
+                TextFont {
+                    font_size: 22.0,
                     ..default()
                 },
-                BackgroundColor(Team::Green.ui_color()),
-                TeamSelectButton { team: Team::Green },
-                Name::new("TeamGreenButton"),
+                TextColor(Color::WHITE),
+                Name::new("CharacterSelectTitle"),
             ));
+
+            parent
+                .spawn((
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(CHARACTER_BUTTON_GAP),
+                        ..default()
+                    },
+                    Name::new("CharacterButtonsRow"),
+                ))
+                .with_children(|row| {
+                    for choice in [
+                        CharacterChoice::Ipfs,
+                        CharacterChoice::Toka,
+                        CharacterChoice::Wang,
+                        CharacterChoice::Cube,
+                    ] {
+                        row.spawn((
+                            Button,
+                            Node {
+                                width: Val::Px(CHARACTER_BUTTON_WIDTH),
+                                height: Val::Px(CHARACTER_BUTTON_HEIGHT),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            BackgroundColor(if choice == selected_character {
+                                CHARACTER_BUTTON_SELECTED_COLOR
+                            } else {
+                                CHARACTER_BUTTON_COLOR
+                            }),
+                            CharacterSelectButton { choice },
+                            Name::new(format!("CharacterButton-{}", choice.as_str())),
+                        ))
+                        .with_children(|button| {
+                            button.spawn((
+                                Text::new(choice.as_str()),
+                                TextFont {
+                                    font_size: 18.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
+                    }
+                });
+
             parent.spawn((
-                Button,
-                Node {
-                    width: Val::Px(TEAM_BUTTON_SIZE),
-                    height: Val::Px(TEAM_BUTTON_SIZE),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
+                Text::new("Choose Team"),
+                TextFont {
+                    font_size: 22.0,
                     ..default()
                 },
-                BackgroundColor(Team::Blue.ui_color()),
-                TeamSelectButton { team: Team::Blue },
-                Name::new("TeamBlueButton"),
+                TextColor(Color::WHITE),
+                Name::new("TeamSelectTitle"),
             ));
+
+            parent
+                .spawn((
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(TEAM_BUTTON_GAP),
+                        ..default()
+                    },
+                    Name::new("TeamButtonsRow"),
+                ))
+                .with_children(|row| {
+                    row.spawn((
+                        Button,
+                        Node {
+                            width: Val::Px(TEAM_BUTTON_SIZE),
+                            height: Val::Px(TEAM_BUTTON_SIZE),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        BackgroundColor(Team::Green.ui_color()),
+                        TeamSelectButton { team: Team::Green },
+                        Name::new("TeamGreenButton"),
+                    ));
+                    row.spawn((
+                        Button,
+                        Node {
+                            width: Val::Px(TEAM_BUTTON_SIZE),
+                            height: Val::Px(TEAM_BUTTON_SIZE),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        BackgroundColor(Team::Blue.ui_color()),
+                        TeamSelectButton { team: Team::Blue },
+                        Name::new("TeamBlueButton"),
+                    ));
+                });
         });
 }
 
 fn team_select_ui_system(
     mut commands: Commands,
     mut selection: ResMut<TeamSelection>,
-    mut interactions: Query<
+    mut team_interactions: Query<
         (&Interaction, &TeamSelectButton, &mut BackgroundColor),
-        (Changed<Interaction>, With<Button>),
+        (
+            Changed<Interaction>,
+            With<Button>,
+            Without<CharacterSelectButton>,
+        ),
+    >,
+    mut character_interactions: Query<
+        (&Interaction, &CharacterSelectButton, &mut BackgroundColor),
+        (Changed<Interaction>, With<Button>, Without<TeamSelectButton>),
+    >,
+    character_buttons: Query<
+        (Entity, &CharacterSelectButton),
+        (With<Button>, Without<TeamSelectButton>),
     >,
     overlay_query: Query<Entity, With<TeamSelectRoot>>,
     mut command_writer: MessageWriter<NetworkCommand>,
@@ -122,7 +253,38 @@ fn team_select_ui_system(
         return;
     }
 
-    for (interaction, button, mut color) in interactions.iter_mut() {
+    let mut selected_character_changed = false;
+    for (interaction, button, mut color) in character_interactions.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                selection.character = button.choice;
+                selected_character_changed = true;
+            }
+            Interaction::Hovered => {
+                if selection.character != button.choice {
+                    *color = CHARACTER_BUTTON_HOVER_COLOR.into();
+                }
+            }
+            Interaction::None => {
+                if selection.character != button.choice {
+                    *color = CHARACTER_BUTTON_COLOR.into();
+                }
+            }
+        }
+    }
+
+    if selected_character_changed {
+        for (entity, button) in &character_buttons {
+            let color = if button.choice == selection.character {
+                CHARACTER_BUTTON_SELECTED_COLOR
+            } else {
+                CHARACTER_BUTTON_COLOR
+            };
+            commands.entity(entity).insert(BackgroundColor(color));
+        }
+    }
+
+    for (interaction, button, mut color) in team_interactions.iter_mut() {
         match *interaction {
             Interaction::Pressed => {
                 selection.team = Some(button.team);

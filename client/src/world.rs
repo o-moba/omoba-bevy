@@ -1,20 +1,36 @@
 use bevy::prelude::*;
+use bevy::camera::primitives::Aabb;
 use bevy::scene::SceneRoot;
+use bevy::gltf::Gltf;
 use std::f32::consts::PI;
 
 use crate::camera::{CameraState, MainCamera, locked_camera_offset};
 use crate::combat::CombatStats;
 use crate::maps::MapLayout;
 use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
-use crate::team::{Team, TeamSelection};
+use crate::team::{CharacterChoice, Team, TeamSelection};
 
 const USE_CUSTOM_MODEL: bool = true;
+pub const DEFAULT_MODEL_TARGET_HEIGHT: f32 = 0.26;
+pub const MIN_MODEL_TARGET_HEIGHT: f32 = 0.08;
+pub const MAX_MODEL_TARGET_HEIGHT: f32 = 1.2;
+const NORMALIZATION_MIN_HEIGHT: f32 = 0.001;
 
 #[derive(Resource, Clone)]
 pub struct PlayerAssets {
     pub scene: Option<Handle<Scene>>,
+    pub gltf: Option<Handle<Gltf>>,
     pub mesh: Handle<Mesh>,
     pub material: Handle<StandardMaterial>,
+}
+
+#[derive(Resource, Clone, Default)]
+struct PlayerModelCatalog {
+    ipfs_scene: Option<Handle<Scene>>,
+    toka_scene: Option<Handle<Scene>>,
+    toka_gltf: Option<Handle<Gltf>>,
+    wang_scene: Option<Handle<Scene>>,
+    wang_gltf: Option<Handle<Gltf>>,
 }
 
 pub struct SetupPlugin;
@@ -22,7 +38,38 @@ pub struct SetupPlugin;
 impl Plugin for SetupPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup_scene)
+            .init_resource::<ModelScaleSettings>()
+            .add_systems(Update, sync_selected_player_assets)
+            .add_systems(Update, normalize_model_scale_system)
             .add_systems(Update, spawn_local_player_on_team);
+    }
+}
+
+#[derive(Component)]
+pub struct NormalizeModelScale {
+    base_scale: Vec3,
+    last_applied_target_height: Option<f32>,
+}
+
+impl NormalizeModelScale {
+    pub fn for_player_model() -> Self {
+        Self {
+            base_scale: Vec3::ONE,
+            last_applied_target_height: None,
+        }
+    }
+}
+
+#[derive(Resource, Clone, Copy)]
+pub struct ModelScaleSettings {
+    pub target_height: f32,
+}
+
+impl Default for ModelScaleSettings {
+    fn default() -> Self {
+        Self {
+            target_height: DEFAULT_MODEL_TARGET_HEIGHT,
+        }
     }
 }
 
@@ -98,17 +145,36 @@ fn setup_scene(
     )));
     let player_material_handle: Handle<StandardMaterial> =
         materials.add(StandardMaterial::from(Color::srgb(0.8, 0.7, 0.6)));
-    let scene_handle = if USE_CUSTOM_MODEL {
-        load_scene_from_ipfs(
+    let mut catalog = PlayerModelCatalog::default();
+    if USE_CUSTOM_MODEL {
+        let toka_model_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("downloaded")
+            .join("toka.glb");
+        if toka_model_path.exists() {
+            catalog.toka_scene = Some(asset_server.load("downloaded/toka.glb#Scene0"));
+            catalog.toka_gltf = Some(asset_server.load("downloaded/toka.glb"));
+        }
+
+        let wang_model_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("downloaded")
+            .join("wang.glb");
+        if wang_model_path.exists() {
+            catalog.wang_scene = Some(asset_server.load("downloaded/wang.glb#Scene0"));
+            catalog.wang_gltf = Some(asset_server.load("downloaded/wang.glb"));
+        }
+
+        catalog.ipfs_scene = load_scene_from_ipfs(
             "https://ipfs.io/ipfs/QmWMYVUF2pa4GkoMgquyY8nmYjQJDP9yxnSBvjVqH7EJQr",
             &asset_server,
-        )
-    } else {
-        None
-    };
+        );
+    }
 
+    commands.insert_resource(catalog.clone());
     commands.insert_resource(PlayerAssets {
-        scene: scene_handle.clone(),
+        scene: catalog.ipfs_scene,
+        gltf: None,
         mesh: player_mesh_handle.clone(),
         material: player_material_handle.clone(),
     });
@@ -140,6 +206,34 @@ fn setup_scene(
         MainCamera,
         Name::new("Camera"),
     ));
+}
+
+fn sync_selected_player_assets(
+    team_selection: Res<TeamSelection>,
+    catalog: Res<PlayerModelCatalog>,
+    mut player_assets: ResMut<PlayerAssets>,
+) {
+    let (scene, gltf, label) = match team_selection.character {
+        CharacterChoice::Ipfs => (catalog.ipfs_scene.clone(), None, "IPFS"),
+        CharacterChoice::Toka => (
+            catalog.toka_scene.clone(),
+            catalog.toka_gltf.clone(),
+            "downloaded/toka.glb",
+        ),
+        CharacterChoice::Wang => (
+            catalog.wang_scene.clone(),
+            catalog.wang_gltf.clone(),
+            "downloaded/wang.glb",
+        ),
+        CharacterChoice::Cube => (None, None, "Cube"),
+    };
+
+    let changed = player_assets.scene != scene || player_assets.gltf != gltf;
+    if changed {
+        player_assets.scene = scene;
+        player_assets.gltf = gltf;
+        info!("Selected player model: {label}");
+    }
 }
 
 fn spawn_local_player_on_team(
@@ -186,6 +280,7 @@ fn spawn_player_entity(commands: &mut Commands, assets: &PlayerAssets, spawn: Ve
             CombatStats::default(),
             VerticalVelocity::default(),
             team,
+            NormalizeModelScale::for_player_model(),
             Name::new(format!("Player-{}", team.as_str())),
         ));
     } else {
@@ -201,5 +296,62 @@ fn spawn_player_entity(commands: &mut Commands, assets: &PlayerAssets, spawn: Ve
             team,
             Name::new(format!("Player-{}", team.as_str())),
         ));
+    }
+}
+
+fn normalize_model_scale_system(
+    settings: Res<ModelScaleSettings>,
+    mut roots: Query<(Entity, &mut Transform, &mut NormalizeModelScale)>,
+    children_query: Query<&Children>,
+    aabb_query: Query<&Aabb>,
+    globals_query: Query<&GlobalTransform>,
+) {
+    for (entity, mut transform, mut normalization) in &mut roots {
+        let target_height = settings
+            .target_height
+            .clamp(MIN_MODEL_TARGET_HEIGHT, MAX_MODEL_TARGET_HEIGHT);
+        if normalization
+            .last_applied_target_height
+            .is_some_and(|applied| (applied - target_height).abs() < f32::EPSILON)
+        {
+            continue;
+        }
+
+        let mut min_y = f32::INFINITY;
+        let mut max_y = f32::NEG_INFINITY;
+        let mut has_bounds = false;
+
+        for descendant in children_query.iter_descendants(entity) {
+            let (Ok(aabb), Ok(global)) = (aabb_query.get(descendant), globals_query.get(descendant))
+            else {
+                continue;
+            };
+            let center: Vec3 = aabb.center.into();
+            let half: Vec3 = aabb.half_extents.into();
+            for sx in [-1.0_f32, 1.0] {
+                for sy in [-1.0_f32, 1.0] {
+                    for sz in [-1.0_f32, 1.0] {
+                        let local_corner = center + Vec3::new(half.x * sx, half.y * sy, half.z * sz);
+                        let world_corner = global.transform_point(local_corner);
+                        min_y = min_y.min(world_corner.y);
+                        max_y = max_y.max(world_corner.y);
+                        has_bounds = true;
+                    }
+                }
+            }
+        }
+
+        if !has_bounds {
+            continue;
+        }
+
+        let current_height = max_y - min_y;
+        if current_height <= NORMALIZATION_MIN_HEIGHT {
+            continue;
+        }
+
+        let scale_factor = target_height / current_height;
+        transform.scale = normalization.base_scale * Vec3::splat(scale_factor);
+        normalization.last_applied_target_height = Some(target_height);
     }
 }

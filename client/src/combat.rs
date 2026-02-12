@@ -1,4 +1,5 @@
 use bevy::{
+    camera::primitives::Aabb,
     input::mouse::MouseButton,
     math::{
         Dir3,
@@ -24,6 +25,8 @@ const BAR_WIDTH: f32 = 1.45;
 const BAR_HEIGHT: f32 = 0.09;
 const BAR_LAYER_OFFSET: f32 = 0.01;
 const MANA_BAR_OFFSET_Y: f32 = -0.15;
+const BAR_HEAD_CLEARANCE: f32 = 0.28;
+const MIN_PLAYER_BAR_Y: f32 = 1.4;
 const TOWER_BAR_Y: f32 = 3.6;
 const BASE_TOWER_BAR_Y: f32 = 4.8;
 const TARGET_PICK_RADIUS: f32 = 4.0;
@@ -650,7 +653,9 @@ fn update_combat_bars_system(
 fn sync_combat_bar_transforms_system(
     mut commands: Commands,
     camera_query: Query<&GlobalTransform, With<MainCamera>>,
-    target_query: Query<&GlobalTransform>,
+    global_query: Query<&GlobalTransform>,
+    aabb_query: Query<&Aabb>,
+    children_query: Query<&Children>,
     mut bar_query: Query<(Entity, &CombatBarAnchor, &mut Transform), With<CombatBarRoot>>,
 ) {
     let Ok(camera_transform) = camera_query.single() else {
@@ -659,16 +664,74 @@ fn sync_combat_bar_transforms_system(
     let camera_rotation = camera_transform.compute_transform().rotation;
 
     for (bar_entity, anchor, mut bar_transform) in bar_query.iter_mut() {
-        let Ok(target_transform) = target_query.get(anchor.target) else {
+        let Ok(target_transform) = global_query.get(anchor.target) else {
             commands
                 .entity(bar_entity)
                 .despawn_related::<Children>()
                 .despawn();
             continue;
         };
-        bar_transform.translation = target_transform.translation() + Vec3::Y * anchor.y_offset;
+        let dynamic_offset = compute_bar_offset_for_entity(
+            anchor.target,
+            anchor.y_offset,
+            &children_query,
+            &aabb_query,
+            &global_query,
+        );
+        bar_transform.translation = target_transform.translation() + Vec3::Y * dynamic_offset;
         bar_transform.rotation = camera_rotation;
     }
+}
+
+fn compute_bar_offset_for_entity(
+    entity: Entity,
+    fallback_offset: f32,
+    children_query: &Query<&Children>,
+    aabb_query: &Query<&Aabb>,
+    global_query: &Query<&GlobalTransform>,
+) -> f32 {
+    let mut max_y = f32::NEG_INFINITY;
+    let mut min_y = f32::INFINITY;
+    let mut has_bounds = false;
+
+    let mut sample_entity = |sample: Entity| {
+        let (Ok(aabb), Ok(global)) = (aabb_query.get(sample), global_query.get(sample)) else {
+            return;
+        };
+        let center: Vec3 = aabb.center.into();
+        let half: Vec3 = aabb.half_extents.into();
+        for sx in [-1.0_f32, 1.0] {
+            for sy in [-1.0_f32, 1.0] {
+                for sz in [-1.0_f32, 1.0] {
+                    let local_corner = center + Vec3::new(half.x * sx, half.y * sy, half.z * sz);
+                    let world_corner = global.transform_point(local_corner);
+                    max_y = max_y.max(world_corner.y);
+                    min_y = min_y.min(world_corner.y);
+                    has_bounds = true;
+                }
+            }
+        }
+    };
+
+    sample_entity(entity);
+    for child in children_query.iter_descendants(entity) {
+        sample_entity(child);
+    }
+
+    if !has_bounds {
+        return fallback_offset;
+    }
+
+    let Ok(root_global) = global_query.get(entity) else {
+        return fallback_offset;
+    };
+    let root_y = root_global.translation().y;
+    let extents_above_root = (max_y - root_y).max(0.0);
+    let full_height = (max_y - min_y).max(0.0);
+
+    (extents_above_root + BAR_HEAD_CLEARANCE)
+        .max(full_height * 0.5 + BAR_HEAD_CLEARANCE)
+        .max(MIN_PLAYER_BAR_Y)
 }
 
 fn update_target_marker_system(

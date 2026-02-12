@@ -1,4 +1,5 @@
 use bevy::{
+    gltf::Gltf,
     input::mouse::MouseButton,
     math::{Dir3, primitives::InfinitePlane3d},
     prelude::*,
@@ -12,6 +13,7 @@ use crate::debug_console::DebugConsole;
 use crate::maps::MapLayout;
 use crate::net::{GameState, GameStateSnapshot, NetworkStructure, StructureKind};
 use crate::team::Team;
+use crate::world::PlayerAssets;
 
 pub const PLAYER_SPEED: f32 = 5.0;
 pub const PLAYER_SIZE: f32 = 1.0;
@@ -29,9 +31,18 @@ impl Plugin for PlayerPlugin {
             Update,
             (handle_player_input, animate_jump, move_player).chain(),
         )
+        .add_systems(
+            Update,
+            (
+                setup_player_animation_library,
+                bind_player_animation_players,
+                sync_player_animation_state,
+            ),
+        )
         .add_systems(Update, resolve_player_structure_overlap.after(move_player))
         .add_systems(PostUpdate, apply_gravity)
         .init_resource::<RespawnCountdown>()
+        .init_resource::<PlayerAnimationLibrary>()
         .add_systems(Startup, setup_respawn_ui)
         .add_systems(Update, respawn_countdown_system);
     }
@@ -77,6 +88,174 @@ struct Jumping {
     start_y: f32,
 }
 
+#[derive(Resource, Default)]
+struct PlayerAnimationLibrary {
+    source_gltf: Option<Handle<Gltf>>,
+    graph: Option<Handle<AnimationGraph>>,
+    idle_node: Option<AnimationNodeIndex>,
+    walk_node: Option<AnimationNodeIndex>,
+}
+
+impl PlayerAnimationLibrary {
+    fn has_locomotion_animations(&self) -> bool {
+        self.graph.is_some() && self.idle_node.is_some() && self.walk_node.is_some()
+    }
+}
+
+#[derive(Component)]
+struct PlayerAnimationBinding {
+    owner: Entity,
+    state: LocomotionAnimState,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LocomotionAnimState {
+    Idle,
+    Walk,
+}
+
+fn setup_player_animation_library(
+    mut library: ResMut<PlayerAnimationLibrary>,
+    player_assets: Option<Res<PlayerAssets>>,
+    gltf_assets: Res<Assets<Gltf>>,
+    mut animation_graphs: ResMut<Assets<AnimationGraph>>,
+) {
+    let Some(player_assets) = player_assets else {
+        return;
+    };
+    let desired_gltf = player_assets.gltf.clone();
+    if desired_gltf.is_none() {
+        library.source_gltf = None;
+        library.graph = None;
+        library.idle_node = None;
+        library.walk_node = None;
+        return;
+    }
+    if library.source_gltf == desired_gltf {
+        return;
+    }
+
+    let Some(gltf_handle) = desired_gltf else {
+        return;
+    };
+    let Some(gltf) = gltf_assets.get(&gltf_handle) else {
+        return;
+    };
+
+    library.source_gltf = Some(gltf_handle.clone());
+    library.graph = None;
+    library.idle_node = None;
+    library.walk_node = None;
+
+    let find_clip = |name: &str| {
+        gltf.named_animations.iter().find_map(|(animation_name, handle)| {
+            if animation_name.to_ascii_lowercase().contains(name) {
+                Some(handle.clone())
+            } else {
+                None
+            }
+        })
+    };
+
+    let idle = find_clip("idle");
+    let walk = find_clip("walk");
+    let has_tpose = find_clip("tpose").is_some() || find_clip("t-pose").is_some();
+
+    match (idle, walk) {
+        (Some(idle_clip), Some(walk_clip)) => {
+            let (graph, nodes) = AnimationGraph::from_clips([idle_clip, walk_clip]);
+            let graph_handle = animation_graphs.add(graph);
+            library.graph = Some(graph_handle);
+            library.idle_node = nodes.first().copied();
+            library.walk_node = nodes.get(1).copied();
+            info!(
+                "Player animation set initialized (idle/walk{}).",
+                if has_tpose { ", tpose found" } else { "" }
+            );
+        }
+        _ => {
+            warn!(
+                "Player model animations idle/walk were not found. Using fallback movement visuals."
+            );
+        }
+    }
+}
+
+fn bind_player_animation_players(
+    mut commands: Commands,
+    library: Res<PlayerAnimationLibrary>,
+    player_roots: Query<(), With<Player>>,
+    child_of_query: Query<&ChildOf>,
+    mut animation_players: Query<(Entity, &mut AnimationPlayer), Added<AnimationPlayer>>,
+) {
+    let (Some(graph), Some(idle_node)) = (library.graph.as_ref(), library.idle_node) else {
+        return;
+    };
+
+    for (animation_entity, mut animation_player) in &mut animation_players {
+        let mut current = animation_entity;
+        let mut owner = None;
+        loop {
+            if player_roots.get(current).is_ok() {
+                owner = Some(current);
+                break;
+            }
+            let Ok(child_of) = child_of_query.get(current) else {
+                break;
+            };
+            current = child_of.parent();
+        }
+
+        let Some(owner) = owner else {
+            continue;
+        };
+
+        animation_player.play(idle_node).repeat();
+        commands.entity(animation_entity).insert((
+            AnimationGraphHandle(graph.clone()),
+            PlayerAnimationBinding {
+                owner,
+                state: LocomotionAnimState::Idle,
+            },
+        ));
+    }
+}
+
+fn sync_player_animation_state(
+    library: Res<PlayerAnimationLibrary>,
+    player_state_query: Query<(Option<&MovementTarget>, Option<&Jumping>, &CombatStats), With<Player>>,
+    mut animation_query: Query<(&mut AnimationPlayer, &mut PlayerAnimationBinding)>,
+) {
+    let (Some(idle_node), Some(walk_node)) = (library.idle_node, library.walk_node) else {
+        return;
+    };
+
+    for (mut animation_player, mut binding) in &mut animation_query {
+        let Ok((movement_target, jumping, stats)) = player_state_query.get(binding.owner) else {
+            continue;
+        };
+        let moving = stats.is_alive() && (movement_target.is_some() || jumping.is_some());
+        let desired_state = if moving {
+            LocomotionAnimState::Walk
+        } else {
+            LocomotionAnimState::Idle
+        };
+
+        if desired_state == binding.state {
+            continue;
+        }
+
+        let node = match desired_state {
+            LocomotionAnimState::Idle => idle_node,
+            LocomotionAnimState::Walk => walk_node,
+        };
+        animation_player.stop(idle_node);
+        animation_player.stop(walk_node);
+        animation_player.play(node).repeat();
+        binding.state = desired_state;
+    }
+}
+
 fn handle_player_input(
     mut commands: Commands,
     mouse_button_input: Res<ButtonInput<MouseButton>>,
@@ -84,6 +263,7 @@ fn handle_player_input(
     window_query: Query<&Window, With<PrimaryWindow>>,
     player_query: Query<(Entity, &CombatStats), With<Player>>,
     cam_state: Res<CameraState>,
+    animation_library: Res<PlayerAnimationLibrary>,
     map_layout: Option<Res<MapLayout>>,
     game_state: Option<Res<GameStateSnapshot>>,
 ) {
@@ -124,10 +304,17 @@ fn handle_player_input(
                             commands
                                 .entity(player_entity)
                                 .insert(MovementTarget { target: target_pos });
-                            commands.entity(player_entity).insert(Jumping {
-                                timer: Timer::from_seconds(JUMP_DURATION, TimerMode::Repeating),
-                                start_y: PLAYER_SIZE / 2.0,
-                            });
+                            if animation_library.has_locomotion_animations() {
+                                commands.entity(player_entity).remove::<Jumping>();
+                            } else {
+                                commands.entity(player_entity).insert(Jumping {
+                                    timer: Timer::from_seconds(
+                                        JUMP_DURATION,
+                                        TimerMode::Repeating,
+                                    ),
+                                    start_y: PLAYER_SIZE / 2.0,
+                                });
+                            }
                         }
                     }
                 } else {
