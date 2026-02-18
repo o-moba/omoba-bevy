@@ -6,6 +6,7 @@ use bevy::scene::SceneRoot;
 use crate::camera::{CameraState, MainCamera, locked_camera_offset};
 use crate::combat::CombatStats;
 use crate::maps::MapLayout;
+use crate::net::NetworkCharacterChoice;
 use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
 use crate::team::{CharacterChoice, Team, TeamSelection};
 
@@ -36,12 +37,24 @@ pub struct PlayerAssets {
 }
 
 #[derive(Resource, Clone, Default)]
-struct PlayerModelCatalog {
+pub struct PlayerModelCatalog {
     ipfs_scene: Option<Handle<Scene>>,
     toka_scene: Option<Handle<Scene>>,
     toka_gltf: Option<Handle<Gltf>>,
     wang_scene: Option<Handle<Scene>>,
     wang_gltf: Option<Handle<Gltf>>,
+}
+
+pub fn model_assets_for_choice(
+    catalog: &PlayerModelCatalog,
+    choice: CharacterChoice,
+) -> (Option<Handle<Scene>>, Option<Handle<Gltf>>) {
+    match choice {
+        CharacterChoice::Ipfs => (catalog.ipfs_scene.clone(), None),
+        CharacterChoice::Toka => (catalog.toka_scene.clone(), catalog.toka_gltf.clone()),
+        CharacterChoice::Wang => (catalog.wang_scene.clone(), catalog.wang_gltf.clone()),
+        CharacterChoice::Cube => (None, None),
+    }
 }
 
 pub struct SetupPlugin;
@@ -296,19 +309,12 @@ fn sync_selected_player_assets(
     catalog: Res<PlayerModelCatalog>,
     mut player_assets: ResMut<PlayerAssets>,
 ) {
-    let (scene, gltf, label) = match team_selection.character {
-        CharacterChoice::Ipfs => (catalog.ipfs_scene.clone(), None, "IPFS"),
-        CharacterChoice::Toka => (
-            catalog.toka_scene.clone(),
-            catalog.toka_gltf.clone(),
-            "downloaded/toka.glb",
-        ),
-        CharacterChoice::Wang => (
-            catalog.wang_scene.clone(),
-            catalog.wang_gltf.clone(),
-            "downloaded/wang.glb",
-        ),
-        CharacterChoice::Cube => (None, None, "Cube"),
+    let (scene, gltf) = model_assets_for_choice(&catalog, team_selection.character);
+    let label = match team_selection.character {
+        CharacterChoice::Ipfs => "IPFS",
+        CharacterChoice::Toka => "downloaded/toka.glb",
+        CharacterChoice::Wang => "downloaded/wang.glb",
+        CharacterChoice::Cube => "Cube",
     };
 
     let changed = player_assets.scene != scene || player_assets.gltf != gltf;
@@ -335,9 +341,10 @@ fn spawn_local_player_on_team(
         return;
     }
     let team = team_selection.team.unwrap();
+    let character = team_selection.character;
     let spawn = map_layout.team_spawn(team);
 
-    spawn_player_entity(&mut commands, &player_assets, spawn, team);
+    spawn_player_entity(&mut commands, &player_assets, spawn, team, character);
     if let Ok(mut camera_transform) = camera_query.single_mut() {
         cam_state.locked = true;
         let zoom = cam_state.zoom;
@@ -347,7 +354,13 @@ fn spawn_local_player_on_team(
     }
 }
 
-fn spawn_player_entity(commands: &mut Commands, assets: &PlayerAssets, spawn: Vec3, team: Team) {
+fn spawn_player_entity(
+    commands: &mut Commands,
+    assets: &PlayerAssets,
+    spawn: Vec3,
+    team: Team,
+    character: CharacterChoice,
+) {
     if let Some(glb_scene) = assets.scene.clone() {
         commands.spawn((
             SceneRoot(glb_scene),
@@ -363,6 +376,7 @@ fn spawn_player_entity(commands: &mut Commands, assets: &PlayerAssets, spawn: Ve
             CombatStats::default(),
             VerticalVelocity::default(),
             team,
+            NetworkCharacterChoice(character),
             NormalizeModelScale::for_player_model(),
             Name::new(format!("Player-{}", team.as_str())),
         ));
@@ -377,6 +391,7 @@ fn spawn_player_entity(commands: &mut Commands, assets: &PlayerAssets, spawn: Ve
             CombatStats::default(),
             VerticalVelocity::default(),
             team,
+            NetworkCharacterChoice(character),
             Name::new(format!("Player-{}", team.as_str())),
         ));
     }

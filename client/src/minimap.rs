@@ -1,8 +1,10 @@
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
+use crate::camera::CameraState;
 use crate::combat::CombatStats;
 use crate::maps::MapLayout;
+use crate::player::PLAYER_SIZE;
 use crate::net::{NetworkMinion, NetworkStructure, RemotePlayer, StructureKind};
 use crate::player::Player;
 use crate::team::Team;
@@ -22,9 +24,17 @@ pub struct MinimapPlugin;
 impl Plugin for MinimapPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MinimapUiState>()
+            .init_resource::<MinimapNavigationState>()
             .add_systems(Startup, setup_minimap_ui)
+            .add_systems(PreUpdate, handle_minimap_navigation_system)
             .add_systems(PostUpdate, update_minimap_icons_system);
     }
+}
+
+#[derive(Resource, Default)]
+pub struct MinimapNavigationState {
+    pub focus_target: Option<Vec3>,
+    pub consumed_primary_click: bool,
 }
 
 #[derive(Resource, Default)]
@@ -82,6 +92,46 @@ fn setup_minimap_ui(mut commands: Commands, mut state: ResMut<MinimapUiState>) {
         });
 
     state.container = container_entity;
+}
+
+fn handle_minimap_navigation_system(
+    window_query: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mouse_input: Res<ButtonInput<MouseButton>>,
+    touches: Res<Touches>,
+    map_layout: Res<MapLayout>,
+    mut cam_state: ResMut<CameraState>,
+    mut nav_state: ResMut<MinimapNavigationState>,
+) {
+    nav_state.consumed_primary_click = false;
+
+    let Ok(window) = window_query.single() else {
+        return;
+    };
+
+    if let Some(cursor) = window.cursor_position() {
+        let world_target = minimap_cursor_to_world(*map_layout, cursor);
+        if mouse_input.just_pressed(MouseButton::Left) && world_target.is_some() {
+            nav_state.consumed_primary_click = true;
+        }
+        if mouse_input.pressed(MouseButton::Left) {
+            if let Some(target) = world_target {
+                nav_state.focus_target = Some(target);
+                cam_state.locked = true;
+            }
+        }
+    }
+
+    for touch in touches.iter_just_pressed() {
+        if minimap_cursor_to_world(*map_layout, touch.position()).is_some() {
+            nav_state.consumed_primary_click = true;
+        }
+    }
+    for touch in touches.iter() {
+        if let Some(target) = minimap_cursor_to_world(*map_layout, touch.position()) {
+            nav_state.focus_target = Some(target);
+            cam_state.locked = true;
+        }
+    }
 }
 
 fn update_minimap_icons_system(
@@ -285,6 +335,44 @@ fn world_to_minimap(layout: MapLayout, world_pos: Vec3, icon_size: f32) -> (f32,
         .clamp(0.0, MINIMAP_INNER_SIZE - icon_size);
 
     (left, top)
+}
+
+fn minimap_cursor_to_world(layout: MapLayout, cursor_pos: Vec2) -> Option<Vec3> {
+    let inner_left = MINIMAP_MARGIN + MINIMAP_PADDING;
+    let inner_top = MINIMAP_MARGIN + MINIMAP_PADDING;
+    let inner_right = inner_left + MINIMAP_INNER_SIZE;
+    let inner_bottom = inner_top + MINIMAP_INNER_SIZE;
+
+    if cursor_pos.x < inner_left
+        || cursor_pos.x > inner_right
+        || cursor_pos.y < inner_top
+        || cursor_pos.y > inner_bottom
+    {
+        return None;
+    }
+
+    let rotated_x_norm = ((cursor_pos.x - inner_left) / MINIMAP_INNER_SIZE).clamp(0.0, 1.0);
+    let rotated_y_norm = ((cursor_pos.y - inner_top) / MINIMAP_INNER_SIZE).clamp(0.0, 1.0);
+
+    let rotated_x = rotated_x_norm - 0.5;
+    let rotated_y_up = 0.5 - rotated_y_norm;
+
+    let theta = std::f32::consts::FRAC_PI_2;
+    let cos_t = theta.cos();
+    let sin_t = theta.sin();
+    let centered_x = rotated_x * cos_t - rotated_y_up * sin_t;
+    let centered_y_up = rotated_x * sin_t + rotated_y_up * cos_t;
+
+    let base_x = centered_x + 0.5;
+    let base_y = 0.5 - centered_y_up;
+    let normalized_x = (1.0 - base_x).clamp(0.0, 1.0);
+    let normalized_z = (1.0 - base_y).clamp(0.0, 1.0);
+
+    let map_size = layout.size();
+    let world_x = layout.min.x + normalized_x * map_size.x;
+    let world_z = layout.min.y + normalized_z * map_size.y;
+    let clamped = layout.clamp_position(Vec3::new(world_x, PLAYER_SIZE * 0.5, world_z));
+    Some(clamped)
 }
 
 fn player_color(team: Team, is_local: bool) -> Color {

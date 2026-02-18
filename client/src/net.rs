@@ -13,9 +13,9 @@ use std::{
 use crate::camera::{CameraState, MainCamera, locked_camera_offset};
 use crate::combat::{CombatStats, MAX_HP, MAX_MANA};
 use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
-use crate::team::Team;
+use crate::team::{CharacterChoice, Team};
 use crate::team::TeamSelection;
-use crate::world::{NormalizeModelScale, PlayerAssets};
+use crate::world::{NormalizeModelScale, PlayerAssets, PlayerModelCatalog, model_assets_for_choice};
 
 const DEFAULT_SERVER_ADDR: &str = "127.0.0.1:4000";
 const LOCAL_BIND_ADDR: &str = "0.0.0.0:0";
@@ -62,7 +62,7 @@ impl Plugin for NetworkingPlugin {
 #[derive(Message, Clone, Copy, Debug)]
 pub enum NetworkCommand {
     Cast { target: TargetId },
-    Join { team: Team },
+    Join { team: Team, character: CharacterChoice },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,7 +70,11 @@ pub enum NetworkCommand {
 enum ClientPacket {
     Transform { x: f32, y: f32, z: f32, yaw: f32 },
     Cast { target: TargetId },
-    Join { team: Team },
+    Join {
+        team: Team,
+        #[serde(default = "default_character_choice")]
+        character: CharacterChoice,
+    },
     Ping,
 }
 
@@ -78,6 +82,7 @@ enum ClientPacket {
 #[serde(rename_all = "snake_case")]
 pub enum TargetKind {
     Player,
+    Minion,
     Structure,
 }
 
@@ -108,6 +113,8 @@ struct PlayerState {
     gold: u32,
     #[serde(default)]
     xp: u32,
+    #[serde(default = "default_character_choice")]
+    character: CharacterChoice,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -244,6 +251,9 @@ pub struct RemotePlayer;
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkPlayerId(pub u64);
 
+#[derive(Component, Clone, Copy, Debug)]
+pub struct NetworkCharacterChoice(pub CharacterChoice);
+
 #[derive(Component)]
 struct NetworkProjectile;
 
@@ -255,6 +265,9 @@ pub struct NetworkStructure;
 
 #[derive(Component)]
 pub struct NetworkMinion;
+
+#[derive(Component, Clone, Copy, Debug)]
+pub struct NetworkMinionId(pub u64);
 
 #[derive(Component, Clone, Copy, Debug)]
 struct MinionInterpolation {
@@ -493,8 +506,11 @@ fn send_network_commands(
                     .outgoing
                     .send(ClientPacket::Cast { target: *target });
             }
-            NetworkCommand::Join { team } => {
-                let _ = channels.outgoing.send(ClientPacket::Join { team: *team });
+            NetworkCommand::Join { team, character } => {
+                let _ = channels.outgoing.send(ClientPacket::Join {
+                    team: *team,
+                    character: *character,
+                });
             }
         }
     }
@@ -514,6 +530,7 @@ fn apply_server_snapshot(
     minion_query: Query<&NetworkMinion>,
     local_player_query: Query<Entity, With<Player>>,
     player_assets: Res<PlayerAssets>,
+    model_catalog: Res<PlayerModelCatalog>,
     visuals: Res<NetworkVisualAssets>,
     mut game_state_snapshot: ResMut<GameStateSnapshot>,
     mut cam_state: ResMut<CameraState>,
@@ -563,9 +580,15 @@ fn apply_server_snapshot(
 
     let local_player_state = players.iter().find(|player| player.id == your_id);
     if let Ok(local_entity) = local_player_query.single() {
+        let snapshot_character = local_player_state
+            .map(|player| player.character)
+            .unwrap_or_else(default_character_choice);
         commands.queue(move |world: &mut World| {
             if let Ok(mut entity) = world.get_entity_mut(local_entity) {
-                entity.insert(NetworkPlayerId(your_id));
+                entity.insert((
+                    NetworkPlayerId(your_id),
+                    NetworkCharacterChoice(snapshot_character),
+                ));
             }
         });
         if let Some(local_player_state) = local_player_state {
@@ -587,9 +610,10 @@ fn apply_server_snapshot(
             }
             let local_team = local_player_state.team;
             let local_stats = player_state_to_combat_stats(local_player_state);
+            let local_character = local_player_state.character;
             commands.queue(move |world: &mut World| {
                 if let Ok(mut entity) = world.get_entity_mut(local_entity) {
-                    entity.insert((local_team, local_stats));
+                    entity.insert((local_team, local_stats, NetworkCharacterChoice(local_character)));
                 }
             });
             network_state.local_team = Some(local_player_state.team);
@@ -607,7 +631,9 @@ fn apply_server_snapshot(
             local_player_state.y,
             local_player_state.z,
         );
-        let entity = if let Some(scene_handle) = player_assets.scene.clone() {
+        let (local_scene, _local_gltf) =
+            model_assets_for_choice(&model_catalog, local_player_state.character);
+        let entity = if let Some(scene_handle) = local_scene {
             commands
                 .spawn((
                     SceneRoot(scene_handle),
@@ -624,6 +650,7 @@ fn apply_server_snapshot(
                     local_player_state.team,
                     NormalizeModelScale::for_player_model(),
                     NetworkPlayerId(your_id),
+                    NetworkCharacterChoice(local_player_state.character),
                     player_state_to_combat_stats(local_player_state),
                     Name::new("Player"),
                 ))
@@ -639,6 +666,7 @@ fn apply_server_snapshot(
                     VerticalVelocity::default(),
                     local_player_state.team,
                     NetworkPlayerId(your_id),
+                    NetworkCharacterChoice(local_player_state.character),
                     player_state_to_combat_stats(local_player_state),
                     Name::new("Player"),
                 ))
@@ -680,12 +708,13 @@ fn apply_server_snapshot(
             commands.entity(entity).insert((
                 NetworkPlayerId(player.id),
                 player.team,
+                NetworkCharacterChoice(player.character),
                 player_state_to_combat_stats(player),
             ));
             continue;
         }
 
-        let scene_handle = player_assets.scene.clone();
+        let (scene_handle, _gltf_handle) = model_assets_for_choice(&model_catalog, player.character);
         let mesh_handle = player_assets.mesh.clone();
         let material_handle = player_assets.material.clone();
         let spawn_translation = Vec3::new(player.x, player.y, player.z);
@@ -697,6 +726,7 @@ fn apply_server_snapshot(
             PlayerBody,
             player.team,
             NetworkPlayerId(player.id),
+            NetworkCharacterChoice(player.character),
             NormalizeModelScale::for_player_model(),
             player_state_to_combat_stats(player),
             RemotePlayerInterpolation {
@@ -879,7 +909,11 @@ fn apply_server_snapshot(
             }
             commands
                 .entity(entity)
-                .insert((minion.team, minion_state_to_combat_stats(minion)));
+                .insert((
+                    NetworkMinionId(minion.id),
+                    minion.team,
+                    minion_state_to_combat_stats(minion),
+                ));
             continue;
         }
 
@@ -895,6 +929,7 @@ fn apply_server_snapshot(
                 Transform::from_translation(target_translation).with_rotation(target_rotation),
                 Visibility::default(),
                 NetworkMinion,
+                NetworkMinionId(minion.id),
                 MinionInterpolation {
                     from_translation: target_translation,
                     to_translation: target_translation,
@@ -996,6 +1031,10 @@ fn default_hp() -> f32 {
 
 fn default_team() -> Team {
     Team::Green
+}
+
+fn default_character_choice() -> CharacterChoice {
+    CharacterChoice::Ipfs
 }
 
 fn default_max_hp() -> f32 {

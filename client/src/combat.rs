@@ -12,8 +12,9 @@ use bevy::{
 use crate::camera::MainCamera;
 use crate::debug_console::DebugConsole;
 use crate::net::{
-    GameState, GameStateSnapshot, NetworkCommand, NetworkMinion, NetworkPlayerId, NetworkStructure,
-    NetworkStructureId, RemotePlayer, StructureKind, TargetId, TargetKind,
+    GameState, GameStateSnapshot, NetworkCommand, NetworkMinion, NetworkMinionId,
+    NetworkPlayerId, NetworkStructure, NetworkStructureId, RemotePlayer, StructureKind, TargetId,
+    TargetKind,
 };
 use crate::player::Player;
 use crate::team::Team;
@@ -36,6 +37,7 @@ const TARGET_MARKER_Y: f32 = 0.24;
 const TARGET_MARKER_EDGE: f32 = 0.18;
 const TARGET_MARKER_PULSE_AMPLITUDE: f32 = 0.09;
 const TARGET_MARKER_BOB_AMPLITUDE: f32 = 0.06;
+const TARGET_MARKER_SPIN_SPEED: f32 = 2.6;
 const PLAYER_MARKER_RADIUS: f32 = 1.25;
 const MINION_MARKER_RADIUS: f32 = 1.05;
 const TOWER_MARKER_RADIUS: f32 = 2.0;
@@ -285,6 +287,10 @@ fn select_target_system(
         ),
         With<NetworkStructure>,
     >,
+    minion_candidates: Query<
+        (Entity, &Transform, &NetworkMinionId, &CombatStats, &Team),
+        With<NetworkMinion>,
+    >,
     mut target_state: ResMut<TargetState>,
 ) {
     if let Some(game_state) = game_state.as_ref() {
@@ -302,6 +308,7 @@ fn select_target_system(
             local_transform.translation,
             *local_team,
             &player_candidates,
+            &minion_candidates,
             &structure_candidates,
         );
     }
@@ -332,6 +339,7 @@ fn select_target_system(
             click_point,
             *local_team,
             &player_candidates,
+            &minion_candidates,
             &structure_candidates,
         );
     }
@@ -379,6 +387,10 @@ fn cast_spell_system(
         (Entity, &Transform, &NetworkPlayerId, &CombatStats, &Team),
         (With<RemotePlayer>, Without<Player>),
     >,
+    minion_candidates: Query<
+        (Entity, &Transform, &NetworkMinionId, &CombatStats, &Team),
+        With<NetworkMinion>,
+    >,
     structure_candidates: Query<
         (
             Entity,
@@ -406,18 +418,15 @@ fn cast_spell_system(
     let Ok(local_stats) = local_stats_query.single() else {
         return;
     };
-    let target = resolve_cast_target(
-        &mut target_state,
-        local_player.single().ok(),
-        &player_candidates,
-        &structure_candidates,
-    );
+    let _ = (local_player, player_candidates, minion_candidates, structure_candidates);
+    let target = resolve_cast_target(&mut target_state);
     if let Some(target) = target {
         command_writer.write(NetworkCommand::Cast { target });
         let message = format!(
             "Cast -> {} {} (mana {:.0})",
             match target.kind {
                 TargetKind::Player => "player",
+                TargetKind::Minion => "minion",
                 TargetKind::Structure => "structure",
             },
             target.id,
@@ -443,6 +452,10 @@ fn skill_button_system(
     player_candidates: Query<
         (Entity, &Transform, &NetworkPlayerId, &CombatStats, &Team),
         (With<RemotePlayer>, Without<Player>),
+    >,
+    minion_candidates: Query<
+        (Entity, &Transform, &NetworkMinionId, &CombatStats, &Team),
+        With<NetworkMinion>,
     >,
     structure_candidates: Query<
         (
@@ -471,17 +484,19 @@ fn skill_button_system(
                 let Ok(local_stats) = local_stats_query.single() else {
                     continue;
                 };
-                if let Some(target) = resolve_cast_target(
-                    &mut target_state,
-                    local_player.single().ok(),
+                let _ = (
+                    &local_player,
                     &player_candidates,
+                    &minion_candidates,
                     &structure_candidates,
-                ) {
+                );
+                if let Some(target) = resolve_cast_target(&mut target_state) {
                     command_writer.write(NetworkCommand::Cast { target });
                     let message = format!(
                         "Cast -> {} {} (mana {:.0})",
                         match target.kind {
                             TargetKind::Player => "player",
+                            TargetKind::Minion => "minion",
                             TargetKind::Structure => "structure",
                         },
                         target.id,
@@ -687,7 +702,9 @@ fn compute_bar_world_y_for_entity(
 fn update_target_marker_system(
     time: Res<Time>,
     target_state: Res<TargetState>,
-    targets: Query<&Transform, Without<TargetMarker>>,
+    children_query: Query<&Children>,
+    aabb_query: Query<&Aabb>,
+    global_query: Query<&GlobalTransform, Without<TargetMarker>>,
     structure_kinds: Query<&StructureKind, With<NetworkStructure>>,
     minions: Query<(), With<NetworkMinion>>,
     players: Query<(), Or<(With<Player>, With<RemotePlayer>)>>,
@@ -705,12 +722,13 @@ fn update_target_marker_system(
         *marker_visibility = Visibility::Hidden;
         return;
     };
-    let Ok(target_transform) = targets.get(target_entity) else {
+    let Ok(target_transform) = global_query.get(target_entity) else {
         *marker_visibility = Visibility::Hidden;
         return;
     };
 
     *marker_visibility = Visibility::Visible;
+    let target_translation = target_transform.translation();
     let marker_radius = if let Ok(kind) = structure_kinds.get(target_entity) {
         match kind {
             StructureKind::Tower => TOWER_MARKER_RADIUS,
@@ -725,12 +743,62 @@ fn update_target_marker_system(
     };
     let pulse = 1.0 + TARGET_MARKER_PULSE_AMPLITUDE * (time.elapsed_secs() * 7.5).sin();
     let bob = TARGET_MARKER_BOB_AMPLITUDE * (time.elapsed_secs() * 5.0).sin();
-    marker_transform.translation = Vec3::new(
-        target_transform.translation.x,
-        TARGET_MARKER_Y + bob,
-        target_transform.translation.z,
+    let marker_center_y = compute_marker_world_y_for_entity(
+        target_entity,
+        target_translation.y + TARGET_MARKER_Y,
+        &children_query,
+        &aabb_query,
+        &global_query,
     );
+    marker_transform.translation = Vec3::new(
+        target_translation.x,
+        marker_center_y + bob,
+        target_translation.z,
+    );
+    marker_transform.rotation = Quat::from_rotation_y(time.elapsed_secs() * TARGET_MARKER_SPIN_SPEED);
     marker_transform.scale = Vec3::new(marker_radius * pulse, 1.0, marker_radius * pulse);
+}
+
+fn compute_marker_world_y_for_entity(
+    entity: Entity,
+    fallback_world_y: f32,
+    children_query: &Query<&Children>,
+    aabb_query: &Query<&Aabb>,
+    global_query: &Query<&GlobalTransform, Without<TargetMarker>>,
+) -> f32 {
+    let mut min_y = f32::INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
+    let mut has_bounds = false;
+
+    let mut sample_entity = |sample: Entity| {
+        let (Ok(aabb), Ok(global)) = (aabb_query.get(sample), global_query.get(sample)) else {
+            return;
+        };
+        let center: Vec3 = aabb.center.into();
+        let half: Vec3 = aabb.half_extents.into();
+        for sx in [-1.0_f32, 1.0] {
+            for sy in [-1.0_f32, 1.0] {
+                for sz in [-1.0_f32, 1.0] {
+                    let local_corner = center + Vec3::new(half.x * sx, half.y * sy, half.z * sz);
+                    let world_corner = global.transform_point(local_corner);
+                    min_y = min_y.min(world_corner.y);
+                    max_y = max_y.max(world_corner.y);
+                    has_bounds = true;
+                }
+            }
+        }
+    };
+
+    sample_entity(entity);
+    for child in children_query.iter_descendants(entity) {
+        sample_entity(child);
+    }
+
+    if !has_bounds {
+        return fallback_world_y;
+    }
+
+    (min_y + max_y) * 0.5
 }
 
 fn find_nearest_enemy_target(
@@ -739,6 +807,10 @@ fn find_nearest_enemy_target(
     player_candidates: &Query<
         (Entity, &Transform, &NetworkPlayerId, &CombatStats, &Team),
         (With<RemotePlayer>, Without<Player>),
+    >,
+    minion_candidates: &Query<
+        (Entity, &Transform, &NetworkMinionId, &CombatStats, &Team),
+        With<NetworkMinion>,
     >,
     structure_candidates: &Query<
         (
@@ -764,6 +836,23 @@ fn find_nearest_enemy_target(
                 entity,
                 TargetId {
                     kind: TargetKind::Player,
+                    id: id.0,
+                },
+                dist_sq,
+            ));
+        }
+    }
+
+    for (entity, transform, id, stats, _team) in minion_candidates.iter() {
+        if !stats.is_alive() {
+            continue;
+        }
+        let dist_sq = transform.translation.distance_squared(local_pos);
+        if best.map_or(true, |(_, _, best_dist)| dist_sq < best_dist) {
+            best = Some((
+                entity,
+                TargetId {
+                    kind: TargetKind::Minion,
                     id: id.0,
                 },
                 dist_sq,
@@ -798,6 +887,10 @@ fn find_target_near_point(
         (Entity, &Transform, &NetworkPlayerId, &CombatStats, &Team),
         (With<RemotePlayer>, Without<Player>),
     >,
+    minion_candidates: &Query<
+        (Entity, &Transform, &NetworkMinionId, &CombatStats, &Team),
+        With<NetworkMinion>,
+    >,
     structure_candidates: &Query<
         (
             Entity,
@@ -831,6 +924,25 @@ fn find_target_near_point(
         }
     }
 
+    for (entity, transform, id, stats, _team) in minion_candidates.iter() {
+        if !stats.is_alive() {
+            continue;
+        }
+        let dist = transform.translation.xz().distance(click_point.xz());
+        if dist <= TARGET_PICK_RADIUS {
+            if best.map_or(true, |(_, _, best_dist)| dist < best_dist) {
+                best = Some((
+                    entity,
+                    TargetId {
+                        kind: TargetKind::Minion,
+                        id: id.0,
+                    },
+                    dist,
+                ));
+            }
+        }
+    }
+
     for (entity, transform, id, stats, team, _kind) in structure_candidates.iter() {
         if !stats.is_alive() || *team == local_team {
             continue;
@@ -853,25 +965,6 @@ fn find_target_near_point(
     best.map(|(entity, target, _)| (entity, target))
 }
 
-fn resolve_cast_target(
-    target_state: &mut TargetState,
-    local: Option<(&Transform, &Team)>,
-    player_candidates: &Query<
-        (Entity, &Transform, &NetworkPlayerId, &CombatStats, &Team),
-        (With<RemotePlayer>, Without<Player>),
-    >,
-    structure_candidates: &Query<
-        (
-            Entity,
-            &Transform,
-            &NetworkStructureId,
-            &CombatStats,
-            &Team,
-            &StructureKind,
-        ),
-        With<NetworkStructure>,
-    >,
-) -> Option<TargetId> {
-    let _ = (local, player_candidates, structure_candidates);
+fn resolve_cast_target(target_state: &mut TargetState) -> Option<TargetId> {
     target_state.selected_target
 }

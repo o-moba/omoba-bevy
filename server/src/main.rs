@@ -68,7 +68,11 @@ const LANE_EDGE_PADDING: f32 = 6.0;
 enum ClientPacket {
     Transform { x: f32, y: f32, z: f32, yaw: f32 },
     Cast { target: TargetId },
-    Join { team: Team },
+    Join {
+        team: Team,
+        #[serde(default = "default_character_choice")]
+        character: CharacterChoice,
+    },
     Ping,
 }
 
@@ -77,6 +81,15 @@ enum ClientPacket {
 enum Team {
     Green,
     Blue,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum CharacterChoice {
+    Ipfs,
+    Toka,
+    Wang,
+    Cube,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -91,6 +104,7 @@ enum Lane {
 #[serde(rename_all = "snake_case")]
 enum TargetKind {
     Player,
+    Minion,
     Structure,
 }
 
@@ -98,6 +112,10 @@ enum TargetKind {
 struct TargetId {
     kind: TargetKind,
     id: u64,
+}
+
+fn default_character_choice() -> CharacterChoice {
+    CharacterChoice::Ipfs
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,6 +132,8 @@ struct PlayerState {
     max_mana: f32,
     gold: u32,
     xp: u32,
+    #[serde(default = "default_character_choice")]
+    character: CharacterChoice,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -378,6 +398,7 @@ fn main() -> io::Result<()> {
                             handle_cast_request(
                                 &mut players,
                                 &mut projectiles,
+                                &mut minions,
                                 &mut structures,
                                 addr,
                                 target,
@@ -386,9 +407,9 @@ fn main() -> io::Result<()> {
                                 now,
                             );
                         }
-                        ClientPacket::Join { team } => {
+                        ClientPacket::Join { team, character } => {
                             if let Some(player) = players.get_mut(&addr) {
-                                handle_join_request(player, team, &map_layout);
+                                handle_join_request(player, team, character, &map_layout);
                             }
                         }
                         ClientPacket::Ping => {}
@@ -437,13 +458,14 @@ fn main() -> io::Result<()> {
         );
         simulate_projectiles(
             &mut players,
+            &mut minions,
             &mut structures,
             &mut projectiles,
             &mut game_state,
             dt,
             now,
         );
-        handle_respawns(&mut players, &map_layout, &game_state, now);
+        handle_respawns(&mut players, &structures, &map_layout, &game_state, now);
 
         players.retain(|addr, player| {
             let is_alive = now.duration_since(player.last_seen) <= PLAYER_TIMEOUT;
@@ -458,15 +480,16 @@ fn main() -> io::Result<()> {
             .map(|player| player.state.id)
             .collect::<HashSet<_>>();
         projectiles.retain(|_, projectile| {
-            let owner_alive = projectile.state.owner_id == 0
-                || live_player_ids.contains(&projectile.state.owner_id);
             let target_alive = match projectile.target.kind {
                 TargetKind::Player => live_player_ids.contains(&projectile.target.id),
+                TargetKind::Minion => minions
+                    .get(&projectile.target.id)
+                    .is_some_and(|minion| minion.state.hp > 0.0),
                 TargetKind::Structure => structures
                     .get(&projectile.target.id)
                     .is_some_and(|structure| structure.state.hp > 0.0),
             };
-            owner_alive && target_alive
+            target_alive
         });
 
         minions.retain(|_, minion| minion.state.hp > 0.0);
@@ -552,6 +575,7 @@ fn ensure_player_connected(
                 max_mana: MAX_MANA,
                 gold: 0,
                 xp: 0,
+                character: default_character_choice(),
             },
             last_seen: now,
             last_cast_at: None,
@@ -573,8 +597,14 @@ fn regenerate_mana(players: &mut HashMap<SocketAddr, ConnectedPlayer>, dt: f32) 
     }
 }
 
-fn handle_join_request(player: &mut ConnectedPlayer, team: Team, map_layout: &MapLayoutState) {
+fn handle_join_request(
+    player: &mut ConnectedPlayer,
+    team: Team,
+    character: CharacterChoice,
+    map_layout: &MapLayoutState,
+) {
     player.state.team = team;
+    player.state.character = character;
     let spawn = spawn_position_for_team(map_layout, team);
     player.state.x = spawn.x;
     player.state.y = 0.5;
@@ -593,6 +623,7 @@ fn handle_join_request(player: &mut ConnectedPlayer, team: Team, map_layout: &Ma
 fn handle_cast_request(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,
     projectiles: &mut HashMap<u64, Projectile>,
+    minions: &mut HashMap<u64, Minion>,
     structures: &mut HashMap<u64, Structure>,
     caster_addr: SocketAddr,
     target: TargetId,
@@ -633,6 +664,19 @@ fn handle_cast_request(
                 target_player.state.x,
                 target_player.state.y + AIM_HEIGHT,
                 target_player.state.z,
+            )
+        }
+        TargetKind::Minion => {
+            let Some(target_minion) = minions.get(&target.id) else {
+                return;
+            };
+            if target_minion.state.hp <= 0.0 {
+                return;
+            }
+            Vec3f::new(
+                target_minion.state.x,
+                target_minion.state.y + MINION_RADIUS * 0.8,
+                target_minion.state.z,
             )
         }
         TargetKind::Structure => {
@@ -693,7 +737,7 @@ fn handle_cast_request(
                 direction.z * PROJECTILE_SPEED,
             ),
             homing: true,
-            guaranteed_hit: false,
+            guaranteed_hit: true,
             damage: PROJECTILE_DAMAGE,
             radius: PROJECTILE_RADIUS,
             expires_at: now + PROJECTILE_LIFETIME,
@@ -703,6 +747,7 @@ fn handle_cast_request(
 
 fn simulate_projectiles(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+    minions: &mut HashMap<u64, Minion>,
     structures: &mut HashMap<u64, Structure>,
     projectiles: &mut HashMap<u64, Projectile>,
     game_state: &mut GameState,
@@ -713,6 +758,7 @@ fn simulate_projectiles(
         return;
     }
     let mut player_damage_events: Vec<(u64, f32)> = Vec::new();
+    let mut minion_damage_events: Vec<(u64, f32, Team)> = Vec::new();
     let mut structure_damage_events: Vec<(u64, f32, Team)> = Vec::new();
 
     projectiles.retain(|_, projectile| {
@@ -757,6 +803,57 @@ fn simulate_projectiles(
                 let combined_radius = projectile.radius + PLAYER_HIT_RADIUS;
                 if swept_sphere_intersects_target(start, end, target_pos, combined_radius) {
                     player_damage_events.push((projectile.target.id, projectile.damage));
+                    return false;
+                }
+            }
+            TargetKind::Minion => {
+                let Some(target_minion) = minions.get(&projectile.target.id) else {
+                    return false;
+                };
+                if target_minion.state.hp <= 0.0 {
+                    return false;
+                }
+
+                let start =
+                    Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z);
+                let target_pos = Vec3f::new(
+                    target_minion.state.x,
+                    target_minion.state.y + MINION_RADIUS * 0.8,
+                    target_minion.state.z,
+                );
+                if projectile.homing {
+                    let direction = Vec3f::new(
+                        target_pos.x - start.x,
+                        target_pos.y - start.y,
+                        target_pos.z - start.z,
+                    )
+                    .normalize_or_zero();
+                    if direction.x == 0.0 && direction.y == 0.0 && direction.z == 0.0 {
+                        minion_damage_events.push((
+                            projectile.target.id,
+                            projectile.damage,
+                            projectile.state.owner_team,
+                        ));
+                        return false;
+                    }
+                    projectile.velocity = Vec3f::new(
+                        direction.x * PROJECTILE_SPEED,
+                        direction.y * PROJECTILE_SPEED,
+                        direction.z * PROJECTILE_SPEED,
+                    );
+                }
+                let end = start.add_scaled(projectile.velocity, dt);
+                projectile.state.x = end.x;
+                projectile.state.y = end.y;
+                projectile.state.z = end.z;
+
+                let combined_radius = projectile.radius + MINION_RADIUS;
+                if swept_sphere_intersects_target(start, end, target_pos, combined_radius) {
+                    minion_damage_events.push((
+                        projectile.target.id,
+                        projectile.damage,
+                        projectile.state.owner_team,
+                    ));
                     return false;
                 }
             }
@@ -826,6 +923,10 @@ fn simulate_projectiles(
                 target_player.respawn_at = Some(now + RESPAWN_DELAY);
             }
         }
+    }
+
+    for (target_id, damage, attacker_team) in minion_damage_events {
+        apply_minion_damage(players, minions, target_id, damage, attacker_team);
     }
 
     for (target_id, damage, attacker_team) in structure_damage_events {
@@ -999,6 +1100,28 @@ fn spawn_position_for_team(map_layout: &MapLayoutState, team: Team) -> Vec3f {
     Vec3f::new(
         base.x + dir.x * PLAYER_SPAWN_OFFSET,
         base.y,
+        base.z + dir.z * PLAYER_SPAWN_OFFSET,
+    )
+}
+
+fn spawn_position_for_team_from_base(
+    structures: &HashMap<u64, Structure>,
+    map_layout: &MapLayoutState,
+    team: Team,
+) -> Vec3f {
+    let Some(base_tower) = structures.values().find(|structure| {
+        structure.state.team == team
+            && structure.state.kind == StructureKind::BaseTower
+            && structure.state.hp > 0.0
+    }) else {
+        return spawn_position_for_team(map_layout, team);
+    };
+
+    let base = Vec3f::new(base_tower.state.x, 0.0, base_tower.state.z);
+    let dir = Vec3f::new(-base.x, 0.0, -base.z).normalize_or_zero();
+    Vec3f::new(
+        base.x + dir.x * PLAYER_SPAWN_OFFSET,
+        0.0,
         base.z + dir.z * PLAYER_SPAWN_OFFSET,
     )
 }
@@ -1699,6 +1822,7 @@ mod tests {
 
 fn handle_respawns(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+    structures: &HashMap<u64, Structure>,
     map_layout: &MapLayoutState,
     game_state: &GameState,
     now: Instant,
@@ -1713,7 +1837,7 @@ fn handle_respawns(
         if now < respawn_at {
             continue;
         }
-        let spawn = spawn_position_for_team(map_layout, player.state.team);
+        let spawn = spawn_position_for_team_from_base(structures, map_layout, player.state.team);
         player.state.x = spawn.x;
         player.state.y = 0.5;
         player.state.z = spawn.z;

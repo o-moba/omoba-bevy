@@ -5,6 +5,7 @@ use bevy::{
 };
 use std::f32::consts::PI;
 
+use crate::minimap::MinimapNavigationState;
 use crate::player::{PLAYER_SIZE, Player};
 
 pub const CAMERA_DISTANCE: f32 = 15.0;
@@ -114,6 +115,7 @@ fn update_camera(
     mut camera_query: Query<&mut Transform, (With<MainCamera>, Without<Player>)>,
     player_query: Query<&Transform, (With<Player>, Without<MainCamera>)>,
     mut cam_state: ResMut<CameraState>,
+    mut minimap_nav: Option<ResMut<MinimapNavigationState>>,
     mut mouse_motion_events: MessageReader<MouseMotion>,
     mut mouse_wheel_events: MessageReader<MouseWheel>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
@@ -129,6 +131,15 @@ fn update_camera(
     }
 
     if cam_state.locked {
+        let focus_override = if let Some(nav_state) = minimap_nav.as_deref_mut() {
+            if keyboard_input.just_pressed(KeyCode::Space) {
+                nav_state.focus_target = None;
+            }
+            nav_state.focus_target
+        } else {
+            None
+        };
+
         let mut scroll_delta: f32 = 0.0;
         for event in mouse_wheel_events.read() {
             let scale = match event.unit {
@@ -141,18 +152,19 @@ fn update_camera(
             cam_state.zoom = (cam_state.zoom - scroll_delta * CAMERA_ZOOM_SPEED)
                 .clamp(CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM);
         }
-        if let Ok(player_transform) = player_query.single() {
+        let follow_target = if let Some(override_target) = focus_override {
+            Some(override_target)
+        } else {
+            player_query.single().ok().map(|transform| transform.translation)
+        };
+        if let Some(target) = follow_target {
             let zoom = cam_state.zoom;
-            let target_position = player_transform.translation + locked_camera_offset(zoom);
+            let target_position = target + locked_camera_offset(zoom);
             let lerp_factor = (time.delta_secs() * 2.0).min(1.0);
             camera_transform.translation = camera_transform
                 .translation
                 .lerp(target_position, lerp_factor);
-            let look_target = Vec3::new(
-                player_transform.translation.x,
-                PLAYER_SIZE / 2.0,
-                player_transform.translation.z,
-            );
+            let look_target = Vec3::new(target.x, PLAYER_SIZE / 2.0, target.z);
             let look_direction = look_target - camera_transform.translation;
             if look_direction.length_squared() > 0.0001 {
                 let target_transform = Transform::from_translation(camera_transform.translation)

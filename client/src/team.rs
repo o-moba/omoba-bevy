@@ -43,7 +43,8 @@ impl Team {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CharacterChoice {
     Ipfs,
     Toka,
@@ -299,7 +300,10 @@ fn team_select_ui_system(
             match *interaction {
                 Interaction::Pressed => {
                     selection.team = Some(button.team);
-                    command_writer.write(NetworkCommand::Join { team: button.team });
+                    command_writer.write(NetworkCommand::Join {
+                        team: button.team,
+                        character: selection.character,
+                    });
                     if let Ok(overlay) = overlay_query.single() {
                         commands
                             .entity(overlay)
