@@ -58,7 +58,6 @@ impl Plugin for CombatPlugin {
                 (
                     select_target_system,
                     clear_invalid_target_system,
-                    auto_select_target_system,
                     cast_spell_system,
                     skill_button_system,
                     update_target_marker_system,
@@ -368,48 +367,6 @@ fn clear_invalid_target_system(
             target_state.selected_entity = None;
             target_state.selected_target = None;
         }
-    }
-}
-
-fn auto_select_target_system(
-    game_state: Option<Res<GameStateSnapshot>>,
-    local_player: Query<(&Transform, &Team), With<Player>>,
-    player_candidates: Query<
-        (Entity, &Transform, &NetworkPlayerId, &CombatStats, &Team),
-        (With<RemotePlayer>, Without<Player>),
-    >,
-    structure_candidates: Query<
-        (
-            Entity,
-            &Transform,
-            &NetworkStructureId,
-            &CombatStats,
-            &Team,
-            &StructureKind,
-        ),
-        With<NetworkStructure>,
-    >,
-    mut target_state: ResMut<TargetState>,
-) {
-    if let Some(game_state) = game_state.as_ref() {
-        if !matches!(game_state.state, GameState::Running) {
-            return;
-        }
-    }
-    if target_state.selected_entity.is_some() {
-        return;
-    }
-    let Ok((local_transform, local_team)) = local_player.single() else {
-        return;
-    };
-    if let Some((entity, target_id)) = find_nearest_enemy_target(
-        local_transform.translation,
-        *local_team,
-        &player_candidates,
-        &structure_candidates,
-    ) {
-        target_state.selected_entity = Some(entity);
-        target_state.selected_target = Some(target_id);
     }
 }
 
@@ -915,22 +872,6 @@ fn resolve_cast_target(
         With<NetworkStructure>,
     >,
 ) -> Option<TargetId> {
-    if let Some(selected) = target_state.selected_target {
-        return Some(selected);
-    }
-    let (local_transform, local_team) = local?;
-    let selected = find_nearest_enemy_target(
-        local_transform.translation,
-        *local_team,
-        player_candidates,
-        structure_candidates,
-    );
-
-    if let Some((entity, target_id)) = selected {
-        target_state.selected_entity = Some(entity);
-        target_state.selected_target = Some(target_id);
-        return Some(target_id);
-    }
-
-    None
+    let _ = (local, player_candidates, structure_candidates);
+    target_state.selected_target
 }

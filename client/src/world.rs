@@ -1,8 +1,7 @@
-use bevy::prelude::*;
 use bevy::camera::primitives::Aabb;
-use bevy::scene::SceneRoot;
 use bevy::gltf::Gltf;
-use std::f32::consts::PI;
+use bevy::prelude::*;
+use bevy::scene::SceneRoot;
 
 use crate::camera::{CameraState, MainCamera, locked_camera_offset};
 use crate::combat::CombatStats;
@@ -15,6 +14,18 @@ pub const DEFAULT_MODEL_TARGET_HEIGHT: f32 = 0.26;
 pub const MIN_MODEL_TARGET_HEIGHT: f32 = 0.08;
 pub const MAX_MODEL_TARGET_HEIGHT: f32 = 1.2;
 const NORMALIZATION_MIN_HEIGHT: f32 = 0.001;
+pub const DEFAULT_LIGHT_ILLUMINANCE: f32 = 25_000.0;
+pub const MIN_LIGHT_ILLUMINANCE: f32 = 4_000.0;
+pub const MAX_LIGHT_ILLUMINANCE: f32 = 120_000.0;
+pub const DEFAULT_AMBIENT_BRIGHTNESS: f32 = 300.0;
+pub const MIN_AMBIENT_BRIGHTNESS: f32 = 0.0;
+pub const MAX_AMBIENT_BRIGHTNESS: f32 = 3_500.0;
+pub const DEFAULT_LIGHT_PITCH_DEG: f32 = 45.0;
+pub const MIN_LIGHT_PITCH_DEG: f32 = 10.0;
+pub const MAX_LIGHT_PITCH_DEG: f32 = 85.0;
+pub const DEFAULT_LIGHT_YAW_DEG: f32 = -45.0;
+pub const MIN_LIGHT_YAW_DEG: f32 = -180.0;
+pub const MAX_LIGHT_YAW_DEG: f32 = 180.0;
 
 #[derive(Resource, Clone)]
 pub struct PlayerAssets {
@@ -39,8 +50,10 @@ impl Plugin for SetupPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup_scene)
             .init_resource::<ModelScaleSettings>()
+            .init_resource::<LightingSettings>()
             .add_systems(Update, sync_selected_player_assets)
             .add_systems(Update, normalize_model_scale_system)
+            .add_systems(Update, apply_lighting_settings_system)
             .add_systems(Update, spawn_local_player_on_team);
     }
 }
@@ -72,6 +85,28 @@ impl Default for ModelScaleSettings {
         }
     }
 }
+
+#[derive(Resource, Clone, Copy)]
+pub struct LightingSettings {
+    pub illuminance: f32,
+    pub ambient_brightness: f32,
+    pub light_pitch_deg: f32,
+    pub light_yaw_deg: f32,
+}
+
+impl Default for LightingSettings {
+    fn default() -> Self {
+        Self {
+            illuminance: DEFAULT_LIGHT_ILLUMINANCE,
+            ambient_brightness: DEFAULT_AMBIENT_BRIGHTNESS,
+            light_pitch_deg: DEFAULT_LIGHT_PITCH_DEG,
+            light_yaw_deg: DEFAULT_LIGHT_YAW_DEG,
+        }
+    }
+}
+
+#[derive(Component)]
+struct SceneDirectionalLight;
 
 pub fn load_scene_from_ipfs(url: &str, asset_server: &AssetServer) -> Option<Handle<Scene>> {
     use reqwest::blocking as req_blocking;
@@ -137,6 +172,7 @@ fn setup_scene(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut cam_state: ResMut<CameraState>,
     asset_server: Res<AssetServer>,
+    lighting_settings: Res<LightingSettings>,
 ) {
     let player_mesh_handle: Handle<Mesh> = meshes.add(Mesh::from(Cuboid::new(
         PLAYER_SIZE,
@@ -179,16 +215,34 @@ fn setup_scene(
         material: player_material_handle.clone(),
     });
 
+    let pitch_rad = lighting_settings
+        .light_pitch_deg
+        .clamp(MIN_LIGHT_PITCH_DEG, MAX_LIGHT_PITCH_DEG)
+        .to_radians();
+    let yaw_rad = lighting_settings
+        .light_yaw_deg
+        .clamp(MIN_LIGHT_YAW_DEG, MAX_LIGHT_YAW_DEG)
+        .to_radians();
     let light_transform =
-        Transform::from_rotation(Quat::from_euler(EulerRot::ZYX, 0.0, PI / 4.0, -PI / 4.0));
+        Transform::from_rotation(Quat::from_euler(EulerRot::ZYX, 0.0, pitch_rad, yaw_rad));
     commands.spawn((
         DirectionalLight {
+            illuminance: lighting_settings
+                .illuminance
+                .clamp(MIN_LIGHT_ILLUMINANCE, MAX_LIGHT_ILLUMINANCE),
             shadows_enabled: true,
             ..default()
         },
         light_transform,
+        SceneDirectionalLight,
         Name::new("Light"),
     ));
+    commands.insert_resource(GlobalAmbientLight {
+        brightness: lighting_settings
+            .ambient_brightness
+            .clamp(MIN_AMBIENT_BRIGHTNESS, MAX_AMBIENT_BRIGHTNESS),
+        ..default()
+    });
 
     let map_center = Vec3::new(0.0, PLAYER_SIZE * 0.5, 0.0);
     let zoom = cam_state.zoom;
@@ -206,6 +260,35 @@ fn setup_scene(
         MainCamera,
         Name::new("Camera"),
     ));
+}
+
+fn apply_lighting_settings_system(
+    settings: Res<LightingSettings>,
+    mut ambient_light: ResMut<GlobalAmbientLight>,
+    mut light_query: Query<(&mut DirectionalLight, &mut Transform), With<SceneDirectionalLight>>,
+) {
+    if !settings.is_changed() {
+        return;
+    }
+
+    ambient_light.brightness = settings
+        .ambient_brightness
+        .clamp(MIN_AMBIENT_BRIGHTNESS, MAX_AMBIENT_BRIGHTNESS);
+
+    if let Ok((mut light, mut transform)) = light_query.single_mut() {
+        light.illuminance = settings
+            .illuminance
+            .clamp(MIN_LIGHT_ILLUMINANCE, MAX_LIGHT_ILLUMINANCE);
+        let pitch_rad = settings
+            .light_pitch_deg
+            .clamp(MIN_LIGHT_PITCH_DEG, MAX_LIGHT_PITCH_DEG)
+            .to_radians();
+        let yaw_rad = settings
+            .light_yaw_deg
+            .clamp(MIN_LIGHT_YAW_DEG, MAX_LIGHT_YAW_DEG)
+            .to_radians();
+        transform.rotation = Quat::from_euler(EulerRot::ZYX, 0.0, pitch_rad, yaw_rad);
+    }
 }
 
 fn sync_selected_player_assets(
@@ -322,7 +405,8 @@ fn normalize_model_scale_system(
         let mut has_bounds = false;
 
         for descendant in children_query.iter_descendants(entity) {
-            let (Ok(aabb), Ok(global)) = (aabb_query.get(descendant), globals_query.get(descendant))
+            let (Ok(aabb), Ok(global)) =
+                (aabb_query.get(descendant), globals_query.get(descendant))
             else {
                 continue;
             };
@@ -331,7 +415,8 @@ fn normalize_model_scale_system(
             for sx in [-1.0_f32, 1.0] {
                 for sy in [-1.0_f32, 1.0] {
                     for sz in [-1.0_f32, 1.0] {
-                        let local_corner = center + Vec3::new(half.x * sx, half.y * sy, half.z * sz);
+                        let local_corner =
+                            center + Vec3::new(half.x * sx, half.y * sy, half.z * sz);
                         let world_corner = global.transform_point(local_corner);
                         min_y = min_y.min(world_corner.y);
                         max_y = max_y.max(world_corner.y);

@@ -68,7 +68,11 @@ impl MapLayout {
         } else {
             dir = Vec3::ZERO;
         }
-        base + Vec3::new(dir.x * PLAYER_SPAWN_OFFSET, 0.0, dir.z * PLAYER_SPAWN_OFFSET)
+        base + Vec3::new(
+            dir.x * PLAYER_SPAWN_OFFSET,
+            0.0,
+            dir.z * PLAYER_SPAWN_OFFSET,
+        )
     }
 
     pub fn center_lane_distance(self) -> f32 {

@@ -265,6 +265,8 @@ struct Projectile {
     state: ProjectileState,
     target: TargetId,
     velocity: Vec3f,
+    homing: bool,
+    guaranteed_hit: bool,
     damage: f32,
     radius: f32,
     expires_at: Instant,
@@ -690,6 +692,8 @@ fn handle_cast_request(
                 direction.y * PROJECTILE_SPEED,
                 direction.z * PROJECTILE_SPEED,
             ),
+            homing: true,
+            guaranteed_hit: false,
             damage: PROJECTILE_DAMAGE,
             radius: PROJECTILE_RADIUS,
             expires_at: now + PROJECTILE_LIFETIME,
@@ -712,15 +716,9 @@ fn simulate_projectiles(
     let mut structure_damage_events: Vec<(u64, f32, Team)> = Vec::new();
 
     projectiles.retain(|_, projectile| {
-        if now >= projectile.expires_at {
+        if !projectile.guaranteed_hit && now >= projectile.expires_at {
             return false;
         }
-
-        let position = Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z)
-            .add_scaled(projectile.velocity, dt);
-        projectile.state.x = position.x;
-        projectile.state.y = position.y;
-        projectile.state.z = position.z;
 
         match projectile.target.kind {
             TargetKind::Player => {
@@ -730,10 +728,34 @@ fn simulate_projectiles(
                     return false;
                 };
 
+                let start =
+                    Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z);
                 let target_pos =
                     Vec3f::new(target.state.x, target.state.y + AIM_HEIGHT, target.state.z);
+                if projectile.homing {
+                    let direction = Vec3f::new(
+                        target_pos.x - start.x,
+                        target_pos.y - start.y,
+                        target_pos.z - start.z,
+                    )
+                    .normalize_or_zero();
+                    if direction.x == 0.0 && direction.y == 0.0 && direction.z == 0.0 {
+                        player_damage_events.push((projectile.target.id, projectile.damage));
+                        return false;
+                    }
+                    projectile.velocity = Vec3f::new(
+                        direction.x * PROJECTILE_SPEED,
+                        direction.y * PROJECTILE_SPEED,
+                        direction.z * PROJECTILE_SPEED,
+                    );
+                }
+                let end = start.add_scaled(projectile.velocity, dt);
+                projectile.state.x = end.x;
+                projectile.state.y = end.y;
+                projectile.state.z = end.z;
+
                 let combined_radius = projectile.radius + PLAYER_HIT_RADIUS;
-                if position.distance_squared(target_pos) <= combined_radius * combined_radius {
+                if swept_sphere_intersects_target(start, end, target_pos, combined_radius) {
                     player_damage_events.push((projectile.target.id, projectile.damage));
                     return false;
                 }
@@ -745,14 +767,42 @@ fn simulate_projectiles(
                 if structure.state.hp <= 0.0 {
                     return false;
                 }
+                let start =
+                    Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z);
                 let target_pos =
                     Vec3f::new(structure.state.x, structure.state.y, structure.state.z);
+                if projectile.homing {
+                    let direction = Vec3f::new(
+                        target_pos.x - start.x,
+                        target_pos.y - start.y,
+                        target_pos.z - start.z,
+                    )
+                    .normalize_or_zero();
+                    if direction.x == 0.0 && direction.y == 0.0 && direction.z == 0.0 {
+                        structure_damage_events.push((
+                            projectile.target.id,
+                            projectile.damage,
+                            projectile.state.owner_team,
+                        ));
+                        return false;
+                    }
+                    projectile.velocity = Vec3f::new(
+                        direction.x * PROJECTILE_SPEED,
+                        direction.y * PROJECTILE_SPEED,
+                        direction.z * PROJECTILE_SPEED,
+                    );
+                }
+                let end = start.add_scaled(projectile.velocity, dt);
+                projectile.state.x = end.x;
+                projectile.state.y = end.y;
+                projectile.state.z = end.z;
+
                 let target_radius = match structure.state.kind {
                     StructureKind::Tower => TOWER_SIZE * 0.5,
                     StructureKind::BaseTower => BASE_TOWER_SIZE * 0.5,
                 };
                 let combined_radius = projectile.radius + target_radius;
-                if position.distance_squared(target_pos) <= combined_radius * combined_radius {
+                if swept_sphere_intersects_target(start, end, target_pos, combined_radius) {
                     structure_damage_events.push((
                         projectile.target.id,
                         projectile.damage,
@@ -793,6 +843,29 @@ fn simulate_projectiles(
             }
         }
     }
+}
+
+fn swept_sphere_intersects_target(start: Vec3f, end: Vec3f, target: Vec3f, radius: f32) -> bool {
+    let seg_x = end.x - start.x;
+    let seg_y = end.y - start.y;
+    let seg_z = end.z - start.z;
+    let seg_len_sq = seg_x * seg_x + seg_y * seg_y + seg_z * seg_z;
+    if seg_len_sq <= 0.000_001 {
+        return start.distance_squared(target) <= radius * radius;
+    }
+
+    let to_target_x = target.x - start.x;
+    let to_target_y = target.y - start.y;
+    let to_target_z = target.z - start.z;
+    let t = ((to_target_x * seg_x + to_target_y * seg_y + to_target_z * seg_z) / seg_len_sq)
+        .clamp(0.0, 1.0);
+    let closest = Vec3f::new(
+        start.x + seg_x * t,
+        start.y + seg_y * t,
+        start.z + seg_z * t,
+    );
+
+    closest.distance_squared(target) <= radius * radius
 }
 
 fn build_structures(layout: &MapLayoutState) -> HashMap<u64, Structure> {
@@ -1552,6 +1625,8 @@ fn simulate_tower_attacks(
                     direction.y * PROJECTILE_SPEED,
                     direction.z * PROJECTILE_SPEED,
                 ),
+                homing: true,
+                guaranteed_hit: true,
                 damage,
                 radius: PROJECTILE_RADIUS,
                 expires_at: now + PROJECTILE_LIFETIME,

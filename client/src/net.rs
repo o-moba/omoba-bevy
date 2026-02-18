@@ -52,7 +52,10 @@ impl Plugin for NetworkingPlugin {
                 ),
             )
             .add_systems(Update, interpolate_minions.after(apply_server_snapshot))
-            .add_systems(Update, interpolate_remote_players.after(apply_server_snapshot));
+            .add_systems(
+                Update,
+                interpolate_remote_players.after(apply_server_snapshot),
+            );
     }
 }
 
@@ -560,9 +563,11 @@ fn apply_server_snapshot(
 
     let local_player_state = players.iter().find(|player| player.id == your_id);
     if let Ok(local_entity) = local_player_query.single() {
-        commands
-            .entity(local_entity)
-            .insert(NetworkPlayerId(your_id));
+        commands.queue(move |world: &mut World| {
+            if let Ok(mut entity) = world.get_entity_mut(local_entity) {
+                entity.insert(NetworkPlayerId(your_id));
+            }
+        });
         if let Some(local_player_state) = local_player_state {
             let server_translation = Vec3::new(
                 local_player_state.x,
@@ -580,10 +585,13 @@ fn apply_server_snapshot(
                     local_transform.rotation = Quat::from_rotation_y(local_player_state.yaw);
                 }
             }
-            commands.entity(local_entity).insert((
-                local_player_state.team,
-                player_state_to_combat_stats(local_player_state),
-            ));
+            let local_team = local_player_state.team;
+            let local_stats = player_state_to_combat_stats(local_player_state);
+            commands.queue(move |world: &mut World| {
+                if let Ok(mut entity) = world.get_entity_mut(local_entity) {
+                    entity.insert((local_team, local_stats));
+                }
+            });
             network_state.local_team = Some(local_player_state.team);
         }
     } else if let Some(local_player_state) = local_player_state {

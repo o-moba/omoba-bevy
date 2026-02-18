@@ -148,13 +148,15 @@ fn setup_player_animation_library(
     library.walk_node = None;
 
     let find_clip = |name: &str| {
-        gltf.named_animations.iter().find_map(|(animation_name, handle)| {
-            if animation_name.to_ascii_lowercase().contains(name) {
-                Some(handle.clone())
-            } else {
-                None
-            }
-        })
+        gltf.named_animations
+            .iter()
+            .find_map(|(animation_name, handle)| {
+                if animation_name.to_ascii_lowercase().contains(name) {
+                    Some(handle.clone())
+                } else {
+                    None
+                }
+            })
     };
 
     let idle = find_clip("idle");
@@ -223,7 +225,10 @@ fn bind_player_animation_players(
 
 fn sync_player_animation_state(
     library: Res<PlayerAnimationLibrary>,
-    player_state_query: Query<(Option<&MovementTarget>, Option<&Jumping>, &CombatStats), With<Player>>,
+    player_state_query: Query<
+        (Option<&MovementTarget>, Option<&Jumping>, &CombatStats),
+        With<Player>,
+    >,
     mut animation_query: Query<(&mut AnimationPlayer, &mut PlayerAnimationBinding)>,
 ) {
     let (Some(idle_node), Some(walk_node)) = (library.idle_node, library.walk_node) else {
@@ -308,10 +313,7 @@ fn handle_player_input(
                                 commands.entity(player_entity).remove::<Jumping>();
                             } else {
                                 commands.entity(player_entity).insert(Jumping {
-                                    timer: Timer::from_seconds(
-                                        JUMP_DURATION,
-                                        TimerMode::Repeating,
-                                    ),
+                                    timer: Timer::from_seconds(JUMP_DURATION, TimerMode::Repeating),
                                     start_y: PLAYER_SIZE / 2.0,
                                 });
                             }

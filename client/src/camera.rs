@@ -21,8 +21,10 @@ pub struct CameraPlugin;
 
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<CameraState>()
-            .add_systems(Update, (update_cursor_grab, toggle_camera_lock, update_camera));
+        app.init_resource::<CameraState>().add_systems(
+            Update,
+            (update_cursor_grab, toggle_camera_lock, update_camera),
+        );
     }
 }
 
@@ -153,9 +155,8 @@ fn update_camera(
             );
             let look_direction = look_target - camera_transform.translation;
             if look_direction.length_squared() > 0.0001 {
-                let target_transform =
-                    Transform::from_translation(camera_transform.translation)
-                        .looking_at(look_target, Vec3::Y);
+                let target_transform = Transform::from_translation(camera_transform.translation)
+                    .looking_at(look_target, Vec3::Y);
                 camera_transform.rotation = camera_transform
                     .rotation
                     .slerp(target_transform.rotation, lerp_factor);

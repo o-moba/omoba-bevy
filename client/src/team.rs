@@ -230,18 +230,24 @@ pub fn spawn_team_select_ui(commands: &mut Commands, selected_character: Charact
 fn team_select_ui_system(
     mut commands: Commands,
     mut selection: ResMut<TeamSelection>,
-    mut team_interactions: Query<
-        (&Interaction, &TeamSelectButton, &mut BackgroundColor),
-        (
-            Changed<Interaction>,
-            With<Button>,
-            Without<CharacterSelectButton>,
-        ),
-    >,
-    mut character_interactions: Query<
-        (&Interaction, &CharacterSelectButton, &mut BackgroundColor),
-        (Changed<Interaction>, With<Button>, Without<TeamSelectButton>),
-    >,
+    mut interaction_sets: ParamSet<(
+        Query<
+            (&Interaction, &TeamSelectButton, &mut BackgroundColor),
+            (
+                Changed<Interaction>,
+                With<Button>,
+                Without<CharacterSelectButton>,
+            ),
+        >,
+        Query<
+            (&Interaction, &CharacterSelectButton, &mut BackgroundColor),
+            (
+                Changed<Interaction>,
+                With<Button>,
+                Without<TeamSelectButton>,
+            ),
+        >,
+    )>,
     character_buttons: Query<
         (Entity, &CharacterSelectButton),
         (With<Button>, Without<TeamSelectButton>),
@@ -254,20 +260,23 @@ fn team_select_ui_system(
     }
 
     let mut selected_character_changed = false;
-    for (interaction, button, mut color) in character_interactions.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                selection.character = button.choice;
-                selected_character_changed = true;
-            }
-            Interaction::Hovered => {
-                if selection.character != button.choice {
-                    *color = CHARACTER_BUTTON_HOVER_COLOR.into();
+    {
+        let mut character_interactions = interaction_sets.p1();
+        for (interaction, button, mut color) in character_interactions.iter_mut() {
+            match *interaction {
+                Interaction::Pressed => {
+                    selection.character = button.choice;
+                    selected_character_changed = true;
                 }
-            }
-            Interaction::None => {
-                if selection.character != button.choice {
-                    *color = CHARACTER_BUTTON_COLOR.into();
+                Interaction::Hovered => {
+                    if selection.character != button.choice {
+                        *color = CHARACTER_BUTTON_HOVER_COLOR.into();
+                    }
+                }
+                Interaction::None => {
+                    if selection.character != button.choice {
+                        *color = CHARACTER_BUTTON_COLOR.into();
+                    }
                 }
             }
         }
@@ -284,23 +293,26 @@ fn team_select_ui_system(
         }
     }
 
-    for (interaction, button, mut color) in team_interactions.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                selection.team = Some(button.team);
-                command_writer.write(NetworkCommand::Join { team: button.team });
-                if let Ok(overlay) = overlay_query.single() {
-                    commands
-                        .entity(overlay)
-                        .despawn_related::<Children>()
-                        .despawn();
+    {
+        let mut team_interactions = interaction_sets.p0();
+        for (interaction, button, mut color) in team_interactions.iter_mut() {
+            match *interaction {
+                Interaction::Pressed => {
+                    selection.team = Some(button.team);
+                    command_writer.write(NetworkCommand::Join { team: button.team });
+                    if let Ok(overlay) = overlay_query.single() {
+                        commands
+                            .entity(overlay)
+                            .despawn_related::<Children>()
+                            .despawn();
+                    }
                 }
-            }
-            Interaction::Hovered => {
-                *color = button.team.ui_hover_color().into();
-            }
-            Interaction::None => {
-                *color = button.team.ui_color().into();
+                Interaction::Hovered => {
+                    *color = button.team.ui_hover_color().into();
+                }
+                Interaction::None => {
+                    *color = button.team.ui_color().into();
+                }
             }
         }
     }
