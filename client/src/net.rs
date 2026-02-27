@@ -528,7 +528,7 @@ fn apply_server_snapshot(
     projectile_query: Query<&NetworkProjectile>,
     structure_query: Query<&NetworkStructure>,
     minion_query: Query<&NetworkMinion>,
-    local_player_query: Query<Entity, With<Player>>,
+    local_player_query: Query<(Entity, Option<&NetworkPlayerId>), With<Player>>,
     player_assets: Res<PlayerAssets>,
     model_catalog: Res<PlayerModelCatalog>,
     visuals: Res<NetworkVisualAssets>,
@@ -579,19 +579,46 @@ fn apply_server_snapshot(
     game_state_snapshot.state = game_state;
 
     let local_player_state = players.iter().find(|player| player.id == your_id);
-    if let Ok(local_entity) = local_player_query.single() {
-        let snapshot_character = local_player_state
-            .map(|player| player.character)
-            .unwrap_or_else(default_character_choice);
-        commands.queue(move |world: &mut World| {
-            if let Ok(mut entity) = world.get_entity_mut(local_entity) {
-                entity.insert((
-                    NetworkPlayerId(your_id),
-                    NetworkCharacterChoice(snapshot_character),
-                ));
+    // IMPORTANT: we must tolerate temporary duplication of `Player` entities (e.g. during loading /
+    // restart races). Many gameplay systems use `Query::single()` and will break if we allow >1.
+    let mut chosen_local: Option<Entity> = None;
+    for (entity, maybe_id) in &local_player_query {
+        if maybe_id.is_some_and(|id| id.0 == your_id) {
+            chosen_local = Some(entity);
+            break;
+        }
+        chosen_local.get_or_insert(entity);
+    }
+
+    if let Some(local_entity) = chosen_local {
+        // Keep exactly one local `Player` alive to avoid `single()` query failures.
+        for (entity, maybe_id) in &local_player_query {
+            if entity == local_entity {
+                continue;
             }
-        });
+            // If this extra player happens to have our id, prefer the chosen one anyway and despawn.
+            if maybe_id.is_some_and(|id| id.0 == your_id) {
+                warn!("Found duplicate local Player for id={your_id}; despawning extra entity");
+            }
+            commands
+                .entity(entity)
+                .despawn_related::<Children>()
+                .despawn();
+        }
+
+        // Always ensure the local player is tagged with the server-provided id.
+        commands.entity(local_entity).insert(NetworkPlayerId(your_id));
+
+        // Only apply character/team/stats once we actually have a state entry for our id.
+        // Otherwise we'd oscillate between the locally selected character and the server default.
         if let Some(local_player_state) = local_player_state {
+            commands.entity(local_entity).insert((
+                local_player_state.team,
+                player_state_to_combat_stats(local_player_state),
+                NetworkCharacterChoice(local_player_state.character),
+            ));
+            network_state.local_team = Some(local_player_state.team);
+
             let server_translation = Vec3::new(
                 local_player_state.x,
                 local_player_state.y,
@@ -608,15 +635,6 @@ fn apply_server_snapshot(
                     local_transform.rotation = Quat::from_rotation_y(local_player_state.yaw);
                 }
             }
-            let local_team = local_player_state.team;
-            let local_stats = player_state_to_combat_stats(local_player_state);
-            let local_character = local_player_state.character;
-            commands.queue(move |world: &mut World| {
-                if let Ok(mut entity) = world.get_entity_mut(local_entity) {
-                    entity.insert((local_team, local_stats, NetworkCharacterChoice(local_character)));
-                }
-            });
-            network_state.local_team = Some(local_player_state.team);
         }
     } else if let Some(local_player_state) = local_player_state {
         // Wait for server ack of selected team to avoid first spawn on default Green.

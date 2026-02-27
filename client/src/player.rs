@@ -47,7 +47,7 @@ impl Plugin for PlayerPlugin {
             (
                 setup_player_animation_library,
                 bind_player_animation_players,
-                sync_player_animation_state,
+                sync_player_animation_state.after(move_player),
             ),
         )
         .add_systems(Update, resolve_player_structure_overlap.after(move_player))
@@ -111,15 +111,10 @@ impl PlayerAnimationLibrary {
         !self.sets.is_empty()
     }
 
-    fn has_locomotion_for(&self, character: CharacterChoice) -> bool {
-        self.sets.contains_key(&character)
-    }
-
     fn should_use_jump_fallback(&self, character: CharacterChoice) -> bool {
-        if character == CharacterChoice::Cube {
-            return true;
-        }
-        self.evaluated_characters.contains(&character) && !self.has_locomotion_for(character)
+        // Jumping is purely a fallback locomotion "effect" for non-skeletal models.
+        // It should never apply to animated characters like Toka/Wang.
+        character == CharacterChoice::Cube
     }
 
     fn get_set(&self, character: CharacterChoice) -> Option<&CharacterAnimationSet> {
@@ -160,6 +155,8 @@ fn setup_player_animation_library(
     for character in [CharacterChoice::Ipfs, CharacterChoice::Toka, CharacterChoice::Wang] {
         let (_scene, maybe_gltf) = model_assets_for_choice(&catalog, character);
         let Some(gltf_handle) = maybe_gltf else {
+            // No GLTF means no skeletal animations — mark evaluated so jump fallback activates.
+            library.evaluated_characters.insert(character);
             continue;
         };
         if library.source_gltfs.get(&character) == Some(&gltf_handle)
@@ -174,21 +171,31 @@ fn setup_player_animation_library(
         library.evaluated_characters.insert(character);
         library.source_gltfs.insert(character, gltf_handle.clone());
 
-        let find_clip = |name: &str| {
-            gltf.named_animations
-                .iter()
-                .find_map(|(animation_name, handle)| {
-                    if animation_name.to_ascii_lowercase().contains(name) {
-                        Some(handle.clone())
-                    } else {
-                        None
-                    }
-                })
+        let find_clip = |substrings: &[&str]| -> Option<(String, Handle<AnimationClip>)> {
+            for needle in substrings {
+                if let Some((animation_name, handle)) =
+                    gltf.named_animations.iter().find(|(animation_name, _handle)| {
+                        animation_name.to_ascii_lowercase().contains(needle)
+                    })
+                {
+                    return Some((animation_name.to_string(), handle.clone()));
+                }
+            }
+            None
         };
 
-        let idle = find_clip("idle");
-        let walk = find_clip("walk");
-        if let (Some(idle_clip), Some(walk_clip)) = (idle, walk) {
+        let idle = find_clip(&["idle"]);
+        // Prefer explicit walkcycle naming to avoid accidentally matching non-locomotion "walk*".
+        let walk = find_clip(&["walkcycle", "walk_cycle", "walk"]);
+        if let (Some((idle_name, idle_clip)), Some((walk_name, walk_clip))) = (idle, walk) {
+            if idle_clip == walk_clip {
+                warn!(
+                    "idle/walk matched the same clip for {:?}: {:?}",
+                    character, idle_name
+                );
+                library.sets.remove(&character);
+                continue;
+            }
             let (graph, nodes) = AnimationGraph::from_clips([idle_clip, walk_clip]);
             let Some(idle_node) = nodes.first().copied() else {
                 continue;
@@ -205,7 +212,10 @@ fn setup_player_animation_library(
                     walk_node,
                 },
             );
-            info!("Animation set ready for {:?}", character);
+            info!(
+                "Animation set ready for {:?}: idle={:?}, walk={:?}",
+                character, idle_name, walk_name
+            );
         } else {
             library.sets.remove(&character);
             warn!("idle/walk animations were not found for {:?}", character);
@@ -272,6 +282,8 @@ fn bind_player_animation_players(
             .get(owner)
             .map(|transform| transform.translation)
             .unwrap_or(Vec3::ZERO);
+        // Ensure we don't accidentally blend leftover animations from a previous graph.
+        animation_player.stop_all();
         animation_player.play(set.idle_node).repeat();
         commands.entity(animation_entity).insert((
             AnimationGraphHandle(set.graph.clone()),
@@ -316,10 +328,7 @@ fn sync_player_animation_state(
             let Some(new_set) = library.get_set(desired_character) else {
                 continue;
             };
-            if let Some(previous_set) = library.get_set(binding.character) {
-                animation_player.stop(previous_set.idle_node);
-                animation_player.stop(previous_set.walk_node);
-            }
+            animation_player.stop_all();
             binding.character = desired_character;
             binding.state = LocomotionAnimState::Idle;
             *graph_handle = AnimationGraphHandle(new_set.graph.clone());
@@ -339,6 +348,8 @@ fn sync_player_animation_state(
             animation_player.stop_all();
             animation_player.play(active_node).repeat();
         } else if !animation_player.is_playing_animation(active_node) {
+            // If the graph handle / player got reset (scene reload, late component insert, etc.),
+            // force the expected animation to actually start.
             animation_player.stop_all();
             animation_player.play(active_node).repeat();
         }
