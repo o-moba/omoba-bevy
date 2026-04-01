@@ -54,6 +54,11 @@ const MINIONS_PER_WAVE: usize = 3;
 const MINION_KILL_GOLD: u32 = 18;
 const MINION_KILL_XP: u32 = 32;
 const PLAYER_SPAWN_OFFSET: f32 = 7.0;
+const STARTING_LEVEL: u32 = 1;
+const MAX_LEVEL: u32 = 10;
+const LEVEL_UP_HP_BONUS: f32 = 18.0;
+const LEVEL_UP_MANA_BONUS: f32 = 12.0;
+const LEVEL_XP_THRESHOLDS: [u32; 9] = [120, 150, 180, 220, 260, 300, 340, 380, 420];
 
 const TARGET_BASE_RUN_TIME_SECONDS: f32 = 45.0;
 const PLAYER_SPEED: f32 = 5.0;
@@ -66,8 +71,15 @@ const LANE_EDGE_PADDING: f32 = 6.0;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ClientPacket {
-    Transform { x: f32, y: f32, z: f32, yaw: f32 },
-    Cast { target: TargetId },
+    Transform {
+        x: f32,
+        y: f32,
+        z: f32,
+        yaw: f32,
+    },
+    Cast {
+        target: TargetId,
+    },
     Join {
         team: Team,
         #[serde(default = "default_character_choice")]
@@ -132,8 +144,52 @@ struct PlayerState {
     max_mana: f32,
     gold: u32,
     xp: u32,
+    level: u32,
+    next_level_xp: u32,
+    skill_points: u32,
     #[serde(default = "default_character_choice")]
     character: CharacterChoice,
+}
+
+fn xp_threshold_for_level(level: u32) -> u32 {
+    if level >= MAX_LEVEL {
+        0
+    } else {
+        let index = level.saturating_sub(STARTING_LEVEL) as usize;
+        LEVEL_XP_THRESHOLDS[index]
+    }
+}
+
+fn apply_level_up(state: &mut PlayerState) {
+    state.level = state.level.saturating_add(1);
+    state.skill_points = state.skill_points.saturating_add(1);
+    state.max_hp += LEVEL_UP_HP_BONUS;
+    state.max_mana += LEVEL_UP_MANA_BONUS;
+    state.hp = (state.hp + LEVEL_UP_HP_BONUS).clamp(0.0, state.max_hp);
+    state.mana = (state.mana + LEVEL_UP_MANA_BONUS).clamp(0.0, state.max_mana);
+    state.next_level_xp = xp_threshold_for_level(state.level);
+}
+
+fn grant_player_xp(state: &mut PlayerState, amount: u32) {
+    if amount == 0 {
+        return;
+    }
+    if state.level >= MAX_LEVEL {
+        state.xp = 0;
+        state.next_level_xp = 0;
+        return;
+    }
+
+    state.xp = state.xp.saturating_add(amount);
+    while state.level < MAX_LEVEL && state.next_level_xp > 0 && state.xp >= state.next_level_xp {
+        state.xp -= state.next_level_xp;
+        apply_level_up(state);
+    }
+
+    if state.level >= MAX_LEVEL {
+        state.xp = 0;
+        state.next_level_xp = 0;
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -575,6 +631,9 @@ fn ensure_player_connected(
                 max_mana: MAX_MANA,
                 gold: 0,
                 xp: 0,
+                level: STARTING_LEVEL,
+                next_level_xp: xp_threshold_for_level(STARTING_LEVEL),
+                skill_points: 0,
                 character: default_character_choice(),
             },
             last_seen: now,
@@ -620,6 +679,9 @@ fn handle_join_request(
     player.state.max_mana = MAX_MANA;
     player.state.gold = 0;
     player.state.xp = 0;
+    player.state.level = STARTING_LEVEL;
+    player.state.next_level_xp = xp_threshold_for_level(STARTING_LEVEL);
+    player.state.skill_points = 0;
     player.last_cast_at = None;
     player.respawn_at = None;
 }
@@ -778,8 +840,7 @@ fn simulate_projectiles(
                     return false;
                 };
 
-                let start =
-                    Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z);
+                let start = Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z);
                 let target_pos =
                     Vec3f::new(target.state.x, target.state.y + AIM_HEIGHT, target.state.z);
                 if projectile.homing {
@@ -818,8 +879,7 @@ fn simulate_projectiles(
                     return false;
                 }
 
-                let start =
-                    Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z);
+                let start = Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z);
                 let target_pos = Vec3f::new(
                     target_minion.state.x,
                     target_minion.state.y + MINION_RADIUS * 0.8,
@@ -868,8 +928,7 @@ fn simulate_projectiles(
                 if structure.state.hp <= 0.0 {
                     return false;
                 }
-                let start =
-                    Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z);
+                let start = Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z);
                 let target_pos =
                     Vec3f::new(structure.state.x, structure.state.y, structure.state.z);
                 if projectile.homing {
@@ -1334,7 +1393,7 @@ fn award_minion_kill_rewards(
             xp += 1;
         }
         player.state.gold = player.state.gold.saturating_add(gold);
-        player.state.xp = player.state.xp.saturating_add(xp);
+        grant_player_xp(&mut player.state, xp);
     }
 }
 
@@ -1821,6 +1880,60 @@ mod tests {
         regenerate_mana(&mut players, 100.0);
         let clamped = players.get(&addr).unwrap().state.mana;
         assert!((clamped - MAX_MANA).abs() < EPSILON);
+    }
+
+    #[test]
+    fn progression_levels_up_and_scales_stats() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:34568".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let player = players.get_mut(&addr).unwrap();
+        let first_threshold = player.state.next_level_xp;
+        let second_threshold = xp_threshold_for_level(STARTING_LEVEL + 1);
+
+        grant_player_xp(&mut player.state, first_threshold + second_threshold + 17);
+
+        assert_eq!(player.state.level, STARTING_LEVEL + 2);
+        assert_eq!(player.state.skill_points, 2);
+        assert_eq!(player.state.xp, 17);
+        assert_eq!(
+            player.state.next_level_xp,
+            xp_threshold_for_level(STARTING_LEVEL + 2)
+        );
+        assert!((player.state.max_hp - (MAX_HP + LEVEL_UP_HP_BONUS * 2.0)).abs() < EPSILON);
+        assert!((player.state.max_mana - (MAX_MANA + LEVEL_UP_MANA_BONUS * 2.0)).abs() < EPSILON);
+    }
+
+    #[test]
+    fn respawn_restores_scaled_maximums() {
+        let layout = build_map_layout();
+        let structures = build_structures(&layout);
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:34569".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let player = players.get_mut(&addr).unwrap();
+        let first_threshold = player.state.next_level_xp;
+        let second_threshold = xp_threshold_for_level(STARTING_LEVEL + 1);
+        grant_player_xp(&mut player.state, first_threshold + second_threshold);
+        player.state.hp = 0.0;
+        player.state.mana = 0.0;
+        player.respawn_at = Some(now - Duration::from_millis(1));
+
+        handle_respawns(&mut players, &structures, &layout, &GameState::Running, now);
+
+        let player = players.get(&addr).unwrap();
+        assert_eq!(player.state.level, STARTING_LEVEL + 2);
+        assert!(player.state.max_hp > MAX_HP);
+        assert!(player.state.max_mana > MAX_MANA);
+        assert!((player.state.hp - player.state.max_hp).abs() < EPSILON);
+        assert!((player.state.mana - player.state.max_mana).abs() < EPSILON);
     }
 }
 
