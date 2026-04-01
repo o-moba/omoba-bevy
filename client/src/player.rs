@@ -11,11 +11,11 @@ use std::f32::consts::PI;
 use crate::camera::{CameraState, MainCamera};
 use crate::combat::{CombatStats, MAX_HP};
 use crate::debug_console::DebugConsole;
-use crate::minimap::MinimapNavigationState;
 use crate::maps::MapLayout;
+use crate::minimap::MinimapNavigationState;
 use crate::net::{
-    GameState, GameStateSnapshot, NetworkCharacterChoice, NetworkStructure, RemotePlayer,
-    StructureKind,
+    GameState, GameStateSnapshot, NetworkCharacterChoice, NetworkStructure, PlayerProgression,
+    RemotePlayer, StructureKind,
 };
 use crate::team::{CharacterChoice, Team};
 use crate::world::{PlayerModelCatalog, model_assets_for_choice};
@@ -54,8 +54,8 @@ impl Plugin for PlayerPlugin {
         .add_systems(PostUpdate, apply_gravity)
         .init_resource::<RespawnCountdown>()
         .init_resource::<PlayerAnimationLibrary>()
-        .add_systems(Startup, setup_respawn_ui)
-        .add_systems(Update, respawn_countdown_system);
+        .add_systems(Startup, (setup_respawn_ui, setup_progression_ui))
+        .add_systems(Update, (respawn_countdown_system, progression_hud_system));
     }
 }
 
@@ -87,6 +87,9 @@ impl Default for RespawnCountdown {
 
 #[derive(Component)]
 struct RespawnCountdownText;
+
+#[derive(Component)]
+struct ProgressionHudText;
 
 #[derive(Component)]
 struct MovementTarget {
@@ -152,7 +155,11 @@ fn setup_player_animation_library(
     let Some(catalog) = catalog else {
         return;
     };
-    for character in [CharacterChoice::Ipfs, CharacterChoice::Toka, CharacterChoice::Wang] {
+    for character in [
+        CharacterChoice::Ipfs,
+        CharacterChoice::Toka,
+        CharacterChoice::Wang,
+    ] {
         let (_scene, maybe_gltf) = model_assets_for_choice(&catalog, character);
         let Some(gltf_handle) = maybe_gltf else {
             // No GLTF means no skeletal animations — mark evaluated so jump fallback activates.
@@ -174,9 +181,11 @@ fn setup_player_animation_library(
         let find_clip = |substrings: &[&str]| -> Option<(String, Handle<AnimationClip>)> {
             for needle in substrings {
                 if let Some((animation_name, handle)) =
-                    gltf.named_animations.iter().find(|(animation_name, _handle)| {
-                        animation_name.to_ascii_lowercase().contains(needle)
-                    })
+                    gltf.named_animations
+                        .iter()
+                        .find(|(animation_name, _handle)| {
+                            animation_name.to_ascii_lowercase().contains(needle)
+                        })
                 {
                     return Some((animation_name.to_string(), handle.clone()));
                 }
@@ -229,7 +238,9 @@ fn sync_jump_fallback_mode(
     players: Query<(Entity, Option<&NetworkCharacterChoice>, Option<&Jumping>), With<Player>>,
 ) {
     for (entity, character, jumping) in &players {
-        let character = character.map(|selected| selected.0).unwrap_or(CharacterChoice::Ipfs);
+        let character = character
+            .map(|selected| selected.0)
+            .unwrap_or(CharacterChoice::Ipfs);
         let should_jump_fallback = animation_library.should_use_jump_fallback(character);
         if !should_jump_fallback && jumping.is_some() {
             commands.entity(entity).remove::<Jumping>();
@@ -304,13 +315,11 @@ fn sync_player_animation_state(
     local_player_query: Query<(), With<Player>>,
     local_movement_query: Query<(Option<&MovementTarget>, Option<&Jumping>), With<Player>>,
     player_state_query: Query<(&Transform, &CombatStats), Or<(With<Player>, With<RemotePlayer>)>>,
-    mut animation_query: Query<
-        (
-            &mut AnimationPlayer,
-            &mut PlayerAnimationBinding,
-            &mut AnimationGraphHandle,
-        ),
-    >,
+    mut animation_query: Query<(
+        &mut AnimationPlayer,
+        &mut PlayerAnimationBinding,
+        &mut AnimationGraphHandle,
+    )>,
 ) {
     if !library.has_locomotion_animations() {
         return;
@@ -354,7 +363,9 @@ fn sync_player_animation_state(
             animation_player.play(active_node).repeat();
         }
 
-        let distance = owner_transform.translation.distance(binding.last_owner_position);
+        let distance = owner_transform
+            .translation
+            .distance(binding.last_owner_position);
         let speed = distance / time.delta_secs().max(0.001);
         let moved = speed > 0.05;
         binding.last_owner_position = owner_transform.translation;
@@ -442,8 +453,9 @@ fn handle_player_input(
                             commands
                                 .entity(player_entity)
                                 .insert(MovementTarget { target: target_pos });
-                            let character =
-                                character.map(|selected| selected.0).unwrap_or(CharacterChoice::Ipfs);
+                            let character = character
+                                .map(|selected| selected.0)
+                                .unwrap_or(CharacterChoice::Ipfs);
                             if !animation_library.should_use_jump_fallback(character) {
                                 commands.entity(player_entity).remove::<Jumping>();
                             } else {
@@ -612,6 +624,61 @@ fn setup_respawn_ui(mut commands: Commands) {
                 RespawnCountdownText,
             ));
         });
+}
+
+fn setup_progression_ui(mut commands: Commands) {
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(16.0),
+                top: Val::Px(16.0),
+                ..default()
+            },
+            Name::new("ProgressionHud"),
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Text::new("Level --   XP --/--   Skill points --"),
+                TextFont {
+                    font_size: 24.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+                ProgressionHudText,
+            ));
+        });
+}
+
+fn progression_hud_system(
+    player_query: Query<&PlayerProgression, With<Player>>,
+    mut text_query: Query<&mut Text, With<ProgressionHudText>>,
+) {
+    let Ok(mut text) = text_query.single_mut() else {
+        return;
+    };
+
+    let Some(progression) = player_query.iter().next() else {
+        text.0 = "Level --   XP --/--   Skill points --".to_string();
+        return;
+    };
+
+    if progression.next_level_xp == 0 {
+        text.0 = format!(
+            "Level {}   XP MAX   Skill points {}",
+            progression.level.max(1),
+            progression.skill_points
+        );
+    } else {
+        let displayed_xp = progression.xp.min(progression.next_level_xp);
+        text.0 = format!(
+            "Level {}   XP {}/{}   Skill points {}",
+            progression.level.max(1),
+            displayed_xp,
+            progression.next_level_xp,
+            progression.skill_points
+        );
+    }
 }
 
 fn respawn_countdown_system(
