@@ -55,6 +55,14 @@ const MINION_KILL_GOLD: u32 = 18;
 const MINION_KILL_XP: u32 = 32;
 const PLAYER_SPAWN_OFFSET: f32 = 7.0;
 
+const NEUTRAL_RADIUS: f32 = 0.62;
+const NEUTRAL_SPAWN_HEIGHT: f32 = 0.5;
+const NEUTRAL_AGGRO_RADIUS: f32 = 7.5;
+const NEUTRAL_LEASH_DISTANCE: f32 = 13.0;
+const NEUTRAL_ATTACK_COOLDOWN: Duration = Duration::from_millis(850);
+const NEUTRAL_CHASE_SPEED: f32 = 2.9;
+const NEUTRAL_RESPAWN_COOLDOWN: Duration = Duration::from_secs(40);
+
 const TARGET_BASE_RUN_TIME_SECONDS: f32 = 45.0;
 const PLAYER_SPEED: f32 = 5.0;
 const TARGET_BASE_DISTANCE: f32 = PLAYER_SPEED * TARGET_BASE_RUN_TIME_SECONDS;
@@ -106,6 +114,7 @@ enum TargetKind {
     Player,
     Minion,
     Structure,
+    Neutral,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -188,6 +197,34 @@ enum MinionTargetKind {
     Structure,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum NeutralCampType {
+    Skirmisher,
+    Bruiser,
+    Spitter,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum NeutralAiState {
+    Idle,
+    Aggro,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct NeutralState {
+    id: u64,
+    camp_type: NeutralCampType,
+    x: f32,
+    y: f32,
+    z: f32,
+    yaw: f32,
+    hp: f32,
+    max_hp: f32,
+    ai_state: NeutralAiState,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ProjectileState {
     id: u64,
@@ -207,6 +244,8 @@ enum ServerPacket {
         projectiles: Vec<ProjectileState>,
         structures: Vec<StructureState>,
         minions: Vec<MinionState>,
+        #[serde(default)]
+        neutrals: Vec<NeutralState>,
         game_state: GameState,
     },
 }
@@ -321,6 +360,104 @@ enum MinionAggroTarget {
     Minion(u64),
 }
 
+#[derive(Debug, Clone, Copy)]
+struct NeutralTemplate {
+    max_hp: f32,
+    attack_damage: f32,
+    attack_range: f32,
+    kill_gold: u32,
+    kill_xp: u32,
+}
+
+fn neutral_template(camp_type: NeutralCampType) -> NeutralTemplate {
+    match camp_type {
+        NeutralCampType::Skirmisher => NeutralTemplate {
+            max_hp: 72.0,
+            attack_damage: 7.0,
+            attack_range: 2.45,
+            kill_gold: 28,
+            kill_xp: 50,
+        },
+        NeutralCampType::Bruiser => NeutralTemplate {
+            max_hp: 130.0,
+            attack_damage: 11.0,
+            attack_range: 2.65,
+            kill_gold: 52,
+            kill_xp: 85,
+        },
+        NeutralCampType::Spitter => NeutralTemplate {
+            max_hp: 58.0,
+            attack_damage: 9.0,
+            attack_range: 7.6,
+            kill_gold: 35,
+            kill_xp: 55,
+        },
+    }
+}
+
+fn jungle_camp_blueprints() -> Vec<(Vec3f, NeutralCampType)> {
+    let inner_side = TARGET_BASE_DISTANCE / 2.0_f32.sqrt();
+    let half_inner_side = inner_side * 0.5;
+    let base_padding = BASE_PAD_SIZE * 0.5 + BASE_EDGE_MARGIN;
+    let half_map_size = half_inner_side + base_padding;
+    let map_size = half_map_size * 2.0;
+    let jungle_outer = map_size * 0.34;
+    let jungle_inner = map_size * 0.22;
+    let y = NEUTRAL_SPAWN_HEIGHT;
+    vec![
+        (
+            Vec3f::new(-jungle_outer, y, jungle_inner),
+            NeutralCampType::Skirmisher,
+        ),
+        (
+            Vec3f::new(jungle_outer, y, -jungle_inner),
+            NeutralCampType::Bruiser,
+        ),
+        (
+            Vec3f::new(-jungle_inner, y, -jungle_outer),
+            NeutralCampType::Spitter,
+        ),
+    ]
+}
+
+fn build_neutral_camps(next_id: &mut u64) -> HashMap<u64, Neutral> {
+    let mut out = HashMap::new();
+    for (anchor, camp_type) in jungle_camp_blueprints() {
+        let template = neutral_template(camp_type);
+        let id = *next_id;
+        *next_id += 1;
+        out.insert(
+            id,
+            Neutral {
+                state: NeutralState {
+                    id,
+                    camp_type,
+                    x: anchor.x,
+                    y: anchor.y,
+                    z: anchor.z,
+                    yaw: 0.0,
+                    hp: template.max_hp,
+                    max_hp: template.max_hp,
+                    ai_state: NeutralAiState::Idle,
+                },
+                anchor,
+                target_player_id: None,
+                last_attack_at: None,
+                dead_until: None,
+            },
+        );
+    }
+    out
+}
+
+struct Neutral {
+    state: NeutralState,
+    anchor: Vec3f,
+    target_player_id: Option<u64>,
+    last_attack_at: Option<Instant>,
+    dead_until: Option<Instant>,
+}
+
 impl MinionAggroTarget {
     fn id(self) -> u64 {
         match self {
@@ -352,6 +489,8 @@ fn main() -> io::Result<()> {
     let mut next_player_id: u64 = 1;
     let mut next_projectile_id: u64 = 1;
     let mut next_minion_id: u64 = 1;
+    let mut next_neutral_id: u64 = 9001;
+    let mut neutrals = build_neutral_camps(&mut next_neutral_id);
     let mut recv_buf = [0_u8; MAX_PACKET_SIZE];
     let mut last_snapshot_at = Instant::now();
     let mut last_simulation_at = Instant::now();
@@ -400,6 +539,7 @@ fn main() -> io::Result<()> {
                                 &mut projectiles,
                                 &mut minions,
                                 &mut structures,
+                                &mut neutrals,
                                 addr,
                                 target,
                                 &mut next_projectile_id,
@@ -460,11 +600,13 @@ fn main() -> io::Result<()> {
             &mut players,
             &mut minions,
             &mut structures,
+            &mut neutrals,
             &mut projectiles,
             &mut game_state,
             dt,
             now,
         );
+        simulate_neutrals(&mut players, &mut neutrals, &game_state, dt, now);
         handle_respawns(&mut players, &structures, &map_layout, &game_state, now);
 
         players.retain(|addr, player| {
@@ -488,6 +630,9 @@ fn main() -> io::Result<()> {
                 TargetKind::Structure => structures
                     .get(&projectile.target.id)
                     .is_some_and(|structure| structure.state.hp > 0.0),
+                TargetKind::Neutral => neutrals.get(&projectile.target.id).is_some_and(|neutral| {
+                    neutral.dead_until.is_none() && neutral.state.hp > 0.0
+                }),
             };
             target_alive
         });
@@ -521,6 +666,13 @@ fn main() -> io::Result<()> {
                 .collect::<Vec<_>>();
             minions_snapshot.sort_unstable_by_key(|minion| minion.id);
 
+            let mut neutrals_snapshot = neutrals
+                .values()
+                .filter(|neutral| neutral.dead_until.is_none() && neutral.state.hp > 0.0)
+                .map(|neutral| neutral.state.clone())
+                .collect::<Vec<_>>();
+            neutrals_snapshot.sort_unstable_by_key(|neutral| neutral.id);
+
             for (addr, player) in &players {
                 let packet = ServerPacket::Snapshot {
                     your_id: player.state.id,
@@ -528,6 +680,7 @@ fn main() -> io::Result<()> {
                     projectiles: projectiles_snapshot.clone(),
                     structures: structures_snapshot.clone(),
                     minions: minions_snapshot.clone(),
+                    neutrals: neutrals_snapshot.clone(),
                     game_state: game_state.clone(),
                 };
 
@@ -629,6 +782,7 @@ fn handle_cast_request(
     projectiles: &mut HashMap<u64, Projectile>,
     minions: &mut HashMap<u64, Minion>,
     structures: &mut HashMap<u64, Structure>,
+    neutrals: &mut HashMap<u64, Neutral>,
     caster_addr: SocketAddr,
     target: TargetId,
     next_projectile_id: &mut u64,
@@ -696,6 +850,19 @@ fn handle_cast_request(
                 target_structure.state.z,
             )
         }
+        TargetKind::Neutral => {
+            let Some(target_neutral) = neutrals.get(&target.id) else {
+                return;
+            };
+            if target_neutral.dead_until.is_some() || target_neutral.state.hp <= 0.0 {
+                return;
+            }
+            Vec3f::new(
+                target_neutral.state.x,
+                target_neutral.state.y + NEUTRAL_RADIUS * 0.85,
+                target_neutral.state.z,
+            )
+        }
     };
 
     let caster_position = Vec3f::new(
@@ -753,6 +920,7 @@ fn simulate_projectiles(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,
     minions: &mut HashMap<u64, Minion>,
     structures: &mut HashMap<u64, Structure>,
+    neutrals: &mut HashMap<u64, Neutral>,
     projectiles: &mut HashMap<u64, Projectile>,
     game_state: &mut GameState,
     dt: f32,
@@ -764,6 +932,7 @@ fn simulate_projectiles(
     let mut player_damage_events: Vec<(u64, f32)> = Vec::new();
     let mut minion_damage_events: Vec<(u64, f32, Team)> = Vec::new();
     let mut structure_damage_events: Vec<(u64, f32, Team)> = Vec::new();
+    let mut neutral_damage_events: Vec<(u64, f32, u64)> = Vec::new();
 
     projectiles.retain(|_, projectile| {
         if !projectile.guaranteed_hit && now >= projectile.expires_at {
@@ -912,6 +1081,57 @@ fn simulate_projectiles(
                     return false;
                 }
             }
+            TargetKind::Neutral => {
+                let Some(target_neutral) = neutrals.get(&projectile.target.id) else {
+                    return false;
+                };
+                if target_neutral.dead_until.is_some() || target_neutral.state.hp <= 0.0 {
+                    return false;
+                }
+
+                let start =
+                    Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z);
+                let target_pos = Vec3f::new(
+                    target_neutral.state.x,
+                    target_neutral.state.y + NEUTRAL_RADIUS * 0.85,
+                    target_neutral.state.z,
+                );
+                if projectile.homing {
+                    let direction = Vec3f::new(
+                        target_pos.x - start.x,
+                        target_pos.y - start.y,
+                        target_pos.z - start.z,
+                    )
+                    .normalize_or_zero();
+                    if direction.x == 0.0 && direction.y == 0.0 && direction.z == 0.0 {
+                        neutral_damage_events.push((
+                            projectile.target.id,
+                            projectile.damage,
+                            projectile.state.owner_id,
+                        ));
+                        return false;
+                    }
+                    projectile.velocity = Vec3f::new(
+                        direction.x * PROJECTILE_SPEED,
+                        direction.y * PROJECTILE_SPEED,
+                        direction.z * PROJECTILE_SPEED,
+                    );
+                }
+                let end = start.add_scaled(projectile.velocity, dt);
+                projectile.state.x = end.x;
+                projectile.state.y = end.y;
+                projectile.state.z = end.z;
+
+                let combined_radius = projectile.radius + NEUTRAL_RADIUS;
+                if swept_sphere_intersects_target(start, end, target_pos, combined_radius) {
+                    neutral_damage_events.push((
+                        projectile.target.id,
+                        projectile.damage,
+                        projectile.state.owner_id,
+                    ));
+                    return false;
+                }
+            }
         }
 
         true
@@ -945,6 +1165,199 @@ fn simulate_projectiles(
                         winner: attacker_team,
                     };
                 }
+            }
+        }
+    }
+
+    for (target_id, damage, attacker_id) in neutral_damage_events {
+        apply_neutral_damage(players, neutrals, target_id, damage, attacker_id, now);
+    }
+}
+
+fn apply_neutral_damage(
+    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+    neutrals: &mut HashMap<u64, Neutral>,
+    target_id: u64,
+    damage: f32,
+    attacker_player_id: u64,
+    now: Instant,
+) {
+    let Some(neutral) = neutrals.get_mut(&target_id) else {
+        return;
+    };
+    if neutral.dead_until.is_some() || neutral.state.hp <= 0.0 {
+        return;
+    }
+    neutral.state.hp = (neutral.state.hp - damage).max(0.0);
+    if players.values().any(|player| {
+        player.state.id == attacker_player_id && player.state.hp > 0.0
+    }) {
+        neutral.target_player_id = Some(attacker_player_id);
+        neutral.state.ai_state = NeutralAiState::Aggro;
+    }
+    if neutral.state.hp <= 0.0 {
+        let camp_type = neutral.state.camp_type;
+        award_neutral_kill_to_player(players, attacker_player_id, camp_type);
+        neutral.dead_until = Some(now + NEUTRAL_RESPAWN_COOLDOWN);
+        neutral.target_player_id = None;
+        neutral.last_attack_at = None;
+        neutral.state.ai_state = NeutralAiState::Idle;
+    }
+}
+
+fn award_neutral_kill_to_player(
+    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+    killer_id: u64,
+    camp_type: NeutralCampType,
+) {
+    let rewards = neutral_template(camp_type);
+    for player in players.values_mut() {
+        if player.state.id == killer_id {
+            player.state.gold = player.state.gold.saturating_add(rewards.kill_gold);
+            player.state.xp = player.state.xp.saturating_add(rewards.kill_xp);
+            break;
+        }
+    }
+}
+
+fn neutral_horizontal_distance_sq_from_anchor(anchor: Vec3f, player: &PlayerState) -> f32 {
+    let dx = anchor.x - player.x;
+    let dz = anchor.z - player.z;
+    dx * dx + dz * dz
+}
+
+fn simulate_neutrals(
+    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+    neutrals: &mut HashMap<u64, Neutral>,
+    game_state: &GameState,
+    dt: f32,
+    now: Instant,
+) {
+    if !matches!(game_state, GameState::Running) {
+        return;
+    }
+
+    let aggro_sq = NEUTRAL_AGGRO_RADIUS * NEUTRAL_AGGRO_RADIUS;
+    let leash_sq = NEUTRAL_LEASH_DISTANCE * NEUTRAL_LEASH_DISTANCE;
+    let mut player_damage_events: Vec<(u64, f32)> = Vec::new();
+
+    for neutral in neutrals.values_mut() {
+        if let Some(dead_until) = neutral.dead_until {
+            if now >= dead_until {
+                let template = neutral_template(neutral.state.camp_type);
+                neutral.dead_until = None;
+                neutral.state.hp = template.max_hp;
+                neutral.state.max_hp = template.max_hp;
+                neutral.state.x = neutral.anchor.x;
+                neutral.state.y = neutral.anchor.y;
+                neutral.state.z = neutral.anchor.z;
+                neutral.state.yaw = 0.0;
+                neutral.state.ai_state = NeutralAiState::Idle;
+                neutral.target_player_id = None;
+                neutral.last_attack_at = None;
+            } else {
+                continue;
+            }
+        }
+
+        if neutral.state.hp <= 0.0 {
+            continue;
+        }
+
+        let template = neutral_template(neutral.state.camp_type);
+        let anchor = neutral.anchor;
+        let neutral_pos = Vec3f::new(neutral.state.x, neutral.state.y, neutral.state.z);
+
+        if neutral.state.ai_state == NeutralAiState::Idle && neutral.target_player_id.is_none() {
+            let best = players
+                .values()
+                .filter(|player| player.state.hp > 0.0)
+                .map(|player| {
+                    let hit = Vec3f::new(player.state.x, player.state.y + AIM_HEIGHT, player.state.z);
+                    (player.state.id, neutral_pos.distance_squared(hit))
+                })
+                .filter(|(_, dist_sq)| *dist_sq <= aggro_sq)
+                .min_by(|a, b| {
+                    a.1
+                        .partial_cmp(&b.1)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+            if let Some((player_id, _)) = best {
+                neutral.target_player_id = Some(player_id);
+                neutral.state.ai_state = NeutralAiState::Aggro;
+            }
+        }
+
+        let Some(target_id) = neutral.target_player_id else {
+            neutral.state.ai_state = NeutralAiState::Idle;
+            continue;
+        };
+
+        let Some(target_player) = players
+            .values()
+            .find(|player| player.state.id == target_id && player.state.hp > 0.0)
+        else {
+            neutral.target_player_id = None;
+            neutral.state.ai_state = NeutralAiState::Idle;
+            continue;
+        };
+
+        if neutral_horizontal_distance_sq_from_anchor(anchor, &target_player.state) > leash_sq {
+            neutral.state.x = anchor.x;
+            neutral.state.y = anchor.y;
+            neutral.state.z = anchor.z;
+            neutral.state.hp = neutral.state.max_hp;
+            neutral.state.ai_state = NeutralAiState::Idle;
+            neutral.target_player_id = None;
+            neutral.last_attack_at = None;
+            neutral.state.yaw = 0.0;
+            continue;
+        }
+
+        let target_hit = Vec3f::new(
+            target_player.state.x,
+            target_player.state.y + AIM_HEIGHT,
+            target_player.state.z,
+        );
+        let dist = neutral_pos.distance(target_hit);
+
+        if dist <= template.attack_range {
+            let can_attack = neutral
+                .last_attack_at
+                .is_none_or(|last| now.duration_since(last) >= NEUTRAL_ATTACK_COOLDOWN);
+            if can_attack {
+                neutral.last_attack_at = Some(now);
+                player_damage_events.push((target_id, template.attack_damage));
+            }
+            let dir_x = target_hit.x - neutral.state.x;
+            let dir_z = target_hit.z - neutral.state.z;
+            if dir_x * dir_x + dir_z * dir_z > 0.0001 {
+                neutral.state.yaw = dir_x.atan2(dir_z);
+            }
+        } else {
+            neutral.state.ai_state = NeutralAiState::Aggro;
+            let dir_x = target_hit.x - neutral.state.x;
+            let dir_z = target_hit.z - neutral.state.z;
+            let dist_flat_sq = dir_x * dir_x + dir_z * dir_z;
+            let dist_flat = dist_flat_sq.sqrt();
+            if dist_flat > 0.0001 {
+                let travel = (NEUTRAL_CHASE_SPEED * dt).min(dist_flat);
+                let inv = dist_flat.recip();
+                neutral.state.x += dir_x * inv * travel;
+                neutral.state.z += dir_z * inv * travel;
+                neutral.state.yaw = dir_x.atan2(dir_z);
+            }
+        }
+    }
+
+    for (target_id, damage) in player_damage_events {
+        if let Some(target_player) = players
+            .values_mut()
+            .find(|player| player.state.id == target_id && player.state.hp > 0.0)
+        {
+            target_player.state.hp = (target_player.state.hp - damage).max(0.0);
+            if target_player.state.hp <= 0.0 && target_player.respawn_at.is_none() {
+                target_player.respawn_at = Some(now + RESPAWN_DELAY);
             }
         }
     }
@@ -1821,6 +2234,223 @@ mod tests {
         regenerate_mana(&mut players, 100.0);
         let clamped = players.get(&addr).unwrap().state.mana;
         assert!((clamped - MAX_MANA).abs() < EPSILON);
+    }
+
+    #[test]
+    fn neutral_camps_spawn_alive_with_distinct_templates() {
+        let mut next_neutral_id = 9_001;
+        let neutrals = build_neutral_camps(&mut next_neutral_id);
+
+        assert_eq!(neutrals.len(), 3);
+
+        let mut camp_types = Vec::new();
+        for neutral in neutrals.values() {
+            let template = neutral_template(neutral.state.camp_type);
+            assert!(!camp_types.contains(&neutral.state.camp_type));
+            camp_types.push(neutral.state.camp_type);
+            assert!((neutral.state.x - neutral.anchor.x).abs() < EPSILON);
+            assert!((neutral.state.y - neutral.anchor.y).abs() < EPSILON);
+            assert!((neutral.state.z - neutral.anchor.z).abs() < EPSILON);
+            assert!((neutral.state.hp - template.max_hp).abs() < EPSILON);
+            assert!((neutral.state.max_hp - template.max_hp).abs() < EPSILON);
+            assert_eq!(neutral.state.ai_state, NeutralAiState::Idle);
+            assert!(neutral.dead_until.is_none());
+        }
+    }
+
+    #[test]
+    fn neutral_kills_award_rewards_and_respawn_on_cooldown() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:45678".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let killer_id = players.get(&addr).unwrap().state.id;
+
+        let mut next_neutral_id = 9_001;
+        let mut neutrals = build_neutral_camps(&mut next_neutral_id);
+        let neutral_id = *neutrals.keys().next().unwrap();
+        let camp_type = neutrals.get(&neutral_id).unwrap().state.camp_type;
+        let template = neutral_template(camp_type);
+        let kill_damage = neutrals.get(&neutral_id).unwrap().state.hp + 1.0;
+
+        apply_neutral_damage(
+            &mut players,
+            &mut neutrals,
+            neutral_id,
+            kill_damage,
+            killer_id,
+            now,
+        );
+
+        let killer = players.get(&addr).unwrap();
+        assert_eq!(killer.state.gold, template.kill_gold);
+        assert_eq!(killer.state.xp, template.kill_xp);
+
+        let neutral = neutrals.get(&neutral_id).unwrap();
+        assert_eq!(neutral.state.hp, 0.0);
+        assert_eq!(neutral.state.ai_state, NeutralAiState::Idle);
+        assert!(neutral.dead_until.is_some());
+        assert!(neutral.target_player_id.is_none());
+
+        simulate_neutrals(
+            &mut players,
+            &mut neutrals,
+            &GameState::Running,
+            0.1,
+            now + NEUTRAL_RESPAWN_COOLDOWN + Duration::from_millis(1),
+        );
+
+        let respawned = neutrals.get(&neutral_id).unwrap();
+        assert!(respawned.dead_until.is_none());
+        assert!((respawned.state.hp - template.max_hp).abs() < EPSILON);
+        assert!((respawned.state.x - respawned.anchor.x).abs() < EPSILON);
+        assert!((respawned.state.z - respawned.anchor.z).abs() < EPSILON);
+        assert_eq!(respawned.state.ai_state, NeutralAiState::Idle);
+    }
+
+    #[test]
+    fn neutral_leash_reset_restores_anchor_and_full_hp() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:56789".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let player_id = players.get(&addr).unwrap().state.id;
+
+        let mut next_neutral_id = 9_001;
+        let mut neutrals = build_neutral_camps(&mut next_neutral_id);
+        let neutral_id = *neutrals.keys().next().unwrap();
+        let anchor = neutrals.get(&neutral_id).unwrap().anchor;
+
+        {
+            let neutral = neutrals.get_mut(&neutral_id).unwrap();
+            neutral.state.hp -= 15.0;
+            neutral.state.x = anchor.x + 2.0;
+            neutral.state.z = anchor.z + 1.5;
+            neutral.state.ai_state = NeutralAiState::Aggro;
+            neutral.target_player_id = Some(player_id);
+        }
+
+        {
+            let player = players.get_mut(&addr).unwrap();
+            player.state.x = anchor.x + NEUTRAL_LEASH_DISTANCE + 2.0;
+            player.state.z = anchor.z;
+        }
+
+        simulate_neutrals(&mut players, &mut neutrals, &GameState::Running, 0.1, now);
+
+        let reset = neutrals.get(&neutral_id).unwrap();
+        assert!((reset.state.x - anchor.x).abs() < EPSILON);
+        assert!((reset.state.y - anchor.y).abs() < EPSILON);
+        assert!((reset.state.z - anchor.z).abs() < EPSILON);
+        assert!((reset.state.hp - reset.state.max_hp).abs() < EPSILON);
+        assert_eq!(reset.state.ai_state, NeutralAiState::Idle);
+        assert!(reset.target_player_id.is_none());
+    }
+
+    #[test]
+    fn neutrals_do_not_break_minion_waves_or_tower_attacks() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:60000".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+
+        let mut next_neutral_id = 9_001;
+        let mut neutrals = build_neutral_camps(&mut next_neutral_id);
+        let focus_neutral_id = *neutrals.keys().next().unwrap();
+        let focus_anchor = neutrals.get(&focus_neutral_id).unwrap().anchor;
+        {
+            let player = players.get_mut(&addr).unwrap();
+            player.state.x = focus_anchor.x;
+            player.state.z = focus_anchor.z;
+        }
+        simulate_neutrals(&mut players, &mut neutrals, &GameState::Running, 0.1, now);
+        assert_eq!(
+            neutrals.get(&focus_neutral_id).unwrap().state.ai_state,
+            NeutralAiState::Aggro
+        );
+
+        let mut minions = HashMap::new();
+        let mut next_minion_id = 1;
+        let mut last_wave_spawn_at = now - MINION_WAVE_INTERVAL;
+        spawn_minion_waves_if_due(
+            &layout,
+            &mut minions,
+            &mut next_minion_id,
+            &GameState::Running,
+            now,
+            &mut last_wave_spawn_at,
+        );
+        assert!(!minions.is_empty());
+
+        let moving_minion_id = *minions.keys().next().unwrap();
+        let before_move = {
+            let minion = minions.get(&moving_minion_id).unwrap();
+            (minion.state.x, minion.state.z)
+        };
+
+        let mut structures = build_structures(&layout);
+        let green_tower = structures
+            .values()
+            .find(|structure| {
+                structure.state.team == Team::Green && structure.state.kind == StructureKind::Tower
+            })
+            .unwrap()
+            .state
+            .clone();
+
+        let enemy_minion_id = minions
+            .values()
+            .find(|minion| minion.state.team == Team::Blue)
+            .unwrap()
+            .state
+            .id;
+        {
+            let enemy_minion = minions.get_mut(&enemy_minion_id).unwrap();
+            enemy_minion.state.x = green_tower.x + 1.0;
+            enemy_minion.state.z = green_tower.z + 1.0;
+        }
+        let tower_target_hp = minions.get(&enemy_minion_id).unwrap().state.hp;
+
+        let mut game_state = GameState::Running;
+        simulate_minions(
+            &mut players,
+            &mut minions,
+            &mut structures,
+            &mut game_state,
+            0.5,
+            now + Duration::from_millis(250),
+        );
+
+        let after_move = {
+            let minion = minions.get(&moving_minion_id).unwrap();
+            (minion.state.x, minion.state.z)
+        };
+        assert!(before_move != after_move);
+
+        let mut projectiles = HashMap::new();
+        let mut next_projectile_id = 1;
+        simulate_tower_attacks(
+            &mut players,
+            &mut minions,
+            &mut projectiles,
+            &mut structures,
+            &mut next_projectile_id,
+            &GameState::Running,
+            now + TOWER_COOLDOWN,
+        );
+
+        let damaged_hp = minions.get(&enemy_minion_id).unwrap().state.hp;
+        assert!(damaged_hp < tower_target_hp);
+        assert!(matches!(game_state, GameState::Running));
     }
 }
 
