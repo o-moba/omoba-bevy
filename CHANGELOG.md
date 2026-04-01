@@ -10,6 +10,16 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 - Added a reproducible multiplayer session verification harness at `scripts/verify_task_02_multiplayer_session_flow.py` that exercises sequential and simultaneous joins, repeated joins, timeout cleanup, reconnect-as-new-player, server restart recovery, and four-client snapshot consistency against the live UDP server.
 - Added focused client coverage for authoritative local-player selection so duplicate local `Player` entities cannot silently break gameplay systems that rely on `Query::single()`.
 - Added multiplayer session policy documentation and a `TASK-02` progress log with the recorded session matrix.
+- Level-based player progression driven by server-authoritative XP thresholds and stat scaling.
+- Snapshot propagation of progression fields (`level`, `xp`, `next_level_xp`, `skill_points`) for synchronized client state.
+- Local HUD progression readout for level, XP progress, and available skill points.
+
+## [0.2.0] - 2026-04-01
+
+### Added
+- Implemented TASK-05 player leveling and stat progression, including XP thresholds, level-up scaling for HP/mana, and respawn compatibility with upgraded stats.
+- Added progression-oriented server tests covering multi-level XP transitions and respawn behavior after scaling.
+- Added client progression ingestion and HUD presentation of progression state.
 - **TASK-03**: Full match lifecycle — `Lobby → Running → Victory → (rematch) → Running` state machine on both server and client.
   - Server starts in `Lobby`; match begins when the first player sends a `Join` packet.
   - Victory state blocks all movement and cast input from clients.
