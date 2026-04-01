@@ -1,3 +1,4 @@
+use bevy::ecs::query::Or;
 use bevy::prelude::*;
 use bevy::scene::SceneRoot;
 use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
@@ -31,6 +32,7 @@ const TOWER_HEIGHT: f32 = 6.0;
 const BASE_TOWER_SIZE: f32 = 6.0;
 const BASE_TOWER_HEIGHT: f32 = 8.0;
 const MINION_RADIUS: f32 = 0.55;
+const NEUTRAL_RADIUS: f32 = 0.62;
 const LOCAL_SNAP_DISTANCE: f32 = 4.0;
 const DEFAULT_PLAYER_LEVEL: u32 = 1;
 const DEFAULT_NEXT_LEVEL_XP: u32 = 120;
@@ -55,7 +57,10 @@ impl Plugin for NetworkingPlugin {
                     apply_server_snapshot,
                 ),
             )
-            .add_systems(Update, interpolate_minions.after(apply_server_snapshot))
+            .add_systems(
+                Update,
+                interpolate_snapshot_entities.after(apply_server_snapshot),
+            )
             .add_systems(
                 Update,
                 interpolate_remote_players.after(apply_server_snapshot),
@@ -98,6 +103,7 @@ pub enum TargetKind {
     Player,
     Minion,
     Structure,
+    Neutral,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -211,6 +217,34 @@ enum MinionTargetKind {
     Structure,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum NeutralCampType {
+    Skirmisher,
+    Bruiser,
+    Spitter,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum NeutralAiState {
+    Idle,
+    Aggro,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct NeutralState {
+    id: u64,
+    camp_type: NeutralCampType,
+    x: f32,
+    y: f32,
+    z: f32,
+    yaw: f32,
+    hp: f32,
+    max_hp: f32,
+    ai_state: NeutralAiState,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ServerPacket {
@@ -223,6 +257,8 @@ enum ServerPacket {
         structures: Vec<StructureState>,
         #[serde(default)]
         minions: Vec<MinionState>,
+        #[serde(default)]
+        neutrals: Vec<NeutralState>,
         #[serde(default)]
         game_state: GameState,
         #[serde(default)]
@@ -259,6 +295,7 @@ struct NetworkState {
     projectiles: HashMap<u64, Entity>,
     structures: HashMap<u64, Entity>,
     minions: HashMap<u64, Entity>,
+    neutrals: HashMap<u64, Entity>,
 }
 
 #[derive(Resource)]
@@ -296,8 +333,14 @@ pub struct NetworkMinion;
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkMinionId(pub u64);
 
+#[derive(Component)]
+pub struct NetworkNeutral;
+
 #[derive(Component, Clone, Copy, Debug)]
-struct MinionInterpolation {
+pub struct NetworkNeutralId(pub u64);
+
+#[derive(Component, Clone, Copy, Debug)]
+struct NetEntityInterpolation {
     from_translation: Vec3,
     to_translation: Vec3,
     from_rotation: Quat,
@@ -328,6 +371,8 @@ struct NetworkVisualAssets {
     blue_structure_material: Handle<StandardMaterial>,
     green_minion_material: Handle<StandardMaterial>,
     blue_minion_material: Handle<StandardMaterial>,
+    neutral_mesh: Handle<Mesh>,
+    neutral_material: Handle<StandardMaterial>,
 }
 
 fn setup_network_visual_assets(
@@ -377,6 +422,12 @@ fn setup_network_visual_assets(
         perceptual_roughness: 0.75,
         ..default()
     });
+    let neutral_mesh = meshes.add(Mesh::from(Sphere::new(NEUTRAL_RADIUS)));
+    let neutral_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.55, 0.38, 0.18),
+        perceptual_roughness: 0.8,
+        ..default()
+    });
 
     commands.insert_resource(NetworkVisualAssets {
         projectile_mesh,
@@ -389,6 +440,8 @@ fn setup_network_visual_assets(
         blue_structure_material,
         green_minion_material,
         blue_minion_material,
+        neutral_mesh,
+        neutral_material,
     });
 }
 
@@ -581,6 +634,7 @@ fn apply_server_snapshot(
     projectile_query: Query<&NetworkProjectile>,
     structure_query: Query<&NetworkStructure>,
     minion_query: Query<&NetworkMinion>,
+    neutral_query: Query<&NetworkNeutral>,
     local_player_query: Query<(Entity, Option<&NetworkPlayerId>), With<Player>>,
     player_assets: Res<PlayerAssets>,
     model_catalog: Res<PlayerModelCatalog>,
@@ -599,6 +653,7 @@ fn apply_server_snapshot(
         Vec<ProjectileState>,
         Vec<StructureState>,
         Vec<MinionState>,
+        Vec<NeutralState>,
         GameState,
         Option<u64>,
     )> = None;
@@ -610,6 +665,7 @@ fn apply_server_snapshot(
                 projectiles,
                 structures,
                 minions,
+                neutrals,
                 game_state,
                 rematch_in_secs,
             } => {
@@ -619,6 +675,7 @@ fn apply_server_snapshot(
                     projectiles,
                     structures,
                     minions,
+                    neutrals,
                     game_state,
                     rematch_in_secs,
                 ));
@@ -626,7 +683,16 @@ fn apply_server_snapshot(
         }
     }
 
-    let Some((your_id, players, projectiles, structures, minions, game_state, rematch_in_secs)) =
+    let Some((
+        your_id,
+        players,
+        projectiles,
+        structures,
+        minions,
+        neutrals,
+        game_state,
+        rematch_in_secs,
+    )) =
         latest_snapshot
     else {
         return;
@@ -979,7 +1045,7 @@ fn apply_server_snapshot(
 
         if let Some(entity) = network_state.minions.get(&minion.id).copied() {
             if let Ok(transform) = transform_sets.p0().get_mut(entity) {
-                let interpolation = MinionInterpolation {
+                let interpolation = NetEntityInterpolation {
                     from_translation: transform.translation,
                     to_translation: target_translation,
                     from_rotation: transform.rotation,
@@ -1010,7 +1076,7 @@ fn apply_server_snapshot(
                 Visibility::default(),
                 NetworkMinion,
                 NetworkMinionId(minion.id),
-                MinionInterpolation {
+                NetEntityInterpolation {
                     from_translation: target_translation,
                     to_translation: target_translation,
                     from_rotation: target_rotation,
@@ -1024,6 +1090,71 @@ fn apply_server_snapshot(
             ))
             .id();
         network_state.minions.insert(minion.id, entity);
+    }
+
+    let mut seen_neutral_ids = HashSet::new();
+    for neutral in &neutrals {
+        seen_neutral_ids.insert(neutral.id);
+        let target_translation = Vec3::new(neutral.x, neutral.y, neutral.z);
+        let target_rotation = Quat::from_rotation_y(neutral.yaw);
+
+        if let Some(entity) = network_state.neutrals.get(&neutral.id).copied() {
+            if let Ok(transform) = transform_sets.p0().get_mut(entity) {
+                let interpolation = NetEntityInterpolation {
+                    from_translation: transform.translation,
+                    to_translation: target_translation,
+                    from_rotation: transform.rotation,
+                    to_rotation: target_rotation,
+                    elapsed: 0.0,
+                    duration: UPDATE_INTERVAL_SECONDS.max(0.001),
+                };
+                commands.entity(entity).insert(interpolation);
+            }
+            commands.entity(entity).insert((
+                NetworkNeutralId(neutral.id),
+                neutral_state_to_combat_stats(neutral),
+            ));
+            continue;
+        }
+
+        let entity = commands
+            .spawn((
+                Mesh3d(visuals.neutral_mesh.clone()),
+                MeshMaterial3d(visuals.neutral_material.clone()),
+                Transform::from_translation(target_translation).with_rotation(target_rotation),
+                Visibility::default(),
+                NetworkNeutral,
+                NetworkNeutralId(neutral.id),
+                NetEntityInterpolation {
+                    from_translation: target_translation,
+                    to_translation: target_translation,
+                    from_rotation: target_rotation,
+                    to_rotation: target_rotation,
+                    elapsed: UPDATE_INTERVAL_SECONDS,
+                    duration: UPDATE_INTERVAL_SECONDS.max(0.001),
+                },
+                neutral_state_to_combat_stats(neutral),
+                Name::new(format!("Neutral-{}", neutral.id)),
+            ))
+            .id();
+        network_state.neutrals.insert(neutral.id, entity);
+    }
+
+    let stale_neutral_ids = network_state
+        .neutrals
+        .keys()
+        .copied()
+        .filter(|id| !seen_neutral_ids.contains(id))
+        .collect::<Vec<_>>();
+    for neutral_id in stale_neutral_ids {
+        if let Some(entity) = network_state.neutrals.remove(&neutral_id) {
+            if neutral_query.get(entity).is_ok() {
+                commands
+                    .entity(entity)
+                    .despawn_related::<Children>()
+                    .despawn();
+            }
+        }
     }
 
     let stale_minion_ids = network_state
@@ -1044,11 +1175,14 @@ fn apply_server_snapshot(
     }
 }
 
-fn interpolate_minions(
+fn interpolate_snapshot_entities(
     time: Res<Time>,
-    mut minion_query: Query<(&mut Transform, &mut MinionInterpolation), With<NetworkMinion>>,
+    mut entity_query: Query<
+        (&mut Transform, &mut NetEntityInterpolation),
+        Or<(With<NetworkMinion>, With<NetworkNeutral>)>,
+    >,
 ) {
-    for (mut transform, mut interpolation) in &mut minion_query {
+    for (mut transform, mut interpolation) in &mut entity_query {
         let duration = interpolation.duration.max(0.001);
         interpolation.elapsed = (interpolation.elapsed + time.delta_secs()).min(duration);
         let t = (interpolation.elapsed / duration).clamp(0.0, 1.0);
@@ -1109,6 +1243,15 @@ fn minion_state_to_combat_stats(minion: &MinionState) -> CombatStats {
     CombatStats {
         hp: minion.hp,
         max_hp: minion.max_hp.max(1.0),
+        mana: 0.0,
+        max_mana: 1.0,
+    }
+}
+
+fn neutral_state_to_combat_stats(neutral: &NeutralState) -> CombatStats {
+    CombatStats {
+        hp: neutral.hp,
+        max_hp: neutral.max_hp.max(1.0),
         mana: 0.0,
         max_mana: 1.0,
     }
