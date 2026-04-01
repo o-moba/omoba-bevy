@@ -662,7 +662,8 @@ fn main() -> io::Result<()> {
             .values()
             .map(|player| player.state.id)
             .collect::<HashSet<_>>();
-        projectiles.retain(|_, projectile| match projectile.target.kind {
+        projectiles.retain(|_, projectile| {
+            match projectile.target.kind {
                 TargetKind::Player => live_player_ids.contains(&projectile.target.id),
                 TargetKind::Minion => minions
                     .get(&projectile.target.id)
