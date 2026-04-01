@@ -386,6 +386,7 @@ fn run_udp_client(
     outgoing: Receiver<ClientPacket>,
     incoming: Sender<ServerPacket>,
 ) {
+    println!("Connecting to server at {server_addr}");
     let socket = match UdpSocket::bind(LOCAL_BIND_ADDR) {
         Ok(socket) => socket,
         Err(error) => {
@@ -402,10 +403,12 @@ fn run_udp_client(
         eprintln!("Failed to set UDP client socket nonblocking: {error}");
         return;
     }
+    println!("UDP socket connected to {server_addr}; waiting for first snapshot");
 
     let mut recv_buf = [0_u8; MAX_PACKET_SIZE];
     let mut last_heartbeat_at = Instant::now();
     let mut last_receive_error_log_at: Option<Instant> = None;
+    let mut first_snapshot_received = false;
 
     let _ = send_packet(&socket, &ClientPacket::Ping);
 
@@ -431,6 +434,10 @@ fn run_udp_client(
             match socket.recv(&mut recv_buf) {
                 Ok(len) => match serde_json::from_slice::<ServerPacket>(&recv_buf[..len]) {
                     Ok(packet) => {
+                        if !first_snapshot_received {
+                            println!("First snapshot received from {server_addr}; connection is live");
+                            first_snapshot_received = true;
+                        }
                         let _ = incoming.send(packet);
                     }
                     Err(error) => {
