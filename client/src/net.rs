@@ -63,6 +63,8 @@ impl Plugin for NetworkingPlugin {
 pub enum NetworkCommand {
     Cast { target: TargetId },
     Join { team: Team, character: CharacterChoice },
+    #[allow(dead_code)]
+    RequestRematch,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +78,7 @@ enum ClientPacket {
         character: CharacterChoice,
     },
     Ping,
+    RequestRematch,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -205,25 +208,24 @@ enum ServerPacket {
         minions: Vec<MinionState>,
         #[serde(default)]
         game_state: GameState,
+        #[serde(default)]
+        rematch_in_secs: Option<u64>,
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum GameState {
+    #[default]
+    Lobby,
     Running,
     Victory { winner: Team },
-}
-
-impl Default for GameState {
-    fn default() -> Self {
-        GameState::Running
-    }
 }
 
 #[derive(Resource, Default, Clone)]
 pub struct GameStateSnapshot {
     pub state: GameState,
+    pub rematch_in_secs: Option<u64>,
 }
 
 #[derive(Resource)]
@@ -519,6 +521,9 @@ fn send_network_commands(
                     character: *character,
                 });
             }
+            NetworkCommand::RequestRematch => {
+                let _ = channels.outgoing.send(ClientPacket::RequestRematch);
+            }
         }
     }
 }
@@ -568,6 +573,7 @@ fn apply_server_snapshot(
         Vec<StructureState>,
         Vec<MinionState>,
         GameState,
+        Option<u64>,
     )> = None;
     while let Ok(packet) = channels.incoming.try_recv() {
         match packet {
@@ -578,6 +584,7 @@ fn apply_server_snapshot(
                 structures,
                 minions,
                 game_state,
+                rematch_in_secs,
             } => {
                 latest_snapshot = Some((
                     your_id,
@@ -586,18 +593,21 @@ fn apply_server_snapshot(
                     structures,
                     minions,
                     game_state,
+                    rematch_in_secs,
                 ));
             }
         }
     }
 
-    let Some((your_id, players, projectiles, structures, minions, game_state)) = latest_snapshot
+    let Some((your_id, players, projectiles, structures, minions, game_state, rematch_in_secs)) =
+        latest_snapshot
     else {
         return;
     };
 
     network_state.local_id = Some(your_id);
     game_state_snapshot.state = game_state;
+    game_state_snapshot.rematch_in_secs = rematch_in_secs;
 
     let local_player_state = players.iter().find(|player| player.id == your_id);
     let local_players = local_player_query
