@@ -60,6 +60,8 @@ const LEVEL_UP_HP_BONUS: f32 = 18.0;
 const LEVEL_UP_MANA_BONUS: f32 = 12.0;
 const LEVEL_XP_THRESHOLDS: [u32; 9] = [120, 150, 180, 220, 260, 300, 340, 380, 420];
 
+const VICTORY_REMATCH_DELAY: Duration = Duration::from_secs(10);
+
 const TARGET_BASE_RUN_TIME_SECONDS: f32 = 45.0;
 const PLAYER_SPEED: f32 = 5.0;
 const TARGET_BASE_DISTANCE: f32 = PLAYER_SPEED * TARGET_BASE_RUN_TIME_SECONDS;
@@ -86,6 +88,7 @@ enum ClientPacket {
         character: CharacterChoice,
     },
     Ping,
+    RequestRematch,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -264,20 +267,18 @@ enum ServerPacket {
         structures: Vec<StructureState>,
         minions: Vec<MinionState>,
         game_state: GameState,
+        #[serde(default)]
+        rematch_in_secs: Option<u64>,
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum GameState {
+    #[default]
+    Lobby,
     Running,
     Victory { winner: Team },
-}
-
-impl Default for GameState {
-    fn default() -> Self {
-        GameState::Running
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -404,7 +405,8 @@ fn main() -> io::Result<()> {
     let map_layout = build_map_layout();
     let mut structures = build_structures(&map_layout);
     let mut minions = HashMap::<u64, Minion>::new();
-    let mut game_state = GameState::Running;
+    let mut game_state = GameState::Lobby;
+    let mut victory_at: Option<Instant> = None;
     let mut next_player_id: u64 = 1;
     let mut next_projectile_id: u64 = 1;
     let mut next_minion_id: u64 = 1;
@@ -441,13 +443,14 @@ fn main() -> io::Result<()> {
 
                     match packet {
                         ClientPacket::Transform { x, y, z, yaw } => {
-                            if let Some(player) = players.get_mut(&addr) {
-                                if player.state.hp > 0.0 {
-                                    player.state.x = x;
-                                    player.state.y = y;
-                                    player.state.z = z;
-                                    player.state.yaw = yaw;
-                                }
+                            if matches!(game_state, GameState::Running)
+                                && let Some(player) = players.get_mut(&addr)
+                                && player.state.hp > 0.0
+                            {
+                                player.state.x = x;
+                                player.state.y = y;
+                                player.state.z = z;
+                                player.state.yaw = yaw;
                             }
                         }
                         ClientPacket::Cast { target } => {
@@ -467,8 +470,26 @@ fn main() -> io::Result<()> {
                             if let Some(player) = players.get_mut(&addr) {
                                 handle_join_request(player, team, character, &map_layout);
                             }
+                            if matches!(game_state, GameState::Lobby) {
+                                println!("First player joined – match starting");
+                                game_state = GameState::Running;
+                            }
                         }
                         ClientPacket::Ping => {}
+                        ClientPacket::RequestRematch => {
+                            if matches!(game_state, GameState::Victory { .. }) {
+                                reset_match(
+                                    &mut players,
+                                    &mut structures,
+                                    &mut minions,
+                                    &mut projectiles,
+                                    &map_layout,
+                                    &mut last_wave_spawn_at,
+                                    &mut game_state,
+                                );
+                                victory_at = None;
+                            }
+                        }
                     }
                 }
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
@@ -523,6 +544,27 @@ fn main() -> io::Result<()> {
         );
         handle_respawns(&mut players, &structures, &map_layout, &game_state, now);
 
+        // Rematch countdown
+        if let GameState::Victory { .. } = game_state {
+            if victory_at.is_none() {
+                victory_at = Some(now);
+            }
+            if victory_at.is_some_and(|t| now.duration_since(t) >= VICTORY_REMATCH_DELAY) {
+                reset_match(
+                    &mut players,
+                    &mut structures,
+                    &mut minions,
+                    &mut projectiles,
+                    &map_layout,
+                    &mut last_wave_spawn_at,
+                    &mut game_state,
+                );
+                victory_at = None;
+            }
+        } else {
+            victory_at = None;
+        }
+
         players.retain(|addr, player| {
             let is_alive = now.duration_since(player.last_seen) <= PLAYER_TIMEOUT;
             if !is_alive {
@@ -536,7 +578,7 @@ fn main() -> io::Result<()> {
             .map(|player| player.state.id)
             .collect::<HashSet<_>>();
         projectiles.retain(|_, projectile| {
-            let target_alive = match projectile.target.kind {
+            match projectile.target.kind {
                 TargetKind::Player => live_player_ids.contains(&projectile.target.id),
                 TargetKind::Minion => minions
                     .get(&projectile.target.id)
@@ -544,8 +586,7 @@ fn main() -> io::Result<()> {
                 TargetKind::Structure => structures
                     .get(&projectile.target.id)
                     .is_some_and(|structure| structure.state.hp > 0.0),
-            };
-            target_alive
+            }
         });
 
         minions.retain(|_, minion| minion.state.hp > 0.0);
@@ -577,6 +618,16 @@ fn main() -> io::Result<()> {
                 .collect::<Vec<_>>();
             minions_snapshot.sort_unstable_by_key(|minion| minion.id);
 
+            let rematch_in_secs = if let GameState::Victory { .. } = game_state {
+                victory_at.map(|t| {
+                    VICTORY_REMATCH_DELAY
+                        .saturating_sub(now.duration_since(t))
+                        .as_secs()
+                })
+            } else {
+                None
+            };
+
             for (addr, player) in &players {
                 let packet = ServerPacket::Snapshot {
                     your_id: player.state.id,
@@ -585,6 +636,7 @@ fn main() -> io::Result<()> {
                     structures: structures_snapshot.clone(),
                     minions: minions_snapshot.clone(),
                     game_state: game_state.clone(),
+                    rematch_in_secs,
                 };
 
                 match serde_json::to_vec(&packet) {
@@ -686,6 +738,7 @@ fn handle_join_request(
     player.respawn_at = None;
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_cast_request(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,
     projectiles: &mut HashMap<u64, Projectile>,
@@ -998,12 +1051,12 @@ fn simulate_projectiles(
                 continue;
             }
             target_structure.state.hp = (target_structure.state.hp - damage).max(0.0);
-            if target_structure.state.hp <= 0.0 {
-                if target_structure.state.kind == StructureKind::BaseTower {
-                    *game_state = GameState::Victory {
-                        winner: attacker_team,
-                    };
-                }
+            if target_structure.state.hp <= 0.0
+                && target_structure.state.kind == StructureKind::BaseTower
+            {
+                *game_state = GameState::Victory {
+                    winner: attacker_team,
+                };
             }
         }
     }
@@ -1744,10 +1797,10 @@ fn simulate_tower_attacks(
             let target_pos =
                 Vec3f::new(player.state.x, player.state.y + AIM_HEIGHT, player.state.z);
             let dist_sq = tower_position.distance_squared(target_pos);
-            if dist_sq <= range_sq {
-                if best_target.map_or(true, |(_, _, best)| dist_sq < best) {
-                    best_target = Some((player.state.id, target_pos, dist_sq));
-                }
+            if dist_sq <= range_sq
+                && best_target.is_none_or(|(_, _, best)| dist_sq < best)
+            {
+                best_target = Some((player.state.id, target_pos, dist_sq));
             }
         }
 
@@ -1964,4 +2017,44 @@ fn handle_respawns(
         player.respawn_at = None;
         player.last_cast_at = None;
     }
+}
+
+fn reset_match(
+    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+    structures: &mut HashMap<u64, Structure>,
+    minions: &mut HashMap<u64, Minion>,
+    projectiles: &mut HashMap<u64, Projectile>,
+    map_layout: &MapLayoutState,
+    last_wave_spawn_at: &mut Instant,
+    game_state: &mut GameState,
+) {
+    println!("Resetting match for rematch");
+    // Reset structures HP
+    for structure in structures.values_mut() {
+        let max = structure.state.max_hp;
+        structure.state.hp = max;
+        structure.last_attack_at = None;
+    }
+    // Clear minions and projectiles
+    minions.clear();
+    projectiles.clear();
+    // Reset wave timer so first wave isn't immediate
+    *last_wave_spawn_at = Instant::now();
+    // Reset all players to spawn
+    for player in players.values_mut() {
+        let spawn = spawn_position_for_team(map_layout, player.state.team);
+        player.state.x = spawn.x;
+        player.state.y = 0.5;
+        player.state.z = spawn.z;
+        player.state.yaw = 0.0;
+        player.state.hp = MAX_HP;
+        player.state.max_hp = MAX_HP;
+        player.state.mana = MAX_MANA;
+        player.state.max_mana = MAX_MANA;
+        player.state.gold = 0;
+        player.state.xp = 0;
+        player.last_cast_at = None;
+        player.respawn_at = None;
+    }
+    *game_state = GameState::Running;
 }
