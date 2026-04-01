@@ -10,6 +10,16 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 - Jungle neutral camps: three server-simulated camp types (Skirmisher, Bruiser, Spitter) with distinct HP, damage, attack range, and kill rewards; placement mirrors client jungle layout (off-lane).
 - Server-authoritative neutral AI (idle, proximity/damage aggro, chase, attack, leash reset, respawn), snapshot sync, and `TargetKind::Neutral` for player casts.
 - Client rendering for neutrals (sphere mesh) and HP bars consistent with other units; TAB and middle-click target selection includes neutrals.
+- Level-based player progression driven by server-authoritative XP thresholds and stat scaling.
+- Snapshot propagation of progression fields (`level`, `xp`, `next_level_xp`, `skill_points`) for synchronized client state.
+- Local HUD progression readout for level, XP progress, and available skill points.
+
+## [0.2.0] - 2026-04-01
+
+### Added
+- Implemented TASK-05 player leveling and stat progression, including XP thresholds, level-up scaling for HP/mana, and respawn compatibility with upgraded stats.
+- Added progression-oriented server tests covering multi-level XP transitions and respawn behavior after scaling.
+- Added client progression ingestion and HUD presentation of progression state.
 - **TASK-03**: Full match lifecycle — `Lobby → Running → Victory → (rematch) → Running` state machine on both server and client.
   - Server starts in `Lobby`; match begins when the first player sends a `Join` packet.
   - Victory state blocks all movement and cast input from clients.
