@@ -31,6 +31,7 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 - Initial `docs/features.md` and `docs/progress/` structure for ongoing release tracking.
 - Added `docs/agents/README.md` with copy-paste prompts for single-task and parallel task execution.
 - Standardized agent prompts and repo-facing coordination docs on English for this international project.
+- Added project-scoped Cursor subagents in `.cursor/agents/` (`verifier`, `code-reviewer`, `search-agent`, `reasoning-agent`) to improve verification, review, search, and architecture support workflows.
 
 ## [0.1.0] - 2026-04-01
 
