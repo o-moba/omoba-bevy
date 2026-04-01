@@ -13,9 +13,11 @@ use std::{
 use crate::camera::{CameraState, MainCamera, locked_camera_offset};
 use crate::combat::{CombatStats, MAX_HP, MAX_MANA};
 use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
-use crate::team::{CharacterChoice, Team};
 use crate::team::TeamSelection;
-use crate::world::{NormalizeModelScale, PlayerAssets, PlayerModelCatalog, model_assets_for_choice};
+use crate::team::{CharacterChoice, Team};
+use crate::world::{
+    NormalizeModelScale, PlayerAssets, PlayerModelCatalog, model_assets_for_choice,
+};
 
 const DEFAULT_SERVER_ADDR: &str = "127.0.0.1:4000";
 const LOCAL_BIND_ADDR: &str = "0.0.0.0:0";
@@ -30,6 +32,8 @@ const BASE_TOWER_SIZE: f32 = 6.0;
 const BASE_TOWER_HEIGHT: f32 = 8.0;
 const MINION_RADIUS: f32 = 0.55;
 const LOCAL_SNAP_DISTANCE: f32 = 4.0;
+const DEFAULT_PLAYER_LEVEL: u32 = 1;
+const DEFAULT_NEXT_LEVEL_XP: u32 = 120;
 
 pub struct NetworkingPlugin;
 
@@ -70,8 +74,15 @@ pub enum NetworkCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ClientPacket {
-    Transform { x: f32, y: f32, z: f32, yaw: f32 },
-    Cast { target: TargetId },
+    Transform {
+        x: f32,
+        y: f32,
+        z: f32,
+        yaw: f32,
+    },
+    Cast {
+        target: TargetId,
+    },
     Join {
         team: Team,
         #[serde(default = "default_character_choice")]
@@ -116,6 +127,12 @@ struct PlayerState {
     gold: u32,
     #[serde(default)]
     xp: u32,
+    #[serde(default = "default_player_level")]
+    level: u32,
+    #[serde(default = "default_next_level_xp")]
+    next_level_xp: u32,
+    #[serde(default)]
+    skill_points: u32,
     #[serde(default = "default_character_choice")]
     character: CharacterChoice,
 }
@@ -255,6 +272,14 @@ pub struct NetworkPlayerId(pub u64);
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkCharacterChoice(pub CharacterChoice);
+
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct PlayerProgression {
+    pub level: u32,
+    pub xp: u32,
+    pub next_level_xp: u32,
+    pub skill_points: u32,
+}
 
 #[derive(Component)]
 struct NetworkProjectile;
@@ -437,7 +462,9 @@ fn run_udp_client(
                 Ok(len) => match serde_json::from_slice::<ServerPacket>(&recv_buf[..len]) {
                     Ok(packet) => {
                         if !first_snapshot_received {
-                            println!("First snapshot received from {server_addr}; connection is live");
+                            println!(
+                                "First snapshot received from {server_addr}; connection is live"
+                            );
                             first_snapshot_received = true;
                         }
                         let _ = incoming.send(packet);
@@ -636,7 +663,9 @@ fn apply_server_snapshot(
         }
 
         // Always ensure the local player is tagged with the server-provided id.
-        commands.entity(local_entity).insert(NetworkPlayerId(your_id));
+        commands
+            .entity(local_entity)
+            .insert(NetworkPlayerId(your_id));
 
         // Only apply character/team/stats once we actually have a state entry for our id.
         // Otherwise we'd oscillate between the locally selected character and the server default.
@@ -645,6 +674,7 @@ fn apply_server_snapshot(
                 local_player_state.team,
                 player_state_to_combat_stats(local_player_state),
                 NetworkCharacterChoice(local_player_state.character),
+                player_state_to_progression(local_player_state),
             ));
             network_state.local_team = Some(local_player_state.team);
 
@@ -699,6 +729,7 @@ fn apply_server_snapshot(
                     NetworkPlayerId(your_id),
                     NetworkCharacterChoice(local_player_state.character),
                     player_state_to_combat_stats(local_player_state),
+                    player_state_to_progression(local_player_state),
                     Name::new("Player"),
                 ))
                 .id()
@@ -715,6 +746,7 @@ fn apply_server_snapshot(
                     NetworkPlayerId(your_id),
                     NetworkCharacterChoice(local_player_state.character),
                     player_state_to_combat_stats(local_player_state),
+                    player_state_to_progression(local_player_state),
                     Name::new("Player"),
                 ))
                 .id()
@@ -757,11 +789,13 @@ fn apply_server_snapshot(
                 player.team,
                 NetworkCharacterChoice(player.character),
                 player_state_to_combat_stats(player),
+                player_state_to_progression(player),
             ));
             continue;
         }
 
-        let (scene_handle, _gltf_handle) = model_assets_for_choice(&model_catalog, player.character);
+        let (scene_handle, _gltf_handle) =
+            model_assets_for_choice(&model_catalog, player.character);
         let mesh_handle = player_assets.mesh.clone();
         let material_handle = player_assets.material.clone();
         let spawn_translation = Vec3::new(player.x, player.y, player.z);
@@ -776,6 +810,7 @@ fn apply_server_snapshot(
             NetworkCharacterChoice(player.character),
             NormalizeModelScale::for_player_model(),
             player_state_to_combat_stats(player),
+            player_state_to_progression(player),
             RemotePlayerInterpolation {
                 from_translation: spawn_translation,
                 to_translation: spawn_translation,
@@ -954,13 +989,11 @@ fn apply_server_snapshot(
                 };
                 commands.entity(entity).insert(interpolation);
             }
-            commands
-                .entity(entity)
-                .insert((
-                    NetworkMinionId(minion.id),
-                    minion.team,
-                    minion_state_to_combat_stats(minion),
-                ));
+            commands.entity(entity).insert((
+                NetworkMinionId(minion.id),
+                minion.team,
+                minion_state_to_combat_stats(minion),
+            ));
             continue;
         }
 
@@ -1054,6 +1087,15 @@ fn player_state_to_combat_stats(player: &PlayerState) -> CombatStats {
     }
 }
 
+fn player_state_to_progression(player: &PlayerState) -> PlayerProgression {
+    PlayerProgression {
+        level: player.level.max(1),
+        xp: player.xp,
+        next_level_xp: player.next_level_xp,
+        skill_points: player.skill_points,
+    }
+}
+
 fn structure_state_to_combat_stats(structure: &StructureState) -> CombatStats {
     CombatStats {
         hp: structure.hp,
@@ -1082,6 +1124,14 @@ fn default_team() -> Team {
 
 fn default_character_choice() -> CharacterChoice {
     CharacterChoice::Ipfs
+}
+
+fn default_player_level() -> u32 {
+    DEFAULT_PLAYER_LEVEL
+}
+
+fn default_next_level_xp() -> u32 {
+    DEFAULT_NEXT_LEVEL_XP
 }
 
 fn default_max_hp() -> f32 {

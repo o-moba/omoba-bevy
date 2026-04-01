@@ -1,6 +1,6 @@
 # Feature Inventory
 
-Canonical version: `0.1.0`
+Canonical version: `0.2.0`
 
 ## Current Playable Surface
 
@@ -9,6 +9,8 @@ Canonical version: `0.1.0`
 - Team join flow with character selection and player spawning.
 - Core combat loop with projectiles, structures, minions, death, respawn, mana regeneration, and base-destruction win condition.
 - Map layout with three lanes and simple jungle blocks.
+- Player progression with level-based XP thresholds, HP/mana scaling on level-up, and tracked skill points.
+- In-game local HUD display for level and XP progression.
 
 ## Multiplayer Session Reliability
 
@@ -21,8 +23,8 @@ Canonical version: `0.1.0`
 
 ## Release Gaps Tracked In Tasks
 
+- Runtime and startup stability hardening.
 - Full reconnect slot reclaim across disconnects and NAT changes.
 - Match phase, restart, and rematch flow.
 - Jungle camps and neutral AI.
-- Player progression, level scaling, and skill upgrades.
 - Full skill system, tooltip UX, and release-readiness validation.
