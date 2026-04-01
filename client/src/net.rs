@@ -63,6 +63,8 @@ impl Plugin for NetworkingPlugin {
 pub enum NetworkCommand {
     Cast { target: TargetId },
     Join { team: Team, character: CharacterChoice },
+    #[allow(dead_code)]
+    RequestRematch,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +78,7 @@ enum ClientPacket {
         character: CharacterChoice,
     },
     Ping,
+    RequestRematch,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -208,17 +211,13 @@ enum ServerPacket {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum GameState {
+    #[default]
+    Lobby,
     Running,
     Victory { winner: Team },
-}
-
-impl Default for GameState {
-    fn default() -> Self {
-        GameState::Running
-    }
 }
 
 #[derive(Resource, Default, Clone)]
@@ -518,6 +517,9 @@ fn send_network_commands(
                     team: *team,
                     character: *character,
                 });
+            }
+            NetworkCommand::RequestRematch => {
+                let _ = channels.outgoing.send(ClientPacket::RequestRematch);
             }
         }
     }
