@@ -85,7 +85,7 @@ fn update_game_state_ui(
             *visibility = Visibility::Visible;
             let is_winner = local_team.single().is_ok_and(|team| *team == winner);
             *background = BackgroundColor(if is_winner { WIN_COLOR } else { LOSE_COLOR });
-            label.0 = if is_winner {
+            let base_msg = if is_winner {
                 format!(
                     "Victory! Team {} destroyed the enemy base tower.",
                     winner.as_str()
@@ -95,6 +95,11 @@ fn update_game_state_ui(
                     "Defeat. Team {} destroyed your base tower.",
                     winner.as_str()
                 )
+            };
+            label.0 = if let Some(secs) = game_state.rematch_in_secs {
+                format!("{base_msg}\nRematch in {secs}s...")
+            } else {
+                base_msg
             };
         }
     }

@@ -211,6 +211,8 @@ enum ServerPacket {
         structures: Vec<StructureState>,
         minions: Vec<MinionState>,
         game_state: GameState,
+        #[serde(default)]
+        rematch_in_secs: Option<u64>,
     },
 }
 
@@ -560,6 +562,16 @@ fn main() -> io::Result<()> {
                 .collect::<Vec<_>>();
             minions_snapshot.sort_unstable_by_key(|minion| minion.id);
 
+            let rematch_in_secs = if let GameState::Victory { .. } = game_state {
+                victory_at.map(|t| {
+                    VICTORY_REMATCH_DELAY
+                        .saturating_sub(now.duration_since(t))
+                        .as_secs()
+                })
+            } else {
+                None
+            };
+
             for (addr, player) in &players {
                 let packet = ServerPacket::Snapshot {
                     your_id: player.state.id,
@@ -568,6 +580,7 @@ fn main() -> io::Result<()> {
                     structures: structures_snapshot.clone(),
                     minions: minions_snapshot.clone(),
                     game_state: game_state.clone(),
+                    rematch_in_secs,
                 };
 
                 match serde_json::to_vec(&packet) {

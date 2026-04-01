@@ -208,6 +208,8 @@ enum ServerPacket {
         minions: Vec<MinionState>,
         #[serde(default)]
         game_state: GameState,
+        #[serde(default)]
+        rematch_in_secs: Option<u64>,
     },
 }
 
@@ -223,6 +225,7 @@ pub enum GameState {
 #[derive(Resource, Default, Clone)]
 pub struct GameStateSnapshot {
     pub state: GameState,
+    pub rematch_in_secs: Option<u64>,
 }
 
 #[derive(Resource)]
@@ -556,6 +559,7 @@ fn apply_server_snapshot(
         Vec<StructureState>,
         Vec<MinionState>,
         GameState,
+        Option<u64>,
     )> = None;
     while let Ok(packet) = channels.incoming.try_recv() {
         match packet {
@@ -566,6 +570,7 @@ fn apply_server_snapshot(
                 structures,
                 minions,
                 game_state,
+                rematch_in_secs,
             } => {
                 latest_snapshot = Some((
                     your_id,
@@ -574,18 +579,21 @@ fn apply_server_snapshot(
                     structures,
                     minions,
                     game_state,
+                    rematch_in_secs,
                 ));
             }
         }
     }
 
-    let Some((your_id, players, projectiles, structures, minions, game_state)) = latest_snapshot
+    let Some((your_id, players, projectiles, structures, minions, game_state, rematch_in_secs)) =
+        latest_snapshot
     else {
         return;
     };
 
     network_state.local_id = Some(your_id);
     game_state_snapshot.state = game_state;
+    game_state_snapshot.rematch_in_secs = rematch_in_secs;
 
     let local_player_state = players.iter().find(|player| player.id == your_id);
     // IMPORTANT: we must tolerate temporary duplication of `Player` entities (e.g. during loading /
