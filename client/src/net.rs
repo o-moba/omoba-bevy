@@ -608,6 +608,20 @@ fn send_network_commands(
     }
 }
 
+fn choose_authoritative_local_player<T: Copy + Eq>(
+    candidates: &[(T, Option<u64>)],
+    your_id: u64,
+) -> Option<T> {
+    let mut chosen = None;
+    for (entity, maybe_id) in candidates {
+        if maybe_id.is_some_and(|id| id == your_id) {
+            return Some(*entity);
+        }
+        chosen.get_or_insert(*entity);
+    }
+    chosen
+}
+
 fn apply_server_snapshot(
     mut commands: Commands,
     channels: Option<Res<NetworkChannels>>,
@@ -689,25 +703,23 @@ fn apply_server_snapshot(
     game_state_snapshot.rematch_in_secs = rematch_in_secs;
 
     let local_player_state = players.iter().find(|player| player.id == your_id);
+    let local_players = local_player_query
+        .iter()
+        .map(|(entity, maybe_id)| (entity, maybe_id.map(|id| id.0)))
+        .collect::<Vec<_>>();
     // IMPORTANT: we must tolerate temporary duplication of `Player` entities (e.g. during loading /
     // restart races). Many gameplay systems use `Query::single()` and will break if we allow >1.
-    let mut chosen_local: Option<Entity> = None;
-    for (entity, maybe_id) in &local_player_query {
-        if maybe_id.is_some_and(|id| id.0 == your_id) {
-            chosen_local = Some(entity);
-            break;
-        }
-        chosen_local.get_or_insert(entity);
-    }
+    let chosen_local =
+        choose_authoritative_local_player(&local_players, your_id);
 
     if let Some(local_entity) = chosen_local {
         // Keep exactly one local `Player` alive to avoid `single()` query failures.
-        for (entity, maybe_id) in &local_player_query {
+        for &(entity, maybe_id) in &local_players {
             if entity == local_entity {
                 continue;
             }
             // If this extra player happens to have our id, prefer the chosen one anyway and despawn.
-            if maybe_id.is_some_and(|id| id.0 == your_id) {
+            if maybe_id.is_some_and(|id| id == your_id) {
                 warn!("Found duplicate local Player for id={your_id}; despawning extra entity");
             }
             commands
@@ -1279,4 +1291,36 @@ fn default_max_mana() -> f32 {
 
 fn default_minion_brain_state() -> MinionBrainState {
     MinionBrainState::Marching
+}
+
+#[cfg(test)]
+mod tests {
+    use super::choose_authoritative_local_player;
+
+    #[test]
+    fn choose_authoritative_local_player_prefers_matching_network_id() {
+        let candidates = [(1_u32, None), (2_u32, Some(77)), (3_u32, Some(13))];
+
+        let chosen = choose_authoritative_local_player(&candidates, 77);
+
+        assert_eq!(chosen, Some(2));
+    }
+
+    #[test]
+    fn choose_authoritative_local_player_falls_back_to_first_candidate() {
+        let candidates = [(11_u32, None), (12_u32, Some(7)), (13_u32, None)];
+
+        let chosen = choose_authoritative_local_player(&candidates, 99);
+
+        assert_eq!(chosen, Some(11));
+    }
+
+    #[test]
+    fn choose_authoritative_local_player_returns_none_when_empty() {
+        let candidates: [(u32, Option<u64>); 0] = [];
+
+        let chosen = choose_authoritative_local_player(&candidates, 1);
+
+        assert_eq!(chosen, None);
+    }
 }
