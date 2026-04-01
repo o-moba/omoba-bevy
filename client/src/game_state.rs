@@ -7,6 +7,7 @@ use crate::team::Team;
 const OVERLAY_ALPHA: f32 = 0.55;
 const WIN_COLOR: Color = Color::srgba(0.12, 0.55, 0.22, OVERLAY_ALPHA);
 const LOSE_COLOR: Color = Color::srgba(0.55, 0.12, 0.12, OVERLAY_ALPHA);
+const LOBBY_COLOR: Color = Color::srgba(0.10, 0.10, 0.35, OVERLAY_ALPHA);
 
 pub struct GameStateUiPlugin;
 
@@ -70,6 +71,11 @@ fn update_game_state_ui(
     };
 
     match game_state.state {
+        GameState::Lobby => {
+            *visibility = Visibility::Visible;
+            *background = BackgroundColor(LOBBY_COLOR);
+            label.0 = "Waiting for match to start...".to_string();
+        }
         GameState::Running => {
             *visibility = Visibility::Hidden;
             *background = BackgroundColor(Color::NONE);
@@ -79,7 +85,7 @@ fn update_game_state_ui(
             *visibility = Visibility::Visible;
             let is_winner = local_team.single().is_ok_and(|team| *team == winner);
             *background = BackgroundColor(if is_winner { WIN_COLOR } else { LOSE_COLOR });
-            label.0 = if is_winner {
+            let base_msg = if is_winner {
                 format!(
                     "Victory! Team {} destroyed the enemy base tower.",
                     winner.as_str()
@@ -89,6 +95,11 @@ fn update_game_state_ui(
                     "Defeat. Team {} destroyed your base tower.",
                     winner.as_str()
                 )
+            };
+            label.0 = if let Some(secs) = game_state.rematch_in_secs {
+                format!("{base_msg}\nRematch in {secs}s...")
+            } else {
+                base_msg
             };
         }
     }
