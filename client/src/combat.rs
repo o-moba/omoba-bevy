@@ -13,8 +13,8 @@ use crate::camera::MainCamera;
 use crate::debug_console::DebugConsole;
 use crate::net::{
     GameState, GameStateSnapshot, NetworkCommand, NetworkMinion, NetworkMinionId,
-    NetworkPlayerId, NetworkStructure, NetworkStructureId, RemotePlayer, StructureKind, TargetId,
-    TargetKind,
+    NetworkNeutral, NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId,
+    RemotePlayer, StructureKind, TargetId, TargetKind,
 };
 use crate::player::Player;
 use crate::team::Team;
@@ -40,6 +40,7 @@ const TARGET_MARKER_BOB_AMPLITUDE: f32 = 0.06;
 const TARGET_MARKER_SPIN_SPEED: f32 = 2.6;
 const PLAYER_MARKER_RADIUS: f32 = 1.25;
 const MINION_MARKER_RADIUS: f32 = 1.05;
+const NEUTRAL_MARKER_RADIUS: f32 = 1.1;
 const TOWER_MARKER_RADIUS: f32 = 2.0;
 const BASE_TOWER_MARKER_RADIUS: f32 = 3.75;
 const SKILL_BUTTON_SIZE: f32 = 80.0;
@@ -291,6 +292,10 @@ fn select_target_system(
         (Entity, &Transform, &NetworkMinionId, &CombatStats, &Team),
         With<NetworkMinion>,
     >,
+    neutral_candidates: Query<
+        (Entity, &Transform, &NetworkNeutralId, &CombatStats),
+        With<NetworkNeutral>,
+    >,
     mut target_state: ResMut<TargetState>,
 ) {
     if let Some(game_state) = game_state.as_ref() {
@@ -309,6 +314,7 @@ fn select_target_system(
             *local_team,
             &player_candidates,
             &minion_candidates,
+            &neutral_candidates,
             &structure_candidates,
         );
     }
@@ -340,6 +346,7 @@ fn select_target_system(
             *local_team,
             &player_candidates,
             &minion_candidates,
+            &neutral_candidates,
             &structure_candidates,
         );
     }
@@ -391,6 +398,10 @@ fn cast_spell_system(
         (Entity, &Transform, &NetworkMinionId, &CombatStats, &Team),
         With<NetworkMinion>,
     >,
+    neutral_candidates: Query<
+        (Entity, &Transform, &NetworkNeutralId, &CombatStats),
+        With<NetworkNeutral>,
+    >,
     structure_candidates: Query<
         (
             Entity,
@@ -418,7 +429,13 @@ fn cast_spell_system(
     let Ok(local_stats) = local_stats_query.single() else {
         return;
     };
-    let _ = (local_player, player_candidates, minion_candidates, structure_candidates);
+    let _ = (
+        local_player,
+        player_candidates,
+        minion_candidates,
+        neutral_candidates,
+        structure_candidates,
+    );
     let target = resolve_cast_target(&mut target_state);
     if let Some(target) = target {
         command_writer.write(NetworkCommand::Cast { target });
@@ -428,6 +445,7 @@ fn cast_spell_system(
                 TargetKind::Player => "player",
                 TargetKind::Minion => "minion",
                 TargetKind::Structure => "structure",
+                TargetKind::Neutral => "neutral",
             },
             target.id,
             local_stats.mana
@@ -456,6 +474,10 @@ fn skill_button_system(
     minion_candidates: Query<
         (Entity, &Transform, &NetworkMinionId, &CombatStats, &Team),
         With<NetworkMinion>,
+    >,
+    neutral_candidates: Query<
+        (Entity, &Transform, &NetworkNeutralId, &CombatStats),
+        With<NetworkNeutral>,
     >,
     structure_candidates: Query<
         (
@@ -488,6 +510,7 @@ fn skill_button_system(
                     &local_player,
                     &player_candidates,
                     &minion_candidates,
+                    &neutral_candidates,
                     &structure_candidates,
                 );
                 if let Some(target) = resolve_cast_target(&mut target_state) {
@@ -498,6 +521,7 @@ fn skill_button_system(
                             TargetKind::Player => "player",
                             TargetKind::Minion => "minion",
                             TargetKind::Structure => "structure",
+                            TargetKind::Neutral => "neutral",
                         },
                         target.id,
                         local_stats.mana
@@ -524,17 +548,24 @@ fn spawn_combat_bars_system(
     mut commands: Commands,
     assets: Res<CombatVisualAssets>,
     players_without_bars: Query<
-        (Entity, Option<&StructureKind>, Option<&NetworkMinion>),
+        (
+            Entity,
+            Option<&StructureKind>,
+            Option<&NetworkMinion>,
+            Option<&NetworkNeutral>,
+        ),
         (With<CombatStats>, Without<CombatBars>),
     >,
 ) {
-    for (entity, structure_kind, minion_marker) in players_without_bars.iter() {
+    for (entity, structure_kind, minion_marker, neutral_marker) in players_without_bars.iter() {
         let bar_y = match structure_kind.copied() {
             Some(StructureKind::Tower) => TOWER_BAR_Y,
             Some(StructureKind::BaseTower) => BASE_TOWER_BAR_Y,
             None => 2.1,
         };
-        let show_mana_bar = structure_kind.is_none() && minion_marker.is_none();
+        let show_mana_bar = structure_kind.is_none()
+            && minion_marker.is_none()
+            && neutral_marker.is_none();
         let mut bars = CombatBars::default();
         let bar_root = commands
             .spawn((
@@ -707,6 +738,7 @@ fn update_target_marker_system(
     global_query: Query<&GlobalTransform, Without<TargetMarker>>,
     structure_kinds: Query<&StructureKind, With<NetworkStructure>>,
     minions: Query<(), With<NetworkMinion>>,
+    neutrals: Query<(), With<NetworkNeutral>>,
     players: Query<(), Or<(With<Player>, With<RemotePlayer>)>>,
     mut marker_query: Query<(&mut Transform, &mut Visibility), With<TargetMarker>>,
 ) {
@@ -736,6 +768,8 @@ fn update_target_marker_system(
         }
     } else if minions.get(target_entity).is_ok() {
         MINION_MARKER_RADIUS
+    } else if neutrals.get(target_entity).is_ok() {
+        NEUTRAL_MARKER_RADIUS
     } else if players.get(target_entity).is_ok() {
         PLAYER_MARKER_RADIUS
     } else {
@@ -812,6 +846,10 @@ fn find_nearest_enemy_target(
         (Entity, &Transform, &NetworkMinionId, &CombatStats, &Team),
         With<NetworkMinion>,
     >,
+    neutral_candidates: &Query<
+        (Entity, &Transform, &NetworkNeutralId, &CombatStats),
+        With<NetworkNeutral>,
+    >,
     structure_candidates: &Query<
         (
             Entity,
@@ -860,6 +898,23 @@ fn find_nearest_enemy_target(
         }
     }
 
+    for (entity, transform, id, stats) in neutral_candidates.iter() {
+        if !stats.is_alive() {
+            continue;
+        }
+        let dist_sq = transform.translation.distance_squared(local_pos);
+        if best.map_or(true, |(_, _, best_dist)| dist_sq < best_dist) {
+            best = Some((
+                entity,
+                TargetId {
+                    kind: TargetKind::Neutral,
+                    id: id.0,
+                },
+                dist_sq,
+            ));
+        }
+    }
+
     for (entity, transform, id, stats, team, _kind) in structure_candidates.iter() {
         if !stats.is_alive() || *team == local_team {
             continue;
@@ -890,6 +945,10 @@ fn find_target_near_point(
     minion_candidates: &Query<
         (Entity, &Transform, &NetworkMinionId, &CombatStats, &Team),
         With<NetworkMinion>,
+    >,
+    neutral_candidates: &Query<
+        (Entity, &Transform, &NetworkNeutralId, &CombatStats),
+        With<NetworkNeutral>,
     >,
     structure_candidates: &Query<
         (
@@ -935,6 +994,25 @@ fn find_target_near_point(
                     entity,
                     TargetId {
                         kind: TargetKind::Minion,
+                        id: id.0,
+                    },
+                    dist,
+                ));
+            }
+        }
+    }
+
+    for (entity, transform, id, stats) in neutral_candidates.iter() {
+        if !stats.is_alive() {
+            continue;
+        }
+        let dist = transform.translation.xz().distance(click_point.xz());
+        if dist <= TARGET_PICK_RADIUS {
+            if best.map_or(true, |(_, _, best_dist)| dist < best_dist) {
+                best = Some((
+                    entity,
+                    TargetId {
+                        kind: TargetKind::Neutral,
                         id: id.0,
                     },
                     dist,
