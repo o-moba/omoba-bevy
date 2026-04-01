@@ -1,2 +1,10 @@
 /target
 assets/
+.claude
+.cursor
+.codex
+.agent
+.tasks
+AGENTS.md
+CLAUDE.md
+tasks/

@@ -603,6 +603,10 @@ fn handle_join_request(
     character: CharacterChoice,
     map_layout: &MapLayoutState,
 ) {
+    println!(
+        "Player {} joined team {:?} as {:?}",
+        player.state.id, team, character
+    );
     player.state.team = team;
     player.state.character = character;
     let spawn = spawn_position_for_team(map_layout, team);
