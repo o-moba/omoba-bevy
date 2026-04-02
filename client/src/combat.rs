@@ -2,8 +2,8 @@ use bevy::{
     camera::primitives::Aabb,
     input::mouse::MouseButton,
     math::{
-        Dir3,
         primitives::{InfinitePlane3d, Rectangle},
+        Dir3,
     },
     prelude::*,
     window::PrimaryWindow,
@@ -17,6 +17,7 @@ use crate::net::{
     NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId, PlayerProgression,
     RemotePlayer, StructureKind, TargetId, TargetKind,
 };
+use shared::{SkillSlot, TargetingMode, ability_for_slot, scaled_mana_cost};
 use crate::player::Player;
 use crate::team::Team;
 
@@ -48,11 +49,11 @@ const MINION_MARKER_RADIUS: f32 = 1.05;
 const NEUTRAL_MARKER_RADIUS: f32 = 1.1;
 const TOWER_MARKER_RADIUS: f32 = 2.0;
 const BASE_TOWER_MARKER_RADIUS: f32 = 3.75;
-const SKILL_BUTTON_SIZE: f32 = 80.0;
+const SKILL_BUTTON_SIZE: f32 = 72.0;
+const SKILL_BUTTON_GAP: f32 = 8.0;
 const SKILL_BUTTON_MARGIN: f32 = 20.0;
+const SKILL_BUTTON_GAP: f32 = 12.0;
 const SKILL_BUTTON_COLOR: Color = Color::srgba(0.12, 0.12, 0.12, 0.75);
-const SKILL_BUTTON_HOVER_COLOR: Color = Color::srgba(0.18, 0.18, 0.18, 0.85);
-const SKILL_BUTTON_PRESS_COLOR: Color = Color::srgba(0.28, 0.28, 0.28, 0.95);
 
 pub struct CombatPlugin;
 
@@ -65,10 +66,12 @@ impl Plugin for CombatPlugin {
             .add_systems(
                 Update,
                 (
+                    ability_feedback_display_system,
                     select_target_system,
                     clear_invalid_target_system,
-                    cast_spell_system,
-                    skill_button_system,
+                    upgrade_ranged_shot_system,
+                    ability_keyboard_system,
+                    ability_hud_button_system,
                     update_target_marker_system,
                 )
                     .chain(),
@@ -204,7 +207,7 @@ struct CombatBars {
 struct TargetMarker;
 
 #[derive(Component)]
-struct SkillButton;
+struct AbilityHudButton(HeroAbility);
 
 #[derive(Component)]
 struct CombatBarRoot;
@@ -322,11 +325,14 @@ fn setup_combat_visual_assets(
 }
 
 fn setup_combat_ui(mut commands: Commands) {
+    let ranged_right = SKILL_BUTTON_MARGIN;
+    let melee_right = SKILL_BUTTON_MARGIN + SKILL_BUTTON_SIZE + SKILL_BUTTON_GAP;
+
     commands.spawn((
         Button,
         Node {
             position_type: PositionType::Absolute,
-            right: Val::Px(SKILL_BUTTON_MARGIN),
+            right: Val::Px(ranged_right),
             bottom: Val::Px(SKILL_BUTTON_MARGIN),
             width: Val::Px(SKILL_BUTTON_SIZE),
             height: Val::Px(SKILL_BUTTON_SIZE),
@@ -335,9 +341,76 @@ fn setup_combat_ui(mut commands: Commands) {
             ..default()
         },
         BackgroundColor(SKILL_BUTTON_COLOR),
-        SkillButton,
-        Name::new("SkillButton"),
-    ));
+        AbilityHudButton(HeroAbility::RangedShot),
+        Name::new("RangedShotButton"),
+    ))
+    .with_children(|parent| {
+        parent.spawn((
+            Text::new("E"),
+            TextFont {
+                font_size: 26.0,
+                ..default()
+            },
+            TextColor(Color::WHITE),
+        ));
+    });
+    commands
+        .spawn((
+            Button,
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(melee_right),
+                bottom: Val::Px(SKILL_BUTTON_MARGIN),
+                width: Val::Px(SKILL_BUTTON_SIZE),
+                height: Val::Px(SKILL_BUTTON_SIZE),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(SKILL_BUTTON_COLOR),
+            AbilityHudButton(HeroAbility::MeleeStrike),
+            Name::new("MeleeStrikeButton"),
+        ))
+    .with_children(|parent| {
+        parent.spawn((
+            Text::new("Q"),
+            TextFont {
+                font_size: 26.0,
+                ..default()
+            },
+            TextColor(Color::WHITE),
+        ));
+    });
+}
+
+fn ability_feedback_display_system(
+    mut feedback: ResMut<PendingAbilityFeedback>,
+    mut console: ResMut<DebugConsole>,
+) {
+    let Some(msg) = feedback.message.take() else {
+        return;
+    };
+    console.push_line(msg.clone());
+    info!("{msg}");
+}
+
+fn upgrade_ranged_shot_system(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    game_state: Option<Res<GameStateSnapshot>>,
+    mut command_writer: MessageWriter<NetworkCommand>,
+) {
+    if let Some(game_state) = game_state.as_ref() {
+        if !matches!(game_state.state, GameState::Running) {
+            return;
+        }
+    }
+    if !keyboard_input.just_pressed(KeyCode::KeyT) {
+        return;
+    }
+    command_writer.write(NetworkCommand::UpgradeAbility {
+        ability: HeroAbility::RangedShot,
+    });
+    info!("Request upgrade: Ranged Shot (skill points)");
 }
 
 fn select_target_system(
@@ -459,34 +532,11 @@ fn clear_invalid_target_system(
     }
 }
 
-fn cast_spell_system(
+fn ability_keyboard_system(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     game_state: Option<Res<GameStateSnapshot>>,
+    ability_bar: Res<LocalAbilityBar>,
     local_stats_query: Query<&CombatStats, With<Player>>,
-    local_player: Query<(&Transform, &Team), With<Player>>,
-    player_candidates: Query<
-        (Entity, &Transform, &NetworkPlayerId, &CombatStats, &Team),
-        (With<RemotePlayer>, Without<Player>),
-    >,
-    minion_candidates: Query<
-        (Entity, &Transform, &NetworkMinionId, &CombatStats, &Team),
-        With<NetworkMinion>,
-    >,
-    neutral_candidates: Query<
-        (Entity, &Transform, &NetworkNeutralId, &CombatStats),
-        With<NetworkNeutral>,
-    >,
-    structure_candidates: Query<
-        (
-            Entity,
-            &Transform,
-            &NetworkStructureId,
-            &CombatStats,
-            &Team,
-            &StructureKind,
-        ),
-        With<NetworkStructure>,
-    >,
     mut target_state: ResMut<TargetState>,
     mut cast_state: ResMut<LocalSpellCastState>,
     mut command_writer: MessageWriter<NetworkCommand>,
@@ -503,20 +553,21 @@ fn cast_spell_system(
             return;
         }
     }
-    if !keyboard_input.just_pressed(KeyCode::KeyQ) {
+
+    let ability = if keyboard_input.just_pressed(KeyCode::KeyQ) {
+        Some(HeroAbility::MeleeStrike)
+    } else if keyboard_input.just_pressed(KeyCode::KeyE) {
+        Some(HeroAbility::RangedShot)
+    } else {
+        None
+    };
+    let Some(ability) = ability else {
         return;
-    }
+    };
 
     let Ok(local_stats) = local_stats_query.single() else {
         return;
     };
-    let _ = (
-        local_player,
-        player_candidates,
-        minion_candidates,
-        neutral_candidates,
-        structure_candidates,
-    );
     let target = resolve_cast_target(&mut target_state);
     if let Some(target) = target {
         try_queue_spell_cast(
@@ -527,43 +578,44 @@ fn cast_spell_system(
             &mut console,
         );
     } else {
-        let message = "No target available. Use TAB or middle mouse click to select.";
+        let message = match ability {
+            HeroAbility::MeleeStrike => {
+                "Melee Strike: no target. Use TAB or middle mouse click to select."
+            }
+            HeroAbility::RangedShot => {
+                "Ranged Shot: no target. Use TAB or middle mouse click to select."
+            }
+        };
         console.push_line(message);
         info!("[omoba:cli] event=cast_reject reason=no_valid_target");
     }
+
+    command_writer.write(NetworkCommand::Cast { target });
+    let message = format!(
+        "Melee (rank {}) -> {} {} (mana {:.0})",
+        progression.skill1_rank.max(1),
+        match target.kind {
+            TargetKind::Player => "player",
+            TargetKind::Minion => "minion",
+            TargetKind::Structure => "structure",
+            TargetKind::Neutral => "neutral",
+        },
+        target.id,
+        local_stats.mana
+    );
+    console.push_line(message.clone());
+    info!("{message}");
 }
 
-fn skill_button_system(
+fn ability_hud_button_system(
     mut interactions: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<SkillButton>),
+        (&Interaction, &mut BackgroundColor, &AbilityHudButton),
+        Changed<Interaction>,
     >,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
     game_state: Option<Res<GameStateSnapshot>>,
+    ability_bar: Res<LocalAbilityBar>,
     local_stats_query: Query<&CombatStats, With<Player>>,
-    local_player: Query<(&Transform, &Team), With<Player>>,
-    player_candidates: Query<
-        (Entity, &Transform, &NetworkPlayerId, &CombatStats, &Team),
-        (With<RemotePlayer>, Without<Player>),
-    >,
-    minion_candidates: Query<
-        (Entity, &Transform, &NetworkMinionId, &CombatStats, &Team),
-        With<NetworkMinion>,
-    >,
-    neutral_candidates: Query<
-        (Entity, &Transform, &NetworkNeutralId, &CombatStats),
-        With<NetworkNeutral>,
-    >,
-    structure_candidates: Query<
-        (
-            Entity,
-            &Transform,
-            &NetworkStructureId,
-            &CombatStats,
-            &Team,
-            &StructureKind,
-        ),
-        With<NetworkStructure>,
-    >,
     mut target_state: ResMut<TargetState>,
     mut cast_state: ResMut<LocalSpellCastState>,
     mut command_writer: MessageWriter<NetworkCommand>,
@@ -585,13 +637,6 @@ fn skill_button_system(
                 let Ok(local_stats) = local_stats_query.single() else {
                     continue;
                 };
-                let _ = (
-                    &local_player,
-                    &player_candidates,
-                    &minion_candidates,
-                    &neutral_candidates,
-                    &structure_candidates,
-                );
                 if let Some(target) = resolve_cast_target(&mut target_state) {
                     try_queue_spell_cast(
                         target,
@@ -601,10 +646,32 @@ fn skill_button_system(
                         &mut console,
                     );
                 } else {
-                    let message = "No target available. Use TAB or middle mouse click to select.";
+                    let message = match ability {
+                        HeroAbility::MeleeStrike => {
+                            "Melee Strike: no target. Use TAB or middle mouse click to select."
+                        }
+                        HeroAbility::RangedShot => {
+                            "Ranged Shot: no target. Use TAB or middle mouse click to select."
+                        }
+                    };
                     console.push_line(message);
                     info!("[omoba:cli] event=cast_reject reason=no_valid_target");
                 }
+                command_writer.write(NetworkCommand::Cast { target });
+                let message = format!(
+                    "Melee (rank {}) -> {} {} (mana {:.0})",
+                    progression.skill1_rank.max(1),
+                    match target.kind {
+                        TargetKind::Player => "player",
+                        TargetKind::Minion => "minion",
+                        TargetKind::Structure => "structure",
+                        TargetKind::Neutral => "neutral",
+                    },
+                    target.id,
+                    local_stats.mana
+                );
+                console.push_line(message.clone());
+                info!("{message}");
             }
             Interaction::Hovered => {
                 *color = SKILL_BUTTON_HOVER_COLOR.into();
@@ -997,8 +1064,8 @@ fn find_nearest_enemy_target(
         }
     }
 
-    for (entity, transform, id, stats, _team) in minion_candidates.iter() {
-        if !stats.is_alive() {
+    for (entity, transform, id, stats, team) in minion_candidates.iter() {
+        if !stats.is_alive() || *team == local_team {
             continue;
         }
         let dist_sq = transform.translation.distance_squared(local_pos);
@@ -1099,8 +1166,8 @@ fn find_target_near_point(
         }
     }
 
-    for (entity, transform, id, stats, _team) in minion_candidates.iter() {
-        if !stats.is_alive() {
+    for (entity, transform, id, stats, team) in minion_candidates.iter() {
+        if !stats.is_alive() || *team == local_team {
             continue;
         }
         let dist = transform.translation.xz().distance(click_point.xz());
@@ -1161,4 +1228,76 @@ fn find_target_near_point(
 
 fn resolve_cast_target(target_state: &mut TargetState) -> Option<TargetId> {
     target_state.selected_target
+}
+
+fn horizontal_distance_squared_xz(a: Vec3, b: Vec3) -> f32 {
+    let dx = a.x - b.x;
+    let dz = a.z - b.z;
+    dx * dx + dz * dz
+}
+
+/// Client-side checks aligned with server melee validation (TASK-07).
+fn local_melee_cast_block_reason(
+    target: TargetId,
+    local_team: Team,
+    target_team: Option<Team>,
+    local_translation: Vec3,
+    target_world_translation: Vec3,
+    mana: f32,
+) -> Option<&'static str> {
+    if target.kind == TargetKind::Structure {
+        return Some("Melee skill cannot target structures.");
+    }
+    if matches!(target.kind, TargetKind::Player | TargetKind::Minion) {
+        let Some(t_team) = target_team else {
+            return Some("Target is no longer valid.");
+        };
+        if t_team == local_team {
+            return Some("Melee cannot target allied units.");
+        }
+    }
+    if mana < MELEE_MANA_COST {
+        return Some("Not enough mana for melee (20).");
+    }
+    let max_sq = MELEE_RANGE_XZ * MELEE_RANGE_XZ;
+    if horizontal_distance_squared_xz(local_translation, target_world_translation) > max_sq {
+        return Some("Target is out of melee range.");
+    }
+    None
+}
+
+fn melee_skill_upgrade_system(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    game_state: Option<Res<GameStateSnapshot>>,
+    local_prog: Query<&PlayerProgression, With<Player>>,
+    mut command_writer: MessageWriter<NetworkCommand>,
+    mut console: ResMut<DebugConsole>,
+) {
+    if let Some(game_state) = game_state.as_ref() {
+        if !matches!(game_state.state, GameState::Running) {
+            return;
+        }
+    }
+    if !keyboard_input.just_pressed(KeyCode::Digit1) {
+        return;
+    }
+    let Ok(prog) = local_prog.single() else {
+        return;
+    };
+    if prog.skill_points == 0 {
+        let message = "No skill points to upgrade melee.";
+        console.push_line(message);
+        info!("{message}");
+        return;
+    }
+    if prog.skill1_rank >= MAX_MELEE_SKILL_RANK {
+        let message = "Melee skill is already max rank.";
+        console.push_line(message);
+        info!("{message}");
+        return;
+    }
+    command_writer.write(NetworkCommand::UpgradeMeleeSkill);
+    let message = "Sent melee skill upgrade request.";
+    console.push_line(message);
+    info!("{message}");
 }
