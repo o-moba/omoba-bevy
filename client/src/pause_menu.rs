@@ -4,7 +4,12 @@ use bevy::{
     window::{CursorGrabMode, CursorOptions, PrimaryWindow},
 };
 
+use crate::net::{ClientConnectionState, ClientSession};
+use crate::persistence::{
+    ClientPrefsSaveGate, ResolvedServerAddressForPrefs, reset_graphics_to_defaults,
+};
 use crate::player::Player;
+use crate::session_config::DEFAULT_GAME_SERVER_ADDR;
 use crate::team::{TeamSelectRoot, TeamSelection, spawn_team_select_ui};
 use crate::world::{
     DEFAULT_AMBIENT_BRIGHTNESS, DEFAULT_LIGHT_ILLUMINANCE, DEFAULT_LIGHT_PITCH_DEG,
@@ -38,6 +43,7 @@ impl Plugin for PauseMenuPlugin {
                 Update,
                 (
                     toggle_pause_menu,
+                    close_pause_menu_when_disconnected,
                     handle_settings_navigation_buttons,
                     sync_pause_menu_visibility,
                     sync_pause_menu_sections,
@@ -46,7 +52,9 @@ impl Plugin for PauseMenuPlugin {
                     update_model_scale_label,
                     update_lighting_labels,
                     handle_restart_button_request,
+                    handle_reset_graphics_defaults_button,
                     handle_exit_button,
+                    sync_settings_server_addr_label,
                 ),
             )
             .add_systems(Last, process_restart_request);
@@ -78,6 +86,9 @@ struct SettingsOpenButton;
 
 #[derive(Component)]
 struct SettingsBackButton;
+
+#[derive(Component)]
+struct ResetGraphicsDefaultsButton;
 
 #[derive(Component)]
 struct ExitButton;
@@ -129,6 +140,9 @@ struct PitchValueLabel;
 
 #[derive(Component)]
 struct YawValueLabel;
+
+#[derive(Component)]
+struct SettingsServerAddrLabel;
 
 fn setup_pause_menu_ui(mut commands: Commands) {
     commands
@@ -242,6 +256,17 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                             ));
 
                             settings.spawn((
+                                Text::new(""),
+                                TextFont {
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.75, 0.78, 0.85)),
+                                SettingsServerAddrLabel,
+                                Name::new("PauseMenuServerAddrHint"),
+                            ));
+
+                            settings.spawn((
                                 Text::new("Lighting"),
                                 TextFont {
                                     font_size: 18.0,
@@ -309,6 +334,13 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                 ScaleValueLabel,
                                 ScaleIncreaseButton,
                                 "PauseMenuScaleControls",
+                            );
+
+                            spawn_menu_button(
+                                settings,
+                                "Reset graphics to defaults",
+                                ResetGraphicsDefaultsButton,
+                                "PauseMenuResetGraphicsButton",
                             );
 
                             spawn_menu_button(settings, "Back", SettingsBackButton, "BackButton");
@@ -438,6 +470,20 @@ fn spawn_adjust_row<Dec: Component, ValueMarker: Component, Inc: Component>(
                 ));
             });
         });
+}
+
+/// Match-assuming UI must not stay open without an active session (TASK-14 P5 / AC6).
+fn close_pause_menu_when_disconnected(
+    client_session: Res<ClientSession>,
+    mut menu_state: ResMut<PauseMenuState>,
+) {
+    if client_session.state != ClientConnectionState::Disconnected {
+        return;
+    }
+    if menu_state.open {
+        menu_state.open = false;
+        menu_state.in_settings = false;
+    }
 }
 
 fn toggle_pause_menu(
@@ -720,6 +766,76 @@ fn update_lighting_labels(
     }
     if let Ok(mut text) = label_queries.p3().single_mut() {
         text.0 = format!("{:.0}°", lighting_settings.light_yaw_deg);
+    }
+}
+
+fn sync_settings_server_addr_label(
+    resolved_addr: Res<ResolvedServerAddressForPrefs>,
+    mut label_q: Query<&mut Text, With<SettingsServerAddrLabel>>,
+) {
+    let addr = {
+        let s = resolved_addr.0.as_str().trim();
+        if s.is_empty() {
+            DEFAULT_GAME_SERVER_ADDR
+        } else {
+            s
+        }
+    };
+    let next = format!(
+        "Game server: {addr}\n\
+         Saved with preferences when you change graphics or character. \
+         Next launch: set GAME_SERVER_ADDR or edit client_preferences.json (see persistence docs)."
+    );
+    if let Ok(mut text) = label_q.single_mut() {
+        if text.0 != next {
+            text.0 = next;
+        }
+    }
+}
+
+fn handle_reset_graphics_defaults_button(
+    mut lighting: ResMut<LightingSettings>,
+    mut model: ResMut<ModelScaleSettings>,
+    mut prefs_gate: ResMut<ClientPrefsSaveGate>,
+    resolved_addr: Res<ResolvedServerAddressForPrefs>,
+    team: Res<TeamSelection>,
+    mut button_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (
+            Changed<Interaction>,
+            With<Button>,
+            With<ResetGraphicsDefaultsButton>,
+        ),
+    >,
+) {
+    let addr = {
+        let s = resolved_addr.0.as_str().trim();
+        if s.is_empty() {
+            DEFAULT_GAME_SERVER_ADDR
+        } else {
+            s
+        }
+    };
+
+    for (interaction, mut color) in &mut button_query {
+        match *interaction {
+            Interaction::Pressed => {
+                reset_graphics_to_defaults(
+                    lighting.as_mut(),
+                    model.as_mut(),
+                    prefs_gate.as_mut(),
+                    team.character,
+                    addr,
+                );
+                *color = BUTTON_HOVER_COLOR.into();
+            }
+            Interaction::Hovered => {
+                *color = BUTTON_HOVER_COLOR.into();
+            }
+            Interaction::None => {
+                *color = BUTTON_COLOR.into();
+            }
+        }
     }
 }
 
