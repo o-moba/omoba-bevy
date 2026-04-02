@@ -12,9 +12,9 @@ use bevy::{
 use crate::camera::MainCamera;
 use crate::debug_console::DebugConsole;
 use crate::net::{
-    GameState, GameStateSnapshot, HeroAbility, NetworkCommand, NetworkMinion, NetworkMinionId,
-    NetworkNeutral, NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId,
-    PendingAbilityFeedback, RemotePlayer, StructureKind, TargetId, TargetKind,
+    GameState, GameStateSnapshot, NetworkCommand, NetworkMinion, NetworkMinionId, NetworkNeutral,
+    NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId, RemotePlayer,
+    StructureKind, TargetId, TargetKind,
 };
 use shared::{SkillSlot, TargetingMode, ability_for_slot, scaled_mana_cost};
 use crate::player::Player;
