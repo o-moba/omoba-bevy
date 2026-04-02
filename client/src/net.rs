@@ -139,36 +139,15 @@ impl Plugin for NetworkingPlugin {
                 UPDATE_INTERVAL_SECONDS,
                 TimerMode::Repeating,
             )))
-            .add_systems(
-                Startup,
-                (
-                    setup_network_visual_assets,
-                    start_networking.after(crate::persistence::load_persistent_client_settings),
-                    setup_connection_status_ui,
-                ),
-            )
-            .configure_sets(
-                Update,
-                (send_local_state, send_network_commands).in_set(ClientNetSet::Outgoing),
-            )
-            .add_systems(
-                Update,
-                apply_server_snapshot.in_set(ClientNetSet::SnapshotApply),
-            )
+            .add_systems(Startup, (setup_network_visual_assets, start_networking))
+            .init_resource::<LastObservedGameState>()
             .add_systems(
                 Update,
                 (
-                    ClientNetPipeline::SendCommands.after(ClientNetPipeline::SendLocalState),
-                    ClientNetPipeline::IngestSnapshot.after(ClientNetPipeline::SendCommands),
-                    ClientNetPipeline::ApplySnapshot.after(ClientNetPipeline::IngestSnapshot),
-                    ClientNetPipeline::InterpolateNetEntities
-                        .after(ClientNetPipeline::ApplySnapshot),
-                    ClientNetPipeline::InterpolateRemotePlayers
-                        .after(ClientNetPipeline::InterpolateNetEntities),
-                    ClientNetPipeline::SessionRetryInput
-                        .after(ClientNetPipeline::InterpolateRemotePlayers),
-                    ClientNetPipeline::SessionLifecycle.after(ClientNetPipeline::SessionRetryInput),
-                    ClientNetPipeline::SyncConnectionUi.after(ClientNetPipeline::SessionLifecycle),
+                    send_local_state,
+                    send_network_commands,
+                    apply_server_snapshot,
+                    log_game_state_transition.after(apply_server_snapshot),
                 ),
             )
             .add_systems(
@@ -475,6 +454,27 @@ struct NetworkChannels {
 }
 
 #[derive(Resource, Default)]
+struct LastObservedGameState(Option<GameState>);
+
+fn log_game_state_transition(
+    snapshot: Res<GameStateSnapshot>,
+    mut last: ResMut<LastObservedGameState>,
+) {
+    if !snapshot.is_changed() {
+        return;
+    }
+    let current = snapshot.state.clone();
+    if last.0.as_ref() == Some(&current) {
+        return;
+    }
+    info!(
+        "[omoba:cli] event=game_state_transition from={:?} to={:?}",
+        last.0, current
+    );
+    last.0 = Some(current);
+}
+
+#[derive(Resource, Default)]
 struct NetworkState {
     local_id: Option<u64>,
     local_team: Option<Team>,
@@ -483,6 +483,8 @@ struct NetworkState {
     structures: HashMap<u64, Entity>,
     minions: HashMap<u64, Entity>,
     neutrals: HashMap<u64, Entity>,
+    /// Dedupes `join_pending` logs while waiting for server team ack (TASK-16 AC2).
+    join_pending_last_logged: Option<(u64, Team, Team)>,
 }
 
 /// Latest drained snapshot for this frame (filled by [`ingest_server_snapshot_packets`]).
@@ -735,27 +737,24 @@ fn run_udp_client(
     incoming: Sender<ServerPacket>,
     signals: Sender<NetThreadSignal>,
 ) {
-    println!("Connecting to server at {server_addr}");
+    eprintln!("[omoba:cli] event=net_connecting addr={server_addr}");
     let socket = match UdpSocket::bind(LOCAL_BIND_ADDR) {
         Ok(socket) => socket,
         Err(error) => {
-            eprintln!("Failed to bind client UDP socket: {error}");
-            let _ = signals.send(NetThreadSignal::TransportFailure);
+            eprintln!("[omoba:cli] event=net_bind_failed error={error}");
             return;
         }
     };
 
     if let Err(error) = socket.connect(&server_addr) {
-        eprintln!("Failed to connect UDP socket to {server_addr}: {error}");
-        let _ = signals.send(NetThreadSignal::TransportFailure);
+        eprintln!("[omoba:cli] event=net_connect_failed addr={server_addr} error={error}");
         return;
     }
     if let Err(error) = socket.set_nonblocking(true) {
-        eprintln!("Failed to set UDP client socket nonblocking: {error}");
-        let _ = signals.send(NetThreadSignal::TransportFailure);
+        eprintln!("[omoba:cli] event=net_socket_config_failed error={error}");
         return;
     }
-    println!("UDP socket connected to {server_addr}; waiting for first snapshot");
+    eprintln!("[omoba:cli] event=net_connected addr={server_addr} detail=awaiting_first_snapshot");
 
     let mut recv_buf = [0_u8; MAX_PACKET_SIZE];
     let mut last_heartbeat_at = Instant::now();
@@ -777,13 +776,9 @@ fn run_udp_client(
         loop {
             match outgoing.try_recv() {
                 Ok(packet) => {
-                    udp_try_send(
-                        &socket,
-                        &packet,
-                        &mut consecutive_send_errors,
-                        &mut transport_failure_reported,
-                        &signals,
-                    );
+                    if send_packet(&socket, &packet).is_err() {
+                        eprintln!("[omoba:cli] event=net_send_failed detail=outgoing_queue");
+                    }
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => return,
@@ -803,23 +798,17 @@ fn run_udp_client(
 
         loop {
             match socket.recv(&mut recv_buf) {
-                Ok(len) => {
-                    consecutive_recv_errors = 0;
-                    match serde_json::from_slice::<ServerPacket>(&recv_buf[..len]) {
-                        Ok(packet) => {
-                            if !first_snapshot_received {
-                                println!(
-                                    "First snapshot received from {server_addr}; connection is live"
-                                );
-                                first_snapshot_received = true;
-                            }
-                            let _ = incoming.send(packet);
-                        }
-                        Err(error) => {
-                            eprintln!("Failed to decode server packet: {error}");
+                Ok(len) => match serde_json::from_slice::<ServerPacket>(&recv_buf[..len]) {
+                    Ok(packet) => {
+                        if !first_snapshot_received {
+                            eprintln!("[omoba:cli] event=net_first_snapshot addr={server_addr}");
+                            first_snapshot_received = true;
                         }
                     }
-                }
+                    Err(error) => {
+                        eprintln!("[omoba:cli] event=net_packet_decode_error error={error}");
+                    }
+                },
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
                 Err(error) => {
                     consecutive_recv_errors = consecutive_recv_errors.saturating_add(1);
@@ -827,7 +816,7 @@ fn run_udp_client(
                     if last_receive_error_log_at
                         .is_none_or(|last| now.duration_since(last) >= Duration::from_secs(1))
                     {
-                        eprintln!("Client socket receive error: {error}");
+                        eprintln!("[omoba:cli] event=net_recv_error error={error}");
                         last_receive_error_log_at = Some(now);
                     }
                     if consecutive_recv_errors >= TRANSPORT_CONSECUTIVE_RECV_ERRORS
@@ -1093,18 +1082,10 @@ fn apply_server_snapshot(
         neutrals,
         game_state,
         rematch_in_secs,
-        selected_team_for_spawn,
-    } = data;
-
-    if client_session.state != ClientConnectionState::Connected {
-        client_session.state = ClientConnectionState::Connected;
-        client_session.waiting_since = None;
-    }
-    client_session.last_qualifying_snapshot_wall = Some(snapshot_wall_time);
-
-    if let Some(msg) = ability_feedback {
-        pending_ability_feedback.message = Some(msg);
-    }
+    )) = latest_snapshot
+    else {
+        return;
+    };
 
     network_state.local_id = Some(your_id);
     game_state_snapshot.state = game_state;
@@ -1178,8 +1159,17 @@ fn apply_server_snapshot(
             return;
         };
         if local_player_state.team != selected_team {
+            let key = (your_id, local_player_state.team, selected_team);
+            if network_state.join_pending_last_logged != Some(key) {
+                info!(
+                    "[omoba:cli] event=join_pending reason=awaiting_team_ack server_reported_team={:?} client_selected_team={:?} player_id={}",
+                    local_player_state.team, selected_team, your_id
+                );
+                network_state.join_pending_last_logged = Some(key);
+            }
             return;
         }
+        network_state.join_pending_last_logged = None;
         let spawn = Vec3::new(
             local_player_state.x,
             local_player_state.y,
@@ -1228,6 +1218,11 @@ fn apply_server_snapshot(
                 ))
                 .id()
         };
+
+        info!(
+            "[omoba:cli] event=join_ok player_id={your_id} team={:?} character={:?}",
+            local_player_state.team, local_player_state.character
+        );
 
         network_state.local_team = Some(local_player_state.team);
         if let Ok(mut camera_transform) = transform_sets.p1().single_mut() {
