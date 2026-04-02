@@ -1,7 +1,7 @@
 use bevy::{
     gltf::Gltf,
     input::mouse::MouseButton,
-    math::{Dir3, primitives::InfinitePlane3d},
+    math::{primitives::InfinitePlane3d, Dir3},
     prelude::*,
     window::PrimaryWindow,
 };
@@ -18,7 +18,7 @@ use crate::net::{
     RemotePlayer, StructureKind,
 };
 use crate::team::{CharacterChoice, Team};
-use crate::world::{PlayerModelCatalog, model_assets_for_choice};
+use crate::world::{model_assets_for_choice, PlayerModelCatalog};
 
 pub const PLAYER_SPEED: f32 = 5.0;
 pub const PLAYER_SIZE: f32 = 1.0;
@@ -639,7 +639,7 @@ fn setup_progression_ui(mut commands: Commands) {
         ))
         .with_children(|parent| {
             parent.spawn((
-                Text::new("Level --   XP --/--   Skill points --"),
+                Text::new("Level --   XP --/--   Skill pts --   Melee r--"),
                 TextFont {
                     font_size: 24.0,
                     ..default()
@@ -659,24 +659,26 @@ fn progression_hud_system(
     };
 
     let Some(progression) = player_query.iter().next() else {
-        text.0 = "Level --   XP --/--   Skill points --".to_string();
+        text.0 = "Level --   XP --/--   Skill pts --   Melee r--".to_string();
         return;
     };
 
     if progression.next_level_xp == 0 {
         text.0 = format!(
-            "Level {}   XP MAX   Skill points {}",
+            "Level {}   XP MAX   Skill pts {}   Melee r{}",
             progression.level.max(1),
-            progression.skill_points
+            progression.skill_points,
+            progression.skill1_rank.max(1)
         );
     } else {
         let displayed_xp = progression.xp.min(progression.next_level_xp);
         text.0 = format!(
-            "Level {}   XP {}/{}   Skill points {}",
+            "Level {}   XP {}/{}   Skill pts {}   Melee r{}",
             progression.level.max(1),
             displayed_xp,
             progression.next_level_xp,
-            progression.skill_points
+            progression.skill_points,
+            progression.skill1_rank.max(1)
         );
     }
 }

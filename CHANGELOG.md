@@ -7,6 +7,7 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 ## [Unreleased]
 
 ### Added
+- **TASK-07**: Skill 1 as a melee strike on the selected target — XZ range `MELEE_RANGE_XZ` (shorter than homing projectile reach), server-only damage and cooldown/mana spend after validation, rank scaling for damage and cooldown, structure targets rejected, client debug-console reasons for blocked casts (including allied units).
 - Added a reproducible multiplayer session verification harness at `scripts/verify_task_02_multiplayer_session_flow.py` that exercises sequential and simultaneous joins, repeated joins, timeout cleanup, reconnect-as-new-player, server restart recovery, and four-client snapshot consistency against the live UDP server.
 - Added focused client coverage for authoritative local-player selection so duplicate local `Player` entities cannot silently break gameplay systems that rely on `Query::single()`.
 - Added multiplayer session policy documentation and a `TASK-02` progress log with the recorded session matrix.
