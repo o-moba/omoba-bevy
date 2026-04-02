@@ -1,7 +1,7 @@
 use bevy::ecs::query::Or;
 use bevy::prelude::*;
 use bevy::scene::SceneRoot;
-use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
+use crossbeam_channel::{unbounded, Receiver, Sender, TryRecvError};
 use serde::{Deserialize, Serialize};
 use shared::{PlayerAbilitySnapshot, SkillSlot};
 use std::{
@@ -12,13 +12,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::camera::{CameraState, MainCamera, locked_camera_offset};
+use crate::camera::{locked_camera_offset, CameraState, MainCamera};
 use crate::combat::{CombatStats, MAX_HP, MAX_MANA};
-use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
+use crate::player::{Player, PlayerBody, VerticalVelocity, PLAYER_SIZE};
 use crate::team::TeamSelection;
 use crate::team::{CharacterChoice, Team};
 use crate::world::{
-    NormalizeModelScale, PlayerAssets, PlayerModelCatalog, model_assets_for_choice,
+    model_assets_for_choice, NormalizeModelScale, PlayerAssets, PlayerModelCatalog,
 };
 
 const DEFAULT_SERVER_ADDR: &str = "127.0.0.1:4000";
@@ -73,13 +73,13 @@ impl Plugin for NetworkingPlugin {
 #[derive(Message, Clone, Copy, Debug)]
 pub enum NetworkCommand {
     Cast {
-        slot: SkillSlot,
-        target: Option<TargetId>,
+        target: TargetId,
     },
-    UpgradeAbility {
-        slot: SkillSlot,
+    UpgradeMeleeSkill,
+    Join {
+        team: Team,
+        character: CharacterChoice,
     },
-    Join { team: Team, character: CharacterChoice },
     #[allow(dead_code)]
     RequestRematch,
 }
@@ -101,6 +101,7 @@ enum ClientPacket {
     UpgradeAbility {
         slot: SkillSlot,
     },
+    UpgradeMeleeSkill,
     Join {
         team: Team,
         #[serde(default = "default_character_choice")]
@@ -152,6 +153,8 @@ struct PlayerState {
     next_level_xp: u32,
     #[serde(default)]
     skill_points: u32,
+    #[serde(default = "default_melee_skill_rank")]
+    skill1_rank: u32,
     #[serde(default = "default_character_choice")]
     character: CharacterChoice,
     #[serde(default)]
@@ -287,7 +290,9 @@ pub enum GameState {
     #[default]
     Lobby,
     Running,
-    Victory { winner: Team },
+    Victory {
+        winner: Team,
+    },
 }
 
 #[derive(Resource, Default, Clone)]
@@ -335,12 +340,25 @@ pub struct NetworkPlayerId(pub u64);
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkCharacterChoice(pub CharacterChoice);
 
-#[derive(Component, Clone, Copy, Debug, Default)]
+#[derive(Component, Clone, Copy, Debug)]
 pub struct PlayerProgression {
     pub level: u32,
     pub xp: u32,
     pub next_level_xp: u32,
     pub skill_points: u32,
+    pub skill1_rank: u32,
+}
+
+impl Default for PlayerProgression {
+    fn default() -> Self {
+        Self {
+            level: DEFAULT_PLAYER_LEVEL,
+            xp: 0,
+            next_level_xp: DEFAULT_NEXT_LEVEL_XP,
+            skill_points: 0,
+            skill1_rank: 1,
+        }
+    }
 }
 
 #[derive(Component)]
@@ -626,6 +644,9 @@ fn send_network_commands(
                     .outgoing
                     .send(ClientPacket::UpgradeAbility { slot: *slot });
             }
+            NetworkCommand::UpgradeMeleeSkill => {
+                let _ = channels.outgoing.send(ClientPacket::UpgradeMeleeSkill);
+            }
             NetworkCommand::Join { team, character } => {
                 let _ = channels.outgoing.send(ClientPacket::Join {
                     team: *team,
@@ -723,8 +744,7 @@ fn apply_server_snapshot(
         neutrals,
         game_state,
         rematch_in_secs,
-    )) =
-        latest_snapshot
+    )) = latest_snapshot
     else {
         return;
     };
@@ -744,8 +764,7 @@ fn apply_server_snapshot(
         .collect::<Vec<_>>();
     // IMPORTANT: we must tolerate temporary duplication of `Player` entities (e.g. during loading /
     // restart races). Many gameplay systems use `Query::single()` and will break if we allow >1.
-    let chosen_local =
-        choose_authoritative_local_player(&local_players, your_id);
+    let chosen_local = choose_authoritative_local_player(&local_players, your_id);
 
     if let Some(local_entity) = chosen_local {
         // Keep exactly one local `Player` alive to avoid `single()` query failures.
@@ -1262,6 +1281,7 @@ fn player_state_to_progression(player: &PlayerState) -> PlayerProgression {
         xp: player.xp,
         next_level_xp: player.next_level_xp,
         skill_points: player.skill_points,
+        skill1_rank: player.skill1_rank.max(1),
     }
 }
 
@@ -1310,6 +1330,10 @@ fn default_player_level() -> u32 {
 
 fn default_next_level_xp() -> u32 {
     DEFAULT_NEXT_LEVEL_XP
+}
+
+fn default_melee_skill_rank() -> u32 {
+    1
 }
 
 fn default_max_hp() -> f32 {
