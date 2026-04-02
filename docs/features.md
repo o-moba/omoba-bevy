@@ -25,6 +25,13 @@ Canonical version: `0.2.0`
 
 - Runtime and startup stability hardening.
 - Full reconnect slot reclaim across disconnects and NAT changes.
-- Match phase, restart, and rematch flow.
-- Jungle camps and neutral AI.
-- Full skill system, tooltip UX, and release-readiness validation.
+- Expanded skill roster, tooltip UX, balance passes, and release-scale QA beyond the current cast-and-HUD surface.
+
+## Operations and playtest documentation
+
+- [README.md](../README.md) — setup, controls summary, links to tester docs.
+- [RUNBOOK.md](../RUNBOOK.md) — startup, env vars, troubleshooting with recovery steps.
+- [docs/playtest-script.md](playtest-script.md) — timeboxed MVP session checklist.
+- [docs/bug-report-template.md](bug-report-template.md) — internal report format.
+- [docs/mvp-scope-and-limitations.md](mvp-scope-and-limitations.md) — explicit MVP scope and limitations.
+- [tasks/MVP-CHECKLIST.md](../tasks/MVP-CHECKLIST.md) — MVP-blocking vs deferrable classification.
