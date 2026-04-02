@@ -1,8 +1,10 @@
 use bevy::ecs::query::Or;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::scene::SceneRoot;
-use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
+use crossbeam_channel::{unbounded, Receiver, Sender, TryRecvError};
 use serde::{Deserialize, Serialize};
+use shared::{PlayerAbilitySnapshot, SkillSlot};
 use std::{
     collections::{HashMap, HashSet},
     io,
@@ -11,19 +13,22 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::camera::{CameraState, MainCamera, locked_camera_offset};
+use crate::camera::{locked_camera_offset, CameraState, MainCamera};
 use crate::combat::{CombatStats, MAX_HP, MAX_MANA};
+use crate::persistence::{FileGameServerAddr, ResolvedServerAddressForPrefs};
 use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
+use crate::session_config::{
+    DEFAULT_GAME_SERVER_ADDR, T_RETRY, T_STALE_SNAPSHOT, T_WAIT_MAX,
+    TRANSPORT_CONSECUTIVE_RECV_ERRORS, TRANSPORT_CONSECUTIVE_SEND_ERRORS, is_stale,
+};
 use crate::team::TeamSelection;
-use crate::team::{CharacterChoice, Team};
+use crate::team::{CharacterChoice, Team, TeamSelectRoot, spawn_team_select_ui};
 use crate::world::{
-    NormalizeModelScale, PlayerAssets, PlayerModelCatalog, model_assets_for_choice,
+    model_assets_for_choice, NormalizeModelScale, PlayerAssets, PlayerModelCatalog,
 };
 
-const DEFAULT_SERVER_ADDR: &str = "127.0.0.1:4000";
 const LOCAL_BIND_ADDR: &str = "0.0.0.0:0";
 const UPDATE_INTERVAL_SECONDS: f32 = 0.05;
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 const NETWORK_LOOP_SLEEP: Duration = Duration::from_millis(16);
 const MAX_PACKET_SIZE: usize = 8 * 1024;
 const PROJECTILE_RADIUS: f32 = 0.22;
@@ -37,13 +42,99 @@ const LOCAL_SNAP_DISTANCE: f32 = 4.0;
 const DEFAULT_PLAYER_LEVEL: u32 = 1;
 const DEFAULT_NEXT_LEVEL_XP: u32 = 120;
 
+/// High-level client session / transport state (TASK-14 frozen connection states).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ClientConnectionState {
+    /// Binding socket / spawning I/O thread (single-frame or brief).
+    #[default]
+    Connecting,
+    /// Transport up; no qualifying snapshot yet for this connect attempt.
+    WaitingForServer,
+    /// At least one qualifying snapshot applied; `your_id` is known.
+    Connected,
+    /// Session not live; user must use Retry or pick team again as documented.
+    Disconnected,
+}
+
+/// Signal from the UDP thread to the Bevy main thread (failure detection §3 in spec).
+#[derive(Debug, Clone, Copy)]
+pub enum NetThreadSignal {
+    /// Recv/send error streak exceeded fixed thresholds (P3 transport rule).
+    TransportFailure,
+}
+
+#[derive(Message, Clone, Copy, Debug)]
+pub enum SessionUiCommand {
+    /// User explicitly resumes waiting for snapshots after **Disconnected** (P2 manual recovery).
+    Retry,
+}
+
+/// Set by [`ingest_server_snapshot_packets`] when the UDP thread dropped the snapshot sender
+/// (failure detection §3: channel implies session ended).
+#[derive(Resource, Default)]
+pub struct NetIncomingDisconnected(pub bool);
+
+/// Session controller: owns lifecycle flags and join idempotency (single ownership vs UI/net).
+#[derive(Resource)]
+pub struct ClientSession {
+    pub state: ClientConnectionState,
+    /// Wall time when **WaitingForServer** began for the current attempt.
+    pub waiting_since: Option<Instant>,
+    /// Last time a qualifying snapshot was applied while **Connected**.
+    pub last_qualifying_snapshot_wall: Option<Instant>,
+    /// While true, incoming snapshots are drained and ignored (no silent re-entry to gameplay).
+    pub discard_incoming_snapshots: bool,
+    /// **P4**: after a join packet is sent, suppress duplicate join until teardown.
+    pub join_flow_committed: bool,
+    /// Server address used for this process (for UI copy).
+    pub server_addr_display: String,
+}
+
+impl Default for ClientSession {
+    fn default() -> Self {
+        Self {
+            state: ClientConnectionState::Connecting,
+            waiting_since: None,
+            last_qualifying_snapshot_wall: None,
+            discard_incoming_snapshots: false,
+            join_flow_committed: false,
+            server_addr_display: String::new(),
+        }
+    }
+}
+
+impl ClientSession {
+    pub fn is_connected(&self) -> bool {
+        self.state == ClientConnectionState::Connected
+    }
+}
+
 pub struct NetworkingPlugin;
+
+/// Strict main-thread ordering for networking / snapshot / UI sync (Bevy 0.18: avoid `.after(fn)`).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+enum ClientNetPipeline {
+    SendLocalState,
+    SendCommands,
+    IngestSnapshot,
+    ApplySnapshot,
+    InterpolateNetEntities,
+    InterpolateRemotePlayers,
+    SessionRetryInput,
+    SessionLifecycle,
+    SyncConnectionUi,
+}
 
 impl Plugin for NetworkingPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<NetworkCommand>()
+            .add_message::<SessionUiCommand>()
             .init_resource::<NetworkState>()
+            .init_resource::<PendingAbilityFeedback>()
             .init_resource::<GameStateSnapshot>()
+            .init_resource::<PendingServerSnapshotFrame>()
+            .init_resource::<ClientSession>()
+            .init_resource::<NetIncomingDisconnected>()
             .insert_resource(LocalStateSendTimer(Timer::from_seconds(
                 UPDATE_INTERVAL_SECONDS,
                 TimerMode::Repeating,
@@ -61,11 +152,39 @@ impl Plugin for NetworkingPlugin {
             )
             .add_systems(
                 Update,
-                interpolate_snapshot_entities.after(apply_server_snapshot),
+                send_local_state.in_set(ClientNetPipeline::SendLocalState),
             )
             .add_systems(
                 Update,
-                interpolate_remote_players.after(apply_server_snapshot),
+                send_network_commands.in_set(ClientNetPipeline::SendCommands),
+            )
+            .add_systems(
+                Update,
+                ingest_server_snapshot_packets.in_set(ClientNetPipeline::IngestSnapshot),
+            )
+            .add_systems(
+                Update,
+                apply_server_snapshot.in_set(ClientNetPipeline::ApplySnapshot),
+            )
+            .add_systems(
+                Update,
+                interpolate_snapshot_entities.in_set(ClientNetPipeline::InterpolateNetEntities),
+            )
+            .add_systems(
+                Update,
+                interpolate_remote_players.in_set(ClientNetPipeline::InterpolateRemotePlayers),
+            )
+            .add_systems(
+                Update,
+                handle_connection_retry_button.in_set(ClientNetPipeline::SessionRetryInput),
+            )
+            .add_systems(
+                Update,
+                update_session_lifecycle.in_set(ClientNetPipeline::SessionLifecycle),
+            )
+            .add_systems(
+                Update,
+                sync_connection_status_ui.in_set(ClientNetPipeline::SyncConnectionUi),
             );
     }
 }
@@ -92,8 +211,12 @@ enum ClientPacket {
         z: f32,
         yaw: f32,
     },
-    Cast {
+    UseAbility {
+        ability: HeroAbility,
         target: TargetId,
+    },
+    UpgradeAbility {
+        ability: HeroAbility,
     },
     Join {
         team: Team,
@@ -117,6 +240,21 @@ pub enum TargetKind {
 pub struct TargetId {
     pub kind: TargetKind,
     pub id: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HeroAbility {
+    MeleeStrike,
+    RangedShot,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectileVisual {
+    #[default]
+    TowerBolt,
+    RangedShot,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -146,8 +284,12 @@ struct PlayerState {
     next_level_xp: u32,
     #[serde(default)]
     skill_points: u32,
+    #[serde(default = "default_ranged_shot_rank")]
+    ranged_shot_rank: u8,
     #[serde(default = "default_character_choice")]
     character: CharacterChoice,
+    #[serde(default)]
+    abilities: PlayerAbilitySnapshot,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -167,6 +309,8 @@ struct ProjectileState {
     x: f32,
     y: f32,
     z: f32,
+    #[serde(default)]
+    visual: ProjectileVisual,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Component)]
@@ -270,6 +414,8 @@ enum ServerPacket {
         game_state: GameState,
         #[serde(default)]
         rematch_in_secs: Option<u64>,
+        #[serde(default)]
+        ability_feedback: Option<String>,
     },
 }
 
@@ -290,10 +436,21 @@ pub struct GameStateSnapshot {
     pub rematch_in_secs: Option<u64>,
 }
 
+/// Latest server ability snapshot for the local hero (drives hotbar UI).
+#[derive(Resource, Clone, Debug)]
+pub struct LocalAbilityBar(pub PlayerAbilitySnapshot);
+
+impl Default for LocalAbilityBar {
+    fn default() -> Self {
+        Self(PlayerAbilitySnapshot::default())
+    }
+}
+
 #[derive(Resource)]
 struct NetworkChannels {
     outgoing: Sender<ClientPacket>,
     incoming: Receiver<ServerPacket>,
+    signals: Receiver<NetThreadSignal>,
 }
 
 #[derive(Resource, Default)]
@@ -330,6 +487,26 @@ struct NetworkState {
     join_pending_last_logged: Option<(u64, Team, Team)>,
 }
 
+/// Latest drained snapshot for this frame (filled by [`ingest_server_snapshot_packets`]).
+#[derive(Resource, Default)]
+struct PendingServerSnapshotFrame {
+    frame: Option<PendingSnapshotData>,
+}
+
+struct PendingSnapshotData {
+    wall_time: Instant,
+    your_id: u64,
+    players: Vec<PlayerState>,
+    projectiles: Vec<ProjectileState>,
+    structures: Vec<StructureState>,
+    minions: Vec<MinionState>,
+    neutrals: Vec<NeutralState>,
+    game_state: GameState,
+    rematch_in_secs: Option<u64>,
+    /// Local team choice at ingest time (spawn gate when server has not yet mirrored selection).
+    selected_team_for_spawn: Option<Team>,
+}
+
 #[derive(Resource)]
 struct LocalStateSendTimer(Timer);
 
@@ -342,12 +519,18 @@ pub struct NetworkPlayerId(pub u64);
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkCharacterChoice(pub CharacterChoice);
 
-#[derive(Component, Clone, Copy, Debug, Default)]
+#[derive(Component, Clone, Copy, Debug)]
 pub struct PlayerProgression {
     pub level: u32,
     pub xp: u32,
     pub next_level_xp: u32,
     pub skill_points: u32,
+    pub ranged_shot_rank: u8,
+}
+
+#[derive(Resource, Default)]
+pub struct PendingAbilityFeedback {
+    pub message: Option<String>,
 }
 
 #[derive(Component)]
@@ -394,8 +577,11 @@ struct RemotePlayerInterpolation {
 #[derive(Resource)]
 struct NetworkVisualAssets {
     projectile_mesh: Handle<Mesh>,
+    ranged_shot_mesh: Handle<Mesh>,
     friendly_projectile_material: Handle<StandardMaterial>,
     hostile_projectile_material: Handle<StandardMaterial>,
+    friendly_ranged_shot_material: Handle<StandardMaterial>,
+    hostile_ranged_shot_material: Handle<StandardMaterial>,
     tower_mesh: Handle<Mesh>,
     base_tower_mesh: Handle<Mesh>,
     minion_mesh: Handle<Mesh>,
@@ -413,6 +599,7 @@ fn setup_network_visual_assets(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let projectile_mesh = meshes.add(Mesh::from(Sphere::new(PROJECTILE_RADIUS)));
+    let ranged_shot_mesh = meshes.add(Mesh::from(Cuboid::new(0.22, 0.22, 0.72)));
     let tower_mesh = meshes.add(Mesh::from(Cuboid::new(
         TOWER_SIZE,
         TOWER_HEIGHT,
@@ -431,6 +618,16 @@ fn setup_network_visual_assets(
     });
     let hostile_projectile_material = materials.add(StandardMaterial {
         base_color: Color::srgb(1.0, 0.36, 0.36),
+        unlit: true,
+        ..default()
+    });
+    let friendly_ranged_shot_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.15, 0.98, 0.62),
+        unlit: true,
+        ..default()
+    });
+    let hostile_ranged_shot_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.42, 0.08),
         unlit: true,
         ..default()
     });
@@ -463,8 +660,11 @@ fn setup_network_visual_assets(
 
     commands.insert_resource(NetworkVisualAssets {
         projectile_mesh,
+        ranged_shot_mesh,
         friendly_projectile_material,
         hostile_projectile_material,
+        friendly_ranged_shot_material,
+        hostile_ranged_shot_material,
         tower_mesh,
         base_tower_mesh,
         minion_mesh,
@@ -477,19 +677,57 @@ fn setup_network_visual_assets(
     });
 }
 
-fn start_networking(mut commands: Commands) {
-    let server_addr =
-        std::env::var("GAME_SERVER_ADDR").unwrap_or_else(|_| DEFAULT_SERVER_ADDR.to_owned());
+fn start_networking(
+    mut commands: Commands,
+    mut client_session: ResMut<ClientSession>,
+    file_addr: Res<FileGameServerAddr>,
+) {
+    let preferred_addr = std::env::var("GAME_SERVER_ADDR")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| file_addr.0.clone())
+        .unwrap_or_else(|| DEFAULT_GAME_SERVER_ADDR.to_owned());
+    let server_addr = validated_server_addr_or_default(&preferred_addr);
+    if server_addr != preferred_addr {
+        warn!(
+            "Ignoring invalid GAME_SERVER_ADDR/file value {preferred_addr:?}; falling back to {server_addr}"
+        );
+    }
+    spawn_network_transport(&mut commands, &mut client_session, server_addr);
+}
+
+fn validated_server_addr_or_default(raw: &str) -> String {
+    crate::persistence::validate_game_server_addr(raw)
+        .or_else(|| crate::persistence::validate_game_server_addr(DEFAULT_GAME_SERVER_ADDR))
+        .expect("default game server address must validate")
+}
+
+fn spawn_network_transport(
+    commands: &mut Commands,
+    client_session: &mut ClientSession,
+    server_addr: String,
+) {
+    client_session.server_addr_display.clone_from(&server_addr);
+    commands.insert_resource(ResolvedServerAddressForPrefs(server_addr.clone()));
     let (outgoing_tx, outgoing_rx) = unbounded::<ClientPacket>();
     let (incoming_tx, incoming_rx) = unbounded::<ServerPacket>();
+    let (signal_tx, signal_rx) = unbounded::<NetThreadSignal>();
 
+    let addr_for_thread = server_addr;
     thread::spawn(move || {
-        run_udp_client(server_addr, outgoing_rx, incoming_tx);
+        run_udp_client(addr_for_thread, outgoing_rx, incoming_tx, signal_tx);
     });
+
+    client_session.state = ClientConnectionState::WaitingForServer;
+    client_session.waiting_since = Some(Instant::now());
+    client_session.discard_incoming_snapshots = false;
+    client_session.join_flow_committed = false;
+    client_session.last_qualifying_snapshot_wall = None;
 
     commands.insert_resource(NetworkChannels {
         outgoing: outgoing_tx,
         incoming: incoming_rx,
+        signals: signal_rx,
     });
 }
 
@@ -497,6 +735,7 @@ fn run_udp_client(
     server_addr: String,
     outgoing: Receiver<ClientPacket>,
     incoming: Sender<ServerPacket>,
+    signals: Sender<NetThreadSignal>,
 ) {
     eprintln!("[omoba:cli] event=net_connecting addr={server_addr}");
     let socket = match UdpSocket::bind(LOCAL_BIND_ADDR) {
@@ -521,8 +760,17 @@ fn run_udp_client(
     let mut last_heartbeat_at = Instant::now();
     let mut last_receive_error_log_at: Option<Instant> = None;
     let mut first_snapshot_received = false;
+    let mut consecutive_recv_errors: u32 = 0;
+    let mut consecutive_send_errors: u32 = 0;
+    let mut transport_failure_reported = false;
 
-    let _ = send_packet(&socket, &ClientPacket::Ping);
+    let _ = udp_try_send(
+        &socket,
+        &ClientPacket::Ping,
+        &mut consecutive_send_errors,
+        &mut transport_failure_reported,
+        &signals,
+    );
 
     loop {
         loop {
@@ -537,8 +785,14 @@ fn run_udp_client(
             }
         }
 
-        if last_heartbeat_at.elapsed() >= HEARTBEAT_INTERVAL {
-            let _ = send_packet(&socket, &ClientPacket::Ping);
+        if last_heartbeat_at.elapsed() >= T_RETRY {
+            udp_try_send(
+                &socket,
+                &ClientPacket::Ping,
+                &mut consecutive_send_errors,
+                &mut transport_failure_reported,
+                &signals,
+            );
             last_heartbeat_at = Instant::now();
         }
 
@@ -550,7 +804,6 @@ fn run_udp_client(
                             eprintln!("[omoba:cli] event=net_first_snapshot addr={server_addr}");
                             first_snapshot_received = true;
                         }
-                        let _ = incoming.send(packet);
                     }
                     Err(error) => {
                         eprintln!("[omoba:cli] event=net_packet_decode_error error={error}");
@@ -558,12 +811,19 @@ fn run_udp_client(
                 },
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
                 Err(error) => {
+                    consecutive_recv_errors = consecutive_recv_errors.saturating_add(1);
                     let now = Instant::now();
                     if last_receive_error_log_at
                         .is_none_or(|last| now.duration_since(last) >= Duration::from_secs(1))
                     {
                         eprintln!("[omoba:cli] event=net_recv_error error={error}");
                         last_receive_error_log_at = Some(now);
+                    }
+                    if consecutive_recv_errors >= TRANSPORT_CONSECUTIVE_RECV_ERRORS
+                        && !transport_failure_reported
+                    {
+                        transport_failure_reported = true;
+                        let _ = signals.send(NetThreadSignal::TransportFailure);
                     }
                     break;
                 }
@@ -581,15 +841,46 @@ fn send_packet(socket: &UdpSocket, packet: &ClientPacket) -> io::Result<()> {
     Ok(())
 }
 
+fn udp_try_send(
+    socket: &UdpSocket,
+    packet: &ClientPacket,
+    consecutive_send_errors: &mut u32,
+    transport_failure_reported: &mut bool,
+    signals: &Sender<NetThreadSignal>,
+) -> bool {
+    match send_packet(socket, packet) {
+        Ok(()) => {
+            *consecutive_send_errors = 0;
+            true
+        }
+        Err(error) => {
+            *consecutive_send_errors = consecutive_send_errors.saturating_add(1);
+            eprintln!("Client UDP send error: {error}");
+            if *consecutive_send_errors >= TRANSPORT_CONSECUTIVE_SEND_ERRORS
+                && !*transport_failure_reported
+            {
+                *transport_failure_reported = true;
+                let _ = signals.send(NetThreadSignal::TransportFailure);
+            }
+            false
+        }
+    }
+}
+
 fn send_local_state(
     time: Res<Time>,
     mut timer: ResMut<LocalStateSendTimer>,
     channels: Option<Res<NetworkChannels>>,
+    client_session: Res<ClientSession>,
     player_query: Query<&Transform, With<Player>>,
 ) {
     let Some(channels) = channels else {
         return;
     };
+
+    if !client_session.is_connected() {
+        return;
+    }
 
     timer.0.tick(time.delta());
     if !timer.0.just_finished() {
@@ -613,6 +904,7 @@ fn send_local_state(
 fn send_network_commands(
     mut command_events: MessageReader<NetworkCommand>,
     channels: Option<Res<NetworkChannels>>,
+    mut client_session: ResMut<ClientSession>,
 ) {
     let Some(channels) = channels else {
         return;
@@ -621,17 +913,27 @@ fn send_network_commands(
     for command in command_events.read() {
         match command {
             NetworkCommand::Cast { target } => {
+                if !client_session.is_connected() {
+                    continue;
+                }
                 let _ = channels
                     .outgoing
-                    .send(ClientPacket::Cast { target: *target });
+                    .send(ClientPacket::UpgradeAbility { ability: *ability });
             }
             NetworkCommand::Join { team, character } => {
+                if client_session.join_flow_committed {
+                    continue;
+                }
+                client_session.join_flow_committed = true;
                 let _ = channels.outgoing.send(ClientPacket::Join {
                     team: *team,
                     character: *character,
                 });
             }
             NetworkCommand::RequestRematch => {
+                if !client_session.is_connected() {
+                    continue;
+                }
                 let _ = channels.outgoing.send(ClientPacket::RequestRematch);
             }
         }
@@ -652,30 +954,27 @@ fn choose_authoritative_local_player<T: Copy + Eq>(
     chosen
 }
 
-fn apply_server_snapshot(
-    mut commands: Commands,
+fn ingest_server_snapshot_packets(
     channels: Option<Res<NetworkChannels>>,
-    mut network_state: ResMut<NetworkState>,
-    mut transform_sets: ParamSet<(
-        Query<&mut Transform>,
-        Query<&mut Transform, With<MainCamera>>,
-    )>,
-    remote_query: Query<&RemotePlayer>,
-    projectile_query: Query<&NetworkProjectile>,
-    structure_query: Query<&NetworkStructure>,
-    minion_query: Query<&NetworkMinion>,
-    neutral_query: Query<&NetworkNeutral>,
-    local_player_query: Query<(Entity, Option<&NetworkPlayerId>), With<Player>>,
-    player_assets: Res<PlayerAssets>,
-    model_catalog: Res<PlayerModelCatalog>,
-    visuals: Res<NetworkVisualAssets>,
-    mut game_state_snapshot: ResMut<GameStateSnapshot>,
-    mut cam_state: ResMut<CameraState>,
+    client_session: Res<ClientSession>,
+    mut pending: ResMut<PendingServerSnapshotFrame>,
+    mut incoming_dead: ResMut<NetIncomingDisconnected>,
     team_selection: Res<TeamSelection>,
 ) {
-    let Some(channels) = channels else {
+    pending.frame = None;
+    let Some(channels) = channels.as_ref() else {
         return;
     };
+
+    if client_session.discard_incoming_snapshots {
+        loop {
+            match channels.incoming.try_recv() {
+                Ok(_) => {}
+                Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
+            }
+        }
+        return;
+    }
 
     let mut latest_snapshot: Option<(
         u64,
@@ -687,19 +986,16 @@ fn apply_server_snapshot(
         GameState,
         Option<u64>,
     )> = None;
-    while let Ok(packet) = channels.incoming.try_recv() {
-        match packet {
-            ServerPacket::Snapshot {
-                your_id,
-                players,
-                projectiles,
-                structures,
-                minions,
-                neutrals,
-                game_state,
-                rematch_in_secs,
-            } => {
-                latest_snapshot = Some((
+
+    loop {
+        match channels.incoming.try_recv() {
+            Err(TryRecvError::Empty) => break,
+            Err(TryRecvError::Disconnected) => {
+                incoming_dead.0 = true;
+                break;
+            }
+            Ok(packet) => match packet {
+                ServerPacket::Snapshot {
                     your_id,
                     players,
                     projectiles,
@@ -708,8 +1004,19 @@ fn apply_server_snapshot(
                     neutrals,
                     game_state,
                     rematch_in_secs,
-                ));
-            }
+                } => {
+                    latest_snapshot = Some((
+                        your_id,
+                        players,
+                        projectiles,
+                        structures,
+                        minions,
+                        neutrals,
+                        game_state,
+                        rematch_in_secs,
+                    ));
+                }
+            },
         }
     }
 
@@ -727,9 +1034,66 @@ fn apply_server_snapshot(
         return;
     };
 
+    pending.frame = Some(PendingSnapshotData {
+        wall_time: Instant::now(),
+        your_id,
+        players,
+        projectiles,
+        structures,
+        minions,
+        neutrals,
+        game_state,
+        rematch_in_secs,
+        selected_team_for_spawn: team_selection.team,
+    });
+}
+
+fn apply_server_snapshot(
+    mut commands: Commands,
+    mut pending: ResMut<PendingServerSnapshotFrame>,
+    mut client_session: ResMut<ClientSession>,
+    mut network_state: ResMut<NetworkState>,
+    mut transform_sets: ParamSet<(
+        Query<&mut Transform>,
+        Query<&mut Transform, With<MainCamera>>,
+    )>,
+    remote_query: Query<&RemotePlayer>,
+    projectile_query: Query<&NetworkProjectile>,
+    structure_query: Query<&NetworkStructure>,
+    minion_query: Query<&NetworkMinion>,
+    neutral_query: Query<&NetworkNeutral>,
+    local_player_query: Query<(Entity, Option<&NetworkPlayerId>), With<Player>>,
+    player_assets: Res<PlayerAssets>,
+    model_catalog: Res<PlayerModelCatalog>,
+    visuals: Res<NetworkVisualAssets>,
+    mut game_state_snapshot: ResMut<GameStateSnapshot>,
+    mut cam_state: ResMut<CameraState>,
+) {
+    let Some(data) = pending.frame.take() else {
+        return;
+    };
+    let PendingSnapshotData {
+        wall_time: snapshot_wall_time,
+        your_id,
+        players,
+        projectiles,
+        structures,
+        minions,
+        neutrals,
+        game_state,
+        rematch_in_secs,
+    )) = latest_snapshot
+    else {
+        return;
+    };
+
     network_state.local_id = Some(your_id);
     game_state_snapshot.state = game_state;
     game_state_snapshot.rematch_in_secs = rematch_in_secs;
+
+    if let Some(local) = players.iter().find(|player| player.id == your_id) {
+        commands.insert_resource(LocalAbilityBar(local.abilities.clone()));
+    }
 
     let local_player_state = players.iter().find(|player| player.id == your_id);
     let local_players = local_player_query
@@ -791,7 +1155,7 @@ fn apply_server_snapshot(
         }
     } else if let Some(local_player_state) = local_player_state {
         // Wait for server ack of selected team to avoid first spawn on default Green.
-        let Some(selected_team) = team_selection.team else {
+        let Some(selected_team) = selected_team_for_spawn else {
             return;
         };
         if local_player_state.team != selected_team {
@@ -982,15 +1346,28 @@ fn apply_server_snapshot(
         let is_friendly = network_state
             .local_team
             .is_some_and(|team| team == projectile.owner_team);
-        let material = if is_friendly {
-            visuals.friendly_projectile_material.clone()
-        } else {
-            visuals.hostile_projectile_material.clone()
+        let (proj_mesh, material) = match projectile.visual {
+            ProjectileVisual::RangedShot => (
+                visuals.ranged_shot_mesh.clone(),
+                if is_friendly {
+                    visuals.friendly_ranged_shot_material.clone()
+                } else {
+                    visuals.hostile_ranged_shot_material.clone()
+                },
+            ),
+            ProjectileVisual::TowerBolt => (
+                visuals.projectile_mesh.clone(),
+                if is_friendly {
+                    visuals.friendly_projectile_material.clone()
+                } else {
+                    visuals.hostile_projectile_material.clone()
+                },
+            ),
         };
 
         let entity = commands
             .spawn((
-                Mesh3d(visuals.projectile_mesh.clone()),
+                Mesh3d(proj_mesh),
                 MeshMaterial3d(material),
                 Transform::from_xyz(projectile.x, projectile.y, projectile.z),
                 Visibility::default(),
@@ -1254,6 +1631,372 @@ fn interpolate_remote_players(
     }
 }
 
+#[derive(Component)]
+struct ConnectionStatusRoot;
+
+#[derive(Component)]
+struct ConnectionStatusLabel;
+
+#[derive(Component)]
+struct ConnectionRetryButton;
+
+const CONNECTION_PANEL_BG: Color = Color::srgba(0.02, 0.02, 0.06, 0.72);
+
+fn setup_connection_status_ui(mut commands: Commands) {
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(16.0),
+                top: Val::Px(12.0),
+                padding: UiRect::all(Val::Px(12.0)),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(8.0),
+                ..default()
+            },
+            BackgroundColor(CONNECTION_PANEL_BG),
+            ConnectionStatusRoot,
+            Visibility::Visible,
+            ZIndex(20),
+            Name::new("ConnectionStatusPanel"),
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Text::new(""),
+                TextFont {
+                    font_size: 16.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+                ConnectionStatusLabel,
+            ));
+            parent
+                .spawn((
+                    Button,
+                    Node {
+                        width: Val::Px(120.0),
+                        height: Val::Px(36.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.25, 0.42, 0.32)),
+                    Visibility::Hidden,
+                    ConnectionRetryButton,
+                ))
+                .with_children(|button| {
+                    button.spawn((
+                        Text::new("Retry"),
+                        TextFont {
+                            font_size: 16.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
+        });
+}
+
+fn handle_connection_retry_button(
+    interaction: Query<&Interaction, (With<ConnectionRetryButton>, Changed<Interaction>)>,
+    mut writer: MessageWriter<SessionUiCommand>,
+) {
+    for i in &interaction {
+        if *i == Interaction::Pressed {
+            writer.write(SessionUiCommand::Retry);
+        }
+    }
+}
+
+fn sync_connection_status_ui(
+    client_session: Res<ClientSession>,
+    mut label_q: Query<&mut Text, With<ConnectionStatusLabel>>,
+    mut retry_vis: Query<&mut Visibility, With<ConnectionRetryButton>>,
+) {
+    let Ok(mut text) = label_q.single_mut() else {
+        return;
+    };
+    match client_session.state {
+        ClientConnectionState::Connecting => {
+            text.0 = format!("Connecting… ({})", client_session.server_addr_display);
+        }
+        ClientConnectionState::WaitingForServer => {
+            text.0 = format!(
+                "Waiting for server at {}. Start the server or check GAME_SERVER_ADDR. Retries every {}s (max wait {}s).",
+                client_session.server_addr_display,
+                T_RETRY.as_secs(),
+                T_WAIT_MAX.as_secs()
+            );
+        }
+        ClientConnectionState::Connected => {
+            text.0 = format!("Connected ({}).", client_session.server_addr_display);
+        }
+        ClientConnectionState::Disconnected => {
+            text.0 = "Disconnected — connection lost or timed out. Use Retry when the server is back, then choose your team again."
+                .to_string();
+        }
+    }
+
+    let Ok(mut retry_vis) = retry_vis.single_mut() else {
+        return;
+    };
+    *retry_vis = if client_session.state == ClientConnectionState::Disconnected {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
+}
+
+fn despawn_tracked_net_entities(
+    commands: &mut Commands,
+    network_state: &mut NetworkState,
+    remote_query: &Query<Entity, With<RemotePlayer>>,
+    projectile_query: &Query<Entity, With<NetworkProjectile>>,
+    structure_query: &Query<Entity, With<NetworkStructure>>,
+    minion_query: &Query<Entity, With<NetworkMinion>>,
+    neutral_query: &Query<Entity, With<NetworkNeutral>>,
+) {
+    for &entity in network_state.remote_players.values() {
+        if remote_query.get(entity).is_ok() {
+            commands
+                .entity(entity)
+                .despawn_related::<Children>()
+                .despawn();
+        }
+    }
+    network_state.remote_players.clear();
+
+    for &entity in network_state.projectiles.values() {
+        if projectile_query.get(entity).is_ok() {
+            commands
+                .entity(entity)
+                .despawn_related::<Children>()
+                .despawn();
+        }
+    }
+    network_state.projectiles.clear();
+
+    for &entity in network_state.structures.values() {
+        if structure_query.get(entity).is_ok() {
+            commands
+                .entity(entity)
+                .despawn_related::<Children>()
+                .despawn();
+        }
+    }
+    network_state.structures.clear();
+
+    for &entity in network_state.minions.values() {
+        if minion_query.get(entity).is_ok() {
+            commands
+                .entity(entity)
+                .despawn_related::<Children>()
+                .despawn();
+        }
+    }
+    network_state.minions.clear();
+
+    for &entity in network_state.neutrals.values() {
+        if neutral_query.get(entity).is_ok() {
+            commands
+                .entity(entity)
+                .despawn_related::<Children>()
+                .despawn();
+        }
+    }
+    network_state.neutrals.clear();
+
+    network_state.local_id = None;
+    network_state.local_team = None;
+}
+
+fn despawn_local_players(commands: &mut Commands, player_query: &Query<Entity, With<Player>>) {
+    for entity in player_query.iter() {
+        commands
+            .entity(entity)
+            .despawn_related::<Children>()
+            .despawn();
+    }
+}
+
+fn perform_network_teardown(
+    commands: &mut Commands,
+    client_session: &mut ClientSession,
+    network_state: &mut NetworkState,
+    game_state_snapshot: &mut GameStateSnapshot,
+    team_selection: &mut TeamSelection,
+    cam_state: &mut CameraState,
+    overlay_query: &Query<Entity, With<TeamSelectRoot>>,
+    remote_query: &Query<Entity, With<RemotePlayer>>,
+    projectile_query: &Query<Entity, With<NetworkProjectile>>,
+    structure_query: &Query<Entity, With<NetworkStructure>>,
+    minion_query: &Query<Entity, With<NetworkMinion>>,
+    neutral_query: &Query<Entity, With<NetworkNeutral>>,
+    player_query: &Query<Entity, With<Player>>,
+) {
+    despawn_tracked_net_entities(
+        commands,
+        network_state,
+        remote_query,
+        projectile_query,
+        structure_query,
+        minion_query,
+        neutral_query,
+    );
+    despawn_local_players(commands, player_query);
+
+    *game_state_snapshot = GameStateSnapshot::default();
+    cam_state.locked = false;
+    team_selection.team = None;
+
+    if overlay_query.iter().next().is_none() {
+        spawn_team_select_ui(commands, team_selection.character);
+    }
+
+    client_session.state = ClientConnectionState::Disconnected;
+    client_session.discard_incoming_snapshots = true;
+    client_session.join_flow_committed = false;
+    client_session.waiting_since = None;
+    client_session.last_qualifying_snapshot_wall = None;
+}
+
+fn update_session_lifecycle(
+    mut commands: Commands,
+    mut client_session: ResMut<ClientSession>,
+    mut incoming_dead: ResMut<NetIncomingDisconnected>,
+    channels: Option<Res<NetworkChannels>>,
+    mut network_state: ResMut<NetworkState>,
+    mut game_state_snapshot: ResMut<GameStateSnapshot>,
+    mut team_selection: ResMut<TeamSelection>,
+    mut cam_state: ResMut<CameraState>,
+    overlay_query: Query<Entity, With<TeamSelectRoot>>,
+    mut session_ui: MessageReader<SessionUiCommand>,
+    remote_query: Query<Entity, With<RemotePlayer>>,
+    projectile_query: Query<Entity, With<NetworkProjectile>>,
+    structure_query: Query<Entity, With<NetworkStructure>>,
+    minion_query: Query<Entity, With<NetworkMinion>>,
+    neutral_query: Query<Entity, With<NetworkNeutral>>,
+    player_query: Query<Entity, With<Player>>,
+) {
+    let mut retried_this_frame = false;
+    for event in session_ui.read() {
+        match event {
+            SessionUiCommand::Retry => {
+                if client_session.state == ClientConnectionState::Disconnected {
+                    commands.remove_resource::<NetworkChannels>();
+                    let retry_addr =
+                        validated_server_addr_or_default(&client_session.server_addr_display);
+                    spawn_network_transport(&mut commands, &mut client_session, retry_addr);
+                    incoming_dead.0 = false;
+                    retried_this_frame = true;
+                }
+            }
+        }
+    }
+
+    // Ignore stale transport signals in the same frame as a Retry-triggered transport swap.
+    if retried_this_frame {
+        return;
+    }
+
+    let Some(channels) = channels.as_ref() else {
+        return;
+    };
+
+    if incoming_dead.0 {
+        incoming_dead.0 = false;
+        if client_session.state != ClientConnectionState::Disconnected {
+            perform_network_teardown(
+                &mut commands,
+                &mut client_session,
+                &mut network_state,
+                &mut game_state_snapshot,
+                &mut team_selection,
+                &mut cam_state,
+                &overlay_query,
+                &remote_query,
+                &projectile_query,
+                &structure_query,
+                &minion_query,
+                &neutral_query,
+                &player_query,
+            );
+        }
+    }
+
+    while let Ok(signal) = channels.signals.try_recv() {
+        match signal {
+            NetThreadSignal::TransportFailure => {
+                if client_session.state != ClientConnectionState::Disconnected {
+                    perform_network_teardown(
+                        &mut commands,
+                        &mut client_session,
+                        &mut network_state,
+                        &mut game_state_snapshot,
+                        &mut team_selection,
+                        &mut cam_state,
+                        &overlay_query,
+                        &remote_query,
+                        &projectile_query,
+                        &structure_query,
+                        &minion_query,
+                        &neutral_query,
+                        &player_query,
+                    );
+                }
+            }
+        }
+    }
+
+    let now = Instant::now();
+
+    if client_session.state == ClientConnectionState::WaitingForServer {
+        if let Some(since) = client_session.waiting_since {
+            if since.elapsed() >= T_WAIT_MAX {
+                perform_network_teardown(
+                    &mut commands,
+                    &mut client_session,
+                    &mut network_state,
+                    &mut game_state_snapshot,
+                    &mut team_selection,
+                    &mut cam_state,
+                    &overlay_query,
+                    &remote_query,
+                    &projectile_query,
+                    &structure_query,
+                    &minion_query,
+                    &neutral_query,
+                    &player_query,
+                );
+            }
+        }
+    }
+
+    if client_session.state == ClientConnectionState::Connected {
+        if is_stale(
+            client_session.last_qualifying_snapshot_wall,
+            now,
+            T_STALE_SNAPSHOT,
+        ) {
+            perform_network_teardown(
+                &mut commands,
+                &mut client_session,
+                &mut network_state,
+                &mut game_state_snapshot,
+                &mut team_selection,
+                &mut cam_state,
+                &overlay_query,
+                &remote_query,
+                &projectile_query,
+                &structure_query,
+                &minion_query,
+                &neutral_query,
+                &player_query,
+            );
+        }
+    }
+}
+
 fn player_state_to_combat_stats(player: &PlayerState) -> CombatStats {
     CombatStats {
         hp: player.hp,
@@ -1269,6 +2012,7 @@ fn player_state_to_progression(player: &PlayerState) -> PlayerProgression {
         xp: player.xp,
         next_level_xp: player.next_level_xp,
         skill_points: player.skill_points,
+        ranged_shot_rank: player.ranged_shot_rank.max(1),
     }
 }
 
@@ -1319,6 +2063,10 @@ fn default_next_level_xp() -> u32 {
     DEFAULT_NEXT_LEVEL_XP
 }
 
+fn default_ranged_shot_rank() -> u8 {
+    1
+}
+
 fn default_max_hp() -> f32 {
     MAX_HP
 }
@@ -1337,7 +2085,29 @@ fn default_minion_brain_state() -> MinionBrainState {
 
 #[cfg(test)]
 mod tests {
-    use super::choose_authoritative_local_player;
+    use super::{HeroAbility, NetworkCommand, TargetId, TargetKind, choose_authoritative_local_player};
+
+    #[test]
+    fn hero_ability_ranged_shot_deserializes_from_snake_case_json() {
+        let parsed: HeroAbility = serde_json::from_str("\"ranged_shot\"").unwrap();
+        assert_eq!(parsed, HeroAbility::RangedShot);
+    }
+
+    #[test]
+    fn use_ability_ranged_shot_command_holds_target() {
+        let cmd = NetworkCommand::UseAbility {
+            ability: HeroAbility::RangedShot,
+            target: TargetId {
+                kind: TargetKind::Minion,
+                id: 42,
+            },
+        };
+        let NetworkCommand::UseAbility { ability, target } = cmd else {
+            panic!("expected UseAbility");
+        };
+        assert_eq!(ability, HeroAbility::RangedShot);
+        assert_eq!(target.id, 42);
+    }
 
     #[test]
     fn choose_authoritative_local_player_prefers_matching_network_id() {

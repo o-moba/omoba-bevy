@@ -61,13 +61,16 @@ pub struct SetupPlugin;
 
 impl Plugin for SetupPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_scene)
-            .init_resource::<ModelScaleSettings>()
-            .init_resource::<LightingSettings>()
-            .add_systems(Update, sync_selected_player_assets)
-            .add_systems(Update, normalize_model_scale_system)
-            .add_systems(Update, apply_lighting_settings_system)
-            .add_systems(Update, spawn_local_player_on_team);
+        app.add_systems(
+            Startup,
+            setup_scene.after(crate::persistence::load_persistent_client_settings),
+        )
+        .init_resource::<ModelScaleSettings>()
+        .init_resource::<LightingSettings>()
+        .add_systems(Update, sync_selected_player_assets)
+        .add_systems(Update, normalize_model_scale_system)
+        .add_systems(Update, apply_lighting_settings_system)
+        .add_systems(Update, spawn_local_player_on_team);
     }
 }
 

@@ -27,7 +27,13 @@ impl Plugin for MinimapPlugin {
             .init_resource::<MinimapNavigationState>()
             .add_systems(Startup, setup_minimap_ui)
             .add_systems(PreUpdate, handle_minimap_navigation_system)
-            .add_systems(PostUpdate, update_minimap_icons_system);
+            .add_systems(
+                PostUpdate,
+                (
+                    update_minimap_icons_system,
+                    sync_minimap_visibility_for_session.after(update_minimap_icons_system),
+                ),
+            );
     }
 }
 
@@ -234,6 +240,20 @@ fn update_minimap_icons_system(
         );
     }
     despawn_removed_icons(&mut commands, &mut state.minion_icons, &seen_minions);
+}
+
+fn sync_minimap_visibility_for_session(
+    client_session: Res<ClientSession>,
+    mut roots: Query<&mut Visibility, With<MinimapRoot>>,
+) {
+    let vis = if client_session.is_connected() {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
+    for mut v in &mut roots {
+        *v = vis;
+    }
 }
 
 fn sync_minimap_icon(
