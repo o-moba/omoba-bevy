@@ -4,12 +4,8 @@
 use bevy::prelude::KeyCode;
 
 /// Keys that trigger a cast toward the current target (same server action until skill slots exist).
-pub const SKILL_CAST_KEYS: [KeyCode; 4] = [
-    KeyCode::KeyQ,
-    KeyCode::KeyW,
-    KeyCode::KeyE,
-    KeyCode::KeyR,
-];
+pub const SKILL_CAST_KEYS: [KeyCode; 4] =
+    [KeyCode::KeyQ, KeyCode::KeyW, KeyCode::KeyE, KeyCode::KeyR];
 
 /// Reserved for future skill-upgrade UI; keep in sync with `upgrade_key_display()`.
 #[allow(dead_code)]

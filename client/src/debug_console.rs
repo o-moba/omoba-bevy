@@ -71,10 +71,6 @@ impl Plugin for DebugConsolePlugin {
     }
 }
 
-pub fn debug_ui_enabled(console: Option<Res<DebugConsole>>) -> bool {
-    console.is_some_and(|c| c.ui_enabled)
-}
-
 #[derive(Component)]
 struct DebugConsoleRoot;
 

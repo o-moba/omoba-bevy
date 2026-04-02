@@ -140,7 +140,10 @@ fn running_status_text(
     objective_line: &str,
     cooldown_remaining_secs: f32,
 ) -> String {
-    let slots_line = format!("Skill slots: {} (same cast, shared CD)", skill_slots_bracket_line());
+    let slots_line = format!(
+        "Skill slots: {} (same cast, shared CD)",
+        skill_slots_bracket_line()
+    );
     let cast_line = if cooldown_remaining_secs > 0.0 {
         format!("Spell cooldown: {:.1}s (shared)", cooldown_remaining_secs)
     } else {
@@ -156,7 +159,9 @@ fn running_status_text(
             };
             format!("Target: {kind} #{}", t.id)
         }
-        None => "Target: none — Tab (nearest foe), middle-click near foe, Backspace clear".to_string(),
+        None => {
+            "Target: none — Tab (nearest foe), middle-click near foe, Backspace clear".to_string()
+        }
     };
     let hp = stats.hp.max(0.0);
     let max_hp = stats.max_hp.max(1.0);
