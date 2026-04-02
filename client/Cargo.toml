@@ -9,5 +9,5 @@ crossbeam-channel.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-shared = { path = "../shared" }
+skills = { path = "../skills" }
 winit.workspace = true

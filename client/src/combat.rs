@@ -8,13 +8,14 @@ use bevy::{
     prelude::*,
     window::PrimaryWindow,
 };
+use std::time::{Duration, Instant};
 
 use crate::camera::MainCamera;
-use crate::debug_console::DebugConsole;
+use crate::debug_console::{DebugConsole, debug_ui_enabled};
 use crate::net::{
     GameState, GameStateSnapshot, HeroAbility, NetworkCommand, NetworkMinion, NetworkMinionId,
     NetworkNeutral, NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId,
-    PendingAbilityFeedback, RemotePlayer, StructureKind, TargetId, TargetKind,
+    PlayerProgression, RemotePlayer, StructureKind, TargetId, TargetKind,
 };
 use shared::{SkillSlot, TargetingMode, ability_for_slot, scaled_mana_cost};
 use crate::player::Player;
@@ -25,12 +26,11 @@ pub const MAX_HP: f32 = 100.0;
 /// Must match server `server/src/balance.rs` player baselines (display / local defaults).
 pub const MAX_MANA: f32 = 100.0;
 
-/// Must match `MELEE_RANGE_XZ` in `server/src/main.rs` (TASK-07 / AD2).
-pub const MELEE_RANGE_XZ: f32 = 2.75;
-/// Must match `SPELL_MANA_COST` for skill 1 on the server.
-pub const MELEE_MANA_COST: f32 = 20.0;
-/// Must match `MAX_MELEE_SKILL_RANK` on the server.
-pub const MAX_MELEE_SKILL_RANK: u32 = 5;
+/// Heal per rank for skill 3 (rank 1 = index 0). Must match `server/src/main.rs` `SKILL3_HEAL_BY_RANK`.
+pub const SKILL3_HEAL_BY_RANK: [f32; 5] = [30.0, 45.0, 60.0, 75.0, 90.0];
+pub const SKILL3_MANA_COST: f32 = 25.0;
+/// Must match server `SKILL3_COOLDOWN`.
+pub const SKILL3_COOLDOWN_SECS: f32 = 4.0;
 
 const BAR_WIDTH: f32 = 1.45;
 const BAR_HEIGHT: f32 = 0.09;
@@ -54,16 +54,28 @@ const NEUTRAL_MARKER_RADIUS: f32 = 1.1;
 const TOWER_MARKER_RADIUS: f32 = 2.0;
 const BASE_TOWER_MARKER_RADIUS: f32 = 3.75;
 const SKILL_BUTTON_SIZE: f32 = 72.0;
-const SKILL_BUTTON_GAP: f32 = 8.0;
+const SKILL_SLOT_GAP: f32 = 8.0;
 const SKILL_BUTTON_MARGIN: f32 = 20.0;
-const SKILL_BUTTON_GAP: f32 = 12.0;
+const SKILL3_BUTTON_GAP: f32 = 12.0;
 const SKILL_BUTTON_COLOR: Color = Color::srgba(0.12, 0.12, 0.12, 0.75);
+const SKILL_BUTTON_HOVER_COLOR: Color = Color::srgba(0.18, 0.18, 0.18, 0.85);
+const SKILL_BUTTON_PRESS_COLOR: Color = Color::srgba(0.28, 0.28, 0.28, 0.95);
+/// Slight gold tint when the server state allows spending a point on this slot (synced eligibility).
+const SKILL_BUTTON_AFFORDANCE_COLOR: Color = Color::srgba(0.18, 0.16, 0.08, 0.88);
+
+/// HUD copy only — keep in sync with `MANA_RESTORE_*` in `server/src/main.rs`.
+const MANA_RESTORE_BASE: f32 = 22.0;
+const MANA_RESTORE_PER_RANK: f32 = 7.0;
+const MANA_RESTORE_MAX_RANK: u8 = 5;
+const MANA_RESTORE_COOLDOWN_SECS: u64 = 12;
 
 pub struct CombatPlugin;
 
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TargetState>()
+            .init_resource::<HoveredSkillSlot>()
+            .init_resource::<LocalRangedCooldownUntil>()
             .add_systems(Startup, setup_combat_visual_assets)
             .add_systems(Startup, setup_combat_ui)
             .add_systems(
@@ -72,9 +84,13 @@ impl Plugin for CombatPlugin {
                     ability_feedback_display_system,
                     select_target_system,
                     clear_invalid_target_system,
-                    upgrade_ranged_shot_system,
-                    ability_keyboard_system,
-                    ability_hud_button_system,
+                    shift_skill_upgrade_hotkey_system,
+                    cast_spell_system,
+                    skill_hover_scan_system,
+                    skill_slot_button_appearance_system,
+                    skill_slot_press_system,
+                    update_skill_slot_labels_system,
+                    update_skill_tooltip_system,
                     update_target_marker_system,
                 )
                     .chain(),
@@ -88,6 +104,7 @@ impl Plugin for CombatPlugin {
             )
                 .chain(),
         );
+        app.add_systems(Update, admin_debug_hotkeys.run_if(debug_ui_enabled));
     }
 }
 
@@ -132,6 +149,73 @@ struct TargetState {
     marker_entity: Option<Entity>,
 }
 
+/// Optimistic client-side cast gate for observability (mirrors server rules; may drift if server rejects).
+#[derive(Resource, Default)]
+struct LocalSpellCastState {
+    last_cast_at: Option<Instant>,
+}
+
+fn try_queue_spell_cast(
+    target: TargetId,
+    local_stats: &CombatStats,
+    cast_state: &mut LocalSpellCastState,
+    command_writer: &mut MessageWriter<NetworkCommand>,
+    console: &mut DebugConsole,
+) {
+    let now = Instant::now();
+    if !local_stats.is_alive() {
+        info!("[omoba:cli] event=cast_reject reason=caster_dead");
+        console.push_line("Cast rejected: dead (wait for respawn).".to_string());
+        return;
+    }
+    if local_stats.mana < SPELL_MANA_COST {
+        info!(
+            "[omoba:cli] event=cast_reject reason=insufficient_mana have_mana={:.2} cost={:.2}",
+            local_stats.mana, SPELL_MANA_COST
+        );
+        console.push_line(format!(
+            "Cast rejected: need {:.0} mana (have {:.0}).",
+            SPELL_MANA_COST, local_stats.mana
+        ));
+        return;
+    }
+    if let Some(last) = cast_state.last_cast_at {
+        let elapsed = now.duration_since(last);
+        if elapsed < SPELL_COOLDOWN {
+            let remaining = SPELL_COOLDOWN - elapsed;
+            info!(
+                "[omoba:cli] event=cast_reject reason=on_cooldown remaining_ms={}",
+                remaining.as_millis()
+            );
+            console.push_line(format!(
+                "Cast rejected: on cooldown (~{} ms left).",
+                remaining.as_millis()
+            ));
+            return;
+        }
+    }
+
+    command_writer.write(NetworkCommand::Cast { target });
+    cast_state.last_cast_at = Some(now);
+
+    let message = format!(
+        "Cast -> {} {} (mana {:.0})",
+        match target.kind {
+            TargetKind::Player => "player",
+            TargetKind::Minion => "minion",
+            TargetKind::Structure => "structure",
+            TargetKind::Neutral => "neutral",
+        },
+        target.id,
+        local_stats.mana
+    );
+    console.push_line(message.clone());
+    info!(
+        "[omoba:cli] event=cast_sent target_kind={:?} target_id={} mana={:.0}",
+        target.kind, target.id, local_stats.mana
+    );
+}
+
 #[derive(Component, Default)]
 struct CombatBars {
     hp_fill: Option<Entity>,
@@ -141,8 +225,38 @@ struct CombatBars {
 #[derive(Component)]
 struct TargetMarker;
 
+#[derive(Component, Clone, Copy)]
+struct SkillSlotButton {
+    slot: u8,
+}
+
+#[derive(Component, Clone, Copy)]
+struct SkillSlotRankText {
+    slot: u8,
+}
+
+#[derive(Component, Clone, Copy)]
+struct SkillSlotCdText {
+    slot: u8,
+}
+
 #[derive(Component)]
-struct AbilityHudButton(HeroAbility);
+struct SkillTooltipRoot;
+
+#[derive(Component)]
+struct SkillTooltipBody;
+
+#[derive(Resource, Default)]
+struct HoveredSkillSlot(Option<u8>);
+
+#[derive(Resource, Default)]
+struct LocalRangedCooldownUntil(Option<f32>);
+
+#[derive(Component)]
+struct ManaRestoreSkillButton;
+
+#[derive(Component)]
+struct ManaRestoreSkillTooltip;
 
 #[derive(Component)]
 struct CombatBarRoot;
@@ -260,76 +374,95 @@ fn setup_combat_visual_assets(
 }
 
 fn setup_combat_ui(mut commands: Commands) {
-    let ranged_right = SKILL_BUTTON_MARGIN;
-    let melee_right = SKILL_BUTTON_MARGIN + SKILL_BUTTON_SIZE + SKILL_BUTTON_GAP;
-
-    commands.spawn((
-        Button,
-        Node {
-            position_type: PositionType::Absolute,
-            right: Val::Px(ranged_right),
-            bottom: Val::Px(SKILL_BUTTON_MARGIN),
-            width: Val::Px(SKILL_BUTTON_SIZE),
-            height: Val::Px(SKILL_BUTTON_SIZE),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            ..default()
-        },
-        BackgroundColor(SKILL_BUTTON_COLOR),
-        AbilityHudButton(HeroAbility::RangedShot),
-        Name::new("RangedShotButton"),
-    ))
-    .with_children(|parent| {
-        parent.spawn((
-            Text::new("E"),
-            TextFont {
-                font_size: 26.0,
-                ..default()
-            },
-            TextColor(Color::WHITE),
-        ));
-    });
     commands
         .spawn((
-            Button,
             Node {
                 position_type: PositionType::Absolute,
-                right: Val::Px(melee_right),
+                right: Val::Px(SKILL_BUTTON_MARGIN),
                 bottom: Val::Px(SKILL_BUTTON_MARGIN),
-                width: Val::Px(SKILL_BUTTON_SIZE),
-                height: Val::Px(SKILL_BUTTON_SIZE),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
+                flex_direction: FlexDirection::Row,
+                column_gap: Val::Px(SKILL_SLOT_GAP),
                 ..default()
             },
-            BackgroundColor(SKILL_BUTTON_COLOR),
-            AbilityHudButton(HeroAbility::MeleeStrike),
-            Name::new("MeleeStrikeButton"),
+            Name::new("SkillBar"),
         ))
-    .with_children(|parent| {
-        parent.spawn((
-            Text::new("Q"),
-            TextFont {
-                font_size: 26.0,
+        .with_children(|bar| {
+            for slot in 0_u8..4_u8 {
+                bar.spawn((
+                    Button,
+                    Node {
+                        width: Val::Px(SKILL_BUTTON_SIZE),
+                        height: Val::Px(SKILL_BUTTON_SIZE),
+                        flex_direction: FlexDirection::Column,
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        row_gap: Val::Px(2.0),
+                        ..default()
+                    },
+                    BackgroundColor(SKILL_BUTTON_COLOR),
+                    SkillSlotButton { slot },
+                    Name::new(format!("SkillSlot{slot}")),
+                ))
+                .with_children(|btn| {
+                    btn.spawn((
+                        Text::new(format!(
+                            "{}/{}",
+                            skills::STARTING_RANK,
+                            skills::MAX_SKILL_RANK
+                        )),
+                        TextFont {
+                            font_size: 16.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                        SkillSlotRankText { slot },
+                    ));
+                    btn.spawn((
+                        Text::new(""),
+                        TextFont {
+                            font_size: 13.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgba(0.95, 0.82, 0.35, 1.0)),
+                        SkillSlotCdText { slot },
+                        Visibility::Hidden,
+                    ));
+                });
+            }
+        });
+
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(SKILL_BUTTON_MARGIN),
+                bottom: Val::Px(SKILL_BUTTON_MARGIN + SKILL_BUTTON_SIZE + 18.0),
+                width: Val::Px(440.0),
+                padding: UiRect::all(Val::Px(12.0)),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(4.0),
+                border_radius: BorderRadius::all(Val::Px(6.0)),
                 ..default()
             },
-            TextColor(Color::WHITE),
-        ));
-    });
+            BackgroundColor(Color::srgba(0.06, 0.07, 0.1, 0.94)),
+            Visibility::Hidden,
+            SkillTooltipRoot,
+            Name::new("SkillTooltip"),
+        ))
+        .with_children(|tip| {
+            tip.spawn((
+                Text::new(""),
+                TextFont {
+                    font_size: 17.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+                SkillTooltipBody,
+            ));
+        });
 }
 
-fn ability_feedback_display_system(
-    mut feedback: ResMut<PendingAbilityFeedback>,
-    mut console: ResMut<DebugConsole>,
-) {
-    let Some(msg) = feedback.message.take() else {
-        return;
-    };
-    console.push_line(msg.clone());
-    info!("{msg}");
-}
-
-fn upgrade_ranged_shot_system(
+fn shift_skill_upgrade_hotkey_system(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     game_state: Option<Res<GameStateSnapshot>>,
     mut command_writer: MessageWriter<NetworkCommand>,
@@ -339,13 +472,287 @@ fn upgrade_ranged_shot_system(
             return;
         }
     }
-    if !keyboard_input.just_pressed(KeyCode::KeyT) {
+    if !keyboard_input.pressed(KeyCode::ShiftLeft)
+        && !keyboard_input.pressed(KeyCode::ShiftRight)
+    {
         return;
     }
-    command_writer.write(NetworkCommand::UpgradeAbility {
-        ability: HeroAbility::RangedShot,
-    });
-    info!("Request upgrade: Ranged Shot (skill points)");
+    let slot = if keyboard_input.just_pressed(KeyCode::KeyQ) {
+        Some(0_u8)
+    } else if keyboard_input.just_pressed(KeyCode::KeyW) {
+        Some(1)
+    } else if keyboard_input.just_pressed(KeyCode::KeyE) {
+        Some(2)
+    } else if keyboard_input.just_pressed(KeyCode::KeyR) {
+        Some(3)
+    } else {
+        None
+    };
+    if let Some(slot) = slot {
+        command_writer.write(NetworkCommand::UpgradeSkill { slot });
+    }
+}
+
+fn skill_hover_scan_system(
+    buttons: Query<(&Interaction, &SkillSlotButton)>,
+    mut hover: ResMut<HoveredSkillSlot>,
+) {
+    hover.0 = None;
+    for (interaction, btn) in &buttons {
+        if *interaction == Interaction::Hovered || *interaction == Interaction::Pressed {
+            hover.0 = Some(btn.slot);
+            break;
+        }
+    }
+}
+
+fn skill_slot_button_appearance_system(
+    progression: Query<&PlayerProgression, With<Player>>,
+    mut buttons: Query<(&SkillSlotButton, &Interaction, &mut BackgroundColor), With<SkillSlotButton>>,
+) {
+    let Ok(progression) = progression.single() else {
+        return;
+    };
+    for (btn, interaction, mut color) in &mut buttons {
+        let slot = btn.slot as usize;
+        let afford = slot < skills::SLOT_COUNT
+            && skills::can_upgrade_slot(&progression.skill_ranks, slot, progression.skill_points);
+        match *interaction {
+            Interaction::Pressed => {
+                *color = SKILL_BUTTON_PRESS_COLOR.into();
+            }
+            Interaction::Hovered => {
+                *color = SKILL_BUTTON_HOVER_COLOR.into();
+            }
+            Interaction::None => {
+                *color = if afford {
+                    SKILL_BUTTON_AFFORDANCE_COLOR.into()
+                } else {
+                    SKILL_BUTTON_COLOR.into()
+                };
+            }
+        }
+    }
+}
+
+fn arm_local_slot0_cooldown(
+    cooldown: &mut LocalRangedCooldownUntil,
+    elapsed_secs: f32,
+    ranged_rank: u8,
+) {
+    cooldown.0 = Some(
+        elapsed_secs + skills::slot0_cooldown(ranged_rank).as_secs_f32(),
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn skill_slot_press_system(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    game_state: Option<Res<GameStateSnapshot>>,
+    mut interactions: Query<
+        (&Interaction, &SkillSlotButton),
+        (Changed<Interaction>, With<SkillSlotButton>),
+    >,
+    local_stats_query: Query<&CombatStats, With<Player>>,
+    progression: Query<&PlayerProgression, With<Player>>,
+    local_player: Query<(&Transform, &Team), With<Player>>,
+    player_candidates: Query<
+        (Entity, &Transform, &NetworkPlayerId, &CombatStats, &Team),
+        (With<RemotePlayer>, Without<Player>),
+    >,
+    minion_candidates: Query<
+        (Entity, &Transform, &NetworkMinionId, &CombatStats, &Team),
+        With<NetworkMinion>,
+    >,
+    neutral_candidates: Query<
+        (Entity, &Transform, &NetworkNeutralId, &CombatStats),
+        With<NetworkNeutral>,
+    >,
+    structure_candidates: Query<
+        (
+            Entity,
+            &Transform,
+            &NetworkStructureId,
+            &CombatStats,
+            &Team,
+            &StructureKind,
+        ),
+        With<NetworkStructure>,
+    >,
+    mut target_state: ResMut<TargetState>,
+    time: Res<Time>,
+    mut cooldown: ResMut<LocalRangedCooldownUntil>,
+    mut command_writer: MessageWriter<NetworkCommand>,
+    mut console: ResMut<DebugConsole>,
+) {
+    if let Some(game_state) = game_state.as_ref() {
+        if !matches!(game_state.state, GameState::Running) {
+            return;
+        }
+    }
+    let shift_held = keyboard_input.pressed(KeyCode::ShiftLeft)
+        || keyboard_input.pressed(KeyCode::ShiftRight);
+    let Ok(progression) = progression.single() else {
+        return;
+    };
+    for (interaction, btn) in interactions.iter_mut() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        if shift_held {
+            command_writer.write(NetworkCommand::UpgradeSkill { slot: btn.slot });
+            continue;
+        }
+        if btn.slot != 0 {
+            continue;
+        }
+        let Ok(local_stats) = local_stats_query.single() else {
+            continue;
+        };
+        let _ = (
+            &local_player,
+            &player_candidates,
+            &minion_candidates,
+            &neutral_candidates,
+            &structure_candidates,
+        );
+        if let Some(target) = resolve_cast_target(&mut target_state) {
+            command_writer.write(NetworkCommand::Cast { slot: 0, target });
+            arm_local_slot0_cooldown(
+                &mut cooldown,
+                time.elapsed_secs(),
+                progression.skill_ranks[0],
+            );
+            let message = format!(
+                "Cast -> {} {} (mana {:.0})",
+                match target.kind {
+                    TargetKind::Player => "player",
+                    TargetKind::Minion => "minion",
+                    TargetKind::Structure => "structure",
+                    TargetKind::Neutral => "neutral",
+                },
+                target.id,
+                local_stats.mana
+            );
+            console.push_line(message.clone());
+            info!("{message}");
+        } else {
+            let message = "No target available. Use TAB or middle mouse click to select.";
+            console.push_line(message);
+            info!("{message}");
+        }
+    }
+}
+
+fn update_skill_slot_labels_system(
+    progression: Query<&PlayerProgression, With<Player>>,
+    mut rank_q: Query<(&mut Text, &SkillSlotRankText)>,
+    mut cd_q: Query<(&mut Text, &mut Visibility, &SkillSlotCdText)>,
+    time: Res<Time>,
+    mut cooldown: ResMut<LocalRangedCooldownUntil>,
+) {
+    let Ok(progression) = progression.single() else {
+        return;
+    };
+    if let Some(until) = cooldown.0 {
+        if time.elapsed_secs() >= until {
+            cooldown.0 = None;
+        }
+    }
+    for (mut text, tag) in &mut rank_q {
+        let slot = tag.slot as usize;
+        if slot < skills::SLOT_COUNT {
+            let r = progression.skill_ranks[slot];
+            text.0 = format!("{}/{}", r, skills::MAX_SKILL_RANK);
+        }
+    }
+    for (mut text, mut vis, tag) in &mut cd_q {
+        if tag.slot != 0 {
+            *vis = Visibility::Hidden;
+            continue;
+        }
+        if let Some(until) = cooldown.0 {
+            let left = (until - time.elapsed_secs()).max(0.0);
+            if left > 0.02 {
+                *vis = Visibility::Visible;
+                text.0 = format!("{left:.1}s");
+            } else {
+                *vis = Visibility::Hidden;
+                text.0.clear();
+            }
+        } else {
+            *vis = Visibility::Hidden;
+            text.0.clear();
+        }
+    }
+}
+
+fn update_skill_tooltip_system(
+    hover: Res<HoveredSkillSlot>,
+    progression: Query<&PlayerProgression, With<Player>>,
+    mut tooltip_root: Query<&mut Visibility, With<SkillTooltipRoot>>,
+    mut tooltip_text: Query<&mut Text, With<SkillTooltipBody>>,
+) {
+    let Ok(progression) = progression.single() else {
+        return;
+    };
+    let Some(slot) = hover.0.map(|s| s as usize) else {
+        for mut vis in &mut tooltip_root {
+            *vis = Visibility::Hidden;
+        }
+        return;
+    };
+    let Some(meta) = skills::skill_meta(slot) else {
+        return;
+    };
+    let ranks = progression.skill_ranks;
+    let mana_line = if slot == 0 {
+        format!(
+            "Mana cost: {:.0}",
+            skills::slot0_mana_cost(ranks[0])
+        )
+    } else {
+        "Mana cost: — (passive)".to_string()
+    };
+    let cd_line = if let Some(ms) = skills::cooldown_label_ms(slot, ranks[0]) {
+        format!("Cooldown: {:.2}s", ms as f32 / 1000.0)
+    } else {
+        "Cooldown: — (passive)".to_string()
+    };
+    let current_val = skills::primary_value_for_slot(slot, &ranks);
+    let current_line = format!(
+        "Current: {}",
+        skills::primary_value_tooltip_current(slot, current_val)
+    );
+
+    let upgradeable = skills::can_upgrade_slot(&ranks, slot, progression.skill_points);
+    let next_line = if upgradeable {
+        skills::next_rank_primary_value(slot, &ranks).map_or_else(
+            || String::new(),
+            |nv| {
+                format!(
+                    "Next rank: {}\nHold Shift and click the slot or press Shift+Q/W/E/R to upgrade.",
+                    skills::primary_value_tooltip_next_rank(slot, nv)
+                )
+            },
+        )
+    } else if ranks[slot] >= skills::MAX_SKILL_RANK {
+        "Max rank reached.".to_string()
+    } else {
+        "No skill points available.".to_string()
+    };
+
+    let body = format!(
+        "{}\n{}\n\n{mana_line}\n{cd_line}\n{current_line}\n{next_line}",
+        meta.name, meta.description,
+    );
+
+    for mut vis in &mut tooltip_root {
+        *vis = Visibility::Visible;
+    }
+    for mut text in &mut tooltip_text {
+        text.0 = body.clone();
+    }
 }
 
 fn select_target_system(
@@ -437,7 +844,7 @@ fn select_target_system(
         target_state.selected_entity = Some(entity);
         target_state.selected_target = Some(target_id);
         info!(
-            "Target selected: id={} ({:?})",
+            "[omoba:cli] event=target_selected target_id={} target_kind={:?}",
             target_id.id, target_id.kind
         );
     }
@@ -472,37 +879,79 @@ fn ability_keyboard_system(
     game_state: Option<Res<GameStateSnapshot>>,
     ability_bar: Res<LocalAbilityBar>,
     local_stats_query: Query<&CombatStats, With<Player>>,
+    progression: Query<&PlayerProgression, With<Player>>,
+    time: Res<Time>,
+    mut cooldown: ResMut<LocalRangedCooldownUntil>,
+    local_player: Query<(&Transform, &Team), With<Player>>,
+    player_candidates: Query<
+        (Entity, &Transform, &NetworkPlayerId, &CombatStats, &Team),
+        (With<RemotePlayer>, Without<Player>),
+    >,
+    minion_candidates: Query<
+        (Entity, &Transform, &NetworkMinionId, &CombatStats, &Team),
+        With<NetworkMinion>,
+    >,
+    neutral_candidates: Query<
+        (Entity, &Transform, &NetworkNeutralId, &CombatStats),
+        With<NetworkNeutral>,
+    >,
+    structure_candidates: Query<
+        (
+            Entity,
+            &Transform,
+            &NetworkStructureId,
+            &CombatStats,
+            &Team,
+            &StructureKind,
+        ),
+        With<NetworkStructure>,
+    >,
     mut target_state: ResMut<TargetState>,
+    mut cast_state: ResMut<LocalSpellCastState>,
     mut command_writer: MessageWriter<NetworkCommand>,
     mut console: ResMut<DebugConsole>,
 ) {
     if let Some(game_state) = game_state.as_ref() {
         if !matches!(game_state.state, GameState::Running) {
+            if keyboard_input.just_pressed(KeyCode::KeyQ) {
+                info!(
+                    "[omoba:cli] event=cast_reject reason=match_not_running state={:?}",
+                    game_state.state
+                );
+            }
             return;
         }
     }
-
-    let ability = if keyboard_input.just_pressed(KeyCode::KeyQ) {
-        Some(HeroAbility::MeleeStrike)
-    } else if keyboard_input.just_pressed(KeyCode::KeyE) {
-        Some(HeroAbility::RangedShot)
-    } else {
-        None
-    };
-    let Some(ability) = ability else {
+    if keyboard_input.pressed(KeyCode::ShiftLeft)
+        || keyboard_input.pressed(KeyCode::ShiftRight)
+    {
+        return;
+    }
+    if !keyboard_input.just_pressed(KeyCode::KeyQ) {
         return;
     };
 
     let Ok(local_stats) = local_stats_query.single() else {
         return;
     };
+    let Ok(progression) = progression.single() else {
+        return;
+    };
+    let _ = (
+        local_player,
+        player_candidates,
+        minion_candidates,
+        neutral_candidates,
+        structure_candidates,
+    );
     let target = resolve_cast_target(&mut target_state);
     if let Some(target) = target {
-        command_writer.write(NetworkCommand::UseAbility { ability, target });
-        let label = match ability {
-            HeroAbility::MeleeStrike => "Melee Strike",
-            HeroAbility::RangedShot => "Ranged Shot",
-        };
+        command_writer.write(NetworkCommand::Cast { slot: 0, target });
+        arm_local_slot0_cooldown(
+            &mut cooldown,
+            time.elapsed_secs(),
+            progression.skill_ranks[0],
+        );
         let message = format!(
             "{label} -> {} {} (mana {:.0})",
             match target.kind {
@@ -514,8 +963,6 @@ fn ability_keyboard_system(
             target.id,
             local_stats.mana
         );
-        console.push_line(message.clone());
-        info!("{message}");
     } else {
         let message = match ability {
             HeroAbility::MeleeStrike => {
@@ -526,33 +973,7 @@ fn ability_keyboard_system(
             }
         };
         console.push_line(message);
-        info!("{message}");
-        return;
-    };
-    let Some(entity) = target_state.selected_entity else {
-        let message = "No target entity for melee (re-select target).";
-        console.push_line(message);
-        info!("{message}");
-        return;
-    };
-    let Ok(target_transform) = target_transforms.get(entity) else {
-        let message = "Target is no longer valid.";
-        console.push_line(message);
-        info!("{message}");
-        return;
-    };
-    let target_team = target_teams.get(entity).ok().copied();
-    if let Some(reason) = local_melee_cast_block_reason(
-        target,
-        *local_team,
-        target_team,
-        local_transform.translation,
-        target_transform.translation,
-        local_stats.mana,
-    ) {
-        console.push_line(reason);
-        info!("{reason}");
-        return;
+        info!("[omoba:cli] event=cast_reject reason=no_valid_target");
     }
 
     command_writer.write(NetworkCommand::Cast { target });
@@ -570,117 +991,6 @@ fn ability_keyboard_system(
     );
     console.push_line(message.clone());
     info!("{message}");
-}
-
-fn ability_hud_button_system(
-    mut interactions: Query<
-        (&Interaction, &mut BackgroundColor, &AbilityHudButton),
-        Changed<Interaction>,
-    >,
-    keyboard_input: Res<ButtonInput<KeyCode>>,
-    game_state: Option<Res<GameStateSnapshot>>,
-    ability_bar: Res<LocalAbilityBar>,
-    local_stats_query: Query<&CombatStats, With<Player>>,
-    mut target_state: ResMut<TargetState>,
-    mut command_writer: MessageWriter<NetworkCommand>,
-    mut console: ResMut<DebugConsole>,
-) {
-    if let Some(game_state) = game_state.as_ref() {
-        if !matches!(game_state.state, GameState::Running) {
-            return;
-        }
-    }
-    for (interaction, mut color, AbilityHudButton(ability)) in interactions.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                *color = SKILL_BUTTON_PRESS_COLOR.into();
-                let Ok(local_stats) = local_stats_query.single() else {
-                    continue;
-                };
-                if let Some(target) = resolve_cast_target(&mut target_state) {
-                    command_writer.write(NetworkCommand::UseAbility {
-                        ability: *ability,
-                        target,
-                    });
-                    let label = match ability {
-                        HeroAbility::MeleeStrike => "Melee Strike",
-                        HeroAbility::RangedShot => "Ranged Shot",
-                    };
-                    let message = format!(
-                        "{label} -> {} {} (mana {:.0})",
-                        match target.kind {
-                            TargetKind::Player => "player",
-                            TargetKind::Minion => "minion",
-                            TargetKind::Structure => "structure",
-                            TargetKind::Neutral => "neutral",
-                        },
-                        target.id,
-                        local_stats.mana
-                    );
-                    console.push_line(message.clone());
-                    info!("{message}");
-                } else {
-                    let message = match ability {
-                        HeroAbility::MeleeStrike => {
-                            "Melee Strike: no target. Use TAB or middle mouse click to select."
-                        }
-                        HeroAbility::RangedShot => {
-                            "Ranged Shot: no target. Use TAB or middle mouse click to select."
-                        }
-                    };
-                    console.push_line(message);
-                    info!("{message}");
-                    continue;
-                };
-                let Some(entity) = target_state.selected_entity else {
-                    let message = "No target entity for melee (re-select target).";
-                    console.push_line(message);
-                    info!("{message}");
-                    continue;
-                };
-                let Ok(target_transform) = target_transforms.get(entity) else {
-                    let message = "Target is no longer valid.";
-                    console.push_line(message);
-                    info!("{message}");
-                    continue;
-                };
-                let target_team = target_teams.get(entity).ok().copied();
-                if let Some(reason) = local_melee_cast_block_reason(
-                    target,
-                    *local_team,
-                    target_team,
-                    local_transform.translation,
-                    target_transform.translation,
-                    local_stats.mana,
-                ) {
-                    console.push_line(reason);
-                    info!("{reason}");
-                    continue;
-                }
-                command_writer.write(NetworkCommand::Cast { target });
-                let message = format!(
-                    "Melee (rank {}) -> {} {} (mana {:.0})",
-                    progression.skill1_rank.max(1),
-                    match target.kind {
-                        TargetKind::Player => "player",
-                        TargetKind::Minion => "minion",
-                        TargetKind::Structure => "structure",
-                        TargetKind::Neutral => "neutral",
-                    },
-                    target.id,
-                    local_stats.mana
-                );
-                console.push_line(message.clone());
-                info!("{message}");
-            }
-            Interaction::Hovered => {
-                *color = SKILL_BUTTON_HOVER_COLOR.into();
-            }
-            Interaction::None => {
-                *color = SKILL_BUTTON_COLOR.into();
-            }
-        }
-    }
 }
 
 fn spawn_combat_bars_system(

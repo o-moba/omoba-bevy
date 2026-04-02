@@ -10,11 +10,15 @@ Canonical version: `0.2.0`
 - Core combat loop with projectiles, structures, minions, death, respawn, mana regeneration, and base-destruction win condition.
 - Map layout with three lanes and simple jungle blocks.
 - Player progression with level-based XP thresholds, HP/mana scaling on level-up, and tracked skill points.
-- In-game local HUD display for level and XP progression.
-- **Skill 1 (melee)**: `Q` or the in-game skill button casts on the current TAB/middle-click target. Server validates horizontal range, mana, cooldown, and target type (enemy players, enemy minions, neutrals; not structures or allies). Damage and cooldown scale with melee rank; spend skill points with `1` when available. Failed local checks show messages in the debug console without sending a cast.
+- In-game local HUD display for level, XP progression, and available skill points.
+- Four-slot skill bar (Q/W/E/R): rank vs max rank, local cooldown readout for the active shot, and a gold-tinted idle state when the server snapshot indicates an upgrade is allowed (skill point available and below max rank).
+- **Skill upgrades (authoritative):** hold **Shift** and click a slot, or press **Shift+Q / Shift+W / Shift+E / Shift+R** to send an upgrade intent. The server validates points, rank cap, and slot; the next snapshot updates ranks and gameplay numbers (damage, mana cost, cooldown, passives) immediately.
+- **Tooltips:** hover a skill slot for name, description, mana cost, cooldown (active vs passive), current primary value, and next-rank preview when upgradeable. Tooltip text and numbers come from the shared `skills` crate so they stay aligned with server simulation.
 
 ## Multiplayer Session Reliability
 
+- **TASK-14 (client)**: Explicit session states, non-blocking wait when the server is down, bounded `WaitingForServer` timeout, stale snapshot detection while connected, UDP transport error thresholds, snapshot-channel disconnect detection when the UDP thread ends, full teardown (replicated entities + team overlay) on disconnect, manual reconnect via **Retry** (no silent rejoin into a match), pause menu auto-closes on **Disconnected**, minimap hidden unless **Connected**.
+- Named timing constants and failure-detection summary: `docs/network-client-session.md` and `client/src/session_config.rs`.
 - Join is authoritative on the server: the client may optimistically pick a team and character, but the snapshot for `your_id` is the source of truth for spawn side, team, and character.
 - Repeated `Join` packets from the same UDP endpoint are deterministic: the last processed `Join` wins for team, character, spawn position, HP, mana, gold, and XP reset.
 - If a client stops sending packets, the server removes that player after `PLAYER_TIMEOUT = 5s`; remaining clients stop receiving that player in snapshots after the timeout expires.
