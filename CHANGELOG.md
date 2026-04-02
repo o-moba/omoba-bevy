@@ -7,6 +7,7 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 ## [Unreleased]
 
 ### Added
+- **TASK-13 (client):** Match HUD column (level, XP, skill points, upgrade key hint, HP/mana, target summary, objective line, F1 reminder); bottom skill bar with four labeled slots (`Q`–`R`) wired to the same cast action until the server exposes distinct skills; centralized key labels in `input_bindings`; F1 help overlay with control and objective copy; clearer victory/defeat next-step text; help panel only renders during `Running` so lobby/victory overlays stay readable on reconnect/snapshot transitions; bracketed skill slot line and display strings derived from `SKILL_SLOT_KEY_LABELS`; unit tests for binding/display consistency.
 - Added a reproducible multiplayer session verification harness at `scripts/verify_task_02_multiplayer_session_flow.py` that exercises sequential and simultaneous joins, repeated joins, timeout cleanup, reconnect-as-new-player, server restart recovery, and four-client snapshot consistency against the live UDP server.
 - Added focused client coverage for authoritative local-player selection so duplicate local `Player` entities cannot silently break gameplay systems that rely on `Query::single()`.
 - Added multiplayer session policy documentation and a `TASK-02` progress log with the recorded session matrix.

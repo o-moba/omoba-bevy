@@ -11,6 +11,7 @@ use bevy::{
 
 use crate::camera::MainCamera;
 use crate::debug_console::DebugConsole;
+use crate::input_bindings::SKILL_CAST_KEYS;
 use crate::net::{
     GameState, GameStateSnapshot, NetworkCommand, NetworkMinion, NetworkMinionId,
     NetworkNeutral, NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId,
@@ -21,6 +22,15 @@ use crate::team::Team;
 
 pub const MAX_HP: f32 = 100.0;
 pub const MAX_MANA: f32 = 100.0;
+
+/// Mirrors server `SPELL_COOLDOWN` for local HUD feedback until the snapshot exposes cooldowns.
+pub const LOCAL_CAST_COOLDOWN_SECS: f32 = 0.35;
+
+/// Local spell cooldown timer (all cast keys share one server action).
+#[derive(Resource, Default)]
+pub struct LocalCastCooldown {
+    pub remaining_secs: f32,
+}
 
 const BAR_WIDTH: f32 = 1.45;
 const BAR_HEIGHT: f32 = 0.09;
@@ -43,7 +53,8 @@ const MINION_MARKER_RADIUS: f32 = 1.05;
 const NEUTRAL_MARKER_RADIUS: f32 = 1.1;
 const TOWER_MARKER_RADIUS: f32 = 2.0;
 const BASE_TOWER_MARKER_RADIUS: f32 = 3.75;
-const SKILL_BUTTON_SIZE: f32 = 80.0;
+const SKILL_SLOT_SIZE: f32 = 64.0;
+const SKILL_SLOT_GAP: f32 = 8.0;
 const SKILL_BUTTON_MARGIN: f32 = 20.0;
 const SKILL_BUTTON_COLOR: Color = Color::srgba(0.12, 0.12, 0.12, 0.75);
 const SKILL_BUTTON_HOVER_COLOR: Color = Color::srgba(0.18, 0.18, 0.18, 0.85);
@@ -54,11 +65,13 @@ pub struct CombatPlugin;
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TargetState>()
+            .init_resource::<LocalCastCooldown>()
             .add_systems(Startup, setup_combat_visual_assets)
             .add_systems(Startup, setup_combat_ui)
             .add_systems(
                 Update,
                 (
+                    tick_local_cast_cooldown,
                     select_target_system,
                     clear_invalid_target_system,
                     cast_spell_system,
@@ -114,9 +127,9 @@ struct CombatVisualAssets {
 }
 
 #[derive(Resource, Default)]
-struct TargetState {
-    selected_entity: Option<Entity>,
-    selected_target: Option<TargetId>,
+pub struct TargetState {
+    pub selected_entity: Option<Entity>,
+    pub selected_target: Option<TargetId>,
     marker_entity: Option<Entity>,
 }
 
@@ -130,7 +143,13 @@ struct CombatBars {
 struct TargetMarker;
 
 #[derive(Component)]
-struct SkillButton;
+struct SkillBarSlot;
+
+fn tick_local_cast_cooldown(time: Res<Time>, mut cd: ResMut<LocalCastCooldown>) {
+    if cd.remaining_secs > 0.0 {
+        cd.remaining_secs = (cd.remaining_secs - time.delta_secs()).max(0.0);
+    }
+}
 
 #[derive(Component)]
 struct CombatBarRoot;
@@ -248,22 +267,48 @@ fn setup_combat_visual_assets(
 }
 
 fn setup_combat_ui(mut commands: Commands) {
-    commands.spawn((
-        Button,
-        Node {
-            position_type: PositionType::Absolute,
-            right: Val::Px(SKILL_BUTTON_MARGIN),
-            bottom: Val::Px(SKILL_BUTTON_MARGIN),
-            width: Val::Px(SKILL_BUTTON_SIZE),
-            height: Val::Px(SKILL_BUTTON_SIZE),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            ..default()
-        },
-        BackgroundColor(SKILL_BUTTON_COLOR),
-        SkillButton,
-        Name::new("SkillButton"),
-    ));
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(SKILL_BUTTON_MARGIN),
+                bottom: Val::Px(SKILL_BUTTON_MARGIN),
+                flex_direction: FlexDirection::Row,
+                column_gap: Val::Px(SKILL_SLOT_GAP),
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            ZIndex(12),
+            Name::new("SkillBarRoot"),
+        ))
+        .with_children(|row| {
+            for i in 0..4 {
+                let label = crate::input_bindings::SKILL_SLOT_KEY_LABELS[i];
+                row.spawn((
+                    Button,
+                    Node {
+                        width: Val::Px(SKILL_SLOT_SIZE),
+                        height: Val::Px(SKILL_SLOT_SIZE),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    BackgroundColor(SKILL_BUTTON_COLOR),
+                    SkillBarSlot,
+                    Name::new(format!("SkillSlot-{label}")),
+                ))
+                .with_children(|slot| {
+                    slot.spawn((
+                        Text::new(label),
+                        TextFont {
+                            font_size: 22.0,
+                            ..default()
+                        },
+                        TextColor::WHITE,
+                    ));
+                });
+            }
+        });
 }
 
 fn select_target_system(
@@ -416,13 +461,20 @@ fn cast_spell_system(
     mut target_state: ResMut<TargetState>,
     mut command_writer: MessageWriter<NetworkCommand>,
     mut console: ResMut<DebugConsole>,
+    mut cast_cd: ResMut<LocalCastCooldown>,
 ) {
     if let Some(game_state) = game_state.as_ref() {
         if !matches!(game_state.state, GameState::Running) {
             return;
         }
     }
-    if !keyboard_input.just_pressed(KeyCode::KeyQ) {
+    let cast_pressed = SKILL_CAST_KEYS
+        .iter()
+        .any(|key| keyboard_input.just_pressed(*key));
+    if !cast_pressed {
+        return;
+    }
+    if cast_cd.remaining_secs > 0.0 {
         return;
     }
 
@@ -438,6 +490,7 @@ fn cast_spell_system(
     );
     let target = resolve_cast_target(&mut target_state);
     if let Some(target) = target {
+        cast_cd.remaining_secs = LOCAL_CAST_COOLDOWN_SECS;
         command_writer.write(NetworkCommand::Cast { target });
         let message = format!(
             "Cast -> {} {} (mana {:.0})",
@@ -462,7 +515,7 @@ fn cast_spell_system(
 fn skill_button_system(
     mut interactions: Query<
         (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<SkillButton>),
+        (Changed<Interaction>, With<SkillBarSlot>),
     >,
     game_state: Option<Res<GameStateSnapshot>>,
     local_stats_query: Query<&CombatStats, With<Player>>,
@@ -493,6 +546,7 @@ fn skill_button_system(
     mut target_state: ResMut<TargetState>,
     mut command_writer: MessageWriter<NetworkCommand>,
     mut console: ResMut<DebugConsole>,
+    mut cast_cd: ResMut<LocalCastCooldown>,
 ) {
     if let Some(game_state) = game_state.as_ref() {
         if !matches!(game_state.state, GameState::Running) {
@@ -503,6 +557,9 @@ fn skill_button_system(
         match *interaction {
             Interaction::Pressed => {
                 *color = SKILL_BUTTON_PRESS_COLOR.into();
+                if cast_cd.remaining_secs > 0.0 {
+                    continue;
+                }
                 let Ok(local_stats) = local_stats_query.single() else {
                     continue;
                 };
@@ -514,6 +571,7 @@ fn skill_button_system(
                     &structure_candidates,
                 );
                 if let Some(target) = resolve_cast_target(&mut target_state) {
+                    cast_cd.remaining_secs = LOCAL_CAST_COOLDOWN_SECS;
                     command_writer.write(NetworkCommand::Cast { target });
                     let message = format!(
                         "Cast -> {} {} (mana {:.0})",

@@ -14,7 +14,7 @@ use crate::debug_console::DebugConsole;
 use crate::maps::MapLayout;
 use crate::minimap::MinimapNavigationState;
 use crate::net::{
-    GameState, GameStateSnapshot, NetworkCharacterChoice, NetworkStructure, PlayerProgression,
+    GameState, GameStateSnapshot, NetworkCharacterChoice, NetworkStructure,
     RemotePlayer, StructureKind,
 };
 use crate::team::{CharacterChoice, Team};
@@ -54,8 +54,8 @@ impl Plugin for PlayerPlugin {
         .add_systems(PostUpdate, apply_gravity)
         .init_resource::<RespawnCountdown>()
         .init_resource::<PlayerAnimationLibrary>()
-        .add_systems(Startup, (setup_respawn_ui, setup_progression_ui))
-        .add_systems(Update, (respawn_countdown_system, progression_hud_system));
+        .add_systems(Startup, setup_respawn_ui)
+        .add_systems(Update, respawn_countdown_system);
     }
 }
 
@@ -87,9 +87,6 @@ impl Default for RespawnCountdown {
 
 #[derive(Component)]
 struct RespawnCountdownText;
-
-#[derive(Component)]
-struct ProgressionHudText;
 
 #[derive(Component)]
 struct MovementTarget {
@@ -624,61 +621,6 @@ fn setup_respawn_ui(mut commands: Commands) {
                 RespawnCountdownText,
             ));
         });
-}
-
-fn setup_progression_ui(mut commands: Commands) {
-    commands
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(16.0),
-                top: Val::Px(16.0),
-                ..default()
-            },
-            Name::new("ProgressionHud"),
-        ))
-        .with_children(|parent| {
-            parent.spawn((
-                Text::new("Level --   XP --/--   Skill points --"),
-                TextFont {
-                    font_size: 24.0,
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-                ProgressionHudText,
-            ));
-        });
-}
-
-fn progression_hud_system(
-    player_query: Query<&PlayerProgression, With<Player>>,
-    mut text_query: Query<&mut Text, With<ProgressionHudText>>,
-) {
-    let Ok(mut text) = text_query.single_mut() else {
-        return;
-    };
-
-    let Some(progression) = player_query.iter().next() else {
-        text.0 = "Level --   XP --/--   Skill points --".to_string();
-        return;
-    };
-
-    if progression.next_level_xp == 0 {
-        text.0 = format!(
-            "Level {}   XP MAX   Skill points {}",
-            progression.level.max(1),
-            progression.skill_points
-        );
-    } else {
-        let displayed_xp = progression.xp.min(progression.next_level_xp);
-        text.0 = format!(
-            "Level {}   XP {}/{}   Skill points {}",
-            progression.level.max(1),
-            displayed_xp,
-            progression.next_level_xp,
-            progression.skill_points
-        );
-    }
 }
 
 fn respawn_countdown_system(
