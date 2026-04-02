@@ -16,6 +16,7 @@ use crate::net::{
     NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId, PlayerProgression,
     RemotePlayer, StructureKind, TargetId, TargetKind,
 };
+use shared::{SkillSlot, TargetingMode, ability_for_slot, scaled_mana_cost};
 use crate::player::Player;
 use crate::team::Team;
 
@@ -50,11 +51,10 @@ const MINION_MARKER_RADIUS: f32 = 1.05;
 const NEUTRAL_MARKER_RADIUS: f32 = 1.1;
 const TOWER_MARKER_RADIUS: f32 = 2.0;
 const BASE_TOWER_MARKER_RADIUS: f32 = 3.75;
-const SKILL_BUTTON_SIZE: f32 = 80.0;
+const SKILL_BUTTON_SIZE: f32 = 72.0;
+const SKILL_BUTTON_GAP: f32 = 8.0;
 const SKILL_BUTTON_MARGIN: f32 = 20.0;
 const SKILL_BUTTON_COLOR: Color = Color::srgba(0.12, 0.12, 0.12, 0.75);
-const SKILL_BUTTON_HOVER_COLOR: Color = Color::srgba(0.18, 0.18, 0.18, 0.85);
-const SKILL_BUTTON_PRESS_COLOR: Color = Color::srgba(0.28, 0.28, 0.28, 0.95);
 
 pub struct CombatPlugin;
 
@@ -138,7 +138,10 @@ struct CombatBars {
 struct TargetMarker;
 
 #[derive(Component)]
-struct SkillButton;
+struct HotbarSlotButton(SkillSlot);
+
+#[derive(Component)]
+struct HotbarSlotLabel(SkillSlot);
 
 #[derive(Component)]
 struct CombatBarRoot;
@@ -256,22 +259,57 @@ fn setup_combat_visual_assets(
 }
 
 fn setup_combat_ui(mut commands: Commands) {
-    commands.spawn((
-        Button,
-        Node {
-            position_type: PositionType::Absolute,
-            right: Val::Px(SKILL_BUTTON_MARGIN),
-            bottom: Val::Px(SKILL_BUTTON_MARGIN),
-            width: Val::Px(SKILL_BUTTON_SIZE),
-            height: Val::Px(SKILL_BUTTON_SIZE),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            ..default()
-        },
-        BackgroundColor(SKILL_BUTTON_COLOR),
-        SkillButton,
-        Name::new("SkillButton"),
-    ));
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(SKILL_BUTTON_MARGIN),
+                bottom: Val::Px(SKILL_BUTTON_MARGIN),
+                flex_direction: FlexDirection::Row,
+                column_gap: Val::Px(SKILL_BUTTON_GAP),
+                ..default()
+            },
+            Name::new("HotbarRow"),
+        ))
+        .with_children(|row| {
+            for slot in [
+                SkillSlot::Q,
+                SkillSlot::W,
+                SkillSlot::E,
+                SkillSlot::R,
+            ] {
+                let key = match slot {
+                    SkillSlot::Q => "Q",
+                    SkillSlot::W => "W",
+                    SkillSlot::E => "E",
+                    SkillSlot::R => "R",
+                };
+                row.spawn((
+                    Button,
+                    Node {
+                        width: Val::Px(SKILL_BUTTON_SIZE),
+                        height: Val::Px(SKILL_BUTTON_SIZE),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    BackgroundColor(SKILL_BUTTON_COLOR),
+                    HotbarSlotButton(slot),
+                    Name::new(format!("Hotbar-{key}")),
+                ))
+                .with_children(|btn| {
+                    btn.spawn((
+                        Text::new(key),
+                        TextFont {
+                            font_size: 20.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                        HotbarSlotLabel(slot),
+                    ));
+                });
+            }
+        });
 }
 
 fn select_target_system(
@@ -396,6 +434,7 @@ fn clear_invalid_target_system(
 fn cast_spell_system(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     game_state: Option<Res<GameStateSnapshot>>,
+    ability_bar: Res<LocalAbilityBar>,
     local_stats_query: Query<&CombatStats, With<Player>>,
     local_prog: Query<&PlayerProgression, With<Player>>,
     local_player: Query<(&Transform, &Team), With<Player>>,
@@ -410,10 +449,6 @@ fn cast_spell_system(
             return;
         }
     }
-    if !keyboard_input.just_pressed(KeyCode::KeyQ) {
-        return;
-    }
-
     let Ok(local_stats) = local_stats_query.single() else {
         return;
     };
@@ -473,12 +508,14 @@ fn cast_spell_system(
     info!("{message}");
 }
 
-fn skill_button_system(
+fn hotbar_interaction_system(
     mut interactions: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<SkillButton>),
+        (&HotbarSlotButton, &Interaction),
+        (Changed<Interaction>, With<Button>),
     >,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
     game_state: Option<Res<GameStateSnapshot>>,
+    ability_bar: Res<LocalAbilityBar>,
     local_stats_query: Query<&CombatStats, With<Player>>,
     local_prog: Query<&PlayerProgression, With<Player>>,
     local_player: Query<(&Transform, &Team), With<Player>>,
@@ -901,8 +938,8 @@ fn find_nearest_enemy_target(
         }
     }
 
-    for (entity, transform, id, stats, _team) in minion_candidates.iter() {
-        if !stats.is_alive() {
+    for (entity, transform, id, stats, team) in minion_candidates.iter() {
+        if !stats.is_alive() || *team == local_team {
             continue;
         }
         let dist_sq = transform.translation.distance_squared(local_pos);
@@ -1003,8 +1040,8 @@ fn find_target_near_point(
         }
     }
 
-    for (entity, transform, id, stats, _team) in minion_candidates.iter() {
-        if !stats.is_alive() {
+    for (entity, transform, id, stats, team) in minion_candidates.iter() {
+        if !stats.is_alive() || *team == local_team {
             continue;
         }
         let dist = transform.translation.xz().distance(click_point.xz());
