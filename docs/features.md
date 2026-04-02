@@ -15,6 +15,8 @@ Canonical version: `0.2.0`
 
 ## Multiplayer Session Reliability
 
+- **TASK-14 (client)**: Explicit session states, non-blocking wait when the server is down, bounded `WaitingForServer` timeout, stale snapshot detection while connected, UDP transport error thresholds, snapshot-channel disconnect detection when the UDP thread ends, full teardown (replicated entities + team overlay) on disconnect, manual reconnect via **Retry** (no silent rejoin into a match), pause menu auto-closes on **Disconnected**, minimap hidden unless **Connected**.
+- Named timing constants and failure-detection summary: `docs/network-client-session.md` and `client/src/session_config.rs`.
 - Join is authoritative on the server: the client may optimistically pick a team and character, but the snapshot for `your_id` is the source of truth for spawn side, team, and character.
 - Repeated `Join` packets from the same UDP endpoint are deterministic: the last processed `Join` wins for team, character, spawn position, HP, mana, gold, and XP reset.
 - If a client stops sending packets, the server removes that player after `PLAYER_TIMEOUT = 5s`; remaining clients stop receiving that player in snapshots after the timeout expires.
@@ -26,6 +28,10 @@ Canonical version: `0.2.0`
 
 - Runtime and startup stability hardening.
 - Full reconnect slot reclaim across disconnects and NAT changes.
-- Match phase, restart, and rematch flow.
-- Jungle camps and neutral AI.
-- Full skill system, tooltip UX, and release-readiness validation.
+- Full skill system (four distinct server-validated abilities with per-rank tuning), tooltip UX.
+
+## Release gate and balance (TASK-12)
+
+- Authoritative tuning constants: `server/src/balance.rs` (see `docs/balance-tuning.md`).
+- Release checklist, manual QA matrix, and readiness report: `docs/release-gate-checklist.md`, `docs/manual-qa-matrix.md`, `docs/release-readiness-report.md`.
+- Live UDP QA smoke (two clients + cast): `make verify-task-12` or `python3 scripts/verify_task_12_qa_matrix_live_udp.py` (after `cargo build -p server`).

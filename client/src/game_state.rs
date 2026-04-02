@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::net::{GameState, GameStateSnapshot};
+use crate::net::{ClientSession, GameState, GameStateSnapshot};
 use crate::player::Player;
 use crate::team::Team;
 
@@ -59,6 +59,7 @@ fn setup_game_state_ui(mut commands: Commands) {
 
 fn update_game_state_ui(
     game_state: Res<GameStateSnapshot>,
+    client_session: Res<ClientSession>,
     local_team: Query<&Team, With<Player>>,
     mut overlay_query: Query<(&mut Visibility, &mut BackgroundColor), With<GameStateOverlay>>,
     mut text_query: Query<&mut Text, With<GameStateLabel>>,
@@ -69,6 +70,13 @@ fn update_game_state_ui(
     let Ok(mut label) = text_query.single_mut() else {
         return;
     };
+
+    if !client_session.is_connected() {
+        *visibility = Visibility::Hidden;
+        *background = BackgroundColor(Color::NONE);
+        label.0.clear();
+        return;
+    }
 
     match game_state.state {
         GameState::Lobby => {
@@ -83,7 +91,7 @@ fn update_game_state_ui(
         }
         GameState::Victory { winner } => {
             *visibility = Visibility::Visible;
-            let is_winner = local_team.single().is_ok_and(|team| *team == winner);
+            let is_winner = local_team.iter().next().is_some_and(|team| *team == winner);
             *background = BackgroundColor(if is_winner { WIN_COLOR } else { LOSE_COLOR });
             let base_msg = if is_winner {
                 format!(

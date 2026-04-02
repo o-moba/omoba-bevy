@@ -11,7 +11,9 @@ mod match_hud;
 mod minimap;
 mod net;
 mod pause_menu;
+mod persistence;
 mod player;
+mod session_config;
 mod team;
 mod world;
 
@@ -25,6 +27,7 @@ use maps::MapsPlugin;
 use minimap::MinimapPlugin;
 use net::NetworkingPlugin;
 use pause_menu::PauseMenuPlugin;
+use persistence::ClientPersistencePlugin;
 use player::PlayerPlugin;
 use team::TeamSelectPlugin;
 use world::SetupPlugin;
@@ -39,7 +42,9 @@ fn main() {
             CameraPlugin,
             PlayerPlugin,
             MapsPlugin,
+            ClientPersistencePlugin,
             SetupPlugin,
+            DebugConsolePlugin,
             NetworkingPlugin,
             MinimapPlugin,
             CombatPlugin,

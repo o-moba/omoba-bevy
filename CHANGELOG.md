@@ -18,6 +18,12 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 - Snapshot propagation of progression fields (`level`, `xp`, `next_level_xp`, `skill_points`) for synchronized client state.
 - Local HUD progression readout for level, XP progress, and available skill points.
 
+### Fixed
+- Neutral kill XP now uses `grant_player_xp` so jungle rewards level the same way as other XP sources.
+
+### Changed
+- Server: allow `clippy::items_after_test_module` on the binary and `clippy::too_many_arguments` on `simulate_projectiles`; allow `clippy::assertions_on_constants` in `balance` unit tests (keeps `-D warnings` clean for `cargo clippy -p server`).
+
 ## [0.2.0] - 2026-04-01
 
 ### Added
