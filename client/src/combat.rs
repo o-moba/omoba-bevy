@@ -12,9 +12,9 @@ use bevy::{
 use crate::camera::MainCamera;
 use crate::debug_console::DebugConsole;
 use crate::net::{
-    GameState, GameStateSnapshot, NetworkCommand, NetworkMinion, NetworkMinionId, NetworkNeutral,
-    NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId, PlayerProgression,
-    RemotePlayer, StructureKind, TargetId, TargetKind,
+    GameState, GameStateSnapshot, HeroAbility, NetworkCommand, NetworkMinion, NetworkMinionId,
+    NetworkNeutral, NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId,
+    PendingAbilityFeedback, RemotePlayer, StructureKind, TargetId, TargetKind,
 };
 use shared::{SkillSlot, TargetingMode, ability_for_slot, scaled_mana_cost};
 use crate::player::Player;
@@ -54,6 +54,7 @@ const BASE_TOWER_MARKER_RADIUS: f32 = 3.75;
 const SKILL_BUTTON_SIZE: f32 = 72.0;
 const SKILL_BUTTON_GAP: f32 = 8.0;
 const SKILL_BUTTON_MARGIN: f32 = 20.0;
+const SKILL_BUTTON_GAP: f32 = 12.0;
 const SKILL_BUTTON_COLOR: Color = Color::srgba(0.12, 0.12, 0.12, 0.75);
 
 pub struct CombatPlugin;
@@ -66,11 +67,12 @@ impl Plugin for CombatPlugin {
             .add_systems(
                 Update,
                 (
+                    ability_feedback_display_system,
                     select_target_system,
                     clear_invalid_target_system,
-                    cast_spell_system,
-                    skill_button_system,
-                    melee_skill_upgrade_system,
+                    upgrade_ranged_shot_system,
+                    ability_keyboard_system,
+                    ability_hud_button_system,
                     update_target_marker_system,
                 )
                     .chain(),
@@ -138,10 +140,7 @@ struct CombatBars {
 struct TargetMarker;
 
 #[derive(Component)]
-struct HotbarSlotButton(SkillSlot);
-
-#[derive(Component)]
-struct HotbarSlotLabel(SkillSlot);
+struct AbilityHudButton(HeroAbility);
 
 #[derive(Component)]
 struct CombatBarRoot;
@@ -259,57 +258,92 @@ fn setup_combat_visual_assets(
 }
 
 fn setup_combat_ui(mut commands: Commands) {
-    commands
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                right: Val::Px(SKILL_BUTTON_MARGIN),
-                bottom: Val::Px(SKILL_BUTTON_MARGIN),
-                flex_direction: FlexDirection::Row,
-                column_gap: Val::Px(SKILL_BUTTON_GAP),
+    let ranged_right = SKILL_BUTTON_MARGIN;
+    let melee_right = SKILL_BUTTON_MARGIN + SKILL_BUTTON_SIZE + SKILL_BUTTON_GAP;
+
+    commands.spawn((
+        Button,
+        Node {
+            position_type: PositionType::Absolute,
+            right: Val::Px(ranged_right),
+            bottom: Val::Px(SKILL_BUTTON_MARGIN),
+            width: Val::Px(SKILL_BUTTON_SIZE),
+            height: Val::Px(SKILL_BUTTON_SIZE),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        },
+        BackgroundColor(SKILL_BUTTON_COLOR),
+        AbilityHudButton(HeroAbility::RangedShot),
+        Name::new("RangedShotButton"),
+    ))
+    .with_children(|parent| {
+        parent.spawn((
+            Text::new("E"),
+            TextFont {
+                font_size: 26.0,
                 ..default()
             },
-            Name::new("HotbarRow"),
+            TextColor(Color::WHITE),
+        ));
+    });
+    commands
+        .spawn((
+            Button,
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(melee_right),
+                bottom: Val::Px(SKILL_BUTTON_MARGIN),
+                width: Val::Px(SKILL_BUTTON_SIZE),
+                height: Val::Px(SKILL_BUTTON_SIZE),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(SKILL_BUTTON_COLOR),
+            AbilityHudButton(HeroAbility::MeleeStrike),
+            Name::new("MeleeStrikeButton"),
         ))
-        .with_children(|row| {
-            for slot in [
-                SkillSlot::Q,
-                SkillSlot::W,
-                SkillSlot::E,
-                SkillSlot::R,
-            ] {
-                let key = match slot {
-                    SkillSlot::Q => "Q",
-                    SkillSlot::W => "W",
-                    SkillSlot::E => "E",
-                    SkillSlot::R => "R",
-                };
-                row.spawn((
-                    Button,
-                    Node {
-                        width: Val::Px(SKILL_BUTTON_SIZE),
-                        height: Val::Px(SKILL_BUTTON_SIZE),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
-                    BackgroundColor(SKILL_BUTTON_COLOR),
-                    HotbarSlotButton(slot),
-                    Name::new(format!("Hotbar-{key}")),
-                ))
-                .with_children(|btn| {
-                    btn.spawn((
-                        Text::new(key),
-                        TextFont {
-                            font_size: 20.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
-                        HotbarSlotLabel(slot),
-                    ));
-                });
-            }
-        });
+    .with_children(|parent| {
+        parent.spawn((
+            Text::new("Q"),
+            TextFont {
+                font_size: 26.0,
+                ..default()
+            },
+            TextColor(Color::WHITE),
+        ));
+    });
+}
+
+fn ability_feedback_display_system(
+    mut feedback: ResMut<PendingAbilityFeedback>,
+    mut console: ResMut<DebugConsole>,
+) {
+    let Some(msg) = feedback.message.take() else {
+        return;
+    };
+    console.push_line(msg.clone());
+    info!("{msg}");
+}
+
+fn upgrade_ranged_shot_system(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    game_state: Option<Res<GameStateSnapshot>>,
+    mut command_writer: MessageWriter<NetworkCommand>,
+) {
+    if let Some(game_state) = game_state.as_ref() {
+        if !matches!(game_state.state, GameState::Running) {
+            return;
+        }
+    }
+    if !keyboard_input.just_pressed(KeyCode::KeyT) {
+        return;
+    }
+    command_writer.write(NetworkCommand::UpgradeAbility {
+        ability: HeroAbility::RangedShot,
+    });
+    info!("Request upgrade: Ranged Shot (skill points)");
 }
 
 fn select_target_system(
@@ -431,15 +465,11 @@ fn clear_invalid_target_system(
     }
 }
 
-fn cast_spell_system(
+fn ability_keyboard_system(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     game_state: Option<Res<GameStateSnapshot>>,
     ability_bar: Res<LocalAbilityBar>,
     local_stats_query: Query<&CombatStats, With<Player>>,
-    local_prog: Query<&PlayerProgression, With<Player>>,
-    local_player: Query<(&Transform, &Team), With<Player>>,
-    target_transforms: Query<&Transform>,
-    target_teams: Query<&Team>,
     mut target_state: ResMut<TargetState>,
     mut command_writer: MessageWriter<NetworkCommand>,
     mut console: ResMut<DebugConsole>,
@@ -449,18 +479,50 @@ fn cast_spell_system(
             return;
         }
     }
+
+    let ability = if keyboard_input.just_pressed(KeyCode::KeyQ) {
+        Some(HeroAbility::MeleeStrike)
+    } else if keyboard_input.just_pressed(KeyCode::KeyE) {
+        Some(HeroAbility::RangedShot)
+    } else {
+        None
+    };
+    let Some(ability) = ability else {
+        return;
+    };
+
     let Ok(local_stats) = local_stats_query.single() else {
         return;
     };
-    let Ok((local_transform, local_team)) = local_player.single() else {
-        return;
-    };
-    let Ok(progression) = local_prog.single() else {
-        return;
-    };
     let target = resolve_cast_target(&mut target_state);
-    let Some(target) = target else {
-        let message = "No target selected. Use TAB or middle mouse click to select.";
+    if let Some(target) = target {
+        command_writer.write(NetworkCommand::UseAbility { ability, target });
+        let label = match ability {
+            HeroAbility::MeleeStrike => "Melee Strike",
+            HeroAbility::RangedShot => "Ranged Shot",
+        };
+        let message = format!(
+            "{label} -> {} {} (mana {:.0})",
+            match target.kind {
+                TargetKind::Player => "player",
+                TargetKind::Minion => "minion",
+                TargetKind::Structure => "structure",
+                TargetKind::Neutral => "neutral",
+            },
+            target.id,
+            local_stats.mana
+        );
+        console.push_line(message.clone());
+        info!("{message}");
+    } else {
+        let message = match ability {
+            HeroAbility::MeleeStrike => {
+                "Melee Strike: no target. Use TAB or middle mouse click to select."
+            }
+            HeroAbility::RangedShot => {
+                "Ranged Shot: no target. Use TAB or middle mouse click to select."
+            }
+        };
         console.push_line(message);
         info!("{message}");
         return;
@@ -508,19 +570,15 @@ fn cast_spell_system(
     info!("{message}");
 }
 
-fn hotbar_interaction_system(
+fn ability_hud_button_system(
     mut interactions: Query<
-        (&HotbarSlotButton, &Interaction),
-        (Changed<Interaction>, With<Button>),
+        (&Interaction, &mut BackgroundColor, &AbilityHudButton),
+        Changed<Interaction>,
     >,
     keyboard_input: Res<ButtonInput<KeyCode>>,
     game_state: Option<Res<GameStateSnapshot>>,
     ability_bar: Res<LocalAbilityBar>,
     local_stats_query: Query<&CombatStats, With<Player>>,
-    local_prog: Query<&PlayerProgression, With<Player>>,
-    local_player: Query<(&Transform, &Team), With<Player>>,
-    target_transforms: Query<&Transform>,
-    target_teams: Query<&Team>,
     mut target_state: ResMut<TargetState>,
     mut command_writer: MessageWriter<NetworkCommand>,
     mut console: ResMut<DebugConsole>,
@@ -530,22 +588,44 @@ fn hotbar_interaction_system(
             return;
         }
     }
-    for (interaction, mut color) in interactions.iter_mut() {
+    for (interaction, mut color, AbilityHudButton(ability)) in interactions.iter_mut() {
         match *interaction {
             Interaction::Pressed => {
                 *color = SKILL_BUTTON_PRESS_COLOR.into();
                 let Ok(local_stats) = local_stats_query.single() else {
                     continue;
                 };
-                let Ok((local_transform, local_team)) = local_player.single() else {
-                    continue;
-                };
-                let Ok(progression) = local_prog.single() else {
-                    continue;
-                };
-                let target = resolve_cast_target(&mut target_state);
-                let Some(target) = target else {
-                    let message = "No target selected. Use TAB or middle mouse click to select.";
+                if let Some(target) = resolve_cast_target(&mut target_state) {
+                    command_writer.write(NetworkCommand::UseAbility {
+                        ability: *ability,
+                        target,
+                    });
+                    let label = match ability {
+                        HeroAbility::MeleeStrike => "Melee Strike",
+                        HeroAbility::RangedShot => "Ranged Shot",
+                    };
+                    let message = format!(
+                        "{label} -> {} {} (mana {:.0})",
+                        match target.kind {
+                            TargetKind::Player => "player",
+                            TargetKind::Minion => "minion",
+                            TargetKind::Structure => "structure",
+                            TargetKind::Neutral => "neutral",
+                        },
+                        target.id,
+                        local_stats.mana
+                    );
+                    console.push_line(message.clone());
+                    info!("{message}");
+                } else {
+                    let message = match ability {
+                        HeroAbility::MeleeStrike => {
+                            "Melee Strike: no target. Use TAB or middle mouse click to select."
+                        }
+                        HeroAbility::RangedShot => {
+                            "Ranged Shot: no target. Use TAB or middle mouse click to select."
+                        }
+                    };
                     console.push_line(message);
                     info!("{message}");
                     continue;
