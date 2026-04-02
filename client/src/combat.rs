@@ -12,10 +12,11 @@ use bevy::{
 use crate::camera::MainCamera;
 use crate::debug_console::DebugConsole;
 use crate::net::{
-    GameState, GameStateSnapshot, NetworkCommand, NetworkMinion, NetworkMinionId,
+    GameState, GameStateSnapshot, LocalAbilityBar, NetworkCommand, NetworkMinion, NetworkMinionId,
     NetworkNeutral, NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId,
     RemotePlayer, StructureKind, TargetId, TargetKind,
 };
+use shared::{SkillSlot, TargetingMode, ability_for_slot, scaled_mana_cost};
 use crate::player::Player;
 use crate::team::Team;
 
@@ -43,11 +44,10 @@ const MINION_MARKER_RADIUS: f32 = 1.05;
 const NEUTRAL_MARKER_RADIUS: f32 = 1.1;
 const TOWER_MARKER_RADIUS: f32 = 2.0;
 const BASE_TOWER_MARKER_RADIUS: f32 = 3.75;
-const SKILL_BUTTON_SIZE: f32 = 80.0;
+const SKILL_BUTTON_SIZE: f32 = 72.0;
+const SKILL_BUTTON_GAP: f32 = 8.0;
 const SKILL_BUTTON_MARGIN: f32 = 20.0;
 const SKILL_BUTTON_COLOR: Color = Color::srgba(0.12, 0.12, 0.12, 0.75);
-const SKILL_BUTTON_HOVER_COLOR: Color = Color::srgba(0.18, 0.18, 0.18, 0.85);
-const SKILL_BUTTON_PRESS_COLOR: Color = Color::srgba(0.28, 0.28, 0.28, 0.95);
 
 pub struct CombatPlugin;
 
@@ -62,7 +62,8 @@ impl Plugin for CombatPlugin {
                     select_target_system,
                     clear_invalid_target_system,
                     cast_spell_system,
-                    skill_button_system,
+                    hotbar_interaction_system,
+                    update_hotbar_visuals_system,
                     update_target_marker_system,
                 )
                     .chain(),
@@ -130,7 +131,10 @@ struct CombatBars {
 struct TargetMarker;
 
 #[derive(Component)]
-struct SkillButton;
+struct HotbarSlotButton(SkillSlot);
+
+#[derive(Component)]
+struct HotbarSlotLabel(SkillSlot);
 
 #[derive(Component)]
 struct CombatBarRoot;
@@ -248,22 +252,57 @@ fn setup_combat_visual_assets(
 }
 
 fn setup_combat_ui(mut commands: Commands) {
-    commands.spawn((
-        Button,
-        Node {
-            position_type: PositionType::Absolute,
-            right: Val::Px(SKILL_BUTTON_MARGIN),
-            bottom: Val::Px(SKILL_BUTTON_MARGIN),
-            width: Val::Px(SKILL_BUTTON_SIZE),
-            height: Val::Px(SKILL_BUTTON_SIZE),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            ..default()
-        },
-        BackgroundColor(SKILL_BUTTON_COLOR),
-        SkillButton,
-        Name::new("SkillButton"),
-    ));
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(SKILL_BUTTON_MARGIN),
+                bottom: Val::Px(SKILL_BUTTON_MARGIN),
+                flex_direction: FlexDirection::Row,
+                column_gap: Val::Px(SKILL_BUTTON_GAP),
+                ..default()
+            },
+            Name::new("HotbarRow"),
+        ))
+        .with_children(|row| {
+            for slot in [
+                SkillSlot::Q,
+                SkillSlot::W,
+                SkillSlot::E,
+                SkillSlot::R,
+            ] {
+                let key = match slot {
+                    SkillSlot::Q => "Q",
+                    SkillSlot::W => "W",
+                    SkillSlot::E => "E",
+                    SkillSlot::R => "R",
+                };
+                row.spawn((
+                    Button,
+                    Node {
+                        width: Val::Px(SKILL_BUTTON_SIZE),
+                        height: Val::Px(SKILL_BUTTON_SIZE),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    BackgroundColor(SKILL_BUTTON_COLOR),
+                    HotbarSlotButton(slot),
+                    Name::new(format!("Hotbar-{key}")),
+                ))
+                .with_children(|btn| {
+                    btn.spawn((
+                        Text::new(key),
+                        TextFont {
+                            font_size: 20.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                        HotbarSlotLabel(slot),
+                    ));
+                });
+            }
+        });
 }
 
 fn select_target_system(
@@ -388,31 +427,8 @@ fn clear_invalid_target_system(
 fn cast_spell_system(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     game_state: Option<Res<GameStateSnapshot>>,
+    ability_bar: Res<LocalAbilityBar>,
     local_stats_query: Query<&CombatStats, With<Player>>,
-    local_player: Query<(&Transform, &Team), With<Player>>,
-    player_candidates: Query<
-        (Entity, &Transform, &NetworkPlayerId, &CombatStats, &Team),
-        (With<RemotePlayer>, Without<Player>),
-    >,
-    minion_candidates: Query<
-        (Entity, &Transform, &NetworkMinionId, &CombatStats, &Team),
-        With<NetworkMinion>,
-    >,
-    neutral_candidates: Query<
-        (Entity, &Transform, &NetworkNeutralId, &CombatStats),
-        With<NetworkNeutral>,
-    >,
-    structure_candidates: Query<
-        (
-            Entity,
-            &Transform,
-            &NetworkStructureId,
-            &CombatStats,
-            &Team,
-            &StructureKind,
-        ),
-        With<NetworkStructure>,
-    >,
     mut target_state: ResMut<TargetState>,
     mut command_writer: MessageWriter<NetworkCommand>,
     mut console: ResMut<DebugConsole>,
@@ -422,74 +438,39 @@ fn cast_spell_system(
             return;
         }
     }
-    if !keyboard_input.just_pressed(KeyCode::KeyQ) {
-        return;
-    }
-
     let Ok(local_stats) = local_stats_query.single() else {
         return;
     };
-    let _ = (
-        local_player,
-        player_candidates,
-        minion_candidates,
-        neutral_candidates,
-        structure_candidates,
-    );
-    let target = resolve_cast_target(&mut target_state);
-    if let Some(target) = target {
-        command_writer.write(NetworkCommand::Cast { target });
-        let message = format!(
-            "Cast -> {} {} (mana {:.0})",
-            match target.kind {
-                TargetKind::Player => "player",
-                TargetKind::Minion => "minion",
-                TargetKind::Structure => "structure",
-                TargetKind::Neutral => "neutral",
-            },
-            target.id,
-            local_stats.mana
-        );
-        console.push_line(message.clone());
-        info!("{message}");
-    } else {
-        let message = "No target available. Use TAB or middle mouse click to select.";
-        console.push_line(message);
-        info!("{message}");
+
+    let bindings = [
+        (KeyCode::KeyQ, SkillSlot::Q),
+        (KeyCode::KeyW, SkillSlot::W),
+        (KeyCode::KeyE, SkillSlot::E),
+        (KeyCode::KeyR, SkillSlot::R),
+    ];
+    for (key, slot) in bindings {
+        if keyboard_input.just_pressed(key) {
+            try_cast_slot(
+                slot,
+                &ability_bar,
+                local_stats,
+                &mut target_state,
+                &mut command_writer,
+                &mut console,
+            );
+        }
     }
 }
 
-fn skill_button_system(
+fn hotbar_interaction_system(
     mut interactions: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<SkillButton>),
+        (&HotbarSlotButton, &Interaction),
+        (Changed<Interaction>, With<Button>),
     >,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
     game_state: Option<Res<GameStateSnapshot>>,
+    ability_bar: Res<LocalAbilityBar>,
     local_stats_query: Query<&CombatStats, With<Player>>,
-    local_player: Query<(&Transform, &Team), With<Player>>,
-    player_candidates: Query<
-        (Entity, &Transform, &NetworkPlayerId, &CombatStats, &Team),
-        (With<RemotePlayer>, Without<Player>),
-    >,
-    minion_candidates: Query<
-        (Entity, &Transform, &NetworkMinionId, &CombatStats, &Team),
-        With<NetworkMinion>,
-    >,
-    neutral_candidates: Query<
-        (Entity, &Transform, &NetworkNeutralId, &CombatStats),
-        With<NetworkNeutral>,
-    >,
-    structure_candidates: Query<
-        (
-            Entity,
-            &Transform,
-            &NetworkStructureId,
-            &CombatStats,
-            &Team,
-            &StructureKind,
-        ),
-        With<NetworkStructure>,
-    >,
     mut target_state: ResMut<TargetState>,
     mut command_writer: MessageWriter<NetworkCommand>,
     mut console: ResMut<DebugConsole>,
@@ -499,47 +480,147 @@ fn skill_button_system(
             return;
         }
     }
-    for (interaction, mut color) in interactions.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                *color = SKILL_BUTTON_PRESS_COLOR.into();
-                let Ok(local_stats) = local_stats_query.single() else {
-                    continue;
-                };
-                let _ = (
-                    &local_player,
-                    &player_candidates,
-                    &minion_candidates,
-                    &neutral_candidates,
-                    &structure_candidates,
-                );
-                if let Some(target) = resolve_cast_target(&mut target_state) {
-                    command_writer.write(NetworkCommand::Cast { target });
-                    let message = format!(
-                        "Cast -> {} {} (mana {:.0})",
-                        match target.kind {
-                            TargetKind::Player => "player",
-                            TargetKind::Minion => "minion",
-                            TargetKind::Structure => "structure",
-                            TargetKind::Neutral => "neutral",
-                        },
-                        target.id,
-                        local_stats.mana
-                    );
-                    console.push_line(message.clone());
-                    info!("{message}");
-                } else {
-                    let message = "No target available. Use TAB or middle mouse click to select.";
-                    console.push_line(message);
-                    info!("{message}");
-                }
-            }
-            Interaction::Hovered => {
-                *color = SKILL_BUTTON_HOVER_COLOR.into();
-            }
-            Interaction::None => {
-                *color = SKILL_BUTTON_COLOR.into();
-            }
+    let Ok(local_stats) = local_stats_query.single() else {
+        return;
+    };
+
+    let alt_held = keyboard_input.pressed(KeyCode::AltLeft)
+        || keyboard_input.pressed(KeyCode::AltRight);
+
+    for (HotbarSlotButton(slot), interaction) in interactions.iter_mut() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        if alt_held {
+            command_writer.write(NetworkCommand::UpgradeAbility { slot: *slot });
+            let def = ability_for_slot(*slot);
+            console.push_line(format!("Request rank upgrade: {}", def.name));
+            info!("Upgrade request {:?}", slot);
+        } else {
+            try_cast_slot(
+                *slot,
+                &ability_bar,
+                local_stats,
+                &mut target_state,
+                &mut command_writer,
+                &mut console,
+            );
+        }
+    }
+}
+
+fn update_hotbar_visuals_system(
+    ability_bar: Res<LocalAbilityBar>,
+    local_stats_query: Query<&CombatStats, With<Player>>,
+    mut buttons: Query<(&HotbarSlotButton, &mut BackgroundColor)>,
+    mut labels: Query<(&HotbarSlotLabel, &mut Text)>,
+) {
+    let Ok(stats) = local_stats_query.single() else {
+        return;
+    };
+    let snap = &ability_bar.0;
+
+    for (HotbarSlotButton(slot), mut bg) in buttons.iter_mut() {
+        let i = slot.index();
+        let def = ability_for_slot(*slot);
+        let rank = snap.ranks[i].max(1);
+        let mana_ok = stats.mana >= scaled_mana_cost(def, rank);
+        let mut c = SKILL_BUTTON_COLOR;
+        if !snap.unlocked[i] {
+            c = Color::srgba(0.28, 0.1, 0.1, 0.82);
+        } else if snap.cooldown_remaining[i] > 0.01 {
+            c = Color::srgba(0.08, 0.12, 0.28, 0.88);
+        } else if !mana_ok {
+            c = Color::srgba(0.18, 0.16, 0.08, 0.78);
+        } else if snap.rank_upgrade_available[i] {
+            c = Color::srgba(0.1, 0.24, 0.14, 0.9);
+        }
+        *bg = c.into();
+    }
+
+    for (HotbarSlotLabel(slot), mut text) in labels.iter_mut() {
+        let i = slot.index();
+        let key = match *slot {
+            SkillSlot::Q => "Q",
+            SkillSlot::W => "W",
+            SkillSlot::E => "E",
+            SkillSlot::R => "R",
+        };
+        let cd = snap.cooldown_remaining[i];
+        let sub = if !snap.unlocked[i] {
+            "LOCK".to_string()
+        } else if cd > 0.01 {
+            format!("{cd:.1}")
+        } else if snap.rank_upgrade_available[i] {
+            "^".to_string()
+        } else {
+            format!("rk{}", snap.ranks[i].max(1))
+        };
+        *text = Text::new(format!("{key}\n{sub}"));
+    }
+}
+
+fn try_cast_slot(
+    slot: SkillSlot,
+    ability_bar: &LocalAbilityBar,
+    local_stats: &CombatStats,
+    target_state: &mut TargetState,
+    command_writer: &mut MessageWriter<NetworkCommand>,
+    console: &mut DebugConsole,
+) {
+    let snap = &ability_bar.0;
+    let i = slot.index();
+    if !snap.unlocked[i] {
+        let msg = "That ability slot is locked (level up to unlock W, E, then R).";
+        console.push_line(msg);
+        info!("{msg}");
+        return;
+    }
+    let def = ability_for_slot(slot);
+    let rank = snap.ranks[i].max(1);
+    if local_stats.mana < scaled_mana_cost(def, rank) {
+        let msg = "Not enough mana for that ability.";
+        console.push_line(msg);
+        info!("{msg}");
+        return;
+    }
+    if snap.cooldown_remaining[i] > 0.01 {
+        let msg = "That ability is on cooldown.";
+        console.push_line(msg);
+        info!("{msg}");
+        return;
+    }
+
+    match def.targeting {
+        TargetingMode::UnitTarget => {
+            let Some(target) = resolve_cast_target(target_state) else {
+                let msg = "No target available. Use TAB or middle mouse click to select.";
+                console.push_line(msg);
+                info!("{msg}");
+                return;
+            };
+            command_writer.write(NetworkCommand::Cast {
+                slot,
+                target: Some(target),
+            });
+            let message = format!(
+                "{} -> {:?} {} (mana {:.0})",
+                def.name,
+                target.kind,
+                target.id,
+                local_stats.mana
+            );
+            console.push_line(message.clone());
+            info!("{message}");
+        }
+        TargetingMode::SelfTarget => {
+            command_writer.write(NetworkCommand::Cast {
+                slot,
+                target: None,
+            });
+            let message = format!("{} (self, mana {:.0})", def.name, local_stats.mana);
+            console.push_line(message.clone());
+            info!("{message}");
         }
     }
 }
@@ -881,8 +962,8 @@ fn find_nearest_enemy_target(
         }
     }
 
-    for (entity, transform, id, stats, _team) in minion_candidates.iter() {
-        if !stats.is_alive() {
+    for (entity, transform, id, stats, team) in minion_candidates.iter() {
+        if !stats.is_alive() || *team == local_team {
             continue;
         }
         let dist_sq = transform.translation.distance_squared(local_pos);
@@ -983,8 +1064,8 @@ fn find_target_near_point(
         }
     }
 
-    for (entity, transform, id, stats, _team) in minion_candidates.iter() {
-        if !stats.is_alive() {
+    for (entity, transform, id, stats, team) in minion_candidates.iter() {
+        if !stats.is_alive() || *team == local_team {
             continue;
         }
         let dist = transform.translation.xz().distance(click_point.xz());
