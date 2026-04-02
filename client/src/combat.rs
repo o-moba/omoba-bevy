@@ -2,8 +2,8 @@ use bevy::{
     camera::primitives::Aabb,
     input::mouse::MouseButton,
     math::{
-        Dir3,
         primitives::{InfinitePlane3d, Rectangle},
+        Dir3,
     },
     prelude::*,
     window::PrimaryWindow,
@@ -16,11 +16,19 @@ use crate::net::{
     NetworkNeutral, NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId,
     PendingAbilityFeedback, RemotePlayer, StructureKind, TargetId, TargetKind,
 };
+use shared::{SkillSlot, TargetingMode, ability_for_slot, scaled_mana_cost};
 use crate::player::Player;
 use crate::team::Team;
 
 pub const MAX_HP: f32 = 100.0;
 pub const MAX_MANA: f32 = 100.0;
+
+/// Must match `MELEE_RANGE_XZ` in `server/src/main.rs` (TASK-07 / AD2).
+pub const MELEE_RANGE_XZ: f32 = 2.75;
+/// Must match `SPELL_MANA_COST` for skill 1 on the server.
+pub const MELEE_MANA_COST: f32 = 20.0;
+/// Must match `MAX_MELEE_SKILL_RANK` on the server.
+pub const MAX_MELEE_SKILL_RANK: u32 = 5;
 
 const BAR_WIDTH: f32 = 1.45;
 const BAR_HEIGHT: f32 = 0.09;
@@ -43,12 +51,11 @@ const MINION_MARKER_RADIUS: f32 = 1.05;
 const NEUTRAL_MARKER_RADIUS: f32 = 1.1;
 const TOWER_MARKER_RADIUS: f32 = 2.0;
 const BASE_TOWER_MARKER_RADIUS: f32 = 3.75;
-const SKILL_BUTTON_SIZE: f32 = 80.0;
+const SKILL_BUTTON_SIZE: f32 = 72.0;
+const SKILL_BUTTON_GAP: f32 = 8.0;
 const SKILL_BUTTON_MARGIN: f32 = 20.0;
 const SKILL_BUTTON_GAP: f32 = 12.0;
 const SKILL_BUTTON_COLOR: Color = Color::srgba(0.12, 0.12, 0.12, 0.75);
-const SKILL_BUTTON_HOVER_COLOR: Color = Color::srgba(0.18, 0.18, 0.18, 0.85);
-const SKILL_BUTTON_PRESS_COLOR: Color = Color::srgba(0.28, 0.28, 0.28, 0.95);
 
 pub struct CombatPlugin;
 
@@ -461,6 +468,7 @@ fn clear_invalid_target_system(
 fn ability_keyboard_system(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     game_state: Option<Res<GameStateSnapshot>>,
+    ability_bar: Res<LocalAbilityBar>,
     local_stats_query: Query<&CombatStats, With<Player>>,
     mut target_state: ResMut<TargetState>,
     mut command_writer: MessageWriter<NetworkCommand>,
@@ -517,7 +525,49 @@ fn ability_keyboard_system(
         };
         console.push_line(message);
         info!("{message}");
+        return;
+    };
+    let Some(entity) = target_state.selected_entity else {
+        let message = "No target entity for melee (re-select target).";
+        console.push_line(message);
+        info!("{message}");
+        return;
+    };
+    let Ok(target_transform) = target_transforms.get(entity) else {
+        let message = "Target is no longer valid.";
+        console.push_line(message);
+        info!("{message}");
+        return;
+    };
+    let target_team = target_teams.get(entity).ok().copied();
+    if let Some(reason) = local_melee_cast_block_reason(
+        target,
+        *local_team,
+        target_team,
+        local_transform.translation,
+        target_transform.translation,
+        local_stats.mana,
+    ) {
+        console.push_line(reason);
+        info!("{reason}");
+        return;
     }
+
+    command_writer.write(NetworkCommand::Cast { target });
+    let message = format!(
+        "Melee (rank {}) -> {} {} (mana {:.0})",
+        progression.skill1_rank.max(1),
+        match target.kind {
+            TargetKind::Player => "player",
+            TargetKind::Minion => "minion",
+            TargetKind::Structure => "structure",
+            TargetKind::Neutral => "neutral",
+        },
+        target.id,
+        local_stats.mana
+    );
+    console.push_line(message.clone());
+    info!("{message}");
 }
 
 fn ability_hud_button_system(
@@ -525,7 +575,9 @@ fn ability_hud_button_system(
         (&Interaction, &mut BackgroundColor, &AbilityHudButton),
         Changed<Interaction>,
     >,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
     game_state: Option<Res<GameStateSnapshot>>,
+    ability_bar: Res<LocalAbilityBar>,
     local_stats_query: Query<&CombatStats, With<Player>>,
     mut target_state: ResMut<TargetState>,
     mut command_writer: MessageWriter<NetworkCommand>,
@@ -576,7 +628,48 @@ fn ability_hud_button_system(
                     };
                     console.push_line(message);
                     info!("{message}");
+                    continue;
+                };
+                let Some(entity) = target_state.selected_entity else {
+                    let message = "No target entity for melee (re-select target).";
+                    console.push_line(message);
+                    info!("{message}");
+                    continue;
+                };
+                let Ok(target_transform) = target_transforms.get(entity) else {
+                    let message = "Target is no longer valid.";
+                    console.push_line(message);
+                    info!("{message}");
+                    continue;
+                };
+                let target_team = target_teams.get(entity).ok().copied();
+                if let Some(reason) = local_melee_cast_block_reason(
+                    target,
+                    *local_team,
+                    target_team,
+                    local_transform.translation,
+                    target_transform.translation,
+                    local_stats.mana,
+                ) {
+                    console.push_line(reason);
+                    info!("{reason}");
+                    continue;
                 }
+                command_writer.write(NetworkCommand::Cast { target });
+                let message = format!(
+                    "Melee (rank {}) -> {} {} (mana {:.0})",
+                    progression.skill1_rank.max(1),
+                    match target.kind {
+                        TargetKind::Player => "player",
+                        TargetKind::Minion => "minion",
+                        TargetKind::Structure => "structure",
+                        TargetKind::Neutral => "neutral",
+                    },
+                    target.id,
+                    local_stats.mana
+                );
+                console.push_line(message.clone());
+                info!("{message}");
             }
             Interaction::Hovered => {
                 *color = SKILL_BUTTON_HOVER_COLOR.into();
@@ -607,9 +700,8 @@ fn spawn_combat_bars_system(
             Some(StructureKind::BaseTower) => BASE_TOWER_BAR_Y,
             None => 2.1,
         };
-        let show_mana_bar = structure_kind.is_none()
-            && minion_marker.is_none()
-            && neutral_marker.is_none();
+        let show_mana_bar =
+            structure_kind.is_none() && minion_marker.is_none() && neutral_marker.is_none();
         let mut bars = CombatBars::default();
         let bar_root = commands
             .spawn((
@@ -833,7 +925,8 @@ fn update_target_marker_system(
         marker_center_y + bob,
         target_translation.z,
     );
-    marker_transform.rotation = Quat::from_rotation_y(time.elapsed_secs() * TARGET_MARKER_SPIN_SPEED);
+    marker_transform.rotation =
+        Quat::from_rotation_y(time.elapsed_secs() * TARGET_MARKER_SPIN_SPEED);
     marker_transform.scale = Vec3::new(marker_radius * pulse, 1.0, marker_radius * pulse);
 }
 
@@ -1089,4 +1182,76 @@ fn find_target_near_point(
 
 fn resolve_cast_target(target_state: &mut TargetState) -> Option<TargetId> {
     target_state.selected_target
+}
+
+fn horizontal_distance_squared_xz(a: Vec3, b: Vec3) -> f32 {
+    let dx = a.x - b.x;
+    let dz = a.z - b.z;
+    dx * dx + dz * dz
+}
+
+/// Client-side checks aligned with server melee validation (TASK-07).
+fn local_melee_cast_block_reason(
+    target: TargetId,
+    local_team: Team,
+    target_team: Option<Team>,
+    local_translation: Vec3,
+    target_world_translation: Vec3,
+    mana: f32,
+) -> Option<&'static str> {
+    if target.kind == TargetKind::Structure {
+        return Some("Melee skill cannot target structures.");
+    }
+    if matches!(target.kind, TargetKind::Player | TargetKind::Minion) {
+        let Some(t_team) = target_team else {
+            return Some("Target is no longer valid.");
+        };
+        if t_team == local_team {
+            return Some("Melee cannot target allied units.");
+        }
+    }
+    if mana < MELEE_MANA_COST {
+        return Some("Not enough mana for melee (20).");
+    }
+    let max_sq = MELEE_RANGE_XZ * MELEE_RANGE_XZ;
+    if horizontal_distance_squared_xz(local_translation, target_world_translation) > max_sq {
+        return Some("Target is out of melee range.");
+    }
+    None
+}
+
+fn melee_skill_upgrade_system(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    game_state: Option<Res<GameStateSnapshot>>,
+    local_prog: Query<&PlayerProgression, With<Player>>,
+    mut command_writer: MessageWriter<NetworkCommand>,
+    mut console: ResMut<DebugConsole>,
+) {
+    if let Some(game_state) = game_state.as_ref() {
+        if !matches!(game_state.state, GameState::Running) {
+            return;
+        }
+    }
+    if !keyboard_input.just_pressed(KeyCode::Digit1) {
+        return;
+    }
+    let Ok(prog) = local_prog.single() else {
+        return;
+    };
+    if prog.skill_points == 0 {
+        let message = "No skill points to upgrade melee.";
+        console.push_line(message);
+        info!("{message}");
+        return;
+    }
+    if prog.skill1_rank >= MAX_MELEE_SKILL_RANK {
+        let message = "Melee skill is already max rank.";
+        console.push_line(message);
+        info!("{message}");
+        return;
+    }
+    command_writer.write(NetworkCommand::UpgradeMeleeSkill);
+    let message = "Sent melee skill upgrade request.";
+    console.push_line(message);
+    info!("{message}");
 }

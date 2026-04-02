@@ -2,8 +2,9 @@ use bevy::ecs::query::Or;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::scene::SceneRoot;
-use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
+use crossbeam_channel::{unbounded, Receiver, Sender, TryRecvError};
 use serde::{Deserialize, Serialize};
+use shared::{PlayerAbilitySnapshot, SkillSlot};
 use std::{
     collections::{HashMap, HashSet},
     io,
@@ -12,13 +13,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::camera::{CameraState, MainCamera, locked_camera_offset};
+use crate::camera::{locked_camera_offset, CameraState, MainCamera};
 use crate::combat::{CombatStats, MAX_HP, MAX_MANA};
-use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
+use crate::player::{Player, PlayerBody, VerticalVelocity, PLAYER_SIZE};
 use crate::team::TeamSelection;
 use crate::team::{CharacterChoice, Team};
 use crate::world::{
-    NormalizeModelScale, PlayerAssets, PlayerModelCatalog, model_assets_for_choice,
+    model_assets_for_choice, NormalizeModelScale, PlayerAssets, PlayerModelCatalog,
 };
 
 const DEFAULT_SERVER_ADDR: &str = "127.0.0.1:4000";
@@ -54,6 +55,7 @@ impl Plugin for NetworkingPlugin {
             .init_resource::<NetworkState>()
             .init_resource::<PendingAbilityFeedback>()
             .init_resource::<GameStateSnapshot>()
+            .init_resource::<LocalAbilityBar>()
             .insert_resource(LocalStateSendTimer(Timer::from_seconds(
                 UPDATE_INTERVAL_SECONDS,
                 TimerMode::Repeating,
@@ -185,6 +187,8 @@ struct PlayerState {
     ranged_shot_rank: u8,
     #[serde(default = "default_character_choice")]
     character: CharacterChoice,
+    #[serde(default)]
+    abilities: PlayerAbilitySnapshot,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -320,13 +324,25 @@ pub enum GameState {
     #[default]
     Lobby,
     Running,
-    Victory { winner: Team },
+    Victory {
+        winner: Team,
+    },
 }
 
 #[derive(Resource, Default, Clone)]
 pub struct GameStateSnapshot {
     pub state: GameState,
     pub rematch_in_secs: Option<u64>,
+}
+
+/// Latest server ability snapshot for the local hero (drives hotbar UI).
+#[derive(Resource, Clone, Debug)]
+pub struct LocalAbilityBar(pub PlayerAbilitySnapshot);
+
+impl Default for LocalAbilityBar {
+    fn default() -> Self {
+        Self(PlayerAbilitySnapshot::default())
+    }
 }
 
 #[derive(Resource)]
@@ -358,7 +374,7 @@ pub struct NetworkPlayerId(pub u64);
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkCharacterChoice(pub CharacterChoice);
 
-#[derive(Component, Clone, Copy, Debug, Default)]
+#[derive(Component, Clone, Copy, Debug)]
 pub struct PlayerProgression {
     pub level: u32,
     pub xp: u32,
@@ -812,6 +828,10 @@ fn apply_server_snapshot(params: ApplyServerSnapshotParams) {
     game_state_snapshot.state = game_state;
     game_state_snapshot.rematch_in_secs = rematch_in_secs;
 
+    if let Some(local) = players.iter().find(|player| player.id == your_id) {
+        commands.insert_resource(LocalAbilityBar(local.abilities.clone()));
+    }
+
     let local_player_state = players.iter().find(|player| player.id == your_id);
     let local_players = local_player_query
         .iter()
@@ -819,8 +839,7 @@ fn apply_server_snapshot(params: ApplyServerSnapshotParams) {
         .collect::<Vec<_>>();
     // IMPORTANT: we must tolerate temporary duplication of `Player` entities (e.g. during loading /
     // restart races). Many gameplay systems use `Query::single()` and will break if we allow >1.
-    let chosen_local =
-        choose_authoritative_local_player(&local_players, your_id);
+    let chosen_local = choose_authoritative_local_player(&local_players, your_id);
 
     if let Some(local_entity) = chosen_local {
         // Keep exactly one local `Player` alive to avoid `single()` query failures.
