@@ -2,6 +2,8 @@
 
 Single-machine multiplayer testing for omoba-bevy.
 
+Entry point: see [README.md](README.md) for first-time setup and a controls summary. This file focuses on processes, logs, and recovery.
+
 ## Prerequisites
 
 - Rust toolchain (`rustup`) installed.
@@ -80,10 +82,14 @@ server is not running or is on a different address/port.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `Address already in use` on server start | Previous server still running | `make stop` |
-| Client never receives first snapshot | Server not started or wrong port | Check `GAME_SERVER_ADDR` matches `SERVER_ADDR` |
-| `Failed to bind client UDP socket` | OS port exhaustion (rare) | Restart the client |
-| Client exits immediately | Build error or missing assets | Run `cargo build --workspace` and check for errors |
+| `Address already in use` on server start | Previous server still running | Run `make stop`; if it persists, find and terminate the process bound to the port (`lsof -i :4000` on macOS/Linux) and retry |
+| Client stuck on "Connecting…" / no snapshot | Server not running, wrong host, or firewall | 1) Confirm server log shows listening. 2) Ensure client `GAME_SERVER_ADDR` host and **port** match `SERVER_ADDR` (default `127.0.0.1:4000`). 3) Allow UDP for local binaries in OS firewall. 4) Retry `make restart` after `make stop` |
+| Client never receives first snapshot | Port mismatch between server bind and client target | Parse port from `SERVER_ADDR` (e.g. `0.0.0.0:5000` → clients use `127.0.0.1:5000` in `GAME_SERVER_ADDR`) |
+| Second machine on LAN cannot connect | Client still points at localhost | On the client machine set `GAME_SERVER_ADDR=<server-LAN-IP>:4000`; on the server keep `SERVER_ADDR=0.0.0.0:4000` so it accepts non-local interfaces |
+| `Connection refused` (tools) or immediate disconnect | Nothing listening on declared port | Start server first; verify with server log line; check VPN or corporate proxy is not blocking UDP loopback |
+| `Failed to bind client UDP socket` | OS port exhaustion (rare) | Close other clients; reboot if needed; retry `make game` |
+| Client exits immediately | Build error or asset load failure | Run `cargo build --workspace` from repo root and fix compile errors; check client stderr for asset path errors (the client uses `client/assets/` under the crate, including an auto-created downloads subfolder) |
+| `make stop` did not clear processes | Processes not started via `make start` | Manually kill `target/debug/server` and `target/debug/client` (or `pkill -f target/debug/server` / `client`) then confirm the port is free |
 
 ## Repeated Restart Behavior
 
