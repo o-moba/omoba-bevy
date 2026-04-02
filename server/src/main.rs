@@ -17,6 +17,9 @@ const MAX_PACKET_SIZE: usize = 8 * 1024;
 const MAX_HP: f32 = 100.0;
 const MAX_MANA: f32 = 100.0;
 const MANA_REGEN_PER_SECOND: f32 = 8.0;
+// Client pre-check mirrors these in client/src/combat.rs (SPELL_MANA_COST / SPELL_COOLDOWN).
+const SPELL_MANA_COST: f32 = 20.0;
+const SPELL_COOLDOWN: Duration = Duration::from_millis(350);
 
 /// Skill 3 (self heal): restore per rank. Rank uses 1-based indexing on `PlayerState.skill3_rank`.
 /// Client UI must stay consistent with this table (see `client/src/combat.rs`).
@@ -88,6 +91,47 @@ const NEUTRAL_ATTACK_COOLDOWN: Duration = Duration::from_millis(850);
 const NEUTRAL_CHASE_SPEED: f32 = 2.9;
 const NEUTRAL_RESPAWN_COOLDOWN: Duration = Duration::from_secs(40);
 const VICTORY_REMATCH_DELAY: Duration = Duration::from_secs(10);
+
+/// Stable, grep-friendly server log line for triage (see TASK-16 AC4).
+fn omoba_srv(event: &'static str, details: &str) {
+    println!("[omoba:srv] event={event} {details}");
+}
+
+/// Player damage batch item: victim id, damage, optional killer player id (projectile owner), optional env source label.
+type PlayerHit = (u64, f32, Option<u64>, Option<&'static str>);
+
+fn apply_player_hit_events(
+    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+    events: Vec<PlayerHit>,
+    now: Instant,
+) {
+    for (target_id, damage, killer_player, env_src) in events {
+        if let Some(target_player) = players
+            .values_mut()
+            .find(|player| player.state.id == target_id && player.state.hp > 0.0)
+        {
+            let was_alive = target_player.state.hp > 0.0;
+            target_player.state.hp = (target_player.state.hp - damage).max(0.0);
+            if was_alive && target_player.state.hp <= 0.0 {
+                let detail = match (killer_player, env_src) {
+                    (Some(k), _) => {
+                        omoba_srv(
+                            "player_kill",
+                            &format!("killer_id={k} victim_id={target_id}"),
+                        );
+                        format!("killer_player_id={k}")
+                    }
+                    (None, Some(env)) => format!("killer_kind={env}"),
+                    (None, None) => "killer_kind=unknown".to_string(),
+                };
+                omoba_srv("player_death", &format!("victim_id={target_id} {detail}"));
+                if target_player.respawn_at.is_none() {
+                    target_player.respawn_at = Some(now + RESPAWN_DELAY);
+                }
+            }
+        }
+    }
+}
 
 const TARGET_BASE_RUN_TIME_SECONDS: f32 = 45.0;
 const PLAYER_SPEED: f32 = 5.0;
@@ -302,7 +346,7 @@ fn xp_threshold_for_level(level: u32) -> u32 {
     }
 }
 
-fn apply_level_up(state: &mut PlayerState) {
+fn apply_level_up(state: &mut PlayerState, player_id: u64) {
     state.level = state.level.saturating_add(1);
     state.skill_points = state.skill_points.saturating_add(1);
     state.max_hp += LEVEL_UP_HP_BONUS;
@@ -310,9 +354,16 @@ fn apply_level_up(state: &mut PlayerState) {
     state.hp = (state.hp + LEVEL_UP_HP_BONUS).clamp(0.0, state.max_hp);
     state.mana = (state.mana + LEVEL_UP_MANA_BONUS).clamp(0.0, state.max_mana);
     state.next_level_xp = xp_threshold_for_level(state.level);
+    omoba_srv(
+        "level_up",
+        &format!(
+            "player_id={player_id} level={} skill_points={}",
+            state.level, state.skill_points
+        ),
+    );
 }
 
-fn grant_player_xp(state: &mut PlayerState, amount: u32) {
+fn grant_player_xp(player_id: u64, state: &mut PlayerState, amount: u32) {
     if amount == 0 {
         return;
     }
@@ -325,7 +376,7 @@ fn grant_player_xp(state: &mut PlayerState, amount: u32) {
     state.xp = state.xp.saturating_add(amount);
     while state.level < MAX_LEVEL && state.next_level_xp > 0 && state.xp >= state.next_level_xp {
         state.xp -= state.next_level_xp;
-        apply_level_up(state);
+        apply_level_up(state, player_id);
     }
 
     if state.level >= MAX_LEVEL {
@@ -460,7 +511,9 @@ enum GameState {
     #[default]
     Lobby,
     Running,
-    Victory { winner: Team },
+    Victory {
+        winner: Team,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -709,7 +762,7 @@ fn main() -> io::Result<()> {
                     let packet = match serde_json::from_slice::<ClientPacket>(&recv_buf[..len]) {
                         Ok(packet) => packet,
                         Err(error) => {
-                            eprintln!("Invalid packet from {addr}: {error}");
+                            omoba_srv("packet_decode_error", &format!("addr={addr} error={error}"));
                             continue;
                         }
                     };
@@ -761,7 +814,7 @@ fn main() -> io::Result<()> {
                                 handle_join_request(player, team, character, &map_layout);
                             }
                             if matches!(game_state, GameState::Lobby) {
-                                println!("First player joined – match starting");
+                                omoba_srv("match_start", "reason=first_join");
                                 game_state = GameState::Running;
                             }
                         }
@@ -778,13 +831,24 @@ fn main() -> io::Result<()> {
                                     &mut game_state,
                                 );
                                 victory_at = None;
+                            } else {
+                                let id = players
+                                    .get(&addr)
+                                    .map(|player| player.state.id)
+                                    .unwrap_or(0);
+                                omoba_srv(
+                                    "rematch_reject",
+                                    &format!(
+                                        "player_id={id} reason=match_not_in_victory state={game_state:?}"
+                                    ),
+                                );
                             }
                         }
                     }
                 }
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
                 Err(error) => {
-                    eprintln!("Socket receive error: {error}");
+                    eprintln!("[omoba:srv] event=socket_recv_error error={error}");
                     break;
                 }
             }
@@ -863,7 +927,10 @@ fn main() -> io::Result<()> {
         players.retain(|addr, player| {
             let is_alive = now.duration_since(player.last_seen) <= PLAYER_TIMEOUT;
             if !is_alive {
-                println!("Player {} timed out ({addr})", player.state.id);
+                omoba_srv(
+                    "client_leave",
+                    &format!("player_id={} reason=timeout addr={addr}", player.state.id),
+                );
             }
             is_alive
         });
@@ -872,19 +939,17 @@ fn main() -> io::Result<()> {
             .values()
             .map(|player| player.state.id)
             .collect::<HashSet<_>>();
-        projectiles.retain(|_, projectile| {
-            match projectile.target.kind {
-                TargetKind::Player => live_player_ids.contains(&projectile.target.id),
-                TargetKind::Minion => minions
-                    .get(&projectile.target.id)
-                    .is_some_and(|minion| minion.state.hp > 0.0),
-                TargetKind::Structure => structures
-                    .get(&projectile.target.id)
-                    .is_some_and(|structure| structure.state.hp > 0.0),
-                TargetKind::Neutral => neutrals.get(&projectile.target.id).is_some_and(|neutral| {
-                    neutral.dead_until.is_none() && neutral.state.hp > 0.0
-                }),
-            }
+        projectiles.retain(|_, projectile| match projectile.target.kind {
+            TargetKind::Player => live_player_ids.contains(&projectile.target.id),
+            TargetKind::Minion => minions
+                .get(&projectile.target.id)
+                .is_some_and(|minion| minion.state.hp > 0.0),
+            TargetKind::Structure => structures
+                .get(&projectile.target.id)
+                .is_some_and(|structure| structure.state.hp > 0.0),
+            TargetKind::Neutral => neutrals
+                .get(&projectile.target.id)
+                .is_some_and(|neutral| neutral.dead_until.is_none() && neutral.state.hp > 0.0),
         });
 
         minions.retain(|_, minion| minion.state.hp > 0.0);
@@ -964,10 +1029,14 @@ fn main() -> io::Result<()> {
                 match serde_json::to_vec(&packet) {
                     Ok(payload) => {
                         if let Err(error) = socket.send_to(&payload, addr) {
-                            eprintln!("Failed to send snapshot to {addr}: {error}");
+                            eprintln!(
+                                "[omoba:srv] event=snapshot_send_failed addr={addr} error={error}"
+                            );
                         }
                     }
-                    Err(error) => eprintln!("Failed to serialize snapshot: {error}"),
+                    Err(error) => {
+                        eprintln!("[omoba:srv] event=snapshot_serialize_failed error={error}")
+                    }
                 }
             }
 
@@ -988,7 +1057,7 @@ fn ensure_player_connected(
     players.entry(addr).or_insert_with(|| {
         let player_id = *next_player_id;
         *next_player_id += 1;
-        println!("Player {player_id} connected from {addr}");
+        omoba_srv("client_join", &format!("player_id={player_id} addr={addr}"));
         let spawn = spawn_position_for_team(map_layout, Team::Green);
 
         ConnectedPlayer {
@@ -1041,9 +1110,12 @@ fn handle_join_request(
     character: CharacterChoice,
     map_layout: &MapLayoutState,
 ) {
-    println!(
-        "Player {} joined team {:?} as {:?}",
-        player.state.id, team, character
+    omoba_srv(
+        "team_join",
+        &format!(
+            "player_id={} team={team:?} character={character:?}",
+            player.state.id
+        ),
     );
     player.state.team = team;
     player.state.character = character;
@@ -1194,7 +1266,20 @@ fn handle_use_ability_request(
     next_projectile_id: &mut u64,
     now: Instant,
 ) {
+    omoba_srv(
+        "cast_request",
+        &format!(
+            "addr={caster_addr} target_kind={:?} target_id={}",
+            target.kind, target.id
+        ),
+    );
+
     if !matches!(game_state, GameState::Running) {
+        let id = players.get(&caster_addr).map(|p| p.state.id).unwrap_or(0);
+        omoba_srv(
+            "cast_reject",
+            &format!("player_id={id} reason=match_not_running"),
+        );
         return;
     }
     match ability {
@@ -1238,140 +1323,158 @@ fn try_melee_strike(
     now: Instant,
 ) {
     let Some(caster) = players.get(&caster_addr) else {
+        omoba_srv(
+            "cast_reject",
+            &format!("addr={caster_addr} reason=caster_not_connected"),
+        );
         return;
     };
-    if caster.state.hp <= 0.0 {
-        queue_ability_feedback(players, caster_addr, "Cannot use abilities while dead.".to_string());
-        return;
-    }
-    if caster.state.mana < MELEE_STRIKE_MANA {
-        queue_ability_feedback(
-            players,
-            caster_addr,
-            "Not enough mana for Melee Strike.".to_string(),
-        );
-        return;
-    }
-    if caster
-        .last_melee_at
-        .is_some_and(|t| now.duration_since(t) < MELEE_STRIKE_COOLDOWN)
-    {
-        queue_ability_feedback(
-            players,
-            caster_addr,
-            "Melee Strike is on cooldown.".to_string(),
-        );
-        return;
-    }
-
-    let caster_team = caster.state.team;
     let caster_id = caster.state.id;
-    let caster_position = Vec3f::new(caster.state.x, caster.state.y + AIM_HEIGHT, caster.state.z);
-
-    let Some(target_position) = resolve_hero_ability_target_world(
-        players,
-        minions,
-        structures,
-        neutrals,
-        caster_team,
-        target,
-    ) else {
-        queue_ability_feedback(
-            players,
-            caster_addr,
-            "Melee Strike: invalid or dead target.".to_string(),
-        );
-        return;
-    };
-
-    let dist = caster_position.distance(target_position);
-    if dist > MELEE_STRIKE_RANGE {
-        queue_ability_feedback(
-            players,
-            caster_addr,
-            "Target is out of range for Melee Strike.".to_string(),
-        );
-        return;
-    }
-
-    let Some(caster_mut) = players.get_mut(&caster_addr) else {
-        return;
-    };
-    caster_mut.state.mana -= MELEE_STRIKE_MANA;
-    caster_mut.last_melee_at = Some(now);
-
-    apply_hero_direct_damage(
-        players,
-        minions,
-        structures,
-        neutrals,
-        game_state,
-        caster_id,
-        caster_team,
-        target,
-        MELEE_STRIKE_DAMAGE,
-        now,
-    );
-}
-
-#[allow(clippy::too_many_arguments)]
-fn try_ranged_shot_ability(
-    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
-    minions: &mut HashMap<u64, Minion>,
-    neutrals: &mut HashMap<u64, Neutral>,
-    caster_addr: SocketAddr,
-    target: TargetId,
-    next_projectile_id: &mut u64,
-    now: Instant,
-) {
-    let Some(caster) = players.get(&caster_addr) else {
-        return;
-    };
     if caster.state.hp <= 0.0 {
-        queue_ability_feedback(players, caster_addr, "Cannot use abilities while dead.".to_string());
-        return;
-    }
-
-    let rank = caster.state.ranged_shot_rank;
-    let mana_cost = RANGED_SHOT_MANA;
-    let cooldown = ranged_shot_cooldown_for_rank(rank);
-    let max_range = ranged_shot_range_for_rank(rank);
-
-    if caster.state.mana < mana_cost {
-        queue_ability_feedback(
-            players,
-            caster_addr,
-            "Not enough mana for Ranged Shot.".to_string(),
+        omoba_srv(
+            "cast_reject",
+            &format!("player_id={caster_id} reason=caster_dead"),
         );
         return;
     }
-    if caster
-        .last_ranged_shot_at
-        .is_some_and(|t| now.duration_since(t) < cooldown)
-    {
-        queue_ability_feedback(
-            players,
-            caster_addr,
-            "Ranged Shot is on cooldown.".to_string(),
+    if caster.state.mana < SPELL_MANA_COST {
+        omoba_srv(
+            "cast_reject",
+            &format!(
+                "player_id={caster_id} reason=insufficient_mana have_mana={:.2} cost={:.2}",
+                caster.state.mana, SPELL_MANA_COST
+            ),
         );
         return;
+    }
+    if let Some(last_cast) = caster.last_cast_at {
+        let elapsed = now.duration_since(last_cast);
+        if elapsed < SPELL_COOLDOWN {
+            omoba_srv(
+                "cast_reject",
+                &format!(
+                    "player_id={caster_id} reason=on_cooldown remaining_ms={}",
+                    (SPELL_COOLDOWN - elapsed).as_millis()
+                ),
+            );
+            return;
+        }
     }
 
     let caster_team = caster.state.team;
-    let Some(target_position) = resolve_hero_ability_target_world(
-        players,
-        minions,
-        structures,
-        neutrals,
-        caster_team,
-        target,
-    ) else {
-        queue_ability_feedback(
-            players,
-            caster_addr,
-            "Ranged Shot: invalid or dead target.".to_string(),
-        );
-        return;
+    let target_position = match target.kind {
+        TargetKind::Player => {
+            let Some(target_player) = players.values().find(|player| {
+                player.state.id == target.id
+                    && player.state.hp > 0.0
+                    && player.state.team != caster_team
+            }) else {
+                omoba_srv(
+                    "cast_reject",
+                    &format!(
+                        "player_id={caster_id} reason=invalid_target_player target_id={}",
+                        target.id
+                    ),
+                );
+                return;
+            };
+            Vec3f::new(
+                target_player.state.x,
+                target_player.state.y + AIM_HEIGHT,
+                target_player.state.z,
+            )
+        }
+        TargetKind::Minion => {
+            let Some(target_minion) = minions.get(&target.id) else {
+                omoba_srv(
+                    "cast_reject",
+                    &format!(
+                        "player_id={caster_id} reason=minion_not_found minion_id={}",
+                        target.id
+                    ),
+                );
+                return;
+            };
+            if target_minion.state.hp <= 0.0 {
+                omoba_srv(
+                    "cast_reject",
+                    &format!(
+                        "player_id={caster_id} reason=minion_dead minion_id={}",
+                        target.id
+                    ),
+                );
+                return;
+            }
+            Vec3f::new(
+                target_minion.state.x,
+                target_minion.state.y + MINION_RADIUS * 0.8,
+                target_minion.state.z,
+            )
+        }
+        TargetKind::Structure => {
+            let Some(target_structure) = structures.get(&target.id) else {
+                omoba_srv(
+                    "cast_reject",
+                    &format!(
+                        "player_id={caster_id} reason=structure_not_found structure_id={}",
+                        target.id
+                    ),
+                );
+                return;
+            };
+            if target_structure.state.hp <= 0.0 {
+                omoba_srv(
+                    "cast_reject",
+                    &format!(
+                        "player_id={caster_id} reason=structure_destroyed structure_id={}",
+                        target.id
+                    ),
+                );
+                return;
+            }
+            if target_structure.state.team == caster_team {
+                omoba_srv(
+                    "cast_reject",
+                    &format!(
+                        "player_id={caster_id} reason=structure_friendly_fire structure_id={}",
+                        target.id
+                    ),
+                );
+                return;
+            }
+            Vec3f::new(
+                target_structure.state.x,
+                target_structure.state.y,
+                target_structure.state.z,
+            )
+        }
+        TargetKind::Neutral => {
+            let Some(target_neutral) = neutrals.get(&target.id) else {
+                omoba_srv(
+                    "cast_reject",
+                    &format!(
+                        "player_id={caster_id} reason=neutral_not_found neutral_id={}",
+                        target.id
+                    ),
+                );
+                return;
+            };
+            if target_neutral.dead_until.is_some() || target_neutral.state.hp <= 0.0 {
+                omoba_srv(
+                    "cast_reject",
+                    &format!(
+                        "player_id={caster_id} reason=neutral_dead neutral_id={}",
+                        target.id
+                    ),
+                );
+                return;
+            }
+            Vec3f::new(
+                target_neutral.state.x,
+                target_neutral.state.y + NEUTRAL_RADIUS * 0.85,
+                target_neutral.state.z,
+            )
+        }
     };
 
     let caster_position = Vec3f::new(
@@ -1397,10 +1500,9 @@ fn try_ranged_shot_ability(
     .normalize_or_zero();
 
     if direction.x == 0.0 && direction.y == 0.0 && direction.z == 0.0 {
-        queue_ability_feedback(
-            players,
-            caster_addr,
-            "Cannot resolve Ranged Shot direction.".to_string(),
+        omoba_srv(
+            "cast_reject",
+            &format!("player_id={caster_id} reason=zero_aim_direction"),
         );
         return;
     }
@@ -1409,6 +1511,10 @@ fn try_ranged_shot_ability(
     let damage = ranged_shot_damage_for_rank(rank);
 
     let Some(caster_mut) = players.get_mut(&caster_addr) else {
+        omoba_srv(
+            "cast_reject",
+            &format!("player_id={caster_id} reason=caster_lost_race"),
+        );
         return;
     };
     caster_mut.state.mana -= mana_cost;
@@ -1549,7 +1655,7 @@ fn simulate_projectiles(
     if !matches!(game_state, GameState::Running) {
         return;
     }
-    let mut player_damage_events: Vec<(u64, f32)> = Vec::new();
+    let mut player_damage_events: Vec<PlayerHit> = Vec::new();
     let mut minion_damage_events: Vec<(u64, f32, Team)> = Vec::new();
     let mut structure_damage_events: Vec<(u64, f32, Team)> = Vec::new();
     let mut neutral_damage_events: Vec<(u64, f32, u64)> = Vec::new();
@@ -1566,6 +1672,9 @@ fn simulate_projectiles(
                 }) else {
                     return false;
                 };
+                let owner = projectile.state.owner_id;
+                let killer_player = (owner > 0).then_some(owner);
+                let env_src = (owner == 0).then_some("tower");
 
                 let start = Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z);
                 let target_pos =
@@ -1578,7 +1687,12 @@ fn simulate_projectiles(
                     )
                     .normalize_or_zero();
                     if direction.x == 0.0 && direction.y == 0.0 && direction.z == 0.0 {
-                        player_damage_events.push((projectile.target.id, projectile.damage));
+                        player_damage_events.push((
+                            projectile.target.id,
+                            projectile.damage,
+                            killer_player,
+                            env_src,
+                        ));
                         return false;
                     }
                     projectile.velocity = Vec3f::new(
@@ -1594,7 +1708,12 @@ fn simulate_projectiles(
 
                 let combined_radius = projectile.radius + PLAYER_HIT_RADIUS;
                 if swept_sphere_intersects_target(start, end, target_pos, combined_radius) {
-                    player_damage_events.push((projectile.target.id, projectile.damage));
+                    player_damage_events.push((
+                        projectile.target.id,
+                        projectile.damage,
+                        killer_player,
+                        env_src,
+                    ));
                     return false;
                 }
             }
@@ -1706,8 +1825,7 @@ fn simulate_projectiles(
                     return false;
                 }
 
-                let start =
-                    Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z);
+                let start = Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z);
                 let target_pos = Vec3f::new(
                     target_neutral.state.x,
                     target_neutral.state.y + NEUTRAL_RADIUS * 0.85,
@@ -1754,17 +1872,7 @@ fn simulate_projectiles(
         true
     });
 
-    for (target_id, damage) in player_damage_events {
-        if let Some(target_player) = players
-            .values_mut()
-            .find(|player| player.state.id == target_id && player.state.hp > 0.0)
-        {
-            target_player.state.hp = (target_player.state.hp - damage).max(0.0);
-            if target_player.state.hp <= 0.0 && target_player.respawn_at.is_none() {
-                target_player.respawn_at = Some(now + RESPAWN_DELAY);
-            }
-        }
-    }
+    apply_player_hit_events(players, player_damage_events, now);
 
     for (target_id, damage, attacker_team) in minion_damage_events {
         apply_minion_damage(players, minions, target_id, damage, attacker_team);
@@ -1775,13 +1883,30 @@ fn simulate_projectiles(
             if target_structure.state.hp <= 0.0 {
                 continue;
             }
+            let was_alive = target_structure.state.hp > 0.0;
             target_structure.state.hp = (target_structure.state.hp - damage).max(0.0);
+            if was_alive && target_structure.state.hp <= 0.0 {
+                omoba_srv(
+                    "structure_destroyed",
+                    &format!(
+                        "structure_id={} kind={:?} team={:?} last_hit_by_team={:?}",
+                        target_id,
+                        target_structure.state.kind,
+                        target_structure.state.team,
+                        attacker_team
+                    ),
+                );
+            }
             if target_structure.state.hp <= 0.0
                 && target_structure.state.kind == StructureKind::BaseTower
             {
                 *game_state = GameState::Victory {
                     winner: attacker_team,
                 };
+                omoba_srv(
+                    "match_result",
+                    &format!("winner={attacker_team:?} reason=base_tower_destroyed"),
+                );
             }
         }
     }
@@ -1806,9 +1931,10 @@ fn apply_neutral_damage(
         return;
     }
     neutral.state.hp = (neutral.state.hp - damage).max(0.0);
-    if players.values().any(|player| {
-        player.state.id == attacker_player_id && player.state.hp > 0.0
-    }) {
+    if players
+        .values()
+        .any(|player| player.state.id == attacker_player_id && player.state.hp > 0.0)
+    {
         neutral.target_player_id = Some(attacker_player_id);
         neutral.state.ai_state = NeutralAiState::Aggro;
     }
@@ -1831,7 +1957,7 @@ fn award_neutral_kill_to_player(
     for player in players.values_mut() {
         if player.state.id == killer_id {
             player.state.gold = player.state.gold.saturating_add(rewards.kill_gold);
-            player.state.xp = player.state.xp.saturating_add(rewards.kill_xp);
+            grant_player_xp(killer_id, &mut player.state, rewards.kill_xp);
             break;
         }
     }
@@ -1856,7 +1982,7 @@ fn simulate_neutrals(
 
     let aggro_sq = NEUTRAL_AGGRO_RADIUS * NEUTRAL_AGGRO_RADIUS;
     let leash_sq = NEUTRAL_LEASH_DISTANCE * NEUTRAL_LEASH_DISTANCE;
-    let mut player_damage_events: Vec<(u64, f32)> = Vec::new();
+    let mut player_damage_events: Vec<PlayerHit> = Vec::new();
 
     for neutral in neutrals.values_mut() {
         if let Some(dead_until) = neutral.dead_until {
@@ -1890,15 +2016,12 @@ fn simulate_neutrals(
                 .values()
                 .filter(|player| player.state.hp > 0.0)
                 .map(|player| {
-                    let hit = Vec3f::new(player.state.x, player.state.y + AIM_HEIGHT, player.state.z);
+                    let hit =
+                        Vec3f::new(player.state.x, player.state.y + AIM_HEIGHT, player.state.z);
                     (player.state.id, neutral_pos.distance_squared(hit))
                 })
                 .filter(|(_, dist_sq)| *dist_sq <= aggro_sq)
-                .min_by(|a, b| {
-                    a.1
-                        .partial_cmp(&b.1)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
+                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
             if let Some((player_id, _)) = best {
                 neutral.target_player_id = Some(player_id);
                 neutral.state.ai_state = NeutralAiState::Aggro;
@@ -1944,7 +2067,12 @@ fn simulate_neutrals(
                 .is_none_or(|last| now.duration_since(last) >= NEUTRAL_ATTACK_COOLDOWN);
             if can_attack {
                 neutral.last_attack_at = Some(now);
-                player_damage_events.push((target_id, template.attack_damage));
+                player_damage_events.push((
+                    target_id,
+                    template.attack_damage,
+                    None,
+                    Some("neutral"),
+                ));
             }
             let dir_x = target_hit.x - neutral.state.x;
             let dir_z = target_hit.z - neutral.state.z;
@@ -1967,17 +2095,7 @@ fn simulate_neutrals(
         }
     }
 
-    for (target_id, damage) in player_damage_events {
-        if let Some(target_player) = players
-            .values_mut()
-            .find(|player| player.state.id == target_id && player.state.hp > 0.0)
-        {
-            target_player.state.hp = (target_player.state.hp - damage).max(0.0);
-            if target_player.state.hp <= 0.0 && target_player.respawn_at.is_none() {
-                target_player.respawn_at = Some(now + RESPAWN_DELAY);
-            }
-        }
-    }
+    apply_player_hit_events(players, player_damage_events, now);
 }
 
 fn swept_sphere_intersects_target(start: Vec3f, end: Vec3f, target: Vec3f, radius: f32) -> bool {
@@ -2364,7 +2482,7 @@ fn award_minion_kill_rewards(
             xp += 1;
         }
         player.state.gold = player.state.gold.saturating_add(gold);
-        grant_player_xp(&mut player.state, xp);
+        grant_player_xp(player.state.id, &mut player.state, xp);
     }
 }
 
@@ -2403,7 +2521,7 @@ fn simulate_minions(
         })
         .collect::<Vec<_>>();
 
-    let mut player_damage_events: Vec<(u64, f32)> = Vec::new();
+    let mut player_damage_events: Vec<PlayerHit> = Vec::new();
     let mut minion_damage_events: Vec<(u64, f32, Team)> = Vec::new();
     let mut structure_damage_events: Vec<(u64, f32, Team)> = Vec::new();
     let minion_vision_sq = MINION_VISION_RANGE * MINION_VISION_RANGE;
@@ -2513,7 +2631,12 @@ fn simulate_minions(
                     minion.last_attack_at = Some(now);
                     match target {
                         MinionAggroTarget::Player(target_id) => {
-                            player_damage_events.push((target_id, MINION_ATTACK_DAMAGE));
+                            player_damage_events.push((
+                                target_id,
+                                MINION_ATTACK_DAMAGE,
+                                None,
+                                Some("minion"),
+                            ));
                         }
                         MinionAggroTarget::Minion(target_id) => {
                             minion_damage_events.push((
@@ -2621,17 +2744,7 @@ fn simulate_minions(
         }
     }
 
-    for (target_id, damage) in player_damage_events {
-        if let Some(target_player) = players
-            .values_mut()
-            .find(|player| player.state.id == target_id && player.state.hp > 0.0)
-        {
-            target_player.state.hp = (target_player.state.hp - damage).max(0.0);
-            if target_player.state.hp <= 0.0 && target_player.respawn_at.is_none() {
-                target_player.respawn_at = Some(now + RESPAWN_DELAY);
-            }
-        }
-    }
+    apply_player_hit_events(players, player_damage_events, now);
 
     for (target_id, damage, attacker_team) in minion_damage_events {
         apply_minion_damage(players, minions, target_id, damage, attacker_team);
@@ -2644,13 +2757,30 @@ fn simulate_minions(
         if target_structure.state.hp <= 0.0 {
             continue;
         }
+        let was_alive = target_structure.state.hp > 0.0;
         target_structure.state.hp = (target_structure.state.hp - damage).max(0.0);
+        if was_alive && target_structure.state.hp <= 0.0 {
+            omoba_srv(
+                "structure_destroyed",
+                &format!(
+                    "structure_id={} kind={:?} team={:?} last_hit_by_team={:?}",
+                    target_id,
+                    target_structure.state.kind,
+                    target_structure.state.team,
+                    attacker_team
+                ),
+            );
+        }
         if target_structure.state.hp <= 0.0
             && target_structure.state.kind == StructureKind::BaseTower
         {
             *game_state = GameState::Victory {
                 winner: attacker_team,
             };
+            omoba_srv(
+                "match_result",
+                &format!("winner={attacker_team:?} reason=base_tower_destroyed"),
+            );
         }
     }
 }
@@ -2715,9 +2845,7 @@ fn simulate_tower_attacks(
             let target_pos =
                 Vec3f::new(player.state.x, player.state.y + AIM_HEIGHT, player.state.z);
             let dist_sq = tower_position.distance_squared(target_pos);
-            if dist_sq <= range_sq
-                && best_target.is_none_or(|(_, _, best)| dist_sq < best)
-            {
+            if dist_sq <= range_sq && best_target.is_none_or(|(_, _, best)| dist_sq < best) {
                 best_target = Some((player.state.id, target_pos, dist_sq));
             }
         }
@@ -2792,6 +2920,75 @@ fn simulate_tower_attacks(
             },
         );
     }
+}
+
+fn handle_respawns(
+    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+    structures: &HashMap<u64, Structure>,
+    map_layout: &MapLayoutState,
+    game_state: &GameState,
+    now: Instant,
+) {
+    if !matches!(game_state, GameState::Running) {
+        return;
+    }
+    for player in players.values_mut() {
+        let Some(respawn_at) = player.respawn_at else {
+            continue;
+        };
+        if now < respawn_at {
+            continue;
+        }
+        let spawn = spawn_position_for_team_from_base(structures, map_layout, player.state.team);
+        player.state.x = spawn.x;
+        player.state.y = 0.5;
+        player.state.z = spawn.z;
+        player.state.yaw = 0.0;
+        player.state.hp = player.state.max_hp;
+        player.state.mana = player.state.max_mana;
+        player.respawn_at = None;
+        player.last_cast_at = None;
+    }
+}
+
+fn reset_match(
+    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+    structures: &mut HashMap<u64, Structure>,
+    minions: &mut HashMap<u64, Minion>,
+    projectiles: &mut HashMap<u64, Projectile>,
+    map_layout: &MapLayoutState,
+    last_wave_spawn_at: &mut Instant,
+    game_state: &mut GameState,
+) {
+    omoba_srv("match_reset", "reason=rematch_or_auto");
+    // Reset structures HP
+    for structure in structures.values_mut() {
+        let max = structure.state.max_hp;
+        structure.state.hp = max;
+        structure.last_attack_at = None;
+    }
+    // Clear minions and projectiles
+    minions.clear();
+    projectiles.clear();
+    // Reset wave timer so first wave isn't immediate
+    *last_wave_spawn_at = Instant::now();
+    // Reset all players to spawn
+    for player in players.values_mut() {
+        let spawn = spawn_position_for_team(map_layout, player.state.team);
+        player.state.x = spawn.x;
+        player.state.y = 0.5;
+        player.state.z = spawn.z;
+        player.state.yaw = 0.0;
+        player.state.hp = MAX_HP;
+        player.state.max_hp = MAX_HP;
+        player.state.mana = MAX_MANA;
+        player.state.max_mana = MAX_MANA;
+        player.state.gold = 0;
+        player.state.xp = 0;
+        player.last_cast_at = None;
+        player.respawn_at = None;
+    }
+    *game_state = GameState::Running;
 }
 
 #[cfg(test)]
@@ -3085,7 +3282,11 @@ mod tests {
         let first_threshold = player.state.next_level_xp;
         let second_threshold = xp_threshold_for_level(STARTING_LEVEL + 1);
 
-        grant_player_xp(&mut player.state, first_threshold + second_threshold + 17);
+        grant_player_xp(
+            player.state.id,
+            &mut player.state,
+            first_threshold + second_threshold + 17,
+        );
 
         assert_eq!(player.state.level, STARTING_LEVEL + 2);
         assert_eq!(player.state.skill_points, 2);
@@ -3506,7 +3707,11 @@ mod tests {
         let player = players.get_mut(&addr).unwrap();
         let first_threshold = player.state.next_level_xp;
         let second_threshold = xp_threshold_for_level(STARTING_LEVEL + 1);
-        grant_player_xp(&mut player.state, first_threshold + second_threshold);
+        grant_player_xp(
+            player.state.id,
+            &mut player.state,
+            first_threshold + second_threshold,
+        );
         player.state.hp = 0.0;
         player.state.mana = 0.0;
         player.respawn_at = Some(now - Duration::from_millis(1));
