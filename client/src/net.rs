@@ -1,4 +1,5 @@
 use bevy::ecs::query::Or;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::scene::SceneRoot;
 use crossbeam_channel::{unbounded, Receiver, Sender, TryRecvError};
@@ -38,48 +39,64 @@ const LOCAL_SNAP_DISTANCE: f32 = 4.0;
 const DEFAULT_PLAYER_LEVEL: u32 = 1;
 const DEFAULT_NEXT_LEVEL_XP: u32 = 120;
 
+/// Ordering for networking: `apply_server_snapshot` must finish before interpolation reads spawned entities.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum ClientNetSet {
+    Outgoing,
+    SnapshotApply,
+    AfterSnapshot,
+}
+
 pub struct NetworkingPlugin;
 
 impl Plugin for NetworkingPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<NetworkCommand>()
             .init_resource::<NetworkState>()
+            .init_resource::<PendingAbilityFeedback>()
             .init_resource::<GameStateSnapshot>()
             .init_resource::<LocalAbilityBar>()
             .insert_resource(LocalStateSendTimer(Timer::from_seconds(
                 UPDATE_INTERVAL_SECONDS,
                 TimerMode::Repeating,
             )))
+            .configure_sets(
+                Update,
+                (
+                    ClientNetSet::SnapshotApply.after(ClientNetSet::Outgoing),
+                    ClientNetSet::AfterSnapshot.after(ClientNetSet::SnapshotApply),
+                ),
+            )
             .add_systems(Startup, (setup_network_visual_assets, start_networking))
             .add_systems(
                 Update,
+                (send_local_state, send_network_commands).in_set(ClientNetSet::Outgoing),
+            )
+            .add_systems(
+                Update,
+                apply_server_snapshot.in_set(ClientNetSet::SnapshotApply),
+            )
+            .add_systems(
+                Update,
                 (
-                    send_local_state,
-                    send_network_commands,
-                    apply_server_snapshot,
-                ),
-            )
-            .add_systems(
-                Update,
-                interpolate_snapshot_entities.after(apply_server_snapshot),
-            )
-            .add_systems(
-                Update,
-                interpolate_remote_players.after(apply_server_snapshot),
+                    interpolate_snapshot_entities,
+                    interpolate_remote_players,
+                )
+                    .in_set(ClientNetSet::AfterSnapshot),
             );
     }
 }
 
 #[derive(Message, Clone, Copy, Debug)]
 pub enum NetworkCommand {
-    Cast {
+    UseAbility {
+        ability: HeroAbility,
         target: TargetId,
     },
-    UpgradeMeleeSkill,
-    Join {
-        team: Team,
-        character: CharacterChoice,
+    UpgradeAbility {
+        ability: HeroAbility,
     },
+    Join { team: Team, character: CharacterChoice },
     #[allow(dead_code)]
     RequestRematch,
 }
@@ -93,15 +110,13 @@ enum ClientPacket {
         z: f32,
         yaw: f32,
     },
-    Cast {
-        slot: SkillSlot,
-        #[serde(default)]
-        target: Option<TargetId>,
+    UseAbility {
+        ability: HeroAbility,
+        target: TargetId,
     },
     UpgradeAbility {
-        slot: SkillSlot,
+        ability: HeroAbility,
     },
-    UpgradeMeleeSkill,
     Join {
         team: Team,
         #[serde(default = "default_character_choice")]
@@ -124,6 +139,21 @@ pub enum TargetKind {
 pub struct TargetId {
     pub kind: TargetKind,
     pub id: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HeroAbility {
+    MeleeStrike,
+    RangedShot,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectileVisual {
+    #[default]
+    TowerBolt,
+    RangedShot,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -153,8 +183,8 @@ struct PlayerState {
     next_level_xp: u32,
     #[serde(default)]
     skill_points: u32,
-    #[serde(default = "default_melee_skill_rank")]
-    skill1_rank: u32,
+    #[serde(default = "default_ranged_shot_rank")]
+    ranged_shot_rank: u8,
     #[serde(default = "default_character_choice")]
     character: CharacterChoice,
     #[serde(default)]
@@ -178,6 +208,8 @@ struct ProjectileState {
     x: f32,
     y: f32,
     z: f32,
+    #[serde(default)]
+    visual: ProjectileVisual,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Component)]
@@ -281,6 +313,8 @@ enum ServerPacket {
         game_state: GameState,
         #[serde(default)]
         rematch_in_secs: Option<u64>,
+        #[serde(default)]
+        ability_feedback: Option<String>,
     },
 }
 
@@ -346,19 +380,12 @@ pub struct PlayerProgression {
     pub xp: u32,
     pub next_level_xp: u32,
     pub skill_points: u32,
-    pub skill1_rank: u32,
+    pub ranged_shot_rank: u8,
 }
 
-impl Default for PlayerProgression {
-    fn default() -> Self {
-        Self {
-            level: DEFAULT_PLAYER_LEVEL,
-            xp: 0,
-            next_level_xp: DEFAULT_NEXT_LEVEL_XP,
-            skill_points: 0,
-            skill1_rank: 1,
-        }
-    }
+#[derive(Resource, Default)]
+pub struct PendingAbilityFeedback {
+    pub message: Option<String>,
 }
 
 #[derive(Component)]
@@ -405,8 +432,11 @@ struct RemotePlayerInterpolation {
 #[derive(Resource)]
 struct NetworkVisualAssets {
     projectile_mesh: Handle<Mesh>,
+    ranged_shot_mesh: Handle<Mesh>,
     friendly_projectile_material: Handle<StandardMaterial>,
     hostile_projectile_material: Handle<StandardMaterial>,
+    friendly_ranged_shot_material: Handle<StandardMaterial>,
+    hostile_ranged_shot_material: Handle<StandardMaterial>,
     tower_mesh: Handle<Mesh>,
     base_tower_mesh: Handle<Mesh>,
     minion_mesh: Handle<Mesh>,
@@ -424,6 +454,7 @@ fn setup_network_visual_assets(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let projectile_mesh = meshes.add(Mesh::from(Sphere::new(PROJECTILE_RADIUS)));
+    let ranged_shot_mesh = meshes.add(Mesh::from(Cuboid::new(0.22, 0.22, 0.72)));
     let tower_mesh = meshes.add(Mesh::from(Cuboid::new(
         TOWER_SIZE,
         TOWER_HEIGHT,
@@ -442,6 +473,16 @@ fn setup_network_visual_assets(
     });
     let hostile_projectile_material = materials.add(StandardMaterial {
         base_color: Color::srgb(1.0, 0.36, 0.36),
+        unlit: true,
+        ..default()
+    });
+    let friendly_ranged_shot_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.15, 0.98, 0.62),
+        unlit: true,
+        ..default()
+    });
+    let hostile_ranged_shot_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.42, 0.08),
         unlit: true,
         ..default()
     });
@@ -474,8 +515,11 @@ fn setup_network_visual_assets(
 
     commands.insert_resource(NetworkVisualAssets {
         projectile_mesh,
+        ranged_shot_mesh,
         friendly_projectile_material,
         hostile_projectile_material,
+        friendly_ranged_shot_material,
+        hostile_ranged_shot_material,
         tower_mesh,
         base_tower_mesh,
         minion_mesh,
@@ -633,19 +677,16 @@ fn send_network_commands(
 
     for command in command_events.read() {
         match command {
-            NetworkCommand::Cast { slot, target } => {
-                let _ = channels.outgoing.send(ClientPacket::Cast {
-                    slot: *slot,
+            NetworkCommand::UseAbility { ability, target } => {
+                let _ = channels.outgoing.send(ClientPacket::UseAbility {
+                    ability: *ability,
                     target: *target,
                 });
             }
-            NetworkCommand::UpgradeAbility { slot } => {
+            NetworkCommand::UpgradeAbility { ability } => {
                 let _ = channels
                     .outgoing
-                    .send(ClientPacket::UpgradeAbility { slot: *slot });
-            }
-            NetworkCommand::UpgradeMeleeSkill => {
-                let _ = channels.outgoing.send(ClientPacket::UpgradeMeleeSkill);
+                    .send(ClientPacket::UpgradeAbility { ability: *ability });
             }
             NetworkCommand::Join { team, character } => {
                 let _ = channels.outgoing.send(ClientPacket::Join {
@@ -674,27 +715,52 @@ fn choose_authoritative_local_player<T: Copy + Eq>(
     chosen
 }
 
-fn apply_server_snapshot(
-    mut commands: Commands,
-    channels: Option<Res<NetworkChannels>>,
-    mut network_state: ResMut<NetworkState>,
-    mut transform_sets: ParamSet<(
-        Query<&mut Transform>,
-        Query<&mut Transform, With<MainCamera>>,
+/// Bundles parameters for [`apply_server_snapshot`]; keeps the system within Bevy's `SystemParam` tuple limit.
+#[derive(SystemParam)]
+struct ApplyServerSnapshotParams<'w, 's> {
+    commands: Commands<'w, 's>,
+    channels: Option<Res<'w, NetworkChannels>>,
+    network_state: ResMut<'w, NetworkState>,
+    pending_ability_feedback: ResMut<'w, PendingAbilityFeedback>,
+    transform_sets: ParamSet<'w, 's, (
+        Query<'w, 's, &'static mut Transform>,
+        Query<'w, 's, &'static mut Transform, With<MainCamera>>,
     )>,
-    remote_query: Query<&RemotePlayer>,
-    projectile_query: Query<&NetworkProjectile>,
-    structure_query: Query<&NetworkStructure>,
-    minion_query: Query<&NetworkMinion>,
-    neutral_query: Query<&NetworkNeutral>,
-    local_player_query: Query<(Entity, Option<&NetworkPlayerId>), With<Player>>,
-    player_assets: Res<PlayerAssets>,
-    model_catalog: Res<PlayerModelCatalog>,
-    visuals: Res<NetworkVisualAssets>,
-    mut game_state_snapshot: ResMut<GameStateSnapshot>,
-    mut cam_state: ResMut<CameraState>,
-    team_selection: Res<TeamSelection>,
-) {
+    remote_query: Query<'w, 's, &'static RemotePlayer>,
+    projectile_query: Query<'w, 's, &'static NetworkProjectile>,
+    structure_query: Query<'w, 's, &'static NetworkStructure>,
+    minion_query: Query<'w, 's, &'static NetworkMinion>,
+    neutral_query: Query<'w, 's, &'static NetworkNeutral>,
+    local_player_query: Query<'w, 's, (Entity, Option<&'static NetworkPlayerId>), With<Player>>,
+    player_assets: Res<'w, PlayerAssets>,
+    model_catalog: Res<'w, PlayerModelCatalog>,
+    visuals: Res<'w, NetworkVisualAssets>,
+    game_state_snapshot: ResMut<'w, GameStateSnapshot>,
+    cam_state: ResMut<'w, CameraState>,
+    team_selection: Res<'w, TeamSelection>,
+}
+
+fn apply_server_snapshot(params: ApplyServerSnapshotParams) {
+    let ApplyServerSnapshotParams {
+        mut commands,
+        channels,
+        mut network_state,
+        mut pending_ability_feedback,
+        mut transform_sets,
+        remote_query,
+        projectile_query,
+        structure_query,
+        minion_query,
+        neutral_query,
+        local_player_query,
+        player_assets,
+        model_catalog,
+        visuals,
+        mut game_state_snapshot,
+        mut cam_state,
+        team_selection,
+    } = params;
+
     let Some(channels) = channels else {
         return;
     };
@@ -708,6 +774,7 @@ fn apply_server_snapshot(
         Vec<NeutralState>,
         GameState,
         Option<u64>,
+        Option<String>,
     )> = None;
     while let Ok(packet) = channels.incoming.try_recv() {
         match packet {
@@ -720,6 +787,7 @@ fn apply_server_snapshot(
                 neutrals,
                 game_state,
                 rematch_in_secs,
+                ability_feedback,
             } => {
                 latest_snapshot = Some((
                     your_id,
@@ -730,6 +798,7 @@ fn apply_server_snapshot(
                     neutrals,
                     game_state,
                     rematch_in_secs,
+                    ability_feedback,
                 ));
             }
         }
@@ -744,10 +813,16 @@ fn apply_server_snapshot(
         neutrals,
         game_state,
         rematch_in_secs,
-    )) = latest_snapshot
+        ability_feedback,
+    )) =
+        latest_snapshot
     else {
         return;
     };
+
+    if let Some(msg) = ability_feedback {
+        pending_ability_feedback.message = Some(msg);
+    }
 
     network_state.local_id = Some(your_id);
     game_state_snapshot.state = game_state;
@@ -994,15 +1069,28 @@ fn apply_server_snapshot(
         let is_friendly = network_state
             .local_team
             .is_some_and(|team| team == projectile.owner_team);
-        let material = if is_friendly {
-            visuals.friendly_projectile_material.clone()
-        } else {
-            visuals.hostile_projectile_material.clone()
+        let (proj_mesh, material) = match projectile.visual {
+            ProjectileVisual::RangedShot => (
+                visuals.ranged_shot_mesh.clone(),
+                if is_friendly {
+                    visuals.friendly_ranged_shot_material.clone()
+                } else {
+                    visuals.hostile_ranged_shot_material.clone()
+                },
+            ),
+            ProjectileVisual::TowerBolt => (
+                visuals.projectile_mesh.clone(),
+                if is_friendly {
+                    visuals.friendly_projectile_material.clone()
+                } else {
+                    visuals.hostile_projectile_material.clone()
+                },
+            ),
         };
 
         let entity = commands
             .spawn((
-                Mesh3d(visuals.projectile_mesh.clone()),
+                Mesh3d(proj_mesh),
                 MeshMaterial3d(material),
                 Transform::from_xyz(projectile.x, projectile.y, projectile.z),
                 Visibility::default(),
@@ -1281,7 +1369,7 @@ fn player_state_to_progression(player: &PlayerState) -> PlayerProgression {
         xp: player.xp,
         next_level_xp: player.next_level_xp,
         skill_points: player.skill_points,
-        skill1_rank: player.skill1_rank.max(1),
+        ranged_shot_rank: player.ranged_shot_rank.max(1),
     }
 }
 
@@ -1332,7 +1420,7 @@ fn default_next_level_xp() -> u32 {
     DEFAULT_NEXT_LEVEL_XP
 }
 
-fn default_melee_skill_rank() -> u32 {
+fn default_ranged_shot_rank() -> u8 {
     1
 }
 
@@ -1354,7 +1442,29 @@ fn default_minion_brain_state() -> MinionBrainState {
 
 #[cfg(test)]
 mod tests {
-    use super::choose_authoritative_local_player;
+    use super::{HeroAbility, NetworkCommand, TargetId, TargetKind, choose_authoritative_local_player};
+
+    #[test]
+    fn hero_ability_ranged_shot_deserializes_from_snake_case_json() {
+        let parsed: HeroAbility = serde_json::from_str("\"ranged_shot\"").unwrap();
+        assert_eq!(parsed, HeroAbility::RangedShot);
+    }
+
+    #[test]
+    fn use_ability_ranged_shot_command_holds_target() {
+        let cmd = NetworkCommand::UseAbility {
+            ability: HeroAbility::RangedShot,
+            target: TargetId {
+                kind: TargetKind::Minion,
+                id: 42,
+            },
+        };
+        let NetworkCommand::UseAbility { ability, target } = cmd else {
+            panic!("expected UseAbility");
+        };
+        assert_eq!(ability, HeroAbility::RangedShot);
+        assert_eq!(target.id, 42);
+    }
 
     #[test]
     fn choose_authoritative_local_player_prefers_matching_network_id() {
