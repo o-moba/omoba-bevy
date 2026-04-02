@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use shared::{PlayerAbilitySnapshot, SkillSlot, TargetingMode};
 use std::{
     collections::{HashMap, HashSet},
     io,
@@ -94,7 +95,12 @@ enum ClientPacket {
         yaw: f32,
     },
     Cast {
-        target: TargetId,
+        slot: SkillSlot,
+        #[serde(default)]
+        target: Option<TargetId>,
+    },
+    UpgradeAbility {
+        slot: SkillSlot,
     },
     /// Spend one skill point to raise melee (skill 1) rank, up to [`MAX_MELEE_SKILL_RANK`].
     UpgradeMeleeSkill,
@@ -150,6 +156,32 @@ fn default_character_choice() -> CharacterChoice {
     CharacterChoice::Ipfs
 }
 
+fn sync_connected_player_abilities(player: &mut ConnectedPlayer, now: Instant) {
+    let state = &mut player.state;
+    let level = state.level;
+    state.abilities.unlocked = shared::unlocked_slots_for_level(level);
+    for i in 0..4 {
+        let def = &shared::ABILITIES[i];
+        let rank = state.abilities.ranks[i].clamp(1, def.max_rank);
+        state.abilities.ranks[i] = rank;
+        state.abilities.cooldown_remaining[i] =
+            if let Some(last) = player.last_ability_cast_at[i] {
+                let cd = shared::scaled_cooldown(def, rank);
+                let elapsed = now.duration_since(last);
+                if elapsed >= cd {
+                    0.0
+                } else {
+                    (cd - elapsed).as_secs_f32()
+                }
+            } else {
+                0.0
+            };
+        state.abilities.rank_upgrade_available[i] = state.skill_points > 0
+            && state.abilities.unlocked[i]
+            && rank < def.max_rank;
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PlayerState {
     id: u64,
@@ -172,6 +204,8 @@ struct PlayerState {
     skill1_rank: u32,
     #[serde(default = "default_character_choice")]
     character: CharacterChoice,
+    #[serde(default)]
+    abilities: PlayerAbilitySnapshot,
 }
 
 fn default_melee_skill_rank() -> u32 {
@@ -416,7 +450,7 @@ impl Vec3f {
 struct ConnectedPlayer {
     state: PlayerState,
     last_seen: Instant,
-    last_cast_at: Option<Instant>,
+    last_ability_cast_at: [Option<Instant>; 4],
     respawn_at: Option<Instant>,
 }
 
@@ -635,12 +669,13 @@ fn main() -> io::Result<()> {
                                 player.state.yaw = yaw;
                             }
                         }
-                        ClientPacket::Cast { target } => {
+                        ClientPacket::Cast { slot, target } => {
                             handle_cast_request(
                                 &mut players,
                                 &mut minions,
                                 &mut neutrals,
                                 addr,
+                                slot,
                                 target,
                                 &game_state,
                                 now,
@@ -691,6 +726,9 @@ fn main() -> io::Result<()> {
         last_simulation_at = now;
 
         regenerate_mana(&mut players, dt);
+        for player in players.values_mut() {
+            sync_connected_player_abilities(player, now);
+        }
         spawn_minion_waves_if_due(
             &map_layout,
             &mut minions,
@@ -884,9 +922,10 @@ fn ensure_player_connected(
                 skill_points: 0,
                 skill1_rank: 1,
                 character: default_character_choice(),
+                abilities: PlayerAbilitySnapshot::fresh_for_level(STARTING_LEVEL),
             },
             last_seen: now,
-            last_cast_at: None,
+            last_ability_cast_at: [None; 4],
             respawn_at: None,
         }
     });
@@ -2691,6 +2730,353 @@ mod tests {
     }
 
     #[test]
+    fn upgrade_ability_consumes_skill_point_and_increments_rank() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:49999".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        {
+            let p = players.get_mut(&addr).unwrap();
+            p.state.skill_points = 2;
+            p.state.level = 6;
+            p.state.abilities.unlocked = shared::unlocked_slots_for_level(6);
+        }
+
+        handle_upgrade_ability_request(&mut players, addr, SkillSlot::Q, &GameState::Running);
+
+        let p = players.get(&addr).unwrap();
+        assert_eq!(p.state.skill_points, 1);
+        assert_eq!(p.state.abilities.ranks[0], 2);
+    }
+
+    /// Hostile player next to the green spawn for targeted-ability checks.
+    fn connect_enemy_player_adjacent(
+        players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+        layout: &MapLayoutState,
+        green_addr: SocketAddr,
+        enemy_addr: SocketAddr,
+        next_player_id: &mut u64,
+        now: Instant,
+    ) -> u64 {
+        ensure_player_connected(players, layout, green_addr, next_player_id, now);
+        ensure_player_connected(players, layout, enemy_addr, next_player_id, now);
+        let (gx, gz) = {
+            let g = players.get(&green_addr).unwrap();
+            (g.state.x, g.state.z)
+        };
+        let enemy_id = {
+            let enemy = players.get_mut(&enemy_addr).unwrap();
+            enemy.state.team = Team::Blue;
+            enemy.state.x = gx + 3.0;
+            enemy.state.y = 0.5;
+            enemy.state.z = gz;
+            enemy.state.id
+        };
+        enemy_id
+    }
+
+    #[test]
+    fn cast_rejects_insufficient_mana_for_targeted_ability() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let green_addr: SocketAddr = "127.0.0.1:50201".parse().unwrap();
+        let blue_addr: SocketAddr = "127.0.0.1:50202".parse().unwrap();
+        let now = Instant::now();
+        let blue_id = connect_enemy_player_adjacent(
+            &mut players,
+            &layout,
+            green_addr,
+            blue_addr,
+            &mut next_player_id,
+            now,
+        );
+        players.get_mut(&green_addr).unwrap().state.mana = 5.0;
+
+        let mut projectiles = HashMap::new();
+        let mut next_pid = 1_u64;
+        let mut minions = HashMap::new();
+        let mut structures = build_structures(&layout);
+        let mut neutrals = HashMap::new();
+
+        handle_cast_request(
+            &mut players,
+            &mut projectiles,
+            &mut minions,
+            &mut structures,
+            &mut neutrals,
+            green_addr,
+            SkillSlot::Q,
+            Some(TargetId {
+                kind: TargetKind::Player,
+                id: blue_id,
+            }),
+            &mut next_pid,
+            &GameState::Running,
+            now,
+        );
+
+        assert!(projectiles.is_empty());
+        assert!((players.get(&green_addr).unwrap().state.mana - 5.0).abs() < EPSILON);
+    }
+
+    #[test]
+    fn cast_rejects_unit_target_without_target() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:50203".parse().unwrap();
+        let now = Instant::now();
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let mana_before = players.get(&addr).unwrap().state.mana;
+
+        let mut projectiles = HashMap::new();
+        let mut next_pid = 1_u64;
+        let mut minions = HashMap::new();
+        let mut structures = build_structures(&layout);
+        let mut neutrals = HashMap::new();
+
+        handle_cast_request(
+            &mut players,
+            &mut projectiles,
+            &mut minions,
+            &mut structures,
+            &mut neutrals,
+            addr,
+            SkillSlot::Q,
+            None,
+            &mut next_pid,
+            &GameState::Running,
+            now,
+        );
+
+        assert!(projectiles.is_empty());
+        assert!((players.get(&addr).unwrap().state.mana - mana_before).abs() < EPSILON);
+    }
+
+    #[test]
+    fn cast_rejects_friendly_minion_target() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:50209".parse().unwrap();
+        let now = Instant::now();
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let (px, pz, mana_before) = {
+            let p = players.get(&addr).unwrap();
+            (p.state.x, p.state.z, p.state.mana)
+        };
+
+        let mut projectiles = HashMap::new();
+        let mut next_pid = 1_u64;
+        let mut minions = HashMap::new();
+        let friendly_minion_id = 9001;
+        minions.insert(
+            friendly_minion_id,
+            Minion {
+                state: MinionState {
+                    id: friendly_minion_id,
+                    team: Team::Green,
+                    lane: Lane::Mid,
+                    x: px + 1.0,
+                    y: MINION_SPAWN_HEIGHT,
+                    z: pz,
+                    yaw: 0.0,
+                    hp: MINION_MAX_HP,
+                    max_hp: MINION_MAX_HP,
+                    state: MinionBrainState::Marching,
+                    target_kind: None,
+                    target_id: None,
+                },
+                path: vec![Vec3f::new(px + 1.0, MINION_SPAWN_HEIGHT, pz)],
+                next_waypoint: 0,
+                last_attack_at: None,
+                aggro_target: None,
+            },
+        );
+        let mut structures = build_structures(&layout);
+        let mut neutrals = HashMap::new();
+
+        handle_cast_request(
+            &mut players,
+            &mut projectiles,
+            &mut minions,
+            &mut structures,
+            &mut neutrals,
+            addr,
+            SkillSlot::Q,
+            Some(TargetId {
+                kind: TargetKind::Minion,
+                id: friendly_minion_id,
+            }),
+            &mut next_pid,
+            &GameState::Running,
+            now,
+        );
+
+        assert!(projectiles.is_empty());
+        assert!((players.get(&addr).unwrap().state.mana - mana_before).abs() < EPSILON);
+    }
+
+    #[test]
+    fn cast_rejects_second_cast_while_on_cooldown() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let green_addr: SocketAddr = "127.0.0.1:50204".parse().unwrap();
+        let blue_addr: SocketAddr = "127.0.0.1:50205".parse().unwrap();
+        let now = Instant::now();
+        let blue_id = connect_enemy_player_adjacent(
+            &mut players,
+            &layout,
+            green_addr,
+            blue_addr,
+            &mut next_player_id,
+            now,
+        );
+        let target = Some(TargetId {
+            kind: TargetKind::Player,
+            id: blue_id,
+        });
+
+        let mut projectiles = HashMap::new();
+        let mut next_pid = 1_u64;
+        let mut minions = HashMap::new();
+        let mut structures = build_structures(&layout);
+        let mut neutrals = HashMap::new();
+
+        handle_cast_request(
+            &mut players,
+            &mut projectiles,
+            &mut minions,
+            &mut structures,
+            &mut neutrals,
+            green_addr,
+            SkillSlot::Q,
+            target,
+            &mut next_pid,
+            &GameState::Running,
+            now,
+        );
+        assert_eq!(projectiles.len(), 1);
+
+        handle_cast_request(
+            &mut players,
+            &mut projectiles,
+            &mut minions,
+            &mut structures,
+            &mut neutrals,
+            green_addr,
+            SkillSlot::Q,
+            target,
+            &mut next_pid,
+            &GameState::Running,
+            now,
+        );
+        assert_eq!(projectiles.len(), 1);
+    }
+
+    #[test]
+    fn cast_self_target_rejects_spurious_network_target() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let green_addr: SocketAddr = "127.0.0.1:50207".parse().unwrap();
+        let blue_addr: SocketAddr = "127.0.0.1:50208".parse().unwrap();
+        let now = Instant::now();
+        let blue_id = connect_enemy_player_adjacent(
+            &mut players,
+            &layout,
+            green_addr,
+            blue_addr,
+            &mut next_player_id,
+            now,
+        );
+        {
+            let p = players.get_mut(&green_addr).unwrap();
+            p.state.level = 2;
+            p.state.abilities = PlayerAbilitySnapshot::fresh_for_level(2);
+            p.state.hp = 70.0;
+            p.state.mana = MAX_MANA;
+        }
+        let hp_before = players.get(&green_addr).unwrap().state.hp;
+        let mana_before = players.get(&green_addr).unwrap().state.mana;
+
+        let mut projectiles = HashMap::new();
+        let mut next_pid = 1_u64;
+        let mut minions = HashMap::new();
+        let mut structures = build_structures(&layout);
+        let mut neutrals = HashMap::new();
+
+        handle_cast_request(
+            &mut players,
+            &mut projectiles,
+            &mut minions,
+            &mut structures,
+            &mut neutrals,
+            green_addr,
+            SkillSlot::W,
+            Some(TargetId {
+                kind: TargetKind::Player,
+                id: blue_id,
+            }),
+            &mut next_pid,
+            &GameState::Running,
+            now,
+        );
+
+        let p = players.get(&green_addr).unwrap();
+        assert!(projectiles.is_empty());
+        assert!((p.state.hp - hp_before).abs() < EPSILON);
+        assert!((p.state.mana - mana_before).abs() < EPSILON);
+    }
+
+    #[test]
+    fn cast_self_target_applies_without_network_target() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:50206".parse().unwrap();
+        let now = Instant::now();
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        {
+            let p = players.get_mut(&addr).unwrap();
+            p.state.level = 2;
+            p.state.abilities = PlayerAbilitySnapshot::fresh_for_level(2);
+            p.state.hp = 70.0;
+            p.state.mana = MAX_MANA;
+        }
+
+        let mut projectiles = HashMap::new();
+        let mut next_pid = 1_u64;
+        let mut minions = HashMap::new();
+        let mut structures = build_structures(&layout);
+        let mut neutrals = HashMap::new();
+
+        handle_cast_request(
+            &mut players,
+            &mut projectiles,
+            &mut minions,
+            &mut structures,
+            &mut neutrals,
+            addr,
+            SkillSlot::W,
+            None,
+            &mut next_pid,
+            &GameState::Running,
+            now,
+        );
+
+        let p = players.get(&addr).unwrap();
+        assert!(projectiles.is_empty());
+        assert!(p.state.hp > 70.0);
+        assert!(p.state.mana < MAX_MANA);
+    }
+
+    #[test]
     fn respawn_restores_scaled_maximums() {
         let layout = build_map_layout();
         let structures = build_structures(&layout);
@@ -3114,7 +3500,7 @@ fn handle_respawns(
         player.state.hp = player.state.max_hp;
         player.state.mana = player.state.max_mana;
         player.respawn_at = None;
-        player.last_cast_at = None;
+        player.last_ability_cast_at = [None; 4];
     }
 }
 
