@@ -49,12 +49,14 @@ impl Plugin for NetworkingPlugin {
                 TimerMode::Repeating,
             )))
             .add_systems(Startup, (setup_network_visual_assets, start_networking))
+            .init_resource::<LastObservedGameState>()
             .add_systems(
                 Update,
                 (
                     send_local_state,
                     send_network_commands,
                     apply_server_snapshot,
+                    log_game_state_transition.after(apply_server_snapshot),
                 ),
             )
             .add_systems(
@@ -70,8 +72,13 @@ impl Plugin for NetworkingPlugin {
 
 #[derive(Message, Clone, Copy, Debug)]
 pub enum NetworkCommand {
-    Cast { target: TargetId },
-    Join { team: Team, character: CharacterChoice },
+    Cast {
+        target: TargetId,
+    },
+    Join {
+        team: Team,
+        character: CharacterChoice,
+    },
     #[allow(dead_code)]
     RequestRematch,
 }
@@ -272,7 +279,9 @@ pub enum GameState {
     #[default]
     Lobby,
     Running,
-    Victory { winner: Team },
+    Victory {
+        winner: Team,
+    },
 }
 
 #[derive(Resource, Default, Clone)]
@@ -288,6 +297,27 @@ struct NetworkChannels {
 }
 
 #[derive(Resource, Default)]
+struct LastObservedGameState(Option<GameState>);
+
+fn log_game_state_transition(
+    snapshot: Res<GameStateSnapshot>,
+    mut last: ResMut<LastObservedGameState>,
+) {
+    if !snapshot.is_changed() {
+        return;
+    }
+    let current = snapshot.state.clone();
+    if last.0.as_ref() == Some(&current) {
+        return;
+    }
+    info!(
+        "[omoba:cli] event=game_state_transition from={:?} to={:?}",
+        last.0, current
+    );
+    last.0 = Some(current);
+}
+
+#[derive(Resource, Default)]
 struct NetworkState {
     local_id: Option<u64>,
     local_team: Option<Team>,
@@ -296,6 +326,8 @@ struct NetworkState {
     structures: HashMap<u64, Entity>,
     minions: HashMap<u64, Entity>,
     neutrals: HashMap<u64, Entity>,
+    /// Dedupes `join_pending` logs while waiting for server team ack (TASK-16 AC2).
+    join_pending_last_logged: Option<(u64, Team, Team)>,
 }
 
 #[derive(Resource)]
@@ -466,24 +498,24 @@ fn run_udp_client(
     outgoing: Receiver<ClientPacket>,
     incoming: Sender<ServerPacket>,
 ) {
-    println!("Connecting to server at {server_addr}");
+    eprintln!("[omoba:cli] event=net_connecting addr={server_addr}");
     let socket = match UdpSocket::bind(LOCAL_BIND_ADDR) {
         Ok(socket) => socket,
         Err(error) => {
-            eprintln!("Failed to bind client UDP socket: {error}");
+            eprintln!("[omoba:cli] event=net_bind_failed error={error}");
             return;
         }
     };
 
     if let Err(error) = socket.connect(&server_addr) {
-        eprintln!("Failed to connect UDP socket to {server_addr}: {error}");
+        eprintln!("[omoba:cli] event=net_connect_failed addr={server_addr} error={error}");
         return;
     }
     if let Err(error) = socket.set_nonblocking(true) {
-        eprintln!("Failed to set UDP client socket nonblocking: {error}");
+        eprintln!("[omoba:cli] event=net_socket_config_failed error={error}");
         return;
     }
-    println!("UDP socket connected to {server_addr}; waiting for first snapshot");
+    eprintln!("[omoba:cli] event=net_connected addr={server_addr} detail=awaiting_first_snapshot");
 
     let mut recv_buf = [0_u8; MAX_PACKET_SIZE];
     let mut last_heartbeat_at = Instant::now();
@@ -497,7 +529,7 @@ fn run_udp_client(
             match outgoing.try_recv() {
                 Ok(packet) => {
                     if send_packet(&socket, &packet).is_err() {
-                        eprintln!("Failed to send packet to server");
+                        eprintln!("[omoba:cli] event=net_send_failed detail=outgoing_queue");
                     }
                 }
                 Err(TryRecvError::Empty) => break,
@@ -515,15 +547,13 @@ fn run_udp_client(
                 Ok(len) => match serde_json::from_slice::<ServerPacket>(&recv_buf[..len]) {
                     Ok(packet) => {
                         if !first_snapshot_received {
-                            println!(
-                                "First snapshot received from {server_addr}; connection is live"
-                            );
+                            eprintln!("[omoba:cli] event=net_first_snapshot addr={server_addr}");
                             first_snapshot_received = true;
                         }
                         let _ = incoming.send(packet);
                     }
                     Err(error) => {
-                        eprintln!("Failed to decode server packet: {error}");
+                        eprintln!("[omoba:cli] event=net_packet_decode_error error={error}");
                     }
                 },
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
@@ -532,7 +562,7 @@ fn run_udp_client(
                     if last_receive_error_log_at
                         .is_none_or(|last| now.duration_since(last) >= Duration::from_secs(1))
                     {
-                        eprintln!("Client socket receive error: {error}");
+                        eprintln!("[omoba:cli] event=net_recv_error error={error}");
                         last_receive_error_log_at = Some(now);
                     }
                     break;
@@ -692,8 +722,7 @@ fn apply_server_snapshot(
         neutrals,
         game_state,
         rematch_in_secs,
-    )) =
-        latest_snapshot
+    )) = latest_snapshot
     else {
         return;
     };
@@ -709,8 +738,7 @@ fn apply_server_snapshot(
         .collect::<Vec<_>>();
     // IMPORTANT: we must tolerate temporary duplication of `Player` entities (e.g. during loading /
     // restart races). Many gameplay systems use `Query::single()` and will break if we allow >1.
-    let chosen_local =
-        choose_authoritative_local_player(&local_players, your_id);
+    let chosen_local = choose_authoritative_local_player(&local_players, your_id);
 
     if let Some(local_entity) = chosen_local {
         // Keep exactly one local `Player` alive to avoid `single()` query failures.
@@ -767,8 +795,17 @@ fn apply_server_snapshot(
             return;
         };
         if local_player_state.team != selected_team {
+            let key = (your_id, local_player_state.team, selected_team);
+            if network_state.join_pending_last_logged != Some(key) {
+                info!(
+                    "[omoba:cli] event=join_pending reason=awaiting_team_ack server_reported_team={:?} client_selected_team={:?} player_id={}",
+                    local_player_state.team, selected_team, your_id
+                );
+                network_state.join_pending_last_logged = Some(key);
+            }
             return;
         }
+        network_state.join_pending_last_logged = None;
         let spawn = Vec3::new(
             local_player_state.x,
             local_player_state.y,
@@ -817,6 +854,11 @@ fn apply_server_snapshot(
                 ))
                 .id()
         };
+
+        info!(
+            "[omoba:cli] event=join_ok player_id={your_id} team={:?} character={:?}",
+            local_player_state.team, local_player_state.character
+        );
 
         network_state.local_team = Some(local_player_state.team);
         if let Ok(mut camera_transform) = transform_sets.p1().single_mut() {

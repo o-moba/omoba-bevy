@@ -4,8 +4,8 @@ use std::collections::{HashMap, HashSet};
 use crate::camera::CameraState;
 use crate::combat::CombatStats;
 use crate::maps::MapLayout;
-use crate::player::PLAYER_SIZE;
 use crate::net::{NetworkMinion, NetworkStructure, RemotePlayer, StructureKind};
+use crate::player::PLAYER_SIZE;
 use crate::player::Player;
 use crate::team::Team;
 

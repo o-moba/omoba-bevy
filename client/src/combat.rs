@@ -8,12 +8,13 @@ use bevy::{
     prelude::*,
     window::PrimaryWindow,
 };
+use std::time::{Duration, Instant};
 
 use crate::camera::MainCamera;
-use crate::debug_console::DebugConsole;
+use crate::debug_console::{DebugConsole, debug_ui_enabled};
 use crate::net::{
-    GameState, GameStateSnapshot, NetworkCommand, NetworkMinion, NetworkMinionId,
-    NetworkNeutral, NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId,
+    GameState, GameStateSnapshot, NetworkCommand, NetworkMinion, NetworkMinionId, NetworkNeutral,
+    NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId, PlayerProgression,
     RemotePlayer, StructureKind, TargetId, TargetKind,
 };
 use crate::player::Player;
@@ -21,6 +22,10 @@ use crate::team::Team;
 
 pub const MAX_HP: f32 = 100.0;
 pub const MAX_MANA: f32 = 100.0;
+
+// Must stay in sync with server `SPELL_MANA_COST` / `SPELL_COOLDOWN` in server/src/main.rs.
+const SPELL_MANA_COST: f32 = 20.0;
+const SPELL_COOLDOWN: Duration = Duration::from_millis(350);
 
 const BAR_WIDTH: f32 = 1.45;
 const BAR_HEIGHT: f32 = 0.09;
@@ -54,6 +59,7 @@ pub struct CombatPlugin;
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TargetState>()
+            .init_resource::<LocalSpellCastState>()
             .add_systems(Startup, setup_combat_visual_assets)
             .add_systems(Startup, setup_combat_ui)
             .add_systems(
@@ -76,6 +82,7 @@ impl Plugin for CombatPlugin {
             )
                 .chain(),
         );
+        app.add_systems(Update, admin_debug_hotkeys.run_if(debug_ui_enabled));
     }
 }
 
@@ -118,6 +125,73 @@ struct TargetState {
     selected_entity: Option<Entity>,
     selected_target: Option<TargetId>,
     marker_entity: Option<Entity>,
+}
+
+/// Optimistic client-side cast gate for observability (mirrors server rules; may drift if server rejects).
+#[derive(Resource, Default)]
+struct LocalSpellCastState {
+    last_cast_at: Option<Instant>,
+}
+
+fn try_queue_spell_cast(
+    target: TargetId,
+    local_stats: &CombatStats,
+    cast_state: &mut LocalSpellCastState,
+    command_writer: &mut MessageWriter<NetworkCommand>,
+    console: &mut DebugConsole,
+) {
+    let now = Instant::now();
+    if !local_stats.is_alive() {
+        info!("[omoba:cli] event=cast_reject reason=caster_dead");
+        console.push_line("Cast rejected: dead (wait for respawn).".to_string());
+        return;
+    }
+    if local_stats.mana < SPELL_MANA_COST {
+        info!(
+            "[omoba:cli] event=cast_reject reason=insufficient_mana have_mana={:.2} cost={:.2}",
+            local_stats.mana, SPELL_MANA_COST
+        );
+        console.push_line(format!(
+            "Cast rejected: need {:.0} mana (have {:.0}).",
+            SPELL_MANA_COST, local_stats.mana
+        ));
+        return;
+    }
+    if let Some(last) = cast_state.last_cast_at {
+        let elapsed = now.duration_since(last);
+        if elapsed < SPELL_COOLDOWN {
+            let remaining = SPELL_COOLDOWN - elapsed;
+            info!(
+                "[omoba:cli] event=cast_reject reason=on_cooldown remaining_ms={}",
+                remaining.as_millis()
+            );
+            console.push_line(format!(
+                "Cast rejected: on cooldown (~{} ms left).",
+                remaining.as_millis()
+            ));
+            return;
+        }
+    }
+
+    command_writer.write(NetworkCommand::Cast { target });
+    cast_state.last_cast_at = Some(now);
+
+    let message = format!(
+        "Cast -> {} {} (mana {:.0})",
+        match target.kind {
+            TargetKind::Player => "player",
+            TargetKind::Minion => "minion",
+            TargetKind::Structure => "structure",
+            TargetKind::Neutral => "neutral",
+        },
+        target.id,
+        local_stats.mana
+    );
+    console.push_line(message.clone());
+    info!(
+        "[omoba:cli] event=cast_sent target_kind={:?} target_id={} mana={:.0}",
+        target.kind, target.id, local_stats.mana
+    );
 }
 
 #[derive(Component, Default)]
@@ -355,7 +429,7 @@ fn select_target_system(
         target_state.selected_entity = Some(entity);
         target_state.selected_target = Some(target_id);
         info!(
-            "Target selected: id={} ({:?})",
+            "[omoba:cli] event=target_selected target_id={} target_kind={:?}",
             target_id.id, target_id.kind
         );
     }
@@ -414,11 +488,18 @@ fn cast_spell_system(
         With<NetworkStructure>,
     >,
     mut target_state: ResMut<TargetState>,
+    mut cast_state: ResMut<LocalSpellCastState>,
     mut command_writer: MessageWriter<NetworkCommand>,
     mut console: ResMut<DebugConsole>,
 ) {
     if let Some(game_state) = game_state.as_ref() {
         if !matches!(game_state.state, GameState::Running) {
+            if keyboard_input.just_pressed(KeyCode::KeyQ) {
+                info!(
+                    "[omoba:cli] event=cast_reject reason=match_not_running state={:?}",
+                    game_state.state
+                );
+            }
             return;
         }
     }
@@ -438,24 +519,17 @@ fn cast_spell_system(
     );
     let target = resolve_cast_target(&mut target_state);
     if let Some(target) = target {
-        command_writer.write(NetworkCommand::Cast { target });
-        let message = format!(
-            "Cast -> {} {} (mana {:.0})",
-            match target.kind {
-                TargetKind::Player => "player",
-                TargetKind::Minion => "minion",
-                TargetKind::Structure => "structure",
-                TargetKind::Neutral => "neutral",
-            },
-            target.id,
-            local_stats.mana
+        try_queue_spell_cast(
+            target,
+            local_stats,
+            &mut cast_state,
+            &mut command_writer,
+            &mut console,
         );
-        console.push_line(message.clone());
-        info!("{message}");
     } else {
         let message = "No target available. Use TAB or middle mouse click to select.";
         console.push_line(message);
-        info!("{message}");
+        info!("[omoba:cli] event=cast_reject reason=no_valid_target");
     }
 }
 
@@ -491,18 +565,23 @@ fn skill_button_system(
         With<NetworkStructure>,
     >,
     mut target_state: ResMut<TargetState>,
+    mut cast_state: ResMut<LocalSpellCastState>,
     mut command_writer: MessageWriter<NetworkCommand>,
     mut console: ResMut<DebugConsole>,
 ) {
-    if let Some(game_state) = game_state.as_ref() {
-        if !matches!(game_state.state, GameState::Running) {
-            return;
-        }
-    }
     for (interaction, mut color) in interactions.iter_mut() {
         match *interaction {
             Interaction::Pressed => {
                 *color = SKILL_BUTTON_PRESS_COLOR.into();
+                if let Some(gs) = game_state.as_ref() {
+                    if !matches!(gs.state, GameState::Running) {
+                        info!(
+                            "[omoba:cli] event=cast_reject reason=match_not_running state={:?}",
+                            gs.state
+                        );
+                        continue;
+                    }
+                }
                 let Ok(local_stats) = local_stats_query.single() else {
                     continue;
                 };
@@ -514,24 +593,17 @@ fn skill_button_system(
                     &structure_candidates,
                 );
                 if let Some(target) = resolve_cast_target(&mut target_state) {
-                    command_writer.write(NetworkCommand::Cast { target });
-                    let message = format!(
-                        "Cast -> {} {} (mana {:.0})",
-                        match target.kind {
-                            TargetKind::Player => "player",
-                            TargetKind::Minion => "minion",
-                            TargetKind::Structure => "structure",
-                            TargetKind::Neutral => "neutral",
-                        },
-                        target.id,
-                        local_stats.mana
+                    try_queue_spell_cast(
+                        target,
+                        local_stats,
+                        &mut cast_state,
+                        &mut command_writer,
+                        &mut console,
                     );
-                    console.push_line(message.clone());
-                    info!("{message}");
                 } else {
                     let message = "No target available. Use TAB or middle mouse click to select.";
                     console.push_line(message);
-                    info!("{message}");
+                    info!("[omoba:cli] event=cast_reject reason=no_valid_target");
                 }
             }
             Interaction::Hovered => {
@@ -540,6 +612,50 @@ fn skill_button_system(
             Interaction::None => {
                 *color = SKILL_BUTTON_COLOR.into();
             }
+        }
+    }
+}
+
+fn admin_debug_hotkeys(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut commands: MessageWriter<NetworkCommand>,
+    snapshot: Res<GameStateSnapshot>,
+    player_query: Query<
+        (
+            &Transform,
+            &CombatStats,
+            &PlayerProgression,
+            Option<&NetworkPlayerId>,
+        ),
+        With<Player>,
+    >,
+) {
+    if keyboard.just_pressed(KeyCode::F9) {
+        if matches!(snapshot.state, GameState::Victory { .. }) {
+            commands.write(NetworkCommand::RequestRematch);
+            info!("[omoba:cli] event=admin_rematch_requested state=victory");
+        } else {
+            info!("[omoba:cli] event=admin_rematch_ignored reason=not_in_victory_screen");
+        }
+    }
+    if keyboard.just_pressed(KeyCode::F8) {
+        if let Ok((transform, stats, prog, net_id)) = player_query.single() {
+            let id = net_id.map(|n| n.0).unwrap_or(0);
+            info!(
+                "[omoba:cli] event=admin_player_snapshot player_id={} pos=({:.2},{:.2},{:.2}) hp={:.1}/{:.1} mana={:.1}/{:.1} level={} xp={}/{} sp={}",
+                id,
+                transform.translation.x,
+                transform.translation.y,
+                transform.translation.z,
+                stats.hp,
+                stats.max_hp,
+                stats.mana,
+                stats.max_mana,
+                prog.level,
+                prog.xp,
+                prog.next_level_xp,
+                prog.skill_points
+            );
         }
     }
 }
@@ -563,9 +679,8 @@ fn spawn_combat_bars_system(
             Some(StructureKind::BaseTower) => BASE_TOWER_BAR_Y,
             None => 2.1,
         };
-        let show_mana_bar = structure_kind.is_none()
-            && minion_marker.is_none()
-            && neutral_marker.is_none();
+        let show_mana_bar =
+            structure_kind.is_none() && minion_marker.is_none() && neutral_marker.is_none();
         let mut bars = CombatBars::default();
         let bar_root = commands
             .spawn((
@@ -789,7 +904,8 @@ fn update_target_marker_system(
         marker_center_y + bob,
         target_translation.z,
     );
-    marker_transform.rotation = Quat::from_rotation_y(time.elapsed_secs() * TARGET_MARKER_SPIN_SPEED);
+    marker_transform.rotation =
+        Quat::from_rotation_y(time.elapsed_secs() * TARGET_MARKER_SPIN_SPEED);
     marker_transform.scale = Vec3::new(marker_radius * pulse, 1.0, marker_radius * pulse);
 }
 
