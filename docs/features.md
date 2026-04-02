@@ -10,8 +10,10 @@ Canonical version: `0.2.0`
 - Core combat loop with projectiles, structures, minions, death, respawn, mana regeneration, and base-destruction win condition.
 - Map layout with three lanes and simple jungle blocks.
 - Player progression with level-based XP thresholds, HP/mana scaling on level-up, and tracked skill points.
-- In-game local HUD display for level and XP progression.
-- Persistent local client preferences (graphics, character, optional server address) with safe clamping on load; override directory with `OMOBA_CLIENT_CONFIG_DIR` for tests or portable installs.
+- In-game local HUD display for level, XP progression, and available skill points.
+- Four-slot skill bar (Q/W/E/R): rank vs max rank, local cooldown readout for the active shot, and a gold-tinted idle state when the server snapshot indicates an upgrade is allowed (skill point available and below max rank).
+- **Skill upgrades (authoritative):** hold **Shift** and click a slot, or press **Shift+Q / Shift+W / Shift+E / Shift+R** to send an upgrade intent. The server validates points, rank cap, and slot; the next snapshot updates ranks and gameplay numbers (damage, mana cost, cooldown, passives) immediately.
+- **Tooltips:** hover a skill slot for name, description, mana cost, cooldown (active vs passive), current primary value, and next-rank preview when upgradeable. Tooltip text and numbers come from the shared `skills` crate so they stay aligned with server simulation.
 
 ## Multiplayer Session Reliability
 
@@ -30,4 +32,4 @@ Canonical version: `0.2.0`
 - Full reconnect slot reclaim across disconnects and NAT changes.
 - Match phase, restart, and rematch flow.
 - Jungle camps and neutral AI.
-- Full skill system, tooltip UX, and release-readiness validation.
+- Release-readiness validation for the full combat/skill loop in production builds.

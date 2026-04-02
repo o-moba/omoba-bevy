@@ -125,15 +125,9 @@ impl Plugin for NetworkingPlugin {
 
 #[derive(Message, Clone, Copy, Debug)]
 pub enum NetworkCommand {
-    Cast {
-        target: TargetId,
-    },
-    /// Skill 4 — server-authoritative mana restore (no target).
-    ManaRestore,
-    Join {
-        team: Team,
-        character: CharacterChoice,
-    },
+    Cast { slot: u8, target: TargetId },
+    UpgradeSkill { slot: u8 },
+    Join { team: Team, character: CharacterChoice },
     #[allow(dead_code)]
     RequestRematch,
 }
@@ -147,11 +141,14 @@ enum ClientPacket {
         z: f32,
         yaw: f32,
     },
-    UseAbility {
-        ability: HeroAbility,
+    Cast {
+        #[serde(default)]
+        slot: u8,
         target: TargetId,
     },
-    ManaRestore,
+    UpgradeSkill {
+        slot: u8,
+    },
     Join {
         team: Team,
         #[serde(default = "default_character_choice")]
@@ -218,12 +215,16 @@ struct PlayerState {
     next_level_xp: u32,
     #[serde(default)]
     skill_points: u32,
-    #[serde(default = "default_mana_restore_rank")]
-    mana_restore_rank: u8,
+    #[serde(default = "default_skill_ranks")]
+    skill_ranks: [u8; skills::SLOT_COUNT],
     #[serde(default = "default_character_choice")]
     character: CharacterChoice,
     #[serde(default)]
     abilities: PlayerAbilitySnapshot,
+}
+
+fn default_skill_ranks() -> [u8; skills::SLOT_COUNT] {
+    [skills::STARTING_RANK; skills::SLOT_COUNT]
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -487,7 +488,19 @@ pub struct PlayerProgression {
     pub xp: u32,
     pub next_level_xp: u32,
     pub skill_points: u32,
-    pub mana_restore_rank: u8,
+    pub skill_ranks: [u8; skills::SLOT_COUNT],
+}
+
+impl Default for PlayerProgression {
+    fn default() -> Self {
+        Self {
+            level: DEFAULT_PLAYER_LEVEL,
+            xp: 0,
+            next_level_xp: DEFAULT_NEXT_LEVEL_XP,
+            skill_points: 0,
+            skill_ranks: [skills::STARTING_RANK; skills::SLOT_COUNT],
+        }
+    }
 }
 
 #[derive(Component)]
@@ -869,13 +882,16 @@ fn send_network_commands(
 
     for command in command_events.read() {
         match command {
-            NetworkCommand::Cast { target } => {
-                if !client_session.is_connected() {
-                    continue;
-                }
+            NetworkCommand::Cast { slot, target } => {
+                let _ = channels.outgoing.send(ClientPacket::Cast {
+                    slot: *slot,
+                    target: *target,
+                });
+            }
+            NetworkCommand::UpgradeSkill { slot } => {
                 let _ = channels
                     .outgoing
-                    .send(ClientPacket::UpgradeAbility { ability: *ability });
+                    .send(ClientPacket::UpgradeSkill { slot: *slot });
             }
             NetworkCommand::ManaRestore => {
                 let _ = channels.outgoing.send(ClientPacket::ManaRestore);
@@ -1918,7 +1934,7 @@ fn player_state_to_progression(player: &PlayerState) -> PlayerProgression {
         xp: player.xp,
         next_level_xp: player.next_level_xp,
         skill_points: player.skill_points,
-        mana_restore_rank: player.mana_restore_rank.max(1),
+        skill_ranks: player.skill_ranks,
     }
 }
 
