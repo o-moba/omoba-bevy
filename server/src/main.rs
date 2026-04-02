@@ -316,7 +316,9 @@ enum GameState {
     #[default]
     Lobby,
     Running,
-    Victory { winner: Team },
+    Victory {
+        winner: Team,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -718,19 +720,17 @@ fn main() -> io::Result<()> {
             .values()
             .map(|player| player.state.id)
             .collect::<HashSet<_>>();
-        projectiles.retain(|_, projectile| {
-            match projectile.target.kind {
-                TargetKind::Player => live_player_ids.contains(&projectile.target.id),
-                TargetKind::Minion => minions
-                    .get(&projectile.target.id)
-                    .is_some_and(|minion| minion.state.hp > 0.0),
-                TargetKind::Structure => structures
-                    .get(&projectile.target.id)
-                    .is_some_and(|structure| structure.state.hp > 0.0),
-                TargetKind::Neutral => neutrals.get(&projectile.target.id).is_some_and(|neutral| {
-                    neutral.dead_until.is_none() && neutral.state.hp > 0.0
-                }),
-            }
+        projectiles.retain(|_, projectile| match projectile.target.kind {
+            TargetKind::Player => live_player_ids.contains(&projectile.target.id),
+            TargetKind::Minion => minions
+                .get(&projectile.target.id)
+                .is_some_and(|minion| minion.state.hp > 0.0),
+            TargetKind::Structure => structures
+                .get(&projectile.target.id)
+                .is_some_and(|structure| structure.state.hp > 0.0),
+            TargetKind::Neutral => neutrals
+                .get(&projectile.target.id)
+                .is_some_and(|neutral| neutral.dead_until.is_none() && neutral.state.hp > 0.0),
         });
 
         minions.retain(|_, minion| minion.state.hp > 0.0);
@@ -1200,8 +1200,7 @@ fn simulate_projectiles(
                     return false;
                 }
 
-                let start =
-                    Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z);
+                let start = Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z);
                 let target_pos = Vec3f::new(
                     target_neutral.state.x,
                     target_neutral.state.y + NEUTRAL_RADIUS * 0.85,
@@ -1300,9 +1299,10 @@ fn apply_neutral_damage(
         return;
     }
     neutral.state.hp = (neutral.state.hp - damage).max(0.0);
-    if players.values().any(|player| {
-        player.state.id == attacker_player_id && player.state.hp > 0.0
-    }) {
+    if players
+        .values()
+        .any(|player| player.state.id == attacker_player_id && player.state.hp > 0.0)
+    {
         neutral.target_player_id = Some(attacker_player_id);
         neutral.state.ai_state = NeutralAiState::Aggro;
     }
@@ -1384,15 +1384,12 @@ fn simulate_neutrals(
                 .values()
                 .filter(|player| player.state.hp > 0.0)
                 .map(|player| {
-                    let hit = Vec3f::new(player.state.x, player.state.y + AIM_HEIGHT, player.state.z);
+                    let hit =
+                        Vec3f::new(player.state.x, player.state.y + AIM_HEIGHT, player.state.z);
                     (player.state.id, neutral_pos.distance_squared(hit))
                 })
                 .filter(|(_, dist_sq)| *dist_sq <= aggro_sq)
-                .min_by(|a, b| {
-                    a.1
-                        .partial_cmp(&b.1)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
+                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
             if let Some((player_id, _)) = best {
                 neutral.target_player_id = Some(player_id);
                 neutral.state.ai_state = NeutralAiState::Aggro;
@@ -2209,9 +2206,7 @@ fn simulate_tower_attacks(
             let target_pos =
                 Vec3f::new(player.state.x, player.state.y + AIM_HEIGHT, player.state.z);
             let dist_sq = tower_position.distance_squared(target_pos);
-            if dist_sq <= range_sq
-                && best_target.is_none_or(|(_, _, best)| dist_sq < best)
-            {
+            if dist_sq <= range_sq && best_target.is_none_or(|(_, _, best)| dist_sq < best) {
                 best_target = Some((player.state.id, target_pos, dist_sq));
             }
         }

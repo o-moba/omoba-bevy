@@ -93,3 +93,18 @@ After an abnormal termination (e.g. `kill -9`):
 2. Run `make start` (or `make restart` which does both automatically).
 
 No code edits are required between restarts.
+
+## TASK-14 — Network failure and session resilience (manual QA)
+
+Use two terminals (or `make start` / `make stop`). Constants live in `client/src/session_config.rs`.
+
+| Step | Action | Expected client state / UI |
+|------|--------|----------------------------|
+| 1 | Start **client only** (no server) | **WaitingForServer** (or brief **Connecting**): panel explains address, retry interval, max wait; viewport keeps rendering; after `T_WAIT_MAX` → **Disconnected** with **Retry** visible. |
+| 2 | Start server while client waits or after **Retry** | First qualifying snapshot → **Connected**; status text updates; join flow works. |
+| 3 | Reach **Connected**, play briefly, **kill server** | Within `T_STALE_SNAPSHOT` (or transport threshold if errors surface), **Disconnected**; replicated world cleared; team select returns; game-state overlay hidden. |
+| 4 | Restart server, click **Retry**, join again | Returns to normal **Connected** flow (manual path — no auto-rejoin into match). If the client UDP thread exited (e.g. bind failure), restart the client instead — **Retry** does not respawn that thread. |
+| 5 | Spam team join (double-click / rapid confirm) | At most one local `Player` after sync; `Join` idempotent while `join_flow_committed`. |
+| 6 | Block UDP (e.g. firewall) while **Connected** | Stale snapshot or transport rule → **Disconnected** same as server kill. |
+
+**Preferences file** (optional server address + graphics): see `client/src/persistence.rs` (`OMOBA_CLIENT_CONFIG_DIR` or default OS path). **Env wins** over saved `game_server_addr` when `GAME_SERVER_ADDR` is set and non-empty.
