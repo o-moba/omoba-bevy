@@ -13,9 +13,9 @@ use std::time::{Duration, Instant};
 use crate::camera::MainCamera;
 use crate::debug_console::{DebugConsole, debug_ui_enabled};
 use crate::net::{
-    GameState, GameStateSnapshot, NetworkCommand, NetworkMinion, NetworkMinionId, NetworkNeutral,
-    NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId, PlayerProgression,
-    RemotePlayer, StructureKind, TargetId, TargetKind,
+    GameState, GameStateSnapshot, LocalSkill3Hud, NetworkCommand, NetworkMinion, NetworkMinionId,
+    NetworkNeutral, NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId,
+    PendingAbilityFeedback, RemotePlayer, StructureKind, TargetId, TargetKind,
 };
 use shared::{SkillSlot, TargetingMode, ability_for_slot, scaled_mana_cost};
 use crate::player::Player;
@@ -24,9 +24,11 @@ use crate::team::Team;
 pub const MAX_HP: f32 = 100.0;
 pub const MAX_MANA: f32 = 100.0;
 
-// Must stay in sync with server `SPELL_MANA_COST` / `SPELL_COOLDOWN` in server/src/main.rs.
-const SPELL_MANA_COST: f32 = 20.0;
-const SPELL_COOLDOWN: Duration = Duration::from_millis(350);
+/// Heal per rank for skill 3 (rank 1 = index 0). Must match `server/src/main.rs` `SKILL3_HEAL_BY_RANK`.
+pub const SKILL3_HEAL_BY_RANK: [f32; 5] = [30.0, 45.0, 60.0, 75.0, 90.0];
+pub const SKILL3_MANA_COST: f32 = 25.0;
+/// Must match server `SKILL3_COOLDOWN`.
+pub const SKILL3_COOLDOWN_SECS: f32 = 4.0;
 
 const BAR_WIDTH: f32 = 1.45;
 const BAR_HEIGHT: f32 = 0.09;
@@ -52,7 +54,7 @@ const BASE_TOWER_MARKER_RADIUS: f32 = 3.75;
 const SKILL_BUTTON_SIZE: f32 = 72.0;
 const SKILL_BUTTON_GAP: f32 = 8.0;
 const SKILL_BUTTON_MARGIN: f32 = 20.0;
-const SKILL_BUTTON_GAP: f32 = 12.0;
+const SKILL3_BUTTON_GAP: f32 = 12.0;
 const SKILL_BUTTON_COLOR: Color = Color::srgba(0.12, 0.12, 0.12, 0.75);
 
 pub struct CombatPlugin;
@@ -69,9 +71,14 @@ impl Plugin for CombatPlugin {
                     ability_feedback_display_system,
                     select_target_system,
                     clear_invalid_target_system,
-                    upgrade_ranged_shot_system,
-                    ability_keyboard_system,
-                    ability_hud_button_system,
+                    cast_spell_system,
+                    skill_button_system,
+                    skill3_cast_key_system,
+                    skill3_button_system,
+                    skill3_tooltip_hover_system,
+                    skill3_tooltip_text_system,
+                    skill3_cooldown_label_system,
+                    skill3_heal_hint_system,
                     update_target_marker_system,
                 )
                     .chain(),
@@ -210,6 +217,21 @@ struct TargetMarker;
 struct AbilityHudButton(HeroAbility);
 
 #[derive(Component)]
+struct Skill3Button;
+
+#[derive(Component)]
+struct Skill3TooltipPanel;
+
+#[derive(Component)]
+struct Skill3TooltipText;
+
+#[derive(Component)]
+struct Skill3CooldownLabel;
+
+#[derive(Component)]
+struct Skill3HealHint;
+
+#[derive(Component)]
 struct CombatBarRoot;
 
 #[derive(Component)]
@@ -325,41 +347,12 @@ fn setup_combat_visual_assets(
 }
 
 fn setup_combat_ui(mut commands: Commands) {
-    let ranged_right = SKILL_BUTTON_MARGIN;
-    let melee_right = SKILL_BUTTON_MARGIN + SKILL_BUTTON_SIZE + SKILL_BUTTON_GAP;
-
-    commands.spawn((
-        Button,
-        Node {
-            position_type: PositionType::Absolute,
-            right: Val::Px(ranged_right),
-            bottom: Val::Px(SKILL_BUTTON_MARGIN),
-            width: Val::Px(SKILL_BUTTON_SIZE),
-            height: Val::Px(SKILL_BUTTON_SIZE),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            ..default()
-        },
-        BackgroundColor(SKILL_BUTTON_COLOR),
-        AbilityHudButton(HeroAbility::RangedShot),
-        Name::new("RangedShotButton"),
-    ))
-    .with_children(|parent| {
-        parent.spawn((
-            Text::new("E"),
-            TextFont {
-                font_size: 26.0,
-                ..default()
-            },
-            TextColor(Color::WHITE),
-        ));
-    });
     commands
         .spawn((
             Button,
             Node {
                 position_type: PositionType::Absolute,
-                right: Val::Px(melee_right),
+                right: Val::Px(SKILL_BUTTON_MARGIN),
                 bottom: Val::Px(SKILL_BUTTON_MARGIN),
                 width: Val::Px(SKILL_BUTTON_SIZE),
                 height: Val::Px(SKILL_BUTTON_SIZE),
@@ -368,49 +361,151 @@ fn setup_combat_ui(mut commands: Commands) {
                 ..default()
             },
             BackgroundColor(SKILL_BUTTON_COLOR),
-            AbilityHudButton(HeroAbility::MeleeStrike),
-            Name::new("MeleeStrikeButton"),
+            SkillButton,
+            Name::new("SkillButtonQ"),
         ))
-    .with_children(|parent| {
-        parent.spawn((
-            Text::new("Q"),
-            TextFont {
-                font_size: 26.0,
+        .with_children(|parent| {
+            parent.spawn((
+                Text::new("Q"),
+                TextFont {
+                    font_size: 22.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+        });
+
+    let skill3_right = SKILL_BUTTON_MARGIN + SKILL_BUTTON_SIZE + SKILL3_BUTTON_GAP;
+    commands
+        .spawn((
+            Button,
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(skill3_right),
+                bottom: Val::Px(SKILL_BUTTON_MARGIN),
+                width: Val::Px(SKILL_BUTTON_SIZE),
+                height: Val::Px(SKILL_BUTTON_SIZE),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
                 ..default()
             },
-            TextColor(Color::WHITE),
-        ));
-    });
+            BackgroundColor(SKILL_BUTTON_COLOR),
+            Skill3Button,
+            Name::new("SkillButtonHeal"),
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Text::new("E"),
+                TextFont {
+                    font_size: 22.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+            parent.spawn((
+                Text::new(""),
+                TextFont {
+                    font_size: 16.0,
+                    ..default()
+                },
+                TextColor(Color::srgba(1.0, 0.85, 0.35, 1.0)),
+                Node {
+                    position_type: PositionType::Absolute,
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                Skill3CooldownLabel,
+            ));
+            parent.spawn((
+                Text::new(""),
+                TextFont {
+                    font_size: 11.0,
+                    ..default()
+                },
+                TextColor(Color::srgba(0.55, 0.95, 0.65, 1.0)),
+                Node {
+                    position_type: PositionType::Absolute,
+                    bottom: Val::Px(5.0),
+                    left: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                Skill3HealHint,
+            ));
+        });
+
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(skill3_right),
+                bottom: Val::Px(SKILL_BUTTON_MARGIN + SKILL_BUTTON_SIZE + 10.0),
+                width: Val::Px(240.0),
+                padding: UiRect::all(Val::Px(10.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.05, 0.05, 0.08, 0.92)),
+            Visibility::Hidden,
+            Skill3TooltipPanel,
+            Name::new("Skill3TooltipPanel"),
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Text::new(""),
+                TextFont {
+                    font_size: 14.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+                Skill3TooltipText,
+            ));
+        });
 }
 
-fn ability_feedback_display_system(
-    mut feedback: ResMut<PendingAbilityFeedback>,
-    mut console: ResMut<DebugConsole>,
-) {
-    let Some(msg) = feedback.message.take() else {
-        return;
-    };
-    console.push_line(msg.clone());
-    info!("{msg}");
+fn skill3_heal_value_for_rank(rank: u8) -> Option<f32> {
+    if rank == 0 || rank as usize > SKILL3_HEAL_BY_RANK.len() {
+        return None;
+    }
+    Some(SKILL3_HEAL_BY_RANK[(rank - 1) as usize])
 }
 
-fn upgrade_ranged_shot_system(
-    keyboard_input: Res<ButtonInput<KeyCode>>,
-    game_state: Option<Res<GameStateSnapshot>>,
-    mut command_writer: MessageWriter<NetworkCommand>,
+fn skill3_rank_scaling_summary() -> String {
+    SKILL3_HEAL_BY_RANK
+        .iter()
+        .enumerate()
+        .map(|(i, h)| format!("{}:{:.0}", i + 1, h))
+        .collect::<Vec<_>>()
+        .join(" → ")
+}
+
+fn try_request_skill3_cast(
+    console: &mut DebugConsole,
+    command_writer: &mut MessageWriter<NetworkCommand>,
+    hud: &LocalSkill3Hud,
+    stats: &CombatStats,
 ) {
-    if let Some(game_state) = game_state.as_ref() {
-        if !matches!(game_state.state, GameState::Running) {
-            return;
-        }
-    }
-    if !keyboard_input.just_pressed(KeyCode::KeyT) {
+    if stats.hp <= 0.0 {
+        console.push_line("Skill 3: cannot cast while dead.");
         return;
     }
-    command_writer.write(NetworkCommand::UpgradeAbility {
-        ability: HeroAbility::RangedShot,
-    });
-    info!("Request upgrade: Ranged Shot (skill points)");
+    if hud.rank == 0 {
+        console.push_line("Skill 3: not learned.");
+        return;
+    }
+    if hud.cooldown_remaining_secs > 0.05 {
+        console.push_line("Skill 3: on cooldown.");
+        return;
+    }
+    if stats.mana + f32::EPSILON < SKILL3_MANA_COST {
+        console.push_line("Skill 3: not enough mana.");
+        return;
+    }
+    command_writer.write(NetworkCommand::CastSkill { skill_slot: 3 });
 }
 
 fn select_target_system(
@@ -683,47 +778,121 @@ fn ability_hud_button_system(
     }
 }
 
-fn admin_debug_hotkeys(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut commands: MessageWriter<NetworkCommand>,
-    snapshot: Res<GameStateSnapshot>,
-    player_query: Query<
-        (
-            &Transform,
-            &CombatStats,
-            &PlayerProgression,
-            Option<&NetworkPlayerId>,
-        ),
-        With<Player>,
-    >,
+fn skill3_cast_key_system(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    game_state: Option<Res<GameStateSnapshot>>,
+    hud: Res<LocalSkill3Hud>,
+    local_stats_query: Query<&CombatStats, With<Player>>,
+    mut command_writer: MessageWriter<NetworkCommand>,
+    mut console: ResMut<DebugConsole>,
 ) {
-    if keyboard.just_pressed(KeyCode::F9) {
-        if matches!(snapshot.state, GameState::Victory { .. }) {
-            commands.write(NetworkCommand::RequestRematch);
-            info!("[omoba:cli] event=admin_rematch_requested state=victory");
-        } else {
-            info!("[omoba:cli] event=admin_rematch_ignored reason=not_in_victory_screen");
+    if let Some(game_state) = game_state.as_ref() {
+        if !matches!(game_state.state, GameState::Running) {
+            return;
         }
     }
-    if keyboard.just_pressed(KeyCode::F8) {
-        if let Ok((transform, stats, prog, net_id)) = player_query.single() {
-            let id = net_id.map(|n| n.0).unwrap_or(0);
-            info!(
-                "[omoba:cli] event=admin_player_snapshot player_id={} pos=({:.2},{:.2},{:.2}) hp={:.1}/{:.1} mana={:.1}/{:.1} level={} xp={}/{} sp={}",
-                id,
-                transform.translation.x,
-                transform.translation.y,
-                transform.translation.z,
-                stats.hp,
-                stats.max_hp,
-                stats.mana,
-                stats.max_mana,
-                prog.level,
-                prog.xp,
-                prog.next_level_xp,
-                prog.skill_points
-            );
+    if !keyboard_input.just_pressed(KeyCode::KeyE) {
+        return;
+    }
+    let Ok(stats) = local_stats_query.single() else {
+        return;
+    };
+    try_request_skill3_cast(&mut console, &mut command_writer, &hud, stats);
+}
+
+fn skill3_button_system(
+    mut interactions: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<Skill3Button>),
+    >,
+    game_state: Option<Res<GameStateSnapshot>>,
+    hud: Res<LocalSkill3Hud>,
+    local_stats_query: Query<&CombatStats, With<Player>>,
+    mut command_writer: MessageWriter<NetworkCommand>,
+    mut console: ResMut<DebugConsole>,
+) {
+    if let Some(game_state) = game_state.as_ref() {
+        if !matches!(game_state.state, GameState::Running) {
+            return;
         }
+    }
+    for (interaction, mut color) in interactions.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *color = SKILL_BUTTON_PRESS_COLOR.into();
+                let Ok(stats) = local_stats_query.single() else {
+                    continue;
+                };
+                try_request_skill3_cast(&mut console, &mut command_writer, &hud, stats);
+            }
+            Interaction::Hovered => {
+                *color = SKILL_BUTTON_HOVER_COLOR.into();
+            }
+            Interaction::None => {
+                *color = SKILL_BUTTON_COLOR.into();
+            }
+        }
+    }
+}
+
+fn skill3_tooltip_hover_system(
+    interaction: Query<&Interaction, With<Skill3Button>>,
+    mut panel: Query<&mut Visibility, With<Skill3TooltipPanel>>,
+) {
+    let Ok(inter) = interaction.single() else {
+        return;
+    };
+    let Ok(mut vis) = panel.single_mut() else {
+        return;
+    };
+    *vis = match *inter {
+        Interaction::Hovered | Interaction::Pressed => Visibility::Visible,
+        _ => Visibility::Hidden,
+    };
+}
+
+fn skill3_tooltip_text_system(
+    hud: Res<LocalSkill3Hud>,
+    mut text_q: Query<&mut Text, With<Skill3TooltipText>>,
+) {
+    let rank_line = match skill3_heal_value_for_rank(hud.rank) {
+        Some(heal) => format!("Current rank {}: restores {:.0} HP (self).", hud.rank, heal),
+        None => "Rank 0: not learned on server — cannot cast.".to_string(),
+    };
+    let scaling = skill3_rank_scaling_summary();
+    let line = format!(
+        "Skill 3 — Heal (self)\n{rank_line}\nScaling by rank (HP): {scaling}\nMana {:.0}. Cooldown {:.1}s (authoritative on server).",
+        SKILL3_MANA_COST, SKILL3_COOLDOWN_SECS
+    );
+    for mut text in &mut text_q {
+        text.0 = line.clone();
+    }
+}
+
+fn skill3_cooldown_label_system(
+    hud: Res<LocalSkill3Hud>,
+    mut label_q: Query<&mut Text, With<Skill3CooldownLabel>>,
+) {
+    let s = if hud.cooldown_remaining_secs > 0.05 {
+        format!("{:.1}s", hud.cooldown_remaining_secs)
+    } else {
+        String::new()
+    };
+    for mut text in &mut label_q {
+        text.0 = s.clone();
+    }
+}
+
+fn skill3_heal_hint_system(
+    hud: Res<LocalSkill3Hud>,
+    mut label_q: Query<&mut Text, With<Skill3HealHint>>,
+) {
+    let s = match skill3_heal_value_for_rank(hud.rank) {
+        Some(v) => format!("+{:.0}", v),
+        None => "—".to_string(),
+    };
+    for mut text in &mut label_q {
+        text.0 = s.clone();
     }
 }
 
