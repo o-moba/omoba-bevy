@@ -28,10 +28,13 @@ Canonical version: `0.2.0`
 
 - Runtime and startup stability hardening.
 - Full reconnect slot reclaim across disconnects and NAT changes.
-- Full skill system (four distinct server-validated abilities with per-rank tuning), tooltip UX.
+- Expanded skill roster, tooltip UX, balance passes, and release-scale QA beyond the current cast-and-HUD surface.
 
-## Release gate and balance (TASK-12)
+## Operations and playtest documentation
 
-- Authoritative tuning constants: `server/src/balance.rs` (see `docs/balance-tuning.md`).
-- Release checklist, manual QA matrix, and readiness report: `docs/release-gate-checklist.md`, `docs/manual-qa-matrix.md`, `docs/release-readiness-report.md`.
-- Live UDP QA smoke (two clients + cast): `make verify-task-12` or `python3 scripts/verify_task_12_qa_matrix_live_udp.py` (after `cargo build -p server`).
+- [README.md](../README.md) — setup, controls summary, links to tester docs.
+- [RUNBOOK.md](../RUNBOOK.md) — startup, env vars, troubleshooting with recovery steps.
+- [docs/playtest-script.md](playtest-script.md) — timeboxed MVP session checklist.
+- [docs/bug-report-template.md](bug-report-template.md) — internal report format.
+- [docs/mvp-scope-and-limitations.md](mvp-scope-and-limitations.md) — explicit MVP scope and limitations.
+- [tasks/MVP-CHECKLIST.md](../tasks/MVP-CHECKLIST.md) — MVP-blocking vs deferrable classification.

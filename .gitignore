@@ -13,5 +13,14 @@ assets/
 .tasks
 AGENTS.md
 CLAUDE.md
-tasks/
-docs
+# docs/tasks: ignore by default; whitelist canonical markdown so deliverables stay versioned.
+docs/*
+!docs/features.md
+!docs/playtest-script.md
+!docs/bug-report-template.md
+!docs/mvp-scope-and-limitations.md
+!docs/progress/
+!docs/progress/**
+
+tasks/*
+!tasks/MVP-CHECKLIST.md
