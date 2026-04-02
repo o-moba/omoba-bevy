@@ -39,6 +39,7 @@ pub(crate) fn ensure_player_connected(
     });
 }
 
+#[cfg(test)]
 pub(crate) fn regenerate_mana(players: &mut HashMap<SocketAddr, ConnectedPlayer>, dt: f32) {
     for player in players.values_mut() {
         if player.state.hp <= 0.0 {

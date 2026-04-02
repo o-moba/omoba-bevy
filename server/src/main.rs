@@ -7,6 +7,7 @@ mod session;
 mod world;
 
 use balance::*;
+use bevy::{app::ScheduleRunnerPlugin, prelude::*};
 use neutrals::*;
 use progression::*;
 use serde::{Deserialize, Serialize};
@@ -15,7 +16,6 @@ use std::{
     collections::{HashMap, HashSet},
     io,
     net::{SocketAddr, UdpSocket},
-    thread,
     time::{Duration, Instant},
 };
 use world::*;
@@ -358,35 +358,114 @@ impl MinionAggroTarget {
     }
 }
 
-fn main() -> io::Result<()> {
-    let bind_addr = std::env::var("SERVER_ADDR").unwrap_or_else(|_| DEFAULT_BIND_ADDR.to_owned());
-    let socket = UdpSocket::bind(&bind_addr)?;
-    socket.set_nonblocking(true)?;
+#[derive(Component)]
+struct Player;
 
-    println!("UDP game server is listening on {bind_addr}");
+#[derive(Component)]
+struct Transform3D {
+    position: Vec3,
+    yaw: f32,
+}
 
-    let mut players = HashMap::<SocketAddr, ConnectedPlayer>::new();
-    let mut projectiles = HashMap::<u64, Projectile>::new();
-    let map_layout = build_map_layout();
-    let mut structures = build_structures(&map_layout);
-    let mut minions = HashMap::<u64, Minion>::new();
-    let mut game_state = GameState::Lobby;
-    let mut victory_at: Option<Instant> = None;
-    let mut next_player_id: u64 = 1;
-    let mut next_projectile_id: u64 = 1;
-    let mut next_minion_id: u64 = 1;
-    let mut next_neutral_id: u64 = 9001;
-    let mut neutrals = build_neutral_camps(&mut next_neutral_id);
-    let mut recv_buf = [0_u8; MAX_PACKET_SIZE];
-    let mut last_snapshot_at = Instant::now();
-    let mut last_simulation_at = Instant::now();
-    let mut last_wave_spawn_at = Instant::now()
-        .checked_sub(MINION_WAVE_INTERVAL)
-        .unwrap_or_else(Instant::now);
+#[derive(Component)]
+struct Health {
+    current: f32,
+    max: f32,
+}
 
-    loop {
+#[derive(Component)]
+struct Mana {
+    current: f32,
+    max: f32,
+}
+
+#[derive(Component)]
+struct TeamMarker(Team);
+
+#[derive(Resource, Default)]
+struct EcsPlayerEntities {
+    by_player_id: HashMap<u64, Entity>,
+}
+
+#[derive(Resource, Default)]
+struct SimulationDeltaSeconds {
+    value: f32,
+}
+
+#[derive(Resource, Default)]
+struct TickContext {
+    now: Option<Instant>,
+    dt: f32,
+}
+
+#[derive(Resource)]
+struct ServerRuntime {
+    socket: UdpSocket,
+    players: HashMap<SocketAddr, ConnectedPlayer>,
+    projectiles: HashMap<u64, Projectile>,
+    map_layout: MapLayoutState,
+    structures: HashMap<u64, Structure>,
+    minions: HashMap<u64, Minion>,
+    game_state: GameState,
+    victory_at: Option<Instant>,
+    next_player_id: u64,
+    next_projectile_id: u64,
+    next_minion_id: u64,
+    neutrals: HashMap<u64, Neutral>,
+    recv_buf: [u8; MAX_PACKET_SIZE],
+    last_snapshot_at: Instant,
+    last_simulation_at: Instant,
+    last_wave_spawn_at: Instant,
+}
+
+impl ServerRuntime {
+    fn new(socket: UdpSocket) -> Self {
+        let map_layout = build_map_layout();
+        let mut next_neutral_id: u64 = 9_001;
+        let neutrals = build_neutral_camps(&mut next_neutral_id);
+
+        Self {
+            socket,
+            players: HashMap::new(),
+            projectiles: HashMap::new(),
+            structures: build_structures(&map_layout),
+            minions: HashMap::new(),
+            game_state: GameState::Lobby,
+            map_layout,
+            victory_at: None,
+            next_player_id: 1,
+            next_projectile_id: 1,
+            next_minion_id: 1,
+            neutrals,
+            recv_buf: [0_u8; MAX_PACKET_SIZE],
+            last_snapshot_at: Instant::now(),
+            last_simulation_at: Instant::now(),
+            last_wave_spawn_at: Instant::now()
+                .checked_sub(MINION_WAVE_INTERVAL)
+                .unwrap_or_else(Instant::now),
+        }
+    }
+
+    fn receive_packets(&mut self) {
+        let Self {
+            socket,
+            recv_buf,
+            players,
+            projectiles,
+            map_layout,
+            structures,
+            minions,
+            game_state,
+            victory_at,
+            next_player_id,
+            next_projectile_id,
+            last_wave_spawn_at,
+            neutrals,
+            ..
+        } = self;
+
         loop {
-            match socket.recv_from(&mut recv_buf) {
+            match socket.recv_from(recv_buf) {
                 Ok((len, addr)) => {
                     let packet = match serde_json::from_slice::<ClientPacket>(&recv_buf[..len]) {
                         Ok(packet) => packet,
@@ -397,13 +476,7 @@ fn main() -> io::Result<()> {
                     };
 
                     let now = Instant::now();
-                    ensure_player_connected(
-                        &mut players,
-                        &map_layout,
-                        addr,
-                        &mut next_player_id,
-                        now,
-                    );
+                    ensure_player_connected(players, map_layout, addr, next_player_id, now);
                     if let Some(player) = players.get_mut(&addr) {
                         player.last_seen = now;
                     }
@@ -422,40 +495,40 @@ fn main() -> io::Result<()> {
                         }
                         ClientPacket::Cast { target } => {
                             handle_cast_request(
-                                &mut players,
-                                &mut projectiles,
-                                &mut minions,
-                                &mut structures,
-                                &mut neutrals,
+                                players,
+                                projectiles,
+                                minions,
+                                structures,
+                                neutrals,
                                 addr,
                                 target,
-                                &mut next_projectile_id,
-                                &game_state,
+                                next_projectile_id,
+                                game_state,
                                 now,
                             );
                         }
                         ClientPacket::Join { team, character } => {
                             if let Some(player) = players.get_mut(&addr) {
-                                handle_join_request(player, team, character, &map_layout);
+                                handle_join_request(player, team, character, map_layout);
                             }
                             if matches!(game_state, GameState::Lobby) {
-                                println!("First player joined – match starting");
-                                game_state = GameState::Running;
+                                println!("First player joined - match starting");
+                                *game_state = GameState::Running;
                             }
                         }
                         ClientPacket::Ping => {}
                         ClientPacket::RequestRematch => {
                             if matches!(game_state, GameState::Victory { .. }) {
                                 reset_match(
-                                    &mut players,
-                                    &mut structures,
-                                    &mut minions,
-                                    &mut projectiles,
-                                    &map_layout,
-                                    &mut last_wave_spawn_at,
-                                    &mut game_state,
+                                    players,
+                                    structures,
+                                    minions,
+                                    projectiles,
+                                    map_layout,
+                                    last_wave_spawn_at,
+                                    game_state,
                                 );
-                                victory_at = None;
+                                *victory_at = None;
                             }
                         }
                     }
@@ -467,72 +540,87 @@ fn main() -> io::Result<()> {
                 }
             }
         }
+    }
+
+    fn prepare_tick(&mut self) -> (Instant, f32) {
+        self.receive_packets();
 
         let now = Instant::now();
         let dt = now
-            .duration_since(last_simulation_at)
+            .duration_since(self.last_simulation_at)
             .as_secs_f32()
             .clamp(0.0, 0.1);
-        last_simulation_at = now;
+        self.last_simulation_at = now;
+        (now, dt)
+    }
 
-        regenerate_mana(&mut players, dt);
+    fn simulate_after_mana(&mut self, now: Instant, dt: f32) {
+        let Self {
+            socket,
+            players,
+            projectiles,
+            map_layout,
+            structures,
+            minions,
+            game_state,
+            victory_at,
+            next_projectile_id,
+            next_minion_id,
+            neutrals,
+            last_wave_spawn_at,
+            last_snapshot_at,
+            ..
+        } = self;
+
         spawn_minion_waves_if_due(
-            &map_layout,
-            &mut minions,
-            &mut next_minion_id,
-            &game_state,
+            map_layout,
+            minions,
+            next_minion_id,
+            game_state,
             now,
-            &mut last_wave_spawn_at,
+            last_wave_spawn_at,
         );
-        simulate_minions(
-            &mut players,
-            &mut minions,
-            &mut structures,
-            &mut game_state,
-            dt,
-            now,
-        );
+        simulate_minions(players, minions, structures, game_state, dt, now);
         simulate_tower_attacks(
-            &mut players,
-            &mut minions,
-            &mut projectiles,
-            &mut structures,
-            &mut next_projectile_id,
-            &game_state,
+            players,
+            minions,
+            projectiles,
+            structures,
+            next_projectile_id,
+            game_state,
             now,
         );
         simulate_projectiles(
-            &mut players,
-            &mut minions,
-            &mut structures,
-            &mut neutrals,
-            &mut projectiles,
-            &mut game_state,
+            players,
+            minions,
+            structures,
+            neutrals,
+            projectiles,
+            game_state,
             dt,
             now,
         );
-        simulate_neutrals(&mut players, &mut neutrals, &game_state, dt, now);
-        handle_respawns(&mut players, &structures, &map_layout, &game_state, now);
+        simulate_neutrals(players, neutrals, game_state, dt, now);
+        handle_respawns(players, structures, map_layout, game_state, now);
 
-        // Rematch countdown
         if let GameState::Victory { .. } = game_state {
             if victory_at.is_none() {
-                victory_at = Some(now);
+                *victory_at = Some(now);
             }
             if victory_at.is_some_and(|t| now.duration_since(t) >= VICTORY_REMATCH_DELAY) {
                 reset_match(
-                    &mut players,
-                    &mut structures,
-                    &mut minions,
-                    &mut projectiles,
-                    &map_layout,
-                    &mut last_wave_spawn_at,
-                    &mut game_state,
+                    players,
+                    structures,
+                    minions,
+                    projectiles,
+                    map_layout,
+                    last_wave_spawn_at,
+                    game_state,
                 );
-                victory_at = None;
+                *victory_at = None;
             }
         } else {
-            victory_at = None;
+            *victory_at = None;
         }
 
         players.retain(|addr, player| {
@@ -562,7 +650,7 @@ fn main() -> io::Result<()> {
 
         minions.retain(|_, minion| minion.state.hp > 0.0);
 
-        if now.duration_since(last_snapshot_at) >= SNAPSHOT_INTERVAL {
+        if now.duration_since(*last_snapshot_at) >= SNAPSHOT_INTERVAL {
             let mut players_snapshot = players
                 .values()
                 .map(|player| player.state.clone())
@@ -606,7 +694,7 @@ fn main() -> io::Result<()> {
                 None
             };
 
-            for (addr, player) in &players {
+            for (addr, player) in &*players {
                 let packet = ServerPacket::Snapshot {
                     your_id: player.state.id,
                     players: players_snapshot.clone(),
@@ -628,11 +716,175 @@ fn main() -> io::Result<()> {
                 }
             }
 
-            last_snapshot_at = now;
+            *last_snapshot_at = now;
         }
-
-        thread::sleep(SIMULATION_STEP_SLEEP);
     }
+}
+
+fn server_prepare_tick_system(
+    mut runtime: ResMut<ServerRuntime>,
+    mut tick: ResMut<TickContext>,
+    mut simulation_delta: ResMut<SimulationDeltaSeconds>,
+) {
+    let (now, dt) = runtime.prepare_tick();
+    tick.now = Some(now);
+    tick.dt = dt;
+    simulation_delta.value = dt;
+}
+
+fn sync_players_into_ecs_system(
+    runtime: Res<ServerRuntime>,
+    mut commands: Commands,
+    mut entities: ResMut<EcsPlayerEntities>,
+    mut query: Query<(&mut Transform3D, &mut Health, &mut Mana, &mut TeamMarker), With<Player>>,
+) {
+    let live_ids = runtime
+        .players
+        .values()
+        .map(|player| player.state.id)
+        .collect::<HashSet<_>>();
+    let stale_ids = entities
+        .by_player_id
+        .keys()
+        .copied()
+        .filter(|player_id| !live_ids.contains(player_id))
+        .collect::<Vec<_>>();
+
+    for stale_player_id in stale_ids {
+        if let Some(entity) = entities.by_player_id.remove(&stale_player_id) {
+            commands.entity(entity).despawn();
+        }
+    }
+
+    for connected_player in runtime.players.values() {
+        let state = &connected_player.state;
+        let Some(entity) = entities.by_player_id.get(&state.id).copied() else {
+            let entity = commands
+                .spawn((
+                    Player,
+                    Transform3D {
+                        position: Vec3::new(state.x, state.y, state.z),
+                        yaw: state.yaw,
+                    },
+                    Health {
+                        current: state.hp,
+                        max: state.max_hp,
+                    },
+                    Mana {
+                        current: state.mana,
+                        max: state.max_mana,
+                    },
+                    TeamMarker(state.team),
+                ))
+                .id();
+            entities.by_player_id.insert(state.id, entity);
+            continue;
+        };
+
+        if let Ok((mut transform, mut health, mut mana, mut team)) = query.get_mut(entity) {
+            transform.position = Vec3::new(state.x, state.y, state.z);
+            transform.yaw = state.yaw;
+            health.current = state.hp;
+            health.max = state.max_hp;
+            mana.current = state.mana;
+            mana.max = state.max_mana;
+            team.0 = state.team;
+        } else {
+            commands.entity(entity).despawn();
+            let replacement = commands
+                .spawn((
+                    Player,
+                    Transform3D {
+                        position: Vec3::new(state.x, state.y, state.z),
+                        yaw: state.yaw,
+                    },
+                    Health {
+                        current: state.hp,
+                        max: state.max_hp,
+                    },
+                    Mana {
+                        current: state.mana,
+                        max: state.max_mana,
+                    },
+                    TeamMarker(state.team),
+                ))
+                .id();
+            entities.by_player_id.insert(state.id, replacement);
+        }
+    }
+}
+
+fn regenerate_mana_system(
+    simulation_delta: Res<SimulationDeltaSeconds>,
+    mut query: Query<(&mut Mana, &Health), With<Player>>,
+) {
+    if simulation_delta.value <= 0.0 {
+        return;
+    }
+
+    for (mut mana, health) in &mut query {
+        if health.current <= 0.0 {
+            continue;
+        }
+        if mana.max <= 0.0 {
+            mana.max = MAX_MANA;
+        }
+        mana.current =
+            (mana.current + MANA_REGEN_PER_SECOND * simulation_delta.value).clamp(0.0, mana.max);
+    }
+}
+
+fn sync_players_from_ecs_system(
+    mut runtime: ResMut<ServerRuntime>,
+    entities: Res<EcsPlayerEntities>,
+    query: Query<&Mana, With<Player>>,
+) {
+    for connected_player in runtime.players.values_mut() {
+        let player_id = connected_player.state.id;
+        let Some(entity) = entities.by_player_id.get(&player_id).copied() else {
+            continue;
+        };
+        let Ok(mana) = query.get(entity) else {
+            continue;
+        };
+        connected_player.state.mana = mana.current;
+        connected_player.state.max_mana = mana.max;
+    }
+}
+
+fn server_finalize_tick_system(mut runtime: ResMut<ServerRuntime>, tick: Res<TickContext>) {
+    let Some(now) = tick.now else {
+        return;
+    };
+    runtime.simulate_after_mana(now, tick.dt);
+}
+
+fn main() -> io::Result<()> {
+    let bind_addr = std::env::var("SERVER_ADDR").unwrap_or_else(|_| DEFAULT_BIND_ADDR.to_owned());
+    let socket = UdpSocket::bind(&bind_addr)?;
+    socket.set_nonblocking(true)?;
+    println!("UDP game server is listening on {bind_addr}");
+
+    App::new()
+        .add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(SIMULATION_STEP_SLEEP)))
+        .insert_resource(ServerRuntime::new(socket))
+        .init_resource::<TickContext>()
+        .init_resource::<SimulationDeltaSeconds>()
+        .init_resource::<EcsPlayerEntities>()
+        .add_systems(
+            Update,
+            (
+                server_prepare_tick_system,
+                sync_players_into_ecs_system,
+                regenerate_mana_system,
+                sync_players_from_ecs_system,
+                server_finalize_tick_system,
+            )
+                .chain(),
+        )
+        .run();
+
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
