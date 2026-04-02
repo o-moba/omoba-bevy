@@ -1,7 +1,7 @@
 use bevy::{
     gltf::Gltf,
     input::mouse::MouseButton,
-    math::{primitives::InfinitePlane3d, Dir3},
+    math::{Dir3, primitives::InfinitePlane3d},
     prelude::*,
     window::PrimaryWindow,
 };
@@ -14,11 +14,11 @@ use crate::debug_console::DebugConsole;
 use crate::maps::MapLayout;
 use crate::minimap::MinimapNavigationState;
 use crate::net::{
-    GameState, GameStateSnapshot, NetworkCharacterChoice, NetworkStructure,
-    RemotePlayer, StructureKind,
+    GameState, GameStateSnapshot, NetworkCharacterChoice, NetworkStructure, RemotePlayer,
+    StructureKind,
 };
 use crate::team::{CharacterChoice, Team};
-use crate::world::{model_assets_for_choice, PlayerModelCatalog};
+use crate::world::{PlayerModelCatalog, model_assets_for_choice};
 
 pub const PLAYER_SPEED: f32 = 5.0;
 pub const PLAYER_SIZE: f32 = 1.0;

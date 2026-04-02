@@ -10,6 +10,8 @@ Canonical version: `0.2.0`
 - Core combat loop with projectiles, structures, minions, death, respawn, mana regeneration, and base-destruction win condition.
 - Map layout with three lanes and simple jungle blocks.
 - Player progression with level-based XP thresholds, HP/mana scaling on level-up, and tracked skill points.
+- In-game local HUD display for level and XP progression.
+- Persistent local client preferences (graphics, character, optional server address) with safe clamping on load; override directory with `OMOBA_CLIENT_CONFIG_DIR` for tests or portable installs.
 - In-game match HUD (below minimap): level, XP, skill points, reserved upgrade key label (`U`), local HP/mana, target hints, objective line, and F1 help reminder; bottom-right skill bar showing `Q`–`R` keys (same cast binding until per-skill server support).
 - F1 toggle help overlay with movement, camera, targeting, casting, objective, and pause guidance; does not reset simulation when toggled. The panel is shown only while the match is `Running` (toggle state is preserved when returning to a live match so lobby/victory screens are not covered).
 
@@ -28,6 +30,13 @@ Canonical version: `0.2.0`
 
 - Runtime and startup stability hardening.
 - Full reconnect slot reclaim across disconnects and NAT changes.
+- Full skill system (four distinct server-validated abilities with per-rank tuning), tooltip UX.
+
+## Release gate and balance (TASK-12)
+
+- Authoritative tuning constants: `server/src/balance.rs` (see `docs/balance-tuning.md`).
+- Release checklist, manual QA matrix, and readiness report: `docs/release-gate-checklist.md`, `docs/manual-qa-matrix.md`, `docs/release-readiness-report.md`.
+- Live UDP QA smoke (two clients + cast): `make verify-task-12` or `python3 scripts/verify_task_12_qa_matrix_live_udp.py` (after `cargo build -p server`).
 - Expanded skill roster, tooltip UX, balance passes, and release-scale QA beyond the current cast-and-HUD surface.
 
 ## Operations and playtest documentation

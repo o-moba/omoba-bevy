@@ -2,7 +2,9 @@
 
 use bevy::prelude::*;
 
-use crate::input_bindings::{HELP_TOGGLE_KEY, help_key_display, skill_keys_display, upgrade_key_display};
+use crate::input_bindings::{
+    HELP_TOGGLE_KEY, help_key_display, skill_keys_display, upgrade_key_display,
+};
 use crate::net::{GameState, GameStateSnapshot};
 
 pub struct HelpOverlayPlugin;

@@ -22,8 +22,8 @@ use combat::CombatPlugin;
 use debug_console::DebugConsolePlugin;
 use game_state::GameStateUiPlugin;
 use help_overlay::HelpOverlayPlugin;
-use match_hud::MatchHudPlugin;
 use maps::MapsPlugin;
+use match_hud::MatchHudPlugin;
 use minimap::MinimapPlugin;
 use net::NetworkingPlugin;
 use pause_menu::PauseMenuPlugin;
@@ -44,7 +44,6 @@ fn main() {
             MapsPlugin,
             ClientPersistencePlugin,
             SetupPlugin,
-            DebugConsolePlugin,
             NetworkingPlugin,
             MinimapPlugin,
             CombatPlugin,
