@@ -96,10 +96,11 @@ fn update_game_state_ui(
                     winner.as_str()
                 )
             };
+            let next_steps = "\nPress Escape for the menu. Wait for an automatic rematch countdown when shown, or restart the client from the pause menu if needed.";
             label.0 = if let Some(secs) = game_state.rematch_in_secs {
-                format!("{base_msg}\nRematch in {secs}s...")
+                format!("{base_msg}\nRematch in {secs}s...{next_steps}")
             } else {
-                base_msg
+                format!("{base_msg}{next_steps}")
             };
         }
     }
