@@ -15,12 +15,8 @@ use std::{
 
 use crate::camera::{locked_camera_offset, CameraState, MainCamera};
 use crate::combat::{CombatStats, MAX_HP, MAX_MANA};
-use crate::persistence::{FileGameServerAddr, ResolvedServerAddressForPrefs};
+use crate::debug_console::DebugConsole;
 use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
-use crate::session_config::{
-    DEFAULT_GAME_SERVER_ADDR, T_RETRY, T_STALE_SNAPSHOT, T_WAIT_MAX,
-    TRANSPORT_CONSECUTIVE_RECV_ERRORS, TRANSPORT_CONSECUTIVE_SEND_ERRORS, is_stale,
-};
 use crate::team::TeamSelection;
 use crate::team::{CharacterChoice, Team, TeamSelectRoot, spawn_team_select_ui};
 use crate::world::{
@@ -42,70 +38,19 @@ const LOCAL_SNAP_DISTANCE: f32 = 4.0;
 const DEFAULT_PLAYER_LEVEL: u32 = 1;
 const DEFAULT_NEXT_LEVEL_XP: u32 = 120;
 
-/// High-level client session / transport state (TASK-14 frozen connection states).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum ClientConnectionState {
-    /// Binding socket / spawning I/O thread (single-frame or brief).
-    #[default]
-    Connecting,
-    /// Transport up; no qualifying snapshot yet for this connect attempt.
-    WaitingForServer,
-    /// At least one qualifying snapshot applied; `your_id` is known.
-    Connected,
-    /// Session not live; user must use Retry or pick team again as documented.
-    Disconnected,
+/// Latest skill-3 fields from the server snapshot (local hero), for HUD prechecks and tooltips.
+#[derive(Resource, Clone, Copy, Debug)]
+pub struct LocalSkill3Hud {
+    pub rank: u8,
+    pub cooldown_remaining_secs: f32,
 }
 
-/// Signal from the UDP thread to the Bevy main thread (failure detection §3 in spec).
-#[derive(Debug, Clone, Copy)]
-pub enum NetThreadSignal {
-    /// Recv/send error streak exceeded fixed thresholds (P3 transport rule).
-    TransportFailure,
-}
-
-#[derive(Message, Clone, Copy, Debug)]
-pub enum SessionUiCommand {
-    /// User explicitly resumes waiting for snapshots after **Disconnected** (P2 manual recovery).
-    Retry,
-}
-
-/// Set by [`ingest_server_snapshot_packets`] when the UDP thread dropped the snapshot sender
-/// (failure detection §3: channel implies session ended).
-#[derive(Resource, Default)]
-pub struct NetIncomingDisconnected(pub bool);
-
-/// Session controller: owns lifecycle flags and join idempotency (single ownership vs UI/net).
-#[derive(Resource)]
-pub struct ClientSession {
-    pub state: ClientConnectionState,
-    /// Wall time when **WaitingForServer** began for the current attempt.
-    pub waiting_since: Option<Instant>,
-    /// Last time a qualifying snapshot was applied while **Connected**.
-    pub last_qualifying_snapshot_wall: Option<Instant>,
-    /// While true, incoming snapshots are drained and ignored (no silent re-entry to gameplay).
-    pub discard_incoming_snapshots: bool,
-    /// **P4**: after a join packet is sent, suppress duplicate join until teardown.
-    pub join_flow_committed: bool,
-    /// Server address used for this process (for UI copy).
-    pub server_addr_display: String,
-}
-
-impl Default for ClientSession {
+impl Default for LocalSkill3Hud {
     fn default() -> Self {
         Self {
-            state: ClientConnectionState::Connecting,
-            waiting_since: None,
-            last_qualifying_snapshot_wall: None,
-            discard_incoming_snapshots: false,
-            join_flow_committed: false,
-            server_addr_display: String::new(),
+            rank: 1,
+            cooldown_remaining_secs: 0.0,
         }
-    }
-}
-
-impl ClientSession {
-    pub fn is_connected(&self) -> bool {
-        self.state == ClientConnectionState::Connected
     }
 }
 
@@ -132,9 +77,8 @@ impl Plugin for NetworkingPlugin {
             .init_resource::<NetworkState>()
             .init_resource::<PendingAbilityFeedback>()
             .init_resource::<GameStateSnapshot>()
-            .init_resource::<PendingServerSnapshotFrame>()
-            .init_resource::<ClientSession>()
-            .init_resource::<NetIncomingDisconnected>()
+            .init_resource::<LocalSkill3Hud>()
+            .init_resource::<QueuedServerSnapshot>()
             .insert_resource(LocalStateSendTimer(Timer::from_seconds(
                 UPDATE_INTERVAL_SECONDS,
                 TimerMode::Repeating,
@@ -160,44 +104,30 @@ impl Plugin for NetworkingPlugin {
             )
             .add_systems(
                 Update,
-                ingest_server_snapshot_packets.in_set(ClientNetPipeline::IngestSnapshot),
+                (
+                    send_local_state,
+                    send_network_commands,
+                    drain_server_snapshots,
+                    apply_server_snapshot,
+                )
+                    .chain(),
             )
             .add_systems(
                 Update,
-                apply_server_snapshot.in_set(ClientNetPipeline::ApplySnapshot),
+                interpolate_snapshot_entities.after(apply_server_snapshot),
             )
             .add_systems(
                 Update,
-                interpolate_snapshot_entities.in_set(ClientNetPipeline::InterpolateNetEntities),
-            )
-            .add_systems(
-                Update,
-                interpolate_remote_players.in_set(ClientNetPipeline::InterpolateRemotePlayers),
-            )
-            .add_systems(
-                Update,
-                handle_connection_retry_button.in_set(ClientNetPipeline::SessionRetryInput),
-            )
-            .add_systems(
-                Update,
-                update_session_lifecycle.in_set(ClientNetPipeline::SessionLifecycle),
-            )
-            .add_systems(
-                Update,
-                sync_connection_status_ui.in_set(ClientNetPipeline::SyncConnectionUi),
+                interpolate_remote_players.after(apply_server_snapshot),
             );
     }
 }
 
 #[derive(Message, Clone, Copy, Debug)]
 pub enum NetworkCommand {
-    Cast {
-        target: TargetId,
-    },
-    Join {
-        team: Team,
-        character: CharacterChoice,
-    },
+    Cast { slot: u8, target: TargetId },
+    UpgradeSkill { slot: u8 },
+    Join { team: Team, character: CharacterChoice },
     #[allow(dead_code)]
     RequestRematch,
 }
@@ -211,12 +141,13 @@ enum ClientPacket {
         z: f32,
         yaw: f32,
     },
-    UseAbility {
-        ability: HeroAbility,
+    Cast {
+        #[serde(default)]
+        slot: u8,
         target: TargetId,
     },
-    UpgradeAbility {
-        ability: HeroAbility,
+    UpgradeSkill {
+        slot: u8,
     },
     Join {
         team: Team,
@@ -284,12 +215,16 @@ struct PlayerState {
     next_level_xp: u32,
     #[serde(default)]
     skill_points: u32,
-    #[serde(default = "default_ranged_shot_rank")]
-    ranged_shot_rank: u8,
+    #[serde(default = "default_skill_ranks")]
+    skill_ranks: [u8; skills::SLOT_COUNT],
     #[serde(default = "default_character_choice")]
     character: CharacterChoice,
     #[serde(default)]
     abilities: PlayerAbilitySnapshot,
+}
+
+fn default_skill_ranks() -> [u8; skills::SLOT_COUNT] {
+    [skills::STARTING_RANK; skills::SLOT_COUNT]
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -415,7 +350,7 @@ enum ServerPacket {
         #[serde(default)]
         rematch_in_secs: Option<u64>,
         #[serde(default)]
-        ability_feedback: Option<String>,
+        your_skill_feedback: Option<String>,
     },
 }
 
@@ -474,6 +409,34 @@ fn log_game_state_transition(
     last.0 = Some(current);
 }
 
+/// Latest snapshot drained from UDP; applied on the same frame by `apply_server_snapshot`.
+#[derive(Resource, Default)]
+struct QueuedServerSnapshot {
+    latest: Option<ServerSnapshotPayload>,
+}
+
+struct ServerSnapshotPayload {
+    your_id: u64,
+    players: Vec<PlayerState>,
+    projectiles: Vec<ProjectileState>,
+    structures: Vec<StructureState>,
+    minions: Vec<MinionState>,
+    neutrals: Vec<NeutralState>,
+    game_state: GameState,
+    rematch_in_secs: Option<u64>,
+    your_skill_feedback: Option<String>,
+}
+
+/// Bundles stale-entity checks so `apply_server_snapshot` stays within Bevy's system param limit.
+#[derive(SystemParam)]
+struct SnapshotStaleQueries<'w, 's> {
+    remote: Query<'w, 's, &'static RemotePlayer>,
+    projectile: Query<'w, 's, &'static NetworkProjectile>,
+    structure: Query<'w, 's, &'static NetworkStructure>,
+    minion: Query<'w, 's, &'static NetworkMinion>,
+    neutral: Query<'w, 's, &'static NetworkNeutral>,
+}
+
 #[derive(Resource, Default)]
 struct NetworkState {
     local_id: Option<u64>,
@@ -525,12 +488,19 @@ pub struct PlayerProgression {
     pub xp: u32,
     pub next_level_xp: u32,
     pub skill_points: u32,
-    pub ranged_shot_rank: u8,
+    pub skill_ranks: [u8; skills::SLOT_COUNT],
 }
 
-#[derive(Resource, Default)]
-pub struct PendingAbilityFeedback {
-    pub message: Option<String>,
+impl Default for PlayerProgression {
+    fn default() -> Self {
+        Self {
+            level: DEFAULT_PLAYER_LEVEL,
+            xp: 0,
+            next_level_xp: DEFAULT_NEXT_LEVEL_XP,
+            skill_points: 0,
+            skill_ranks: [skills::STARTING_RANK; skills::SLOT_COUNT],
+        }
+    }
 }
 
 #[derive(Component)]
@@ -912,13 +882,19 @@ fn send_network_commands(
 
     for command in command_events.read() {
         match command {
-            NetworkCommand::Cast { target } => {
-                if !client_session.is_connected() {
-                    continue;
-                }
+            NetworkCommand::Cast { slot, target } => {
+                let _ = channels.outgoing.send(ClientPacket::Cast {
+                    slot: *slot,
+                    target: *target,
+                });
+            }
+            NetworkCommand::UpgradeSkill { slot } => {
                 let _ = channels
                     .outgoing
-                    .send(ClientPacket::UpgradeAbility { ability: *ability });
+                    .send(ClientPacket::UpgradeSkill { slot: *slot });
+            }
+            NetworkCommand::ManaRestore => {
+                let _ = channels.outgoing.send(ClientPacket::ManaRestore);
             }
             NetworkCommand::Join { team, character } => {
                 if client_session.join_flow_committed {
@@ -954,126 +930,59 @@ fn choose_authoritative_local_player<T: Copy + Eq>(
     chosen
 }
 
-fn ingest_server_snapshot_packets(
+fn drain_server_snapshots(
     channels: Option<Res<NetworkChannels>>,
-    client_session: Res<ClientSession>,
-    mut pending: ResMut<PendingServerSnapshotFrame>,
-    mut incoming_dead: ResMut<NetIncomingDisconnected>,
-    team_selection: Res<TeamSelection>,
+    mut queued: ResMut<QueuedServerSnapshot>,
 ) {
-    pending.frame = None;
-    let Some(channels) = channels.as_ref() else {
+    let Some(channels) = channels else {
         return;
     };
 
-    if client_session.discard_incoming_snapshots {
-        loop {
-            match channels.incoming.try_recv() {
-                Ok(_) => {}
-                Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
-            }
-        }
-        return;
+    while let Ok(packet) = channels.incoming.try_recv() {
+        let ServerPacket::Snapshot {
+            your_id,
+            players,
+            projectiles,
+            structures,
+            minions,
+            neutrals,
+            game_state,
+            rematch_in_secs,
+            your_skill_feedback,
+        } = packet;
+        queued.latest = Some(ServerSnapshotPayload {
+            your_id,
+            players,
+            projectiles,
+            structures,
+            minions,
+            neutrals,
+            game_state,
+            rematch_in_secs,
+            your_skill_feedback,
+        });
     }
-
-    let mut latest_snapshot: Option<(
-        u64,
-        Vec<PlayerState>,
-        Vec<ProjectileState>,
-        Vec<StructureState>,
-        Vec<MinionState>,
-        Vec<NeutralState>,
-        GameState,
-        Option<u64>,
-    )> = None;
-
-    loop {
-        match channels.incoming.try_recv() {
-            Err(TryRecvError::Empty) => break,
-            Err(TryRecvError::Disconnected) => {
-                incoming_dead.0 = true;
-                break;
-            }
-            Ok(packet) => match packet {
-                ServerPacket::Snapshot {
-                    your_id,
-                    players,
-                    projectiles,
-                    structures,
-                    minions,
-                    neutrals,
-                    game_state,
-                    rematch_in_secs,
-                } => {
-                    latest_snapshot = Some((
-                        your_id,
-                        players,
-                        projectiles,
-                        structures,
-                        minions,
-                        neutrals,
-                        game_state,
-                        rematch_in_secs,
-                    ));
-                }
-            },
-        }
-    }
-
-    let Some((
-        your_id,
-        players,
-        projectiles,
-        structures,
-        minions,
-        neutrals,
-        game_state,
-        rematch_in_secs,
-    )) = latest_snapshot
-    else {
-        return;
-    };
-
-    pending.frame = Some(PendingSnapshotData {
-        wall_time: Instant::now(),
-        your_id,
-        players,
-        projectiles,
-        structures,
-        minions,
-        neutrals,
-        game_state,
-        rematch_in_secs,
-        selected_team_for_spawn: team_selection.team,
-    });
 }
 
 fn apply_server_snapshot(
     mut commands: Commands,
-    mut pending: ResMut<PendingServerSnapshotFrame>,
-    mut client_session: ResMut<ClientSession>,
+    mut queued: ResMut<QueuedServerSnapshot>,
+    mut console: ResMut<DebugConsole>,
     mut network_state: ResMut<NetworkState>,
     mut transform_sets: ParamSet<(
         Query<&mut Transform>,
         Query<&mut Transform, With<MainCamera>>,
     )>,
-    remote_query: Query<&RemotePlayer>,
-    projectile_query: Query<&NetworkProjectile>,
-    structure_query: Query<&NetworkStructure>,
-    minion_query: Query<&NetworkMinion>,
-    neutral_query: Query<&NetworkNeutral>,
+    stale_queries: SnapshotStaleQueries,
     local_player_query: Query<(Entity, Option<&NetworkPlayerId>), With<Player>>,
     player_assets: Res<PlayerAssets>,
     model_catalog: Res<PlayerModelCatalog>,
     visuals: Res<NetworkVisualAssets>,
     mut game_state_snapshot: ResMut<GameStateSnapshot>,
     mut cam_state: ResMut<CameraState>,
+    team_selection: Res<TeamSelection>,
 ) {
-    let Some(data) = pending.frame.take() else {
-        return;
-    };
-    let PendingSnapshotData {
-        wall_time: snapshot_wall_time,
+    let Some(ServerSnapshotPayload {
         your_id,
         players,
         projectiles,
@@ -1086,6 +995,11 @@ fn apply_server_snapshot(
     else {
         return;
     };
+
+    if let Some(msg) = your_skill_feedback {
+        console.push_line(msg.clone());
+        info!("{msg}");
+    }
 
     network_state.local_id = Some(your_id);
     game_state_snapshot.state = game_state;
@@ -1128,6 +1042,10 @@ fn apply_server_snapshot(
         // Only apply character/team/stats once we actually have a state entry for our id.
         // Otherwise we'd oscillate between the locally selected character and the server default.
         if let Some(local_player_state) = local_player_state {
+            commands.insert_resource(LocalSkill3Hud {
+                rank: local_player_state.skill3_rank,
+                cooldown_remaining_secs: local_player_state.skill3_cooldown_remaining_secs,
+            });
             commands.entity(local_entity).insert((
                 local_player_state.team,
                 player_state_to_combat_stats(local_player_state),
@@ -1225,6 +1143,10 @@ fn apply_server_snapshot(
         );
 
         network_state.local_team = Some(local_player_state.team);
+        commands.insert_resource(LocalSkill3Hud {
+            rank: local_player_state.skill3_rank,
+            cooldown_remaining_secs: local_player_state.skill3_cooldown_remaining_secs,
+        });
         if let Ok(mut camera_transform) = transform_sets.p1().single_mut() {
             cam_state.locked = true;
             let zoom = cam_state.zoom;
@@ -1323,7 +1245,7 @@ fn apply_server_snapshot(
 
     for player_id in stale_ids {
         if let Some(entity) = network_state.remote_players.remove(&player_id) {
-            if remote_query.get(entity).is_ok() {
+            if stale_queries.remote.get(entity).is_ok() {
                 commands
                     .entity(entity)
                     .despawn_related::<Children>()
@@ -1386,7 +1308,7 @@ fn apply_server_snapshot(
         .collect::<Vec<_>>();
     for projectile_id in stale_projectile_ids {
         if let Some(entity) = network_state.projectiles.remove(&projectile_id) {
-            if projectile_query.get(entity).is_ok() {
+            if stale_queries.projectile.get(entity).is_ok() {
                 commands
                     .entity(entity)
                     .despawn_related::<Children>()
@@ -1447,7 +1369,7 @@ fn apply_server_snapshot(
         .collect::<Vec<_>>();
     for structure_id in stale_structure_ids {
         if let Some(entity) = network_state.structures.remove(&structure_id) {
-            if structure_query.get(entity).is_ok() {
+            if stale_queries.structure.get(entity).is_ok() {
                 commands
                     .entity(entity)
                     .despawn_related::<Children>()
@@ -1567,7 +1489,7 @@ fn apply_server_snapshot(
         .collect::<Vec<_>>();
     for neutral_id in stale_neutral_ids {
         if let Some(entity) = network_state.neutrals.remove(&neutral_id) {
-            if neutral_query.get(entity).is_ok() {
+            if stale_queries.neutral.get(entity).is_ok() {
                 commands
                     .entity(entity)
                     .despawn_related::<Children>()
@@ -1584,7 +1506,7 @@ fn apply_server_snapshot(
         .collect::<Vec<_>>();
     for minion_id in stale_minion_ids {
         if let Some(entity) = network_state.minions.remove(&minion_id) {
-            if minion_query.get(entity).is_ok() {
+            if stale_queries.minion.get(entity).is_ok() {
                 commands
                     .entity(entity)
                     .despawn_related::<Children>()
@@ -2012,7 +1934,7 @@ fn player_state_to_progression(player: &PlayerState) -> PlayerProgression {
         xp: player.xp,
         next_level_xp: player.next_level_xp,
         skill_points: player.skill_points,
-        ranged_shot_rank: player.ranged_shot_rank.max(1),
+        skill_ranks: player.skill_ranks,
     }
 }
 
@@ -2079,8 +2001,16 @@ fn default_max_mana() -> f32 {
     MAX_MANA
 }
 
+fn default_skill3_rank() -> u8 {
+    1
+}
+
 fn default_minion_brain_state() -> MinionBrainState {
     MinionBrainState::Marching
+}
+
+fn default_mana_restore_rank() -> u8 {
+    1
 }
 
 #[cfg(test)]
