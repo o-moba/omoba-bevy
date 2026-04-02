@@ -1,4 +1,4 @@
-.PHONY: server game start stop restart
+.PHONY: server game start stop restart verify-task-12
 
 # Run the dedicated game server (env: SERVER_ADDR, default 0.0.0.0:4000)
 server:
@@ -27,3 +27,8 @@ stop:
 restart: stop
 	sleep 1
 	$(MAKE) start
+
+# TASK-12: live UDP matrix harness (M1/M2/M3). Requires built server binary.
+verify-task-12:
+	cargo build -p server
+	python3 scripts/verify_task_12_qa_matrix_live_udp.py

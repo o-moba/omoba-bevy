@@ -19,7 +19,9 @@ use crate::net::{
 use crate::player::Player;
 use crate::team::Team;
 
+/// Must match server `server/src/balance.rs` player baselines (display / local defaults).
 pub const MAX_HP: f32 = 100.0;
+/// Must match server `server/src/balance.rs` player baselines (display / local defaults).
 pub const MAX_MANA: f32 = 100.0;
 
 const BAR_WIDTH: f32 = 1.45;

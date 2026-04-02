@@ -1,3 +1,8 @@
+#![allow(clippy::items_after_test_module)]
+
+mod balance;
+
+use balance::*;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -12,70 +17,6 @@ const SNAPSHOT_INTERVAL: Duration = Duration::from_millis(50);
 const PLAYER_TIMEOUT: Duration = Duration::from_secs(5);
 const SIMULATION_STEP_SLEEP: Duration = Duration::from_millis(10);
 const MAX_PACKET_SIZE: usize = 8 * 1024;
-
-const MAX_HP: f32 = 100.0;
-const MAX_MANA: f32 = 100.0;
-const MANA_REGEN_PER_SECOND: f32 = 8.0;
-const SPELL_MANA_COST: f32 = 20.0;
-const SPELL_COOLDOWN: Duration = Duration::from_millis(350);
-
-const PROJECTILE_SPEED: f32 = 19.0;
-const PROJECTILE_DAMAGE: f32 = 20.0;
-const PROJECTILE_RADIUS: f32 = 0.22;
-const PROJECTILE_LIFETIME: Duration = Duration::from_secs(3);
-const PLAYER_HIT_RADIUS: f32 = 0.62;
-const CAST_SPAWN_HEIGHT: f32 = 0.85;
-const AIM_HEIGHT: f32 = 0.55;
-const RESPAWN_DELAY: Duration = Duration::from_secs(5);
-
-const TOWER_MAX_HP: f32 = 240.0;
-const BASE_TOWER_MAX_HP: f32 = 650.0;
-const TOWER_SIZE: f32 = 2.6;
-const BASE_TOWER_SIZE: f32 = 6.0;
-const TOWER_RANGE: f32 = 20.0;
-const TOWER_DAMAGE: f32 = 14.0;
-const TOWER_COOLDOWN: Duration = Duration::from_millis(900);
-const TOWER_SHOT_HEIGHT: f32 = 2.4;
-const BASE_TOWER_RANGE: f32 = 24.0;
-const BASE_TOWER_DAMAGE: f32 = 18.0;
-const BASE_TOWER_COOLDOWN: Duration = Duration::from_millis(850);
-const BASE_TOWER_SHOT_HEIGHT: f32 = 3.2;
-
-const MINION_MAX_HP: f32 = 65.0;
-const MINION_SPEED: f32 = 3.1;
-const MINION_ATTACK_RANGE: f32 = 2.4;
-const MINION_ATTACK_DAMAGE: f32 = 8.0;
-const MINION_ATTACK_COOLDOWN: Duration = Duration::from_millis(950);
-const MINION_VISION_RANGE: f32 = 10.0;
-const MINION_RADIUS: f32 = 0.55;
-const MINION_SPAWN_HEIGHT: f32 = 0.5;
-const MINION_WAVE_INTERVAL: Duration = Duration::from_secs(60);
-const MINIONS_PER_WAVE: usize = 3;
-const MINION_KILL_GOLD: u32 = 18;
-const MINION_KILL_XP: u32 = 32;
-const PLAYER_SPAWN_OFFSET: f32 = 7.0;
-const STARTING_LEVEL: u32 = 1;
-const MAX_LEVEL: u32 = 10;
-const LEVEL_UP_HP_BONUS: f32 = 18.0;
-const LEVEL_UP_MANA_BONUS: f32 = 12.0;
-const LEVEL_XP_THRESHOLDS: [u32; 9] = [120, 150, 180, 220, 260, 300, 340, 380, 420];
-
-const NEUTRAL_RADIUS: f32 = 0.62;
-const NEUTRAL_SPAWN_HEIGHT: f32 = 0.5;
-const NEUTRAL_AGGRO_RADIUS: f32 = 7.5;
-const NEUTRAL_LEASH_DISTANCE: f32 = 13.0;
-const NEUTRAL_ATTACK_COOLDOWN: Duration = Duration::from_millis(850);
-const NEUTRAL_CHASE_SPEED: f32 = 2.9;
-const NEUTRAL_RESPAWN_COOLDOWN: Duration = Duration::from_secs(40);
-const VICTORY_REMATCH_DELAY: Duration = Duration::from_secs(10);
-
-const TARGET_BASE_RUN_TIME_SECONDS: f32 = 45.0;
-const PLAYER_SPEED: f32 = 5.0;
-const TARGET_BASE_DISTANCE: f32 = PLAYER_SPEED * TARGET_BASE_RUN_TIME_SECONDS;
-const BASE_PAD_SIZE: f32 = 46.0;
-const BASE_EDGE_MARGIN: f32 = 6.0;
-const LANE_WIDTH: f32 = 12.0;
-const LANE_EDGE_PADDING: f32 = 6.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -316,7 +257,9 @@ enum GameState {
     #[default]
     Lobby,
     Running,
-    Victory { winner: Team },
+    Victory {
+        winner: Team,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -428,25 +371,25 @@ struct NeutralTemplate {
 fn neutral_template(camp_type: NeutralCampType) -> NeutralTemplate {
     match camp_type {
         NeutralCampType::Skirmisher => NeutralTemplate {
-            max_hp: 72.0,
-            attack_damage: 7.0,
-            attack_range: 2.45,
-            kill_gold: 28,
-            kill_xp: 50,
+            max_hp: SKIRMISHER_MAX_HP,
+            attack_damage: SKIRMISHER_ATTACK_DAMAGE,
+            attack_range: SKIRMISHER_ATTACK_RANGE,
+            kill_gold: SKIRMISHER_KILL_GOLD,
+            kill_xp: SKIRMISHER_KILL_XP,
         },
         NeutralCampType::Bruiser => NeutralTemplate {
-            max_hp: 130.0,
-            attack_damage: 11.0,
-            attack_range: 2.65,
-            kill_gold: 52,
-            kill_xp: 85,
+            max_hp: BRUISER_MAX_HP,
+            attack_damage: BRUISER_ATTACK_DAMAGE,
+            attack_range: BRUISER_ATTACK_RANGE,
+            kill_gold: BRUISER_KILL_GOLD,
+            kill_xp: BRUISER_KILL_XP,
         },
         NeutralCampType::Spitter => NeutralTemplate {
-            max_hp: 58.0,
-            attack_damage: 9.0,
-            attack_range: 7.6,
-            kill_gold: 35,
-            kill_xp: 55,
+            max_hp: SPITTER_MAX_HP,
+            attack_damage: SPITTER_ATTACK_DAMAGE,
+            attack_range: SPITTER_ATTACK_RANGE,
+            kill_gold: SPITTER_KILL_GOLD,
+            kill_xp: SPITTER_KILL_XP,
         },
     }
 }
@@ -457,8 +400,8 @@ fn jungle_camp_blueprints() -> Vec<(Vec3f, NeutralCampType)> {
     let base_padding = BASE_PAD_SIZE * 0.5 + BASE_EDGE_MARGIN;
     let half_map_size = half_inner_side + base_padding;
     let map_size = half_map_size * 2.0;
-    let jungle_outer = map_size * 0.34;
-    let jungle_inner = map_size * 0.22;
+    let jungle_outer = map_size * JUNGLE_MAP_OUTER_FRAC;
+    let jungle_inner = map_size * JUNGLE_MAP_INNER_FRAC;
     let y = NEUTRAL_SPAWN_HEIGHT;
     vec![
         (
@@ -718,19 +661,17 @@ fn main() -> io::Result<()> {
             .values()
             .map(|player| player.state.id)
             .collect::<HashSet<_>>();
-        projectiles.retain(|_, projectile| {
-            match projectile.target.kind {
-                TargetKind::Player => live_player_ids.contains(&projectile.target.id),
-                TargetKind::Minion => minions
-                    .get(&projectile.target.id)
-                    .is_some_and(|minion| minion.state.hp > 0.0),
-                TargetKind::Structure => structures
-                    .get(&projectile.target.id)
-                    .is_some_and(|structure| structure.state.hp > 0.0),
-                TargetKind::Neutral => neutrals.get(&projectile.target.id).is_some_and(|neutral| {
-                    neutral.dead_until.is_none() && neutral.state.hp > 0.0
-                }),
-            }
+        projectiles.retain(|_, projectile| match projectile.target.kind {
+            TargetKind::Player => live_player_ids.contains(&projectile.target.id),
+            TargetKind::Minion => minions
+                .get(&projectile.target.id)
+                .is_some_and(|minion| minion.state.hp > 0.0),
+            TargetKind::Structure => structures
+                .get(&projectile.target.id)
+                .is_some_and(|structure| structure.state.hp > 0.0),
+            TargetKind::Neutral => neutrals
+                .get(&projectile.target.id)
+                .is_some_and(|neutral| neutral.dead_until.is_none() && neutral.state.hp > 0.0),
         });
 
         minions.retain(|_, minion| minion.state.hp > 0.0);
@@ -1023,13 +964,14 @@ fn handle_cast_request(
             ),
             homing: true,
             guaranteed_hit: true,
-            damage: PROJECTILE_DAMAGE,
+            damage: PRIMARY_ABILITY_DAMAGE_BY_RANK[0],
             radius: PROJECTILE_RADIUS,
             expires_at: now + PROJECTILE_LIFETIME,
         },
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn simulate_projectiles(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,
     minions: &mut HashMap<u64, Minion>,
@@ -1200,8 +1142,7 @@ fn simulate_projectiles(
                     return false;
                 }
 
-                let start =
-                    Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z);
+                let start = Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z);
                 let target_pos = Vec3f::new(
                     target_neutral.state.x,
                     target_neutral.state.y + NEUTRAL_RADIUS * 0.85,
@@ -1300,9 +1241,10 @@ fn apply_neutral_damage(
         return;
     }
     neutral.state.hp = (neutral.state.hp - damage).max(0.0);
-    if players.values().any(|player| {
-        player.state.id == attacker_player_id && player.state.hp > 0.0
-    }) {
+    if players
+        .values()
+        .any(|player| player.state.id == attacker_player_id && player.state.hp > 0.0)
+    {
         neutral.target_player_id = Some(attacker_player_id);
         neutral.state.ai_state = NeutralAiState::Aggro;
     }
@@ -1325,7 +1267,7 @@ fn award_neutral_kill_to_player(
     for player in players.values_mut() {
         if player.state.id == killer_id {
             player.state.gold = player.state.gold.saturating_add(rewards.kill_gold);
-            player.state.xp = player.state.xp.saturating_add(rewards.kill_xp);
+            grant_player_xp(&mut player.state, rewards.kill_xp);
             break;
         }
     }
@@ -1384,15 +1326,12 @@ fn simulate_neutrals(
                 .values()
                 .filter(|player| player.state.hp > 0.0)
                 .map(|player| {
-                    let hit = Vec3f::new(player.state.x, player.state.y + AIM_HEIGHT, player.state.z);
+                    let hit =
+                        Vec3f::new(player.state.x, player.state.y + AIM_HEIGHT, player.state.z);
                     (player.state.id, neutral_pos.distance_squared(hit))
                 })
                 .filter(|(_, dist_sq)| *dist_sq <= aggro_sq)
-                .min_by(|a, b| {
-                    a.1
-                        .partial_cmp(&b.1)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
+                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
             if let Some((player_id, _)) = best {
                 neutral.target_player_id = Some(player_id);
                 neutral.state.ai_state = NeutralAiState::Aggro;
@@ -2209,9 +2148,7 @@ fn simulate_tower_attacks(
             let target_pos =
                 Vec3f::new(player.state.x, player.state.y + AIM_HEIGHT, player.state.z);
             let dist_sq = tower_position.distance_squared(target_pos);
-            if dist_sq <= range_sq
-                && best_target.is_none_or(|(_, _, best)| dist_sq < best)
-            {
+            if dist_sq <= range_sq && best_target.is_none_or(|(_, _, best)| dist_sq < best) {
                 best_target = Some((player.state.id, target_pos, dist_sq));
             }
         }
@@ -2345,6 +2282,24 @@ mod tests {
         regenerate_mana(&mut players, 100.0);
         let clamped = players.get(&addr).unwrap().state.mana;
         assert!((clamped - MAX_MANA).abs() < EPSILON);
+    }
+
+    #[test]
+    fn neutral_template_matches_balance_constants() {
+        let sk = neutral_template(NeutralCampType::Skirmisher);
+        assert!((sk.max_hp - SKIRMISHER_MAX_HP).abs() < EPSILON);
+        assert!((sk.attack_damage - SKIRMISHER_ATTACK_DAMAGE).abs() < EPSILON);
+        assert!((sk.attack_range - SKIRMISHER_ATTACK_RANGE).abs() < EPSILON);
+        assert_eq!(sk.kill_gold, SKIRMISHER_KILL_GOLD);
+        assert_eq!(sk.kill_xp, SKIRMISHER_KILL_XP);
+
+        let br = neutral_template(NeutralCampType::Bruiser);
+        assert!((br.max_hp - BRUISER_MAX_HP).abs() < EPSILON);
+        assert_eq!(br.kill_gold, BRUISER_KILL_GOLD);
+
+        let sp = neutral_template(NeutralCampType::Spitter);
+        assert!((sp.attack_range - SPITTER_ATTACK_RANGE).abs() < EPSILON);
+        assert_eq!(sp.kill_xp, SPITTER_KILL_XP);
     }
 
     #[test]
@@ -2616,6 +2571,127 @@ mod tests {
         assert!(player.state.max_mana > MAX_MANA);
         assert!((player.state.hp - player.state.max_hp).abs() < EPSILON);
         assert!((player.state.mana - player.state.max_mana).abs() < EPSILON);
+    }
+
+    #[test]
+    fn cast_drains_mana_respects_cooldown_and_blocks_empty_mana() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr_a: SocketAddr = "127.0.0.1:51001".parse().unwrap();
+        let addr_b: SocketAddr = "127.0.0.1:51002".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr_a, &mut next_player_id, now);
+        ensure_player_connected(&mut players, &layout, addr_b, &mut next_player_id, now);
+        handle_join_request(
+            players.get_mut(&addr_a).unwrap(),
+            Team::Green,
+            CharacterChoice::Ipfs,
+            &layout,
+        );
+        handle_join_request(
+            players.get_mut(&addr_b).unwrap(),
+            Team::Blue,
+            CharacterChoice::Wang,
+            &layout,
+        );
+
+        let b_id = players.get(&addr_b).unwrap().state.id;
+        let a_mana_before = players.get(&addr_a).unwrap().state.mana;
+
+        let mut projectiles = HashMap::new();
+        let mut minions = HashMap::new();
+        let mut structures = HashMap::new();
+        let mut neutrals = HashMap::new();
+        let mut next_projectile_id = 1_u64;
+        let game_state = GameState::Running;
+
+        handle_cast_request(
+            &mut players,
+            &mut projectiles,
+            &mut minions,
+            &mut structures,
+            &mut neutrals,
+            addr_a,
+            TargetId {
+                kind: TargetKind::Player,
+                id: b_id,
+            },
+            &mut next_projectile_id,
+            &game_state,
+            now,
+        );
+
+        assert_eq!(projectiles.len(), 1);
+        let mana_after_first = players.get(&addr_a).unwrap().state.mana;
+        assert!((mana_after_first - (a_mana_before - SPELL_MANA_COST)).abs() < EPSILON);
+
+        handle_cast_request(
+            &mut players,
+            &mut projectiles,
+            &mut minions,
+            &mut structures,
+            &mut neutrals,
+            addr_a,
+            TargetId {
+                kind: TargetKind::Player,
+                id: b_id,
+            },
+            &mut next_projectile_id,
+            &game_state,
+            now,
+        );
+        assert_eq!(
+            projectiles.len(),
+            1,
+            "second cast at same instant must be cooldown-blocked"
+        );
+
+        let later = now + SPELL_COOLDOWN + Duration::from_millis(1);
+        handle_cast_request(
+            &mut players,
+            &mut projectiles,
+            &mut minions,
+            &mut structures,
+            &mut neutrals,
+            addr_a,
+            TargetId {
+                kind: TargetKind::Player,
+                id: b_id,
+            },
+            &mut next_projectile_id,
+            &game_state,
+            later,
+        );
+        assert_eq!(
+            projectiles.len(),
+            2,
+            "cast after cooldown should spawn another projectile"
+        );
+
+        players.get_mut(&addr_a).unwrap().state.mana = 0.0;
+        let mut next_id = 99_u64;
+        handle_cast_request(
+            &mut players,
+            &mut projectiles,
+            &mut minions,
+            &mut structures,
+            &mut neutrals,
+            addr_a,
+            TargetId {
+                kind: TargetKind::Player,
+                id: b_id,
+            },
+            &mut next_id,
+            &game_state,
+            later + SPELL_COOLDOWN,
+        );
+        assert_eq!(
+            projectiles.len(),
+            2,
+            "zero mana must not create a projectile"
+        );
     }
 }
 
