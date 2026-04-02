@@ -11,6 +11,7 @@ Canonical version: `0.2.0`
 - Map layout with three lanes and simple jungle blocks.
 - Player progression with level-based XP thresholds, HP/mana scaling on level-up, and tracked skill points.
 - In-game local HUD display for level and XP progression.
+- **Skill 1 (melee)**: `Q` or the in-game skill button casts on the current TAB/middle-click target. Server validates horizontal range, mana, cooldown, and target type (enemy players, enemy minions, neutrals; not structures or allies). Damage and cooldown scale with melee rank; spend skill points with `1` when available. Failed local checks show messages in the debug console without sending a cast.
 
 ## Multiplayer Session Reliability
 

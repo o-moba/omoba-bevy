@@ -2,8 +2,9 @@ use bevy::ecs::query::Or;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::scene::SceneRoot;
-use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
+use crossbeam_channel::{unbounded, Receiver, Sender, TryRecvError};
 use serde::{Deserialize, Serialize};
+use shared::{PlayerAbilitySnapshot, SkillSlot};
 use std::{
     collections::{HashMap, HashSet},
     io,
@@ -12,14 +13,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::camera::{CameraState, MainCamera, locked_camera_offset};
+use crate::camera::{locked_camera_offset, CameraState, MainCamera};
 use crate::combat::{CombatStats, MAX_HP, MAX_MANA};
 use crate::debug_console::DebugConsole;
 use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
 use crate::team::TeamSelection;
 use crate::team::{CharacterChoice, Team};
 use crate::world::{
-    NormalizeModelScale, PlayerAssets, PlayerModelCatalog, model_assets_for_choice,
+    model_assets_for_choice, NormalizeModelScale, PlayerAssets, PlayerModelCatalog,
 };
 
 const DEFAULT_SERVER_ADDR: &str = "127.0.0.1:4000";
@@ -61,6 +62,7 @@ impl Plugin for NetworkingPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<NetworkCommand>()
             .init_resource::<NetworkState>()
+            .init_resource::<PendingAbilityFeedback>()
             .init_resource::<GameStateSnapshot>()
             .init_resource::<LocalSkill3Hud>()
             .init_resource::<QueuedServerSnapshot>()
@@ -68,7 +70,22 @@ impl Plugin for NetworkingPlugin {
                 UPDATE_INTERVAL_SECONDS,
                 TimerMode::Repeating,
             )))
+            .configure_sets(
+                Update,
+                (
+                    ClientNetSet::SnapshotApply.after(ClientNetSet::Outgoing),
+                    ClientNetSet::AfterSnapshot.after(ClientNetSet::SnapshotApply),
+                ),
+            )
             .add_systems(Startup, (setup_network_visual_assets, start_networking))
+            .add_systems(
+                Update,
+                (send_local_state, send_network_commands).in_set(ClientNetSet::Outgoing),
+            )
+            .add_systems(
+                Update,
+                apply_server_snapshot.in_set(ClientNetSet::SnapshotApply),
+            )
             .add_systems(
                 Update,
                 (
@@ -108,7 +125,8 @@ enum ClientPacket {
         z: f32,
         yaw: f32,
     },
-    Cast {
+    UseAbility {
+        ability: HeroAbility,
         target: TargetId,
     },
     CastSkill {
@@ -136,6 +154,21 @@ pub enum TargetKind {
 pub struct TargetId {
     pub kind: TargetKind,
     pub id: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HeroAbility {
+    MeleeStrike,
+    RangedShot,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectileVisual {
+    #[default]
+    TowerBolt,
+    RangedShot,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -171,6 +204,8 @@ struct PlayerState {
     skill3_cooldown_remaining_secs: f32,
     #[serde(default = "default_character_choice")]
     character: CharacterChoice,
+    #[serde(default)]
+    abilities: PlayerAbilitySnapshot,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -190,6 +225,8 @@ struct ProjectileState {
     x: f32,
     y: f32,
     z: f32,
+    #[serde(default)]
+    visual: ProjectileVisual,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Component)]
@@ -304,13 +341,25 @@ pub enum GameState {
     #[default]
     Lobby,
     Running,
-    Victory { winner: Team },
+    Victory {
+        winner: Team,
+    },
 }
 
 #[derive(Resource, Default, Clone)]
 pub struct GameStateSnapshot {
     pub state: GameState,
     pub rematch_in_secs: Option<u64>,
+}
+
+/// Latest server ability snapshot for the local hero (drives hotbar UI).
+#[derive(Resource, Clone, Debug)]
+pub struct LocalAbilityBar(pub PlayerAbilitySnapshot);
+
+impl Default for LocalAbilityBar {
+    fn default() -> Self {
+        Self(PlayerAbilitySnapshot::default())
+    }
 }
 
 #[derive(Resource)]
@@ -370,12 +419,18 @@ pub struct NetworkPlayerId(pub u64);
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkCharacterChoice(pub CharacterChoice);
 
-#[derive(Component, Clone, Copy, Debug, Default)]
+#[derive(Component, Clone, Copy, Debug)]
 pub struct PlayerProgression {
     pub level: u32,
     pub xp: u32,
     pub next_level_xp: u32,
     pub skill_points: u32,
+    pub ranged_shot_rank: u8,
+}
+
+#[derive(Resource, Default)]
+pub struct PendingAbilityFeedback {
+    pub message: Option<String>,
 }
 
 #[derive(Component)]
@@ -422,8 +477,11 @@ struct RemotePlayerInterpolation {
 #[derive(Resource)]
 struct NetworkVisualAssets {
     projectile_mesh: Handle<Mesh>,
+    ranged_shot_mesh: Handle<Mesh>,
     friendly_projectile_material: Handle<StandardMaterial>,
     hostile_projectile_material: Handle<StandardMaterial>,
+    friendly_ranged_shot_material: Handle<StandardMaterial>,
+    hostile_ranged_shot_material: Handle<StandardMaterial>,
     tower_mesh: Handle<Mesh>,
     base_tower_mesh: Handle<Mesh>,
     minion_mesh: Handle<Mesh>,
@@ -441,6 +499,7 @@ fn setup_network_visual_assets(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let projectile_mesh = meshes.add(Mesh::from(Sphere::new(PROJECTILE_RADIUS)));
+    let ranged_shot_mesh = meshes.add(Mesh::from(Cuboid::new(0.22, 0.22, 0.72)));
     let tower_mesh = meshes.add(Mesh::from(Cuboid::new(
         TOWER_SIZE,
         TOWER_HEIGHT,
@@ -459,6 +518,16 @@ fn setup_network_visual_assets(
     });
     let hostile_projectile_material = materials.add(StandardMaterial {
         base_color: Color::srgb(1.0, 0.36, 0.36),
+        unlit: true,
+        ..default()
+    });
+    let friendly_ranged_shot_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.15, 0.98, 0.62),
+        unlit: true,
+        ..default()
+    });
+    let hostile_ranged_shot_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.42, 0.08),
         unlit: true,
         ..default()
     });
@@ -491,8 +560,11 @@ fn setup_network_visual_assets(
 
     commands.insert_resource(NetworkVisualAssets {
         projectile_mesh,
+        ranged_shot_mesh,
         friendly_projectile_material,
         hostile_projectile_material,
+        friendly_ranged_shot_material,
+        hostile_ranged_shot_material,
         tower_mesh,
         base_tower_mesh,
         minion_mesh,
@@ -650,10 +722,16 @@ fn send_network_commands(
 
     for command in command_events.read() {
         match command {
-            NetworkCommand::Cast { target } => {
+            NetworkCommand::UseAbility { ability, target } => {
+                let _ = channels.outgoing.send(ClientPacket::UseAbility {
+                    ability: *ability,
+                    target: *target,
+                });
+            }
+            NetworkCommand::UpgradeAbility { ability } => {
                 let _ = channels
                     .outgoing
-                    .send(ClientPacket::Cast { target: *target });
+                    .send(ClientPacket::UpgradeAbility { ability: *ability });
             }
             NetworkCommand::CastSkill { skill_slot } => {
                 let _ = channels.outgoing.send(ClientPacket::CastSkill {
@@ -763,6 +841,10 @@ fn apply_server_snapshot(
     game_state_snapshot.state = game_state;
     game_state_snapshot.rematch_in_secs = rematch_in_secs;
 
+    if let Some(local) = players.iter().find(|player| player.id == your_id) {
+        commands.insert_resource(LocalAbilityBar(local.abilities.clone()));
+    }
+
     let local_player_state = players.iter().find(|player| player.id == your_id);
     let local_players = local_player_query
         .iter()
@@ -770,8 +852,7 @@ fn apply_server_snapshot(
         .collect::<Vec<_>>();
     // IMPORTANT: we must tolerate temporary duplication of `Player` entities (e.g. during loading /
     // restart races). Many gameplay systems use `Query::single()` and will break if we allow >1.
-    let chosen_local =
-        choose_authoritative_local_player(&local_players, your_id);
+    let chosen_local = choose_authoritative_local_player(&local_players, your_id);
 
     if let Some(local_entity) = chosen_local {
         // Keep exactly one local `Player` alive to avoid `single()` query failures.
@@ -1009,15 +1090,28 @@ fn apply_server_snapshot(
         let is_friendly = network_state
             .local_team
             .is_some_and(|team| team == projectile.owner_team);
-        let material = if is_friendly {
-            visuals.friendly_projectile_material.clone()
-        } else {
-            visuals.hostile_projectile_material.clone()
+        let (proj_mesh, material) = match projectile.visual {
+            ProjectileVisual::RangedShot => (
+                visuals.ranged_shot_mesh.clone(),
+                if is_friendly {
+                    visuals.friendly_ranged_shot_material.clone()
+                } else {
+                    visuals.hostile_ranged_shot_material.clone()
+                },
+            ),
+            ProjectileVisual::TowerBolt => (
+                visuals.projectile_mesh.clone(),
+                if is_friendly {
+                    visuals.friendly_projectile_material.clone()
+                } else {
+                    visuals.hostile_projectile_material.clone()
+                },
+            ),
         };
 
         let entity = commands
             .spawn((
-                Mesh3d(visuals.projectile_mesh.clone()),
+                Mesh3d(proj_mesh),
                 MeshMaterial3d(material),
                 Transform::from_xyz(projectile.x, projectile.y, projectile.z),
                 Visibility::default(),
@@ -1296,6 +1390,7 @@ fn player_state_to_progression(player: &PlayerState) -> PlayerProgression {
         xp: player.xp,
         next_level_xp: player.next_level_xp,
         skill_points: player.skill_points,
+        ranged_shot_rank: player.ranged_shot_rank.max(1),
     }
 }
 
@@ -1346,6 +1441,10 @@ fn default_next_level_xp() -> u32 {
     DEFAULT_NEXT_LEVEL_XP
 }
 
+fn default_ranged_shot_rank() -> u8 {
+    1
+}
+
 fn default_max_hp() -> f32 {
     MAX_HP
 }
@@ -1368,7 +1467,29 @@ fn default_minion_brain_state() -> MinionBrainState {
 
 #[cfg(test)]
 mod tests {
-    use super::choose_authoritative_local_player;
+    use super::{HeroAbility, NetworkCommand, TargetId, TargetKind, choose_authoritative_local_player};
+
+    #[test]
+    fn hero_ability_ranged_shot_deserializes_from_snake_case_json() {
+        let parsed: HeroAbility = serde_json::from_str("\"ranged_shot\"").unwrap();
+        assert_eq!(parsed, HeroAbility::RangedShot);
+    }
+
+    #[test]
+    fn use_ability_ranged_shot_command_holds_target() {
+        let cmd = NetworkCommand::UseAbility {
+            ability: HeroAbility::RangedShot,
+            target: TargetId {
+                kind: TargetKind::Minion,
+                id: 42,
+            },
+        };
+        let NetworkCommand::UseAbility { ability, target } = cmd else {
+            panic!("expected UseAbility");
+        };
+        assert_eq!(ability, HeroAbility::RangedShot);
+        assert_eq!(target.id, 42);
+    }
 
     #[test]
     fn choose_authoritative_local_player_prefers_matching_network_id() {
