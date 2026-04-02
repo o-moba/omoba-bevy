@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use bevy::scene::SceneRoot;
 use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
 use serde::{Deserialize, Serialize};
+use shared::{PlayerAbilitySnapshot, SkillSlot};
 use std::{
     collections::{HashMap, HashSet},
     io,
@@ -44,6 +45,7 @@ impl Plugin for NetworkingPlugin {
         app.add_message::<NetworkCommand>()
             .init_resource::<NetworkState>()
             .init_resource::<GameStateSnapshot>()
+            .init_resource::<LocalAbilityBar>()
             .insert_resource(LocalStateSendTimer(Timer::from_seconds(
                 UPDATE_INTERVAL_SECONDS,
                 TimerMode::Repeating,
@@ -70,7 +72,13 @@ impl Plugin for NetworkingPlugin {
 
 #[derive(Message, Clone, Copy, Debug)]
 pub enum NetworkCommand {
-    Cast { target: TargetId },
+    Cast {
+        slot: SkillSlot,
+        target: Option<TargetId>,
+    },
+    UpgradeAbility {
+        slot: SkillSlot,
+    },
     Join { team: Team, character: CharacterChoice },
     #[allow(dead_code)]
     RequestRematch,
@@ -86,7 +94,12 @@ enum ClientPacket {
         yaw: f32,
     },
     Cast {
-        target: TargetId,
+        slot: SkillSlot,
+        #[serde(default)]
+        target: Option<TargetId>,
+    },
+    UpgradeAbility {
+        slot: SkillSlot,
     },
     Join {
         team: Team,
@@ -141,6 +154,8 @@ struct PlayerState {
     skill_points: u32,
     #[serde(default = "default_character_choice")]
     character: CharacterChoice,
+    #[serde(default)]
+    abilities: PlayerAbilitySnapshot,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -279,6 +294,16 @@ pub enum GameState {
 pub struct GameStateSnapshot {
     pub state: GameState,
     pub rematch_in_secs: Option<u64>,
+}
+
+/// Latest server ability snapshot for the local hero (drives hotbar UI).
+#[derive(Resource, Clone, Debug)]
+pub struct LocalAbilityBar(pub PlayerAbilitySnapshot);
+
+impl Default for LocalAbilityBar {
+    fn default() -> Self {
+        Self(PlayerAbilitySnapshot::default())
+    }
 }
 
 #[derive(Resource)]
@@ -590,10 +615,16 @@ fn send_network_commands(
 
     for command in command_events.read() {
         match command {
-            NetworkCommand::Cast { target } => {
+            NetworkCommand::Cast { slot, target } => {
+                let _ = channels.outgoing.send(ClientPacket::Cast {
+                    slot: *slot,
+                    target: *target,
+                });
+            }
+            NetworkCommand::UpgradeAbility { slot } => {
                 let _ = channels
                     .outgoing
-                    .send(ClientPacket::Cast { target: *target });
+                    .send(ClientPacket::UpgradeAbility { slot: *slot });
             }
             NetworkCommand::Join { team, character } => {
                 let _ = channels.outgoing.send(ClientPacket::Join {
@@ -701,6 +732,10 @@ fn apply_server_snapshot(
     network_state.local_id = Some(your_id);
     game_state_snapshot.state = game_state;
     game_state_snapshot.rematch_in_secs = rematch_in_secs;
+
+    if let Some(local) = players.iter().find(|player| player.id == your_id) {
+        commands.insert_resource(LocalAbilityBar(local.abilities.clone()));
+    }
 
     let local_player_state = players.iter().find(|player| player.id == your_id);
     let local_players = local_player_query
