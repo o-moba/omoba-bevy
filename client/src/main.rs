@@ -39,12 +39,12 @@ fn main() {
             MapsPlugin,
             ClientPersistencePlugin,
             SetupPlugin,
+            DebugConsolePlugin,
             NetworkingPlugin,
             MinimapPlugin,
             CombatPlugin,
             TeamSelectPlugin,
             GameStateUiPlugin,
-            DebugConsolePlugin,
             PauseMenuPlugin,
         ))
         .run();
