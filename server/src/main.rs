@@ -1,9 +1,16 @@
 #![allow(clippy::items_after_test_module)]
 
 mod balance;
+mod neutrals;
+mod progression;
+mod session;
+mod world;
 
 use balance::*;
+use neutrals::*;
+use progression::*;
 use serde::{Deserialize, Serialize};
+use session::*;
 use std::{
     collections::{HashMap, HashSet},
     io,
@@ -11,6 +18,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use world::*;
 
 const DEFAULT_BIND_ADDR: &str = "0.0.0.0:4000";
 const SNAPSHOT_INTERVAL: Duration = Duration::from_millis(50);
@@ -101,47 +109,6 @@ struct PlayerState {
     skill_points: u32,
     #[serde(default = "default_character_choice")]
     character: CharacterChoice,
-}
-
-fn xp_threshold_for_level(level: u32) -> u32 {
-    if level >= MAX_LEVEL {
-        0
-    } else {
-        let index = level.saturating_sub(STARTING_LEVEL) as usize;
-        LEVEL_XP_THRESHOLDS[index]
-    }
-}
-
-fn apply_level_up(state: &mut PlayerState) {
-    state.level = state.level.saturating_add(1);
-    state.skill_points = state.skill_points.saturating_add(1);
-    state.max_hp += LEVEL_UP_HP_BONUS;
-    state.max_mana += LEVEL_UP_MANA_BONUS;
-    state.hp = (state.hp + LEVEL_UP_HP_BONUS).clamp(0.0, state.max_hp);
-    state.mana = (state.mana + LEVEL_UP_MANA_BONUS).clamp(0.0, state.max_mana);
-    state.next_level_xp = xp_threshold_for_level(state.level);
-}
-
-fn grant_player_xp(state: &mut PlayerState, amount: u32) {
-    if amount == 0 {
-        return;
-    }
-    if state.level >= MAX_LEVEL {
-        state.xp = 0;
-        state.next_level_xp = 0;
-        return;
-    }
-
-    state.xp = state.xp.saturating_add(amount);
-    while state.level < MAX_LEVEL && state.next_level_xp > 0 && state.xp >= state.next_level_xp {
-        state.xp -= state.next_level_xp;
-        apply_level_up(state);
-    }
-
-    if state.level >= MAX_LEVEL {
-        state.xp = 0;
-        state.next_level_xp = 0;
-    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -366,87 +333,6 @@ struct NeutralTemplate {
     attack_range: f32,
     kill_gold: u32,
     kill_xp: u32,
-}
-
-fn neutral_template(camp_type: NeutralCampType) -> NeutralTemplate {
-    match camp_type {
-        NeutralCampType::Skirmisher => NeutralTemplate {
-            max_hp: SKIRMISHER_MAX_HP,
-            attack_damage: SKIRMISHER_ATTACK_DAMAGE,
-            attack_range: SKIRMISHER_ATTACK_RANGE,
-            kill_gold: SKIRMISHER_KILL_GOLD,
-            kill_xp: SKIRMISHER_KILL_XP,
-        },
-        NeutralCampType::Bruiser => NeutralTemplate {
-            max_hp: BRUISER_MAX_HP,
-            attack_damage: BRUISER_ATTACK_DAMAGE,
-            attack_range: BRUISER_ATTACK_RANGE,
-            kill_gold: BRUISER_KILL_GOLD,
-            kill_xp: BRUISER_KILL_XP,
-        },
-        NeutralCampType::Spitter => NeutralTemplate {
-            max_hp: SPITTER_MAX_HP,
-            attack_damage: SPITTER_ATTACK_DAMAGE,
-            attack_range: SPITTER_ATTACK_RANGE,
-            kill_gold: SPITTER_KILL_GOLD,
-            kill_xp: SPITTER_KILL_XP,
-        },
-    }
-}
-
-fn jungle_camp_blueprints() -> Vec<(Vec3f, NeutralCampType)> {
-    let inner_side = TARGET_BASE_DISTANCE / 2.0_f32.sqrt();
-    let half_inner_side = inner_side * 0.5;
-    let base_padding = BASE_PAD_SIZE * 0.5 + BASE_EDGE_MARGIN;
-    let half_map_size = half_inner_side + base_padding;
-    let map_size = half_map_size * 2.0;
-    let jungle_outer = map_size * JUNGLE_MAP_OUTER_FRAC;
-    let jungle_inner = map_size * JUNGLE_MAP_INNER_FRAC;
-    let y = NEUTRAL_SPAWN_HEIGHT;
-    vec![
-        (
-            Vec3f::new(-jungle_outer, y, jungle_inner),
-            NeutralCampType::Skirmisher,
-        ),
-        (
-            Vec3f::new(jungle_outer, y, -jungle_inner),
-            NeutralCampType::Bruiser,
-        ),
-        (
-            Vec3f::new(-jungle_inner, y, -jungle_outer),
-            NeutralCampType::Spitter,
-        ),
-    ]
-}
-
-fn build_neutral_camps(next_id: &mut u64) -> HashMap<u64, Neutral> {
-    let mut out = HashMap::new();
-    for (anchor, camp_type) in jungle_camp_blueprints() {
-        let template = neutral_template(camp_type);
-        let id = *next_id;
-        *next_id += 1;
-        out.insert(
-            id,
-            Neutral {
-                state: NeutralState {
-                    id,
-                    camp_type,
-                    x: anchor.x,
-                    y: anchor.y,
-                    z: anchor.z,
-                    yaw: 0.0,
-                    hp: template.max_hp,
-                    max_hp: template.max_hp,
-                    ai_state: NeutralAiState::Idle,
-                },
-                anchor,
-                target_player_id: None,
-                last_attack_at: None,
-                dead_until: None,
-            },
-        );
-    }
-    out
 }
 
 struct Neutral {
@@ -747,88 +633,6 @@ fn main() -> io::Result<()> {
 
         thread::sleep(SIMULATION_STEP_SLEEP);
     }
-}
-
-fn ensure_player_connected(
-    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
-    map_layout: &MapLayoutState,
-    addr: SocketAddr,
-    next_player_id: &mut u64,
-    now: Instant,
-) {
-    players.entry(addr).or_insert_with(|| {
-        let player_id = *next_player_id;
-        *next_player_id += 1;
-        println!("Player {player_id} connected from {addr}");
-        let spawn = spawn_position_for_team(map_layout, Team::Green);
-
-        ConnectedPlayer {
-            state: PlayerState {
-                id: player_id,
-                x: spawn.x,
-                y: 0.5,
-                z: spawn.z,
-                yaw: 0.0,
-                team: Team::Green,
-                hp: MAX_HP,
-                max_hp: MAX_HP,
-                mana: MAX_MANA,
-                max_mana: MAX_MANA,
-                gold: 0,
-                xp: 0,
-                level: STARTING_LEVEL,
-                next_level_xp: xp_threshold_for_level(STARTING_LEVEL),
-                skill_points: 0,
-                character: default_character_choice(),
-            },
-            last_seen: now,
-            last_cast_at: None,
-            respawn_at: None,
-        }
-    });
-}
-
-fn regenerate_mana(players: &mut HashMap<SocketAddr, ConnectedPlayer>, dt: f32) {
-    for player in players.values_mut() {
-        if player.state.hp <= 0.0 {
-            continue;
-        }
-        if player.state.max_mana <= 0.0 {
-            player.state.max_mana = MAX_MANA;
-        }
-        player.state.mana =
-            (player.state.mana + MANA_REGEN_PER_SECOND * dt).clamp(0.0, player.state.max_mana);
-    }
-}
-
-fn handle_join_request(
-    player: &mut ConnectedPlayer,
-    team: Team,
-    character: CharacterChoice,
-    map_layout: &MapLayoutState,
-) {
-    println!(
-        "Player {} joined team {:?} as {:?}",
-        player.state.id, team, character
-    );
-    player.state.team = team;
-    player.state.character = character;
-    let spawn = spawn_position_for_team(map_layout, team);
-    player.state.x = spawn.x;
-    player.state.y = 0.5;
-    player.state.z = spawn.z;
-    player.state.yaw = 0.0;
-    player.state.hp = MAX_HP;
-    player.state.max_hp = MAX_HP;
-    player.state.mana = MAX_MANA;
-    player.state.max_mana = MAX_MANA;
-    player.state.gold = 0;
-    player.state.xp = 0;
-    player.state.level = STARTING_LEVEL;
-    player.state.next_level_xp = xp_threshold_for_level(STARTING_LEVEL);
-    player.state.skill_points = 0;
-    player.last_cast_at = None;
-    player.respawn_at = None;
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1436,119 +1240,6 @@ fn swept_sphere_intersects_target(start: Vec3f, end: Vec3f, target: Vec3f, radiu
     closest.distance_squared(target) <= radius * radius
 }
 
-fn build_structures(layout: &MapLayoutState) -> HashMap<u64, Structure> {
-    let mut structures = HashMap::new();
-    let mut next_id: u64 = 1;
-
-    for lane in [Lane::Top, Lane::Mid, Lane::Bot] {
-        let lane_points = lane_control_points(layout, lane);
-        let green_tower = sample_polyline_position(&lane_points, 0.30);
-        let blue_tower = sample_polyline_position(&lane_points, 0.70);
-        add_structure(
-            &mut structures,
-            &mut next_id,
-            StructureKind::Tower,
-            StructureRole::LaneTower { lane },
-            Team::Green,
-            Vec3f::new(green_tower.x, 3.0, green_tower.z),
-        );
-        add_structure(
-            &mut structures,
-            &mut next_id,
-            StructureKind::Tower,
-            StructureRole::LaneTower { lane },
-            Team::Blue,
-            Vec3f::new(blue_tower.x, 3.0, blue_tower.z),
-        );
-    }
-
-    let home_nexus = Vec3f::new(layout.home.x, 4.0, layout.home.z);
-    let away_nexus = Vec3f::new(layout.away.x, 4.0, layout.away.z);
-    add_structure(
-        &mut structures,
-        &mut next_id,
-        StructureKind::BaseTower,
-        StructureRole::BaseTower,
-        Team::Green,
-        home_nexus,
-    );
-    add_structure(
-        &mut structures,
-        &mut next_id,
-        StructureKind::BaseTower,
-        StructureRole::BaseTower,
-        Team::Blue,
-        away_nexus,
-    );
-
-    structures
-}
-
-fn add_structure(
-    structures: &mut HashMap<u64, Structure>,
-    next_id: &mut u64,
-    kind: StructureKind,
-    role: StructureRole,
-    team: Team,
-    position: Vec3f,
-) {
-    let (max_hp, attack_range, attack_damage, attack_cooldown) = match kind {
-        StructureKind::Tower => (TOWER_MAX_HP, TOWER_RANGE, TOWER_DAMAGE, TOWER_COOLDOWN),
-        StructureKind::BaseTower => (
-            BASE_TOWER_MAX_HP,
-            BASE_TOWER_RANGE,
-            BASE_TOWER_DAMAGE,
-            BASE_TOWER_COOLDOWN,
-        ),
-    };
-    let id = *next_id;
-    *next_id += 1;
-    structures.insert(
-        id,
-        Structure {
-            state: StructureState {
-                id,
-                kind,
-                team,
-                x: position.x,
-                y: position.y,
-                z: position.z,
-                hp: max_hp,
-                max_hp,
-            },
-            role,
-            last_attack_at: None,
-            attack_range,
-            attack_damage,
-            attack_cooldown,
-        },
-    );
-}
-
-fn build_map_layout() -> MapLayoutState {
-    let inner_side = TARGET_BASE_DISTANCE / 2.0_f32.sqrt();
-    let half_inner_side = inner_side * 0.5;
-    let base_padding = BASE_PAD_SIZE * 0.5 + BASE_EDGE_MARGIN;
-    let half_map_size = half_inner_side + base_padding;
-    let home = Vec3f::new(-half_inner_side, 0.0, -half_inner_side);
-    let away = Vec3f::new(half_inner_side, 0.0, half_inner_side);
-
-    let lane_edge_offset = LANE_EDGE_PADDING + LANE_WIDTH * 0.5;
-    let left_x = -half_map_size + lane_edge_offset;
-    let right_x = half_map_size - lane_edge_offset;
-    let top_z = half_map_size - lane_edge_offset;
-    let bottom_z = -half_map_size + lane_edge_offset;
-
-    MapLayoutState {
-        home,
-        away,
-        left_x,
-        right_x,
-        top_z,
-        bottom_z,
-    }
-}
-
 struct MapLayoutState {
     home: Vec3f,
     away: Vec3f,
@@ -1556,192 +1247,6 @@ struct MapLayoutState {
     right_x: f32,
     top_z: f32,
     bottom_z: f32,
-}
-
-fn spawn_position_for_team(map_layout: &MapLayoutState, team: Team) -> Vec3f {
-    let base = match team {
-        Team::Green => map_layout.home,
-        Team::Blue => map_layout.away,
-    };
-    let dir = Vec3f::new(-base.x, 0.0, -base.z).normalize_or_zero();
-    Vec3f::new(
-        base.x + dir.x * PLAYER_SPAWN_OFFSET,
-        base.y,
-        base.z + dir.z * PLAYER_SPAWN_OFFSET,
-    )
-}
-
-fn spawn_position_for_team_from_base(
-    structures: &HashMap<u64, Structure>,
-    map_layout: &MapLayoutState,
-    team: Team,
-) -> Vec3f {
-    let Some(base_tower) = structures.values().find(|structure| {
-        structure.state.team == team
-            && structure.state.kind == StructureKind::BaseTower
-            && structure.state.hp > 0.0
-    }) else {
-        return spawn_position_for_team(map_layout, team);
-    };
-
-    let base = Vec3f::new(base_tower.state.x, 0.0, base_tower.state.z);
-    let dir = Vec3f::new(-base.x, 0.0, -base.z).normalize_or_zero();
-    Vec3f::new(
-        base.x + dir.x * PLAYER_SPAWN_OFFSET,
-        0.0,
-        base.z + dir.z * PLAYER_SPAWN_OFFSET,
-    )
-}
-
-fn lane_control_points(layout: &MapLayoutState, lane: Lane) -> Vec<Vec3f> {
-    match lane {
-        Lane::Mid => vec![layout.home, layout.away],
-        Lane::Top => vec![
-            layout.home,
-            Vec3f::new(layout.left_x, 0.0, layout.home.z),
-            Vec3f::new(layout.left_x, 0.0, layout.top_z),
-            Vec3f::new(layout.right_x, 0.0, layout.top_z),
-            Vec3f::new(layout.away.x, 0.0, layout.top_z),
-            layout.away,
-        ],
-        Lane::Bot => vec![
-            layout.home,
-            Vec3f::new(layout.home.x, 0.0, layout.bottom_z),
-            Vec3f::new(layout.left_x, 0.0, layout.bottom_z),
-            Vec3f::new(layout.right_x, 0.0, layout.bottom_z),
-            Vec3f::new(layout.right_x, 0.0, layout.away.z),
-            layout.away,
-        ],
-    }
-}
-
-fn sample_polyline_position(points: &[Vec3f], t: f32) -> Vec3f {
-    if points.len() <= 1 {
-        return points.first().copied().unwrap_or(Vec3f::new(0.0, 0.0, 0.0));
-    }
-
-    let segment_lengths = points
-        .windows(2)
-        .map(|pair| pair[0].distance(pair[1]))
-        .collect::<Vec<_>>();
-    let total_length: f32 = segment_lengths.iter().sum();
-    if total_length <= 0.0001 {
-        return points[0];
-    }
-
-    let mut remaining = total_length * t.clamp(0.0, 1.0);
-    for (index, length) in segment_lengths.into_iter().enumerate() {
-        if remaining <= length {
-            let local_t = if length <= 0.0001 {
-                0.0
-            } else {
-                remaining / length
-            };
-            return points[index].lerp(points[index + 1], local_t);
-        }
-        remaining -= length;
-    }
-
-    points.last().copied().unwrap_or(points[0])
-}
-
-fn build_minion_path(layout: &MapLayoutState, lane: Lane, team: Team) -> Vec<Vec3f> {
-    let mut points = lane_control_points(layout, lane);
-    if team == Team::Blue {
-        points.reverse();
-    }
-    for point in &mut points {
-        point.y = MINION_SPAWN_HEIGHT;
-    }
-    points
-}
-
-fn spawn_minion_waves_if_due(
-    map_layout: &MapLayoutState,
-    minions: &mut HashMap<u64, Minion>,
-    next_minion_id: &mut u64,
-    game_state: &GameState,
-    now: Instant,
-    last_wave_spawn_at: &mut Instant,
-) {
-    if !matches!(game_state, GameState::Running) {
-        return;
-    }
-    if now.duration_since(*last_wave_spawn_at) < MINION_WAVE_INTERVAL {
-        return;
-    }
-    *last_wave_spawn_at = now;
-
-    for lane in [Lane::Top, Lane::Mid, Lane::Bot] {
-        spawn_minion_wave_for_team_lane(map_layout, minions, next_minion_id, Team::Green, lane);
-        spawn_minion_wave_for_team_lane(map_layout, minions, next_minion_id, Team::Blue, lane);
-    }
-}
-
-fn spawn_minion_wave_for_team_lane(
-    map_layout: &MapLayoutState,
-    minions: &mut HashMap<u64, Minion>,
-    next_minion_id: &mut u64,
-    team: Team,
-    lane: Lane,
-) {
-    let path = build_minion_path(map_layout, lane, team);
-    if path.is_empty() {
-        return;
-    }
-    let spawn = path[0];
-
-    for wave_index in 0..MINIONS_PER_WAVE {
-        let minion_id = *next_minion_id;
-        *next_minion_id += 1;
-
-        let offset = wave_index as f32 * (MINION_RADIUS * 2.0 + 0.4);
-        let mut spawn_x = spawn.x;
-        let mut spawn_z = spawn.z;
-        let mut yaw = 0.0;
-        if let Some(next_point) = path.get(1) {
-            let dir_x = next_point.x - spawn.x;
-            let dir_z = next_point.z - spawn.z;
-            let len_sq = dir_x * dir_x + dir_z * dir_z;
-            if len_sq > 0.0001 {
-                let inv_len = len_sq.sqrt().recip();
-                spawn_x -= dir_x * inv_len * offset;
-                spawn_z -= dir_z * inv_len * offset;
-                yaw = dir_x.atan2(dir_z);
-            }
-        }
-
-        minions.insert(
-            minion_id,
-            Minion {
-                state: MinionState {
-                    id: minion_id,
-                    team,
-                    lane,
-                    x: spawn_x,
-                    y: MINION_SPAWN_HEIGHT,
-                    z: spawn_z,
-                    yaw,
-                    hp: MINION_MAX_HP,
-                    max_hp: MINION_MAX_HP,
-                    state: MinionBrainState::Marching,
-                    target_kind: None,
-                    target_id: None,
-                },
-                path: path.clone(),
-                next_waypoint: 1,
-                last_attack_at: None,
-                aggro_target: None,
-            },
-        );
-    }
-}
-
-fn structure_radius(kind: StructureKind) -> f32 {
-    match kind {
-        StructureKind::Tower => TOWER_SIZE * 0.5,
-        StructureKind::BaseTower => BASE_TOWER_SIZE * 0.5,
-    }
 }
 
 fn apply_minion_damage(
@@ -2693,73 +2198,4 @@ mod tests {
             "zero mana must not create a projectile"
         );
     }
-}
-
-fn handle_respawns(
-    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
-    structures: &HashMap<u64, Structure>,
-    map_layout: &MapLayoutState,
-    game_state: &GameState,
-    now: Instant,
-) {
-    if !matches!(game_state, GameState::Running) {
-        return;
-    }
-    for player in players.values_mut() {
-        let Some(respawn_at) = player.respawn_at else {
-            continue;
-        };
-        if now < respawn_at {
-            continue;
-        }
-        let spawn = spawn_position_for_team_from_base(structures, map_layout, player.state.team);
-        player.state.x = spawn.x;
-        player.state.y = 0.5;
-        player.state.z = spawn.z;
-        player.state.yaw = 0.0;
-        player.state.hp = player.state.max_hp;
-        player.state.mana = player.state.max_mana;
-        player.respawn_at = None;
-        player.last_cast_at = None;
-    }
-}
-
-fn reset_match(
-    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
-    structures: &mut HashMap<u64, Structure>,
-    minions: &mut HashMap<u64, Minion>,
-    projectiles: &mut HashMap<u64, Projectile>,
-    map_layout: &MapLayoutState,
-    last_wave_spawn_at: &mut Instant,
-    game_state: &mut GameState,
-) {
-    println!("Resetting match for rematch");
-    // Reset structures HP
-    for structure in structures.values_mut() {
-        let max = structure.state.max_hp;
-        structure.state.hp = max;
-        structure.last_attack_at = None;
-    }
-    // Clear minions and projectiles
-    minions.clear();
-    projectiles.clear();
-    // Reset wave timer so first wave isn't immediate
-    *last_wave_spawn_at = Instant::now();
-    // Reset all players to spawn
-    for player in players.values_mut() {
-        let spawn = spawn_position_for_team(map_layout, player.state.team);
-        player.state.x = spawn.x;
-        player.state.y = 0.5;
-        player.state.z = spawn.z;
-        player.state.yaw = 0.0;
-        player.state.hp = MAX_HP;
-        player.state.max_hp = MAX_HP;
-        player.state.mana = MAX_MANA;
-        player.state.max_mana = MAX_MANA;
-        player.state.gold = 0;
-        player.state.xp = 0;
-        player.last_cast_at = None;
-        player.respawn_at = None;
-    }
-    *game_state = GameState::Running;
 }
