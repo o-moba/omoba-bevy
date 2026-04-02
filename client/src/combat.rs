@@ -12,8 +12,8 @@ use bevy::{
 use crate::camera::MainCamera;
 use crate::debug_console::DebugConsole;
 use crate::net::{
-    GameState, GameStateSnapshot, NetworkCommand, NetworkMinion, NetworkMinionId,
-    NetworkNeutral, NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId,
+    GameState, GameStateSnapshot, NetworkCommand, NetworkMinion, NetworkMinionId, NetworkNeutral,
+    NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId, PlayerProgression,
     RemotePlayer, StructureKind, TargetId, TargetKind,
 };
 use crate::player::Player;
@@ -49,6 +49,12 @@ const SKILL_BUTTON_COLOR: Color = Color::srgba(0.12, 0.12, 0.12, 0.75);
 const SKILL_BUTTON_HOVER_COLOR: Color = Color::srgba(0.18, 0.18, 0.18, 0.85);
 const SKILL_BUTTON_PRESS_COLOR: Color = Color::srgba(0.28, 0.28, 0.28, 0.95);
 
+/// HUD copy only — keep in sync with `MANA_RESTORE_*` in `server/src/main.rs`.
+const MANA_RESTORE_BASE: f32 = 22.0;
+const MANA_RESTORE_PER_RANK: f32 = 7.0;
+const MANA_RESTORE_MAX_RANK: u8 = 5;
+const MANA_RESTORE_COOLDOWN_SECS: u64 = 12;
+
 pub struct CombatPlugin;
 
 impl Plugin for CombatPlugin {
@@ -62,7 +68,10 @@ impl Plugin for CombatPlugin {
                     select_target_system,
                     clear_invalid_target_system,
                     cast_spell_system,
+                    cast_mana_restore_system,
                     skill_button_system,
+                    mana_restore_button_system,
+                    mana_restore_tooltip_system,
                     update_target_marker_system,
                 )
                     .chain(),
@@ -131,6 +140,12 @@ struct TargetMarker;
 
 #[derive(Component)]
 struct SkillButton;
+
+#[derive(Component)]
+struct ManaRestoreSkillButton;
+
+#[derive(Component)]
+struct ManaRestoreSkillTooltip;
 
 #[derive(Component)]
 struct CombatBarRoot;
@@ -264,6 +279,70 @@ fn setup_combat_ui(mut commands: Commands) {
         SkillButton,
         Name::new("SkillButton"),
     ));
+
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(SKILL_BUTTON_MARGIN + SKILL_BUTTON_SIZE + SKILL_BUTTON_MARGIN),
+                bottom: Val::Px(SKILL_BUTTON_MARGIN),
+                width: Val::Px(SKILL_BUTTON_SIZE + 24.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(4.0),
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            Name::new("ManaRestoreSkillRoot"),
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Text::new(mana_restore_tooltip_text(1)),
+                TextFont {
+                    font_size: 12.0,
+                    ..default()
+                },
+                TextColor(Color::srgba(0.9, 0.95, 1.0, 0.92)),
+                ManaRestoreSkillTooltip,
+            ));
+            parent
+                .spawn((
+                    Button,
+                    Node {
+                        width: Val::Px(SKILL_BUTTON_SIZE),
+                        height: Val::Px(SKILL_BUTTON_SIZE),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    BackgroundColor(SKILL_BUTTON_COLOR),
+                    ManaRestoreSkillButton,
+                    Name::new("ManaRestoreSkillButton"),
+                ))
+                .with_children(|btn| {
+                    btn.spawn((
+                        Text::new("F"),
+                        TextFont {
+                            font_size: 24.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
+        });
+}
+
+fn mana_restore_amount_for_rank(rank: u8) -> f32 {
+    let rank = rank.clamp(1, MANA_RESTORE_MAX_RANK);
+    MANA_RESTORE_BASE + MANA_RESTORE_PER_RANK * (f32::from(rank) - 1.0)
+}
+
+fn mana_restore_tooltip_text(rank: u8) -> String {
+    let rank = rank.clamp(1, MANA_RESTORE_MAX_RANK);
+    let amount = mana_restore_amount_for_rank(rank);
+    format!(
+        "Skill 4: +{:.0} mana (rank {}/{}) · {}s CD · no cast at full",
+        amount, rank, MANA_RESTORE_MAX_RANK, MANA_RESTORE_COOLDOWN_SECS
+    )
 }
 
 fn select_target_system(
@@ -459,6 +538,35 @@ fn cast_spell_system(
     }
 }
 
+fn cast_mana_restore_system(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    game_state: Option<Res<GameStateSnapshot>>,
+    local_stats_query: Query<&CombatStats, With<Player>>,
+    mut command_writer: MessageWriter<NetworkCommand>,
+    mut console: ResMut<DebugConsole>,
+) {
+    if let Some(game_state) = game_state.as_ref() {
+        if !matches!(game_state.state, GameState::Running) {
+            return;
+        }
+    }
+    if !keyboard_input.just_pressed(KeyCode::KeyF) {
+        return;
+    }
+
+    let Ok(local_stats) = local_stats_query.single() else {
+        return;
+    };
+
+    command_writer.write(NetworkCommand::ManaRestore);
+    let message = format!(
+        "Mana restore requested (mana {:.0}/{:.0})",
+        local_stats.mana, local_stats.max_mana
+    );
+    console.push_line(message.clone());
+    info!("{message}");
+}
+
 fn skill_button_system(
     mut interactions: Query<
         (&Interaction, &mut BackgroundColor),
@@ -544,6 +652,60 @@ fn skill_button_system(
     }
 }
 
+fn mana_restore_button_system(
+    mut interactions: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<ManaRestoreSkillButton>),
+    >,
+    game_state: Option<Res<GameStateSnapshot>>,
+    local_stats_query: Query<&CombatStats, With<Player>>,
+    mut command_writer: MessageWriter<NetworkCommand>,
+    mut console: ResMut<DebugConsole>,
+) {
+    if let Some(game_state) = game_state.as_ref() {
+        if !matches!(game_state.state, GameState::Running) {
+            return;
+        }
+    }
+    for (interaction, mut color) in interactions.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *color = SKILL_BUTTON_PRESS_COLOR.into();
+                let Ok(local_stats) = local_stats_query.single() else {
+                    continue;
+                };
+                command_writer.write(NetworkCommand::ManaRestore);
+                let message = format!(
+                    "Mana restore requested (mana {:.0}/{:.0})",
+                    local_stats.mana, local_stats.max_mana
+                );
+                console.push_line(message.clone());
+                info!("{message}");
+            }
+            Interaction::Hovered => {
+                *color = SKILL_BUTTON_HOVER_COLOR.into();
+            }
+            Interaction::None => {
+                *color = SKILL_BUTTON_COLOR.into();
+            }
+        }
+    }
+}
+
+fn mana_restore_tooltip_system(
+    progression_query: Query<&PlayerProgression, With<Player>>,
+    mut text_query: Query<&mut Text, With<ManaRestoreSkillTooltip>>,
+) {
+    let Ok(mut text) = text_query.single_mut() else {
+        return;
+    };
+    let Some(progression) = progression_query.iter().next() else {
+        text.0 = mana_restore_tooltip_text(1);
+        return;
+    };
+    text.0 = mana_restore_tooltip_text(progression.mana_restore_rank);
+}
+
 fn spawn_combat_bars_system(
     mut commands: Commands,
     assets: Res<CombatVisualAssets>,
@@ -563,9 +725,8 @@ fn spawn_combat_bars_system(
             Some(StructureKind::BaseTower) => BASE_TOWER_BAR_Y,
             None => 2.1,
         };
-        let show_mana_bar = structure_kind.is_none()
-            && minion_marker.is_none()
-            && neutral_marker.is_none();
+        let show_mana_bar =
+            structure_kind.is_none() && minion_marker.is_none() && neutral_marker.is_none();
         let mut bars = CombatBars::default();
         let bar_root = commands
             .spawn((
@@ -789,7 +950,8 @@ fn update_target_marker_system(
         marker_center_y + bob,
         target_translation.z,
     );
-    marker_transform.rotation = Quat::from_rotation_y(time.elapsed_secs() * TARGET_MARKER_SPIN_SPEED);
+    marker_transform.rotation =
+        Quat::from_rotation_y(time.elapsed_secs() * TARGET_MARKER_SPIN_SPEED);
     marker_transform.scale = Vec3::new(marker_radius * pulse, 1.0, marker_radius * pulse);
 }
 

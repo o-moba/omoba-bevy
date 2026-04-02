@@ -19,6 +19,18 @@ const MANA_REGEN_PER_SECOND: f32 = 8.0;
 const SPELL_MANA_COST: f32 = 20.0;
 const SPELL_COOLDOWN: Duration = Duration::from_millis(350);
 
+/// Skill 4 — Mana Restore. **AD2:** flat base plus per-rank scaling (server is source of truth).
+///
+/// **Balance (AC6, cross-task):** Ranged cast costs [`SPELL_MANA_COST`]. Rank 1 restore (22) is ~one cast
+/// plus margin; higher ranks track level-ups (see [`apply_level_up`]). Twelve-second cooldown limits
+/// burst mana relative to passive [`MANA_REGEN_PER_SECOND`] so timing still matters alongside skill 1–3.
+/// Coordinate with TASK-09 heal costs when that ability lands.
+const MANA_RESTORE_BASE: f32 = 22.0;
+const MANA_RESTORE_PER_RANK: f32 = 7.0;
+const MANA_RESTORE_MAX_RANK: u8 = 5;
+const MANA_RESTORE_COOLDOWN: Duration = Duration::from_secs(12);
+const MANA_FULL_EPSILON: f32 = 0.001;
+
 const PROJECTILE_SPEED: f32 = 19.0;
 const PROJECTILE_DAMAGE: f32 = 20.0;
 const PROJECTILE_RADIUS: f32 = 0.22;
@@ -89,6 +101,8 @@ enum ClientPacket {
     Cast {
         target: TargetId,
     },
+    /// Active mana restore (skill 4). No target; server validates mana and cooldown.
+    ManaRestore,
     Join {
         team: Team,
         #[serde(default = "default_character_choice")]
@@ -158,8 +172,20 @@ struct PlayerState {
     level: u32,
     next_level_xp: u32,
     skill_points: u32,
+    /// Rank for mana restore scaling (increments on level-up, capped).
+    #[serde(default = "default_mana_restore_rank")]
+    mana_restore_rank: u8,
     #[serde(default = "default_character_choice")]
     character: CharacterChoice,
+}
+
+fn default_mana_restore_rank() -> u8 {
+    1
+}
+
+fn mana_restore_amount_for_rank(rank: u8) -> f32 {
+    let rank = rank.clamp(1, MANA_RESTORE_MAX_RANK);
+    MANA_RESTORE_BASE + MANA_RESTORE_PER_RANK * (f32::from(rank) - 1.0)
 }
 
 fn xp_threshold_for_level(level: u32) -> u32 {
@@ -174,6 +200,10 @@ fn xp_threshold_for_level(level: u32) -> u32 {
 fn apply_level_up(state: &mut PlayerState) {
     state.level = state.level.saturating_add(1);
     state.skill_points = state.skill_points.saturating_add(1);
+    state.mana_restore_rank = state
+        .mana_restore_rank
+        .saturating_add(1)
+        .min(MANA_RESTORE_MAX_RANK);
     state.max_hp += LEVEL_UP_HP_BONUS;
     state.max_mana += LEVEL_UP_MANA_BONUS;
     state.hp = (state.hp + LEVEL_UP_HP_BONUS).clamp(0.0, state.max_hp);
@@ -316,7 +346,9 @@ enum GameState {
     #[default]
     Lobby,
     Running,
-    Victory { winner: Team },
+    Victory {
+        winner: Team,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -373,6 +405,7 @@ struct ConnectedPlayer {
     state: PlayerState,
     last_seen: Instant,
     last_cast_at: Option<Instant>,
+    last_mana_restore_at: Option<Instant>,
     respawn_at: Option<Instant>,
 }
 
@@ -605,6 +638,9 @@ fn main() -> io::Result<()> {
                                 now,
                             );
                         }
+                        ClientPacket::ManaRestore => {
+                            handle_mana_restore_request(&mut players, addr, &game_state, now);
+                        }
                         ClientPacket::Join { team, character } => {
                             if let Some(player) = players.get_mut(&addr) {
                                 handle_join_request(player, team, character, &map_layout);
@@ -646,6 +682,8 @@ fn main() -> io::Result<()> {
             .clamp(0.0, 0.1);
         last_simulation_at = now;
 
+        // AC5: inbound packets (including `ManaRestore`) are applied above; passive regen always runs
+        // once per tick afterward — deterministic order, no duplicate skill restore, regen never skipped.
         regenerate_mana(&mut players, dt);
         spawn_minion_waves_if_due(
             &map_layout,
@@ -718,19 +756,17 @@ fn main() -> io::Result<()> {
             .values()
             .map(|player| player.state.id)
             .collect::<HashSet<_>>();
-        projectiles.retain(|_, projectile| {
-            match projectile.target.kind {
-                TargetKind::Player => live_player_ids.contains(&projectile.target.id),
-                TargetKind::Minion => minions
-                    .get(&projectile.target.id)
-                    .is_some_and(|minion| minion.state.hp > 0.0),
-                TargetKind::Structure => structures
-                    .get(&projectile.target.id)
-                    .is_some_and(|structure| structure.state.hp > 0.0),
-                TargetKind::Neutral => neutrals.get(&projectile.target.id).is_some_and(|neutral| {
-                    neutral.dead_until.is_none() && neutral.state.hp > 0.0
-                }),
-            }
+        projectiles.retain(|_, projectile| match projectile.target.kind {
+            TargetKind::Player => live_player_ids.contains(&projectile.target.id),
+            TargetKind::Minion => minions
+                .get(&projectile.target.id)
+                .is_some_and(|minion| minion.state.hp > 0.0),
+            TargetKind::Structure => structures
+                .get(&projectile.target.id)
+                .is_some_and(|structure| structure.state.hp > 0.0),
+            TargetKind::Neutral => neutrals
+                .get(&projectile.target.id)
+                .is_some_and(|neutral| neutral.dead_until.is_none() && neutral.state.hp > 0.0),
         });
 
         minions.retain(|_, minion| minion.state.hp > 0.0);
@@ -838,10 +874,12 @@ fn ensure_player_connected(
                 level: STARTING_LEVEL,
                 next_level_xp: xp_threshold_for_level(STARTING_LEVEL),
                 skill_points: 0,
+                mana_restore_rank: 1,
                 character: default_character_choice(),
             },
             last_seen: now,
             last_cast_at: None,
+            last_mana_restore_at: None,
             respawn_at: None,
         }
     });
@@ -886,7 +924,9 @@ fn handle_join_request(
     player.state.level = STARTING_LEVEL;
     player.state.next_level_xp = xp_threshold_for_level(STARTING_LEVEL);
     player.state.skill_points = 0;
+    player.state.mana_restore_rank = 1;
     player.last_cast_at = None;
+    player.last_mana_restore_at = None;
     player.respawn_at = None;
 }
 
@@ -1028,6 +1068,48 @@ fn handle_cast_request(
             expires_at: now + PROJECTILE_LIFETIME,
         },
     );
+}
+
+fn handle_mana_restore_request(
+    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+    caster_addr: SocketAddr,
+    game_state: &GameState,
+    now: Instant,
+) {
+    if !matches!(game_state, GameState::Running) {
+        return;
+    }
+    let Some(caster) = players.get(&caster_addr) else {
+        return;
+    };
+    if caster.state.hp <= 0.0 {
+        return;
+    }
+    let max_m = caster.state.max_mana.max(0.0);
+    let cur = caster.state.mana.clamp(0.0, max_m);
+    // AD4: reject at full mana; do not start cooldown.
+    if cur + MANA_FULL_EPSILON >= max_m {
+        return;
+    }
+    if caster
+        .last_mana_restore_at
+        .is_some_and(|t| now.duration_since(t) < MANA_RESTORE_COOLDOWN)
+    {
+        return;
+    }
+
+    let restore = mana_restore_amount_for_rank(caster.state.mana_restore_rank);
+    let new_mana = (cur + restore).min(max_m);
+    // AD3: clamped above; if somehow no gain, reject.
+    if new_mana <= cur + MANA_FULL_EPSILON {
+        return;
+    }
+
+    let Some(caster_mut) = players.get_mut(&caster_addr) else {
+        return;
+    };
+    caster_mut.state.mana = new_mana;
+    caster_mut.last_mana_restore_at = Some(now);
 }
 
 fn simulate_projectiles(
@@ -1200,8 +1282,7 @@ fn simulate_projectiles(
                     return false;
                 }
 
-                let start =
-                    Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z);
+                let start = Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z);
                 let target_pos = Vec3f::new(
                     target_neutral.state.x,
                     target_neutral.state.y + NEUTRAL_RADIUS * 0.85,
@@ -1300,9 +1381,10 @@ fn apply_neutral_damage(
         return;
     }
     neutral.state.hp = (neutral.state.hp - damage).max(0.0);
-    if players.values().any(|player| {
-        player.state.id == attacker_player_id && player.state.hp > 0.0
-    }) {
+    if players
+        .values()
+        .any(|player| player.state.id == attacker_player_id && player.state.hp > 0.0)
+    {
         neutral.target_player_id = Some(attacker_player_id);
         neutral.state.ai_state = NeutralAiState::Aggro;
     }
@@ -1384,15 +1466,12 @@ fn simulate_neutrals(
                 .values()
                 .filter(|player| player.state.hp > 0.0)
                 .map(|player| {
-                    let hit = Vec3f::new(player.state.x, player.state.y + AIM_HEIGHT, player.state.z);
+                    let hit =
+                        Vec3f::new(player.state.x, player.state.y + AIM_HEIGHT, player.state.z);
                     (player.state.id, neutral_pos.distance_squared(hit))
                 })
                 .filter(|(_, dist_sq)| *dist_sq <= aggro_sq)
-                .min_by(|a, b| {
-                    a.1
-                        .partial_cmp(&b.1)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
+                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
             if let Some((player_id, _)) = best {
                 neutral.target_player_id = Some(player_id);
                 neutral.state.ai_state = NeutralAiState::Aggro;
@@ -2209,9 +2288,7 @@ fn simulate_tower_attacks(
             let target_pos =
                 Vec3f::new(player.state.x, player.state.y + AIM_HEIGHT, player.state.z);
             let dist_sq = tower_position.distance_squared(target_pos);
-            if dist_sq <= range_sq
-                && best_target.is_none_or(|(_, _, best)| dist_sq < best)
-            {
+            if dist_sq <= range_sq && best_target.is_none_or(|(_, _, best)| dist_sq < best) {
                 best_target = Some((player.state.id, target_pos, dist_sq));
             }
         }
@@ -2345,6 +2422,195 @@ mod tests {
         regenerate_mana(&mut players, 100.0);
         let clamped = players.get(&addr).unwrap().state.mana;
         assert!((clamped - MAX_MANA).abs() < EPSILON);
+    }
+
+    #[test]
+    fn mana_restore_rejects_full_mana_without_cooldown() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:34568".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let p = players.get_mut(&addr).unwrap();
+        p.state.mana = MAX_MANA;
+        p.state.max_mana = MAX_MANA;
+
+        handle_mana_restore_request(&mut players, addr, &GameState::Running, now);
+        let p = players.get(&addr).unwrap();
+        assert!((p.state.mana - MAX_MANA).abs() < EPSILON);
+        assert!(p.last_mana_restore_at.is_none());
+    }
+
+    #[test]
+    fn mana_restore_clamps_to_max_and_sets_cooldown() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:34570".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let p = players.get_mut(&addr).unwrap();
+        p.state.mana = 95.0;
+        p.state.max_mana = 100.0;
+        p.state.mana_restore_rank = 1;
+
+        handle_mana_restore_request(&mut players, addr, &GameState::Running, now);
+        let p = players.get(&addr).unwrap();
+        assert!((p.state.mana - 100.0).abs() < EPSILON);
+        assert!(p.last_mana_restore_at.is_some());
+
+        handle_mana_restore_request(&mut players, addr, &GameState::Running, now);
+        let p = players.get(&addr).unwrap();
+        assert!((p.state.mana - 100.0).abs() < EPSILON);
+    }
+
+    #[test]
+    fn mana_restore_amount_scales_with_rank() {
+        assert!((mana_restore_amount_for_rank(1) - 22.0).abs() < EPSILON);
+        assert!((mana_restore_amount_for_rank(2) - 29.0).abs() < EPSILON);
+    }
+
+    #[test]
+    fn mana_restore_and_passive_regen_stay_consistent() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:34571".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let p = players.get_mut(&addr).unwrap();
+        p.state.mana = 50.0;
+        p.state.max_mana = 100.0;
+
+        handle_mana_restore_request(&mut players, addr, &GameState::Running, now);
+        let after_skill = players.get(&addr).unwrap().state.mana;
+
+        regenerate_mana(&mut players, 1.0);
+        let after_regen = players.get(&addr).unwrap().state.mana;
+
+        assert!(after_skill > 50.0);
+        assert!(after_regen > after_skill);
+        assert!(after_regen <= 100.0 + EPSILON);
+    }
+
+    #[test]
+    fn mana_restore_blocked_by_cooldown_when_not_full() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:34572".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let p = players.get_mut(&addr).unwrap();
+        p.state.mana = 15.0;
+        p.state.max_mana = 100.0;
+        p.state.mana_restore_rank = 1;
+
+        handle_mana_restore_request(&mut players, addr, &GameState::Running, now);
+        let after_first = players.get(&addr).unwrap().state.mana;
+        assert!((after_first - 37.0).abs() < EPSILON);
+
+        handle_mana_restore_request(&mut players, addr, &GameState::Running, now);
+        let after_spam = players.get(&addr).unwrap().state.mana;
+        assert!((after_spam - after_first).abs() < EPSILON);
+
+        let later = now + MANA_RESTORE_COOLDOWN;
+        handle_mana_restore_request(&mut players, addr, &GameState::Running, later);
+        let after_cooldown = players.get(&addr).unwrap().state.mana;
+        assert!(after_cooldown > after_first);
+        assert!((after_cooldown - 59.0).abs() < EPSILON);
+    }
+
+    #[test]
+    fn mana_restore_passive_regen_additive_after_skill_in_same_model() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:34573".parse().unwrap();
+        let now = Instant::now();
+        let dt = 0.5_f32;
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let p = players.get_mut(&addr).unwrap();
+        p.state.mana = 20.0;
+        p.state.max_mana = 100.0;
+        p.state.mana_restore_rank = 2;
+        let restore = mana_restore_amount_for_rank(2);
+
+        handle_mana_restore_request(&mut players, addr, &GameState::Running, now);
+        regenerate_mana(&mut players, dt);
+
+        let expected = (20.0 + restore + MANA_REGEN_PER_SECOND * dt).min(100.0);
+        let got = players.get(&addr).unwrap().state.mana;
+        assert!((got - expected).abs() < EPSILON);
+    }
+
+    #[test]
+    fn mana_restore_rank_caps_at_max_for_amount() {
+        assert!(
+            (mana_restore_amount_for_rank(5) - mana_restore_amount_for_rank(99)).abs() < EPSILON
+        );
+    }
+
+    #[test]
+    fn reset_match_resets_progression_and_mana_restore_rank() {
+        let layout = build_map_layout();
+        let mut structures = build_structures(&layout);
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:34574".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        {
+            let player = players.get_mut(&addr).unwrap();
+            player.state.level = STARTING_LEVEL + 2;
+            player.state.xp = 25;
+            player.state.next_level_xp = xp_threshold_for_level(STARTING_LEVEL + 2);
+            player.state.skill_points = 2;
+            player.state.mana_restore_rank = 4;
+            player.state.max_hp = MAX_HP + 50.0;
+            player.state.max_mana = MAX_MANA + 40.0;
+            player.state.hp = 3.0;
+            player.state.mana = 4.0;
+            player.last_mana_restore_at = Some(now);
+        }
+
+        let mut minions = HashMap::new();
+        let mut projectiles = HashMap::new();
+        let mut last_wave_spawn_at = now - MINION_WAVE_INTERVAL;
+        let mut game_state = GameState::Victory { winner: Team::Blue };
+
+        reset_match(
+            &mut players,
+            &mut structures,
+            &mut minions,
+            &mut projectiles,
+            &layout,
+            &mut last_wave_spawn_at,
+            &mut game_state,
+        );
+
+        let player = players.get(&addr).unwrap();
+        assert_eq!(player.state.level, STARTING_LEVEL);
+        assert_eq!(player.state.xp, 0);
+        assert_eq!(
+            player.state.next_level_xp,
+            xp_threshold_for_level(STARTING_LEVEL)
+        );
+        assert_eq!(player.state.skill_points, 0);
+        assert_eq!(player.state.mana_restore_rank, 1);
+        assert!((player.state.max_hp - MAX_HP).abs() < EPSILON);
+        assert!((player.state.max_mana - MAX_MANA).abs() < EPSILON);
+        assert!(player.last_mana_restore_at.is_none());
+        assert!(minions.is_empty());
+        assert!(projectiles.is_empty());
+        assert!(matches!(game_state, GameState::Running));
     }
 
     #[test]
@@ -2581,6 +2847,7 @@ mod tests {
 
         assert_eq!(player.state.level, STARTING_LEVEL + 2);
         assert_eq!(player.state.skill_points, 2);
+        assert_eq!(player.state.mana_restore_rank, 3);
         assert_eq!(player.state.xp, 17);
         assert_eq!(
             player.state.next_level_xp,
@@ -2645,6 +2912,7 @@ fn handle_respawns(
         player.state.mana = player.state.max_mana;
         player.respawn_at = None;
         player.last_cast_at = None;
+        player.last_mana_restore_at = None;
     }
 }
 
@@ -2676,13 +2944,18 @@ fn reset_match(
         player.state.y = 0.5;
         player.state.z = spawn.z;
         player.state.yaw = 0.0;
+        player.state.level = STARTING_LEVEL;
         player.state.hp = MAX_HP;
         player.state.max_hp = MAX_HP;
         player.state.mana = MAX_MANA;
         player.state.max_mana = MAX_MANA;
         player.state.gold = 0;
         player.state.xp = 0;
+        player.state.next_level_xp = xp_threshold_for_level(STARTING_LEVEL);
+        player.state.skill_points = 0;
+        player.state.mana_restore_rank = 1;
         player.last_cast_at = None;
+        player.last_mana_restore_at = None;
         player.respawn_at = None;
     }
     *game_state = GameState::Running;
