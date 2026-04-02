@@ -70,7 +70,8 @@ impl Plugin for NetworkingPlugin {
 
 #[derive(Message, Clone, Copy, Debug)]
 pub enum NetworkCommand {
-    Cast { target: TargetId },
+    Cast { slot: u8, target: TargetId },
+    UpgradeSkill { slot: u8 },
     Join { team: Team, character: CharacterChoice },
     #[allow(dead_code)]
     RequestRematch,
@@ -86,7 +87,12 @@ enum ClientPacket {
         yaw: f32,
     },
     Cast {
+        #[serde(default)]
+        slot: u8,
         target: TargetId,
+    },
+    UpgradeSkill {
+        slot: u8,
     },
     Join {
         team: Team,
@@ -139,8 +145,14 @@ struct PlayerState {
     next_level_xp: u32,
     #[serde(default)]
     skill_points: u32,
+    #[serde(default = "default_skill_ranks")]
+    skill_ranks: [u8; skills::SLOT_COUNT],
     #[serde(default = "default_character_choice")]
     character: CharacterChoice,
+}
+
+fn default_skill_ranks() -> [u8; skills::SLOT_COUNT] {
+    [skills::STARTING_RANK; skills::SLOT_COUNT]
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -310,12 +322,25 @@ pub struct NetworkPlayerId(pub u64);
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkCharacterChoice(pub CharacterChoice);
 
-#[derive(Component, Clone, Copy, Debug, Default)]
+#[derive(Component, Clone, Copy, Debug)]
 pub struct PlayerProgression {
     pub level: u32,
     pub xp: u32,
     pub next_level_xp: u32,
     pub skill_points: u32,
+    pub skill_ranks: [u8; skills::SLOT_COUNT],
+}
+
+impl Default for PlayerProgression {
+    fn default() -> Self {
+        Self {
+            level: DEFAULT_PLAYER_LEVEL,
+            xp: 0,
+            next_level_xp: DEFAULT_NEXT_LEVEL_XP,
+            skill_points: 0,
+            skill_ranks: [skills::STARTING_RANK; skills::SLOT_COUNT],
+        }
+    }
 }
 
 #[derive(Component)]
@@ -590,10 +615,16 @@ fn send_network_commands(
 
     for command in command_events.read() {
         match command {
-            NetworkCommand::Cast { target } => {
+            NetworkCommand::Cast { slot, target } => {
+                let _ = channels.outgoing.send(ClientPacket::Cast {
+                    slot: *slot,
+                    target: *target,
+                });
+            }
+            NetworkCommand::UpgradeSkill { slot } => {
                 let _ = channels
                     .outgoing
-                    .send(ClientPacket::Cast { target: *target });
+                    .send(ClientPacket::UpgradeSkill { slot: *slot });
             }
             NetworkCommand::Join { team, character } => {
                 let _ = channels.outgoing.send(ClientPacket::Join {
@@ -1227,6 +1258,7 @@ fn player_state_to_progression(player: &PlayerState) -> PlayerProgression {
         xp: player.xp,
         next_level_xp: player.next_level_xp,
         skill_points: player.skill_points,
+        skill_ranks: player.skill_ranks,
     }
 }
 

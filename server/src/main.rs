@@ -16,11 +16,7 @@ const MAX_PACKET_SIZE: usize = 8 * 1024;
 const MAX_HP: f32 = 100.0;
 const MAX_MANA: f32 = 100.0;
 const MANA_REGEN_PER_SECOND: f32 = 8.0;
-const SPELL_MANA_COST: f32 = 20.0;
-const SPELL_COOLDOWN: Duration = Duration::from_millis(350);
-
 const PROJECTILE_SPEED: f32 = 19.0;
-const PROJECTILE_DAMAGE: f32 = 20.0;
 const PROJECTILE_RADIUS: f32 = 0.22;
 const PROJECTILE_LIFETIME: Duration = Duration::from_secs(3);
 const PLAYER_HIT_RADIUS: f32 = 0.62;
@@ -87,7 +83,12 @@ enum ClientPacket {
         yaw: f32,
     },
     Cast {
+        #[serde(default)]
+        slot: u8,
         target: TargetId,
+    },
+    UpgradeSkill {
+        slot: u8,
     },
     Join {
         team: Team,
@@ -158,8 +159,27 @@ struct PlayerState {
     level: u32,
     next_level_xp: u32,
     skill_points: u32,
+    #[serde(default = "default_skill_ranks")]
+    skill_ranks: [u8; skills::SLOT_COUNT],
     #[serde(default = "default_character_choice")]
     character: CharacterChoice,
+}
+
+fn default_skill_ranks() -> [u8; skills::SLOT_COUNT] {
+    [skills::STARTING_RANK; skills::SLOT_COUNT]
+}
+
+fn try_upgrade_skill(state: &mut PlayerState, slot: u8) -> bool {
+    let slot_usize = slot as usize;
+    if slot_usize >= skills::SLOT_COUNT {
+        return false;
+    }
+    if !skills::can_upgrade_slot(&state.skill_ranks, slot_usize, state.skill_points) {
+        return false;
+    }
+    state.skill_points -= 1;
+    state.skill_ranks[slot_usize] = state.skill_ranks[slot_usize].saturating_add(1);
+    true
 }
 
 fn xp_threshold_for_level(level: u32) -> u32 {
@@ -591,7 +611,7 @@ fn main() -> io::Result<()> {
                                 player.state.yaw = yaw;
                             }
                         }
-                        ClientPacket::Cast { target } => {
+                        ClientPacket::Cast { slot, target } => {
                             handle_cast_request(
                                 &mut players,
                                 &mut projectiles,
@@ -599,11 +619,19 @@ fn main() -> io::Result<()> {
                                 &mut structures,
                                 &mut neutrals,
                                 addr,
+                                slot,
                                 target,
                                 &mut next_projectile_id,
                                 &game_state,
                                 now,
                             );
+                        }
+                        ClientPacket::UpgradeSkill { slot } => {
+                            if matches!(game_state, GameState::Running)
+                                && let Some(player) = players.get_mut(&addr)
+                            {
+                                let _applied = try_upgrade_skill(&mut player.state, slot);
+                            }
                         }
                         ClientPacket::Join { team, character } => {
                             if let Some(player) = players.get_mut(&addr) {
@@ -647,6 +675,7 @@ fn main() -> io::Result<()> {
         last_simulation_at = now;
 
         regenerate_mana(&mut players, dt);
+        apply_vitality_regen(&mut players, dt);
         spawn_minion_waves_if_due(
             &map_layout,
             &mut minions,
@@ -838,6 +867,7 @@ fn ensure_player_connected(
                 level: STARTING_LEVEL,
                 next_level_xp: xp_threshold_for_level(STARTING_LEVEL),
                 skill_points: 0,
+                skill_ranks: default_skill_ranks(),
                 character: default_character_choice(),
             },
             last_seen: now,
@@ -855,8 +885,20 @@ fn regenerate_mana(players: &mut HashMap<SocketAddr, ConnectedPlayer>, dt: f32) 
         if player.state.max_mana <= 0.0 {
             player.state.max_mana = MAX_MANA;
         }
-        player.state.mana =
-            (player.state.mana + MANA_REGEN_PER_SECOND * dt).clamp(0.0, player.state.max_mana);
+        let focus_bonus = skills::focus_mana_regen_bonus(player.state.skill_ranks[2]);
+        player.state.mana = (player.state.mana
+            + (MANA_REGEN_PER_SECOND + focus_bonus) * dt)
+            .clamp(0.0, player.state.max_mana);
+    }
+}
+
+fn apply_vitality_regen(players: &mut HashMap<SocketAddr, ConnectedPlayer>, dt: f32) {
+    for player in players.values_mut() {
+        if player.state.hp <= 0.0 || player.state.hp >= player.state.max_hp {
+            continue;
+        }
+        let regen = skills::vitality_hp_per_second(player.state.skill_ranks[1]);
+        player.state.hp = (player.state.hp + regen * dt).min(player.state.max_hp);
     }
 }
 
@@ -886,6 +928,7 @@ fn handle_join_request(
     player.state.level = STARTING_LEVEL;
     player.state.next_level_xp = xp_threshold_for_level(STARTING_LEVEL);
     player.state.skill_points = 0;
+    player.state.skill_ranks = default_skill_ranks();
     player.last_cast_at = None;
     player.respawn_at = None;
 }
@@ -898,6 +941,7 @@ fn handle_cast_request(
     structures: &mut HashMap<u64, Structure>,
     neutrals: &mut HashMap<u64, Neutral>,
     caster_addr: SocketAddr,
+    slot: u8,
     target: TargetId,
     next_projectile_id: &mut u64,
     game_state: &GameState,
@@ -906,18 +950,23 @@ fn handle_cast_request(
     if !matches!(game_state, GameState::Running) {
         return;
     }
+    if slot != 0 {
+        return;
+    }
     let Some(caster) = players.get(&caster_addr) else {
         return;
     };
     if caster.state.hp <= 0.0 {
         return;
     }
-    if caster.state.mana < SPELL_MANA_COST {
+    let mana_cost = skills::slot0_mana_cost(caster.state.skill_ranks[0]);
+    let cooldown = skills::slot0_cooldown(caster.state.skill_ranks[0]);
+    if caster.state.mana < mana_cost {
         return;
     }
     if caster
         .last_cast_at
-        .is_some_and(|last_cast| now.duration_since(last_cast) < SPELL_COOLDOWN)
+        .is_some_and(|last_cast| now.duration_since(last_cast) < cooldown)
     {
         return;
     }
@@ -998,7 +1047,12 @@ fn handle_cast_request(
     let Some(caster_mut) = players.get_mut(&caster_addr) else {
         return;
     };
-    caster_mut.state.mana -= SPELL_MANA_COST;
+    let projectile_speed = skills::effective_projectile_speed(
+        caster_mut.state.skill_ranks[0],
+        caster_mut.state.skill_ranks[3],
+    );
+    let projectile_damage = skills::slot0_damage(caster_mut.state.skill_ranks[0]);
+    caster_mut.state.mana -= mana_cost;
     caster_mut.last_cast_at = Some(now);
 
     let projectile_id = *next_projectile_id;
@@ -1017,13 +1071,13 @@ fn handle_cast_request(
             },
             target,
             velocity: Vec3f::new(
-                direction.x * PROJECTILE_SPEED,
-                direction.y * PROJECTILE_SPEED,
-                direction.z * PROJECTILE_SPEED,
+                direction.x * projectile_speed,
+                direction.y * projectile_speed,
+                direction.z * projectile_speed,
             ),
             homing: true,
             guaranteed_hit: true,
-            damage: PROJECTILE_DAMAGE,
+            damage: projectile_damage,
             radius: PROJECTILE_RADIUS,
             expires_at: now + PROJECTILE_LIFETIME,
         },
@@ -2338,13 +2392,124 @@ mod tests {
         player.state.max_mana = MAX_MANA;
 
         regenerate_mana(&mut players, 2.5);
-        let expected = 10.0 + MANA_REGEN_PER_SECOND * 2.5;
+        let bonus = skills::focus_mana_regen_bonus(
+            players.get(&addr).unwrap().state.skill_ranks[2],
+        );
+        let expected = 10.0 + (MANA_REGEN_PER_SECOND + bonus) * 2.5;
         let current = players.get(&addr).unwrap().state.mana;
         assert!((current - expected).abs() < EPSILON);
 
         regenerate_mana(&mut players, 100.0);
         let clamped = players.get(&addr).unwrap().state.mana;
         assert!((clamped - MAX_MANA).abs() < EPSILON);
+    }
+
+    #[test]
+    fn upgrade_skill_spends_point_and_increments_rank() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:34571".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let state = &mut players.get_mut(&addr).unwrap().state;
+        state.skill_points = 1;
+        assert!(try_upgrade_skill(state, 0));
+        assert_eq!(state.skill_points, 0);
+        assert_eq!(state.skill_ranks[0], skills::STARTING_RANK + 1);
+    }
+
+    #[test]
+    fn upgrade_skill_rejects_without_points_or_invalid_slot() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:34572".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let state = &mut players.get_mut(&addr).unwrap().state;
+        state.skill_points = 0;
+        let ranks_before = state.skill_ranks;
+        assert!(!try_upgrade_skill(state, 0));
+        assert_eq!(state.skill_ranks, ranks_before);
+        assert!(!try_upgrade_skill(state, 9));
+    }
+
+    #[test]
+    fn apply_level_up_grants_one_skill_point() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:34573".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let state = &mut players.get_mut(&addr).unwrap().state;
+        let before = state.skill_points;
+        apply_level_up(state);
+        assert_eq!(state.skill_points, before.saturating_add(1));
+    }
+
+    #[test]
+    fn grant_xp_over_threshold_levels_and_awards_skill_point() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:34574".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let state = &mut players.get_mut(&addr).unwrap().state;
+        assert_eq!(state.skill_points, 0);
+        let before_level = state.level;
+        state.xp = state.next_level_xp.saturating_sub(1);
+        grant_player_xp(state, 1);
+        assert_eq!(state.level, before_level + 1);
+        assert_eq!(state.skill_points, 1);
+    }
+
+    #[test]
+    fn upgrade_skill_rejects_at_max_rank_even_with_points() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:34575".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let state = &mut players.get_mut(&addr).unwrap().state;
+        state.skill_points = 3;
+        state.skill_ranks[0] = skills::MAX_SKILL_RANK;
+        let ranks_before = state.skill_ranks;
+        let points_before = state.skill_points;
+        assert!(!try_upgrade_skill(state, 0));
+        assert_eq!(state.skill_ranks, ranks_before);
+        assert_eq!(state.skill_points, points_before);
+    }
+
+    #[test]
+    fn upgrade_slot0_updates_authoritative_cast_mana_and_cooldown() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:34576".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let state = &mut players.get_mut(&addr).unwrap().state;
+        state.skill_points = 1;
+        let rank_before = state.skill_ranks[0];
+        let mana_before = skills::slot0_mana_cost(rank_before);
+        let cd_before = skills::slot0_cooldown(rank_before);
+        assert!(try_upgrade_skill(state, 0));
+        let rank_after = state.skill_ranks[0];
+        assert_eq!(rank_after, rank_before + 1);
+        let mana_after = skills::slot0_mana_cost(rank_after);
+        let cd_after = skills::slot0_cooldown(rank_after);
+        assert!(mana_after <= mana_before);
+        assert!(cd_after <= cd_before);
     }
 
     #[test]
