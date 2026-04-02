@@ -70,8 +70,15 @@ impl Plugin for NetworkingPlugin {
 
 #[derive(Message, Clone, Copy, Debug)]
 pub enum NetworkCommand {
-    Cast { target: TargetId },
-    Join { team: Team, character: CharacterChoice },
+    Cast {
+        target: TargetId,
+    },
+    /// Skill 4 — server-authoritative mana restore (no target).
+    ManaRestore,
+    Join {
+        team: Team,
+        character: CharacterChoice,
+    },
     #[allow(dead_code)]
     RequestRematch,
 }
@@ -88,6 +95,7 @@ enum ClientPacket {
     Cast {
         target: TargetId,
     },
+    ManaRestore,
     Join {
         team: Team,
         #[serde(default = "default_character_choice")]
@@ -139,6 +147,8 @@ struct PlayerState {
     next_level_xp: u32,
     #[serde(default)]
     skill_points: u32,
+    #[serde(default = "default_mana_restore_rank")]
+    mana_restore_rank: u8,
     #[serde(default = "default_character_choice")]
     character: CharacterChoice,
 }
@@ -272,7 +282,9 @@ pub enum GameState {
     #[default]
     Lobby,
     Running,
-    Victory { winner: Team },
+    Victory {
+        winner: Team,
+    },
 }
 
 #[derive(Resource, Default, Clone)]
@@ -316,6 +328,7 @@ pub struct PlayerProgression {
     pub xp: u32,
     pub next_level_xp: u32,
     pub skill_points: u32,
+    pub mana_restore_rank: u8,
 }
 
 #[derive(Component)]
@@ -595,6 +608,9 @@ fn send_network_commands(
                     .outgoing
                     .send(ClientPacket::Cast { target: *target });
             }
+            NetworkCommand::ManaRestore => {
+                let _ = channels.outgoing.send(ClientPacket::ManaRestore);
+            }
             NetworkCommand::Join { team, character } => {
                 let _ = channels.outgoing.send(ClientPacket::Join {
                     team: *team,
@@ -692,8 +708,7 @@ fn apply_server_snapshot(
         neutrals,
         game_state,
         rematch_in_secs,
-    )) =
-        latest_snapshot
+    )) = latest_snapshot
     else {
         return;
     };
@@ -709,8 +724,7 @@ fn apply_server_snapshot(
         .collect::<Vec<_>>();
     // IMPORTANT: we must tolerate temporary duplication of `Player` entities (e.g. during loading /
     // restart races). Many gameplay systems use `Query::single()` and will break if we allow >1.
-    let chosen_local =
-        choose_authoritative_local_player(&local_players, your_id);
+    let chosen_local = choose_authoritative_local_player(&local_players, your_id);
 
     if let Some(local_entity) = chosen_local {
         // Keep exactly one local `Player` alive to avoid `single()` query failures.
@@ -1227,6 +1241,7 @@ fn player_state_to_progression(player: &PlayerState) -> PlayerProgression {
         xp: player.xp,
         next_level_xp: player.next_level_xp,
         skill_points: player.skill_points,
+        mana_restore_rank: player.mana_restore_rank.max(1),
     }
 }
 
@@ -1291,6 +1306,10 @@ fn default_max_mana() -> f32 {
 
 fn default_minion_brain_state() -> MinionBrainState {
     MinionBrainState::Marching
+}
+
+fn default_mana_restore_rank() -> u8 {
+    1
 }
 
 #[cfg(test)]
