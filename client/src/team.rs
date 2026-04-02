@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::net::NetworkCommand;
+use crate::net::{ClientSession, NetworkCommand};
 
 const TEAM_BUTTON_SIZE: f32 = 140.0;
 const TEAM_BUTTON_GAP: f32 = 28.0;
@@ -80,7 +80,10 @@ pub struct TeamSelectPlugin;
 impl Plugin for TeamSelectPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TeamSelection>()
-            .add_systems(Startup, setup_team_select_ui)
+            .add_systems(
+                Startup,
+                setup_team_select_ui.after(crate::persistence::load_persistent_client_settings),
+            )
             .add_systems(Update, team_select_ui_system);
     }
 }
@@ -230,6 +233,7 @@ pub fn spawn_team_select_ui(commands: &mut Commands, selected_character: Charact
 
 fn team_select_ui_system(
     mut commands: Commands,
+    client_session: Res<ClientSession>,
     mut selection: ResMut<TeamSelection>,
     mut interaction_sets: ParamSet<(
         Query<
@@ -299,6 +303,9 @@ fn team_select_ui_system(
         for (interaction, button, mut color) in team_interactions.iter_mut() {
             match *interaction {
                 Interaction::Pressed => {
+                    if client_session.join_flow_committed {
+                        continue;
+                    }
                     selection.team = Some(button.team);
                     command_writer.write(NetworkCommand::Join {
                         team: button.team,
