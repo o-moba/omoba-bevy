@@ -1,7 +1,7 @@
 use bevy::{
     gltf::Gltf,
     input::mouse::MouseButton,
-    math::{Dir3, primitives::InfinitePlane3d},
+    math::{primitives::InfinitePlane3d, Dir3},
     prelude::*,
     window::PrimaryWindow,
 };
@@ -18,7 +18,7 @@ use crate::net::{
     RemotePlayer, StructureKind,
 };
 use crate::team::{CharacterChoice, Team};
-use crate::world::{PlayerModelCatalog, model_assets_for_choice};
+use crate::world::{model_assets_for_choice, PlayerModelCatalog};
 
 pub const PLAYER_SPEED: f32 = 5.0;
 pub const PLAYER_SIZE: f32 = 1.0;
