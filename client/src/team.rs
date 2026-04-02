@@ -307,6 +307,10 @@ fn team_select_ui_system(
                         continue;
                     }
                     selection.team = Some(button.team);
+                    info!(
+                        "[omoba:cli] event=join_request team={:?} character={:?}",
+                        button.team, selection.character
+                    );
                     command_writer.write(NetworkCommand::Join {
                         team: button.team,
                         character: selection.character,
