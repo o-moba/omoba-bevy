@@ -4,7 +4,10 @@ mod camera;
 mod combat;
 mod debug_console;
 mod game_state;
+mod help_overlay;
+mod input_bindings;
 mod maps;
+mod match_hud;
 mod minimap;
 mod net;
 mod pause_menu;
@@ -18,6 +21,8 @@ use camera::CameraPlugin;
 use combat::CombatPlugin;
 use debug_console::DebugConsolePlugin;
 use game_state::GameStateUiPlugin;
+use help_overlay::HelpOverlayPlugin;
+use match_hud::MatchHudPlugin;
 use maps::MapsPlugin;
 use minimap::MinimapPlugin;
 use net::NetworkingPlugin;
@@ -43,8 +48,11 @@ fn main() {
             NetworkingPlugin,
             MinimapPlugin,
             CombatPlugin,
+            MatchHudPlugin,
             TeamSelectPlugin,
             GameStateUiPlugin,
+            HelpOverlayPlugin,
+            DebugConsolePlugin,
             PauseMenuPlugin,
         ))
         .run();
