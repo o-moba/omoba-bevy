@@ -1,4 +1,5 @@
 use bevy::ecs::query::Or;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::scene::SceneRoot;
 use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
@@ -13,6 +14,7 @@ use std::{
 
 use crate::camera::{CameraState, MainCamera, locked_camera_offset};
 use crate::combat::{CombatStats, MAX_HP, MAX_MANA};
+use crate::debug_console::DebugConsole;
 use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
 use crate::team::TeamSelection;
 use crate::team::{CharacterChoice, Team};
@@ -37,6 +39,22 @@ const LOCAL_SNAP_DISTANCE: f32 = 4.0;
 const DEFAULT_PLAYER_LEVEL: u32 = 1;
 const DEFAULT_NEXT_LEVEL_XP: u32 = 120;
 
+/// Latest skill-3 fields from the server snapshot (local hero), for HUD prechecks and tooltips.
+#[derive(Resource, Clone, Copy, Debug)]
+pub struct LocalSkill3Hud {
+    pub rank: u8,
+    pub cooldown_remaining_secs: f32,
+}
+
+impl Default for LocalSkill3Hud {
+    fn default() -> Self {
+        Self {
+            rank: 1,
+            cooldown_remaining_secs: 0.0,
+        }
+    }
+}
+
 pub struct NetworkingPlugin;
 
 impl Plugin for NetworkingPlugin {
@@ -44,6 +62,8 @@ impl Plugin for NetworkingPlugin {
         app.add_message::<NetworkCommand>()
             .init_resource::<NetworkState>()
             .init_resource::<GameStateSnapshot>()
+            .init_resource::<LocalSkill3Hud>()
+            .init_resource::<QueuedServerSnapshot>()
             .insert_resource(LocalStateSendTimer(Timer::from_seconds(
                 UPDATE_INTERVAL_SECONDS,
                 TimerMode::Repeating,
@@ -54,8 +74,10 @@ impl Plugin for NetworkingPlugin {
                 (
                     send_local_state,
                     send_network_commands,
+                    drain_server_snapshots,
                     apply_server_snapshot,
-                ),
+                )
+                    .chain(),
             )
             .add_systems(
                 Update,
@@ -71,6 +93,7 @@ impl Plugin for NetworkingPlugin {
 #[derive(Message, Clone, Copy, Debug)]
 pub enum NetworkCommand {
     Cast { target: TargetId },
+    CastSkill { skill_slot: u8 },
     Join { team: Team, character: CharacterChoice },
     #[allow(dead_code)]
     RequestRematch,
@@ -87,6 +110,9 @@ enum ClientPacket {
     },
     Cast {
         target: TargetId,
+    },
+    CastSkill {
+        skill_slot: u8,
     },
     Join {
         team: Team,
@@ -139,6 +165,10 @@ struct PlayerState {
     next_level_xp: u32,
     #[serde(default)]
     skill_points: u32,
+    #[serde(default = "default_skill3_rank")]
+    skill3_rank: u8,
+    #[serde(default)]
+    skill3_cooldown_remaining_secs: f32,
     #[serde(default = "default_character_choice")]
     character: CharacterChoice,
 }
@@ -263,6 +293,8 @@ enum ServerPacket {
         game_state: GameState,
         #[serde(default)]
         rematch_in_secs: Option<u64>,
+        #[serde(default)]
+        your_skill_feedback: Option<String>,
     },
 }
 
@@ -285,6 +317,34 @@ pub struct GameStateSnapshot {
 struct NetworkChannels {
     outgoing: Sender<ClientPacket>,
     incoming: Receiver<ServerPacket>,
+}
+
+/// Latest snapshot drained from UDP; applied on the same frame by `apply_server_snapshot`.
+#[derive(Resource, Default)]
+struct QueuedServerSnapshot {
+    latest: Option<ServerSnapshotPayload>,
+}
+
+struct ServerSnapshotPayload {
+    your_id: u64,
+    players: Vec<PlayerState>,
+    projectiles: Vec<ProjectileState>,
+    structures: Vec<StructureState>,
+    minions: Vec<MinionState>,
+    neutrals: Vec<NeutralState>,
+    game_state: GameState,
+    rematch_in_secs: Option<u64>,
+    your_skill_feedback: Option<String>,
+}
+
+/// Bundles stale-entity checks so `apply_server_snapshot` stays within Bevy's system param limit.
+#[derive(SystemParam)]
+struct SnapshotStaleQueries<'w, 's> {
+    remote: Query<'w, 's, &'static RemotePlayer>,
+    projectile: Query<'w, 's, &'static NetworkProjectile>,
+    structure: Query<'w, 's, &'static NetworkStructure>,
+    minion: Query<'w, 's, &'static NetworkMinion>,
+    neutral: Query<'w, 's, &'static NetworkNeutral>,
 }
 
 #[derive(Resource, Default)]
@@ -595,6 +655,11 @@ fn send_network_commands(
                     .outgoing
                     .send(ClientPacket::Cast { target: *target });
             }
+            NetworkCommand::CastSkill { skill_slot } => {
+                let _ = channels.outgoing.send(ClientPacket::CastSkill {
+                    skill_slot: *skill_slot,
+                });
+            }
             NetworkCommand::Join { team, character } => {
                 let _ = channels.outgoing.send(ClientPacket::Join {
                     team: *team,
@@ -622,19 +687,50 @@ fn choose_authoritative_local_player<T: Copy + Eq>(
     chosen
 }
 
+fn drain_server_snapshots(
+    channels: Option<Res<NetworkChannels>>,
+    mut queued: ResMut<QueuedServerSnapshot>,
+) {
+    let Some(channels) = channels else {
+        return;
+    };
+
+    while let Ok(packet) = channels.incoming.try_recv() {
+        let ServerPacket::Snapshot {
+            your_id,
+            players,
+            projectiles,
+            structures,
+            minions,
+            neutrals,
+            game_state,
+            rematch_in_secs,
+            your_skill_feedback,
+        } = packet;
+        queued.latest = Some(ServerSnapshotPayload {
+            your_id,
+            players,
+            projectiles,
+            structures,
+            minions,
+            neutrals,
+            game_state,
+            rematch_in_secs,
+            your_skill_feedback,
+        });
+    }
+}
+
 fn apply_server_snapshot(
     mut commands: Commands,
-    channels: Option<Res<NetworkChannels>>,
+    mut queued: ResMut<QueuedServerSnapshot>,
+    mut console: ResMut<DebugConsole>,
     mut network_state: ResMut<NetworkState>,
     mut transform_sets: ParamSet<(
         Query<&mut Transform>,
         Query<&mut Transform, With<MainCamera>>,
     )>,
-    remote_query: Query<&RemotePlayer>,
-    projectile_query: Query<&NetworkProjectile>,
-    structure_query: Query<&NetworkStructure>,
-    minion_query: Query<&NetworkMinion>,
-    neutral_query: Query<&NetworkNeutral>,
+    stale_queries: SnapshotStaleQueries,
     local_player_query: Query<(Entity, Option<&NetworkPlayerId>), With<Player>>,
     player_assets: Res<PlayerAssets>,
     model_catalog: Res<PlayerModelCatalog>,
@@ -643,47 +739,7 @@ fn apply_server_snapshot(
     mut cam_state: ResMut<CameraState>,
     team_selection: Res<TeamSelection>,
 ) {
-    let Some(channels) = channels else {
-        return;
-    };
-
-    let mut latest_snapshot: Option<(
-        u64,
-        Vec<PlayerState>,
-        Vec<ProjectileState>,
-        Vec<StructureState>,
-        Vec<MinionState>,
-        Vec<NeutralState>,
-        GameState,
-        Option<u64>,
-    )> = None;
-    while let Ok(packet) = channels.incoming.try_recv() {
-        match packet {
-            ServerPacket::Snapshot {
-                your_id,
-                players,
-                projectiles,
-                structures,
-                minions,
-                neutrals,
-                game_state,
-                rematch_in_secs,
-            } => {
-                latest_snapshot = Some((
-                    your_id,
-                    players,
-                    projectiles,
-                    structures,
-                    minions,
-                    neutrals,
-                    game_state,
-                    rematch_in_secs,
-                ));
-            }
-        }
-    }
-
-    let Some((
+    let Some(ServerSnapshotPayload {
         your_id,
         players,
         projectiles,
@@ -692,11 +748,16 @@ fn apply_server_snapshot(
         neutrals,
         game_state,
         rematch_in_secs,
-    )) =
-        latest_snapshot
+        your_skill_feedback,
+    }) = queued.latest.take()
     else {
         return;
     };
+
+    if let Some(msg) = your_skill_feedback {
+        console.push_line(msg.clone());
+        info!("{msg}");
+    }
 
     network_state.local_id = Some(your_id);
     game_state_snapshot.state = game_state;
@@ -736,6 +797,10 @@ fn apply_server_snapshot(
         // Only apply character/team/stats once we actually have a state entry for our id.
         // Otherwise we'd oscillate between the locally selected character and the server default.
         if let Some(local_player_state) = local_player_state {
+            commands.insert_resource(LocalSkill3Hud {
+                rank: local_player_state.skill3_rank,
+                cooldown_remaining_secs: local_player_state.skill3_cooldown_remaining_secs,
+            });
             commands.entity(local_entity).insert((
                 local_player_state.team,
                 player_state_to_combat_stats(local_player_state),
@@ -819,6 +884,10 @@ fn apply_server_snapshot(
         };
 
         network_state.local_team = Some(local_player_state.team);
+        commands.insert_resource(LocalSkill3Hud {
+            rank: local_player_state.skill3_rank,
+            cooldown_remaining_secs: local_player_state.skill3_cooldown_remaining_secs,
+        });
         if let Ok(mut camera_transform) = transform_sets.p1().single_mut() {
             cam_state.locked = true;
             let zoom = cam_state.zoom;
@@ -917,7 +986,7 @@ fn apply_server_snapshot(
 
     for player_id in stale_ids {
         if let Some(entity) = network_state.remote_players.remove(&player_id) {
-            if remote_query.get(entity).is_ok() {
+            if stale_queries.remote.get(entity).is_ok() {
                 commands
                     .entity(entity)
                     .despawn_related::<Children>()
@@ -967,7 +1036,7 @@ fn apply_server_snapshot(
         .collect::<Vec<_>>();
     for projectile_id in stale_projectile_ids {
         if let Some(entity) = network_state.projectiles.remove(&projectile_id) {
-            if projectile_query.get(entity).is_ok() {
+            if stale_queries.projectile.get(entity).is_ok() {
                 commands
                     .entity(entity)
                     .despawn_related::<Children>()
@@ -1028,7 +1097,7 @@ fn apply_server_snapshot(
         .collect::<Vec<_>>();
     for structure_id in stale_structure_ids {
         if let Some(entity) = network_state.structures.remove(&structure_id) {
-            if structure_query.get(entity).is_ok() {
+            if stale_queries.structure.get(entity).is_ok() {
                 commands
                     .entity(entity)
                     .despawn_related::<Children>()
@@ -1148,7 +1217,7 @@ fn apply_server_snapshot(
         .collect::<Vec<_>>();
     for neutral_id in stale_neutral_ids {
         if let Some(entity) = network_state.neutrals.remove(&neutral_id) {
-            if neutral_query.get(entity).is_ok() {
+            if stale_queries.neutral.get(entity).is_ok() {
                 commands
                     .entity(entity)
                     .despawn_related::<Children>()
@@ -1165,7 +1234,7 @@ fn apply_server_snapshot(
         .collect::<Vec<_>>();
     for minion_id in stale_minion_ids {
         if let Some(entity) = network_state.minions.remove(&minion_id) {
-            if minion_query.get(entity).is_ok() {
+            if stale_queries.minion.get(entity).is_ok() {
                 commands
                     .entity(entity)
                     .despawn_related::<Children>()
@@ -1287,6 +1356,10 @@ fn default_mana() -> f32 {
 
 fn default_max_mana() -> f32 {
     MAX_MANA
+}
+
+fn default_skill3_rank() -> u8 {
+    1
 }
 
 fn default_minion_brain_state() -> MinionBrainState {

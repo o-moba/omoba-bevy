@@ -19,6 +19,13 @@ const MANA_REGEN_PER_SECOND: f32 = 8.0;
 const SPELL_MANA_COST: f32 = 20.0;
 const SPELL_COOLDOWN: Duration = Duration::from_millis(350);
 
+/// Skill 3 (self heal): restore per rank. Rank uses 1-based indexing on `PlayerState.skill3_rank`.
+/// Client UI must stay consistent with this table (see `client/src/combat.rs`).
+const SKILL3_HEAL_BY_RANK: [f32; 5] = [30.0, 45.0, 60.0, 75.0, 90.0];
+const SKILL3_MANA_COST: f32 = 25.0;
+const SKILL3_COOLDOWN: Duration = Duration::from_secs(4);
+const SKILL3_MAX_RANK: u8 = SKILL3_HEAL_BY_RANK.len() as u8;
+
 const PROJECTILE_SPEED: f32 = 19.0;
 const PROJECTILE_DAMAGE: f32 = 20.0;
 const PROJECTILE_RADIUS: f32 = 0.22;
@@ -89,6 +96,9 @@ enum ClientPacket {
     Cast {
         target: TargetId,
     },
+    CastSkill {
+        skill_slot: u8,
+    },
     Join {
         team: Team,
         #[serde(default = "default_character_choice")]
@@ -158,8 +168,18 @@ struct PlayerState {
     level: u32,
     next_level_xp: u32,
     skill_points: u32,
+    /// Learned rank for skill 3 (heal). `0` means not learned; valid ranks are `1..=SKILL3_MAX_RANK`.
+    #[serde(default = "default_skill3_rank")]
+    skill3_rank: u8,
+    /// Seconds remaining on skill-3 cooldown (for HUD); derived when building snapshots.
+    #[serde(default)]
+    skill3_cooldown_remaining_secs: f32,
     #[serde(default = "default_character_choice")]
     character: CharacterChoice,
+}
+
+fn default_skill3_rank() -> u8 {
+    1
 }
 
 fn xp_threshold_for_level(level: u32) -> u32 {
@@ -307,6 +327,9 @@ enum ServerPacket {
         game_state: GameState,
         #[serde(default)]
         rematch_in_secs: Option<u64>,
+        /// One-shot cast feedback for the receiving client (heal / reject reason).
+        #[serde(default)]
+        your_skill_feedback: Option<String>,
     },
 }
 
@@ -373,7 +396,9 @@ struct ConnectedPlayer {
     state: PlayerState,
     last_seen: Instant,
     last_cast_at: Option<Instant>,
+    last_skill3_cast_at: Option<Instant>,
     respawn_at: Option<Instant>,
+    pending_skill_feedback: Option<String>,
 }
 
 struct Projectile {
@@ -605,6 +630,11 @@ fn main() -> io::Result<()> {
                                 now,
                             );
                         }
+                        ClientPacket::CastSkill { skill_slot } => {
+                            if skill_slot == 3 {
+                                handle_skill3_cast_request(&mut players, addr, &game_state, now);
+                            }
+                        }
                         ClientPacket::Join { team, character } => {
                             if let Some(player) = players.get_mut(&addr) {
                                 handle_join_request(player, team, character, &map_layout);
@@ -738,7 +768,12 @@ fn main() -> io::Result<()> {
         if now.duration_since(last_snapshot_at) >= SNAPSHOT_INTERVAL {
             let mut players_snapshot = players
                 .values()
-                .map(|player| player.state.clone())
+                .map(|player| {
+                    let mut s = player.state.clone();
+                    s.skill3_cooldown_remaining_secs =
+                        skill3_cooldown_remaining_secs(player.last_skill3_cast_at, now);
+                    s
+                })
                 .collect::<Vec<_>>();
             players_snapshot.sort_unstable_by_key(|player| player.id);
 
@@ -779,9 +814,19 @@ fn main() -> io::Result<()> {
                 None
             };
 
-            for (addr, player) in &players {
+            let addrs: Vec<SocketAddr> = players.keys().copied().collect();
+            for addr in addrs {
+                let (your_id, your_skill_feedback) = {
+                    let Some(recipient) = players.get_mut(&addr) else {
+                        continue;
+                    };
+                    (
+                        recipient.state.id,
+                        recipient.pending_skill_feedback.take(),
+                    )
+                };
                 let packet = ServerPacket::Snapshot {
-                    your_id: player.state.id,
+                    your_id,
                     players: players_snapshot.clone(),
                     projectiles: projectiles_snapshot.clone(),
                     structures: structures_snapshot.clone(),
@@ -789,6 +834,7 @@ fn main() -> io::Result<()> {
                     neutrals: neutrals_snapshot.clone(),
                     game_state: game_state.clone(),
                     rematch_in_secs,
+                    your_skill_feedback,
                 };
 
                 match serde_json::to_vec(&packet) {
@@ -838,11 +884,15 @@ fn ensure_player_connected(
                 level: STARTING_LEVEL,
                 next_level_xp: xp_threshold_for_level(STARTING_LEVEL),
                 skill_points: 0,
+                skill3_rank: 1,
+                skill3_cooldown_remaining_secs: 0.0,
                 character: default_character_choice(),
             },
             last_seen: now,
             last_cast_at: None,
+            last_skill3_cast_at: None,
             respawn_at: None,
+            pending_skill_feedback: None,
         }
     });
 }
@@ -886,8 +936,12 @@ fn handle_join_request(
     player.state.level = STARTING_LEVEL;
     player.state.next_level_xp = xp_threshold_for_level(STARTING_LEVEL);
     player.state.skill_points = 0;
+    player.state.skill3_rank = 1;
+    player.state.skill3_cooldown_remaining_secs = 0.0;
     player.last_cast_at = None;
+    player.last_skill3_cast_at = None;
     player.respawn_at = None;
+    player.pending_skill_feedback = None;
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1028,6 +1082,97 @@ fn handle_cast_request(
             expires_at: now + PROJECTILE_LIFETIME,
         },
     );
+}
+
+fn skill3_cooldown_remaining_secs(last: Option<Instant>, now: Instant) -> f32 {
+    last
+        .map(|t| {
+            SKILL3_COOLDOWN
+                .saturating_sub(now.saturating_duration_since(t))
+                .as_secs_f32()
+        })
+        .unwrap_or(0.0)
+}
+
+fn skill3_heal_amount_for_rank(rank: u8) -> Option<f32> {
+    if rank == 0 || rank > SKILL3_MAX_RANK {
+        return None;
+    }
+    Some(SKILL3_HEAL_BY_RANK[(rank - 1) as usize])
+}
+
+/// Self-cast heal (skill slot 3). Ignores client-supplied amounts; uses `skill3_rank` only.
+fn handle_skill3_cast_request(
+    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+    caster_addr: SocketAddr,
+    game_state: &GameState,
+    now: Instant,
+) {
+    let set_feedback = |player: &mut ConnectedPlayer, msg: String| {
+        player.pending_skill_feedback = Some(msg);
+    };
+
+    if !matches!(game_state, GameState::Running) {
+        if let Some(player) = players.get_mut(&caster_addr) {
+            set_feedback(player, "Skill 3: match is not running.".to_string());
+        }
+        return;
+    }
+
+    let Some(player) = players.get_mut(&caster_addr) else {
+        return;
+    };
+
+    if player.state.hp <= 0.0 {
+        set_feedback(player, "Skill 3: cannot heal while dead.".to_string());
+        return;
+    }
+    if player.respawn_at.is_some() {
+        set_feedback(
+            player,
+            "Skill 3: cannot cast while waiting to respawn.".to_string(),
+        );
+        return;
+    }
+
+    let Some(heal_amount) = skill3_heal_amount_for_rank(player.state.skill3_rank) else {
+        set_feedback(player, "Skill 3: not learned (rank 0).".to_string());
+        return;
+    };
+
+    if player.state.mana + f32::EPSILON < SKILL3_MANA_COST {
+        set_feedback(player, "Skill 3: not enough mana.".to_string());
+        return;
+    }
+
+    if player.last_skill3_cast_at.is_some_and(|last| {
+        now.duration_since(last) < SKILL3_COOLDOWN
+    }) {
+        set_feedback(player, "Skill 3: on cooldown.".to_string());
+        return;
+    }
+
+    let hp_before = player.state.hp;
+    player.state.mana -= SKILL3_MANA_COST;
+    player.last_skill3_cast_at = Some(now);
+    player.state.hp = (player.state.hp + heal_amount).min(player.state.max_hp);
+    let gained = player.state.hp - hp_before;
+    let overheal = (heal_amount - gained).max(0.0);
+
+    let msg = if gained <= f32::EPSILON && overheal > f32::EPSILON {
+        format!(
+            "Skill 3: no effective heal (already at full HP). Overheal {:.0}.",
+            overheal
+        )
+    } else if overheal > f32::EPSILON {
+        format!(
+            "Skill 3: healed {:.0} HP (overheal {:.0}).",
+            gained, overheal
+        )
+    } else {
+        format!("Skill 3: healed {:.0} HP.", gained)
+    };
+    player.pending_skill_feedback = Some(msg);
 }
 
 fn simulate_projectiles(
@@ -2617,6 +2762,198 @@ mod tests {
         assert!((player.state.hp - player.state.max_hp).abs() < EPSILON);
         assert!((player.state.mana - player.state.max_mana).abs() < EPSILON);
     }
+
+    #[test]
+    fn skill3_heal_clamps_to_max_hp_and_reports_overheal() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:50001".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let player = players.get_mut(&addr).unwrap();
+        player.state.hp = 92.0;
+        player.state.max_hp = 100.0;
+        player.state.mana = MAX_MANA;
+        player.state.skill3_rank = 1;
+
+        handle_skill3_cast_request(&mut players, addr, &GameState::Running, now);
+
+        let player = players.get(&addr).unwrap();
+        assert!((player.state.hp - 100.0).abs() < EPSILON);
+        assert!((player.state.mana - (MAX_MANA - SKILL3_MANA_COST)).abs() < EPSILON);
+        assert!(player.last_skill3_cast_at.is_some());
+        let fb = player.pending_skill_feedback.as_deref().unwrap();
+        assert!(
+            fb.contains("overheal"),
+            "expected overheal in feedback: {fb}"
+        );
+    }
+
+    #[test]
+    fn skill3_rejects_dead_without_spending_mana_or_starting_cooldown() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:50002".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let player = players.get_mut(&addr).unwrap();
+        player.state.hp = 0.0;
+        let mana_before = player.state.mana;
+
+        handle_skill3_cast_request(&mut players, addr, &GameState::Running, now);
+
+        let player = players.get(&addr).unwrap();
+        assert!((player.state.mana - mana_before).abs() < EPSILON);
+        assert!(player.last_skill3_cast_at.is_none());
+        assert!(player
+            .pending_skill_feedback
+            .as_deref()
+            .is_some_and(|s| s.contains("dead")));
+    }
+
+    #[test]
+    fn skill3_rejects_while_respawn_pending_without_spending() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:50003".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let player = players.get_mut(&addr).unwrap();
+        player.state.hp = 100.0;
+        player.state.mana = MAX_MANA;
+        player.respawn_at = Some(now + Duration::from_secs(2));
+
+        handle_skill3_cast_request(&mut players, addr, &GameState::Running, now);
+
+        let player = players.get(&addr).unwrap();
+        assert!((player.state.mana - MAX_MANA).abs() < EPSILON);
+        assert!(player.last_skill3_cast_at.is_none());
+        assert!(player
+            .pending_skill_feedback
+            .as_deref()
+            .is_some_and(|s| s.contains("respawn")));
+    }
+
+    #[test]
+    fn skill3_rejects_insufficient_mana_and_on_cooldown() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:50004".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let player = players.get_mut(&addr).unwrap();
+        player.state.hp = 50.0;
+        player.state.mana = SKILL3_MANA_COST * 0.5;
+        handle_skill3_cast_request(&mut players, addr, &GameState::Running, now);
+        {
+            let p = players.get(&addr).unwrap();
+            assert!(p.last_skill3_cast_at.is_none());
+            assert!(p
+                .pending_skill_feedback
+                .as_deref()
+                .is_some_and(|s| s.contains("mana")));
+        }
+        {
+            let p = players.get_mut(&addr).unwrap();
+            p.pending_skill_feedback = None;
+            p.state.mana = MAX_MANA;
+        }
+        handle_skill3_cast_request(&mut players, addr, &GameState::Running, now);
+        assert!(players
+            .get(&addr)
+            .is_some_and(|p| p.last_skill3_cast_at.is_some()));
+        players.get_mut(&addr).unwrap().pending_skill_feedback = None;
+
+        let (hp_after_first, mana_after_first) = {
+            let p = players.get(&addr).unwrap();
+            (p.state.hp, p.state.mana)
+        };
+        handle_skill3_cast_request(&mut players, addr, &GameState::Running, now);
+        let player = players.get(&addr).unwrap();
+        assert!((player.state.hp - hp_after_first).abs() < EPSILON);
+        assert!((player.state.mana - mana_after_first).abs() < EPSILON);
+        assert!(player
+            .pending_skill_feedback
+            .as_deref()
+            .is_some_and(|s| s.contains("cooldown")));
+    }
+
+    #[test]
+    fn skill3_rank_zero_is_rejected() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:50005".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let player = players.get_mut(&addr).unwrap();
+        player.state.skill3_rank = 0;
+        player.state.mana = MAX_MANA;
+
+        handle_skill3_cast_request(&mut players, addr, &GameState::Running, now);
+
+        let player = players.get(&addr).unwrap();
+        assert!(player.last_skill3_cast_at.is_none());
+        assert!((player.state.mana - MAX_MANA).abs() < EPSILON);
+        assert!(player
+            .pending_skill_feedback
+            .as_deref()
+            .is_some_and(|s| s.contains("rank")));
+    }
+
+    #[test]
+    fn skill3_scales_with_rank() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:50006".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let player = players.get_mut(&addr).unwrap();
+        player.state.hp = 10.0;
+        player.state.max_hp = 200.0;
+        player.state.mana = MAX_MANA;
+        player.state.skill3_rank = 3;
+        let expected = SKILL3_HEAL_BY_RANK[2];
+
+        handle_skill3_cast_request(&mut players, addr, &GameState::Running, now);
+
+        let player = players.get(&addr).unwrap();
+        assert!((player.state.hp - (10.0 + expected)).abs() < EPSILON);
+    }
+
+    #[test]
+    fn skill3_rejects_when_match_not_running_without_spending() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:50007".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let player = players.get_mut(&addr).unwrap();
+        let mana_before = player.state.mana;
+
+        handle_skill3_cast_request(&mut players, addr, &GameState::Lobby, now);
+
+        let player = players.get(&addr).unwrap();
+        assert!((player.state.mana - mana_before).abs() < EPSILON);
+        assert!(player.last_skill3_cast_at.is_none());
+        assert!(player
+            .pending_skill_feedback
+            .as_deref()
+            .is_some_and(|s| s.contains("not running")));
+    }
 }
 
 fn handle_respawns(
@@ -2645,6 +2982,8 @@ fn handle_respawns(
         player.state.mana = player.state.max_mana;
         player.respawn_at = None;
         player.last_cast_at = None;
+        player.last_skill3_cast_at = None;
+        player.pending_skill_feedback = None;
     }
 }
 
@@ -2682,8 +3021,12 @@ fn reset_match(
         player.state.max_mana = MAX_MANA;
         player.state.gold = 0;
         player.state.xp = 0;
+        player.state.skill3_rank = 1;
+        player.state.skill3_cooldown_remaining_secs = 0.0;
         player.last_cast_at = None;
+        player.last_skill3_cast_at = None;
         player.respawn_at = None;
+        player.pending_skill_feedback = None;
     }
     *game_state = GameState::Running;
 }
