@@ -21,7 +21,9 @@ use shared::{SkillSlot, TargetingMode, ability_for_slot, scaled_mana_cost};
 use crate::player::Player;
 use crate::team::Team;
 
+/// Must match server `server/src/balance.rs` player baselines (display / local defaults).
 pub const MAX_HP: f32 = 100.0;
+/// Must match server `server/src/balance.rs` player baselines (display / local defaults).
 pub const MAX_MANA: f32 = 100.0;
 
 /// Heal per rank for skill 3 (rank 1 = index 0). Must match `server/src/main.rs` `SKILL3_HEAL_BY_RANK`.

@@ -30,6 +30,10 @@ Canonical version: `0.2.0`
 
 - Runtime and startup stability hardening.
 - Full reconnect slot reclaim across disconnects and NAT changes.
-- Match phase, restart, and rematch flow.
-- Jungle camps and neutral AI.
-- Release-readiness validation for the full combat/skill loop in production builds.
+- Full skill system (four distinct server-validated abilities with per-rank tuning), tooltip UX.
+
+## Release gate and balance (TASK-12)
+
+- Authoritative tuning constants: `server/src/balance.rs` (see `docs/balance-tuning.md`).
+- Release checklist, manual QA matrix, and readiness report: `docs/release-gate-checklist.md`, `docs/manual-qa-matrix.md`, `docs/release-readiness-report.md`.
+- Live UDP QA smoke (two clients + cast): `make verify-task-12` or `python3 scripts/verify_task_12_qa_matrix_live_udp.py` (after `cargo build -p server`).
