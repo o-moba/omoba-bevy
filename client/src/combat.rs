@@ -12,9 +12,9 @@ use bevy::{
 use crate::camera::MainCamera;
 use crate::debug_console::DebugConsole;
 use crate::net::{
-    GameState, GameStateSnapshot, NetworkCommand, NetworkMinion, NetworkMinionId,
-    NetworkNeutral, NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId,
-    RemotePlayer, StructureKind, TargetId, TargetKind,
+    GameState, GameStateSnapshot, NetworkCommand, NetworkMinion, NetworkMinionId, NetworkNeutral,
+    NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId, RemotePlayer,
+    StructureKind, TargetId, TargetKind,
 };
 use crate::player::Player;
 use crate::team::Team;
@@ -563,9 +563,8 @@ fn spawn_combat_bars_system(
             Some(StructureKind::BaseTower) => BASE_TOWER_BAR_Y,
             None => 2.1,
         };
-        let show_mana_bar = structure_kind.is_none()
-            && minion_marker.is_none()
-            && neutral_marker.is_none();
+        let show_mana_bar =
+            structure_kind.is_none() && minion_marker.is_none() && neutral_marker.is_none();
         let mut bars = CombatBars::default();
         let bar_root = commands
             .spawn((
@@ -789,7 +788,8 @@ fn update_target_marker_system(
         marker_center_y + bob,
         target_translation.z,
     );
-    marker_transform.rotation = Quat::from_rotation_y(time.elapsed_secs() * TARGET_MARKER_SPIN_SPEED);
+    marker_transform.rotation =
+        Quat::from_rotation_y(time.elapsed_secs() * TARGET_MARKER_SPIN_SPEED);
     marker_transform.scale = Vec3::new(marker_radius * pulse, 1.0, marker_radius * pulse);
 }
 

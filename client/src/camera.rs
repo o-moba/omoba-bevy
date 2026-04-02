@@ -155,7 +155,10 @@ fn update_camera(
         let follow_target = if let Some(override_target) = focus_override {
             Some(override_target)
         } else {
-            player_query.single().ok().map(|transform| transform.translation)
+            player_query
+                .single()
+                .ok()
+                .map(|transform| transform.translation)
         };
         if let Some(target) = follow_target {
             let zoom = cam_state.zoom;
