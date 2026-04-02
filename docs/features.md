@@ -10,10 +10,8 @@ Canonical version: `0.2.0`
 - Core combat loop with projectiles, structures, minions, death, respawn, mana regeneration, and base-destruction win condition.
 - Map layout with three lanes and simple jungle blocks.
 - Player progression with level-based XP thresholds, HP/mana scaling on level-up, and tracked skill points.
-- In-game local HUD display for level, XP progression, and available skill points.
-- Four-slot skill bar (Q/W/E/R): rank vs max rank, local cooldown readout for the active shot, and a gold-tinted idle state when the server snapshot indicates an upgrade is allowed (skill point available and below max rank).
-- **Skill upgrades (authoritative):** hold **Shift** and click a slot, or press **Shift+Q / Shift+W / Shift+E / Shift+R** to send an upgrade intent. The server validates points, rank cap, and slot; the next snapshot updates ranks and gameplay numbers (damage, mana cost, cooldown, passives) immediately.
-- **Tooltips:** hover a skill slot for name, description, mana cost, cooldown (active vs passive), current primary value, and next-rank preview when upgradeable. Tooltip text and numbers come from the shared `skills` crate so they stay aligned with server simulation.
+- In-game match HUD (below minimap): level, XP, skill points, reserved upgrade key label (`U`), local HP/mana, target hints, objective line, and F1 help reminder; bottom-right skill bar showing `Q`–`R` keys (same cast binding until per-skill server support).
+- F1 toggle help overlay with movement, camera, targeting, casting, objective, and pause guidance; does not reset simulation when toggled. The panel is shown only while the match is `Running` (toggle state is preserved when returning to a live match so lobby/victory screens are not covered).
 
 ## Multiplayer Session Reliability
 
