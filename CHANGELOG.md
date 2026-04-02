@@ -30,6 +30,7 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ### Changed
 - Server: allow `clippy::items_after_test_module` on the binary and `clippy::too_many_arguments` on `simulate_projectiles`; allow `clippy::assertions_on_constants` in `balance` unit tests (keeps `-D warnings` clean for `cargo clippy -p server`).
+- Server refactor: split monolithic `server/src/main.rs` logic into focused modules (`progression`, `neutrals`, `world`, `session`) while preserving runtime behavior and test coverage.
 
 ## [0.2.0] - 2026-04-01
 

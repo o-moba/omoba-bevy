@@ -76,8 +76,8 @@ fn update_match_hud(
     enemy_bases: Query<(&CombatStats, &Team, &StructureKind), With<NetworkStructure>>,
     cast_cd: Res<LocalCastCooldown>,
     target_state: Res<TargetState>,
-    mut prog: Query<&mut Text, With<MatchHudProgressionText>>,
-    mut status: Query<&mut Text, With<MatchHudStatusText>>,
+    mut prog: Query<&mut Text, (With<MatchHudProgressionText>, Without<MatchHudStatusText>)>,
+    mut status: Query<&mut Text, (With<MatchHudStatusText>, Without<MatchHudProgressionText>)>,
 ) {
     let Ok(mut prog_text) = prog.single_mut() else {
         return;
