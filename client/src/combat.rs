@@ -8,9 +8,10 @@ use bevy::{
     prelude::*,
     window::PrimaryWindow,
 };
+use std::time::{Duration, Instant};
 
 use crate::camera::MainCamera;
-use crate::debug_console::DebugConsole;
+use crate::debug_console::{DebugConsole, debug_ui_enabled};
 use crate::net::{
     GameState, GameStateSnapshot, HeroAbility, NetworkCommand, NetworkMinion, NetworkMinionId,
     NetworkNeutral, NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId,
@@ -23,12 +24,11 @@ use crate::team::Team;
 pub const MAX_HP: f32 = 100.0;
 pub const MAX_MANA: f32 = 100.0;
 
-/// Must match `MELEE_RANGE_XZ` in `server/src/main.rs` (TASK-07 / AD2).
-pub const MELEE_RANGE_XZ: f32 = 2.75;
-/// Must match `SPELL_MANA_COST` for skill 1 on the server.
-pub const MELEE_MANA_COST: f32 = 20.0;
-/// Must match `MAX_MELEE_SKILL_RANK` on the server.
-pub const MAX_MELEE_SKILL_RANK: u32 = 5;
+/// Heal per rank for skill 3 (rank 1 = index 0). Must match `server/src/main.rs` `SKILL3_HEAL_BY_RANK`.
+pub const SKILL3_HEAL_BY_RANK: [f32; 5] = [30.0, 45.0, 60.0, 75.0, 90.0];
+pub const SKILL3_MANA_COST: f32 = 25.0;
+/// Must match server `SKILL3_COOLDOWN`.
+pub const SKILL3_COOLDOWN_SECS: f32 = 4.0;
 
 const BAR_WIDTH: f32 = 1.45;
 const BAR_HEIGHT: f32 = 0.09;
@@ -54,12 +54,18 @@ const BASE_TOWER_MARKER_RADIUS: f32 = 3.75;
 const SKILL_BUTTON_SIZE: f32 = 72.0;
 const SKILL_SLOT_GAP: f32 = 8.0;
 const SKILL_BUTTON_MARGIN: f32 = 20.0;
-const SKILL_BUTTON_GAP: f32 = 12.0;
+const SKILL3_BUTTON_GAP: f32 = 12.0;
 const SKILL_BUTTON_COLOR: Color = Color::srgba(0.12, 0.12, 0.12, 0.75);
 const SKILL_BUTTON_HOVER_COLOR: Color = Color::srgba(0.18, 0.18, 0.18, 0.85);
 const SKILL_BUTTON_PRESS_COLOR: Color = Color::srgba(0.28, 0.28, 0.28, 0.95);
 /// Slight gold tint when the server state allows spending a point on this slot (synced eligibility).
 const SKILL_BUTTON_AFFORDANCE_COLOR: Color = Color::srgba(0.18, 0.16, 0.08, 0.88);
+
+/// HUD copy only — keep in sync with `MANA_RESTORE_*` in `server/src/main.rs`.
+const MANA_RESTORE_BASE: f32 = 22.0;
+const MANA_RESTORE_PER_RANK: f32 = 7.0;
+const MANA_RESTORE_MAX_RANK: u8 = 5;
+const MANA_RESTORE_COOLDOWN_SECS: u64 = 12;
 
 pub struct CombatPlugin;
 
@@ -96,6 +102,7 @@ impl Plugin for CombatPlugin {
             )
                 .chain(),
         );
+        app.add_systems(Update, admin_debug_hotkeys.run_if(debug_ui_enabled));
     }
 }
 
@@ -140,6 +147,73 @@ struct TargetState {
     marker_entity: Option<Entity>,
 }
 
+/// Optimistic client-side cast gate for observability (mirrors server rules; may drift if server rejects).
+#[derive(Resource, Default)]
+struct LocalSpellCastState {
+    last_cast_at: Option<Instant>,
+}
+
+fn try_queue_spell_cast(
+    target: TargetId,
+    local_stats: &CombatStats,
+    cast_state: &mut LocalSpellCastState,
+    command_writer: &mut MessageWriter<NetworkCommand>,
+    console: &mut DebugConsole,
+) {
+    let now = Instant::now();
+    if !local_stats.is_alive() {
+        info!("[omoba:cli] event=cast_reject reason=caster_dead");
+        console.push_line("Cast rejected: dead (wait for respawn).".to_string());
+        return;
+    }
+    if local_stats.mana < SPELL_MANA_COST {
+        info!(
+            "[omoba:cli] event=cast_reject reason=insufficient_mana have_mana={:.2} cost={:.2}",
+            local_stats.mana, SPELL_MANA_COST
+        );
+        console.push_line(format!(
+            "Cast rejected: need {:.0} mana (have {:.0}).",
+            SPELL_MANA_COST, local_stats.mana
+        ));
+        return;
+    }
+    if let Some(last) = cast_state.last_cast_at {
+        let elapsed = now.duration_since(last);
+        if elapsed < SPELL_COOLDOWN {
+            let remaining = SPELL_COOLDOWN - elapsed;
+            info!(
+                "[omoba:cli] event=cast_reject reason=on_cooldown remaining_ms={}",
+                remaining.as_millis()
+            );
+            console.push_line(format!(
+                "Cast rejected: on cooldown (~{} ms left).",
+                remaining.as_millis()
+            ));
+            return;
+        }
+    }
+
+    command_writer.write(NetworkCommand::Cast { target });
+    cast_state.last_cast_at = Some(now);
+
+    let message = format!(
+        "Cast -> {} {} (mana {:.0})",
+        match target.kind {
+            TargetKind::Player => "player",
+            TargetKind::Minion => "minion",
+            TargetKind::Structure => "structure",
+            TargetKind::Neutral => "neutral",
+        },
+        target.id,
+        local_stats.mana
+    );
+    console.push_line(message.clone());
+    info!(
+        "[omoba:cli] event=cast_sent target_kind={:?} target_id={} mana={:.0}",
+        target.kind, target.id, local_stats.mana
+    );
+}
+
 #[derive(Component, Default)]
 struct CombatBars {
     hp_fill: Option<Entity>,
@@ -175,6 +249,12 @@ struct HoveredSkillSlot(Option<u8>);
 
 #[derive(Resource, Default)]
 struct LocalRangedCooldownUntil(Option<f32>);
+
+#[derive(Component)]
+struct ManaRestoreSkillButton;
+
+#[derive(Component)]
+struct ManaRestoreSkillTooltip;
 
 #[derive(Component)]
 struct CombatBarRoot;
@@ -762,7 +842,7 @@ fn select_target_system(
         target_state.selected_entity = Some(entity);
         target_state.selected_target = Some(target_id);
         info!(
-            "Target selected: id={} ({:?})",
+            "[omoba:cli] event=target_selected target_id={} target_kind={:?}",
             target_id.id, target_id.kind
         );
     }
@@ -825,11 +905,18 @@ fn ability_keyboard_system(
         With<NetworkStructure>,
     >,
     mut target_state: ResMut<TargetState>,
+    mut cast_state: ResMut<LocalSpellCastState>,
     mut command_writer: MessageWriter<NetworkCommand>,
     mut console: ResMut<DebugConsole>,
 ) {
     if let Some(game_state) = game_state.as_ref() {
         if !matches!(game_state.state, GameState::Running) {
+            if keyboard_input.just_pressed(KeyCode::KeyQ) {
+                info!(
+                    "[omoba:cli] event=cast_reject reason=match_not_running state={:?}",
+                    game_state.state
+                );
+            }
             return;
         }
     }
@@ -874,8 +961,6 @@ fn ability_keyboard_system(
             target.id,
             local_stats.mana
         );
-        console.push_line(message.clone());
-        info!("{message}");
     } else {
         let message = match ability {
             HeroAbility::MeleeStrike => {
@@ -886,33 +971,7 @@ fn ability_keyboard_system(
             }
         };
         console.push_line(message);
-        info!("{message}");
-        return;
-    };
-    let Some(entity) = target_state.selected_entity else {
-        let message = "No target entity for melee (re-select target).";
-        console.push_line(message);
-        info!("{message}");
-        return;
-    };
-    let Ok(target_transform) = target_transforms.get(entity) else {
-        let message = "Target is no longer valid.";
-        console.push_line(message);
-        info!("{message}");
-        return;
-    };
-    let target_team = target_teams.get(entity).ok().copied();
-    if let Some(reason) = local_melee_cast_block_reason(
-        target,
-        *local_team,
-        target_team,
-        local_transform.translation,
-        target_transform.translation,
-        local_stats.mana,
-    ) {
-        console.push_line(reason);
-        info!("{reason}");
-        return;
+        info!("[omoba:cli] event=cast_reject reason=no_valid_target");
     }
 
     command_writer.write(NetworkCommand::Cast { target });
