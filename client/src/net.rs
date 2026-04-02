@@ -125,9 +125,15 @@ impl Plugin for NetworkingPlugin {
 
 #[derive(Message, Clone, Copy, Debug)]
 pub enum NetworkCommand {
-    Cast { target: TargetId },
-    CastSkill { skill_slot: u8 },
-    Join { team: Team, character: CharacterChoice },
+    Cast {
+        target: TargetId,
+    },
+    /// Skill 4 — server-authoritative mana restore (no target).
+    ManaRestore,
+    Join {
+        team: Team,
+        character: CharacterChoice,
+    },
     #[allow(dead_code)]
     RequestRematch,
 }
@@ -145,9 +151,7 @@ enum ClientPacket {
         ability: HeroAbility,
         target: TargetId,
     },
-    CastSkill {
-        skill_slot: u8,
-    },
+    ManaRestore,
     Join {
         team: Team,
         #[serde(default = "default_character_choice")]
@@ -214,10 +218,8 @@ struct PlayerState {
     next_level_xp: u32,
     #[serde(default)]
     skill_points: u32,
-    #[serde(default = "default_skill3_rank")]
-    skill3_rank: u8,
-    #[serde(default)]
-    skill3_cooldown_remaining_secs: f32,
+    #[serde(default = "default_mana_restore_rank")]
+    mana_restore_rank: u8,
     #[serde(default = "default_character_choice")]
     character: CharacterChoice,
     #[serde(default)]
@@ -485,12 +487,7 @@ pub struct PlayerProgression {
     pub xp: u32,
     pub next_level_xp: u32,
     pub skill_points: u32,
-    pub ranged_shot_rank: u8,
-}
-
-#[derive(Resource, Default)]
-pub struct PendingAbilityFeedback {
-    pub message: Option<String>,
+    pub mana_restore_rank: u8,
 }
 
 #[derive(Component)]
@@ -880,10 +877,8 @@ fn send_network_commands(
                     .outgoing
                     .send(ClientPacket::UpgradeAbility { ability: *ability });
             }
-            NetworkCommand::CastSkill { skill_slot } => {
-                let _ = channels.outgoing.send(ClientPacket::CastSkill {
-                    skill_slot: *skill_slot,
-                });
+            NetworkCommand::ManaRestore => {
+                let _ = channels.outgoing.send(ClientPacket::ManaRestore);
             }
             NetworkCommand::Join { team, character } => {
                 if client_session.join_flow_committed {
@@ -980,8 +975,7 @@ fn apply_server_snapshot(
         neutrals,
         game_state,
         rematch_in_secs,
-        your_skill_feedback,
-    }) = queued.latest.take()
+    )) = latest_snapshot
     else {
         return;
     };
@@ -1924,7 +1918,7 @@ fn player_state_to_progression(player: &PlayerState) -> PlayerProgression {
         xp: player.xp,
         next_level_xp: player.next_level_xp,
         skill_points: player.skill_points,
-        ranged_shot_rank: player.ranged_shot_rank.max(1),
+        mana_restore_rank: player.mana_restore_rank.max(1),
     }
 }
 
@@ -1997,6 +1991,10 @@ fn default_skill3_rank() -> u8 {
 
 fn default_minion_brain_state() -> MinionBrainState {
     MinionBrainState::Marching
+}
+
+fn default_mana_restore_rank() -> u8 {
+    1
 }
 
 #[cfg(test)]
