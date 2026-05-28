@@ -2,6 +2,7 @@ use bevy::camera::primitives::Aabb;
 use bevy::gltf::Gltf;
 use bevy::prelude::*;
 use bevy::scene::SceneRoot;
+use ekza_stellar_sdk::bevy::{EkzaModelCatalog, load_builtin_model_catalog};
 
 use crate::camera::{CameraState, MainCamera, locked_camera_offset};
 use crate::combat::CombatStats;
@@ -36,25 +37,13 @@ pub struct PlayerAssets {
     pub material: Handle<StandardMaterial>,
 }
 
-#[derive(Resource, Clone, Default)]
-pub struct PlayerModelCatalog {
-    ipfs_scene: Option<Handle<Scene>>,
-    toka_scene: Option<Handle<Scene>>,
-    toka_gltf: Option<Handle<Gltf>>,
-    wang_scene: Option<Handle<Scene>>,
-    wang_gltf: Option<Handle<Gltf>>,
-}
+pub type PlayerModelCatalog = EkzaModelCatalog;
 
 pub fn model_assets_for_choice(
     catalog: &PlayerModelCatalog,
     choice: CharacterChoice,
 ) -> (Option<Handle<Scene>>, Option<Handle<Gltf>>) {
-    match choice {
-        CharacterChoice::Ipfs => (catalog.ipfs_scene.clone(), None),
-        CharacterChoice::Toka => (catalog.toka_scene.clone(), catalog.toka_gltf.clone()),
-        CharacterChoice::Wang => (catalog.wang_scene.clone(), catalog.wang_gltf.clone()),
-        CharacterChoice::Cube => (None, None),
-    }
+    catalog.handles_for(choice)
 }
 
 pub struct SetupPlugin;
@@ -124,64 +113,6 @@ impl Default for LightingSettings {
 #[derive(Component)]
 struct SceneDirectionalLight;
 
-pub fn load_scene_from_ipfs(url: &str, asset_server: &AssetServer) -> Option<Handle<Scene>> {
-    use reqwest::blocking as req_blocking;
-    use std::fs;
-    use std::path::PathBuf;
-
-    let last_segment = url.split('/').last().unwrap_or("downloaded_scene.glb");
-
-    let filename = if last_segment.ends_with(".glb") {
-        last_segment.to_string()
-    } else {
-        format!("{last_segment}.glb")
-    };
-
-    let assets_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("assets")
-        .join("downloaded");
-    if let Err(error) = fs::create_dir_all(&assets_dir) {
-        warn!("Failed to create ./assets/downloaded folder: {error}");
-        return None;
-    }
-
-    let final_path = assets_dir.join(&filename);
-
-    let response = match req_blocking::get(url) {
-        Ok(response) => response,
-        Err(error) => {
-            warn!("Failed to download {url}: {error}");
-            return None;
-        }
-    };
-    let bytes = response
-        .bytes()
-        .map_err(|error| warn!("Failed to read bytes from {url}: {error}"))
-        .ok()?;
-    if !is_valid_glb_bytes(&bytes) {
-        warn!("Downloaded asset from {url} is not a valid glb.");
-        return None;
-    }
-
-    if let Err(error) = fs::write(&final_path, &bytes) {
-        warn!("Failed to write asset file {:?}: {error}", final_path);
-        return None;
-    }
-
-    let relative_path = format!("downloaded/{}#Scene0", filename);
-    let scene_handle: Handle<Scene> = asset_server.load(&relative_path);
-    Some(scene_handle)
-}
-
-fn is_valid_glb_bytes(bytes: &[u8]) -> bool {
-    if bytes.len() < 12 || &bytes[0..4] != b"glTF" {
-        return false;
-    }
-    let version = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
-    let length = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]) as usize;
-    version == 2 && length <= bytes.len()
-}
-
 fn setup_scene(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -197,36 +128,18 @@ fn setup_scene(
     )));
     let player_material_handle: Handle<StandardMaterial> =
         materials.add(StandardMaterial::from(Color::srgb(0.8, 0.7, 0.6)));
-    let mut catalog = PlayerModelCatalog::default();
-    if USE_CUSTOM_MODEL {
-        let toka_model_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("assets")
-            .join("downloaded")
-            .join("toka.glb");
-        if toka_model_path.exists() {
-            catalog.toka_scene = Some(asset_server.load("downloaded/toka.glb#Scene0"));
-            catalog.toka_gltf = Some(asset_server.load("downloaded/toka.glb"));
-        }
-
-        let wang_model_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("assets")
-            .join("downloaded")
-            .join("wang.glb");
-        if wang_model_path.exists() {
-            catalog.wang_scene = Some(asset_server.load("downloaded/wang.glb#Scene0"));
-            catalog.wang_gltf = Some(asset_server.load("downloaded/wang.glb"));
-        }
-
-        catalog.ipfs_scene = load_scene_from_ipfs(
-            "https://ipfs.io/ipfs/QmWMYVUF2pa4GkoMgquyY8nmYjQJDP9yxnSBvjVqH7EJQr",
-            &asset_server,
-        );
-    }
+    let assets_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
+    let catalog = if USE_CUSTOM_MODEL {
+        load_builtin_model_catalog(&asset_server, &assets_dir)
+    } else {
+        PlayerModelCatalog::default()
+    };
+    let (initial_scene, initial_gltf) = model_assets_for_choice(&catalog, CharacterChoice::Ipfs);
 
     commands.insert_resource(catalog.clone());
     commands.insert_resource(PlayerAssets {
-        scene: catalog.ipfs_scene,
-        gltf: None,
+        scene: initial_scene,
+        gltf: initial_gltf,
         mesh: player_mesh_handle.clone(),
         material: player_material_handle.clone(),
     });
@@ -313,12 +226,7 @@ fn sync_selected_player_assets(
     mut player_assets: ResMut<PlayerAssets>,
 ) {
     let (scene, gltf) = model_assets_for_choice(&catalog, team_selection.character);
-    let label = match team_selection.character {
-        CharacterChoice::Ipfs => "IPFS",
-        CharacterChoice::Toka => "downloaded/toka.glb",
-        CharacterChoice::Wang => "downloaded/wang.glb",
-        CharacterChoice::Cube => "Cube",
-    };
+    let label = catalog.label_for(team_selection.character);
 
     let changed = player_assets.scene != scene || player_assets.gltf != gltf;
     if changed {

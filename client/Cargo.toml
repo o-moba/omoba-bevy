@@ -6,7 +6,7 @@ edition.workspace = true
 [dependencies]
 bevy.workspace = true
 crossbeam-channel.workspace = true
-reqwest.workspace = true
+ekza-stellar-sdk = { path = "../ekza-stellar-sdk" }
 serde.workspace = true
 serde_json.workspace = true
 winit.workspace = true

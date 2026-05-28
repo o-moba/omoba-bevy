@@ -9,6 +9,7 @@ mod world;
 
 use balance::*;
 use bevy::{app::ScheduleRunnerPlugin, prelude::*};
+use ekza_stellar_sdk::EkzaCharacter as CharacterChoice;
 use gameplay::GameplayPlugin;
 use neutrals::*;
 use progression::*;
@@ -56,15 +57,6 @@ enum ClientPacket {
 enum Team {
     Green,
     Blue,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-enum CharacterChoice {
-    Ipfs,
-    Toka,
-    Wang,
-    Cube,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
