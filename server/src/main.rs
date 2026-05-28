@@ -44,6 +44,8 @@ enum ClientPacket {
         team: Team,
         #[serde(default = "default_character_choice")]
         character: CharacterChoice,
+        #[serde(default)]
+        session_id: Option<String>,
     },
     Ping,
     RequestRematch,
@@ -283,9 +285,16 @@ impl Vec3f {
 
 struct ConnectedPlayer {
     state: PlayerState,
+    session_id: Option<String>,
     last_seen: Instant,
+    last_movement_at: Instant,
     last_cast_at: Option<Instant>,
     respawn_at: Option<Instant>,
+}
+
+struct DisconnectedSession {
+    player: ConnectedPlayer,
+    disconnected_at: Instant,
 }
 
 struct Projectile {
@@ -404,6 +413,7 @@ struct TickContext {
 struct ServerRuntime {
     socket: UdpSocket,
     players: HashMap<SocketAddr, ConnectedPlayer>,
+    disconnected_sessions: HashMap<String, DisconnectedSession>,
     projectiles: HashMap<u64, Projectile>,
     map_layout: MapLayoutState,
     structures: HashMap<u64, Structure>,
@@ -429,6 +439,7 @@ impl ServerRuntime {
         Self {
             socket,
             players: HashMap::new(),
+            disconnected_sessions: HashMap::new(),
             projectiles: HashMap::new(),
             structures: build_structures(&map_layout),
             minions: HashMap::new(),
@@ -453,6 +464,7 @@ impl ServerRuntime {
             socket,
             recv_buf,
             players,
+            disconnected_sessions,
             projectiles,
             map_layout,
             structures,
@@ -478,24 +490,25 @@ impl ServerRuntime {
                     };
 
                     let now = Instant::now();
-                    ensure_player_connected(players, map_layout, addr, next_player_id, now);
-                    if let Some(player) = players.get_mut(&addr) {
-                        player.last_seen = now;
-                    }
 
                     match packet {
                         ClientPacket::Transform { x, y, z, yaw } => {
+                            ensure_player_connected(players, map_layout, addr, next_player_id, now);
+                            if let Some(player) = players.get_mut(&addr) {
+                                player.last_seen = now;
+                            }
                             if matches!(game_state, GameState::Running)
                                 && let Some(player) = players.get_mut(&addr)
                                 && player.state.hp > 0.0
                             {
-                                player.state.x = x;
-                                player.state.y = y;
-                                player.state.z = z;
-                                player.state.yaw = yaw;
+                                handle_transform_request(player, map_layout, x, y, z, yaw, now);
                             }
                         }
                         ClientPacket::Cast { target } => {
+                            ensure_player_connected(players, map_layout, addr, next_player_id, now);
+                            if let Some(player) = players.get_mut(&addr) {
+                                player.last_seen = now;
+                            }
                             handle_cast_request(
                                 players,
                                 projectiles,
@@ -509,17 +522,42 @@ impl ServerRuntime {
                                 now,
                             );
                         }
-                        ClientPacket::Join { team, character } => {
+                        ClientPacket::Join {
+                            team,
+                            character,
+                            session_id,
+                        } => {
+                            let session_id = normalize_session_id(session_id);
+                            if !ensure_player_for_join(
+                                players,
+                                disconnected_sessions,
+                                map_layout,
+                                addr,
+                                session_id,
+                                next_player_id,
+                                now,
+                            ) {
+                                continue;
+                            }
                             if let Some(player) = players.get_mut(&addr) {
-                                handle_join_request(player, team, character, map_layout);
+                                handle_join_request(player, team, character, map_layout, now);
                             }
                             if matches!(game_state, GameState::Lobby) {
                                 println!("First player joined - match starting");
                                 *game_state = GameState::Running;
                             }
                         }
-                        ClientPacket::Ping => {}
+                        ClientPacket::Ping => {
+                            ensure_player_connected(players, map_layout, addr, next_player_id, now);
+                            if let Some(player) = players.get_mut(&addr) {
+                                player.last_seen = now;
+                            }
+                        }
                         ClientPacket::RequestRematch => {
+                            ensure_player_connected(players, map_layout, addr, next_player_id, now);
+                            if let Some(player) = players.get_mut(&addr) {
+                                player.last_seen = now;
+                            }
                             if matches!(game_state, GameState::Victory { .. }) {
                                 reset_match(
                                     players,
@@ -560,6 +598,7 @@ impl ServerRuntime {
         let Self {
             socket,
             players,
+            disconnected_sessions,
             projectiles,
             map_layout,
             structures,
@@ -625,12 +664,28 @@ impl ServerRuntime {
             *victory_at = None;
         }
 
-        players.retain(|addr, player| {
-            let is_alive = now.duration_since(player.last_seen) <= PLAYER_TIMEOUT;
-            if !is_alive {
-                println!("Player {} timed out ({addr})", player.state.id);
+        let timed_out_addrs = players
+            .iter()
+            .filter(|(_, player)| now.duration_since(player.last_seen) > PLAYER_TIMEOUT)
+            .map(|(addr, _)| *addr)
+            .collect::<Vec<_>>();
+        for addr in timed_out_addrs {
+            let Some(player) = players.remove(&addr) else {
+                continue;
+            };
+            println!("Player {} timed out ({addr})", player.state.id);
+            if let Some(session_id) = player.session_id.clone() {
+                disconnected_sessions.insert(
+                    session_id,
+                    DisconnectedSession {
+                        player,
+                        disconnected_at: now,
+                    },
+                );
             }
-            is_alive
+        }
+        disconnected_sessions.retain(|_, session| {
+            now.duration_since(session.disconnected_at) <= SESSION_RECLAIM_WINDOW
         });
 
         let live_player_ids = players
@@ -926,7 +981,7 @@ fn handle_cast_request(
     }
 
     let caster_team = caster.state.team;
-    let target_position = match target.kind {
+    let (target_position, target_radius) = match target.kind {
         TargetKind::Player => {
             let Some(target_player) = players.values().find(|player| {
                 player.state.id == target.id
@@ -935,23 +990,29 @@ fn handle_cast_request(
             }) else {
                 return;
             };
-            Vec3f::new(
-                target_player.state.x,
-                target_player.state.y + AIM_HEIGHT,
-                target_player.state.z,
+            (
+                Vec3f::new(
+                    target_player.state.x,
+                    target_player.state.y + AIM_HEIGHT,
+                    target_player.state.z,
+                ),
+                PLAYER_HIT_RADIUS,
             )
         }
         TargetKind::Minion => {
             let Some(target_minion) = minions.get(&target.id) else {
                 return;
             };
-            if target_minion.state.hp <= 0.0 {
+            if target_minion.state.hp <= 0.0 || target_minion.state.team == caster_team {
                 return;
             }
-            Vec3f::new(
-                target_minion.state.x,
-                target_minion.state.y + MINION_RADIUS * 0.8,
-                target_minion.state.z,
+            (
+                Vec3f::new(
+                    target_minion.state.x,
+                    target_minion.state.y + MINION_RADIUS * 0.8,
+                    target_minion.state.z,
+                ),
+                MINION_RADIUS,
             )
         }
         TargetKind::Structure => {
@@ -961,10 +1022,13 @@ fn handle_cast_request(
             if target_structure.state.hp <= 0.0 || target_structure.state.team == caster_team {
                 return;
             }
-            Vec3f::new(
-                target_structure.state.x,
-                target_structure.state.y,
-                target_structure.state.z,
+            (
+                Vec3f::new(
+                    target_structure.state.x,
+                    target_structure.state.y,
+                    target_structure.state.z,
+                ),
+                structure_radius(target_structure.state.kind),
             )
         }
         TargetKind::Neutral => {
@@ -974,10 +1038,13 @@ fn handle_cast_request(
             if target_neutral.dead_until.is_some() || target_neutral.state.hp <= 0.0 {
                 return;
             }
-            Vec3f::new(
-                target_neutral.state.x,
-                target_neutral.state.y + NEUTRAL_RADIUS * 0.85,
-                target_neutral.state.z,
+            (
+                Vec3f::new(
+                    target_neutral.state.x,
+                    target_neutral.state.y + NEUTRAL_RADIUS * 0.85,
+                    target_neutral.state.z,
+                ),
+                NEUTRAL_RADIUS,
             )
         }
     };
@@ -995,6 +1062,13 @@ fn handle_cast_request(
     .normalize_or_zero();
 
     if direction.x == 0.0 && direction.y == 0.0 && direction.z == 0.0 {
+        return;
+    }
+
+    let dx = target_position.x - caster_position.x;
+    let dz = target_position.z - caster_position.z;
+    let horizontal_distance = (dx * dx + dz * dz).sqrt();
+    if horizontal_distance > SPELL_CAST_RANGE + target_radius {
         return;
     }
 
@@ -1449,10 +1523,24 @@ fn swept_sphere_intersects_target(start: Vec3f, end: Vec3f, target: Vec3f, radiu
 struct MapLayoutState {
     home: Vec3f,
     away: Vec3f,
+    min_x: f32,
+    max_x: f32,
+    min_z: f32,
+    max_z: f32,
     left_x: f32,
     right_x: f32,
     top_z: f32,
     bottom_z: f32,
+}
+
+impl MapLayoutState {
+    fn clamp_player_position(&self, position: Vec3f) -> Vec3f {
+        Vec3f::new(
+            position.x.clamp(self.min_x, self.max_x),
+            PLAYER_GROUND_Y,
+            position.z.clamp(self.min_z, self.max_z),
+        )
+    }
 }
 
 fn apply_minion_damage(
@@ -1940,6 +2028,12 @@ mod tests {
 
     const EPSILON: f32 = 0.0001;
 
+    fn horizontal_distance(a: &PlayerState, b: &PlayerState) -> f32 {
+        let dx = a.x - b.x;
+        let dz = a.z - b.z;
+        (dx * dx + dz * dz).sqrt()
+    }
+
     #[test]
     fn map_layout_is_symmetric() {
         let layout = build_map_layout();
@@ -1993,6 +2087,99 @@ mod tests {
         regenerate_mana(&mut players, 100.0);
         let clamped = players.get(&addr).unwrap().state.mana;
         assert!((clamped - MAX_MANA).abs() < EPSILON);
+    }
+
+    #[test]
+    fn movement_authority_clamps_teleports_and_accepts_normal_steps() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:35001".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let start = players.get(&addr).unwrap().state.clone();
+        let normal_at = now + Duration::from_millis(100);
+        let normal_x = start.x + PLAYER_SPEED * 0.1;
+        handle_transform_request(
+            players.get_mut(&addr).unwrap(),
+            &layout,
+            normal_x,
+            PLAYER_GROUND_Y,
+            start.z,
+            0.25,
+            normal_at,
+        );
+
+        let after_normal = players.get(&addr).unwrap().state.clone();
+        assert!((after_normal.x - normal_x).abs() < EPSILON);
+        assert!((after_normal.y - PLAYER_GROUND_Y).abs() < EPSILON);
+        assert!((after_normal.yaw - 0.25).abs() < EPSILON);
+
+        let teleport_at = normal_at + Duration::from_millis(50);
+        let before_teleport = players.get(&addr).unwrap().state.clone();
+        handle_transform_request(
+            players.get_mut(&addr).unwrap(),
+            &layout,
+            before_teleport.x + 500.0,
+            PLAYER_GROUND_Y,
+            before_teleport.z,
+            0.5,
+            teleport_at,
+        );
+
+        let after_teleport = players.get(&addr).unwrap().state.clone();
+        let accepted_distance = horizontal_distance(&before_teleport, &after_teleport);
+        let max_distance = PLAYER_SPEED * 0.05 + MOVEMENT_POSITION_TOLERANCE + EPSILON;
+        assert!(accepted_distance <= max_distance);
+        assert!(after_teleport.x < before_teleport.x + 500.0);
+
+        let before_invalid = after_teleport.clone();
+        handle_transform_request(
+            players.get_mut(&addr).unwrap(),
+            &layout,
+            f32::NAN,
+            PLAYER_GROUND_Y,
+            before_invalid.z + 1.0,
+            1.0,
+            teleport_at + Duration::from_millis(50),
+        );
+        let after_invalid = players.get(&addr).unwrap().state.clone();
+        assert!((after_invalid.x - before_invalid.x).abs() < EPSILON);
+        assert!((after_invalid.z - before_invalid.z).abs() < EPSILON);
+    }
+
+    #[test]
+    fn movement_authority_keeps_players_inside_map_bounds() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:35002".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        {
+            let player = players.get_mut(&addr).unwrap();
+            player.state.x = layout.max_x - 0.1;
+            player.state.z = layout.max_z - 0.1;
+            player.last_movement_at = now;
+        }
+
+        handle_transform_request(
+            players.get_mut(&addr).unwrap(),
+            &layout,
+            layout.max_x + 5.0,
+            PLAYER_GROUND_Y,
+            layout.max_z + 5.0,
+            0.0,
+            now + Duration::from_secs(1),
+        );
+
+        let player = players.get(&addr).unwrap();
+        assert!(player.state.x <= layout.max_x);
+        assert!(player.state.z <= layout.max_z);
+        assert!(player.state.x >= layout.min_x);
+        assert!(player.state.z >= layout.min_z);
     }
 
     #[test]
@@ -2285,6 +2472,177 @@ mod tests {
     }
 
     #[test]
+    fn session_id_reclaims_timed_out_player_from_new_endpoint() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut disconnected_sessions = HashMap::new();
+        let mut next_player_id = 1;
+        let old_addr: SocketAddr = "127.0.0.1:52001".parse().unwrap();
+        let new_addr: SocketAddr = "127.0.0.1:52002".parse().unwrap();
+        let now = Instant::now();
+        let session_id = "stable-player-1".to_string();
+
+        ensure_player_for_join(
+            &mut players,
+            &mut disconnected_sessions,
+            &layout,
+            old_addr,
+            Some(session_id.clone()),
+            &mut next_player_id,
+            now,
+        );
+        let original_id = players.get(&old_addr).unwrap().state.id;
+        players.get_mut(&old_addr).unwrap().last_seen =
+            now - PLAYER_TIMEOUT - Duration::from_secs(1);
+
+        assert!(ensure_player_for_join(
+            &mut players,
+            &mut disconnected_sessions,
+            &layout,
+            new_addr,
+            Some(session_id.clone()),
+            &mut next_player_id,
+            now,
+        ));
+
+        assert!(!players.contains_key(&old_addr));
+        let reclaimed = players.get(&new_addr).unwrap();
+        assert_eq!(reclaimed.state.id, original_id);
+        assert_eq!(reclaimed.session_id.as_deref(), Some(session_id.as_str()));
+    }
+
+    #[test]
+    fn active_session_id_cannot_be_stolen_by_another_endpoint() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut disconnected_sessions = HashMap::new();
+        let mut next_player_id = 1;
+        let old_addr: SocketAddr = "127.0.0.1:52101".parse().unwrap();
+        let new_addr: SocketAddr = "127.0.0.1:52102".parse().unwrap();
+        let now = Instant::now();
+        let session_id = "active-player-1".to_string();
+
+        assert!(ensure_player_for_join(
+            &mut players,
+            &mut disconnected_sessions,
+            &layout,
+            old_addr,
+            Some(session_id.clone()),
+            &mut next_player_id,
+            now,
+        ));
+        ensure_player_connected(
+            &mut players,
+            &layout,
+            new_addr,
+            &mut next_player_id,
+            now + Duration::from_millis(1),
+        );
+        let placeholder_id = players.get(&new_addr).unwrap().state.id;
+        assert!(!ensure_player_for_join(
+            &mut players,
+            &mut disconnected_sessions,
+            &layout,
+            new_addr,
+            Some(session_id),
+            &mut next_player_id,
+            now + Duration::from_secs(1),
+        ));
+
+        assert!(players.contains_key(&old_addr));
+        let placeholder = players.get(&new_addr).unwrap();
+        assert_eq!(placeholder.state.id, placeholder_id);
+        assert!(placeholder.session_id.is_none());
+    }
+
+    #[test]
+    fn connected_placeholder_can_reclaim_timed_out_session_id() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut disconnected_sessions = HashMap::new();
+        let mut next_player_id = 1;
+        let old_addr: SocketAddr = "127.0.0.1:52111".parse().unwrap();
+        let new_addr: SocketAddr = "127.0.0.1:52112".parse().unwrap();
+        let now = Instant::now();
+        let session_id = "placeholder-reclaim-1".to_string();
+
+        assert!(ensure_player_for_join(
+            &mut players,
+            &mut disconnected_sessions,
+            &layout,
+            old_addr,
+            Some(session_id.clone()),
+            &mut next_player_id,
+            now,
+        ));
+        let original_id = players.get(&old_addr).unwrap().state.id;
+        players.get_mut(&old_addr).unwrap().last_seen =
+            now - PLAYER_TIMEOUT - Duration::from_secs(1);
+
+        ensure_player_connected(
+            &mut players,
+            &layout,
+            new_addr,
+            &mut next_player_id,
+            now + Duration::from_millis(1),
+        );
+        let placeholder_id = players.get(&new_addr).unwrap().state.id;
+        assert_ne!(placeholder_id, original_id);
+
+        assert!(ensure_player_for_join(
+            &mut players,
+            &mut disconnected_sessions,
+            &layout,
+            new_addr,
+            Some(session_id.clone()),
+            &mut next_player_id,
+            now,
+        ));
+
+        assert!(!players.contains_key(&old_addr));
+        let reclaimed = players.get(&new_addr).unwrap();
+        assert_eq!(reclaimed.state.id, original_id);
+        assert_eq!(reclaimed.session_id.as_deref(), Some(session_id.as_str()));
+    }
+
+    #[test]
+    fn stale_disconnected_session_gets_new_player_id() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut disconnected_sessions = HashMap::new();
+        let mut next_player_id = 1;
+        let old_addr: SocketAddr = "127.0.0.1:52201".parse().unwrap();
+        let new_addr: SocketAddr = "127.0.0.1:52202".parse().unwrap();
+        let now = Instant::now();
+        let session_id = "stale-player-1".to_string();
+
+        ensure_player_connected(&mut players, &layout, old_addr, &mut next_player_id, now);
+        let mut old_player = players.remove(&old_addr).unwrap();
+        old_player.session_id = Some(session_id.clone());
+        let original_id = old_player.state.id;
+        disconnected_sessions.insert(
+            session_id.clone(),
+            DisconnectedSession {
+                player: old_player,
+                disconnected_at: now - SESSION_RECLAIM_WINDOW - Duration::from_secs(1),
+            },
+        );
+
+        assert!(ensure_player_for_join(
+            &mut players,
+            &mut disconnected_sessions,
+            &layout,
+            new_addr,
+            Some(session_id),
+            &mut next_player_id,
+            now,
+        ));
+
+        assert_ne!(players.get(&new_addr).unwrap().state.id, original_id);
+        assert!(disconnected_sessions.is_empty());
+    }
+
+    #[test]
     fn cast_drains_mana_respects_cooldown_and_blocks_empty_mana() {
         let layout = build_map_layout();
         let mut players = HashMap::new();
@@ -2300,13 +2658,25 @@ mod tests {
             Team::Green,
             CharacterChoice::Ipfs,
             &layout,
+            now,
         );
         handle_join_request(
             players.get_mut(&addr_b).unwrap(),
             Team::Blue,
             CharacterChoice::Wang,
             &layout,
+            now,
         );
+
+        let a_pos = {
+            let a = players.get(&addr_a).unwrap();
+            (a.state.x, a.state.z)
+        };
+        {
+            let b = players.get_mut(&addr_b).unwrap();
+            b.state.x = a_pos.0 + SPELL_CAST_RANGE * 0.5;
+            b.state.z = a_pos.1;
+        }
 
         let b_id = players.get(&addr_b).unwrap().state.id;
         let a_mana_before = players.get(&addr_a).unwrap().state.mana;
@@ -2403,5 +2773,153 @@ mod tests {
             2,
             "zero mana must not create a projectile"
         );
+    }
+
+    #[test]
+    fn cast_range_validation_covers_target_types_and_rejects_far_targets() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let caster_addr: SocketAddr = "127.0.0.1:53001".parse().unwrap();
+        let target_addr: SocketAddr = "127.0.0.1:53002".parse().unwrap();
+        let now = Instant::now();
+
+        ensure_player_connected(&mut players, &layout, caster_addr, &mut next_player_id, now);
+        ensure_player_connected(&mut players, &layout, target_addr, &mut next_player_id, now);
+        handle_join_request(
+            players.get_mut(&caster_addr).unwrap(),
+            Team::Green,
+            CharacterChoice::Ipfs,
+            &layout,
+            now,
+        );
+        handle_join_request(
+            players.get_mut(&target_addr).unwrap(),
+            Team::Blue,
+            CharacterChoice::Wang,
+            &layout,
+            now,
+        );
+        {
+            let caster = players.get_mut(&caster_addr).unwrap();
+            caster.state.x = 0.0;
+            caster.state.z = 0.0;
+        }
+        {
+            let target = players.get_mut(&target_addr).unwrap();
+            target.state.x = SPELL_CAST_RANGE * 0.5;
+            target.state.z = 0.0;
+        }
+
+        let mut minions = HashMap::new();
+        minions.insert(
+            10,
+            Minion {
+                state: MinionState {
+                    id: 10,
+                    team: Team::Blue,
+                    lane: Lane::Mid,
+                    x: 0.0,
+                    y: MINION_SPAWN_HEIGHT,
+                    z: SPELL_CAST_RANGE * 0.5,
+                    yaw: 0.0,
+                    hp: MINION_MAX_HP,
+                    max_hp: MINION_MAX_HP,
+                    state: MinionBrainState::Marching,
+                    target_kind: None,
+                    target_id: None,
+                },
+                path: Vec::new(),
+                next_waypoint: 0,
+                last_attack_at: None,
+                aggro_target: None,
+            },
+        );
+
+        let mut structures = HashMap::new();
+        let mut structure_id = 20;
+        add_structure(
+            &mut structures,
+            &mut structure_id,
+            StructureKind::Tower,
+            StructureRole::LaneTower { lane: Lane::Mid },
+            Team::Blue,
+            Vec3f::new(SPELL_CAST_RANGE * 0.5, 3.0, SPELL_CAST_RANGE * 0.25),
+        );
+
+        let mut next_neutral_id = 9_001;
+        let mut neutrals = build_neutral_camps(&mut next_neutral_id);
+        let neutral_id = *neutrals.keys().next().unwrap();
+        {
+            let neutral = neutrals.get_mut(&neutral_id).unwrap();
+            neutral.state.x = SPELL_CAST_RANGE * 0.25;
+            neutral.state.z = SPELL_CAST_RANGE * 0.5;
+        }
+
+        let mut projectiles = HashMap::new();
+        let mut next_projectile_id = 1_u64;
+        let game_state = GameState::Running;
+        let target_player_id = players.get(&target_addr).unwrap().state.id;
+        let targets = [
+            TargetId {
+                kind: TargetKind::Player,
+                id: target_player_id,
+            },
+            TargetId {
+                kind: TargetKind::Minion,
+                id: 10,
+            },
+            TargetId {
+                kind: TargetKind::Structure,
+                id: 20,
+            },
+            TargetId {
+                kind: TargetKind::Neutral,
+                id: neutral_id,
+            },
+        ];
+
+        for (index, target) in targets.into_iter().enumerate() {
+            players.get_mut(&caster_addr).unwrap().state.mana = MAX_MANA;
+            handle_cast_request(
+                &mut players,
+                &mut projectiles,
+                &mut minions,
+                &mut structures,
+                &mut neutrals,
+                caster_addr,
+                target,
+                &mut next_projectile_id,
+                &game_state,
+                now + (SPELL_COOLDOWN + Duration::from_millis(1)) * index as u32,
+            );
+            assert_eq!(projectiles.len(), index + 1);
+        }
+
+        {
+            let target = players.get_mut(&target_addr).unwrap();
+            target.state.x = SPELL_CAST_RANGE + PLAYER_HIT_RADIUS + 10.0;
+            target.state.z = 0.0;
+        }
+        let mana_before = players.get(&caster_addr).unwrap().state.mana;
+        let projectile_count = projectiles.len();
+        handle_cast_request(
+            &mut players,
+            &mut projectiles,
+            &mut minions,
+            &mut structures,
+            &mut neutrals,
+            caster_addr,
+            TargetId {
+                kind: TargetKind::Player,
+                id: target_player_id,
+            },
+            &mut next_projectile_id,
+            &game_state,
+            now + (SPELL_COOLDOWN + Duration::from_millis(1)) * 5,
+        );
+
+        assert_eq!(projectiles.len(), projectile_count);
+        assert!((players.get(&caster_addr).unwrap().state.mana - mana_before).abs() < EPSILON);
     }
 }

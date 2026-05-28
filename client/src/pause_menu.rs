@@ -6,7 +6,7 @@ use bevy::{
 
 use crate::net::{ClientConnectionState, ClientSession};
 use crate::persistence::{
-    ClientPrefsSaveGate, ResolvedServerAddressForPrefs, reset_graphics_to_defaults,
+    ClientPrefsSaveGate, ClientSessionId, ResolvedServerAddressForPrefs, reset_graphics_to_defaults,
 };
 use crate::player::Player;
 use crate::session_config::DEFAULT_GAME_SERVER_ADDR;
@@ -798,6 +798,7 @@ fn handle_reset_graphics_defaults_button(
     mut model: ResMut<ModelScaleSettings>,
     mut prefs_gate: ResMut<ClientPrefsSaveGate>,
     resolved_addr: Res<ResolvedServerAddressForPrefs>,
+    client_session_id: Res<ClientSessionId>,
     team: Res<TeamSelection>,
     mut button_query: Query<
         (&Interaction, &mut BackgroundColor),
@@ -826,6 +827,7 @@ fn handle_reset_graphics_defaults_button(
                     prefs_gate.as_mut(),
                     team.character,
                     addr,
+                    client_session_id.0.as_str(),
                 );
                 *color = BUTTON_HOVER_COLOR.into();
             }
