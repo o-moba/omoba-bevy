@@ -8,7 +8,7 @@ Canonical version: `0.2.0`
 - Server-authoritative hardening for player movement and casts: client transforms are speed/map clamped, non-finite positions are ignored, and casts require the authoritative caster position to be in range of the live target.
 - Local multiplayer flow with server startup plus multi-client local play via `make start`.
 - Team join flow with character selection and player spawning.
-- Ekza-Stellar SDK extraction: shared `ekza-stellar-sdk` workspace crate owns stable character ids, built-in 3D model manifest metadata, GLB validation, and Bevy model catalog loading for future dependency publishing.
+- Ekza Bevy SDK extraction: shared sibling `ekza-bevy-sdk` repository owns stable character ids, built-in 3D model manifest metadata, GLB validation, and Bevy model catalog loading for future dependency publishing.
 - Core combat loop with projectiles, structures, minions, death, respawn, mana regeneration, and base-destruction win condition.
 - Map layout with three lanes and simple jungle blocks.
 - Player progression with level-based XP thresholds, HP/mana scaling on level-up, and tracked skill points.

@@ -2,7 +2,7 @@ use bevy::camera::primitives::Aabb;
 use bevy::gltf::Gltf;
 use bevy::prelude::*;
 use bevy::scene::SceneRoot;
-use ekza_stellar_sdk::bevy::{EkzaModelCatalog, load_builtin_model_catalog};
+use ekza_bevy_sdk::bevy::{EkzaModelCatalog, load_builtin_model_catalog};
 
 use crate::camera::{CameraState, MainCamera, locked_camera_offset};
 use crate::combat::CombatStats;
