@@ -106,6 +106,10 @@ pub(crate) fn build_map_layout() -> MapLayoutState {
     MapLayoutState {
         home,
         away,
+        min_x: -half_map_size,
+        max_x: half_map_size,
+        min_z: -half_map_size,
+        max_z: half_map_size,
         left_x,
         right_x,
         top_z,

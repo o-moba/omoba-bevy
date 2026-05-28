@@ -10,9 +10,10 @@ This page states what the **current MVP build** is intended to cover. It complem
 
 ## Known limitations (explicit)
 
-- **Reconnect identity:** A new UDP endpoint is treated as a new player; slot reclaim and persistent identity across disconnects are not implemented (see [features.md](features.md) → Multiplayer Session Reliability).
+- **Reconnect identity:** Bevy clients persist a local `client_session_id`, and the server can reclaim a timed-out player slot/id from a new UDP endpoint within the reclaim window. Legacy clients without a session id still reconnect as new players.
 - **Server restart:** Clients that stay open after a server restart need to send `Join` again for team/character; behavior is documented, not seamless reconnect.
 - **Player timeout:** Idle clients are dropped from snapshots after server `PLAYER_TIMEOUT` (~5s); this is intentional for this version.
+- **Identity security:** The local session id is a reclaim token for playtest continuity, not account auth or cryptographic anti-cheat.
 - **Operations:** No production SLOs, on-call runbooks, or hosted infrastructure; documentation targets developers and internal testers on their own machines.
 - **Balance and content:** Tuning, full skill UX, and release-scale QA are ongoing; the checklist marks what blocks external MVP versus backlog.
 

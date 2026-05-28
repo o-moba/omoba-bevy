@@ -22,13 +22,16 @@ from pathlib import Path
 SERVER_START_WAIT_SECONDS = 1.0
 SNAPSHOT_WAIT_SECONDS = 4.0
 PING_INTERVAL_SECONDS = 0.25
+MOVE_TIMEOUT_SECONDS = 45.0
 # Cross-map homing projectile needs several seconds of simulation at current speed.
 CAST_PUMP_SECONDS = 16.0
 SERVER_ADDR = ("127.0.0.1", 4012)
 # Large snapshots (minions, structures); must not truncate JSON.
 MAX_PACKET_SIZE = 64 * 1024
-M2_VICTORY_TIMEOUT_SECONDS = 75.0
+M2_VICTORY_TIMEOUT_SECONDS = 110.0
 M2_REMATCH_TIMEOUT_SECONDS = 16.0
+SPELL_CAST_RANGE = 28.0
+BASE_TOWER_RADIUS = 3.0
 
 TARGET_BASE_RUN_TIME_SECONDS = 45.0
 PLAYER_SPEED = 5.0
@@ -63,6 +66,10 @@ def spawn_for_team(team: str) -> tuple[float, float, float]:
         0.5,
         base_z + dir_z * PLAYER_SPAWN_OFFSET,
     )
+
+
+def distance2d(a: tuple[float, float], b: tuple[float, float]) -> float:
+    return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
 def assert_spawn_matches(player: dict, team: str, epsilon: float = 0.08) -> None:
@@ -193,6 +200,60 @@ def pump_until(
     raise AssertionError(f"Timed out: {description}. Last: {last_snapshots}")
 
 
+def move_clients_towards(
+    clients: list[ProtocolClient],
+    targets: list[tuple[float, float]],
+    timeout_seconds: float,
+    threshold: float,
+    description: str,
+) -> None:
+    assert_true(len(clients) == len(targets), "client/target length mismatch")
+    deadline = time.monotonic() + timeout_seconds
+    last_send = 0.0
+    while time.monotonic() < deadline:
+        now = time.monotonic()
+        if now - last_send >= PING_INTERVAL_SECONDS:
+            for client, (target_x, target_z) in zip(clients, targets):
+                snapshot = client.last_snapshot
+                if snapshot is not None:
+                    player = player_map(snapshot).get(int(snapshot["your_id"]))
+                    if player is not None:
+                        client.send(
+                            {
+                                "type": "transform",
+                                "x": target_x,
+                                "y": float(player["y"]),
+                                "z": target_z,
+                                "yaw": float(player.get("yaw", 0.0)),
+                            }
+                        )
+                client.ping()
+            last_send = now
+
+        for client in clients:
+            client.recv_once()
+
+        reached = True
+        for client, target in zip(clients, targets):
+            snapshot = client.last_snapshot
+            if snapshot is None:
+                reached = False
+                break
+            player = player_map(snapshot).get(int(snapshot["your_id"]))
+            if player is None:
+                reached = False
+                break
+            if distance2d((float(player["x"]), float(player["z"])), target) > threshold:
+                reached = False
+                break
+        if reached:
+            return
+        time.sleep(0.02)
+
+    last = [client.last_snapshot for client in clients]
+    raise AssertionError(f"Timed out while moving clients for {description}. Last: {last}")
+
+
 def player_map(snapshot: dict) -> dict[int, dict]:
     return {int(p["id"]): p for p in snapshot["players"]}
 
@@ -283,21 +344,37 @@ def scenario_m3_cast_player(server: ServerHandle) -> RowResult:
         players = player_map(green.last_snapshot)
         bid = next(pid for pid, p in players.items() if p["team"] == "blue")
 
-        g0 = players[gid]
-        mana_before = float(g0["mana"])
-        b0_hp = float(players[bid]["hp"])
-        moved = False
-
-        green.send(
-            {
-                "type": "transform",
-                "x": float(g0["x"]) + 2.0,
-                "y": float(g0["y"]),
-                "z": float(g0["z"]),
-                "yaw": float(g0.get("yaw", 0.0)),
-            }
+        move_clients_towards(
+            [green, blue],
+            [(-4.0, 0.0), (4.0, 0.0)],
+            MOVE_TIMEOUT_SECONDS,
+            1.25,
+            "M3 in-range duel setup",
         )
 
+        assert green.last_snapshot is not None
+        players = player_map(green.last_snapshot)
+        g0 = players[gid]
+        b0_hp = float(players[bid]["hp"])
+        move_target = (float(g0["x"]) + 2.0, float(g0["z"]))
+        move_clients_towards(
+            [green],
+            [move_target],
+            4.0,
+            0.25,
+            "M3 legal movement nudge",
+        )
+
+        assert green.last_snapshot is not None
+        moved_player = player_map(green.last_snapshot)[gid]
+        moved = (
+            distance2d(
+                (float(moved_player["x"]), float(moved_player["z"])),
+                (float(g0["x"]), float(g0["z"])),
+            )
+            > 0.5
+        )
+        mana_before = float(moved_player["mana"])
         green.cast_player(bid)
 
         deadline = time.monotonic() + CAST_PUMP_SECONDS
@@ -317,8 +394,6 @@ def scenario_m3_cast_player(server: ServerHandle) -> RowResult:
                 continue
             gm = player_map(gs).get(gid, {})
             bm = player_map(gs).get(bid, {})
-            if gm and abs(float(gm["x"]) - float(g0["x"])) > 0.5:
-                moved = True
             # Mana regen runs between snapshots; require a clear spend, not exact post-cast value.
             if gm and float(gm["mana"]) < mana_before - 5.0:
                 ok_mana = True
@@ -360,6 +435,28 @@ def scenario_m2_victory_and_rematch(server: ServerHandle) -> RowResult:
         base_id = int(blue_base["id"])
         initial_blue_base_hp = float(blue_base["hp"])
         min_hp_seen = initial_blue_base_hp
+        attack_distance = SPELL_CAST_RANGE + BASE_TOWER_RADIUS - 2.0
+        attack_angle = math.radians(205.0)
+        attack_pos = (
+            float(blue_base["x"]) + attack_distance * math.cos(attack_angle),
+            float(blue_base["z"]) + attack_distance * math.sin(attack_angle),
+        )
+        safe_siege_waypoints = [
+            (8.0, 8.0),
+            (8.0, 44.0),
+            (20.0, 54.0),
+            (40.0, 60.0),
+            attack_pos,
+        ]
+        for waypoint_index, waypoint in enumerate(safe_siege_waypoints, start=1):
+            threshold = 0.75 if waypoint == attack_pos else 1.5
+            move_clients_towards(
+                [g1, g2],
+                [waypoint, waypoint],
+                MOVE_TIMEOUT_SECONDS,
+                threshold,
+                f"M2 safe siege waypoint {waypoint_index}",
+            )
 
         victory_seen = False
         victory_at = 0.0
@@ -368,8 +465,24 @@ def scenario_m2_victory_and_rematch(server: ServerHandle) -> RowResult:
         while time.monotonic() < deadline:
             now = time.monotonic()
             if now - last_ping >= PING_INTERVAL_SECONDS:
-                g1.transform_at_spawn("green")
-                g2.transform_at_spawn("green")
+                g1.send(
+                    {
+                        "type": "transform",
+                        "x": attack_pos[0],
+                        "y": 0.5,
+                        "z": attack_pos[1],
+                        "yaw": 0.0,
+                    }
+                )
+                g2.send(
+                    {
+                        "type": "transform",
+                        "x": attack_pos[0],
+                        "y": 0.5,
+                        "z": attack_pos[1],
+                        "yaw": 0.0,
+                    }
+                )
                 g1.cast_structure(base_id)
                 g2.cast_structure(base_id)
                 g1.ping()

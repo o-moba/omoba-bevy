@@ -10,6 +10,7 @@ use std::fs;
 use std::io;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -22,8 +23,9 @@ use crate::world::{
     MIN_LIGHT_PITCH_DEG, MIN_LIGHT_YAW_DEG, MIN_MODEL_TARGET_HEIGHT, ModelScaleSettings,
 };
 
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 const PREFS_FILENAME: &str = "client_preferences.json";
+const CLIENT_SESSION_ID_MAX_LEN: usize = 64;
 
 /// Address loaded from disk for use when `GAME_SERVER_ADDR` is unset (validated).
 #[derive(Resource, Default, Clone)]
@@ -33,12 +35,24 @@ pub struct FileGameServerAddr(pub Option<String>);
 #[derive(Resource, Default, Clone)]
 pub struct ResolvedServerAddressForPrefs(pub String);
 
+/// Stable per-install client id sent in Join packets for server-side reconnect reclaim.
+#[derive(Resource, Clone)]
+pub struct ClientSessionId(pub String);
+
+impl Default for ClientSessionId {
+    fn default() -> Self {
+        Self(generate_client_session_id())
+    }
+}
+
 pub struct ClientPersistencePlugin;
 
 impl Plugin for ClientPersistencePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FileGameServerAddr>()
             .init_resource::<ResolvedServerAddressForPrefs>()
+            .init_resource::<ClientSessionId>()
+            .init_resource::<ClientSessionIdInitialSavePending>()
             .init_resource::<ClientPrefsSaveGate>()
             .add_systems(Startup, load_persistent_client_settings)
             .add_systems(Update, save_client_preferences_on_change);
@@ -51,12 +65,17 @@ pub struct ClientPrefsSaveGate {
     pub suppress_saves: u8,
 }
 
+#[derive(Resource, Default)]
+pub(crate) struct ClientSessionIdInitialSavePending(bool);
+
 #[derive(Debug, Serialize, Deserialize)]
 struct ClientPreferencesFile {
     #[serde(default = "default_schema_version")]
     schema_version: u32,
     #[serde(default)]
     game_server_addr: Option<String>,
+    #[serde(default)]
+    client_session_id: Option<String>,
     #[serde(default)]
     character: Option<CharacterChoice>,
     #[serde(default)]
@@ -73,6 +92,28 @@ struct ClientPreferencesFile {
 
 fn default_schema_version() -> u32 {
     SCHEMA_VERSION
+}
+
+fn generate_client_session_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    format!("omoba-{}-{nanos}", std::process::id())
+}
+
+pub fn validate_client_session_id(raw: &str) -> Option<String> {
+    let t = raw.trim();
+    if t.is_empty() || t.len() > CLIENT_SESSION_ID_MAX_LEN {
+        return None;
+    }
+    if !t
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+    {
+        return None;
+    }
+    Some(t.to_string())
 }
 
 fn preferences_path() -> Option<PathBuf> {
@@ -157,10 +198,13 @@ pub fn load_persistent_client_settings(
     mut lighting: ResMut<LightingSettings>,
     mut model: ResMut<ModelScaleSettings>,
     mut team: ResMut<crate::team::TeamSelection>,
+    mut client_session_id: ResMut<ClientSessionId>,
+    mut session_id_save_pending: ResMut<ClientSessionIdInitialSavePending>,
     mut gate: ResMut<ClientPrefsSaveGate>,
 ) {
     gate.suppress_saves = 3;
     file_addr.0 = None;
+    session_id_save_pending.0 = false;
 
     let Some(path) = preferences_path() else {
         warn!("No home/config directory for client preferences; using defaults only.");
@@ -168,6 +212,7 @@ pub fn load_persistent_client_settings(
     };
 
     if !path.exists() {
+        session_id_save_pending.0 = true;
         return;
     }
 
@@ -193,6 +238,17 @@ pub fn load_persistent_client_settings(
         } else {
             warn!("Ignoring invalid game_server_addr in preferences file.");
         }
+    }
+
+    if let Some(raw_session_id) = disk.client_session_id.as_deref() {
+        if let Some(session_id) = validate_client_session_id(raw_session_id) {
+            client_session_id.0 = session_id;
+        } else {
+            warn!("Ignoring invalid client_session_id in preferences file.");
+            session_id_save_pending.0 = true;
+        }
+    } else {
+        session_id_save_pending.0 = true;
     }
 
     if let Some(ch) = disk.character {
@@ -229,10 +285,12 @@ fn build_file_from_state(
     model: &ModelScaleSettings,
     character: CharacterChoice,
     game_server_addr: &str,
+    client_session_id: &str,
 ) -> ClientPreferencesFile {
     ClientPreferencesFile {
         schema_version: SCHEMA_VERSION,
         game_server_addr: Some(game_server_addr.to_string()),
+        client_session_id: Some(client_session_id.to_string()),
         character: Some(character),
         model_target_height: Some(model.target_height),
         illuminance: Some(lighting.illuminance),
@@ -248,6 +306,7 @@ pub fn save_client_preferences_to_disk(
     model: &ModelScaleSettings,
     character: CharacterChoice,
     game_server_addr: &str,
+    client_session_id: &str,
 ) -> io::Result<()> {
     let Some(path) = preferences_path() else {
         return Err(io::Error::new(
@@ -259,16 +318,20 @@ pub fn save_client_preferences_to_disk(
         validate_game_server_addr(DEFAULT_GAME_SERVER_ADDR)
             .expect("default game server addr must validate")
     });
-    let prefs = build_file_from_state(lighting, model, character, &addr);
+    let session_id =
+        validate_client_session_id(client_session_id).unwrap_or_else(generate_client_session_id);
+    let prefs = build_file_from_state(lighting, model, character, &addr, &session_id);
     write_preferences_file(&path, &prefs)
 }
 
 fn save_client_preferences_on_change(
     mut gate: ResMut<ClientPrefsSaveGate>,
+    mut session_id_save_pending: ResMut<ClientSessionIdInitialSavePending>,
     lighting: Res<LightingSettings>,
     model: Res<ModelScaleSettings>,
     team: Res<crate::team::TeamSelection>,
     resolved_addr: Res<ResolvedServerAddressForPrefs>,
+    client_session_id: Res<ClientSessionId>,
 ) {
     if gate.suppress_saves > 0 {
         gate.suppress_saves -= 1;
@@ -278,12 +341,14 @@ fn save_client_preferences_on_change(
     let changed = lighting.is_changed()
         || model.is_changed()
         || team.is_changed()
-        || resolved_addr.is_changed();
-    if !changed {
+        || resolved_addr.is_changed()
+        || client_session_id.is_changed();
+    if !changed && !session_id_save_pending.0 {
         return;
     }
 
     let addr = resolved_addr.0.as_str();
+    let initial_session_id_save = session_id_save_pending.0;
     if let Err(e) = save_client_preferences_to_disk(
         lighting.as_ref(),
         model.as_ref(),
@@ -293,8 +358,14 @@ fn save_client_preferences_on_change(
         } else {
             addr
         },
+        client_session_id.0.as_str(),
     ) {
         warn!("Failed to save client preferences: {e}");
+        if initial_session_id_save {
+            session_id_save_pending.0 = false;
+        }
+    } else {
+        session_id_save_pending.0 = false;
     }
 }
 
@@ -305,11 +376,18 @@ pub fn reset_graphics_to_defaults(
     gate: &mut ClientPrefsSaveGate,
     character: CharacterChoice,
     game_server_addr: &str,
+    client_session_id: &str,
 ) {
     *lighting = LightingSettings::default();
     *model = ModelScaleSettings::default();
     gate.suppress_saves = 1;
-    if let Err(e) = save_client_preferences_to_disk(lighting, model, character, game_server_addr) {
+    if let Err(e) = save_client_preferences_to_disk(
+        lighting,
+        model,
+        character,
+        game_server_addr,
+        client_session_id,
+    ) {
         warn!("Failed to save preferences after reset: {e}");
     }
 }
@@ -340,6 +418,21 @@ mod tests {
         assert!(validate_game_server_addr("   ").is_none());
         assert!(validate_game_server_addr("nocolon").is_none());
         assert!(validate_game_server_addr("host:").is_none());
+    }
+
+    #[test]
+    fn validate_client_session_id_accepts_safe_tokens() {
+        assert_eq!(
+            validate_client_session_id("player_01.alpha-2").as_deref(),
+            Some("player_01.alpha-2")
+        );
+    }
+
+    #[test]
+    fn validate_client_session_id_rejects_empty_spaces_and_long_values() {
+        assert!(validate_client_session_id("").is_none());
+        assert!(validate_client_session_id("bad token").is_none());
+        assert!(validate_client_session_id(&"x".repeat(CLIENT_SESSION_ID_MAX_LEN + 1)).is_none());
     }
 
     #[test]

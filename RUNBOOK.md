@@ -100,6 +100,13 @@ After an abnormal termination (e.g. `kill -9`):
 
 No code edits are required between restarts.
 
+## Authority and Reconnect Notes
+
+- The server treats client movement packets as requested positions and clamps accepted movement by player speed, elapsed server time, and map bounds. Large or non-finite transform jumps are ignored or reduced to legal movement.
+- Cast requests are server validated against the authoritative caster position, target team/state, mana, cooldown, and range.
+- The Bevy client stores a stable `client_session_id` in the preferences file. A new UDP endpoint with the same valid session id can reclaim a recently timed-out player slot/id; clients without that id keep the older reconnect-as-new-player behavior.
+- The session id is not a login credential or anti-cheat secret. It is only a local playtest continuity token.
+
 ## TASK-14 — Network failure and session resilience (manual QA)
 
 Use two terminals (or `make start` / `make stop`). Constants live in `client/src/session_config.rs`.
@@ -113,4 +120,4 @@ Use two terminals (or `make start` / `make stop`). Constants live in `client/src
 | 5 | Spam team join (double-click / rapid confirm) | At most one local `Player` after sync; `Join` idempotent while `join_flow_committed`. |
 | 6 | Block UDP (e.g. firewall) while **Connected** | Stale snapshot or transport rule → **Disconnected** same as server kill. |
 
-**Preferences file** (optional server address + graphics): see `client/src/persistence.rs` (`OMOBA_CLIENT_CONFIG_DIR` or default OS path). **Env wins** over saved `game_server_addr` when `GAME_SERVER_ADDR` is set and non-empty.
+**Preferences file** (optional server address + graphics + stable client session id): see `client/src/persistence.rs` (`OMOBA_CLIENT_CONFIG_DIR` or default OS path). **Env wins** over saved `game_server_addr` when `GAME_SERVER_ADDR` is set and non-empty.
