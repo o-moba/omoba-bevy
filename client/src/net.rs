@@ -13,7 +13,7 @@ use std::{
 
 use crate::camera::{CameraState, MainCamera, locked_camera_offset};
 use crate::combat::{CombatStats, MAX_HP, MAX_MANA};
-use crate::persistence::{FileGameServerAddr, ResolvedServerAddressForPrefs};
+use crate::persistence::{ClientSessionId, FileGameServerAddr, ResolvedServerAddressForPrefs};
 use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
 use crate::session_config::{
     DEFAULT_GAME_SERVER_ADDR, T_RETRY, T_STALE_SNAPSHOT, T_WAIT_MAX,
@@ -228,6 +228,8 @@ enum ClientPacket {
         team: Team,
         #[serde(default = "default_character_choice")]
         character: CharacterChoice,
+        #[serde(default)]
+        session_id: Option<String>,
     },
     Ping,
     RequestRematch,
@@ -845,6 +847,7 @@ fn send_network_commands(
     mut command_events: MessageReader<NetworkCommand>,
     channels: Option<Res<NetworkChannels>>,
     mut client_session: ResMut<ClientSession>,
+    client_session_id: Res<ClientSessionId>,
 ) {
     let Some(channels) = channels else {
         return;
@@ -868,6 +871,7 @@ fn send_network_commands(
                 let _ = channels.outgoing.send(ClientPacket::Join {
                     team: *team,
                     character: *character,
+                    session_id: Some(client_session_id.0.clone()),
                 });
             }
             NetworkCommand::RequestRematch => {
