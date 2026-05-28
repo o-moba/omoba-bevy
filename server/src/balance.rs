@@ -21,6 +21,7 @@ pub const MANA_REGEN_PER_SECOND: f32 = 8.0;
 // --- Primary ability (server-validated projectile) / cooldown–mana economy ---
 pub const SPELL_MANA_COST: f32 = 20.0;
 pub const SPELL_COOLDOWN: Duration = Duration::from_millis(350);
+pub const SPELL_CAST_RANGE: f32 = 28.0;
 pub const PROJECTILE_SPEED: f32 = 19.0;
 pub const PROJECTILE_DAMAGE: f32 = 20.0;
 /// Tunable damage per invested rank for the primary server-validated ability (index = rank − 1).
@@ -64,6 +65,10 @@ pub const MINIONS_PER_WAVE: usize = 3;
 pub const MINION_KILL_GOLD: u32 = 18;
 pub const MINION_KILL_XP: u32 = 32;
 pub const PLAYER_SPAWN_OFFSET: f32 = 7.0;
+pub const PLAYER_GROUND_Y: f32 = 0.5;
+pub const MOVEMENT_POSITION_TOLERANCE: f32 = 0.10;
+pub const MOVEMENT_MAX_DELTA_SECONDS: f32 = 0.5;
+pub const SESSION_RECLAIM_WINDOW: Duration = Duration::from_secs(30);
 
 // --- Level curve & stat growth ---
 pub const STARTING_LEVEL: u32 = 1;

@@ -131,7 +131,13 @@ class ProtocolClient:
 
     def send(self, packet: dict) -> None:
         payload = json.dumps(packet).encode("utf-8")
-        self.sock.send(payload)
+        try:
+            self.sock.send(payload)
+        except ConnectionRefusedError:
+            # Connected UDP sockets can surface a transient ICMP error after
+            # the restart scenario stops the server. The pump loop will keep
+            # retrying until a fresh snapshot arrives or the scenario times out.
+            return
 
     def ping(self) -> None:
         self.send({"type": "ping"})
@@ -142,7 +148,7 @@ class ProtocolClient:
     def recv_once(self) -> dict | None:
         try:
             payload = self.sock.recv(MAX_PACKET_SIZE)
-        except socket.timeout:
+        except (socket.timeout, ConnectionRefusedError):
             return None
         packet = json.loads(payload.decode("utf-8"))
         if packet.get("type") == "snapshot":
