@@ -1,6 +1,7 @@
 #![allow(clippy::items_after_test_module)]
 
 mod balance;
+mod gameplay;
 mod neutrals;
 mod progression;
 mod session;
@@ -8,6 +9,7 @@ mod world;
 
 use balance::*;
 use bevy::{app::ScheduleRunnerPlugin, prelude::*};
+use gameplay::GameplayPlugin;
 use neutrals::*;
 use progression::*;
 use serde::{Deserialize, Serialize};
@@ -867,6 +869,7 @@ fn main() -> io::Result<()> {
 
     App::new()
         .add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(SIMULATION_STEP_SLEEP)))
+        .add_plugins(GameplayPlugin)
         .insert_resource(ServerRuntime::new(socket))
         .init_resource::<TickContext>()
         .init_resource::<SimulationDeltaSeconds>()
@@ -878,6 +881,9 @@ fn main() -> io::Result<()> {
                 sync_players_into_ecs_system,
                 regenerate_mana_system,
                 sync_players_from_ecs_system,
+                gameplay::combat::sync_minions_into_ecs_system,
+                gameplay::combat::collect_projectile_minion_damage_system,
+                gameplay::combat::apply_projectile_minion_damage_system,
                 server_finalize_tick_system,
             )
                 .chain(),
@@ -1030,7 +1036,7 @@ fn handle_cast_request(
 #[allow(clippy::too_many_arguments)]
 fn simulate_projectiles(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,
-    minions: &mut HashMap<u64, Minion>,
+    _minions: &mut HashMap<u64, Minion>,
     structures: &mut HashMap<u64, Structure>,
     neutrals: &mut HashMap<u64, Neutral>,
     projectiles: &mut HashMap<u64, Projectile>,
@@ -1042,7 +1048,6 @@ fn simulate_projectiles(
         return;
     }
     let mut player_damage_events: Vec<(u64, f32)> = Vec::new();
-    let mut minion_damage_events: Vec<(u64, f32, Team)> = Vec::new();
     let mut structure_damage_events: Vec<(u64, f32, Team)> = Vec::new();
     let mut neutral_damage_events: Vec<(u64, f32, u64)> = Vec::new();
 
@@ -1091,54 +1096,7 @@ fn simulate_projectiles(
                 }
             }
             TargetKind::Minion => {
-                let Some(target_minion) = minions.get(&projectile.target.id) else {
-                    return false;
-                };
-                if target_minion.state.hp <= 0.0 {
-                    return false;
-                }
-
-                let start = Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z);
-                let target_pos = Vec3f::new(
-                    target_minion.state.x,
-                    target_minion.state.y + MINION_RADIUS * 0.8,
-                    target_minion.state.z,
-                );
-                if projectile.homing {
-                    let direction = Vec3f::new(
-                        target_pos.x - start.x,
-                        target_pos.y - start.y,
-                        target_pos.z - start.z,
-                    )
-                    .normalize_or_zero();
-                    if direction.x == 0.0 && direction.y == 0.0 && direction.z == 0.0 {
-                        minion_damage_events.push((
-                            projectile.target.id,
-                            projectile.damage,
-                            projectile.state.owner_team,
-                        ));
-                        return false;
-                    }
-                    projectile.velocity = Vec3f::new(
-                        direction.x * PROJECTILE_SPEED,
-                        direction.y * PROJECTILE_SPEED,
-                        direction.z * PROJECTILE_SPEED,
-                    );
-                }
-                let end = start.add_scaled(projectile.velocity, dt);
-                projectile.state.x = end.x;
-                projectile.state.y = end.y;
-                projectile.state.z = end.z;
-
-                let combined_radius = projectile.radius + MINION_RADIUS;
-                if swept_sphere_intersects_target(start, end, target_pos, combined_radius) {
-                    minion_damage_events.push((
-                        projectile.target.id,
-                        projectile.damage,
-                        projectile.state.owner_team,
-                    ));
-                    return false;
-                }
+                // Projectile-vs-minion collisions are handled by ECS combat systems.
             }
             TargetKind::Structure => {
                 let Some(structure) = structures.get(&projectile.target.id) else {
@@ -1255,10 +1213,6 @@ fn simulate_projectiles(
                 target_player.respawn_at = Some(now + RESPAWN_DELAY);
             }
         }
-    }
-
-    for (target_id, damage, attacker_team) in minion_damage_events {
-        apply_minion_damage(players, minions, target_id, damage, attacker_team);
     }
 
     for (target_id, damage, attacker_team) in structure_damage_events {

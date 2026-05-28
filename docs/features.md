@@ -4,7 +4,7 @@ Canonical version: `0.2.0`
 
 ## Current Playable Surface
 
-- Headless Bevy-scheduled authoritative UDP loop with periodic player snapshots; player mana regeneration now runs through ECS components/systems (`Player`, `Health`, `Mana`) bridged to the current authoritative state maps.
+- Headless Bevy-scheduled authoritative UDP loop with periodic player snapshots; player mana regeneration and `projectile -> minion` damage now run through ECS/message-driven systems bridged to the current authoritative state maps.
 - Local multiplayer flow with server startup plus multi-client local play via `make start`.
 - Team join flow with character selection and player spawning.
 - Core combat loop with projectiles, structures, minions, death, respawn, mana regeneration, and base-destruction win condition.
