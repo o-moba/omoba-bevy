@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::net::{ClientSession, NetworkCommand};
+pub use ekza_stellar_sdk::EkzaCharacter as CharacterChoice;
 
 const TEAM_BUTTON_SIZE: f32 = 140.0;
 const TEAM_BUTTON_GAP: f32 = 28.0;
@@ -43,36 +44,10 @@ impl Team {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CharacterChoice {
-    Ipfs,
-    Toka,
-    Wang,
-    Cube,
-}
-
-impl CharacterChoice {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            CharacterChoice::Ipfs => "IPFS",
-            CharacterChoice::Toka => "Toka",
-            CharacterChoice::Wang => "Wang",
-            CharacterChoice::Cube => "Cube",
-        }
-    }
-}
-
 #[derive(Resource, Default)]
 pub struct TeamSelection {
     pub team: Option<Team>,
     pub character: CharacterChoice,
-}
-
-impl Default for CharacterChoice {
-    fn default() -> Self {
-        Self::Ipfs
-    }
 }
 
 pub struct TeamSelectPlugin;
@@ -145,12 +120,7 @@ pub fn spawn_team_select_ui(commands: &mut Commands, selected_character: Charact
                     Name::new("CharacterButtonsRow"),
                 ))
                 .with_children(|row| {
-                    for choice in [
-                        CharacterChoice::Ipfs,
-                        CharacterChoice::Toka,
-                        CharacterChoice::Wang,
-                        CharacterChoice::Cube,
-                    ] {
+                    for choice in CharacterChoice::ALL {
                         row.spawn((
                             Button,
                             Node {

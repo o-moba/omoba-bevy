@@ -7,6 +7,7 @@ Canonical version: `0.2.0`
 - Headless Bevy-scheduled authoritative UDP loop with periodic player snapshots; player mana regeneration and `projectile -> minion` damage now run through ECS/message-driven systems bridged to the current authoritative state maps.
 - Local multiplayer flow with server startup plus multi-client local play via `make start`.
 - Team join flow with character selection and player spawning.
+- Ekza-Stellar SDK extraction: shared `ekza-stellar-sdk` workspace crate owns stable character ids, built-in 3D model manifest metadata, GLB validation, and Bevy model catalog loading for future dependency publishing.
 - Core combat loop with projectiles, structures, minions, death, respawn, mana regeneration, and base-destruction win condition.
 - Map layout with three lanes and simple jungle blocks.
 - Player progression with level-based XP thresholds, HP/mana scaling on level-up, and tracked skill points.
@@ -29,6 +30,7 @@ Canonical version: `0.2.0`
 ## Release Gaps Tracked In Tasks
 
 - Runtime and startup stability hardening.
+- Publishable SDK packaging: registry metadata, versioning policy, examples, entitlement/auth hooks, and non-blocking asset delivery are still future work.
 - Full reconnect slot reclaim across disconnects and NAT changes.
 - Full skill system (four distinct server-validated abilities with per-rank tuning), tooltip UX.
 

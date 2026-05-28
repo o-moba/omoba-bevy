@@ -1,5 +1,5 @@
 [workspace]
-members = ["client", "server", "skills"]
+members = ["client", "server", "skills", "ekza-stellar-sdk"]
 resolver = "2"
 
 [workspace.package]
