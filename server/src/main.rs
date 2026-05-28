@@ -9,7 +9,7 @@ mod world;
 
 use balance::*;
 use bevy::{app::ScheduleRunnerPlugin, prelude::*};
-use ekza_stellar_sdk::EkzaCharacter as CharacterChoice;
+use ekza_bevy_sdk::EkzaCharacter as CharacterChoice;
 use gameplay::GameplayPlugin;
 use neutrals::*;
 use progression::*;

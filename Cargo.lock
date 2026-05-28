@@ -1803,7 +1803,7 @@ version = "0.2.0"
 dependencies = [
  "bevy",
  "crossbeam-channel",
- "ekza-stellar-sdk",
+ "ekza-bevy-sdk",
  "serde",
  "serde_json",
  "winit",
@@ -2191,13 +2191,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
-name = "ekza-stellar-sdk"
+name = "ekza-bevy-sdk"
 version = "0.2.0"
 dependencies = [
  "bevy",
  "reqwest",
  "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -4719,7 +4718,7 @@ name = "server"
 version = "0.2.0"
 dependencies = [
  "bevy",
- "ekza-stellar-sdk",
+ "ekza-bevy-sdk",
  "serde",
  "serde_json",
 ]

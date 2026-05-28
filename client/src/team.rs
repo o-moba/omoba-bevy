@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::net::{ClientSession, NetworkCommand};
-pub use ekza_stellar_sdk::EkzaCharacter as CharacterChoice;
+pub use ekza_bevy_sdk::EkzaCharacter as CharacterChoice;
 
 const TEAM_BUTTON_SIZE: f32 = 140.0;
 const TEAM_BUTTON_GAP: f32 = 28.0;
