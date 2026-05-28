@@ -7,6 +7,7 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 ## [Unreleased]
 
 ### Added
+- `ekza-stellar-sdk` workspace crate with stable Ekza-Stellar character ids, built-in 3D model manifest metadata, GLB validation helpers, and a Bevy-gated model catalog loader for local/remote GLB assets.
 - TASK-12: centralized server gameplay tuning in `server/src/balance.rs` with `docs/balance-tuning.md`; release gate checklist, manual QA matrix + run log, and release readiness report under `docs/`.
 - `scripts/verify_task_12_qa_matrix_live_udp.py` and `make verify-task-12` for recorded two-client UDP join (M1) and cast/mana/damage smoke (M3).
 - `PRIMARY_ABILITY_DAMAGE_BY_RANK` / `SKILL_SLOT_COUNT` in `balance.rs` for documented per-rank and four-slot progression hooks.
@@ -29,6 +30,7 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 - Neutral kill XP now uses `grant_player_xp` so jungle rewards level the same way as other XP sources.
 
 ### Changed
+- Client/server character identity now uses the shared `ekza-stellar-sdk::EkzaCharacter` type while preserving existing snake_case packet values.
 - Server: allow `clippy::items_after_test_module` on the binary and `clippy::too_many_arguments` on `simulate_projectiles`; allow `clippy::assertions_on_constants` in `balance` unit tests (keeps `-D warnings` clean for `cargo clippy -p server`).
 - Server refactor: split monolithic `server/src/main.rs` logic into focused modules (`progression`, `neutrals`, `world`, `session`) while preserving runtime behavior and test coverage.
 - Server runtime loop now runs under a headless Bevy `App` + `ScheduleRunnerPlugin`; mana regeneration was moved to ECS (`Player`/`Health`/`Mana` components and systems) with a sync bridge to the existing authoritative state maps.
