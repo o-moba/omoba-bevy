@@ -171,34 +171,46 @@ pub fn spawn_team_select_ui(commands: &mut Commands, selected_character: Charact
                     Name::new("TeamButtonsRow"),
                 ))
                 .with_children(|row| {
-                    row.spawn((
-                        Button,
-                        Node {
-                            width: Val::Px(TEAM_BUTTON_SIZE),
-                            height: Val::Px(TEAM_BUTTON_SIZE),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                        BackgroundColor(Team::Green.ui_color()),
-                        TeamSelectButton { team: Team::Green },
-                        Name::new("TeamGreenButton"),
-                    ));
-                    row.spawn((
-                        Button,
-                        Node {
-                            width: Val::Px(TEAM_BUTTON_SIZE),
-                            height: Val::Px(TEAM_BUTTON_SIZE),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                        BackgroundColor(Team::Blue.ui_color()),
-                        TeamSelectButton { team: Team::Blue },
-                        Name::new("TeamBlueButton"),
-                    ));
+                    spawn_team_button(row, Team::Green, "TeamGreenButton");
+                    spawn_team_button(row, Team::Blue, "TeamBlueButton");
                 });
+
+            parent.spawn((
+                Text::new("Pick a character, then a team to join the match."),
+                TextFont {
+                    font_size: 15.0,
+                    ..default()
+                },
+                TextColor(Color::srgba(0.78, 0.80, 0.86, 1.0)),
+                Name::new("TeamSelectHint"),
+            ));
         });
+}
+
+fn spawn_team_button(row: &mut ChildSpawnerCommands, team: Team, name: &str) {
+    row.spawn((
+        Button,
+        Node {
+            width: Val::Px(TEAM_BUTTON_SIZE),
+            height: Val::Px(TEAM_BUTTON_SIZE),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        },
+        BackgroundColor(team.ui_color()),
+        TeamSelectButton { team },
+        Name::new(name.to_owned()),
+    ))
+    .with_children(|button| {
+        button.spawn((
+            Text::new(team.as_str()),
+            TextFont {
+                font_size: 26.0,
+                ..default()
+            },
+            TextColor(Color::WHITE),
+        ));
+    });
 }
 
 fn team_select_ui_system(

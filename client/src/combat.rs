@@ -11,14 +11,15 @@ use bevy::{
 
 use crate::camera::MainCamera;
 use crate::debug_console::DebugConsole;
-use crate::input_bindings::SKILL_CAST_KEYS;
+use crate::input_bindings::{SKILL_CAST_KEYS, SKILL_UPGRADE_KEY};
 use crate::net::{
     GameState, GameStateSnapshot, NetworkCommand, NetworkMinion, NetworkMinionId, NetworkNeutral,
-    NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId, RemotePlayer,
-    StructureKind, TargetId, TargetKind,
+    NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId, PlayerProgression,
+    RemotePlayer, StructureKind, TargetId, TargetKind,
 };
 use crate::player::Player;
 use crate::team::Team;
+use crate::world::NormalizeModelScale;
 
 /// Must match server `server/src/balance.rs` player baselines (display / local defaults).
 pub const MAX_HP: f32 = 100.0;
@@ -61,6 +62,11 @@ const SKILL_BUTTON_MARGIN: f32 = 20.0;
 const SKILL_BUTTON_COLOR: Color = Color::srgba(0.12, 0.12, 0.12, 0.75);
 const SKILL_BUTTON_HOVER_COLOR: Color = Color::srgba(0.18, 0.18, 0.18, 0.85);
 const SKILL_BUTTON_PRESS_COLOR: Color = Color::srgba(0.28, 0.28, 0.28, 0.95);
+const SKILL_UPGRADE_READY_COLOR: Color = Color::srgba(0.20, 0.62, 0.26, 0.95);
+const SKILL_UPGRADE_HOVER_COLOR: Color = Color::srgba(0.26, 0.72, 0.32, 0.98);
+const SKILL_UPGRADE_IDLE_COLOR: Color = Color::srgba(0.16, 0.16, 0.18, 0.55);
+/// Mirror of the server's `MAX_SKILL_RANK`; keep in sync with `server/src/balance.rs`.
+const CLIENT_MAX_SKILL_RANK: u8 = 5;
 
 pub struct CombatPlugin;
 
@@ -78,6 +84,8 @@ impl Plugin for CombatPlugin {
                     clear_invalid_target_system,
                     cast_spell_system,
                     skill_button_system,
+                    skill_upgrade_input_system,
+                    update_skill_bar_system,
                     update_target_marker_system,
                 )
                     .chain(),
@@ -146,6 +154,16 @@ struct TargetMarker;
 
 #[derive(Component)]
 struct SkillBarSlot;
+
+#[derive(Component)]
+struct SkillUpgradeButton {
+    slot: usize,
+}
+
+#[derive(Component)]
+struct SkillRankLabel {
+    slot: usize,
+}
 
 fn tick_local_cast_cooldown(time: Res<Time>, mut cd: ResMut<LocalCastCooldown>) {
     if cd.remaining_secs > 0.0 {
@@ -287,30 +305,144 @@ fn setup_combat_ui(mut commands: Commands) {
             for i in 0..4 {
                 let label = crate::input_bindings::SKILL_SLOT_KEY_LABELS[i];
                 row.spawn((
-                    Button,
                     Node {
-                        width: Val::Px(SKILL_SLOT_SIZE),
-                        height: Val::Px(SKILL_SLOT_SIZE),
-                        justify_content: JustifyContent::Center,
+                        flex_direction: FlexDirection::Column,
                         align_items: AlignItems::Center,
+                        row_gap: Val::Px(4.0),
                         ..default()
                     },
-                    BackgroundColor(SKILL_BUTTON_COLOR),
-                    SkillBarSlot,
-                    Name::new(format!("SkillSlot-{label}")),
+                    Name::new(format!("SkillColumn-{label}")),
                 ))
-                .with_children(|slot| {
-                    slot.spawn((
-                        Text::new(label),
-                        TextFont {
-                            font_size: 22.0,
+                .with_children(|col| {
+                    // Upgrade arrow above the slot; bright when a point can be spent.
+                    col.spawn((
+                        Button,
+                        Node {
+                            width: Val::Px(SKILL_SLOT_SIZE),
+                            height: Val::Px(22.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
                             ..default()
                         },
-                        TextColor::WHITE,
-                    ));
+                        BackgroundColor(SKILL_UPGRADE_IDLE_COLOR),
+                        SkillUpgradeButton { slot: i },
+                        Name::new(format!("SkillUpgrade-{label}")),
+                    ))
+                    .with_children(|arrow| {
+                        arrow.spawn((
+                            Text::new("\u{2191}"),
+                            TextFont {
+                                font_size: 16.0,
+                                ..default()
+                            },
+                            TextColor::WHITE,
+                        ));
+                    });
+
+                    col.spawn((
+                        Button,
+                        Node {
+                            width: Val::Px(SKILL_SLOT_SIZE),
+                            height: Val::Px(SKILL_SLOT_SIZE),
+                            flex_direction: FlexDirection::Column,
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            row_gap: Val::Px(2.0),
+                            ..default()
+                        },
+                        BackgroundColor(SKILL_BUTTON_COLOR),
+                        SkillBarSlot,
+                        Name::new(format!("SkillSlot-{label}")),
+                    ))
+                    .with_children(|slot| {
+                        slot.spawn((
+                            Text::new(label),
+                            TextFont {
+                                font_size: 22.0,
+                                ..default()
+                            },
+                            TextColor::WHITE,
+                        ));
+                        slot.spawn((
+                            Text::new("Lv 1"),
+                            TextFont {
+                                font_size: 13.0,
+                                ..default()
+                            },
+                            TextColor(Color::srgba(0.82, 0.84, 0.90, 1.0)),
+                            SkillRankLabel { slot: i },
+                        ));
+                    });
                 });
             }
         });
+}
+
+/// Reflect server ranks on the slot labels and light the upgrade arrows when the
+/// local player has a skill point to spend and the slot is below max rank (TASK03).
+fn update_skill_bar_system(
+    progression: Query<&PlayerProgression, With<Player>>,
+    mut rank_labels: Query<(&SkillRankLabel, &mut Text)>,
+    mut upgrade_buttons: Query<
+        (&SkillUpgradeButton, &Interaction, &mut BackgroundColor, &mut Node),
+        With<Button>,
+    >,
+) {
+    let prog = progression.iter().next().copied().unwrap_or_default();
+
+    for (label, mut text) in &mut rank_labels {
+        let rank = prog.ranks.get(label.slot).copied().unwrap_or(1).max(1);
+        let next = format!("Lv {rank}");
+        if text.0 != next {
+            text.0 = next;
+        }
+    }
+
+    for (button, interaction, mut color, mut node) in &mut upgrade_buttons {
+        let rank = prog.ranks.get(button.slot).copied().unwrap_or(1).max(1);
+        let can_upgrade = prog.skill_points > 0 && rank < CLIENT_MAX_SKILL_RANK;
+        // Arrow only shows when a point can actually be spent on this slot.
+        let display = if can_upgrade {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        if node.display != display {
+            node.display = display;
+        }
+        let next_color = if matches!(interaction, Interaction::Hovered | Interaction::Pressed) {
+            SKILL_UPGRADE_HOVER_COLOR
+        } else {
+            SKILL_UPGRADE_READY_COLOR
+        };
+        *color = next_color.into();
+    }
+}
+
+/// Arrow click or the upgrade key spends a point on the matching slot. The server
+/// is authoritative: it ignores the request when no point is available.
+fn skill_upgrade_input_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    progression: Query<&PlayerProgression, With<Player>>,
+    upgrade_buttons: Query<(&SkillUpgradeButton, &Interaction), (Changed<Interaction>, With<Button>)>,
+    mut command_writer: MessageWriter<NetworkCommand>,
+) {
+    let can_spend = progression
+        .iter()
+        .next()
+        .is_some_and(|prog| prog.skill_points > 0);
+
+    if can_spend && keyboard.just_pressed(SKILL_UPGRADE_KEY) {
+        command_writer.write(NetworkCommand::UpgradeSkill { slot: 0 });
+    }
+
+    for (button, interaction) in &upgrade_buttons {
+        if matches!(interaction, Interaction::Pressed) && can_spend {
+            command_writer.write(NetworkCommand::UpgradeSkill {
+                slot: button.slot as u8,
+            });
+        }
+    }
 }
 
 fn select_target_system(
@@ -718,6 +850,7 @@ fn sync_combat_bar_transforms_system(
     global_query: Query<&GlobalTransform>,
     aabb_query: Query<&Aabb>,
     children_query: Query<&Children>,
+    normalized_query: Query<&NormalizeModelScale>,
     mut bar_query: Query<(Entity, &CombatBarAnchor, &mut Transform), With<CombatBarRoot>>,
 ) {
     let Ok(camera_transform) = camera_query.single() else {
@@ -733,13 +866,24 @@ fn sync_combat_bar_transforms_system(
                 .despawn();
             continue;
         };
-        let bar_world_y = compute_bar_world_y_for_entity(
-            anchor.target,
-            target_transform.translation().y + anchor.y_offset,
-            &children_query,
-            &aabb_query,
-            &global_query,
-        );
+        // Normalized player models report a deterministic head height; prefer it
+        // over per-frame AABB sampling (unstable for rigged/center-pivot meshes).
+        let bar_world_y = match normalized_query
+            .get(anchor.target)
+            .ok()
+            .and_then(|n| n.head_local_y)
+        {
+            Some(head_local_y) => {
+                target_transform.translation().y + head_local_y + BAR_HEAD_CLEARANCE
+            }
+            None => compute_bar_world_y_for_entity(
+                anchor.target,
+                target_transform.translation().y + anchor.y_offset,
+                &children_query,
+                &aabb_query,
+                &global_query,
+            ),
+        };
         bar_transform.translation = Vec3::new(
             target_transform.translation().x,
             bar_world_y,
@@ -941,8 +1085,8 @@ fn find_nearest_enemy_target(
         }
     }
 
-    for (entity, transform, id, stats, _team) in minion_candidates.iter() {
-        if !stats.is_alive() {
+    for (entity, transform, id, stats, team) in minion_candidates.iter() {
+        if !stats.is_alive() || *team == local_team {
             continue;
         }
         let dist_sq = transform.translation.distance_squared(local_pos);
@@ -1043,8 +1187,8 @@ fn find_target_near_point(
         }
     }
 
-    for (entity, transform, id, stats, _team) in minion_candidates.iter() {
-        if !stats.is_alive() {
+    for (entity, transform, id, stats, team) in minion_candidates.iter() {
+        if !stats.is_alive() || *team == local_team {
             continue;
         }
         let dist = transform.translation.xz().distance(click_point.xz());

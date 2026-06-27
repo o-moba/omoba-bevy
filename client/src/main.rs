@@ -4,6 +4,7 @@ mod camera;
 mod combat;
 mod debug_console;
 mod game_state;
+mod god_mode;
 mod help_overlay;
 mod input_bindings;
 mod maps;
@@ -21,6 +22,7 @@ use camera::CameraPlugin;
 use combat::CombatPlugin;
 use debug_console::DebugConsolePlugin;
 use game_state::GameStateUiPlugin;
+use god_mode::GodModePlugin;
 use help_overlay::HelpOverlayPlugin;
 use maps::MapsPlugin;
 use match_hud::MatchHudPlugin;
@@ -53,6 +55,7 @@ fn main() {
             HelpOverlayPlugin,
             DebugConsolePlugin,
             PauseMenuPlugin,
+            GodModePlugin,
         ))
         .run();
 }

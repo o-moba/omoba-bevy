@@ -21,6 +21,12 @@ use crate::team::{CharacterChoice, Team};
 use crate::world::{PlayerModelCatalog, model_assets_for_choice};
 
 pub const PLAYER_SPEED: f32 = 5.0;
+/// Debug movement multiplier; mirror of `server/src/balance.rs::DEBUG_SPEED_MULTIPLIER`.
+pub const DEBUG_SPEED_MULTIPLIER: f32 = 2.6;
+
+/// Debug speed-boost toggle, shared by the boost button and local movement.
+#[derive(Resource, Default)]
+pub struct DebugSpeedBoost(pub bool);
 pub const PLAYER_SIZE: f32 = 1.0;
 pub const JUMP_HEIGHT: f32 = 1.5;
 pub const JUMP_DURATION: f32 = 0.6;
@@ -53,6 +59,7 @@ impl Plugin for PlayerPlugin {
         .add_systems(Update, resolve_player_structure_overlap.after(move_player))
         .add_systems(PostUpdate, apply_gravity)
         .init_resource::<RespawnCountdown>()
+        .init_resource::<DebugSpeedBoost>()
         .init_resource::<PlayerAnimationLibrary>()
         .add_systems(Startup, setup_respawn_ui)
         .add_systems(Update, respawn_countdown_system);
@@ -163,8 +170,11 @@ fn setup_player_animation_library(
             library.evaluated_characters.insert(character);
             continue;
         };
+        // Skip once this exact GLTF has been evaluated, whether or not it produced an
+        // animation set. Gating on `sets` instead re-ran every frame for models that
+        // lack idle/walk clips, spamming the "animations were not found" warning.
         if library.source_gltfs.get(&character) == Some(&gltf_handle)
-            && library.sets.contains_key(&character)
+            && library.evaluated_characters.contains(&character)
         {
             continue;
         }
@@ -479,6 +489,7 @@ fn move_player(
         Query<&Transform, (With<PlayerBody>, Without<Player>)>,
         Query<(&Transform, &StructureKind), With<NetworkStructure>>,
     )>,
+    speed_boost: Res<DebugSpeedBoost>,
     map_layout: Option<Res<MapLayout>>,
     game_state: Option<Res<GameStateSnapshot>>,
 ) {
@@ -514,7 +525,12 @@ fn move_player(
         );
         let direction = (target_pos_flat - current_pos).normalize_or_zero();
         let distance = current_pos.xz().distance(target_pos_flat.xz());
-        let move_delta = PLAYER_SPEED * time.delta_secs();
+        let speed = if speed_boost.0 {
+            PLAYER_SPEED * DEBUG_SPEED_MULTIPLIER
+        } else {
+            PLAYER_SPEED
+        };
+        let move_delta = speed * time.delta_secs();
 
         if distance < move_delta || distance < 0.01 {
             let mut desired = Vec3::new(

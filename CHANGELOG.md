@@ -7,6 +7,63 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 ## [Unreleased]
 
 ### Added
+- **TASK03 — upgradable skills:** the primary ability (Q) now scales with an
+  authoritative per-slot rank. Server tracks `ranks: [u8;4]` in `PlayerState`,
+  handles a new `UpgradeSkill { slot }` packet (spends one skill point, capped at
+  `MAX_SKILL_RANK`), and the projectile damage is `PRIMARY_ABILITY_DAMAGE_BY_RANK`
+  by Q rank (now an increasing table 20→52). Client shows each slot's `Lv N` and an
+  upgrade ↑ button (lit when a point is spendable); the `U` key upgrades Q.
+- **TASK04 — God Mode (debug):** a left-side toggle button makes the local player
+  invulnerable for gameplay debugging. Authoritative: `ClientPacket::SetGodMode`
+  sets a server-side `god_mode` flag that skips all player damage (projectile,
+  neutral, and minion attacks). Not networked back; the requesting client owns it.
+
+### Added
+- **TASK05 — Debug Speed Boost:** a button next to God Mode (bottom-left) toggles an
+  authoritative movement multiplier (`DEBUG_SPEED_MULTIPLIER`). The server widens the
+  movement-authority clamp so the boosted client is not rubber-banded; the client
+  moves faster locally. Re-asserted on (re)connect.
+
+### Fixed
+- Minions now always prioritize enemy minions over players: while any enemy minion
+  is within vision a minion never targets a player (overrides sticky player aggro);
+  players are only chosen when no enemy minion is in range. Covered by
+  `minion_prefers_enemy_minion_over_closer_player`.
+- Debug toggles (God Mode / Speed Boost) now take effect reliably: a single
+  edge-triggered send could be lost (UDP, connection races, fresh server session),
+  leaving the server flag unset — so god mode "did nothing" and speed boost
+  rubber-banded. The client now re-asserts the current toggle state to the server
+  ~2x/sec (idempotent; server logs only on change), and the snapshot reconcile
+  widens its local snap threshold while boosting so the boosted player is not
+  snapped back. Verified end-to-end against a live server (`set_god_mode` /
+  `set_speed_boost` received and applied).
+- Debug toggles can now be driven by keyboard (**F2** god mode, **F3** speed boost)
+  as a reliable fallback if the on-screen buttons do not receive clicks; toggling
+  logs `[debug] god_mode/speed_boost -> <bool>` client-side, and the server logs
+  receipt, to diagnose the command path end to end.
+- God Mode now reliably keeps the player alive: besides skipping damage at every
+  player-damage site, the server restores god-mode players to full HP **and full
+  mana** each tick (after damage, before respawn) and on toggle, so no missed path
+  can kill them and abilities can be cast freely.
+- Stopped per-frame `"idle/walk animations were not found"` log spam for models
+  without locomotion clips: the animation library now skips a GLTF once evaluated
+  (gating on `evaluated_characters`) instead of re-checking every frame.
+
+### Changed
+- Skill upgrade arrows now appear **only when a point can actually be spent** on that
+  slot (hidden otherwise) instead of always showing dimmed.
+- God Mode debug button moved to the bottom-left, on the same line as the skill bar,
+  and is re-asserted to the server after a (re)connect (the server resets the flag for
+  a fresh session).
+- First level is reachable in ~3 minion kills (`LEVEL_XP_THRESHOLDS[0]` 120 → 90) so the
+  skill-upgrade flow is easy to exercise during playtests.
+
+### Fixed
+- Target selection (`Tab` nearest-enemy and middle-click) no longer picks **friendly minions**: minion candidates now skip same-team units like players and structures do, so the enemy base tower can be selected near friendly minion waves (`client/src/combat.rs`).
+- Head HP/Mana bar for player models is now anchored to a deterministic normalized head height (`NormalizeModelScale.head_local_y`) instead of unstable per-frame AABB sampling, so the bar sits above the head for every character regardless of GLB pivot (previously drifted to mid-body for `wang`/`toka`).
+
+### Added
+- **UI/UX iteration:** team-select buttons now show their `Green`/`Blue` labels (previously bare colored squares) plus a flow hint ("Pick a character, then a team to join the match."); the in-match HUD gains color-coded HP and Mana bars (HP tints green/amber/red by ratio) shown only while the match is `Running`.
 - Production authority hardening: stable optional client session ids in join packets, client-side persistence for the id, and server-side reclaim of timed-out player slots from a new UDP endpoint.
 - Standalone sibling `ekza-bevy-sdk` repository with stable Ekza-Stellar character ids, built-in 3D model manifest metadata, GLB validation helpers, and a Bevy-gated model catalog loader for local/remote GLB assets.
 - SDK model validation module and examples: typed GLB validation reports, configurable rules, issue enums, a `model_check` CLI example, a headless `model_cache` built-in source verifier, and an interactive Bevy `model_viewer` viewport.
