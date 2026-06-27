@@ -1,0 +1,171 @@
+//! Test mirror of the server's UDP/JSON wire protocol.
+//!
+//! These types are a **deliberate, minimal mirror** of the structures the
+//! authoritative server (`server/src/main.rs`) serializes over UDP. They are
+//! NOT shared with the server crate on purpose: the harness must exercise the
+//! server purely through its public wire format, exactly like a real client.
+//!
+//! If the server protocol changes, this file must be updated to match. The
+//! source of truth lives in:
+//!   - `server/src/main.rs` — `enum ClientPacket`, `enum ServerPacket`,
+//!     `struct PlayerState`, `enum Team`, `struct TargetId`, `enum TargetKind`.
+//!
+//! Wire conventions copied from the server:
+//!   - Packets use `#[serde(tag = "type", rename_all = "snake_case")]`
+//!     (internally tagged: `{"type":"join", ...}`).
+//!   - Plain enums use `#[serde(rename_all = "snake_case")]`
+//!     (e.g. `Team::Green` -> `"green"`).
+//!
+//! Only the fields the harness asserts on are modeled here. `#[serde(default)]`
+//! is used liberally so the harness tolerates the server adding or omitting
+//! fields without breaking deserialization (internally tagged enums already
+//! ignore unknown fields).
+
+use serde::{Deserialize, Serialize};
+
+/// Team selection. Mirrors `server::Team`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Team {
+    Green,
+    Blue,
+}
+
+/// Kind of entity a cast can target. Mirrors `server::TargetKind`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TargetKind {
+    Player,
+    Minion,
+    Structure,
+    Neutral,
+}
+
+/// Playable character selection sent in a `Join`.
+///
+/// Mirrors `ekza_bevy_sdk::EkzaCharacter` (`rename_all = "snake_case"`,
+/// variants `EkzaCharacter::ALL`). Modeling it as an enum — instead of a raw
+/// string — turns an invalid character into a compile-time error rather than a
+/// runtime packet the server silently rejects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Character {
+    Ipfs,
+    Toka,
+    Wang,
+    Cube,
+}
+
+/// A cast target reference. Mirrors `server::TargetId`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TargetId {
+    pub kind: TargetKind,
+    pub id: u64,
+}
+
+impl TargetId {
+    /// Convenience constructor for targeting an enemy player by id.
+    pub fn player(id: u64) -> Self {
+        Self {
+            kind: TargetKind::Player,
+            id,
+        }
+    }
+}
+
+/// Outbound client -> server packets.
+///
+/// Mirror of `server::ClientPacket`. The harness only ever *sends* these, so
+/// the type derives `Serialize` only. This is a curated mirror: it models the
+/// variants and field names the harness needs, matching the server's
+/// `#[serde(tag = "type", rename_all = "snake_case")]` wire shape (it is not an
+/// exhaustive copy of every server variant).
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ClientPacket {
+    Transform { x: f32, y: f32, z: f32, yaw: f32 },
+    Cast { target: TargetId },
+    Join {
+        team: Team,
+        character: Character,
+        session_id: Option<String>,
+    },
+    Ping,
+    SetGodMode { enabled: bool },
+    SetSpeedBoost { enabled: bool },
+    UpgradeSkill { slot: u8 },
+}
+
+/// A single player's networked state. Minimal mirror of `server::PlayerState`.
+///
+/// Fields the harness does not assert on (e.g. `y`, `yaw`, `next_level_xp`)
+/// are omitted; `#[serde(default)]` keeps deserialization resilient.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PlayerState {
+    pub id: u64,
+    #[serde(default)]
+    pub x: f32,
+    #[serde(default)]
+    pub z: f32,
+    #[serde(default)]
+    pub team: Option<Team>,
+    #[serde(default)]
+    pub hp: f32,
+    #[serde(default)]
+    pub max_hp: f32,
+    #[serde(default)]
+    pub mana: f32,
+    #[serde(default)]
+    pub max_mana: f32,
+    #[serde(default)]
+    pub gold: u32,
+    #[serde(default)]
+    pub xp: u32,
+    #[serde(default)]
+    pub level: u32,
+    #[serde(default)]
+    pub skill_points: u32,
+    /// Per-slot ability ranks (Q/W/E/R). Base rank is 1.
+    #[serde(default = "default_ranks")]
+    pub ranks: [u8; 4],
+}
+
+fn default_ranks() -> [u8; 4] {
+    [1; 4]
+}
+
+/// Inbound server -> client packets. Mirror of `server::ServerPacket`.
+///
+/// Only the `Snapshot` variant exists today. Extra snapshot fields the harness
+/// does not use (projectiles, structures, minions, neutrals, game_state, ...)
+/// are intentionally not modeled and are ignored during deserialization.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ServerPacket {
+    Snapshot {
+        your_id: u64,
+        #[serde(default)]
+        players: Vec<PlayerState>,
+    },
+}
+
+impl ServerPacket {
+    /// Returns the receiving client's own player id from a snapshot.
+    pub fn your_id(&self) -> u64 {
+        match self {
+            ServerPacket::Snapshot { your_id, .. } => *your_id,
+        }
+    }
+
+    /// Borrows the players carried by a snapshot.
+    pub fn players(&self) -> &[PlayerState] {
+        match self {
+            ServerPacket::Snapshot { players, .. } => players,
+        }
+    }
+
+    /// Finds a player by id within a snapshot.
+    pub fn player(&self, id: u64) -> Option<&PlayerState> {
+        self.players().iter().find(|player| player.id == id)
+    }
+}

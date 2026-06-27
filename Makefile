@@ -1,4 +1,4 @@
-.PHONY: server game start stop restart verify-task-12
+.PHONY: server game start stop restart verify-task-12 verify-gameplay
 
 # Run the dedicated game server (env: SERVER_ADDR, default 0.0.0.0:4000)
 server:
@@ -32,3 +32,10 @@ restart: stop
 verify-task-12:
 	cargo build -p server
 	python3 scripts/verify_task_12_qa_matrix_live_udp.py
+
+# Headless gameplay harness: builds the server, then drives it with bot clients
+# over UDP to assert gameplay rules (god mode, movement clamp, skill gating).
+# No GPU, no human. Runs sequentially so spawned servers do not contend.
+verify-gameplay:
+	cargo build -p server
+	cargo test -p harness -- --test-threads=1

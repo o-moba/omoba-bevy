@@ -41,6 +41,7 @@ Canonical version: `0.2.0`
 - Authoritative tuning constants: `server/src/balance.rs` (see `docs/balance-tuning.md`).
 - Release checklist, manual QA matrix, and readiness report: `docs/release-gate-checklist.md`, `docs/manual-qa-matrix.md`, `docs/release-readiness-report.md`.
 - Live UDP QA smoke (two clients + cast): `make verify-task-12` or `python3 scripts/verify_task_12_qa_matrix_live_udp.py` (after `cargo build -p server`).
+- Headless gameplay rule harness (typed Rust, no GPU/human): `make verify-gameplay` boots the real server on a per-test port and drives it with bot clients to assert god mode, the movement-authority clamp, and skill-point gating (`harness/` crate; see `docs/progress/2026-06-28-headless-gameplay-harness.md`).
 - Expanded skill roster, tooltip UX, balance passes, and release-scale QA beyond the current cast-and-HUD surface.
 
 ## Operations and playtest documentation
