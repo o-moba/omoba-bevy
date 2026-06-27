@@ -28,9 +28,35 @@ struct MatchHudProgressionText;
 #[derive(Component)]
 struct MatchHudStatusText;
 
+/// Container for the HP/Mana bars; hidden until the match is running.
+#[derive(Component)]
+struct HudBarsRoot;
+
+#[derive(Component)]
+struct HpBarFill;
+
+#[derive(Component)]
+struct ManaBarFill;
+
 const HUD_LEFT: f32 = 16.0;
 /// Below the minimap (minimap top margin + outer size ~ 236px).
 const HUD_TOP: f32 = 248.0;
+
+const BAR_TRACK_WIDTH: f32 = 200.0;
+const BAR_HEIGHT: f32 = 14.0;
+const BAR_TRACK_COLOR: Color = Color::srgba(0.10, 0.11, 0.14, 0.92);
+const MANA_BAR_COLOR: Color = Color::srgb(0.30, 0.55, 0.95);
+
+/// HP bar tints green/amber/red so low health reads at a glance.
+fn hp_bar_color(ratio: f32) -> Color {
+    if ratio > 0.5 {
+        Color::srgb(0.30, 0.78, 0.34)
+    } else if ratio > 0.25 {
+        Color::srgb(0.90, 0.74, 0.20)
+    } else {
+        Color::srgb(0.86, 0.26, 0.22)
+    }
+}
 
 fn setup_match_hud(mut commands: Commands) {
     commands
@@ -58,6 +84,20 @@ fn setup_match_hud(mut commands: Commands) {
                 MatchHudProgressionText,
             ));
             col.spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(5.0),
+                    ..default()
+                },
+                Visibility::Hidden,
+                HudBarsRoot,
+                Name::new("MatchHudBars"),
+            ))
+            .with_children(|bars| {
+                spawn_stat_bar(bars, "HP", hp_bar_color(1.0), HpBarFill);
+                spawn_stat_bar(bars, "Mana", MANA_BAR_COLOR, ManaBarFill);
+            });
+            col.spawn((
                 Text::new(""),
                 TextFont {
                     font_size: 17.0,
@@ -69,6 +109,56 @@ fn setup_match_hud(mut commands: Commands) {
         });
 }
 
+fn spawn_stat_bar<F: Component>(
+    col: &mut ChildSpawnerCommands,
+    label: &str,
+    fill_color: Color,
+    fill_marker: F,
+) {
+    col.spawn((
+        Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(8.0),
+            ..default()
+        },
+        Name::new(format!("MatchHudBar-{label}")),
+    ))
+    .with_children(|row| {
+        row.spawn((
+            Text::new(label),
+            TextFont {
+                font_size: 14.0,
+                ..default()
+            },
+            TextColor(Color::srgba(0.85, 0.87, 0.92, 1.0)),
+            Node {
+                width: Val::Px(44.0),
+                ..default()
+            },
+        ));
+        row.spawn((
+            Node {
+                width: Val::Px(BAR_TRACK_WIDTH),
+                height: Val::Px(BAR_HEIGHT),
+                ..default()
+            },
+            BackgroundColor(BAR_TRACK_COLOR),
+        ))
+        .with_children(|track| {
+            track.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    ..default()
+                },
+                BackgroundColor(fill_color),
+                fill_marker,
+            ));
+        });
+    });
+}
+
 fn update_match_hud(
     game_state: Option<Res<GameStateSnapshot>>,
     player: Query<(&CombatStats, &PlayerProgression), With<Player>>,
@@ -78,6 +168,9 @@ fn update_match_hud(
     target_state: Res<TargetState>,
     mut prog: Query<&mut Text, (With<MatchHudProgressionText>, Without<MatchHudStatusText>)>,
     mut status: Query<&mut Text, (With<MatchHudStatusText>, Without<MatchHudProgressionText>)>,
+    mut bars_root: Query<&mut Visibility, With<HudBarsRoot>>,
+    mut hp_fill: Query<(&mut Node, &mut BackgroundColor), (With<HpBarFill>, Without<ManaBarFill>)>,
+    mut mana_fill: Query<(&mut Node, &mut BackgroundColor), (With<ManaBarFill>, Without<HpBarFill>)>,
 ) {
     let Ok(mut prog_text) = prog.single_mut() else {
         return;
@@ -89,12 +182,17 @@ fn update_match_hud(
     let Some((stats, progression)) = player.iter().next() else {
         prog_text.0 = "Level --   XP --/--   Skill points --".into();
         status_text.0.clear();
+        if let Ok(mut v) = bars_root.single_mut() {
+            *v = Visibility::Hidden;
+        }
         return;
     };
 
     let running = game_state
         .as_ref()
         .is_some_and(|g| matches!(g.state, GameState::Running));
+
+    update_stat_bars(running, *stats, &mut bars_root, &mut hp_fill, &mut mana_fill);
 
     let up = upgrade_key_display();
     if progression.next_level_xp == 0 {
@@ -132,6 +230,34 @@ fn update_match_hud(
         &objective_line,
         cast_cd.remaining_secs,
     );
+}
+
+fn update_stat_bars(
+    running: bool,
+    stats: CombatStats,
+    bars_root: &mut Query<&mut Visibility, With<HudBarsRoot>>,
+    hp_fill: &mut Query<(&mut Node, &mut BackgroundColor), (With<HpBarFill>, Without<ManaBarFill>)>,
+    mana_fill: &mut Query<(&mut Node, &mut BackgroundColor), (With<ManaBarFill>, Without<HpBarFill>)>,
+) {
+    if let Ok(mut v) = bars_root.single_mut() {
+        *v = if running {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+    }
+
+    let hp_ratio = (stats.hp.max(0.0) / stats.max_hp.max(1.0)).clamp(0.0, 1.0);
+    let mana_ratio = (stats.mana.max(0.0) / stats.max_mana.max(1.0)).clamp(0.0, 1.0);
+
+    if let Ok((mut node, mut color)) = hp_fill.single_mut() {
+        node.width = Val::Percent(hp_ratio * 100.0);
+        *color = BackgroundColor(hp_bar_color(hp_ratio));
+    }
+    if let Ok((mut node, mut color)) = mana_fill.single_mut() {
+        node.width = Val::Percent(mana_ratio * 100.0);
+        *color = BackgroundColor(MANA_BAR_COLOR);
+    }
 }
 
 fn running_status_text(

@@ -47,6 +47,7 @@ pub(crate) fn ensure_player_connected(
                 level: STARTING_LEVEL,
                 next_level_xp: xp_threshold_for_level(STARTING_LEVEL),
                 skill_points: 0,
+                ranks: [1; 4],
                 character: default_character_choice(),
             },
             session_id: None,
@@ -54,6 +55,8 @@ pub(crate) fn ensure_player_connected(
             last_movement_at: now,
             last_cast_at: None,
             respawn_at: None,
+            god_mode: false,
+            speed_mult: 1.0,
         }
     });
 }
@@ -175,6 +178,7 @@ pub(crate) fn handle_join_request(
     player.state.level = STARTING_LEVEL;
     player.state.next_level_xp = xp_threshold_for_level(STARTING_LEVEL);
     player.state.skill_points = 0;
+    player.state.ranks = [1; 4];
     player.last_seen = now;
     player.last_movement_at = now;
     player.last_cast_at = None;
@@ -203,7 +207,8 @@ pub(crate) fn handle_transform_request(
         .duration_since(player.last_movement_at)
         .as_secs_f32()
         .clamp(0.0, MOVEMENT_MAX_DELTA_SECONDS);
-    let max_distance = PLAYER_SPEED * elapsed + MOVEMENT_POSITION_TOLERANCE;
+    let speed_mult = player.speed_mult.max(1.0);
+    let max_distance = PLAYER_SPEED * speed_mult * elapsed + MOVEMENT_POSITION_TOLERANCE;
 
     let accepted = if distance <= max_distance || distance <= 0.000_1 {
         requested

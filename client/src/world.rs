@@ -67,6 +67,10 @@ impl Plugin for SetupPlugin {
 pub struct NormalizeModelScale {
     base_scale: Vec3,
     last_applied_target_height: Option<f32>,
+    /// Height of the model's top above the entity origin after normalization.
+    /// Used to anchor the head bar deterministically instead of per-frame AABB
+    /// sampling, which is unstable for rigged/center-pivot models.
+    pub head_local_y: Option<f32>,
 }
 
 impl NormalizeModelScale {
@@ -74,6 +78,7 @@ impl NormalizeModelScale {
         Self {
             base_scale: Vec3::ONE,
             last_applied_target_height: None,
+            head_local_y: None,
         }
     }
 }
@@ -362,7 +367,15 @@ fn normalize_model_scale_system(
         }
 
         let scale_factor = target_height / current_height;
+        // Top of the model above the entity origin. Sampled at the current scale,
+        // de-scaled to model-local units, then re-scaled to the normalized size.
+        // Pivot-independent, so the head bar sits above every model regardless of
+        // where the GLB origin sits inside the mesh.
+        let prev_scale_y = transform.scale.y.max(NORMALIZATION_MIN_HEIGHT);
+        let top_above_origin = max_y - transform.translation.y;
+        let head_local_y = top_above_origin / prev_scale_y * scale_factor;
         transform.scale = normalization.base_scale * Vec3::splat(scale_factor);
         normalization.last_applied_target_height = Some(target_height);
+        normalization.head_local_y = Some(head_local_y);
     }
 }

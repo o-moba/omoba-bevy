@@ -50,6 +50,15 @@ enum ClientPacket {
     },
     Ping,
     RequestRematch,
+    SetGodMode {
+        enabled: bool,
+    },
+    SetSpeedBoost {
+        enabled: bool,
+    },
+    UpgradeSkill {
+        slot: u8,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -86,6 +95,11 @@ fn default_character_choice() -> CharacterChoice {
     CharacterChoice::Ipfs
 }
 
+/// All ability ranks start at 1 (1-based; rank 1 = base power).
+fn default_skill_ranks() -> [u8; 4] {
+    [1; 4]
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PlayerState {
     id: u64,
@@ -103,6 +117,8 @@ struct PlayerState {
     level: u32,
     next_level_xp: u32,
     skill_points: u32,
+    #[serde(default = "default_skill_ranks")]
+    ranks: [u8; 4],
     #[serde(default = "default_character_choice")]
     character: CharacterChoice,
 }
@@ -282,6 +298,12 @@ struct ConnectedPlayer {
     last_movement_at: Instant,
     last_cast_at: Option<Instant>,
     respawn_at: Option<Instant>,
+    /// Debug invulnerability toggle (TASK04). Not networked; the requesting
+    /// client owns the toggle and the server skips damage while it is set.
+    god_mode: bool,
+    /// Debug movement multiplier (1.0 = normal). Raises the server's accepted
+    /// movement distance so a boosted client is not clamped as a teleport.
+    speed_mult: f32,
 }
 
 struct DisconnectedSession {
@@ -563,6 +585,50 @@ impl ServerRuntime {
                                 *victory_at = None;
                             }
                         }
+                        ClientPacket::SetGodMode { enabled } => {
+                            ensure_player_connected(players, map_layout, addr, next_player_id, now);
+                            if let Some(player) = players.get_mut(&addr) {
+                                player.last_seen = now;
+                                if player.god_mode != enabled {
+                                    println!("Player {} god_mode={}", player.state.id, enabled);
+                                }
+                                player.god_mode = enabled;
+                                if enabled {
+                                    player.state.hp = player.state.max_hp;
+                                    player.state.mana = player.state.max_mana;
+                                    player.respawn_at = None;
+                                }
+                            }
+                        }
+                        ClientPacket::SetSpeedBoost { enabled } => {
+                            ensure_player_connected(players, map_layout, addr, next_player_id, now);
+                            if let Some(player) = players.get_mut(&addr) {
+                                player.last_seen = now;
+                                let mult = if enabled { DEBUG_SPEED_MULTIPLIER } else { 1.0 };
+                                if (player.speed_mult - mult).abs() > f32::EPSILON {
+                                    println!("Player {} speed_boost={}", player.state.id, enabled);
+                                }
+                                player.speed_mult = mult;
+                            }
+                        }
+                        ClientPacket::UpgradeSkill { slot } => {
+                            ensure_player_connected(players, map_layout, addr, next_player_id, now);
+                            if let Some(player) = players.get_mut(&addr) {
+                                player.last_seen = now;
+                                let s = slot as usize;
+                                if s < player.state.ranks.len()
+                                    && player.state.skill_points > 0
+                                    && player.state.ranks[s] < MAX_SKILL_RANK
+                                {
+                                    player.state.ranks[s] += 1;
+                                    player.state.skill_points -= 1;
+                                    println!(
+                                        "Player {} upgraded skill slot {} to rank {}",
+                                        player.state.id, s, player.state.ranks[s]
+                                    );
+                                }
+                            }
+                        }
                     }
                 }
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
@@ -634,6 +700,7 @@ impl ServerRuntime {
             now,
         );
         simulate_neutrals(players, neutrals, game_state, dt, now);
+        restore_god_mode_players(players);
         handle_respawns(players, structures, map_layout, game_state, now);
 
         if let GameState::Victory { .. } = game_state {
@@ -1070,6 +1137,11 @@ fn handle_cast_request(
     caster_mut.state.mana -= SPELL_MANA_COST;
     caster_mut.last_cast_at = Some(now);
 
+    // Primary ability uses the Q slot rank; higher rank = more damage (TASK03).
+    let q_rank = caster_mut.state.ranks[0].max(1) as usize;
+    let rank_damage =
+        PRIMARY_ABILITY_DAMAGE_BY_RANK[(q_rank - 1).min(PRIMARY_ABILITY_DAMAGE_BY_RANK.len() - 1)];
+
     let projectile_id = *next_projectile_id;
     *next_projectile_id += 1;
 
@@ -1092,7 +1164,7 @@ fn handle_cast_request(
             ),
             homing: true,
             guaranteed_hit: true,
-            damage: PRIMARY_ABILITY_DAMAGE_BY_RANK[0],
+            damage: rank_damage,
             radius: PROJECTILE_RADIUS,
             expires_at: now + PROJECTILE_LIFETIME,
         },
@@ -1274,6 +1346,9 @@ fn simulate_projectiles(
             .values_mut()
             .find(|player| player.state.id == target_id && player.state.hp > 0.0)
         {
+            if target_player.god_mode {
+                continue;
+            }
             target_player.state.hp = (target_player.state.hp - damage).max(0.0);
             if target_player.state.hp <= 0.0 && target_player.respawn_at.is_none() {
                 target_player.respawn_at = Some(now + RESPAWN_DELAY);
@@ -1481,6 +1556,9 @@ fn simulate_neutrals(
             .values_mut()
             .find(|player| player.state.id == target_id && player.state.hp > 0.0)
         {
+            if target_player.god_mode {
+                continue;
+            }
             target_player.state.hp = (target_player.state.hp - damage).max(0.0);
             if target_player.state.hp <= 0.0 && target_player.respawn_at.is_none() {
                 target_player.respawn_at = Some(now + RESPAWN_DELAY);
@@ -1554,6 +1632,19 @@ fn apply_minion_damage(
         target_minion.state.target_kind = None;
         target_minion.state.target_id = None;
         award_minion_kill_rewards(players, attacker_team);
+    }
+}
+
+/// Bulletproof debug invulnerability: after all damage for the tick, force god-mode
+/// players back to full HP and cancel any pending respawn, so they never die even if
+/// a damage path is missed (TASK04).
+fn restore_god_mode_players(players: &mut HashMap<SocketAddr, ConnectedPlayer>) {
+    for player in players.values_mut() {
+        if player.god_mode {
+            player.state.hp = player.state.max_hp;
+            player.state.mana = player.state.max_mana;
+            player.respawn_at = None;
+        }
     }
 }
 
@@ -1645,80 +1736,65 @@ fn simulate_minions(
 
         let minion_position = Vec3f::new(minion.state.x, minion.state.y, minion.state.z);
 
-        let mut aggro_target = minion.aggro_target.and_then(|target| match target {
-            MinionAggroTarget::Player(target_id) => player_targets
-                .iter()
-                .find(|(id, team, position)| {
-                    *id == target_id
-                        && *team != minion.state.team
-                        && minion_position.distance_squared(*position) <= minion_vision_sq
-                })
-                .map(|(_, _, position)| (target, *position, PLAYER_HIT_RADIUS)),
-            MinionAggroTarget::Minion(target_id) => minion_targets
-                .iter()
-                .find(|(id, team, position)| {
-                    *id == target_id
-                        && *id != minion.state.id
-                        && *team != minion.state.team
-                        && minion_position.distance_squared(*position) <= minion_vision_sq
-                })
-                .map(|(_, _, position)| (target, *position, MINION_RADIUS)),
-        });
+        // Enemy minions always take priority. A minion never targets a player while
+        // any enemy minion is within vision; players are only considered when no
+        // enemy minion is in range. This overrides sticky player aggro too.
+        let best_minion = minion_targets
+            .iter()
+            .filter(|(id, team, _)| *id != minion.state.id && *team != minion.state.team)
+            .map(|(id, _, position)| {
+                (
+                    MinionAggroTarget::Minion(*id),
+                    *position,
+                    MINION_RADIUS,
+                    minion_position.distance_squared(*position),
+                )
+            })
+            .filter(|(_, _, _, dist_sq)| *dist_sq <= minion_vision_sq)
+            .min_by(|left, right| {
+                left.3
+                    .partial_cmp(&right.3)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
 
-        if aggro_target.is_none() {
-            let best_player = player_targets
-                .iter()
-                .filter(|(_, team, _)| *team != minion.state.team)
-                .map(|(id, _, position)| {
-                    (
-                        MinionAggroTarget::Player(*id),
-                        *position,
-                        PLAYER_HIT_RADIUS,
-                        minion_position.distance_squared(*position),
-                    )
-                })
-                .filter(|(_, _, _, dist_sq)| *dist_sq <= minion_vision_sq)
-                .min_by(|left, right| {
-                    left.3
-                        .partial_cmp(&right.3)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
+        let aggro_target = if let Some(minion_target) = best_minion {
+            Some((minion_target.0, minion_target.1, minion_target.2))
+        } else {
+            // No enemy minion in range: keep sticky player aggro if still valid,
+            // otherwise pick the nearest enemy player in vision.
+            let sticky_player = minion.aggro_target.and_then(|target| match target {
+                MinionAggroTarget::Player(target_id) => player_targets
+                    .iter()
+                    .find(|(id, team, position)| {
+                        *id == target_id
+                            && *team != minion.state.team
+                            && minion_position.distance_squared(*position) <= minion_vision_sq
+                    })
+                    .map(|(_, _, position)| (target, *position, PLAYER_HIT_RADIUS)),
+                MinionAggroTarget::Minion(_) => None,
+            });
 
-            let best_minion = minion_targets
-                .iter()
-                .filter(|(id, team, _)| *id != minion.state.id && *team != minion.state.team)
-                .map(|(id, _, position)| {
-                    (
-                        MinionAggroTarget::Minion(*id),
-                        *position,
-                        MINION_RADIUS,
-                        minion_position.distance_squared(*position),
-                    )
-                })
-                .filter(|(_, _, _, dist_sq)| *dist_sq <= minion_vision_sq)
-                .min_by(|left, right| {
-                    left.3
-                        .partial_cmp(&right.3)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
-
-            aggro_target = match (best_player, best_minion) {
-                (Some(player_target), Some(minion_target)) => {
-                    if player_target.3 <= minion_target.3 {
-                        Some((player_target.0, player_target.1, player_target.2))
-                    } else {
-                        Some((minion_target.0, minion_target.1, minion_target.2))
-                    }
-                }
-                (Some(player_target), None) => {
-                    Some((player_target.0, player_target.1, player_target.2))
-                }
-                (None, Some(minion_target)) => {
-                    Some((minion_target.0, minion_target.1, minion_target.2))
-                }
-                (None, None) => None,
-            };
-        }
+            sticky_player.or_else(|| {
+                player_targets
+                    .iter()
+                    .filter(|(_, team, _)| *team != minion.state.team)
+                    .map(|(id, _, position)| {
+                        (
+                            MinionAggroTarget::Player(*id),
+                            *position,
+                            PLAYER_HIT_RADIUS,
+                            minion_position.distance_squared(*position),
+                        )
+                    })
+                    .filter(|(_, _, _, dist_sq)| *dist_sq <= minion_vision_sq)
+                    .min_by(|left, right| {
+                        left.3
+                            .partial_cmp(&right.3)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .map(|(target, position, radius, _)| (target, position, radius))
+            })
+        };
 
         if let Some((target, target_pos, target_radius)) = aggro_target {
             minion.aggro_target = Some(target);
@@ -1850,6 +1926,9 @@ fn simulate_minions(
             .values_mut()
             .find(|player| player.state.id == target_id && player.state.hp > 0.0)
         {
+            if target_player.god_mode {
+                continue;
+            }
             target_player.state.hp = (target_player.state.hp - damage).max(0.0);
             if target_player.state.hp <= 0.0 && target_player.respawn_at.is_none() {
                 target_player.respawn_at = Some(now + RESPAWN_DELAY);
@@ -2407,6 +2486,74 @@ mod tests {
         let damaged_hp = minions.get(&enemy_minion_id).unwrap().state.hp;
         assert!(damaged_hp < tower_target_hp);
         assert!(matches!(game_state, GameState::Running));
+    }
+
+    #[test]
+    fn minion_prefers_enemy_minion_over_closer_player() {
+        let layout = build_map_layout();
+        let now = Instant::now();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let enemy_addr: SocketAddr = "127.0.0.1:34570".parse().unwrap();
+        ensure_player_connected(&mut players, &layout, enemy_addr, &mut next_player_id, now);
+        handle_join_request(
+            players.get_mut(&enemy_addr).unwrap(),
+            Team::Blue,
+            CharacterChoice::Ipfs,
+            &layout,
+            now,
+        );
+        {
+            // Enemy player right next to the acting green minion at the origin.
+            let p = players.get_mut(&enemy_addr).unwrap();
+            p.state.x = 1.0;
+            p.state.z = 0.0;
+        }
+
+        let make_minion = |id: u64, team: Team, x: f32| Minion {
+            state: MinionState {
+                id,
+                team,
+                lane: Lane::Mid,
+                x,
+                y: MINION_SPAWN_HEIGHT,
+                z: 0.0,
+                yaw: 0.0,
+                hp: MINION_MAX_HP,
+                max_hp: MINION_MAX_HP,
+                state: MinionBrainState::Marching,
+                target_kind: None,
+                target_id: None,
+            },
+            path: Vec::new(),
+            next_waypoint: 0,
+            last_attack_at: None,
+            aggro_target: None,
+        };
+
+        let mut minions = HashMap::new();
+        minions.insert(1, make_minion(1, Team::Green, 0.0));
+        // Enemy minion farther than the player but still within vision.
+        minions.insert(2, make_minion(2, Team::Blue, MINION_VISION_RANGE * 0.5));
+
+        let mut structures = HashMap::new();
+        let mut game_state = GameState::Running;
+        simulate_minions(
+            &mut players,
+            &mut minions,
+            &mut structures,
+            &mut game_state,
+            0.1,
+            now,
+        );
+
+        let green = minions.get(&1).unwrap();
+        assert_eq!(
+            green.state.target_kind,
+            Some(MinionTargetKind::Minion),
+            "enemy minion must take priority over the closer player"
+        );
+        assert_eq!(green.state.target_id, Some(2));
     }
 
     #[test]

@@ -14,7 +14,9 @@ use std::{
 use crate::camera::{CameraState, MainCamera, locked_camera_offset};
 use crate::combat::{CombatStats, MAX_HP, MAX_MANA};
 use crate::persistence::{ClientSessionId, FileGameServerAddr, ResolvedServerAddressForPrefs};
-use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
+use crate::player::{
+    DEBUG_SPEED_MULTIPLIER, DebugSpeedBoost, PLAYER_SIZE, Player, PlayerBody, VerticalVelocity,
+};
 use crate::session_config::{
     DEFAULT_GAME_SERVER_ADDR, T_RETRY, T_STALE_SNAPSHOT, T_WAIT_MAX,
     TRANSPORT_CONSECUTIVE_RECV_ERRORS, TRANSPORT_CONSECUTIVE_SEND_ERRORS, is_stale,
@@ -168,6 +170,7 @@ impl Plugin for NetworkingPlugin {
                 Update,
                 send_network_commands.in_set(ClientNetPipeline::SendCommands),
             )
+            .add_systems(Update, mirror_debug_flags_to_network_state)
             .add_systems(
                 Update,
                 ingest_server_snapshot_packets.in_set(ClientNetPipeline::IngestSnapshot),
@@ -210,6 +213,15 @@ pub enum NetworkCommand {
     },
     #[allow(dead_code)]
     RequestRematch,
+    SetGodMode {
+        enabled: bool,
+    },
+    SetSpeedBoost {
+        enabled: bool,
+    },
+    UpgradeSkill {
+        slot: u8,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -233,6 +245,15 @@ enum ClientPacket {
     },
     Ping,
     RequestRematch,
+    SetGodMode {
+        enabled: bool,
+    },
+    SetSpeedBoost {
+        enabled: bool,
+    },
+    UpgradeSkill {
+        slot: u8,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -277,6 +298,8 @@ struct PlayerState {
     next_level_xp: u32,
     #[serde(default)]
     skill_points: u32,
+    #[serde(default = "default_skill_ranks")]
+    ranks: [u8; 4],
     #[serde(default = "default_character_choice")]
     character: CharacterChoice,
 }
@@ -437,6 +460,9 @@ struct NetworkState {
     structures: HashMap<u64, Entity>,
     minions: HashMap<u64, Entity>,
     neutrals: HashMap<u64, Entity>,
+    /// Mirror of `DebugSpeedBoost`, so snapshot reconcile can widen the snap
+    /// threshold while boosting without exceeding the 16-param system limit.
+    speed_boost_active: bool,
 }
 
 /// Latest drained snapshot for this frame (filled by [`ingest_server_snapshot_packets`]).
@@ -471,12 +497,26 @@ pub struct NetworkPlayerId(pub u64);
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkCharacterChoice(pub CharacterChoice);
 
-#[derive(Component, Clone, Copy, Debug, Default)]
+#[derive(Component, Clone, Copy, Debug)]
 pub struct PlayerProgression {
     pub level: u32,
     pub xp: u32,
     pub next_level_xp: u32,
     pub skill_points: u32,
+    /// Per-slot ability ranks (1-based) mirrored from the server snapshot (TASK03).
+    pub ranks: [u8; 4],
+}
+
+impl Default for PlayerProgression {
+    fn default() -> Self {
+        Self {
+            level: 1,
+            xp: 0,
+            next_level_xp: 0,
+            skill_points: 0,
+            ranks: [1; 4],
+        }
+    }
 }
 
 #[derive(Component)]
@@ -843,6 +883,15 @@ fn send_local_state(
     let _ = channels.outgoing.send(packet);
 }
 
+fn mirror_debug_flags_to_network_state(
+    speed_boost: Res<DebugSpeedBoost>,
+    mut network_state: ResMut<NetworkState>,
+) {
+    if network_state.speed_boost_active != speed_boost.0 {
+        network_state.speed_boost_active = speed_boost.0;
+    }
+}
+
 fn send_network_commands(
     mut command_events: MessageReader<NetworkCommand>,
     channels: Option<Res<NetworkChannels>>,
@@ -879,6 +928,30 @@ fn send_network_commands(
                     continue;
                 }
                 let _ = channels.outgoing.send(ClientPacket::RequestRematch);
+            }
+            NetworkCommand::SetGodMode { enabled } => {
+                if !client_session.is_connected() {
+                    continue;
+                }
+                let _ = channels
+                    .outgoing
+                    .send(ClientPacket::SetGodMode { enabled: *enabled });
+            }
+            NetworkCommand::SetSpeedBoost { enabled } => {
+                if !client_session.is_connected() {
+                    continue;
+                }
+                let _ = channels
+                    .outgoing
+                    .send(ClientPacket::SetSpeedBoost { enabled: *enabled });
+            }
+            NetworkCommand::UpgradeSkill { slot } => {
+                if !client_session.is_connected() {
+                    continue;
+                }
+                let _ = channels
+                    .outgoing
+                    .send(ClientPacket::UpgradeSkill { slot: *slot });
             }
         }
     }
@@ -1086,11 +1159,19 @@ fn apply_server_snapshot(
                 local_player_state.z,
             );
             if let Ok(mut local_transform) = transform_sets.p0().get_mut(local_entity) {
-                // Snap on meaningful server corrections (first team spawn, respawn, etc.)
+                // Snap on meaningful server corrections (first team spawn, respawn, etc.).
+                // While speed-boosting, the local player legitimately leads the last
+                // server-acked position further, so widen the threshold to avoid
+                // rubber-banding the boosted movement.
+                let snap_distance = if network_state.speed_boost_active {
+                    LOCAL_SNAP_DISTANCE * DEBUG_SPEED_MULTIPLIER
+                } else {
+                    LOCAL_SNAP_DISTANCE
+                };
                 if local_transform
                     .translation
                     .distance_squared(server_translation)
-                    > LOCAL_SNAP_DISTANCE * LOCAL_SNAP_DISTANCE
+                    > snap_distance * snap_distance
                 {
                     local_transform.translation = server_translation;
                     local_transform.rotation = Quat::from_rotation_y(local_player_state.yaw);
@@ -1929,6 +2010,7 @@ fn player_state_to_progression(player: &PlayerState) -> PlayerProgression {
         xp: player.xp,
         next_level_xp: player.next_level_xp,
         skill_points: player.skill_points,
+        ranks: player.ranks,
     }
 }
 
@@ -1977,6 +2059,10 @@ fn default_player_level() -> u32 {
 
 fn default_next_level_xp() -> u32 {
     DEFAULT_NEXT_LEVEL_XP
+}
+
+fn default_skill_ranks() -> [u8; 4] {
+    [1; 4]
 }
 
 fn default_max_hp() -> f32 {

@@ -25,8 +25,17 @@ pub const SPELL_CAST_RANGE: f32 = 28.0;
 pub const PROJECTILE_SPEED: f32 = 19.0;
 pub const PROJECTILE_DAMAGE: f32 = 20.0;
 /// Tunable damage per invested rank for the primary server-validated ability (index = rank − 1).
-/// The live simulation uses rank slot 0 only until skill investment affects combat.
-pub const PRIMARY_ABILITY_DAMAGE_BY_RANK: [f32; 5] = [PROJECTILE_DAMAGE; 5];
+/// Rank 1 equals the base projectile damage; each further rank adds a flat step so investing
+/// skill points makes the ability hit harder (TASK03).
+pub const PRIMARY_ABILITY_DAMAGE_BY_RANK: [f32; 5] = [
+    PROJECTILE_DAMAGE,
+    PROJECTILE_DAMAGE + 8.0,
+    PROJECTILE_DAMAGE + 16.0,
+    PROJECTILE_DAMAGE + 24.0,
+    PROJECTILE_DAMAGE + 32.0,
+];
+/// Highest investable rank for the primary ability (1-based, bounded by the damage table).
+pub const MAX_SKILL_RANK: u8 = PRIMARY_ABILITY_DAMAGE_BY_RANK.len() as u8;
 /// Skill slots tracked by progression (`skill_points`); four UI slots, one authoritative cast today.
 #[allow(dead_code)]
 pub const SKILL_SLOT_COUNT: usize = 4;
@@ -71,11 +80,15 @@ pub const MOVEMENT_MAX_DELTA_SECONDS: f32 = 0.5;
 pub const SESSION_RECLAIM_WINDOW: Duration = Duration::from_secs(30);
 
 // --- Level curve & stat growth ---
+/// Debug movement multiplier applied when a client enables the speed-boost toggle.
+pub const DEBUG_SPEED_MULTIPLIER: f32 = 2.6;
 pub const STARTING_LEVEL: u32 = 1;
 pub const MAX_LEVEL: u32 = 10;
 pub const LEVEL_UP_HP_BONUS: f32 = 18.0;
 pub const LEVEL_UP_MANA_BONUS: f32 = 12.0;
-pub const LEVEL_XP_THRESHOLDS: [u32; 9] = [120, 150, 180, 220, 260, 300, 340, 380, 420];
+// First level is reachable in ~3 minion kills (3 * MINION_KILL_XP = 96 ≥ 90) so the
+// skill-upgrade flow is easy to exercise; later levels keep the original curve.
+pub const LEVEL_XP_THRESHOLDS: [u32; 9] = [90, 150, 180, 220, 260, 300, 340, 380, 420];
 
 // --- Jungle neutrals (camp stats & reward pacing) ---
 pub const NEUTRAL_RADIUS: f32 = 0.62;
