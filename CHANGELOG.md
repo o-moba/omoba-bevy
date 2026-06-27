@@ -7,6 +7,20 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 ## [Unreleased]
 
 ### Added
+- **VRM avatar support + one CC0 humanoid (`Paco`):** the engine now loads VRM 0.x
+  avatars through the existing glTF model catalog. VRM 0.x files are glTF 2.0
+  binary containers whose VRM-specific data (`VRM`, spring bones, blendshapes) is
+  listed under `extensionsUsed` only — never `extensionsRequired` — so Bevy's
+  standard `GltfLoader` ignores it and still loads the mesh + skeleton. The
+  avatar is staged as `.glb` (a byte-identical glTF 2.0 container) so the asset
+  server selects the glTF loader by extension; the validate-and-copy step lives
+  in `scripts/convert_vrm_to_glb.py`. Added a new `EkzaCharacter::Paco` variant
+  (SDK enum + `ALL` + `BUILTIN_MODEL_MANIFEST` → `downloaded/paco.glb`), so it
+  appears in the character-select UI and spawns/normalizes like other models.
+  Avatar: *Paco* (Avatar 211) from ToxSam's **100Avatars R3**, **CC0** — see
+  `ATTRIBUTION.md`. The avatar ships **no animation clips**, so it renders as a
+  static skinned mesh via the existing anim-less fallback (no idle/walk
+  locomotion); see the progress note for how to add clips later.
 - **Headless gameplay test harness (`harness/` crate, `publish = false`):** a new
   workspace member that spins up the *real* UDP server on a unique loopback port
   per test and drives it with typed bot clients over the JSON wire protocol — no

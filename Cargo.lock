@@ -1799,7 +1799,7 @@ dependencies = [
 
 [[package]]
 name = "client"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bevy",
  "crossbeam-channel",
@@ -2192,7 +2192,7 @@ checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
 name = "ekza-bevy-sdk"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bevy",
  "reqwest",
@@ -2775,7 +2775,7 @@ dependencies = [
 
 [[package]]
 name = "harness"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4723,7 +4723,7 @@ dependencies = [
 
 [[package]]
 name = "server"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bevy",
  "ekza-bevy-sdk",
@@ -4754,7 +4754,7 @@ checksum = "d66dc143e6b11c1eddc06d5c423cfc97062865baf299914ab64caa38182078fe"
 
 [[package]]
 name = "skills"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "skrifa"
