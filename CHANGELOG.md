@@ -7,6 +7,18 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 ## [Unreleased]
 
 ### Added
+- **Headless gameplay test harness (`harness/` crate, `publish = false`):** a new
+  workspace member that spins up the *real* UDP server on a unique loopback port
+  per test and drives it with typed bot clients over the JSON wire protocol — no
+  GPU, no renderer, no human. Layered into `protocol` (a documented test mirror of
+  the server wire format), `server` (`ServerProcess`, RAII: kills the child on
+  drop), and `bot` (`Bot`, typed packet senders + freshest-snapshot polling).
+  Integration scenarios in `harness/tests/gameplay.rs` assert: join → snapshot at
+  full HP; god mode prevents all damage (with a no-god-mode control proving damage
+  is detectable); speed boost widens the movement-authority clamp; and an
+  `upgrade_skill` with zero points is a server-side no-op. Run via
+  `make verify-gameplay` (builds the server first, then `cargo test -p harness
+  -- --test-threads=1`). No server/client source was modified.
 - **TASK03 — upgradable skills:** the primary ability (Q) now scales with an
   authoritative per-slot rank. Server tracks `ranks: [u8;4]` in `PlayerState`,
   handles a new `UpgradeSkill { slot }` packet (spends one skill point, capped at
