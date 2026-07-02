@@ -1,5 +1,10 @@
 /target
 assets/
+# Re-include the client assets dir so the committed avatar roster stays versioned,
+# while everything else under client/assets/ (e.g. downloaded/) remains ignored.
+!client/assets/
+client/assets/*
+!client/assets/avatars/
 .claude/*
 .claude/rules/
 .claude/rules/**
