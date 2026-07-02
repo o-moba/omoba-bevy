@@ -1,0 +1,148 @@
+{
+  "avatars": [
+    {
+      "slug": "agnes",
+      "display_name": "Agnes",
+      "collection": "100Avatars R3",
+      "license": "CC0",
+      "source_url": "https://arweave.net/c8mrbRq29sfQdovW1l_D2JYGOaCNF3JxTaUsmHTSNAg",
+      "author": "Polygonal-Mind",
+      "thumbnail": "agnes.png"
+    },
+    {
+      "slug": "anna",
+      "display_name": "Anna",
+      "collection": "100Avatars R3",
+      "license": "CC0",
+      "source_url": "https://arweave.net/RqDioyluCcxDNHFPoXLUlbEQjhP1Fy9HtaGzLFVh0mE",
+      "author": "Polygonal-Mind",
+      "thumbnail": "anna.png"
+    },
+    {
+      "slug": "megan-the-fox",
+      "display_name": "MeganTheFox",
+      "collection": "100Avatars R3",
+      "license": "CC0",
+      "source_url": "https://arweave.net/up4WzT0YJfXv9woGseCIQnBSq3eH8KWASJJbNtuvEWY",
+      "author": "Polygonal-Mind",
+      "thumbnail": "megan-the-fox.png"
+    },
+    {
+      "slug": "lady-koi",
+      "display_name": "LadyKoi",
+      "collection": "100Avatars R3",
+      "license": "CC0",
+      "source_url": "https://arweave.net/t3aTp6AhxfdLcq5I3HZx29wK8MFQGmDC9wPwXrHQoW0",
+      "author": "Polygonal-Mind",
+      "thumbnail": "lady-koi.png"
+    },
+    {
+      "slug": "bao-samurai",
+      "display_name": "BaoSamurai",
+      "collection": "100Avatars R3",
+      "license": "CC0",
+      "source_url": "https://arweave.net/wmTy-SEXxmlp847i1U1m2GziSGp-4T8qrZ77A32LlY8",
+      "author": "Polygonal-Mind",
+      "thumbnail": null
+    },
+    {
+      "slug": "good-knight",
+      "display_name": "GoodKnight",
+      "collection": "100Avatars R3",
+      "license": "CC0",
+      "source_url": "https://arweave.net/GssJhnk0HJsS6u3ZNN6fTk4TEL7g4AbVGoCztUgjAu0",
+      "author": "Polygonal-Mind",
+      "thumbnail": "good-knight.png"
+    },
+    {
+      "slug": "crowley",
+      "display_name": "Crowley",
+      "collection": "100Avatars R3",
+      "license": "CC0",
+      "source_url": "https://arweave.net/U5J00CQ4NHUkXH7rrM4DTt4Oi3JqkTXKzC2z4oX67qs",
+      "author": "Polygonal-Mind",
+      "thumbnail": "crowley.png"
+    },
+    {
+      "slug": "cyberpal",
+      "display_name": "Cyberpal",
+      "collection": "100Avatars R3",
+      "license": "CC0",
+      "source_url": "https://arweave.net/zNTLqtifNdl38MpdNXACcvSMFVu6-s7d6pJQDm7E7Us",
+      "author": "Polygonal-Mind",
+      "thumbnail": "cyberpal.png"
+    },
+    {
+      "slug": "sport-mecha",
+      "display_name": "SportMecha",
+      "collection": "100Avatars R3",
+      "license": "CC0",
+      "source_url": "https://arweave.net/xpx3cF_x4G4FUW-oIx7c2LiSUPigXK74fLHXgJ2w6lA",
+      "author": "Polygonal-Mind",
+      "thumbnail": "sport-mecha.png"
+    },
+    {
+      "slug": "pirate-bot",
+      "display_name": "PirateBot",
+      "collection": "100Avatars R3",
+      "license": "CC0",
+      "source_url": "https://arweave.net/f6VUW6sCyJcjErrBWSu_MVlYMkmAx5CRpyNGedUNxHM",
+      "author": "Polygonal-Mind",
+      "thumbnail": "pirate-bot.png"
+    },
+    {
+      "slug": "mega-angel",
+      "display_name": "MegaAngel",
+      "collection": "100Avatars R3",
+      "license": "CC0",
+      "source_url": "https://arweave.net/hFjw4u33v1cjEFl80leP2M8dfRjaJ5UNNmIZp8sIA8Y",
+      "author": "Polygonal-Mind",
+      "thumbnail": "mega-angel.png"
+    },
+    {
+      "slug": "stitch-witch",
+      "display_name": "StitchWitch",
+      "collection": "100Avatars R3",
+      "license": "CC0",
+      "source_url": "https://arweave.net/O-cHPoD2LyfqSbkltB15-nwGK1aUT0M1JMLf1-gq46g",
+      "author": "Polygonal-Mind",
+      "thumbnail": "stitch-witch.png"
+    },
+    {
+      "slug": "cool-tiger",
+      "display_name": "CoolTiger",
+      "collection": "100Avatars R3",
+      "license": "CC0",
+      "source_url": "https://arweave.net/2EQ5wsstsJaFOG9LXq_gVFKKgM8bnfPa3axYJ-VS1ug",
+      "author": "Polygonal-Mind",
+      "thumbnail": "cool-tiger.png"
+    },
+    {
+      "slug": "aurora",
+      "display_name": "Aurora",
+      "collection": "ToxSam",
+      "license": "CC0",
+      "source_url": "https://gateway.pinata.cloud/ipfs/QmVvfCcAKYozNQwwxPbHyNohLyBJbTrCBSM1Ycck3ouJSj/Avartar_Aurora.vrm",
+      "author": "toxsam",
+      "thumbnail": "aurora.png"
+    },
+    {
+      "slug": "orion",
+      "display_name": "Orion",
+      "collection": "ToxSam",
+      "license": "CC0",
+      "source_url": "https://gateway.pinata.cloud/ipfs/Qmed8jVF5FvBn6Jerxk8Wm5DwRjuAHRfBXgofTue37orBC/Avatar_Orion.vrm",
+      "author": "toxsam",
+      "thumbnail": "orion.png"
+    },
+    {
+      "slug": "el-bueno",
+      "display_name": "EL BUENO",
+      "collection": "NeonGlitch86 Collection",
+      "license": "CC0",
+      "source_url": "https://raw.githubusercontent.com/neonglitch86/vrm/main/G_C.vrm",
+      "author": "NeonGlitch86",
+      "thumbnail": "el-bueno.png"
+    }
+  ]
+}
