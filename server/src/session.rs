@@ -49,11 +49,13 @@ pub(crate) fn ensure_player_connected(
                 skill_points: 0,
                 ranks: [1; 4],
                 character: default_character_choice(),
+                hero_class: HeroClass::default(),
+                avatar: None,
             },
             session_id: None,
             last_seen: now,
             last_movement_at: now,
-            last_cast_at: None,
+            last_cast_at: [None; 4],
             respawn_at: None,
             god_mode: false,
             speed_mult: 1.0,
@@ -155,15 +157,32 @@ pub(crate) fn handle_join_request(
     player: &mut ConnectedPlayer,
     team: Team,
     character: CharacterChoice,
+    hero_class: HeroClass,
+    avatar: Option<&str>,
     map_layout: &MapLayoutState,
     now: Instant,
 ) {
+    // Unknown avatar slugs are dropped (client falls back to the default model);
+    // unknown class strings already decoded to the default class in serde.
+    let normalized_avatar = shared::normalize_avatar_slug(avatar);
+    if avatar.is_some() && normalized_avatar.is_none() {
+        eprintln!(
+            "Player {} requested unknown avatar {:?}; falling back to default model",
+            player.state.id, avatar
+        );
+    }
     println!(
-        "Player {} joined team {:?} as {:?}",
-        player.state.id, team, character
+        "Player {} joined team {:?} as {:?} (class {}, avatar {:?})",
+        player.state.id,
+        team,
+        character,
+        hero_class.id(),
+        normalized_avatar
     );
     player.state.team = team;
     player.state.character = character;
+    player.state.hero_class = hero_class;
+    player.state.avatar = normalized_avatar.map(str::to_owned);
     let spawn = spawn_position_for_team(map_layout, team);
     player.state.x = spawn.x;
     player.state.y = PLAYER_GROUND_Y;
@@ -181,7 +200,7 @@ pub(crate) fn handle_join_request(
     player.state.ranks = [1; 4];
     player.last_seen = now;
     player.last_movement_at = now;
-    player.last_cast_at = None;
+    player.last_cast_at = [None; 4];
     player.respawn_at = None;
 }
 
@@ -256,7 +275,7 @@ pub(crate) fn handle_respawns(
         player.state.mana = player.state.max_mana;
         player.respawn_at = None;
         player.last_movement_at = now;
-        player.last_cast_at = None;
+        player.last_cast_at = [None; 4];
     }
 }
 
@@ -295,7 +314,7 @@ pub(crate) fn reset_match(
         player.state.gold = 0;
         player.state.xp = 0;
         player.last_movement_at = Instant::now();
-        player.last_cast_at = None;
+        player.last_cast_at = [None; 4];
         player.respawn_at = None;
     }
     *game_state = GameState::Running;

@@ -443,9 +443,11 @@ mod tests {
 
     #[test]
     fn clamp_lighting_respects_bounds() {
-        let mut s = LightingSettings::default();
-        s.illuminance = 1.0;
-        s.ambient_brightness = 999_999.0;
+        let s = LightingSettings {
+            illuminance: 1.0,
+            ambient_brightness: 999_999.0,
+            ..Default::default()
+        };
         let c = clamp_lighting_settings(s);
         assert_eq!(c.illuminance, MIN_LIGHT_ILLUMINANCE);
         assert_eq!(c.ambient_brightness, MAX_AMBIENT_BRIGHTNESS);

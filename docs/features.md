@@ -1,8 +1,28 @@
 # Feature Inventory
 
-Canonical version: `0.3.0`
+Canonical version: `0.4.0`
 
 ## Current Playable Surface
+
+- **Hero classes (TASK-17):** four playable classes — Warrior, Mage, Ranger,
+  Cleric — each with a distinct Q/W/E/R kit (16 ability definitions in the
+  `shared` crate; projectile damage, self-heal, and self-mana-restore
+  primitives with per-class numbers). The server resolves the kit
+  authoritatively per player: per-slot cooldowns, unlock gating by level
+  (Q@1/W@2/E@4/R@6), rank scaling up to max rank 3, and skill upgrades capped
+  at the shared max rank. Class selection happens on the pre-join screen and
+  is carried in the join packet.
+- **CC0 VRM avatar roster (TASK-17):** 16 CC0 avatars (Open Source Avatars
+  collections) staged as GLB under `client/assets/avatars/` with embedded
+  retargeted animation clips (`idle`/`walk`/`attack`/`cast`/`death` from the
+  Quaternius Universal Animation Library, CC0) and a provenance manifest
+  (slug, name, collection, license, source URL, author, thumbnail). Avatar
+  selection is a thumbnail grid on the pre-join screen; the chosen slug
+  replicates to all clients, models load lazily, and every roster avatar
+  plays idle when stationary and walk while moving (idle-grace hysteresis
+  smooths snapshot interpolation). Unknown avatar slugs and class ids fall
+  back safely (default model / Warrior). `OMOBA_AUTOJOIN=<class>:<slug>:<team>`
+  joins without UI for automation.
 
 - Headless Bevy-scheduled authoritative UDP loop with periodic player snapshots; player mana regeneration and `projectile -> minion` damage now run through ECS/message-driven systems bridged to the current authoritative state maps.
 - Server-authoritative hardening for player movement and casts: client transforms are speed/map clamped, non-finite positions are ignored, and casts require the authoritative caster position to be in range of the live target.
@@ -15,7 +35,7 @@ Canonical version: `0.3.0`
 - Player progression with level-based XP thresholds, HP/mana scaling on level-up, and tracked skill points.
 - In-game local HUD display for level and XP progression.
 - Persistent local client preferences (graphics, character, optional server address, stable client session id) with safe clamping on load; override directory with `OMOBA_CLIENT_CONFIG_DIR` for tests or portable installs.
-- In-game match HUD (below minimap): level, XP, skill points, reserved upgrade key label (`U`), local HP/mana, target hints, objective line, and F1 help reminder; bottom-right skill bar showing `Q`–`R` keys (same cast binding until per-skill server support).
+- In-game match HUD (below minimap): level, XP, skill points, upgrade key label (`U`), local HP/mana, target hints, objective line, per-slot class ability lines (name, effect numbers, cooldown/lock state), and F1 help reminder; bottom-right skill bar shows `Q`–`R` keys with the selected class's ability names and ranks.
 - F1 toggle help overlay with movement, camera, targeting, casting, objective, and pause guidance; does not reset simulation when toggled. The panel is shown only while the match is `Running` (toggle state is preserved when returning to a live match so lobby/victory screens are not covered).
 
 ## Multiplayer Session Reliability
@@ -35,7 +55,7 @@ Canonical version: `0.3.0`
 - Account-backed identity, cryptographic session authentication, and long-lived reconnect across server restarts.
 - Publishable SDK packaging: registry metadata, versioning policy, examples, entitlement/auth hooks, and non-blocking asset delivery are still future work.
 - Full reconnect slot reclaim across disconnects and NAT changes.
-- Full skill system (four distinct server-validated abilities with per-rank tuning), tooltip UX.
+- Ability VFX/animation sync for attack/cast/death clips (embedded in every roster avatar, not yet gameplay-triggered), richer tooltip UX, and balance passes over the class kits.
 
 ## Release gate and balance (TASK-12)
 

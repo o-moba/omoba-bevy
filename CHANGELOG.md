@@ -6,6 +6,51 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-03
+
+### Added
+- **TASK-17 — playable demo: hero classes + VRM avatar roster.**
+  - **Four hero classes with distinct Q/W/E/R kits** (Warrior, Mage, Ranger,
+    Cleric; 16 distinct ability definitions) defined in the `shared` crate and
+    resolved **authoritatively on the server** per player. Kits reuse the
+    projectile-damage / self-heal / self-mana-restore primitives with per-class
+    numbers; rank mechanics unchanged (max rank 3, `rank_effect_scale`,
+    cooldown/range scaling) and slot unlock levels preserved (Q@1/W@2/E@4/R@6,
+    now enforced server-side per cast). Casts carry a slot index and cool down
+    per slot; skill upgrades cap at the shared max rank.
+  - **CC0 avatar roster (16 VRM avatars)** staged as GLB with embedded
+    retargeted clips (`idle`/`walk`/`attack`/`cast`/`death`, Quaternius UAL,
+    CC0) under `client/assets/avatars/` with a provenance manifest. The
+    manifest is embedded in the `shared` crate so client and server agree on
+    the shipped set; unknown slugs fall back to the default model (and unknown
+    class ids decode as Warrior) without breaking packets.
+  - **Pre-join selection flow**: class buttons (name + kit summary), a
+    16-avatar thumbnail grid, then team; the join packet carries
+    `{team, character, hero_class, avatar, session_id}` and the server
+    replicates class + avatar to every client. `OMOBA_AUTOJOIN=<class>:<slug>:<team>`
+    joins without UI for automation/evidence runs.
+  - **Runtime avatar animation**: roster avatars load lazily, spawn for local
+    and remote players, and drive the idle/walk locomotion graph from movement
+    state (with a short idle-grace hysteresis so snapshot interpolation does
+    not flap the animation). The VRM double-sided material fix now covers the
+    whole roster (previously Paco-only).
+  - **Class-aware HUD**: the hotbar shows the selected class's ability names
+    and per-slot rank; the match HUD lists each slot's ability with effect
+    numbers, per-slot cooldown, and lock level.
+  - **New tests**: shared kit/unlock/rank/roster unit tests; server tests for
+    per-class cast resolution, self-target heals, unlock gating, rank caps, and
+    avatar-slug normalization; harness end-to-end scenarios for two clients
+    joining with different class+avatar (replication + distinct kit costs),
+    locked-slot rejection, and hostile class/avatar values falling back safely.
+
+### Fixed
+- Roster thumbnails that were actually JPEG data under a `.png` name are now
+  staged with their real extension (Bevy picks the image decoder by extension);
+  the client enables the `jpeg` Bevy feature. `scripts/stage_avatars.py` sniffs
+  the magic bytes when staging.
+
+### Earlier unreleased work shipped with this release
+
 ### Added
 - **VRM avatar support + one CC0 humanoid (`Paco`):** the engine now loads VRM 0.x
   avatars through the existing glTF model catalog. VRM 0.x files are glTF 2.0

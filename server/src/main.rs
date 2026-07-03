@@ -15,6 +15,10 @@ use neutrals::*;
 use progression::*;
 use serde::{Deserialize, Serialize};
 use session::*;
+use shared::{
+    HeroClass, SkillSlot, TargetingMode, ability_for_class_slot, rank_effect_scale,
+    scaled_cast_range, scaled_cooldown, scaled_mana_cost, unlocked_slots_for_level,
+};
 use std::{
     collections::{HashMap, HashSet},
     io,
@@ -40,11 +44,21 @@ enum ClientPacket {
     },
     Cast {
         target: TargetId,
+        /// Hotbar slot index (0=Q .. 3=R); the server resolves the ability
+        /// from the caster's class kit. Defaults to Q for legacy packets.
+        #[serde(default)]
+        slot: u8,
     },
     Join {
         team: Team,
         #[serde(default = "default_character_choice")]
         character: CharacterChoice,
+        /// Selected class; unknown wire values decode as the default class.
+        #[serde(default)]
+        hero_class: HeroClass,
+        /// Cosmetic roster avatar slug; validated against the shipped roster.
+        #[serde(default)]
+        avatar: Option<String>,
         #[serde(default)]
         session_id: Option<String>,
     },
@@ -121,6 +135,13 @@ struct PlayerState {
     ranks: [u8; 4],
     #[serde(default = "default_character_choice")]
     character: CharacterChoice,
+    /// Authoritative class assigned at join time (kit resolution key).
+    #[serde(default)]
+    hero_class: HeroClass,
+    /// Cosmetic roster avatar slug replicated to every client; `None` means
+    /// the legacy `character` model is used.
+    #[serde(default)]
+    avatar: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -296,7 +317,8 @@ struct ConnectedPlayer {
     session_id: Option<String>,
     last_seen: Instant,
     last_movement_at: Instant,
-    last_cast_at: Option<Instant>,
+    /// Per-slot cast timestamps (Q/W/E/R); each ability cools down independently.
+    last_cast_at: [Option<Instant>; 4],
     respawn_at: Option<Instant>,
     /// Debug invulnerability toggle (TASK04). Not networked; the requesting
     /// client owns the toggle and the server skips damage while it is set.
@@ -518,7 +540,7 @@ impl ServerRuntime {
                                 handle_transform_request(player, map_layout, x, y, z, yaw, now);
                             }
                         }
-                        ClientPacket::Cast { target } => {
+                        ClientPacket::Cast { target, slot } => {
                             ensure_player_connected(players, map_layout, addr, next_player_id, now);
                             if let Some(player) = players.get_mut(&addr) {
                                 player.last_seen = now;
@@ -531,6 +553,7 @@ impl ServerRuntime {
                                 neutrals,
                                 addr,
                                 target,
+                                slot,
                                 next_projectile_id,
                                 game_state,
                                 now,
@@ -539,6 +562,8 @@ impl ServerRuntime {
                         ClientPacket::Join {
                             team,
                             character,
+                            hero_class,
+                            avatar,
                             session_id,
                         } => {
                             let session_id = normalize_session_id(session_id);
@@ -554,7 +579,15 @@ impl ServerRuntime {
                                 continue;
                             }
                             if let Some(player) = players.get_mut(&addr) {
-                                handle_join_request(player, team, character, map_layout, now);
+                                handle_join_request(
+                                    player,
+                                    team,
+                                    character,
+                                    hero_class,
+                                    avatar.as_deref(),
+                                    map_layout,
+                                    now,
+                                );
                             }
                             if matches!(game_state, GameState::Lobby) {
                                 println!("First player joined - match starting");
@@ -615,18 +648,7 @@ impl ServerRuntime {
                             ensure_player_connected(players, map_layout, addr, next_player_id, now);
                             if let Some(player) = players.get_mut(&addr) {
                                 player.last_seen = now;
-                                let s = slot as usize;
-                                if s < player.state.ranks.len()
-                                    && player.state.skill_points > 0
-                                    && player.state.ranks[s] < MAX_SKILL_RANK
-                                {
-                                    player.state.ranks[s] += 1;
-                                    player.state.skill_points -= 1;
-                                    println!(
-                                        "Player {} upgraded skill slot {} to rank {}",
-                                        player.state.id, s, player.state.ranks[s]
-                                    );
-                                }
+                                apply_skill_upgrade(player, slot);
                             }
                         }
                     }
@@ -1007,6 +1029,23 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
+/// Spends a skill point on the given slot, capped by the class ability's max rank.
+fn apply_skill_upgrade(player: &mut ConnectedPlayer, slot: u8) {
+    let Some(skill_slot) = SkillSlot::from_index(slot) else {
+        return;
+    };
+    let def = ability_for_class_slot(player.state.hero_class, skill_slot);
+    let s = skill_slot.index();
+    if player.state.skill_points > 0 && player.state.ranks[s] < def.max_rank {
+        player.state.ranks[s] += 1;
+        player.state.skill_points -= 1;
+        println!(
+            "Player {} upgraded {} (slot {}) to rank {}",
+            player.state.id, def.id, s, player.state.ranks[s]
+        );
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn handle_cast_request(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,
@@ -1016,6 +1055,7 @@ fn handle_cast_request(
     neutrals: &mut HashMap<u64, Neutral>,
     caster_addr: SocketAddr,
     target: TargetId,
+    slot: u8,
     next_projectile_id: &mut u64,
     game_state: &GameState,
     now: Instant,
@@ -1023,19 +1063,46 @@ fn handle_cast_request(
     if !matches!(game_state, GameState::Running) {
         return;
     }
+    let Some(skill_slot) = SkillSlot::from_index(slot) else {
+        return;
+    };
     let Some(caster) = players.get(&caster_addr) else {
         return;
     };
     if caster.state.hp <= 0.0 {
         return;
     }
-    if caster.state.mana < SPELL_MANA_COST {
+    // Authoritative kit resolution: class + slot -> ability definition.
+    let def = ability_for_class_slot(caster.state.hero_class, skill_slot);
+    if !unlocked_slots_for_level(caster.state.level)[skill_slot.index()] {
         return;
     }
-    if caster
-        .last_cast_at
-        .is_some_and(|last_cast| now.duration_since(last_cast) < SPELL_COOLDOWN)
+    let rank = caster.state.ranks[skill_slot.index()].clamp(1, def.max_rank);
+    let mana_cost = scaled_mana_cost(def, rank);
+    if caster.state.mana < mana_cost {
+        return;
+    }
+    if caster.last_cast_at[skill_slot.index()]
+        .is_some_and(|last_cast| now.duration_since(last_cast) < scaled_cooldown(def, rank))
     {
+        return;
+    }
+
+    let effect_scale = rank_effect_scale(rank);
+    if def.targeting == TargetingMode::SelfTarget {
+        let Some(caster_mut) = players.get_mut(&caster_addr) else {
+            return;
+        };
+        caster_mut.state.mana -= mana_cost;
+        caster_mut.last_cast_at[skill_slot.index()] = Some(now);
+        if let Some(heal) = def.self_heal {
+            caster_mut.state.hp =
+                (caster_mut.state.hp + heal * effect_scale).min(caster_mut.state.max_hp);
+        }
+        if let Some(restore) = def.self_mana_restore {
+            caster_mut.state.mana =
+                (caster_mut.state.mana + restore * effect_scale).min(caster_mut.state.max_mana);
+        }
         return;
     }
 
@@ -1127,20 +1194,18 @@ fn handle_cast_request(
     let dx = target_position.x - caster_position.x;
     let dz = target_position.z - caster_position.z;
     let horizontal_distance = (dx * dx + dz * dz).sqrt();
-    if horizontal_distance > SPELL_CAST_RANGE + target_radius {
+    if horizontal_distance > scaled_cast_range(def, rank) + target_radius {
         return;
     }
 
     let Some(caster_mut) = players.get_mut(&caster_addr) else {
         return;
     };
-    caster_mut.state.mana -= SPELL_MANA_COST;
-    caster_mut.last_cast_at = Some(now);
+    caster_mut.state.mana -= mana_cost;
+    caster_mut.last_cast_at[skill_slot.index()] = Some(now);
 
-    // Primary ability uses the Q slot rank; higher rank = more damage (TASK03).
-    let q_rank = caster_mut.state.ranks[0].max(1) as usize;
-    let rank_damage =
-        PRIMARY_ABILITY_DAMAGE_BY_RANK[(q_rank - 1).min(PRIMARY_ABILITY_DAMAGE_BY_RANK.len() - 1)];
+    // Higher invested rank = proportionally more projectile damage.
+    let rank_damage = def.projectile_damage.unwrap_or(0.0) * effect_scale;
 
     let projectile_id = *next_projectile_id;
     *next_projectile_id += 1;
@@ -2500,6 +2565,8 @@ mod tests {
             players.get_mut(&enemy_addr).unwrap(),
             Team::Blue,
             CharacterChoice::Ipfs,
+            HeroClass::default(),
+            None,
             &layout,
             now,
         );
@@ -2781,85 +2848,124 @@ mod tests {
         assert!(disconnected_sessions.is_empty());
     }
 
+    /// Sets up two joined enemy players (caster at `caster_addr` with the given
+    /// class) standing `gap` apart on the x axis, returning the target's id.
+    fn setup_caster_and_target(
+        players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+        layout: &MapLayoutState,
+        caster_addr: SocketAddr,
+        target_addr: SocketAddr,
+        caster_class: HeroClass,
+        gap: f32,
+        now: Instant,
+    ) -> u64 {
+        let mut next_player_id = 1;
+        ensure_player_connected(players, layout, caster_addr, &mut next_player_id, now);
+        ensure_player_connected(players, layout, target_addr, &mut next_player_id, now);
+        handle_join_request(
+            players.get_mut(&caster_addr).unwrap(),
+            Team::Green,
+            CharacterChoice::Ipfs,
+            caster_class,
+            None,
+            layout,
+            now,
+        );
+        handle_join_request(
+            players.get_mut(&target_addr).unwrap(),
+            Team::Blue,
+            CharacterChoice::Wang,
+            HeroClass::default(),
+            None,
+            layout,
+            now,
+        );
+        let caster_pos = {
+            let caster = players.get(&caster_addr).unwrap();
+            (caster.state.x, caster.state.z)
+        };
+        {
+            let target = players.get_mut(&target_addr).unwrap();
+            target.state.x = caster_pos.0 + gap;
+            target.state.z = caster_pos.1;
+        }
+        players.get(&target_addr).unwrap().state.id
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn cast_slot(
+        players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+        projectiles: &mut HashMap<u64, Projectile>,
+        caster_addr: SocketAddr,
+        target: TargetId,
+        slot: u8,
+        next_projectile_id: &mut u64,
+        now: Instant,
+    ) {
+        let mut minions = HashMap::new();
+        let mut structures = HashMap::new();
+        let mut neutrals = HashMap::new();
+        handle_cast_request(
+            players,
+            projectiles,
+            &mut minions,
+            &mut structures,
+            &mut neutrals,
+            caster_addr,
+            target,
+            slot,
+            next_projectile_id,
+            &GameState::Running,
+            now,
+        );
+    }
+
     #[test]
     fn cast_drains_mana_respects_cooldown_and_blocks_empty_mana() {
         let layout = build_map_layout();
         let mut players = HashMap::new();
-        let mut next_player_id = 1;
         let addr_a: SocketAddr = "127.0.0.1:51001".parse().unwrap();
         let addr_b: SocketAddr = "127.0.0.1:51002".parse().unwrap();
         let now = Instant::now();
-
-        ensure_player_connected(&mut players, &layout, addr_a, &mut next_player_id, now);
-        ensure_player_connected(&mut players, &layout, addr_b, &mut next_player_id, now);
-        handle_join_request(
-            players.get_mut(&addr_a).unwrap(),
-            Team::Green,
-            CharacterChoice::Ipfs,
+        let q = ability_for_class_slot(HeroClass::Warrior, SkillSlot::Q);
+        let b_id = setup_caster_and_target(
+            &mut players,
             &layout,
+            addr_a,
+            addr_b,
+            HeroClass::Warrior,
+            q.cast_range * 0.5,
             now,
         );
-        handle_join_request(
-            players.get_mut(&addr_b).unwrap(),
-            Team::Blue,
-            CharacterChoice::Wang,
-            &layout,
-            now,
-        );
-
-        let a_pos = {
-            let a = players.get(&addr_a).unwrap();
-            (a.state.x, a.state.z)
+        let target = TargetId {
+            kind: TargetKind::Player,
+            id: b_id,
         };
-        {
-            let b = players.get_mut(&addr_b).unwrap();
-            b.state.x = a_pos.0 + SPELL_CAST_RANGE * 0.5;
-            b.state.z = a_pos.1;
-        }
-
-        let b_id = players.get(&addr_b).unwrap().state.id;
         let a_mana_before = players.get(&addr_a).unwrap().state.mana;
 
         let mut projectiles = HashMap::new();
-        let mut minions = HashMap::new();
-        let mut structures = HashMap::new();
-        let mut neutrals = HashMap::new();
         let mut next_projectile_id = 1_u64;
-        let game_state = GameState::Running;
 
-        handle_cast_request(
+        cast_slot(
             &mut players,
             &mut projectiles,
-            &mut minions,
-            &mut structures,
-            &mut neutrals,
             addr_a,
-            TargetId {
-                kind: TargetKind::Player,
-                id: b_id,
-            },
+            target,
+            0,
             &mut next_projectile_id,
-            &game_state,
             now,
         );
-
         assert_eq!(projectiles.len(), 1);
         let mana_after_first = players.get(&addr_a).unwrap().state.mana;
-        assert!((mana_after_first - (a_mana_before - SPELL_MANA_COST)).abs() < EPSILON);
+        assert!((mana_after_first - (a_mana_before - scaled_mana_cost(q, 1))).abs() < EPSILON);
 
-        handle_cast_request(
+        cast_slot(
             &mut players,
             &mut projectiles,
-            &mut minions,
-            &mut structures,
-            &mut neutrals,
             addr_a,
-            TargetId {
-                kind: TargetKind::Player,
-                id: b_id,
-            },
+            target,
+            0,
             &mut next_projectile_id,
-            &game_state,
             now,
         );
         assert_eq!(
@@ -2868,20 +2974,14 @@ mod tests {
             "second cast at same instant must be cooldown-blocked"
         );
 
-        let later = now + SPELL_COOLDOWN + Duration::from_millis(1);
-        handle_cast_request(
+        let later = now + scaled_cooldown(q, 1) + Duration::from_millis(1);
+        cast_slot(
             &mut players,
             &mut projectiles,
-            &mut minions,
-            &mut structures,
-            &mut neutrals,
             addr_a,
-            TargetId {
-                kind: TargetKind::Player,
-                id: b_id,
-            },
+            target,
+            0,
             &mut next_projectile_id,
-            &game_state,
             later,
         );
         assert_eq!(
@@ -2892,26 +2992,236 @@ mod tests {
 
         players.get_mut(&addr_a).unwrap().state.mana = 0.0;
         let mut next_id = 99_u64;
-        handle_cast_request(
+        cast_slot(
             &mut players,
             &mut projectiles,
-            &mut minions,
-            &mut structures,
-            &mut neutrals,
             addr_a,
-            TargetId {
-                kind: TargetKind::Player,
-                id: b_id,
-            },
+            target,
+            0,
             &mut next_id,
-            &game_state,
-            later + SPELL_COOLDOWN,
+            later + scaled_cooldown(q, 1),
         );
         assert_eq!(
             projectiles.len(),
             2,
             "zero mana must not create a projectile"
         );
+    }
+
+    #[test]
+    fn join_applies_class_and_normalizes_avatar() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:51050".parse().unwrap();
+        let now = Instant::now();
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+
+        let valid_slug = shared::avatar_roster()[0].slug.clone();
+        handle_join_request(
+            players.get_mut(&addr).unwrap(),
+            Team::Blue,
+            CharacterChoice::Ipfs,
+            HeroClass::Cleric,
+            Some(valid_slug.as_str()),
+            &layout,
+            now,
+        );
+        {
+            let state = &players.get(&addr).unwrap().state;
+            assert_eq!(state.hero_class, HeroClass::Cleric);
+            assert_eq!(state.avatar.as_deref(), Some(valid_slug.as_str()));
+        }
+
+        // Unknown or malicious avatar slugs must fall back to None without panicking.
+        handle_join_request(
+            players.get_mut(&addr).unwrap(),
+            Team::Blue,
+            CharacterChoice::Ipfs,
+            HeroClass::Mage,
+            Some("../../etc/passwd"),
+            &layout,
+            now,
+        );
+        let state = &players.get(&addr).unwrap().state;
+        assert_eq!(state.hero_class, HeroClass::Mage);
+        assert_eq!(state.avatar, None);
+    }
+
+    #[test]
+    fn class_kits_apply_distinct_authoritative_numbers() {
+        let layout = build_map_layout();
+        let now = Instant::now();
+        let mut results = Vec::new();
+        for (index, class) in [HeroClass::Warrior, HeroClass::Mage].into_iter().enumerate() {
+            let mut players = HashMap::new();
+            let caster: SocketAddr = format!("127.0.0.1:5210{index}").parse().unwrap();
+            let victim: SocketAddr = format!("127.0.0.1:5220{index}").parse().unwrap();
+            let q = ability_for_class_slot(class, SkillSlot::Q);
+            let victim_id = setup_caster_and_target(
+                &mut players,
+                &layout,
+                caster,
+                victim,
+                class,
+                q.cast_range * 0.5,
+                now,
+            );
+            let mut projectiles = HashMap::new();
+            let mut next_projectile_id = 1_u64;
+            cast_slot(
+                &mut players,
+                &mut projectiles,
+                caster,
+                TargetId {
+                    kind: TargetKind::Player,
+                    id: victim_id,
+                },
+                0,
+                &mut next_projectile_id,
+                now,
+            );
+            assert_eq!(projectiles.len(), 1);
+            let projectile = projectiles.values().next().unwrap();
+            assert!((projectile.damage - q.projectile_damage.unwrap()).abs() < EPSILON);
+            let mana_spent = MAX_MANA - players.get(&caster).unwrap().state.mana;
+            assert!((mana_spent - q.base_mana_cost).abs() < EPSILON);
+            results.push((projectile.damage, mana_spent));
+        }
+        assert!(
+            (results[0].0 - results[1].0).abs() > EPSILON,
+            "warrior and mage Q damage must differ"
+        );
+        assert!(
+            (results[0].1 - results[1].1).abs() > EPSILON,
+            "warrior and mage Q mana cost must differ"
+        );
+    }
+
+    #[test]
+    fn self_target_abilities_apply_heal_and_respect_unlock_gates() {
+        let layout = build_map_layout();
+        let now = Instant::now();
+        let mut players = HashMap::new();
+        let caster: SocketAddr = "127.0.0.1:52301".parse().unwrap();
+        let other: SocketAddr = "127.0.0.1:52302".parse().unwrap();
+        setup_caster_and_target(
+            &mut players,
+            &layout,
+            caster,
+            other,
+            HeroClass::Cleric,
+            5.0,
+            now,
+        );
+        let self_target = TargetId {
+            kind: TargetKind::Player,
+            id: players.get(&caster).unwrap().state.id,
+        };
+        let w = ability_for_class_slot(HeroClass::Cleric, SkillSlot::W);
+        assert_eq!(w.targeting, TargetingMode::SelfTarget);
+
+        // Level 1: W is locked -> cast must be a complete no-op.
+        {
+            let state = &mut players.get_mut(&caster).unwrap().state;
+            state.hp = 40.0;
+        }
+        let mut projectiles = HashMap::new();
+        let mut next_projectile_id = 1_u64;
+        cast_slot(
+            &mut players,
+            &mut projectiles,
+            caster,
+            self_target,
+            1,
+            &mut next_projectile_id,
+            now,
+        );
+        {
+            let state = &players.get(&caster).unwrap().state;
+            assert!((state.hp - 40.0).abs() < EPSILON, "locked W must not heal");
+            assert!((state.mana - MAX_MANA).abs() < EPSILON);
+            assert!(projectiles.is_empty());
+        }
+
+        // Level 2 unlocks W: heal appears, mana is drained, still no projectile.
+        {
+            let state = &mut players.get_mut(&caster).unwrap().state;
+            grant_player_xp(state, state.next_level_xp);
+            assert_eq!(state.level, 2);
+            state.hp = 40.0;
+            state.mana = state.max_mana;
+        }
+        cast_slot(
+            &mut players,
+            &mut projectiles,
+            caster,
+            self_target,
+            1,
+            &mut next_projectile_id,
+            now,
+        );
+        let state = &players.get(&caster).unwrap().state;
+        assert!(
+            (state.hp - (40.0 + w.self_heal.unwrap())).abs() < EPSILON,
+            "unlocked W must heal by the kit amount"
+        );
+        assert!((state.mana - (state.max_mana - w.base_mana_cost)).abs() < EPSILON);
+        assert!(projectiles.is_empty(), "self ability must not spawn a projectile");
+    }
+
+    #[test]
+    fn rank_scaling_boosts_damage_and_upgrades_cap_at_max_rank() {
+        let layout = build_map_layout();
+        let now = Instant::now();
+        let mut players = HashMap::new();
+        let caster: SocketAddr = "127.0.0.1:52401".parse().unwrap();
+        let victim: SocketAddr = "127.0.0.1:52402".parse().unwrap();
+        let q = ability_for_class_slot(HeroClass::Ranger, SkillSlot::Q);
+        let victim_id = setup_caster_and_target(
+            &mut players,
+            &layout,
+            caster,
+            victim,
+            HeroClass::Ranger,
+            q.cast_range * 0.5,
+            now,
+        );
+
+        // Upgrades consume points and cap at the shared max rank (3).
+        {
+            let player = players.get_mut(&caster).unwrap();
+            player.state.skill_points = 5;
+            for _ in 0..5 {
+                apply_skill_upgrade(player, 0);
+            }
+            assert_eq!(player.state.ranks[0], q.max_rank);
+            assert_eq!(
+                player.state.skill_points,
+                5 - u32::from(q.max_rank - 1),
+                "only rank-raising upgrades may consume points"
+            );
+        }
+
+        let mut projectiles = HashMap::new();
+        let mut next_projectile_id = 1_u64;
+        cast_slot(
+            &mut players,
+            &mut projectiles,
+            caster,
+            TargetId {
+                kind: TargetKind::Player,
+                id: victim_id,
+            },
+            0,
+            &mut next_projectile_id,
+            now,
+        );
+        let projectile = projectiles.values().next().expect("rank-3 cast fires");
+        let expected = q.projectile_damage.unwrap() * rank_effect_scale(q.max_rank);
+        assert!((projectile.damage - expected).abs() < EPSILON);
+        let mana_spent = MAX_MANA - players.get(&caster).unwrap().state.mana;
+        assert!((mana_spent - scaled_mana_cost(q, q.max_rank)).abs() < EPSILON);
     }
 
     #[test]
@@ -2922,6 +3232,10 @@ mod tests {
         let caster_addr: SocketAddr = "127.0.0.1:53001".parse().unwrap();
         let target_addr: SocketAddr = "127.0.0.1:53002".parse().unwrap();
         let now = Instant::now();
+        // Mage Q has the longest basic range; targets below sit at half range.
+        let q = ability_for_class_slot(HeroClass::Mage, SkillSlot::Q);
+        let cast_range = q.cast_range;
+        let cooldown = scaled_cooldown(q, 1);
 
         ensure_player_connected(&mut players, &layout, caster_addr, &mut next_player_id, now);
         ensure_player_connected(&mut players, &layout, target_addr, &mut next_player_id, now);
@@ -2929,6 +3243,8 @@ mod tests {
             players.get_mut(&caster_addr).unwrap(),
             Team::Green,
             CharacterChoice::Ipfs,
+            HeroClass::Mage,
+            None,
             &layout,
             now,
         );
@@ -2936,6 +3252,8 @@ mod tests {
             players.get_mut(&target_addr).unwrap(),
             Team::Blue,
             CharacterChoice::Wang,
+            HeroClass::default(),
+            None,
             &layout,
             now,
         );
@@ -2946,7 +3264,7 @@ mod tests {
         }
         {
             let target = players.get_mut(&target_addr).unwrap();
-            target.state.x = SPELL_CAST_RANGE * 0.5;
+            target.state.x = cast_range * 0.5;
             target.state.z = 0.0;
         }
 
@@ -2960,7 +3278,7 @@ mod tests {
                     lane: Lane::Mid,
                     x: 0.0,
                     y: MINION_SPAWN_HEIGHT,
-                    z: SPELL_CAST_RANGE * 0.5,
+                    z: cast_range * 0.5,
                     yaw: 0.0,
                     hp: MINION_MAX_HP,
                     max_hp: MINION_MAX_HP,
@@ -2983,7 +3301,7 @@ mod tests {
             StructureKind::Tower,
             StructureRole::LaneTower { lane: Lane::Mid },
             Team::Blue,
-            Vec3f::new(SPELL_CAST_RANGE * 0.5, 3.0, SPELL_CAST_RANGE * 0.25),
+            Vec3f::new(cast_range * 0.5, 3.0, cast_range * 0.25),
         );
 
         let mut next_neutral_id = 9_001;
@@ -2991,8 +3309,8 @@ mod tests {
         let neutral_id = *neutrals.keys().next().unwrap();
         {
             let neutral = neutrals.get_mut(&neutral_id).unwrap();
-            neutral.state.x = SPELL_CAST_RANGE * 0.25;
-            neutral.state.z = SPELL_CAST_RANGE * 0.5;
+            neutral.state.x = cast_range * 0.25;
+            neutral.state.z = cast_range * 0.5;
         }
 
         let mut projectiles = HashMap::new();
@@ -3028,16 +3346,17 @@ mod tests {
                 &mut neutrals,
                 caster_addr,
                 target,
+                0,
                 &mut next_projectile_id,
                 &game_state,
-                now + (SPELL_COOLDOWN + Duration::from_millis(1)) * index as u32,
+                now + (cooldown + Duration::from_millis(1)) * index as u32,
             );
             assert_eq!(projectiles.len(), index + 1);
         }
 
         {
             let target = players.get_mut(&target_addr).unwrap();
-            target.state.x = SPELL_CAST_RANGE + PLAYER_HIT_RADIUS + 10.0;
+            target.state.x = cast_range + PLAYER_HIT_RADIUS + 10.0;
             target.state.z = 0.0;
         }
         let mana_before = players.get(&caster_addr).unwrap().state.mana;
@@ -3053,9 +3372,10 @@ mod tests {
                 kind: TargetKind::Player,
                 id: target_player_id,
             },
+            0,
             &mut next_projectile_id,
             &game_state,
-            now + (SPELL_COOLDOWN + Duration::from_millis(1)) * 5,
+            now + (cooldown + Duration::from_millis(1)) * 5,
         );
 
         assert_eq!(projectiles.len(), projectile_count);

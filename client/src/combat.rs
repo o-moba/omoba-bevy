@@ -13,26 +13,28 @@ use crate::camera::MainCamera;
 use crate::debug_console::DebugConsole;
 use crate::input_bindings::{SKILL_CAST_KEYS, SKILL_UPGRADE_KEY};
 use crate::net::{
-    GameState, GameStateSnapshot, NetworkCommand, NetworkMinion, NetworkMinionId, NetworkNeutral,
-    NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId, PlayerProgression,
-    RemotePlayer, StructureKind, TargetId, TargetKind,
+    GameState, GameStateSnapshot, NetworkCommand, NetworkHeroClass, NetworkMinion, NetworkMinionId,
+    NetworkNeutral, NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId,
+    PlayerProgression, RemotePlayer, StructureKind, TargetId, TargetKind,
 };
 use crate::player::Player;
-use crate::team::Team;
+use crate::team::{Team, TeamSelection};
 use crate::world::NormalizeModelScale;
+use shared::{
+    HeroClass, MAX_ABILITY_RANK, SkillSlot, TargetingMode, ability_for_class_slot, scaled_cooldown,
+    unlocked_slots_for_level,
+};
 
 /// Must match server `server/src/balance.rs` player baselines (display / local defaults).
 pub const MAX_HP: f32 = 100.0;
 /// Must match server `server/src/balance.rs` player baselines (display / local defaults).
 pub const MAX_MANA: f32 = 100.0;
 
-/// Mirrors server `SPELL_COOLDOWN` for local HUD feedback until the snapshot exposes cooldowns.
-pub const LOCAL_CAST_COOLDOWN_SECS: f32 = 0.35;
-
-/// Local spell cooldown timer (all cast keys share one server action).
+/// Local per-slot cast cooldown mirror for HUD feedback (the server remains
+/// authoritative; values come from the shared class kit numbers).
 #[derive(Resource, Default)]
 pub struct LocalCastCooldown {
-    pub remaining_secs: f32,
+    pub remaining_secs: [f32; 4],
 }
 
 const BAR_WIDTH: f32 = 1.45;
@@ -65,8 +67,6 @@ const SKILL_BUTTON_PRESS_COLOR: Color = Color::srgba(0.28, 0.28, 0.28, 0.95);
 const SKILL_UPGRADE_READY_COLOR: Color = Color::srgba(0.20, 0.62, 0.26, 0.95);
 const SKILL_UPGRADE_HOVER_COLOR: Color = Color::srgba(0.26, 0.72, 0.32, 0.98);
 const SKILL_UPGRADE_IDLE_COLOR: Color = Color::srgba(0.16, 0.16, 0.18, 0.55);
-/// Mirror of the server's `MAX_SKILL_RANK`; keep in sync with `server/src/balance.rs`.
-const CLIENT_MAX_SKILL_RANK: u8 = 5;
 
 pub struct CombatPlugin;
 
@@ -153,7 +153,9 @@ struct CombatBars {
 struct TargetMarker;
 
 #[derive(Component)]
-struct SkillBarSlot;
+struct SkillBarSlot {
+    slot: usize,
+}
 
 #[derive(Component)]
 struct SkillUpgradeButton {
@@ -165,10 +167,30 @@ struct SkillRankLabel {
     slot: usize,
 }
 
+/// Ability-name caption on a hotbar slot; follows the selected class kit.
+#[derive(Component)]
+struct SkillNameLabel {
+    slot: usize,
+}
+
 fn tick_local_cast_cooldown(time: Res<Time>, mut cd: ResMut<LocalCastCooldown>) {
-    if cd.remaining_secs > 0.0 {
-        cd.remaining_secs = (cd.remaining_secs - time.delta_secs()).max(0.0);
+    for remaining in cd.remaining_secs.iter_mut() {
+        if *remaining > 0.0 {
+            *remaining = (*remaining - time.delta_secs()).max(0.0);
+        }
     }
+}
+
+/// The class whose kit drives the local HUD: server-replicated when available,
+/// otherwise the pre-join selection.
+fn local_hero_class(
+    replicated: Option<Option<&NetworkHeroClass>>,
+    selection: &TeamSelection,
+) -> HeroClass {
+    replicated
+        .flatten()
+        .map(|class| class.0)
+        .unwrap_or(selection.hero_class)
 }
 
 #[derive(Component)]
@@ -347,26 +369,35 @@ fn setup_combat_ui(mut commands: Commands) {
                             flex_direction: FlexDirection::Column,
                             justify_content: JustifyContent::Center,
                             align_items: AlignItems::Center,
-                            row_gap: Val::Px(2.0),
+                            row_gap: Val::Px(1.0),
                             ..default()
                         },
                         BackgroundColor(SKILL_BUTTON_COLOR),
-                        SkillBarSlot,
+                        SkillBarSlot { slot: i },
                         Name::new(format!("SkillSlot-{label}")),
                     ))
                     .with_children(|slot| {
                         slot.spawn((
                             Text::new(label),
                             TextFont {
-                                font_size: 22.0,
+                                font_size: 20.0,
                                 ..default()
                             },
                             TextColor::WHITE,
                         ));
                         slot.spawn((
+                            Text::new(""),
+                            TextFont {
+                                font_size: 9.5,
+                                ..default()
+                            },
+                            TextColor(Color::srgba(0.88, 0.90, 0.94, 1.0)),
+                            SkillNameLabel { slot: i },
+                        ));
+                        slot.spawn((
                             Text::new("Lv 1"),
                             TextFont {
-                                font_size: 13.0,
+                                font_size: 12.0,
                                 ..default()
                             },
                             TextColor(Color::srgba(0.82, 0.84, 0.90, 1.0)),
@@ -378,17 +409,33 @@ fn setup_combat_ui(mut commands: Commands) {
         });
 }
 
-/// Reflect server ranks on the slot labels and light the upgrade arrows when the
-/// local player has a skill point to spend and the slot is below max rank (TASK03).
+/// Reflect the selected class kit + server ranks on the hotbar and light the
+/// upgrade arrows when the local player has a skill point to spend and the
+/// slot is below the shared max rank.
+#[allow(clippy::type_complexity)]
 fn update_skill_bar_system(
-    progression: Query<&PlayerProgression, With<Player>>,
-    mut rank_labels: Query<(&SkillRankLabel, &mut Text)>,
+    progression: Query<(&PlayerProgression, Option<&NetworkHeroClass>), With<Player>>,
+    team_selection: Res<TeamSelection>,
+    mut rank_labels: Query<(&SkillRankLabel, &mut Text), Without<SkillNameLabel>>,
+    mut name_labels: Query<(&SkillNameLabel, &mut Text), Without<SkillRankLabel>>,
     mut upgrade_buttons: Query<
         (&SkillUpgradeButton, &Interaction, &mut BackgroundColor, &mut Node),
         With<Button>,
     >,
 ) {
-    let prog = progression.iter().next().copied().unwrap_or_default();
+    let local = progression.iter().next();
+    let prog = local.map(|(prog, _)| *prog).unwrap_or_default();
+    let class = local_hero_class(local.map(|(_, class)| class), &team_selection);
+
+    for (label, mut text) in &mut name_labels {
+        let Some(slot) = SkillSlot::from_index(label.slot as u8) else {
+            continue;
+        };
+        let next = ability_for_class_slot(class, slot).name;
+        if text.0 != next {
+            text.0 = next.to_string();
+        }
+    }
 
     for (label, mut text) in &mut rank_labels {
         let rank = prog.ranks.get(label.slot).copied().unwrap_or(1).max(1);
@@ -400,7 +447,7 @@ fn update_skill_bar_system(
 
     for (button, interaction, mut color, mut node) in &mut upgrade_buttons {
         let rank = prog.ranks.get(button.slot).copied().unwrap_or(1).max(1);
-        let can_upgrade = prog.skill_points > 0 && rank < CLIENT_MAX_SKILL_RANK;
+        let can_upgrade = prog.skill_points > 0 && rank < MAX_ABILITY_RANK;
         // Arrow only shows when a point can actually be spent on this slot.
         let display = if can_upgrade {
             Display::Flex
@@ -564,118 +611,94 @@ fn clear_invalid_target_system(
     }
 }
 
-fn cast_spell_system(
-    keyboard_input: Res<ButtonInput<KeyCode>>,
-    game_state: Option<Res<GameStateSnapshot>>,
-    local_stats_query: Query<&CombatStats, With<Player>>,
-    local_player: Query<(&Transform, &Team), With<Player>>,
-    player_candidates: Query<
-        (Entity, &Transform, &NetworkPlayerId, &CombatStats, &Team),
-        (With<RemotePlayer>, Without<Player>),
-    >,
-    minion_candidates: Query<
-        (Entity, &Transform, &NetworkMinionId, &CombatStats, &Team),
-        With<NetworkMinion>,
-    >,
-    neutral_candidates: Query<
-        (Entity, &Transform, &NetworkNeutralId, &CombatStats),
-        With<NetworkNeutral>,
-    >,
-    structure_candidates: Query<
-        (
-            Entity,
-            &Transform,
-            &NetworkStructureId,
-            &CombatStats,
-            &Team,
-            &StructureKind,
-        ),
-        With<NetworkStructure>,
-    >,
-    mut target_state: ResMut<TargetState>,
-    mut command_writer: MessageWriter<NetworkCommand>,
-    mut console: ResMut<DebugConsole>,
-    mut cast_cd: ResMut<LocalCastCooldown>,
+/// Resolves the target and sends a slot cast for the local player's class kit.
+/// Client-side checks (unlock level, local cooldown, target presence) exist for
+/// responsive UX only; the server re-validates everything authoritatively.
+fn try_cast_slot(
+    slot_index: usize,
+    class: HeroClass,
+    local: (&CombatStats, PlayerProgression, Option<&NetworkPlayerId>),
+    target_state: &mut TargetState,
+    command_writer: &mut MessageWriter<NetworkCommand>,
+    console: &mut DebugConsole,
+    cast_cd: &mut LocalCastCooldown,
 ) {
-    if let Some(game_state) = game_state.as_ref() {
-        if !matches!(game_state.state, GameState::Running) {
-            return;
-        }
-    }
-    let cast_pressed = SKILL_CAST_KEYS
-        .iter()
-        .any(|key| keyboard_input.just_pressed(*key));
-    if !cast_pressed {
-        return;
-    }
-    if cast_cd.remaining_secs > 0.0 {
-        return;
-    }
-
-    let Ok(local_stats) = local_stats_query.single() else {
+    let Some(slot) = SkillSlot::from_index(slot_index as u8) else {
         return;
     };
-    let _ = (
-        local_player,
-        player_candidates,
-        minion_candidates,
-        neutral_candidates,
-        structure_candidates,
-    );
-    let target = resolve_cast_target(&mut target_state);
-    if let Some(target) = target {
-        cast_cd.remaining_secs = LOCAL_CAST_COOLDOWN_SECS;
-        command_writer.write(NetworkCommand::Cast { target });
+    let (stats, prog, net_id) = local;
+    if !stats.is_alive() {
+        return;
+    }
+    let def = ability_for_class_slot(class, slot);
+    if !unlocked_slots_for_level(prog.level.max(1))[slot.index()] {
         let message = format!(
-            "Cast -> {} {} (mana {:.0})",
-            match target.kind {
-                TargetKind::Player => "player",
-                TargetKind::Minion => "minion",
-                TargetKind::Structure => "structure",
-                TargetKind::Neutral => "neutral",
-            },
-            target.id,
-            local_stats.mana
+            "{} is locked until level {}.",
+            def.name,
+            shared::SLOT_UNLOCK_LEVELS[slot.index()]
         );
         console.push_line(message.clone());
         info!("{message}");
-    } else {
-        let message = "No target available. Use TAB or middle mouse click to select.";
+        return;
+    }
+    if cast_cd.remaining_secs[slot.index()] > 0.0 {
+        return;
+    }
+
+    let target = match def.targeting {
+        TargetingMode::SelfTarget => net_id.map(|id| TargetId {
+            kind: TargetKind::Player,
+            id: id.0,
+        }),
+        TargetingMode::UnitTarget => resolve_cast_target(target_state),
+    };
+    let Some(target) = target else {
+        let message = match def.targeting {
+            TargetingMode::UnitTarget => {
+                "No target available. Use TAB or middle mouse click to select."
+            }
+            TargetingMode::SelfTarget => "Not connected yet; self-cast unavailable.",
+        };
         console.push_line(message);
         info!("{message}");
-    }
+        return;
+    };
+
+    let rank = prog.ranks[slot.index()].clamp(1, def.max_rank);
+    cast_cd.remaining_secs[slot.index()] = scaled_cooldown(def, rank).as_secs_f32();
+    command_writer.write(NetworkCommand::Cast {
+        target,
+        slot: slot.index() as u8,
+    });
+    let message = format!(
+        "Cast {} -> {} {} (mana {:.0})",
+        def.name,
+        match target.kind {
+            TargetKind::Player => "player",
+            TargetKind::Minion => "minion",
+            TargetKind::Structure => "structure",
+            TargetKind::Neutral => "neutral",
+        },
+        target.id,
+        stats.mana
+    );
+    console.push_line(message.clone());
+    info!("{message}");
 }
 
-fn skill_button_system(
-    mut interactions: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<SkillBarSlot>),
-    >,
+#[allow(clippy::type_complexity)]
+fn cast_spell_system(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
     game_state: Option<Res<GameStateSnapshot>>,
-    local_stats_query: Query<&CombatStats, With<Player>>,
-    local_player: Query<(&Transform, &Team), With<Player>>,
-    player_candidates: Query<
-        (Entity, &Transform, &NetworkPlayerId, &CombatStats, &Team),
-        (With<RemotePlayer>, Without<Player>),
-    >,
-    minion_candidates: Query<
-        (Entity, &Transform, &NetworkMinionId, &CombatStats, &Team),
-        With<NetworkMinion>,
-    >,
-    neutral_candidates: Query<
-        (Entity, &Transform, &NetworkNeutralId, &CombatStats),
-        With<NetworkNeutral>,
-    >,
-    structure_candidates: Query<
+    team_selection: Res<TeamSelection>,
+    local_player: Query<
         (
-            Entity,
-            &Transform,
-            &NetworkStructureId,
             &CombatStats,
-            &Team,
-            &StructureKind,
+            Option<&PlayerProgression>,
+            Option<&NetworkPlayerId>,
+            Option<&NetworkHeroClass>,
         ),
-        With<NetworkStructure>,
+        With<Player>,
     >,
     mut target_state: ResMut<TargetState>,
     mut command_writer: MessageWriter<NetworkCommand>,
@@ -687,44 +710,72 @@ fn skill_button_system(
             return;
         }
     }
-    for (interaction, mut color) in interactions.iter_mut() {
+    let Some(slot_index) = SKILL_CAST_KEYS
+        .iter()
+        .position(|key| keyboard_input.just_pressed(*key))
+    else {
+        return;
+    };
+
+    let Ok((stats, prog, net_id, class)) = local_player.single() else {
+        return;
+    };
+    let class = local_hero_class(Some(class), &team_selection);
+    try_cast_slot(
+        slot_index,
+        class,
+        (stats, prog.copied().unwrap_or_default(), net_id),
+        &mut target_state,
+        &mut command_writer,
+        &mut console,
+        &mut cast_cd,
+    );
+}
+
+#[allow(clippy::type_complexity)]
+fn skill_button_system(
+    mut interactions: Query<
+        (&Interaction, &SkillBarSlot, &mut BackgroundColor),
+        (Changed<Interaction>, With<Button>),
+    >,
+    game_state: Option<Res<GameStateSnapshot>>,
+    team_selection: Res<TeamSelection>,
+    local_player: Query<
+        (
+            &CombatStats,
+            Option<&PlayerProgression>,
+            Option<&NetworkPlayerId>,
+            Option<&NetworkHeroClass>,
+        ),
+        With<Player>,
+    >,
+    mut target_state: ResMut<TargetState>,
+    mut command_writer: MessageWriter<NetworkCommand>,
+    mut console: ResMut<DebugConsole>,
+    mut cast_cd: ResMut<LocalCastCooldown>,
+) {
+    if let Some(game_state) = game_state.as_ref() {
+        if !matches!(game_state.state, GameState::Running) {
+            return;
+        }
+    }
+    for (interaction, bar_slot, mut color) in interactions.iter_mut() {
         match *interaction {
             Interaction::Pressed => {
                 *color = SKILL_BUTTON_PRESS_COLOR.into();
-                if cast_cd.remaining_secs > 0.0 {
-                    continue;
-                }
-                let Ok(local_stats) = local_stats_query.single() else {
+                let Ok((stats, prog, net_id, class)) = local_player.single() else {
                     continue;
                 };
-                let _ = (
-                    &local_player,
-                    &player_candidates,
-                    &minion_candidates,
-                    &neutral_candidates,
-                    &structure_candidates,
+                let class = local_hero_class(Some(class), &team_selection);
+                try_cast_slot(
+                    bar_slot.slot,
+                    class,
+                    (stats, prog.copied().unwrap_or_default(), net_id),
+                    &mut target_state,
+                    &mut command_writer,
+                    &mut console,
+                    &mut cast_cd,
                 );
-                if let Some(target) = resolve_cast_target(&mut target_state) {
-                    cast_cd.remaining_secs = LOCAL_CAST_COOLDOWN_SECS;
-                    command_writer.write(NetworkCommand::Cast { target });
-                    let message = format!(
-                        "Cast -> {} {} (mana {:.0})",
-                        match target.kind {
-                            TargetKind::Player => "player",
-                            TargetKind::Minion => "minion",
-                            TargetKind::Structure => "structure",
-                            TargetKind::Neutral => "neutral",
-                        },
-                        target.id,
-                        local_stats.mana
-                    );
-                    console.push_line(message.clone());
-                    info!("{message}");
-                } else {
-                    let message = "No target available. Use TAB or middle mouse click to select.";
-                    console.push_line(message);
-                    info!("{message}");
-                }
             }
             Interaction::Hovered => {
                 *color = SKILL_BUTTON_HOVER_COLOR.into();
@@ -1073,7 +1124,7 @@ fn find_nearest_enemy_target(
             continue;
         }
         let dist_sq = transform.translation.distance_squared(local_pos);
-        if best.map_or(true, |(_, _, best_dist)| dist_sq < best_dist) {
+        if best.is_none_or(|(_, _, best_dist)| dist_sq < best_dist) {
             best = Some((
                 entity,
                 TargetId {
@@ -1090,7 +1141,7 @@ fn find_nearest_enemy_target(
             continue;
         }
         let dist_sq = transform.translation.distance_squared(local_pos);
-        if best.map_or(true, |(_, _, best_dist)| dist_sq < best_dist) {
+        if best.is_none_or(|(_, _, best_dist)| dist_sq < best_dist) {
             best = Some((
                 entity,
                 TargetId {
@@ -1107,7 +1158,7 @@ fn find_nearest_enemy_target(
             continue;
         }
         let dist_sq = transform.translation.distance_squared(local_pos);
-        if best.map_or(true, |(_, _, best_dist)| dist_sq < best_dist) {
+        if best.is_none_or(|(_, _, best_dist)| dist_sq < best_dist) {
             best = Some((
                 entity,
                 TargetId {
@@ -1124,7 +1175,7 @@ fn find_nearest_enemy_target(
             continue;
         }
         let dist_sq = transform.translation.distance_squared(local_pos);
-        if best.map_or(true, |(_, _, best_dist)| dist_sq < best_dist) {
+        if best.is_none_or(|(_, _, best_dist)| dist_sq < best_dist) {
             best = Some((
                 entity,
                 TargetId {
@@ -1174,7 +1225,7 @@ fn find_target_near_point(
         }
         let dist = transform.translation.xz().distance(click_point.xz());
         if dist <= TARGET_PICK_RADIUS {
-            if best.map_or(true, |(_, _, best_dist)| dist < best_dist) {
+            if best.is_none_or(|(_, _, best_dist)| dist < best_dist) {
                 best = Some((
                     entity,
                     TargetId {
@@ -1193,7 +1244,7 @@ fn find_target_near_point(
         }
         let dist = transform.translation.xz().distance(click_point.xz());
         if dist <= TARGET_PICK_RADIUS {
-            if best.map_or(true, |(_, _, best_dist)| dist < best_dist) {
+            if best.is_none_or(|(_, _, best_dist)| dist < best_dist) {
                 best = Some((
                     entity,
                     TargetId {
@@ -1212,7 +1263,7 @@ fn find_target_near_point(
         }
         let dist = transform.translation.xz().distance(click_point.xz());
         if dist <= TARGET_PICK_RADIUS {
-            if best.map_or(true, |(_, _, best_dist)| dist < best_dist) {
+            if best.is_none_or(|(_, _, best_dist)| dist < best_dist) {
                 best = Some((
                     entity,
                     TargetId {
@@ -1231,7 +1282,7 @@ fn find_target_near_point(
         }
         let dist = transform.translation.xz().distance(click_point.xz());
         if dist <= TARGET_PICK_RADIUS {
-            if best.map_or(true, |(_, _, best_dist)| dist < best_dist) {
+            if best.is_none_or(|(_, _, best_dist)| dist < best_dist) {
                 best = Some((
                     entity,
                     TargetId {
