@@ -33,3 +33,4 @@ tasks/*
 # Runtime-synced arena avatars (arena-sync output) — not committed content.
 client/assets/avatars/osa-*.glb
 client/assets/avatars/osa-*.png
+client/assets/avatars/osa-*.jpg
