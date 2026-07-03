@@ -106,6 +106,53 @@ pub const JUNGLE_MAP_OUTER_FRAC: f32 = 0.34;
 /// Fraction of half-map extent used for jungle camp anchor distance (inner ring).
 pub const JUNGLE_MAP_INNER_FRAC: f32 = 0.22;
 
+// --- Raid bosses (TASK-19): epic neutral objectives with team buffs ---
+//
+// Two bosses sit in mirror-symmetric pits derived with the same map formula as
+// the jungle camps. They spawn on a match-time schedule, hit much harder than
+// camps, respawn on their own (longer) cooldown, and grant the killer's whole
+// team a timed buff.
+
+/// Boss pit distance fractions (mirror the jungle ring formula; see
+/// `neutrals::boss_blueprints`).
+pub const BOSS_PIT_OUTER_FRAC: f32 = JUNGLE_MAP_OUTER_FRAC;
+pub const BOSS_PIT_INNER_FRAC: f32 = JUNGLE_MAP_INNER_FRAC;
+
+/// Bottom boss (Wendigo) spawns this long after match start (Lobby -> Running).
+pub const BOTTOM_BOSS_SPAWN_DELAY: Duration = Duration::from_secs(60);
+/// Top boss (King Mutatio) spawns this long after match start.
+pub const TOP_BOSS_SPAWN_DELAY: Duration = Duration::from_secs(180);
+/// Bosses respawn this long after death (camps keep `NEUTRAL_RESPAWN_COOLDOWN`).
+pub const BOSS_RESPAWN_COOLDOWN: Duration = Duration::from_secs(180);
+
+/// Bosses chase further from their pit than camps before resetting.
+pub const BOSS_LEASH_DISTANCE: f32 = 18.0;
+/// Boss proximity-aggro radius (kept at camp scale; bosses mostly punish attackers).
+pub const BOSS_AGGRO_RADIUS: f32 = NEUTRAL_AGGRO_RADIUS;
+
+// Bottom boss: Wendigo (dragon-slot objective).
+pub const WENDIGO_MAX_HP: f32 = 900.0;
+pub const WENDIGO_ATTACK_DAMAGE: f32 = 20.0;
+pub const WENDIGO_ATTACK_RANGE: f32 = 3.2;
+pub const WENDIGO_KILL_GOLD: u32 = 150;
+pub const WENDIGO_KILL_XP: u32 = 200;
+
+// Top boss: King Mutatio (Baron-slot objective).
+pub const MUTATIO_MAX_HP: f32 = 1500.0;
+pub const MUTATIO_ATTACK_DAMAGE: f32 = 28.0;
+pub const MUTATIO_ATTACK_RANGE: f32 = 3.4;
+pub const MUTATIO_KILL_GOLD: u32 = 250;
+pub const MUTATIO_KILL_XP: u32 = 300;
+
+// Team buffs granted on boss kill (refresh on re-kill; multiplicative if both).
+/// Bottom boss buff: +15% ability damage for the killing team.
+pub const BOTTOM_BOSS_BUFF_DAMAGE_MULT: f32 = 1.15;
+pub const BOTTOM_BOSS_BUFF_DURATION: Duration = Duration::from_secs(90);
+/// Top boss buff: +25% ability damage plus flat HP regen for the killing team.
+pub const TOP_BOSS_BUFF_DAMAGE_MULT: f32 = 1.25;
+pub const TOP_BOSS_BUFF_HP_REGEN_PER_SECOND: f32 = 2.0;
+pub const TOP_BOSS_BUFF_DURATION: Duration = Duration::from_secs(90);
+
 // --- Match flow ---
 pub const VICTORY_REMATCH_DELAY: Duration = Duration::from_secs(10);
 
@@ -161,6 +208,29 @@ mod tests {
         assert!(NEUTRAL_RESPAWN_COOLDOWN > Duration::ZERO);
         assert!(SKIRMISHER_MAX_HP > 0.0 && BRUISER_MAX_HP > 0.0 && SPITTER_MAX_HP > 0.0);
         assert!(JUNGLE_MAP_INNER_FRAC > 0.0 && JUNGLE_MAP_OUTER_FRAC > JUNGLE_MAP_INNER_FRAC);
+    }
+
+    #[test]
+    fn boss_tuning_outclasses_camps_and_timings_are_positive() {
+        // Bosses must be clearly stronger and more rewarding than every camp.
+        for camp_hp in [SKIRMISHER_MAX_HP, BRUISER_MAX_HP, SPITTER_MAX_HP] {
+            assert!(WENDIGO_MAX_HP > camp_hp * 2.0);
+        }
+        assert!(MUTATIO_MAX_HP > WENDIGO_MAX_HP);
+        assert!(WENDIGO_ATTACK_DAMAGE > BRUISER_ATTACK_DAMAGE);
+        assert!(MUTATIO_ATTACK_DAMAGE > WENDIGO_ATTACK_DAMAGE);
+        assert!(WENDIGO_KILL_GOLD > BRUISER_KILL_GOLD && WENDIGO_KILL_XP > BRUISER_KILL_XP);
+        assert!(MUTATIO_KILL_GOLD > WENDIGO_KILL_GOLD && MUTATIO_KILL_XP > WENDIGO_KILL_XP);
+        // Schedule: bottom before top; boss respawn slower than camps.
+        assert!(BOTTOM_BOSS_SPAWN_DELAY < TOP_BOSS_SPAWN_DELAY);
+        assert!(BOSS_RESPAWN_COOLDOWN > NEUTRAL_RESPAWN_COOLDOWN);
+        assert!(BOSS_LEASH_DISTANCE > NEUTRAL_LEASH_DISTANCE);
+        // Buffs: top stronger than bottom; both multiplicative bonuses > 1.
+        assert!(BOTTOM_BOSS_BUFF_DAMAGE_MULT > 1.0);
+        assert!(TOP_BOSS_BUFF_DAMAGE_MULT > BOTTOM_BOSS_BUFF_DAMAGE_MULT);
+        assert!(TOP_BOSS_BUFF_HP_REGEN_PER_SECOND > 0.0);
+        assert!(!BOTTOM_BOSS_BUFF_DURATION.is_zero() && !TOP_BOSS_BUFF_DURATION.is_zero());
+        assert!(BOSS_PIT_OUTER_FRAC > BOSS_PIT_INNER_FRAC && BOSS_PIT_INNER_FRAC > 0.0);
     }
 
     #[test]

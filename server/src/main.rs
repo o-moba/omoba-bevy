@@ -202,6 +202,28 @@ enum NeutralCampType {
     Skirmisher,
     Bruiser,
     Spitter,
+    /// Bottom raid boss ("Wendigo", dragon-slot objective).
+    WendigoBoss,
+    /// Top raid boss ("King Mutatio", Baron-slot objective).
+    KingMutatioBoss,
+}
+
+impl NeutralCampType {
+    fn is_boss(self) -> bool {
+        matches!(
+            self,
+            NeutralCampType::WendigoBoss | NeutralCampType::KingMutatioBoss
+        )
+    }
+
+    /// Team buff granted to the killer's team when this neutral dies.
+    fn team_buff_kind(self) -> Option<TeamBuffKind> {
+        match self {
+            NeutralCampType::WendigoBoss => Some(TeamBuffKind::WendigoFavor),
+            NeutralCampType::KingMutatioBoss => Some(TeamBuffKind::MutatioMight),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -222,6 +244,123 @@ struct NeutralState {
     hp: f32,
     max_hp: f32,
     ai_state: NeutralAiState,
+}
+
+/// Team-wide buff kinds granted by raid-boss kills (TASK-19).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum TeamBuffKind {
+    /// Bottom boss (Wendigo): +ability damage.
+    WendigoFavor,
+    /// Top boss (King Mutatio): +ability damage and HP regen.
+    MutatioMight,
+}
+
+impl TeamBuffKind {
+    const ALL: [TeamBuffKind; 2] = [TeamBuffKind::WendigoFavor, TeamBuffKind::MutatioMight];
+
+    fn index(self) -> usize {
+        match self {
+            TeamBuffKind::WendigoFavor => 0,
+            TeamBuffKind::MutatioMight => 1,
+        }
+    }
+
+    fn duration(self) -> Duration {
+        match self {
+            TeamBuffKind::WendigoFavor => BOTTOM_BOSS_BUFF_DURATION,
+            TeamBuffKind::MutatioMight => TOP_BOSS_BUFF_DURATION,
+        }
+    }
+
+    fn damage_multiplier(self) -> f32 {
+        match self {
+            TeamBuffKind::WendigoFavor => BOTTOM_BOSS_BUFF_DAMAGE_MULT,
+            TeamBuffKind::MutatioMight => TOP_BOSS_BUFF_DAMAGE_MULT,
+        }
+    }
+
+    fn hp_regen_per_second(self) -> f32 {
+        match self {
+            TeamBuffKind::WendigoFavor => 0.0,
+            TeamBuffKind::MutatioMight => TOP_BOSS_BUFF_HP_REGEN_PER_SECOND,
+        }
+    }
+}
+
+/// Replicated team-buff entry (additive snapshot field, `serde(default)`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TeamBuffState {
+    team: Team,
+    kind: TeamBuffKind,
+    remaining_secs: f32,
+}
+
+fn team_index(team: Team) -> usize {
+    match team {
+        Team::Green => 0,
+        Team::Blue => 1,
+    }
+}
+
+/// Authoritative active team buffs keyed by (team, kind) with absolute expiry
+/// instants. A re-kill refreshes the expiry (no stacking of the same kind);
+/// different kinds combine multiplicatively for damage.
+#[derive(Default)]
+struct TeamBuffs {
+    /// `expires[team_index][kind_index]`
+    expires: [[Option<Instant>; TeamBuffKind::ALL.len()]; 2],
+}
+
+impl TeamBuffs {
+    fn grant(&mut self, team: Team, kind: TeamBuffKind, now: Instant) {
+        self.expires[team_index(team)][kind.index()] = Some(now + kind.duration());
+    }
+
+    fn is_active(&self, team: Team, kind: TeamBuffKind, now: Instant) -> bool {
+        self.expires[team_index(team)][kind.index()].is_some_and(|expiry| now < expiry)
+    }
+
+    /// Combined outgoing ability-damage multiplier for a team (1.0 = no buff).
+    fn damage_multiplier(&self, team: Team, now: Instant) -> f32 {
+        TeamBuffKind::ALL
+            .iter()
+            .filter(|kind| self.is_active(team, **kind, now))
+            .map(|kind| kind.damage_multiplier())
+            .product()
+    }
+
+    /// Combined flat HP regen per second for a team (0.0 = no buff).
+    fn hp_regen_per_second(&self, team: Team, now: Instant) -> f32 {
+        TeamBuffKind::ALL
+            .iter()
+            .filter(|kind| self.is_active(team, **kind, now))
+            .map(|kind| kind.hp_regen_per_second())
+            .sum()
+    }
+
+    fn clear(&mut self) {
+        self.expires = Default::default();
+    }
+
+    /// Snapshot representation of every active buff (deterministic order).
+    fn snapshot(&self, now: Instant) -> Vec<TeamBuffState> {
+        let mut out = Vec::new();
+        for team in [Team::Green, Team::Blue] {
+            for kind in TeamBuffKind::ALL {
+                if let Some(expiry) = self.expires[team_index(team)][kind.index()] {
+                    if now < expiry {
+                        out.push(TeamBuffState {
+                            team,
+                            kind,
+                            remaining_secs: expiry.duration_since(now).as_secs_f32(),
+                        });
+                    }
+                }
+            }
+        }
+        out
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -245,6 +384,9 @@ enum ServerPacket {
         minions: Vec<MinionState>,
         #[serde(default)]
         neutrals: Vec<NeutralState>,
+        /// Active boss team buffs (additive field; absent = no buffs).
+        #[serde(default)]
+        team_buffs: Vec<TeamBuffState>,
         game_state: GameState,
         #[serde(default)]
         rematch_in_secs: Option<u64>,
@@ -460,6 +602,7 @@ struct ServerRuntime {
     next_projectile_id: u64,
     next_minion_id: u64,
     neutrals: HashMap<u64, Neutral>,
+    team_buffs: TeamBuffs,
     recv_buf: [u8; MAX_PACKET_SIZE],
     last_snapshot_at: Instant,
     last_simulation_at: Instant,
@@ -470,7 +613,10 @@ impl ServerRuntime {
     fn new(socket: UdpSocket) -> Self {
         let map_layout = build_map_layout();
         let mut next_neutral_id: u64 = 9_001;
-        let neutrals = build_neutral_camps(&mut next_neutral_id);
+        let mut neutrals = build_neutral_camps(&mut next_neutral_id);
+        // Raid bosses start dormant; the Lobby -> Running transition arms
+        // their spawn schedule (see `schedule_boss_spawns`).
+        neutrals.extend(build_boss_neutrals(&mut next_neutral_id));
 
         Self {
             socket,
@@ -486,6 +632,7 @@ impl ServerRuntime {
             next_projectile_id: 1,
             next_minion_id: 1,
             neutrals,
+            team_buffs: TeamBuffs::default(),
             recv_buf: [0_u8; MAX_PACKET_SIZE],
             last_snapshot_at: Instant::now(),
             last_simulation_at: Instant::now(),
@@ -511,6 +658,7 @@ impl ServerRuntime {
             next_projectile_id,
             last_wave_spawn_at,
             neutrals,
+            team_buffs,
             ..
         } = self;
 
@@ -551,6 +699,7 @@ impl ServerRuntime {
                                 minions,
                                 structures,
                                 neutrals,
+                                team_buffs,
                                 addr,
                                 target,
                                 slot,
@@ -592,6 +741,13 @@ impl ServerRuntime {
                             if matches!(game_state, GameState::Lobby) {
                                 println!("First player joined - match starting");
                                 *game_state = GameState::Running;
+                                // Match start: arm the raid-boss spawn schedule.
+                                schedule_boss_spawns(neutrals, now);
+                                println!(
+                                    "Boss schedule armed: wendigo_boss in {}s, king_mutatio_boss in {}s",
+                                    BOTTOM_BOSS_SPAWN_DELAY.as_secs(),
+                                    TOP_BOSS_SPAWN_DELAY.as_secs()
+                                );
                             }
                         }
                         ClientPacket::Ping => {
@@ -611,6 +767,8 @@ impl ServerRuntime {
                                     structures,
                                     minions,
                                     projectiles,
+                                    neutrals,
+                                    team_buffs,
                                     map_layout,
                                     last_wave_spawn_at,
                                     game_state,
@@ -688,6 +846,7 @@ impl ServerRuntime {
             next_projectile_id,
             next_minion_id,
             neutrals,
+            team_buffs,
             last_wave_spawn_at,
             last_snapshot_at,
             ..
@@ -716,12 +875,14 @@ impl ServerRuntime {
             minions,
             structures,
             neutrals,
+            team_buffs,
             projectiles,
             game_state,
             dt,
             now,
         );
         simulate_neutrals(players, neutrals, game_state, dt, now);
+        regenerate_team_buff_hp(players, team_buffs, game_state, dt, now);
         restore_god_mode_players(players);
         handle_respawns(players, structures, map_layout, game_state, now);
 
@@ -735,6 +896,8 @@ impl ServerRuntime {
                     structures,
                     minions,
                     projectiles,
+                    neutrals,
+                    team_buffs,
                     map_layout,
                     last_wave_spawn_at,
                     game_state,
@@ -822,6 +985,8 @@ impl ServerRuntime {
                 .collect::<Vec<_>>();
             neutrals_snapshot.sort_unstable_by_key(|neutral| neutral.id);
 
+            let team_buffs_snapshot = team_buffs.snapshot(now);
+
             let rematch_in_secs = if let GameState::Victory { .. } = game_state {
                 victory_at.map(|t| {
                     VICTORY_REMATCH_DELAY
@@ -840,6 +1005,7 @@ impl ServerRuntime {
                     structures: structures_snapshot.clone(),
                     minions: minions_snapshot.clone(),
                     neutrals: neutrals_snapshot.clone(),
+                    team_buffs: team_buffs_snapshot.clone(),
                     game_state: game_state.clone(),
                     rematch_in_secs,
                 };
@@ -1053,6 +1219,7 @@ fn handle_cast_request(
     minions: &mut HashMap<u64, Minion>,
     structures: &mut HashMap<u64, Structure>,
     neutrals: &mut HashMap<u64, Neutral>,
+    team_buffs: &TeamBuffs,
     caster_addr: SocketAddr,
     target: TargetId,
     slot: u8,
@@ -1204,8 +1371,11 @@ fn handle_cast_request(
     caster_mut.state.mana -= mana_cost;
     caster_mut.last_cast_at[skill_slot.index()] = Some(now);
 
-    // Higher invested rank = proportionally more projectile damage.
-    let rank_damage = def.projectile_damage.unwrap_or(0.0) * effect_scale;
+    // Higher invested rank = proportionally more projectile damage; active
+    // boss team buffs multiply the outgoing ability damage authoritatively.
+    let rank_damage = def.projectile_damage.unwrap_or(0.0)
+        * effect_scale
+        * team_buffs.damage_multiplier(caster_team, now);
 
     let projectile_id = *next_projectile_id;
     *next_projectile_id += 1;
@@ -1242,6 +1412,7 @@ fn simulate_projectiles(
     _minions: &mut HashMap<u64, Minion>,
     structures: &mut HashMap<u64, Structure>,
     neutrals: &mut HashMap<u64, Neutral>,
+    team_buffs: &mut TeamBuffs,
     projectiles: &mut HashMap<u64, Projectile>,
     game_state: &mut GameState,
     dt: f32,
@@ -1438,13 +1609,16 @@ fn simulate_projectiles(
     }
 
     for (target_id, damage, attacker_id) in neutral_damage_events {
-        apply_neutral_damage(players, neutrals, target_id, damage, attacker_id, now);
+        apply_neutral_damage(
+            players, neutrals, team_buffs, target_id, damage, attacker_id, now,
+        );
     }
 }
 
 fn apply_neutral_damage(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,
     neutrals: &mut HashMap<u64, Neutral>,
+    team_buffs: &mut TeamBuffs,
     target_id: u64,
     damage: f32,
     attacker_player_id: u64,
@@ -1467,10 +1641,48 @@ fn apply_neutral_damage(
     if neutral.state.hp <= 0.0 {
         let camp_type = neutral.state.camp_type;
         award_neutral_kill_to_player(players, attacker_player_id, camp_type);
-        neutral.dead_until = Some(now + NEUTRAL_RESPAWN_COOLDOWN);
+        // Boss kill: the killer's whole team gains the boss buff (refresh on
+        // re-kill). Unresolvable killer (already gone) grants no buff.
+        if let Some(kind) = camp_type.team_buff_kind() {
+            let killer_team = players
+                .values()
+                .find(|player| player.state.id == attacker_player_id)
+                .map(|player| player.state.team);
+            if let Some(team) = killer_team {
+                team_buffs.grant(team, kind, now);
+                println!(
+                    "Boss {camp_type:?} slain by player {attacker_player_id}; team {team:?} gains {kind:?} for {}s",
+                    kind.duration().as_secs()
+                );
+            }
+        }
+        neutral.dead_until = Some(now + neutral_respawn_cooldown(camp_type));
         neutral.target_player_id = None;
         neutral.last_attack_at = None;
         neutral.state.ai_state = NeutralAiState::Idle;
+    }
+}
+
+/// Applies boss-buff HP regeneration to every alive player of a buffed team,
+/// clamped to max HP. Runs each simulation tick (piggybacks the regen cadence).
+fn regenerate_team_buff_hp(
+    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+    team_buffs: &TeamBuffs,
+    game_state: &GameState,
+    dt: f32,
+    now: Instant,
+) {
+    if !matches!(game_state, GameState::Running) || dt <= 0.0 {
+        return;
+    }
+    for player in players.values_mut() {
+        if player.state.hp <= 0.0 {
+            continue;
+        }
+        let regen = team_buffs.hp_regen_per_second(player.state.team, now);
+        if regen > 0.0 {
+            player.state.hp = (player.state.hp + regen * dt).min(player.state.max_hp);
+        }
     }
 }
 
@@ -1506,8 +1718,6 @@ fn simulate_neutrals(
         return;
     }
 
-    let aggro_sq = NEUTRAL_AGGRO_RADIUS * NEUTRAL_AGGRO_RADIUS;
-    let leash_sq = NEUTRAL_LEASH_DISTANCE * NEUTRAL_LEASH_DISTANCE;
     let mut player_damage_events: Vec<(u64, f32)> = Vec::new();
 
     for neutral in neutrals.values_mut() {
@@ -1534,6 +1744,9 @@ fn simulate_neutrals(
         }
 
         let template = neutral_template(neutral.state.camp_type);
+        let (aggro_radius, leash_distance) = neutral_aggro_and_leash(neutral.state.camp_type);
+        let aggro_sq = aggro_radius * aggro_radius;
+        let leash_sq = leash_distance * leash_distance;
         let anchor = neutral.anchor;
         let neutral_pos = Vec3f::new(neutral.state.x, neutral.state.y, neutral.state.z);
 
@@ -2376,9 +2589,11 @@ mod tests {
         let template = neutral_template(camp_type);
         let kill_damage = neutrals.get(&neutral_id).unwrap().state.hp + 1.0;
 
+        let mut team_buffs = TeamBuffs::default();
         apply_neutral_damage(
             &mut players,
             &mut neutrals,
+            &mut team_buffs,
             neutral_id,
             kill_damage,
             killer_id,
@@ -2893,9 +3108,10 @@ mod tests {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn cast_slot(
+    fn cast_slot_with_buffs(
         players: &mut HashMap<SocketAddr, ConnectedPlayer>,
         projectiles: &mut HashMap<u64, Projectile>,
+        team_buffs: &TeamBuffs,
         caster_addr: SocketAddr,
         target: TargetId,
         slot: u8,
@@ -2911,11 +3127,35 @@ mod tests {
             &mut minions,
             &mut structures,
             &mut neutrals,
+            team_buffs,
             caster_addr,
             target,
             slot,
             next_projectile_id,
             &GameState::Running,
+            now,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn cast_slot(
+        players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+        projectiles: &mut HashMap<u64, Projectile>,
+        caster_addr: SocketAddr,
+        target: TargetId,
+        slot: u8,
+        next_projectile_id: &mut u64,
+        now: Instant,
+    ) {
+        let team_buffs = TeamBuffs::default();
+        cast_slot_with_buffs(
+            players,
+            projectiles,
+            &team_buffs,
+            caster_addr,
+            target,
+            slot,
+            next_projectile_id,
             now,
         );
     }
@@ -3336,6 +3576,7 @@ mod tests {
             },
         ];
 
+        let team_buffs = TeamBuffs::default();
         for (index, target) in targets.into_iter().enumerate() {
             players.get_mut(&caster_addr).unwrap().state.mana = MAX_MANA;
             handle_cast_request(
@@ -3344,6 +3585,7 @@ mod tests {
                 &mut minions,
                 &mut structures,
                 &mut neutrals,
+                &team_buffs,
                 caster_addr,
                 target,
                 0,
@@ -3367,6 +3609,7 @@ mod tests {
             &mut minions,
             &mut structures,
             &mut neutrals,
+            &team_buffs,
             caster_addr,
             TargetId {
                 kind: TargetKind::Player,
@@ -3380,5 +3623,608 @@ mod tests {
 
         assert_eq!(projectiles.len(), projectile_count);
         assert!((players.get(&caster_addr).unwrap().state.mana - mana_before).abs() < EPSILON);
+    }
+
+    // --- TASK-19 raid bosses -------------------------------------------------
+
+    /// Camp types visible under the snapshot filter (alive and not respawn-gated).
+    fn visible_camp_types(neutrals: &HashMap<u64, Neutral>) -> Vec<NeutralCampType> {
+        neutrals
+            .values()
+            .filter(|neutral| neutral.dead_until.is_none() && neutral.state.hp > 0.0)
+            .map(|neutral| neutral.state.camp_type)
+            .collect()
+    }
+
+    fn build_camps_and_bosses() -> HashMap<u64, Neutral> {
+        let mut next_neutral_id = 9_001;
+        let mut neutrals = build_neutral_camps(&mut next_neutral_id);
+        neutrals.extend(build_boss_neutrals(&mut next_neutral_id));
+        neutrals
+    }
+
+    fn find_boss_id(neutrals: &HashMap<u64, Neutral>, camp_type: NeutralCampType) -> u64 {
+        neutrals
+            .values()
+            .find(|neutral| neutral.state.camp_type == camp_type)
+            .map(|neutral| neutral.state.id)
+            .expect("boss neutral must exist")
+    }
+
+    #[test]
+    fn boss_templates_use_boss_constants_and_outclass_camps() {
+        let wendigo = neutral_template(NeutralCampType::WendigoBoss);
+        assert!((wendigo.max_hp - WENDIGO_MAX_HP).abs() < EPSILON);
+        assert!((wendigo.attack_damage - WENDIGO_ATTACK_DAMAGE).abs() < EPSILON);
+        assert!((wendigo.attack_range - WENDIGO_ATTACK_RANGE).abs() < EPSILON);
+        assert_eq!(wendigo.kill_gold, WENDIGO_KILL_GOLD);
+        assert_eq!(wendigo.kill_xp, WENDIGO_KILL_XP);
+
+        let mutatio = neutral_template(NeutralCampType::KingMutatioBoss);
+        assert!((mutatio.max_hp - MUTATIO_MAX_HP).abs() < EPSILON);
+        assert!((mutatio.attack_damage - MUTATIO_ATTACK_DAMAGE).abs() < EPSILON);
+        assert!((mutatio.attack_range - MUTATIO_ATTACK_RANGE).abs() < EPSILON);
+        assert_eq!(mutatio.kill_gold, MUTATIO_KILL_GOLD);
+        assert_eq!(mutatio.kill_xp, MUTATIO_KILL_XP);
+
+        for camp in [
+            NeutralCampType::Skirmisher,
+            NeutralCampType::Bruiser,
+            NeutralCampType::Spitter,
+        ] {
+            let template = neutral_template(camp);
+            assert!(wendigo.max_hp > template.max_hp);
+            assert!(mutatio.max_hp > template.max_hp);
+            assert!(wendigo.attack_damage > template.attack_damage);
+            assert!(!camp.is_boss());
+        }
+        assert!(NeutralCampType::WendigoBoss.is_boss());
+        assert!(NeutralCampType::KingMutatioBoss.is_boss());
+    }
+
+    #[test]
+    fn boss_pits_are_point_symmetric_and_clear_of_camps() {
+        let bosses = boss_blueprints();
+        assert_eq!(bosses.len(), 2);
+        let (wendigo_anchor, wendigo_type) = bosses[0];
+        let (mutatio_anchor, mutatio_type) = bosses[1];
+        assert_eq!(wendigo_type, NeutralCampType::WendigoBoss);
+        assert_eq!(mutatio_type, NeutralCampType::KingMutatioBoss);
+
+        // Bottom boss sits in negative-z (bottom-lane) territory, top boss in
+        // positive-z; the pits are 180-degree rotationally symmetric.
+        assert!(wendigo_anchor.z < 0.0 && mutatio_anchor.z > 0.0);
+        assert!((wendigo_anchor.x + mutatio_anchor.x).abs() < EPSILON);
+        assert!((wendigo_anchor.z + mutatio_anchor.z).abs() < EPSILON);
+
+        // Pits stay clear of every jungle camp slot.
+        for (camp_anchor, _) in jungle_camp_blueprints() {
+            for (boss_anchor, _) in &bosses {
+                assert!(
+                    camp_anchor.distance(*boss_anchor) > 5.0,
+                    "boss pit overlaps a camp"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn bosses_are_gated_before_spawn_delays_and_spawn_with_full_stats() {
+        let mut players = HashMap::new();
+        let mut neutrals = build_camps_and_bosses();
+        let now = Instant::now();
+
+        // Before match start (Lobby): bosses dormant, only the 3 camps visible.
+        let visible = visible_camp_types(&neutrals);
+        assert_eq!(visible.len(), 3);
+        assert!(visible.iter().all(|camp_type| !camp_type.is_boss()));
+
+        schedule_boss_spawns(&mut neutrals, now);
+
+        // Just before the bottom-boss delay: still no boss.
+        let before_bottom = now + BOTTOM_BOSS_SPAWN_DELAY - Duration::from_millis(1);
+        simulate_neutrals(&mut players, &mut neutrals, &GameState::Running, 0.1, before_bottom);
+        assert!(
+            visible_camp_types(&neutrals)
+                .iter()
+                .all(|camp_type| !camp_type.is_boss())
+        );
+
+        // At/after the bottom delay: Wendigo up at its pit with full boss HP,
+        // top boss still gated.
+        let after_bottom = now + BOTTOM_BOSS_SPAWN_DELAY + Duration::from_millis(1);
+        simulate_neutrals(&mut players, &mut neutrals, &GameState::Running, 0.1, after_bottom);
+        let visible = visible_camp_types(&neutrals);
+        assert!(visible.contains(&NeutralCampType::WendigoBoss));
+        assert!(!visible.contains(&NeutralCampType::KingMutatioBoss));
+        let wendigo = neutrals
+            .values()
+            .find(|neutral| neutral.state.camp_type == NeutralCampType::WendigoBoss)
+            .unwrap();
+        assert!((wendigo.state.hp - WENDIGO_MAX_HP).abs() < EPSILON);
+        assert!((wendigo.state.x - wendigo.anchor.x).abs() < EPSILON);
+        assert!((wendigo.state.z - wendigo.anchor.z).abs() < EPSILON);
+
+        // At/after the top delay: King Mutatio up as well.
+        let after_top = now + TOP_BOSS_SPAWN_DELAY + Duration::from_millis(1);
+        simulate_neutrals(&mut players, &mut neutrals, &GameState::Running, 0.1, after_top);
+        let visible = visible_camp_types(&neutrals);
+        assert!(visible.contains(&NeutralCampType::KingMutatioBoss));
+        let mutatio = neutrals
+            .values()
+            .find(|neutral| neutral.state.camp_type == NeutralCampType::KingMutatioBoss)
+            .unwrap();
+        assert!((mutatio.state.hp - MUTATIO_MAX_HP).abs() < EPSILON);
+        assert!((mutatio.state.x - mutatio.anchor.x).abs() < EPSILON);
+        assert!((mutatio.state.z - mutatio.anchor.z).abs() < EPSILON);
+
+        // Camps were never gated by the boss schedule.
+        let camp_count = visible
+            .iter()
+            .filter(|camp_type| !camp_type.is_boss())
+            .count();
+        assert_eq!(camp_count, 3);
+    }
+
+    #[test]
+    fn boss_kill_grants_team_buff_and_respawns_on_boss_cooldown() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let killer_addr: SocketAddr = "127.0.0.1:47001".parse().unwrap();
+        let enemy_addr: SocketAddr = "127.0.0.1:47002".parse().unwrap();
+        let now = Instant::now();
+        ensure_player_connected(&mut players, &layout, killer_addr, &mut next_player_id, now);
+        ensure_player_connected(&mut players, &layout, enemy_addr, &mut next_player_id, now);
+        players.get_mut(&killer_addr).unwrap().state.team = Team::Green;
+        players.get_mut(&enemy_addr).unwrap().state.team = Team::Blue;
+        let killer_id = players.get(&killer_addr).unwrap().state.id;
+
+        let mut neutrals = build_camps_and_bosses();
+        schedule_boss_spawns(&mut neutrals, now);
+        let spawn_at = now + BOTTOM_BOSS_SPAWN_DELAY + Duration::from_millis(1);
+        simulate_neutrals(&mut players, &mut neutrals, &GameState::Running, 0.1, spawn_at);
+
+        let wendigo_id = find_boss_id(&neutrals, NeutralCampType::WendigoBoss);
+        let mut team_buffs = TeamBuffs::default();
+        let kill_at = spawn_at + Duration::from_secs(5);
+        apply_neutral_damage(
+            &mut players,
+            &mut neutrals,
+            &mut team_buffs,
+            wendigo_id,
+            WENDIGO_MAX_HP + 1.0,
+            killer_id,
+            kill_at,
+        );
+
+        // Killer got the individual reward; the whole killing team got the buff.
+        let killer = players.get(&killer_addr).unwrap();
+        assert_eq!(killer.state.gold, WENDIGO_KILL_GOLD);
+        assert!(team_buffs.is_active(Team::Green, TeamBuffKind::WendigoFavor, kill_at));
+        assert!(!team_buffs.is_active(Team::Blue, TeamBuffKind::WendigoFavor, kill_at));
+        assert!(
+            (team_buffs.damage_multiplier(Team::Green, kill_at) - BOTTOM_BOSS_BUFF_DAMAGE_MULT)
+                .abs()
+                < EPSILON
+        );
+        assert!((team_buffs.damage_multiplier(Team::Blue, kill_at) - 1.0).abs() < EPSILON);
+
+        // The boss stays down through the camp cooldown (40s) and until its own
+        // 180s cooldown elapses, then respawns at the pit at full HP.
+        let after_camp_cooldown = kill_at + NEUTRAL_RESPAWN_COOLDOWN + Duration::from_millis(1);
+        simulate_neutrals(
+            &mut players,
+            &mut neutrals,
+            &GameState::Running,
+            0.1,
+            after_camp_cooldown,
+        );
+        assert!(
+            !visible_camp_types(&neutrals).contains(&NeutralCampType::WendigoBoss),
+            "boss must not reuse the camp respawn cooldown"
+        );
+
+        let before_boss_respawn = kill_at + BOSS_RESPAWN_COOLDOWN - Duration::from_millis(1);
+        simulate_neutrals(
+            &mut players,
+            &mut neutrals,
+            &GameState::Running,
+            0.1,
+            before_boss_respawn,
+        );
+        assert!(!visible_camp_types(&neutrals).contains(&NeutralCampType::WendigoBoss));
+
+        let after_boss_respawn = kill_at + BOSS_RESPAWN_COOLDOWN + Duration::from_millis(1);
+        simulate_neutrals(
+            &mut players,
+            &mut neutrals,
+            &GameState::Running,
+            0.1,
+            after_boss_respawn,
+        );
+        let wendigo = neutrals.get(&wendigo_id).unwrap();
+        assert!(wendigo.dead_until.is_none());
+        assert!((wendigo.state.hp - WENDIGO_MAX_HP).abs() < EPSILON);
+        assert!((wendigo.state.x - wendigo.anchor.x).abs() < EPSILON);
+        assert!((wendigo.state.z - wendigo.anchor.z).abs() < EPSILON);
+    }
+
+    #[test]
+    fn camp_kills_do_not_grant_team_buffs() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:47003".parse().unwrap();
+        let now = Instant::now();
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let killer_id = players.get(&addr).unwrap().state.id;
+
+        let mut next_neutral_id = 9_001;
+        let mut neutrals = build_neutral_camps(&mut next_neutral_id);
+        let camp_id = *neutrals.keys().next().unwrap();
+        let mut team_buffs = TeamBuffs::default();
+        apply_neutral_damage(
+            &mut players,
+            &mut neutrals,
+            &mut team_buffs,
+            camp_id,
+            10_000.0,
+            killer_id,
+            now,
+        );
+        for team in [Team::Green, Team::Blue] {
+            assert!((team_buffs.damage_multiplier(team, now) - 1.0).abs() < EPSILON);
+            assert!(team_buffs.hp_regen_per_second(team, now) == 0.0);
+        }
+        assert!(team_buffs.snapshot(now).is_empty());
+    }
+
+    #[test]
+    fn team_buffs_expire_refresh_and_stack_multiplicatively() {
+        let mut buffs = TeamBuffs::default();
+        let now = Instant::now();
+        buffs.grant(Team::Green, TeamBuffKind::WendigoFavor, now);
+
+        let almost_expired = now + BOTTOM_BOSS_BUFF_DURATION - Duration::from_millis(1);
+        assert!(buffs.is_active(Team::Green, TeamBuffKind::WendigoFavor, almost_expired));
+        let expired = now + BOTTOM_BOSS_BUFF_DURATION;
+        assert!(!buffs.is_active(Team::Green, TeamBuffKind::WendigoFavor, expired));
+        assert!((buffs.damage_multiplier(Team::Green, expired) - 1.0).abs() < EPSILON);
+
+        // Re-kill refreshes the expiry from the new kill instant.
+        let rekill_at = now + Duration::from_secs(30);
+        buffs.grant(Team::Green, TeamBuffKind::WendigoFavor, rekill_at);
+        assert!(buffs.is_active(
+            Team::Green,
+            TeamBuffKind::WendigoFavor,
+            rekill_at + BOTTOM_BOSS_BUFF_DURATION - Duration::from_millis(1)
+        ));
+        assert!(!buffs.is_active(
+            Team::Green,
+            TeamBuffKind::WendigoFavor,
+            rekill_at + BOTTOM_BOSS_BUFF_DURATION
+        ));
+
+        // Both buffs active for one team combine multiplicatively.
+        buffs.grant(Team::Green, TeamBuffKind::MutatioMight, rekill_at);
+        let both_active = rekill_at + Duration::from_secs(1);
+        let expected = BOTTOM_BOSS_BUFF_DAMAGE_MULT * TOP_BOSS_BUFF_DAMAGE_MULT;
+        assert!((buffs.damage_multiplier(Team::Green, both_active) - expected).abs() < EPSILON);
+        assert!(
+            (buffs.hp_regen_per_second(Team::Green, both_active)
+                - TOP_BOSS_BUFF_HP_REGEN_PER_SECOND)
+                .abs()
+                < EPSILON
+        );
+        // Enemy team remains unaffected throughout.
+        assert!((buffs.damage_multiplier(Team::Blue, both_active) - 1.0).abs() < EPSILON);
+        assert!(buffs.hp_regen_per_second(Team::Blue, both_active) == 0.0);
+
+        // Snapshot carries both active entries with sane remaining times.
+        let snapshot = buffs.snapshot(both_active);
+        assert_eq!(snapshot.len(), 2);
+        for entry in &snapshot {
+            assert_eq!(entry.team, Team::Green);
+            assert!(entry.remaining_secs > 0.0);
+            assert!(entry.remaining_secs <= TOP_BOSS_BUFF_DURATION.as_secs_f32());
+        }
+
+        buffs.clear();
+        assert!(buffs.snapshot(both_active).is_empty());
+    }
+
+    #[test]
+    fn team_buff_multiplies_cast_damage_for_buffed_team_only() {
+        let layout = build_map_layout();
+        let now = Instant::now();
+        let mut players = HashMap::new();
+        let caster_addr: SocketAddr = "127.0.0.1:47101".parse().unwrap();
+        let target_addr: SocketAddr = "127.0.0.1:47102".parse().unwrap();
+        let q = ability_for_class_slot(HeroClass::Warrior, SkillSlot::Q);
+        let target_id = setup_caster_and_target(
+            &mut players,
+            &layout,
+            caster_addr,
+            target_addr,
+            HeroClass::Warrior,
+            q.cast_range * 0.5,
+            now,
+        );
+        let caster_id = players.get(&caster_addr).unwrap().state.id;
+        let base_damage = q.projectile_damage.unwrap();
+
+        // Buff the caster's team (Green): outgoing damage is multiplied.
+        let mut team_buffs = TeamBuffs::default();
+        team_buffs.grant(Team::Green, TeamBuffKind::WendigoFavor, now);
+        let mut projectiles = HashMap::new();
+        let mut next_projectile_id = 1_u64;
+        cast_slot_with_buffs(
+            &mut players,
+            &mut projectiles,
+            &team_buffs,
+            caster_addr,
+            TargetId {
+                kind: TargetKind::Player,
+                id: target_id,
+            },
+            0,
+            &mut next_projectile_id,
+            now,
+        );
+        let buffed = projectiles.values().next().expect("buffed cast fires");
+        assert!(
+            (buffed.damage - base_damage * BOTTOM_BOSS_BUFF_DAMAGE_MULT).abs() < EPSILON,
+            "buffed team damage must include the boss multiplier"
+        );
+
+        // The enemy (Blue) caster gets no multiplier from Green's buff.
+        projectiles.clear();
+        cast_slot_with_buffs(
+            &mut players,
+            &mut projectiles,
+            &team_buffs,
+            target_addr,
+            TargetId {
+                kind: TargetKind::Player,
+                id: caster_id,
+            },
+            0,
+            &mut next_projectile_id,
+            now,
+        );
+        let unbuffed = projectiles.values().next().expect("enemy cast fires");
+        assert!((unbuffed.damage - base_damage).abs() < EPSILON);
+
+        // Both buffs active: multiplicative stacking on the buffed team.
+        team_buffs.grant(Team::Green, TeamBuffKind::MutatioMight, now);
+        projectiles.clear();
+        let later = now + scaled_cooldown(q, 1) + Duration::from_millis(1);
+        cast_slot_with_buffs(
+            &mut players,
+            &mut projectiles,
+            &team_buffs,
+            caster_addr,
+            TargetId {
+                kind: TargetKind::Player,
+                id: target_id,
+            },
+            0,
+            &mut next_projectile_id,
+            later,
+        );
+        let double_buffed = projectiles.values().next().expect("double-buffed cast fires");
+        let expected = base_damage * BOTTOM_BOSS_BUFF_DAMAGE_MULT * TOP_BOSS_BUFF_DAMAGE_MULT;
+        assert!((double_buffed.damage - expected).abs() < EPSILON);
+
+        // After expiry the multiplier is gone.
+        projectiles.clear();
+        let after_expiry = now + TOP_BOSS_BUFF_DURATION + scaled_cooldown(q, 1);
+        cast_slot_with_buffs(
+            &mut players,
+            &mut projectiles,
+            &team_buffs,
+            caster_addr,
+            TargetId {
+                kind: TargetKind::Player,
+                id: target_id,
+            },
+            0,
+            &mut next_projectile_id,
+            after_expiry,
+        );
+        let expired = projectiles.values().next().expect("post-expiry cast fires");
+        assert!((expired.damage - base_damage).abs() < EPSILON);
+    }
+
+    #[test]
+    fn top_buff_regenerates_hp_for_alive_buffed_players_only() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let green_addr: SocketAddr = "127.0.0.1:47201".parse().unwrap();
+        let blue_addr: SocketAddr = "127.0.0.1:47202".parse().unwrap();
+        let dead_addr: SocketAddr = "127.0.0.1:47203".parse().unwrap();
+        let now = Instant::now();
+        for addr in [green_addr, blue_addr, dead_addr] {
+            ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        }
+        players.get_mut(&green_addr).unwrap().state.team = Team::Green;
+        players.get_mut(&blue_addr).unwrap().state.team = Team::Blue;
+        players.get_mut(&dead_addr).unwrap().state.team = Team::Green;
+        players.get_mut(&green_addr).unwrap().state.hp = 50.0;
+        players.get_mut(&blue_addr).unwrap().state.hp = 50.0;
+        players.get_mut(&dead_addr).unwrap().state.hp = 0.0;
+
+        let mut team_buffs = TeamBuffs::default();
+        team_buffs.grant(Team::Green, TeamBuffKind::MutatioMight, now);
+
+        regenerate_team_buff_hp(&mut players, &team_buffs, &GameState::Running, 1.0, now);
+        let expected = 50.0 + TOP_BOSS_BUFF_HP_REGEN_PER_SECOND;
+        assert!((players.get(&green_addr).unwrap().state.hp - expected).abs() < EPSILON);
+        assert!((players.get(&blue_addr).unwrap().state.hp - 50.0).abs() < EPSILON);
+        assert!(players.get(&dead_addr).unwrap().state.hp == 0.0);
+
+        // Regen clamps to max HP.
+        regenerate_team_buff_hp(&mut players, &team_buffs, &GameState::Running, 10_000.0, now);
+        let green = players.get(&green_addr).unwrap();
+        assert!((green.state.hp - green.state.max_hp).abs() < EPSILON);
+
+        // No regen after the buff expires.
+        players.get_mut(&green_addr).unwrap().state.hp = 50.0;
+        let expired = now + TOP_BOSS_BUFF_DURATION;
+        regenerate_team_buff_hp(&mut players, &team_buffs, &GameState::Running, 1.0, expired);
+        assert!((players.get(&green_addr).unwrap().state.hp - 50.0).abs() < EPSILON);
+    }
+
+    #[test]
+    fn reset_match_clears_buffs_and_restarts_boss_schedule() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:47301".parse().unwrap();
+        let now = Instant::now();
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+
+        let mut structures = build_structures(&layout);
+        let mut minions = HashMap::new();
+        let mut projectiles = HashMap::new();
+        let mut neutrals = build_camps_and_bosses();
+        schedule_boss_spawns(&mut neutrals, now);
+        // Bring both bosses up, then grant a buff as if one was killed.
+        simulate_neutrals(
+            &mut players,
+            &mut neutrals,
+            &GameState::Running,
+            0.1,
+            now + TOP_BOSS_SPAWN_DELAY + Duration::from_millis(1),
+        );
+        let mut team_buffs = TeamBuffs::default();
+        team_buffs.grant(Team::Green, TeamBuffKind::WendigoFavor, now);
+
+        let mut last_wave_spawn_at = now;
+        let mut game_state = GameState::Victory {
+            winner: Team::Green,
+        };
+        reset_match(
+            &mut players,
+            &mut structures,
+            &mut minions,
+            &mut projectiles,
+            &mut neutrals,
+            &mut team_buffs,
+            &layout,
+            &mut last_wave_spawn_at,
+            &mut game_state,
+        );
+
+        assert!(matches!(game_state, GameState::Running));
+        // Buffs cleared for both teams.
+        let later = now + Duration::from_secs(1);
+        for team in [Team::Green, Team::Blue] {
+            assert!((team_buffs.damage_multiplier(team, later) - 1.0).abs() < EPSILON);
+        }
+        // Bosses re-gated on the fresh schedule; camps untouched.
+        for neutral in neutrals.values() {
+            if neutral.state.camp_type.is_boss() {
+                assert!(neutral.dead_until.is_some());
+                assert!(neutral.state.hp <= 0.0);
+            } else {
+                assert!(neutral.dead_until.is_none());
+                assert!(neutral.state.hp > 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn boss_and_buff_wire_formats_are_snake_case_and_additive() {
+        assert_eq!(
+            serde_json::to_string(&NeutralCampType::WendigoBoss).unwrap(),
+            "\"wendigo_boss\""
+        );
+        assert_eq!(
+            serde_json::to_string(&NeutralCampType::KingMutatioBoss).unwrap(),
+            "\"king_mutatio_boss\""
+        );
+        let entry = TeamBuffState {
+            team: Team::Green,
+            kind: TeamBuffKind::MutatioMight,
+            remaining_secs: 12.5,
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(json.contains("\"mutatio_might\""));
+        assert!(json.contains("\"green\""));
+
+        // The snapshot stays decodable without the new field (serde default).
+        let legacy = r#"{"type":"snapshot","your_id":1,"players":[],"projectiles":[],"structures":[],"minions":[],"game_state":{"type":"lobby"}}"#;
+        let packet: ServerPacket = serde_json::from_str(legacy).expect("legacy snapshot decodes");
+        let ServerPacket::Snapshot { team_buffs, .. } = packet;
+        assert!(team_buffs.is_empty());
+    }
+
+    #[test]
+    fn boss_leash_reset_uses_boss_distance_and_restores_full_hp() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:47401".parse().unwrap();
+        let now = Instant::now();
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let player_id = players.get(&addr).unwrap().state.id;
+
+        let mut neutrals = build_camps_and_bosses();
+        schedule_boss_spawns(&mut neutrals, now);
+        let spawn_at = now + BOTTOM_BOSS_SPAWN_DELAY + Duration::from_millis(1);
+        simulate_neutrals(&mut players, &mut neutrals, &GameState::Running, 0.1, spawn_at);
+        let wendigo_id = find_boss_id(&neutrals, NeutralCampType::WendigoBoss);
+        let anchor = neutrals.get(&wendigo_id).unwrap().anchor;
+
+        // Aggro the boss, then keep the target INSIDE the camp leash distance
+        // but OUTSIDE the (larger) boss leash: the boss must keep chasing.
+        {
+            let boss = neutrals.get_mut(&wendigo_id).unwrap();
+            boss.state.hp -= 50.0;
+            boss.state.ai_state = NeutralAiState::Aggro;
+            boss.target_player_id = Some(player_id);
+        }
+        {
+            let player = players.get_mut(&addr).unwrap();
+            player.state.x = anchor.x + NEUTRAL_LEASH_DISTANCE + 2.0;
+            player.state.z = anchor.z;
+        }
+        const {
+            assert!(NEUTRAL_LEASH_DISTANCE + 2.0 < BOSS_LEASH_DISTANCE);
+        }
+        simulate_neutrals(
+            &mut players,
+            &mut neutrals,
+            &GameState::Running,
+            0.1,
+            spawn_at + Duration::from_millis(100),
+        );
+        {
+            let boss = neutrals.get(&wendigo_id).unwrap();
+            assert_eq!(boss.state.ai_state, NeutralAiState::Aggro);
+            assert!(boss.state.hp < WENDIGO_MAX_HP, "no reset inside boss leash");
+        }
+
+        // Past the boss leash the boss resets to its pit at full HP.
+        {
+            let player = players.get_mut(&addr).unwrap();
+            player.state.x = anchor.x + BOSS_LEASH_DISTANCE + 2.0;
+        }
+        simulate_neutrals(
+            &mut players,
+            &mut neutrals,
+            &GameState::Running,
+            0.1,
+            spawn_at + Duration::from_millis(200),
+        );
+        let boss = neutrals.get(&wendigo_id).unwrap();
+        assert_eq!(boss.state.ai_state, NeutralAiState::Idle);
+        assert!((boss.state.hp - WENDIGO_MAX_HP).abs() < EPSILON);
+        assert!((boss.state.x - anchor.x).abs() < EPSILON);
+        assert!((boss.state.z - anchor.z).abs() < EPSILON);
+        assert!(boss.target_player_id.is_none());
     }
 }
