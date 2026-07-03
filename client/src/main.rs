@@ -1,5 +1,6 @@
 use bevy::{asset::AssetPlugin, prelude::*};
 
+mod bosses;
 mod camera;
 mod combat;
 mod debug_console;
@@ -18,6 +19,7 @@ mod session_config;
 mod team;
 mod world;
 
+use bosses::BossesPlugin;
 use camera::CameraPlugin;
 use combat::CombatPlugin;
 use debug_console::DebugConsolePlugin;
@@ -47,11 +49,14 @@ fn main() {
             ClientPersistencePlugin,
             SetupPlugin,
             NetworkingPlugin,
+            BossesPlugin,
             MinimapPlugin,
             CombatPlugin,
             MatchHudPlugin,
             TeamSelectPlugin,
             GameStateUiPlugin,
+        ))
+        .add_plugins((
             HelpOverlayPlugin,
             DebugConsolePlugin,
             PauseMenuPlugin,

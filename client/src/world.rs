@@ -130,6 +130,9 @@ impl Plugin for SetupPlugin {
 #[derive(Component)]
 pub struct NormalizeModelScale {
     base_scale: Vec3,
+    /// Multiplier on the shared normalized target height (1.0 = player-sized;
+    /// raid bosses use [`crate::bosses::BOSS_MODEL_HEIGHT_SCALE`]).
+    height_scale: f32,
     last_applied_target_height: Option<f32>,
     /// Height of the model's top above the entity origin after normalization.
     /// Used to anchor the head bar deterministically instead of per-frame AABB
@@ -141,8 +144,18 @@ impl NormalizeModelScale {
     pub fn for_player_model() -> Self {
         Self {
             base_scale: Vec3::ONE,
+            height_scale: 1.0,
             last_applied_target_height: None,
             head_local_y: None,
+        }
+    }
+
+    /// Like [`Self::for_player_model`], but normalized to `height_scale` times
+    /// the player target height (raid-boss presence).
+    pub fn scaled_by(height_scale: f32) -> Self {
+        Self {
+            height_scale: height_scale.max(0.1),
+            ..Self::for_player_model()
         }
     }
 }
@@ -434,7 +447,8 @@ fn normalize_model_scale_system(
     for (entity, mut transform, mut normalization) in &mut roots {
         let target_height = settings
             .target_height
-            .clamp(MIN_MODEL_TARGET_HEIGHT, MAX_MODEL_TARGET_HEIGHT);
+            .clamp(MIN_MODEL_TARGET_HEIGHT, MAX_MODEL_TARGET_HEIGHT)
+            * normalization.height_scale;
         if normalization
             .last_applied_target_height
             .is_some_and(|applied| (applied - target_height).abs() < f32::EPSILON)
