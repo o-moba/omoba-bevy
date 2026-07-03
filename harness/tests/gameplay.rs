@@ -12,7 +12,7 @@
 
 use std::time::{Duration, Instant};
 
-use harness::{Bot, Character, HeroClass, ServerProcess, Team};
+use harness::{Bot, Character, HeroClass, NeutralCampType, ServerProcess, Team};
 use harness::protocol::PlayerState;
 
 // --- Constants mirrored from server balance (source of truth in
@@ -366,4 +366,106 @@ fn upgrade_skill_without_points_is_noop() {
     // deducted, capped at MAX_SKILL_RANK -> projectile hits harder) depends on
     // long-form leveling and belongs in a server-side unit test (see the
     // skill-point/rank tests in `server/src/main.rs`).
+}
+
+// --- TASK-19 raid bosses ----------------------------------------------------
+
+/// `BOTTOM_BOSS_SPAWN_DELAY` mirror (`server/src/balance.rs`).
+const BOTTOM_BOSS_SPAWN_DELAY_SECS: u64 = 60;
+/// `WENDIGO_MAX_HP` mirror (`server/src/balance.rs`).
+const WENDIGO_MAX_HP: f32 = 900.0;
+
+/// AC1/A5 live coverage: the bottom boss is absent from snapshots until its
+/// 60 s spawn delay, then appears at its bottom-side pit with full boss HP,
+/// while the top boss (180 s delay) is still absent — proving the delays are
+/// distinct. Buffs stay empty without a boss kill. (Killing a 900 HP boss and
+/// waiting for the 180 s top spawn are impractically slow over the wire, so
+/// kill/buff/respawn semantics are covered by server unit tests per spec A5.)
+#[test]
+fn bottom_boss_spawns_on_schedule_with_boss_stats() {
+    let server = ServerProcess::spawn();
+    let mut bot = Bot::connect(server.addr());
+
+    bot.join(harness::Team::Green, Character::Ipfs);
+    let _id = bot.my_id(POLL_TIMEOUT);
+    // Match starts when the join is processed; the first snapshot arrives
+    // within ~100 ms of that, so this reference is accurate to well under 1 s.
+    let match_start = Instant::now();
+
+    // Early window: the three camps are up, no boss, no team buffs.
+    let early_deadline = match_start + Duration::from_secs(5);
+    let mut saw_camps = false;
+    while Instant::now() < early_deadline {
+        bot.ping();
+        let Some(packet) = bot.recv_snapshot(Instant::now() + POLL_TIMEOUT) else {
+            continue;
+        };
+        assert!(
+            packet.neutrals().iter().all(|n| !n.camp_type.is_boss()),
+            "no boss may exist right after match start"
+        );
+        assert!(
+            packet.team_buffs().is_empty(),
+            "no team buff may be active without a boss kill"
+        );
+        if packet.neutrals().len() == 3 {
+            saw_camps = true;
+        }
+    }
+    assert!(saw_camps, "the three jungle camps should replicate from the start");
+
+    // Up to shortly before the delay: still no boss.
+    let gated_until = match_start + Duration::from_secs(BOTTOM_BOSS_SPAWN_DELAY_SECS - 10);
+    while Instant::now() < gated_until {
+        bot.ping();
+        if let Some(packet) = bot.recv_snapshot(Instant::now() + POLL_TIMEOUT) {
+            assert!(
+                packet.neutral_of_type(NeutralCampType::WendigoBoss).is_none(),
+                "bottom boss appeared before its spawn delay"
+            );
+        }
+    }
+
+    // The bottom boss must appear around the 60 s mark (top boss still gated).
+    let appear_deadline = match_start + Duration::from_secs(BOTTOM_BOSS_SPAWN_DELAY_SECS + 15);
+    let mut wendigo: Option<harness::NeutralState> = None;
+    while Instant::now() < appear_deadline {
+        bot.ping();
+        let Some(packet) = bot.recv_snapshot(Instant::now() + POLL_TIMEOUT) else {
+            continue;
+        };
+        assert!(
+            packet
+                .neutral_of_type(NeutralCampType::KingMutatioBoss)
+                .is_none(),
+            "top boss must not spawn before its own (later) delay"
+        );
+        if let Some(boss) = packet.neutral_of_type(NeutralCampType::WendigoBoss) {
+            wendigo = Some(boss.clone());
+            break;
+        }
+    }
+    let wendigo = wendigo.expect("bottom boss did not appear within its spawn window");
+    let elapsed = match_start.elapsed();
+    assert!(
+        elapsed >= Duration::from_secs(BOTTOM_BOSS_SPAWN_DELAY_SECS - 5),
+        "bottom boss spawned too early: {elapsed:?}"
+    );
+
+    // Distinct boss stats: full 900 HP at spawn, parked in the bottom-side pit.
+    assert!(
+        (wendigo.max_hp - WENDIGO_MAX_HP).abs() < 0.001,
+        "unexpected boss max hp {}",
+        wendigo.max_hp
+    );
+    assert!(
+        (wendigo.hp - wendigo.max_hp).abs() < 0.001,
+        "boss must spawn at full hp"
+    );
+    assert!(
+        wendigo.z < 0.0 && wendigo.x > 0.0,
+        "bottom boss pit must sit in the bottom-side (+x/-z) region, got ({}, {})",
+        wendigo.x,
+        wendigo.z
+    );
 }
