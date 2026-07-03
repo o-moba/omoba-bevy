@@ -40,6 +40,9 @@ fn setup_game_state_ui(mut commands: Commands) {
             BackgroundColor(Color::NONE),
             Visibility::Hidden,
             ZIndex(10),
+            // Purely informational overlay: it must never swallow pointer
+            // events meant for UI underneath (e.g. the pre-join select screen).
+            Pickable::IGNORE,
             GameStateOverlay,
             Name::new("GameStateOverlay"),
         ))
@@ -51,6 +54,7 @@ fn setup_game_state_ui(mut commands: Commands) {
                     ..default()
                 },
                 TextColor(Color::WHITE),
+                Pickable::IGNORE,
                 GameStateLabel,
                 Name::new("GameStateLabel"),
             ));
@@ -80,9 +84,17 @@ fn update_game_state_ui(
 
     match game_state.state {
         GameState::Lobby => {
-            *visibility = Visibility::Visible;
-            *background = BackgroundColor(LOBBY_COLOR);
-            label.0 = "Waiting for match to start...".to_string();
+            // Before the local join is committed the select screen is up;
+            // keep the lobby overlay hidden so it never obscures that flow.
+            if client_session.join_flow_committed {
+                *visibility = Visibility::Visible;
+                *background = BackgroundColor(LOBBY_COLOR);
+                label.0 = "Waiting for match to start...".to_string();
+            } else {
+                *visibility = Visibility::Hidden;
+                *background = BackgroundColor(Color::NONE);
+                label.0.clear();
+            }
         }
         GameState::Running => {
             *visibility = Visibility::Hidden;
@@ -111,5 +123,79 @@ fn update_game_state_ui(
                 format!("{base_msg}{next_steps}")
             };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::net::ClientConnectionState;
+
+    fn spawn_ui_app() -> App {
+        let mut app = App::new();
+        app.init_resource::<GameStateSnapshot>();
+        app.init_resource::<ClientSession>();
+        app.add_systems(Startup, setup_game_state_ui);
+        app.add_systems(Update, update_game_state_ui);
+        app
+    }
+
+    fn overlay_entity(app: &mut App) -> Entity {
+        app.world_mut()
+            .query_filtered::<Entity, With<GameStateOverlay>>()
+            .single(app.world())
+            .expect("overlay spawned")
+    }
+
+    #[test]
+    fn overlay_never_blocks_pointer_picking() {
+        let mut app = spawn_ui_app();
+        app.update();
+
+        let overlay = overlay_entity(&mut app);
+        assert_eq!(
+            app.world().entity(overlay).get::<Pickable>(),
+            Some(&Pickable::IGNORE),
+            "overlay root must ignore picking"
+        );
+
+        let label = app
+            .world_mut()
+            .query_filtered::<Entity, With<GameStateLabel>>()
+            .single(app.world())
+            .expect("label spawned");
+        assert_eq!(
+            app.world().entity(label).get::<Pickable>(),
+            Some(&Pickable::IGNORE),
+            "overlay label must ignore picking"
+        );
+    }
+
+    #[test]
+    fn lobby_overlay_stays_hidden_until_join_is_committed() {
+        let mut app = spawn_ui_app();
+        {
+            let mut session = app.world_mut().resource_mut::<ClientSession>();
+            session.state = ClientConnectionState::Connected;
+            session.join_flow_committed = false;
+        }
+        app.update();
+
+        let overlay = overlay_entity(&mut app);
+        assert_eq!(
+            *app.world().entity(overlay).get::<Visibility>().unwrap(),
+            Visibility::Hidden,
+            "pre-join lobby must not cover the select screen"
+        );
+
+        app.world_mut()
+            .resource_mut::<ClientSession>()
+            .join_flow_committed = true;
+        app.update();
+        assert_eq!(
+            *app.world().entity(overlay).get::<Visibility>().unwrap(),
+            Visibility::Visible,
+            "committed join in lobby shows the waiting overlay"
+        );
     }
 }

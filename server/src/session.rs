@@ -27,7 +27,7 @@ pub(crate) fn ensure_player_connected(
     players.entry(addr).or_insert_with(|| {
         let player_id = *next_player_id;
         *next_player_id += 1;
-        println!("Player {player_id} connected from {addr}");
+        println!("Endpoint {addr} connected (pre-join), reserved player id {player_id}");
         let spawn = spawn_position_for_team(map_layout, Team::Green);
 
         ConnectedPlayer {
@@ -52,6 +52,7 @@ pub(crate) fn ensure_player_connected(
                 hero_class: HeroClass::default(),
                 avatar: None,
             },
+            joined: false,
             session_id: None,
             last_seen: now,
             last_movement_at: now,
@@ -179,6 +180,7 @@ pub(crate) fn handle_join_request(
         hero_class.id(),
         normalized_avatar
     );
+    player.joined = true;
     player.state.team = team;
     player.state.character = character;
     player.state.hero_class = hero_class;
@@ -213,6 +215,11 @@ pub(crate) fn handle_transform_request(
     yaw: f32,
     now: Instant,
 ) {
+    // Movement authority only applies to joined players; pre-join endpoints
+    // (heartbeat-only connections) have no simulated presence to move.
+    if !player.joined {
+        return;
+    }
     if !x.is_finite() || !y.is_finite() || !z.is_finite() {
         return;
     }

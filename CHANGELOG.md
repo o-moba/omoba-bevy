@@ -4,6 +4,26 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [0.7.1] - 2026-07-03
+
+### Fixed
+- **Server: pre-join ghost players.** Any packet (including the transport's
+  immediate `Ping` heartbeat) used to create a fully joined default player
+  (Green, default character) that appeared in everyone's snapshots and could
+  start the match. Endpoints are now tracked as `joined = false` until their
+  `Join` packet arrives: they still receive snapshots (for addressing) but are
+  excluded from the replicated player list and from all gameplay (movement,
+  casting, skill upgrades, rematch/god-mode/speed-boost requests, minion and
+  tower and neutral targeting, buff regen, and kill-reward splits).
+- **Client: lobby overlay blocked the character-select screen.** The
+  full-screen "Waiting for match to start..." overlay is now `Pickable::IGNORE`
+  and only shows once the local join is committed, so the pre-join class/
+  avatar/team select UI stays visible and clickable on a fresh server.
+- **Client: team click while disconnected silently lost the join.** Picking a
+  team with a dead transport no longer commits the selection and despawns the
+  select overlay (which stranded the player); it now triggers the same
+  reconnect flow as the Retry button and keeps the select screen up.
+
 ## [0.7.0] - 2026-07-03
 
 ### Added

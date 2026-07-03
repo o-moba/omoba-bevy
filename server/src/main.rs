@@ -456,6 +456,10 @@ impl Vec3f {
 
 struct ConnectedPlayer {
     state: PlayerState,
+    /// False until the endpoint sends a `Join` packet. Pre-join endpoints are
+    /// kept for addressing (snapshots are still sent to them) but are excluded
+    /// from the replicated player list and from all gameplay simulation.
+    joined: bool,
     session_id: Option<String>,
     last_seen: Instant,
     last_movement_at: Instant,
@@ -758,10 +762,12 @@ impl ServerRuntime {
                         }
                         ClientPacket::RequestRematch => {
                             ensure_player_connected(players, map_layout, addr, next_player_id, now);
+                            let mut joined = false;
                             if let Some(player) = players.get_mut(&addr) {
                                 player.last_seen = now;
+                                joined = player.joined;
                             }
-                            if matches!(game_state, GameState::Victory { .. }) {
+                            if joined && matches!(game_state, GameState::Victory { .. }) {
                                 reset_match(
                                     players,
                                     structures,
@@ -780,6 +786,9 @@ impl ServerRuntime {
                             ensure_player_connected(players, map_layout, addr, next_player_id, now);
                             if let Some(player) = players.get_mut(&addr) {
                                 player.last_seen = now;
+                                if !player.joined {
+                                    continue;
+                                }
                                 if player.god_mode != enabled {
                                     println!("Player {} god_mode={}", player.state.id, enabled);
                                 }
@@ -795,6 +804,9 @@ impl ServerRuntime {
                             ensure_player_connected(players, map_layout, addr, next_player_id, now);
                             if let Some(player) = players.get_mut(&addr) {
                                 player.last_seen = now;
+                                if !player.joined {
+                                    continue;
+                                }
                                 let mult = if enabled { DEBUG_SPEED_MULTIPLIER } else { 1.0 };
                                 if (player.speed_mult - mult).abs() > f32::EPSILON {
                                     println!("Player {} speed_boost={}", player.state.id, enabled);
@@ -806,7 +818,9 @@ impl ServerRuntime {
                             ensure_player_connected(players, map_layout, addr, next_player_id, now);
                             if let Some(player) = players.get_mut(&addr) {
                                 player.last_seen = now;
-                                apply_skill_upgrade(player, slot);
+                                if player.joined {
+                                    apply_skill_upgrade(player, slot);
+                                }
                             }
                         }
                     }
@@ -952,11 +966,7 @@ impl ServerRuntime {
         minions.retain(|_, minion| minion.state.hp > 0.0);
 
         if now.duration_since(*last_snapshot_at) >= SNAPSHOT_INTERVAL {
-            let mut players_snapshot = players
-                .values()
-                .map(|player| player.state.clone())
-                .collect::<Vec<_>>();
-            players_snapshot.sort_unstable_by_key(|player| player.id);
+            let players_snapshot = build_players_snapshot(players);
 
             let mut projectiles_snapshot = projectiles
                 .values()
@@ -1025,6 +1035,19 @@ impl ServerRuntime {
     }
 }
 
+/// Replicated player list: only joined players are visible to clients.
+/// Pre-join endpoints keep receiving snapshots (they are still addressable)
+/// but must not appear in the world as ghost players.
+fn build_players_snapshot(players: &HashMap<SocketAddr, ConnectedPlayer>) -> Vec<PlayerState> {
+    let mut snapshot = players
+        .values()
+        .filter(|player| player.joined)
+        .map(|player| player.state.clone())
+        .collect::<Vec<_>>();
+    snapshot.sort_unstable_by_key(|player| player.id);
+    snapshot
+}
+
 fn server_prepare_tick_system(
     mut runtime: ResMut<ServerRuntime>,
     mut tick: ResMut<TickContext>,
@@ -1045,6 +1068,7 @@ fn sync_players_into_ecs_system(
     let live_ids = runtime
         .players
         .values()
+        .filter(|player| player.joined)
         .map(|player| player.state.id)
         .collect::<HashSet<_>>();
     let stale_ids = entities
@@ -1061,6 +1085,9 @@ fn sync_players_into_ecs_system(
     }
 
     for connected_player in runtime.players.values() {
+        if !connected_player.joined {
+            continue;
+        }
         let state = &connected_player.state;
         let Some(entity) = entities.by_player_id.get(&state.id).copied() else {
             let entity = commands
@@ -1236,7 +1263,7 @@ fn handle_cast_request(
     let Some(caster) = players.get(&caster_addr) else {
         return;
     };
-    if caster.state.hp <= 0.0 {
+    if !caster.joined || caster.state.hp <= 0.0 {
         return;
     }
     // Authoritative kit resolution: class + slot -> ability definition.
@@ -1277,7 +1304,8 @@ fn handle_cast_request(
     let (target_position, target_radius) = match target.kind {
         TargetKind::Player => {
             let Some(target_player) = players.values().find(|player| {
-                player.state.id == target.id
+                player.joined
+                    && player.state.id == target.id
                     && player.state.hp > 0.0
                     && player.state.team != caster_team
             }) else {
@@ -1676,7 +1704,7 @@ fn regenerate_team_buff_hp(
         return;
     }
     for player in players.values_mut() {
-        if player.state.hp <= 0.0 {
+        if !player.joined || player.state.hp <= 0.0 {
             continue;
         }
         let regen = team_buffs.hp_regen_per_second(player.state.team, now);
@@ -1753,7 +1781,7 @@ fn simulate_neutrals(
         if neutral.state.ai_state == NeutralAiState::Idle && neutral.target_player_id.is_none() {
             let best = players
                 .values()
-                .filter(|player| player.state.hp > 0.0)
+                .filter(|player| player.joined && player.state.hp > 0.0)
                 .map(|player| {
                     let hit =
                         Vec3f::new(player.state.x, player.state.y + AIM_HEIGHT, player.state.z);
@@ -1932,7 +1960,7 @@ fn award_minion_kill_rewards(
 ) {
     let recipients = players
         .iter()
-        .filter(|(_, player)| player.state.team == attacker_team)
+        .filter(|(_, player)| player.joined && player.state.team == attacker_team)
         .map(|(addr, _)| *addr)
         .collect::<Vec<_>>();
     if recipients.is_empty() {
@@ -1975,7 +2003,7 @@ fn simulate_minions(
 
     let player_targets = players
         .values()
-        .filter(|player| player.state.hp > 0.0)
+        .filter(|player| player.joined && player.state.hp > 0.0)
         .map(|player| {
             (
                 player.state.id,
@@ -2290,7 +2318,8 @@ fn simulate_tower_attacks(
 
         let mut best_target: Option<(u64, Vec3f, f32)> = None;
         for player in players.values() {
-            if player.state.hp <= 0.0 || player.state.team == structure.state.team {
+            if !player.joined || player.state.hp <= 0.0 || player.state.team == structure.state.team
+            {
                 continue;
             }
             let target_pos =
@@ -2447,6 +2476,15 @@ mod tests {
         let now = Instant::now();
 
         ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        handle_join_request(
+            players.get_mut(&addr).unwrap(),
+            Team::Green,
+            CharacterChoice::Ipfs,
+            HeroClass::default(),
+            None,
+            &layout,
+            now,
+        );
         let start = players.get(&addr).unwrap().state.clone();
         let normal_at = now + Duration::from_millis(100);
         let normal_x = start.x + PLAYER_SPEED * 0.1;
@@ -2507,6 +2545,15 @@ mod tests {
         let now = Instant::now();
 
         ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        handle_join_request(
+            players.get_mut(&addr).unwrap(),
+            Team::Green,
+            CharacterChoice::Ipfs,
+            HeroClass::default(),
+            None,
+            &layout,
+            now,
+        );
         {
             let player = players.get_mut(&addr).unwrap();
             player.state.x = layout.max_x - 0.1;
@@ -2677,6 +2724,15 @@ mod tests {
         let now = Instant::now();
 
         ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        handle_join_request(
+            players.get_mut(&addr).unwrap(),
+            Team::Green,
+            CharacterChoice::Ipfs,
+            HeroClass::default(),
+            None,
+            &layout,
+            now,
+        );
 
         let mut next_neutral_id = 9_001;
         let mut neutrals = build_neutral_camps(&mut next_neutral_id);
@@ -3061,6 +3117,91 @@ mod tests {
 
         assert_ne!(players.get(&new_addr).unwrap().state.id, original_id);
         assert!(disconnected_sessions.is_empty());
+    }
+
+    #[test]
+    fn pre_join_endpoint_is_hidden_and_inert_until_join() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let ghost_addr: SocketAddr = "127.0.0.1:53001".parse().unwrap();
+        let enemy_addr: SocketAddr = "127.0.0.1:53002".parse().unwrap();
+        let now = Instant::now();
+
+        // A heartbeat-only endpoint (Ping before Join) must not be replicated.
+        ensure_player_connected(&mut players, &layout, ghost_addr, &mut next_player_id, now);
+        assert!(!players.get(&ghost_addr).unwrap().joined);
+        assert!(build_players_snapshot(&players).is_empty());
+
+        // It cannot move...
+        let before = players.get(&ghost_addr).unwrap().state.clone();
+        handle_transform_request(
+            players.get_mut(&ghost_addr).unwrap(),
+            &layout,
+            before.x + 1.0,
+            PLAYER_GROUND_Y,
+            before.z,
+            1.0,
+            now + Duration::from_secs(1),
+        );
+        let after = players.get(&ghost_addr).unwrap().state.clone();
+        assert!((after.x - before.x).abs() < EPSILON);
+        assert!((after.yaw - before.yaw).abs() < EPSILON);
+
+        // ...and cannot cast, even at a valid joined enemy in range.
+        ensure_player_connected(&mut players, &layout, enemy_addr, &mut next_player_id, now);
+        handle_join_request(
+            players.get_mut(&enemy_addr).unwrap(),
+            Team::Blue,
+            CharacterChoice::Wang,
+            HeroClass::default(),
+            None,
+            &layout,
+            now,
+        );
+        let ghost_pos = {
+            let ghost = players.get(&ghost_addr).unwrap();
+            (ghost.state.x, ghost.state.z)
+        };
+        {
+            let enemy = players.get_mut(&enemy_addr).unwrap();
+            enemy.state.x = ghost_pos.0 + 2.0;
+            enemy.state.z = ghost_pos.1;
+        }
+        let enemy_id = players.get(&enemy_addr).unwrap().state.id;
+        let mana_before = players.get(&ghost_addr).unwrap().state.mana;
+        let mut projectiles = HashMap::new();
+        let mut next_projectile_id = 1;
+        cast_slot_with_buffs(
+            &mut players,
+            &mut projectiles,
+            &TeamBuffs::default(),
+            ghost_addr,
+            TargetId {
+                kind: TargetKind::Player,
+                id: enemy_id,
+            },
+            0,
+            &mut next_projectile_id,
+            now,
+        );
+        assert!(projectiles.is_empty());
+        assert!((players.get(&ghost_addr).unwrap().state.mana - mana_before).abs() < EPSILON);
+
+        // Joining flips the flag and the player becomes visible in snapshots.
+        handle_join_request(
+            players.get_mut(&ghost_addr).unwrap(),
+            Team::Green,
+            CharacterChoice::Ipfs,
+            HeroClass::default(),
+            None,
+            &layout,
+            now,
+        );
+        let ghost_id = players.get(&ghost_addr).unwrap().state.id;
+        let snapshot = build_players_snapshot(&players);
+        assert_eq!(snapshot.len(), 2);
+        assert!(snapshot.iter().any(|player| player.id == ghost_id));
     }
 
     /// Sets up two joined enemy players (caster at `caster_addr` with the given
@@ -4048,6 +4189,8 @@ mod tests {
         let now = Instant::now();
         for addr in [green_addr, blue_addr, dead_addr] {
             ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+            // Buff regen only applies to joined players.
+            players.get_mut(&addr).unwrap().joined = true;
         }
         players.get_mut(&green_addr).unwrap().state.team = Team::Green;
         players.get_mut(&blue_addr).unwrap().state.team = Team::Blue;
