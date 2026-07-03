@@ -8,7 +8,7 @@ use crate::input_bindings::{
 };
 use crate::net::{
     GameState, GameStateSnapshot, NetworkHeroClass, NetworkStructure, PlayerProgression,
-    StructureKind, TargetId, TargetKind,
+    StructureKind, TargetId, TargetKind, TeamBuffKind, TeamBuffState,
 };
 use crate::player::Player;
 use crate::team::{Team, TeamSelection};
@@ -31,6 +31,12 @@ struct MatchHudProgressionText;
 
 #[derive(Component)]
 struct MatchHudStatusText;
+
+/// Active boss team-buff indicator (hidden while no buff is active).
+#[derive(Component)]
+struct MatchHudBuffText;
+
+const BUFF_TEXT_COLOR: Color = Color::srgba(1.0, 0.82, 0.35, 1.0);
 
 /// Container for the HP/Mana bars; hidden until the match is running.
 #[derive(Component)]
@@ -104,6 +110,16 @@ fn setup_match_hud(mut commands: Commands) {
             col.spawn((
                 Text::new(""),
                 TextFont {
+                    font_size: 16.0,
+                    ..default()
+                },
+                TextColor(BUFF_TEXT_COLOR),
+                MatchHudBuffText,
+                Name::new("MatchHudBuffText"),
+            ));
+            col.spawn((
+                Text::new(""),
+                TextFont {
                     font_size: 17.0,
                     ..default()
                 },
@@ -172,8 +188,30 @@ fn update_match_hud(
     enemy_bases: Query<(&CombatStats, &Team, &StructureKind), With<NetworkStructure>>,
     cast_cd: Res<LocalCastCooldown>,
     target_state: Res<TargetState>,
-    mut prog: Query<&mut Text, (With<MatchHudProgressionText>, Without<MatchHudStatusText>)>,
-    mut status: Query<&mut Text, (With<MatchHudStatusText>, Without<MatchHudProgressionText>)>,
+    mut prog: Query<
+        &mut Text,
+        (
+            With<MatchHudProgressionText>,
+            Without<MatchHudStatusText>,
+            Without<MatchHudBuffText>,
+        ),
+    >,
+    mut status: Query<
+        &mut Text,
+        (
+            With<MatchHudStatusText>,
+            Without<MatchHudProgressionText>,
+            Without<MatchHudBuffText>,
+        ),
+    >,
+    mut buff_text: Query<
+        &mut Text,
+        (
+            With<MatchHudBuffText>,
+            Without<MatchHudProgressionText>,
+            Without<MatchHudStatusText>,
+        ),
+    >,
     mut bars_root: Query<&mut Visibility, With<HudBarsRoot>>,
     mut hp_fill: Query<(&mut Node, &mut BackgroundColor), (With<HpBarFill>, Without<ManaBarFill>)>,
     mut mana_fill: Query<(&mut Node, &mut BackgroundColor), (With<ManaBarFill>, Without<HpBarFill>)>,
@@ -202,6 +240,32 @@ fn update_match_hud(
         .is_some_and(|g| matches!(g.state, GameState::Running));
 
     update_stat_bars(running, *stats, &mut bars_root, &mut hp_fill, &mut mana_fill);
+
+    // Boss team-buff indicator: only the LOCAL team's active buffs, with
+    // remaining seconds; empty (invisible) when nothing is active.
+    if let Ok(mut buff) = buff_text.single_mut() {
+        let next = if running {
+            let buffs = game_state
+                .as_ref()
+                .map(|snapshot| snapshot.team_buffs.as_slice())
+                .unwrap_or(&[]);
+            local_team
+                .single()
+                .map(|team| team_buff_hud_text(buffs, *team))
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        if buff.0 != next {
+            // Log transitions (not the per-second countdown) for evidence runs.
+            if next.is_empty() {
+                info!("[hud] team buff indicator cleared");
+            } else if buff.0.is_empty() || buff.0.lines().count() != next.lines().count() {
+                info!("[hud] team buff indicator: {}", next.replace('\n', " | "));
+            }
+            buff.0 = next;
+        }
+    }
 
     let up = upgrade_key_display();
     if progression.next_level_xp == 0 {
@@ -270,6 +334,28 @@ fn update_stat_bars(
         node.width = Val::Percent(mana_ratio * 100.0);
         *color = BackgroundColor(MANA_BAR_COLOR);
     }
+}
+
+/// One line per active buff of the LOCAL player's team, with the remaining
+/// time in whole seconds. Effect numbers mirror `server/src/balance.rs`
+/// (`BOTTOM_BOSS_BUFF_*` / `TOP_BOSS_BUFF_*`); an empty string hides the row.
+fn team_buff_hud_text(buffs: &[TeamBuffState], local_team: Team) -> String {
+    buffs
+        .iter()
+        .filter(|buff| buff.team == local_team)
+        .map(|buff| {
+            let secs = buff.remaining_secs.max(0.0).ceil() as u32;
+            match buff.kind {
+                TeamBuffKind::WendigoFavor => {
+                    format!("Wendigo's Favor: +15% ability damage — {secs}s")
+                }
+                TeamBuffKind::MutatioMight => {
+                    format!("Mutatio's Might: +25% ability damage, +2 HP/s — {secs}s")
+                }
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Short effect summary for an ability tooltip line (single effect per ability).
@@ -450,6 +536,66 @@ mod tests {
         assert!(text.contains("cd 1.3s"));
         assert!(text.contains("[W] Renew (26 heal, self) — ready"));
         assert!(text.contains("[R] Guardian's Blessing"));
+    }
+
+    #[test]
+    fn team_buff_hud_text_lists_local_team_buffs_with_remaining_time() {
+        let buffs = vec![
+            TeamBuffState {
+                team: Team::Green,
+                kind: TeamBuffKind::WendigoFavor,
+                remaining_secs: 71.3,
+            },
+            TeamBuffState {
+                team: Team::Blue,
+                kind: TeamBuffKind::MutatioMight,
+                remaining_secs: 45.0,
+            },
+        ];
+
+        let green = team_buff_hud_text(&buffs, Team::Green);
+        assert!(green.contains("Wendigo's Favor"));
+        assert!(green.contains("+15% ability damage"));
+        assert!(green.contains("72s"), "remaining time must round up: {green}");
+        assert!(
+            !green.contains("Mutatio"),
+            "enemy team's buff must not show: {green}"
+        );
+
+        let blue = team_buff_hud_text(&buffs, Team::Blue);
+        assert!(blue.contains("Mutatio's Might"));
+        assert!(blue.contains("+25% ability damage, +2 HP/s"));
+        assert!(blue.contains("45s"));
+    }
+
+    #[test]
+    fn team_buff_hud_text_is_empty_without_active_buffs() {
+        assert_eq!(team_buff_hud_text(&[], Team::Green), "");
+        let enemy_only = vec![TeamBuffState {
+            team: Team::Blue,
+            kind: TeamBuffKind::WendigoFavor,
+            remaining_secs: 10.0,
+        }];
+        assert_eq!(team_buff_hud_text(&enemy_only, Team::Green), "");
+    }
+
+    #[test]
+    fn team_buff_hud_text_stacks_both_buffs_on_separate_lines() {
+        let buffs = vec![
+            TeamBuffState {
+                team: Team::Green,
+                kind: TeamBuffKind::WendigoFavor,
+                remaining_secs: 30.0,
+            },
+            TeamBuffState {
+                team: Team::Green,
+                kind: TeamBuffKind::MutatioMight,
+                remaining_secs: 80.0,
+            },
+        ];
+        let text = team_buff_hud_text(&buffs, Team::Green);
+        assert_eq!(text.lines().count(), 2);
+        assert!(text.contains("Wendigo's Favor") && text.contains("Mutatio's Might"));
     }
 
     #[test]
