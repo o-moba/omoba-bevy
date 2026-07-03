@@ -11,6 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::bosses::BossVisual;
 use crate::camera::{CameraState, MainCamera, locked_camera_offset};
 use crate::combat::{CombatStats, MAX_HP, MAX_MANA};
 use crate::persistence::{ClientSessionId, FileGameServerAddr, ResolvedServerAddressForPrefs};
@@ -394,12 +395,44 @@ enum MinionTargetKind {
     Structure,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum NeutralCampType {
     Skirmisher,
     Bruiser,
     Spitter,
+    /// Bottom raid boss ("Wendigo").
+    WendigoBoss,
+    /// Top raid boss ("King Mutatio").
+    KingMutatioBoss,
+}
+
+impl NeutralCampType {
+    pub fn is_boss(self) -> bool {
+        matches!(
+            self,
+            NeutralCampType::WendigoBoss | NeutralCampType::KingMutatioBoss
+        )
+    }
+}
+
+/// Team-wide boss buff kinds replicated from the server (TASK-19).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TeamBuffKind {
+    /// Bottom boss (Wendigo): +ability damage.
+    WendigoFavor,
+    /// Top boss (King Mutatio): +ability damage and HP regen.
+    MutatioMight,
+}
+
+/// One active team buff from the snapshot (`serde(default)` additive field).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamBuffState {
+    pub team: Team,
+    pub kind: TeamBuffKind,
+    #[serde(default)]
+    pub remaining_secs: f32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -437,6 +470,8 @@ enum ServerPacket {
         #[serde(default)]
         neutrals: Vec<NeutralState>,
         #[serde(default)]
+        team_buffs: Vec<TeamBuffState>,
+        #[serde(default)]
         game_state: GameState,
         #[serde(default)]
         rematch_in_secs: Option<u64>,
@@ -458,6 +493,8 @@ pub enum GameState {
 pub struct GameStateSnapshot {
     pub state: GameState,
     pub rematch_in_secs: Option<u64>,
+    /// Active boss team buffs replicated from the server.
+    pub team_buffs: Vec<TeamBuffState>,
 }
 
 #[derive(Resource)]
@@ -495,6 +532,7 @@ struct PendingSnapshotData {
     structures: Vec<StructureState>,
     minions: Vec<MinionState>,
     neutrals: Vec<NeutralState>,
+    team_buffs: Vec<TeamBuffState>,
     game_state: GameState,
     rematch_in_secs: Option<u64>,
     /// Local team choice at ingest time (spawn gate when server has not yet mirrored selection).
@@ -563,6 +601,10 @@ pub struct NetworkNeutral;
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkNeutralId(pub u64);
+
+/// Replicated neutral AI state (drives the boss idle/walk animation switch).
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NeutralAiStateTag(pub NeutralAiState);
 
 #[derive(Component, Clone, Copy, Debug)]
 struct NetEntityInterpolation {
@@ -1020,16 +1062,7 @@ fn ingest_server_snapshot_packets(
         return;
     }
 
-    let mut latest_snapshot: Option<(
-        u64,
-        Vec<PlayerState>,
-        Vec<ProjectileState>,
-        Vec<StructureState>,
-        Vec<MinionState>,
-        Vec<NeutralState>,
-        GameState,
-        Option<u64>,
-    )> = None;
+    let mut latest_snapshot: Option<PendingSnapshotData> = None;
 
     loop {
         match channels.incoming.try_recv() {
@@ -1046,50 +1079,29 @@ fn ingest_server_snapshot_packets(
                     structures,
                     minions,
                     neutrals,
+                    team_buffs,
                     game_state,
                     rematch_in_secs,
                 } => {
-                    latest_snapshot = Some((
+                    latest_snapshot = Some(PendingSnapshotData {
+                        wall_time: Instant::now(),
                         your_id,
                         players,
                         projectiles,
                         structures,
                         minions,
                         neutrals,
+                        team_buffs,
                         game_state,
                         rematch_in_secs,
-                    ));
+                        selected_team_for_spawn: team_selection.team,
+                    });
                 }
             },
         }
     }
 
-    let Some((
-        your_id,
-        players,
-        projectiles,
-        structures,
-        minions,
-        neutrals,
-        game_state,
-        rematch_in_secs,
-    )) = latest_snapshot
-    else {
-        return;
-    };
-
-    pending.frame = Some(PendingSnapshotData {
-        wall_time: Instant::now(),
-        your_id,
-        players,
-        projectiles,
-        structures,
-        minions,
-        neutrals,
-        game_state,
-        rematch_in_secs,
-        selected_team_for_spawn: team_selection.team,
-    });
+    pending.frame = latest_snapshot;
 }
 
 fn apply_server_snapshot(
@@ -1124,6 +1136,7 @@ fn apply_server_snapshot(
         structures,
         minions,
         neutrals,
+        team_buffs,
         game_state,
         rematch_in_secs,
         selected_team_for_spawn,
@@ -1138,6 +1151,7 @@ fn apply_server_snapshot(
     network_state.local_id = Some(your_id);
     game_state_snapshot.state = game_state;
     game_state_snapshot.rematch_in_secs = rematch_in_secs;
+    game_state_snapshot.team_buffs = team_buffs;
 
     let local_player_state = players.iter().find(|player| player.id == your_id);
     let local_players = local_player_query
@@ -1573,30 +1587,54 @@ fn apply_server_snapshot(
             commands.entity(entity).insert((
                 NetworkNeutralId(neutral.id),
                 neutral_state_to_combat_stats(neutral),
+                NeutralAiStateTag(neutral.ai_state),
             ));
             continue;
         }
 
-        let entity = commands
-            .spawn((
-                Mesh3d(visuals.neutral_mesh.clone()),
-                MeshMaterial3d(visuals.neutral_material.clone()),
-                Transform::from_translation(target_translation).with_rotation(target_rotation),
-                Visibility::default(),
-                NetworkNeutral,
-                NetworkNeutralId(neutral.id),
-                NetEntityInterpolation {
-                    from_translation: target_translation,
-                    to_translation: target_translation,
-                    from_rotation: target_rotation,
-                    to_rotation: target_rotation,
-                    elapsed: UPDATE_INTERVAL_SECONDS,
-                    duration: UPDATE_INTERVAL_SECONDS.max(0.001),
-                },
-                neutral_state_to_combat_stats(neutral),
-                Name::new(format!("Neutral-{}", neutral.id)),
-            ))
-            .id();
+        let base_components = (
+            Transform::from_translation(target_translation).with_rotation(target_rotation),
+            Visibility::default(),
+            NetworkNeutral,
+            NetworkNeutralId(neutral.id),
+            NetEntityInterpolation {
+                from_translation: target_translation,
+                to_translation: target_translation,
+                from_rotation: target_rotation,
+                to_rotation: target_rotation,
+                elapsed: UPDATE_INTERVAL_SECONDS,
+                duration: UPDATE_INTERVAL_SECONDS.max(0.001),
+            },
+            neutral_state_to_combat_stats(neutral),
+            NeutralAiStateTag(neutral.ai_state),
+        );
+
+        // Raid bosses render their staged GLB model (attached by the bosses
+        // module) instead of the generic neutral sphere.
+        let entity = if neutral.camp_type.is_boss() {
+            commands
+                .spawn((
+                    base_components,
+                    BossVisual {
+                        camp_type: neutral.camp_type,
+                    },
+                    Name::new(format!(
+                        "Boss-{}-{}",
+                        neutral.id,
+                        crate::bosses::boss_display_name(neutral.camp_type)
+                    )),
+                ))
+                .id()
+        } else {
+            commands
+                .spawn((
+                    base_components,
+                    Mesh3d(visuals.neutral_mesh.clone()),
+                    MeshMaterial3d(visuals.neutral_material.clone()),
+                    Name::new(format!("Neutral-{}", neutral.id)),
+                ))
+                .id()
+        };
         network_state.neutrals.insert(neutral.id, entity);
     }
 

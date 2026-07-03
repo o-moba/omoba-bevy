@@ -5,6 +5,7 @@ assets/
 !client/assets/
 client/assets/*
 !client/assets/avatars/
+!client/assets/bosses/
 .claude/*
 .claude/rules/
 .claude/rules/**

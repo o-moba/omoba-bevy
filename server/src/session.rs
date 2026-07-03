@@ -279,11 +279,14 @@ pub(crate) fn handle_respawns(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn reset_match(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,
     structures: &mut HashMap<u64, Structure>,
     minions: &mut HashMap<u64, Minion>,
     projectiles: &mut HashMap<u64, Projectile>,
+    neutrals: &mut HashMap<u64, Neutral>,
+    team_buffs: &mut TeamBuffs,
     map_layout: &MapLayoutState,
     last_wave_spawn_at: &mut Instant,
     game_state: &mut GameState,
@@ -298,6 +301,10 @@ pub(crate) fn reset_match(
     // Clear minions and projectiles
     minions.clear();
     projectiles.clear();
+    // Boss objectives restart their spawn schedule from the new match start,
+    // and any lingering team buffs are dropped (camps keep their state).
+    schedule_boss_spawns(neutrals, Instant::now());
+    team_buffs.clear();
     // Reset wave timer so first wave isn't immediate
     *last_wave_spawn_at = Instant::now();
     // Reset all players to spawn

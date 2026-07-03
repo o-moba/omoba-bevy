@@ -11,9 +11,12 @@ A `manifest.json` is written alongside with provenance (collection, license,
 source URL, author) taken from each avatar's `meta.json`.
 
 The roster below is the TASK-17 shortlist (all CC0, VRM 0.x, Mixamo-compatible
-skeletons). Run from the repo root:
+skeletons). The separate `bosses` set (TASK-19) stages the raid-boss models
+into `client/assets/bosses/` with the same manifest schema, keeping boss slugs
+out of the player-selectable roster manifest. Run from the repo root:
 
     python3 scripts/stage_avatars.py [--collection-root PATH] [--out DIR]
+    python3 scripts/stage_avatars.py --set bosses
 """
 
 import argparse
@@ -49,6 +52,18 @@ ROSTER = {
     "el-bueno": "NeonGlitch86-collection/0x776bd31ae5549eac9ed215b5db278229454d5bed_7",
 }
 
+# Raid-boss models (TASK-19). Staged into client/assets/bosses/ — deliberately
+# NOT part of ROSTER so boss slugs never enter the player-selectable manifest.
+BOSSES = {
+    "wendigo-hollow": "halloween-rising/0x0ad4c869d0019df7460b33ca852610c9cb0a5647_60",
+    "king-mutatio": "toxsam/0x59202483529a11642a43578a6ee77ca4ec24f930_0",
+}
+
+AVATAR_SETS = {
+    "roster": (ROSTER, DEFAULT_OUT_DIR),
+    "bosses": (BOSSES, Path("client/assets/bosses")),
+}
+
 
 def sniff_image_extension(path: Path) -> str:
     """Actual image format by magic bytes (extension must match the decoder)."""
@@ -76,15 +91,23 @@ def validate_glb(data: bytes) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--collection-root", type=Path, default=DEFAULT_COLLECTION_ROOT)
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT_DIR)
+    parser.add_argument(
+        "--set",
+        dest="avatar_set",
+        choices=sorted(AVATAR_SETS),
+        default="roster",
+        help="which avatar set to stage (roster -> client/assets/avatars, bosses -> client/assets/bosses)",
+    )
+    parser.add_argument("--out", type=Path, default=None, help="override the set's output directory")
     args = parser.parse_args()
 
-    out_dir: Path = args.out
+    entries, default_out = AVATAR_SETS[args.avatar_set]
+    out_dir: Path = args.out if args.out is not None else default_out
     out_dir.mkdir(parents=True, exist_ok=True)
     manifest = {"avatars": []}
     failures = []
 
-    for slug, rel_dir in ROSTER.items():
+    for slug, rel_dir in entries.items():
         src_dir = args.collection_root / rel_dir
         model = src_dir / "model.vrm"
         meta_path = src_dir / "meta.json"
@@ -126,7 +149,7 @@ def main() -> int:
 
     manifest_path = out_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
-    print(f"\nStaged {len(manifest['avatars'])}/{len(ROSTER)} avatars -> {out_dir}")
+    print(f"\nStaged {len(manifest['avatars'])}/{len(entries)} avatars -> {out_dir}")
     print(f"Manifest: {manifest_path}")
     if failures:
         print(f"Failures: {failures}")

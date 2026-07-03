@@ -14,10 +14,12 @@ For every avatar in `client/assets/avatars/manifest.json`, checks:
   * manifest fields are complete (slug, display_name, collection,
     license == CC0, source_url, author) and the referenced thumbnail exists.
 
-Also enforces the roster size window (10..20 shipped avatars).
+Also enforces the roster size window (default 10..20 shipped avatars; override
+with --roster-min/--roster-max, e.g. exactly 2 for the raid-boss directory).
 Exits nonzero on any mandatory failure. Run from the repo root:
 
     python3 scripts/validate_avatar_assets.py [--avatars-dir DIR]
+    python3 scripts/validate_avatar_assets.py --avatars-dir client/assets/bosses --roster-min 2 --roster-max 2
 """
 
 import argparse
@@ -220,6 +222,8 @@ def validate_avatar(entry, avatars_dir: Path) -> Report:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--avatars-dir", type=Path, default=AVATARS_DIR)
+    parser.add_argument("--roster-min", type=int, default=ROSTER_MIN)
+    parser.add_argument("--roster-max", type=int, default=ROSTER_MAX)
     args = parser.parse_args()
 
     manifest_path = args.avatars_dir / "manifest.json"
@@ -252,8 +256,10 @@ def main() -> int:
     print()
     print(f"Roster: {len(avatars)} avatars, {total_bytes / 1e6:.1f} MB (GLBs + thumbnails)")
     ok = not failed
-    if not ROSTER_MIN <= len(avatars) <= ROSTER_MAX:
-        print(f"ERROR: roster size {len(avatars)} outside [{ROSTER_MIN}, {ROSTER_MAX}]")
+    if not args.roster_min <= len(avatars) <= args.roster_max:
+        print(
+            f"ERROR: roster size {len(avatars)} outside [{args.roster_min}, {args.roster_max}]"
+        )
         ok = False
     if failed:
         print(f"FAILED avatars: {', '.join(failed)}")

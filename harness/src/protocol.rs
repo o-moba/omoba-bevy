@@ -155,11 +155,65 @@ fn default_ranks() -> [u8; 4] {
     [1; 4]
 }
 
+/// Jungle neutral / raid-boss camp type. Mirrors `server::NeutralCampType`
+/// (snake_case wire names, e.g. `"wendigo_boss"`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NeutralCampType {
+    Skirmisher,
+    Bruiser,
+    Spitter,
+    WendigoBoss,
+    KingMutatioBoss,
+}
+
+impl NeutralCampType {
+    /// True for the TASK-19 raid bosses.
+    pub fn is_boss(self) -> bool {
+        matches!(
+            self,
+            NeutralCampType::WendigoBoss | NeutralCampType::KingMutatioBoss
+        )
+    }
+}
+
+/// One replicated jungle neutral. Minimal mirror of `server::NeutralState`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct NeutralState {
+    pub id: u64,
+    pub camp_type: NeutralCampType,
+    #[serde(default)]
+    pub x: f32,
+    #[serde(default)]
+    pub z: f32,
+    #[serde(default)]
+    pub hp: f32,
+    #[serde(default)]
+    pub max_hp: f32,
+}
+
+/// Boss team-buff kind. Mirrors `server::TeamBuffKind` (snake_case).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TeamBuffKind {
+    WendigoFavor,
+    MutatioMight,
+}
+
+/// One active team buff. Mirrors `server::TeamBuffState`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TeamBuffState {
+    pub team: Team,
+    pub kind: TeamBuffKind,
+    #[serde(default)]
+    pub remaining_secs: f32,
+}
+
 /// Inbound server -> client packets. Mirror of `server::ServerPacket`.
 ///
 /// Only the `Snapshot` variant exists today. Extra snapshot fields the harness
-/// does not use (projectiles, structures, minions, neutrals, game_state, ...)
-/// are intentionally not modeled and are ignored during deserialization.
+/// does not use (projectiles, structures, minions, game_state, ...) are
+/// intentionally not modeled and are ignored during deserialization.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerPacket {
@@ -167,6 +221,12 @@ pub enum ServerPacket {
         your_id: u64,
         #[serde(default)]
         players: Vec<PlayerState>,
+        /// Alive (non-respawn-gated) jungle neutrals, including raid bosses.
+        #[serde(default)]
+        neutrals: Vec<NeutralState>,
+        /// Active boss team buffs (additive `serde(default)` field).
+        #[serde(default)]
+        team_buffs: Vec<TeamBuffState>,
     },
 }
 
@@ -188,5 +248,26 @@ impl ServerPacket {
     /// Finds a player by id within a snapshot.
     pub fn player(&self, id: u64) -> Option<&PlayerState> {
         self.players().iter().find(|player| player.id == id)
+    }
+
+    /// Borrows the neutrals carried by a snapshot.
+    pub fn neutrals(&self) -> &[NeutralState] {
+        match self {
+            ServerPacket::Snapshot { neutrals, .. } => neutrals,
+        }
+    }
+
+    /// Finds the first neutral of a camp type within a snapshot.
+    pub fn neutral_of_type(&self, camp_type: NeutralCampType) -> Option<&NeutralState> {
+        self.neutrals()
+            .iter()
+            .find(|neutral| neutral.camp_type == camp_type)
+    }
+
+    /// Borrows the active team buffs carried by a snapshot.
+    pub fn team_buffs(&self) -> &[TeamBuffState] {
+        match self {
+            ServerPacket::Snapshot { team_buffs, .. } => team_buffs,
+        }
     }
 }
