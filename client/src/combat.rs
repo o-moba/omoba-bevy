@@ -859,7 +859,11 @@ fn spawn_combat_bars_system(
                 bars.mana_fill = Some(mana_fill);
             }
         });
-        commands.entity(entity).insert(bars);
+        // `try_insert`: the owner may have been despawned in this same frame
+        // (e.g. the duplicate local-player cleanup in `apply_server_snapshot`);
+        // a plain `insert` would panic when the command buffer is applied. Any
+        // orphaned bar root is cleaned up by `sync_combat_bar_transforms_system`.
+        commands.entity(entity).try_insert(bars);
     }
 }
 

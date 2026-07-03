@@ -4,7 +4,39 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
-## [Unreleased]
+## [Unreleased] (TASK-19)
+
+### Added
+- **TASK-19 — raid bosses: epic neutral objectives with team buffs.**
+  - **Two raid bosses on the neutrals system**: Wendigo (bottom pit, spawns at
+    60 s match time, 900 HP) and King Mutatio (top pit, spawns at 180 s,
+    1500 HP), placed at 180°-rotationally-symmetric pits derived with the same
+    map formula as the jungle camps. Bosses aggro when attacked, use a larger
+    leash (full-HP reset at the pit), and respawn 180 s after death while
+    camps keep their 40 s cooldown. All tuning is named constants in
+    `server/src/balance.rs`.
+  - **Team buffs on boss kill**, replicated via a new additive
+    `team_buffs` snapshot field (`serde(default)`): Wendigo's Favor (+15%
+    ability damage, 90 s) and Mutatio's Might (+25% ability damage plus
+    2 HP/s team regen, 90 s). Re-kills refresh the timer; both buffs combine
+    multiplicatively; the server applies the damage multiplier and the regen
+    authoritatively. Rematch (`reset_match`) clears buffs and restarts the
+    boss spawn schedule.
+  - **Client presentation**: bosses render their staged CC0 GLB models
+    (`client/assets/bosses/`, staged/retargeted/validated by the existing
+    avatar pipeline with a dedicated manifest) scaled to ~3x player height,
+    with HP bar, floating nameplate, idle/walk animation driven by the
+    replicated AI state, and a match-HUD indicator listing the local team's
+    active buffs with remaining seconds. Boss slugs live outside the player
+    roster manifest, so they are never selectable as player avatars
+    (covered by a shared-crate test).
+  - **Tests**: server unit coverage for the spawn schedule, boss stats/pits,
+    per-type respawn, buff apply/expiry/refresh/team scoping and authoritative
+    buffed damage/regen; harness integration coverage for live boss spawn
+    timing and stats over the wire; HUD text unit tests; asset validation for
+    the boss directory (`--roster-min/--roster-max`).
+  - Version bump deferred to merge time (branch policy).
+
 
 ## [0.6.0] - 2026-07-03
 

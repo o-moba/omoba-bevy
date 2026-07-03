@@ -37,6 +37,21 @@ Canonical version: `0.5.0`
   smooths snapshot interpolation). Unknown avatar slugs and class ids fall
   back safely (default model / Warrior). `OMOBA_AUTOJOIN=<class>:<slug>:<team>`
   joins without UI for automation.
+- **Raid bosses with team buffs (TASK-19):** two epic neutral objectives built
+  on the jungle-neutral system — **Wendigo** (bottom river/jungle pit, spawns
+  at 60 s match time, 900 HP) and **King Mutatio** (top jungle pit, spawns at
+  180 s, 1500 HP), in 180°-symmetric pits derived from the map formula. Bosses
+  aggro when attacked, leash back to their pit at full HP, and respawn 180 s
+  after death (camps keep 40 s). Killing a boss grants the killer's whole team
+  a replicated timed buff: Wendigo's Favor (+15% ability damage, 90 s) or
+  Mutatio's Might (+25% ability damage +2 HP/s regen, 90 s); a re-kill
+  refreshes, both buffs stack multiplicatively, and the server applies the
+  damage multiplier and regen authoritatively. The client renders each boss
+  with its staged CC0 model (`client/assets/bosses/`, own manifest — boss
+  slugs are never player-selectable) scaled to raid presence, with HP bar,
+  floating nameplate, idle/walk animation from the replicated AI state, and a
+  match-HUD indicator showing the local team's active buffs with remaining
+  seconds. All tuning lives in named constants in `server/src/balance.rs`.
 
 - Headless Bevy-scheduled authoritative UDP loop with periodic player snapshots; player mana regeneration and `projectile -> minion` damage now run through ECS/message-driven systems bridged to the current authoritative state maps.
 - Server-authoritative hardening for player movement and casts: client transforms are speed/map clamped, non-finite positions are ignored, and casts require the authoritative caster position to be in range of the live target.
