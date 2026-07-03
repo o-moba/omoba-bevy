@@ -4,7 +4,7 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
-## [Unreleased] (TASK-19)
+## [0.7.0] - 2026-07-03
 
 ### Added
 - **TASK-19 — raid bosses: epic neutral objectives with team buffs.**
@@ -35,7 +35,6 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
     buffed damage/regen; harness integration coverage for live boss spawn
     timing and stats over the wire; HUD text unit tests; asset validation for
     the boss directory (`--roster-min/--roster-max`).
-  - Version bump deferred to merge time (branch policy).
 
 
 ## [0.6.0] - 2026-07-03
