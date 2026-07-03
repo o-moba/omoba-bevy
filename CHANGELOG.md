@@ -6,6 +6,30 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-03
+
+### Added
+- **Ekza Arena avatar sync (`arena-sync` crate).** New workspace tool that
+  pulls Avatar cards from the on-chain Ekza Arena registry (raw JSON-RPC
+  `getProgramAccounts` + minimal borsh parsing, no anchor client), fetches
+  each card's metadata, enforces the model-format classifier (only `vrm` /
+  `glb` — what Bevy's glTF loader handles; mirrors the on-chain
+  `ProjectProfile "omoba"` in solana-stellar), downloads the model +
+  thumbnail into `client/assets/avatars/`, and idempotently merges the
+  entries into `manifest.json` under collection "Ekza Arena".
+  Usage: `cargo run -p arena-sync -- [--rpc …] [--dry-run]`.
+
+### Changed
+- **Avatar roster is now file-first.** `shared::avatar_roster()` reads
+  `client/assets/avatars/manifest.json` at runtime (override with
+  `OMOBA_AVATAR_MANIFEST`); the compile-time embedded manifest is only the
+  fallback. Avatars synced from the chain appear in the team-select grid
+  after a client restart — no rebuild. Client and server must share the same
+  manifest file, otherwise the server's slug validation rejects runtime-added
+  avatars.
+- Roster unit test now checks invariants (lower bound, unique slugs,
+  non-empty license/source) instead of a hard 10–20 size window.
+
 ## [0.5.0] - 2026-07-03
 
 ### Added

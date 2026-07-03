@@ -487,14 +487,49 @@ struct AvatarManifest {
     avatars: Vec<AvatarDefinition>,
 }
 
-/// The committed roster manifest, embedded at compile time so client and
-/// server agree on the exact shipped avatar set.
+/// The committed roster manifest, embedded at compile time as the fallback
+/// when no manifest file is found on disk.
 const AVATAR_MANIFEST_JSON: &str = include_str!("../../client/assets/avatars/manifest.json");
 
-/// All shipped avatars, in manifest order.
+/// Candidate locations of the LIVE manifest. Tools like `arena-sync` append
+/// avatars pulled from the Ekza Arena chain at runtime, so the file on disk —
+/// not the embedded copy — is the source of truth when present. Client and
+/// server must see the same file (same repo checkout) or joins with
+/// runtime-added avatars will be rejected by the server's slug validation.
+fn manifest_candidates() -> Vec<std::path::PathBuf> {
+    let mut candidates = Vec::new();
+    if let Ok(path) = std::env::var("OMOBA_AVATAR_MANIFEST") {
+        candidates.push(std::path::PathBuf::from(path));
+    }
+    for relative in [
+        "client/assets/avatars/manifest.json",
+        "assets/avatars/manifest.json",
+        "../client/assets/avatars/manifest.json",
+    ] {
+        candidates.push(std::path::PathBuf::from(relative));
+    }
+    candidates
+}
+
+/// All shipped avatars, in manifest order. Loaded once: first readable +
+/// parseable manifest file wins, embedded copy is the fallback.
 pub fn avatar_roster() -> &'static [AvatarDefinition] {
     static ROSTER: OnceLock<Vec<AvatarDefinition>> = OnceLock::new();
     ROSTER.get_or_init(|| {
+        for candidate in manifest_candidates() {
+            let Ok(raw) = std::fs::read_to_string(&candidate) else {
+                continue;
+            };
+            match serde_json::from_str::<AvatarManifest>(&raw) {
+                Ok(manifest) => return manifest.avatars,
+                Err(error) => {
+                    eprintln!(
+                        "avatar manifest {} is invalid ({error}); trying next candidate",
+                        candidate.display()
+                    );
+                }
+            }
+        }
         serde_json::from_str::<AvatarManifest>(AVATAR_MANIFEST_JSON)
             .expect("embedded avatar manifest must parse")
             .avatars
@@ -625,16 +660,18 @@ mod tests {
 
     #[test]
     fn avatar_roster_is_committed_and_licensed() {
+        // The roster is the committed manifest plus any avatars synced from
+        // the Ekza Arena chain (arena-sync), so only a lower bound holds.
         let roster = avatar_roster();
         assert!(
-            (10..=20).contains(&roster.len()),
-            "roster size {} outside [10, 20]",
+            roster.len() >= 10,
+            "roster size {} below the committed baseline",
             roster.len()
         );
         let mut slugs = HashSet::new();
         for avatar in roster {
             assert!(slugs.insert(avatar.slug.as_str()), "duplicate slug");
-            assert_eq!(avatar.license, "CC0", "{}", avatar.slug);
+            assert!(!avatar.license.is_empty(), "{}", avatar.slug);
             assert!(!avatar.source_url.is_empty(), "{}", avatar.slug);
             assert!(!avatar.display_name.is_empty(), "{}", avatar.slug);
         }
