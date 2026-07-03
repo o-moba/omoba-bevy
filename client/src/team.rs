@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use shared::{HeroClass, avatar_roster};
 use std::collections::HashMap;
 
-use crate::net::{ClientSession, NetworkCommand};
+use crate::net::{ClientConnectionState, ClientSession, NetworkCommand, SessionUiCommand};
 pub use ekza_bevy_sdk::EkzaCharacter as CharacterChoice;
 
 const TEAM_BUTTON_SIZE: f32 = 110.0;
@@ -408,6 +408,7 @@ fn team_select_ui_system(
     avatar_buttons: Query<(Entity, &AvatarSelectButton), With<Button>>,
     overlay_query: Query<Entity, With<TeamSelectRoot>>,
     mut command_writer: MessageWriter<NetworkCommand>,
+    mut session_ui_writer: MessageWriter<SessionUiCommand>,
 ) {
     if selection.team.is_some() {
         return;
@@ -478,6 +479,17 @@ fn team_select_ui_system(
         match *interaction {
             Interaction::Pressed => {
                 if client_session.join_flow_committed {
+                    continue;
+                }
+                // Dead transport: a Join written now would be silently lost and
+                // the overlay would be gone with no way back. Trigger the same
+                // recovery as the Retry button and keep the select screen up.
+                if client_session.state == ClientConnectionState::Disconnected {
+                    info!(
+                        "[omoba:cli] event=join_deferred reason=disconnected \
+                         msg=\"Reconnecting to server; pick a team again once connected.\""
+                    );
+                    session_ui_writer.write(SessionUiCommand::Retry);
                     continue;
                 }
                 selection.team = Some(button.team);
