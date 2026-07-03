@@ -34,6 +34,7 @@ pub mod server;
 
 pub use bot::Bot;
 pub use protocol::{
-    Character, ClientPacket, HeroClass, PlayerState, ServerPacket, TargetId, TargetKind, Team,
+    Character, ClientPacket, HeroClass, NeutralCampType, NeutralState, PlayerState, ServerPacket,
+    TargetId, TargetKind, Team, TeamBuffKind, TeamBuffState,
 };
 pub use server::ServerProcess;
