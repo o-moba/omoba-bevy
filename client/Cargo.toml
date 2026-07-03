@@ -4,9 +4,14 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-bevy.workspace = true
+# `jpeg` on top of the defaults: several CC0 roster thumbnails are JPEGs.
+bevy = { workspace = true, features = ["jpeg"] }
 crossbeam-channel.workspace = true
 ekza-bevy-sdk = { path = "../../ekza-bevy-sdk" }
 serde.workspace = true
 serde_json.workspace = true
+shared = { path = "../shared" }
 winit.workspace = true
+
+[lints]
+workspace = true

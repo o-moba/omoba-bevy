@@ -4,9 +4,11 @@
 VRM 0.x files are glTF 2.0 binary containers (GLB), so staging is a
 validate-and-copy: each `model.vrm` is checked for a valid GLB header and
 copied to `client/assets/avatars/<slug>.glb`; `thumbnail.png` (when present)
-is copied to `client/assets/avatars/<slug>.png`. A `manifest.json` is written
-alongside with provenance (collection, license, source URL, author) taken
-from each avatar's `meta.json`.
+is copied to `client/assets/avatars/<slug>.<ext>` where `<ext>` reflects the
+file's ACTUAL image format (several collection thumbnails are JPEGs with a
+`.png` name, and the Bevy image loader picks its decoder by extension).
+A `manifest.json` is written alongside with provenance (collection, license,
+source URL, author) taken from each avatar's `meta.json`.
 
 The roster below is the TASK-17 shortlist (all CC0, VRM 0.x, Mixamo-compatible
 skeletons). Run from the repo root:
@@ -46,6 +48,16 @@ ROSTER = {
     "orion": "toxsam/0xc1def47cf1e15ee8c2a92f4e0e968372880d18d1_0",
     "el-bueno": "NeonGlitch86-collection/0x776bd31ae5549eac9ed215b5db278229454d5bed_7",
 }
+
+
+def sniff_image_extension(path: Path) -> str:
+    """Actual image format by magic bytes (extension must match the decoder)."""
+    header = path.read_bytes()[:8]
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if header.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    raise ValueError(f"unsupported thumbnail format (magic {header[:4]!r})")
 
 
 def validate_glb(data: bytes) -> None:
@@ -93,9 +105,11 @@ def main() -> int:
             continue
 
         (out_dir / f"{slug}.glb").write_bytes(data)
-        has_thumb = thumb.is_file()
-        if has_thumb:
-            shutil.copyfile(thumb, out_dir / f"{slug}.png")
+        thumb_name = None
+        if thumb.is_file():
+            ext = sniff_image_extension(thumb)
+            thumb_name = f"{slug}.{ext}"
+            shutil.copyfile(thumb, out_dir / thumb_name)
 
         entry = {
             "slug": slug,
@@ -104,10 +118,10 @@ def main() -> int:
             "license": license_name,
             "source_url": meta.get("model_file_url", ""),
             "author": meta.get("author", ""),
-            "thumbnail": f"{slug}.png" if has_thumb else None,
+            "thumbnail": thumb_name,
         }
         manifest["avatars"].append(entry)
-        thumb_note = "" if has_thumb else " (no thumbnail in source)"
+        thumb_note = "" if thumb_name else " (no thumbnail in source)"
         print(f"OK    {slug}: {len(data)} bytes{thumb_note}")
 
     manifest_path = out_dir / "manifest.json"

@@ -23,9 +23,8 @@ use crate::session_config::{
 };
 use crate::team::TeamSelection;
 use crate::team::{CharacterChoice, Team, TeamSelectRoot, spawn_team_select_ui};
-use crate::world::{
-    NormalizeModelScale, PlayerAssets, PlayerModelCatalog, model_assets_for_choice,
-};
+use crate::world::{NormalizeModelScale, PlayerAssets, PlayerModelResolver};
+use shared::HeroClass;
 
 const LOCAL_BIND_ADDR: &str = "0.0.0.0:0";
 const UPDATE_INTERVAL_SECONDS: f32 = 0.05;
@@ -202,14 +201,19 @@ impl Plugin for NetworkingPlugin {
     }
 }
 
-#[derive(Message, Clone, Copy, Debug)]
+#[derive(Message, Clone, Debug)]
 pub enum NetworkCommand {
     Cast {
         target: TargetId,
+        /// Hotbar slot index (0=Q .. 3=R).
+        slot: u8,
     },
     Join {
         team: Team,
         character: CharacterChoice,
+        hero_class: HeroClass,
+        /// Selected roster avatar slug (cosmetic), if any.
+        avatar: Option<String>,
     },
     #[allow(dead_code)]
     RequestRematch,
@@ -235,11 +239,17 @@ enum ClientPacket {
     },
     Cast {
         target: TargetId,
+        #[serde(default)]
+        slot: u8,
     },
     Join {
         team: Team,
         #[serde(default = "default_character_choice")]
         character: CharacterChoice,
+        #[serde(default)]
+        hero_class: HeroClass,
+        #[serde(default)]
+        avatar: Option<String>,
         #[serde(default)]
         session_id: Option<String>,
     },
@@ -302,6 +312,12 @@ struct PlayerState {
     ranks: [u8; 4],
     #[serde(default = "default_character_choice")]
     character: CharacterChoice,
+    /// Authoritative class the server resolved for this player.
+    #[serde(default)]
+    hero_class: HeroClass,
+    /// Cosmetic roster avatar slug; `None` falls back to `character`.
+    #[serde(default)]
+    avatar: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -496,6 +512,14 @@ pub struct NetworkPlayerId(pub u64);
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkCharacterChoice(pub CharacterChoice);
+
+/// Roster avatar slug replicated from the server (`None` = legacy character model).
+#[derive(Component, Clone, Debug)]
+pub struct NetworkAvatar(pub Option<String>);
+
+/// Authoritative hero class replicated from the server.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct NetworkHeroClass(pub HeroClass);
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct PlayerProgression {
@@ -904,15 +928,21 @@ fn send_network_commands(
 
     for command in command_events.read() {
         match command {
-            NetworkCommand::Cast { target } => {
+            NetworkCommand::Cast { target, slot } => {
                 if !client_session.is_connected() {
                     continue;
                 }
-                let _ = channels
-                    .outgoing
-                    .send(ClientPacket::Cast { target: *target });
+                let _ = channels.outgoing.send(ClientPacket::Cast {
+                    target: *target,
+                    slot: *slot,
+                });
             }
-            NetworkCommand::Join { team, character } => {
+            NetworkCommand::Join {
+                team,
+                character,
+                hero_class,
+                avatar,
+            } => {
                 if client_session.join_flow_committed {
                     continue;
                 }
@@ -920,6 +950,8 @@ fn send_network_commands(
                 let _ = channels.outgoing.send(ClientPacket::Join {
                     team: *team,
                     character: *character,
+                    hero_class: *hero_class,
+                    avatar: avatar.clone(),
                     session_id: Some(client_session_id.0.clone()),
                 });
             }
@@ -984,12 +1016,7 @@ fn ingest_server_snapshot_packets(
     };
 
     if client_session.discard_incoming_snapshots {
-        loop {
-            match channels.incoming.try_recv() {
-                Ok(_) => {}
-                Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
-            }
-        }
+        while let Ok(_ignored) = channels.incoming.try_recv() {}
         return;
     }
 
@@ -1081,7 +1108,7 @@ fn apply_server_snapshot(
     neutral_query: Query<&NetworkNeutral>,
     local_player_query: Query<(Entity, Option<&NetworkPlayerId>), With<Player>>,
     player_assets: Res<PlayerAssets>,
-    model_catalog: Res<PlayerModelCatalog>,
+    mut models: PlayerModelResolver,
     visuals: Res<NetworkVisualAssets>,
     mut game_state_snapshot: ResMut<GameStateSnapshot>,
     mut cam_state: ResMut<CameraState>,
@@ -1149,6 +1176,8 @@ fn apply_server_snapshot(
                 local_player_state.team,
                 player_state_to_combat_stats(local_player_state),
                 NetworkCharacterChoice(local_player_state.character),
+                NetworkAvatar(local_player_state.avatar.clone()),
+                NetworkHeroClass(local_player_state.hero_class),
                 player_state_to_progression(local_player_state),
             ));
             network_state.local_team = Some(local_player_state.team);
@@ -1191,8 +1220,10 @@ fn apply_server_snapshot(
             local_player_state.y,
             local_player_state.z,
         );
-        let (local_scene, _local_gltf) =
-            model_assets_for_choice(&model_catalog, local_player_state.character);
+        let (local_scene, _local_gltf) = models.resolve(
+            local_player_state.character,
+            local_player_state.avatar.as_deref(),
+        );
         let entity = if let Some(scene_handle) = local_scene {
             commands
                 .spawn((
@@ -1209,8 +1240,12 @@ fn apply_server_snapshot(
                     VerticalVelocity::default(),
                     local_player_state.team,
                     NormalizeModelScale::for_player_model(),
-                    NetworkPlayerId(your_id),
-                    NetworkCharacterChoice(local_player_state.character),
+                    (
+                        NetworkPlayerId(your_id),
+                        NetworkCharacterChoice(local_player_state.character),
+                        NetworkAvatar(local_player_state.avatar.clone()),
+                        NetworkHeroClass(local_player_state.hero_class),
+                    ),
                     player_state_to_combat_stats(local_player_state),
                     player_state_to_progression(local_player_state),
                     Name::new("Player"),
@@ -1226,8 +1261,12 @@ fn apply_server_snapshot(
                     PlayerBody,
                     VerticalVelocity::default(),
                     local_player_state.team,
-                    NetworkPlayerId(your_id),
-                    NetworkCharacterChoice(local_player_state.character),
+                    (
+                        NetworkPlayerId(your_id),
+                        NetworkCharacterChoice(local_player_state.character),
+                        NetworkAvatar(local_player_state.avatar.clone()),
+                        NetworkHeroClass(local_player_state.hero_class),
+                    ),
                     player_state_to_combat_stats(local_player_state),
                     player_state_to_progression(local_player_state),
                     Name::new("Player"),
@@ -1271,6 +1310,8 @@ fn apply_server_snapshot(
                 NetworkPlayerId(player.id),
                 player.team,
                 NetworkCharacterChoice(player.character),
+                NetworkAvatar(player.avatar.clone()),
+                NetworkHeroClass(player.hero_class),
                 player_state_to_combat_stats(player),
                 player_state_to_progression(player),
             ));
@@ -1278,7 +1319,7 @@ fn apply_server_snapshot(
         }
 
         let (scene_handle, _gltf_handle) =
-            model_assets_for_choice(&model_catalog, player.character);
+            models.resolve(player.character, player.avatar.as_deref());
         let mesh_handle = player_assets.mesh.clone();
         let material_handle = player_assets.material.clone();
         let spawn_translation = Vec3::new(player.x, player.y, player.z);
@@ -1291,6 +1332,8 @@ fn apply_server_snapshot(
             player.team,
             NetworkPlayerId(player.id),
             NetworkCharacterChoice(player.character),
+            NetworkAvatar(player.avatar.clone()),
+            NetworkHeroClass(player.hero_class),
             NormalizeModelScale::for_player_model(),
             player_state_to_combat_stats(player),
             player_state_to_progression(player),
@@ -1848,7 +1891,7 @@ fn perform_network_teardown(
     team_selection.team = None;
 
     if overlay_query.iter().next().is_none() {
-        spawn_team_select_ui(commands, team_selection.character);
+        spawn_team_select_ui(commands, team_selection);
     }
 
     client_session.state = ClientConnectionState::Disconnected;

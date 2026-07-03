@@ -12,7 +12,7 @@
 
 use std::time::{Duration, Instant};
 
-use harness::{Bot, Character, ServerProcess, Team};
+use harness::{Bot, Character, HeroClass, ServerProcess, Team};
 use harness::protocol::PlayerState;
 
 // --- Constants mirrored from server balance (source of truth in
@@ -22,9 +22,14 @@ use harness::protocol::PlayerState;
 const GROUND_Y: f32 = 0.5;
 /// `MAX_HP` — full player health.
 const MAX_HP: f32 = 100.0;
-/// `SPELL_CAST_RANGE` — horizontal cast range (plus a small hit radius). We
-/// bring players closer than this before casting.
-const SPELL_CAST_RANGE: f32 = 28.0;
+/// Warrior `shield_bash` cast range (`shared::WARRIOR_ABILITIES[0]`) — the
+/// shortest Q range of any kit. We bring players closer than this before
+/// casting so every class's Q connects.
+const SHORTEST_Q_CAST_RANGE: f32 = 12.0;
+/// Warrior Q (`shield_bash`) base mana cost, mirrored from the shared kit.
+const WARRIOR_Q_MANA_COST: f32 = 10.0;
+/// Mage Q (`arc_bolt`) base mana cost, mirrored from the shared kit.
+const MAGE_Q_MANA_COST: f32 = 22.0;
 
 /// Generous default for waiting on a specific snapshot condition.
 const POLL_TIMEOUT: Duration = Duration::from_secs(3);
@@ -43,7 +48,7 @@ fn walk_into_cast_range(observer: &mut Bot, mover: &Bot, observer_id: u64, mover
     observer.set_speed_boost(true);
     mover.set_speed_boost(true);
 
-    let target_gap = SPELL_CAST_RANGE - 4.0; // comfortably inside range
+    let target_gap = SHORTEST_Q_CAST_RANGE - 4.0; // comfortably inside range
     let deadline = Instant::now() + Duration::from_secs(40);
 
     loop {
@@ -202,6 +207,132 @@ fn drive_forward(bot: &mut Bot, id: u64) -> f32 {
         .latest_player(id, POLL_TIMEOUT)
         .expect("player should still be present after driving");
     end.x - start_x
+}
+
+/// Casts the given slot once and returns the caster's lowest observed own mana
+/// over the next ~1.5s of snapshots (detects the authoritative mana drain).
+fn cast_once_and_min_mana(bot: &mut Bot, own_id: u64, target_id: u64, slot: u8) -> f32 {
+    bot.cast_slot(harness::TargetId::player(target_id), slot);
+    let mut min_mana = f32::MAX;
+    let window_end = Instant::now() + Duration::from_millis(1500);
+    while Instant::now() < window_end {
+        if let Some(p) = bot.latest_player(own_id, Duration::from_millis(200)) {
+            min_mana = min_mana.min(p.mana);
+        }
+    }
+    assert!(min_mana < f32::MAX, "no snapshot observed after casting");
+    min_mana
+}
+
+#[test]
+fn join_replicates_class_and_avatar_and_applies_distinct_kits() {
+    let server = ServerProcess::spawn();
+    let mut mage = Bot::connect(server.addr());
+    let mut warrior = Bot::connect(server.addr());
+
+    // Two clients join with different class + avatar loadouts (AC2).
+    mage.join_with_loadout(Team::Green, Character::Ipfs, HeroClass::Mage, Some("agnes"));
+    warrior.join_with_loadout(
+        Team::Blue,
+        Character::Wang,
+        HeroClass::Warrior,
+        Some("cool-tiger"),
+    );
+
+    let mage_id = mage.my_id(POLL_TIMEOUT);
+    let warrior_id = poll_other_player_id(&mut mage, mage_id);
+    assert_eq!(warrior.my_id(POLL_TIMEOUT), warrior_id);
+
+    // The server must replicate BOTH loadouts to BOTH clients.
+    mage.wait_for_player(
+        mage_id,
+        |p| p.hero_class.as_deref() == Some("mage") && p.avatar.as_deref() == Some("agnes"),
+        POLL_TIMEOUT,
+    )
+    .expect("mage should see its own class + avatar replicated");
+    mage.wait_for_player(
+        warrior_id,
+        |p| p.hero_class.as_deref() == Some("warrior") && p.avatar.as_deref() == Some("cool-tiger"),
+        POLL_TIMEOUT,
+    )
+    .expect("mage should see the warrior's class + avatar");
+    warrior
+        .wait_for_player(
+            mage_id,
+            |p| p.hero_class.as_deref() == Some("mage") && p.avatar.as_deref() == Some("agnes"),
+            POLL_TIMEOUT,
+        )
+        .expect("warrior should see the mage's class + avatar");
+
+    // The server applies each player's own kit: a single Q cast drains the
+    // class-specific mana cost (mage arc_bolt 22 vs warrior shield_bash 10).
+    walk_into_cast_range(&mut mage, &warrior, mage_id, warrior_id);
+    let mage_min = cast_once_and_min_mana(&mut mage, mage_id, warrior_id, 0);
+    let warrior_min = cast_once_and_min_mana(&mut warrior, warrior_id, mage_id, 0);
+
+    let split = MAX_HP - (MAGE_Q_MANA_COST + WARRIOR_Q_MANA_COST) / 2.0; // 84
+    assert!(
+        mage_min < split,
+        "mage Q should drain ~{MAGE_Q_MANA_COST} mana, min observed {mage_min}"
+    );
+    assert!(
+        warrior_min > split,
+        "warrior Q should drain only ~{WARRIOR_Q_MANA_COST} mana, min observed {warrior_min}"
+    );
+    assert!(
+        warrior_min < MAX_HP - WARRIOR_Q_MANA_COST * 0.5,
+        "warrior Q cast should still visibly drain mana, min observed {warrior_min}"
+    );
+}
+
+#[test]
+fn locked_slots_are_rejected_authoritatively() {
+    let server = ServerProcess::spawn();
+    let mut caster = Bot::connect(server.addr());
+    let victim = Bot::connect(server.addr());
+
+    caster.join_with_loadout(Team::Green, Character::Ipfs, HeroClass::Warrior, None);
+    victim.join_with_loadout(Team::Blue, Character::Wang, HeroClass::Warrior, None);
+
+    let caster_id = caster.my_id(POLL_TIMEOUT);
+    let victim_id = poll_other_player_id(&mut caster, caster_id);
+    walk_into_cast_range(&mut caster, &victim, caster_id, victim_id);
+
+    // R (slot 3) unlocks at level 6; at level 1 the cast must be a full no-op.
+    let min_mana = cast_once_and_min_mana(&mut caster, caster_id, victim_id, 3);
+    assert!(
+        min_mana > 99.0,
+        "locked R cast must not drain mana, min observed {min_mana}"
+    );
+    let victim_state = caster
+        .latest_player(victim_id, POLL_TIMEOUT)
+        .expect("victim state");
+    assert!(
+        (victim_state.hp - victim_state.max_hp).abs() < 0.001,
+        "locked R cast must not damage the target"
+    );
+}
+
+#[test]
+fn malformed_class_and_avatar_fall_back_without_crashing_the_server() {
+    let server = ServerProcess::spawn();
+    let mut bot = Bot::connect(server.addr());
+
+    // Hostile loadout: unknown class id + path-traversal avatar slug.
+    bot.send_raw(
+        br#"{"type":"join","team":"green","character":"ipfs","hero_class":"necromancer","avatar":"../../etc/passwd"}"#,
+    );
+
+    let id = bot.my_id(POLL_TIMEOUT);
+    let me = bot
+        .wait_for_player(id, |p| p.team == Some(Team::Green), POLL_TIMEOUT)
+        .expect("server must keep serving snapshots after a hostile join");
+    assert_eq!(
+        me.hero_class.as_deref(),
+        Some("warrior"),
+        "unknown class must fall back to the default class"
+    );
+    assert_eq!(me.avatar, None, "unknown avatar slug must be dropped");
 }
 
 #[test]

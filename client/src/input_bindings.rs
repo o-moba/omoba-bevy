@@ -21,15 +21,6 @@ pub fn skill_keys_display() -> String {
     SKILL_SLOT_KEY_LABELS.join(" / ")
 }
 
-/// Four bracketed slot labels for at-a-glance HUD (e.g. `[Q]  [W]  [E]  [R]`).
-pub fn skill_slots_bracket_line() -> String {
-    SKILL_SLOT_KEY_LABELS
-        .iter()
-        .map(|k| format!("[{k}]"))
-        .collect::<Vec<_>>()
-        .join("  ")
-}
-
 pub fn upgrade_key_display() -> &'static str {
     "U"
 }
@@ -58,13 +49,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn skill_slots_bracket_line_has_four_brackets() {
-        let s = skill_slots_bracket_line();
-        assert_eq!(s.matches('[').count(), 4);
-        assert_eq!(s.matches(']').count(), 4);
-        for label in SKILL_SLOT_KEY_LABELS {
-            assert!(s.contains(&format!("[{label}]")));
-        }
-    }
 }

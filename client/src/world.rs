@@ -1,13 +1,15 @@
 use bevy::camera::primitives::Aabb;
+use bevy::ecs::system::SystemParam;
 use bevy::gltf::Gltf;
 use bevy::prelude::*;
 use bevy::scene::SceneRoot;
 use ekza_bevy_sdk::bevy::{EkzaModelCatalog, load_builtin_model_catalog};
+use std::collections::HashMap;
 
 use crate::camera::{CameraState, MainCamera, locked_camera_offset};
 use crate::combat::CombatStats;
 use crate::maps::MapLayout;
-use crate::net::NetworkCharacterChoice;
+use crate::net::{NetworkAvatar, NetworkCharacterChoice};
 use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
 use crate::team::{CharacterChoice, Team, TeamSelection};
 
@@ -46,6 +48,66 @@ pub fn model_assets_for_choice(
     catalog.handles_for(choice)
 }
 
+/// Lazily-created asset handles for roster avatars (slug -> scene + gltf).
+/// Avatars load on first use (local selection or a remote player wearing them)
+/// instead of preloading all 16 GLBs at startup.
+#[derive(Resource, Default)]
+pub struct AvatarAssetCache {
+    handles: HashMap<String, (Handle<Scene>, Handle<Gltf>)>,
+}
+
+impl AvatarAssetCache {
+    pub fn ensure_loaded(
+        &mut self,
+        asset_server: &AssetServer,
+        slug: &str,
+    ) -> (Handle<Scene>, Handle<Gltf>) {
+        self.handles
+            .entry(slug.to_owned())
+            .or_insert_with(|| {
+                info!("Loading roster avatar model '{slug}'");
+                (
+                    asset_server.load(format!("avatars/{slug}.glb#Scene0")),
+                    asset_server.load(format!("avatars/{slug}.glb")),
+                )
+            })
+            .clone()
+    }
+
+    /// Every roster avatar requested so far (slug + gltf handle).
+    pub fn requested(&self) -> impl Iterator<Item = (&str, &Handle<Gltf>)> {
+        self.handles
+            .iter()
+            .map(|(slug, (_scene, gltf))| (slug.as_str(), gltf))
+    }
+}
+
+/// Resolves the model for a player from either the roster avatar slug
+/// (primary demo path) or the legacy SDK character catalog (fallback).
+/// Unknown slugs silently fall back to the legacy character model.
+#[derive(SystemParam)]
+pub struct PlayerModelResolver<'w> {
+    catalog: Res<'w, PlayerModelCatalog>,
+    avatars: ResMut<'w, AvatarAssetCache>,
+    asset_server: Res<'w, AssetServer>,
+}
+
+impl PlayerModelResolver<'_> {
+    pub fn resolve(
+        &mut self,
+        character: CharacterChoice,
+        avatar: Option<&str>,
+    ) -> (Option<Handle<Scene>>, Option<Handle<Gltf>>) {
+        if let Some(slug) = avatar
+            && shared::avatar_definition(slug).is_some()
+        {
+            let (scene, gltf) = self.avatars.ensure_loaded(&self.asset_server, slug);
+            return (Some(scene), Some(gltf));
+        }
+        self.catalog.handles_for(character)
+    }
+}
+
 pub struct SetupPlugin;
 
 impl Plugin for SetupPlugin {
@@ -56,8 +118,10 @@ impl Plugin for SetupPlugin {
         )
         .init_resource::<ModelScaleSettings>()
         .init_resource::<LightingSettings>()
+        .init_resource::<AvatarAssetCache>()
         .add_systems(Update, sync_selected_player_assets)
         .add_systems(Update, normalize_model_scale_system)
+        .add_systems(Update, force_vrm_models_double_sided)
         .add_systems(Update, apply_lighting_settings_system)
         .add_systems(Update, spawn_local_player_on_team);
     }
@@ -227,11 +291,19 @@ fn apply_lighting_settings_system(
 
 fn sync_selected_player_assets(
     team_selection: Res<TeamSelection>,
-    catalog: Res<PlayerModelCatalog>,
+    mut models: PlayerModelResolver,
     mut player_assets: ResMut<PlayerAssets>,
 ) {
-    let (scene, gltf) = model_assets_for_choice(&catalog, team_selection.character);
-    let label = catalog.label_for(team_selection.character);
+    let (scene, gltf) = models.resolve(
+        team_selection.character,
+        team_selection.avatar.as_deref(),
+    );
+    let label = team_selection
+        .avatar
+        .as_deref()
+        .and_then(shared::avatar_definition)
+        .map(|avatar| avatar.display_name.clone())
+        .unwrap_or_else(|| models.catalog.label_for(team_selection.character));
 
     let changed = player_assets.scene != scene || player_assets.gltf != gltf;
     if changed {
@@ -258,9 +330,10 @@ fn spawn_local_player_on_team(
     }
     let team = team_selection.team.unwrap();
     let character = team_selection.character;
+    let avatar = team_selection.avatar.clone();
     let spawn = map_layout.team_spawn(team);
 
-    spawn_player_entity(&mut commands, &player_assets, spawn, team, character);
+    spawn_player_entity(&mut commands, &player_assets, spawn, team, character, avatar);
     if let Ok(mut camera_transform) = camera_query.single_mut() {
         cam_state.locked = true;
         let zoom = cam_state.zoom;
@@ -276,6 +349,7 @@ fn spawn_player_entity(
     spawn: Vec3,
     team: Team,
     character: CharacterChoice,
+    avatar: Option<String>,
 ) {
     if let Some(glb_scene) = assets.scene.clone() {
         commands.spawn((
@@ -293,6 +367,7 @@ fn spawn_player_entity(
             VerticalVelocity::default(),
             team,
             NetworkCharacterChoice(character),
+            NetworkAvatar(avatar),
             NormalizeModelScale::for_player_model(),
             Name::new(format!("Player-{}", team.as_str())),
         ));
@@ -308,8 +383,44 @@ fn spawn_player_entity(
             VerticalVelocity::default(),
             team,
             NetworkCharacterChoice(character),
+            NetworkAvatar(avatar),
             Name::new(format!("Player-{}", team.as_str())),
         ));
+    }
+}
+
+/// VRM avatars (staged as glTF) often use single-sided materials with winding that
+/// makes the body cull its front faces when loaded by the standard glTF loader — the
+/// model looks inside-out / mostly invisible. Force their materials double-sided so
+/// the whole mesh renders. Scoped to VRM-derived characters (the legacy Paco model
+/// and every roster avatar, which are all VRM-staged GLBs) to leave other models
+/// untouched. Idempotent: each material asset is patched once.
+fn force_vrm_models_double_sided(
+    roots: Query<(Entity, &NetworkCharacterChoice, Option<&NetworkAvatar>), With<NormalizeModelScale>>,
+    children_query: Query<&Children>,
+    material_handles: Query<&MeshMaterial3d<StandardMaterial>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut patched: Local<std::collections::HashSet<bevy::asset::AssetId<StandardMaterial>>>,
+) {
+    for (root, choice, avatar) in &roots {
+        let wears_roster_avatar = avatar.is_some_and(|avatar| avatar.0.is_some());
+        if choice.0 != CharacterChoice::Paco && !wears_roster_avatar {
+            continue;
+        }
+        for descendant in children_query.iter_descendants(root) {
+            let Ok(handle) = material_handles.get(descendant) else {
+                continue;
+            };
+            let id = handle.0.id();
+            if patched.contains(&id) {
+                continue;
+            }
+            if let Some(material) = materials.get_mut(&handle.0) {
+                material.double_sided = true;
+                material.cull_mode = None;
+                patched.insert(id);
+            }
+        }
     }
 }
 

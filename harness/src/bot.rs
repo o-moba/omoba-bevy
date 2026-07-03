@@ -13,7 +13,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::protocol::{Character, ClientPacket, PlayerState, ServerPacket, TargetId, Team};
+use crate::protocol::{
+    Character, ClientPacket, HeroClass, PlayerState, ServerPacket, TargetId, Team,
+};
 
 /// Per-recv socket timeout. Snapshots arrive every ~50ms, so this is short
 /// enough to poll responsively and long enough to avoid busy-spinning.
@@ -57,13 +59,34 @@ impl Bot {
             .expect("bot failed to send packet to the server");
     }
 
-    /// Joins a team as the given character.
+    /// Joins a team as the given character with the default loadout
+    /// (Warrior class, no roster avatar).
     pub fn join(&self, team: Team, character: Character) {
+        self.join_with_loadout(team, character, HeroClass::Warrior, None);
+    }
+
+    /// Joins a team with an explicit class and (optional) roster avatar slug.
+    pub fn join_with_loadout(
+        &self,
+        team: Team,
+        character: Character,
+        hero_class: HeroClass,
+        avatar: Option<&str>,
+    ) {
         self.send(&ClientPacket::Join {
             team,
             character,
+            hero_class,
+            avatar: avatar.map(str::to_owned),
             session_id: None,
         });
+    }
+
+    /// Sends a raw datagram as-is (for malformed/hostile input scenarios).
+    pub fn send_raw(&self, bytes: &[u8]) {
+        self.socket
+            .send(bytes)
+            .expect("bot failed to send raw packet to the server");
     }
 
     /// Sends a movement/orientation update.
@@ -71,12 +94,17 @@ impl Bot {
         self.send(&ClientPacket::Transform { x, y, z, yaw });
     }
 
-    /// Casts the primary ability at a target.
+    /// Casts the Q ability at a target.
     pub fn cast(&self, target: TargetId) {
-        self.send(&ClientPacket::Cast { target });
+        self.cast_slot(target, 0);
     }
 
-    /// Convenience: cast the primary ability at an enemy player by id.
+    /// Casts the ability in the given hotbar slot (0=Q .. 3=R) at a target.
+    pub fn cast_slot(&self, target: TargetId, slot: u8) {
+        self.send(&ClientPacket::Cast { target, slot });
+    }
+
+    /// Convenience: cast the Q ability at an enemy player by id.
     pub fn cast_player(&self, player_id: u64) {
         self.cast(TargetId::player(player_id));
     }

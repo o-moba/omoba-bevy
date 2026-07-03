@@ -8,3 +8,7 @@ bevy = { version = "0.18.0", default-features = false }
 ekza-bevy-sdk = { path = "../../ekza-bevy-sdk", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
+shared = { path = "../shared" }
+
+[lints]
+workspace = true

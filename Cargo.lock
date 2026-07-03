@@ -1799,13 +1799,14 @@ dependencies = [
 
 [[package]]
 name = "client"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bevy",
  "crossbeam-channel",
  "ekza-bevy-sdk",
  "serde",
  "serde_json",
+ "shared",
  "winit",
 ]
 
@@ -2775,7 +2776,7 @@ dependencies = [
 
 [[package]]
 name = "harness"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -3107,6 +3108,8 @@ dependencies = [
  "byteorder-lite",
  "num-traits",
  "png",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -4723,12 +4726,13 @@ dependencies = [
 
 [[package]]
 name = "server"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bevy",
  "ekza-bevy-sdk",
  "serde",
  "serde_json",
+ "shared",
 ]
 
 [[package]]
@@ -4738,6 +4742,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
 dependencies = [
  "lazy_static",
+]
+
+[[package]]
+name = "shared"
+version = "0.4.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -4754,7 +4766,7 @@ checksum = "d66dc143e6b11c1eddc06d5c423cfc97062865baf299914ab64caa38182078fe"
 
 [[package]]
 name = "skills"
-version = "0.3.0"
+version = "0.4.0"
 
 [[package]]
 name = "skrifa"
@@ -6699,4 +6711,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "zune-core"
+version = "0.4.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f423a2c17029964870cfaabb1f13dfab7d092a62a29a89264f4d36990ca414a"
+
+[[package]]
+name = "zune-jpeg"
+version = "0.4.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29ce2c8a9384ad323cf564b67da86e21d3cfdff87908bc1223ed5c99bc792713"
+dependencies = [
+ "zune-core",
 ]

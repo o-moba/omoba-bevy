@@ -14,11 +14,11 @@ use crate::debug_console::DebugConsole;
 use crate::maps::MapLayout;
 use crate::minimap::MinimapNavigationState;
 use crate::net::{
-    GameState, GameStateSnapshot, NetworkCharacterChoice, NetworkStructure, RemotePlayer,
-    StructureKind,
+    GameState, GameStateSnapshot, NetworkAvatar, NetworkCharacterChoice, NetworkStructure,
+    RemotePlayer, StructureKind,
 };
 use crate::team::{CharacterChoice, Team};
-use crate::world::{PlayerModelCatalog, model_assets_for_choice};
+use crate::world::{AvatarAssetCache, PlayerModelCatalog, model_assets_for_choice};
 
 pub const PLAYER_SPEED: f32 = 5.0;
 /// Debug movement multiplier; mirror of `server/src/balance.rs::DEBUG_SPEED_MULTIPLIER`.
@@ -106,11 +106,28 @@ struct Jumping {
     start_y: f32,
 }
 
+/// Identity of a player's visual model for animation purposes: either a
+/// legacy SDK character or a roster avatar slug.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum AvatarKey {
+    Character(CharacterChoice),
+    Roster(String),
+}
+
+/// Resolves the animation identity of a player entity from its replicated
+/// character + optional roster avatar components.
+fn avatar_key(character: CharacterChoice, avatar: Option<&NetworkAvatar>) -> AvatarKey {
+    match avatar.and_then(|avatar| avatar.0.as_deref()) {
+        Some(slug) => AvatarKey::Roster(slug.to_owned()),
+        None => AvatarKey::Character(character),
+    }
+}
+
 #[derive(Resource, Default)]
 struct PlayerAnimationLibrary {
-    sets: HashMap<CharacterChoice, CharacterAnimationSet>,
-    source_gltfs: HashMap<CharacterChoice, Handle<Gltf>>,
-    evaluated_characters: HashSet<CharacterChoice>,
+    sets: HashMap<AvatarKey, CharacterAnimationSet>,
+    source_gltfs: HashMap<AvatarKey, Handle<Gltf>>,
+    evaluated_keys: HashSet<AvatarKey>,
 }
 
 impl PlayerAnimationLibrary {
@@ -118,14 +135,14 @@ impl PlayerAnimationLibrary {
         !self.sets.is_empty()
     }
 
-    fn should_use_jump_fallback(&self, character: CharacterChoice) -> bool {
+    fn should_use_jump_fallback(&self, key: &AvatarKey) -> bool {
         // Jumping is purely a fallback locomotion "effect" for non-skeletal models.
-        // It should never apply to animated characters like Toka/Wang.
-        character == CharacterChoice::Cube
+        // It never applies to animated characters or roster avatars.
+        *key == AvatarKey::Character(CharacterChoice::Cube)
     }
 
-    fn get_set(&self, character: CharacterChoice) -> Option<&CharacterAnimationSet> {
-        self.sets.get(&character)
+    fn get_set(&self, key: &AvatarKey) -> Option<&CharacterAnimationSet> {
+        self.sets.get(key)
     }
 }
 
@@ -136,15 +153,22 @@ struct CharacterAnimationSet {
     walk_node: AnimationNodeIndex,
 }
 
+/// Grace period before Walk falls back to Idle. Remote players advance in
+/// snapshot-interpolation bursts with still frames in between; without this
+/// hysteresis the animation flaps Walk<->Idle several times per second.
+const LOCOMOTION_IDLE_GRACE_SECS: f32 = 0.25;
+
 #[derive(Component)]
 struct PlayerAnimationBinding {
     owner: Entity,
-    character: CharacterChoice,
+    key: AvatarKey,
     state: LocomotionAnimState,
     last_owner_position: Vec3,
+    /// Seconds since the owner last visibly moved (drives the idle grace).
+    seconds_since_movement: f32,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum LocomotionAnimState {
     Idle,
     Walk,
@@ -153,28 +177,41 @@ enum LocomotionAnimState {
 fn setup_player_animation_library(
     mut library: ResMut<PlayerAnimationLibrary>,
     catalog: Option<Res<PlayerModelCatalog>>,
+    avatar_cache: Res<AvatarAssetCache>,
     gltf_assets: Res<Assets<Gltf>>,
     mut animation_graphs: ResMut<Assets<AnimationGraph>>,
 ) {
     let Some(catalog) = catalog else {
         return;
     };
-    for character in [
+    // Candidates: legacy animated SDK characters + every roster avatar that has
+    // been requested (local selection or a remote player wearing it).
+    let mut candidates: Vec<(AvatarKey, Option<Handle<Gltf>>)> = [
         CharacterChoice::Ipfs,
         CharacterChoice::Toka,
         CharacterChoice::Wang,
-    ] {
+    ]
+    .into_iter()
+    .map(|character| {
         let (_scene, maybe_gltf) = model_assets_for_choice(&catalog, character);
+        (AvatarKey::Character(character), maybe_gltf)
+    })
+    .collect();
+    for (slug, gltf_handle) in avatar_cache.requested() {
+        candidates.push((AvatarKey::Roster(slug.to_owned()), Some(gltf_handle.clone())));
+    }
+
+    for (key, maybe_gltf) in candidates {
         let Some(gltf_handle) = maybe_gltf else {
             // No GLTF means no skeletal animations — mark evaluated so jump fallback activates.
-            library.evaluated_characters.insert(character);
+            library.evaluated_keys.insert(key);
             continue;
         };
         // Skip once this exact GLTF has been evaluated, whether or not it produced an
         // animation set. Gating on `sets` instead re-ran every frame for models that
         // lack idle/walk clips, spamming the "animations were not found" warning.
-        if library.source_gltfs.get(&character) == Some(&gltf_handle)
-            && library.evaluated_characters.contains(&character)
+        if library.source_gltfs.get(&key) == Some(&gltf_handle)
+            && library.evaluated_keys.contains(&key)
         {
             continue;
         }
@@ -182,8 +219,8 @@ fn setup_player_animation_library(
         let Some(gltf) = gltf_assets.get(&gltf_handle) else {
             continue;
         };
-        library.evaluated_characters.insert(character);
-        library.source_gltfs.insert(character, gltf_handle.clone());
+        library.evaluated_keys.insert(key.clone());
+        library.source_gltfs.insert(key.clone(), gltf_handle.clone());
 
         let find_clip = |substrings: &[&str]| -> Option<(String, Handle<AnimationClip>)> {
             for needle in substrings {
@@ -207,9 +244,9 @@ fn setup_player_animation_library(
             if idle_clip == walk_clip {
                 warn!(
                     "idle/walk matched the same clip for {:?}: {:?}",
-                    character, idle_name
+                    key, idle_name
                 );
-                library.sets.remove(&character);
+                library.sets.remove(&key);
                 continue;
             }
             let (graph, nodes) = AnimationGraph::from_clips([idle_clip, walk_clip]);
@@ -221,7 +258,7 @@ fn setup_player_animation_library(
             };
             let graph_handle = animation_graphs.add(graph);
             library.sets.insert(
-                character,
+                key.clone(),
                 CharacterAnimationSet {
                     graph: graph_handle,
                     idle_node,
@@ -230,11 +267,11 @@ fn setup_player_animation_library(
             );
             info!(
                 "Animation set ready for {:?}: idle={:?}, walk={:?}",
-                character, idle_name, walk_name
+                key, idle_name, walk_name
             );
         } else {
-            library.sets.remove(&character);
-            warn!("idle/walk animations were not found for {:?}", character);
+            library.sets.remove(&key);
+            warn!("idle/walk animations were not found for {:?}", key);
         }
     }
 }
@@ -242,13 +279,22 @@ fn setup_player_animation_library(
 fn sync_jump_fallback_mode(
     mut commands: Commands,
     animation_library: Res<PlayerAnimationLibrary>,
-    players: Query<(Entity, Option<&NetworkCharacterChoice>, Option<&Jumping>), With<Player>>,
+    players: Query<
+        (
+            Entity,
+            Option<&NetworkCharacterChoice>,
+            Option<&NetworkAvatar>,
+            Option<&Jumping>,
+        ),
+        With<Player>,
+    >,
 ) {
-    for (entity, character, jumping) in &players {
+    for (entity, character, avatar, jumping) in &players {
         let character = character
             .map(|selected| selected.0)
             .unwrap_or(CharacterChoice::Ipfs);
-        let should_jump_fallback = animation_library.should_use_jump_fallback(character);
+        let key = avatar_key(character, avatar);
+        let should_jump_fallback = animation_library.should_use_jump_fallback(&key);
         if !should_jump_fallback && jumping.is_some() {
             commands.entity(entity).remove::<Jumping>();
         }
@@ -260,7 +306,10 @@ fn bind_player_animation_players(
     library: Res<PlayerAnimationLibrary>,
     player_roots: Query<(), Or<(With<Player>, With<RemotePlayer>)>>,
     owner_transform_query: Query<&Transform, Or<(With<Player>, With<RemotePlayer>)>>,
-    character_query: Query<&NetworkCharacterChoice, Or<(With<Player>, With<RemotePlayer>)>>,
+    character_query: Query<
+        (&NetworkCharacterChoice, Option<&NetworkAvatar>),
+        Or<(With<Player>, With<RemotePlayer>)>,
+    >,
     child_of_query: Query<&ChildOf>,
     mut animation_players: Query<
         (Entity, &mut AnimationPlayer),
@@ -289,11 +338,11 @@ fn bind_player_animation_players(
             continue;
         };
 
-        let Ok(character_choice) = character_query.get(owner) else {
+        let Ok((character_choice, avatar)) = character_query.get(owner) else {
             continue;
         };
-        let character = character_choice.0;
-        let Some(set) = library.get_set(character) else {
+        let key = avatar_key(character_choice.0, avatar);
+        let Some(set) = library.get_set(&key) else {
             continue;
         };
         let last_owner_position = owner_transform_query
@@ -307,9 +356,10 @@ fn bind_player_animation_players(
             AnimationGraphHandle(set.graph.clone()),
             PlayerAnimationBinding {
                 owner,
-                character,
+                key,
                 state: LocomotionAnimState::Idle,
                 last_owner_position,
+                seconds_since_movement: LOCOMOTION_IDLE_GRACE_SECS,
             },
         ));
     }
@@ -318,7 +368,10 @@ fn bind_player_animation_players(
 fn sync_player_animation_state(
     time: Res<Time>,
     library: Res<PlayerAnimationLibrary>,
-    character_query: Query<&NetworkCharacterChoice, Or<(With<Player>, With<RemotePlayer>)>>,
+    character_query: Query<
+        (&NetworkCharacterChoice, Option<&NetworkAvatar>),
+        Or<(With<Player>, With<RemotePlayer>)>,
+    >,
     local_player_query: Query<(), With<Player>>,
     local_movement_query: Query<(Option<&MovementTarget>, Option<&Jumping>), With<Player>>,
     player_state_query: Query<(&Transform, &CombatStats), Or<(With<Player>, With<RemotePlayer>)>>,
@@ -336,22 +389,22 @@ fn sync_player_animation_state(
         let Ok((owner_transform, stats)) = player_state_query.get(binding.owner) else {
             continue;
         };
-        let desired_character = character_query
+        let desired_key = character_query
             .get(binding.owner)
-            .map(|choice| choice.0)
-            .unwrap_or(binding.character);
-        if desired_character != binding.character {
-            let Some(new_set) = library.get_set(desired_character) else {
+            .map(|(choice, avatar)| avatar_key(choice.0, avatar))
+            .unwrap_or_else(|_| binding.key.clone());
+        if desired_key != binding.key {
+            let Some(new_set) = library.get_set(&desired_key) else {
                 continue;
             };
             animation_player.stop_all();
-            binding.character = desired_character;
+            binding.key = desired_key;
             binding.state = LocomotionAnimState::Idle;
             *graph_handle = AnimationGraphHandle(new_set.graph.clone());
             animation_player.play(new_set.idle_node).repeat();
         }
 
-        let Some(set) = library.get_set(binding.character) else {
+        let Some(set) = library.get_set(&binding.key) else {
             continue;
         };
         let active_node = match binding.state {
@@ -376,6 +429,12 @@ fn sync_player_animation_state(
         let speed = distance / time.delta_secs().max(0.001);
         let moved = speed > 0.05;
         binding.last_owner_position = owner_transform.translation;
+        if moved {
+            binding.seconds_since_movement = 0.0;
+        } else {
+            binding.seconds_since_movement += time.delta_secs();
+        }
+        let moved_recently = binding.seconds_since_movement < LOCOMOTION_IDLE_GRACE_SECS;
         let moving_by_intent = if local_player_query.get(binding.owner).is_ok() {
             local_movement_query
                 .get(binding.owner)
@@ -384,7 +443,7 @@ fn sync_player_animation_state(
         } else {
             false
         };
-        let moving = stats.is_alive() && (moving_by_intent || moved);
+        let moving = stats.is_alive() && (moving_by_intent || moved || moved_recently);
         let desired_state = if moving {
             LocomotionAnimState::Walk
         } else {
@@ -401,6 +460,10 @@ fn sync_player_animation_state(
         };
         animation_player.stop_all();
         animation_player.play(node).repeat();
+        info!(
+            "Locomotion animation {:?} -> {:?} for {:?}",
+            binding.state, desired_state, binding.key
+        );
         binding.state = desired_state;
     }
 }
@@ -410,7 +473,15 @@ fn handle_player_input(
     mouse_button_input: Res<ButtonInput<MouseButton>>,
     camera_query: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
-    player_query: Query<(Entity, &CombatStats, Option<&NetworkCharacterChoice>), With<Player>>,
+    player_query: Query<
+        (
+            Entity,
+            &CombatStats,
+            Option<&NetworkCharacterChoice>,
+            Option<&NetworkAvatar>,
+        ),
+        With<Player>,
+    >,
     cam_state: Res<CameraState>,
     animation_library: Res<PlayerAnimationLibrary>,
     minimap_nav: Option<Res<MinimapNavigationState>>,
@@ -432,7 +503,7 @@ fn handle_player_input(
         return;
     };
 
-    let Ok((player_entity, stats, character)) = player_query.single() else {
+    let Ok((player_entity, stats, character, avatar)) = player_query.single() else {
         return;
     };
     if !stats.is_alive() {
@@ -463,7 +534,8 @@ fn handle_player_input(
                             let character = character
                                 .map(|selected| selected.0)
                                 .unwrap_or(CharacterChoice::Ipfs);
-                            if !animation_library.should_use_jump_fallback(character) {
+                            let key = avatar_key(character, avatar);
+                            if !animation_library.should_use_jump_fallback(&key) {
                                 commands.entity(player_entity).remove::<Jumping>();
                             } else {
                                 commands.entity(player_entity).insert(Jumping {

@@ -928,6 +928,6 @@ fn process_restart_request(
     }
 
     if overlay_query.single().is_err() {
-        spawn_team_select_ui(&mut commands, team_selection.character);
+        spawn_team_select_ui(&mut commands, &team_selection);
     }
 }

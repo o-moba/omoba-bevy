@@ -150,8 +150,8 @@ MOVE: Left-click the ground to walk.\n\
 CAMERA: Mouse wheel zoom. Right-click or Alt toggles free camera; use WASD + Q/E while free.\n\
 MINIMAP: Top-left — click to move the camera focus.\n\
 TARGET: Tab selects nearest hostile, middle-click near units/structures, Backspace clears.\n\
-CAST: Skill keys {skills} — same ability on each key until the server adds separate skills.\n\
-SKILL POINTS: Spend with {upgrade} when the upgrade flow is wired (binding reserved).\n\
+CAST: Skill keys {skills} — each key casts that slot of your class kit (W/E/R unlock by level).\n\
+SKILL POINTS: Spend with {upgrade} or the arrows above the hotbar to rank up abilities.\n\
 OBJECTIVE: Destroy the enemy base tower.\n\
 PAUSE: Escape opens the menu."
     )

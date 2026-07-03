@@ -56,6 +56,17 @@ pub enum Character {
     Cube,
 }
 
+/// Hero class selection sent in a `Join`. Mirrors `shared::HeroClass` wire
+/// format (snake_case string; the server decodes unknown values as Warrior).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HeroClass {
+    Warrior,
+    Mage,
+    Ranger,
+    Cleric,
+}
+
 /// A cast target reference. Mirrors `server::TargetId`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TargetId {
@@ -84,10 +95,12 @@ impl TargetId {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientPacket {
     Transform { x: f32, y: f32, z: f32, yaw: f32 },
-    Cast { target: TargetId },
+    Cast { target: TargetId, slot: u8 },
     Join {
         team: Team,
         character: Character,
+        hero_class: HeroClass,
+        avatar: Option<String>,
         session_id: Option<String>,
     },
     Ping,
@@ -128,6 +141,14 @@ pub struct PlayerState {
     /// Per-slot ability ranks (Q/W/E/R). Base rank is 1.
     #[serde(default = "default_ranks")]
     pub ranks: [u8; 4],
+    /// Authoritative hero class id (snake_case, e.g. `"mage"`). Read as a raw
+    /// string so the mirror never lags behind new server-side classes.
+    #[serde(default)]
+    pub hero_class: Option<String>,
+    /// Replicated cosmetic avatar slug (roster avatar) or `None` for the
+    /// legacy character model.
+    #[serde(default)]
+    pub avatar: Option<String>,
 }
 
 fn default_ranks() -> [u8; 4] {

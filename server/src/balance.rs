@@ -4,10 +4,10 @@
 //! The client mirrors **display-only** baselines (`MAX_HP`, `MAX_MANA`) in
 //! `client/src/combat.rs`; keep those in sync when you change player baselines.
 //!
-//! **Skill power:** The live server validates one ranged ability (projectile) using
-//! [`SPELL_MANA_COST`], [`SPELL_COOLDOWN`], and [`PRIMARY_ABILITY_DAMAGE_BY_RANK`]
-//! (currently all entries match [`PROJECTILE_DAMAGE`]). [`SKILL_SLOT_COUNT`] documents the
-//! four-slot progression surface; other slots are not simulated yet.
+//! **Skill power:** Per-class ability numbers (mana, cooldown, range, damage,
+//! heals, rank scaling) live in the `shared` crate (`shared::HeroClass` kits);
+//! the server resolves them authoritatively in `handle_cast_request`. This file
+//! keeps only server-side simulation tuning (projectile flight, world pacing).
 //!
 //! See also: `docs/balance-tuning.md`.
 
@@ -18,25 +18,9 @@ pub const MAX_HP: f32 = 100.0;
 pub const MAX_MANA: f32 = 100.0;
 pub const MANA_REGEN_PER_SECOND: f32 = 8.0;
 
-// --- Primary ability (server-validated projectile) / cooldown–mana economy ---
-pub const SPELL_MANA_COST: f32 = 20.0;
-pub const SPELL_COOLDOWN: Duration = Duration::from_millis(350);
-pub const SPELL_CAST_RANGE: f32 = 28.0;
+// --- Projectile simulation (ability numbers live in the shared class kits) ---
 pub const PROJECTILE_SPEED: f32 = 19.0;
-pub const PROJECTILE_DAMAGE: f32 = 20.0;
-/// Tunable damage per invested rank for the primary server-validated ability (index = rank − 1).
-/// Rank 1 equals the base projectile damage; each further rank adds a flat step so investing
-/// skill points makes the ability hit harder (TASK03).
-pub const PRIMARY_ABILITY_DAMAGE_BY_RANK: [f32; 5] = [
-    PROJECTILE_DAMAGE,
-    PROJECTILE_DAMAGE + 8.0,
-    PROJECTILE_DAMAGE + 16.0,
-    PROJECTILE_DAMAGE + 24.0,
-    PROJECTILE_DAMAGE + 32.0,
-];
-/// Highest investable rank for the primary ability (1-based, bounded by the damage table).
-pub const MAX_SKILL_RANK: u8 = PRIMARY_ABILITY_DAMAGE_BY_RANK.len() as u8;
-/// Skill slots tracked by progression (`skill_points`); four UI slots, one authoritative cast today.
+/// Skill slots tracked by progression (`skill_points`); matches the shared Q/W/E/R kits.
 #[allow(dead_code)]
 pub const SKILL_SLOT_COUNT: usize = 4;
 pub const PROJECTILE_RADIUS: f32 = 0.22;
@@ -144,9 +128,13 @@ mod tests {
     fn player_baselines_and_spell_economy_are_coherent() {
         assert!(MAX_HP > 0.0 && MAX_MANA > 0.0);
         assert!(MANA_REGEN_PER_SECOND >= 0.0);
-        assert!(SPELL_MANA_COST > 0.0 && SPELL_MANA_COST <= MAX_MANA);
-        assert!(PROJECTILE_DAMAGE > 0.0 && PROJECTILE_SPEED > 0.0);
-        assert!(!SPELL_COOLDOWN.is_zero());
+        assert!(PROJECTILE_SPEED > 0.0);
+        // Every shared-kit ability must be affordable at the player mana baseline.
+        for class in shared::HeroClass::ALL {
+            for def in class.abilities() {
+                assert!(def.base_mana_cost <= MAX_MANA, "{}", def.id);
+            }
+        }
     }
 
     #[test]
@@ -176,11 +164,10 @@ mod tests {
     }
 
     #[test]
-    fn primary_ability_damage_ranks_are_positive() {
+    fn skill_slot_count_matches_shared_kits() {
         assert_eq!(SKILL_SLOT_COUNT, 4);
-        for &d in PRIMARY_ABILITY_DAMAGE_BY_RANK.iter() {
-            assert!(d > 0.0);
+        for class in shared::HeroClass::ALL {
+            assert_eq!(class.abilities().len(), SKILL_SLOT_COUNT);
         }
-        assert!((PRIMARY_ABILITY_DAMAGE_BY_RANK[0] - PROJECTILE_DAMAGE).abs() < 0.000_1);
     }
 }
