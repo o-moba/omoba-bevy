@@ -1,9 +1,23 @@
 # Feature Inventory
 
-Canonical version: `0.4.0`
+Canonical version: `0.5.0`
 
 ## Current Playable Surface
 
+- **Environment decoration (TASK-18):** the arena is dressed with stylized
+  low-poly vegetation and props assembled purely from Bevy mesh primitives —
+  3 tree variants (oak/pine/birch), 2 bush variants, grass tufts, 4 flower
+  variants (white/yellow/red/violet), and 2 rock variants — placed by a
+  deterministic seeded scatter (`client/src/decor.rs`, inline splitmix64
+  PRNG, no external assets or new dependencies). Forest belts hug the arena
+  edges, trees and boulders ring the jungle blocks, and grass/flowers fill
+  the open meadow, while exclusion zones derived from the real map constants
+  keep lanes, base pads, towers, neutral camp clearings, the river, and the
+  jungle blocks clear. Purely cosmetic and client-side: no collision, no
+  server or networking changes. Fixed budget: 396 props = 970 entities
+  (ceiling 1200) spawned once at `Startup` under a single `DecorRoot`,
+  reusing 5 shared mesh and 12 shared material handles for batching. **F4**
+  toggles decoration visibility (client-local debug toggle, logged).
 - **Hero classes (TASK-17):** four playable classes — Warrior, Mage, Ranger,
   Cleric — each with a distinct Q/W/E/R kit (16 ability definitions in the
   `shared` crate; projectile damage, self-heal, and self-mana-restore

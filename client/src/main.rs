@@ -3,6 +3,7 @@ use bevy::{asset::AssetPlugin, prelude::*};
 mod camera;
 mod combat;
 mod debug_console;
+mod decor;
 mod game_state;
 mod god_mode;
 mod help_overlay;
@@ -21,6 +22,7 @@ mod world;
 use camera::CameraPlugin;
 use combat::CombatPlugin;
 use debug_console::DebugConsolePlugin;
+use decor::DecorPlugin;
 use game_state::GameStateUiPlugin;
 use god_mode::GodModePlugin;
 use help_overlay::HelpOverlayPlugin;
@@ -57,5 +59,7 @@ fn main() {
             PauseMenuPlugin,
             GodModePlugin,
         ))
+        // Separate call: the plugin tuple above is at Bevy's 15-element limit.
+        .add_plugins(DecorPlugin)
         .run();
 }

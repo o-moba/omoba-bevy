@@ -6,6 +6,31 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-03
+
+### Added
+- **TASK-18 — environment decoration: procedural vegetation from primitives.**
+  - New client-only `DecorPlugin` (`client/src/decor.rs`) that dresses the
+    arena with stylized low-poly props assembled purely from Bevy primitives
+    (Cuboid, Sphere, Cylinder, Cone, Capsule3d): 3 tree variants, 2 bush
+    variants, grass tufts, 4 flower variants, and 2 rock variants — no
+    external art assets.
+  - Deterministic seeded scatter (`generate_layout`, inline splitmix64 PRNG,
+    no new dependencies): forest belts along the arena edges, trees/boulders
+    ringing the jungle blocks, grass/flowers/bushes across the open meadow.
+    Exclusion zones derived from the real map constants keep lanes, base
+    pads, towers, neutral camp clearings, the river, and the jungle blocks
+    completely clear; covered by unit tests.
+  - Purely cosmetic: no collision, no server/shared changes, no networking.
+    Fixed layout: 396 props = 970 entities (budget ceiling 1200), spawned
+    once at `Startup` under a single `DecorRoot`, reusing 5 shared mesh and
+    12 shared material handles so Bevy batches instances.
+  - Client-local F4 debug toggle hides/shows the whole decoration layer
+    (Visibility flip on `DecorRoot`, logged).
+  - `MapLayout` now exposes the lane/river/jungle-block/camp geometry as
+    shared methods consumed by both the map renderer and the decor layout,
+    so the exclusion math cannot drift from the rendered map.
+
 ## [0.4.0] - 2026-07-03
 
 ### Added
