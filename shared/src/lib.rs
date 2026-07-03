@@ -652,4 +652,19 @@ mod tests {
         assert_eq!(normalize_avatar_slug(Some("")), None);
         assert_eq!(normalize_avatar_slug(None), None);
     }
+
+    /// Raid-boss models (TASK-19) live in `client/assets/bosses/`, outside the
+    /// player roster manifest: their slugs must never be player-selectable.
+    #[test]
+    fn boss_slugs_are_not_player_selectable() {
+        for boss_slug in ["wendigo-hollow", "king-mutatio"] {
+            assert!(
+                avatar_roster()
+                    .iter()
+                    .all(|avatar| avatar.slug != boss_slug),
+                "boss slug {boss_slug:?} leaked into the player roster manifest"
+            );
+            assert_eq!(normalize_avatar_slug(Some(boss_slug)), None);
+        }
+    }
 }
