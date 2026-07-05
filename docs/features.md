@@ -1,9 +1,28 @@
 # Feature Inventory
 
-Canonical version: `0.5.0`
+Canonical version: `0.9.0`
 
 ## Current Playable Surface
 
+- **Character scale normalization (TASK-20/21):** every character and boss GLB
+  (legacy SDK models, roster avatars, raid bosses — authored anywhere from
+  0.64 m to 2.41 m tall) is measured once in bind pose directly from the
+  loaded glTF data and rescaled to the shared world-relative target height
+  (default 1.15 world units, range 0.3–3.0), so all characters render at the
+  same size by default (bosses keep their 3× presence multiplier). Persisted
+  target heights from the legacy 0.26 scale migrate to the new default on
+  load. Per-model size tweaks live in
+  `client/assets/config/model_scale_overrides.json` (slug → multiplier,
+  hot-reloaded while the game runs). `OMOBA_MEASURE_MODELS=1 cargo run -p
+  client` runs a headless analyzer that prints the measured height table
+  (`client/src/model_scale.rs`).
+- **Spawn platform traversal (TASK-21):** the 46×46×0.7 base pads are
+  walkable League-style — a client-side `MapLayout::terrain_height(x, z)`
+  function describes the pad top plus a 6-unit ramp band that exactly matches
+  four visible team-colored ramp slabs per pad. Local player gravity/jumps,
+  remote players, and minions ground onto that surface; models rest on their
+  measured foot offset. The server stays flat-ground authoritative (pure
+  visual fake, no protocol changes).
 - **Environment decoration (TASK-18):** the arena is dressed with stylized
   low-poly vegetation and props assembled purely from Bevy mesh primitives —
   3 tree variants (oak/pine/birch), 2 bush variants, grass tufts, 4 flower

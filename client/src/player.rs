@@ -13,6 +13,7 @@ use crate::combat::{CombatStats, MAX_HP};
 use crate::debug_console::DebugConsole;
 use crate::maps::MapLayout;
 use crate::minimap::MinimapNavigationState;
+use crate::model_scale::NormalizeModelScale;
 use crate::net::{
     GameState, GameStateSnapshot, NetworkAvatar, NetworkCharacterChoice, NetworkStructure,
     RemotePlayer, StructureKind,
@@ -33,6 +34,24 @@ pub const JUMP_DURATION: f32 = 0.6;
 const GRAVITY: f32 = 20.0;
 const GROUND_EPSILON: f32 = 0.001;
 const RESPAWN_DELAY_SECONDS: f32 = 5.0;
+
+/// Entity-origin height that puts a character's feet on the walkable surface
+/// at (x, z): terrain height plus the model's measured foot offset. Entities
+/// without a measured model (primitive cube stand-in, or a GLB that is still
+/// loading) keep the legacy half-cube offset.
+pub(crate) fn ground_origin_y(
+    layout: &MapLayout,
+    normalization: Option<&NormalizeModelScale>,
+    x: f32,
+    z: f32,
+) -> f32 {
+    let terrain = layout.terrain_height(x, z);
+    let offset = match normalization.and_then(NormalizeModelScale::foot_local_y) {
+        Some(foot_local_y) => -foot_local_y,
+        None => PLAYER_SIZE * 0.5,
+    };
+    terrain + offset
+}
 
 pub struct PlayerPlugin;
 
@@ -103,7 +122,6 @@ struct MovementTarget {
 #[derive(Component)]
 struct Jumping {
     timer: Timer,
-    start_y: f32,
 }
 
 /// Identity of a player's visual model for animation purposes: either a
@@ -540,7 +558,6 @@ fn handle_player_input(
                             } else {
                                 commands.entity(player_entity).insert(Jumping {
                                     timer: Timer::from_seconds(JUMP_DURATION, TimerMode::Repeating),
-                                    start_y: PLAYER_SIZE / 2.0,
                                 });
                             }
                         }
@@ -628,7 +645,10 @@ fn move_player(
             transform.translation.z = desired.z;
 
             if direction.length_squared() > 0.001 {
-                let target_y_angle = direction.x.atan2(direction.z);
+                // Character models face the entity's -Z (Bevy forward), so
+                // yaw must point -Z along the movement direction; aligning +Z
+                // renders every model walking backwards.
+                let target_y_angle = (-direction.x).atan2(-direction.z);
                 let target_rotation = Quat::from_rotation_y(target_y_angle);
 
                 transform.rotation = transform
@@ -641,31 +661,57 @@ fn move_player(
 
 fn animate_jump(
     time: Res<Time>,
-    mut query: Query<(&mut Transform, &mut Jumping), (With<Player>, With<MovementTarget>)>,
+    map_layout: Res<MapLayout>,
+    mut query: Query<
+        (&mut Transform, &mut Jumping, Option<&NormalizeModelScale>),
+        (With<Player>, With<MovementTarget>),
+    >,
 ) {
-    for (mut transform, mut jumping) in query.iter_mut() {
+    for (mut transform, mut jumping, normalization) in query.iter_mut() {
         jumping.timer.tick(time.delta());
 
         let progress = jumping.timer.fraction();
 
         let jump_offset = (progress * PI).sin() * JUMP_HEIGHT;
 
-        transform.translation.y = jumping.start_y + jump_offset;
+        // Base follows the terrain so hops track ramps instead of clipping.
+        let base_y = ground_origin_y(
+            &map_layout,
+            normalization,
+            transform.translation.x,
+            transform.translation.z,
+        );
+        transform.translation.y = base_y + jump_offset;
     }
 }
 
 fn apply_gravity(
     time: Res<Time>,
-    mut query: Query<(&mut Transform, &mut VerticalVelocity, Option<&Jumping>), With<Player>>,
+    map_layout: Res<MapLayout>,
+    mut query: Query<
+        (
+            &mut Transform,
+            &mut VerticalVelocity,
+            Option<&Jumping>,
+            Option<&NormalizeModelScale>,
+        ),
+        With<Player>,
+    >,
 ) {
-    let ground_y = PLAYER_SIZE / 2.0;
     let dt = time.delta_secs();
 
-    for (mut transform, mut velocity, jumping) in query.iter_mut() {
+    for (mut transform, mut velocity, jumping, normalization) in query.iter_mut() {
         if jumping.is_some() {
             velocity.0 = 0.0;
             continue;
         }
+
+        let ground_y = ground_origin_y(
+            &map_layout,
+            normalization,
+            transform.translation.x,
+            transform.translation.z,
+        );
 
         if transform.translation.y <= ground_y + GROUND_EPSILON {
             transform.translation.y = ground_y;

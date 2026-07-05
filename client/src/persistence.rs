@@ -17,10 +17,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::session_config::DEFAULT_GAME_SERVER_ADDR;
 use crate::team::CharacterChoice;
+use crate::model_scale::{
+    DEFAULT_MODEL_TARGET_HEIGHT, MAX_MODEL_TARGET_HEIGHT, MIN_MODEL_TARGET_HEIGHT,
+    ModelScaleSettings,
+};
 use crate::world::{
     LightingSettings, MAX_AMBIENT_BRIGHTNESS, MAX_LIGHT_ILLUMINANCE, MAX_LIGHT_PITCH_DEG,
-    MAX_LIGHT_YAW_DEG, MAX_MODEL_TARGET_HEIGHT, MIN_AMBIENT_BRIGHTNESS, MIN_LIGHT_ILLUMINANCE,
-    MIN_LIGHT_PITCH_DEG, MIN_LIGHT_YAW_DEG, MIN_MODEL_TARGET_HEIGHT, ModelScaleSettings,
+    MAX_LIGHT_YAW_DEG, MIN_AMBIENT_BRIGHTNESS, MIN_LIGHT_ILLUMINANCE, MIN_LIGHT_PITCH_DEG,
+    MIN_LIGHT_YAW_DEG,
 };
 
 const SCHEMA_VERSION: u32 = 2;
@@ -164,6 +168,18 @@ pub fn clamp_model_target_height(value: f32) -> f32 {
     value.clamp(MIN_MODEL_TARGET_HEIGHT, MAX_MODEL_TARGET_HEIGHT)
 }
 
+/// Resolves a persisted model target height against the current valid range.
+/// Values below the minimum come from the legacy world scale (default used to
+/// be 0.26) and are migrated to the current default instead of being clamped
+/// to the minimum, which would keep characters near-invisible.
+pub fn migrate_model_target_height(stored: f32) -> f32 {
+    if stored < MIN_MODEL_TARGET_HEIGHT {
+        DEFAULT_MODEL_TARGET_HEIGHT
+    } else {
+        clamp_model_target_height(stored)
+    }
+}
+
 pub fn clamp_lighting_settings(mut s: LightingSettings) -> LightingSettings {
     s.illuminance = s
         .illuminance
@@ -256,7 +272,13 @@ pub fn load_persistent_client_settings(
     }
 
     if let Some(h) = disk.model_target_height {
-        model.target_height = clamp_model_target_height(h);
+        let resolved = migrate_model_target_height(h);
+        if (resolved - h).abs() > f32::EPSILON && h < MIN_MODEL_TARGET_HEIGHT {
+            info!(
+                "Migrating legacy model target height {h:.3} -> {resolved:.3} (world rescale)."
+            );
+        }
+        model.target_height = resolved;
     }
 
     if disk.illuminance.is_some()
@@ -439,6 +461,18 @@ mod tests {
     fn clamp_model_respects_bounds() {
         assert_eq!(clamp_model_target_height(0.0), MIN_MODEL_TARGET_HEIGHT);
         assert_eq!(clamp_model_target_height(99.0), MAX_MODEL_TARGET_HEIGHT);
+    }
+
+    #[test]
+    fn migrate_model_target_height_resets_legacy_values() {
+        // Legacy world scale (old default 0.26, old range 0.08..1.2): below
+        // the current minimum means "saved before the world rescale".
+        assert_eq!(migrate_model_target_height(0.26), DEFAULT_MODEL_TARGET_HEIGHT);
+        assert_eq!(migrate_model_target_height(0.08), DEFAULT_MODEL_TARGET_HEIGHT);
+        // In-range values survive as-is; above-range values clamp.
+        assert_eq!(migrate_model_target_height(1.2), 1.2);
+        assert_eq!(migrate_model_target_height(0.5), 0.5);
+        assert_eq!(migrate_model_target_height(99.0), MAX_MODEL_TARGET_HEIGHT);
     }
 
     #[test]

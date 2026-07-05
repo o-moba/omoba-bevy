@@ -4,6 +4,60 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [0.9.1] - 2026-07-06
+
+### Fixed
+- **Characters walked backwards.** Movement code aligned the entity's +Z axis
+  with the walk direction, but character models face -Z (Bevy forward), so
+  every model rendered 180° from its heading. Local yaw now points -Z along
+  the movement direction (`(-dx).atan2(-dz)`); the flipped yaw replicates
+  as-is, so remote players match. Raid-boss models (same VRM-staged facing)
+  keep the server's +Z yaw convention and get a 180° model-child rotation
+  instead.
+
+## [0.9.0] - 2026-07-06
+
+### Added
+- **TASK-21 — world-relative character size.** Characters were normalized to
+  0.26 world units in a world tuned for `PLAYER_SIZE = 1.0` (46-unit base
+  pads, 4-unit jungle blocks, camera at ~19 units) — barely visible.
+  `DEFAULT_MODEL_TARGET_HEIGHT` is now 1.15 with range [0.3, 3.0]; persisted
+  target heights saved under the legacy scale (below the new minimum) are
+  migrated to the new default on load instead of being clamped.
+- **TASK-21 — spawn platform traversal (League-style).** The base pad is now
+  walkable: `MapLayout::terrain_height(x, z)` describes the pad top and a
+  6-unit linear ramp band around it, matching four new visible ramp slabs
+  spawned per pad (corner-overlapping, team-colored). Local player gravity,
+  the jump-fallback hop, remote players, and minions all ground onto that
+  surface client-side; the server keeps its flat ground plane (no protocol
+  change). Normalized models now also expose a measured foot offset, so
+  character feet rest on the surface instead of the entity origin floating
+  at cube half-height (models used to sink ~0.2 into the 0.7-tall pad).
+
+## [0.8.0] - 2026-07-05
+
+### Added
+- **TASK-20 — character scale normalization module.** New
+  `client/src/model_scale.rs` owns all model-size logic. Every character and
+  boss GLB is measured once in bind pose straight from the loaded glTF data
+  (node transforms × mesh bounds — independent of animation state or spawn
+  timing; raw heights ranged 0.64 m..2.41 m across legacy models, roster
+  avatars, and bosses) and its root is rescaled absolutely to the shared
+  target height, so all characters render at exactly the same size by
+  default. Per-model multipliers live in
+  `client/assets/config/model_scale_overrides.json` (slug → multiplier,
+  missing = 1.0), hot-reloaded ~1 s while the game runs. A headless analyzer
+  mode (`OMOBA_MEASURE_MODELS=1 cargo run -p client`) prints the measured
+  height table using the same code path the game uses.
+
+### Fixed
+- **Model rescaling no longer compounds.** The old normalization sampled the
+  world-space AABB after spawn (timing/animation dependent) and re-applied
+  relative factors on top of the already-scaled transform when the target
+  height changed. Scales are now always derived from the raw measured height;
+  the AABB fallback for primitive stand-ins remembers its first raw
+  measurement and stays absolute too.
+
 ## [0.7.1] - 2026-07-03
 
 ### Fixed
