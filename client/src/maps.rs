@@ -6,7 +6,12 @@ use crate::team::Team;
 pub const TARGET_BASE_RUN_TIME_SECONDS: f32 = 45.0;
 pub const TARGET_BASE_DISTANCE: f32 = PLAYER_SPEED * TARGET_BASE_RUN_TIME_SECONDS;
 pub(crate) const BASE_PAD_SIZE: f32 = 46.0;
-const BASE_PAD_HEIGHT: f32 = 0.7;
+pub(crate) const BASE_PAD_HEIGHT: f32 = 0.7;
+/// Horizontal length of the walk-up ramps around each base pad. Characters
+/// ascend/descend over this distance (League-style client-side fake: the
+/// server keeps a flat ground plane, only the rendered height changes).
+pub(crate) const PAD_RAMP_LENGTH: f32 = 6.0;
+const PAD_RAMP_THICKNESS: f32 = 0.12;
 const BASE_EDGE_MARGIN: f32 = 6.0;
 const PLAYER_SPAWN_OFFSET: f32 = 7.0;
 pub(crate) const LANE_WIDTH: f32 = 12.0;
@@ -25,6 +30,33 @@ const JUNGLE_MAP_MID_FRAC: f32 = 0.28;
 
 #[derive(Component)]
 pub struct MapStatic;
+
+/// Height of one pad's walkable surface at an offset (dx, dz) from the pad
+/// center. Full height on the 46×46 top, linear ramp over `PAD_RAMP_LENGTH`
+/// beyond each edge (ramp slabs span the pad plus both corner extensions),
+/// zero outside.
+fn pad_surface_height(dx: f32, dz: f32) -> f32 {
+    let half = BASE_PAD_SIZE * 0.5;
+    let reach = half + PAD_RAMP_LENGTH;
+    let ax = dx.abs();
+    let az = dz.abs();
+    if ax > reach || az > reach {
+        return 0.0;
+    }
+    if ax <= half && az <= half {
+        return BASE_PAD_HEIGHT;
+    }
+    let mut height: f32 = 0.0;
+    if ax > half {
+        let t = ((ax - half) / PAD_RAMP_LENGTH).clamp(0.0, 1.0);
+        height = height.max(BASE_PAD_HEIGHT * (1.0 - t));
+    }
+    if az > half {
+        let t = ((az - half) / PAD_RAMP_LENGTH).clamp(0.0, 1.0);
+        height = height.max(BASE_PAD_HEIGHT * (1.0 - t));
+    }
+    height
+}
 
 #[derive(Resource, Clone, Copy)]
 pub struct MapLayout {
@@ -157,6 +189,17 @@ impl MapLayout {
             Vec2::new(0.0, mid),
             Vec2::new(0.0, -mid),
         ]
+    }
+
+    /// Walkable ground height at an XZ position: `BASE_PAD_HEIGHT` on top of
+    /// either base pad, a linear descent along the ramp band around it, and
+    /// 0.0 on open ground. Matches the rendered pad + ramp-slab geometry:
+    /// side ramps extend `PAD_RAMP_LENGTH` past the pad corners and overlap
+    /// there, so the corner height is the max of the two slabs.
+    pub fn terrain_height(self, x: f32, z: f32) -> f32 {
+        let home = pad_surface_height(x - self.home_spawn.x, z - self.home_spawn.z);
+        let away = pad_surface_height(x - self.away_spawn.x, z - self.away_spawn.z);
+        home.max(away)
     }
 
     /// XZ centers of the three neutral jungle camps
@@ -303,6 +346,20 @@ fn setup_moba_map(
         Vec3::new(BASE_PAD_SIZE, BASE_PAD_HEIGHT, BASE_PAD_SIZE),
         "AwayBasePad",
     );
+    spawn_pad_ramps(
+        &mut commands,
+        &mut meshes,
+        &home_base_material,
+        Vec2::new(layout.home_spawn.x, layout.home_spawn.z),
+        "HomeBasePad",
+    );
+    spawn_pad_ramps(
+        &mut commands,
+        &mut meshes,
+        &away_base_material,
+        Vec2::new(layout.away_spawn.x, layout.away_spawn.z),
+        "AwayBasePad",
+    );
 
     for (idx, center) in layout.jungle_block_centers().iter().copied().enumerate() {
         spawn_box(
@@ -383,6 +440,51 @@ fn spawn_lane_polyline(
     }
 }
 
+/// Four thin sloped slabs connecting a base pad's top edges to the ground.
+/// Their walkable tops match `MapLayout::terrain_height` exactly: each slab
+/// spans the pad side plus both corner extensions, and overlapping slabs at
+/// the corners form the max-of-ramps surface the height function returns.
+fn spawn_pad_ramps(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    material: &Handle<StandardMaterial>,
+    pad_center: Vec2,
+    name_prefix: &str,
+) {
+    let half = BASE_PAD_SIZE * 0.5;
+    let slope_len = (PAD_RAMP_LENGTH * PAD_RAMP_LENGTH + BASE_PAD_HEIGHT * BASE_PAD_HEIGHT).sqrt();
+    let span = BASE_PAD_SIZE + 2.0 * PAD_RAMP_LENGTH;
+    let angle = BASE_PAD_HEIGHT.atan2(PAD_RAMP_LENGTH);
+    let mid = half + PAD_RAMP_LENGTH * 0.5;
+    // Slab center sits half a thickness below the walk line so the top face
+    // is what characters stand on.
+    let center_y = BASE_PAD_HEIGHT * 0.5 - PAD_RAMP_THICKNESS * 0.5;
+
+    let x_mesh = meshes.add(Mesh::from(Cuboid::new(slope_len, PAD_RAMP_THICKNESS, span)));
+    let z_mesh = meshes.add(Mesh::from(Cuboid::new(span, PAD_RAMP_THICKNESS, slope_len)));
+
+    let ramps = [
+        (Vec3::new(mid, 0.0, 0.0), Quat::from_rotation_z(-angle), &x_mesh, "East"),
+        (Vec3::new(-mid, 0.0, 0.0), Quat::from_rotation_z(angle), &x_mesh, "West"),
+        (Vec3::new(0.0, 0.0, mid), Quat::from_rotation_x(angle), &z_mesh, "South"),
+        (Vec3::new(0.0, 0.0, -mid), Quat::from_rotation_x(-angle), &z_mesh, "North"),
+    ];
+    for (offset, rotation, mesh, side) in ramps {
+        commands.spawn((
+            Mesh3d(mesh.clone()),
+            MeshMaterial3d(material.clone()),
+            Transform::from_translation(Vec3::new(
+                pad_center.x + offset.x,
+                center_y,
+                pad_center.y + offset.z,
+            ))
+            .with_rotation(rotation),
+            MapStatic,
+            Name::new(format!("{name_prefix}-Ramp-{side}")),
+        ));
+    }
+}
+
 fn spawn_box(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -423,5 +525,72 @@ mod tests {
         assert!(clamped.x <= layout.max.x + EPSILON);
         assert!(clamped.z >= layout.min.y - EPSILON);
         assert_eq!(clamped.y, 5.0);
+    }
+
+    #[test]
+    fn terrain_height_covers_pad_top_and_spawn_points() {
+        let layout = MapLayout::default();
+        let home = layout.home_spawn;
+        assert!((layout.terrain_height(home.x, home.z) - BASE_PAD_HEIGHT).abs() < EPSILON);
+        for team in [Team::Green, Team::Blue] {
+            let spawn = layout.team_spawn(team);
+            assert!(
+                (layout.terrain_height(spawn.x, spawn.z) - BASE_PAD_HEIGHT).abs() < EPSILON,
+                "spawn point must be on the pad top"
+            );
+        }
+    }
+
+    #[test]
+    fn terrain_height_ramp_descends_linearly_and_continuously() {
+        let layout = MapLayout::default();
+        let home = layout.home_spawn;
+        let half = BASE_PAD_SIZE * 0.5;
+        // Pad edge: still full height (C0-continuous with the top).
+        assert!((layout.terrain_height(home.x + half, home.z) - BASE_PAD_HEIGHT).abs() < EPSILON);
+        // Mid-ramp: half height.
+        let mid = layout.terrain_height(home.x + half + PAD_RAMP_LENGTH * 0.5, home.z);
+        assert!((mid - BASE_PAD_HEIGHT * 0.5).abs() < EPSILON);
+        // Ramp end: ground level (C0-continuous with open ground).
+        assert!(layout.terrain_height(home.x + half + PAD_RAMP_LENGTH, home.z).abs() < EPSILON);
+        // No step anywhere along the walk-off line.
+        let mut previous = layout.terrain_height(home.x, home.z);
+        let steps = 200;
+        let total = half + PAD_RAMP_LENGTH + 2.0;
+        for step in 1..=steps {
+            let x = home.x + total * step as f32 / steps as f32;
+            let current = layout.terrain_height(x, home.z);
+            assert!(
+                (current - previous).abs() < BASE_PAD_HEIGHT * total / PAD_RAMP_LENGTH / steps as f32 + EPSILON,
+                "terrain must not step discontinuously"
+            );
+            previous = current;
+        }
+    }
+
+    #[test]
+    fn terrain_height_corner_matches_overlapping_ramps() {
+        let layout = MapLayout::default();
+        let home = layout.home_spawn;
+        let half = BASE_PAD_SIZE * 0.5;
+        // 1.0 beyond the X edge, 3.0 beyond the Z edge: the X-side slab is
+        // higher and its top is the walkable surface.
+        let corner = layout.terrain_height(home.x + half + 1.0, home.z + half + 3.0);
+        let expected = BASE_PAD_HEIGHT * (1.0 - 1.0 / PAD_RAMP_LENGTH);
+        assert!((corner - expected).abs() < EPSILON);
+        // Beyond the ramp reach diagonally: open ground.
+        let beyond = layout.terrain_height(
+            home.x + half + PAD_RAMP_LENGTH + 0.1,
+            home.z + half + PAD_RAMP_LENGTH + 0.1,
+        );
+        assert!(beyond.abs() < EPSILON);
+    }
+
+    #[test]
+    fn terrain_height_open_ground_is_flat() {
+        let layout = MapLayout::default();
+        assert_eq!(layout.terrain_height(0.0, 0.0), 0.0);
+        let mid_lane = (layout.home_spawn + layout.away_spawn) * 0.5;
+        assert_eq!(layout.terrain_height(mid_lane.x, mid_lane.z), 0.0);
     }
 }

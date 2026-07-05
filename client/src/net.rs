@@ -14,6 +14,7 @@ use std::{
 use crate::bosses::BossVisual;
 use crate::camera::{CameraState, MainCamera, locked_camera_offset};
 use crate::combat::{CombatStats, MAX_HP, MAX_MANA};
+use crate::maps::MapLayout;
 use crate::persistence::{ClientSessionId, FileGameServerAddr, ResolvedServerAddressForPrefs};
 use crate::player::{
     DEBUG_SPEED_MULTIPLIER, DebugSpeedBoost, PLAYER_SIZE, Player, PlayerBody, VerticalVelocity,
@@ -24,7 +25,8 @@ use crate::session_config::{
 };
 use crate::team::TeamSelection;
 use crate::team::{CharacterChoice, Team, TeamSelectRoot, spawn_team_select_ui};
-use crate::world::{NormalizeModelScale, PlayerAssets, PlayerModelResolver};
+use crate::model_scale::{ModelScaleSource, NormalizeModelScale, model_scale_key};
+use crate::world::{PlayerAssets, PlayerModelResolver};
 use shared::HeroClass;
 
 const LOCAL_BIND_ADDR: &str = "0.0.0.0:0";
@@ -198,7 +200,38 @@ impl Plugin for NetworkingPlugin {
             .add_systems(
                 Update,
                 sync_connection_status_ui.in_set(ClientNetPipeline::SyncConnectionUi),
+            )
+            .add_systems(
+                PostUpdate,
+                ground_networked_entities
+                    .before(bevy::transform::TransformSystems::Propagate),
             );
+    }
+}
+
+/// Client-side terrain lift for server-driven entities. The server simulates
+/// a flat ground plane; after interpolation writes the (flat) server Y, this
+/// re-bases remote players and minions onto the local terrain (base pads and
+/// their ramps), matching how the local player is grounded.
+fn ground_networked_entities(
+    map_layout: Res<MapLayout>,
+    mut remote_players: Query<
+        (&mut Transform, Option<&NormalizeModelScale>),
+        (With<RemotePlayer>, Without<NetworkMinion>),
+    >,
+    mut minions: Query<&mut Transform, (With<NetworkMinion>, Without<RemotePlayer>)>,
+) {
+    for (mut transform, normalization) in &mut remote_players {
+        transform.translation.y = crate::player::ground_origin_y(
+            &map_layout,
+            normalization,
+            transform.translation.x,
+            transform.translation.z,
+        );
+    }
+    for mut transform in &mut minions {
+        let terrain = map_layout.terrain_height(transform.translation.x, transform.translation.z);
+        transform.translation.y = terrain + MINION_RADIUS;
     }
 }
 
@@ -1234,12 +1267,12 @@ fn apply_server_snapshot(
             local_player_state.y,
             local_player_state.z,
         );
-        let (local_scene, _local_gltf) = models.resolve(
+        let (local_scene, local_gltf) = models.resolve(
             local_player_state.character,
             local_player_state.avatar.as_deref(),
         );
         let entity = if let Some(scene_handle) = local_scene {
-            commands
+            let mut entity_commands = commands
                 .spawn((
                     SceneRoot(scene_handle),
                     Transform {
@@ -1263,8 +1296,17 @@ fn apply_server_snapshot(
                     player_state_to_combat_stats(local_player_state),
                     player_state_to_progression(local_player_state),
                     Name::new("Player"),
-                ))
-                .id()
+                ));
+            if let Some(gltf) = local_gltf {
+                entity_commands.insert(ModelScaleSource {
+                    gltf,
+                    key: model_scale_key(
+                        local_player_state.character,
+                        local_player_state.avatar.as_deref(),
+                    ),
+                });
+            }
+            entity_commands.id()
         } else {
             commands
                 .spawn((
@@ -1332,7 +1374,7 @@ fn apply_server_snapshot(
             continue;
         }
 
-        let (scene_handle, _gltf_handle) =
+        let (scene_handle, gltf_handle) =
             models.resolve(player.character, player.avatar.as_deref());
         let mesh_handle = player_assets.mesh.clone();
         let material_handle = player_assets.material.clone();
@@ -1361,6 +1403,12 @@ fn apply_server_snapshot(
             },
             Name::new(format!("RemotePlayer-{}", player.id)),
         ));
+        if let Some(gltf) = gltf_handle {
+            entity_commands.insert(ModelScaleSource {
+                gltf,
+                key: model_scale_key(player.character, player.avatar.as_deref()),
+            });
+        }
         entity_commands.with_children(|parent| {
             if let Some(scene_handle) = scene_handle {
                 parent.spawn((

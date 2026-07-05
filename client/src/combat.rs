@@ -19,7 +19,7 @@ use crate::net::{
 };
 use crate::player::Player;
 use crate::team::{Team, TeamSelection};
-use crate::world::NormalizeModelScale;
+use crate::model_scale::NormalizeModelScale;
 use shared::{
     HeroClass, MAX_ABILITY_RANK, SkillSlot, TargetingMode, ability_for_class_slot, scaled_cooldown,
     unlocked_slots_for_level,

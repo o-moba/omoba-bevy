@@ -13,7 +13,7 @@ use std::collections::HashMap;
 
 use crate::camera::MainCamera;
 use crate::net::{NetworkNeutral, NeutralAiState, NeutralAiStateTag, NeutralCampType};
-use crate::world::NormalizeModelScale;
+use crate::model_scale::{ModelScaleSource, NormalizeModelScale};
 
 /// Raid bosses render this many times taller than the normalized player model
 /// (spec D7: 2.5-3.5x for raid presence).
@@ -137,17 +137,25 @@ fn attach_boss_models(
     new_bosses: Query<(Entity, &BossVisual), Added<BossVisual>>,
 ) {
     for (boss_entity, visual) in &new_bosses {
-        let Some((scene, _gltf)) = cache.handles.get(&visual.camp_type) else {
+        let Some((scene, gltf)) = cache.handles.get(&visual.camp_type) else {
             warn!("No staged model for boss {:?}", visual.camp_type);
             continue;
         };
         commands
             .entity(boss_entity)
             .insert(NormalizeModelScale::scaled_by(BOSS_MODEL_HEIGHT_SCALE))
+            .insert(ModelScaleSource {
+                gltf: gltf.clone(),
+                key: boss_slug(visual.camp_type)
+                    .unwrap_or("unknown-boss")
+                    .to_owned(),
+            })
             .with_children(|parent| {
                 parent.spawn((
                     SceneRoot(scene.clone()),
-                    Transform::default(),
+                    // Staged VRM-derived GLBs face -Z while the server yaw
+                    // convention points +Z at the move/attack direction.
+                    Transform::from_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
                     Visibility::default(),
                     Name::new("BossModel"),
                 ));

@@ -1,4 +1,3 @@
-use bevy::camera::primitives::Aabb;
 use bevy::ecs::system::SystemParam;
 use bevy::gltf::Gltf;
 use bevy::prelude::*;
@@ -9,15 +8,12 @@ use std::collections::HashMap;
 use crate::camera::{CameraState, MainCamera, locked_camera_offset};
 use crate::combat::CombatStats;
 use crate::maps::MapLayout;
+use crate::model_scale::{ModelScaleSource, NormalizeModelScale, model_scale_key};
 use crate::net::{NetworkAvatar, NetworkCharacterChoice};
 use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
 use crate::team::{CharacterChoice, Team, TeamSelection};
 
 const USE_CUSTOM_MODEL: bool = true;
-pub const DEFAULT_MODEL_TARGET_HEIGHT: f32 = 0.26;
-pub const MIN_MODEL_TARGET_HEIGHT: f32 = 0.08;
-pub const MAX_MODEL_TARGET_HEIGHT: f32 = 1.2;
-const NORMALIZATION_MIN_HEIGHT: f32 = 0.001;
 pub const DEFAULT_LIGHT_ILLUMINANCE: f32 = 25_000.0;
 pub const MIN_LIGHT_ILLUMINANCE: f32 = 4_000.0;
 pub const MAX_LIGHT_ILLUMINANCE: f32 = 120_000.0;
@@ -116,60 +112,12 @@ impl Plugin for SetupPlugin {
             Startup,
             setup_scene.after(crate::persistence::load_persistent_client_settings),
         )
-        .init_resource::<ModelScaleSettings>()
         .init_resource::<LightingSettings>()
         .init_resource::<AvatarAssetCache>()
         .add_systems(Update, sync_selected_player_assets)
-        .add_systems(Update, normalize_model_scale_system)
         .add_systems(Update, force_vrm_models_double_sided)
         .add_systems(Update, apply_lighting_settings_system)
         .add_systems(Update, spawn_local_player_on_team);
-    }
-}
-
-#[derive(Component)]
-pub struct NormalizeModelScale {
-    base_scale: Vec3,
-    /// Multiplier on the shared normalized target height (1.0 = player-sized;
-    /// raid bosses use [`crate::bosses::BOSS_MODEL_HEIGHT_SCALE`]).
-    height_scale: f32,
-    last_applied_target_height: Option<f32>,
-    /// Height of the model's top above the entity origin after normalization.
-    /// Used to anchor the head bar deterministically instead of per-frame AABB
-    /// sampling, which is unstable for rigged/center-pivot models.
-    pub head_local_y: Option<f32>,
-}
-
-impl NormalizeModelScale {
-    pub fn for_player_model() -> Self {
-        Self {
-            base_scale: Vec3::ONE,
-            height_scale: 1.0,
-            last_applied_target_height: None,
-            head_local_y: None,
-        }
-    }
-
-    /// Like [`Self::for_player_model`], but normalized to `height_scale` times
-    /// the player target height (raid-boss presence).
-    pub fn scaled_by(height_scale: f32) -> Self {
-        Self {
-            height_scale: height_scale.max(0.1),
-            ..Self::for_player_model()
-        }
-    }
-}
-
-#[derive(Resource, Clone, Copy)]
-pub struct ModelScaleSettings {
-    pub target_height: f32,
-}
-
-impl Default for ModelScaleSettings {
-    fn default() -> Self {
-        Self {
-            target_height: DEFAULT_MODEL_TARGET_HEIGHT,
-        }
     }
 }
 
@@ -365,7 +313,7 @@ fn spawn_player_entity(
     avatar: Option<String>,
 ) {
     if let Some(glb_scene) = assets.scene.clone() {
-        commands.spawn((
+        let mut entity_commands = commands.spawn((
             SceneRoot(glb_scene),
             Transform {
                 translation: spawn,
@@ -380,10 +328,16 @@ fn spawn_player_entity(
             VerticalVelocity::default(),
             team,
             NetworkCharacterChoice(character),
-            NetworkAvatar(avatar),
+            NetworkAvatar(avatar.clone()),
             NormalizeModelScale::for_player_model(),
             Name::new(format!("Player-{}", team.as_str())),
         ));
+        if let Some(gltf) = assets.gltf.clone() {
+            entity_commands.insert(ModelScaleSource {
+                gltf,
+                key: model_scale_key(character, avatar.as_deref()),
+            });
+        }
     } else {
         let player_transform = Transform::from_translation(spawn);
         commands.spawn((
@@ -437,70 +391,3 @@ fn force_vrm_models_double_sided(
     }
 }
 
-fn normalize_model_scale_system(
-    settings: Res<ModelScaleSettings>,
-    mut roots: Query<(Entity, &mut Transform, &mut NormalizeModelScale)>,
-    children_query: Query<&Children>,
-    aabb_query: Query<&Aabb>,
-    globals_query: Query<&GlobalTransform>,
-) {
-    for (entity, mut transform, mut normalization) in &mut roots {
-        let target_height = settings
-            .target_height
-            .clamp(MIN_MODEL_TARGET_HEIGHT, MAX_MODEL_TARGET_HEIGHT)
-            * normalization.height_scale;
-        if normalization
-            .last_applied_target_height
-            .is_some_and(|applied| (applied - target_height).abs() < f32::EPSILON)
-        {
-            continue;
-        }
-
-        let mut min_y = f32::INFINITY;
-        let mut max_y = f32::NEG_INFINITY;
-        let mut has_bounds = false;
-
-        for descendant in children_query.iter_descendants(entity) {
-            let (Ok(aabb), Ok(global)) =
-                (aabb_query.get(descendant), globals_query.get(descendant))
-            else {
-                continue;
-            };
-            let center: Vec3 = aabb.center.into();
-            let half: Vec3 = aabb.half_extents.into();
-            for sx in [-1.0_f32, 1.0] {
-                for sy in [-1.0_f32, 1.0] {
-                    for sz in [-1.0_f32, 1.0] {
-                        let local_corner =
-                            center + Vec3::new(half.x * sx, half.y * sy, half.z * sz);
-                        let world_corner = global.transform_point(local_corner);
-                        min_y = min_y.min(world_corner.y);
-                        max_y = max_y.max(world_corner.y);
-                        has_bounds = true;
-                    }
-                }
-            }
-        }
-
-        if !has_bounds {
-            continue;
-        }
-
-        let current_height = max_y - min_y;
-        if current_height <= NORMALIZATION_MIN_HEIGHT {
-            continue;
-        }
-
-        let scale_factor = target_height / current_height;
-        // Top of the model above the entity origin. Sampled at the current scale,
-        // de-scaled to model-local units, then re-scaled to the normalized size.
-        // Pivot-independent, so the head bar sits above every model regardless of
-        // where the GLB origin sits inside the mesh.
-        let prev_scale_y = transform.scale.y.max(NORMALIZATION_MIN_HEIGHT);
-        let top_above_origin = max_y - transform.translation.y;
-        let head_local_y = top_above_origin / prev_scale_y * scale_factor;
-        transform.scale = normalization.base_scale * Vec3::splat(scale_factor);
-        normalization.last_applied_target_height = Some(target_height);
-        normalization.head_local_y = Some(head_local_y);
-    }
-}
