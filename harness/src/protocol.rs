@@ -209,11 +209,25 @@ pub struct TeamBuffState {
     pub remaining_secs: f32,
 }
 
+/// Match phase. Mirrors `server::GameState` (internally tagged, snake_case).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum GameState {
+    #[default]
+    Lobby,
+    /// Release-mode matchmaking: players joined so far vs. roster size.
+    Forming { ready: u32, needed: u32 },
+    /// Full roster found; match starts when the countdown elapses.
+    Starting { countdown_ms: u32 },
+    Running,
+    Victory { winner: Team },
+}
+
 /// Inbound server -> client packets. Mirror of `server::ServerPacket`.
 ///
 /// Only the `Snapshot` variant exists today. Extra snapshot fields the harness
-/// does not use (projectiles, structures, minions, game_state, ...) are
-/// intentionally not modeled and are ignored during deserialization.
+/// does not use (projectiles, structures, minions, ...) are intentionally not
+/// modeled and are ignored during deserialization.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerPacket {
@@ -227,6 +241,9 @@ pub enum ServerPacket {
         /// Active boss team buffs (additive `serde(default)` field).
         #[serde(default)]
         team_buffs: Vec<TeamBuffState>,
+        /// Match phase (Lobby/Forming/Starting/Running/Victory).
+        #[serde(default)]
+        game_state: GameState,
     },
 }
 
@@ -268,6 +285,13 @@ impl ServerPacket {
     pub fn team_buffs(&self) -> &[TeamBuffState] {
         match self {
             ServerPacket::Snapshot { team_buffs, .. } => team_buffs,
+        }
+    }
+
+    /// Borrows the match phase carried by a snapshot.
+    pub fn game_state(&self) -> &GameState {
+        match self {
+            ServerPacket::Snapshot { game_state, .. } => game_state,
         }
     }
 }

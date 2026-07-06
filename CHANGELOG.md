@@ -4,6 +4,40 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [0.10.0] - 2026-07-06
+
+### Added
+- **TASK-22 — matchmaking and gated match start.** The server now has two
+  explicit match modes (`OMOBA_MATCH_MODE`): `release` (default) queues
+  joining players, forms the match to a full 5v5 roster
+  (`2 × OMOBA_TEAM_SIZE`, default 5, clamped 1–16), assigns balanced teams
+  server-side (client team choice becomes a preference), runs a 3-second
+  countdown, and only then starts the match; `dev` preserves the historical
+  instant start on first join for local development. New replicated match
+  phases `forming { ready, needed }` and `starting { countdown_ms }`;
+  countdown rolls back to forming if a player drops, and an empty queue
+  returns to lobby. Joins beyond a full roster are rejected and logged.
+- **Client matchmaking UX.** The lobby overlay now walks through the search
+  states: "Searching for match...", "Waiting for players — X/10",
+  "Match found! Starting in N...". The client adopts the server-assigned
+  team on spawn (release-mode balancing) instead of waiting for its
+  requested team to be acked.
+- **Fill bots for solo testing.** `cargo run -p harness --bin bots`
+  (`make bots`, `make play-bots`) joins N dummy UDP clients (round-robin
+  classes/avatars, join-resend until acked, ping keepalive, light wander)
+  so one developer can fill a 5v5 queue and walk the full matchmaking flow.
+- **Makefile/dev-flow split.** `make server` (release), `make server-dev`,
+  `make start` (dev quick-start, unchanged UX), `make start-release`,
+  `make play-bots`, `make bots BOTS=<n>`, extended `make stop`; RUNBOOK and
+  README document modes, env vars, and the solo bot flow, and state
+  explicitly that instant start is dev-only.
+- **Tests.** 10 new server unit tests (mode parsing, formation gating at
+  9/10, countdown + rollback, 5v5 balancing, full-match rejection, dev
+  instant start), a client overlay-state test, and a release-mode harness
+  integration test (`OMOBA_TEAM_SIZE=1`: solo waits, second player triggers
+  countdown → running, teams balance 1v1). Existing harness gameplay tests
+  now run the server explicitly in dev mode.
+
 ## [0.9.1] - 2026-07-06
 
 ### Fixed

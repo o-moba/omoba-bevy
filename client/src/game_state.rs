@@ -61,6 +61,25 @@ fn setup_game_state_ui(mut commands: Commands) {
         });
 }
 
+/// Matchmaking overlay text for the pre-match states. `None` = keep the
+/// overlay hidden (join not committed yet - the select screen is visible).
+fn matchmaking_status_text(state: &GameState, join_committed: bool) -> Option<String> {
+    if !join_committed {
+        return None;
+    }
+    match state {
+        GameState::Lobby => Some("Searching for match...".to_owned()),
+        GameState::Forming { ready, needed } => Some(format!(
+            "Searching for match...\nWaiting for players - {ready}/{needed}"
+        )),
+        GameState::Starting { countdown_ms } => Some(format!(
+            "Match found!\nStarting in {}...",
+            countdown_ms.div_ceil(1000).max(1)
+        )),
+        GameState::Running | GameState::Victory { .. } => None,
+    }
+}
+
 fn update_game_state_ui(
     game_state: Res<GameStateSnapshot>,
     client_session: Res<ClientSession>,
@@ -83,17 +102,21 @@ fn update_game_state_ui(
     }
 
     match game_state.state {
-        GameState::Lobby => {
+        GameState::Lobby | GameState::Forming { .. } | GameState::Starting { .. } => {
             // Before the local join is committed the select screen is up;
             // keep the lobby overlay hidden so it never obscures that flow.
-            if client_session.join_flow_committed {
-                *visibility = Visibility::Visible;
-                *background = BackgroundColor(LOBBY_COLOR);
-                label.0 = "Waiting for match to start...".to_string();
-            } else {
-                *visibility = Visibility::Hidden;
-                *background = BackgroundColor(Color::NONE);
-                label.0.clear();
+            match matchmaking_status_text(&game_state.state, client_session.join_flow_committed)
+            {
+                Some(text) => {
+                    *visibility = Visibility::Visible;
+                    *background = BackgroundColor(LOBBY_COLOR);
+                    label.0 = text;
+                }
+                None => {
+                    *visibility = Visibility::Hidden;
+                    *background = BackgroundColor(Color::NONE);
+                    label.0.clear();
+                }
             }
         }
         GameState::Running => {
@@ -197,5 +220,43 @@ mod tests {
             Visibility::Visible,
             "committed join in lobby shows the waiting overlay"
         );
+    }
+
+    #[test]
+    fn matchmaking_text_covers_all_search_states() {
+        // Not committed: overlay stays hidden regardless of state.
+        assert_eq!(matchmaking_status_text(&GameState::Lobby, false), None);
+        assert_eq!(
+            matchmaking_status_text(
+                &GameState::Forming {
+                    ready: 3,
+                    needed: 10
+                },
+                false
+            ),
+            None
+        );
+        // Committed: every pre-match state has a distinct, readable message.
+        assert_eq!(
+            matchmaking_status_text(&GameState::Lobby, true).unwrap(),
+            "Searching for match..."
+        );
+        let forming = matchmaking_status_text(
+            &GameState::Forming {
+                ready: 3,
+                needed: 10,
+            },
+            true,
+        )
+        .unwrap();
+        assert!(forming.contains("3/10"), "forming shows progress: {forming}");
+        let starting =
+            matchmaking_status_text(&GameState::Starting { countdown_ms: 2400 }, true).unwrap();
+        assert!(
+            starting.contains("Starting in 3"),
+            "countdown rounds up: {starting}"
+        );
+        // In-match states render no matchmaking overlay.
+        assert_eq!(matchmaking_status_text(&GameState::Running, true), None);
     }
 }

@@ -32,7 +32,12 @@ pub struct ServerProcess {
 }
 
 impl ServerProcess {
-    /// Spawns the server on a free loopback port and blocks until it is ready.
+    /// Spawns a **dev-mode** server (instant match start on first join) on a
+    /// free loopback port and blocks until it is ready.
+    ///
+    /// Dev mode preserves the instant-start assumption baked into the
+    /// existing gameplay scenarios; matchmaking scenarios use
+    /// [`Self::spawn_with_env`] to run the server in release mode instead.
     ///
     /// Retries up to [`MAX_SPAWN_ATTEMPTS`] times with a fresh port if the
     /// server loses the port race (binds the reserved port a moment too late).
@@ -40,9 +45,15 @@ impl ServerProcess {
     /// retry is fast — no waiting out the full [`READY_TIMEOUT`]. Panics with a
     /// clear message only after every attempt is exhausted.
     pub fn spawn() -> Self {
+        Self::spawn_with_env(&[("OMOBA_MATCH_MODE", "dev")])
+    }
+
+    /// Like [`Self::spawn`] but with explicit extra environment variables
+    /// (e.g. `OMOBA_MATCH_MODE=release`, `OMOBA_TEAM_SIZE=1`).
+    pub fn spawn_with_env(envs: &[(&str, &str)]) -> Self {
         let mut last_error = String::new();
         for attempt in 1..=MAX_SPAWN_ATTEMPTS {
-            match Self::try_spawn_once() {
+            match Self::try_spawn_once(envs) {
                 Ok(server) => return server,
                 Err(error) => last_error = format!("attempt {attempt}/{MAX_SPAWN_ATTEMPTS}: {error}"),
             }
@@ -55,7 +66,7 @@ impl ServerProcess {
 
     /// Single spawn attempt on a freshly reserved port. Returns an error string
     /// (instead of panicking) so the caller can retry on a lost port race.
-    fn try_spawn_once() -> Result<Self, String> {
+    fn try_spawn_once(envs: &[(&str, &str)]) -> Result<Self, String> {
         let port = free_loopback_port();
         let addr: SocketAddr = format!("127.0.0.1:{port}")
             .parse()
@@ -66,6 +77,9 @@ impl ServerProcess {
             .env("SERVER_ADDR", addr.to_string())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
+        for (key, value) in envs {
+            command.env(key, value);
+        }
 
         let mut child = command
             .spawn()

@@ -9,14 +9,32 @@ Entry point: see [README.md](README.md) for first-time setup and a controls summ
 - Rust toolchain (`rustup`) installed.
 - Repository cloned and dependencies fetched (`cargo build --workspace`).
 
-## Quick Start (two-client local play)
+## Match Modes (TASK-22)
+
+The server has two explicit match-start modes, selected with
+`OMOBA_MATCH_MODE`:
+
+| Mode | Behavior | When to use |
+|---|---|---|
+| `release` (**default**) | Production-like matchmaking: players who join land in a queue, the match forms to a full 5v5 roster (`2 × OMOBA_TEAM_SIZE`), teams are **assigned by the server** (balanced, client choice is a preference only), a 3-second countdown runs, and only then the match starts. A solo player waits at "Searching for match..." forever — by design. | Anything player-facing / release-like. |
+| `dev` | Instant start: the first join flips the match to Running immediately and the client-chosen team is honored. This is the historical development behavior. | Local development and debugging ONLY. **Never ship dev mode.** |
+
+The bare server (`make server`, `cargo run -p server`) runs **release** mode —
+you cannot accidentally start an under-filled match in a production-like
+setup. Every quick dev flow goes through an explicit dev target.
+
+Client-side search states you should see in release mode after picking a
+class/avatar/team: `Searching for match...` → `Waiting for players — X/10` →
+`Match found! Starting in N...` → match begins.
+
+## Quick Start (dev mode, two-client local play)
 
 ```sh
 make start
 ```
 
-This launches:
-1. The game server (background) bound to `0.0.0.0:4000`.
+This launches (all in **dev** match mode — instant start):
+1. The game server (background) bound to `0.0.0.0:4000` with `OMOBA_MATCH_MODE=dev`.
 2. A first game client (background) connecting to `127.0.0.1:4000`.
 3. A second game client (foreground) connecting to `127.0.0.1:4000`.
 
@@ -32,15 +50,49 @@ Restart from scratch (stop → wait → start):
 make restart
 ```
 
+## Full Match Flow Solo (release mode + bots)
+
+One developer can walk through the real matchmaking UX end-to-end:
+
+```sh
+make play-bots
+```
+
+This starts a release-mode server, nine fill bots in the background, and your
+client in the foreground. Pick a class/avatar/team in the client — you are
+the 10th player: the overlay shows the queue filling, `Match found!`, the
+countdown, and the match starts as a real 5v5 (the bots wander near their
+spawns; they test matchmaking and match-start UX, not combat).
+
+Manual variant (separate terminals):
+
+```sh
+make server            # terminal 1: release-mode server
+make game              # terminal 2: your client, join the queue
+make bots              # terminal 3: fill the remaining 9 seats
+# make bots BOTS=4     #   ...or any other number of bots
+```
+
+Checking matchmaking behavior quickly without a GPU:
+
+```sh
+make verify-gameplay   # includes the release-mode formation harness test
+```
+
 ## Individual Commands
 
 | Goal | Command |
 |---|---|
-| Start server only | `make server` |
+| Start server (release matchmaking) | `make server` |
+| Start server (dev instant-start) | `make server-dev` |
 | Start one client | `make game` |
-| Start server + 2 clients | `make start` |
-| Stop all local processes | `make stop` |
-| Full restart | `make restart` |
+| Dev quick-start: dev server + 2 clients | `make start` |
+| Release server + 1 client | `make start-release` |
+| Full solo 5v5 demo (server + 9 bots + client) | `make play-bots` |
+| Fill bots for a running server | `make bots` (`BOTS=<n>`, `BOTS_SERVER=<addr>`) |
+| Stop all local processes (incl. bots) | `make stop` |
+| Full dev restart | `make restart` |
+| Headless gameplay + matchmaking tests | `make verify-gameplay` |
 
 ## Environment Variables
 
@@ -48,6 +100,9 @@ make restart
 |---|---|---|
 | `SERVER_ADDR` | `0.0.0.0:4000` | Address the server binds to |
 | `GAME_SERVER_ADDR` | `127.0.0.1:4000` | Server address clients connect to |
+| `OMOBA_MATCH_MODE` | `release` | `release` = queue to full 5v5 before start; `dev` = instant start on first join (dev only) |
+| `OMOBA_TEAM_SIZE` | `5` | Players per team in release mode (clamped 1–16); `1` gives a 1v1 with release semantics for quick checks |
+| `OMOBA_AUTOJOIN` | unset | Client joins without UI: `<class>:<avatar-slug|->:<team>` |
 
 Example — run server on a non-default port:
 
@@ -55,6 +110,14 @@ Example — run server on a non-default port:
 SERVER_ADDR=0.0.0.0:5000 make server
 # in another terminal:
 GAME_SERVER_ADDR=127.0.0.1:5000 make game
+```
+
+Example — release-semantics 1v1 sanity check on one machine:
+
+```sh
+OMOBA_TEAM_SIZE=1 make server      # terminal 1
+make game                          # terminal 2: joins, waits at 1/2
+make bots BOTS=1                   # terminal 3: fills the seat, match starts
 ```
 
 ## Expected Startup Log Output
