@@ -516,6 +516,15 @@ enum ServerPacket {
 pub enum GameState {
     #[default]
     Lobby,
+    /// Release-mode matchmaking: players joined so far vs. roster size.
+    Forming {
+        ready: u32,
+        needed: u32,
+    },
+    /// Full roster found; the match starts when the countdown elapses.
+    Starting {
+        countdown_ms: u32,
+    },
     Running,
     Victory {
         winner: Team,
@@ -1137,6 +1146,15 @@ fn ingest_server_snapshot_packets(
     pending.frame = latest_snapshot;
 }
 
+/// Grouped UI-side resources for [`apply_server_snapshot`] (Bevy caps system
+/// functions at 16 parameters).
+#[derive(bevy::ecs::system::SystemParam)]
+struct SnapshotUiState<'w> {
+    game_state_snapshot: ResMut<'w, GameStateSnapshot>,
+    cam_state: ResMut<'w, CameraState>,
+    team_selection: ResMut<'w, TeamSelection>,
+}
+
 fn apply_server_snapshot(
     mut commands: Commands,
     mut pending: ResMut<PendingServerSnapshotFrame>,
@@ -1155,9 +1173,13 @@ fn apply_server_snapshot(
     player_assets: Res<PlayerAssets>,
     mut models: PlayerModelResolver,
     visuals: Res<NetworkVisualAssets>,
-    mut game_state_snapshot: ResMut<GameStateSnapshot>,
-    mut cam_state: ResMut<CameraState>,
+    mut ui_state: SnapshotUiState,
 ) {
+    let SnapshotUiState {
+        game_state_snapshot,
+        cam_state,
+        team_selection,
+    } = &mut ui_state;
     let Some(data) = pending.frame.take() else {
         return;
     };
@@ -1255,12 +1277,19 @@ fn apply_server_snapshot(
             }
         }
     } else if let Some(local_player_state) = local_player_state {
-        // Wait for server ack of selected team to avoid first spawn on default Green.
-        let Some(selected_team) = selected_team_for_spawn else {
+        // Spawn only after the local join was committed (a team was picked).
+        // Snapshots list joined players only, so our presence in the list is
+        // the server's join ack. The server may have assigned a different
+        // team than requested (release-mode balancing) - adopt it as truth.
+        if selected_team_for_spawn.is_none() {
             return;
-        };
-        if local_player_state.team != selected_team {
-            return;
+        }
+        if team_selection.team != Some(local_player_state.team) {
+            info!(
+                "Server assigned team {} (matchmaking)",
+                local_player_state.team.as_str()
+            );
+            team_selection.team = Some(local_player_state.team);
         }
         let spawn = Vec3::new(
             local_player_state.x,

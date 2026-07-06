@@ -1,9 +1,19 @@
 # Feature Inventory
 
-Canonical version: `0.9.0`
+Canonical version: `0.10.0`
 
 ## Current Playable Surface
 
+- **Matchmaking and gated match start (TASK-22):** in release mode (server
+  default) players who join land in a queue; the match forms to a full 5v5
+  roster, teams are assigned and balanced server-side, a 3-second countdown
+  runs, and only then the match starts — a solo player cannot start an
+  under-filled match. The client overlay walks through "Searching for
+  match..." → "Waiting for players — X/10" → "Match found! Starting in N...".
+  `OMOBA_MATCH_MODE=dev` keeps the instant-start dev flow (`make start`,
+  `make server-dev`); `OMOBA_TEAM_SIZE` scales the roster (1–16 per team)
+  for playtests. `make play-bots` / `make bots` fill the queue with dummy
+  UDP bots so one developer can walk the whole flow (see RUNBOOK.md).
 - **Character scale normalization (TASK-20/21):** every character and boss GLB
   (legacy SDK models, roster avatars, raid bosses — authored anywhere from
   0.64 m to 2.41 m tall) is measured once in bind pose directly from the

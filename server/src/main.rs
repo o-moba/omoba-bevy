@@ -398,10 +398,235 @@ enum ServerPacket {
 enum GameState {
     #[default]
     Lobby,
+    /// Release-mode match formation: players joined so far vs. roster size.
+    Forming {
+        ready: u32,
+        needed: u32,
+    },
+    /// Full roster assembled; match starts when the countdown elapses.
+    Starting {
+        countdown_ms: u32,
+    },
     Running,
     Victory {
         winner: Team,
     },
+}
+
+/// How matches are allowed to start.
+///
+/// * `Release` — production-like: the match forms to a full
+///   `2 x team_size` roster with server-assigned balanced teams before it
+///   starts. Safe default.
+/// * `Dev` — local development: the first join starts the match immediately
+///   and the client-chosen team is honored (the pre-TASK-22 behavior).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MatchMode {
+    Release,
+    Dev,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MatchConfig {
+    mode: MatchMode,
+    team_size: u32,
+}
+
+const DEFAULT_TEAM_SIZE: u32 = 5;
+const MIN_TEAM_SIZE: u32 = 1;
+const MAX_TEAM_SIZE: u32 = 16;
+const MATCH_START_COUNTDOWN_MS: u32 = 3_000;
+
+fn parse_match_mode(raw: Option<&str>) -> MatchMode {
+    match raw.map(|value| value.trim().to_ascii_lowercase()).as_deref() {
+        None | Some("") | Some("release") | Some("normal") => MatchMode::Release,
+        Some("dev") | Some("debug") => MatchMode::Dev,
+        Some(other) => {
+            eprintln!(
+                "Unknown OMOBA_MATCH_MODE '{other}' - falling back to release (expected 'release' or 'dev')"
+            );
+            MatchMode::Release
+        }
+    }
+}
+
+fn parse_team_size(raw: Option<&str>) -> u32 {
+    let Some(raw) = raw else {
+        return DEFAULT_TEAM_SIZE;
+    };
+    match raw.trim().parse::<u32>() {
+        Ok(value) => value.clamp(MIN_TEAM_SIZE, MAX_TEAM_SIZE),
+        Err(_) => {
+            eprintln!("Invalid OMOBA_TEAM_SIZE '{raw}' - using default {DEFAULT_TEAM_SIZE}");
+            DEFAULT_TEAM_SIZE
+        }
+    }
+}
+
+impl MatchConfig {
+    fn from_env() -> Self {
+        Self {
+            mode: parse_match_mode(std::env::var("OMOBA_MATCH_MODE").ok().as_deref()),
+            team_size: parse_team_size(std::env::var("OMOBA_TEAM_SIZE").ok().as_deref()),
+        }
+    }
+
+    /// Instant-start config used by unit tests and as the documented dev
+    /// baseline.
+    #[cfg(test)]
+    fn dev() -> Self {
+        Self {
+            mode: MatchMode::Dev,
+            team_size: DEFAULT_TEAM_SIZE,
+        }
+    }
+
+    #[cfg(test)]
+    fn release(team_size: u32) -> Self {
+        Self {
+            mode: MatchMode::Release,
+            team_size,
+        }
+    }
+
+    fn roster_size(&self) -> u32 {
+        self.team_size * 2
+    }
+}
+
+fn joined_count(players: &HashMap<SocketAddr, ConnectedPlayer>) -> u32 {
+    players.values().filter(|player| player.joined).count() as u32
+}
+
+fn joined_team_counts(players: &HashMap<SocketAddr, ConnectedPlayer>) -> (u32, u32) {
+    let mut green = 0;
+    let mut blue = 0;
+    for player in players.values().filter(|player| player.joined) {
+        match player.state.team {
+            Team::Green => green += 1,
+            Team::Blue => blue += 1,
+        }
+    }
+    (green, blue)
+}
+
+/// Release-mode team assignment: the joining player goes to the smaller team
+/// (tie -> Green). Returns `None` when the match roster is already full.
+fn assign_release_team(
+    players: &HashMap<SocketAddr, ConnectedPlayer>,
+    team_size: u32,
+) -> Option<Team> {
+    let (green, blue) = joined_team_counts(players);
+    if green >= team_size && blue >= team_size {
+        return None;
+    }
+    if green <= blue && green < team_size {
+        Some(Team::Green)
+    } else {
+        Some(Team::Blue)
+    }
+}
+
+/// Shared `-> Running` transition: arms the raid-boss spawn schedule.
+fn start_match_running(
+    game_state: &mut GameState,
+    neutrals: &mut HashMap<u64, Neutral>,
+    now: Instant,
+) {
+    *game_state = GameState::Running;
+    schedule_boss_spawns(neutrals, now);
+    println!(
+        "Match running. Boss schedule armed: wendigo_boss in {}s, king_mutatio_boss in {}s",
+        BOTTOM_BOSS_SPAWN_DELAY.as_secs(),
+        TOP_BOSS_SPAWN_DELAY.as_secs()
+    );
+}
+
+/// Formation step applied right after a successful join.
+/// Dev: first join starts the match immediately (legacy behavior).
+/// Release: joins only move `Lobby -> Forming`; the per-tick formation
+/// logic owns `Forming -> Starting -> Running`.
+fn advance_formation_on_join(
+    game_state: &mut GameState,
+    players: &HashMap<SocketAddr, ConnectedPlayer>,
+    neutrals: &mut HashMap<u64, Neutral>,
+    config: MatchConfig,
+    now: Instant,
+) {
+    match config.mode {
+        MatchMode::Dev => {
+            if matches!(game_state, GameState::Lobby) {
+                println!("First player joined - match starting (dev mode)");
+                start_match_running(game_state, neutrals, now);
+            }
+        }
+        MatchMode::Release => {
+            if matches!(game_state, GameState::Lobby) {
+                let ready = joined_count(players);
+                println!(
+                    "Matchmaking: forming match {ready}/{} players",
+                    config.roster_size()
+                );
+                *game_state = GameState::Forming {
+                    ready,
+                    needed: config.roster_size(),
+                };
+            }
+        }
+    }
+}
+
+/// Per-tick formation logic (release mode): keeps `Forming` counters fresh,
+/// promotes a full roster to the `Starting` countdown, rolls back to
+/// `Forming` when someone drops out mid-countdown, returns to `Lobby` when
+/// everyone leaves, and starts the match when the countdown elapses.
+fn tick_match_formation(
+    game_state: &mut GameState,
+    players: &HashMap<SocketAddr, ConnectedPlayer>,
+    neutrals: &mut HashMap<u64, Neutral>,
+    config: MatchConfig,
+    dt: f32,
+    now: Instant,
+) {
+    let needed = config.roster_size();
+    let ready = joined_count(players);
+    match game_state {
+        GameState::Forming { .. } => {
+            if ready == 0 {
+                println!("Matchmaking: queue empty - back to lobby");
+                *game_state = GameState::Lobby;
+            } else if ready >= needed {
+                println!(
+                    "Matchmaking: match found ({ready}/{needed}) - starting in {}s",
+                    MATCH_START_COUNTDOWN_MS / 1000
+                );
+                *game_state = GameState::Starting {
+                    countdown_ms: MATCH_START_COUNTDOWN_MS,
+                };
+            } else {
+                *game_state = GameState::Forming { ready, needed };
+            }
+        }
+        GameState::Starting { countdown_ms } => {
+            if ready < needed {
+                println!(
+                    "Matchmaking: player left during countdown ({ready}/{needed}) - back to forming"
+                );
+                *game_state = GameState::Forming { ready, needed };
+            } else {
+                let elapsed_ms = (dt * 1000.0).max(0.0) as u32;
+                let remaining = countdown_ms.saturating_sub(elapsed_ms);
+                if remaining == 0 {
+                    start_match_running(game_state, neutrals, now);
+                } else {
+                    *game_state = GameState::Starting {
+                        countdown_ms: remaining,
+                    };
+                }
+            }
+        }
+        GameState::Lobby | GameState::Running | GameState::Victory { .. } => {}
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -611,10 +836,11 @@ struct ServerRuntime {
     last_snapshot_at: Instant,
     last_simulation_at: Instant,
     last_wave_spawn_at: Instant,
+    match_config: MatchConfig,
 }
 
 impl ServerRuntime {
-    fn new(socket: UdpSocket) -> Self {
+    fn new(socket: UdpSocket, match_config: MatchConfig) -> Self {
         let map_layout = build_map_layout();
         let mut next_neutral_id: u64 = 9_001;
         let mut neutrals = build_neutral_camps(&mut next_neutral_id);
@@ -643,6 +869,7 @@ impl ServerRuntime {
             last_wave_spawn_at: Instant::now()
                 .checked_sub(MINION_WAVE_INTERVAL)
                 .unwrap_or_else(Instant::now),
+            match_config,
         }
     }
 
@@ -663,6 +890,7 @@ impl ServerRuntime {
             last_wave_spawn_at,
             neutrals,
             team_buffs,
+            match_config,
             ..
         } = self;
 
@@ -731,10 +959,31 @@ impl ServerRuntime {
                             ) {
                                 continue;
                             }
+                            // Team resolution: dev mode honors the client's
+                            // choice; release mode balances teams server-side
+                            // (rejoining players keep their original team).
+                            let assigned_team = match match_config.mode {
+                                MatchMode::Dev => Some(team),
+                                MatchMode::Release => {
+                                    let existing_team = players
+                                        .get(&addr)
+                                        .filter(|player| player.joined)
+                                        .map(|player| player.state.team);
+                                    existing_team
+                                        .or_else(|| assign_release_team(players, match_config.team_size))
+                                }
+                            };
+                            let Some(assigned_team) = assigned_team else {
+                                println!(
+                                    "Matchmaking: match is full ({} players) - join from {addr} rejected",
+                                    match_config.roster_size()
+                                );
+                                continue;
+                            };
                             if let Some(player) = players.get_mut(&addr) {
                                 handle_join_request(
                                     player,
-                                    team,
+                                    assigned_team,
                                     character,
                                     hero_class,
                                     avatar.as_deref(),
@@ -742,17 +991,13 @@ impl ServerRuntime {
                                     now,
                                 );
                             }
-                            if matches!(game_state, GameState::Lobby) {
-                                println!("First player joined - match starting");
-                                *game_state = GameState::Running;
-                                // Match start: arm the raid-boss spawn schedule.
-                                schedule_boss_spawns(neutrals, now);
-                                println!(
-                                    "Boss schedule armed: wendigo_boss in {}s, king_mutatio_boss in {}s",
-                                    BOTTOM_BOSS_SPAWN_DELAY.as_secs(),
-                                    TOP_BOSS_SPAWN_DELAY.as_secs()
-                                );
-                            }
+                            advance_formation_on_join(
+                                game_state,
+                                players,
+                                neutrals,
+                                *match_config,
+                                now,
+                            );
                         }
                         ClientPacket::Ping => {
                             ensure_player_connected(players, map_layout, addr, next_player_id, now);
@@ -863,6 +1108,7 @@ impl ServerRuntime {
             team_buffs,
             last_wave_spawn_at,
             last_snapshot_at,
+            match_config,
             ..
         } = self;
 
@@ -945,6 +1191,10 @@ impl ServerRuntime {
         disconnected_sessions.retain(|_, session| {
             now.duration_since(session.disconnected_at) <= SESSION_RECLAIM_WINDOW
         });
+
+        // Release-mode match formation: runs after timeouts so the roster
+        // count is fresh (Forming counters, Starting countdown + rollback).
+        tick_match_formation(game_state, players, neutrals, *match_config, dt, now);
 
         let live_player_ids = players
             .values()
@@ -1196,10 +1446,21 @@ fn main() -> io::Result<()> {
     socket.set_nonblocking(true)?;
     println!("UDP game server is listening on {bind_addr}");
 
+    let match_config = MatchConfig::from_env();
+    match match_config.mode {
+        MatchMode::Release => println!(
+            "Match mode: release - matches form to {}v{} before starting (OMOBA_MATCH_MODE=dev for instant start)",
+            match_config.team_size, match_config.team_size
+        ),
+        MatchMode::Dev => println!(
+            "Match mode: dev - first join starts the match immediately (NOT for release)"
+        ),
+    }
+
     App::new()
         .add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(SIMULATION_STEP_SLEEP)))
         .add_plugins(GameplayPlugin)
-        .insert_resource(ServerRuntime::new(socket))
+        .insert_resource(ServerRuntime::new(socket, match_config))
         .init_resource::<TickContext>()
         .init_resource::<SimulationDeltaSeconds>()
         .init_resource::<EcsPlayerEntities>()
@@ -4369,5 +4630,238 @@ mod tests {
         assert!((boss.state.x - anchor.x).abs() < EPSILON);
         assert!((boss.state.z - anchor.z).abs() < EPSILON);
         assert!(boss.target_player_id.is_none());
+    }
+
+    // ---- TASK-22: matchmaking / match formation ----
+
+    fn test_addr(index: u16) -> SocketAddr {
+        format!("127.0.0.1:{}", 40_000 + index).parse().unwrap()
+    }
+
+    /// Builds `count` joined players, teams assigned release-style.
+    fn joined_roster(count: u32, team_size: u32) -> HashMap<SocketAddr, ConnectedPlayer> {
+        let map_layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        for index in 0..count {
+            let addr = test_addr(index as u16);
+            ensure_player_connected(
+                &mut players,
+                &map_layout,
+                addr,
+                &mut next_player_id,
+                Instant::now(),
+            );
+            let team = assign_release_team(&players, team_size)
+                .expect("roster should not be full while building");
+            let player = players.get_mut(&addr).unwrap();
+            player.joined = true;
+            player.state.team = team;
+        }
+        players
+    }
+
+    #[test]
+    fn match_mode_parses_with_release_as_safe_default() {
+        assert_eq!(parse_match_mode(None), MatchMode::Release);
+        assert_eq!(parse_match_mode(Some("release")), MatchMode::Release);
+        assert_eq!(parse_match_mode(Some("normal")), MatchMode::Release);
+        assert_eq!(parse_match_mode(Some("dev")), MatchMode::Dev);
+        assert_eq!(parse_match_mode(Some("DEBUG")), MatchMode::Dev);
+        assert_eq!(parse_match_mode(Some("garbage")), MatchMode::Release);
+    }
+
+    #[test]
+    fn team_size_parses_and_clamps() {
+        assert_eq!(parse_team_size(None), DEFAULT_TEAM_SIZE);
+        assert_eq!(parse_team_size(Some("3")), 3);
+        assert_eq!(parse_team_size(Some("0")), MIN_TEAM_SIZE);
+        assert_eq!(parse_team_size(Some("99")), MAX_TEAM_SIZE);
+        assert_eq!(parse_team_size(Some("not-a-number")), DEFAULT_TEAM_SIZE);
+    }
+
+    #[test]
+    fn release_solo_join_forms_but_never_starts() {
+        let config = MatchConfig::release(5);
+        let players = joined_roster(1, config.team_size);
+        let mut neutrals = HashMap::new();
+        let mut game_state = GameState::Lobby;
+        let now = Instant::now();
+
+        advance_formation_on_join(&mut game_state, &players, &mut neutrals, config, now);
+        assert_eq!(
+            game_state,
+            GameState::Forming {
+                ready: 1,
+                needed: 10
+            }
+        );
+        // Many ticks later the solo player is still waiting.
+        for _ in 0..100 {
+            tick_match_formation(&mut game_state, &players, &mut neutrals, config, 0.5, now);
+        }
+        assert_eq!(
+            game_state,
+            GameState::Forming {
+                ready: 1,
+                needed: 10
+            }
+        );
+    }
+
+    #[test]
+    fn release_match_waits_at_nine_players() {
+        let config = MatchConfig::release(5);
+        let players = joined_roster(9, config.team_size);
+        let mut neutrals = HashMap::new();
+        let mut game_state = GameState::Forming {
+            ready: 1,
+            needed: 10,
+        };
+        tick_match_formation(
+            &mut game_state,
+            &players,
+            &mut neutrals,
+            config,
+            0.01,
+            Instant::now(),
+        );
+        assert_eq!(
+            game_state,
+            GameState::Forming {
+                ready: 9,
+                needed: 10
+            }
+        );
+    }
+
+    #[test]
+    fn release_match_starts_after_full_roster_and_countdown() {
+        let config = MatchConfig::release(5);
+        let players = joined_roster(10, config.team_size);
+        let mut neutrals = HashMap::new();
+        let mut game_state = GameState::Forming {
+            ready: 9,
+            needed: 10,
+        };
+        let now = Instant::now();
+
+        tick_match_formation(&mut game_state, &players, &mut neutrals, config, 0.01, now);
+        assert_eq!(
+            game_state,
+            GameState::Starting {
+                countdown_ms: MATCH_START_COUNTDOWN_MS
+            }
+        );
+
+        // Countdown ticks down monotonically, then flips to Running.
+        tick_match_formation(&mut game_state, &players, &mut neutrals, config, 1.0, now);
+        assert_eq!(
+            game_state,
+            GameState::Starting {
+                countdown_ms: MATCH_START_COUNTDOWN_MS - 1_000
+            }
+        );
+        tick_match_formation(&mut game_state, &players, &mut neutrals, config, 5.0, now);
+        assert_eq!(game_state, GameState::Running);
+    }
+
+    #[test]
+    fn release_teams_form_five_vs_five_and_full_match_rejects_joins() {
+        let team_size = 5;
+        let players = joined_roster(10, team_size);
+        let (green, blue) = joined_team_counts(&players);
+        assert_eq!(green, 5);
+        assert_eq!(blue, 5);
+        // The 11th player has no seat.
+        assert_eq!(assign_release_team(&players, team_size), None);
+    }
+
+    #[test]
+    fn release_team_assignment_always_fills_smaller_team() {
+        let mut players = joined_roster(3, 5);
+        let (green, blue) = joined_team_counts(&players);
+        assert_eq!((green, blue), (2, 1));
+        // Next assignment must balance to 2v2.
+        let team = assign_release_team(&players, 5).unwrap();
+        assert_eq!(team, Team::Blue);
+        let addr = test_addr(99);
+        let map_layout = build_map_layout();
+        let mut next_player_id = 100;
+        ensure_player_connected(
+            &mut players,
+            &map_layout,
+            addr,
+            &mut next_player_id,
+            Instant::now(),
+        );
+        let player = players.get_mut(&addr).unwrap();
+        player.joined = true;
+        player.state.team = team;
+        assert_eq!(joined_team_counts(&players), (2, 2));
+    }
+
+    #[test]
+    fn dev_mode_first_join_starts_match_immediately() {
+        let config = MatchConfig::dev();
+        let players = joined_roster(1, config.team_size);
+        let mut neutrals = HashMap::new();
+        let mut game_state = GameState::Lobby;
+
+        advance_formation_on_join(
+            &mut game_state,
+            &players,
+            &mut neutrals,
+            config,
+            Instant::now(),
+        );
+        assert_eq!(game_state, GameState::Running);
+    }
+
+    #[test]
+    fn starting_countdown_rolls_back_when_a_player_drops() {
+        let config = MatchConfig::release(1);
+        let mut players = joined_roster(2, config.team_size);
+        let mut neutrals = HashMap::new();
+        let mut game_state = GameState::Starting {
+            countdown_ms: MATCH_START_COUNTDOWN_MS,
+        };
+        // One player disconnects mid-countdown.
+        players.remove(&test_addr(0));
+        tick_match_formation(
+            &mut game_state,
+            &players,
+            &mut neutrals,
+            config,
+            0.01,
+            Instant::now(),
+        );
+        assert_eq!(
+            game_state,
+            GameState::Forming {
+                ready: 1,
+                needed: 2
+            }
+        );
+    }
+
+    #[test]
+    fn forming_returns_to_lobby_when_queue_empties() {
+        let config = MatchConfig::release(5);
+        let players = HashMap::new();
+        let mut neutrals = HashMap::new();
+        let mut game_state = GameState::Forming {
+            ready: 1,
+            needed: 10,
+        };
+        tick_match_formation(
+            &mut game_state,
+            &players,
+            &mut neutrals,
+            config,
+            0.01,
+            Instant::now(),
+        );
+        assert_eq!(game_state, GameState::Lobby);
     }
 }
