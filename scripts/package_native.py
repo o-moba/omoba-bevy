@@ -8,7 +8,6 @@ from pathlib import Path
 import platform
 import shutil
 import subprocess
-import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -67,7 +66,8 @@ exec "$PACKAGE_DIR/''' + kind + '''" "$@"
         launcher.chmod(0o755)
     shutil.copy2(ROOT / "docs/progress/2026-09-05-release-test-guide.md", destination / "TESTING.md")
     shutil.copy2(ROOT / "docs/progress/2026-09-05-distribution-review.md", destination / "2026-09-05-distribution-review.md")
-    version = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"]["version"]
+    metadata = json.loads(run("cargo", "metadata", "--no-deps", "--format-version", "1", "--locked"))
+    version = next(item["version"] for item in metadata["packages"] if item["name"] == "client")
     files = {str(p.relative_to(destination)): hashlib.sha256(p.read_bytes()).hexdigest()
              for p in sorted(destination.rglob("*")) if p.is_file()}
     identity = dict(version=version, source_revision=run("git", "rev-parse", "HEAD"),
