@@ -163,3 +163,31 @@ platform/network coverage. Automated render evidence cannot substitute for
 those observations. The earlier dependency review remains applicable to the
 unchanged dependency set. This branch prepares a controlled native playtest
 candidate; it does not deploy a public service or publish a binary release.
+
+## Delivery record
+
+Production source: `c61853af88a9599faa471c139cc0da57564a73fc`, built from a clean
+working tree. Host package: `.agent/tasks/VERDANT-3D-RELEASE-2026-09-05/package/omoba-0.18.0-rc.2-macos-arm64/`.
+It contains 86 hashed files (383,089,195 bytes including `BUILD.json`), uses the
+`dev` profile on macOS 26.6 ARM64, and reports asset-content PASS. The package's
+client/server hashes are identical to the final source-tree capture binaries.
+`BUILD.json` SHA-256: `3fc8940845694f074639ec098bcf30a178f1a7a8e6a0a00f918a9f07fde125b2`.
+
+A fresh independent pass reran all **267 Rust tests**, the workspace build,
+workspace/all-targets clippy with warnings denied, formatting, and diff checks:
+all passed. It also repeated the art/geometry, exact 15-hero/one-boss animation
+and 23-case content-gate checks. The independent package inventory verified the
+actual file hashes and clean source identity.
+
+The package ran outside the checkout with isolated preferences and packaged
+assets twice: coordinator capture **42.76 s**, independent capture **41.40 s**.
+Both wrappers report PASS, client exit 0, four saved native images, authoritative
+snapshots and no detected missing-asset, panic or remote-download errors. Three
+consecutive final-source captures, including these two packaged runs, completed
+without reproducing the earlier capture-04 shutdown timeout. Keep that earlier
+failed run in the record and include quit/restart behavior in longer testing.
+
+Per-criterion evidence, raw files and the fresh verdict are in the task proof
+directory. The final documentation commit only records this delivery; the
+package's production-source commit above remains its exact build identity.
+The remaining release work described above is still required.
