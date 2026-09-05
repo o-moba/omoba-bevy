@@ -4,6 +4,14 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [Unreleased]
+
+### Added
+- Added the offline Verdant Confluence Blender environment: 24 original modular
+  architecture/nature assets, a complete forest-observatory arena, PBR GLB exports,
+  presentation renders, deterministic builder scripts, and a map-aware validation
+  and integration handoff. Runtime asset loading remains a subsequent task.
+
 ## [0.10.0] - 2026-07-06
 
 ### Added

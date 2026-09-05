@@ -2,6 +2,14 @@
 
 Canonical version: `0.10.0`
 
+## Offline 3D Art Preparation
+
+- **Verdant Confluence (TASK-BLENDER-VERDANT-01):** `art/verdant-confluence/`
+  contains an editable Blender arena, 24 reusable GLB assets, an assembled GLB,
+  four presentation views, and a manifest preserving current 3D map anchors.
+  This is prepared art for the next integration step; the playable runtime
+  presentation is unchanged.
+
 ## Current Playable Surface
 
 - **Matchmaking and gated match start (TASK-22):** in release mode (server
