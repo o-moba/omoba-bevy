@@ -1,0 +1,68 @@
+## main...origin/main
+ M .gitignore
+ M ATTRIBUTION.md
+ M CHANGELOG.md
+ M Cargo.lock
+ M Cargo.toml
+ M Makefile
+ M README.md
+ M RUNBOOK.md
+ M arena-sync/src/main.rs
+ M client/Cargo.toml
+ M client/assets/config/model_scale_overrides.json
+ M client/src/bosses.rs
+ M client/src/camera.rs
+ M client/src/combat.rs
+ M client/src/decor.rs
+ M client/src/game_state.rs
+ M client/src/help_overlay.rs
+ M client/src/input_bindings.rs
+ M client/src/main.rs
+ M client/src/maps.rs
+ M client/src/match_hud.rs
+ M client/src/model_scale.rs
+ M client/src/net.rs
+ M client/src/pause_menu.rs
+ M client/src/persistence.rs
+ M client/src/player.rs
+ M client/src/team.rs
+ M client/src/world.rs
+ M docs/features.md
+ M harness/Cargo.toml
+ M harness/src/bin/bots.rs
+ M harness/src/bot.rs
+ M harness/src/lib.rs
+ M harness/src/protocol.rs
+ M harness/src/server.rs
+ M harness/tests/gameplay.rs
+ M harness/tests/matchmaking.rs
+ M scripts/verify_task_02_multiplayer_session_flow.py
+ M server/Cargo.toml
+ M server/src/main.rs
+ M server/src/session.rs
+ M shared/src/lib.rs
+?? .claude/
+?? client/assets/presentation2d/
+?? client/assets/sprites/
+?? client/assets/world2d/
+?? client/src/minions.rs
+?? client/src/presentation2d.rs
+?? client/src/sprite.rs
+?? client/src/world2d.rs
+?? docs/progress/2026-07-06-bot-lane-ai.md
+?? docs/progress/2026-07-06-minion-models-and-visible-camps.md
+?? docs/progress/2026-07-06-session-reconnect-ux.md
+?? docs/progress/2026-07-27-2d-release-vertical-slice.md
+?? docs/progress/2026-07-27-2d-sprite-prototype.md
+?? docs/progress/2026-07-28-2d-controls-and-camera-follow.md
+?? docs/progress/2026-07-28-2d-production-readiness.md
+?? docs/progress/2026-07-28-full-2d-world.md
+?? docs/progress/2026-07-29-pointer-combat-mobile.md
+?? harness/src/bot_ai.rs
+?? harness/tests/bot_ai_live.rs
+?? harness/tests/combat_actions.rs
+?? harness/tests/sprite_cosmetics.rs
+?? harness/tests/udp_datagrams.rs
+?? scripts/validate_2d_readability.py
+?? scripts/validate_sprite_assets.py
+?? scripts/validate_world2d_assets.py

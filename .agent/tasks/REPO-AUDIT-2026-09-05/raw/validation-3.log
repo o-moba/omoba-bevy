@@ -1,0 +1,11 @@
+test_invalid_topology_reference (__main__.NegativeContractTests) ... ok
+test_malformed_frame_range (__main__.NegativeContractTests) ... ok
+test_missing_asset (__main__.NegativeContractTests) ... ok
+test_missing_category (__main__.NegativeContractTests) ... ok
+test_missing_license (__main__.NegativeContractTests) ... ok
+test_unsafe_path (__main__.NegativeContractTests) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.002s
+
+OK

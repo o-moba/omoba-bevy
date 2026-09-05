@@ -1,0 +1,176 @@
+{
+  "task_id": "REPO-AUDIT-2026-09-05",
+  "scope": "assessment and preservation plus narrow packaging repairs; not gameplay implementation or release certification",
+  "snapshot_commit": "52aa7737387083ad29565ad1ed03418a0f01f72b",
+  "workspace_version": "0.17.1",
+  "report": "docs/progress/2026-09-05-3d-readiness-audit.md",
+  "product_readiness": "NOT_READY_FOR_UNATTENDED_EXTERNAL_PLAYTESTS",
+  "checks": [
+    {
+      "command": "cargo build --workspace --locked",
+      "exit_code": 0,
+      "status": "PASS",
+      "artifact": "raw/build-final.log",
+      "sha256": "4f13d68b4b469ec71d8a8ed6e9a21b40253a97a6b0f584ace98833f05e56a727"
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "exit_code": 0,
+      "status": "PASS",
+      "artifact": "raw/format.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "status": "PASS",
+      "artifact": "raw/diff-check.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --locked -- -D warnings",
+      "exit_code": 0,
+      "status": "PASS",
+      "artifact": "raw/clippy.log",
+      "sha256": "fd8331b12751190d70763c4b4541318fcfae0e69692770db78cb661ad174e96a"
+    },
+    {
+      "command": "cargo test --workspace --locked -- --test-threads=1",
+      "exit_code": 101,
+      "status": "FAIL",
+      "artifact": "raw/test-workspace.log",
+      "sha256": "f3574aa516482c6da767cc8aaec4d14261805723193986600052e6a6ac32ea76"
+    },
+    {
+      "command": "cargo test -p server -p shared -p skills --locked -- --test-threads=1",
+      "exit_code": 0,
+      "status": "PASS",
+      "artifact": "raw/test-remaining.log",
+      "sha256": "fbcae529af50644aa5b8f9430b334cc4d5765df53285e182776163c942e61d57"
+    },
+    {
+      "command": "python3 scripts/validate_avatar_assets.py",
+      "exit_code": 0,
+      "status": "PASS",
+      "artifact": "raw/avatar-packaged.log",
+      "sha256": "cd62786eeea1abb7ad67820b8ab013e45cfdbb1b7ad5c535219803ca19392c3a"
+    },
+    {
+      "command": "python3 scripts/validate_avatar_assets.py --avatars-dir client/assets/minions --roster-min 2 --roster-max 2",
+      "exit_code": 0,
+      "status": "PASS",
+      "artifact": "raw/minion-packaged.log",
+      "sha256": "b8477a6cc7d6b91be1a10952890daecd1d89e311d522691b1448f045e3471481"
+    },
+    {
+      "command": "python3 scripts/validate_avatar_assets.py --avatars-dir client/assets/bosses --roster-min 2 --roster-max 2",
+      "exit_code": 0,
+      "status": "PASS",
+      "artifact": "raw/validation-2.log",
+      "sha256": "07af7409684711dba7ac8b8f7023d11eb701f516c4c35f5473edb06c84ca1632"
+    },
+    {
+      "command": "python3 scripts/validate_world2d_assets.py --self-test",
+      "exit_code": 0,
+      "status": "PASS",
+      "artifact": "raw/validation-3.log",
+      "sha256": "e21170c17dee525d16e971b8133e32f9ce6253c3fbfe1f3364179f845e6e83ac"
+    },
+    {
+      "command": "python3 scripts/validate_world2d_assets.py",
+      "exit_code": 1,
+      "status": "FAIL",
+      "artifact": "raw/world2d-manifest.log",
+      "sha256": "a69a43cfbbfd1352a7f531aca463940856bbda1e55e06d319d99018e8c172a80"
+    },
+    {
+      "command": "python3 scripts/validate_sprite_assets.py --self-test",
+      "exit_code": 1,
+      "status": "FAIL",
+      "artifact": "raw/validation-4.log",
+      "sha256": "e74563cb3b3e937d324485e33c8cf0e6c02c2393b225446d51d0f720bb03890e"
+    },
+    {
+      "command": "python3 scripts/validate_2d_readability.py --json",
+      "exit_code": 1,
+      "status": "FAIL",
+      "artifact": "raw/validation-5.log",
+      "sha256": "763ecb464a0e59237475c38e82c437a78f8e80534ce71d2ccac68c1cd1eb78a6"
+    },
+    {
+      "command": "python3 scripts/verify_task_02_multiplayer_session_flow.py",
+      "exit_code": 0,
+      "status": "PASS",
+      "artifact": "raw/session-flow.log",
+      "sha256": "956671dcd9d4a5aa7a80ab7cd51b2734c51ac2fd14fa2cf36c9daf1a019c034b"
+    },
+    {
+      "command": "python3 raw/probe_session_contract.py --repo <worktree> --server-bin <current server>",
+      "exit_code": 0,
+      "status": "OBSERVATIONS_COMPLETED",
+      "artifact": "raw/session-contract-observations.json",
+      "sha256": "d635226be1bd1841f7207c07d7fbfa8d7a0bbaeb0e8e15129584fa7a8ea4aa1f"
+    },
+    {
+      "command": "isolated server + Models3d client process for20 seconds",
+      "exit_code": 0,
+      "status": "STARTUP_ONLY",
+      "artifact": "raw/native-startup.json",
+      "sha256": "97780e2898f510a839e62127b37ed76f1ed21997fb5a2054d45c6827b88e6354"
+    },
+    {
+      "command": "mcp__cua_repl.js: cua.getState()",
+      "exit_code": null,
+      "status": "UNAVAILABLE",
+      "artifact": "raw/gui-observation.txt",
+      "sha256": "888f0edd7de40a3750948e3a7fd1429d6e4f9044282552e157ac4c11c264bc30"
+    },
+    {
+      "command": "cargo test -p harness --test udp_datagrams --locked -- --nocapture",
+      "exit_code": 0,
+      "status": "PASS",
+      "artifact": "raw/udp-datagrams-fixed.log",
+      "sha256": "6500191e9ca94efa4e767d55adc6ea49e5523bc4029a8596ee39814b1a269a29"
+    },
+    {
+      "command": "python3 raw/probe_5v5.py",
+      "exit_code": 0,
+      "status": "OBSERVATIONS_COMPLETED",
+      "artifact": "raw/5v5-observations.json",
+      "sha256": "7c0f1c189f3668b6ecb5c882d9534c5c85dae337081b5b674ea9cf084905cff7"
+    },
+    {
+      "command": "cargo test --workspace --locked -- --test-threads=1 (after fixture repair)",
+      "exit_code": 0,
+      "status": "PASS",
+      "artifact": "raw/test-workspace-final.log",
+      "sha256": "a3ebcdbbaba07f63b0d5413fff1d8770a136346c759f8b930776e5b28e746858"
+    }
+  ],
+  "production_rust_changes_after_snapshot": [],
+  "packaging_changes": [
+    "Cargo.lock existing SDK git revision and workspace patch version",
+    "Cargo.toml canonical0.17.1",
+    ".gitignore minions exception",
+    "client/assets/minions existing GLBs + provenance",
+    "client/assets/avatars/manifest.json16 offline avatars"
+  ],
+  "limitations": [
+    "No manual GUI/layout/FPS verification; Computer Use configuration access failed.",
+    "Native startup had missing optional2D sheets and invalid built-in SDK download warnings.",
+    "No level progression or rematch in the live audit probe; those findings cite current code.",
+    "2D generation/completion and gameplay/network fixes remain separate tasks."
+  ],
+  "test_fixture_changes_after_snapshot": [
+    "harness/tests/udp_datagrams.rs: derive a valid avatar from shared roster and assert replicated identity"
+  ],
+  "initial_rust_test_totals": {
+    "passed": 203,
+    "failed": 1
+  },
+  "initial_workspace_failure_cause": "Test fixture referenced a non-shipped local-only avatar; complete 5v5 snapshots arrived below required 8 KiB. Fixed test passes without modifying transport.",
+  "rust_test_totals": {
+    "passed": 204,
+    "failed": 0
+  }
+}

@@ -1,0 +1,6 @@
+UDP game server is listening on 127.0.0.1:51420
+Match mode: dev - first join starts the match immediately (NOT for release)
+Endpoint 127.0.0.1:58315 connected (pre-join), reserved player id 1
+Player 1 joined team Green as Ipfs (class warrior, avatar Some("megan-the-fox"), sprite "mossback-teapot")
+First player joined - match starting (dev mode)
+Match running. Boss schedule armed: wendigo_boss in 60s, king_mutatio_boss in 180s

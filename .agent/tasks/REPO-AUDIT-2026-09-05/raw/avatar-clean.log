@@ -1,0 +1,58 @@
+PASS  agnes (7.4 MB)
+PASS  anna (8.0 MB)
+PASS  megan-the-fox (6.0 MB)
+PASS  lady-koi (5.3 MB)
+PASS  bao-samurai (6.5 MB)
+      warn:  no thumbnail
+PASS  good-knight (6.3 MB)
+PASS  crowley (6.1 MB)
+PASS  cyberpal (5.4 MB)
+PASS  sport-mecha (8.8 MB)
+PASS  pirate-bot (11.8 MB)
+PASS  mega-angel (5.3 MB)
+PASS  stitch-witch (7.9 MB)
+PASS  cool-tiger (8.4 MB)
+PASS  aurora (7.9 MB)
+PASS  orion (6.4 MB)
+PASS  el-bueno (6.1 MB)
+FAIL  osa-chill-a06490585f92 (0.0 MB)
+      ERROR: declared thumbnail 'osa-chill-a06490585f92.png' not found
+      ERROR: client/assets/avatars/osa-chill-a06490585f92.glb does not exist
+FAIL  osa-coolpyramid-38e2d8b8b08c (0.0 MB)
+      ERROR: declared thumbnail 'osa-coolpyramid-38e2d8b8b08c.jpg' not found
+      ERROR: client/assets/avatars/osa-coolpyramid-38e2d8b8b08c.glb does not exist
+FAIL  osa-cyberpal-d5efc197b62c (0.0 MB)
+      ERROR: declared thumbnail 'osa-cyberpal-d5efc197b62c.jpg' not found
+      ERROR: client/assets/avatars/osa-cyberpal-d5efc197b62c.glb does not exist
+FAIL  osa-esktix-depths-3b9e59c589e5 (0.0 MB)
+      ERROR: declared thumbnail 'osa-esktix-depths-3b9e59c589e5.png' not found
+      ERROR: client/assets/avatars/osa-esktix-depths-3b9e59c589e5.glb does not exist
+FAIL  osa-joy-garland-a885e8c35e04 (0.0 MB)
+      ERROR: declared thumbnail 'osa-joy-garland-a885e8c35e04.png' not found
+      ERROR: client/assets/avatars/osa-joy-garland-a885e8c35e04.glb does not exist
+FAIL  osa-juanita-855b483bcd15 (0.0 MB)
+      ERROR: declared thumbnail 'osa-juanita-855b483bcd15.jpg' not found
+      ERROR: client/assets/avatars/osa-juanita-855b483bcd15.glb does not exist
+FAIL  osa-kardialtheconsumer-00bea9121db1 (0.0 MB)
+      ERROR: declared thumbnail 'osa-kardialtheconsumer-00bea9121db1.jpg' not found
+      ERROR: client/assets/avatars/osa-kardialtheconsumer-00bea9121db1.glb does not exist
+FAIL  osa-lilbro-4fb407544767 (0.0 MB)
+      ERROR: declared thumbnail 'osa-lilbro-4fb407544767.png' not found
+      ERROR: client/assets/avatars/osa-lilbro-4fb407544767.glb does not exist
+FAIL  osa-maxhax-ae3d3dcbd3a1 (0.0 MB)
+      ERROR: declared thumbnail 'osa-maxhax-ae3d3dcbd3a1.png' not found
+      ERROR: client/assets/avatars/osa-maxhax-ae3d3dcbd3a1.glb does not exist
+FAIL  osa-petaldude-9ba71e701cac (0.0 MB)
+      ERROR: declared thumbnail 'osa-petaldude-9ba71e701cac.jpg' not found
+      ERROR: client/assets/avatars/osa-petaldude-9ba71e701cac.glb does not exist
+FAIL  osa-squeak-eggnog-48def036a841 (0.0 MB)
+      ERROR: declared thumbnail 'osa-squeak-eggnog-48def036a841.png' not found
+      ERROR: client/assets/avatars/osa-squeak-eggnog-48def036a841.glb does not exist
+FAIL  osa-wendigo-blond-1c8a3897d748 (0.0 MB)
+      ERROR: declared thumbnail 'osa-wendigo-blond-1c8a3897d748.png' not found
+      ERROR: client/assets/avatars/osa-wendigo-blond-1c8a3897d748.glb does not exist
+
+Roster: 28 avatars, 121.6 MB (GLBs + thumbnails)
+ERROR: roster size 28 outside [10, 20]
+FAILED avatars: osa-chill-a06490585f92, osa-coolpyramid-38e2d8b8b08c, osa-cyberpal-d5efc197b62c, osa-esktix-depths-3b9e59c589e5, osa-joy-garland-a885e8c35e04, osa-juanita-855b483bcd15, osa-kardialtheconsumer-00bea9121db1, osa-lilbro-4fb407544767, osa-maxhax-ae3d3dcbd3a1, osa-petaldude-9ba71e701cac, osa-squeak-eggnog-48def036a841, osa-wendigo-blond-1c8a3897d748
+RESULT: FAIL

@@ -1,0 +1,47 @@
+2026-09-05T17:07:39.339162Z  INFO bevy_diagnostic::system_information_diagnostics_plugin::internal: SystemInfo { os: "macOS 26.6", kernel: "25.6.0", cpu: "Apple M4 Pro", core_count: "14", memory: "48.0 GiB" }
+2026-09-05T17:07:39.402512Z  INFO bevy_render::renderer: AdapterInfo { name: "Apple M4 Pro", vendor: 0, device: 0, device_type: IntegratedGpu, driver: "", driver_info: "", backend: Metal }
+2026-09-05T17:07:39.610525Z  INFO bevy_render::batching::gpu_preprocessing: GPU preprocessing is fully supported on this device.
+2026-09-05T17:07:39.640866Z  INFO bevy_winit::system: Creating new window client (0v0)
+2026-09-05T17:07:39.729593Z  INFO client::bosses: Loading raid-boss model 'wendigo-hollow'
+2026-09-05T17:07:39.729773Z  INFO client::bosses: Loading raid-boss model 'king-mutatio'
+Connecting to server at 127.0.0.1:51420
+UDP socket connected to 127.0.0.1:51420; waiting for first snapshot
+2026-09-05T17:07:39.729927Z  INFO client::decor: decor: spawned 970 decor entities (396 props + 1 root, budget 1200) reusing 5 shared meshes and 12 shared materials; F4 toggles visibility
+2026-09-05T17:07:39.729979Z  INFO client::model_scale: model-scale: loaded 37 override entries (0 != 1.0) from /Users/wotori/git/ekza/omoba-bevy-playtest-audit/client/assets/config/model_scale_overrides.json
+2026-09-05T17:07:39.730425Z ERROR bevy_asset::server: Path not found: /Users/wotori/git/ekza/omoba-bevy-playtest-audit/client/assets/sprites/actions/orchard-comet-centaur.png
+2026-09-05T17:07:39.730488Z ERROR bevy_asset::server: Path not found: /Users/wotori/git/ekza/omoba-bevy-playtest-audit/client/assets/sprites/orchard-comet-centaur.png
+First snapshot received from 127.0.0.1:51420; connection is live
+2026-09-05T17:07:40.109954Z  WARN ekza_bevy_sdk::bevy: Downloaded Ekza model from https://ipfs.io/ipfs/QmWMYVUF2pa4GkoMgquyY8nmYjQJDP9yxnSBvjVqH7EJQr is not a valid GLB.
+2026-09-05T17:07:40.110039Z  INFO client::maps: MOBA map spawned: center lane 225.0 units (~45.0s at 5.0 u/s)
+2026-09-05T17:07:40.116758Z  INFO client::minions: Minion animation set ready for Green (idle/walk/attack)
+2026-09-05T17:07:40.116794Z  INFO client::minions: Minion animation set ready for Blue (idle/walk/attack)
+2026-09-05T17:07:40.116757Z  INFO client::team: [omoba:cli] event=autojoin team=Green class=warrior avatar=Some("megan-the-fox")
+2026-09-05T17:07:40.116817Z  INFO client::bosses: Boss animation set ready for KingMutatioBoss (idle/walk)
+2026-09-05T17:07:40.116830Z  INFO client::bosses: Boss animation set ready for WendigoBoss (idle/walk)
+2026-09-05T17:07:40.116834Z  INFO client::world: Loading roster avatar model 'megan-the-fox'
+2026-09-05T17:07:40.116869Z  INFO client::world: Selected player model: MeganTheFox
+2026-09-05T17:07:40.168015Z  INFO client::player: Animation set ready for Roster("megan-the-fox"): idle="idle", walk="walk"
+2026-09-05T17:07:40.168052Z  INFO client::model_scale: model-scale: 'megan-the-fox' bind-pose height 1.587 (y -0.008..1.579)
+2026-09-05T17:07:40.168083Z  INFO client::model_scale: model-scale: 'megan-the-fox' normalized to 1.150 (scale x0.7246)
+2026-09-05T17:07:43.068356Z  INFO client::model_scale: model-scale: 'slime-green' bind-pose height 1.374 (y 0.001..1.375)
+2026-09-05T17:07:43.068391Z  INFO client::model_scale: model-scale: 'slime-green' normalized to 0.690 (scale x0.5021)
+2026-09-05T17:07:43.068398Z  INFO client::model_scale: model-scale: 'slime-green' normalized to 0.690 (scale x0.5021)
+2026-09-05T17:07:43.068403Z  INFO client::model_scale: model-scale: 'slime-green' normalized to 0.690 (scale x0.5021)
+2026-09-05T17:07:43.068423Z  INFO client::model_scale: model-scale: 'slime-blue' bind-pose height 1.510 (y -0.016..1.494)
+2026-09-05T17:07:43.068434Z  INFO client::model_scale: model-scale: 'slime-blue' normalized to 0.690 (scale x0.4570)
+2026-09-05T17:07:43.068440Z  INFO client::model_scale: model-scale: 'slime-blue' normalized to 0.690 (scale x0.4570)
+2026-09-05T17:07:43.068443Z  INFO client::model_scale: model-scale: 'slime-blue' normalized to 0.690 (scale x0.4570)
+2026-09-05T17:07:43.068445Z  INFO client::model_scale: model-scale: 'slime-green' normalized to 0.690 (scale x0.5021)
+2026-09-05T17:07:43.068472Z  INFO client::model_scale: model-scale: 'slime-green' normalized to 0.690 (scale x0.5021)
+2026-09-05T17:07:43.068475Z  INFO client::model_scale: model-scale: 'slime-green' normalized to 0.690 (scale x0.5021)
+2026-09-05T17:07:43.068478Z  INFO client::model_scale: model-scale: 'slime-blue' normalized to 0.690 (scale x0.4570)
+2026-09-05T17:07:43.068480Z  INFO client::model_scale: model-scale: 'slime-blue' normalized to 0.690 (scale x0.4570)
+2026-09-05T17:07:43.068485Z  INFO client::model_scale: model-scale: 'slime-blue' normalized to 0.690 (scale x0.4570)
+2026-09-05T17:07:43.068489Z  INFO client::model_scale: model-scale: 'slime-green' normalized to 0.690 (scale x0.5021)
+2026-09-05T17:07:43.068491Z  INFO client::model_scale: model-scale: 'slime-green' normalized to 0.690 (scale x0.5021)
+2026-09-05T17:07:43.068495Z  INFO client::model_scale: model-scale: 'slime-green' normalized to 0.690 (scale x0.5021)
+2026-09-05T17:07:43.068497Z  INFO client::model_scale: model-scale: 'slime-blue' normalized to 0.690 (scale x0.4570)
+2026-09-05T17:07:43.068499Z  INFO client::model_scale: model-scale: 'slime-blue' normalized to 0.690 (scale x0.4570)
+2026-09-05T17:07:43.068502Z  INFO client::model_scale: model-scale: 'slime-blue' normalized to 0.690 (scale x0.4570)
+2026-09-05T17:07:43.068825Z  INFO client::player: Locomotion animation Idle -> Walk for Roster("megan-the-fox")
+2026-09-05T17:07:43.682509Z  INFO client::player: Locomotion animation Walk -> Idle for Roster("megan-the-fox")

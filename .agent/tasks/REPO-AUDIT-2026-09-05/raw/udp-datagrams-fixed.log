@@ -1,0 +1,18 @@
+   Compiling proc-macro2 v1.0.94
+   Compiling serde_core v1.0.228
+   Compiling serde v1.0.228
+   Compiling quote v1.0.40
+   Compiling syn v2.0.114
+   Compiling serde_derive v1.0.228
+   Compiling serde_json v1.0.140
+   Compiling shared v0.17.1 (/Users/wotori/git/ekza/omoba-bevy-playtest-audit/shared)
+   Compiling harness v0.17.1 (/Users/wotori/git/ekza/omoba-bevy-playtest-audit/harness)
+    Finished `test` profile [optimized + debuginfo] target(s) in 9.55s
+     Running tests/udp_datagrams.rs (target/debug/deps/udp_datagrams-0df64ac7ac070782)
+
+running 1 test
+received complete real-server snapshot: 8193 bytes (runtime-dependent; asserted 8192 < bytes <= 65507), 10 players, 8 structures, 18 minions
+test real_server_emits_complete_populated_snapshot_above_8_kib ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.05s
+

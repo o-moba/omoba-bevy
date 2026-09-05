@@ -6,6 +6,23 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-09-05
+
+### Fixed
+- Clean-checkout locked builds now retain the existing git SDK revision in
+  Cargo.lock, without dependency upgrades or a sibling checkout override.
+- Include the two existing CC0 slime minion models and their provenance
+  manifest in version control so the default 3D renderer can load them.
+- Derive the large UDP regression fixture from the shipped avatar roster and
+  assert the replicated identity, avoiding dependence on local Arena downloads.
+- Keep the shipped avatar roster to the 16 committed offline models; remove
+  references to local-only Arena downloads while preserving those local files.
+
+### Documentation
+- Add the current 3D readiness audit, prioritized gameplay/UI/network roadmap,
+  reproducible verification results and a mandatory full-match/rematch test gate.
+  This patch is a development delivery fix, not a playtest-ready release.
+
 ## [0.17.0] - 2026-07-29
 
 ### Added

@@ -1,0 +1,322 @@
+{
+  "probe": "release-5v5-datagrams",
+  "status": "OBSERVATIONS_COMPLETED",
+  "repo": "/Users/wotori/git/ekza/omoba-bevy-playtest-audit",
+  "server_binary": "/Users/wotori/git/ekza/omoba-bevy-playtest-audit/target/debug/server",
+  "server_sha256": "8dc9744619d018f15ebd3da061ccf04c8ddaecc3433b4a7f86e139bc1471ab6b",
+  "read_only_sysctl": {
+    "exit_code": 0,
+    "stdout": [
+      "net.inet.udp.maxdgram: 9216",
+      "net.inet.udp.recvspace: 786896"
+    ],
+    "stderr": []
+  },
+  "native_loopback_udp_boundary": [
+    {
+      "requested_bytes": 8192,
+      "sent_bytes": 8192,
+      "received_bytes": 8192
+    },
+    {
+      "requested_bytes": 9216,
+      "sent_bytes": 9216,
+      "received_bytes": 9216
+    },
+    {
+      "requested_bytes": 9217,
+      "errno": 40,
+      "error": "[Errno 40] Message too long"
+    },
+    {
+      "requested_bytes": 12000,
+      "errno": 40,
+      "error": "[Errno 40] Message too long"
+    },
+    {
+      "requested_bytes": 65507,
+      "errno": 40,
+      "error": "[Errno 40] Message too long"
+    }
+  ],
+  "server_pid": 57830,
+  "server_address": "127.0.0.1:56831",
+  "clients": [
+    {
+      "client_index": 0,
+      "datagrams": 249,
+      "max_bytes": 8112,
+      "last_snapshot": {
+        "elapsed_seconds": 15.314,
+        "bytes": 8105,
+        "your_id": 1,
+        "game_state": {
+          "type": "running"
+        },
+        "players": 10,
+        "structures": 8,
+        "minions": 18,
+        "projectiles": 0,
+        "neutrals": 3
+      }
+    },
+    {
+      "client_index": 1,
+      "datagrams": 249,
+      "max_bytes": 8112,
+      "last_snapshot": {
+        "elapsed_seconds": 15.314,
+        "bytes": 8105,
+        "your_id": 2,
+        "game_state": {
+          "type": "running"
+        },
+        "players": 10,
+        "structures": 8,
+        "minions": 18,
+        "projectiles": 0,
+        "neutrals": 3
+      }
+    },
+    {
+      "client_index": 2,
+      "datagrams": 249,
+      "max_bytes": 8112,
+      "last_snapshot": {
+        "elapsed_seconds": 15.314,
+        "bytes": 8105,
+        "your_id": 3,
+        "game_state": {
+          "type": "running"
+        },
+        "players": 10,
+        "structures": 8,
+        "minions": 18,
+        "projectiles": 0,
+        "neutrals": 3
+      }
+    },
+    {
+      "client_index": 3,
+      "datagrams": 249,
+      "max_bytes": 8112,
+      "last_snapshot": {
+        "elapsed_seconds": 15.314,
+        "bytes": 8105,
+        "your_id": 4,
+        "game_state": {
+          "type": "running"
+        },
+        "players": 10,
+        "structures": 8,
+        "minions": 18,
+        "projectiles": 0,
+        "neutrals": 3
+      }
+    },
+    {
+      "client_index": 4,
+      "datagrams": 249,
+      "max_bytes": 8112,
+      "last_snapshot": {
+        "elapsed_seconds": 15.314,
+        "bytes": 8105,
+        "your_id": 5,
+        "game_state": {
+          "type": "running"
+        },
+        "players": 10,
+        "structures": 8,
+        "minions": 18,
+        "projectiles": 0,
+        "neutrals": 3
+      }
+    },
+    {
+      "client_index": 5,
+      "datagrams": 249,
+      "max_bytes": 8112,
+      "last_snapshot": {
+        "elapsed_seconds": 15.314,
+        "bytes": 8105,
+        "your_id": 6,
+        "game_state": {
+          "type": "running"
+        },
+        "players": 10,
+        "structures": 8,
+        "minions": 18,
+        "projectiles": 0,
+        "neutrals": 3
+      }
+    },
+    {
+      "client_index": 6,
+      "datagrams": 249,
+      "max_bytes": 8112,
+      "last_snapshot": {
+        "elapsed_seconds": 15.314,
+        "bytes": 8105,
+        "your_id": 7,
+        "game_state": {
+          "type": "running"
+        },
+        "players": 10,
+        "structures": 8,
+        "minions": 18,
+        "projectiles": 0,
+        "neutrals": 3
+      }
+    },
+    {
+      "client_index": 7,
+      "datagrams": 249,
+      "max_bytes": 8112,
+      "last_snapshot": {
+        "elapsed_seconds": 15.314,
+        "bytes": 8105,
+        "your_id": 8,
+        "game_state": {
+          "type": "running"
+        },
+        "players": 10,
+        "structures": 8,
+        "minions": 18,
+        "projectiles": 0,
+        "neutrals": 3
+      }
+    },
+    {
+      "client_index": 8,
+      "datagrams": 249,
+      "max_bytes": 8112,
+      "last_snapshot": {
+        "elapsed_seconds": 15.314,
+        "bytes": 8105,
+        "your_id": 9,
+        "game_state": {
+          "type": "running"
+        },
+        "players": 10,
+        "structures": 8,
+        "minions": 18,
+        "projectiles": 0,
+        "neutrals": 3
+      }
+    },
+    {
+      "client_index": 9,
+      "datagrams": 249,
+      "max_bytes": 8113,
+      "last_snapshot": {
+        "elapsed_seconds": 15.314,
+        "bytes": 8106,
+        "your_id": 10,
+        "game_state": {
+          "type": "running"
+        },
+        "players": 10,
+        "structures": 8,
+        "minions": 18,
+        "projectiles": 0,
+        "neutrals": 3
+      }
+    }
+  ],
+  "snapshot_shape_changes": [
+    {
+      "elapsed_seconds": 0.365,
+      "bytes": 1365,
+      "your_id": 1,
+      "game_state": {
+        "type": "lobby"
+      },
+      "players": 0,
+      "structures": 8,
+      "minions": 0,
+      "projectiles": 0,
+      "neutrals": 3
+    },
+    {
+      "elapsed_seconds": 0.426,
+      "bytes": 5033,
+      "your_id": 1,
+      "game_state": {
+        "type": "starting",
+        "countdown_ms": 2956
+      },
+      "players": 10,
+      "structures": 8,
+      "minions": 0,
+      "projectiles": 0,
+      "neutrals": 3
+    },
+    {
+      "elapsed_seconds": 3.532,
+      "bytes": 8067,
+      "your_id": 1,
+      "game_state": {
+        "type": "running"
+      },
+      "players": 10,
+      "structures": 8,
+      "minions": 18,
+      "projectiles": 0,
+      "neutrals": 3
+    }
+  ],
+  "largest_received_snapshot": {
+    "elapsed_seconds": 15.13,
+    "bytes": 8113,
+    "your_id": 10,
+    "game_state": {
+      "type": "running"
+    },
+    "players": 10,
+    "structures": 8,
+    "minions": 18,
+    "projectiles": 0,
+    "neutrals": 3
+  },
+  "qualifying_running_snapshots": 0,
+  "join_sent_at_seconds": 0.365,
+  "owned_server_exit_code": -15,
+  "server_log": [
+    "UDP game server is listening on 127.0.0.1:56831",
+    "Match mode: release - matches form to 5v5 before starting (OMOBA_MATCH_MODE=dev for instant start)",
+    "Endpoint 127.0.0.1:52834 connected (pre-join), reserved player id 1",
+    "Endpoint 127.0.0.1:52392 connected (pre-join), reserved player id 2",
+    "Endpoint 127.0.0.1:58907 connected (pre-join), reserved player id 3",
+    "Endpoint 127.0.0.1:53254 connected (pre-join), reserved player id 4",
+    "Endpoint 127.0.0.1:53145 connected (pre-join), reserved player id 5",
+    "Endpoint 127.0.0.1:64966 connected (pre-join), reserved player id 6",
+    "Endpoint 127.0.0.1:50624 connected (pre-join), reserved player id 7",
+    "Endpoint 127.0.0.1:57803 connected (pre-join), reserved player id 8",
+    "Endpoint 127.0.0.1:64194 connected (pre-join), reserved player id 9",
+    "Endpoint 127.0.0.1:52793 connected (pre-join), reserved player id 10",
+    "Player 1 requested unknown avatar Some(\"osa-kardialtheconsumer-00bea9121db1\"); falling back to default model",
+    "Player 1 joined team Green as Ipfs (class warrior, avatar None, sprite \"cathedral-moth-bellringer\")",
+    "Matchmaking: forming match 1/10 players",
+    "Player 2 requested unknown avatar Some(\"osa-kardialtheconsumer-00bea9121db1\"); falling back to default model",
+    "Player 2 joined team Blue as Ipfs (class warrior, avatar None, sprite \"cathedral-moth-bellringer\")",
+    "Player 3 requested unknown avatar Some(\"osa-kardialtheconsumer-00bea9121db1\"); falling back to default model",
+    "Player 3 joined team Green as Ipfs (class warrior, avatar None, sprite \"cathedral-moth-bellringer\")",
+    "Player 4 requested unknown avatar Some(\"osa-kardialtheconsumer-00bea9121db1\"); falling back to default model",
+    "Player 4 joined team Blue as Ipfs (class warrior, avatar None, sprite \"cathedral-moth-bellringer\")",
+    "Player 5 requested unknown avatar Some(\"osa-kardialtheconsumer-00bea9121db1\"); falling back to default model",
+    "Player 5 joined team Green as Ipfs (class warrior, avatar None, sprite \"cathedral-moth-bellringer\")",
+    "Player 6 requested unknown avatar Some(\"osa-kardialtheconsumer-00bea9121db1\"); falling back to default model",
+    "Player 6 joined team Blue as Ipfs (class warrior, avatar None, sprite \"cathedral-moth-bellringer\")",
+    "Player 7 requested unknown avatar Some(\"osa-kardialtheconsumer-00bea9121db1\"); falling back to default model",
+    "Player 7 joined team Green as Ipfs (class warrior, avatar None, sprite \"cathedral-moth-bellringer\")",
+    "Player 8 requested unknown avatar Some(\"osa-kardialtheconsumer-00bea9121db1\"); falling back to default model",
+    "Player 8 joined team Blue as Ipfs (class warrior, avatar None, sprite \"cathedral-moth-bellringer\")",
+    "Player 9 requested unknown avatar Some(\"osa-kardialtheconsumer-00bea9121db1\"); falling back to default model",
+    "Player 9 joined team Green as Ipfs (class warrior, avatar None, sprite \"cathedral-moth-bellringer\")",
+    "Player 10 requested unknown avatar Some(\"osa-kardialtheconsumer-00bea9121db1\"); falling back to default model",
+    "Player 10 joined team Blue as Ipfs (class warrior, avatar None, sprite \"cathedral-moth-bellringer\")",
+    "Matchmaking: match found (10/10) - starting in 3s",
+    "Match running. Boss schedule armed: wendigo_boss in 60s, king_mutatio_boss in 180s"
+  ],
+  "elapsed_seconds": 15.371
+}

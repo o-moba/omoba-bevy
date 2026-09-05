@@ -1,0 +1,3 @@
+# Verification issue identified during packaging checks
+
+AC7 fixture repair required before completion. Initial `cargo test --workspace --locked -- --test-threads=1` failed at harness/tests/udp_datagrams.rs:75. The hardcoded `osa-kardialtheconsumer-00bea9121db1` is a local-only runtime avatar absent from the shipped roster. Live probe received complete 5v5 snapshots up to8113 bytes; the invalid avatar became null, so the8KiB threshold was never crossed. This is a fixture failure, not observed transport loss. Smallest safe fix: derive a valid longest avatar from shared::avatar_roster, assert the replicated avatar, keep payload/topology checks. Do not raise sysctl or reduce the size assertion. Raw reproduction: raw/5v5-observations.json and raw/test-workspace.log.
