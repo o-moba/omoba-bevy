@@ -105,6 +105,9 @@ impl TargetId {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientPacket {
+    Hello {
+        protocol_version: u16,
+    },
     Transform {
         x: f32,
         y: f32,
@@ -265,6 +268,8 @@ pub struct MinionState {
 /// (targeting fields only).
 #[derive(Debug, Clone, Deserialize)]
 pub struct StructureState {
+    #[serde(default)]
+    pub protected: bool,
     pub id: u64,
     #[serde(default)]
     pub team: Option<Team>,
@@ -306,6 +311,10 @@ pub enum GameState {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerPacket {
     Snapshot {
+        #[serde(flatten, default)]
+        meta: shared::protocol::SnapshotMeta,
+        #[serde(default)]
+        join_error: Option<shared::protocol::JoinRejection>,
         your_id: u64,
         #[serde(default)]
         players: Vec<PlayerState>,
@@ -328,6 +337,17 @@ pub enum ServerPacket {
 }
 
 impl ServerPacket {
+    pub fn meta(&self) -> shared::protocol::SnapshotMeta {
+        match self {
+            Self::Snapshot { meta, .. } => *meta,
+        }
+    }
+    pub fn join_error(&self) -> Option<shared::protocol::JoinRejection> {
+        match self {
+            Self::Snapshot { join_error, .. } => *join_error,
+        }
+    }
+
     /// Returns the receiving client's own player id from a snapshot.
     pub fn your_id(&self) -> u64 {
         match self {

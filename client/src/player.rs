@@ -8,7 +8,7 @@ use bevy::{
 use std::collections::{HashMap, HashSet};
 use std::f32::consts::PI;
 
-use crate::camera::{CameraState, MainCamera};
+use crate::camera::MainCamera;
 use crate::combat::{
     CombatPointerInputSet, CombatStats, MAX_HP, PendingCast, WorldMovementInputSet,
     WorldPointerState,
@@ -19,7 +19,7 @@ use crate::minimap::MinimapNavigationState;
 use crate::model_scale::NormalizeModelScale;
 use crate::net::{
     GameState, GameStateSnapshot, NetworkAvatar, NetworkCharacterChoice, NetworkStructure,
-    RemotePlayer, StructureKind,
+    PlayerCosmeticAction, RemotePlayer, StructureKind,
 };
 use crate::sprite::PlayerVisualMode;
 use crate::team::{CharacterChoice, Team};
@@ -66,7 +66,7 @@ impl Plugin for PlayerPlugin {
             Update,
             (
                 sync_jump_fallback_mode,
-                handle_player_input,
+                handle_player_input.after(crate::input_context::InputContextSet::Resolve),
                 animate_jump,
                 move_player,
             )
@@ -80,7 +80,8 @@ impl Plugin for PlayerPlugin {
                 setup_player_animation_library,
                 bind_player_animation_players,
                 sync_player_animation_state.after(move_player),
-            ),
+            )
+                .chain(),
         )
         .add_systems(Update, resolve_player_structure_overlap.after(move_player))
         .add_systems(PostUpdate, apply_gravity)
@@ -176,6 +177,9 @@ struct CharacterAnimationSet {
     graph: Handle<AnimationGraph>,
     idle_node: AnimationNodeIndex,
     walk_node: AnimationNodeIndex,
+    attack_node: Option<AnimationNodeIndex>,
+    cast_node: Option<AnimationNodeIndex>,
+    death_node: Option<AnimationNodeIndex>,
 }
 
 /// Grace period before Walk falls back to Idle. Remote players advance in
@@ -187,16 +191,131 @@ const LOCOMOTION_IDLE_GRACE_SECS: f32 = 0.25;
 struct PlayerAnimationBinding {
     owner: Entity,
     key: AvatarKey,
-    state: LocomotionAnimState,
+    playback: HeroAnimationPlayback,
     last_owner_position: Vec3,
     /// Seconds since the owner last visibly moved (drives the idle grace).
     seconds_since_movement: f32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum LocomotionAnimState {
+enum HeroAnimationState {
     Idle,
     Walk,
+    Attack,
+    Cast,
+    Death,
+}
+
+impl CharacterAnimationSet {
+    fn node(&self, state: HeroAnimationState) -> AnimationNodeIndex {
+        match state {
+            HeroAnimationState::Idle => self.idle_node,
+            HeroAnimationState::Walk => self.walk_node,
+            HeroAnimationState::Attack => self.attack_node.unwrap_or(self.idle_node),
+            HeroAnimationState::Cast => self.cast_node.unwrap_or(self.idle_node),
+            HeroAnimationState::Death => self.death_node.unwrap_or(self.idle_node),
+        }
+    }
+
+    fn available(&self, state: HeroAnimationState) -> bool {
+        match state {
+            HeroAnimationState::Attack => self.attack_node.is_some(),
+            HeroAnimationState::Cast => self.cast_node.is_some(),
+            HeroAnimationState::Death => self.death_node.is_some(),
+            _ => true,
+        }
+    }
+}
+
+struct HeroAnimationPlayback {
+    state: HeroAnimationState,
+    last_action_sequence: u64,
+    alive: bool,
+    round: Option<(u64, u64)>,
+}
+
+impl HeroAnimationPlayback {
+    fn new(sequence: u64) -> Self {
+        Self {
+            state: HeroAnimationState::Idle,
+            last_action_sequence: sequence,
+            alive: true,
+            round: None,
+        }
+    }
+
+    fn observe_round(&mut self, round: (u64, u64)) -> bool {
+        let changed = self.round.is_some_and(|previous| previous != round);
+        if changed {
+            *self = Self::new(0);
+        }
+        self.round = Some(round);
+        changed
+    }
+
+    /// Returns true when playback must restart, including two consecutive attacks.
+    /// A round reset explicitly carries sequence zero. Older nonzero actions do
+    /// not replay; the network layer independently orders authoritative snapshots.
+    fn advance(
+        &mut self,
+        alive: bool,
+        moving: bool,
+        action: PlayerCosmeticAction,
+        finished: bool,
+        available: impl Fn(HeroAnimationState) -> bool,
+    ) -> bool {
+        let incoming = action.sequence > self.last_action_sequence;
+        if incoming || action.sequence == 0 {
+            self.last_action_sequence = action.sequence;
+        }
+        let respawned = !self.alive && alive;
+        self.alive = alive;
+        let locomotion = if moving {
+            HeroAnimationState::Walk
+        } else {
+            HeroAnimationState::Idle
+        };
+        let action_state = match action.kind {
+            shared::PlayerActionKind::Attack => Some(HeroAnimationState::Attack),
+            shared::PlayerActionKind::Cast => Some(HeroAnimationState::Cast),
+            shared::PlayerActionKind::None => None,
+        };
+        let new_action = alive && !respawned && incoming && action_state.is_some_and(&available);
+        let next = if !alive {
+            HeroAnimationState::Death
+        } else if respawned {
+            locomotion
+        } else if new_action {
+            action_state.unwrap_or(locomotion)
+        } else if matches!(
+            self.state,
+            HeroAnimationState::Attack | HeroAnimationState::Cast
+        ) && !finished
+            && available(self.state)
+        {
+            self.state
+        } else {
+            locomotion
+        };
+        let restart = self.state != next || new_action;
+        self.state = next;
+        restart
+    }
+}
+
+fn start_hero_animation(
+    player: &mut AnimationPlayer,
+    set: &CharacterAnimationSet,
+    state: HeroAnimationState,
+) {
+    player.stop_all();
+    let active = player.start(set.node(state));
+    if matches!(state, HeroAnimationState::Idle | HeroAnimationState::Walk) {
+        active.repeat();
+    } else if state == HeroAnimationState::Death && !set.available(state) {
+        // A missing death clip freezes a safe pose until authoritative respawn.
+        active.pause();
+    }
 }
 
 fn setup_player_animation_library(
@@ -279,7 +398,18 @@ fn setup_player_animation_library(
                 library.sets.remove(&key);
                 continue;
             }
-            let (graph, nodes) = AnimationGraph::from_clips([idle_clip, walk_clip]);
+            let attack = find_clip(&["attack"]);
+            let cast = find_clip(&["cast", "spell"]);
+            let death = find_clip(&["death", "die"]);
+            let mut clips = vec![idle_clip, walk_clip];
+            let mut optional_indices = [None; 3];
+            for (index, clip) in [attack, cast, death].into_iter().enumerate() {
+                if let Some((_name, handle)) = clip {
+                    optional_indices[index] = Some(clips.len());
+                    clips.push(handle);
+                }
+            }
+            let (graph, nodes) = AnimationGraph::from_clips(clips);
             let Some(idle_node) = nodes.first().copied() else {
                 continue;
             };
@@ -293,6 +423,9 @@ fn setup_player_animation_library(
                     graph: graph_handle,
                     idle_node,
                     walk_node,
+                    attack_node: optional_indices[0].and_then(|index| nodes.get(index).copied()),
+                    cast_node: optional_indices[1].and_then(|index| nodes.get(index).copied()),
+                    death_node: optional_indices[2].and_then(|index| nodes.get(index).copied()),
                 },
             );
             info!(
@@ -335,7 +468,10 @@ fn bind_player_animation_players(
     mut commands: Commands,
     library: Res<PlayerAnimationLibrary>,
     player_roots: Query<(), Or<(With<Player>, With<RemotePlayer>)>>,
-    owner_transform_query: Query<&Transform, Or<(With<Player>, With<RemotePlayer>)>>,
+    owner_transform_query: Query<
+        (&Transform, Option<&PlayerCosmeticAction>),
+        Or<(With<Player>, With<RemotePlayer>)>,
+    >,
     character_query: Query<
         (&NetworkCharacterChoice, Option<&NetworkAvatar>),
         Or<(With<Player>, With<RemotePlayer>)>,
@@ -375,10 +511,15 @@ fn bind_player_animation_players(
         let Some(set) = library.get_set(&key) else {
             continue;
         };
-        let last_owner_position = owner_transform_query
+        let (last_owner_position, sequence) = owner_transform_query
             .get(owner)
-            .map(|transform| transform.translation)
-            .unwrap_or(Vec3::ZERO);
+            .map(|(transform, action)| {
+                (
+                    transform.translation,
+                    action.map_or(0, |value| value.sequence),
+                )
+            })
+            .unwrap_or((Vec3::ZERO, 0));
         // Ensure we don't accidentally blend leftover animations from a previous graph.
         animation_player.stop_all();
         animation_player.play(set.idle_node).repeat();
@@ -387,7 +528,7 @@ fn bind_player_animation_players(
             PlayerAnimationBinding {
                 owner,
                 key,
-                state: LocomotionAnimState::Idle,
+                playback: HeroAnimationPlayback::new(sequence),
                 last_owner_position,
                 seconds_since_movement: LOCOMOTION_IDLE_GRACE_SECS,
             },
@@ -397,67 +538,54 @@ fn bind_player_animation_players(
 
 fn sync_player_animation_state(
     time: Res<Time>,
+    game_state: Option<Res<GameStateSnapshot>>,
     library: Res<PlayerAnimationLibrary>,
     character_query: Query<
         (&NetworkCharacterChoice, Option<&NetworkAvatar>),
         Or<(With<Player>, With<RemotePlayer>)>,
     >,
-    local_player_query: Query<(), With<Player>>,
     local_movement_query: Query<(Option<&MovementTarget>, Option<&Jumping>), With<Player>>,
-    player_state_query: Query<(&Transform, &CombatStats), Or<(With<Player>, With<RemotePlayer>)>>,
+    player_state_query: Query<
+        (&Transform, &CombatStats, Option<&PlayerCosmeticAction>),
+        Or<(With<Player>, With<RemotePlayer>)>,
+    >,
     mut animation_query: Query<(
         &mut AnimationPlayer,
         &mut PlayerAnimationBinding,
         &mut AnimationGraphHandle,
     )>,
 ) {
-    if !library.has_locomotion_animations() {
-        return;
-    }
-
     for (mut animation_player, mut binding, mut graph_handle) in &mut animation_query {
-        let Ok((owner_transform, stats)) = player_state_query.get(binding.owner) else {
+        let Ok((owner_transform, stats, action)) = player_state_query.get(binding.owner) else {
             continue;
         };
+        let action = action.copied().unwrap_or_default();
         let desired_key = character_query
             .get(binding.owner)
             .map(|(choice, avatar)| avatar_key(choice.0, avatar))
             .unwrap_or_else(|_| binding.key.clone());
-        if desired_key != binding.key {
-            let Some(new_set) = library.get_set(&desired_key) else {
+        let key_changed = desired_key != binding.key;
+        if key_changed {
+            if library.get_set(&desired_key).is_none() {
                 continue;
-            };
-            animation_player.stop_all();
+            }
             binding.key = desired_key;
-            binding.state = LocomotionAnimState::Idle;
-            *graph_handle = AnimationGraphHandle(new_set.graph.clone());
-            animation_player.play(new_set.idle_node).repeat();
+            binding.playback = HeroAnimationPlayback::new(action.sequence);
         }
-
+        let round_changed = game_state.as_ref().is_some_and(|state| {
+            state.meta.server_epoch != 0
+                && state.meta.match_id != 0
+                && binding
+                    .playback
+                    .observe_round((state.meta.server_epoch, state.meta.match_id))
+        });
         let Some(set) = library.get_set(&binding.key) else {
             continue;
         };
-        let active_node = match binding.state {
-            LocomotionAnimState::Idle => set.idle_node,
-            LocomotionAnimState::Walk => set.walk_node,
-        };
-        let expected_graph_handle = AnimationGraphHandle(set.graph.clone());
-        if *graph_handle != expected_graph_handle {
-            *graph_handle = expected_graph_handle;
-            animation_player.stop_all();
-            animation_player.play(active_node).repeat();
-        } else if !animation_player.is_playing_animation(active_node) {
-            // If the graph handle / player got reset (scene reload, late component insert, etc.),
-            // force the expected animation to actually start.
-            animation_player.stop_all();
-            animation_player.play(active_node).repeat();
-        }
-
         let distance = owner_transform
             .translation
             .distance(binding.last_owner_position);
-        let speed = distance / time.delta_secs().max(0.001);
-        let moved = speed > 0.05;
+        let moved = distance / time.delta_secs().max(0.001) > 0.05;
         binding.last_owner_position = owner_transform.translation;
         if moved {
             binding.seconds_since_movement = 0.0;
@@ -465,36 +593,31 @@ fn sync_player_animation_state(
             binding.seconds_since_movement += time.delta_secs();
         }
         let moved_recently = binding.seconds_since_movement < LOCOMOTION_IDLE_GRACE_SECS;
-        let moving_by_intent = if local_player_query.get(binding.owner).is_ok() {
-            local_movement_query
-                .get(binding.owner)
-                .map(|(movement_target, jumping)| movement_target.is_some() || jumping.is_some())
-                .unwrap_or(false)
-        } else {
-            false
-        };
-        let moving = stats.is_alive() && (moving_by_intent || moved || moved_recently);
-        let desired_state = if moving {
-            LocomotionAnimState::Walk
-        } else {
-            LocomotionAnimState::Idle
-        };
-
-        if desired_state == binding.state {
-            continue;
-        }
-
-        let node = match desired_state {
-            LocomotionAnimState::Idle => set.idle_node,
-            LocomotionAnimState::Walk => set.walk_node,
-        };
-        animation_player.stop_all();
-        animation_player.play(node).repeat();
-        info!(
-            "Locomotion animation {:?} -> {:?} for {:?}",
-            binding.state, desired_state, binding.key
+        let moving_by_intent = local_movement_query
+            .get(binding.owner)
+            .map(|(target, jumping)| target.is_some() || jumping.is_some())
+            .unwrap_or(false);
+        let active_node = set.node(binding.playback.state);
+        let finished = animation_player
+            .animation(active_node)
+            .is_none_or(|active| active.is_finished());
+        let restart = binding.playback.advance(
+            stats.is_alive(),
+            moving_by_intent || moved || moved_recently,
+            action,
+            finished,
+            |state| set.available(state),
         );
-        binding.state = desired_state;
+        let expected_graph_handle = AnimationGraphHandle(set.graph.clone());
+        if key_changed
+            || round_changed
+            || restart
+            || *graph_handle != expected_graph_handle
+            || !animation_player.is_playing_animation(set.node(binding.playback.state))
+        {
+            *graph_handle = expected_graph_handle;
+            start_hero_animation(&mut animation_player, set, binding.playback.state);
+        }
     }
 }
 
@@ -513,7 +636,7 @@ fn handle_player_input(
         ),
         With<Player>,
     >,
-    cam_state: Res<CameraState>,
+    context: Res<crate::input_context::GameplayInputContext>,
     animation_library: Res<PlayerAnimationLibrary>,
     minimap_nav: Option<Res<MinimapNavigationState>>,
     map_layout: Option<Res<MapLayout>>,
@@ -528,7 +651,7 @@ fn handle_player_input(
             return;
         }
     }
-    if !accepts_ground_movement_input(*visual_mode, cam_state.locked) {
+    if !context.gameplay_allowed() {
         return;
     }
     let Ok(window) = window_query.single() else {
@@ -609,10 +732,6 @@ const fn should_issue_ground_move(
     pointer_over_ui: bool,
 ) -> bool {
     !target_consumed && !minimap_consumed && !pointer_over_ui
-}
-
-fn accepts_ground_movement_input(mode: PlayerVisualMode, camera_locked: bool) -> bool {
-    mode == PlayerVisualMode::Sprite2d || camera_locked
 }
 
 /// Maps the active camera viewport into authoritative simulation XZ.
@@ -982,27 +1101,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sprite_ground_movement_does_not_depend_on_camera_follow() {
-        assert!(accepts_ground_movement_input(
-            PlayerVisualMode::Sprite2d,
-            true
-        ));
-        assert!(accepts_ground_movement_input(
-            PlayerVisualMode::Sprite2d,
-            false
-        ));
-    }
-
-    #[test]
-    fn model_ground_movement_preserves_legacy_camera_gate() {
-        assert!(accepts_ground_movement_input(
-            PlayerVisualMode::Models3d,
-            true
-        ));
-        assert!(!accepts_ground_movement_input(
-            PlayerVisualMode::Models3d,
-            false
-        ));
+    fn modal_ground_press_never_creates_movement_intent() {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<Touches>()
+            .init_resource::<crate::input_context::GameplayInputContext>()
+            .init_resource::<PlayerAnimationLibrary>()
+            .init_resource::<PendingCast>()
+            .init_resource::<WorldPointerState>()
+            .insert_resource(PlayerVisualMode::Models3d)
+            .add_systems(Update, handle_player_input);
+        let player = app.world_mut().spawn((Player, CombatStats::default())).id();
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        app.world_mut()
+            .resource_mut::<crate::input_context::GameplayInputContext>()
+            .modal_open = true;
+        app.update();
+        assert!(!app.world().entity(player).contains::<MovementTarget>());
+        app.world_mut()
+            .resource_mut::<crate::input_context::GameplayInputContext>()
+            .modal_open = false;
+        app.world_mut()
+            .resource_mut::<crate::input_context::GameplayInputContext>()
+            .debug_flight = true;
+        app.update();
+        assert!(!app.world().entity(player).contains::<MovementTarget>());
     }
 
     #[test]
@@ -1011,5 +1136,277 @@ mod tests {
         assert!(!should_issue_ground_move(true, false, false));
         assert!(!should_issue_ground_move(false, true, false));
         assert!(!should_issue_ground_move(false, false, true));
+    }
+}
+
+#[cfg(test)]
+mod animation_tests {
+    use super::*;
+    use shared::PlayerActionKind;
+
+    fn action(sequence: u64, kind: PlayerActionKind) -> PlayerCosmeticAction {
+        PlayerCosmeticAction {
+            sequence,
+            kind,
+            slot: 0,
+        }
+    }
+
+    #[test]
+    fn combat_animation_transitions_deduplicate_restart_and_hold_death() {
+        let mut playback = HeroAnimationPlayback::new(0);
+        let attack = action(1, PlayerActionKind::Attack);
+        assert!(playback.advance(true, true, attack, false, |_| true));
+        assert_eq!(playback.state, HeroAnimationState::Attack);
+        assert!(!playback.advance(true, true, attack, false, |_| true));
+        assert!(playback.advance(
+            true,
+            true,
+            action(2, PlayerActionKind::Attack),
+            false,
+            |_| true
+        ));
+        assert_eq!(playback.state, HeroAnimationState::Attack);
+        assert!(
+            playback.advance(true, true, action(3, PlayerActionKind::Cast), false, |_| {
+                true
+            })
+        );
+        assert_eq!(playback.state, HeroAnimationState::Cast);
+        assert!(
+            playback.advance(true, true, action(3, PlayerActionKind::Cast), true, |_| {
+                true
+            })
+        );
+        assert_eq!(playback.state, HeroAnimationState::Walk);
+        assert!(playback.advance(false, false, attack, true, |_| true));
+        assert_eq!(playback.state, HeroAnimationState::Death);
+        assert!(
+            !playback.advance(false, true, action(4, PlayerActionKind::Cast), true, |_| {
+                true
+            })
+        );
+        assert_eq!(playback.state, HeroAnimationState::Death);
+        assert!(
+            playback.advance(true, false, action(4, PlayerActionKind::Cast), true, |_| {
+                true
+            })
+        );
+        assert_eq!(playback.state, HeroAnimationState::Idle);
+    }
+
+    #[test]
+    fn new_round_action_rearms_even_when_initial_zero_snapshot_was_lost() {
+        let mut playback = HeroAnimationPlayback::new(42);
+        assert!(!playback.observe_round((100, 1)));
+        playback.state = HeroAnimationState::Death;
+        playback.alive = false;
+        assert!(playback.observe_round((100, 2)));
+        assert!(playback.advance(
+            true,
+            false,
+            action(1, PlayerActionKind::Cast),
+            false,
+            |_| true
+        ));
+        assert_eq!(playback.state, HeroAnimationState::Cast);
+        assert!(!playback.observe_round((100, 2)));
+        assert!(!playback.advance(
+            true,
+            false,
+            action(1, PlayerActionKind::Cast),
+            false,
+            |_| true
+        ));
+        assert!(playback.observe_round((200, 1)));
+        assert!(playback.advance(
+            true,
+            false,
+            action(1, PlayerActionKind::Attack),
+            false,
+            |_| true
+        ));
+        assert_eq!(playback.state, HeroAnimationState::Attack);
+    }
+
+    #[test]
+    fn absent_action_clip_falls_back_and_round_zero_rearms_sequences() {
+        let mut playback = HeroAnimationPlayback::new(10);
+        assert!(!playback.advance(
+            true,
+            false,
+            action(11, PlayerActionKind::Cast),
+            false,
+            |_| false
+        ));
+        assert_eq!(playback.state, HeroAnimationState::Idle);
+        assert!(!playback.advance(
+            true,
+            false,
+            action(9, PlayerActionKind::Attack),
+            false,
+            |_| true
+        ));
+        playback.advance(true, false, PlayerCosmeticAction::default(), true, |_| true);
+        assert!(playback.advance(
+            true,
+            false,
+            action(1, PlayerActionKind::Attack),
+            false,
+            |_| true
+        ));
+        assert_eq!(playback.state, HeroAnimationState::Attack);
+        playback.advance(
+            false,
+            false,
+            action(1, PlayerActionKind::Attack),
+            true,
+            |_| false,
+        );
+        assert_eq!(playback.state, HeroAnimationState::Death);
+    }
+
+    fn animation_set() -> CharacterAnimationSet {
+        let (_, nodes) = AnimationGraph::from_clips([
+            Handle::<AnimationClip>::default(),
+            Handle::default(),
+            Handle::default(),
+            Handle::default(),
+            Handle::default(),
+        ]);
+        CharacterAnimationSet {
+            graph: Handle::default(),
+            idle_node: nodes[0],
+            walk_node: nodes[1],
+            attack_node: Some(nodes[2]),
+            cast_node: Some(nodes[3]),
+            death_node: Some(nodes[4]),
+        }
+    }
+
+    #[test]
+    fn local_and_remote_scene_players_play_one_shots_once_and_respawn() {
+        let mut app = App::new();
+        let set = animation_set();
+        let mut library = PlayerAnimationLibrary::default();
+        library
+            .sets
+            .insert(AvatarKey::Roster("agnes".to_owned()), set.clone());
+        app.insert_resource(Time::<()>::default())
+            .insert_resource(library)
+            .add_systems(
+                Update,
+                (bind_player_animation_players, sync_player_animation_state).chain(),
+            );
+        let mut entities = Vec::new();
+        for local in [true, false] {
+            let owner = app
+                .world_mut()
+                .spawn((
+                    Transform::default(),
+                    CombatStats::default(),
+                    NetworkCharacterChoice(CharacterChoice::Cube),
+                    NetworkAvatar(Some("agnes".to_owned())),
+                    PlayerCosmeticAction::default(),
+                ))
+                .id();
+            if local {
+                app.world_mut().entity_mut(owner).insert(Player);
+            } else {
+                app.world_mut().entity_mut(owner).insert(RemotePlayer);
+            }
+            let child = app
+                .world_mut()
+                .spawn((AnimationPlayer::default(), ChildOf(owner)))
+                .id();
+            entities.push((owner, child));
+        }
+        app.update();
+        for (owner, _) in &entities {
+            app.world_mut()
+                .entity_mut(*owner)
+                .insert(action(1, PlayerActionKind::Attack));
+        }
+        app.update();
+        for (_, child) in &entities {
+            let player = app.world().get::<AnimationPlayer>(*child).unwrap();
+            let active = player.animation(set.attack_node.unwrap()).unwrap();
+            assert_eq!(
+                active.repeat_mode(),
+                bevy::animation::RepeatAnimation::Never
+            );
+            app.world_mut()
+                .get_mut::<AnimationPlayer>(*child)
+                .unwrap()
+                .animation_mut(set.attack_node.unwrap())
+                .unwrap()
+                .seek_to(0.3);
+        }
+        app.update();
+        for (owner, child) in &entities {
+            assert_eq!(
+                app.world()
+                    .get::<AnimationPlayer>(*child)
+                    .unwrap()
+                    .animation(set.attack_node.unwrap())
+                    .unwrap()
+                    .seek_time(),
+                0.3
+            );
+            app.world_mut()
+                .entity_mut(*owner)
+                .insert(action(2, PlayerActionKind::Cast));
+        }
+        app.update();
+        for (owner, child) in &entities {
+            assert!(
+                app.world()
+                    .get::<AnimationPlayer>(*child)
+                    .unwrap()
+                    .is_playing_animation(set.cast_node.unwrap())
+            );
+            app.world_mut().get_mut::<CombatStats>(*owner).unwrap().hp = 0.0;
+        }
+        app.update();
+        for (_, child) in &entities {
+            let mut player = app.world_mut().get_mut::<AnimationPlayer>(*child).unwrap();
+            let active = player.animation_mut(set.death_node.unwrap()).unwrap();
+            assert_eq!(
+                active.repeat_mode(),
+                bevy::animation::RepeatAnimation::Never
+            );
+            active.seek_to(0.9);
+        }
+        app.update();
+        for (owner, child) in &entities {
+            assert_eq!(
+                app.world()
+                    .get::<AnimationPlayer>(*child)
+                    .unwrap()
+                    .animation(set.death_node.unwrap())
+                    .unwrap()
+                    .seek_time(),
+                0.9
+            );
+            app.world_mut().get_mut::<CombatStats>(*owner).unwrap().hp = 100.0;
+        }
+        app.update();
+        for (_, child) in &entities {
+            assert!(
+                app.world()
+                    .get::<AnimationPlayer>(*child)
+                    .unwrap()
+                    .is_playing_animation(set.idle_node)
+            );
+        }
+    }
+
+    #[test]
+    fn unavailable_death_uses_a_paused_safe_pose() {
+        let mut set = animation_set();
+        set.death_node = None;
+        let mut player = AnimationPlayer::default();
+        start_hero_animation(&mut player, &set, HeroAnimationState::Death);
+        assert!(player.animation(set.idle_node).unwrap().is_paused());
     }
 }

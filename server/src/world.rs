@@ -71,6 +71,7 @@ pub(crate) fn add_structure(
         id,
         Structure {
             state: StructureState {
+                protected: false,
                 id,
                 kind,
                 team,

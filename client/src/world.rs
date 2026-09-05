@@ -2,7 +2,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::gltf::Gltf;
 use bevy::prelude::*;
 use bevy::scene::SceneRoot;
-use ekza_bevy_sdk::bevy::{EkzaModelCatalog, load_builtin_model_catalog};
+use ekza_bevy_sdk::bevy::EkzaModelCatalog;
 use std::collections::HashMap;
 
 use crate::camera::{CAMERA2D_BASE_SCALE, CameraState, MainCamera, locked_camera_offset};
@@ -14,7 +14,6 @@ use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
 use crate::sprite::PlayerVisualMode;
 use crate::team::{CharacterChoice, Team, TeamSelection};
 
-const USE_CUSTOM_MODEL: bool = true;
 pub const DEFAULT_LIGHT_ILLUMINANCE: f32 = 25_000.0;
 pub const MIN_LIGHT_ILLUMINANCE: f32 = 4_000.0;
 pub const MAX_LIGHT_ILLUMINANCE: f32 = 120_000.0;
@@ -152,7 +151,6 @@ fn setup_scene(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
     lighting_settings: Res<LightingSettings>,
     visual_mode: Res<PlayerVisualMode>,
 ) {
@@ -171,12 +169,10 @@ fn setup_scene(
     } else {
         materials.add(StandardMaterial::from(Color::srgb(0.8, 0.7, 0.6)))
     };
-    let assets_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
-    let catalog = if USE_CUSTOM_MODEL && *visual_mode == PlayerVisualMode::Models3d {
-        load_builtin_model_catalog(&asset_server, &assets_dir)
-    } else {
-        PlayerModelCatalog::default()
-    };
+    // Release candidates use the shipped roster only. Legacy SDK choices keep
+    // the primitive stand-in; constructing its remote catalog starts downloads
+    // even when the player picked a completely offline roster avatar.
+    let catalog = PlayerModelCatalog::default();
     let (initial_scene, initial_gltf) = model_assets_for_choice(&catalog, CharacterChoice::Ipfs);
 
     commands.insert_resource(catalog.clone());
@@ -317,6 +313,7 @@ fn sync_selected_player_assets(
 
 fn spawn_local_player_on_team(
     mut commands: Commands,
+    session: Res<crate::net::ClientSession>,
     team_selection: Res<TeamSelection>,
     player_assets: Res<PlayerAssets>,
     map_layout: Res<MapLayout>,
@@ -325,7 +322,7 @@ fn spawn_local_player_on_team(
     mut camera_query: Query<&mut Transform, With<MainCamera>>,
     visual_mode: Res<PlayerVisualMode>,
 ) {
-    if team_selection.team.is_none() {
+    if team_selection.team.is_none() || !session.join_confirmed() {
         return;
     }
     if existing_players.iter().next().is_some() {
@@ -478,6 +475,35 @@ fn force_vrm_models_double_sided(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn models3d_scene_bootstraps_offline_with_primitive_legacy_fallbacks() {
+        // No AssetServer or SDK transport exists: scene setup must remain offline.
+        let mut app = App::new();
+        app.insert_resource(PlayerVisualMode::Models3d)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<LightingSettings>()
+            .add_systems(Startup, setup_scene);
+        app.update();
+        let catalog = app.world().resource::<PlayerModelCatalog>();
+        for choice in [
+            CharacterChoice::Cube,
+            CharacterChoice::Ipfs,
+            CharacterChoice::Toka,
+            CharacterChoice::Wang,
+        ] {
+            assert_eq!(catalog.handles_for(choice), (None, None));
+        }
+        let assets = app.world().resource::<PlayerAssets>();
+        assert!(assets.scene.is_none());
+        assert!(assets.gltf.is_none());
+        assert!(
+            app.world()
+                .resource::<Assets<Mesh>>()
+                .contains(&assets.mesh)
+        );
+    }
 
     fn camera_app(mode: PlayerVisualMode) -> App {
         let mut app = App::new();

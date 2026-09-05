@@ -94,7 +94,10 @@ pub struct BossesPlugin;
 impl Plugin for BossesPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BossAnimationLibrary>()
-            .add_systems(Startup, load_boss_assets)
+            .add_systems(
+                Startup,
+                load_boss_assets.after(crate::persistence::load_persistent_client_settings),
+            )
             .add_systems(
                 Update,
                 (
@@ -109,7 +112,15 @@ impl Plugin for BossesPlugin {
     }
 }
 
-fn load_boss_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
+fn load_boss_assets(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mode: Res<PlayerVisualMode>,
+) {
+    if *mode != PlayerVisualMode::Models3d {
+        commands.insert_resource(BossAssetCache::default());
+        return;
+    }
     let mut cache = BossAssetCache::default();
     for camp_type in [
         NeutralCampType::WendigoBoss,

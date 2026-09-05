@@ -21,7 +21,8 @@ impl Plugin for HelpOverlayPlugin {
                     toggle_help_overlay,
                     sync_help_overlay_visibility,
                 )
-                    .chain(),
+                    .chain()
+                    .in_set(crate::input_context::InputContextSet::Modal),
             );
     }
 }
@@ -73,13 +74,16 @@ fn setup_help_overlay(mut commands: Commands) {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
                 right: Val::Px(0.0),
-                top: Val::Px(72.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                display: Display::None,
                 justify_content: JustifyContent::Center,
-                align_items: AlignItems::FlexStart,
+                align_items: AlignItems::Center,
                 ..default()
             },
             Visibility::Hidden,
             ZIndex(40),
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.45)),
             HelpOverlayRoot,
             Name::new("HelpOverlayRoot"),
         ))
@@ -88,7 +92,7 @@ fn setup_help_overlay(mut commands: Commands) {
                 .spawn((
                     Node {
                         width: Val::Percent(88.0),
-                        max_width: Val::Px(520.0),
+                        max_width: Val::Px(760.0),
                         padding: UiRect::all(Val::Px(18.0)),
                         ..default()
                     },
@@ -122,17 +126,22 @@ fn toggle_help_overlay(
 fn sync_help_overlay_visibility(
     visible: Res<HelpOverlayVisible>,
     snapshot: Res<GameStateSnapshot>,
-    mut root: Query<&mut Visibility, With<HelpOverlayRoot>>,
+    mut root: Query<(&mut Visibility, &mut Node), With<HelpOverlayRoot>>,
 ) {
     let in_running_match = matches!(snapshot.state, GameState::Running);
     if !visible.is_changed() && !snapshot.is_changed() {
         return;
     }
-    let Ok(mut v) = root.single_mut() else {
+    let Ok((mut v, mut node)) = root.single_mut() else {
         return;
     };
     // Keep lobby/victory overlays readable (game state UI sits below this z-order).
     let show_panel = visible.0 && in_running_match;
+    node.display = if show_panel {
+        Display::Flex
+    } else {
+        Display::None
+    };
     *v = if show_panel {
         Visibility::Visible
     } else {
@@ -147,14 +156,16 @@ fn help_overlay_body() -> String {
     format!(
         "Quick guide (press {help_key} to close)\n\n\
 MOVE: Click or tap the ground to walk.\n\
-CAMERA: Mouse wheel zoom. Y toggles hero follow; Space returns to your hero. Use arrow keys to pan while free in 2D.\n\
+CAMERA: Mouse wheel zoom. Y toggles hero follow; Space returns to your hero. Hold Alt + right mouse to rotate in 3D. Arrow keys pan in free 2D.\n\
 MINIMAP: Top-left — click to move the camera focus.\n\
 ATTACK: Click or tap a hostile to select it and use Q; your hero approaches if needed.\n\
+TEAMS: You: double ring · Ally: square · Enemy: triangle.\n\
 TARGET: Tab selects the nearest hostile, middle-click selects without attacking, Backspace clears.\n\
 CAST: Skill keys {skills} or the on-screen buttons cast at the selected target (W/E/R unlock by level).\n\
 SKILL POINTS: Spend with {upgrade} or the arrows above the hotbar to rank up abilities.\n\
-OBJECTIVE: Destroy the enemy base tower.\n\
-PAUSE: Escape opens the menu."
+OBJECTIVE: Destroy any enemy lane tower to unlock its base, then destroy the base.\n\
+MENU: Escape opens settings; the online match continues.\n\
+DEBUG: F8 enables flight only with debug controls enabled; Space exits."
     )
 }
 

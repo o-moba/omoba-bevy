@@ -3,7 +3,8 @@
 //! Gives each bot a believable MOBA goal: walk its lane toward the enemy
 //! base, fight enemy players/minions met on the way with the Q ability, and
 //! siege enemy towers when it reaches them. Deliberately simple — nearest
-//! target, no retreat, no skill combos. The server stays fully authoritative
+//! target, bounded tower retreat, and shared-kit self-sustain. The server remains
+//! fully authoritative
 //! (movement speed budget, cast ranges, cooldowns, damage); this module only
 //! decides where a bot *wants* to go and what it *wants* to hit.
 //!
@@ -11,7 +12,11 @@
 //! `lane_control_points` (constants from `server/src/balance.rs`). Keep in
 //! sync with the server, same convention as `protocol.rs`.
 
-use shared::{HeroClass as SharedClass, SkillSlot, ability_for_class_slot};
+use shared::{
+    HeroClass as SharedClass, SkillSlot, TargetingMode, ability_for_class_slot, scaled_cooldown,
+    scaled_mana_cost, unlocked_slots_for_level,
+};
+use std::time::Instant;
 
 use crate::protocol::{
     HeroClass, MinionState, PlayerState, ServerPacket, StructureState, TargetId, TargetKind, Team,
@@ -38,6 +43,12 @@ pub const WAYPOINT_REACHED: f32 = 2.0;
 /// Cast slightly inside the real range so server-side range checks pass
 /// while both sides are moving.
 const CAST_RANGE_SAFETY: f32 = 0.9;
+/// Conservative envelope covering both lane tower (20) and base (24) range.
+pub const TOWER_CAUTION_RADIUS: f32 = 26.0;
+const TOWER_HOLD_RADIUS: f32 = TOWER_CAUTION_RADIUS + 2.0;
+const MINION_SUPPORT_RADIUS: f32 = 24.0;
+const MIN_SUPPORT_MINIONS: usize = 2;
+const MIN_SIEGE_HEALTH: f32 = 0.5;
 
 /// Lanes, ordered like the server's minion lanes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,10 +140,25 @@ pub struct EnemyRef {
 
 /// Enemies extracted from a snapshot, split into units (players + minions)
 /// and structures (towers).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct WorldView {
     pub units: Vec<EnemyRef>,
     pub structures: Vec<EnemyRef>,
+    pub friendly_minions: Vec<EnemyRef>,
+    pub protected_structures: Vec<u64>,
+    pub health_fraction: f32,
+}
+
+impl Default for WorldView {
+    fn default() -> Self {
+        Self {
+            units: Vec::new(),
+            structures: Vec::new(),
+            friendly_minions: Vec::new(),
+            protected_structures: Vec::new(),
+            health_fraction: 1.0,
+        }
+    }
 }
 
 impl WorldView {
@@ -140,6 +166,13 @@ impl WorldView {
     pub fn from_snapshot(snapshot: &ServerPacket, my_id: u64, my_team: Team) -> Self {
         let is_enemy_team = |team: &Option<Team>| team.is_some_and(|t| t != my_team);
         let mut view = WorldView::default();
+        if let Some(me) = snapshot.player(my_id) {
+            view.health_fraction = if me.max_hp > 0.0 {
+                me.hp / me.max_hp
+            } else {
+                0.0
+            };
+        }
         for player in snapshot.players() {
             let PlayerState {
                 id, x, z, team, hp, ..
@@ -155,6 +188,14 @@ impl WorldView {
         }
         for minion in snapshot.minions() {
             let MinionState { id, team, x, z, hp } = minion;
+            if *team == Some(my_team) && *hp > 0.0 {
+                view.friendly_minions.push(EnemyRef {
+                    kind: TargetKind::Minion,
+                    id: *id,
+                    x: *x,
+                    z: *z,
+                });
+            }
             if is_enemy_team(team) && *hp > 0.0 {
                 view.units.push(EnemyRef {
                     kind: TargetKind::Minion,
@@ -165,8 +206,18 @@ impl WorldView {
             }
         }
         for structure in snapshot.structures() {
-            let StructureState { id, team, x, z, hp } = structure;
+            let StructureState {
+                id,
+                team,
+                x,
+                z,
+                hp,
+                protected,
+            } = structure;
             if is_enemy_team(team) && *hp > 0.0 {
+                if *protected {
+                    view.protected_structures.push(*id);
+                }
                 view.structures.push(EnemyRef {
                     kind: TargetKind::Structure,
                     id: *id,
@@ -208,6 +259,106 @@ fn nearest(from: (f32, f32), enemies: &[EnemyRef]) -> Option<(&EnemyRef, f32)> {
         .min_by(|a, b| a.1.total_cmp(&b.1))
 }
 
+fn tower_supported(me: (f32, f32), tower: &EnemyRef, view: &WorldView) -> bool {
+    view.health_fraction >= MIN_SIEGE_HEALTH
+        && view
+            .friendly_minions
+            .iter()
+            .filter(|minion| {
+                let d = distance((minion.x, minion.z), (tower.x, tower.z));
+                d < MINION_SUPPORT_RADIUS && d < distance(me, (tower.x, tower.z))
+            })
+            .take(MIN_SUPPORT_MINIONS)
+            .count()
+            >= MIN_SUPPORT_MINIONS
+}
+
+fn segment_circle_entry(
+    from: (f32, f32),
+    to: (f32, f32),
+    center: (f32, f32),
+    radius: f32,
+) -> Option<f32> {
+    let delta = (to.0 - from.0, to.1 - from.1);
+    let offset = (from.0 - center.0, from.1 - center.1);
+    let a = delta.0 * delta.0 + delta.1 * delta.1;
+    if a < 0.0001 {
+        return None;
+    }
+    let b = 2.0 * (offset.0 * delta.0 + offset.1 * delta.1);
+    let c = offset.0 * offset.0 + offset.1 * offset.1 - radius * radius;
+    let discriminant = b * b - 4.0 * a * c;
+    if discriminant < 0.0 {
+        return None;
+    }
+    let entry = (-b - discriminant.sqrt()) / (2.0 * a);
+    (0.0..=1.0).contains(&entry).then_some(entry)
+}
+
+fn authoritative_class(me: &PlayerState) -> SharedClass {
+    me.hero_class
+        .as_deref()
+        .and_then(SharedClass::from_id)
+        .unwrap_or_default()
+}
+
+/// Spend one point, prioritizing Q then W/E/R, only on an unlocked legal rank.
+pub fn choose_skill_upgrade(me: &PlayerState) -> Option<u8> {
+    if me.skill_points == 0 {
+        return None;
+    }
+    let unlocked = unlocked_slots_for_level(me.level);
+    (0..4u8).find(|&index| {
+        let slot = SkillSlot::from_index(index).unwrap();
+        unlocked[index as usize]
+            && me.ranks[index as usize]
+                < ability_for_class_slot(authoritative_class(me), slot).max_rank
+    })
+}
+
+/// Shared-kit affordability/unlock/cooldown checks before any outbound cast.
+pub fn can_cast_slot(
+    me: &PlayerState,
+    slot: u8,
+    last_casts: &[Option<Instant>; 4],
+    now: Instant,
+) -> bool {
+    let Some(skill_slot) = SkillSlot::from_index(slot) else {
+        return false;
+    };
+    let def = ability_for_class_slot(authoritative_class(me), skill_slot);
+    let index = slot as usize;
+    let rank = me.ranks[index].clamp(1, def.max_rank);
+    me.hp > 0.0
+        && unlocked_slots_for_level(me.level)[index]
+        && me.mana >= scaled_mana_cost(def, rank)
+        && last_casts[index]
+            .is_none_or(|last| now.saturating_duration_since(last) >= scaled_cooldown(def, rank))
+}
+
+/// A self heal or mana restore is useful after at least 20% of that resource is missing.
+pub fn choose_self_sustain(
+    me: &PlayerState,
+    last_casts: &[Option<Instant>; 4],
+    now: Instant,
+) -> Option<u8> {
+    (0..4u8).find(|&index| {
+        let def = ability_for_class_slot(
+            authoritative_class(me),
+            SkillSlot::from_index(index).unwrap(),
+        );
+        let needs_hp = def.self_heal.is_some_and(|amount| amount > 0.0)
+            && me.max_hp > 0.0
+            && me.hp <= me.max_hp * 0.8;
+        let needs_mana = def.self_mana_restore.is_some_and(|amount| amount > 0.0)
+            && me.max_mana > 0.0
+            && me.mana <= me.max_mana * 0.8;
+        def.targeting == TargetingMode::SelfTarget
+            && (needs_hp || needs_mana)
+            && can_cast_slot(me, index, last_casts, now)
+    })
+}
+
 impl BotBrain {
     pub fn new(lane: Lane, team: Team, class: HeroClass) -> Self {
         Self {
@@ -233,6 +384,54 @@ impl BotBrain {
     /// Pure per-tick decision: fight what is close, otherwise push the lane.
     pub fn decide(&mut self, x: f32, z: f32, view: &WorldView) -> BotDecision {
         let me = (x, z);
+        let unsupported = view
+            .structures
+            .iter()
+            .filter(|tower| !tower_supported(me, tower, view))
+            .collect::<Vec<_>>();
+        if let Some(tower) = unsupported
+            .iter()
+            .filter(|tower| distance(me, (tower.x, tower.z)) < TOWER_HOLD_RADIUS)
+            .min_by(|a, b| distance(me, (a.x, a.z)).total_cmp(&distance(me, (b.x, b.z))))
+        {
+            let mut away = (x - tower.x, z - tower.z);
+            let mut length = distance((0.0, 0.0), away);
+            if length < 0.001 {
+                away = (self.waypoints[0].0 - tower.x, self.waypoints[0].1 - tower.z);
+                length = distance((0.0, 0.0), away);
+            }
+            if length < 0.001 {
+                away = (-1.0, 0.0);
+                length = 1.0;
+            }
+            return BotDecision {
+                move_target: Some((
+                    tower.x + away.0 / length * TOWER_HOLD_RADIUS,
+                    tower.z + away.1 / length * TOWER_HOLD_RADIUS,
+                )),
+                cast: None,
+            };
+        }
+        let mut decision = self.decide_intent(x, z, view);
+        if let Some(target) = decision.move_target {
+            let mut fraction = 1.0_f32;
+            for tower in unsupported {
+                if let Some(entry) =
+                    segment_circle_entry(me, target, (tower.x, tower.z), TOWER_HOLD_RADIUS)
+                {
+                    fraction = fraction.min(entry);
+                }
+            }
+            if fraction < 1.0 {
+                let clipped = (x + (target.0 - x) * fraction, z + (target.1 - z) * fraction);
+                decision.move_target = (distance(me, clipped) > 0.1).then_some(clipped);
+            }
+        }
+        decision
+    }
+
+    fn decide_intent(&mut self, x: f32, z: f32, view: &WorldView) -> BotDecision {
+        let me = (x, z);
         let engage_range = self.q_range * CAST_RANGE_SAFETY;
         let pull_range = engage_range + AGGRO_RANGE;
 
@@ -256,7 +455,13 @@ impl BotBrain {
         }
 
         // 2. No units around: siege the nearest structure in reach.
-        if let Some((structure, dist)) = nearest(me, &view.structures)
+        let attackable = view
+            .structures
+            .iter()
+            .filter(|tower| !view.protected_structures.contains(&tower.id))
+            .copied()
+            .collect::<Vec<_>>();
+        if let Some((structure, dist)) = nearest(me, &attackable)
             && dist <= pull_range
         {
             if dist <= engage_range {
@@ -391,6 +596,7 @@ mod tests {
         let near_edge = WorldView {
             units: vec![unit(7, 15.0, 0.0)],
             structures: vec![],
+            ..Default::default()
         };
         let decision = brain.decide(0.0, 0.0, &near_edge);
         assert_eq!(decision.move_target, Some((15.0, 0.0)));
@@ -400,6 +606,7 @@ mod tests {
         let close = WorldView {
             units: vec![unit(7, 3.0, 0.0)],
             structures: vec![],
+            ..Default::default()
         };
         let decision = brain.decide(0.0, 0.0, &close);
         assert_eq!(decision.move_target, None);
@@ -418,6 +625,8 @@ mod tests {
         let view = WorldView {
             units: vec![unit(1, 4.0, 0.0)],
             structures: vec![tower(2, 2.0, 0.0)],
+            friendly_minions: vec![unit(50, 1.5, 0.0), unit(51, 2.0, 0.0)],
+            ..Default::default()
         };
         let decision = brain.decide(0.0, 0.0, &view);
         assert_eq!(
@@ -435,6 +644,8 @@ mod tests {
         let view = WorldView {
             units: vec![],
             structures: vec![tower(42, 5.0, 0.0)],
+            friendly_minions: vec![unit(50, 4.0, 0.0), unit(51, 5.0, 0.0)],
+            ..Default::default()
         };
         let decision = brain.decide(0.0, 0.0, &view);
         assert_eq!(decision.move_target, None);
@@ -510,5 +721,130 @@ mod tests {
         );
         let structure_ids: Vec<u64> = view.structures.iter().map(|s| s.id).collect();
         assert_eq!(structure_ids, vec![20], "only the enemy tower");
+        assert_eq!(
+            view.friendly_minions
+                .iter()
+                .map(|m| m.id)
+                .collect::<Vec<_>>(),
+            vec![11]
+        );
+    }
+    fn hero(class: &str, level: u32) -> PlayerState {
+        serde_json::from_value(serde_json::json!({"id":1,"hp":50.0,"max_hp":100.0,
+            "mana":100.0,"max_mana":100.0,"level":level,"hero_class":class,"skill_points":3,"ranks":[1,1,1,1]})).unwrap()
+    }
+
+    #[test]
+    fn upgrades_respect_authoritative_points_unlocks_and_caps() {
+        for class in SharedClass::ALL {
+            let mut me = hero(class.id(), 1);
+            assert_eq!(choose_skill_upgrade(&me), Some(0));
+            me.ranks[0] = class.abilities()[0].max_rank;
+            assert_eq!(
+                choose_skill_upgrade(&me),
+                None,
+                "locked slots cannot receive upgrades"
+            );
+            me.level = 2;
+            assert_eq!(choose_skill_upgrade(&me), Some(1));
+            me.skill_points = 0;
+            assert_eq!(choose_skill_upgrade(&me), None);
+            me.skill_points = 5;
+            me.level = 10;
+            me.ranks = class.abilities().map(|def| def.max_rank);
+            assert_eq!(choose_skill_upgrade(&me), None);
+        }
+    }
+
+    #[test]
+    fn self_sustain_requires_need_unlock_mana_and_shared_cooldown() {
+        let now = Instant::now();
+        let mut me = hero("warrior", 1);
+        assert_eq!(choose_self_sustain(&me, &[None; 4], now), None);
+        me.level = 2;
+        assert_eq!(choose_self_sustain(&me, &[None; 4], now), Some(1));
+        me.hp = 100.0;
+        assert_eq!(choose_self_sustain(&me, &[None; 4], now), None);
+        me.hp = 50.0;
+        me.mana = 0.0;
+        assert_eq!(choose_self_sustain(&me, &[None; 4], now), None);
+        me.mana = 100.0;
+        let last = [None, Some(now), None, None];
+        assert_eq!(choose_self_sustain(&me, &last, now), None);
+        let cooldown = scaled_cooldown(
+            ability_for_class_slot(SharedClass::Warrior, SkillSlot::W),
+            1,
+        );
+        assert_eq!(choose_self_sustain(&me, &last, now + cooldown), Some(1));
+        me.hp = 0.0;
+        assert_eq!(choose_self_sustain(&me, &[None; 4], now), None);
+    }
+
+    #[test]
+    fn cleric_uses_unlocked_mana_restore_at_zero_mana() {
+        let now = Instant::now();
+        let mut me = hero("cleric", 4);
+        me.hp = 100.0;
+        me.mana = 0.0;
+        assert_eq!(choose_self_sustain(&me, &[None; 4], now), Some(2));
+        me.level = 2;
+        assert_eq!(choose_self_sustain(&me, &[None; 4], now), None);
+        me.level = 4;
+        me.mana = 100.0;
+        assert_eq!(choose_self_sustain(&me, &[None; 4], now), None);
+    }
+
+    #[test]
+    fn bot_retreats_without_two_frontline_minions_and_when_low_health() {
+        let mut brain = BotBrain::new(Lane::Mid, Team::Green, HeroClass::Warrior);
+        let mut view = WorldView {
+            units: vec![unit(2, 3.0, 0.0)],
+            structures: vec![tower(42, 5.0, 0.0)],
+            ..Default::default()
+        };
+        for allies in [
+            vec![],
+            vec![unit(50, 4.0, 0.0)],
+            vec![unit(50, -5.0, 0.0), unit(51, -6.0, 0.0)],
+        ] {
+            view.friendly_minions = allies;
+            let decision = brain.decide(0.0, 0.0, &view);
+            assert_eq!(decision.cast, None);
+            let retreat = decision.move_target.unwrap();
+            assert!(distance(retreat, (5.0, 0.0)) >= TOWER_CAUTION_RADIUS);
+            assert!(retreat.0 < 0.0);
+        }
+        view.friendly_minions = vec![unit(50, 4.0, 0.0), unit(51, 5.0, 0.0)];
+        assert!(brain.decide(0.0, 0.0, &view).cast.is_some());
+        view.health_fraction = 0.49;
+        assert_eq!(brain.decide(0.0, 0.0, &view).cast, None);
+    }
+
+    #[test]
+    fn pursuing_units_cannot_cross_an_unsupported_tower_circle() {
+        let mut brain = BotBrain::new(Lane::Mid, Team::Green, HeroClass::Warrior);
+        let view = WorldView {
+            units: vec![unit(2, 15.0, 0.0)],
+            structures: vec![tower(42, 40.0, 0.0)],
+            ..Default::default()
+        };
+        let decision = brain.decide(0.0, 0.0, &view);
+        let target = decision.move_target.unwrap();
+        assert!(target.0 <= 12.001 && target.0 >= 11.999);
+        assert_eq!(decision.cast, None);
+        let held = brain.decide(12.0, 0.0, &view);
+        assert_eq!(held.move_target, None);
+    }
+
+    #[test]
+    fn protected_base_is_not_selected_even_with_minion_support() {
+        let mut brain = BotBrain::new(Lane::Mid, Team::Green, HeroClass::Warrior);
+        let view = WorldView {
+            structures: vec![tower(42, 5.0, 0.0)],
+            friendly_minions: vec![unit(50, 4.0, 0.0), unit(51, 5.0, 0.0)],
+            protected_structures: vec![42],
+            ..Default::default()
+        };
+        assert_eq!(brain.decide(0.0, 0.0, &view).cast, None);
     }
 }

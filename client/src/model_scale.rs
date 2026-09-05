@@ -33,7 +33,7 @@ const NORMALIZATION_MIN_HEIGHT: f32 = 0.001;
 const MIN_OVERRIDE_MULTIPLIER: f32 = 0.1;
 const MAX_OVERRIDE_MULTIPLIER: f32 = 10.0;
 const OVERRIDES_POLL_SECONDS: f32 = 1.0;
-const OVERRIDES_RELATIVE_PATH: &str = "assets/config/model_scale_overrides.json";
+const OVERRIDES_RELATIVE_PATH: &str = "config/model_scale_overrides.json";
 
 pub struct ModelScalePlugin;
 
@@ -202,12 +202,8 @@ fn parse_overrides(raw: &str) -> Result<HashMap<String, f32>, serde_json::Error>
 }
 
 fn overrides_path() -> Option<PathBuf> {
-    let compiled = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(OVERRIDES_RELATIVE_PATH);
-    if compiled.exists() {
-        return Some(compiled);
-    }
-    let relative = PathBuf::from(OVERRIDES_RELATIVE_PATH);
-    relative.exists().then_some(relative)
+    let path = shared::client_asset_root().join(OVERRIDES_RELATIVE_PATH);
+    path.exists().then_some(path)
 }
 
 fn read_overrides(overrides: &mut ModelScaleOverrides) {
@@ -542,7 +538,7 @@ fn normalize_model_scale_fallback_system(
 pub fn run_model_measurement_analyzer() {
     use bevy::asset::{AssetPlugin, RecursiveDependencyLoadState};
 
-    let assets_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
+    let assets_root = shared::client_asset_root();
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .add_plugins(AssetPlugin {
