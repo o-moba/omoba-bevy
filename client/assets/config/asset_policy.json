@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "purpose": "Candidate content inventory and known denied asset identities. Changes require source/provenance review.",
+  "denied_files": {
+    "avatars/el-bueno.glb": {
+      "sha256": "9498b9fe7b5e70da5180a408b1b2710f4e1f6229ddb0e58c6d863836b0fd8629",
+      "reason": "Conflicting embedded/linked permission metadata; see dated distribution review."
+    },
+    "avatars/el-bueno.png": {
+      "sha256": "68405cdead22048adab2269a057cfeaf448805fe09837f201f94098f26c02456",
+      "reason": "Conflicting embedded/linked permission metadata; see dated distribution review."
+    },
+    "minions/slime-green.glb": {
+      "sha256": "aefd174fd09ea8271a13362513114a5d26c2b8f9144c9af6067cb22652a6d624",
+      "reason": "Conflicting embedded/linked permission metadata; see dated distribution review."
+    },
+    "minions/slime-blue.glb": {
+      "sha256": "794f674666624d7054b810a6fc5db23bc2ee815a329a6fb833684036cd2d98e0",
+      "reason": "Conflicting embedded/linked permission metadata; see dated distribution review."
+    },
+    "bosses/wendigo-hollow.glb": {
+      "sha256": "b868e561accb84a71b3ad4ebbd3fb515d82a2b9b4bcbd696dcee954877440600",
+      "reason": "Conflicting embedded/linked permission metadata; see dated distribution review."
+    },
+    "bosses/wendigo-hollow.png": {
+      "sha256": "616755b07abe7a98c1668ec2b7020a07f007ff56e83d1c775e848eb0f33d45c7",
+      "reason": "Conflicting embedded/linked permission metadata; see dated distribution review."
+    }
+  },
+  "approved_actor_models": {
+    "avatars/agnes.glb": {
+      "sha256": "07292333b33e9a0d522b95fb4b544038387e1786dde8cee1921dc9e1994f1c95",
+      "source_url": "https://arweave.net/c8mrbRq29sfQdovW1l_D2JYGOaCNF3JxTaUsmHTSNAg",
+      "license": "CC0",
+      "embedded_license": "CC0",
+      "thumbnail": "agnes.jpg"
+    },
+    "avatars/anna.glb": {
+      "sha256": "b1506f4eaab88f8c6a938cb4ae808a850f6de1d6ffbf1c5aea324e7152e16f58",
+      "source_url": "https://arweave.net/RqDioyluCcxDNHFPoXLUlbEQjhP1Fy9HtaGzLFVh0mE",
+      "license": "CC0",
+      "embedded_license": "CC0",
+      "thumbnail": "anna.jpg"
+    },
+    "avatars/megan-the-fox.glb": {
+      "sha256": "ed824f79581db1bc44a32cde4ee2902c98195e261f07c8129f5b5bd68862f246",
+      "source_url": "https://arweave.net/up4WzT0YJfXv9woGseCIQnBSq3eH8KWASJJbNtuvEWY",
+      "license": "CC0",
+      "embedded_license": "CC0",
+      "thumbnail": "megan-the-fox.jpg"
+    },
+    "avatars/lady-koi.glb": {
+      "sha256": "4b5c38f00250569e72f5204a20aaecff806b0930ce21820796bb6c5b9303f876",
+      "source_url": "https://arweave.net/t3aTp6AhxfdLcq5I3HZx29wK8MFQGmDC9wPwXrHQoW0",
+      "license": "CC0",
+      "embedded_license": "CC0",
+      "thumbnail": "lady-koi.jpg"
+    },
+    "avatars/bao-samurai.glb": {
+      "sha256": "1e6ef34186dd92545ef73fb0fb54a2ef423e39ae81f2724e342a380938b75367",
+      "source_url": "https://arweave.net/wmTy-SEXxmlp847i1U1m2GziSGp-4T8qrZ77A32LlY8",
+      "license": "CC0",
+      "embedded_license": "CC0",
+      "thumbnail": null
+    },
+    "avatars/good-knight.glb": {
+      "sha256": "bee4c725f53244c6120264af2482e4d4cfa001f0ee48157c10055714ee41f8a3",
+      "source_url": "https://arweave.net/GssJhnk0HJsS6u3ZNN6fTk4TEL7g4AbVGoCztUgjAu0",
+      "license": "CC0",
+      "embedded_license": "CC0",
+      "thumbnail": "good-knight.jpg"
+    },
+    "avatars/crowley.glb": {
+      "sha256": "7964147c48c7129466e6570af2350f842287670846fb45bf781af67696481104",
+      "source_url": "https://arweave.net/U5J00CQ4NHUkXH7rrM4DTt4Oi3JqkTXKzC2z4oX67qs",
+      "license": "CC0",
+      "embedded_license": "CC0",
+      "thumbnail": "crowley.jpg"
+    },
+    "avatars/cyberpal.glb": {
+      "sha256": "f0a388982acd13417fdf15846915444baf9c87e88e529ef47b658b54c7a3c02f",
+      "source_url": "https://arweave.net/zNTLqtifNdl38MpdNXACcvSMFVu6-s7d6pJQDm7E7Us",
+      "license": "CC0",
+      "embedded_license": "CC0",
+      "thumbnail": "cyberpal.jpg"
+    },
+    "avatars/sport-mecha.glb": {
+      "sha256": "0486b3e01c73bec521e1dd26524227b51f73910cb2b9f683a0ae97925f7215be",
+      "source_url": "https://arweave.net/xpx3cF_x4G4FUW-oIx7c2LiSUPigXK74fLHXgJ2w6lA",
+      "license": "CC0",
+      "embedded_license": "CC0",
+      "thumbnail": "sport-mecha.jpg"
+    },
+    "avatars/pirate-bot.glb": {
+      "sha256": "09921bce5249034684055be613a5a0a5616536c2be904906494432eccd20d8ff",
+      "source_url": "https://arweave.net/f6VUW6sCyJcjErrBWSu_MVlYMkmAx5CRpyNGedUNxHM",
+      "license": "CC0",
+      "embedded_license": "CC0",
+      "thumbnail": "pirate-bot.jpg"
+    },
+    "avatars/mega-angel.glb": {
+      "sha256": "cad50a3cacf90cc6659e9680c680bbf96fe6c430f39e8427803b4058be84076a",
+      "source_url": "https://arweave.net/hFjw4u33v1cjEFl80leP2M8dfRjaJ5UNNmIZp8sIA8Y",
+      "license": "CC0",
+      "embedded_license": "CC0",
+      "thumbnail": "mega-angel.jpg"
+    },
+    "avatars/stitch-witch.glb": {
+      "sha256": "5675aa6294c45b32d4983dc713b002ef41072d46fa7eb7537cc99b62726667ab",
+      "source_url": "https://arweave.net/O-cHPoD2LyfqSbkltB15-nwGK1aUT0M1JMLf1-gq46g",
+      "license": "CC0",
+      "embedded_license": "CC0",
+      "thumbnail": "stitch-witch.jpg"
+    },
+    "avatars/cool-tiger.glb": {
+      "sha256": "7c29a0c590407e55a84aaeb8cc5a065f65c4a20f626e508cd366ff2c41e8b378",
+      "source_url": "https://arweave.net/2EQ5wsstsJaFOG9LXq_gVFKKgM8bnfPa3axYJ-VS1ug",
+      "license": "CC0",
+      "embedded_license": "CC0",
+      "thumbnail": "cool-tiger.jpg"
+    },
+    "avatars/aurora.glb": {
+      "sha256": "3c0385b1234b1c7a8c7d74ccfe0f79653e2da83556717b25e4b7941d175d547f",
+      "source_url": "https://gateway.pinata.cloud/ipfs/QmVvfCcAKYozNQwwxPbHyNohLyBJbTrCBSM1Ycck3ouJSj/Avartar_Aurora.vrm",
+      "license": "CC0",
+      "embedded_license": "CC0",
+      "thumbnail": "aurora.png"
+    },
+    "avatars/orion.glb": {
+      "sha256": "5ef0dfc89700bd45a821e8083764d5f68191d6dda89b661a4962d310e43c694b",
+      "source_url": "https://gateway.pinata.cloud/ipfs/Qmed8jVF5FvBn6Jerxk8Wm5DwRjuAHRfBXgofTue37orBC/Avatar_Orion.vrm",
+      "license": "CC0",
+      "embedded_license": "CC0",
+      "thumbnail": "orion.png"
+    },
+    "bosses/king-mutatio.glb": {
+      "sha256": "97d4121071489f30cd3668b2f5b34c1d769139fc00aa4fca3889df4deacf77fb",
+      "source_url": "https://dweb.link/ipfs/QmVXPeQzJhhfjPJyeHdt4PfZddLSLPwNEHuPTu1RauLSsW/king_mutatio.vrm",
+      "license": "CC0",
+      "embedded_license": "CC0",
+      "thumbnail": "king-mutatio.png"
+    }
+  },
+  "environment_manifest": "verdant/manifest.json",
+  "environment_manifest_sha256": "25a3717741813d028d9fd7b96ed75e31e1454eb4413bb5d876074af48f201e22",
+  "environment_provenance": "Original project-authored geometry; see art/verdant-confluence/PROVENANCE.md"
+}

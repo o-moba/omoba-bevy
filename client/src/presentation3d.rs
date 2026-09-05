@@ -226,7 +226,7 @@ fn draw_feedback(
     }
     for (transform, team, local) in &heroes {
         let mut center = transform.translation;
-        center.y = layout.terrain_height(center.x, center.z) + 0.09;
+        center.y = layout.terrain_height_3d(center.x, center.z) + 0.09;
         let cue = allegiance(local, *team, selection.team);
         let color = cue.color();
         let radius = 0.85;

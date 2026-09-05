@@ -1,9 +1,9 @@
 //! Client-side raid-boss presentation (TASK-19).
 //!
 //! The server replicates bosses as neutrals with boss camp types; this module
-//! renders them with their staged GLB models (`client/assets/bosses/`), scaled
-//! up for raid presence, adds a floating nameplate, and drives the embedded
-//! idle/walk clips from the replicated AI state. The HP bar comes for free via
+//! renders King Mutatio with its retained GLB and Wendigo with an original
+//! stone/crystal guardian. Both keep raid scale, floating names, and AI-driven
+//! motion. The HP bar comes for free via
 //! the shared `CombatStats`/`CombatBars` pipeline.
 
 use bevy::gltf::Gltf;
@@ -12,6 +12,7 @@ use bevy::scene::SceneRoot;
 use std::collections::HashMap;
 
 use crate::camera::MainCamera;
+use crate::creatures3d::{CreatureAssets, ProceduralCreature, spawn_creature};
 use crate::model_scale::{ModelScaleSource, NormalizeModelScale};
 use crate::net::{NetworkNeutral, NeutralAiState, NeutralAiStateTag, NeutralCampType};
 use crate::sprite::PlayerVisualMode;
@@ -52,15 +53,13 @@ pub fn boss_display_name(camp_type: NeutralCampType) -> &'static str {
 /// Asset path slug under `client/assets/bosses/` for a boss camp type.
 fn boss_slug(camp_type: NeutralCampType) -> Option<&'static str> {
     match camp_type {
-        NeutralCampType::WendigoBoss => Some("wendigo-hollow"),
         NeutralCampType::KingMutatioBoss => Some("king-mutatio"),
         _ => None,
     }
 }
 
-/// Preloaded handles for the two boss GLBs (scene for rendering, gltf for the
-/// embedded animation clips). Analogous to the roster `AvatarAssetCache`, but
-/// eager: there are exactly two known bosses.
+/// Preloaded handles for the approved imported boss. The procedural guardian
+/// intentionally has no model path or imported animation dependency.
 #[derive(Resource, Default)]
 pub struct BossAssetCache {
     handles: HashMap<NeutralCampType, (Handle<Scene>, Handle<Gltf>)>,
@@ -141,11 +140,12 @@ fn load_boss_assets(
     commands.insert_resource(cache);
 }
 
-/// Attaches the staged GLB scene (scaled up) and a nameplate to every freshly
-/// replicated boss entity.
+/// Attach the role-specific model and a nameplate to each authoritative boss.
+/// Name/HP presentation is independent of whether a role uses an imported GLB.
 fn attach_boss_models(
     mut commands: Commands,
     cache: Res<BossAssetCache>,
+    creatures: Option<Res<CreatureAssets>>,
     new_bosses: Query<(Entity, &BossVisual), Added<BossVisual>>,
     mode: Res<PlayerVisualMode>,
 ) {
@@ -153,29 +153,39 @@ fn attach_boss_models(
         return;
     }
     for (boss_entity, visual) in &new_bosses {
-        let Some((scene, gltf)) = cache.handles.get(&visual.camp_type) else {
-            warn!("No staged model for boss {:?}", visual.camp_type);
-            continue;
-        };
         commands
             .entity(boss_entity)
-            .insert(NormalizeModelScale::scaled_by(BOSS_MODEL_HEIGHT_SCALE))
-            .insert(ModelScaleSource {
-                gltf: gltf.clone(),
-                key: boss_slug(visual.camp_type)
-                    .unwrap_or("unknown-boss")
-                    .to_owned(),
-            })
-            .with_children(|parent| {
-                parent.spawn((
-                    SceneRoot(scene.clone()),
-                    // Staged VRM-derived GLBs face -Z while the server yaw
-                    // convention points +Z at the move/attack direction.
-                    Transform::from_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
-                    Visibility::default(),
-                    Name::new("BossModel"),
-                ));
-            });
+            .insert(NormalizeModelScale::scaled_by(BOSS_MODEL_HEIGHT_SCALE));
+        if visual.camp_type == NeutralCampType::WendigoBoss {
+            if let Some(assets) = creatures.as_ref() {
+                spawn_creature(
+                    &mut commands,
+                    boss_entity,
+                    ProceduralCreature::WendigoGuardian,
+                    assets,
+                );
+            }
+        } else if let Some((scene, gltf)) = cache.handles.get(&visual.camp_type) {
+            commands
+                .entity(boss_entity)
+                .insert(ModelScaleSource {
+                    gltf: gltf.clone(),
+                    key: boss_slug(visual.camp_type)
+                        .unwrap_or("unknown-boss")
+                        .to_owned(),
+                })
+                .with_children(|parent| {
+                    parent.spawn((
+                        SceneRoot(scene.clone()),
+                        // The retained VRM-derived GLB faces -Z; server yaw faces +Z.
+                        Transform::from_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
+                        Visibility::default(),
+                        Name::new("BossModel"),
+                    ));
+                });
+        } else {
+            warn!("No staged model for boss {:?}", visual.camp_type);
+        }
 
         let display_name = boss_display_name(visual.camp_type);
         info!(
@@ -210,12 +220,14 @@ fn update_boss_nameplates(
     bosses: Query<(&GlobalTransform, &NormalizeModelScale), With<BossVisual>>,
     mut nameplates: Query<(Entity, &BossNameplate, &mut Node, &mut Visibility)>,
 ) {
-    let Ok((camera, camera_transform)) = camera_query.single() else {
-        return;
-    };
+    let camera = camera_query.single().ok();
     for (plate_entity, plate, mut node, mut visibility) in &mut nameplates {
         let Ok((boss_transform, normalization)) = bosses.get(plate.boss) else {
             commands.entity(plate_entity).despawn();
+            continue;
+        };
+        let Some((camera, camera_transform)) = camera else {
+            *visibility = Visibility::Hidden;
             continue;
         };
         let head_height = normalization
@@ -378,5 +390,173 @@ fn force_boss_models_double_sided(
                 patched.insert(id);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::combat::CombatStats;
+    use crate::creatures3d::{CreatureAssets, test_app};
+    use crate::model_scale::DEFAULT_MODEL_TARGET_HEIGHT;
+
+    fn boss_app(mode: PlayerVisualMode) -> App {
+        let mut app = test_app(mode);
+        app.insert_resource(BossAssetCache {
+            handles: HashMap::from([(
+                NeutralCampType::KingMutatioBoss,
+                (Handle::default(), Handle::default()),
+            )]),
+        })
+        .add_systems(Update, (attach_boss_models, update_boss_nameplates).chain());
+        app
+    }
+
+    fn spawn_boss(app: &mut App, camp_type: NeutralCampType) -> Entity {
+        app.world_mut()
+            .spawn((
+                NetworkNeutral,
+                BossVisual { camp_type },
+                NeutralAiStateTag(NeutralAiState::Aggro),
+                Transform::default(),
+                Visibility::default(),
+                CombatStats {
+                    hp: 540.0,
+                    max_hp: 900.0,
+                    ..default()
+                },
+            ))
+            .id()
+    }
+
+    #[test]
+    fn both_boss_roles_keep_models_names_hp_and_clean_respawn_ownership() {
+        let mut app = boss_app(PlayerVisualMode::Models3d);
+        assert_eq!(boss_slug(NeutralCampType::WendigoBoss), None);
+        assert_eq!(
+            boss_slug(NeutralCampType::KingMutatioBoss),
+            Some("king-mutatio")
+        );
+        for _round in 0..3 {
+            let guardian = spawn_boss(&mut app, NeutralCampType::WendigoBoss);
+            let king = spawn_boss(&mut app, NeutralCampType::KingMutatioBoss);
+            for _ in 0..8 {
+                app.update();
+            }
+            let root = app.world().entity(guardian);
+            assert_eq!(
+                root.get::<ProceduralCreature>(),
+                Some(&ProceduralCreature::WendigoGuardian)
+            );
+            assert!(root.get::<ModelScaleSource>().is_none());
+            let scale = root.get::<NormalizeModelScale>().unwrap();
+            assert!(
+                (scale.head_local_y.unwrap()
+                    - DEFAULT_MODEL_TARGET_HEIGHT * BOSS_MODEL_HEIGHT_SCALE)
+                    .abs()
+                    < 0.001
+            );
+            assert!(scale.foot_local_y().unwrap().abs() < 0.001);
+            let guardian_children = root.get::<Children>().unwrap().len();
+            assert!(guardian_children >= 18);
+            assert_eq!(app.world().entity(king).get::<Children>().unwrap().len(), 1);
+            assert!(app.world().entity(king).get::<ModelScaleSource>().is_some());
+            assert_eq!(
+                app.world_mut()
+                    .query::<&SceneRoot>()
+                    .iter(app.world())
+                    .count(),
+                1
+            );
+            let plates: Vec<_> = app
+                .world_mut()
+                .query::<(&BossNameplate, &Text)>()
+                .iter(app.world())
+                .map(|(plate, text)| (plate.boss, text.0.clone()))
+                .collect();
+            assert!(plates.contains(&(guardian, "Wendigo".into())));
+            assert!(plates.contains(&(king, "King Mutatio".into())));
+            assert_eq!(plates.len(), 2);
+            for _snapshot in 0..100 {
+                app.world_mut()
+                    .entity_mut(guardian)
+                    .insert(NeutralAiStateTag(NeutralAiState::Idle));
+                app.update();
+            }
+            for entity in [guardian, king] {
+                assert_eq!(
+                    app.world().entity(entity).get::<CombatStats>().unwrap().hp,
+                    540.0
+                );
+            }
+            assert_eq!(
+                app.world()
+                    .entity(guardian)
+                    .get::<Children>()
+                    .unwrap()
+                    .len(),
+                guardian_children
+            );
+            assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 3);
+            assert_eq!(app.world().resource::<Assets<StandardMaterial>>().len(), 5);
+            app.world_mut().entity_mut(guardian).despawn();
+            app.world_mut().entity_mut(king).despawn();
+            app.update();
+            // Cleanup also works when no camera exists (disconnect/rematch).
+            assert_eq!(
+                app.world_mut()
+                    .query::<&BossNameplate>()
+                    .iter(app.world())
+                    .count(),
+                0
+            );
+            assert_eq!(
+                app.world_mut().query::<&Mesh3d>().iter(app.world()).count(),
+                0
+            );
+            assert_eq!(
+                app.world_mut()
+                    .query::<&SceneRoot>()
+                    .iter(app.world())
+                    .count(),
+                0
+            );
+        }
+    }
+
+    #[test]
+    fn sprite2d_bosses_keep_gameplay_identity_without_3d_attachments() {
+        let mut app = boss_app(PlayerVisualMode::Sprite2d);
+        let guardian = spawn_boss(&mut app, NeutralCampType::WendigoBoss);
+        let king = spawn_boss(&mut app, NeutralCampType::KingMutatioBoss);
+        for _ in 0..3 {
+            app.update();
+        }
+        for entity in [guardian, king] {
+            let root = app.world().entity(entity);
+            assert!(root.get::<BossVisual>().is_some());
+            assert!(root.get::<CombatStats>().is_some());
+            assert!(root.get::<Children>().is_none());
+            assert!(root.get::<NormalizeModelScale>().is_none());
+        }
+        assert!(!app.world().contains_resource::<CreatureAssets>());
+        assert_eq!(
+            app.world_mut()
+                .query::<&BossNameplate>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+        assert_eq!(
+            app.world_mut().query::<&Mesh3d>().iter(app.world()).count(),
+            0
+        );
+        assert_eq!(
+            app.world_mut()
+                .query::<&SceneRoot>()
+                .iter(app.world())
+                .count(),
+            0
+        );
     }
 }

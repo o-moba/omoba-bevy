@@ -1,6 +1,9 @@
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs::system::SystemParam;
 use bevy::gltf::Gltf;
+use bevy::light::CascadeShadowConfigBuilder;
 use bevy::prelude::*;
+use bevy::render::view::Hdr;
 use bevy::scene::SceneRoot;
 use ekza_bevy_sdk::bevy::EkzaModelCatalog;
 use std::collections::HashMap;
@@ -14,13 +17,13 @@ use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
 use crate::sprite::PlayerVisualMode;
 use crate::team::{CharacterChoice, Team, TeamSelection};
 
-pub const DEFAULT_LIGHT_ILLUMINANCE: f32 = 25_000.0;
+pub const DEFAULT_LIGHT_ILLUMINANCE: f32 = 11_000.0;
 pub const MIN_LIGHT_ILLUMINANCE: f32 = 4_000.0;
 pub const MAX_LIGHT_ILLUMINANCE: f32 = 120_000.0;
-pub const DEFAULT_AMBIENT_BRIGHTNESS: f32 = 300.0;
+pub const DEFAULT_AMBIENT_BRIGHTNESS: f32 = 650.0;
 pub const MIN_AMBIENT_BRIGHTNESS: f32 = 0.0;
 pub const MAX_AMBIENT_BRIGHTNESS: f32 = 3_500.0;
-pub const DEFAULT_LIGHT_PITCH_DEG: f32 = 45.0;
+pub const DEFAULT_LIGHT_PITCH_DEG: f32 = 55.0;
 pub const MIN_LIGHT_PITCH_DEG: f32 = 10.0;
 pub const MAX_LIGHT_PITCH_DEG: f32 = 85.0;
 pub const DEFAULT_LIGHT_YAW_DEG: f32 = -45.0;
@@ -46,7 +49,7 @@ pub fn model_assets_for_choice(
 
 /// Lazily-created asset handles for roster avatars (slug -> scene + gltf).
 /// Avatars load on first use (local selection or a remote player wearing them)
-/// instead of preloading all 16 GLBs at startup.
+/// instead of preloading all 15 GLBs at startup.
 #[derive(Resource, Default)]
 pub struct AvatarAssetCache {
     handles: HashMap<String, (Handle<Scene>, Handle<Gltf>)>,
@@ -120,9 +123,19 @@ impl Plugin for SetupPlugin {
         .init_resource::<AvatarAssetCache>()
         .add_systems(Update, sync_selected_player_assets)
         .add_systems(Update, force_vrm_models_double_sided)
-        .add_systems(Update, apply_lighting_settings_system)
-        .add_systems(Update, spawn_local_player_on_team);
+        .add_systems(Update, apply_lighting_settings_system);
+        register_local_player_spawn(app);
     }
+}
+
+// Snapshot application can create the admitted local hero with deferred Commands.
+// Flush those commands before checking for a fallback hero, otherwise both paths
+// spawn a root and next-frame duplicate cleanup races scene/animation attachment.
+pub(crate) fn register_local_player_spawn(app: &mut App) {
+    app.add_systems(
+        Update,
+        spawn_local_player_on_team.after(crate::net::ClientNetPipeline::ApplySnapshot),
+    );
 }
 
 #[derive(Resource, Clone, Copy)]
@@ -196,9 +209,10 @@ fn setup_scene(
         .clamp(MIN_LIGHT_YAW_DEG, MAX_LIGHT_YAW_DEG)
         .to_radians();
     let light_transform =
-        Transform::from_rotation(Quat::from_euler(EulerRot::ZYX, 0.0, pitch_rad, yaw_rad));
+        Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, yaw_rad, -pitch_rad, 0.0));
     commands.spawn((
         DirectionalLight {
+            color: Color::srgb(1.0, 0.88, 0.72),
             illuminance: lighting_settings
                 .illuminance
                 .clamp(MIN_LIGHT_ILLUMINANCE, MAX_LIGHT_ILLUMINANCE),
@@ -206,10 +220,17 @@ fn setup_scene(
             ..default()
         },
         light_transform,
+        CascadeShadowConfigBuilder {
+            first_cascade_far_bound: 35.0,
+            maximum_distance: 360.0,
+            ..default()
+        }
+        .build(),
         SceneDirectionalLight,
-        Name::new("Light"),
+        Name::new("Verdant / warm afternoon sun"),
     ));
     commands.insert_resource(GlobalAmbientLight {
+        color: Color::srgb(0.62, 0.80, 0.88),
         brightness: lighting_settings
             .ambient_brightness
             .clamp(MIN_AMBIENT_BRIGHTNESS, MAX_AMBIENT_BRIGHTNESS),
@@ -247,6 +268,20 @@ fn setup_main_camera(
     cam_state.yaw = yaw;
     commands.spawn((
         Camera3d::default(),
+        Camera {
+            clear_color: ClearColorConfig::Custom(Color::srgb(0.12, 0.19, 0.20)),
+            ..default()
+        },
+        Hdr,
+        Tonemapping::AgX,
+        DistanceFog {
+            color: Color::srgb(0.32, 0.46, 0.46),
+            falloff: FogFalloff::Linear {
+                start: 260.0,
+                end: 850.0,
+            },
+            ..default()
+        },
         initial_cam_transform,
         MainCamera,
         Name::new("MainCamera3d"),
@@ -282,7 +317,7 @@ fn apply_lighting_settings_system(
             .light_yaw_deg
             .clamp(MIN_LIGHT_YAW_DEG, MAX_LIGHT_YAW_DEG)
             .to_radians();
-        transform.rotation = Quat::from_euler(EulerRot::ZYX, 0.0, pitch_rad, yaw_rad);
+        transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw_rad, -pitch_rad, 0.0);
     }
 }
 
@@ -439,7 +474,6 @@ fn force_vrm_models_double_sided(
         (Entity, &NetworkCharacterChoice, Option<&NetworkAvatar>),
         With<NormalizeModelScale>,
     >,
-    minion_roots: Query<Entity, (With<crate::net::NetworkMinion>, With<NormalizeModelScale>)>,
     children_query: Query<&Children>,
     material_handles: Query<&MeshMaterial3d<StandardMaterial>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -451,9 +485,7 @@ fn force_vrm_models_double_sided(
             let wears_roster_avatar = avatar.is_some_and(|avatar| avatar.0.is_some());
             choice.0 == CharacterChoice::Paco || wears_roster_avatar
         })
-        .map(|(root, _, _)| root)
-        // Slime minions are VRM-staged GLBs with the same single-sided issue.
-        .chain(minion_roots.iter());
+        .map(|(root, _, _)| root);
     for root in vrm_roots {
         for descendant in children_query.iter_descendants(root) {
             let Ok(handle) = material_handles.get(descendant) else {
@@ -475,6 +507,28 @@ fn force_vrm_models_double_sided(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn removed_avatar_request_falls_back_without_loading_the_disputed_model() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(bevy::asset::AssetPlugin::default())
+            .init_resource::<AvatarAssetCache>()
+            .insert_resource(PlayerModelCatalog::default())
+            .add_systems(Update, |mut resolver: PlayerModelResolver| {
+                assert_eq!(
+                    resolver.resolve(CharacterChoice::Cube, Some("el-bueno")),
+                    (None, None)
+                );
+            });
+        app.update();
+        assert!(
+            app.world()
+                .resource::<AvatarAssetCache>()
+                .handles
+                .is_empty()
+        );
+    }
 
     #[test]
     fn models3d_scene_bootstraps_offline_with_primitive_legacy_fallbacks() {

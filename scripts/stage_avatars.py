@@ -10,8 +10,8 @@ file's ACTUAL image format (several collection thumbnails are JPEGs with a
 A `manifest.json` is written alongside with provenance (collection, license,
 source URL, author) taken from each avatar's `meta.json`.
 
-The roster below is the TASK-17 shortlist (all CC0, VRM 0.x, Mixamo-compatible
-skeletons). The separate `bosses` set (TASK-19) stages the raid-boss models
+The roster below retains the 15 approved release avatars (VRM 0.x,
+Mixamo-compatible skeletons); excluded distribution-review models are not staged. The separate `bosses` set (TASK-19) stages the raid-boss models
 into `client/assets/bosses/` with the same manifest schema, keeping boss slugs
 out of the player-selectable roster manifest. Run from the repo root:
 
@@ -49,13 +49,11 @@ ROSTER = {
     "cool-tiger": "100avatars-r3/fcd73da7-6c89-46fe-8467-3eb4873248fa",
     "aurora": "toxsam/0xc1def47cf1e15ee8c2a92f4e0e968372880d18d1_1",
     "orion": "toxsam/0xc1def47cf1e15ee8c2a92f4e0e968372880d18d1_0",
-    "el-bueno": "NeonGlitch86-collection/0x776bd31ae5549eac9ed215b5db278229454d5bed_7",
 }
 
 # Raid-boss models (TASK-19). Staged into client/assets/bosses/ — deliberately
 # NOT part of ROSTER so boss slugs never enter the player-selectable manifest.
 BOSSES = {
-    "wendigo-hollow": "halloween-rising/0x0ad4c869d0019df7460b33ca852610c9cb0a5647_60",
     "king-mutatio": "toxsam/0x59202483529a11642a43578a6ee77ca4ec24f930_0",
 }
 

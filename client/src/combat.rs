@@ -724,7 +724,7 @@ fn update_skill_bar_system(
         } else {
             "Ready".to_string()
         };
-        let next = format!("Rank {rank} · {cost:.0} MP\n{status}");
+        let next = format!("Rank {rank} | {cost:.0} MP\n{status}");
         if text.0 != next {
             text.0 = next;
         }

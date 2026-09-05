@@ -38,17 +38,38 @@ python3 scripts/convert_vrm_to_glb.py \
     client/assets/downloaded/paco.glb
 ```
 
-### Lane minion slimes (`client/assets/minions/slime-green.glb`, `slime-blue.glb`)
+## Current native candidate assets — 0.18.0-rc.2
 
-- **Avatars:** "Mimic Slime: Classic" (green team) and "Mimic Slime: Water" (blue team)
-- **Collection:** Halloween Rising
-- **Author / creator:** Polygonal-Mind
-- **Original model files:**
-  https://dweb.link/ipfs/QmXyEuwbgUfMG7WzRZys6JnS6DJvxqkPGDseZmHM8wLJm1/Avatar03_v2_Stylized_Green.vrm,
-  https://dweb.link/ipfs/QmXyEuwbgUfMG7WzRZys6JnS6DJvxqkPGDseZmHM8wLJm1/Avatar03_v1_Cute_Blue.vrm
-- **Original format:** VRM 0.x (glTF 2.0 binary)
-- **License:** CC0 1.0 — no attribution legally required; credited as good practice.
-- **Modification:** staged as `.glb` via `scripts/convert_vrm_to_glb.py`; CC0
-  Quaternius UAL animation clips (idle/walk/attack/cast/death) baked in via
-  `scripts/retarget_animations.py --avatars-dir client/assets/minions`.
-  Provenance manifest: `client/assets/minions/manifest.json`.
+The current roster is recorded in `client/assets/avatars/manifest.json` (15
+heroes) and `client/assets/bosses/manifest.json` (King Mutatio). These retain
+creator, collection, source URL and declared CC0 metadata. The reviewed model
+hashes and embedded-license expectations are in
+`client/assets/config/asset_policy.json`; `scripts/validate_candidate_assets.py`
+checks those bytes and metadata in the actual package. This inventory check
+is not a substitute for resolving any newly discovered rights information.
+
+El Bueno, Mimic Slime Classic/Water and Wendigo Hollow are **excluded** from
+this candidate, including the associated previews. The old CC0 collection
+labels were insufficient in light of conflicting embedded/linked permissions;
+the historical evidence remains in
+`docs/progress/2026-09-05-distribution-review.md`. No license metadata was
+rewritten to permit their use. The earlier Paco example above describes an
+optional historical import and is not part of the candidate inventory.
+
+Both faction minions and the affected guardian now use original project-authored
+geometry/materials and motion from `client/src/creatures3d.rs`.
+
+## Original Verdant Confluence environment
+
+`client/assets/verdant/` is derived from the project-authored Blender source in
+`art/verdant-confluence/`. No external mesh or texture was used for this scene.
+See `art/verdant-confluence/PROVENANCE.md` and the runtime `manifest.json` for
+source hashes, derivation details, normalized walk surfaces and output hashes.
+The runtime step preserves the source and is reproducible with
+`python3 scripts/stage_verdant.py`.
+
+## Retargeted actor animations
+
+Retained imported models include Quaternius Universal Animation Library clips,
+credited as CC0 in `assets-src/animations/README.md`, which records source links,
+clip names and retargeting. The native package includes that attribution record.

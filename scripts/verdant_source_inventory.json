@@ -1,0 +1,162 @@
+[
+  {
+    "path": "art/verdant-confluence/PROVENANCE.md",
+    "sha256": "9a878548211de785e22409f568be5c3659d53f48469962dcc2b70b73a15cd93b"
+  },
+  {
+    "path": "art/verdant-confluence/README.md",
+    "sha256": "d94adb88dfe689236add92808b9878094315421fbd51fc5915e456a4545b6fe3"
+  },
+  {
+    "path": "art/verdant-confluence/ART_DIRECTION.md",
+    "sha256": "f5ab41856d12b9b2aa3f35847f4287e305e94c41d1ea25fde35bfe50f952312f"
+  },
+  {
+    "path": "art/verdant-confluence/.gitignore",
+    "sha256": "e9377f7afe22fe574eb065f57e80617538d092aeee369d91c702fbb5e779d238"
+  },
+  {
+    "path": "art/verdant-confluence/manifest.json",
+    "sha256": "ecb0c500d77281a58cea6de63fc40f3f2354a29b44305077a51a1938b1cba798"
+  },
+  {
+    "path": "art/verdant-confluence/verdant-confluence.blend",
+    "sha256": "d75c2606155ac0cc7cce0c35168ce9d383aaa6747044f427e2d2a7c84a7b6c57"
+  },
+  {
+    "path": "art/verdant-confluence/renders/04-tactical-plan.png",
+    "sha256": "2b6c5b5c07d1b0ce995a27b02fad887f687de8b44e78e36de77a34c17caa9228"
+  },
+  {
+    "path": "art/verdant-confluence/renders/01-overview.png",
+    "sha256": "f9cb5dee5425f148ffb466fb5be3824bc6da0400211d731540d7866dc25a07ad"
+  },
+  {
+    "path": "art/verdant-confluence/renders/02-sanctuary.png",
+    "sha256": "e28e8cf66aa7ce6fa502f610aec9cec3dcb477fb7ba7fcb863fc5803b2da9914"
+  },
+  {
+    "path": "art/verdant-confluence/renders/03-river-gameplay.png",
+    "sha256": "3271ec276138bc60e8004909ef1f717e72be9354b48722c454f3707ab1cd9e72"
+  },
+  {
+    "path": "art/verdant-confluence/library/sanctuary_blue.glb",
+    "sha256": "62ff760a2634f97e4a7b69b6ec953d59920bee7cb0a8fac0b8cadb77b1a42918"
+  },
+  {
+    "path": "art/verdant-confluence/library/fern_cluster.glb",
+    "sha256": "4f542a1f7dd4d1b644d2839d4e8b70e4f2d254a26a0717671290619d0d2b3555"
+  },
+  {
+    "path": "art/verdant-confluence/library/tree_windswept_oak.glb",
+    "sha256": "2ce042030a333d3037e2feef81c9f3b77473896454a2808d20cd3ccd7bcfb67f"
+  },
+  {
+    "path": "art/verdant-confluence/library/sanctuary_green.glb",
+    "sha256": "d162e501a80d1060963fb7afa34c8b029084dd79cdd1a4b0f9b39b84b3aa2bba"
+  },
+  {
+    "path": "art/verdant-confluence/library/grass_fan.glb",
+    "sha256": "4fc979816ac3a9d4bb506784520548da52594253be47c7a0f7f18ba5c8f87b4b"
+  },
+  {
+    "path": "art/verdant-confluence/library/rooted_stump.glb",
+    "sha256": "62ac5d2da020c0f2a74a5b51f58ee29ea4db7fce39d2abfa684e17a8a4e40a8a"
+  },
+  {
+    "path": "art/verdant-confluence/library/ruin_wall.glb",
+    "sha256": "49b6eecfe6e1385f59cd3830eb2ce75a34d51731885e4055c40be7de42ca69c6"
+  },
+  {
+    "path": "art/verdant-confluence/library/tree_jade_canopy.glb",
+    "sha256": "d120297754b3deb80e8a55639451e6139c07bc8a9e745912095dd481454018a3"
+  },
+  {
+    "path": "art/verdant-confluence/library/fallen_log.glb",
+    "sha256": "cefcb6e190a0fe2c1d392e35016d74f6bb44cfacf42f151b3cfc91b36bd3c254"
+  },
+  {
+    "path": "art/verdant-confluence/library/boulder_moss_tall.glb",
+    "sha256": "279c48c3acc6ace88426ac7d523f6f94ceae773f56275356ae8b9f94ea42edd3"
+  },
+  {
+    "path": "art/verdant-confluence/library/rock_stratified_outcrop.glb",
+    "sha256": "35adcb85b197bd69936809d7f2c49e6fc61a48784334d1705d46df8856bbb080"
+  },
+  {
+    "path": "art/verdant-confluence/library/flowering_shrub.glb",
+    "sha256": "63e52b981dd4b69d1d2d88dba2ee44bb4d47da821e47f054567e6f2343fd2a41"
+  },
+  {
+    "path": "art/verdant-confluence/library/river_reeds.glb",
+    "sha256": "174f31cc407834ee5eb1c72ca6eb6425e3343e76e048c1b2aad0bfc98740cebf"
+  },
+  {
+    "path": "art/verdant-confluence/library/banner_blue.glb",
+    "sha256": "1f7e49f59b5c1bbd8903441410d824f1d5e9797f86f193dc4ae460b6badc5dda"
+  },
+  {
+    "path": "art/verdant-confluence/library/boulder_moss_flat.glb",
+    "sha256": "9a98a2f239c2a29e305b65417f9799fa88bbf8cc7d19f9d56ebf6506ed3faf97"
+  },
+  {
+    "path": "art/verdant-confluence/library/ruined_arch.glb",
+    "sha256": "3c10ebc424bc2fe4c9f5530ca5ecd8b058b7484920293d35c7ab6560644a0e5a"
+  },
+  {
+    "path": "art/verdant-confluence/library/watchtower_green.glb",
+    "sha256": "2c848720cf9df057b5516953c53689d9176e885a1d84659e4b16bae804c2ce99"
+  },
+  {
+    "path": "art/verdant-confluence/library/tree_cypress_spire.glb",
+    "sha256": "7cf48d17a28d78b4b7601e7a3708dc48b5350b2ac7a6e8e9db76bb5bfb627bf0"
+  },
+  {
+    "path": "art/verdant-confluence/library/bridge.glb",
+    "sha256": "5af0c202fd5b847f69c3e26e91c3a0ca849bdce0a14159523928a760e530604b"
+  },
+  {
+    "path": "art/verdant-confluence/library/tree_sage_elder.glb",
+    "sha256": "a00aeb112a0780d2532e8167422945c1fcfb0db6760f1ec0a05166d7d24791d8"
+  },
+  {
+    "path": "art/verdant-confluence/library/tree_river_pine.glb",
+    "sha256": "3f2452967d35ebbdfcc81ad7314ad9c7f1076a79a748c6952556006e5d6c9268"
+  },
+  {
+    "path": "art/verdant-confluence/library/banner_green.glb",
+    "sha256": "b7ac5529c8c29ddfb207e0f5904fe8f77fe0e3d41f022d4e4250a7d9069c860a"
+  },
+  {
+    "path": "art/verdant-confluence/library/lantern.glb",
+    "sha256": "5e7c47fe5dfef8e79b7f5d5e1a60646584c3cac1e6f64000db2ffed028144d32"
+  },
+  {
+    "path": "art/verdant-confluence/library/watchtower_blue.glb",
+    "sha256": "58bda78f7f2d0ee0c411de04a7e1ff46b46a92904d3f7ec02bf1305238423b42"
+  },
+  {
+    "path": "art/verdant-confluence/exports/verdant-confluence.glb",
+    "sha256": "d24189e03f5999abdbdaa33cd533df5b9ff9e341dac921de4fee54e77ec8faae"
+  },
+  {
+    "path": "art/verdant-confluence/scripts/render_scene.py",
+    "sha256": "6d2a4e88aa83c868d5af2ba358546fbb04cd73cea56dc8fd8c36f5485df671fb"
+  },
+  {
+    "path": "art/verdant-confluence/scripts/build_scene.py",
+    "sha256": "30f0ea24d084e80a98b1cbb81c2c5a89681431f990d1fc55a6ac611fb483230d"
+  },
+  {
+    "path": "art/verdant-confluence/scripts/validate_art.py",
+    "sha256": "75c5186c3333ff8c77e401efd4523b37a644dad13498bde0346b248bea44b04d"
+  },
+  {
+    "path": "art/verdant-confluence/scripts/architecture.py",
+    "sha256": "6904ba8fab7a2bff9398404b93f383eb60fff60251a46d3cea554fc713f7d78e"
+  },
+  {
+    "path": "art/verdant-confluence/scripts/nature.py",
+    "sha256": "23c091f143b97c17a948cb0d7c68f9c500f2e26e0beb818358e8ec0fa63caf0d"
+  }
+]

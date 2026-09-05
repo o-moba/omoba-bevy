@@ -131,7 +131,7 @@ impl NormalizeModelScale {
 }
 
 /// Which glTF asset a normalized model root was instantiated from, plus the
-/// override key ("agnes", "paco", "wendigo-hollow", ...) used for per-model
+/// override key ("agnes", "paco", "king-mutatio", ...) used for per-model
 /// size multipliers and analysis logging.
 #[derive(Component, Clone)]
 pub struct ModelScaleSource {

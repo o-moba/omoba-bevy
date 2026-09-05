@@ -1,0 +1,1629 @@
+{
+  "schema_version": 1,
+  "title": "Verdant Confluence runtime",
+  "seed": 260905,
+  "units": "meters; exported glTF Y-up; no additional axis conversion",
+  "provenance": "Original project-authored geometry; see art/verdant-confluence/PROVENANCE.md",
+  "source_sha256": "d24189e03f5999abdbdaa33cd533df5b9ff9e341dac921de4fee54e77ec8faae",
+  "source_blend_sha256": "d75c2606155ac0cc7cce0c35168ce9d383aaa6747044f427e2d2a7c84a7b6c57",
+  "files": [
+    {
+      "id": "environment",
+      "path": "environment.glb",
+      "sha256": "c7149011b05fb544a140512729604eb66058706842b78172b72c273def267c8e",
+      "bytes": 3654576,
+      "nodes": 509,
+      "meshes": 422,
+      "primitives": 452,
+      "materials": 20,
+      "source": "art/verdant-confluence/exports/verdant-confluence.glb"
+    },
+    {
+      "id": "foliage",
+      "path": "foliage.glb",
+      "sha256": "a5989c4d1814951391182ab4a8906bb87f87f4c630782f64bc32a18484325be6",
+      "bytes": 3856528,
+      "nodes": 1792,
+      "meshes": 13,
+      "primitives": 55,
+      "materials": 20,
+      "source": "art/verdant-confluence/exports/verdant-confluence.glb"
+    },
+    {
+      "id": "watchtower_green",
+      "path": "watchtower_green.glb",
+      "sha256": "52135fb9241fa14e8b6071e746e9670cd5dc18fadc981b41d8762f0a59e96638",
+      "bytes": 113924,
+      "nodes": 2,
+      "meshes": 1,
+      "primitives": 5,
+      "materials": 5,
+      "source": "art/verdant-confluence/library/watchtower_green.glb"
+    },
+    {
+      "id": "watchtower_blue",
+      "path": "watchtower_blue.glb",
+      "sha256": "946a994240866e7c7fce080664188199c84d22f76b3156038feae8fcb0172d57",
+      "bytes": 113940,
+      "nodes": 2,
+      "meshes": 1,
+      "primitives": 5,
+      "materials": 5,
+      "source": "art/verdant-confluence/library/watchtower_blue.glb"
+    },
+    {
+      "id": "sanctuary_green",
+      "path": "sanctuary_green.glb",
+      "sha256": "d6674c4076498004798415c237a8c03e36e668a4f5ef2a4f62d66be746dff726",
+      "bytes": 321068,
+      "nodes": 2,
+      "meshes": 1,
+      "primitives": 6,
+      "materials": 6,
+      "source": "art/verdant-confluence/library/sanctuary_green.glb"
+    },
+    {
+      "id": "sanctuary_blue",
+      "path": "sanctuary_blue.glb",
+      "sha256": "0a26c7f2a1765ea372d30ff386b84c386114982fc1bd839f5c06b437f7cf2ee2",
+      "bytes": 321088,
+      "nodes": 2,
+      "meshes": 1,
+      "primitives": 6,
+      "materials": 6,
+      "source": "art/verdant-confluence/library/sanctuary_blue.glb"
+    }
+  ],
+  "excluded_live_structure_roots": [
+    "sanctuary_green / 0000",
+    "sanctuary_blue / 0015",
+    "watchtower_green / 0030",
+    "watchtower_blue / 0031",
+    "watchtower_green / 0032",
+    "watchtower_blue / 0033",
+    "watchtower_green / 0034",
+    "watchtower_blue / 0035"
+  ],
+  "node_translation_adjustments": [
+    {
+      "node": "Landscape / meadow -1",
+      "translation_y_delta": 0.015
+    },
+    {
+      "node": "Landscape / meadow 1",
+      "translation_y_delta": 0.015
+    },
+    {
+      "node": "River / turquoise channel",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / jade shallows",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / jade shallows.001",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.001",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.002",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.003",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.004",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.005",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.006",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.007",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.008",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.009",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.010",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.011",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.012",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.013",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.014",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.015",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.016",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.017",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.018",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.019",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.020",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.021",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.022",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.023",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.024",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.025",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.026",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.027",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.028",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.029",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.030",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.031",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.032",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.033",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.034",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.035",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.036",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.037",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.038",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "River / current highlight.039",
+      "translation_y_delta": 0.585
+    },
+    {
+      "node": "Route 0 / continuous stone bed",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.001",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.001",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.002",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.003",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.004",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.002",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.003",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.005",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.006",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.007",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.008",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.004",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.005",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.009",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.010",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.011",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.012",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.006",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.007",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.013",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.014",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.015",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.016",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.008",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.009",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.017",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.018",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.010",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.011",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.019",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.020",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.021",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.022",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.012",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.013",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.023",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.024",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.025",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.026",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.014",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.015",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.027",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.028",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.029",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.030",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.016",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.017",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.031",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.032",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.033",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route 1 / continuous stone bed",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route 1 / continuous stone bed.001",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.034",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.035",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.036",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.018",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.019",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.037",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.038",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.039",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.040",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.020",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.021",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.041",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.042",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.043",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.044",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.022",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.023",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.045",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.046",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.047",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.048",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.024",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.025",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.049",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.050",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.051",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.052",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.026",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.027",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.053",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.054",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.055",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.056",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.028",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.029",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.057",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.058",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.059",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.060",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.030",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.031",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.061",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.062",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.063",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.064",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.032",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.033",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.065",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.066",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.067",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route 1 / continuous stone bed.002",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.068",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.034",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.035",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.069",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.070",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.071",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.072",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.036",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.037",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.073",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.074",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.075",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.076",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.038",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.039",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.077",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.078",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.079",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.080",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.040",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.041",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.081",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.082",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.083",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.084",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.042",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.043",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.085",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.086",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.087",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.088",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.044",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.045",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.089",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.090",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.091",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.092",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.046",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.047",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.093",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.094",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.095",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.096",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.048",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.049",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.097",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.098",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.099",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.100",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.050",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.051",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.101",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route 1 / continuous stone bed.003",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route 1 / continuous stone bed.004",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route 2 / continuous stone bed",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route 2 / continuous stone bed.001",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route 2 / continuous stone bed.002",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.102",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.103",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.104",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.052",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.053",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.105",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.106",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.107",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.108",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.054",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.055",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.109",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.110",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.111",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.112",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.056",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.057",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.113",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.114",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.115",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.116",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.058",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.059",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.117",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.118",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.119",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.120",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.060",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.061",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.121",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.122",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.123",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.124",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.062",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.063",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.125",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.126",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.127",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.128",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.064",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.065",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.129",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.130",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.131",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.132",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.066",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.067",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.133",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.134",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.135",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route 2 / continuous stone bed.003",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.136",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.068",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.069",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.137",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.138",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.139",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.140",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.070",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.071",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.141",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.142",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.143",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.144",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.072",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.073",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.145",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.146",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.147",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.148",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.074",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.075",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.149",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.150",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.151",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.152",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.076",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.077",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.153",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.154",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.155",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.156",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.078",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.079",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.157",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.158",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.159",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.160",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.080",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.081",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.161",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.162",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.163",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.164",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.082",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.083",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.165",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.166",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.167",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.168",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.084",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / verge curb.085",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route / worn joint.169",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Route 2 / continuous stone bed.004",
+      "translation_y_delta": -0.1
+    },
+    {
+      "node": "Objective / tower foundation",
+      "translation_y_delta": -0.14
+    },
+    {
+      "node": "Objective / tower rune rim",
+      "translation_y_delta": -0.14
+    },
+    {
+      "node": "Objective / tower foundation.001",
+      "translation_y_delta": -0.14
+    },
+    {
+      "node": "Objective / tower rune rim.001",
+      "translation_y_delta": -0.14
+    },
+    {
+      "node": "Objective / tower foundation.002",
+      "translation_y_delta": -0.14
+    },
+    {
+      "node": "Objective / tower rune rim.002",
+      "translation_y_delta": -0.14
+    },
+    {
+      "node": "Objective / tower foundation.003",
+      "translation_y_delta": -0.14
+    },
+    {
+      "node": "Objective / tower rune rim.003",
+      "translation_y_delta": -0.14
+    },
+    {
+      "node": "Objective / tower foundation.004",
+      "translation_y_delta": -0.14
+    },
+    {
+      "node": "Objective / tower rune rim.004",
+      "translation_y_delta": -0.14
+    },
+    {
+      "node": "Objective / tower foundation.005",
+      "translation_y_delta": -0.14
+    },
+    {
+      "node": "Objective / tower rune rim.005",
+      "translation_y_delta": -0.14
+    },
+    {
+      "node": "River crossing / corner watergate",
+      "translation_y_delta": -0.23
+    },
+    {
+      "node": "River crossing / watergate inlay",
+      "translation_y_delta": -0.23
+    },
+    {
+      "node": "River crossing / foundation",
+      "translation_y_delta": -0.23
+    },
+    {
+      "node": "lantern / 0037",
+      "translation_y_delta": -0.23
+    },
+    {
+      "node": "River crossing / foundation.001",
+      "translation_y_delta": -0.23
+    },
+    {
+      "node": "lantern / 0038",
+      "translation_y_delta": -0.23
+    },
+    {
+      "node": "River crossing / foundation.002",
+      "translation_y_delta": -0.23
+    },
+    {
+      "node": "lantern / 0039",
+      "translation_y_delta": -0.23
+    },
+    {
+      "node": "River crossing / foundation.003",
+      "translation_y_delta": -0.23
+    },
+    {
+      "node": "lantern / 0040",
+      "translation_y_delta": -0.23
+    },
+    {
+      "node": "River crossing / corner watergate.001",
+      "translation_y_delta": -0.23
+    },
+    {
+      "node": "River crossing / watergate inlay.001",
+      "translation_y_delta": -0.23
+    },
+    {
+      "node": "River crossing / foundation.004",
+      "translation_y_delta": -0.23
+    },
+    {
+      "node": "lantern / 0041",
+      "translation_y_delta": -0.23
+    },
+    {
+      "node": "River crossing / foundation.005",
+      "translation_y_delta": -0.23
+    },
+    {
+      "node": "lantern / 0042",
+      "translation_y_delta": -0.23
+    },
+    {
+      "node": "River crossing / foundation.006",
+      "translation_y_delta": -0.23
+    },
+    {
+      "node": "lantern / 0043",
+      "translation_y_delta": -0.23
+    },
+    {
+      "node": "River crossing / foundation.007",
+      "translation_y_delta": -0.23
+    },
+    {
+      "node": "lantern / 0044",
+      "translation_y_delta": -0.23
+    }
+  ],
+  "surfaces": {
+    "open_ground": 0,
+    "meadow_top": -0.02,
+    "road_top": 0,
+    "water_top": -0.015,
+    "bridge_paver_top": 0.02,
+    "outer_crossing_top": 0.02,
+    "base_pad_top": 0.7,
+    "pad_half_extent": 23,
+    "ramp_reach": 29,
+    "pad_corner_rule": "0.7 * clamp((29 - max(abs(dx), abs(dz))) / 6, 0, 1)",
+    "sanctuary_floor_max": 0.03,
+    "height_tolerance": 0.05
+  },
+  "adaptations": [
+    "Flatten bridge pavers rigidly to +0.02 and de-crown fascia/rails; preserve 28x12 meter walking span.",
+    "Move bridge parapets and abutments 0.8m outward and widen fascia bearings to clear the entire 12m deck.",
+    "Square the base pad upper bevel ring at the existing 46m by 0.7m walktop so it meets the miter skirt without corner dips.",
+    "Compress sanctuary bottom 1.1m to 0.03m; translate upper architecture down 1.07m to expose spawn/walk floor.",
+    "Runtime sanctuaries rotate 45 degrees around Y to clear original diagonal spawn points.",
+    "Two scenes split static architecture from F4-controlled foliage; eight live structures are separate assets."
+  ],
+  "layout": {
+    "half_extent": 108.54951288348659,
+    "base_centers_blender": [
+      [
+        -79.54951288348659,
+        79.54951288348659
+      ],
+      [
+        79.54951288348659,
+        -79.54951288348659
+      ]
+    ],
+    "base_pad_size": 46,
+    "base_pad_height": 0.7,
+    "ramp_length": 6,
+    "lane_width": 12,
+    "lanes_blender": [
+      [
+        [
+          -79.54951288348659,
+          79.54951288348659
+        ],
+        [
+          79.54951288348659,
+          -79.54951288348659
+        ]
+      ],
+      [
+        [
+          -79.54951288348659,
+          79.54951288348659
+        ],
+        [
+          -96.54951288348659,
+          79.54951288348659
+        ],
+        [
+          -96.54951288348659,
+          -96.54951288348659
+        ],
+        [
+          96.54951288348659,
+          -96.54951288348659
+        ],
+        [
+          79.54951288348659,
+          -96.54951288348659
+        ],
+        [
+          79.54951288348659,
+          -79.54951288348659
+        ]
+      ],
+      [
+        [
+          -79.54951288348659,
+          79.54951288348659
+        ],
+        [
+          -79.54951288348659,
+          96.54951288348659
+        ],
+        [
+          -96.54951288348659,
+          96.54951288348659
+        ],
+        [
+          96.54951288348659,
+          96.54951288348659
+        ],
+        [
+          96.54951288348659,
+          -79.54951288348659
+        ],
+        [
+          79.54951288348659,
+          -79.54951288348659
+        ]
+      ]
+    ],
+    "river_width": 18,
+    "river_endpoints_blender": [
+      [
+        -96.54951288348659,
+        -96.54951288348659
+      ],
+      [
+        96.54951288348659,
+        96.54951288348659
+      ]
+    ],
+    "camps_blender": [
+      [
+        -73.81366876077088,
+        -47.7617856687341
+      ],
+      [
+        73.81366876077088,
+        47.7617856687341
+      ],
+      [
+        -47.7617856687341,
+        73.81366876077088
+      ]
+    ],
+    "bosses_blender": [
+      [
+        47.7617856687341,
+        73.81366876077088
+      ],
+      [
+        -47.7617856687341,
+        -73.81366876077088
+      ]
+    ],
+    "towers_blender": [
+      [
+        -31.819805153394633,
+        31.819805153394633
+      ],
+      [
+        31.819805153394626,
+        -31.819805153394626
+      ],
+      [
+        -96.54951288348659,
+        -29.509902576697314
+      ],
+      [
+        4.490097423302686,
+        -96.54951288348659
+      ],
+      [
+        -4.490097423302686,
+        96.54951288348659
+      ],
+      [
+        96.54951288348659,
+        29.50990257669733
+      ]
+    ]
+  }
+}

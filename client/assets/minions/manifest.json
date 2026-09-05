@@ -1,22 +1,15 @@
 {
-  "avatars": [
+  "avatars": [],
+  "procedural": [
     {
-      "slug": "slime-green",
-      "display_name": "Mimic Slime: Classic",
-      "collection": "Halloween Rising",
-      "license": "CC0",
-      "source_url": "https://dweb.link/ipfs/QmXyEuwbgUfMG7WzRZys6JnS6DJvxqkPGDseZmHM8wLJm1/Avatar03_v2_Stylized_Green.vrm",
-      "author": "Polygonal-Mind",
-      "thumbnail": null
+      "id": "minion-green",
+      "source": "client/src/creatures3d.rs",
+      "provenance": "original project-authored geometry"
     },
     {
-      "slug": "slime-blue",
-      "display_name": "Mimic Slime: Water",
-      "collection": "Halloween Rising",
-      "license": "CC0",
-      "source_url": "https://dweb.link/ipfs/QmXyEuwbgUfMG7WzRZys6JnS6DJvxqkPGDseZmHM8wLJm1/Avatar03_v1_Cute_Blue.vrm",
-      "author": "Polygonal-Mind",
-      "thumbnail": null
+      "id": "minion-blue",
+      "source": "client/src/creatures3d.rs",
+      "provenance": "original project-authored geometry"
     }
   ]
 }

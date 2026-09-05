@@ -3,6 +3,7 @@ use bevy::{asset::AssetPlugin, prelude::*};
 mod bosses;
 mod camera;
 mod combat;
+mod creatures3d;
 mod debug_console;
 mod decor;
 mod game_state;
@@ -24,6 +25,8 @@ mod presentation3d;
 mod session_config;
 mod sprite;
 mod team;
+mod verdant3d;
+mod visual_qa;
 mod world;
 mod world2d;
 
@@ -91,5 +94,6 @@ fn main() {
         ))
         // Separate call: the plugin tuple above is at Bevy's 15-element limit.
         .add_plugins((DecorPlugin, presentation3d::Presentation3dPlugin))
+        .add_plugins((verdant3d::Verdant3dPlugin, visual_qa::VisualQaPlugin))
         .run();
 }

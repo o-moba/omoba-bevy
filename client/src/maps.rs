@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 
 use crate::player::{PLAYER_SIZE, PLAYER_SPEED};
-use crate::sprite::PlayerVisualMode;
 use crate::team::Team;
 
 pub const TARGET_BASE_RUN_TIME_SECONDS: f32 = 45.0;
@@ -12,17 +11,14 @@ pub(crate) const BASE_PAD_HEIGHT: f32 = 0.7;
 /// ascend/descend over this distance (League-style client-side fake: the
 /// server keeps a flat ground plane, only the rendered height changes).
 pub(crate) const PAD_RAMP_LENGTH: f32 = 6.0;
-const PAD_RAMP_THICKNESS: f32 = 0.12;
 /// Blocks whose center is within this distance of a neutral-camp or
 /// boss-pit anchor get no decorative box (the creature must be visible).
 const JUNGLE_BLOCK_CLEARANCE: f32 = 10.0;
 const BASE_EDGE_MARGIN: f32 = 6.0;
 const PLAYER_SPAWN_OFFSET: f32 = 7.0;
 pub(crate) const LANE_WIDTH: f32 = 12.0;
-const LANE_THICKNESS: f32 = 0.2;
 const LANE_EDGE_PADDING: f32 = 6.0;
 pub(crate) const RIVER_WIDTH: f32 = 18.0;
-const RIVER_THICKNESS: f32 = 0.06;
 /// Fraction of the map size where the outer jungle blocks/camps sit
 /// (mirrors `JUNGLE_MAP_OUTER_FRAC` in server/src/balance.rs).
 const JUNGLE_MAP_OUTER_FRAC: f32 = 0.34;
@@ -31,9 +27,6 @@ const JUNGLE_MAP_OUTER_FRAC: f32 = 0.34;
 const JUNGLE_MAP_INNER_FRAC: f32 = 0.22;
 /// Fraction of the map size for the two mid jungle blocks.
 const JUNGLE_MAP_MID_FRAC: f32 = 0.28;
-
-#[derive(Component)]
-pub struct MapStatic;
 
 /// Height of one pad's walkable surface at an offset (dx, dz) from the pad
 /// center. Full height on the 46×46 top, linear ramp over `PAD_RAMP_LENGTH`
@@ -134,7 +127,7 @@ impl MapLayout {
 
     /// Lane-center polylines in the XZ plane, ordered Mid, Top, Bot.
     ///
-    /// These are the exact control points rendered by `setup_moba_map` and
+    /// These control points match the Verdant export and the 2D renderer and
     /// mirror the server's `lane_control_points` (server/src/world.rs).
     pub(crate) fn lane_polylines(self) -> [Vec<Vec2>; 3] {
         let lane_edge_offset = self.lane_edge_offset();
@@ -175,7 +168,7 @@ impl MapLayout {
         ]
     }
 
-    /// XZ centers of the ten visual jungle blocks spawned by `setup_moba_map`.
+    /// XZ centers of the ten legacy jungle regions, retained for 2D tiles.
     pub(crate) fn jungle_block_centers(self) -> [Vec2; 10] {
         let map_size = self.size().x;
         let outer = map_size * JUNGLE_MAP_OUTER_FRAC;
@@ -206,6 +199,22 @@ impl MapLayout {
         home.max(away)
     }
 
+    /// Verdant's four mitered ramp trapezoids meet at the height determined
+    /// by the larger absolute offset, without the old overlapping slabs.
+    /// Runtime export normalizes all other walkable tops (including bridges
+    /// and sanctuary paving) to within 0.05 m of this baseline. See the
+    /// shipped verdant/manifest.json surface contract and geometry checks.
+    /// Server movement remains flat XZ; Sprite2d uses `terrain_height`.
+    pub fn terrain_height_3d(self, x: f32, z: f32) -> f32 {
+        let height = |center: Vec3| {
+            let offset = (x - center.x).abs().max((z - center.z).abs());
+            BASE_PAD_HEIGHT
+                * ((BASE_PAD_SIZE * 0.5 + PAD_RAMP_LENGTH - offset) / PAD_RAMP_LENGTH)
+                    .clamp(0.0, 1.0)
+        };
+        height(self.home_spawn).max(height(self.away_spawn))
+    }
+
     /// XZ centers of the three neutral jungle camps
     /// (mirrors `jungle_camp_blueprints` in server/src/neutrals.rs).
     pub(crate) fn camp_centers(self) -> [Vec2; 3] {
@@ -229,9 +238,8 @@ impl MapLayout {
         [Vec2::new(inner, -outer), Vec2::new(-inner, outer)]
     }
 
-    /// Jungle blocks that actually get a decorative box: blocks hosting a
-    /// neutral camp or a boss pit are skipped so the creatures stand in
-    /// open clearings instead of being entombed inside the geometry.
+    /// Jungle regions that receive 2D forest tiles: regions hosting a neutral
+    /// camp or a boss pit remain open. The Verdant scene has authored clearings.
     pub(crate) fn decorative_jungle_block_centers(self) -> Vec<Vec2> {
         let camps = self.camp_centers();
         let pits = self.boss_pit_centers();
@@ -247,436 +255,14 @@ impl MapLayout {
     }
 }
 
+/// Layout authority shared by both presentation modes. The 3D scene is owned
+/// by `Verdant3dPlugin`; the 2D tile world remains owned by `World2dPlugin`.
 pub struct MapsPlugin;
 
 impl Plugin for MapsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<MapLayout>()
-            .add_systems(Startup, setup_moba_map)
-            .add_systems(Update, apply_map_visual_mode);
+        app.init_resource::<MapLayout>();
     }
-}
-
-#[derive(Resource)]
-struct MapPresentationMaterials {
-    terrain: Handle<StandardMaterial>,
-    lane: Handle<StandardMaterial>,
-    river: Handle<StandardMaterial>,
-    home_base: Handle<StandardMaterial>,
-    away_base: Handle<StandardMaterial>,
-    prop: Handle<StandardMaterial>,
-    arena_texture: Handle<Image>,
-}
-
-fn setup_moba_map(
-    mut commands: Commands,
-    layout: Res<MapLayout>,
-    visual_mode: Res<PlayerVisualMode>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    let layout = *layout;
-    let map_size = layout.size();
-
-    info!(
-        "MOBA map spawned: center lane {:.1} units (~{:.1}s at {:.1} u/s)",
-        layout.center_lane_distance(),
-        layout.center_lane_distance() / PLAYER_SPEED,
-        PLAYER_SPEED
-    );
-
-    let is_2d = *visual_mode == PlayerVisualMode::Sprite2d;
-    // The genuine 2D world is owned by `World2dPlugin`; none of the legacy
-    // Mesh3d arena is spawned into a sprite2d session.
-    if is_2d {
-        return;
-    }
-    let arena_texture = Handle::default();
-    let terrain_material = materials.add(StandardMaterial {
-        base_color: if is_2d {
-            Color::srgb(0.20, 0.30, 0.25)
-        } else {
-            Color::srgb(0.08, 0.22, 0.10)
-        },
-        base_color_texture: is_2d.then(|| arena_texture.clone()),
-        unlit: is_2d,
-        perceptual_roughness: 0.95,
-        ..default()
-    });
-    let lane_material = materials.add(StandardMaterial {
-        base_color: if is_2d {
-            Color::srgb(0.48, 0.42, 0.32)
-        } else {
-            Color::srgb(0.38, 0.34, 0.28)
-        },
-        unlit: is_2d,
-        perceptual_roughness: 0.8,
-        ..default()
-    });
-    let river_material = materials.add(StandardMaterial {
-        base_color: if is_2d {
-            Color::srgb(0.08, 0.28, 0.36)
-        } else {
-            Color::srgb(0.10, 0.22, 0.40)
-        },
-        unlit: is_2d,
-        metallic: 0.15,
-        perceptual_roughness: 0.2,
-        ..default()
-    });
-    let home_base_material = materials.add(StandardMaterial {
-        base_color: if is_2d {
-            Color::srgb(0.10, 0.62, 0.68)
-        } else {
-            Color::srgb(0.12, 0.35, 0.62)
-        },
-        unlit: is_2d,
-        perceptual_roughness: 0.75,
-        ..default()
-    });
-    let away_base_material = materials.add(StandardMaterial {
-        base_color: if is_2d {
-            Color::srgb(0.78, 0.22, 0.28)
-        } else {
-            Color::srgb(0.58, 0.18, 0.18)
-        },
-        unlit: is_2d,
-        perceptual_roughness: 0.75,
-        ..default()
-    });
-    let prop_material = materials.add(StandardMaterial {
-        base_color: if is_2d {
-            Color::srgb(0.16, 0.25, 0.22)
-        } else {
-            Color::srgb(0.18, 0.26, 0.16)
-        },
-        unlit: is_2d,
-        perceptual_roughness: 0.9,
-        ..default()
-    });
-
-    commands.insert_resource(MapPresentationMaterials {
-        terrain: terrain_material.clone(),
-        lane: lane_material.clone(),
-        river: river_material.clone(),
-        home_base: home_base_material.clone(),
-        away_base: away_base_material.clone(),
-        prop: prop_material.clone(),
-        arena_texture,
-    });
-
-    commands.spawn((
-        Mesh3d(meshes.add(Mesh::from(
-            Plane3d::default().mesh().size(map_size.x, map_size.y),
-        ))),
-        MeshMaterial3d(terrain_material),
-        Transform::from_xyz(0.0, 0.0, 0.0),
-        MapStatic,
-        Name::new("MapTerrain"),
-    ));
-
-    let [mid_lane_points, top_lane_points, bot_lane_points] = layout.lane_polylines();
-    spawn_lane_polyline(
-        &mut commands,
-        &mut meshes,
-        &lane_material,
-        &mid_lane_points,
-        LANE_WIDTH,
-        LANE_THICKNESS,
-        "LaneMid",
-    );
-    spawn_lane_polyline(
-        &mut commands,
-        &mut meshes,
-        &lane_material,
-        &top_lane_points,
-        LANE_WIDTH,
-        LANE_THICKNESS,
-        "LaneTop",
-    );
-    spawn_lane_polyline(
-        &mut commands,
-        &mut meshes,
-        &lane_material,
-        &bot_lane_points,
-        LANE_WIDTH,
-        LANE_THICKNESS,
-        "LaneBot",
-    );
-
-    spawn_lane_polyline(
-        &mut commands,
-        &mut meshes,
-        &river_material,
-        &layout.river_polyline(),
-        RIVER_WIDTH,
-        RIVER_THICKNESS,
-        "River",
-    );
-
-    spawn_box(
-        &mut commands,
-        &mut meshes,
-        &home_base_material,
-        Vec3::new(
-            layout.home_spawn.x,
-            BASE_PAD_HEIGHT * 0.5,
-            layout.home_spawn.z,
-        ),
-        Vec3::new(BASE_PAD_SIZE, BASE_PAD_HEIGHT, BASE_PAD_SIZE),
-        "HomeBasePad",
-    );
-    spawn_box(
-        &mut commands,
-        &mut meshes,
-        &away_base_material,
-        Vec3::new(
-            layout.away_spawn.x,
-            BASE_PAD_HEIGHT * 0.5,
-            layout.away_spawn.z,
-        ),
-        Vec3::new(BASE_PAD_SIZE, BASE_PAD_HEIGHT, BASE_PAD_SIZE),
-        "AwayBasePad",
-    );
-    spawn_pad_ramps(
-        &mut commands,
-        &mut meshes,
-        &home_base_material,
-        Vec2::new(layout.home_spawn.x, layout.home_spawn.z),
-        "HomeBasePad",
-    );
-    spawn_pad_ramps(
-        &mut commands,
-        &mut meshes,
-        &away_base_material,
-        Vec2::new(layout.away_spawn.x, layout.away_spawn.z),
-        "AwayBasePad",
-    );
-
-    // Camp/boss-hosting blocks are skipped: those creatures must be visible
-    // in open clearings, not entombed inside decorative boxes.
-    for (idx, center) in layout
-        .decorative_jungle_block_centers()
-        .iter()
-        .copied()
-        .enumerate()
-    {
-        spawn_box(
-            &mut commands,
-            &mut meshes,
-            &prop_material,
-            Vec3::new(center.x, 2.0, center.y),
-            Vec3::new(12.0, 4.0, 12.0),
-            &format!("JungleBlock-{idx}"),
-        );
-    }
-
-    spawn_box(
-        &mut commands,
-        &mut meshes,
-        &prop_material,
-        Vec3::new(0.0, 1.5, layout.max.y + 1.0),
-        Vec3::new(map_size.x, 3.0, 2.0),
-        "NorthWall",
-    );
-    spawn_box(
-        &mut commands,
-        &mut meshes,
-        &prop_material,
-        Vec3::new(0.0, 1.5, layout.min.y - 1.0),
-        Vec3::new(map_size.x, 3.0, 2.0),
-        "SouthWall",
-    );
-    spawn_box(
-        &mut commands,
-        &mut meshes,
-        &prop_material,
-        Vec3::new(layout.min.x - 1.0, 1.5, 0.0),
-        Vec3::new(2.0, 3.0, map_size.y),
-        "WestWall",
-    );
-    spawn_box(
-        &mut commands,
-        &mut meshes,
-        &prop_material,
-        Vec3::new(layout.max.x + 1.0, 1.5, 0.0),
-        Vec3::new(2.0, 3.0, map_size.y),
-        "EastWall",
-    );
-}
-
-fn apply_map_visual_mode(
-    mode: Res<PlayerVisualMode>,
-    handles: Option<Res<MapPresentationMaterials>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut previous: Local<Option<PlayerVisualMode>>,
-) {
-    if previous.is_some_and(|previous| previous == *mode) {
-        return;
-    }
-    *previous = Some(*mode);
-    let Some(handles) = handles else {
-        return;
-    };
-    let is_2d = *mode == PlayerVisualMode::Sprite2d;
-
-    let updates = [
-        (
-            &handles.terrain,
-            Color::srgb(0.08, 0.22, 0.10),
-            Color::srgb(0.20, 0.30, 0.25),
-        ),
-        (
-            &handles.lane,
-            Color::srgb(0.38, 0.34, 0.28),
-            Color::srgb(0.48, 0.42, 0.32),
-        ),
-        (
-            &handles.river,
-            Color::srgb(0.10, 0.22, 0.40),
-            Color::srgb(0.08, 0.28, 0.36),
-        ),
-        (
-            &handles.home_base,
-            Color::srgb(0.12, 0.35, 0.62),
-            Color::srgb(0.10, 0.62, 0.68),
-        ),
-        (
-            &handles.away_base,
-            Color::srgb(0.58, 0.18, 0.18),
-            Color::srgb(0.78, 0.22, 0.28),
-        ),
-        (
-            &handles.prop,
-            Color::srgb(0.18, 0.26, 0.16),
-            Color::srgb(0.16, 0.25, 0.22),
-        ),
-    ];
-    for (handle, color_3d, color_2d) in updates {
-        if let Some(material) = materials.get_mut(handle) {
-            material.base_color = if is_2d { color_2d } else { color_3d };
-            material.unlit = is_2d;
-        }
-    }
-    if let Some(terrain) = materials.get_mut(&handles.terrain) {
-        terrain.base_color_texture = is_2d.then(|| handles.arena_texture.clone());
-    }
-}
-
-fn spawn_lane_polyline(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    material: &Handle<StandardMaterial>,
-    points: &[Vec2],
-    width: f32,
-    thickness: f32,
-    name_prefix: &str,
-) {
-    for (idx, pair) in points.windows(2).enumerate() {
-        let start = pair[0];
-        let end = pair[1];
-        let delta = end - start;
-        let segment_length = delta.length();
-        if segment_length < 0.001 {
-            continue;
-        }
-
-        let center = (start + end) * 0.5;
-        let yaw = delta.x.atan2(delta.y);
-        commands.spawn((
-            Mesh3d(meshes.add(Mesh::from(Cuboid::new(width, thickness, segment_length)))),
-            MeshMaterial3d(material.clone()),
-            Transform {
-                translation: Vec3::new(center.x, thickness * 0.5, center.y),
-                rotation: Quat::from_rotation_y(yaw),
-                ..default()
-            },
-            MapStatic,
-            Name::new(format!("{name_prefix}-{idx}")),
-        ));
-    }
-}
-
-/// Four thin sloped slabs connecting a base pad's top edges to the ground.
-/// Their walkable tops match `MapLayout::terrain_height` exactly: each slab
-/// spans the pad side plus both corner extensions, and overlapping slabs at
-/// the corners form the max-of-ramps surface the height function returns.
-fn spawn_pad_ramps(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    material: &Handle<StandardMaterial>,
-    pad_center: Vec2,
-    name_prefix: &str,
-) {
-    let half = BASE_PAD_SIZE * 0.5;
-    let slope_len = (PAD_RAMP_LENGTH * PAD_RAMP_LENGTH + BASE_PAD_HEIGHT * BASE_PAD_HEIGHT).sqrt();
-    let span = BASE_PAD_SIZE + 2.0 * PAD_RAMP_LENGTH;
-    let angle = BASE_PAD_HEIGHT.atan2(PAD_RAMP_LENGTH);
-    let mid = half + PAD_RAMP_LENGTH * 0.5;
-    // Slab center sits half a thickness below the walk line so the top face
-    // is what characters stand on.
-    let center_y = BASE_PAD_HEIGHT * 0.5 - PAD_RAMP_THICKNESS * 0.5;
-
-    let x_mesh = meshes.add(Mesh::from(Cuboid::new(slope_len, PAD_RAMP_THICKNESS, span)));
-    let z_mesh = meshes.add(Mesh::from(Cuboid::new(span, PAD_RAMP_THICKNESS, slope_len)));
-
-    let ramps = [
-        (
-            Vec3::new(mid, 0.0, 0.0),
-            Quat::from_rotation_z(-angle),
-            &x_mesh,
-            "East",
-        ),
-        (
-            Vec3::new(-mid, 0.0, 0.0),
-            Quat::from_rotation_z(angle),
-            &x_mesh,
-            "West",
-        ),
-        (
-            Vec3::new(0.0, 0.0, mid),
-            Quat::from_rotation_x(angle),
-            &z_mesh,
-            "South",
-        ),
-        (
-            Vec3::new(0.0, 0.0, -mid),
-            Quat::from_rotation_x(-angle),
-            &z_mesh,
-            "North",
-        ),
-    ];
-    for (offset, rotation, mesh, side) in ramps {
-        commands.spawn((
-            Mesh3d(mesh.clone()),
-            MeshMaterial3d(material.clone()),
-            Transform::from_translation(Vec3::new(
-                pad_center.x + offset.x,
-                center_y,
-                pad_center.y + offset.z,
-            ))
-            .with_rotation(rotation),
-            MapStatic,
-            Name::new(format!("{name_prefix}-Ramp-{side}")),
-        ));
-    }
-}
-
-fn spawn_box(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    material: &Handle<StandardMaterial>,
-    center: Vec3,
-    size: Vec3,
-    name: &str,
-) {
-    commands.spawn((
-        Mesh3d(meshes.add(Mesh::from(Cuboid::new(size.x, size.y, size.z)))),
-        MeshMaterial3d(material.clone()),
-        Transform::from_translation(center),
-        MapStatic,
-        Name::new(name.to_owned()),
-    ));
 }
 
 #[cfg(test)]
@@ -800,5 +386,73 @@ mod tests {
         assert_eq!(layout.terrain_height(0.0, 0.0), 0.0);
         let mid_lane = (layout.home_spawn + layout.away_spawn) * 0.5;
         assert_eq!(layout.terrain_height(mid_lane.x, mid_lane.z), 0.0);
+    }
+}
+
+#[cfg(test)]
+mod verdant_surface_tests {
+    use super::*;
+
+    #[test]
+    fn mitered_pad_samples_cover_edges_sides_and_unequal_corners() {
+        let layout = MapLayout::default();
+        for center in [layout.home_spawn, layout.away_spawn] {
+            for (x, z, expected) in [
+                (0.0, 0.0, 0.7),
+                (23.0, 0.0, 0.7),
+                (26.0, 0.0, 0.35),
+                (29.0, 0.0, 0.0),
+                (24.0, 26.0, 0.35),
+                (26.0, 24.0, 0.35),
+                (29.0, 29.0, 0.0),
+                (29.1, 29.1, 0.0),
+            ] {
+                for (sx, sz) in [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
+                    let actual = layout.terrain_height_3d(center.x + sx * x, center.z + sz * z);
+                    assert!((actual - expected).abs() < 0.00001, "{x}, {z}: {actual}");
+                }
+            }
+        }
+        // Keep the separately tested legacy Sprite2d corner contract intact.
+        let c = layout.home_spawn;
+        assert!(
+            (layout.terrain_height(c.x + 24.0, c.z + 26.0)
+                - layout.terrain_height_3d(c.x + 24.0, c.z + 26.0))
+            .abs()
+                > 0.2
+        );
+    }
+
+    #[test]
+    fn normalized_crossings_approaches_decks_and_exits_match_within_five_centimeters() {
+        let layout = MapLayout::default();
+        let edge = layout.max.x - 12.0;
+        for delta in [-17.0, -14.0, -9.0, 0.0, 9.0, 14.0, 17.0] {
+            let p = Vec2::splat(delta / 2.0_f32.sqrt());
+            assert!((layout.terrain_height_3d(p.x, p.y) - 0.02).abs() <= 0.05);
+        }
+        // Outer lanes turn through square watergates; sample their actual
+        // inbound and outbound center lines, not a fictitious diagonal route.
+        for center in [Vec2::new(-edge, edge), Vec2::new(edge, -edge)] {
+            let sign = center.x.signum();
+            for distance in [0.0, 9.0, 12.5, 13.0, 17.0] {
+                for offset in [
+                    Vec2::new(-sign * distance, 0.0),
+                    Vec2::new(0.0, sign * distance),
+                ] {
+                    let p = center + offset;
+                    assert!((layout.terrain_height_3d(p.x, p.y) - 0.02).abs() <= 0.05);
+                }
+            }
+        }
+        for base in [layout.home_spawn, layout.away_spawn] {
+            let mut previous = 0.7;
+            for step in 0..=320 {
+                let d = step as f32 * 0.1;
+                let current = layout.terrain_height_3d(base.x + d, base.z + d);
+                assert!((current - previous).abs() < 0.012);
+                previous = current;
+            }
+        }
     }
 }

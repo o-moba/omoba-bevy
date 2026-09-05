@@ -1,5 +1,10 @@
 # Native 3D candidate test guide — 2026-09-05
 
+> Historical rc.1 record. The rc.2 exclusion/replacement of all four disputed
+> models is recorded in [the Verdant integration](2026-09-05-verdant-runtime-release.md).
+> Use [the current test guide](2026-09-05-verdant-test-guide.md) for rc.2 packages.
+> The findings below are preserved as evidence of the earlier candidate.
+
 Version: **0.18.0-rc.1**. **INTERNAL REVIEW ONLY.** Controlled developer-led candidate. Public/unattended
 release certification is **BLOCKED** until the external gates below have real
 evidence. The package's `BUILD.json` identifies exact binaries/assets, source

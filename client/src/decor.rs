@@ -1,447 +1,20 @@
-//! Environment decoration (TASK-18): purely cosmetic vegetation and props
-//! assembled from Bevy mesh primitives (no external art assets).
-//!
-//! A deterministic, seeded layout ([`layout::generate_layout`]) scatters trees,
-//! bushes, grass tufts, flowers, and rocks across the arena while excluding
-//! every gameplay zone (lanes, base pads, towers, camp clearings, river,
-//! jungle blocks) derived from the same [`MapLayout`](crate::maps::MapLayout)
-//! math the map renderer uses. All props spawn once at `Startup` as children
-//! of a single `DecorRoot` entity; F4 flips the root's [`Visibility`].
-//!
-//! Performance: every prop part reuses one of [`MESH_VARIANTS`] shared mesh
-//! handles and [`MATERIAL_VARIANTS`] shared material handles (stored in
-//! [`DecorAssets`]), so Bevy can batch instances. Decor has no collision and
-//! no per-frame system beyond the F4 toggle.
-
-use bevy::prelude::*;
-
+//! Verdant3d owns the imported foliage scene and reuses `DecorRoot` for F4.
+//! Historical scatter fixtures remain test-only to retain layout regressions;
+//! the unchanged World2d renderer owns its separate tile/prop presentation.
 use crate::sprite::PlayerVisualMode;
-use layout::PropKind;
-
-/// Number of distinct shared decor meshes (one per primitive shape used).
-pub const MESH_VARIANTS: usize = 5;
-/// Number of distinct shared decor materials (one per palette color).
-pub const MATERIAL_VARIANTS: usize = 12;
+use bevy::prelude::*;
 
 pub struct DecorPlugin;
 
 impl Plugin for DecorPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_decor)
-            .add_systems(Update, (sync_decor_visual_mode, toggle_decor_visibility));
+        app.add_systems(Update, toggle_decor_visibility);
     }
 }
 
-/// Marker for the single parent entity all decor props hang off.
 #[derive(Component)]
 pub struct DecorRoot;
 
-/// Shared mesh/material handles reused by every decor prop instance.
-#[derive(Resource)]
-pub struct DecorAssets {
-    meshes: [Handle<Mesh>; MESH_VARIANTS],
-    materials: [Handle<StandardMaterial>; MATERIAL_VARIANTS],
-}
-
-/// Index into [`DecorAssets::meshes`]; each variant is a unit-sized primitive
-/// scaled per part via its `Transform`.
-#[derive(Clone, Copy)]
-enum PartMesh {
-    Cylinder,
-    Sphere,
-    Cone,
-    Cuboid,
-    Capsule,
-}
-
-/// Index into [`DecorAssets::materials`]: a stylized palette that harmonizes
-/// with the dark-green terrain (rgb 0.08, 0.22, 0.10).
-#[derive(Clone, Copy)]
-enum PartMaterial {
-    TrunkBrown,
-    TrunkPale,
-    CanopyBright,
-    CanopyDeep,
-    BushGreen,
-    GrassGreen,
-    StemGreen,
-    FlowerWhite,
-    FlowerYellow,
-    FlowerRed,
-    FlowerViolet,
-    RockGray,
-}
-
-impl DecorAssets {
-    fn build(meshes: &mut Assets<Mesh>, materials: &mut Assets<StandardMaterial>) -> Self {
-        let mut matte = |color: Color| {
-            materials.add(StandardMaterial {
-                base_color: color,
-                perceptual_roughness: 0.9,
-                ..default()
-            })
-        };
-
-        Self {
-            meshes: [
-                meshes.add(Cylinder::new(0.5, 1.0)),
-                meshes.add(Sphere::new(0.5)),
-                meshes.add(Cone {
-                    radius: 0.5,
-                    height: 1.0,
-                }),
-                meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
-                meshes.add(Capsule3d::new(0.5, 1.0)),
-            ],
-            materials: [
-                matte(Color::srgb(0.30, 0.20, 0.12)),
-                matte(Color::srgb(0.55, 0.52, 0.45)),
-                matte(Color::srgb(0.20, 0.42, 0.18)),
-                matte(Color::srgb(0.13, 0.34, 0.15)),
-                matte(Color::srgb(0.18, 0.38, 0.16)),
-                matte(Color::srgb(0.25, 0.45, 0.18)),
-                matte(Color::srgb(0.16, 0.35, 0.14)),
-                matte(Color::srgb(0.92, 0.92, 0.88)),
-                matte(Color::srgb(0.85, 0.72, 0.20)),
-                matte(Color::srgb(0.75, 0.20, 0.18)),
-                matte(Color::srgb(0.55, 0.30, 0.70)),
-                matte(Color::srgb(0.42, 0.42, 0.44)),
-            ],
-        }
-    }
-
-    fn mesh(&self, mesh: PartMesh) -> Handle<Mesh> {
-        self.meshes[mesh as usize].clone()
-    }
-
-    fn material(&self, material: PartMaterial) -> Handle<StandardMaterial> {
-        self.materials[material as usize].clone()
-    }
-}
-
-/// One primitive part of a composed prop, relative to the prop origin.
-struct PartSpec {
-    mesh: PartMesh,
-    material: PartMaterial,
-    offset: Vec3,
-    rotation: Quat,
-    scale: Vec3,
-}
-
-impl PartSpec {
-    fn new(mesh: PartMesh, material: PartMaterial, offset: Vec3, scale: Vec3) -> Self {
-        Self {
-            mesh,
-            material,
-            offset,
-            rotation: Quat::IDENTITY,
-            scale,
-        }
-    }
-
-    fn rotated(mut self, rotation: Quat) -> Self {
-        self.rotation = rotation;
-        self
-    }
-}
-
-/// Primitive-part assembly for each prop variant. Pure data: unit meshes
-/// positioned/scaled relative to the prop's ground-level origin.
-fn prop_parts(kind: PropKind) -> Vec<PartSpec> {
-    use PartMaterial as M;
-    use PartMesh as P;
-
-    match kind {
-        // Round tree: trunk plus a clustered three-sphere canopy.
-        PropKind::TreeOak => vec![
-            PartSpec::new(
-                P::Cylinder,
-                M::TrunkBrown,
-                Vec3::new(0.0, 1.2, 0.0),
-                Vec3::new(0.7, 2.4, 0.7),
-            ),
-            PartSpec::new(
-                P::Sphere,
-                M::CanopyBright,
-                Vec3::new(0.0, 3.3, 0.0),
-                Vec3::splat(3.2),
-            ),
-            PartSpec::new(
-                P::Sphere,
-                M::CanopyBright,
-                Vec3::new(1.0, 2.8, 0.4),
-                Vec3::splat(2.2),
-            ),
-            PartSpec::new(
-                P::Sphere,
-                M::CanopyDeep,
-                Vec3::new(-0.9, 2.9, -0.4),
-                Vec3::splat(2.0),
-            ),
-        ],
-        // Conifer: trunk plus two stacked cones.
-        PropKind::TreePine => vec![
-            PartSpec::new(
-                P::Cylinder,
-                M::TrunkBrown,
-                Vec3::new(0.0, 1.0, 0.0),
-                Vec3::new(0.55, 2.0, 0.55),
-            ),
-            PartSpec::new(
-                P::Cone,
-                M::CanopyDeep,
-                Vec3::new(0.0, 3.0, 0.0),
-                Vec3::new(3.2, 2.6, 3.2),
-            ),
-            PartSpec::new(
-                P::Cone,
-                M::CanopyDeep,
-                Vec3::new(0.0, 4.6, 0.0),
-                Vec3::new(2.2, 2.2, 2.2),
-            ),
-        ],
-        // Slender pale-trunk tree with a tall two-sphere canopy.
-        PropKind::TreeBirch => vec![
-            PartSpec::new(
-                P::Cylinder,
-                M::TrunkPale,
-                Vec3::new(0.0, 1.5, 0.0),
-                Vec3::new(0.42, 3.0, 0.42),
-            ),
-            PartSpec::new(
-                P::Sphere,
-                M::CanopyBright,
-                Vec3::new(0.0, 3.9, 0.0),
-                Vec3::new(2.0, 2.6, 2.0),
-            ),
-            PartSpec::new(
-                P::Sphere,
-                M::CanopyBright,
-                Vec3::new(0.5, 3.0, 0.3),
-                Vec3::splat(1.4),
-            ),
-        ],
-        // Two overlapping flattened spheres.
-        PropKind::BushRound => vec![
-            PartSpec::new(
-                P::Sphere,
-                M::BushGreen,
-                Vec3::new(0.0, 0.55, 0.0),
-                Vec3::new(1.8, 1.3, 1.8),
-            ),
-            PartSpec::new(
-                P::Sphere,
-                M::BushGreen,
-                Vec3::new(0.7, 0.45, 0.2),
-                Vec3::new(1.2, 0.9, 1.2),
-            ),
-        ],
-        // Low hedge: a capsule lying on its side.
-        PropKind::BushLow => vec![
-            PartSpec::new(
-                P::Capsule,
-                M::BushGreen,
-                Vec3::new(0.0, 0.5, 0.0),
-                Vec3::new(1.2, 1.2, 1.4),
-            )
-            .rotated(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
-        ],
-        // Three thin, slightly splayed cones as grass blades.
-        PropKind::GrassTuft => vec![
-            PartSpec::new(
-                P::Cone,
-                M::GrassGreen,
-                Vec3::new(0.0, 0.45, 0.0),
-                Vec3::new(0.25, 0.9, 0.25),
-            ),
-            PartSpec::new(
-                P::Cone,
-                M::GrassGreen,
-                Vec3::new(0.18, 0.38, 0.10),
-                Vec3::new(0.20, 0.75, 0.20),
-            )
-            .rotated(Quat::from_rotation_z(-0.25)),
-            PartSpec::new(
-                P::Cone,
-                M::GrassGreen,
-                Vec3::new(-0.15, 0.38, 0.12),
-                Vec3::new(0.20, 0.7, 0.20),
-            )
-            .rotated(Quat::from_rotation_x(0.22)),
-        ],
-        // Stem plus a round white head.
-        PropKind::FlowerDaisy => vec![
-            PartSpec::new(
-                P::Cylinder,
-                M::StemGreen,
-                Vec3::new(0.0, 0.35, 0.0),
-                Vec3::new(0.08, 0.7, 0.08),
-            ),
-            PartSpec::new(
-                P::Sphere,
-                M::FlowerWhite,
-                Vec3::new(0.0, 0.78, 0.0),
-                Vec3::splat(0.36),
-            ),
-        ],
-        // Stem plus a larger yellow head.
-        PropKind::FlowerSun => vec![
-            PartSpec::new(
-                P::Cylinder,
-                M::StemGreen,
-                Vec3::new(0.0, 0.4, 0.0),
-                Vec3::new(0.08, 0.8, 0.08),
-            ),
-            PartSpec::new(
-                P::Sphere,
-                M::FlowerYellow,
-                Vec3::new(0.0, 0.88, 0.0),
-                Vec3::splat(0.42),
-            ),
-        ],
-        // Stem plus a red cone bud.
-        PropKind::FlowerTulip => vec![
-            PartSpec::new(
-                P::Cylinder,
-                M::StemGreen,
-                Vec3::new(0.0, 0.35, 0.0),
-                Vec3::new(0.08, 0.7, 0.08),
-            ),
-            PartSpec::new(
-                P::Cone,
-                M::FlowerRed,
-                Vec3::new(0.0, 0.85, 0.0),
-                Vec3::new(0.30, 0.35, 0.30),
-            ),
-        ],
-        // Stem plus a drooping violet bell (elongated sphere).
-        PropKind::FlowerBell => vec![
-            PartSpec::new(
-                P::Cylinder,
-                M::StemGreen,
-                Vec3::new(0.0, 0.32, 0.0),
-                Vec3::new(0.08, 0.64, 0.08),
-            ),
-            PartSpec::new(
-                P::Sphere,
-                M::FlowerViolet,
-                Vec3::new(0.0, 0.72, 0.0),
-                Vec3::new(0.30, 0.40, 0.30),
-            ),
-        ],
-        // Single tilted cuboid, partially sunk into the ground.
-        PropKind::RockSmall => vec![
-            PartSpec::new(
-                P::Cuboid,
-                M::RockGray,
-                Vec3::new(0.0, 0.25, 0.0),
-                Vec3::new(0.9, 0.6, 0.7),
-            )
-            .rotated(Quat::from_rotation_z(0.2)),
-        ],
-        // Two overlapping cuboids forming a larger boulder.
-        PropKind::RockBoulder => vec![
-            PartSpec::new(
-                P::Cuboid,
-                M::RockGray,
-                Vec3::new(0.0, 0.45, 0.0),
-                Vec3::new(1.6, 1.1, 1.3),
-            )
-            .rotated(Quat::from_rotation_x(0.12)),
-            PartSpec::new(
-                P::Cuboid,
-                M::RockGray,
-                Vec3::new(0.7, 0.35, 0.4),
-                Vec3::new(1.0, 0.8, 0.9),
-            )
-            .rotated(Quat::from_rotation_y(0.6)),
-        ],
-    }
-}
-
-/// Spawns the whole decoration layer once: shared assets, `DecorRoot`, and
-/// every prop part as a child entity reusing the shared handles.
-fn spawn_decor(
-    mut commands: Commands,
-    visual_mode: Res<PlayerVisualMode>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    // `World2dPlugin` owns the sprite-mode prop layer.  Do not instantiate
-    // hidden Mesh3d decoration in a genuine 2D session.
-    if *visual_mode == PlayerVisualMode::Sprite2d {
-        return;
-    }
-    let assets = DecorAssets::build(&mut meshes, &mut materials);
-    let placements = layout::generate_layout(layout::DECOR_SEED);
-
-    let mut parts_spawned: usize = 0;
-    commands
-        .spawn((
-            DecorRoot,
-            Transform::default(),
-            if *visual_mode == PlayerVisualMode::Sprite2d {
-                Visibility::Hidden
-            } else {
-                Visibility::Visible
-            },
-            Name::new("DecorRoot"),
-        ))
-        .with_children(|root| {
-            for placement in &placements {
-                let yaw = Quat::from_rotation_y(placement.yaw);
-                let base = Vec3::new(placement.position.x, 0.0, placement.position.y);
-                for part in prop_parts(placement.kind) {
-                    root.spawn((
-                        Mesh3d(assets.mesh(part.mesh)),
-                        MeshMaterial3d(assets.material(part.material)),
-                        Transform {
-                            translation: base + yaw * (part.offset * placement.scale),
-                            rotation: yaw * part.rotation,
-                            scale: part.scale * placement.scale,
-                        },
-                    ));
-                    parts_spawned += 1;
-                }
-            }
-        });
-
-    let total_entities = parts_spawned + 1;
-    if total_entities > layout::MAX_DECOR_ENTITIES {
-        warn!(
-            "decor: {} entities exceed the documented budget of {}",
-            total_entities,
-            layout::MAX_DECOR_ENTITIES
-        );
-    }
-    info!(
-        "decor: spawned {} decor entities ({} props + 1 root, budget {}) reusing {} shared meshes and {} shared materials; F4 toggles visibility",
-        total_entities,
-        placements.len(),
-        layout::MAX_DECOR_ENTITIES,
-        MESH_VARIANTS,
-        MATERIAL_VARIANTS,
-    );
-}
-
-fn sync_decor_visual_mode(
-    mode: Res<PlayerVisualMode>,
-    mut roots: Query<&mut Visibility, With<DecorRoot>>,
-) {
-    if !mode.is_changed() {
-        return;
-    }
-    for mut visibility in &mut roots {
-        *visibility = if *mode == PlayerVisualMode::Sprite2d {
-            Visibility::Hidden
-        } else {
-            Visibility::Visible
-        };
-    }
-}
-
-/// Client-local debug toggle (F4): flips `Visibility` on the `DecorRoot`, so
-/// the whole decoration layer hides/shows at once. No network message.
 fn toggle_decor_visibility(
     keyboard: Res<ButtonInput<KeyCode>>,
     mode: Option<Res<PlayerVisualMode>>,
@@ -451,23 +24,18 @@ fn toggle_decor_visibility(
         return;
     }
     for mut visibility in &mut roots {
-        let next = if matches!(*visibility, Visibility::Hidden) {
+        *visibility = if *visibility == Visibility::Hidden {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
-        *visibility = next;
-        info!(
-            "[debug] decor_visible -> {}",
-            matches!(next, Visibility::Visible)
-        );
     }
 }
 
-/// Pure, render-independent layout generation: a seeded PRNG scatters prop
-/// placements across the arena, rejecting any candidate inside a gameplay
-/// exclusion zone. Everything here is unit-testable without a window.
-pub(crate) mod layout {
+/// Legacy deterministic layout regression fixture. Its old primitive renderer
+/// is retired; the runtime Verdant geometry has its own artifact validator.
+#[cfg(test)]
+mod layout {
     use bevy::math::Vec2;
     use std::f32::consts::TAU;
 
@@ -475,7 +43,7 @@ pub(crate) mod layout {
 
     /// Fixed compile-time seed for the shipped layout.
     pub(crate) const DECOR_SEED: u64 = 0x00DE_C018_0000_5EED;
-    /// Hard ceiling for spawned decor entities (prop parts + the root).
+    /// Legacy scatter placement regression ceiling.
     pub(crate) const MAX_DECOR_ENTITIES: usize = 1200;
 
     /// Keep-out distance from lane center lines (half width + margin).
@@ -859,7 +427,7 @@ mod tests {
         LANE_CLEAR, MAX_DECOR_ENTITIES, PropKind, RIVER_CLEAR, TOWER_CLEAR, chebyshev,
         generate_layout, point_segment_distance, polyline_distance,
     };
-    use super::{DecorRoot, prop_parts, toggle_decor_visibility};
+    use super::{DecorRoot, toggle_decor_visibility};
 
     #[test]
     fn layout_is_deterministic_for_the_same_seed() {
@@ -927,13 +495,11 @@ mod tests {
     }
 
     #[test]
-    fn layout_fits_entity_budget_and_stays_dense() {
+    fn legacy_scatter_stays_bounded_and_dense() {
         let placements = generate_layout(DECOR_SEED);
-        let parts: usize = placements
-            .iter()
-            .map(|placement| prop_parts(placement.kind).len())
-            .sum();
-        let total_entities = parts + 1; // + DecorRoot
+        // Retain the scatter density regression without resurrecting retired
+        // primitive parts. Current 3D ownership is checked in verdant3d tests.
+        let total_entities = placements.len() + 1;
         println!(
             "decor layout: {} props, {} entities (budget {})",
             placements.len(),
@@ -944,7 +510,7 @@ mod tests {
             total_entities <= MAX_DECOR_ENTITIES,
             "{total_entities} decor entities exceed the {MAX_DECOR_ENTITIES} budget"
         );
-        // The arena should actually look decorated, not sparse.
+        // Preserve the density of the legacy fixture.
         let count = |kinds: &[PropKind]| {
             placements
                 .iter()

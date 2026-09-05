@@ -187,7 +187,7 @@ dependencies = [
 
 [[package]]
 name = "arena-sync"
-version = "0.18.0-rc.1"
+version = "0.18.0-rc.2"
 dependencies = [
  "base64",
  "reqwest",
@@ -1818,7 +1818,7 @@ dependencies = [
 
 [[package]]
 name = "client"
-version = "0.18.0-rc.1"
+version = "0.18.0-rc.2"
 dependencies = [
  "bevy",
  "crossbeam-channel",
@@ -2839,7 +2839,7 @@ dependencies = [
 
 [[package]]
 name = "harness"
-version = "0.18.0-rc.1"
+version = "0.18.0-rc.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -4861,7 +4861,7 @@ dependencies = [
 
 [[package]]
 name = "server"
-version = "0.18.0-rc.1"
+version = "0.18.0-rc.2"
 dependencies = [
  "bevy",
  "ekza-bevy-sdk",
@@ -4892,7 +4892,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "0.18.0-rc.1"
+version = "0.18.0-rc.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -4912,7 +4912,7 @@ checksum = "d66dc143e6b11c1eddc06d5c423cfc97062865baf299914ab64caa38182078fe"
 
 [[package]]
 name = "skills"
-version = "0.18.0-rc.1"
+version = "0.18.0-rc.2"
 
 [[package]]
 name = "skrifa"
