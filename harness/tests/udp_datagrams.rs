@@ -10,7 +10,6 @@ use serde_json::Value;
 const OLD_CLIENT_BOUNDARY: usize = 8 * 1024;
 const IPV4_UDP_MAX_PAYLOAD_BYTES: usize = 65_507;
 const POLL_BUDGET: Duration = Duration::from_secs(15);
-const LONGEST_AVATAR_SLUG: &str = "osa-kardialtheconsumer-00bea9121db1";
 const LONGEST_SPRITE_ID: &str = "cathedral-moth-bellringer";
 
 fn array_len(snapshot: &Value, field: &str) -> usize {
@@ -29,6 +28,12 @@ fn last_entity_id(snapshot: &Value, field: &str) -> Option<u64> {
 
 #[test]
 fn real_server_emits_complete_populated_snapshot_above_8_kib() {
+    // Arena-synced avatars are local-only; use the same available roster
+    // that the server validates instead of naming an optional download.
+    let avatar = shared::avatar_roster()
+        .iter()
+        .max_by_key(|avatar| avatar.slug.len())
+        .expect("the shipped avatar roster must not be empty");
     let server =
         ServerProcess::spawn_with_env(&[("OMOBA_MATCH_MODE", "release"), ("OMOBA_TEAM_SIZE", "5")]);
     let mut bots = (0..10)
@@ -42,7 +47,7 @@ fn real_server_emits_complete_populated_snapshot_above_8_kib() {
             Team::Green,
             Character::Ipfs,
             HeroClass::Warrior,
-            Some(LONGEST_AVATAR_SLUG),
+            Some(&avatar.slug),
             Some(LONGEST_SPRITE_ID),
         );
     }
@@ -82,6 +87,9 @@ fn real_server_emits_complete_populated_snapshot_above_8_kib() {
         IPV4_UDP_MAX_PAYLOAD_BYTES,
     );
     assert!(payload.len() <= IPV4_UDP_MAX_PAYLOAD_BYTES);
+    for player in snapshot["players"].as_array().expect("players array") {
+        assert_eq!(player["avatar"].as_str(), Some(avatar.slug.as_str()));
+    }
     assert_eq!(last_entity_id(&snapshot, "structures"), Some(8));
     assert_eq!(last_entity_id(&snapshot, "minions"), Some(18));
 

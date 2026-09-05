@@ -1,8 +1,15 @@
 # Feature Inventory
 
-Canonical version: `0.17.0`
+Canonical version: `0.17.1`
 
 ## Current Playable Surface
+
+- **3D delivery and readiness audit (2026-09-05):** the locked SDK dependency,
+  two offline slime minion models and 16-avatar shipped roster now survive a
+  clean checkout. The [current assessment](progress/2026-09-05-3d-readiness-audit.md)
+  records remaining reconnect/rematch, release debug-command, input and combat
+  readability blockers. These findings qualify earlier feature descriptions;
+  existing features are not a claim of unattended playtest readiness.
 
 - **Pointer-first desktop/mobile combat (TASK-POINTER-COMBAT-MOBILE-01):** a
   primary click or touch tap resolves living hostile actors by their projected

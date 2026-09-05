@@ -1,0 +1,8 @@
+{
+  "duration_seconds": 20,
+  "server_exit_before_cleanup": null,
+  "client_exit_before_cleanup": null,
+  "mode": "models3d",
+  "autojoin": "warrior:megan-the-fox:green",
+  "visual_observation": false
+}

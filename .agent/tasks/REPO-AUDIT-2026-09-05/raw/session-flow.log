@@ -1,0 +1,30 @@
+{
+  "overall": "PASS",
+  "scenarios": [
+    {
+      "name": "M1 sequential join",
+      "details": "client 1 and client 2 joined, saw each other, and spawned on correct sides"
+    },
+    {
+      "name": "M2 simultaneous join",
+      "details": "clients 1/2 joined back-to-back without id or spawn confusion"
+    },
+    {
+      "name": "Repeated Join",
+      "details": "player 1 kept the same id and the last Join won for team/character"
+    },
+    {
+      "name": "M3 disconnect and reconnect",
+      "details": "client 2 timed out cleanly; reconnect from a new UDP endpoint became new player 3"
+    },
+    {
+      "name": "M4 server restart",
+      "details": "client recovered as a fresh session after restart (id 1 -> 1) while hidden before Join, then restored team/character after resending Join"
+    },
+    {
+      "name": "M5 four clients",
+      "details": "four concurrent clients received unique ids and consistent 4-player snapshots: [1, 2, 3, 4]"
+    }
+  ],
+  "server_addr": "127.0.0.1:4010"
+}

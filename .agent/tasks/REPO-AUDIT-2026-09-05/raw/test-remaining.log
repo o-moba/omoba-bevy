@@ -1,0 +1,164 @@
+   Compiling unicode-ident v1.0.18
+   Compiling unicode-segmentation v1.12.0
+   Compiling foldhash v0.2.0
+   Compiling spin v0.10.0
+   Compiling crossbeam-utils v0.8.21
+   Compiling thiserror v2.0.18
+   Compiling disqualified v1.0.0
+   Compiling slotmap v1.0.7
+   Compiling futures-core v0.3.31
+   Compiling smallvec v1.14.0
+   Compiling hashbrown v0.16.1
+   Compiling downcast-rs v2.0.2
+   Compiling async-task v4.7.1
+   Compiling nonmax v0.5.5
+   Compiling proc-macro2 v1.0.94
+   Compiling futures-lite v2.6.0
+   Compiling bitflags v2.9.0
+   Compiling log v0.4.27
+   Compiling fixedbitset v0.5.7
+   Compiling either v1.15.0
+   Compiling convert_case v0.10.0
+   Compiling itertools v0.14.0
+   Compiling serde_json v1.0.140
+   Compiling arrayvec v0.7.6
+   Compiling memchr v2.7.4
+   Compiling quote v1.0.40
+   Compiling indexmap v2.13.0
+   Compiling syn v2.0.114
+   Compiling crossbeam-queue v0.3.12
+   Compiling concurrent-queue v2.5.0
+   Compiling bevy_macro_utils v0.18.0
+   Compiling serde_derive v1.0.228
+   Compiling derive_more-impl v2.1.1
+   Compiling bytemuck_derive v1.9.3
+   Compiling thiserror-impl v2.0.18
+   Compiling assert_type_match v0.1.1
+   Compiling variadics_please v1.1.0
+   Compiling bevy_reflect_derive v0.18.0
+   Compiling bevy_ecs_macros v0.18.0
+   Compiling bevy_derive v0.18.0
+   Compiling bytemuck v1.22.0
+   Compiling glam v0.30.10
+   Compiling serde v1.0.228
+   Compiling bevy_platform v0.18.0
+   Compiling erased-serde v0.4.6
+   Compiling ekza-bevy-sdk v0.3.0 (https://github.com/ekza-space/ekza-bevy-sdk?branch=main#6e4123aa)
+   Compiling bevy_utils v0.18.0
+   Compiling derive_more v2.1.1
+   Compiling shared v0.17.1 (/Users/wotori/git/ekza/omoba-bevy-playtest-audit/shared)
+   Compiling bevy_tasks v0.18.0
+   Compiling bevy_reflect v0.18.0
+   Compiling bevy_ecs v0.18.0
+   Compiling bevy_math v0.18.0
+   Compiling bevy_app v0.18.0
+   Compiling bevy_time v0.18.0
+   Compiling bevy_transform v0.18.0
+   Compiling bevy_input v0.18.0
+   Compiling bevy_diagnostic v0.18.0
+   Compiling bevy_internal v0.18.0
+   Compiling bevy v0.18.0
+   Compiling server v0.17.1 (/Users/wotori/git/ekza/omoba-bevy-playtest-audit/server)
+    Finished `test` profile [optimized + debuginfo] target(s) in 32.67s
+     Running unittests src/main.rs (target/debug/deps/server-e750f3d6ca1c90bf)
+
+running 56 tests
+test balance::tests::boss_tuning_outclasses_camps_and_timings_are_positive ... ok
+test balance::tests::jungle_pacing_constants_are_positive ... ok
+test balance::tests::lane_tower_and_minion_tuning_is_positive ... ok
+test balance::tests::level_xp_table_matches_level_span ... ok
+test balance::tests::player_baselines_and_spell_economy_are_coherent ... ok
+test balance::tests::skill_slot_count_matches_shared_kits ... ok
+test tests::active_session_id_cannot_be_stolen_by_another_endpoint ... ok
+test tests::blue_path_is_reverse_of_green ... ok
+test tests::boss_and_buff_wire_formats_are_snake_case_and_additive ... ok
+test tests::boss_kill_grants_team_buff_and_respawns_on_boss_cooldown ... ok
+test tests::boss_leash_reset_uses_boss_distance_and_restores_full_hp ... ok
+test tests::boss_pits_are_point_symmetric_and_clear_of_camps ... ok
+test tests::boss_templates_use_boss_constants_and_outclass_camps ... ok
+test tests::bosses_are_gated_before_spawn_delays_and_spawn_with_full_stats ... ok
+test tests::camp_kills_do_not_grant_team_buffs ... ok
+test tests::cast_drains_mana_respects_cooldown_and_blocks_empty_mana ... ok
+test tests::cast_range_validation_covers_target_types_and_rejects_far_targets ... ok
+test tests::class_kits_apply_distinct_authoritative_numbers ... ok
+test tests::connected_placeholder_can_reclaim_timed_out_session_id ... ok
+test tests::dev_mode_first_join_starts_match_immediately ... ok
+test tests::forming_returns_to_lobby_when_queue_empties ... ok
+test tests::join_applies_class_and_normalizes_avatar ... ok
+test tests::lane_paths_connect_bases ... ok
+test tests::mana_regenerates_and_is_clamped ... ok
+test tests::map_layout_is_symmetric ... ok
+test tests::match_mode_parses_with_release_as_safe_default ... ok
+test tests::minion_prefers_enemy_minion_over_closer_player ... ok
+test tests::movement_authority_clamps_teleports_and_accepts_normal_steps ... ok
+test tests::movement_authority_keeps_players_inside_map_bounds ... ok
+test tests::network_diagnostic_bursts_are_suppressed_and_reported ... ok
+test tests::neutral_camps_spawn_alive_with_distinct_templates ... ok
+test tests::neutral_kills_award_rewards_and_respawn_on_cooldown ... ok
+test tests::neutral_leash_reset_restores_anchor_and_full_hp ... ok
+test tests::neutral_template_matches_balance_constants ... ok
+test tests::neutrals_do_not_break_minion_waves_or_tower_attacks ... ok
+test tests::opposing_minions_engage_take_damage_die_and_leave_the_next_snapshot_set ... ok
+test tests::pre_join_endpoint_is_hidden_and_inert_until_join ... ok
+test tests::progression_levels_up_and_scales_stats ... ok
+test tests::rank_scaling_boosts_damage_and_upgrades_cap_at_max_rank ... ok
+test tests::release_match_starts_after_full_roster_and_countdown ... ok
+test tests::release_match_waits_at_nine_players ... ok
+test tests::release_solo_join_forms_but_never_starts ... ok
+test tests::release_team_assignment_always_fills_smaller_team ... ok
+test tests::release_teams_form_five_vs_five_and_full_match_rejects_joins ... ok
+test tests::reset_match_clears_buffs_and_restarts_boss_schedule ... ok
+test tests::respawn_restores_scaled_maximums ... ok
+test tests::self_target_abilities_apply_heal_and_respect_unlock_gates ... ok
+test tests::session_id_reclaims_timed_out_player_from_new_endpoint ... ok
+test tests::snapshot_serializer_rejects_whole_over_limit_payload ... ok
+test tests::stale_disconnected_session_gets_new_player_id ... ok
+test tests::starting_countdown_rolls_back_when_a_player_drops ... ok
+test tests::team_buff_multiplies_cast_damage_for_buffed_team_only ... ok
+test tests::team_buffs_expire_refresh_and_stack_multiplicatively ... ok
+test tests::team_size_parses_and_clamps ... ok
+test tests::top_buff_regenerates_hp_for_alive_buffed_players_only ... ok
+test tests::udp_payload_guard_accepts_limit_and_rejects_one_byte_over ... ok
+
+test result: ok. 56 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/shared-83a9ebce52a69780)
+
+running 11 tests
+test tests::avatar_roster_is_committed_and_licensed ... ok
+test tests::avatar_slug_normalization_rejects_unknown_values ... ok
+test tests::boss_slugs_are_not_player_selectable ... ok
+test tests::every_class_resolves_a_full_distinct_kit ... ok
+test tests::every_new_sprite_has_the_frozen_six_state_contract ... ok
+test tests::hero_class_wire_format_is_snake_case_with_fallback ... ok
+test tests::kits_differ_between_classes_per_slot ... ok
+test tests::player_action_kind_unknown_wire_value_is_inert ... ok
+test tests::rank_scaling_applies_to_class_abilities ... ok
+test tests::sprite_manifest_matches_frozen_registry_and_safe_fallback ... ok
+test tests::unlock_slots_follow_level_gates ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/skills-3f4ddc7af05c4e28)
+
+running 5 tests
+test tests::next_rank_preview_is_some_until_max ... ok
+test tests::next_rank_primary_matches_incremented_rank_vector ... ok
+test tests::slot0_scales_with_rank ... ok
+test tests::tooltip_current_line_matches_slot0_damage_text ... ok
+test tests::upgrade_only_when_points_and_below_cap ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests shared
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests skills
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

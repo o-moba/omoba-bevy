@@ -81,6 +81,10 @@ Do not rely on tribal knowledge for ports or addresses: use the tables in `RUNBO
 
 ## Tester-facing documentation
 
+The [2026-09-05 3D readiness audit](docs/progress/2026-09-05-3d-readiness-audit.md)
+contains the current limitations and ordered next steps. This is a development
+prototype; the external-playtest gate is not yet satisfied.
+
 | Document | Purpose |
 | --- | --- |
 | [RUNBOOK.md](RUNBOOK.md) | Server/client startup, env vars, troubleshooting with recovery steps |

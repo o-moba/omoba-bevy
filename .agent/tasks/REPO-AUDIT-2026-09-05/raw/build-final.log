@@ -1,0 +1,7 @@
+   Compiling shared v0.17.1 (/Users/wotori/git/ekza/omoba-bevy-playtest-audit/shared)
+   Compiling skills v0.17.1 (/Users/wotori/git/ekza/omoba-bevy-playtest-audit/skills)
+   Compiling arena-sync v0.17.1 (/Users/wotori/git/ekza/omoba-bevy-playtest-audit/arena-sync)
+   Compiling harness v0.17.1 (/Users/wotori/git/ekza/omoba-bevy-playtest-audit/harness)
+   Compiling client v0.17.1 (/Users/wotori/git/ekza/omoba-bevy-playtest-audit/client)
+   Compiling server v0.17.1 (/Users/wotori/git/ekza/omoba-bevy-playtest-audit/server)
+    Finished `dev` profile [optimized + debuginfo] target(s) in 20.08s

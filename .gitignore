@@ -6,6 +6,7 @@ assets/
 client/assets/*
 !client/assets/avatars/
 !client/assets/bosses/
+!client/assets/minions/
 !client/assets/config/
 !client/assets/sprites/
 !client/assets/presentation2d/

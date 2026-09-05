@@ -1,0 +1,68 @@
+[
+  {
+    "command": [
+      "cargo",
+      "fmt",
+      "--all",
+      "--",
+      "--check"
+    ],
+    "exit_code": 0,
+    "seconds": 0.3,
+    "log": ".agent/tasks/REPO-AUDIT-2026-09-05/raw/validation-0.log"
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/validate_avatar_assets.py"
+    ],
+    "exit_code": 1,
+    "seconds": 0.11,
+    "log": ".agent/tasks/REPO-AUDIT-2026-09-05/raw/validation-1.log"
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/validate_avatar_assets.py",
+      "--avatars-dir",
+      "client/assets/bosses",
+      "--roster-min",
+      "2",
+      "--roster-max",
+      "2"
+    ],
+    "exit_code": 0,
+    "seconds": 0.04,
+    "log": ".agent/tasks/REPO-AUDIT-2026-09-05/raw/validation-2.log"
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/validate_world2d_assets.py",
+      "--self-test"
+    ],
+    "exit_code": 0,
+    "seconds": 0.08,
+    "log": ".agent/tasks/REPO-AUDIT-2026-09-05/raw/validation-3.log"
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/validate_sprite_assets.py",
+      "--self-test"
+    ],
+    "exit_code": 1,
+    "seconds": 2.12,
+    "log": ".agent/tasks/REPO-AUDIT-2026-09-05/raw/validation-4.log"
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/validate_2d_readability.py",
+      "--json"
+    ],
+    "exit_code": 1,
+    "seconds": 30.9,
+    "log": ".agent/tasks/REPO-AUDIT-2026-09-05/raw/validation-5.log"
+  }
+]

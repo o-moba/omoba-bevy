@@ -1,0 +1,21 @@
+test_bad_dimensions (__main__.NegativeContractTests) ... ok
+test_bad_frame_bounds (__main__.NegativeContractTests) ... ok
+test_bad_playback (__main__.NegativeContractTests) ... ok
+test_duplicate_or_unknown_id (__main__.NegativeContractTests) ... ok
+test_missing_or_out_of_cell_presentation_bounds (__main__.NegativeContractTests) ... ok
+test_missing_presentation_category (__main__.NegativeContractTests) ... ok
+test_missing_provenance_cross_link (__main__.NegativeContractTests) ... ok
+test_missing_provenance_job_media_cost_or_source_clip (__main__.NegativeContractTests) ... ok
+test_missing_required_action (__main__.NegativeContractTests) ... ok
+test_opaque_empty_boundary_and_duplicate_frames (__main__.NegativeContractTests) ... ok
+test_orphan_files_altered_hash_and_size_overflow (__main__.NegativeContractTests) ... ok
+test_portrait_order_or_count_mismatch (__main__.NegativeContractTests) ... ok
+test_reordered_id (__main__.NegativeContractTests) ... ok
+test_unreadable_world_height (__main__.NegativeContractTests) ... ok
+test_unsafe_path (__main__.NegativeContractTests) ... ok
+
+----------------------------------------------------------------------
+Ran 15 tests in 2.076s
+
+OK
+sprite validation failed: sheet set mismatch: expected ['aurora-magnet-ram.png', 'cathedral-moth-bellringer.png', 'clockwork-turnip-oracle.png', 'lunar-marionette-giraffe.png', 'mossback-teapot.png', 'neon-axolotl-courier.png', 'orchard-comet-centaur.png', 'origami-storm-heron.png', 'tidal-typewriter-crab.png', 'void-jelly-astronaut.png'], found ['aurora-magnet-ram.png', 'cathedral-moth-bellringer.png', 'clockwork-turnip-oracle.png', 'lunar-marionette-giraffe.png', 'mossback-teapot.png', 'neon-axolotl-courier.png', 'origami-storm-heron.png', 'tidal-typewriter-crab.png', 'void-jelly-astronaut.png']

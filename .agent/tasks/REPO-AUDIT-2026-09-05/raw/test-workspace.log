@@ -1,0 +1,212 @@
+   Compiling harness v0.17.1 (/Users/wotori/git/ekza/omoba-bevy-playtest-audit/harness)
+   Compiling shared v0.17.1 (/Users/wotori/git/ekza/omoba-bevy-playtest-audit/shared)
+   Compiling skills v0.17.1 (/Users/wotori/git/ekza/omoba-bevy-playtest-audit/skills)
+   Compiling arena-sync v0.17.1 (/Users/wotori/git/ekza/omoba-bevy-playtest-audit/arena-sync)
+   Compiling server v0.17.1 (/Users/wotori/git/ekza/omoba-bevy-playtest-audit/server)
+   Compiling client v0.17.1 (/Users/wotori/git/ekza/omoba-bevy-playtest-audit/client)
+    Finished `test` profile [optimized + debuginfo] target(s) in 7.96s
+     Running unittests src/main.rs (target/debug/deps/arena_sync-77f593fa0d53a822)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/client-7c330249c2079a0f)
+
+running 109 tests
+test camera::tests::clamp_accounts_for_zoom_and_aspect_ratio ... ok
+test camera::tests::sprite_mode_does_not_repurpose_right_click_or_alt ... ok
+test camera::tests::y_toggles_follow_and_recenters_a_minimap_override ... ok
+test camera::tests::zoom_limits_are_ordered_and_usable ... ok
+test combat::tests::cast_range_uses_horizontal_gameplay_distance ... ok
+test combat::tests::insufficient_mana_rejects_without_phantom_cooldown ... ok
+test combat::tests::pending_unit_cast_approaches_then_emits_once_in_range ... ok
+test combat::tests::pointer_hit_areas_are_touch_sized_and_screen_bounded ... ok
+test combat::tests::primary_target_request_is_q_for_the_exact_authoritative_target ... ok
+test combat::tests::self_target_hotbar_request_needs_no_selected_enemy ... ok
+test debug_console::tests::parse_debug_ui_flag_accepts_one_and_true ... ok
+test debug_console::tests::parse_debug_ui_flag_rejects_other_values ... ok
+test decor::tests::f4_toggles_decor_root_visibility ... ok
+test decor::tests::layout_covers_every_prop_kind ... ok
+test decor::tests::layout_fits_entity_budget_and_stays_dense ... ok
+test decor::tests::layout_is_deterministic_for_the_same_seed ... ok
+test decor::tests::placements_stay_in_bounds_and_outside_gameplay_zones ... ok
+test game_state::tests::lobby_overlay_stays_hidden_until_join_is_committed ... ok
+test game_state::tests::matchmaking_text_covers_all_search_states ... ok
+test game_state::tests::overlay_never_blocks_pointer_picking ... ok
+test help_overlay::tests::help_overlay_copy_covers_core_first_match_actions ... ok
+test help_overlay::tests::help_overlay_copy_includes_toggle_hint ... ok
+test input_bindings::tests::cast_keys_and_slot_labels_same_length ... ok
+test input_bindings::tests::skill_keys_display_covers_every_slot_label ... ok
+test maps::tests::clamp_position_stays_in_bounds ... ok
+test maps::tests::layout_is_square_and_symmetric ... ok
+test maps::tests::no_decorative_block_entombs_a_camp_or_boss ... ok
+test maps::tests::terrain_height_corner_matches_overlapping_ramps ... ok
+test maps::tests::terrain_height_covers_pad_top_and_spawn_points ... ok
+test maps::tests::terrain_height_open_ground_is_flat ... ok
+test maps::tests::terrain_height_ramp_descends_linearly_and_continuously ... ok
+test match_hud::tests::class_ability_lines_follow_the_selected_class ... ok
+test match_hud::tests::running_status_text_shows_resources_objective_and_class_kit ... ok
+test match_hud::tests::running_status_text_shows_target_and_per_slot_cooldown ... ok
+test match_hud::tests::team_buff_hud_text_is_empty_without_active_buffs ... ok
+test match_hud::tests::team_buff_hud_text_lists_local_team_buffs_with_remaining_time ... ok
+test match_hud::tests::team_buff_hud_text_stacks_both_buffs_on_separate_lines ... ok
+test model_scale::tests::effective_target_combines_setting_boss_scale_and_override ... ok
+test model_scale::tests::foot_offset_scales_with_measurement ... ok
+test model_scale::tests::missing_override_defaults_to_one ... ok
+test model_scale::tests::model_scale_key_prefers_known_avatar_slug ... ok
+test model_scale::tests::parse_overrides_clamps_extremes ... ok
+test model_scale::tests::parse_overrides_reads_flat_map_and_skips_comments ... ok
+test model_scale::tests::parse_overrides_rejects_invalid_json ... ok
+test model_scale::tests::scale_for_height_is_absolute_and_idempotent ... ok
+test net::tests::choose_authoritative_local_player_falls_back_to_first_candidate ... ok
+test net::tests::choose_authoritative_local_player_prefers_matching_network_id ... ok
+test net::tests::choose_authoritative_local_player_returns_none_when_empty ... ok
+test net::tests::loopback_receives_8191_8192_8193_and_malformed_between_good_datagrams ... ok
+test net::tests::near_ipv4_limit_decodes_without_prefix_truncation ... ok
+test net::tests::old_8_kib_boundary_decodes_complete_trailing_entities ... ok
+test net::tests::outbound_payload_guard_uses_ipv4_udp_ceiling ... ok
+test net::tests::platform_near_limit_loopback_behavior_is_explicit ... ok
+test net::tests::production_datagram_forwarding_stages_complete_large_snapshots_only ... ok
+test net::tests::reconnect_gate_requires_disconnected_active_and_cooldown ... ok
+test net::tests::representative_populated_snapshot_larger_than_8_kib_decodes_completely ... ok
+test net::tests::teardown_reasons_render_distinct_messages ... ok
+test net::tests::teardown_shows_select_only_without_committed_join ... ok
+test persistence::tests::clamp_lighting_respects_bounds ... ok
+test persistence::tests::clamp_model_respects_bounds ... ok
+test persistence::tests::migrate_model_target_height_resets_legacy_values ... ok
+test persistence::tests::validate_accepts_host_port ... ok
+test persistence::tests::validate_accepts_socket_addr ... ok
+test persistence::tests::validate_client_session_id_accepts_safe_tokens ... ok
+test persistence::tests::validate_client_session_id_rejects_empty_spaces_and_long_values ... ok
+test persistence::tests::validate_rejects_empty_and_garbage ... ok
+test player::tests::model_ground_movement_preserves_legacy_camera_gate ... ok
+test player::tests::sprite_ground_movement_does_not_depend_on_camera_follow ... ok
+test player::tests::target_minimap_and_ui_presses_never_leak_ground_movement ... ok
+test presentation2d::tests::actor_proxy_attachment_is_idempotent_and_owner_cleanup_is_bounded ... ok
+test presentation2d::tests::actor_scales_preserve_readability_at_gameplay_zoom ... ok
+test presentation2d::tests::cues_encode_team_shape_and_all_three_tower_lanes ... ok
+test presentation2d::tests::lane_classification_uses_team_specific_authoritative_samples ... ok
+test presentation2d::tests::manifest_has_complete_actor_and_vfx_coverage ... ok
+test presentation2d::tests::minion_authoritative_state_and_movement_update_frame_facing_and_position ... ok
+test presentation2d::tests::minion_badges_use_team_color_and_different_shapes ... ok
+test presentation2d::tests::models3d_does_not_attach_2d_actor_proxies_or_cues ... ok
+test presentation2d::tests::six_towers_two_bases_and_initial_wave_stay_one_to_one_and_bounded ... ok
+test presentation2d::tests::team_and_state_keys_are_shape_distinct ... ok
+test presentation2d::tests::vfx_overflow_evicts_oldest_at_the_hard_cap ... ok
+test session_config::tests::is_stale_none_is_stale ... ok
+test session_config::tests::is_stale_old_is_stale ... ok
+test session_config::tests::is_stale_recent_not_stale ... ok
+test session_config::tests::task_14_timing_constants_match_frozen_spec ... ok
+test sprite::tests::animation_system_changes_mesh_for_position_and_time_deltas ... ok
+test sprite::tests::combat_priority_one_shots_death_hold_and_respawn_are_deterministic ... ok
+test sprite::tests::idle_and_run_frames_wrap_and_large_delta_advances ... ok
+test sprite::tests::long_nameplates_shrink_below_the_normal_cap ... ok
+test sprite::tests::missing_action_animation_falls_back_without_panicking ... ok
+test sprite::tests::missing_action_sheet_render_assets_fall_back_without_panicking ... ok
+test sprite::tests::models3d_mode_does_not_attach_sprite_visuals ... ok
+test sprite::tests::movement_grace_returns_to_idle ... ok
+test sprite::tests::multiple_entities_keep_independent_animation_state ... ok
+test sprite::tests::one_shot_plays_once_and_long_delta_resumes_locomotion ... ok
+test sprite::tests::portrait_layout_and_indices_follow_the_embedded_roster ... ok
+test sprite::tests::render_asset_registry_covers_all_ten_six_state_characters ... ok
+test sprite::tests::roster_nameplates_are_proportionate_to_each_hero ... ok
+test sprite::tests::sprite_mode_attaches_all_new_remote_visuals_once ... ok
+test sprite::tests::sprite_visual_is_independent_xy_proxy ... ok
+test sprite::tests::visual_mode_is_default_safe ... ok
+test team::tests::every_frozen_sprite_button_selects_its_roster_id ... ok
+test team::tests::smaller_rosters_do_not_reserve_empty_columns ... ok
+test team::tests::ten_sprite_buttons_use_a_bounded_two_row_grid ... ok
+test world2d::tests::deterministic_world_covers_required_topology ... ok
+test world2d::tests::manifest_matches_authoritative_layout_and_budget ... ok
+test world2d::tests::projection_round_trips_map_corners_and_negative_points ... ok
+test world2d::tests::sorting_is_stable_and_layered ... ok
+test world::tests::models3d_startup_is_mutually_exclusive ... ok
+test world::tests::sprite2d_startup_has_exactly_one_orthographic_camera_and_no_3d_scene ... ok
+
+test result: ok. 109 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running unittests src/lib.rs (target/debug/deps/harness-6ab4c37078961e74)
+
+running 9 tests
+test bot_ai::tests::approaches_unit_in_aggro_and_casts_in_range ... ok
+test bot_ai::tests::follows_waypoints_and_advances_on_reach ... ok
+test bot_ai::tests::holds_at_enemy_base ... ok
+test bot_ai::tests::lanes_start_at_own_base_and_end_at_enemy_base ... ok
+test bot_ai::tests::prefers_units_over_structures ... ok
+test bot_ai::tests::resync_after_respawn_picks_nearest_waypoint ... ok
+test bot_ai::tests::sieges_tower_when_no_units_around ... ok
+test bot_ai::tests::step_toward_respects_speed_budget_and_faces_movement ... ok
+test bot_ai::tests::world_view_filters_enemies_and_dead_entities ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/bots.rs (target/debug/deps/bots-77a8ea32edce548b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/bot_ai_live.rs (target/debug/deps/bot_ai_live-ae8a9c15d780267c)
+
+running 1 test
+test brain_driven_bot_pushes_its_lane_on_a_live_server ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.17s
+
+     Running tests/combat_actions.rs (target/debug/deps/combat_actions-2bd24351a21f962e)
+
+running 2 tests
+test legacy_and_unknown_action_fields_decode_safely ... ok
+test two_clients_observe_sequential_accepted_casts_once_and_defaults_are_inert ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.73s
+
+     Running tests/gameplay.rs (target/debug/deps/gameplay-a9065c6a1a6a9e6e)
+
+running 8 tests
+test bottom_boss_spawns_on_schedule_with_boss_stats ... ok
+test god_mode_keeps_player_alive_under_damage ... ok
+test join_produces_snapshot_with_player ... ok
+test join_replicates_class_and_avatar_and_applies_distinct_kits ... ok
+test locked_slots_are_rejected_authoritatively ... ok
+test malformed_class_and_avatar_fall_back_without_crashing_the_server ... ok
+test speed_boost_widens_movement_clamp ... ok
+test upgrade_skill_without_points_is_noop ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 91.75s
+
+     Running tests/matchmaking.rs (target/debug/deps/matchmaking-c14d91f9da5624f9)
+
+running 1 test
+test release_mode_forms_and_starts_a_full_match ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.33s
+
+     Running tests/sprite_cosmetics.rs (target/debug/deps/sprite_cosmetics-9701e57d39b24efa)
+
+running 1 test
+test distinct_sprite_ids_round_trip_and_invalid_or_omitted_values_default ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.37s
+
+     Running tests/udp_datagrams.rs (target/debug/deps/udp_datagrams-0d1507dea567a341)
+
+running 1 test
+test real_server_emits_complete_populated_snapshot_above_8_kib ... FAILED
+
+failures:
+
+---- real_server_emits_complete_populated_snapshot_above_8_kib stdout ----
+
+thread 'real_server_emits_complete_populated_snapshot_above_8_kib' (277153) panicked at harness/tests/udp_datagrams.rs:75:42:
+real server never produced a complete >8 KiB 5v5 snapshot with 8 structures and 18 minions
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    real_server_emits_complete_populated_snapshot_above_8_kib
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.07s
+
+error: test failed, to rerun pass `-p harness --test udp_datagrams`
