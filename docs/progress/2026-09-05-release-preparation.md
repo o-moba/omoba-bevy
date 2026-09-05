@@ -28,9 +28,9 @@ provides reproducible commands and the mandatory victory/second-round matrix.
 | Join/wire — AC4 | Retry every two seconds, up to 15 attempts; authoritative admission and visible errors. Hello negotiates ≤1200-byte snapshots with bounded reassembly and epoch/round/tick ordering. Client retains at most 8 complete incoming snapshots. | Shared transport/order regressions; client first-Join-loss/rejection/old-round tests; real 5v5 framed and legacy compatibility checks. |
 | Input/UI — AC5 | Current snapshot precedes modal resolution and input/send. Alt+right mouse held orbit, Space recovery, explicit debug flight, modal isolation. Inactive roster excluded; active roster scrolls. | Production input/scheduling/layout ECS regressions; native observation blocked by Computer Use config permission. |
 | 3D presentation — AC6 | Local/remote action/death clips, deduplication and explicit round reset; shape+color allegiance; visible hotbar/action feedback and finite VFX. | Current client 131 tests pass, including real AnimationPlayer checks; all 16 hero GLBs have positive-duration idle/walk/attack/cast/death clips. Visual perception remains unverified. |
-| Offline/package — AC7 | Mode-scoped optional 2D loads, SDK legacy choices use primitives, executable-relative or explicit asset root. New package and isolated smoke scripts. | Required hero/boss validators pass; package launch evidence pending final build. |
+| Offline/package — AC7 | Mode-scoped optional 2D loads, SDK legacy choices use primitives, executable-relative or explicit asset root. New package and isolated smoke scripts. | Required hero/boss/minion validators pass; package launch and independent repeat pass outside the checkout. |
 | Siege/bots/metrics — AC8 | One lane tower must fall before base damage. Bots legally upgrade, self-sustain and require health and an allied wave before structure range. Match logs capture outcome/progression/deaths/objectives/disconnects. | Siege/progression regressions ; 15 bot decision tests pass. No actual human pace measurement. |
-| Current acceptance — AC1/9/10 | Version/changelog/features/dated ledger and release matrix updated. | Current locked workspace build and all 249 Rust tests pass; final lint/package/fresh verification in progress. |
+| Current acceptance — AC1/9/10 | Version/changelog/features/dated ledger and release matrix updated. | Locked workspace build, all 249 Rust tests, formatting and strict clippy pass. Fresh independent verification: **AC1–AC10 PASS**. |
 
 Bot structure rule: enemy structures define conservative 26-unit danger circles.
 Entry requires ≥50% HP and two living allied minions within 24 units, both closer to
@@ -63,6 +63,43 @@ This lane-only estimate exposes a pacing concern: it is slower than the proposed
 5–7 minute ultimate target even before travel/combat. The proposed 8–12 minute match
 length is a design hypothesis, not a measured result. Record real full-roster
 sessions before class/XP tuning. Gold is income with no spending path yet.
+
+## Current build and startup evidence
+
+Production implementation: `f5ce3d5`. Packaged clean source:
+`ccbf57360a39ce3369417b173ea1add2fa8dbbd5` (Python compatibility repair only after
+production commit). Subsequent evidence commits change documentation only.
+The internal package is `.agent/tasks/RELEASE-3D-2026-09-05/package/omoba-0.18.0-rc.1/`:
+80 hashed files, 408,333,280 bytes. `BUILD.json` records the exact binary/asset
+hashes, source revision, clean status, platform, profile and certification block.
+
+- `cargo build --workspace --locked`: PASS; current server built before live tests.
+- `cargo test --workspace --locked -- --test-threads=1`: **249 passed**, none failed.
+- `cargo fmt --all -- --check` and workspace/all-targets clippy with warnings
+  denied: PASS. `git diff --check`: PASS.
+- Required 3D hero, boss and minion validation: PASS. Protocol probes include
+  both complete legacy 5v5 JSON and current framed 5v5 snapshots.
+- Packaged native startup: PASS for 20 seconds outside the checkout, with
+  isolated configuration, package-relative models, first snapshot and no logged
+  panic, missing asset or remote model download. Logs include a LadyKoi Join
+  admitted into a development match. This does not establish visual clarity
+  or a completed match. Independent verifier repeated the startup successfully.
+- Computer Use remained unavailable; no screenshots or visual/gesture claims.
+
+The initial package command exposed default macOS Python 3.9's lack of tomllib.
+The script now gets the canonical version from Cargo metadata and works with
+Python 3.9 without installing anything. Initial failed runs and their final
+passing replacements are retained in raw evidence; they are not omitted.
+
+## Independent verdict
+
+The fresh verifier independently rebuilt the workspace and reran all 249 Rust
+checks, formatting and strict linting, validated all required 3D models, checked
+all 80 package hashes and repeated isolated native startup. **Every AC1–AC10 is
+PASS.** Verdict: `.agent/tasks/RELEASE-3D-2026-09-05/verdict.json`; structured and
+narrative evidence are alongside it. No production code changed during the
+verification pass. These results accept the bounded implementation milestone;
+they do not clear the external release gates below.
 
 ## Remaining certification gates
 
