@@ -40,5 +40,9 @@
 
   "_raid_bosses": "---- multiplier applies on top of the 3x boss presence ----",
   "wendigo-hollow": 1.0,
-  "king-mutatio": 1.0
+  "king-mutatio": 1.0,
+
+  "_lane_minions": "---- multiplier applies on top of the 0.6x minion size ----",
+  "slime-green": 1.0,
+  "slime-blue": 1.0
 }

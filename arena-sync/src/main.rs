@@ -275,7 +275,10 @@ fn main() {
             .as_str()
             .or_else(|| metadata["model"].as_str())
         else {
-            eprintln!("skip {}: no model pointer in card metadata", card.archetype_id);
+            eprintln!(
+                "skip {}: no model pointer in card metadata",
+                card.archetype_id
+            );
             skipped += 1;
             continue;
         };
@@ -312,8 +315,7 @@ fn main() {
             }
         };
         fs::create_dir_all(&avatars_dir).expect("create avatars dir");
-        fs::write(avatars_dir.join(format!("{slug}.glb")), &model_bytes)
-            .expect("write model glb");
+        fs::write(avatars_dir.join(format!("{slug}.glb")), &model_bytes).expect("write model glb");
 
         let mut thumbnail = None;
         if image_url.starts_with("http") {

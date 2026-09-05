@@ -2,6 +2,17 @@
 
 Third-party assets bundled in this repository and their licenses.
 
+## Original Omoba 2D assets
+
+The terrain/prop atlases in `client/assets/world2d/` were generated specifically
+for Omoba on 2026-07-27 through the Higgsfield MCP with Recraft V4.1, then
+processed deterministically into checked-in atlases. No third-party game art
+or commercial-game reference was used. The project dedicates the resulting
+assets to CC0-1.0. Exact prompts, job/media identifiers, costs, source hashes,
+and build records are retained in
+`.agent/tasks/TASK-FULL-2D-WORLD/raw/higgsfield/`; the shipped declaration is
+`client/assets/world2d/LICENSE.md`.
+
 ## Avatars / 3D models
 
 ### Paco (`client/assets/downloaded/paco.glb`)
@@ -26,3 +37,18 @@ python3 scripts/convert_vrm_to_glb.py \
     https://arweave.net/0i-EEnHlcq1EZ1-sMi8DTZhesqGLqtf30WuCknfTHjA \
     client/assets/downloaded/paco.glb
 ```
+
+### Lane minion slimes (`client/assets/minions/slime-green.glb`, `slime-blue.glb`)
+
+- **Avatars:** "Mimic Slime: Classic" (green team) and "Mimic Slime: Water" (blue team)
+- **Collection:** Halloween Rising
+- **Author / creator:** Polygonal-Mind
+- **Original model files:**
+  https://dweb.link/ipfs/QmXyEuwbgUfMG7WzRZys6JnS6DJvxqkPGDseZmHM8wLJm1/Avatar03_v2_Stylized_Green.vrm,
+  https://dweb.link/ipfs/QmXyEuwbgUfMG7WzRZys6JnS6DJvxqkPGDseZmHM8wLJm1/Avatar03_v1_Cute_Blue.vrm
+- **Original format:** VRM 0.x (glTF 2.0 binary)
+- **License:** CC0 1.0 — no attribution legally required; credited as good practice.
+- **Modification:** staged as `.glb` via `scripts/convert_vrm_to_glb.py`; CC0
+  Quaternius UAL animation clips (idle/walk/attack/cast/death) baked in via
+  `scripts/retarget_animations.py --avatars-dir client/assets/minions`.
+  Provenance manifest: `client/assets/minions/manifest.json`.

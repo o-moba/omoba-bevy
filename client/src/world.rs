@@ -5,12 +5,13 @@ use bevy::scene::SceneRoot;
 use ekza_bevy_sdk::bevy::{EkzaModelCatalog, load_builtin_model_catalog};
 use std::collections::HashMap;
 
-use crate::camera::{CameraState, MainCamera, locked_camera_offset};
+use crate::camera::{CAMERA2D_BASE_SCALE, CameraState, MainCamera, locked_camera_offset};
 use crate::combat::CombatStats;
 use crate::maps::MapLayout;
 use crate::model_scale::{ModelScaleSource, NormalizeModelScale, model_scale_key};
-use crate::net::{NetworkAvatar, NetworkCharacterChoice};
+use crate::net::{NetworkAvatar, NetworkCharacterChoice, NetworkSpriteCharacter};
 use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
+use crate::sprite::PlayerVisualMode;
 use crate::team::{CharacterChoice, Team, TeamSelection};
 
 const USE_CUSTOM_MODEL: bool = true;
@@ -112,6 +113,10 @@ impl Plugin for SetupPlugin {
             Startup,
             setup_scene.after(crate::persistence::load_persistent_client_settings),
         )
+        .add_systems(
+            Startup,
+            setup_main_camera.after(crate::persistence::load_persistent_client_settings),
+        )
         .init_resource::<LightingSettings>()
         .init_resource::<AvatarAssetCache>()
         .add_systems(Update, sync_selected_player_assets)
@@ -147,19 +152,27 @@ fn setup_scene(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut cam_state: ResMut<CameraState>,
     asset_server: Res<AssetServer>,
     lighting_settings: Res<LightingSettings>,
+    visual_mode: Res<PlayerVisualMode>,
 ) {
-    let player_mesh_handle: Handle<Mesh> = meshes.add(Mesh::from(Cuboid::new(
-        PLAYER_SIZE,
-        PLAYER_SIZE,
-        PLAYER_SIZE,
-    )));
-    let player_material_handle: Handle<StandardMaterial> =
-        materials.add(StandardMaterial::from(Color::srgb(0.8, 0.7, 0.6)));
+    let is_2d = *visual_mode == PlayerVisualMode::Sprite2d;
+    let player_mesh_handle: Handle<Mesh> = if is_2d {
+        Handle::default()
+    } else {
+        meshes.add(Mesh::from(Cuboid::new(
+            PLAYER_SIZE,
+            PLAYER_SIZE,
+            PLAYER_SIZE,
+        )))
+    };
+    let player_material_handle: Handle<StandardMaterial> = if is_2d {
+        Handle::default()
+    } else {
+        materials.add(StandardMaterial::from(Color::srgb(0.8, 0.7, 0.6)))
+    };
     let assets_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
-    let catalog = if USE_CUSTOM_MODEL {
+    let catalog = if USE_CUSTOM_MODEL && *visual_mode == PlayerVisualMode::Models3d {
         load_builtin_model_catalog(&asset_server, &assets_dir)
     } else {
         PlayerModelCatalog::default()
@@ -173,6 +186,10 @@ fn setup_scene(
         mesh: player_mesh_handle.clone(),
         material: player_material_handle.clone(),
     });
+
+    if is_2d {
+        return;
+    }
 
     let pitch_rad = lighting_settings
         .light_pitch_deg
@@ -202,30 +219,53 @@ fn setup_scene(
             .clamp(MIN_AMBIENT_BRIGHTNESS, MAX_AMBIENT_BRIGHTNESS),
         ..default()
     });
+}
+
+fn setup_main_camera(
+    mut commands: Commands,
+    mut cam_state: ResMut<CameraState>,
+    visual_mode: Res<PlayerVisualMode>,
+) {
+    if *visual_mode == PlayerVisualMode::Sprite2d {
+        cam_state.pitch = 0.0;
+        cam_state.yaw = 0.0;
+        commands.spawn((
+            Camera2d,
+            Projection::Orthographic(OrthographicProjection {
+                scale: CAMERA2D_BASE_SCALE * cam_state.zoom,
+                ..OrthographicProjection::default_2d()
+            }),
+            Transform::default(),
+            MainCamera,
+            Name::new("MainCamera2d"),
+        ));
+        return;
+    }
 
     let map_center = Vec3::new(0.0, PLAYER_SIZE * 0.5, 0.0);
-    let zoom = cam_state.zoom;
-    let initial_cam_pos = map_center + locked_camera_offset(zoom);
+    let initial_cam_pos = map_center + locked_camera_offset(cam_state.zoom);
     let initial_cam_transform =
         Transform::from_translation(initial_cam_pos).looking_at(map_center, Vec3::Y);
-
-    let (_yaw, pitch, _roll) = initial_cam_transform.rotation.to_euler(EulerRot::YXZ);
+    let (yaw, pitch, _) = initial_cam_transform.rotation.to_euler(EulerRot::YXZ);
     cam_state.pitch = pitch;
-    cam_state.yaw = _yaw;
-
+    cam_state.yaw = yaw;
     commands.spawn((
         Camera3d::default(),
         initial_cam_transform,
         MainCamera,
-        Name::new("Camera"),
+        Name::new("MainCamera3d"),
     ));
 }
 
 fn apply_lighting_settings_system(
+    mode: Res<PlayerVisualMode>,
     settings: Res<LightingSettings>,
     mut ambient_light: ResMut<GlobalAmbientLight>,
     mut light_query: Query<(&mut DirectionalLight, &mut Transform), With<SceneDirectionalLight>>,
 ) {
+    if *mode != PlayerVisualMode::Models3d {
+        return;
+    }
     if !settings.is_changed() {
         return;
     }
@@ -252,13 +292,14 @@ fn apply_lighting_settings_system(
 
 fn sync_selected_player_assets(
     team_selection: Res<TeamSelection>,
+    visual_mode: Res<PlayerVisualMode>,
     mut models: PlayerModelResolver,
     mut player_assets: ResMut<PlayerAssets>,
 ) {
-    let (scene, gltf) = models.resolve(
-        team_selection.character,
-        team_selection.avatar.as_deref(),
-    );
+    if *visual_mode != PlayerVisualMode::Models3d {
+        return;
+    }
+    let (scene, gltf) = models.resolve(team_selection.character, team_selection.avatar.as_deref());
     let label = team_selection
         .avatar
         .as_deref()
@@ -282,6 +323,7 @@ fn spawn_local_player_on_team(
     existing_players: Query<Entity, With<Player>>,
     mut cam_state: ResMut<CameraState>,
     mut camera_query: Query<&mut Transform, With<MainCamera>>,
+    visual_mode: Res<PlayerVisualMode>,
 ) {
     if team_selection.team.is_none() {
         return;
@@ -294,13 +336,28 @@ fn spawn_local_player_on_team(
     let avatar = team_selection.avatar.clone();
     let spawn = map_layout.team_spawn(team);
 
-    spawn_player_entity(&mut commands, &player_assets, spawn, team, character, avatar);
+    spawn_player_entity(
+        &mut commands,
+        &player_assets,
+        spawn,
+        team,
+        character,
+        avatar,
+        Some(team_selection.sprite_character.clone()),
+        *visual_mode,
+    );
     if let Ok(mut camera_transform) = camera_query.single_mut() {
         cam_state.locked = true;
-        let zoom = cam_state.zoom;
-        camera_transform.translation = spawn + locked_camera_offset(zoom);
-        let look_target = Vec3::new(spawn.x, PLAYER_SIZE * 0.5, spawn.z);
-        *camera_transform = camera_transform.looking_at(look_target, Vec3::Y);
+        if *visual_mode == PlayerVisualMode::Sprite2d {
+            let render = crate::world2d::simulation_xz_to_render_xy(spawn);
+            camera_transform.translation.x = render.x;
+            camera_transform.translation.y = render.y;
+        } else {
+            let zoom = cam_state.zoom;
+            camera_transform.translation = spawn + locked_camera_offset(zoom);
+            let look_target = Vec3::new(spawn.x, PLAYER_SIZE * 0.5, spawn.z);
+            *camera_transform = camera_transform.looking_at(look_target, Vec3::Y);
+        }
     }
 }
 
@@ -311,7 +368,25 @@ fn spawn_player_entity(
     team: Team,
     character: CharacterChoice,
     avatar: Option<String>,
+    sprite_character: Option<String>,
+    visual_mode: PlayerVisualMode,
 ) {
+    if visual_mode == PlayerVisualMode::Sprite2d {
+        commands.spawn((
+            Transform::from_translation(spawn),
+            Visibility::default(),
+            Player,
+            PlayerBody,
+            CombatStats::default(),
+            VerticalVelocity::default(),
+            team,
+            NetworkCharacterChoice(character),
+            NetworkAvatar(avatar),
+            NetworkSpriteCharacter(sprite_character),
+            Name::new(format!("Player-{}", team.as_str())),
+        ));
+        return;
+    }
     if let Some(glb_scene) = assets.scene.clone() {
         let mut entity_commands = commands.spawn((
             SceneRoot(glb_scene),
@@ -363,17 +438,26 @@ fn spawn_player_entity(
 /// and every roster avatar, which are all VRM-staged GLBs) to leave other models
 /// untouched. Idempotent: each material asset is patched once.
 fn force_vrm_models_double_sided(
-    roots: Query<(Entity, &NetworkCharacterChoice, Option<&NetworkAvatar>), With<NormalizeModelScale>>,
+    roots: Query<
+        (Entity, &NetworkCharacterChoice, Option<&NetworkAvatar>),
+        With<NormalizeModelScale>,
+    >,
+    minion_roots: Query<Entity, (With<crate::net::NetworkMinion>, With<NormalizeModelScale>)>,
     children_query: Query<&Children>,
     material_handles: Query<&MeshMaterial3d<StandardMaterial>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut patched: Local<std::collections::HashSet<bevy::asset::AssetId<StandardMaterial>>>,
 ) {
-    for (root, choice, avatar) in &roots {
-        let wears_roster_avatar = avatar.is_some_and(|avatar| avatar.0.is_some());
-        if choice.0 != CharacterChoice::Paco && !wears_roster_avatar {
-            continue;
-        }
+    let vrm_roots = roots
+        .iter()
+        .filter(|(_, choice, avatar)| {
+            let wears_roster_avatar = avatar.is_some_and(|avatar| avatar.0.is_some());
+            choice.0 == CharacterChoice::Paco || wears_roster_avatar
+        })
+        .map(|(root, _, _)| root)
+        // Slime minions are VRM-staged GLBs with the same single-sided issue.
+        .chain(minion_roots.iter());
+    for root in vrm_roots {
         for descendant in children_query.iter_descendants(root) {
             let Ok(handle) = material_handles.get(descendant) else {
                 continue;
@@ -391,3 +475,86 @@ fn force_vrm_models_double_sided(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn camera_app(mode: PlayerVisualMode) -> App {
+        let mut app = App::new();
+        app.insert_resource(mode)
+            .init_resource::<CameraState>()
+            .add_systems(Startup, setup_main_camera);
+        app.update();
+        app
+    }
+
+    #[test]
+    fn sprite2d_startup_has_exactly_one_orthographic_camera_and_no_3d_scene() {
+        let mut app = camera_app(PlayerVisualMode::Sprite2d);
+        assert_eq!(
+            app.world_mut()
+                .query::<&Camera2d>()
+                .iter(app.world())
+                .count(),
+            1
+        );
+        assert_eq!(
+            app.world_mut()
+                .query::<&Camera3d>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+        assert_eq!(
+            app.world_mut()
+                .query::<&DirectionalLight>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+        assert_eq!(
+            app.world_mut().query::<&Mesh3d>().iter(app.world()).count(),
+            0
+        );
+        assert_eq!(
+            app.world_mut()
+                .query::<&SceneRoot>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+        let projection = app
+            .world_mut()
+            .query::<(&MainCamera, &Projection)>()
+            .single(app.world())
+            .unwrap()
+            .1;
+        assert!(matches!(projection, Projection::Orthographic(_)));
+    }
+
+    #[test]
+    fn models3d_startup_is_mutually_exclusive() {
+        let mut app = camera_app(PlayerVisualMode::Models3d);
+        assert_eq!(
+            app.world_mut()
+                .query::<&Camera3d>()
+                .iter(app.world())
+                .count(),
+            1
+        );
+        assert_eq!(
+            app.world_mut()
+                .query::<&Camera2d>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+        let projection = app
+            .world_mut()
+            .query::<(&MainCamera, &Projection)>()
+            .single(app.world())
+            .unwrap()
+            .1;
+        assert!(matches!(projection, Projection::Perspective(_)));
+    }
+}

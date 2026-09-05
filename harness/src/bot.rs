@@ -21,8 +21,10 @@ use crate::protocol::{
 /// enough to poll responsively and long enough to avoid busy-spinning.
 const RECV_TIMEOUT: Duration = Duration::from_millis(200);
 
-/// Max UDP datagram we will read. Snapshots can grow with entity count.
-const MAX_DATAGRAM: usize = 64 * 1024;
+/// Largest legal application payload in one IPv4 UDP datagram.
+pub const IPV4_UDP_MAX_PAYLOAD_BYTES: usize = 65_507;
+/// Storage exceeds the legal payload limit, preventing prefix truncation.
+const DATAGRAM_RECEIVE_CAPACITY: usize = 65_536;
 
 /// A connected bot client.
 pub struct Bot {
@@ -46,7 +48,7 @@ impl Bot {
         Self {
             socket,
             my_id: None,
-            recv_buf: vec![0u8; MAX_DATAGRAM],
+            recv_buf: vec![0u8; DATAGRAM_RECEIVE_CAPACITY],
         }
     }
 
@@ -73,11 +75,24 @@ impl Bot {
         hero_class: HeroClass,
         avatar: Option<&str>,
     ) {
+        self.join_with_cosmetics(team, character, hero_class, avatar, None);
+    }
+
+    /// Joins with independent 3D-avatar and 2D-sprite cosmetic identities.
+    pub fn join_with_cosmetics(
+        &self,
+        team: Team,
+        character: Character,
+        hero_class: HeroClass,
+        avatar: Option<&str>,
+        sprite_character: Option<&str>,
+    ) {
         self.send(&ClientPacket::Join {
             team,
             character,
             hero_class,
             avatar: avatar.map(str::to_owned),
+            sprite_character: sprite_character.map(str::to_owned),
             session_id: None,
         });
     }
@@ -131,6 +146,21 @@ impl Bot {
 
     // --- Inbound snapshot helpers ------------------------------------------
 
+    /// Receives one complete raw datagram for transport-level assertions.
+    /// Invalid JSON is returned unchanged and is never treated as a snapshot.
+    pub fn recv_raw_datagram(&mut self, deadline: Instant) -> Option<Vec<u8>> {
+        loop {
+            if Instant::now() >= deadline {
+                return None;
+            }
+            match self.socket.recv(&mut self.recv_buf) {
+                Ok(len) => return Some(self.recv_buf[..len].to_vec()),
+                Err(error) if is_timeout(&error) => {}
+                Err(error) => panic!("bot socket raw recv failed: {error}"),
+            }
+        }
+    }
+
     /// Returns the **freshest** snapshot available before `deadline`.
     ///
     /// The server emits a snapshot every ~50ms, so a bot's socket buffer can
@@ -148,7 +178,8 @@ impl Bot {
         loop {
             match self.socket.recv(&mut self.recv_buf) {
                 Ok(len) => {
-                    if let Ok(packet) = serde_json::from_slice::<ServerPacket>(&self.recv_buf[..len])
+                    if let Ok(packet) =
+                        serde_json::from_slice::<ServerPacket>(&self.recv_buf[..len])
                     {
                         latest = packet;
                     }
@@ -176,7 +207,8 @@ impl Bot {
             }
             match self.socket.recv(&mut self.recv_buf) {
                 Ok(len) => {
-                    if let Ok(packet) = serde_json::from_slice::<ServerPacket>(&self.recv_buf[..len])
+                    if let Ok(packet) =
+                        serde_json::from_slice::<ServerPacket>(&self.recv_buf[..len])
                     {
                         return Some(packet);
                     }

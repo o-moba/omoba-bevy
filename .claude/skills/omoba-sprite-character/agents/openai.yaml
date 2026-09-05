@@ -1,0 +1,4 @@
+interface:
+  display_name: "Omoba Sprite Character"
+  short_description: "Build Higgsfield animated game sprites"
+  default_prompt: "Use $omoba-sprite-character to produce and validate a complete Omoba sprite character."

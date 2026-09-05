@@ -4,6 +4,10 @@ use bevy::{
     window::{CursorGrabMode, CursorOptions, PrimaryWindow},
 };
 
+use crate::model_scale::{
+    DEFAULT_MODEL_TARGET_HEIGHT, MAX_MODEL_TARGET_HEIGHT, MIN_MODEL_TARGET_HEIGHT,
+    ModelScaleSettings,
+};
 use crate::net::{ClientConnectionState, ClientSession};
 use crate::persistence::{
     ClientPrefsSaveGate, ClientSessionId, ResolvedServerAddressForPrefs, reset_graphics_to_defaults,
@@ -11,10 +15,6 @@ use crate::persistence::{
 use crate::player::Player;
 use crate::session_config::DEFAULT_GAME_SERVER_ADDR;
 use crate::team::{TeamSelectRoot, TeamSelection, spawn_team_select_ui};
-use crate::model_scale::{
-    DEFAULT_MODEL_TARGET_HEIGHT, MAX_MODEL_TARGET_HEIGHT, MIN_MODEL_TARGET_HEIGHT,
-    ModelScaleSettings,
-};
 use crate::world::{
     DEFAULT_AMBIENT_BRIGHTNESS, DEFAULT_LIGHT_ILLUMINANCE, DEFAULT_LIGHT_PITCH_DEG,
     DEFAULT_LIGHT_YAW_DEG, LightingSettings, MAX_AMBIENT_BRIGHTNESS, MAX_LIGHT_ILLUMINANCE,
@@ -908,6 +908,8 @@ fn process_restart_request(
     local_players: Query<Entity, With<Player>>,
     overlay_query: Query<Entity, With<TeamSelectRoot>>,
     mut cursor_query: Query<&mut CursorOptions, With<PrimaryWindow>>,
+    visual_mode: Res<crate::sprite::PlayerVisualMode>,
+    sprite_assets: Res<crate::sprite::SpriteVisualAssets>,
 ) {
     if !restart_request.pending {
         return;
@@ -931,6 +933,6 @@ fn process_restart_request(
     }
 
     if overlay_query.single().is_err() {
-        spawn_team_select_ui(&mut commands, &team_selection);
+        spawn_team_select_ui(&mut commands, &team_selection, *visual_mode, &sprite_assets);
     }
 }

@@ -15,12 +15,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::session_config::DEFAULT_GAME_SERVER_ADDR;
-use crate::team::CharacterChoice;
 use crate::model_scale::{
     DEFAULT_MODEL_TARGET_HEIGHT, MAX_MODEL_TARGET_HEIGHT, MIN_MODEL_TARGET_HEIGHT,
     ModelScaleSettings,
 };
+use crate::session_config::DEFAULT_GAME_SERVER_ADDR;
+use crate::team::CharacterChoice;
 use crate::world::{
     LightingSettings, MAX_AMBIENT_BRIGHTNESS, MAX_LIGHT_ILLUMINANCE, MAX_LIGHT_PITCH_DEG,
     MAX_LIGHT_YAW_DEG, MIN_AMBIENT_BRIGHTNESS, MIN_LIGHT_ILLUMINANCE, MIN_LIGHT_PITCH_DEG,
@@ -274,9 +274,7 @@ pub fn load_persistent_client_settings(
     if let Some(h) = disk.model_target_height {
         let resolved = migrate_model_target_height(h);
         if (resolved - h).abs() > f32::EPSILON && h < MIN_MODEL_TARGET_HEIGHT {
-            info!(
-                "Migrating legacy model target height {h:.3} -> {resolved:.3} (world rescale)."
-            );
+            info!("Migrating legacy model target height {h:.3} -> {resolved:.3} (world rescale).");
         }
         model.target_height = resolved;
     }
@@ -467,8 +465,14 @@ mod tests {
     fn migrate_model_target_height_resets_legacy_values() {
         // Legacy world scale (old default 0.26, old range 0.08..1.2): below
         // the current minimum means "saved before the world rescale".
-        assert_eq!(migrate_model_target_height(0.26), DEFAULT_MODEL_TARGET_HEIGHT);
-        assert_eq!(migrate_model_target_height(0.08), DEFAULT_MODEL_TARGET_HEIGHT);
+        assert_eq!(
+            migrate_model_target_height(0.26),
+            DEFAULT_MODEL_TARGET_HEIGHT
+        );
+        assert_eq!(
+            migrate_model_target_height(0.08),
+            DEFAULT_MODEL_TARGET_HEIGHT
+        );
         // In-range values survive as-is; above-range values clamp.
         assert_eq!(migrate_model_target_height(1.2), 1.2);
         assert_eq!(migrate_model_target_height(0.5), 0.5);

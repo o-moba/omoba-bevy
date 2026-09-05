@@ -12,8 +12,9 @@ use bevy::scene::SceneRoot;
 use std::collections::HashMap;
 
 use crate::camera::MainCamera;
-use crate::net::{NetworkNeutral, NeutralAiState, NeutralAiStateTag, NeutralCampType};
 use crate::model_scale::{ModelScaleSource, NormalizeModelScale};
+use crate::net::{NetworkNeutral, NeutralAiState, NeutralAiStateTag, NeutralCampType};
+use crate::sprite::PlayerVisualMode;
 
 /// Raid bosses render this many times taller than the normalized player model
 /// (spec D7: 2.5-3.5x for raid presence).
@@ -135,7 +136,11 @@ fn attach_boss_models(
     mut commands: Commands,
     cache: Res<BossAssetCache>,
     new_bosses: Query<(Entity, &BossVisual), Added<BossVisual>>,
+    mode: Res<PlayerVisualMode>,
 ) {
+    if *mode != PlayerVisualMode::Models3d {
+        return;
+    }
     for (boss_entity, visual) in &new_bosses {
         let Some((scene, gltf)) = cache.handles.get(&visual.camp_type) else {
             warn!("No staged model for boss {:?}", visual.camp_type);
@@ -205,8 +210,7 @@ fn update_boss_nameplates(
         let head_height = normalization
             .head_local_y
             .unwrap_or(NAMEPLATE_FALLBACK_HEIGHT);
-        let anchor =
-            boss_transform.translation() + Vec3::Y * (head_height + NAMEPLATE_CLEARANCE);
+        let anchor = boss_transform.translation() + Vec3::Y * (head_height + NAMEPLATE_CLEARANCE);
         match camera.world_to_viewport(camera_transform, anchor) {
             Ok(screen) => {
                 node.left = Val::Px(screen.x - NAMEPLATE_HALF_WIDTH);
@@ -274,10 +278,7 @@ fn bind_boss_animation_players(
     library: Res<BossAnimationLibrary>,
     boss_roots: Query<&BossVisual, With<NetworkNeutral>>,
     child_of_query: Query<&ChildOf>,
-    mut animation_players: Query<
-        (Entity, &mut AnimationPlayer),
-        Without<BossAnimationBinding>,
-    >,
+    mut animation_players: Query<(Entity, &mut AnimationPlayer), Without<BossAnimationBinding>>,
 ) {
     if library.sets.is_empty() {
         return;

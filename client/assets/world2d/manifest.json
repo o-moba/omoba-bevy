@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "license": "CC0-1.0",
+  "repository_size_budget_bytes": 5000000,
+  "tile_pixels": 128,
+  "tile_world_size": 4.0,
+  "atlases": {
+    "terrain": {
+      "path": "terrain-atlas.png",
+      "grid": [8, 4],
+      "frame_size": [128, 128]
+    },
+    "props": {
+      "path": "props-atlas.png",
+      "grid": [8, 4],
+      "frame_size": [128, 128]
+    }
+  },
+  "layers": {
+    "ground": -100.0,
+    "transitions_decals": -80.0,
+    "low_props_shadows": -40.0,
+    "actors_structures": 0.0,
+    "projectiles_vfx": 40.0,
+    "overhead_markers": 80.0,
+    "screen_ui": 1000.0,
+    "y_sort_scale": 0.001,
+    "stable_tie_break_scale": 0.000001
+  },
+  "tiles": {
+    "grass_a": { "frame": 0, "category": "grass", "walkability": "traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] },
+    "grass_b": { "frame": 1, "category": "grass", "walkability": "traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] },
+    "grass_c": { "frame": 2, "category": "grass", "walkability": "traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] },
+    "grass_d": { "frame": 3, "category": "grass", "walkability": "traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] },
+    "forest_floor_a": { "frame": 4, "category": "forest_floor", "walkability": "cosmetic_traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] },
+    "forest_floor_b": { "frame": 5, "category": "forest_floor", "walkability": "cosmetic_traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] },
+    "path_earth_a": { "frame": 6, "category": "path", "walkability": "traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] },
+    "path_earth_b": { "frame": 7, "category": "path", "walkability": "traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] },
+    "water_a": { "frame": 8, "category": "shallow_water", "walkability": "traversable", "rotations": [0, 180], "pivot": [0.5, 0.5] },
+    "water_b": { "frame": 9, "category": "shallow_water", "walkability": "traversable", "rotations": [0, 180], "pivot": [0.5, 0.5] },
+    "water_c": { "frame": 10, "category": "shallow_water", "walkability": "traversable", "rotations": [0, 180], "pivot": [0.5, 0.5] },
+    "path_edge": { "frame": 11, "category": "path_transition", "walkability": "traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] },
+    "path_outer_corner": { "frame": 12, "category": "path_transition", "walkability": "traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] },
+    "path_inner_corner": { "frame": 13, "category": "path_transition", "walkability": "traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] },
+    "water_edge": { "frame": 14, "category": "water_transition", "walkability": "traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] },
+    "water_outer_corner": { "frame": 15, "category": "water_transition", "walkability": "traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] },
+    "water_inner_corner": { "frame": 16, "category": "water_transition", "walkability": "traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] },
+    "stone_crossing": { "frame": 17, "category": "crossing", "walkability": "traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] },
+    "flower_verge": { "frame": 18, "category": "decal", "walkability": "cosmetic_traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] },
+    "forest_edge": { "frame": 19, "category": "forest_transition", "walkability": "cosmetic_traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] },
+    "green_base": { "frame": 20, "category": "base", "walkability": "traversable", "rotations": [0], "pivot": [0.5, 0.5] },
+    "blue_base": { "frame": 21, "category": "base", "walkability": "traversable", "rotations": [0], "pivot": [0.5, 0.5] },
+    "camp_clearing": { "frame": 22, "category": "camp_clearing", "walkability": "traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] },
+    "boss_clearing": { "frame": 23, "category": "boss_clearing", "walkability": "traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] },
+    "green_base_ground_variant": { "frame": 24, "category": "base_decal", "walkability": "traversable", "rotations": [0], "pivot": [0.5, 0.5] },
+    "blue_base_ground_variant": { "frame": 25, "category": "base_decal", "walkability": "traversable", "rotations": [0], "pivot": [0.5, 0.5] },
+    "objective_gold": { "frame": 26, "category": "objective_decal", "walkability": "traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] },
+    "river_ford": { "frame": 27, "category": "crossing", "walkability": "traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] },
+    "water_pebbles": { "frame": 28, "category": "shallow_water", "walkability": "traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] },
+    "grass_flowers": { "frame": 29, "category": "decal", "walkability": "cosmetic_traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] },
+    "forest_shadow": { "frame": 30, "category": "shadow", "walkability": "cosmetic_traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] },
+    "meadow_muted": { "frame": 31, "category": "grass", "walkability": "traversable", "rotations": [0, 90, 180, 270], "pivot": [0.5, 0.5] }
+  },
+  "props": {
+    "tree_oak_a": { "frame": 0, "category": "tree", "pivot": [0.5, 0.08], "world_size": [7.0, 8.0], "clearance_radius": 3.5, "placement": "forest_only" },
+    "tree_gold": { "frame": 1, "category": "tree", "pivot": [0.5, 0.08], "world_size": [7.0, 8.0], "clearance_radius": 3.5, "placement": "forest_only" },
+    "tree_oak_b": { "frame": 2, "category": "tree", "pivot": [0.5, 0.08], "world_size": [6.5, 6.0], "clearance_radius": 3.0, "placement": "forest_only" },
+    "shrub_a": { "frame": 3, "category": "shrub", "pivot": [0.5, 0.08], "world_size": [4.0, 3.0], "clearance_radius": 1.5, "placement": "forest_verge" },
+    "flowers_a": { "frame": 4, "category": "flowers", "pivot": [0.5, 0.08], "world_size": [2.0, 2.5], "clearance_radius": 0.5, "placement": "meadow_sparse" },
+    "flowers_b": { "frame": 5, "category": "flowers", "pivot": [0.5, 0.08], "world_size": [2.2, 2.5], "clearance_radius": 0.5, "placement": "meadow_sparse" },
+    "reeds_a": { "frame": 6, "category": "reeds", "pivot": [0.5, 0.08], "world_size": [2.5, 3.0], "clearance_radius": 0.5, "placement": "river_verge" },
+    "reeds_b": { "frame": 7, "category": "reeds", "pivot": [0.5, 0.08], "world_size": [2.5, 3.0], "clearance_radius": 0.5, "placement": "river_verge" },
+    "mushroom_log": { "frame": 8, "category": "rock_log", "pivot": [0.5, 0.08], "world_size": [5.0, 3.0], "clearance_radius": 2.0, "placement": "forest_only" },
+    "rocks_a": { "frame": 9, "category": "rock_log", "pivot": [0.5, 0.08], "world_size": [4.5, 3.5], "clearance_radius": 2.0, "placement": "forest_verge" },
+    "campfire_ring": { "frame": 10, "category": "camp", "pivot": [0.5, 0.15], "world_size": [4.0, 3.0], "clearance_radius": 2.0, "placement": "camp_anchor" },
+    "camp_totem": { "frame": 11, "category": "camp", "pivot": [0.5, 0.05], "world_size": [3.0, 5.5], "clearance_radius": 2.0, "placement": "camp_anchor" },
+    "wendigo_shrine": { "frame": 12, "category": "objective", "pivot": [0.5, 0.05], "world_size": [6.0, 6.5], "clearance_radius": 3.0, "placement": "boss_anchor" },
+    "green_base_lantern": { "frame": 13, "category": "team_accent", "pivot": [0.5, 0.1], "world_size": [4.5, 4.5], "clearance_radius": 2.0, "placement": "green_base" },
+    "blue_base_obelisk": { "frame": 14, "category": "team_accent", "pivot": [0.5, 0.05], "world_size": [4.5, 6.5], "clearance_radius": 2.0, "placement": "blue_base" },
+    "boss_runes": { "frame": 15, "category": "objective", "pivot": [0.5, 0.35], "world_size": [6.0, 3.5], "clearance_radius": 2.5, "placement": "boss_anchor" }
+  },
+  "teams": {
+    "green": { "accent": "#35D7E5", "shape": "round", "base_tile": "green_base", "base_prop": "green_base_lantern" },
+    "blue": { "accent": "#FF5964", "shape": "diamond", "base_tile": "blue_base", "base_prop": "blue_base_obelisk" },
+    "neutral": { "accent": "#F4C95D", "shape": "ring" }
+  },
+  "topology": {
+    "coordinate_domain": "simulation_xz",
+    "bounds": { "min": [-108.549513, -108.549513], "max": [108.549513, 108.549513] },
+    "bases": { "green": [-79.549513, -79.549513], "blue": [79.549513, 79.549513] },
+    "spawns": { "green": [-74.599766, -74.599766], "blue": [74.599766, 74.599766] },
+    "lanes": {
+      "mid": [[-79.549513, -79.549513], [79.549513, 79.549513]],
+      "top": [[-79.549513, -79.549513], [-96.549513, -79.549513], [-96.549513, 96.549513], [96.549513, 96.549513], [79.549513, 96.549513], [79.549513, 79.549513]],
+      "bot": [[-79.549513, -79.549513], [-79.549513, -96.549513], [-96.549513, -96.549513], [96.549513, -96.549513], [96.549513, 79.549513], [79.549513, 79.549513]]
+    },
+    "river": { "polyline": [[-96.549513, 96.549513], [96.549513, -96.549513]], "width": 18.0, "traversable": true },
+    "lane_towers": [
+      { "team": "green", "lane": "mid", "xz": [-31.819805, -31.819805] },
+      { "team": "blue", "lane": "mid", "xz": [31.819805, 31.819805] },
+      { "team": "green", "lane": "top", "xz": [-96.549513, 29.509903] },
+      { "team": "blue", "lane": "top", "xz": [4.490097, 96.549513] },
+      { "team": "green", "lane": "bot", "xz": [-4.490097, -96.549513] },
+      { "team": "blue", "lane": "bot", "xz": [96.549513, -29.509903] }
+    ],
+    "base_objectives": [
+      { "team": "green", "xz": [-79.549513, -79.549513] },
+      { "team": "blue", "xz": [79.549513, 79.549513] }
+    ],
+    "camps": [[-73.813669, 47.761786], [73.813669, -47.761786], [-47.761786, -73.813669]],
+    "boss_pits": [[47.761786, -73.813669], [-47.761786, 73.813669]],
+    "clearances": { "lane_half_width": 6.0, "camp_radius": 10.0, "boss_radius": 12.0, "base_half_size": 23.0 }
+  },
+  "generation": {
+    "algorithm": "omoba_world2d_v1",
+    "seed": 73129,
+    "grid": { "columns": 55, "rows": 55, "origin_xz": [-108.0, -108.0], "static_tile_count": 3025, "max_static_entities": 4096 },
+    "priority": ["base", "lane_river_crossing", "lane", "camp", "boss", "river", "forest", "grass"],
+    "neighbor_transitions": { "edge_mask": "cardinal_4bit", "corner_mask": "diagonal_4bit", "rotation_order": [0, 90, 180, 270] },
+    "forest_cluster_centers": [[-47.761786, 73.813669], [-73.813669, -47.761786], [47.761786, 73.813669], [73.813669, 47.761786], [47.761786, -73.813669], [0.0, 60.787727], [0.0, -60.787727]],
+    "prop_policy": { "seeded": true, "max_props": 256, "avoid_topology_clearances": true, "server_collision": false }
+  }
+}

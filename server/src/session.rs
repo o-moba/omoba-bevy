@@ -51,6 +51,10 @@ pub(crate) fn ensure_player_connected(
                 character: default_character_choice(),
                 hero_class: HeroClass::default(),
                 avatar: None,
+                sprite_character: None,
+                action_sequence: 0,
+                action_kind: PlayerActionKind::None,
+                action_slot: 0,
             },
             joined: false,
             session_id: None,
@@ -154,6 +158,7 @@ pub(crate) fn regenerate_mana(players: &mut HashMap<SocketAddr, ConnectedPlayer>
     }
 }
 
+#[cfg(test)]
 pub(crate) fn handle_join_request(
     player: &mut ConnectedPlayer,
     team: Team,
@@ -163,28 +168,52 @@ pub(crate) fn handle_join_request(
     map_layout: &MapLayoutState,
     now: Instant,
 ) {
+    handle_join_request_with_sprite(
+        player, team, character, hero_class, avatar, None, map_layout, now,
+    );
+}
+
+pub(crate) fn handle_join_request_with_sprite(
+    player: &mut ConnectedPlayer,
+    team: Team,
+    character: CharacterChoice,
+    hero_class: HeroClass,
+    avatar: Option<&str>,
+    sprite_character: Option<&str>,
+    map_layout: &MapLayoutState,
+    now: Instant,
+) {
     // Unknown avatar slugs are dropped (client falls back to the default model);
     // unknown class strings already decoded to the default class in serde.
     let normalized_avatar = shared::normalize_avatar_slug(avatar);
+    let normalized_sprite = shared::normalize_sprite_character_id(sprite_character);
     if avatar.is_some() && normalized_avatar.is_none() {
         eprintln!(
             "Player {} requested unknown avatar {:?}; falling back to default model",
             player.state.id, avatar
         );
     }
+    if sprite_character.is_some_and(|requested| requested.trim() != normalized_sprite) {
+        eprintln!(
+            "Player {} requested unknown sprite {:?}; falling back to {:?}",
+            player.state.id, sprite_character, normalized_sprite
+        );
+    }
     println!(
-        "Player {} joined team {:?} as {:?} (class {}, avatar {:?})",
+        "Player {} joined team {:?} as {:?} (class {}, avatar {:?}, sprite {:?})",
         player.state.id,
         team,
         character,
         hero_class.id(),
-        normalized_avatar
+        normalized_avatar,
+        normalized_sprite
     );
     player.joined = true;
     player.state.team = team;
     player.state.character = character;
     player.state.hero_class = hero_class;
     player.state.avatar = normalized_avatar.map(str::to_owned);
+    player.state.sprite_character = Some(normalized_sprite.to_owned());
     let spawn = spawn_position_for_team(map_layout, team);
     player.state.x = spawn.x;
     player.state.y = PLAYER_GROUND_Y;
@@ -200,6 +229,9 @@ pub(crate) fn handle_join_request(
     player.state.next_level_xp = xp_threshold_for_level(STARTING_LEVEL);
     player.state.skill_points = 0;
     player.state.ranks = [1; 4];
+    player.state.action_sequence = 0;
+    player.state.action_kind = PlayerActionKind::None;
+    player.state.action_slot = 0;
     player.last_seen = now;
     player.last_movement_at = now;
     player.last_cast_at = [None; 4];

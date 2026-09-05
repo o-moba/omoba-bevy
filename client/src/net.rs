@@ -15,6 +15,7 @@ use crate::bosses::BossVisual;
 use crate::camera::{CameraState, MainCamera, locked_camera_offset};
 use crate::combat::{CombatStats, MAX_HP, MAX_MANA};
 use crate::maps::MapLayout;
+use crate::model_scale::{ModelScaleSource, NormalizeModelScale, model_scale_key};
 use crate::persistence::{ClientSessionId, FileGameServerAddr, ResolvedServerAddressForPrefs};
 use crate::player::{
     DEBUG_SPEED_MULTIPLIER, DebugSpeedBoost, PLAYER_SIZE, Player, PlayerBody, VerticalVelocity,
@@ -23,16 +24,22 @@ use crate::session_config::{
     DEFAULT_GAME_SERVER_ADDR, T_RETRY, T_STALE_SNAPSHOT, T_WAIT_MAX,
     TRANSPORT_CONSECUTIVE_RECV_ERRORS, TRANSPORT_CONSECUTIVE_SEND_ERRORS, is_stale,
 };
+use crate::sprite::{PlayerVisualMode, SpriteVisualAssets};
 use crate::team::TeamSelection;
 use crate::team::{CharacterChoice, Team, TeamSelectRoot, spawn_team_select_ui};
-use crate::model_scale::{ModelScaleSource, NormalizeModelScale, model_scale_key};
 use crate::world::{PlayerAssets, PlayerModelResolver};
-use shared::HeroClass;
+use shared::{HeroClass, PlayerActionKind};
 
 const LOCAL_BIND_ADDR: &str = "0.0.0.0:0";
 const UPDATE_INTERVAL_SECONDS: f32 = 0.05;
 const NETWORK_LOOP_SLEEP: Duration = Duration::from_millis(16);
-const MAX_PACKET_SIZE: usize = 8 * 1024;
+/// Largest application payload that can be carried by one IPv4 UDP datagram.
+const IPV4_UDP_MAX_PAYLOAD_BYTES: usize = 65_507;
+/// Storage is deliberately larger than the legal payload ceiling so a valid
+/// server datagram can never be silently truncated before JSON decoding.
+const SERVER_DATAGRAM_RECEIVE_CAPACITY: usize = 65_536;
+const _: () = assert!(SERVER_DATAGRAM_RECEIVE_CAPACITY > IPV4_UDP_MAX_PAYLOAD_BYTES);
+const DECODE_ERROR_LOG_INTERVAL: Duration = Duration::from_secs(1);
 const PROJECTILE_RADIUS: f32 = 0.22;
 const TOWER_SIZE: f32 = 2.6;
 const TOWER_HEIGHT: f32 = 6.0;
@@ -76,6 +83,27 @@ pub enum SessionUiCommand {
 #[derive(Resource, Default)]
 pub struct NetIncomingDisconnected(pub bool);
 
+/// The loadout that was actually sent in a Join packet. Remembered so a
+/// transient connection loss can re-join automatically (the server keeps the
+/// session reclaimable for `SESSION_RECLAIM_WINDOW`, 30 s) instead of
+/// dumping an already-joined player back onto the select screen (TASK-25).
+#[derive(Clone)]
+pub struct CommittedJoin {
+    pub team: Team,
+    pub character: CharacterChoice,
+    pub hero_class: HeroClass,
+    pub avatar: Option<String>,
+    pub sprite_character: Option<String>,
+}
+
+/// Auto-reconnect bookkeeping for a torn-down session with a committed join.
+#[derive(Default, Clone, Copy)]
+pub struct ReconnectState {
+    pub active: bool,
+    pub attempts: u32,
+    pub last_attempt: Option<Instant>,
+}
+
 /// Session controller: owns lifecycle flags and join idempotency (single ownership vs UI/net).
 #[derive(Resource)]
 pub struct ClientSession {
@@ -90,6 +118,10 @@ pub struct ClientSession {
     pub join_flow_committed: bool,
     /// Server address used for this process (for UI copy).
     pub server_addr_display: String,
+    /// Loadout of the last committed join (auto-rejoin after reconnect).
+    pub last_join: Option<CommittedJoin>,
+    /// Auto-reconnect loop state (active after a teardown of a joined session).
+    pub reconnect: ReconnectState,
 }
 
 impl Default for ClientSession {
@@ -101,8 +133,51 @@ impl Default for ClientSession {
             discard_incoming_snapshots: false,
             join_flow_committed: false,
             server_addr_display: String::new(),
+            last_join: None,
+            reconnect: ReconnectState::default(),
         }
     }
+}
+
+/// Why a network teardown happened; logged so surprise disconnects are
+/// diagnosable from the client log.
+#[derive(Debug, Clone, Copy)]
+enum TeardownReason {
+    StaleSnapshot { elapsed_secs: f32 },
+    TransportFailure,
+    ServerWaitTimeout,
+    IncomingChannelClosed,
+}
+
+impl std::fmt::Display for TeardownReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::StaleSnapshot { elapsed_secs } => {
+                write!(f, "no qualifying snapshot for {elapsed_secs:.1}s")
+            }
+            Self::TransportFailure => write!(f, "transport failure reported by the UDP thread"),
+            Self::ServerWaitTimeout => write!(f, "server did not answer within the wait budget"),
+            Self::IncomingChannelClosed => write!(f, "incoming packet channel closed"),
+        }
+    }
+}
+
+/// A teardown only falls back to the team-select screen when the player
+/// never committed a join; joined players auto-reconnect instead.
+fn teardown_shows_select(has_committed_join: bool) -> bool {
+    !has_committed_join
+}
+
+/// Auto-reconnect cadence gate: disconnected + active + `T_RETRY` since the
+/// last attempt (or no attempt yet).
+fn should_attempt_reconnect(
+    state: ClientConnectionState,
+    reconnect_active: bool,
+    elapsed_since_last_attempt: Option<Duration>,
+) -> bool {
+    state == ClientConnectionState::Disconnected
+        && reconnect_active
+        && elapsed_since_last_attempt.is_none_or(|elapsed| elapsed >= T_RETRY)
 }
 
 impl ClientSession {
@@ -203,8 +278,7 @@ impl Plugin for NetworkingPlugin {
             )
             .add_systems(
                 PostUpdate,
-                ground_networked_entities
-                    .before(bevy::transform::TransformSystems::Propagate),
+                ground_networked_entities.before(bevy::transform::TransformSystems::Propagate),
             );
     }
 }
@@ -219,7 +293,10 @@ fn ground_networked_entities(
         (&mut Transform, Option<&NormalizeModelScale>),
         (With<RemotePlayer>, Without<NetworkMinion>),
     >,
-    mut minions: Query<&mut Transform, (With<NetworkMinion>, Without<RemotePlayer>)>,
+    mut minions: Query<
+        (&mut Transform, Option<&NormalizeModelScale>),
+        (With<NetworkMinion>, Without<RemotePlayer>),
+    >,
 ) {
     for (mut transform, normalization) in &mut remote_players {
         transform.translation.y = crate::player::ground_origin_y(
@@ -229,9 +306,15 @@ fn ground_networked_entities(
             transform.translation.z,
         );
     }
-    for mut transform in &mut minions {
+    for (mut transform, normalization) in &mut minions {
         let terrain = map_layout.terrain_height(transform.translation.x, transform.translation.z);
-        transform.translation.y = terrain + MINION_RADIUS;
+        // Slime models rest on their measured foot offset; the sphere radius
+        // remains the fallback until the model is measured.
+        let offset = match normalization.and_then(NormalizeModelScale::foot_local_y) {
+            Some(foot_local_y) => -foot_local_y,
+            None => MINION_RADIUS,
+        };
+        transform.translation.y = terrain + offset;
     }
 }
 
@@ -248,6 +331,8 @@ pub enum NetworkCommand {
         hero_class: HeroClass,
         /// Selected roster avatar slug (cosmetic), if any.
         avatar: Option<String>,
+        /// Selected 2D sprite cosmetic. The renderer mode remains client-local.
+        sprite_character: Option<String>,
     },
     #[allow(dead_code)]
     RequestRematch,
@@ -284,6 +369,8 @@ enum ClientPacket {
         hero_class: HeroClass,
         #[serde(default)]
         avatar: Option<String>,
+        #[serde(default)]
+        sprite_character: Option<String>,
         #[serde(default)]
         session_id: Option<String>,
     },
@@ -352,6 +439,15 @@ struct PlayerState {
     /// Cosmetic roster avatar slug; `None` falls back to `character`.
     #[serde(default)]
     avatar: Option<String>,
+    /// Cosmetic sprite id; absent legacy snapshots use the manifest default.
+    #[serde(default)]
+    sprite_character: Option<String>,
+    #[serde(default)]
+    action_sequence: u64,
+    #[serde(default)]
+    action_kind: PlayerActionKind,
+    #[serde(default)]
+    action_slot: u8,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -413,7 +509,7 @@ struct MinionState {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum MinionBrainState {
+pub enum MinionBrainState {
     Marching,
     Chasing,
     Attacking,
@@ -597,6 +693,29 @@ pub struct NetworkCharacterChoice(pub CharacterChoice);
 #[derive(Component, Clone, Debug)]
 pub struct NetworkAvatar(pub Option<String>);
 
+/// Sprite character id replicated from the server (`None` = manifest default).
+#[derive(Component, Clone, Debug)]
+pub struct NetworkSpriteCharacter(pub Option<String>);
+
+/// Latest authoritative cosmetic action for a player. The sequence lets
+/// renderers distinguish a new cast from repeated delivery in snapshots.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PlayerCosmeticAction {
+    pub sequence: u64,
+    pub kind: PlayerActionKind,
+    pub slot: u8,
+}
+
+impl From<&PlayerState> for PlayerCosmeticAction {
+    fn from(player: &PlayerState) -> Self {
+        Self {
+            sequence: player.action_sequence,
+            kind: player.action_kind,
+            slot: player.action_slot,
+        }
+    }
+}
+
 /// Authoritative hero class replicated from the server.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkHeroClass(pub HeroClass);
@@ -623,8 +742,11 @@ impl Default for PlayerProgression {
     }
 }
 
-#[derive(Component)]
-struct NetworkProjectile;
+#[derive(Component, Clone, Copy, Debug)]
+pub struct NetworkProjectile {
+    #[allow(dead_code)] // Consumed by the optional 2D presentation plugin.
+    pub owner_team: Team,
+}
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkStructureId(pub u64);
@@ -634,6 +756,14 @@ pub struct NetworkStructure;
 
 #[derive(Component)]
 pub struct NetworkMinion;
+
+/// Replicated minion AI state, mirrored onto the entity so the minion
+/// animation systems can pick walk/attack clips (TASK-24).
+#[derive(Component, Clone, Copy)]
+pub struct NetworkMinionBrainState(pub MinionBrainState);
+
+/// Minions render at this multiple of the shared normalized hero height.
+const MINION_MODEL_HEIGHT_SCALE: f32 = 0.6;
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkMinionId(pub u64);
@@ -669,25 +799,29 @@ struct RemotePlayerInterpolation {
 }
 
 #[derive(Resource)]
-struct NetworkVisualAssets {
+pub struct NetworkVisualAssets {
     projectile_mesh: Handle<Mesh>,
     friendly_projectile_material: Handle<StandardMaterial>,
     hostile_projectile_material: Handle<StandardMaterial>,
     tower_mesh: Handle<Mesh>,
     base_tower_mesh: Handle<Mesh>,
-    minion_mesh: Handle<Mesh>,
     green_structure_material: Handle<StandardMaterial>,
     blue_structure_material: Handle<StandardMaterial>,
-    green_minion_material: Handle<StandardMaterial>,
-    blue_minion_material: Handle<StandardMaterial>,
     neutral_mesh: Handle<Mesh>,
     neutral_material: Handle<StandardMaterial>,
+    /// Team slime creep models (TASK-24): scene for rendering + gltf for
+    /// the bind-pose scale analysis and the animation library.
+    pub green_minion_scene: Handle<Scene>,
+    pub green_minion_gltf: Handle<Gltf>,
+    pub blue_minion_scene: Handle<Scene>,
+    pub blue_minion_gltf: Handle<Gltf>,
 }
 
 fn setup_network_visual_assets(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
 ) {
     let projectile_mesh = meshes.add(Mesh::from(Sphere::new(PROJECTILE_RADIUS)));
     let tower_mesh = meshes.add(Mesh::from(Cuboid::new(
@@ -700,7 +834,6 @@ fn setup_network_visual_assets(
         BASE_TOWER_HEIGHT,
         BASE_TOWER_SIZE,
     )));
-    let minion_mesh = meshes.add(Mesh::from(Sphere::new(MINION_RADIUS)));
     let friendly_projectile_material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.35, 0.92, 1.0),
         unlit: true,
@@ -721,16 +854,6 @@ fn setup_network_visual_assets(
         perceptual_roughness: 0.75,
         ..default()
     });
-    let green_minion_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.24, 0.72, 0.32),
-        perceptual_roughness: 0.75,
-        ..default()
-    });
-    let blue_minion_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.32, 0.48, 0.92),
-        perceptual_roughness: 0.75,
-        ..default()
-    });
     let neutral_mesh = meshes.add(Mesh::from(Sphere::new(NEUTRAL_RADIUS)));
     let neutral_material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.55, 0.38, 0.18),
@@ -744,13 +867,14 @@ fn setup_network_visual_assets(
         hostile_projectile_material,
         tower_mesh,
         base_tower_mesh,
-        minion_mesh,
         green_structure_material,
         blue_structure_material,
-        green_minion_material,
-        blue_minion_material,
         neutral_mesh,
         neutral_material,
+        green_minion_scene: asset_server.load("minions/slime-green.glb#Scene0"),
+        green_minion_gltf: asset_server.load("minions/slime-green.glb"),
+        blue_minion_scene: asset_server.load("minions/slime-blue.glb#Scene0"),
+        blue_minion_gltf: asset_server.load("minions/slime-blue.glb"),
     });
 }
 
@@ -836,9 +960,11 @@ fn run_udp_client(
     }
     println!("UDP socket connected to {server_addr}; waiting for first snapshot");
 
-    let mut recv_buf = [0_u8; MAX_PACKET_SIZE];
+    let mut recv_buf = vec![0_u8; SERVER_DATAGRAM_RECEIVE_CAPACITY];
     let mut last_heartbeat_at = Instant::now();
     let mut last_receive_error_log_at: Option<Instant> = None;
+    let mut last_decode_error_log_at: Option<Instant> = None;
+    let mut suppressed_decode_errors = 0_u64;
     let mut first_snapshot_received = false;
     let mut consecutive_recv_errors: u32 = 0;
     let mut consecutive_send_errors: u32 = 0;
@@ -884,18 +1010,30 @@ fn run_udp_client(
             match socket.recv(&mut recv_buf) {
                 Ok(len) => {
                     consecutive_recv_errors = 0;
-                    match serde_json::from_slice::<ServerPacket>(&recv_buf[..len]) {
-                        Ok(packet) => {
+                    match forward_complete_server_datagram(&recv_buf[..len], &incoming) {
+                        Ok(()) => {
                             if !first_snapshot_received {
                                 println!(
                                     "First snapshot received from {server_addr}; connection is live"
                                 );
                                 first_snapshot_received = true;
                             }
-                            let _ = incoming.send(packet);
                         }
                         Err(error) => {
-                            eprintln!("Failed to decode server packet: {error}");
+                            let now = Instant::now();
+                            if last_decode_error_log_at.is_none_or(|last| {
+                                now.duration_since(last) >= DECODE_ERROR_LOG_INTERVAL
+                            }) {
+                                let suppressed = std::mem::take(&mut suppressed_decode_errors);
+                                eprintln!(
+                                    "Failed to decode complete server datagram ({len} bytes): \
+                                     {error}; suppressed {suppressed} similar errors"
+                                );
+                                last_decode_error_log_at = Some(now);
+                            } else {
+                                suppressed_decode_errors =
+                                    suppressed_decode_errors.saturating_add(1);
+                            }
                         }
                     }
                 }
@@ -924,10 +1062,40 @@ fn run_udp_client(
     }
 }
 
+fn decode_server_packet(payload: &[u8]) -> Result<ServerPacket, serde_json::Error> {
+    serde_json::from_slice(payload)
+}
+
+/// Decode one complete received datagram and publish only the resulting whole
+/// packet. Keeping this boundary shared by the socket loop and tests proves a
+/// malformed/truncated JSON prefix can never enter snapshot staging.
+fn forward_complete_server_datagram(
+    payload: &[u8],
+    incoming: &Sender<ServerPacket>,
+) -> Result<(), serde_json::Error> {
+    let packet = decode_server_packet(payload)?;
+    let _ = incoming.send(packet);
+    Ok(())
+}
+
 fn send_packet(socket: &UdpSocket, packet: &ClientPacket) -> io::Result<()> {
     let payload = serde_json::to_vec(packet)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    validate_client_payload_size(payload.len())?;
     socket.send(&payload)?;
+    Ok(())
+}
+
+fn validate_client_payload_size(payload_len: usize) -> io::Result<()> {
+    if payload_len > IPV4_UDP_MAX_PAYLOAD_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "client datagram is {} bytes; IPv4 UDP payload limit is {} bytes",
+                payload_len, IPV4_UDP_MAX_PAYLOAD_BYTES
+            ),
+        ));
+    }
     Ok(())
 }
 
@@ -1026,16 +1194,25 @@ fn send_network_commands(
                 character,
                 hero_class,
                 avatar,
+                sprite_character,
             } => {
                 if client_session.join_flow_committed {
                     continue;
                 }
                 client_session.join_flow_committed = true;
+                client_session.last_join = Some(CommittedJoin {
+                    team: *team,
+                    character: *character,
+                    hero_class: *hero_class,
+                    avatar: avatar.clone(),
+                    sprite_character: sprite_character.clone(),
+                });
                 let _ = channels.outgoing.send(ClientPacket::Join {
                     team: *team,
                     character: *character,
                     hero_class: *hero_class,
                     avatar: avatar.clone(),
+                    sprite_character: sprite_character.clone(),
                     session_id: Some(client_session_id.0.clone()),
                 });
             }
@@ -1153,6 +1330,7 @@ struct SnapshotUiState<'w> {
     game_state_snapshot: ResMut<'w, GameStateSnapshot>,
     cam_state: ResMut<'w, CameraState>,
     team_selection: ResMut<'w, TeamSelection>,
+    visual_mode: Res<'w, PlayerVisualMode>,
 }
 
 fn apply_server_snapshot(
@@ -1170,6 +1348,7 @@ fn apply_server_snapshot(
     minion_query: Query<&NetworkMinion>,
     neutral_query: Query<&NetworkNeutral>,
     local_player_query: Query<(Entity, Option<&NetworkPlayerId>), With<Player>>,
+    action_query: Query<Option<&PlayerCosmeticAction>>,
     player_assets: Res<PlayerAssets>,
     mut models: PlayerModelResolver,
     visuals: Res<NetworkVisualAssets>,
@@ -1179,6 +1358,7 @@ fn apply_server_snapshot(
         game_state_snapshot,
         cam_state,
         team_selection,
+        visual_mode,
     } = &mut ui_state;
     let Some(data) = pending.frame.take() else {
         return;
@@ -1246,9 +1426,14 @@ fn apply_server_snapshot(
                 player_state_to_combat_stats(local_player_state),
                 NetworkCharacterChoice(local_player_state.character),
                 NetworkAvatar(local_player_state.avatar.clone()),
+                NetworkSpriteCharacter(local_player_state.sprite_character.clone()),
                 NetworkHeroClass(local_player_state.hero_class),
                 player_state_to_progression(local_player_state),
             ));
+            let next_action = PlayerCosmeticAction::from(local_player_state);
+            if action_query.get(local_entity).ok().flatten().copied() != Some(next_action) {
+                commands.entity(local_entity).insert(next_action);
+            }
             network_state.local_team = Some(local_player_state.team);
 
             let server_translation = Vec3::new(
@@ -1296,36 +1481,63 @@ fn apply_server_snapshot(
             local_player_state.y,
             local_player_state.z,
         );
-        let (local_scene, local_gltf) = models.resolve(
-            local_player_state.character,
-            local_player_state.avatar.as_deref(),
-        );
-        let entity = if let Some(scene_handle) = local_scene {
-            let mut entity_commands = commands
+        let (local_scene, local_gltf) = if **visual_mode == PlayerVisualMode::Models3d {
+            models.resolve(
+                local_player_state.character,
+                local_player_state.avatar.as_deref(),
+            )
+        } else {
+            (None, None)
+        };
+        let entity = if **visual_mode == PlayerVisualMode::Sprite2d {
+            commands
                 .spawn((
-                    SceneRoot(scene_handle),
-                    Transform {
-                        translation: spawn,
-                        rotation: Quat::IDENTITY,
-                        scale: Vec3::splat(1.0),
-                    },
-                    GlobalTransform::default(),
+                    Transform::from_translation(spawn),
                     Visibility::default(),
                     Player,
                     PlayerBody,
                     VerticalVelocity::default(),
                     local_player_state.team,
-                    NormalizeModelScale::for_player_model(),
                     (
                         NetworkPlayerId(your_id),
                         NetworkCharacterChoice(local_player_state.character),
                         NetworkAvatar(local_player_state.avatar.clone()),
+                        NetworkSpriteCharacter(local_player_state.sprite_character.clone()),
+                        PlayerCosmeticAction::from(local_player_state),
                         NetworkHeroClass(local_player_state.hero_class),
                     ),
                     player_state_to_combat_stats(local_player_state),
                     player_state_to_progression(local_player_state),
                     Name::new("Player"),
-                ));
+                ))
+                .id()
+        } else if let Some(scene_handle) = local_scene {
+            let mut entity_commands = commands.spawn((
+                SceneRoot(scene_handle),
+                Transform {
+                    translation: spawn,
+                    rotation: Quat::IDENTITY,
+                    scale: Vec3::splat(1.0),
+                },
+                GlobalTransform::default(),
+                Visibility::default(),
+                Player,
+                PlayerBody,
+                VerticalVelocity::default(),
+                local_player_state.team,
+                NormalizeModelScale::for_player_model(),
+                (
+                    NetworkPlayerId(your_id),
+                    NetworkCharacterChoice(local_player_state.character),
+                    NetworkAvatar(local_player_state.avatar.clone()),
+                    NetworkSpriteCharacter(local_player_state.sprite_character.clone()),
+                    PlayerCosmeticAction::from(local_player_state),
+                    NetworkHeroClass(local_player_state.hero_class),
+                ),
+                player_state_to_combat_stats(local_player_state),
+                player_state_to_progression(local_player_state),
+                Name::new("Player"),
+            ));
             if let Some(gltf) = local_gltf {
                 entity_commands.insert(ModelScaleSource {
                     gltf,
@@ -1350,6 +1562,8 @@ fn apply_server_snapshot(
                         NetworkPlayerId(your_id),
                         NetworkCharacterChoice(local_player_state.character),
                         NetworkAvatar(local_player_state.avatar.clone()),
+                        NetworkSpriteCharacter(local_player_state.sprite_character.clone()),
+                        PlayerCosmeticAction::from(local_player_state),
                         NetworkHeroClass(local_player_state.hero_class),
                     ),
                     player_state_to_combat_stats(local_player_state),
@@ -1362,10 +1576,16 @@ fn apply_server_snapshot(
         network_state.local_team = Some(local_player_state.team);
         if let Ok(mut camera_transform) = transform_sets.p1().single_mut() {
             cam_state.locked = true;
-            let zoom = cam_state.zoom;
-            camera_transform.translation = spawn + locked_camera_offset(zoom);
-            let look_target = Vec3::new(spawn.x, PLAYER_SIZE * 0.5, spawn.z);
-            *camera_transform = camera_transform.looking_at(look_target, Vec3::Y);
+            if **visual_mode == PlayerVisualMode::Sprite2d {
+                let xy = crate::world2d::simulation_xz_to_render_xy(spawn);
+                camera_transform.translation.x = xy.x;
+                camera_transform.translation.y = xy.y;
+            } else {
+                let zoom = cam_state.zoom;
+                camera_transform.translation = spawn + locked_camera_offset(zoom);
+                let look_target = Vec3::new(spawn.x, PLAYER_SIZE * 0.5, spawn.z);
+                *camera_transform = camera_transform.looking_at(look_target, Vec3::Y);
+            }
         }
 
         commands.entity(entity);
@@ -1396,15 +1616,23 @@ fn apply_server_snapshot(
                 player.team,
                 NetworkCharacterChoice(player.character),
                 NetworkAvatar(player.avatar.clone()),
+                NetworkSpriteCharacter(player.sprite_character.clone()),
                 NetworkHeroClass(player.hero_class),
                 player_state_to_combat_stats(player),
                 player_state_to_progression(player),
             ));
+            let next_action = PlayerCosmeticAction::from(player);
+            if action_query.get(entity).ok().flatten().copied() != Some(next_action) {
+                commands.entity(entity).insert(next_action);
+            }
             continue;
         }
 
-        let (scene_handle, gltf_handle) =
-            models.resolve(player.character, player.avatar.as_deref());
+        let (scene_handle, gltf_handle) = if **visual_mode == PlayerVisualMode::Models3d {
+            models.resolve(player.character, player.avatar.as_deref())
+        } else {
+            (None, None)
+        };
         let mesh_handle = player_assets.mesh.clone();
         let material_handle = player_assets.material.clone();
         let spawn_translation = Vec3::new(player.x, player.y, player.z);
@@ -1418,8 +1646,9 @@ fn apply_server_snapshot(
             NetworkPlayerId(player.id),
             NetworkCharacterChoice(player.character),
             NetworkAvatar(player.avatar.clone()),
+            NetworkSpriteCharacter(player.sprite_character.clone()),
+            PlayerCosmeticAction::from(player),
             NetworkHeroClass(player.hero_class),
-            NormalizeModelScale::for_player_model(),
             player_state_to_combat_stats(player),
             player_state_to_progression(player),
             RemotePlayerInterpolation {
@@ -1432,28 +1661,31 @@ fn apply_server_snapshot(
             },
             Name::new(format!("RemotePlayer-{}", player.id)),
         ));
-        if let Some(gltf) = gltf_handle {
-            entity_commands.insert(ModelScaleSource {
-                gltf,
-                key: model_scale_key(player.character, player.avatar.as_deref()),
+        if **visual_mode == PlayerVisualMode::Models3d {
+            entity_commands.insert(NormalizeModelScale::for_player_model());
+            if let Some(gltf) = gltf_handle {
+                entity_commands.insert(ModelScaleSource {
+                    gltf,
+                    key: model_scale_key(player.character, player.avatar.as_deref()),
+                });
+            }
+            entity_commands.with_children(|parent| {
+                if let Some(scene_handle) = scene_handle {
+                    parent.spawn((
+                        SceneRoot(scene_handle),
+                        Transform::default(),
+                        Visibility::default(),
+                    ));
+                } else {
+                    parent.spawn((
+                        Mesh3d(mesh_handle),
+                        MeshMaterial3d(material_handle),
+                        Transform::default(),
+                        Visibility::default(),
+                    ));
+                }
             });
         }
-        entity_commands.with_children(|parent| {
-            if let Some(scene_handle) = scene_handle {
-                parent.spawn((
-                    SceneRoot(scene_handle),
-                    Transform::default(),
-                    Visibility::default(),
-                ));
-            } else {
-                parent.spawn((
-                    Mesh3d(mesh_handle),
-                    MeshMaterial3d(material_handle),
-                    Transform::default(),
-                    Visibility::default(),
-                ));
-            }
-        });
         let entity = entity_commands.id();
 
         network_state.remote_players.insert(player.id, entity);
@@ -1485,6 +1717,9 @@ fn apply_server_snapshot(
             if let Ok(mut transform) = transform_sets.p0().get_mut(entity) {
                 transform.translation = Vec3::new(projectile.x, projectile.y, projectile.z);
             }
+            commands.entity(entity).insert(NetworkProjectile {
+                owner_team: projectile.owner_team,
+            });
             continue;
         }
 
@@ -1497,16 +1732,21 @@ fn apply_server_snapshot(
             visuals.hostile_projectile_material.clone()
         };
 
-        let entity = commands
-            .spawn((
+        let mut entity_commands = commands.spawn((
+            Transform::from_xyz(projectile.x, projectile.y, projectile.z),
+            Visibility::default(),
+            NetworkProjectile {
+                owner_team: projectile.owner_team,
+            },
+            Name::new(format!("Projectile-{}", projectile.id)),
+        ));
+        if **visual_mode == PlayerVisualMode::Models3d {
+            entity_commands.insert((
                 Mesh3d(visuals.projectile_mesh.clone()),
                 MeshMaterial3d(material),
-                Transform::from_xyz(projectile.x, projectile.y, projectile.z),
-                Visibility::default(),
-                NetworkProjectile,
-                Name::new(format!("Projectile-{}", projectile.id)),
-            ))
-            .id();
+            ));
+        }
+        let entity = entity_commands.id();
         network_state.projectiles.insert(projectile.id, entity);
     }
 
@@ -1553,20 +1793,20 @@ fn apply_server_snapshot(
             StructureKind::BaseTower => visuals.base_tower_mesh.clone(),
         };
 
-        let entity = commands
-            .spawn((
-                Mesh3d(mesh),
-                MeshMaterial3d(material),
-                Transform::from_xyz(structure.x, structure.y, structure.z),
-                Visibility::default(),
-                NetworkStructure,
-                NetworkStructureId(structure.id),
-                structure.kind,
-                structure.team,
-                structure_state_to_combat_stats(structure),
-                Name::new(format!("Structure-{}", structure.id)),
-            ))
-            .id();
+        let mut entity_commands = commands.spawn((
+            Transform::from_xyz(structure.x, structure.y, structure.z),
+            Visibility::default(),
+            NetworkStructure,
+            NetworkStructureId(structure.id),
+            structure.kind,
+            structure.team,
+            structure_state_to_combat_stats(structure),
+            Name::new(format!("Structure-{}", structure.id)),
+        ));
+        if **visual_mode == PlayerVisualMode::Models3d {
+            entity_commands.insert((Mesh3d(mesh), MeshMaterial3d(material)));
+        }
+        let entity = entity_commands.id();
 
         network_state.structures.insert(structure.id, entity);
     }
@@ -1610,36 +1850,60 @@ fn apply_server_snapshot(
                 NetworkMinionId(minion.id),
                 minion.team,
                 minion_state_to_combat_stats(minion),
+                NetworkMinionBrainState(minion.state),
             ));
             continue;
         }
 
-        let material = match minion.team {
-            Team::Green => visuals.green_minion_material.clone(),
-            Team::Blue => visuals.blue_minion_material.clone(),
+        let (scene, gltf, key) = match minion.team {
+            Team::Green => (
+                visuals.green_minion_scene.clone(),
+                visuals.green_minion_gltf.clone(),
+                "slime-green",
+            ),
+            Team::Blue => (
+                visuals.blue_minion_scene.clone(),
+                visuals.blue_minion_gltf.clone(),
+                "slime-blue",
+            ),
         };
 
-        let entity = commands
-            .spawn((
-                Mesh3d(visuals.minion_mesh.clone()),
-                MeshMaterial3d(material),
-                Transform::from_translation(target_translation).with_rotation(target_rotation),
-                Visibility::default(),
-                NetworkMinion,
-                NetworkMinionId(minion.id),
-                NetEntityInterpolation {
-                    from_translation: target_translation,
-                    to_translation: target_translation,
-                    from_rotation: target_rotation,
-                    to_rotation: target_rotation,
-                    elapsed: UPDATE_INTERVAL_SECONDS,
-                    duration: UPDATE_INTERVAL_SECONDS.max(0.001),
+        let mut entity_commands = commands.spawn((
+            Transform::from_translation(target_translation).with_rotation(target_rotation),
+            Visibility::default(),
+            NetworkMinion,
+            NetworkMinionId(minion.id),
+            NetworkMinionBrainState(minion.state),
+            NetEntityInterpolation {
+                from_translation: target_translation,
+                to_translation: target_translation,
+                from_rotation: target_rotation,
+                to_rotation: target_rotation,
+                elapsed: UPDATE_INTERVAL_SECONDS,
+                duration: UPDATE_INTERVAL_SECONDS.max(0.001),
+            },
+            minion.team,
+            minion_state_to_combat_stats(minion),
+            Name::new(format!("Minion-{}-{:?}", minion.id, minion.lane)),
+        ));
+        if **visual_mode == PlayerVisualMode::Models3d {
+            entity_commands.insert((
+                NormalizeModelScale::scaled_by(MINION_MODEL_HEIGHT_SCALE),
+                ModelScaleSource {
+                    gltf,
+                    key: key.to_owned(),
                 },
-                minion.team,
-                minion_state_to_combat_stats(minion),
-                Name::new(format!("Minion-{}-{:?}", minion.id, minion.lane)),
-            ))
-            .id();
+            ));
+            entity_commands.with_children(|parent| {
+                parent.spawn((
+                    SceneRoot(scene),
+                    Transform::from_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
+                    Visibility::default(),
+                    Name::new("MinionModel"),
+                ));
+            });
+        }
+        let entity = entity_commands.id();
         network_state.minions.insert(minion.id, entity);
     }
 
@@ -1702,12 +1966,19 @@ fn apply_server_snapshot(
                     )),
                 ))
                 .id()
-        } else {
+        } else if **visual_mode == PlayerVisualMode::Models3d {
             commands
                 .spawn((
                     base_components,
                     Mesh3d(visuals.neutral_mesh.clone()),
                     MeshMaterial3d(visuals.neutral_material.clone()),
+                    Name::new(format!("Neutral-{}", neutral.id)),
+                ))
+                .id()
+        } else {
+            commands
+                .spawn((
+                    base_components,
                     Name::new(format!("Neutral-{}", neutral.id)),
                 ))
                 .id()
@@ -1887,6 +2158,12 @@ fn sync_connection_status_ui(
         ClientConnectionState::Connected => {
             text.0 = format!("Connected ({}).", client_session.server_addr_display);
         }
+        ClientConnectionState::Disconnected if client_session.reconnect.active => {
+            text.0 = format!(
+                "Connection lost — reconnecting (attempt {})...",
+                client_session.reconnect.attempts.max(1)
+            );
+        }
         ClientConnectionState::Disconnected => {
             text.0 = "Disconnected — connection lost or timed out. Use Retry when the server is back, then choose your team again."
                 .to_string();
@@ -1976,6 +2253,7 @@ fn despawn_local_players(commands: &mut Commands, player_query: &Query<Entity, W
 }
 
 fn perform_network_teardown(
+    reason: TeardownReason,
     commands: &mut Commands,
     client_session: &mut ClientSession,
     network_state: &mut NetworkState,
@@ -1989,6 +2267,8 @@ fn perform_network_teardown(
     minion_query: &Query<Entity, With<NetworkMinion>>,
     neutral_query: &Query<Entity, With<NetworkNeutral>>,
     player_query: &Query<Entity, With<Player>>,
+    visual_mode: PlayerVisualMode,
+    sprite_assets: &SpriteVisualAssets,
 ) {
     despawn_tracked_net_entities(
         commands,
@@ -2003,10 +2283,21 @@ fn perform_network_teardown(
 
     *game_state_snapshot = GameStateSnapshot::default();
     cam_state.locked = false;
-    team_selection.team = None;
 
-    if overlay_query.iter().next().is_none() {
-        spawn_team_select_ui(commands, team_selection);
+    warn!("Network teardown: {reason}");
+    if teardown_shows_select(client_session.last_join.is_some()) {
+        team_selection.team = None;
+        if overlay_query.iter().next().is_none() {
+            spawn_team_select_ui(commands, team_selection, visual_mode, sprite_assets);
+        }
+    } else if !client_session.reconnect.active {
+        // Joined session: keep the team selection and reconnect quietly
+        // instead of dumping the player back onto the select screen.
+        client_session.reconnect = ReconnectState {
+            active: true,
+            attempts: 0,
+            last_attempt: None,
+        };
     }
 
     client_session.state = ClientConnectionState::Disconnected;
@@ -2016,24 +2307,43 @@ fn perform_network_teardown(
     client_session.last_qualifying_snapshot_wall = None;
 }
 
+/// Entity queries a network teardown needs, grouped (Bevy caps system
+/// functions at 16 parameters).
+#[derive(bevy::ecs::system::SystemParam)]
+struct TeardownQueries<'w, 's> {
+    overlay_query: Query<'w, 's, Entity, With<TeamSelectRoot>>,
+    remote_query: Query<'w, 's, Entity, With<RemotePlayer>>,
+    projectile_query: Query<'w, 's, Entity, With<NetworkProjectile>>,
+    structure_query: Query<'w, 's, Entity, With<NetworkStructure>>,
+    minion_query: Query<'w, 's, Entity, With<NetworkMinion>>,
+    neutral_query: Query<'w, 's, Entity, With<NetworkNeutral>>,
+    player_query: Query<'w, 's, Entity, With<Player>>,
+}
+
 fn update_session_lifecycle(
     mut commands: Commands,
     mut client_session: ResMut<ClientSession>,
+    client_session_id: Res<ClientSessionId>,
     mut incoming_dead: ResMut<NetIncomingDisconnected>,
     channels: Option<Res<NetworkChannels>>,
     mut network_state: ResMut<NetworkState>,
     mut game_state_snapshot: ResMut<GameStateSnapshot>,
     mut team_selection: ResMut<TeamSelection>,
     mut cam_state: ResMut<CameraState>,
-    overlay_query: Query<Entity, With<TeamSelectRoot>>,
+    queries: TeardownQueries,
     mut session_ui: MessageReader<SessionUiCommand>,
-    remote_query: Query<Entity, With<RemotePlayer>>,
-    projectile_query: Query<Entity, With<NetworkProjectile>>,
-    structure_query: Query<Entity, With<NetworkStructure>>,
-    minion_query: Query<Entity, With<NetworkMinion>>,
-    neutral_query: Query<Entity, With<NetworkNeutral>>,
-    player_query: Query<Entity, With<Player>>,
+    visual_mode: Res<PlayerVisualMode>,
+    sprite_assets: Res<SpriteVisualAssets>,
 ) {
+    let TeardownQueries {
+        overlay_query,
+        remote_query,
+        projectile_query,
+        structure_query,
+        minion_query,
+        neutral_query,
+        player_query,
+    } = &queries;
     let mut retried_this_frame = false;
     for event in session_ui.read() {
         match event {
@@ -2055,27 +2365,74 @@ fn update_session_lifecycle(
         return;
     }
 
+    // Auto-reconnect (TASK-25): a torn-down session with a committed join
+    // retries the transport on the shared retry cadence, no user input.
+    if should_attempt_reconnect(
+        client_session.state,
+        client_session.reconnect.active,
+        client_session.reconnect.last_attempt.map(|at| at.elapsed()),
+    ) {
+        commands.remove_resource::<NetworkChannels>();
+        let retry_addr = validated_server_addr_or_default(&client_session.server_addr_display);
+        spawn_network_transport(&mut commands, &mut client_session, retry_addr);
+        incoming_dead.0 = false;
+        client_session.reconnect.attempts = client_session.reconnect.attempts.saturating_add(1);
+        client_session.reconnect.last_attempt = Some(Instant::now());
+        info!(
+            "Auto-reconnect attempt {} to {}",
+            client_session.reconnect.attempts, client_session.server_addr_display
+        );
+        return;
+    }
+
     let Some(channels) = channels.as_ref() else {
         return;
     };
+
+    // Auto-rejoin (TASK-25): connection is back (snapshots flow again) but
+    // the join was reset by the teardown - resend the remembered loadout
+    // with the persistent session id so the server reclaims the session.
+    if client_session.state == ClientConnectionState::Connected && client_session.reconnect.active {
+        if !client_session.join_flow_committed
+            && let Some(join) = client_session.last_join.clone()
+        {
+            let _ = channels.outgoing.send(ClientPacket::Join {
+                team: join.team,
+                character: join.character,
+                hero_class: join.hero_class,
+                avatar: join.avatar,
+                sprite_character: join.sprite_character,
+                session_id: Some(client_session_id.0.clone()),
+            });
+            client_session.join_flow_committed = true;
+            info!(
+                "Auto-rejoined after reconnect (attempt {})",
+                client_session.reconnect.attempts
+            );
+        }
+        client_session.reconnect = ReconnectState::default();
+    }
 
     if incoming_dead.0 {
         incoming_dead.0 = false;
         if client_session.state != ClientConnectionState::Disconnected {
             perform_network_teardown(
+                TeardownReason::IncomingChannelClosed,
                 &mut commands,
                 &mut client_session,
                 &mut network_state,
                 &mut game_state_snapshot,
                 &mut team_selection,
                 &mut cam_state,
-                &overlay_query,
-                &remote_query,
-                &projectile_query,
-                &structure_query,
-                &minion_query,
-                &neutral_query,
-                &player_query,
+                overlay_query,
+                remote_query,
+                projectile_query,
+                structure_query,
+                minion_query,
+                neutral_query,
+                player_query,
+                *visual_mode,
+                &sprite_assets,
             );
         }
     }
@@ -2085,19 +2442,22 @@ fn update_session_lifecycle(
             NetThreadSignal::TransportFailure => {
                 if client_session.state != ClientConnectionState::Disconnected {
                     perform_network_teardown(
+                        TeardownReason::TransportFailure,
                         &mut commands,
                         &mut client_session,
                         &mut network_state,
                         &mut game_state_snapshot,
                         &mut team_selection,
                         &mut cam_state,
-                        &overlay_query,
-                        &remote_query,
-                        &projectile_query,
-                        &structure_query,
-                        &minion_query,
-                        &neutral_query,
-                        &player_query,
+                        overlay_query,
+                        remote_query,
+                        projectile_query,
+                        structure_query,
+                        minion_query,
+                        neutral_query,
+                        player_query,
+                        *visual_mode,
+                        &sprite_assets,
                     );
                 }
             }
@@ -2110,19 +2470,22 @@ fn update_session_lifecycle(
         if let Some(since) = client_session.waiting_since {
             if since.elapsed() >= T_WAIT_MAX {
                 perform_network_teardown(
+                    TeardownReason::ServerWaitTimeout,
                     &mut commands,
                     &mut client_session,
                     &mut network_state,
                     &mut game_state_snapshot,
                     &mut team_selection,
                     &mut cam_state,
-                    &overlay_query,
-                    &remote_query,
-                    &projectile_query,
-                    &structure_query,
-                    &minion_query,
-                    &neutral_query,
-                    &player_query,
+                    overlay_query,
+                    remote_query,
+                    projectile_query,
+                    structure_query,
+                    minion_query,
+                    neutral_query,
+                    player_query,
+                    *visual_mode,
+                    &sprite_assets,
                 );
             }
         }
@@ -2134,20 +2497,27 @@ fn update_session_lifecycle(
             now,
             T_STALE_SNAPSHOT,
         ) {
+            let elapsed_secs = client_session
+                .last_qualifying_snapshot_wall
+                .map(|at| at.elapsed().as_secs_f32())
+                .unwrap_or(f32::NAN);
             perform_network_teardown(
+                TeardownReason::StaleSnapshot { elapsed_secs },
                 &mut commands,
                 &mut client_session,
                 &mut network_state,
                 &mut game_state_snapshot,
                 &mut team_selection,
                 &mut cam_state,
-                &overlay_query,
-                &remote_query,
-                &projectile_query,
-                &structure_query,
-                &minion_query,
-                &neutral_query,
-                &player_query,
+                overlay_query,
+                remote_query,
+                projectile_query,
+                structure_query,
+                minion_query,
+                neutral_query,
+                player_query,
+                *visual_mode,
+                &sprite_assets,
             );
         }
     }
@@ -2242,6 +2612,208 @@ fn default_minion_brain_state() -> MinionBrainState {
 #[cfg(test)]
 mod tests {
     use super::choose_authoritative_local_player;
+    use super::{
+        ClientConnectionState, IPV4_UDP_MAX_PAYLOAD_BYTES, SERVER_DATAGRAM_RECEIVE_CAPACITY,
+        ServerPacket, T_RETRY, TeardownReason, decode_server_packet,
+        forward_complete_server_datagram, should_attempt_reconnect, teardown_shows_select,
+        validate_client_payload_size,
+    };
+    use crate::team::TeamSelection;
+    use bevy::prelude::*;
+    use serde_json::json;
+    use std::{
+        net::UdpSocket,
+        time::{Duration, Instant},
+    };
+
+    fn exact_size_snapshot_fixture(size: usize, sentinel: u64) -> Vec<u8> {
+        let prefix = String::from(r#"{"type":"snapshot","your_id":7,"padding":""#);
+        let suffix = format!(
+            r#"","players":[],"structures":[{{"id":808,"kind":"tower","team":"blue","x":1.0,"y":2.0,"z":3.0,"hp":4.0,"max_hp":5.0}}],"minions":[{{"id":909,"team":"green","lane":"bot","x":6.0,"y":0.5,"z":7.0,"yaw":0.0,"hp":8.0,"max_hp":9.0,"state":"marching","target_kind":null,"target_id":null}}],"rematch_in_secs":{sentinel}}}"#
+        );
+        let fixed_len = prefix.len() + suffix.len();
+        assert!(
+            size >= fixed_len,
+            "fixture size {size} is smaller than fixed JSON length {fixed_len}"
+        );
+        let mut payload = Vec::with_capacity(size);
+        payload.extend_from_slice(prefix.as_bytes());
+        payload.resize(size - suffix.len(), b'x');
+        payload.extend_from_slice(suffix.as_bytes());
+        assert_eq!(payload.len(), size);
+        payload
+    }
+
+    fn assert_fixture_sentinel(payload: &[u8], expected_sentinel: u64) {
+        let packet = decode_server_packet(payload).expect("complete fixture should decode");
+        let ServerPacket::Snapshot {
+            structures,
+            minions,
+            rematch_in_secs,
+            ..
+        } = packet;
+        assert_eq!(structures.last().map(|structure| structure.id), Some(808));
+        assert_eq!(minions.last().map(|minion| minion.id), Some(909));
+        assert_eq!(rematch_in_secs, Some(expected_sentinel));
+    }
+
+    fn populated_snapshot_fixture() -> Vec<u8> {
+        let players = (1_u64..=10)
+            .map(|id| {
+                json!({
+                    "id": id,
+                    "x": id as f32 * 1.125,
+                    "y": 0.5,
+                    "z": id as f32 * -2.25,
+                    "yaw": 1.75,
+                    "team": if id % 2 == 0 { "blue" } else { "green" },
+                    "hp": 100.0,
+                    "max_hp": 100.0,
+                    "mana": 87.25,
+                    "max_mana": 100.0,
+                    "gold": 123,
+                    "xp": 45,
+                    "level": 2,
+                    "next_level_xp": 180,
+                    "skill_points": 1,
+                    "ranks": [1, 1, 1, 1],
+                    "character": "ipfs",
+                    "hero_class": "warrior",
+                    "avatar": "osa-kardialtheconsumer-00bea9121db1",
+                    "sprite_character": "cathedral-moth-bellringer",
+                    "action_sequence": id,
+                    "action_kind": "attack",
+                    "action_slot": 0
+                })
+            })
+            .collect::<Vec<_>>();
+        let structures = (1_u64..=8)
+            .map(|id| {
+                json!({
+                    "id": id,
+                    "kind": if id > 6 { "base_tower" } else { "tower" },
+                    "team": if id % 2 == 0 { "blue" } else { "green" },
+                    "x": id as f32 * 11.25,
+                    "y": 3.0,
+                    "z": id as f32 * -9.75,
+                    "hp": 240.0,
+                    "max_hp": 240.0
+                })
+            })
+            .collect::<Vec<_>>();
+        let minions = (1_u64..=18)
+            .map(|id| {
+                let lane = ["top", "mid", "bot"][(id as usize - 1) % 3];
+                json!({
+                    "id": id,
+                    "team": if id % 2 == 0 { "blue" } else { "green" },
+                    "lane": lane,
+                    "x": id as f32 * 3.125,
+                    "y": 0.5,
+                    "z": id as f32 * -4.25,
+                    "yaw": 2.75,
+                    "hp": 65.0,
+                    "max_hp": 65.0,
+                    "state": "chasing",
+                    "target_kind": "minion",
+                    "target_id": id + 100
+                })
+            })
+            .collect::<Vec<_>>();
+        let projectiles = (1_u64..=4)
+            .map(|id| {
+                json!({
+                    "id": id,
+                    "owner_id": id,
+                    "owner_team": if id % 2 == 0 { "blue" } else { "green" },
+                    "x": id as f32 * 7.125,
+                    "y": 1.35,
+                    "z": id as f32 * -8.75
+                })
+            })
+            .collect::<Vec<_>>();
+        let neutrals = (1_u64..=5)
+            .map(|id| {
+                let camp_type = [
+                    "skirmisher",
+                    "bruiser",
+                    "spitter",
+                    "wendigo_boss",
+                    "king_mutatio_boss",
+                ][id as usize - 1];
+                json!({
+                    "id": 9_000 + id,
+                    "camp_type": camp_type,
+                    "x": id as f32 * 13.25,
+                    "y": 0.7,
+                    "z": id as f32 * -14.5,
+                    "yaw": 0.25,
+                    "hp": 900.0,
+                    "max_hp": 1500.0,
+                    "ai_state": "idle"
+                })
+            })
+            .collect::<Vec<_>>();
+
+        serde_json::to_vec(&json!({
+            "type": "snapshot",
+            "your_id": 10,
+            "players": players,
+            "projectiles": projectiles,
+            "structures": structures,
+            "minions": minions,
+            "neutrals": neutrals,
+            "team_buffs": [],
+            "game_state": { "type": "running" },
+            "rematch_in_secs": 4242
+        }))
+        .expect("populated fixture should serialize")
+    }
+
+    #[test]
+    fn teardown_shows_select_only_without_committed_join() {
+        assert!(teardown_shows_select(false));
+        assert!(!teardown_shows_select(true));
+    }
+
+    #[test]
+    fn teardown_reasons_render_distinct_messages() {
+        let reasons = [
+            TeardownReason::StaleSnapshot { elapsed_secs: 3.2 }.to_string(),
+            TeardownReason::TransportFailure.to_string(),
+            TeardownReason::ServerWaitTimeout.to_string(),
+            TeardownReason::IncomingChannelClosed.to_string(),
+        ];
+        for (index, reason) in reasons.iter().enumerate() {
+            assert!(!reason.is_empty());
+            for other in reasons.iter().skip(index + 1) {
+                assert_ne!(reason, other);
+            }
+        }
+        assert!(reasons[0].contains("3.2"));
+    }
+
+    #[test]
+    fn reconnect_gate_requires_disconnected_active_and_cooldown() {
+        use ClientConnectionState as S;
+        // Fires immediately on the first attempt, then respects T_RETRY.
+        assert!(should_attempt_reconnect(S::Disconnected, true, None));
+        assert!(should_attempt_reconnect(
+            S::Disconnected,
+            true,
+            Some(T_RETRY)
+        ));
+        assert!(!should_attempt_reconnect(
+            S::Disconnected,
+            true,
+            Some(T_RETRY / 2)
+        ));
+        // Inactive or non-disconnected states never auto-reconnect.
+        assert!(!should_attempt_reconnect(S::Disconnected, false, None));
+        assert!(!should_attempt_reconnect(S::Connected, true, None));
+        assert!(!should_attempt_reconnect(S::Connecting, true, None));
+        assert!(!should_attempt_reconnect(S::WaitingForServer, true, None));
+    }
 
     #[test]
     fn choose_authoritative_local_player_prefers_matching_network_id() {
@@ -2268,5 +2840,201 @@ mod tests {
         let chosen = choose_authoritative_local_player(&candidates, 1);
 
         assert_eq!(chosen, None);
+    }
+
+    #[test]
+    fn old_8_kib_boundary_decodes_complete_trailing_entities() {
+        for size in [8_191, 8_192, 8_193] {
+            let payload = exact_size_snapshot_fixture(size, size as u64);
+            assert_fixture_sentinel(&payload, size as u64);
+        }
+    }
+
+    #[test]
+    fn representative_populated_snapshot_larger_than_8_kib_decodes_completely() {
+        let payload = populated_snapshot_fixture();
+        assert!(
+            payload.len() > 8 * 1024,
+            "representative snapshot unexpectedly shrank to {} bytes",
+            payload.len()
+        );
+        let packet = decode_server_packet(&payload).expect("populated snapshot should decode");
+        let ServerPacket::Snapshot {
+            players,
+            projectiles,
+            structures,
+            minions,
+            neutrals,
+            rematch_in_secs,
+            ..
+        } = packet;
+        assert_eq!(players.len(), 10);
+        assert_eq!(projectiles.len(), 4);
+        assert_eq!(structures.last().map(|structure| structure.id), Some(8));
+        assert_eq!(minions.last().map(|minion| minion.id), Some(18));
+        assert_eq!(neutrals.len(), 5);
+        assert_eq!(rematch_in_secs, Some(4242));
+    }
+
+    #[test]
+    fn production_datagram_forwarding_stages_complete_large_snapshots_only() {
+        let (outgoing_tx, _outgoing_rx) = crossbeam_channel::unbounded();
+        let (incoming_tx, incoming_rx) = crossbeam_channel::unbounded();
+        let (_signal_tx, signal_rx) = crossbeam_channel::unbounded();
+        let baseline = Instant::now() - Duration::from_secs(1);
+        let mut app = App::new();
+        app.insert_resource(super::NetworkChannels {
+            outgoing: outgoing_tx,
+            incoming: incoming_rx,
+            signals: signal_rx,
+        })
+        .insert_resource(super::ClientSession {
+            state: ClientConnectionState::Connected,
+            last_qualifying_snapshot_wall: Some(baseline),
+            ..default()
+        })
+        .init_resource::<super::PendingServerSnapshotFrame>()
+        .init_resource::<super::NetIncomingDisconnected>()
+        .init_resource::<TeamSelection>()
+        .add_systems(Update, super::ingest_server_snapshot_packets);
+
+        let populated = populated_snapshot_fixture();
+        assert!(populated.len() > 8 * 1024);
+        forward_complete_server_datagram(&populated, &incoming_tx)
+            .expect("complete populated datagram enters the production channel");
+        app.update();
+        {
+            let pending = app.world().resource::<super::PendingServerSnapshotFrame>();
+            let staged = pending.frame.as_ref().expect("large snapshot is staged");
+            assert_eq!(
+                staged.structures.last().map(|structure| structure.id),
+                Some(8)
+            );
+            assert_eq!(staged.minions.last().map(|minion| minion.id), Some(18));
+            assert_eq!(staged.rematch_in_secs, Some(4242));
+        }
+        assert_eq!(
+            app.world()
+                .resource::<super::ClientSession>()
+                .last_qualifying_snapshot_wall,
+            Some(baseline),
+            "staging alone must not advance the last-applied snapshot timestamp"
+        );
+
+        let malformed = br#"{"type":"snapshot","your_id":7,"players":["#;
+        assert!(forward_complete_server_datagram(malformed, &incoming_tx).is_err());
+        app.update();
+        assert!(
+            app.world()
+                .resource::<super::PendingServerSnapshotFrame>()
+                .frame
+                .is_none(),
+            "malformed JSON must not publish a partial pending snapshot"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<super::ClientSession>()
+                .last_qualifying_snapshot_wall,
+            Some(baseline),
+            "malformed JSON must not advance the qualifying timestamp"
+        );
+
+        let recovery = exact_size_snapshot_fixture(9_000, 9_000);
+        forward_complete_server_datagram(&recovery, &incoming_tx)
+            .expect("a complete datagram after malformed traffic is accepted");
+        app.update();
+        let pending = app.world().resource::<super::PendingServerSnapshotFrame>();
+        let staged = pending.frame.as_ref().expect("recovery snapshot is staged");
+        assert_eq!(
+            staged.structures.last().map(|structure| structure.id),
+            Some(808)
+        );
+        assert_eq!(staged.minions.last().map(|minion| minion.id), Some(909));
+        assert_eq!(staged.rematch_in_secs, Some(9_000));
+    }
+
+    #[test]
+    fn near_ipv4_limit_decodes_without_prefix_truncation() {
+        let payload = exact_size_snapshot_fixture(IPV4_UDP_MAX_PAYLOAD_BYTES, 65_507);
+        assert_fixture_sentinel(&payload, 65_507);
+    }
+
+    #[test]
+    fn outbound_payload_guard_uses_ipv4_udp_ceiling() {
+        assert!(validate_client_payload_size(IPV4_UDP_MAX_PAYLOAD_BYTES).is_ok());
+        let error = validate_client_payload_size(IPV4_UDP_MAX_PAYLOAD_BYTES + 1).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn loopback_receives_8191_8192_8193_and_malformed_between_good_datagrams() {
+        let receiver = UdpSocket::bind("127.0.0.1:0").expect("bind receiver");
+        receiver
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .expect("set receiver timeout");
+        let sender = UdpSocket::bind("127.0.0.1:0").expect("bind sender");
+        sender.connect(receiver.local_addr().unwrap()).unwrap();
+
+        let datagrams = [
+            exact_size_snapshot_fixture(8_191, 1),
+            exact_size_snapshot_fixture(8_192, 2),
+            exact_size_snapshot_fixture(8_193, 3),
+            br#"{"type":"snapshot","your_id":7,"players":["#.to_vec(),
+            exact_size_snapshot_fixture(9_000, 4),
+        ];
+        for payload in &datagrams {
+            assert_eq!(sender.send(payload).expect("loopback send"), payload.len());
+        }
+
+        let mut receive_storage = vec![0_u8; SERVER_DATAGRAM_RECEIVE_CAPACITY];
+        let mut decoded_sentinels = Vec::new();
+        for expected_len in datagrams.iter().map(Vec::len) {
+            let len = receiver
+                .recv(&mut receive_storage)
+                .expect("loopback receive should complete");
+            assert_eq!(len, expected_len);
+            if let Ok(ServerPacket::Snapshot {
+                rematch_in_secs, ..
+            }) = decode_server_packet(&receive_storage[..len])
+            {
+                decoded_sentinels.push(rematch_in_secs.expect("fixture sentinel"));
+            }
+        }
+        assert_eq!(decoded_sentinels, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn platform_near_limit_loopback_behavior_is_explicit() {
+        let receiver = UdpSocket::bind("127.0.0.1:0").expect("bind receiver");
+        receiver
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .expect("set receiver timeout");
+        let sender = UdpSocket::bind("127.0.0.1:0").expect("bind sender");
+        sender.connect(receiver.local_addr().unwrap()).unwrap();
+        let payload = exact_size_snapshot_fixture(IPV4_UDP_MAX_PAYLOAD_BYTES, 55);
+
+        match sender.send(&payload) {
+            Ok(len) => {
+                assert_eq!(len, payload.len());
+                let mut storage = vec![0_u8; SERVER_DATAGRAM_RECEIVE_CAPACITY];
+                let received = receiver
+                    .recv(&mut storage)
+                    .expect("receive near-limit payload");
+                assert_eq!(received, payload.len());
+                assert_fixture_sentinel(&storage[..received], 55);
+            }
+            Err(error) if cfg!(target_os = "macos") => {
+                // The task's Darwin runner was measured at a 9,216-byte
+                // send ceiling. errno 40 (EMSGSIZE) is that lower kernel
+                // sender limit, not receive truncation; this change does not
+                // claim to raise or bypass it.
+                assert_eq!(
+                    error.raw_os_error(),
+                    Some(40),
+                    "unexpected macOS error: {error}"
+                );
+            }
+            Err(error) => panic!("legal IPv4 UDP payload failed on loopback: {error}"),
+        }
     }
 }

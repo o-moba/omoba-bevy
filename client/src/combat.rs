@@ -1,28 +1,24 @@
 use bevy::{
-    camera::primitives::Aabb,
-    input::mouse::MouseButton,
-    math::{
-        Dir3,
-        primitives::{InfinitePlane3d, Rectangle},
-    },
-    prelude::*,
-    window::PrimaryWindow,
+    camera::primitives::Aabb, ecs::system::SystemParam, input::mouse::MouseButton,
+    math::primitives::Rectangle, prelude::*, window::PrimaryWindow,
 };
 
 use crate::camera::MainCamera;
 use crate::debug_console::DebugConsole;
 use crate::input_bindings::{SKILL_CAST_KEYS, SKILL_UPGRADE_KEY};
+use crate::minimap::MinimapNavigationState;
+use crate::model_scale::NormalizeModelScale;
 use crate::net::{
     GameState, GameStateSnapshot, NetworkCommand, NetworkHeroClass, NetworkMinion, NetworkMinionId,
     NetworkNeutral, NetworkNeutralId, NetworkPlayerId, NetworkStructure, NetworkStructureId,
     PlayerProgression, RemotePlayer, StructureKind, TargetId, TargetKind,
 };
-use crate::player::Player;
+use crate::player::{MovementTarget, Player};
+use crate::sprite::PlayerVisualMode;
 use crate::team::{Team, TeamSelection};
-use crate::model_scale::NormalizeModelScale;
 use shared::{
-    HeroClass, MAX_ABILITY_RANK, SkillSlot, TargetingMode, ability_for_class_slot, scaled_cooldown,
-    unlocked_slots_for_level,
+    HeroClass, MAX_ABILITY_RANK, SkillSlot, TargetingMode, ability_for_class_slot,
+    scaled_cast_range, scaled_cooldown, scaled_mana_cost, unlocked_slots_for_level,
 };
 
 /// Must match server `server/src/balance.rs` player baselines (display / local defaults).
@@ -45,7 +41,11 @@ const BAR_HEAD_CLEARANCE: f32 = 0.28;
 const MIN_PLAYER_BAR_Y: f32 = 1.4;
 const TOWER_BAR_Y: f32 = 3.6;
 const BASE_TOWER_BAR_Y: f32 = 4.8;
-const TARGET_PICK_RADIUS: f32 = 4.0;
+const PLAYER_PICK_RADIUS_PX: f32 = 52.0;
+const MINION_PICK_RADIUS_PX: f32 = 48.0;
+const NEUTRAL_PICK_RADIUS_PX: f32 = 52.0;
+const TOWER_PICK_RADIUS_PX: f32 = 56.0;
+const BASE_TOWER_PICK_RADIUS_PX: f32 = 68.0;
 const TARGET_MARKER_SIZE: f32 = 2.0;
 const TARGET_MARKER_THICKNESS: f32 = 0.08;
 const TARGET_MARKER_Y: f32 = 0.24;
@@ -70,25 +70,35 @@ const SKILL_UPGRADE_IDLE_COLOR: Color = Color::srgba(0.16, 0.16, 0.18, 0.55);
 
 pub struct CombatPlugin;
 
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct CombatPointerInputSet;
+
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct WorldMovementInputSet;
+
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TargetState>()
             .init_resource::<LocalCastCooldown>()
+            .init_resource::<WorldPointerState>()
+            .init_resource::<PendingCast>()
             .add_systems(Startup, setup_combat_visual_assets)
             .add_systems(Startup, setup_combat_ui)
+            .add_systems(Update, select_target_system.in_set(CombatPointerInputSet))
             .add_systems(
                 Update,
                 (
                     tick_local_cast_cooldown,
-                    select_target_system,
                     clear_invalid_target_system,
                     cast_spell_system,
                     skill_button_system,
+                    resolve_pending_cast_system,
                     skill_upgrade_input_system,
                     update_skill_bar_system,
                     update_target_marker_system,
                 )
-                    .chain(),
+                    .chain()
+                    .after(WorldMovementInputSet),
             );
         app.add_systems(
             PostUpdate,
@@ -129,6 +139,7 @@ impl CombatStats {
 
 #[derive(Resource)]
 struct CombatVisualAssets {
+    is_2d: bool,
     hp_bg_material: Handle<StandardMaterial>,
     hp_fill_material: Handle<StandardMaterial>,
     mana_bg_material: Handle<StandardMaterial>,
@@ -141,6 +152,84 @@ pub struct TargetState {
     pub selected_entity: Option<Entity>,
     pub selected_target: Option<TargetId>,
     marker_entity: Option<Entity>,
+}
+
+/// Per-frame routing state that prevents one physical press from both
+/// attacking a unit and issuing a ground movement command.
+#[derive(Resource, Default)]
+pub(crate) struct WorldPointerState {
+    pub(crate) consumed_primary_press: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PendingCastRequest {
+    slot: usize,
+    target_entity: Option<Entity>,
+    target: Option<TargetId>,
+    approach_announced: bool,
+}
+
+#[derive(Resource, Default)]
+pub(crate) struct PendingCast {
+    request: Option<PendingCastRequest>,
+}
+
+impl PendingCast {
+    pub(crate) fn cancel(&mut self) {
+        self.request = None;
+    }
+}
+
+#[derive(SystemParam)]
+struct TargetCandidates<'w, 's> {
+    players: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static Transform,
+            &'static NetworkPlayerId,
+            &'static CombatStats,
+            &'static Team,
+        ),
+        (With<RemotePlayer>, Without<Player>),
+    >,
+    structures: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static Transform,
+            &'static NetworkStructureId,
+            &'static CombatStats,
+            &'static Team,
+            &'static StructureKind,
+        ),
+        With<NetworkStructure>,
+    >,
+    minions: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static Transform,
+            &'static NetworkMinionId,
+            &'static CombatStats,
+            &'static Team,
+        ),
+        With<NetworkMinion>,
+    >,
+    neutrals: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static Transform,
+            &'static NetworkNeutralId,
+            &'static CombatStats,
+        ),
+        With<NetworkNeutral>,
+    >,
 }
 
 #[derive(Component, Default)]
@@ -206,7 +295,9 @@ fn setup_combat_visual_assets(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mode: Res<PlayerVisualMode>,
 ) {
+    let is_2d = *mode == PlayerVisualMode::Sprite2d;
     let bar_mesh = meshes.add(Mesh::from(Rectangle::new(BAR_WIDTH, BAR_HEIGHT)));
     let marker_segment_mesh = meshes.add(Mesh::from(Cuboid::new(1.0, 1.0, 1.0)));
 
@@ -241,14 +332,23 @@ fn setup_combat_visual_assets(
         ..default()
     });
 
-    let marker_entity = commands
-        .spawn((
-            Transform::from_xyz(0.0, -50.0, 0.0),
-            Visibility::Hidden,
-            TargetMarker,
-            Name::new("TargetMarker"),
-        ))
+    let mut marker_commands = commands.spawn((
+        Transform::from_xyz(0.0, -50.0, 0.0),
+        Visibility::Hidden,
+        TargetMarker,
+        Name::new("TargetMarker"),
+    ));
+    if is_2d {
+        marker_commands.insert(Sprite::from_color(
+            Color::srgba(1.0, 0.84, 0.24, 0.45),
+            Vec2::splat(TARGET_MARKER_SIZE),
+        ));
+    }
+    let marker_entity = marker_commands
         .with_children(|parent| {
+            if is_2d {
+                return;
+            }
             // Four thin segments form a ring-like selection outline.
             let horizontal_scale = Vec3::new(1.0, TARGET_MARKER_THICKNESS, TARGET_MARKER_EDGE);
             let vertical_scale = Vec3::new(TARGET_MARKER_EDGE, TARGET_MARKER_THICKNESS, 1.0);
@@ -296,6 +396,7 @@ fn setup_combat_visual_assets(
         .id();
 
     commands.insert_resource(CombatVisualAssets {
+        is_2d,
         hp_bg_material,
         hp_fill_material,
         mana_bg_material,
@@ -419,7 +520,12 @@ fn update_skill_bar_system(
     mut rank_labels: Query<(&SkillRankLabel, &mut Text), Without<SkillNameLabel>>,
     mut name_labels: Query<(&SkillNameLabel, &mut Text), Without<SkillRankLabel>>,
     mut upgrade_buttons: Query<
-        (&SkillUpgradeButton, &Interaction, &mut BackgroundColor, &mut Node),
+        (
+            &SkillUpgradeButton,
+            &Interaction,
+            &mut BackgroundColor,
+            &mut Node,
+        ),
         With<Button>,
     >,
 ) {
@@ -471,7 +577,10 @@ fn update_skill_bar_system(
 fn skill_upgrade_input_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     progression: Query<&PlayerProgression, With<Player>>,
-    upgrade_buttons: Query<(&SkillUpgradeButton, &Interaction), (Changed<Interaction>, With<Button>)>,
+    upgrade_buttons: Query<
+        (&SkillUpgradeButton, &Interaction),
+        (Changed<Interaction>, With<Button>),
+    >,
     mut command_writer: MessageWriter<NetworkCommand>,
 ) {
     let can_spend = progression
@@ -495,35 +604,20 @@ fn skill_upgrade_input_system(
 fn select_target_system(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mouse_input: Res<ButtonInput<MouseButton>>,
+    touches: Res<Touches>,
     game_state: Option<Res<GameStateSnapshot>>,
     local_player: Query<(&Transform, &Team), With<Player>>,
     camera_query: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
-    player_candidates: Query<
-        (Entity, &Transform, &NetworkPlayerId, &CombatStats, &Team),
-        (With<RemotePlayer>, Without<Player>),
-    >,
-    structure_candidates: Query<
-        (
-            Entity,
-            &Transform,
-            &NetworkStructureId,
-            &CombatStats,
-            &Team,
-            &StructureKind,
-        ),
-        With<NetworkStructure>,
-    >,
-    minion_candidates: Query<
-        (Entity, &Transform, &NetworkMinionId, &CombatStats, &Team),
-        With<NetworkMinion>,
-    >,
-    neutral_candidates: Query<
-        (Entity, &Transform, &NetworkNeutralId, &CombatStats),
-        With<NetworkNeutral>,
-    >,
+    candidates: TargetCandidates,
     mut target_state: ResMut<TargetState>,
+    mut pending_cast: ResMut<PendingCast>,
+    mut pointer_state: ResMut<WorldPointerState>,
+    visual_mode: Res<PlayerVisualMode>,
+    minimap_nav: Option<Res<MinimapNavigationState>>,
+    ui_interactions: Query<&Interaction, With<Button>>,
 ) {
+    pointer_state.consumed_primary_press = false;
     if let Some(game_state) = game_state.as_ref() {
         if !matches!(game_state.state, GameState::Running) {
             return;
@@ -538,48 +632,61 @@ fn select_target_system(
         select_entity = find_nearest_enemy_target(
             local_transform.translation,
             *local_team,
-            &player_candidates,
-            &minion_candidates,
-            &neutral_candidates,
-            &structure_candidates,
+            &candidates.players,
+            &candidates.minions,
+            &candidates.neutrals,
+            &candidates.structures,
         );
     }
 
-    if mouse_input.just_pressed(MouseButton::Middle) {
-        let Ok(window) = window_query.single() else {
+    let Ok(window) = window_query.single() else {
+        return;
+    };
+    let primary_position = primary_press_position(&mouse_input, &touches, window);
+    let middle_position = mouse_input
+        .just_pressed(MouseButton::Middle)
+        .then(|| window.cursor_position())
+        .flatten();
+    let pointer_position = primary_position.or(middle_position);
+
+    if let Some(pointer_position) = pointer_position {
+        let pointer_over_ui = ui_interactions
+            .iter()
+            .any(|interaction| *interaction != Interaction::None);
+        let pointer_on_minimap = minimap_nav
+            .as_ref()
+            .is_some_and(|nav| nav.consumed_primary_click);
+        if pointer_over_ui || pointer_on_minimap {
             return;
-        };
+        }
         let Ok((camera, camera_transform)) = camera_query.single() else {
             return;
         };
-        let Some(cursor_pos) = window.cursor_position() else {
-            return;
-        };
-        let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_pos) else {
-            return;
-        };
-        let Ok(plane_normal) = Dir3::new(Vec3::Y) else {
-            return;
-        };
-        let plane = InfinitePlane3d::new(plane_normal);
-        let Some(distance) = ray.intersect_plane(Vec3::ZERO, plane) else {
-            return;
-        };
-        let click_point = ray.get_point(distance);
-
-        select_entity = find_target_near_point(
-            click_point,
+        select_entity = find_target_near_screen(
+            pointer_position,
+            camera,
+            camera_transform,
+            *visual_mode,
             *local_team,
-            &player_candidates,
-            &minion_candidates,
-            &neutral_candidates,
-            &structure_candidates,
+            &candidates.players,
+            &candidates.minions,
+            &candidates.neutrals,
+            &candidates.structures,
         );
     }
 
     if let Some((entity, target_id)) = select_entity {
         target_state.selected_entity = Some(entity);
         target_state.selected_target = Some(target_id);
+        if primary_position.is_some() {
+            pointer_state.consumed_primary_press = true;
+            pending_cast.request = Some(PendingCastRequest {
+                slot: SkillSlot::Q.index(),
+                target_entity: Some(entity),
+                target: Some(target_id),
+                approach_announced: false,
+            });
+        }
         info!(
             "Target selected: id={} ({:?})",
             target_id.id, target_id.kind
@@ -587,14 +694,30 @@ fn select_target_system(
     }
 }
 
+fn primary_press_position(
+    mouse_input: &ButtonInput<MouseButton>,
+    touches: &Touches,
+    window: &Window,
+) -> Option<Vec2> {
+    if mouse_input.just_pressed(MouseButton::Left) {
+        return window.cursor_position();
+    }
+    touches
+        .iter_just_pressed()
+        .next()
+        .map(|touch| touch.position())
+}
+
 fn clear_invalid_target_system(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut target_state: ResMut<TargetState>,
+    mut pending_cast: ResMut<PendingCast>,
     combat_stats_query: Query<&CombatStats>,
 ) {
     if keyboard_input.just_pressed(KeyCode::Backspace) {
         target_state.selected_entity = None;
         target_state.selected_target = None;
+        pending_cast.cancel();
         return;
     }
 
@@ -602,11 +725,13 @@ fn clear_invalid_target_system(
         let Ok(stats) = combat_stats_query.get(entity) else {
             target_state.selected_entity = None;
             target_state.selected_target = None;
+            pending_cast.cancel();
             return;
         };
         if !stats.is_alive() {
             target_state.selected_entity = None;
             target_state.selected_target = None;
+            pending_cast.cancel();
         }
     }
 }
@@ -618,17 +743,17 @@ fn try_cast_slot(
     slot_index: usize,
     class: HeroClass,
     local: (&CombatStats, PlayerProgression, Option<&NetworkPlayerId>),
-    target_state: &mut TargetState,
+    selected_target: Option<TargetId>,
     command_writer: &mut MessageWriter<NetworkCommand>,
     console: &mut DebugConsole,
     cast_cd: &mut LocalCastCooldown,
-) {
+) -> bool {
     let Some(slot) = SkillSlot::from_index(slot_index as u8) else {
-        return;
+        return false;
     };
     let (stats, prog, net_id) = local;
     if !stats.is_alive() {
-        return;
+        return false;
     }
     let def = ability_for_class_slot(class, slot);
     if !unlocked_slots_for_level(prog.level.max(1))[slot.index()] {
@@ -639,10 +764,17 @@ fn try_cast_slot(
         );
         console.push_line(message.clone());
         info!("{message}");
-        return;
+        return false;
     }
     if cast_cd.remaining_secs[slot.index()] > 0.0 {
-        return;
+        let message = format!(
+            "{} is cooling down for {:.1}s.",
+            def.name,
+            cast_cd.remaining_secs[slot.index()]
+        );
+        console.push_line(message.clone());
+        info!("{message}");
+        return false;
     }
 
     let target = match def.targeting {
@@ -650,21 +782,31 @@ fn try_cast_slot(
             kind: TargetKind::Player,
             id: id.0,
         }),
-        TargetingMode::UnitTarget => resolve_cast_target(target_state),
+        TargetingMode::UnitTarget => selected_target,
     };
     let Some(target) = target else {
         let message = match def.targeting {
             TargetingMode::UnitTarget => {
-                "No target available. Use TAB or middle mouse click to select."
+                "No target available. Click or tap an enemy, or use Tab to select."
             }
             TargetingMode::SelfTarget => "Not connected yet; self-cast unavailable.",
         };
         console.push_line(message);
         info!("{message}");
-        return;
+        return false;
     };
 
     let rank = prog.ranks[slot.index()].clamp(1, def.max_rank);
+    let mana_cost = scaled_mana_cost(def, rank);
+    if stats.mana < mana_cost {
+        let message = format!(
+            "Not enough mana for {} ({:.0}/{:.0}).",
+            def.name, stats.mana, mana_cost
+        );
+        console.push_line(message.clone());
+        info!("{message}");
+        return false;
+    }
     cast_cd.remaining_secs[slot.index()] = scaled_cooldown(def, rank).as_secs_f32();
     command_writer.write(NetworkCommand::Cast {
         target,
@@ -684,6 +826,40 @@ fn try_cast_slot(
     );
     console.push_line(message.clone());
     info!("{message}");
+    true
+}
+
+fn queue_cast_request(
+    slot_index: usize,
+    class: HeroClass,
+    target_state: &TargetState,
+    pending_cast: &mut PendingCast,
+    console: &mut DebugConsole,
+) {
+    let Some(slot) = SkillSlot::from_index(slot_index as u8) else {
+        return;
+    };
+    let def = ability_for_class_slot(class, slot);
+    let (target_entity, target) = match def.targeting {
+        TargetingMode::SelfTarget => (None, None),
+        TargetingMode::UnitTarget => {
+            let (Some(entity), Some(target)) =
+                (target_state.selected_entity, target_state.selected_target)
+            else {
+                let message = "No target available. Click or tap an enemy, or use Tab to select.";
+                console.push_line(message);
+                info!("{message}");
+                return;
+            };
+            (Some(entity), Some(target))
+        }
+    };
+    pending_cast.request = Some(PendingCastRequest {
+        slot: slot_index,
+        target_entity,
+        target,
+        approach_announced: false,
+    });
 }
 
 #[allow(clippy::type_complexity)]
@@ -700,10 +876,9 @@ fn cast_spell_system(
         ),
         With<Player>,
     >,
-    mut target_state: ResMut<TargetState>,
-    mut command_writer: MessageWriter<NetworkCommand>,
+    target_state: Res<TargetState>,
+    mut pending_cast: ResMut<PendingCast>,
     mut console: ResMut<DebugConsole>,
-    mut cast_cd: ResMut<LocalCastCooldown>,
 ) {
     if let Some(game_state) = game_state.as_ref() {
         if !matches!(game_state.state, GameState::Running) {
@@ -717,18 +892,16 @@ fn cast_spell_system(
         return;
     };
 
-    let Ok((stats, prog, net_id, class)) = local_player.single() else {
+    let Ok((_stats, _prog, _net_id, class)) = local_player.single() else {
         return;
     };
     let class = local_hero_class(Some(class), &team_selection);
-    try_cast_slot(
+    queue_cast_request(
         slot_index,
         class,
-        (stats, prog.copied().unwrap_or_default(), net_id),
-        &mut target_state,
-        &mut command_writer,
+        &target_state,
+        &mut pending_cast,
         &mut console,
-        &mut cast_cd,
     );
 }
 
@@ -749,10 +922,9 @@ fn skill_button_system(
         ),
         With<Player>,
     >,
-    mut target_state: ResMut<TargetState>,
-    mut command_writer: MessageWriter<NetworkCommand>,
+    target_state: Res<TargetState>,
+    mut pending_cast: ResMut<PendingCast>,
     mut console: ResMut<DebugConsole>,
-    mut cast_cd: ResMut<LocalCastCooldown>,
 ) {
     if let Some(game_state) = game_state.as_ref() {
         if !matches!(game_state.state, GameState::Running) {
@@ -763,18 +935,16 @@ fn skill_button_system(
         match *interaction {
             Interaction::Pressed => {
                 *color = SKILL_BUTTON_PRESS_COLOR.into();
-                let Ok((stats, prog, net_id, class)) = local_player.single() else {
+                let Ok((_stats, _prog, _net_id, class)) = local_player.single() else {
                     continue;
                 };
                 let class = local_hero_class(Some(class), &team_selection);
-                try_cast_slot(
+                queue_cast_request(
                     bar_slot.slot,
                     class,
-                    (stats, prog.copied().unwrap_or_default(), net_id),
-                    &mut target_state,
-                    &mut command_writer,
+                    &target_state,
+                    &mut pending_cast,
                     &mut console,
-                    &mut cast_cd,
                 );
             }
             Interaction::Hovered => {
@@ -785,6 +955,96 @@ fn skill_button_system(
             }
         }
     }
+}
+
+#[allow(clippy::type_complexity)]
+fn resolve_pending_cast_system(
+    mut commands: Commands,
+    team_selection: Res<TeamSelection>,
+    local_player: Query<
+        (
+            Entity,
+            &Transform,
+            &CombatStats,
+            Option<&PlayerProgression>,
+            Option<&NetworkPlayerId>,
+            Option<&NetworkHeroClass>,
+        ),
+        With<Player>,
+    >,
+    target_query: Query<(&Transform, &CombatStats), Without<Player>>,
+    mut pending_cast: ResMut<PendingCast>,
+    mut command_writer: MessageWriter<NetworkCommand>,
+    mut console: ResMut<DebugConsole>,
+    mut cast_cd: ResMut<LocalCastCooldown>,
+) {
+    let Some(request) = pending_cast.request else {
+        return;
+    };
+    let Ok((player_entity, player_transform, stats, progression, net_id, class)) =
+        local_player.single()
+    else {
+        pending_cast.cancel();
+        return;
+    };
+    let class = local_hero_class(Some(class), &team_selection);
+    let Some(slot) = SkillSlot::from_index(request.slot as u8) else {
+        pending_cast.cancel();
+        return;
+    };
+    let definition = ability_for_class_slot(class, slot);
+
+    if definition.targeting == TargetingMode::UnitTarget {
+        let (Some(target_entity), Some(_target)) = (request.target_entity, request.target) else {
+            pending_cast.cancel();
+            return;
+        };
+        let Ok((target_transform, target_stats)) = target_query.get(target_entity) else {
+            pending_cast.cancel();
+            return;
+        };
+        if !target_stats.is_alive() {
+            pending_cast.cancel();
+            return;
+        }
+        let progression = progression.copied().unwrap_or_default();
+        let rank = progression.ranks[slot.index()].clamp(1, definition.max_rank);
+        let cast_range = scaled_cast_range(definition, rank);
+        if !within_cast_range(
+            player_transform.translation,
+            target_transform.translation,
+            cast_range,
+        ) {
+            commands.entity(player_entity).insert(MovementTarget {
+                target: target_transform.translation,
+            });
+            if !request.approach_announced {
+                let message = format!("Approaching target for {}.", definition.name);
+                console.push_line(message.clone());
+                info!("{message}");
+                if let Some(request) = pending_cast.request.as_mut() {
+                    request.approach_announced = true;
+                }
+            }
+            return;
+        }
+    }
+
+    commands.entity(player_entity).remove::<MovementTarget>();
+    let _sent = try_cast_slot(
+        request.slot,
+        class,
+        (stats, progression.copied().unwrap_or_default(), net_id),
+        request.target,
+        &mut command_writer,
+        &mut console,
+        &mut cast_cd,
+    );
+    pending_cast.cancel();
+}
+
+fn within_cast_range(local_position: Vec3, target_position: Vec3, cast_range: f32) -> bool {
+    local_position.xz().distance(target_position.xz()) <= cast_range
 }
 
 fn spawn_combat_bars_system(
@@ -823,6 +1083,50 @@ fn spawn_combat_bars_system(
             .id();
 
         commands.entity(bar_root).with_children(|parent| {
+            if assets.is_2d {
+                parent.spawn((
+                    Sprite::from_color(
+                        Color::srgb(0.15, 0.02, 0.02),
+                        Vec2::new(BAR_WIDTH, BAR_HEIGHT),
+                    ),
+                    Transform::default(),
+                    Name::new("HpBarBg"),
+                ));
+                let hp_fill = parent
+                    .spawn((
+                        Sprite::from_color(
+                            Color::srgb(0.85, 0.15, 0.18),
+                            Vec2::new(BAR_WIDTH, BAR_HEIGHT),
+                        ),
+                        Transform::from_xyz(0.0, 0.0, BAR_LAYER_OFFSET),
+                        Name::new("HpBarFill"),
+                    ))
+                    .id();
+                bars.hp_fill = Some(hp_fill);
+                if show_mana_bar {
+                    parent.spawn((
+                        Sprite::from_color(
+                            Color::srgb(0.04, 0.06, 0.18),
+                            Vec2::new(BAR_WIDTH, BAR_HEIGHT),
+                        ),
+                        Transform::from_xyz(0.0, MANA_BAR_OFFSET_Y, 0.0),
+                        Name::new("ManaBarBg"),
+                    ));
+                    bars.mana_fill = Some(
+                        parent
+                            .spawn((
+                                Sprite::from_color(
+                                    Color::srgb(0.16, 0.52, 0.95),
+                                    Vec2::new(BAR_WIDTH, BAR_HEIGHT),
+                                ),
+                                Transform::from_xyz(0.0, MANA_BAR_OFFSET_Y, BAR_LAYER_OFFSET),
+                                Name::new("ManaBarFill"),
+                            ))
+                            .id(),
+                    );
+                }
+                return;
+            }
             parent.spawn((
                 Mesh3d(assets.bar_mesh.clone()),
                 MeshMaterial3d(assets.hp_bg_material.clone()),
@@ -907,6 +1211,7 @@ fn sync_combat_bar_transforms_system(
     children_query: Query<&Children>,
     normalized_query: Query<&NormalizeModelScale>,
     mut bar_query: Query<(Entity, &CombatBarAnchor, &mut Transform), With<CombatBarRoot>>,
+    mode: Res<PlayerVisualMode>,
 ) {
     let Ok(camera_transform) = camera_query.single() else {
         return;
@@ -921,6 +1226,16 @@ fn sync_combat_bar_transforms_system(
                 .despawn();
             continue;
         };
+        if *mode == PlayerVisualMode::Sprite2d {
+            let xy = crate::world2d::simulation_xz_to_render_xy(target_transform.translation());
+            bar_transform.translation = Vec3::new(
+                xy.x,
+                xy.y + anchor.y_offset,
+                crate::world2d::layer::OVERHEAD,
+            );
+            bar_transform.rotation = Quat::IDENTITY;
+            continue;
+        }
         // Normalized player models report a deterministic head height; prefer it
         // over per-frame AABB sampling (unstable for rigged/center-pivot meshes).
         let bar_world_y = match normalized_query
@@ -999,6 +1314,7 @@ fn update_target_marker_system(
     neutrals: Query<(), With<NetworkNeutral>>,
     players: Query<(), Or<(With<Player>, With<RemotePlayer>)>>,
     mut marker_query: Query<(&mut Transform, &mut Visibility), With<TargetMarker>>,
+    mode: Res<PlayerVisualMode>,
 ) {
     let Some(marker_entity) = target_state.marker_entity else {
         return;
@@ -1034,6 +1350,14 @@ fn update_target_marker_system(
         TARGET_MARKER_SIZE * 0.5
     };
     let pulse = 1.0 + TARGET_MARKER_PULSE_AMPLITUDE * (time.elapsed_secs() * 7.5).sin();
+    if *mode == PlayerVisualMode::Sprite2d {
+        let xy = crate::world2d::simulation_xz_to_render_xy(target_translation);
+        marker_transform.translation = Vec3::new(xy.x, xy.y, crate::world2d::layer::MARKER);
+        marker_transform.rotation =
+            Quat::from_rotation_z(time.elapsed_secs() * TARGET_MARKER_SPIN_SPEED);
+        marker_transform.scale = Vec3::splat(marker_radius * pulse / (TARGET_MARKER_SIZE * 0.5));
+        return;
+    }
     let bob = TARGET_MARKER_BOB_AMPLITUDE * (time.elapsed_secs() * 5.0).sin();
     let marker_center_y = compute_marker_world_y_for_entity(
         target_entity,
@@ -1194,8 +1518,11 @@ fn find_nearest_enemy_target(
     best.map(|(entity, target, _)| (entity, target))
 }
 
-fn find_target_near_point(
-    click_point: Vec3,
+fn find_target_near_screen(
+    pointer_position: Vec2,
+    camera: &Camera,
+    camera_transform: &GlobalTransform,
+    visual_mode: PlayerVisualMode,
     local_team: Team,
     player_candidates: &Query<
         (Entity, &Transform, &NetworkPlayerId, &CombatStats, &Team),
@@ -1227,81 +1554,339 @@ fn find_target_near_point(
         if !stats.is_alive() || *team == local_team {
             continue;
         }
-        let dist = transform.translation.xz().distance(click_point.xz());
-        if dist <= TARGET_PICK_RADIUS {
-            if best.is_none_or(|(_, _, best_dist)| dist < best_dist) {
-                best = Some((
-                    entity,
-                    TargetId {
-                        kind: TargetKind::Player,
-                        id: id.0,
-                    },
-                    dist,
-                ));
-            }
-        }
+        consider_screen_target(
+            &mut best,
+            pointer_position,
+            camera,
+            camera_transform,
+            visual_mode,
+            transform.translation,
+            PLAYER_PICK_RADIUS_PX,
+            entity,
+            TargetId {
+                kind: TargetKind::Player,
+                id: id.0,
+            },
+        );
     }
 
     for (entity, transform, id, stats, team) in minion_candidates.iter() {
         if !stats.is_alive() || *team == local_team {
             continue;
         }
-        let dist = transform.translation.xz().distance(click_point.xz());
-        if dist <= TARGET_PICK_RADIUS {
-            if best.is_none_or(|(_, _, best_dist)| dist < best_dist) {
-                best = Some((
-                    entity,
-                    TargetId {
-                        kind: TargetKind::Minion,
-                        id: id.0,
-                    },
-                    dist,
-                ));
-            }
-        }
+        consider_screen_target(
+            &mut best,
+            pointer_position,
+            camera,
+            camera_transform,
+            visual_mode,
+            transform.translation,
+            MINION_PICK_RADIUS_PX,
+            entity,
+            TargetId {
+                kind: TargetKind::Minion,
+                id: id.0,
+            },
+        );
     }
 
     for (entity, transform, id, stats) in neutral_candidates.iter() {
         if !stats.is_alive() {
             continue;
         }
-        let dist = transform.translation.xz().distance(click_point.xz());
-        if dist <= TARGET_PICK_RADIUS {
-            if best.is_none_or(|(_, _, best_dist)| dist < best_dist) {
-                best = Some((
-                    entity,
-                    TargetId {
-                        kind: TargetKind::Neutral,
-                        id: id.0,
-                    },
-                    dist,
-                ));
-            }
-        }
+        consider_screen_target(
+            &mut best,
+            pointer_position,
+            camera,
+            camera_transform,
+            visual_mode,
+            transform.translation,
+            NEUTRAL_PICK_RADIUS_PX,
+            entity,
+            TargetId {
+                kind: TargetKind::Neutral,
+                id: id.0,
+            },
+        );
     }
 
-    for (entity, transform, id, stats, team, _kind) in structure_candidates.iter() {
+    for (entity, transform, id, stats, team, kind) in structure_candidates.iter() {
         if !stats.is_alive() || *team == local_team {
             continue;
         }
-        let dist = transform.translation.xz().distance(click_point.xz());
-        if dist <= TARGET_PICK_RADIUS {
-            if best.is_none_or(|(_, _, best_dist)| dist < best_dist) {
-                best = Some((
-                    entity,
-                    TargetId {
-                        kind: TargetKind::Structure,
-                        id: id.0,
-                    },
-                    dist,
-                ));
-            }
-        }
+        let radius = match kind {
+            StructureKind::Tower => TOWER_PICK_RADIUS_PX,
+            StructureKind::BaseTower => BASE_TOWER_PICK_RADIUS_PX,
+        };
+        consider_screen_target(
+            &mut best,
+            pointer_position,
+            camera,
+            camera_transform,
+            visual_mode,
+            transform.translation,
+            radius,
+            entity,
+            TargetId {
+                kind: TargetKind::Structure,
+                id: id.0,
+            },
+        );
     }
 
     best.map(|(entity, target, _)| (entity, target))
 }
 
-fn resolve_cast_target(target_state: &mut TargetState) -> Option<TargetId> {
-    target_state.selected_target
+#[allow(clippy::too_many_arguments)]
+fn consider_screen_target(
+    best: &mut Option<(Entity, TargetId, f32)>,
+    pointer_position: Vec2,
+    camera: &Camera,
+    camera_transform: &GlobalTransform,
+    visual_mode: PlayerVisualMode,
+    simulation_position: Vec3,
+    pick_radius_px: f32,
+    entity: Entity,
+    target: TargetId,
+) {
+    let render_position = if visual_mode == PlayerVisualMode::Sprite2d {
+        let xy = crate::world2d::simulation_xz_to_render_xy(simulation_position);
+        Vec3::new(xy.x, xy.y, crate::world2d::layer::ACTOR)
+    } else {
+        simulation_position
+    };
+    let Ok(screen_position) = camera.world_to_viewport(camera_transform, render_position) else {
+        return;
+    };
+    let Some(distance) = screen_pick_distance(pointer_position, screen_position, pick_radius_px)
+    else {
+        return;
+    };
+    if best.is_none_or(|(_, _, best_distance)| distance < best_distance) {
+        *best = Some((entity, target, distance));
+    }
+}
+
+fn screen_pick_distance(pointer: Vec2, actor_center: Vec2, radius_px: f32) -> Option<f32> {
+    let distance = pointer.distance(actor_center);
+    (distance <= radius_px).then_some(distance)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pointer_hit_areas_are_touch_sized_and_screen_bounded() {
+        const {
+            assert!(SKILL_SLOT_SIZE >= 48.0);
+        }
+        for radius in [
+            PLAYER_PICK_RADIUS_PX,
+            MINION_PICK_RADIUS_PX,
+            NEUTRAL_PICK_RADIUS_PX,
+            TOWER_PICK_RADIUS_PX,
+            BASE_TOWER_PICK_RADIUS_PX,
+        ] {
+            assert!(radius >= 48.0);
+            assert!(screen_pick_distance(Vec2::ZERO, Vec2::new(radius, 0.0), radius).is_some());
+            assert!(
+                screen_pick_distance(Vec2::ZERO, Vec2::new(radius + 0.1, 0.0), radius).is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn primary_target_request_is_q_for_the_exact_authoritative_target() {
+        let entity = Entity::PLACEHOLDER;
+        let target = TargetId {
+            kind: TargetKind::Minion,
+            id: 77,
+        };
+        let state = TargetState {
+            selected_entity: Some(entity),
+            selected_target: Some(target),
+            marker_entity: None,
+        };
+        let mut pending = PendingCast::default();
+        let mut console = DebugConsole::default();
+        queue_cast_request(
+            SkillSlot::Q.index(),
+            HeroClass::Warrior,
+            &state,
+            &mut pending,
+            &mut console,
+        );
+        assert_eq!(
+            pending.request,
+            Some(PendingCastRequest {
+                slot: SkillSlot::Q.index(),
+                target_entity: Some(entity),
+                target: Some(target),
+                approach_announced: false,
+            })
+        );
+    }
+
+    #[test]
+    fn cast_range_uses_horizontal_gameplay_distance() {
+        assert!(within_cast_range(
+            Vec3::ZERO,
+            Vec3::new(3.0, 99.0, 4.0),
+            5.0
+        ));
+        assert!(!within_cast_range(
+            Vec3::ZERO,
+            Vec3::new(3.01, 0.0, 4.0),
+            5.0
+        ));
+    }
+
+    #[test]
+    fn pending_unit_cast_approaches_then_emits_once_in_range() {
+        let mut app = App::new();
+        app.add_message::<NetworkCommand>()
+            .insert_resource(TeamSelection::default())
+            .insert_resource(PendingCast::default())
+            .insert_resource(LocalCastCooldown::default())
+            .insert_resource(DebugConsole::default())
+            .add_systems(Update, resolve_pending_cast_system);
+
+        let player = app
+            .world_mut()
+            .spawn((
+                Player,
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                CombatStats::default(),
+                PlayerProgression::default(),
+                NetworkPlayerId(1),
+                NetworkHeroClass(HeroClass::Warrior),
+            ))
+            .id();
+        let target = app
+            .world_mut()
+            .spawn((Transform::from_xyz(30.0, 0.0, 0.0), CombatStats::default()))
+            .id();
+        app.world_mut().resource_mut::<PendingCast>().request = Some(PendingCastRequest {
+            slot: SkillSlot::Q.index(),
+            target_entity: Some(target),
+            target: Some(TargetId {
+                kind: TargetKind::Minion,
+                id: 77,
+            }),
+            approach_announced: false,
+        });
+
+        app.update();
+        assert!(app.world().entity(player).contains::<MovementTarget>());
+        assert!(app.world().resource::<PendingCast>().request.is_some());
+        assert_eq!(
+            app.world().resource::<LocalCastCooldown>().remaining_secs[0],
+            0.0
+        );
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .count(),
+            0
+        );
+
+        app.world_mut()
+            .entity_mut(player)
+            .insert(Transform::from_xyz(20.0, 0.0, 0.0));
+        app.update();
+        assert!(app.world().resource::<PendingCast>().request.is_none());
+        assert!(app.world().resource::<LocalCastCooldown>().remaining_secs[0] > 0.0);
+        let commands: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<NetworkCommand>>()
+            .drain()
+            .collect();
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            commands[0],
+            NetworkCommand::Cast {
+                target: TargetId {
+                    kind: TargetKind::Minion,
+                    id: 77
+                },
+                slot: 0
+            }
+        ));
+    }
+
+    #[test]
+    fn insufficient_mana_rejects_without_phantom_cooldown() {
+        let mut app = App::new();
+        app.add_message::<NetworkCommand>()
+            .insert_resource(TeamSelection::default())
+            .insert_resource(PendingCast::default())
+            .insert_resource(LocalCastCooldown::default())
+            .insert_resource(DebugConsole::default())
+            .add_systems(Update, resolve_pending_cast_system);
+
+        let exhausted = CombatStats {
+            mana: 0.0,
+            ..default()
+        };
+        app.world_mut().spawn((
+            Player,
+            Transform::default(),
+            exhausted,
+            PlayerProgression::default(),
+            NetworkPlayerId(1),
+            NetworkHeroClass(HeroClass::Warrior),
+        ));
+        let target = app
+            .world_mut()
+            .spawn((Transform::from_xyz(2.0, 0.0, 0.0), CombatStats::default()))
+            .id();
+        app.world_mut().resource_mut::<PendingCast>().request = Some(PendingCastRequest {
+            slot: SkillSlot::Q.index(),
+            target_entity: Some(target),
+            target: Some(TargetId {
+                kind: TargetKind::Minion,
+                id: 88,
+            }),
+            approach_announced: false,
+        });
+
+        app.update();
+        assert!(app.world().resource::<PendingCast>().request.is_none());
+        assert_eq!(
+            app.world().resource::<LocalCastCooldown>().remaining_secs[0],
+            0.0
+        );
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn self_target_hotbar_request_needs_no_selected_enemy() {
+        let state = TargetState::default();
+        let mut pending = PendingCast::default();
+        let mut console = DebugConsole::default();
+        queue_cast_request(
+            SkillSlot::W.index(),
+            HeroClass::Warrior,
+            &state,
+            &mut pending,
+            &mut console,
+        );
+        assert_eq!(
+            pending.request,
+            Some(PendingCastRequest {
+                slot: SkillSlot::W.index(),
+                target_entity: None,
+                target: None,
+                approach_announced: false,
+            })
+        );
+    }
 }

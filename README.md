@@ -28,7 +28,9 @@ make start
 ```
 
 Full release-like matchmaking flow solo (release server + 9 fill bots + your
-client; the match forms to a real 5v5 through the queue):
+client; the match forms to a real 5v5 through the queue, and once it starts
+the bots actively play — they push their lanes toward the enemy base and
+fight players, minions, and towers with simple nearest-target AI):
 
 ```sh
 make play-bots
@@ -55,7 +57,8 @@ make stop
 | `make play-bots` | **Solo 5v5 demo**: release server + 9 fill bots + your client (you are the 10th player, full matchmaking flow) |
 | `make server` | Server in **release** matchmaking mode (queue to full 5v5 before start) |
 | `make server-dev` | Server in **dev** mode (first join starts the match; dev only) |
-| `make game` | One client (`GAME_SERVER_ADDR` to target a non-default server) |
+| `make game` | One client (defaults explicitly to `127.0.0.1:4000`; set `GAME_SERVER_ADDR` for another server) |
+| `make game2d` | Same explicit local server default, forced into the genuine orthographic 2D game mode |
 | `make start-release` | Release server + 1 client (waits in queue until filled) |
 | `make bots` | Fill bots for a running server (`BOTS=<n>`, `BOTS_SERVER=<addr>`) |
 | `make stop` | Kill server, clients, and bots |
@@ -65,7 +68,14 @@ make stop
 
 Key env vars: `OMOBA_MATCH_MODE` (`release` default / `dev`), `OMOBA_TEAM_SIZE`
 (players per team, default 5 — `1` gives a quick 1v1 with release semantics),
-`SERVER_ADDR`, `GAME_SERVER_ADDR`, `OMOBA_AUTOJOIN` (`<class>:<avatar|->:<team>`).
+`SERVER_ADDR`, `GAME_SERVER_ADDR`, `OMOBA_PLAYER_VISUAL_MODE`
+(`models3d` default / `sprite2d` genuine orthographic XY renderer), and
+`OMOBA_AUTOJOIN` (`<class>:<avatar|->:<team>[:<sprite-id>]`). Validate the
+offline character/presentation contract with
+`python3 scripts/validate_sprite_assets.py --self-test` and the tiled-world
+contract with `python3 scripts/validate_world2d_assets.py --self-test`.
+`python3 scripts/validate_2d_readability.py --json` additionally checks the
+occupied (non-transparent) pixels at default zoom and maximum zoom-out.
 
 Do not rely on tribal knowledge for ports or addresses: use the tables in `RUNBOOK.md` (`SERVER_ADDR`, `GAME_SERVER_ADDR`).
 
@@ -83,18 +93,19 @@ Do not rely on tribal knowledge for ports or addresses: use the tables in `RUNBO
 
 | Input | Action |
 | --- | --- |
-| **W A S D** | Move camera when camera is unlocked (see below) |
-| **Mouse** | Look around when camera is unlocked |
-| **Mouse wheel** | Zoom when camera is locked |
-| **Right mouse** (hold) | Lock cursor for camera look; release to unlock |
-| **Alt** or **right click** (toggle) | Lock / unlock camera follow mode |
-| **Space** | Clear minimap camera focus override (when applicable) |
+| **Arrow keys** (2D) | Pan the orthographic camera while follow is unlocked |
+| **Mouse wheel** | Zoom the active camera; 2D zoom is clamped to the map |
+| **Y** | Toggle hero follow/free camera; a minimap focus returns directly to the hero |
+| **Space** | Restore hero follow and clear a minimap focus override |
+| **Alt**, **right click**, **W A S D / mouse look** (3D only) | Legacy free-camera toggle and movement |
 | Team / character UI | Click team and character before play; server snapshot is authoritative |
+| **Click/tap ground** | Move the hero on desktop or touch devices |
+| **Click/tap hostile** | Select it and use Q; the hero approaches into range automatically |
 | **Tab** | Select nearest enemy target |
-| **Middle mouse** | Select target under cursor on the ground plane |
+| **Middle mouse** | Select a target without immediately attacking |
 | **Backspace** | Clear target |
-| **Q** | Cast at selected target (when match is running) |
-| On-screen **skill** button | Same as cast (when match is running) |
+| **Q / W / E / R** | Cast that class ability at the selected target |
+| On-screen **skill** button | Touch/click alternative to Q/W/E/R |
 | **Esc** | Pause menu |
 
 Gameplay: lane map, minions, structures, combat, respawn, match phases (lobby → running → victory / rematch), and progression HUD as described in [docs/features.md](docs/features.md).
@@ -108,3 +119,13 @@ python3 scripts/verify_task_02_multiplayer_session_flow.py
 ```
 
 See the script header for prerequisites; it spawns its own server on `127.0.0.1:4010`.
+
+## UDP snapshot size
+
+Snapshots remain one JSON object per UDP datagram. The client and harness use
+65,536-byte receive storage and the server rejects a serialized snapshot above
+the legal IPv4 UDP payload ceiling of 65,507 bytes instead of sending a partial
+object. This removes the former 8,192-byte truncation/Serde EOF failure. Some
+hosts impose a smaller practical send limit (the current macOS test host
+reports `EMSGSIZE` above 9,216 bytes), so snapshot growth beyond that point
+requires a separately designed payload-reduction or framing change.

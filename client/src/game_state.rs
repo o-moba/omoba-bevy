@@ -105,8 +105,7 @@ fn update_game_state_ui(
         GameState::Lobby | GameState::Forming { .. } | GameState::Starting { .. } => {
             // Before the local join is committed the select screen is up;
             // keep the lobby overlay hidden so it never obscures that flow.
-            match matchmaking_status_text(&game_state.state, client_session.join_flow_committed)
-            {
+            match matchmaking_status_text(&game_state.state, client_session.join_flow_committed) {
                 Some(text) => {
                     *visibility = Visibility::Visible;
                     *background = BackgroundColor(LOBBY_COLOR);
@@ -249,7 +248,10 @@ mod tests {
             true,
         )
         .unwrap();
-        assert!(forming.contains("3/10"), "forming shows progress: {forming}");
+        assert!(
+            forming.contains("3/10"),
+            "forming shows progress: {forming}"
+        );
         let starting =
             matchmaking_status_text(&GameState::Starting { countdown_ms: 2400 }, true).unwrap();
         assert!(

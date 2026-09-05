@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use crate::player::{PLAYER_SIZE, PLAYER_SPEED};
+use crate::sprite::PlayerVisualMode;
 use crate::team::Team;
 
 pub const TARGET_BASE_RUN_TIME_SECONDS: f32 = 45.0;
@@ -12,6 +13,9 @@ pub(crate) const BASE_PAD_HEIGHT: f32 = 0.7;
 /// server keeps a flat ground plane, only the rendered height changes).
 pub(crate) const PAD_RAMP_LENGTH: f32 = 6.0;
 const PAD_RAMP_THICKNESS: f32 = 0.12;
+/// Blocks whose center is within this distance of a neutral-camp or
+/// boss-pit anchor get no decorative box (the creature must be visible).
+const JUNGLE_BLOCK_CLEARANCE: f32 = 10.0;
 const BASE_EDGE_MARGIN: f32 = 6.0;
 const PLAYER_SPAWN_OFFSET: f32 = 7.0;
 pub(crate) const LANE_WIDTH: f32 = 12.0;
@@ -214,6 +218,33 @@ impl MapLayout {
             Vec2::new(-inner, -outer),
         ]
     }
+
+    /// XZ anchors of the two raid-boss pits
+    /// (mirrors `boss_blueprints` in server/src/neutrals.rs; the boss pit
+    /// fracs equal the jungle fracs, see server/src/balance.rs).
+    pub(crate) fn boss_pit_centers(self) -> [Vec2; 2] {
+        let map_size = self.size().x;
+        let outer = map_size * JUNGLE_MAP_OUTER_FRAC;
+        let inner = map_size * JUNGLE_MAP_INNER_FRAC;
+        [Vec2::new(inner, -outer), Vec2::new(-inner, outer)]
+    }
+
+    /// Jungle blocks that actually get a decorative box: blocks hosting a
+    /// neutral camp or a boss pit are skipped so the creatures stand in
+    /// open clearings instead of being entombed inside the geometry.
+    pub(crate) fn decorative_jungle_block_centers(self) -> Vec<Vec2> {
+        let camps = self.camp_centers();
+        let pits = self.boss_pit_centers();
+        self.jungle_block_centers()
+            .into_iter()
+            .filter(|center| {
+                camps
+                    .iter()
+                    .chain(pits.iter())
+                    .all(|anchor| center.distance(*anchor) > JUNGLE_BLOCK_CLEARANCE)
+            })
+            .collect()
+    }
 }
 
 pub struct MapsPlugin;
@@ -221,13 +252,27 @@ pub struct MapsPlugin;
 impl Plugin for MapsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MapLayout>()
-            .add_systems(Startup, setup_moba_map);
+            .add_systems(Startup, setup_moba_map)
+            .add_systems(Update, apply_map_visual_mode);
     }
+}
+
+#[derive(Resource)]
+struct MapPresentationMaterials {
+    terrain: Handle<StandardMaterial>,
+    lane: Handle<StandardMaterial>,
+    river: Handle<StandardMaterial>,
+    home_base: Handle<StandardMaterial>,
+    away_base: Handle<StandardMaterial>,
+    prop: Handle<StandardMaterial>,
+    arena_texture: Handle<Image>,
 }
 
 fn setup_moba_map(
     mut commands: Commands,
     layout: Res<MapLayout>,
+    visual_mode: Res<PlayerVisualMode>,
+    asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -241,36 +286,84 @@ fn setup_moba_map(
         PLAYER_SPEED
     );
 
+    let is_2d = *visual_mode == PlayerVisualMode::Sprite2d;
+    // The genuine 2D world is owned by `World2dPlugin`; none of the legacy
+    // Mesh3d arena is spawned into a sprite2d session.
+    if is_2d {
+        return;
+    }
+    let arena_texture = asset_server.load("presentation2d/arena.png");
     let terrain_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.08, 0.22, 0.10),
+        base_color: if is_2d {
+            Color::srgb(0.20, 0.30, 0.25)
+        } else {
+            Color::srgb(0.08, 0.22, 0.10)
+        },
+        base_color_texture: is_2d.then(|| arena_texture.clone()),
+        unlit: is_2d,
         perceptual_roughness: 0.95,
         ..default()
     });
     let lane_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.38, 0.34, 0.28),
+        base_color: if is_2d {
+            Color::srgb(0.48, 0.42, 0.32)
+        } else {
+            Color::srgb(0.38, 0.34, 0.28)
+        },
+        unlit: is_2d,
         perceptual_roughness: 0.8,
         ..default()
     });
     let river_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.10, 0.22, 0.40),
+        base_color: if is_2d {
+            Color::srgb(0.08, 0.28, 0.36)
+        } else {
+            Color::srgb(0.10, 0.22, 0.40)
+        },
+        unlit: is_2d,
         metallic: 0.15,
         perceptual_roughness: 0.2,
         ..default()
     });
     let home_base_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.12, 0.35, 0.62),
+        base_color: if is_2d {
+            Color::srgb(0.10, 0.62, 0.68)
+        } else {
+            Color::srgb(0.12, 0.35, 0.62)
+        },
+        unlit: is_2d,
         perceptual_roughness: 0.75,
         ..default()
     });
     let away_base_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.58, 0.18, 0.18),
+        base_color: if is_2d {
+            Color::srgb(0.78, 0.22, 0.28)
+        } else {
+            Color::srgb(0.58, 0.18, 0.18)
+        },
+        unlit: is_2d,
         perceptual_roughness: 0.75,
         ..default()
     });
     let prop_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.18, 0.26, 0.16),
+        base_color: if is_2d {
+            Color::srgb(0.16, 0.25, 0.22)
+        } else {
+            Color::srgb(0.18, 0.26, 0.16)
+        },
+        unlit: is_2d,
         perceptual_roughness: 0.9,
         ..default()
+    });
+
+    commands.insert_resource(MapPresentationMaterials {
+        terrain: terrain_material.clone(),
+        lane: lane_material.clone(),
+        river: river_material.clone(),
+        home_base: home_base_material.clone(),
+        away_base: away_base_material.clone(),
+        prop: prop_material.clone(),
+        arena_texture,
     });
 
     commands.spawn((
@@ -361,7 +454,14 @@ fn setup_moba_map(
         "AwayBasePad",
     );
 
-    for (idx, center) in layout.jungle_block_centers().iter().copied().enumerate() {
+    // Camp/boss-hosting blocks are skipped: those creatures must be visible
+    // in open clearings, not entombed inside decorative boxes.
+    for (idx, center) in layout
+        .decorative_jungle_block_centers()
+        .iter()
+        .copied()
+        .enumerate()
+    {
         spawn_box(
             &mut commands,
             &mut meshes,
@@ -404,6 +504,64 @@ fn setup_moba_map(
         Vec3::new(2.0, 3.0, map_size.y),
         "EastWall",
     );
+}
+
+fn apply_map_visual_mode(
+    mode: Res<PlayerVisualMode>,
+    handles: Option<Res<MapPresentationMaterials>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut previous: Local<Option<PlayerVisualMode>>,
+) {
+    if previous.is_some_and(|previous| previous == *mode) {
+        return;
+    }
+    *previous = Some(*mode);
+    let Some(handles) = handles else {
+        return;
+    };
+    let is_2d = *mode == PlayerVisualMode::Sprite2d;
+
+    let updates = [
+        (
+            &handles.terrain,
+            Color::srgb(0.08, 0.22, 0.10),
+            Color::srgb(0.20, 0.30, 0.25),
+        ),
+        (
+            &handles.lane,
+            Color::srgb(0.38, 0.34, 0.28),
+            Color::srgb(0.48, 0.42, 0.32),
+        ),
+        (
+            &handles.river,
+            Color::srgb(0.10, 0.22, 0.40),
+            Color::srgb(0.08, 0.28, 0.36),
+        ),
+        (
+            &handles.home_base,
+            Color::srgb(0.12, 0.35, 0.62),
+            Color::srgb(0.10, 0.62, 0.68),
+        ),
+        (
+            &handles.away_base,
+            Color::srgb(0.58, 0.18, 0.18),
+            Color::srgb(0.78, 0.22, 0.28),
+        ),
+        (
+            &handles.prop,
+            Color::srgb(0.18, 0.26, 0.16),
+            Color::srgb(0.16, 0.25, 0.22),
+        ),
+    ];
+    for (handle, color_3d, color_2d) in updates {
+        if let Some(material) = materials.get_mut(handle) {
+            material.base_color = if is_2d { color_2d } else { color_3d };
+            material.unlit = is_2d;
+        }
+    }
+    if let Some(terrain) = materials.get_mut(&handles.terrain) {
+        terrain.base_color_texture = is_2d.then(|| handles.arena_texture.clone());
+    }
 }
 
 fn spawn_lane_polyline(
@@ -464,10 +622,30 @@ fn spawn_pad_ramps(
     let z_mesh = meshes.add(Mesh::from(Cuboid::new(span, PAD_RAMP_THICKNESS, slope_len)));
 
     let ramps = [
-        (Vec3::new(mid, 0.0, 0.0), Quat::from_rotation_z(-angle), &x_mesh, "East"),
-        (Vec3::new(-mid, 0.0, 0.0), Quat::from_rotation_z(angle), &x_mesh, "West"),
-        (Vec3::new(0.0, 0.0, mid), Quat::from_rotation_x(angle), &z_mesh, "South"),
-        (Vec3::new(0.0, 0.0, -mid), Quat::from_rotation_x(-angle), &z_mesh, "North"),
+        (
+            Vec3::new(mid, 0.0, 0.0),
+            Quat::from_rotation_z(-angle),
+            &x_mesh,
+            "East",
+        ),
+        (
+            Vec3::new(-mid, 0.0, 0.0),
+            Quat::from_rotation_z(angle),
+            &x_mesh,
+            "West",
+        ),
+        (
+            Vec3::new(0.0, 0.0, mid),
+            Quat::from_rotation_x(angle),
+            &z_mesh,
+            "South",
+        ),
+        (
+            Vec3::new(0.0, 0.0, -mid),
+            Quat::from_rotation_x(-angle),
+            &z_mesh,
+            "North",
+        ),
     ];
     for (offset, rotation, mesh, side) in ramps {
         commands.spawn((
@@ -552,7 +730,12 @@ mod tests {
         let mid = layout.terrain_height(home.x + half + PAD_RAMP_LENGTH * 0.5, home.z);
         assert!((mid - BASE_PAD_HEIGHT * 0.5).abs() < EPSILON);
         // Ramp end: ground level (C0-continuous with open ground).
-        assert!(layout.terrain_height(home.x + half + PAD_RAMP_LENGTH, home.z).abs() < EPSILON);
+        assert!(
+            layout
+                .terrain_height(home.x + half + PAD_RAMP_LENGTH, home.z)
+                .abs()
+                < EPSILON
+        );
         // No step anywhere along the walk-off line.
         let mut previous = layout.terrain_height(home.x, home.z);
         let steps = 200;
@@ -561,7 +744,8 @@ mod tests {
             let x = home.x + total * step as f32 / steps as f32;
             let current = layout.terrain_height(x, home.z);
             assert!(
-                (current - previous).abs() < BASE_PAD_HEIGHT * total / PAD_RAMP_LENGTH / steps as f32 + EPSILON,
+                (current - previous).abs()
+                    < BASE_PAD_HEIGHT * total / PAD_RAMP_LENGTH / steps as f32 + EPSILON,
                 "terrain must not step discontinuously"
             );
             previous = current;
@@ -584,6 +768,31 @@ mod tests {
             home.z + half + PAD_RAMP_LENGTH + 0.1,
         );
         assert!(beyond.abs() < EPSILON);
+    }
+
+    #[test]
+    fn no_decorative_block_entombs_a_camp_or_boss() {
+        let layout = MapLayout::default();
+        let spawned = layout.decorative_jungle_block_centers();
+        let anchors: Vec<Vec2> = layout
+            .camp_centers()
+            .into_iter()
+            .chain(layout.boss_pit_centers())
+            .collect();
+        for anchor in &anchors {
+            for block in &spawned {
+                assert!(
+                    block.distance(*anchor) > JUNGLE_BLOCK_CLEARANCE,
+                    "block at {block:?} would entomb the creature at {anchor:?}"
+                );
+            }
+        }
+        // Exactly the 5 non-hosting blocks remain (3 camps + 2 boss pits
+        // each claim one of the 10 block slots).
+        assert_eq!(
+            spawned.len(),
+            layout.jungle_block_centers().len() - anchors.len()
+        );
     }
 
     #[test]

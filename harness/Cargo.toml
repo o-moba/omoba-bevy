@@ -8,6 +8,7 @@ description = "Headless gameplay test harness that drives the real UDP server wi
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+shared = { path = "../shared" }
 
 [lints]
 workspace = true
