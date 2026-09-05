@@ -8,7 +8,7 @@ macOS ARM64 host is tested; no Windows/Linux distribution claim is made.
 
 ## Build and launch
 
-Python 3.11+ and the locked Rust toolchain/dependencies are build prerequisites.
+Python 3.9+ and the locked Rust toolchain/dependencies are build prerequisites.
 No Python packages are required. From a checkout:
 
 ```sh
