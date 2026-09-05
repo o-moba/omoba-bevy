@@ -33,12 +33,20 @@ pub struct Bot {
     my_id: Option<u64>,
     /// Reusable receive buffer, allocated once instead of per `recv` call.
     recv_buf: Vec<u8>,
+    assembler: shared::transport::SnapshotAssembler,
+    order: shared::protocol::SnapshotOrder,
+    framed: bool,
 }
 
 impl Bot {
     /// Connects a new bot to the given server address.
     pub fn connect(server_addr: SocketAddr) -> Self {
-        let socket = UdpSocket::bind("127.0.0.1:0").expect("bot failed to bind a loopback socket");
+        let socket = UdpSocket::bind(if server_addr.is_ipv4() {
+            "0.0.0.0:0"
+        } else {
+            "[::]:0"
+        })
+        .expect("bot failed to bind a socket");
         socket
             .connect(server_addr)
             .expect("bot failed to connect to the server address");
@@ -49,7 +57,32 @@ impl Bot {
             socket,
             my_id: None,
             recv_buf: vec![0u8; DATAGRAM_RECEIVE_CAPACITY],
+            assembler: Default::default(),
+            order: Default::default(),
+            framed: false,
         }
+    }
+
+    /// Uses the current ordered, MTU-safe snapshot protocol. Legacy connect
+    /// remains available for compatibility and host datagram-budget probes.
+    pub fn connect_framed(server_addr: SocketAddr) -> Self {
+        let mut bot = Self::connect(server_addr);
+        bot.framed = true;
+        bot.ping();
+        bot
+    }
+
+    fn decode_received(&mut self, len: usize) -> Option<ServerPacket> {
+        let bytes = self
+            .assembler
+            .push(&self.recv_buf[..len], Instant::now())
+            .ok()??;
+        let packet: ServerPacket = serde_json::from_slice(&bytes).ok()?;
+        if (self.framed || packet.meta().protocol_version != 0) && !self.order.accept(packet.meta())
+        {
+            return None;
+        }
+        Some(packet)
     }
 
     // --- Outbound packet helpers -------------------------------------------
@@ -141,7 +174,13 @@ impl Bot {
 
     /// Sends a keep-alive ping (also registers the bot with the server).
     pub fn ping(&self) {
-        self.send(&ClientPacket::Ping);
+        if self.framed {
+            self.send(&ClientPacket::Hello {
+                protocol_version: shared::protocol::PROTOCOL_VERSION,
+            });
+        } else {
+            self.send(&ClientPacket::Ping);
+        }
     }
 
     // --- Inbound snapshot helpers ------------------------------------------
@@ -178,9 +217,7 @@ impl Bot {
         loop {
             match self.socket.recv(&mut self.recv_buf) {
                 Ok(len) => {
-                    if let Ok(packet) =
-                        serde_json::from_slice::<ServerPacket>(&self.recv_buf[..len])
-                    {
+                    if let Some(packet) = self.decode_received(len) {
                         latest = packet;
                     }
                 }
@@ -194,7 +231,7 @@ impl Bot {
             .set_nonblocking(false)
             .expect("bot failed to restore blocking socket mode after draining");
 
-        self.my_id.get_or_insert(latest.your_id());
+        self.my_id = Some(latest.your_id());
         Some(latest)
     }
 
@@ -207,9 +244,7 @@ impl Bot {
             }
             match self.socket.recv(&mut self.recv_buf) {
                 Ok(len) => {
-                    if let Ok(packet) =
-                        serde_json::from_slice::<ServerPacket>(&self.recv_buf[..len])
-                    {
+                    if let Some(packet) = self.decode_received(len) {
                         return Some(packet);
                     }
                     // Unknown/garbage datagram: keep polling.

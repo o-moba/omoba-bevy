@@ -6,7 +6,10 @@
 //! selected. Picking a team commits the join (class + avatar + team in one
 //! packet).
 
-use bevy::prelude::*;
+use bevy::{
+    input::mouse::{MouseScrollUnit, MouseWheel},
+    prelude::*,
+};
 use serde::{Deserialize, Serialize};
 use shared::{HeroClass, avatar_roster};
 use std::collections::HashMap;
@@ -15,7 +18,7 @@ use crate::net::{ClientConnectionState, ClientSession, NetworkCommand, SessionUi
 use crate::sprite::{PlayerVisualMode, SpriteVisualAssets};
 pub use ekza_bevy_sdk::EkzaCharacter as CharacterChoice;
 
-const TEAM_BUTTON_SIZE: f32 = 110.0;
+const TEAM_BUTTON_SIZE: f32 = 64.0;
 const TEAM_BUTTON_GAP: f32 = 28.0;
 const CLASS_BUTTON_WIDTH: f32 = 190.0;
 const CLASS_BUTTON_HEIGHT: f32 = 60.0;
@@ -105,7 +108,7 @@ impl Plugin for TeamSelectPlugin {
                     .after(crate::persistence::load_persistent_client_settings)
                     .after(crate::sprite::load_sprite_visual_assets),
             )
-            .add_systems(Update, team_select_ui_system)
+            .add_systems(Update, (team_select_ui_system, scroll_avatar_roster))
             .add_systems(Update, attach_avatar_thumbnails)
             .add_systems(Update, autojoin_from_env);
     }
@@ -135,9 +138,6 @@ struct AvatarSelectButton {
 struct AvatarThumbnailSlot {
     slug: String,
 }
-
-#[derive(Component)]
-struct VisualModeButton(PlayerVisualMode);
 
 #[derive(Component)]
 struct ModelAvatarGrid;
@@ -186,7 +186,11 @@ fn setup_team_select_ui(
     mut commands: Commands,
 ) {
     for avatar in avatar_roster() {
-        if let Some(thumbnail) = avatar.thumbnail.as_deref() {
+        if let Some(thumbnail) = avatar
+            .thumbnail
+            .as_deref()
+            .filter(|_| *visual_mode == PlayerVisualMode::Models3d)
+        {
             thumbnails.0.insert(
                 avatar.slug.clone(),
                 asset_server.load(format!("avatars/{thumbnail}")),
@@ -202,9 +206,8 @@ pub fn spawn_team_select_ui(
     visual_mode: PlayerVisualMode,
     sprite_assets: &SpriteVisualAssets,
 ) {
-    let ui_frame = sprite_assets.ui_frame();
     let sprite_grid = sprite_grid_layout(shared::sprite_character_roster().len());
-    commands
+    let root = commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
@@ -215,17 +218,12 @@ pub fn spawn_team_select_ui(
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(14.0),
+                row_gap: Val::Px(10.0),
+                padding: UiRect::all(Val::Px(18.0)),
                 ..default()
             },
             BackgroundColor(TEAM_OVERLAY_COLOR),
-            ImageNode::from_atlas_image(
-                ui_frame.0,
-                TextureAtlas {
-                    layout: ui_frame.1,
-                    index: 0,
-                },
-            ),
+            ZIndex(15),
             TeamSelectRoot,
             Name::new("TeamSelectOverlay"),
         ))
@@ -249,36 +247,21 @@ pub fn spawn_team_select_ui(
 
             spawn_section_title(parent, "Choose Avatar", "AvatarSelectTitle");
 
-            parent
-                .spawn((
-                    Node {
-                        flex_direction: FlexDirection::Row,
-                        column_gap: Val::Px(CLASS_BUTTON_GAP),
-                        ..default()
-                    },
-                    Name::new("PlayerVisualModeRow"),
-                ))
-                .with_children(|row| {
-                    spawn_visual_mode_button(
-                        row,
-                        PlayerVisualMode::Models3d,
-                        "3D Models",
-                        visual_mode == PlayerVisualMode::Models3d,
-                    );
-                    spawn_visual_mode_button(
-                        row,
-                        PlayerVisualMode::Sprite2d,
-                        "2D Sprites",
-                        visual_mode == PlayerVisualMode::Sprite2d,
-                    );
-                });
+            parent.spawn((
+                Text::new(format!("Renderer: {} (fixed for this session) · Scroll avatars with wheel / Page Up / Page Down", visual_mode.id())),
+                TextFont { font_size: 15.0, ..default() }, TextColor::WHITE,
+                Name::new("RendererStatus"),
+            ));
 
             parent
                 .spawn((
                     Node {
-                        width: Val::Px(
-                            AVATAR_GRID_COLUMNS as f32 * (AVATAR_BUTTON_WIDTH + AVATAR_GRID_GAP),
-                        ),
+                        display: if visual_mode == PlayerVisualMode::Models3d { Display::Flex } else { Display::None },
+                        width: Val::Percent(92.0),
+                        max_width: Val::Px(AVATAR_GRID_COLUMNS as f32 * (AVATAR_BUTTON_WIDTH + AVATAR_GRID_GAP)),
+                        max_height: Val::Vh(32.0),
+                        overflow: Overflow::scroll_y(),
+                        flex_shrink: 0.0,
                         flex_direction: FlexDirection::Row,
                         flex_wrap: FlexWrap::Wrap,
                         justify_content: JustifyContent::Center,
@@ -291,11 +274,12 @@ pub fn spawn_team_select_ui(
                     } else {
                         Visibility::Hidden
                     },
+                    ScrollPosition::default(),
                     ModelAvatarGrid,
                     Name::new("AvatarGrid"),
                 ))
                 .with_children(|grid| {
-                    for avatar in avatar_roster() {
+                    for avatar in avatar_roster().iter().filter(|_| visual_mode == PlayerVisualMode::Models3d) {
                         spawn_avatar_button(
                             grid,
                             &avatar.slug,
@@ -308,6 +292,10 @@ pub fn spawn_team_select_ui(
             parent
                 .spawn((
                     Node {
+                        display: if visual_mode == PlayerVisualMode::Sprite2d { Display::Flex } else { Display::None },
+                        max_height: Val::Vh(32.0),
+                        overflow: Overflow::scroll_y(),
+                        flex_shrink: 0.0,
                         width: Val::Percent(SPRITE_GRID_WIDTH_PERCENT),
                         max_width: Val::Px(sprite_grid.max_width),
                         flex_direction: FlexDirection::Row,
@@ -322,11 +310,12 @@ pub fn spawn_team_select_ui(
                     } else {
                         Visibility::Hidden
                     },
+                    ScrollPosition::default(),
                     SpriteAvatarGrid,
                     Name::new("SpriteCharacterGrid"),
                 ))
                 .with_children(|grid| {
-                    for (index, character) in shared::sprite_character_roster().iter().enumerate() {
+                    for (index, character) in shared::sprite_character_roster().iter().enumerate().filter(|_| visual_mode == PlayerVisualMode::Sprite2d) {
                         spawn_sprite_button(
                             grid,
                             character,
@@ -361,46 +350,50 @@ pub fn spawn_team_select_ui(
                 TextColor(Color::srgba(0.78, 0.80, 0.86, 1.0)),
                 Name::new("TeamSelectHint"),
             ));
-        });
+        }).id();
+    if visual_mode == PlayerVisualMode::Sprite2d {
+        let (image, layout) = sprite_assets.ui_frame();
+        commands.entity(root).insert(ImageNode::from_atlas_image(
+            image,
+            TextureAtlas { layout, index: 0 },
+        ));
+    }
 }
 
-fn spawn_visual_mode_button(
-    row: &mut ChildSpawnerCommands,
-    mode: PlayerVisualMode,
-    label: &str,
-    selected: bool,
+fn scroll_avatar_roster(
+    mut wheel: MessageReader<MouseWheel>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut grids: Query<
+        (&Node, &ComputedNode, &mut ScrollPosition),
+        Or<(With<ModelAvatarGrid>, With<SpriteAvatarGrid>)>,
+    >,
 ) {
-    row.spawn((
-        Button,
-        Node {
-            width: Val::Px(150.0),
-            height: Val::Px(38.0),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            ..default()
-        },
-        BackgroundColor(if selected {
-            SELECT_BUTTON_SELECTED_COLOR
-        } else {
-            SELECT_BUTTON_COLOR
-        }),
-        VisualModeButton(mode),
-        Name::new(format!("VisualModeButton-{}", mode.id())),
-    ))
-    .with_children(|button| {
-        button.spawn((
-            Text::new(if selected {
-                label.to_owned()
-            } else {
-                format!("{label} · restart")
-            }),
-            TextFont {
-                font_size: 15.0,
-                ..default()
-            },
-            TextColor::WHITE,
-        ));
-    });
+    let mut delta = wheel
+        .read()
+        .map(|event| {
+            -event.y
+                * if event.unit == MouseScrollUnit::Line {
+                    48.0
+                } else {
+                    1.0
+                }
+        })
+        .sum::<f32>();
+    if keys.just_pressed(KeyCode::PageDown) {
+        delta += 180.0;
+    }
+    if keys.just_pressed(KeyCode::PageUp) {
+        delta -= 180.0;
+    }
+    for (node, computed, mut position) in &mut grids {
+        if node.display == Display::None {
+            continue;
+        }
+        let maximum = ((computed.content_size().y - computed.size().y)
+            * computed.inverse_scale_factor())
+        .max(0.0);
+        position.y = (position.y + delta).clamp(0.0, maximum);
+    }
 }
 
 fn spawn_sprite_button(
@@ -414,6 +407,7 @@ fn spawn_sprite_button(
         Node {
             width: Val::Px(AVATAR_BUTTON_WIDTH),
             height: Val::Px(AVATAR_BUTTON_HEIGHT),
+            flex_shrink: 0.0,
             flex_direction: FlexDirection::Column,
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
@@ -521,6 +515,7 @@ fn spawn_avatar_button(
         Node {
             width: Val::Px(AVATAR_BUTTON_WIDTH),
             height: Val::Px(AVATAR_BUTTON_HEIGHT),
+            flex_shrink: 0.0,
             flex_direction: FlexDirection::Column,
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
@@ -582,7 +577,7 @@ fn spawn_team_button(row: &mut ChildSpawnerCommands, team: Team, name: &str) {
     row.spawn((
         Button,
         Node {
-            width: Val::Px(TEAM_BUTTON_SIZE),
+            width: Val::Px(180.0),
             height: Val::Px(TEAM_BUTTON_SIZE),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
@@ -594,7 +589,7 @@ fn spawn_team_button(row: &mut ChildSpawnerCommands, team: Team, name: &str) {
     ))
     .with_children(|button| {
         button.spawn((
-            Text::new(team.as_str()),
+            Text::new(format!("Join {}", team.as_str())),
             TextFont {
                 font_size: 26.0,
                 ..default()
@@ -609,7 +604,6 @@ fn team_select_ui_system(
     mut commands: Commands,
     client_session: Res<ClientSession>,
     mut selection: ResMut<TeamSelection>,
-    visual_mode: Res<PlayerVisualMode>,
     mut interaction_sets: ParamSet<(
         Query<
             (&Interaction, &TeamSelectButton, &mut BackgroundColor),
@@ -621,10 +615,6 @@ fn team_select_ui_system(
         >,
         Query<
             (&Interaction, &AvatarSelectButton, &mut BackgroundColor),
-            (Changed<Interaction>, With<Button>),
-        >,
-        Query<
-            (&Interaction, &VisualModeButton, &mut BackgroundColor),
             (Changed<Interaction>, With<Button>),
         >,
         Query<
@@ -704,26 +694,8 @@ fn team_select_ui_system(
         }
     }
 
-    for (interaction, button, mut color) in interaction_sets.p3().iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                if *visual_mode != button.0 {
-                    warn!(
-                        "Renderer changes are applied at startup; restart with OMOBA_PLAYER_VISUAL_MODE={} (or use make game2d)",
-                        button.0.id()
-                    );
-                }
-            }
-            Interaction::Hovered if *visual_mode != button.0 => {
-                *color = SELECT_BUTTON_HOVER_COLOR.into()
-            }
-            Interaction::None if *visual_mode != button.0 => *color = SELECT_BUTTON_COLOR.into(),
-            _ => {}
-        }
-    }
-
     let mut sprite_changed = false;
-    for (interaction, button, mut color) in interaction_sets.p4().iter_mut() {
+    for (interaction, button, mut color) in interaction_sets.p3().iter_mut() {
         let selected = selection.sprite_character == button.id;
         match *interaction {
             Interaction::Pressed => {
@@ -890,6 +862,64 @@ mod tests {
         assert_eq!(
             selection.sprite_character,
             shared::DEFAULT_SPRITE_CHARACTER_ID
+        );
+    }
+
+    #[test]
+    fn model_join_ui_excludes_inactive_layout_and_scrolls_all_shipped_choices() {
+        let mut app = App::new();
+        app.add_message::<MouseWheel>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_systems(Startup, |mut commands: Commands| {
+                spawn_team_select_ui(
+                    &mut commands,
+                    &TeamSelection::default(),
+                    PlayerVisualMode::Models3d,
+                    &SpriteVisualAssets::default(),
+                )
+            })
+            .add_systems(Update, scroll_avatar_roster);
+        app.update();
+        let mut model = app
+            .world_mut()
+            .query_filtered::<(Entity, &Node), With<ModelAvatarGrid>>();
+        let (grid, node) = model.single(app.world()).unwrap();
+        assert_eq!(node.display, Display::Flex);
+        assert_eq!(node.max_height, Val::Vh(32.0));
+        assert_eq!(node.overflow.y, OverflowAxis::Scroll);
+        let mut inactive = app
+            .world_mut()
+            .query_filtered::<&Node, With<SpriteAvatarGrid>>();
+        assert_eq!(inactive.single(app.world()).unwrap().display, Display::None);
+        let mut choices = app.world_mut().query::<&AvatarSelectButton>();
+        assert_eq!(choices.iter(app.world()).count(), avatar_roster().len());
+        let mut sprite_choices = app.world_mut().query::<&SpriteSelectButton>();
+        assert_eq!(sprite_choices.iter(app.world()).count(), 0);
+        let mut teams = app.world_mut().query::<&TeamSelectButton>();
+        assert_eq!(teams.iter(app.world()).count(), 2);
+        // A 720p / 768p roster viewport is bounded while the complete content scrolls.
+        for height in [720.0, 768.0] {
+            app.world_mut().entity_mut(grid).insert(ComputedNode {
+                size: Vec2::new(672.0, height * 0.32),
+                content_size: Vec2::new(672.0, 700.0),
+                inverse_scale_factor: 1.0,
+                ..default()
+            });
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(KeyCode::PageDown);
+            app.update();
+            assert!(app.world().entity(grid).get::<ScrollPosition>().unwrap().y > 0.0);
+            assert!(
+                app.world().entity(grid).get::<ScrollPosition>().unwrap().y
+                    <= 700.0 - height * 0.32
+            );
+        }
+        let mut status = app.world_mut().query::<(&Name, Option<&Button>)>();
+        assert!(
+            status
+                .iter(app.world())
+                .any(|(name, button)| name.as_str() == "RendererStatus" && button.is_none())
         );
     }
 }

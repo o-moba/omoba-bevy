@@ -1,8 +1,21 @@
 # Feature Inventory
 
-Canonical version: `0.17.1`
+Canonical version: `0.18.0-rc.1`
 
 ## Current Playable Surface
+
+- **Native 3D release candidate (2026-09-05, iteration 02):** idempotent admission,
+  full-state reconnect, complete rematches, release roster/debug policy, bounded
+  framed UDP and ordered snapshots address the lifecycle/network audit findings.
+  Shared input/modal rules, intentional orbit, scrollable roster, visible hotbar
+  feedback, existing 3D action/death clips and non-color allegiance cues address
+  the input/presentation findings. Offline mode-scoped loading and the native
+  package remove developer-local runtime requirements. Protected bases, scenario
+  bot upgrades/sustain/tower support and match metrics support controlled sessions.
+  See the [current ledger](progress/2026-09-05-release-preparation.md) and
+  [package/test guide](progress/2026-09-05-release-test-guide.md). External release
+  gates remain blocked until actual evidence exists; the entries below describe
+  historical feature delivery and are superseded where the ledger says so.
 
 - **3D delivery and readiness audit (2026-09-05):** the locked SDK dependency,
   two offline slime minion models and 16-avatar shipped roster now survive a
@@ -43,8 +56,8 @@ Canonical version: `0.17.1`
   over-limit rejection. A real release 5v5 server test receives a complete,
   runtime-dependent snapshot satisfying `8192 < bytes <= 65507`, with 10
   players, 8 structures, and 18 minions. The measured macOS kernel send ceiling
-  remains 9,216 bytes; larger future snapshots need a separately scoped
-  payload-reduction/framing design.
+  remains 9,216 bytes; current protocol-1 clients now use ≤1200-byte framed datagrams; this
+  legacy whole-JSON path remains for compatibility scripts.
 
 - **Genuine full-2D world (TASK-FULL-2D-WORLD):** `sprite2d` is now a true
   orthographic XY renderer rather than a billboard layer over the 3D arena.

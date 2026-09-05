@@ -161,7 +161,10 @@ impl Plugin for Presentation2dPlugin {
         app.init_resource::<Presentation2dAssets>()
             .init_resource::<PreviousCombatStates>()
             .init_resource::<LivePresentationEffects>()
-            .add_systems(Startup, load_presentation_assets)
+            .add_systems(
+                Startup,
+                load_presentation_assets.after(crate::persistence::load_persistent_client_settings),
+            )
             .add_systems(Update, (emit_combat_effects, animate_effects).chain())
             // Snapshot owners and interpolation are produced in `Update`.
             // Reconcile presentation proxies afterwards, but before transform
@@ -183,10 +186,14 @@ impl Plugin for Presentation2dPlugin {
 }
 
 fn load_presentation_assets(
+    mode: Res<PlayerVisualMode>,
     mut assets: ResMut<Presentation2dAssets>,
     asset_server: Res<AssetServer>,
     mut atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
 ) {
+    if *mode != PlayerVisualMode::Sprite2d {
+        return;
+    }
     let manifest = match serde_json::from_str::<PresentationManifest>(PRESENTATION_MANIFEST) {
         Ok(manifest) if manifest.schema_version == 1 => manifest,
         Ok(manifest) => {
@@ -789,6 +796,28 @@ fn animate_effects(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn models3d_startup_does_not_request_optional_2d_presentation_assets() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(bevy::asset::AssetPlugin::default())
+            .init_asset::<Image>()
+            .init_asset::<TextureAtlasLayout>()
+            .insert_resource(PlayerVisualMode::Models3d)
+            .init_resource::<Presentation2dAssets>()
+            .add_systems(Startup, load_presentation_assets);
+        app.update();
+        let assets = app.world().resource::<Presentation2dAssets>();
+        assert!(assets.actors.is_empty());
+        assert!(assets.effects.is_empty());
+        assert_eq!(assets.actor_image, Handle::default());
+        assert_eq!(assets.effect_image, Handle::default());
+        assert!(
+            app.world()
+                .resource::<Assets<TextureAtlasLayout>>()
+                .is_empty()
+        );
+    }
 
     #[test]
     fn manifest_has_complete_actor_and_vfx_coverage() {

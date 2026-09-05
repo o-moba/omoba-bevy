@@ -449,15 +449,15 @@ def scenario_repeated_join(server: ServerHandle) -> ScenarioResult:
         updated = pump_until(
             [client],
             lambda snapshots: snapshots[0] is not None
-            and player_map(snapshots[0]).get(snapshots[0]["your_id"], {}).get("team") == "blue",
+            and snapshots[0].get("snapshot_tick", 0) > initial.get("snapshot_tick", 0),
             SNAPSHOT_WAIT_SECONDS,
-            "repeat join overwrite",
+            "authoritative snapshot after duplicate Join",
         )[0]
         assert updated is not None
-        expect_player_state(updated, player_id, "blue", "wang")
+        expect_player_state(updated, player_id, "green", "ipfs")
         return ScenarioResult(
             name="Repeated Join",
-            details=f"player {player_id} kept the same id and the last Join won for team/character",
+            details=f"player {player_id} retained its original identity and loadout after duplicate Join",
         )
     finally:
         client.close()

@@ -1,3 +1,6 @@
+use shared::protocol::{JoinRejection, PROTOCOL_VERSION, SnapshotMeta, SnapshotOrder};
+use shared::transport::SnapshotAssembler;
+
 use bevy::ecs::query::Or;
 use bevy::prelude::*;
 use bevy::scene::SceneRoot;
@@ -122,6 +125,12 @@ pub struct ClientSession {
     pub last_join: Option<CommittedJoin>,
     /// Auto-reconnect loop state (active after a teardown of a joined session).
     pub reconnect: ReconnectState,
+    admitted: bool,
+    join_last_sent: Option<Instant>,
+    join_attempts: u32,
+    join_error: Option<JoinRejection>,
+    join_exhausted: bool,
+    snapshot_order: SnapshotOrder,
 }
 
 impl Default for ClientSession {
@@ -135,6 +144,12 @@ impl Default for ClientSession {
             server_addr_display: String::new(),
             last_join: None,
             reconnect: ReconnectState::default(),
+            admitted: false,
+            join_last_sent: None,
+            join_attempts: 0,
+            join_error: None,
+            join_exhausted: false,
+            snapshot_order: SnapshotOrder::default(),
         }
     }
 }
@@ -181,6 +196,29 @@ fn should_attempt_reconnect(
 }
 
 impl ClientSession {
+    pub fn join_confirmed(&self) -> bool {
+        self.is_connected() && self.admitted
+    }
+
+    fn clear_join_attempt(&mut self) {
+        self.admitted = false;
+        self.join_last_sent = None;
+        self.join_attempts = 0;
+        self.join_error = None;
+        self.join_exhausted = false;
+    }
+
+    fn join_retry_due(&self, now: Instant) -> bool {
+        self.is_connected()
+            && self.last_join.is_some()
+            && !self.admitted
+            && self.join_error.is_none()
+            && !self.join_exhausted
+            && self
+                .join_last_sent
+                .is_none_or(|at| now.saturating_duration_since(at) >= T_RETRY)
+    }
+
     pub fn is_connected(&self) -> bool {
         self.state == ClientConnectionState::Connected
     }
@@ -190,7 +228,7 @@ pub struct NetworkingPlugin;
 
 /// Strict main-thread ordering for networking / snapshot / UI sync (Bevy 0.18: avoid `.after(fn)`).
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-enum ClientNetPipeline {
+pub(crate) enum ClientNetPipeline {
     SendLocalState,
     SendCommands,
     IngestSnapshot,
@@ -202,8 +240,31 @@ enum ClientNetPipeline {
     SyncConnectionUi,
 }
 
+/// Shared production scheduling contract, also used by the isolated ECS regression.
+pub(crate) fn configure_network_pipeline(app: &mut App) {
+    app.configure_sets(
+        Update,
+        (
+            // Resolve current authoritative state before reading modal/gameplay input.
+            // Commands created by those inputs leave in the same frame.
+            crate::input_context::InputContextSet::Modal
+                .after(ClientNetPipeline::InterpolateRemotePlayers),
+            ClientNetPipeline::SendLocalState.after(crate::input_context::InputContextSet::Actions),
+            ClientNetPipeline::SendCommands.after(ClientNetPipeline::SendLocalState),
+            ClientNetPipeline::ApplySnapshot.after(ClientNetPipeline::IngestSnapshot),
+            ClientNetPipeline::InterpolateNetEntities.after(ClientNetPipeline::ApplySnapshot),
+            ClientNetPipeline::InterpolateRemotePlayers
+                .after(ClientNetPipeline::InterpolateNetEntities),
+            ClientNetPipeline::SessionRetryInput.after(ClientNetPipeline::SendCommands),
+            ClientNetPipeline::SessionLifecycle.after(ClientNetPipeline::SessionRetryInput),
+            ClientNetPipeline::SyncConnectionUi.after(ClientNetPipeline::SessionLifecycle),
+        ),
+    );
+}
+
 impl Plugin for NetworkingPlugin {
     fn build(&self, app: &mut App) {
+        configure_network_pipeline(app);
         app.add_message::<NetworkCommand>()
             .add_message::<SessionUiCommand>()
             .init_resource::<NetworkState>()
@@ -221,22 +282,6 @@ impl Plugin for NetworkingPlugin {
                     setup_network_visual_assets,
                     start_networking.after(crate::persistence::load_persistent_client_settings),
                     setup_connection_status_ui,
-                ),
-            )
-            .configure_sets(
-                Update,
-                (
-                    ClientNetPipeline::SendCommands.after(ClientNetPipeline::SendLocalState),
-                    ClientNetPipeline::IngestSnapshot.after(ClientNetPipeline::SendCommands),
-                    ClientNetPipeline::ApplySnapshot.after(ClientNetPipeline::IngestSnapshot),
-                    ClientNetPipeline::InterpolateNetEntities
-                        .after(ClientNetPipeline::ApplySnapshot),
-                    ClientNetPipeline::InterpolateRemotePlayers
-                        .after(ClientNetPipeline::InterpolateNetEntities),
-                    ClientNetPipeline::SessionRetryInput
-                        .after(ClientNetPipeline::InterpolateRemotePlayers),
-                    ClientNetPipeline::SessionLifecycle.after(ClientNetPipeline::SessionRetryInput),
-                    ClientNetPipeline::SyncConnectionUi.after(ClientNetPipeline::SessionLifecycle),
                 ),
             )
             .add_systems(
@@ -270,7 +315,9 @@ impl Plugin for NetworkingPlugin {
             )
             .add_systems(
                 Update,
-                update_session_lifecycle.in_set(ClientNetPipeline::SessionLifecycle),
+                (update_session_lifecycle, retry_pending_join)
+                    .chain()
+                    .in_set(ClientNetPipeline::SessionLifecycle),
             )
             .add_systems(
                 Update,
@@ -350,6 +397,9 @@ pub enum NetworkCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ClientPacket {
+    Hello {
+        protocol_version: u16,
+    },
     Transform {
         x: f32,
         y: f32,
@@ -478,6 +528,8 @@ pub enum StructureKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StructureState {
+    #[serde(default)]
+    protected: bool,
     id: u64,
     kind: StructureKind,
     team: Team,
@@ -588,6 +640,10 @@ struct NeutralState {
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ServerPacket {
     Snapshot {
+        #[serde(flatten, default)]
+        meta: SnapshotMeta,
+        #[serde(default)]
+        join_error: Option<JoinRejection>,
         your_id: u64,
         players: Vec<PlayerState>,
         #[serde(default)]
@@ -629,6 +685,7 @@ pub enum GameState {
 
 #[derive(Resource, Default, Clone)]
 pub struct GameStateSnapshot {
+    pub meta: SnapshotMeta,
     pub state: GameState,
     pub rematch_in_secs: Option<u64>,
     /// Active boss team buffs replicated from the server.
@@ -663,6 +720,7 @@ struct PendingServerSnapshotFrame {
 }
 
 struct PendingSnapshotData {
+    meta: SnapshotMeta,
     wall_time: Instant,
     your_id: u64,
     players: Vec<PlayerState>,
@@ -753,6 +811,9 @@ pub struct NetworkStructureId(pub u64);
 
 #[derive(Component)]
 pub struct NetworkStructure;
+
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct NetworkStructureProtected(pub bool);
 
 #[derive(Component)]
 pub struct NetworkMinion;
@@ -908,10 +969,12 @@ fn spawn_network_transport(
     client_session: &mut ClientSession,
     server_addr: String,
 ) {
+    client_session.clear_join_attempt();
+    client_session.snapshot_order = SnapshotOrder::default();
     client_session.server_addr_display.clone_from(&server_addr);
     commands.insert_resource(ResolvedServerAddressForPrefs(server_addr.clone()));
     let (outgoing_tx, outgoing_rx) = unbounded::<ClientPacket>();
-    let (incoming_tx, incoming_rx) = unbounded::<ServerPacket>();
+    let (incoming_tx, incoming_rx) = crossbeam_channel::bounded::<ServerPacket>(8);
     let (signal_tx, signal_rx) = unbounded::<NetThreadSignal>();
 
     let addr_for_thread = server_addr;
@@ -960,6 +1023,7 @@ fn run_udp_client(
     }
     println!("UDP socket connected to {server_addr}; waiting for first snapshot");
 
+    let mut assembler = SnapshotAssembler::default();
     let mut recv_buf = vec![0_u8; SERVER_DATAGRAM_RECEIVE_CAPACITY];
     let mut last_heartbeat_at = Instant::now();
     let mut last_receive_error_log_at: Option<Instant> = None;
@@ -972,7 +1036,9 @@ fn run_udp_client(
 
     let _ = udp_try_send(
         &socket,
-        &ClientPacket::Ping,
+        &ClientPacket::Hello {
+            protocol_version: PROTOCOL_VERSION,
+        },
         &mut consecutive_send_errors,
         &mut transport_failure_reported,
         &signals,
@@ -996,9 +1062,12 @@ fn run_udp_client(
         }
 
         if last_heartbeat_at.elapsed() >= T_RETRY {
+            assembler.expire(Instant::now());
             udp_try_send(
                 &socket,
-                &ClientPacket::Ping,
+                &ClientPacket::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                },
                 &mut consecutive_send_errors,
                 &mut transport_failure_reported,
                 &signals,
@@ -1010,9 +1079,22 @@ fn run_udp_client(
             match socket.recv(&mut recv_buf) {
                 Ok(len) => {
                     consecutive_recv_errors = 0;
-                    match forward_complete_server_datagram(&recv_buf[..len], &incoming) {
-                        Ok(()) => {
-                            if !first_snapshot_received {
+                    let payload = match assembler.push(&recv_buf[..len], Instant::now()) {
+                        Ok(Some(payload)) => payload,
+                        Ok(None) => continue,
+                        Err(error) => {
+                            if last_decode_error_log_at
+                                .is_none_or(|at: Instant| at.elapsed() >= T_RETRY)
+                            {
+                                warn!("Snapshot frame rejected: {error}");
+                                last_decode_error_log_at = Some(Instant::now());
+                            }
+                            continue;
+                        }
+                    };
+                    match forward_complete_server_datagram(&payload, &incoming) {
+                        Ok(published) => {
+                            if published && !first_snapshot_received {
                                 println!(
                                     "First snapshot received from {server_addr}; connection is live"
                                 );
@@ -1072,10 +1154,18 @@ fn decode_server_packet(payload: &[u8]) -> Result<ServerPacket, serde_json::Erro
 fn forward_complete_server_datagram(
     payload: &[u8],
     incoming: &Sender<ServerPacket>,
-) -> Result<(), serde_json::Error> {
-    let packet = decode_server_packet(payload)?;
-    let _ = incoming.send(packet);
-    Ok(())
+) -> io::Result<bool> {
+    let packet = decode_server_packet(payload)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    match incoming.try_send(packet) {
+        Ok(()) => Ok(true),
+        // A stalled frame must not grow an unbounded snapshot queue.
+        Err(crossbeam_channel::TrySendError::Full(_)) => Ok(false),
+        Err(crossbeam_channel::TrySendError::Disconnected(_)) => Err(io::Error::new(
+            io::ErrorKind::BrokenPipe,
+            "snapshot receiver closed",
+        )),
+    }
 }
 
 fn send_packet(socket: &UdpSocket, packet: &ClientPacket) -> io::Result<()> {
@@ -1136,7 +1226,7 @@ fn send_local_state(
         return;
     };
 
-    if !client_session.is_connected() {
+    if !client_session.join_confirmed() {
         return;
     }
 
@@ -1181,7 +1271,7 @@ fn send_network_commands(
     for command in command_events.read() {
         match command {
             NetworkCommand::Cast { target, slot } => {
-                if !client_session.is_connected() {
+                if !client_session.join_confirmed() {
                     continue;
                 }
                 let _ = channels.outgoing.send(ClientPacket::Cast {
@@ -1196,9 +1286,10 @@ fn send_network_commands(
                 avatar,
                 sprite_character,
             } => {
-                if client_session.join_flow_committed {
+                if client_session.admitted {
                     continue;
                 }
+                client_session.clear_join_attempt();
                 client_session.join_flow_committed = true;
                 client_session.last_join = Some(CommittedJoin {
                     team: *team,
@@ -1207,23 +1298,16 @@ fn send_network_commands(
                     avatar: avatar.clone(),
                     sprite_character: sprite_character.clone(),
                 });
-                let _ = channels.outgoing.send(ClientPacket::Join {
-                    team: *team,
-                    character: *character,
-                    hero_class: *hero_class,
-                    avatar: avatar.clone(),
-                    sprite_character: sprite_character.clone(),
-                    session_id: Some(client_session_id.0.clone()),
-                });
+                send_join_attempt(&channels, &mut client_session, &client_session_id);
             }
             NetworkCommand::RequestRematch => {
-                if !client_session.is_connected() {
+                if !client_session.join_confirmed() {
                     continue;
                 }
                 let _ = channels.outgoing.send(ClientPacket::RequestRematch);
             }
             NetworkCommand::SetGodMode { enabled } => {
-                if !client_session.is_connected() {
+                if !client_session.join_confirmed() {
                     continue;
                 }
                 let _ = channels
@@ -1231,7 +1315,7 @@ fn send_network_commands(
                     .send(ClientPacket::SetGodMode { enabled: *enabled });
             }
             NetworkCommand::SetSpeedBoost { enabled } => {
-                if !client_session.is_connected() {
+                if !client_session.join_confirmed() {
                     continue;
                 }
                 let _ = channels
@@ -1239,7 +1323,7 @@ fn send_network_commands(
                     .send(ClientPacket::SetSpeedBoost { enabled: *enabled });
             }
             NetworkCommand::UpgradeSkill { slot } => {
-                if !client_session.is_connected() {
+                if !client_session.join_confirmed() {
                     continue;
                 }
                 let _ = channels
@@ -1247,6 +1331,48 @@ fn send_network_commands(
                     .send(ClientPacket::UpgradeSkill { slot: *slot });
             }
         }
+    }
+}
+
+fn retry_pending_join(
+    channels: Option<Res<NetworkChannels>>,
+    mut session: ResMut<ClientSession>,
+    identity: Res<ClientSessionId>,
+) {
+    if let Some(channels) = channels {
+        if session.join_retry_due(Instant::now()) {
+            send_join_attempt(&channels, &mut session, &identity);
+        }
+    }
+}
+
+const MAX_JOIN_ATTEMPTS: u32 = 15;
+
+fn send_join_attempt(
+    channels: &NetworkChannels,
+    session: &mut ClientSession,
+    session_id: &ClientSessionId,
+) {
+    let Some(join) = session.last_join.clone() else {
+        return;
+    };
+    if session.join_attempts >= MAX_JOIN_ATTEMPTS {
+        session.join_exhausted = true;
+        return;
+    }
+    let result = channels.outgoing.send(ClientPacket::Join {
+        team: join.team,
+        character: join.character,
+        hero_class: join.hero_class,
+        avatar: join.avatar,
+        sprite_character: join.sprite_character,
+        session_id: Some(session_id.0.clone()),
+    });
+    session.join_last_sent = Some(Instant::now());
+    session.join_attempts += 1;
+    session.join_flow_committed = true;
+    if result.is_err() {
+        session.join_exhausted = true;
     }
 }
 
@@ -1266,7 +1392,7 @@ fn choose_authoritative_local_player<T: Copy + Eq>(
 
 fn ingest_server_snapshot_packets(
     channels: Option<Res<NetworkChannels>>,
-    client_session: Res<ClientSession>,
+    mut client_session: ResMut<ClientSession>,
     mut pending: ResMut<PendingServerSnapshotFrame>,
     mut incoming_dead: ResMut<NetIncomingDisconnected>,
     team_selection: Res<TeamSelection>,
@@ -1292,6 +1418,8 @@ fn ingest_server_snapshot_packets(
             }
             Ok(packet) => match packet {
                 ServerPacket::Snapshot {
+                    meta,
+                    join_error,
                     your_id,
                     players,
                     projectiles,
@@ -1302,7 +1430,22 @@ fn ingest_server_snapshot_packets(
                     game_state,
                     rematch_in_secs,
                 } => {
+                    if meta.protocol_version != PROTOCOL_VERSION {
+                        client_session.join_error = Some(JoinRejection::ProtocolMismatch);
+                        continue;
+                    }
+                    if !client_session.snapshot_order.accept(meta) {
+                        continue;
+                    }
+                    client_session.join_error = join_error;
+                    client_session.admitted =
+                        join_error.is_none() && players.iter().any(|player| player.id == your_id);
+                    if client_session.admitted {
+                        client_session.reconnect = ReconnectState::default();
+                        client_session.join_exhausted = false;
+                    }
                     latest_snapshot = Some(PendingSnapshotData {
+                        meta,
                         wall_time: Instant::now(),
                         your_id,
                         players,
@@ -1364,6 +1507,7 @@ fn apply_server_snapshot(
         return;
     };
     let PendingSnapshotData {
+        meta,
         wall_time: snapshot_wall_time,
         your_id,
         players,
@@ -1384,6 +1528,7 @@ fn apply_server_snapshot(
     client_session.last_qualifying_snapshot_wall = Some(snapshot_wall_time);
 
     network_state.local_id = Some(your_id);
+    game_state_snapshot.meta = meta;
     game_state_snapshot.state = game_state;
     game_state_snapshot.rematch_in_secs = rematch_in_secs;
     game_state_snapshot.team_buffs = team_buffs;
@@ -1779,6 +1924,7 @@ fn apply_server_snapshot(
                 structure.kind,
                 structure.team,
                 NetworkStructureId(structure.id),
+                NetworkStructureProtected(structure.protected),
                 structure_state_to_combat_stats(structure),
             ));
             continue;
@@ -1798,6 +1944,7 @@ fn apply_server_snapshot(
             Visibility::default(),
             NetworkStructure,
             NetworkStructureId(structure.id),
+            NetworkStructureProtected(structure.protected),
             structure.kind,
             structure.team,
             structure_state_to_combat_stats(structure),
@@ -2156,7 +2303,16 @@ fn sync_connection_status_ui(
             );
         }
         ClientConnectionState::Connected => {
-            text.0 = format!("Connected ({}).", client_session.server_addr_display);
+            text.0 = if client_session.join_confirmed() {
+                "Joined — connected to match.".to_owned()
+            } else if client_session.last_join.is_some() {
+                format!(
+                    "Joining match… attempt {}/{}. Waiting for server admission.",
+                    client_session.join_attempts, MAX_JOIN_ATTEMPTS
+                )
+            } else {
+                "Connected — choose a hero and team to join.".to_owned()
+            };
         }
         ClientConnectionState::Disconnected if client_session.reconnect.active => {
             text.0 = format!(
@@ -2170,10 +2326,19 @@ fn sync_connection_status_ui(
         }
     }
 
+    if let Some(reason) = client_session.join_error {
+        text.0 = reason.message().to_owned();
+    } else if client_session.join_exhausted {
+        text.0 = "The server did not confirm your Join. Use Retry to try again.".to_owned();
+    }
+
     let Ok(mut retry_vis) = retry_vis.single_mut() else {
         return;
     };
-    *retry_vis = if client_session.state == ClientConnectionState::Disconnected {
+    *retry_vis = if client_session.state == ClientConnectionState::Disconnected
+        || client_session.join_error.is_some()
+        || client_session.join_exhausted
+    {
         Visibility::Visible
     } else {
         Visibility::Hidden
@@ -2300,6 +2465,7 @@ fn perform_network_teardown(
         };
     }
 
+    client_session.clear_join_attempt();
     client_session.state = ClientConnectionState::Disconnected;
     client_session.discard_incoming_snapshots = true;
     client_session.join_flow_committed = false;
@@ -2323,7 +2489,6 @@ struct TeardownQueries<'w, 's> {
 fn update_session_lifecycle(
     mut commands: Commands,
     mut client_session: ResMut<ClientSession>,
-    client_session_id: Res<ClientSessionId>,
     mut incoming_dead: ResMut<NetIncomingDisconnected>,
     channels: Option<Res<NetworkChannels>>,
     mut network_state: ResMut<NetworkState>,
@@ -2348,7 +2513,10 @@ fn update_session_lifecycle(
     for event in session_ui.read() {
         match event {
             SessionUiCommand::Retry => {
-                if client_session.state == ClientConnectionState::Disconnected {
+                if client_session.state == ClientConnectionState::Disconnected
+                    || client_session.join_error.is_some()
+                    || client_session.join_exhausted
+                {
                     commands.remove_resource::<NetworkChannels>();
                     let retry_addr =
                         validated_server_addr_or_default(&client_session.server_addr_display);
@@ -2388,30 +2556,6 @@ fn update_session_lifecycle(
     let Some(channels) = channels.as_ref() else {
         return;
     };
-
-    // Auto-rejoin (TASK-25): connection is back (snapshots flow again) but
-    // the join was reset by the teardown - resend the remembered loadout
-    // with the persistent session id so the server reclaims the session.
-    if client_session.state == ClientConnectionState::Connected && client_session.reconnect.active {
-        if !client_session.join_flow_committed
-            && let Some(join) = client_session.last_join.clone()
-        {
-            let _ = channels.outgoing.send(ClientPacket::Join {
-                team: join.team,
-                character: join.character,
-                hero_class: join.hero_class,
-                avatar: join.avatar,
-                sprite_character: join.sprite_character,
-                session_id: Some(client_session_id.0.clone()),
-            });
-            client_session.join_flow_committed = true;
-            info!(
-                "Auto-rejoined after reconnect (attempt {})",
-                client_session.reconnect.attempts
-            );
-        }
-        client_session.reconnect = ReconnectState::default();
-    }
 
     if incoming_dead.0 {
         incoming_dead.0 = false;
@@ -2626,8 +2770,199 @@ mod tests {
         time::{Duration, Instant},
     };
 
+    fn admission_app() -> (
+        App,
+        crossbeam_channel::Sender<ServerPacket>,
+        crossbeam_channel::Receiver<super::ClientPacket>,
+    ) {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let (incoming, incoming_rx) = crossbeam_channel::unbounded();
+        let (_, signals) = crossbeam_channel::unbounded();
+        let mut app = App::new();
+        app.insert_resource(super::NetworkChannels {
+            outgoing: tx,
+            incoming: incoming_rx,
+            signals,
+        })
+        .insert_resource(super::ClientSession {
+            state: ClientConnectionState::Connected,
+            last_join: Some(super::CommittedJoin {
+                team: crate::team::Team::Green,
+                character: ekza_bevy_sdk::EkzaCharacter::Ipfs,
+                hero_class: shared::HeroClass::Warrior,
+                avatar: None,
+                sprite_character: None,
+            }),
+            ..default()
+        })
+        .init_resource::<crate::persistence::ClientSessionId>()
+        .init_resource::<super::PendingServerSnapshotFrame>()
+        .init_resource::<super::NetIncomingDisconnected>()
+        .init_resource::<TeamSelection>()
+        .add_systems(
+            Update,
+            (
+                super::ingest_server_snapshot_packets,
+                super::retry_pending_join,
+            )
+                .chain(),
+        );
+        (app, incoming, rx)
+    }
+
+    fn admission_snapshot(
+        round: u64,
+        tick: u64,
+        admitted: bool,
+        error: Option<shared::protocol::JoinRejection>,
+    ) -> ServerPacket {
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&populated_snapshot_fixture()).unwrap();
+        value["your_id"] = json!(1);
+        value["match_id"] = json!(round);
+        value["snapshot_tick"] = json!(tick);
+        value["join_error"] = json!(error);
+        if !admitted {
+            value["players"] = json!([]);
+        }
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn first_join_datagram_loss_retries_until_authoritative_admission() {
+        let (mut app, incoming, outgoing) = admission_app();
+        let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+        receiver
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let mut buf = [0; 2048];
+        incoming
+            .send(admission_snapshot(1, 1, false, None))
+            .unwrap();
+        app.update();
+        sender
+            .send_to(
+                &serde_json::to_vec(&outgoing.try_recv().unwrap()).unwrap(),
+                receiver.local_addr().unwrap(),
+            )
+            .unwrap();
+        let _dropped = receiver.recv(&mut buf).unwrap(); // Deliberately discard first Join at UDP boundary.
+        assert!(
+            !app.world()
+                .resource::<super::ClientSession>()
+                .join_confirmed()
+        );
+        app.update();
+        assert!(
+            outgoing.try_recv().is_err(),
+            "retry interval must be bounded"
+        );
+        app.world_mut()
+            .resource_mut::<super::ClientSession>()
+            .join_last_sent = Some(Instant::now() - T_RETRY);
+        app.update();
+        sender
+            .send_to(
+                &serde_json::to_vec(&outgoing.try_recv().unwrap()).unwrap(),
+                receiver.local_addr().unwrap(),
+            )
+            .unwrap();
+        let len = receiver.recv(&mut buf).unwrap();
+        let retry: serde_json::Value = serde_json::from_slice(&buf[..len]).unwrap();
+        assert_eq!(retry["type"], "join");
+        assert_eq!(retry["team"], "green");
+        incoming.send(admission_snapshot(1, 2, true, None)).unwrap();
+        app.update();
+        assert!(
+            app.world()
+                .resource::<super::ClientSession>()
+                .join_confirmed()
+        );
+        app.world_mut()
+            .resource_mut::<super::ClientSession>()
+            .join_last_sent = Some(Instant::now() - T_RETRY);
+        app.update();
+        assert!(outgoing.try_recv().is_err(), "admission ends retries");
+    }
+
+    #[test]
+    fn admission_rejection_exhaustion_and_snapshot_order_are_actionable() {
+        use shared::protocol::JoinRejection;
+        let (mut app, incoming, outgoing) = admission_app();
+        for (tick, error) in [
+            (1, JoinRejection::MatchFull),
+            (2, JoinRejection::SessionActive),
+            (3, JoinRejection::ProtocolMismatch),
+        ] {
+            incoming
+                .send(admission_snapshot(1, tick, false, Some(error)))
+                .unwrap();
+            app.update();
+            let session = app.world().resource::<super::ClientSession>();
+            assert_eq!(session.join_error, Some(error));
+            assert!(!session.join_confirmed());
+            assert!(!error.message().is_empty());
+            assert!(outgoing.try_recv().is_err());
+        }
+        incoming.send(admission_snapshot(2, 0, true, None)).unwrap();
+        incoming
+            .send(admission_snapshot(
+                1,
+                999,
+                false,
+                Some(JoinRejection::MatchFull),
+            ))
+            .unwrap();
+        incoming
+            .send(admission_snapshot(
+                2,
+                0,
+                false,
+                Some(JoinRejection::MatchFull),
+            ))
+            .unwrap();
+        app.update();
+        assert!(
+            app.world()
+                .resource::<super::ClientSession>()
+                .join_confirmed(),
+            "old round/duplicate cannot undo admission"
+        );
+        assert!(
+            app.world()
+                .resource::<super::PendingServerSnapshotFrame>()
+                .frame
+                .is_some()
+        );
+        incoming
+            .send(admission_snapshot(1, 1000, false, None))
+            .unwrap();
+        app.update();
+        assert!(
+            app.world()
+                .resource::<super::PendingServerSnapshotFrame>()
+                .frame
+                .is_none()
+        );
+        {
+            let mut session = app.world_mut().resource_mut::<super::ClientSession>();
+            session.clear_join_attempt();
+            session.join_attempts = super::MAX_JOIN_ATTEMPTS;
+        }
+        app.update();
+        assert!(
+            app.world()
+                .resource::<super::ClientSession>()
+                .join_exhausted
+        );
+        assert!(outgoing.try_recv().is_err());
+    }
+
     fn exact_size_snapshot_fixture(size: usize, sentinel: u64) -> Vec<u8> {
-        let prefix = String::from(r#"{"type":"snapshot","your_id":7,"padding":""#);
+        let prefix = String::from(
+            r#"{"type":"snapshot","protocol_version":1,"server_epoch":1,"match_id":1,"snapshot_tick":2,"your_id":7,"padding":""#,
+        );
         let suffix = format!(
             r#"","players":[],"structures":[{{"id":808,"kind":"tower","team":"blue","x":1.0,"y":2.0,"z":3.0,"hp":4.0,"max_hp":5.0}}],"minions":[{{"id":909,"team":"green","lane":"bot","x":6.0,"y":0.5,"z":7.0,"yaw":0.0,"hp":8.0,"max_hp":9.0,"state":"marching","target_kind":null,"target_id":null}}],"rematch_in_secs":{sentinel}}}"#
         );
@@ -2757,6 +3092,7 @@ mod tests {
 
         serde_json::to_vec(&json!({
             "type": "snapshot",
+            "protocol_version": 1, "server_epoch": 1, "match_id": 1, "snapshot_tick": 1,
             "your_id": 10,
             "players": players,
             "projectiles": projectiles,

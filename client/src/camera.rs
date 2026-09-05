@@ -5,6 +5,7 @@ use bevy::{
 };
 use std::f32::consts::PI;
 
+use crate::input_context::{GameplayInputContext, InputContextSet};
 use crate::maps::MapLayout;
 use crate::minimap::MinimapNavigationState;
 use crate::player::{PLAYER_SIZE, Player};
@@ -35,7 +36,9 @@ impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CameraState>().add_systems(
             Update,
-            (update_cursor_grab, toggle_camera_lock, update_camera).chain(),
+            (toggle_camera_lock, update_cursor_grab, update_camera)
+                .chain()
+                .in_set(InputContextSet::Actions),
         );
     }
 }
@@ -49,15 +52,19 @@ pub struct CameraState {
     pub pitch: f32,
     pub yaw: f32,
     pub zoom: f32,
+    pub orbit_yaw: f32,
+    pub orbit_height: f32,
 }
 
 impl Default for CameraState {
     fn default() -> Self {
         Self {
-            locked: false,
+            locked: true,
             pitch: 0.0,
             yaw: 0.0,
             zoom: 1.0,
+            orbit_yaw: 0.0,
+            orbit_height: 1.0,
         }
     }
 }
@@ -72,71 +79,69 @@ pub fn locked_camera_offset(zoom: f32) -> Vec3 {
 }
 
 fn toggle_camera_lock(
-    mouse_button_input: Res<ButtonInput<MouseButton>>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
+    context: Res<GameplayInputContext>,
     mut cam_state: ResMut<CameraState>,
-    mode: Res<PlayerVisualMode>,
     mut minimap_nav: Option<ResMut<MinimapNavigationState>>,
-    window_query: Query<&Window, With<PrimaryWindow>>,
 ) {
-    if window_query.single().is_ok() {
-        let y_pressed = keyboard_input.just_pressed(KeyCode::KeyY);
-        let legacy_3d_toggle = legacy_camera_toggle_requested(
-            *mode,
-            mouse_button_input.just_pressed(MouseButton::Right),
-            keyboard_input.just_pressed(KeyCode::AltLeft)
-                || keyboard_input.just_pressed(KeyCode::AltRight),
-        );
-
-        if y_pressed {
-            // A minimap click temporarily replaces the hero as the follow
-            // target. Treat Y as "return to hero" in that state instead of
-            // making the user press it twice to unlock and relock.
-            let had_focus_override = minimap_nav
-                .as_deref()
-                .is_some_and(|nav| nav.focus_target.is_some());
-            cam_state.locked = y_follow_state(cam_state.locked, had_focus_override);
-            if cam_state.locked {
-                if let Some(nav) = minimap_nav.as_deref_mut() {
-                    nav.focus_target = None;
-                }
-            }
-            info!("Camera follow: {}", cam_state.locked);
-        } else if legacy_3d_toggle {
-            cam_state.locked = !cam_state.locked;
-            info!("Camera follow: {}", cam_state.locked);
-        }
-    } else {
-        warn!("No primary window found.");
+    if !context.camera_allowed() {
+        return;
     }
-}
-
-fn legacy_camera_toggle_requested(
-    mode: PlayerVisualMode,
-    right_pressed: bool,
-    alt_pressed: bool,
-) -> bool {
-    mode == PlayerVisualMode::Models3d && (right_pressed || alt_pressed)
+    if keyboard_input.just_pressed(KeyCode::Space) {
+        cam_state.locked = true;
+        cam_state.orbit_yaw = 0.0;
+        cam_state.orbit_height = 1.0;
+        if let Some(nav) = minimap_nav.as_deref_mut() {
+            nav.focus_target = None;
+        }
+    } else if context.debug_flight {
+        cam_state.locked = false;
+    } else if keyboard_input.just_pressed(KeyCode::F8) {
+        // Exiting debug flight always restores a useful gameplay view.
+        cam_state.locked = true;
+    } else if keyboard_input.just_pressed(KeyCode::KeyY) {
+        let had_focus_override = minimap_nav
+            .as_deref()
+            .is_some_and(|nav| nav.focus_target.is_some());
+        cam_state.locked = y_follow_state(cam_state.locked, had_focus_override);
+        if cam_state.locked {
+            if let Some(nav) = minimap_nav.as_deref_mut() {
+                nav.focus_target = None;
+            }
+        }
+    }
 }
 
 const fn y_follow_state(currently_locked: bool, has_focus_override: bool) -> bool {
     has_focus_override || !currently_locked
 }
 
-fn should_capture_cursor(mode: PlayerVisualMode, right_held: bool) -> bool {
-    mode == PlayerVisualMode::Models3d && right_held
+fn should_capture_cursor(
+    mode: PlayerVisualMode,
+    right_held: bool,
+    alt_held: bool,
+    allowed: bool,
+) -> bool {
+    mode == PlayerVisualMode::Models3d && right_held && alt_held && allowed
 }
 
 fn update_cursor_grab(
     mouse_button_input: Res<ButtonInput<MouseButton>>,
     mode: Res<PlayerVisualMode>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    context: Res<GameplayInputContext>,
     mut cursor_query: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     let Ok(mut cursor_options) = cursor_query.single_mut() else {
         return;
     };
 
-    let should_grab = should_capture_cursor(*mode, mouse_button_input.pressed(MouseButton::Right));
+    let should_grab = should_capture_cursor(
+        *mode,
+        mouse_button_input.pressed(MouseButton::Right),
+        keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight),
+        context.camera_allowed(),
+    );
     let target_grab_mode = if should_grab {
         CursorGrabMode::Locked
     } else {
@@ -166,6 +171,8 @@ fn update_camera(
     mut mouse_motion_events: MessageReader<MouseMotion>,
     mut mouse_wheel_events: MessageReader<MouseWheel>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
+    mouse_input: Res<ButtonInput<MouseButton>>,
+    context: Res<GameplayInputContext>,
 ) {
     let Ok((camera, mut projection, mut camera_transform)) = camera_query.single_mut() else {
         return;
@@ -177,6 +184,19 @@ fn update_camera(
         delta_xy += event.delta;
     }
 
+    if !context.camera_allowed() {
+        mouse_wheel_events.clear();
+        return;
+    }
+    let rotating = should_capture_cursor(
+        *mode,
+        mouse_input.pressed(MouseButton::Right),
+        keyboard_input.pressed(KeyCode::AltLeft) || keyboard_input.pressed(KeyCode::AltRight),
+        true,
+    );
+    if !rotating {
+        delta_xy = Vec2::ZERO;
+    }
     if *mode == PlayerVisualMode::Sprite2d {
         update_camera_2d(
             &time,
@@ -194,6 +214,8 @@ fn update_camera(
     }
 
     if cam_state.locked {
+        cam_state.orbit_yaw -= delta_xy.x * 0.004;
+        cam_state.orbit_height = (cam_state.orbit_height + delta_xy.y * 0.003).clamp(0.4, 2.2);
         let focus_override = if let Some(nav_state) = minimap_nav.as_deref_mut() {
             if keyboard_input.just_pressed(KeyCode::Space) {
                 nav_state.focus_target = None;
@@ -225,7 +247,10 @@ fn update_camera(
         };
         if let Some(target) = follow_target {
             let zoom = cam_state.zoom;
-            let target_position = target + locked_camera_offset(zoom);
+            let mut offset =
+                Quat::from_rotation_y(cam_state.orbit_yaw) * locked_camera_offset(zoom);
+            offset.y *= cam_state.orbit_height;
+            let target_position = target + offset;
             let lerp_factor = (time.delta_secs() * 2.0).min(1.0);
             camera_transform.translation = camera_transform
                 .translation
@@ -242,7 +267,7 @@ fn update_camera(
             cam_state.yaw = camera_transform.rotation.to_euler(EulerRot::YXZ).0;
             cam_state.pitch = camera_transform.rotation.to_euler(EulerRot::YXZ).1;
         }
-    } else {
+    } else if context.debug_flight {
         let sensitivity = 0.002;
         cam_state.yaw -= delta_xy.x * sensitivity;
         cam_state.pitch -= delta_xy.y * sensitivity;
@@ -265,7 +290,7 @@ fn update_camera(
         if keyboard_input.pressed(KeyCode::KeyD) {
             move_direction += camera_right;
         }
-        if keyboard_input.pressed(KeyCode::KeyE) || keyboard_input.pressed(KeyCode::Space) {
+        if keyboard_input.pressed(KeyCode::KeyE) {
             move_direction += camera_up;
         }
         if keyboard_input.pressed(KeyCode::KeyQ) || keyboard_input.pressed(KeyCode::ShiftLeft) {
@@ -432,23 +457,51 @@ mod tests {
     }
 
     #[test]
-    fn sprite_mode_does_not_repurpose_right_click_or_alt() {
-        assert!(!legacy_camera_toggle_requested(
-            PlayerVisualMode::Sprite2d,
+    fn camera_gesture_and_recenter_are_explicit() {
+        assert!(!should_capture_cursor(
+            PlayerVisualMode::Models3d,
             true,
-            false
-        ));
-        assert!(!legacy_camera_toggle_requested(
-            PlayerVisualMode::Sprite2d,
             false,
             true
         ));
-        assert!(!should_capture_cursor(PlayerVisualMode::Sprite2d, true));
-        assert!(legacy_camera_toggle_requested(
+        assert!(!should_capture_cursor(
             PlayerVisualMode::Models3d,
+            true,
             true,
             false
         ));
-        assert!(should_capture_cursor(PlayerVisualMode::Models3d, true));
+        assert!(should_capture_cursor(
+            PlayerVisualMode::Models3d,
+            true,
+            true,
+            true
+        ));
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<GameplayInputContext>()
+            .init_resource::<CameraState>()
+            .init_resource::<MinimapNavigationState>()
+            .add_systems(Update, toggle_camera_lock);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Right);
+        app.update();
+        assert!(app.world().resource::<CameraState>().locked);
+        app.world_mut().resource_mut::<CameraState>().locked = false;
+        app.world_mut()
+            .resource_mut::<MinimapNavigationState>()
+            .focus_target = Some(Vec3::X);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Space);
+        app.update();
+        assert!(app.world().resource::<CameraState>().locked);
+        assert!(
+            app.world()
+                .resource::<MinimapNavigationState>()
+                .focus_target
+                .is_none()
+        );
     }
 }

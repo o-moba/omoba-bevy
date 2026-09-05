@@ -6,6 +6,29 @@ use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 use std::time::Duration;
 
+pub mod protocol;
+pub mod transport;
+
+/// Resolve packaged assets before the development checkout. Launchers can
+/// pin this path without requiring a source-tree working directory.
+pub fn client_asset_root() -> std::path::PathBuf {
+    if let Some(path) = std::env::var_os("OMOBA_ASSET_DIR") {
+        return path.into();
+    }
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(parent) = executable.parent() {
+            let assets = parent.join("assets");
+            if assets.is_dir() {
+                return assets;
+            }
+        }
+    }
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("shared crate has workspace parent")
+        .join("client/assets")
+}
+
 /// Logical hotbar slot; maps to `Q` / `W` / `E` / `R` on the client.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -514,6 +537,7 @@ fn manifest_candidates() -> Vec<std::path::PathBuf> {
     if let Ok(path) = std::env::var("OMOBA_AVATAR_MANIFEST") {
         candidates.push(std::path::PathBuf::from(path));
     }
+    candidates.push(client_asset_root().join("avatars/manifest.json"));
     for relative in [
         "client/assets/avatars/manifest.json",
         "assets/avatars/manifest.json",

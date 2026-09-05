@@ -6,6 +6,37 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.18.0-rc.1] - 2026-09-05
+
+### Changed
+- Prepare the native Models3d candidate for controlled playtests, with a dated
+  implementation ledger and reproducible package containing binaries and assets.
+- Join is idempotent, reconnect restores complete authoritative state, reserved
+  seats count toward capacity, and abandoned matches reset after a bounded grace.
+- Rematches rebuild all gameplay state and repeat release formation/countdown;
+  release servers reject development god/speed commands.
+- Protocol 1 negotiates snapshots in datagrams of at most 1200 bytes, with bounded
+  reassembly and epoch/round/tick ordering; legacy JSON scripts remain supported.
+- Join retries until authoritative admission or visible rejection, with recovery.
+- Models3d camera orbit uses held Alt+right mouse; shared modal/debug input rules
+  isolate gameplay. Roster layout excludes inactive content and scrolls at 720p.
+- Shipped heroes play attack/cast/death clips, with distinct allegiance shapes,
+  bounded combat effects, visible action feedback and hotbar availability.
+- Models3d startup uses shipped assets without optional 2D loads or SDK downloads.
+- Bases require a protecting lane tower to fall first. Scenario bots spend skill
+  points, use applicable self-sustain and require wave support for tower dives.
+- Match logs report progression, deaths, objectives, disconnects and victory.
+- Update existing crossbeam-channel to 0.5.15 to address GHSA-pg9f-39pc-qf8g
+  in the client networking dependency, without adding packages or changing the SDK revision.
+
+### Release status
+- Asset provenance conflicts in four models restrict the current package to
+  internal review. Public distribution needs rights-holder evidence or replacements.
+- This is a candidate with outstanding human, visual, performance, platform and
+  network certification gates. Automated tests do not certify a public release.
+- XP rewards remain unchanged pending measured full-roster pacing; gold has no
+  spending path. Optional 2D asset failures remain outside this 3D milestone.
+
 ## [0.17.1] - 2026-09-05
 
 ### Fixed

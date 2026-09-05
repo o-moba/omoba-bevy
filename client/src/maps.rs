@@ -272,7 +272,6 @@ fn setup_moba_map(
     mut commands: Commands,
     layout: Res<MapLayout>,
     visual_mode: Res<PlayerVisualMode>,
-    asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -292,7 +291,7 @@ fn setup_moba_map(
     if is_2d {
         return;
     }
-    let arena_texture = asset_server.load("presentation2d/arena.png");
+    let arena_texture = Handle::default();
     let terrain_material = materials.add(StandardMaterial {
         base_color: if is_2d {
             Color::srgb(0.20, 0.30, 0.25)

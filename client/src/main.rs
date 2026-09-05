@@ -9,6 +9,7 @@ mod game_state;
 mod god_mode;
 mod help_overlay;
 mod input_bindings;
+mod input_context;
 mod maps;
 mod match_hud;
 mod minimap;
@@ -19,6 +20,7 @@ mod pause_menu;
 mod persistence;
 mod player;
 mod presentation2d;
+mod presentation3d;
 mod session_config;
 mod sprite;
 mod team;
@@ -54,9 +56,11 @@ fn main() {
         model_scale::run_model_measurement_analyzer();
         return;
     }
+    let asset_root = shared::client_asset_root();
+    eprintln!("Omoba asset root: {}", asset_root.display());
     App::new()
         .add_plugins(DefaultPlugins.set(AssetPlugin {
-            file_path: format!("{}/assets", env!("CARGO_MANIFEST_DIR")),
+            file_path: asset_root.to_string_lossy().into_owned(),
             ..default()
         }))
         .add_plugins((
@@ -77,6 +81,7 @@ fn main() {
             GameStateUiPlugin,
         ))
         .add_plugins((
+            input_context::InputContextPlugin,
             HelpOverlayPlugin,
             DebugConsolePlugin,
             PauseMenuPlugin,
@@ -85,6 +90,6 @@ fn main() {
             MinionVisualsPlugin,
         ))
         // Separate call: the plugin tuple above is at Bevy's 15-element limit.
-        .add_plugins(DecorPlugin)
+        .add_plugins((DecorPlugin, presentation3d::Presentation3dPlugin))
         .run();
 }

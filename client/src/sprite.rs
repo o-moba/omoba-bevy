@@ -121,7 +121,11 @@ impl Plugin for SpriteVisualsPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(PlayerVisualMode::from_environment())
             .init_resource::<SpriteVisualAssets>()
-            .add_systems(Startup, load_sprite_visual_assets)
+            .add_systems(
+                Startup,
+                load_sprite_visual_assets
+                    .after(crate::persistence::load_persistent_client_settings),
+            )
             .add_systems(
                 Update,
                 (
@@ -153,10 +157,14 @@ fn reconcile_sprite_identity(
 }
 
 pub(crate) fn load_sprite_visual_assets(
+    mode: Res<PlayerVisualMode>,
     mut assets: ResMut<SpriteVisualAssets>,
     asset_server: Res<AssetServer>,
     mut atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
 ) {
+    if *mode != PlayerVisualMode::Sprite2d {
+        return;
+    }
     assets.portrait_image = asset_server.load("presentation2d/portraits.png");
     assets.ui_frame_image = asset_server.load("presentation2d/ui-frame.png");
     let mut ui_frame_layout = TextureAtlasLayout::new_empty(UVec2::splat(1024));
@@ -552,6 +560,28 @@ fn resolve_sprite_handles(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn models3d_startup_does_not_request_optional_sprite_sheets() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(bevy::asset::AssetPlugin::default())
+            .init_asset::<Image>()
+            .init_asset::<TextureAtlasLayout>()
+            .insert_resource(PlayerVisualMode::Models3d)
+            .init_resource::<SpriteVisualAssets>()
+            .add_systems(Startup, load_sprite_visual_assets);
+        app.update();
+        let assets = app.world().resource::<SpriteVisualAssets>();
+        assert!(assets.sets.is_empty());
+        assert_eq!(assets.portrait_image, Handle::default());
+        assert_eq!(assets.ui_frame_image, Handle::default());
+        assert!(
+            app.world()
+                .resource::<Assets<TextureAtlasLayout>>()
+                .is_empty()
+        );
+    }
+
     use shared::SPRITE_CHARACTER_IDS;
     use std::time::Duration;
 

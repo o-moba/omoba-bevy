@@ -4,6 +4,8 @@ mod balance;
 mod gameplay;
 mod neutrals;
 mod progression;
+#[cfg(test)]
+mod release_tests;
 mod session;
 mod world;
 
@@ -45,6 +47,9 @@ const NETWORK_DIAGNOSTIC_INTERVAL: Duration = Duration::from_secs(1);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ClientPacket {
+    Hello {
+        protocol_version: u16,
+    },
     Transform {
         x: f32,
         y: f32,
@@ -177,6 +182,8 @@ enum StructureKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StructureState {
+    #[serde(default)]
+    protected: bool,
     id: u64,
     kind: StructureKind,
     team: Team,
@@ -401,6 +408,10 @@ struct ProjectileState {
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ServerPacket {
     Snapshot {
+        #[serde(flatten, default)]
+        meta: shared::protocol::SnapshotMeta,
+        #[serde(default)]
+        join_error: Option<shared::protocol::JoinRejection>,
         your_id: u64,
         players: Vec<PlayerState>,
         projectiles: Vec<ProjectileState>,
@@ -573,6 +584,7 @@ fn joined_team_counts(players: &HashMap<SocketAddr, ConnectedPlayer>) -> (u32, u
 
 /// Release-mode team assignment: the joining player goes to the smaller team
 /// (tie -> Green). Returns `None` when the match roster is already full.
+#[cfg(test)]
 fn assign_release_team(
     players: &HashMap<SocketAddr, ConnectedPlayer>,
     team_size: u32,
@@ -747,6 +759,9 @@ struct ConnectedPlayer {
     /// from the replicated player list and from all gameplay simulation.
     joined: bool,
     session_id: Option<String>,
+    framed_snapshots: bool,
+    protocol_compatible: bool,
+    join_error: Option<shared::protocol::JoinRejection>,
     last_seen: Instant,
     last_movement_at: Instant,
     /// Per-slot cast timestamps (Q/W/E/R); each ability cools down independently.
@@ -922,6 +937,13 @@ struct ServerRuntime {
     last_simulation_at: Instant,
     last_wave_spawn_at: Instant,
     match_config: MatchConfig,
+    server_epoch: u64,
+    match_id: u64,
+    snapshot_tick: u64,
+    match_started_at: Option<Instant>,
+    empty_since: Option<Instant>,
+    metrics_players: HashMap<u64, (u32, bool)>,
+    metrics_objectives: HashSet<u64>,
 }
 
 impl ServerRuntime {
@@ -953,228 +975,42 @@ impl ServerRuntime {
             snapshot_send_diagnostic: RateLimitedDiagnostic::default(),
             last_snapshot_at: Instant::now(),
             last_simulation_at: Instant::now(),
-            last_wave_spawn_at: Instant::now()
-                .checked_sub(MINION_WAVE_INTERVAL)
-                .unwrap_or_else(Instant::now),
+            last_wave_spawn_at: Instant::now(),
             match_config,
+            server_epoch: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos() as u64
+                | 1,
+            match_id: 1,
+            snapshot_tick: 0,
+            match_started_at: None,
+            empty_since: None,
+            metrics_players: HashMap::new(),
+            metrics_objectives: HashSet::new(),
         }
     }
 
     fn receive_packets(&mut self) {
-        let Self {
-            socket,
-            recv_buf,
-            players,
-            disconnected_sessions,
-            projectiles,
-            map_layout,
-            structures,
-            minions,
-            game_state,
-            victory_at,
-            next_player_id,
-            next_projectile_id,
-            last_wave_spawn_at,
-            neutrals,
-            team_buffs,
-            match_config,
-            invalid_request_diagnostic,
-            ..
-        } = self;
-
         loop {
-            match socket.recv_from(recv_buf) {
+            match self.socket.recv_from(&mut self.recv_buf) {
                 Ok((len, addr)) => {
+                    let now = Instant::now();
                     if len > MAX_CLIENT_REQUEST_PAYLOAD_BYTES {
-                        if let Some(suppressed) = invalid_request_diagnostic.record(Instant::now())
-                        {
+                        if let Some(suppressed) = self.invalid_request_diagnostic.record(now) {
                             eprintln!(
-                                "Rejected oversized client datagram from {addr}: {len} bytes \
-                                 exceeds request limit {MAX_CLIENT_REQUEST_PAYLOAD_BYTES}; \
-                                 suppressed {suppressed} similar errors"
+                                "Rejected oversized client datagram from {addr}: {len} bytes exceeds request limit {MAX_CLIENT_REQUEST_PAYLOAD_BYTES}; suppressed {suppressed} similar errors"
                             );
                         }
                         continue;
                     }
-                    let packet = match serde_json::from_slice::<ClientPacket>(&recv_buf[..len]) {
-                        Ok(packet) => packet,
+                    match serde_json::from_slice::<ClientPacket>(&self.recv_buf[..len]) {
+                        Ok(packet) => self.handle_packet(addr, packet, now),
                         Err(error) => {
-                            if let Some(suppressed) =
-                                invalid_request_diagnostic.record(Instant::now())
-                            {
+                            if let Some(suppressed) = self.invalid_request_diagnostic.record(now) {
                                 eprintln!(
-                                    "Invalid client datagram from {addr} ({len} bytes): {error}; \
-                                     suppressed {suppressed} similar errors"
+                                    "Invalid client datagram from {addr} ({len} bytes): {error}; suppressed {suppressed} similar errors"
                                 );
-                            }
-                            continue;
-                        }
-                    };
-
-                    let now = Instant::now();
-
-                    match packet {
-                        ClientPacket::Transform { x, y, z, yaw } => {
-                            ensure_player_connected(players, map_layout, addr, next_player_id, now);
-                            if let Some(player) = players.get_mut(&addr) {
-                                player.last_seen = now;
-                            }
-                            if matches!(game_state, GameState::Running)
-                                && let Some(player) = players.get_mut(&addr)
-                                && player.state.hp > 0.0
-                            {
-                                handle_transform_request(player, map_layout, x, y, z, yaw, now);
-                            }
-                        }
-                        ClientPacket::Cast { target, slot } => {
-                            ensure_player_connected(players, map_layout, addr, next_player_id, now);
-                            if let Some(player) = players.get_mut(&addr) {
-                                player.last_seen = now;
-                            }
-                            handle_cast_request(
-                                players,
-                                projectiles,
-                                minions,
-                                structures,
-                                neutrals,
-                                team_buffs,
-                                addr,
-                                target,
-                                slot,
-                                next_projectile_id,
-                                game_state,
-                                now,
-                            );
-                        }
-                        ClientPacket::Join {
-                            team,
-                            character,
-                            hero_class,
-                            avatar,
-                            sprite_character,
-                            session_id,
-                        } => {
-                            let session_id = normalize_session_id(session_id);
-                            if !ensure_player_for_join(
-                                players,
-                                disconnected_sessions,
-                                map_layout,
-                                addr,
-                                session_id,
-                                next_player_id,
-                                now,
-                            ) {
-                                continue;
-                            }
-                            // Team resolution: dev mode honors the client's
-                            // choice; release mode balances teams server-side
-                            // (rejoining players keep their original team).
-                            let assigned_team = match match_config.mode {
-                                MatchMode::Dev => Some(team),
-                                MatchMode::Release => {
-                                    let existing_team = players
-                                        .get(&addr)
-                                        .filter(|player| player.joined)
-                                        .map(|player| player.state.team);
-                                    existing_team.or_else(|| {
-                                        assign_release_team(players, match_config.team_size)
-                                    })
-                                }
-                            };
-                            let Some(assigned_team) = assigned_team else {
-                                println!(
-                                    "Matchmaking: match is full ({} players) - join from {addr} rejected",
-                                    match_config.roster_size()
-                                );
-                                continue;
-                            };
-                            if let Some(player) = players.get_mut(&addr) {
-                                handle_join_request_with_sprite(
-                                    player,
-                                    assigned_team,
-                                    character,
-                                    hero_class,
-                                    avatar.as_deref(),
-                                    sprite_character.as_deref(),
-                                    map_layout,
-                                    now,
-                                );
-                            }
-                            advance_formation_on_join(
-                                game_state,
-                                players,
-                                neutrals,
-                                *match_config,
-                                now,
-                            );
-                        }
-                        ClientPacket::Ping => {
-                            ensure_player_connected(players, map_layout, addr, next_player_id, now);
-                            if let Some(player) = players.get_mut(&addr) {
-                                player.last_seen = now;
-                            }
-                        }
-                        ClientPacket::RequestRematch => {
-                            ensure_player_connected(players, map_layout, addr, next_player_id, now);
-                            let mut joined = false;
-                            if let Some(player) = players.get_mut(&addr) {
-                                player.last_seen = now;
-                                joined = player.joined;
-                            }
-                            if joined && matches!(game_state, GameState::Victory { .. }) {
-                                reset_match(
-                                    players,
-                                    structures,
-                                    minions,
-                                    projectiles,
-                                    neutrals,
-                                    team_buffs,
-                                    map_layout,
-                                    last_wave_spawn_at,
-                                    game_state,
-                                );
-                                *victory_at = None;
-                            }
-                        }
-                        ClientPacket::SetGodMode { enabled } => {
-                            ensure_player_connected(players, map_layout, addr, next_player_id, now);
-                            if let Some(player) = players.get_mut(&addr) {
-                                player.last_seen = now;
-                                if !player.joined {
-                                    continue;
-                                }
-                                if player.god_mode != enabled {
-                                    println!("Player {} god_mode={}", player.state.id, enabled);
-                                }
-                                player.god_mode = enabled;
-                                if enabled {
-                                    player.state.hp = player.state.max_hp;
-                                    player.state.mana = player.state.max_mana;
-                                    player.respawn_at = None;
-                                }
-                            }
-                        }
-                        ClientPacket::SetSpeedBoost { enabled } => {
-                            ensure_player_connected(players, map_layout, addr, next_player_id, now);
-                            if let Some(player) = players.get_mut(&addr) {
-                                player.last_seen = now;
-                                if !player.joined {
-                                    continue;
-                                }
-                                let mult = if enabled { DEBUG_SPEED_MULTIPLIER } else { 1.0 };
-                                if (player.speed_mult - mult).abs() > f32::EPSILON {
-                                    println!("Player {} speed_boost={}", player.state.id, enabled);
-                                }
-                                player.speed_mult = mult;
-                            }
-                        }
-                        ClientPacket::UpgradeSkill { slot } => {
-                            ensure_player_connected(players, map_layout, addr, next_player_id, now);
-                            if let Some(player) = players.get_mut(&addr) {
-                                player.last_seen = now;
-                                if player.joined {
-                                    apply_skill_upgrade(player, slot);
-                                }
                             }
                         }
                     }
@@ -1186,6 +1022,217 @@ impl ServerRuntime {
                 }
             }
         }
+    }
+
+    fn handle_packet(&mut self, addr: SocketAddr, packet: ClientPacket, now: Instant) {
+        self.maintain_roster(now);
+        let Self {
+            players,
+            disconnected_sessions,
+            projectiles,
+            map_layout,
+            structures,
+            minions,
+            game_state,
+            next_player_id,
+            next_projectile_id,
+            neutrals,
+            team_buffs,
+            match_config,
+            ..
+        } = self;
+        match packet {
+            ClientPacket::Hello { protocol_version } => {
+                ensure_player_connected(players, map_layout, addr, next_player_id, now);
+                let player = players.get_mut(&addr).unwrap();
+                player.last_seen = now;
+                player.framed_snapshots = true;
+                player.protocol_compatible = protocol_version == shared::protocol::PROTOCOL_VERSION;
+                player.join_error = (!player.protocol_compatible)
+                    .then_some(shared::protocol::JoinRejection::ProtocolMismatch);
+            }
+            ClientPacket::Transform { x, y, z, yaw } => {
+                ensure_player_connected(players, map_layout, addr, next_player_id, now);
+                if let Some(player) = players.get_mut(&addr) {
+                    player.last_seen = now;
+                }
+                if matches!(game_state, GameState::Running)
+                    && let Some(player) = players.get_mut(&addr)
+                    && player.state.hp > 0.0
+                {
+                    handle_transform_request(player, map_layout, x, y, z, yaw, now);
+                }
+            }
+            ClientPacket::Cast { target, slot } => {
+                ensure_player_connected(players, map_layout, addr, next_player_id, now);
+                if let Some(player) = players.get_mut(&addr) {
+                    player.last_seen = now;
+                }
+                handle_cast_request(
+                    players,
+                    projectiles,
+                    minions,
+                    structures,
+                    neutrals,
+                    team_buffs,
+                    addr,
+                    target,
+                    slot,
+                    next_projectile_id,
+                    game_state,
+                    now,
+                );
+            }
+            ClientPacket::Join {
+                team,
+                character,
+                hero_class,
+                avatar,
+                sprite_character,
+                session_id,
+            } => {
+                ensure_player_connected(players, map_layout, addr, next_player_id, now);
+                let player = players.get_mut(&addr).unwrap();
+                player.last_seen = now;
+                if !player.protocol_compatible {
+                    return;
+                }
+                // A joined endpoint cannot rewrite its identity or loadout through Join.
+                if player.joined {
+                    player.join_error = None;
+                    return;
+                }
+                let session_id = normalize_session_id(session_id);
+                if !ensure_player_for_join(
+                    players,
+                    disconnected_sessions,
+                    map_layout,
+                    addr,
+                    session_id,
+                    next_player_id,
+                    now,
+                ) {
+                    players.get_mut(&addr).unwrap().join_error =
+                        Some(shared::protocol::JoinRejection::SessionActive);
+                    return;
+                }
+                // A reclaim is already joined: retain all authoritative round state.
+                if let Some(player) = players.get_mut(&addr).filter(|player| player.joined) {
+                    player.join_error = None;
+                    return;
+                }
+                // Team resolution: dev mode honors the client's
+                // choice; release mode balances teams server-side
+                // (rejoining players keep their original team).
+                let assigned_team = match match_config.mode {
+                    MatchMode::Dev => (joined_count(players)
+                        + (disconnected_sessions.len() as u32)
+                        < match_config.roster_size())
+                    .then_some(team),
+                    MatchMode::Release => {
+                        let existing_team = players
+                            .get(&addr)
+                            .filter(|player| player.joined)
+                            .map(|player| player.state.team);
+                        existing_team.or_else(|| {
+                            assign_reserved_release_team(
+                                players,
+                                disconnected_sessions,
+                                match_config.team_size,
+                            )
+                        })
+                    }
+                };
+                let Some(assigned_team) = assigned_team else {
+                    println!(
+                        "Matchmaking: match is full ({} players) - join from {addr} rejected",
+                        match_config.roster_size()
+                    );
+                    players.get_mut(&addr).unwrap().join_error =
+                        Some(shared::protocol::JoinRejection::MatchFull);
+                    return;
+                };
+                if let Some(player) = players.get_mut(&addr) {
+                    player.join_error = None;
+                    handle_join_request_with_sprite(
+                        player,
+                        assigned_team,
+                        character,
+                        hero_class,
+                        avatar.as_deref(),
+                        sprite_character.as_deref(),
+                        map_layout,
+                        now,
+                    );
+                }
+                advance_formation_on_join(game_state, players, neutrals, *match_config, now);
+            }
+            ClientPacket::Ping => {
+                ensure_player_connected(players, map_layout, addr, next_player_id, now);
+                if let Some(player) = players.get_mut(&addr) {
+                    player.last_seen = now;
+                }
+            }
+            ClientPacket::RequestRematch => {
+                ensure_player_connected(players, map_layout, addr, next_player_id, now);
+                let mut joined = false;
+                if let Some(player) = players.get_mut(&addr) {
+                    player.last_seen = now;
+                    joined = player.joined;
+                }
+                if joined && matches!(game_state, GameState::Victory { .. }) {
+                    self.restart_round(now);
+                }
+            }
+            ClientPacket::SetGodMode { enabled } => {
+                if match_config.mode != MatchMode::Dev {
+                    return;
+                }
+                ensure_player_connected(players, map_layout, addr, next_player_id, now);
+                if let Some(player) = players.get_mut(&addr) {
+                    player.last_seen = now;
+                    if !player.joined {
+                        return;
+                    }
+                    if player.god_mode != enabled {
+                        println!("Player {} god_mode={}", player.state.id, enabled);
+                    }
+                    player.god_mode = enabled;
+                    if enabled {
+                        player.state.hp = player.state.max_hp;
+                        player.state.mana = player.state.max_mana;
+                        player.respawn_at = None;
+                    }
+                }
+            }
+            ClientPacket::SetSpeedBoost { enabled } => {
+                if match_config.mode != MatchMode::Dev {
+                    return;
+                }
+                ensure_player_connected(players, map_layout, addr, next_player_id, now);
+                if let Some(player) = players.get_mut(&addr) {
+                    player.last_seen = now;
+                    if !player.joined {
+                        return;
+                    }
+                    let mult = if enabled { DEBUG_SPEED_MULTIPLIER } else { 1.0 };
+                    if (player.speed_mult - mult).abs() > f32::EPSILON {
+                        println!("Player {} speed_boost={}", player.state.id, enabled);
+                    }
+                    player.speed_mult = mult;
+                }
+            }
+            ClientPacket::UpgradeSkill { slot } => {
+                ensure_player_connected(players, map_layout, addr, next_player_id, now);
+                if let Some(player) = players.get_mut(&addr) {
+                    player.last_seen = now;
+                    if player.joined {
+                        apply_skill_upgrade(player, slot);
+                    }
+                }
+            }
+        }
+        self.track_round_start(now);
     }
 
     fn prepare_tick(&mut self) -> (Instant, f32) {
@@ -1201,10 +1248,25 @@ impl ServerRuntime {
     }
 
     fn simulate_after_mana(&mut self, now: Instant, dt: f32) {
+        self.maintain_roster(now);
+        if self
+            .victory_at
+            .is_some_and(|at| now.saturating_duration_since(at) >= VICTORY_REMATCH_DELAY)
+        {
+            self.restart_round(now);
+        }
+        tick_match_formation(
+            &mut self.game_state,
+            &self.players,
+            &mut self.neutrals,
+            self.match_config,
+            dt,
+            now,
+        );
+        self.track_round_start(now);
         let Self {
             socket,
             players,
-            disconnected_sessions,
             projectiles,
             map_layout,
             structures,
@@ -1217,8 +1279,10 @@ impl ServerRuntime {
             team_buffs,
             last_wave_spawn_at,
             last_snapshot_at,
-            match_config,
             snapshot_send_diagnostic,
+            server_epoch,
+            match_id,
+            snapshot_tick,
             ..
         } = self;
 
@@ -1256,56 +1320,6 @@ impl ServerRuntime {
         restore_god_mode_players(players);
         handle_respawns(players, structures, map_layout, game_state, now);
 
-        if let GameState::Victory { .. } = game_state {
-            if victory_at.is_none() {
-                *victory_at = Some(now);
-            }
-            if victory_at.is_some_and(|t| now.duration_since(t) >= VICTORY_REMATCH_DELAY) {
-                reset_match(
-                    players,
-                    structures,
-                    minions,
-                    projectiles,
-                    neutrals,
-                    team_buffs,
-                    map_layout,
-                    last_wave_spawn_at,
-                    game_state,
-                );
-                *victory_at = None;
-            }
-        } else {
-            *victory_at = None;
-        }
-
-        let timed_out_addrs = players
-            .iter()
-            .filter(|(_, player)| now.duration_since(player.last_seen) > PLAYER_TIMEOUT)
-            .map(|(addr, _)| *addr)
-            .collect::<Vec<_>>();
-        for addr in timed_out_addrs {
-            let Some(player) = players.remove(&addr) else {
-                continue;
-            };
-            println!("Player {} timed out ({addr})", player.state.id);
-            if let Some(session_id) = player.session_id.clone() {
-                disconnected_sessions.insert(
-                    session_id,
-                    DisconnectedSession {
-                        player,
-                        disconnected_at: now,
-                    },
-                );
-            }
-        }
-        disconnected_sessions.retain(|_, session| {
-            now.duration_since(session.disconnected_at) <= SESSION_RECLAIM_WINDOW
-        });
-
-        // Release-mode match formation: runs after timeouts so the roster
-        // count is fresh (Forming counters, Starting countdown + rollback).
-        tick_match_formation(game_state, players, neutrals, *match_config, dt, now);
-
         let live_player_ids = players
             .values()
             .map(|player| player.state.id)
@@ -1326,6 +1340,7 @@ impl ServerRuntime {
         minions.retain(|_, minion| minion.state.hp > 0.0);
 
         if now.duration_since(*last_snapshot_at) >= SNAPSHOT_INTERVAL {
+            *snapshot_tick = snapshot_tick.saturating_add(1);
             let players_snapshot = build_players_snapshot(players);
 
             let mut projectiles_snapshot = projectiles
@@ -1337,7 +1352,11 @@ impl ServerRuntime {
             let mut structures_snapshot = structures
                 .values()
                 .filter(|structure| structure.state.hp > 0.0)
-                .map(|structure| structure.state.clone())
+                .map(|structure| {
+                    let mut state = structure.state.clone();
+                    state.protected = structure_is_protected(structures, state.id);
+                    state
+                })
                 .collect::<Vec<_>>();
             structures_snapshot.sort_unstable_by_key(|structure| structure.id);
 
@@ -1369,6 +1388,12 @@ impl ServerRuntime {
 
             for (addr, player) in &*players {
                 let packet = ServerPacket::Snapshot {
+                    meta: shared::protocol::SnapshotMeta::new(
+                        *server_epoch,
+                        *match_id,
+                        *snapshot_tick,
+                    ),
+                    join_error: player.join_error,
                     your_id: player.state.id,
                     players: players_snapshot.clone(),
                     projectiles: projectiles_snapshot.clone(),
@@ -1380,23 +1405,50 @@ impl ServerRuntime {
                     rematch_in_secs,
                 };
 
-                match serialize_snapshot_datagram(&packet) {
-                    Ok(payload) => {
-                        if let Err(error) = socket.send_to(&payload, addr) {
-                            if let Some(suppressed) = snapshot_send_diagnostic.record(now) {
-                                eprintln!(
-                                    "Failed to send complete {}-byte snapshot to {addr}: {error}; \
-                                     suppressed {suppressed} similar errors",
-                                    payload.len()
-                                );
+                let payloads = if player.framed_snapshots {
+                    serde_json::to_vec(&packet)
+                        .map_err(|error| error.to_string())
+                        .and_then(|payload| {
+                            shared::transport::encode_snapshot(
+                                &payload,
+                                *server_epoch,
+                                *snapshot_tick,
+                            )
+                            .map_err(|error| error.to_string())
+                        })
+                } else {
+                    serialize_snapshot_datagram(&packet)
+                        .map(|payload| vec![payload])
+                        .map_err(|error| error.to_string())
+                };
+                match payloads {
+                    Ok(payloads) => {
+                        for payload in payloads {
+                            let result = socket.send_to(&payload, addr).and_then(|sent| {
+                                if sent == payload.len() {
+                                    Ok(())
+                                } else {
+                                    Err(io::Error::new(
+                                        io::ErrorKind::WriteZero,
+                                        "incomplete UDP datagram",
+                                    ))
+                                }
+                            });
+                            if let Err(error) = result {
+                                if let Some(suppressed) = snapshot_send_diagnostic.record(now) {
+                                    eprintln!(
+                                        "Failed to send complete {}-byte snapshot datagram to {addr}: {error}; suppressed {suppressed} similar errors",
+                                        payload.len()
+                                    );
+                                }
+                                break;
                             }
                         }
                     }
                     Err(error) => {
                         if let Some(suppressed) = snapshot_send_diagnostic.record(now) {
                             eprintln!(
-                                "Rejected snapshot for {addr}: {error}; \
-                                 suppressed {suppressed} similar errors"
+                                "Rejected snapshot for {addr}: {error}; suppressed {suppressed} similar errors"
                             );
                         }
                     }
@@ -1405,6 +1457,7 @@ impl ServerRuntime {
 
             *last_snapshot_at = now;
         }
+        self.record_match_metrics(now);
     }
 }
 
@@ -1725,7 +1778,10 @@ fn handle_cast_request(
             let Some(target_structure) = structures.get(&target.id) else {
                 return;
             };
-            if target_structure.state.hp <= 0.0 || target_structure.state.team == caster_team {
+            if target_structure.state.hp <= 0.0
+                || target_structure.state.team == caster_team
+                || structure_is_protected(structures, target.id)
+            {
                 return;
             }
             (
@@ -2020,19 +2076,7 @@ fn simulate_projectiles(
     }
 
     for (target_id, damage, attacker_team) in structure_damage_events {
-        if let Some(target_structure) = structures.get_mut(&target_id) {
-            if target_structure.state.hp <= 0.0 {
-                continue;
-            }
-            target_structure.state.hp = (target_structure.state.hp - damage).max(0.0);
-            if target_structure.state.hp <= 0.0
-                && target_structure.state.kind == StructureKind::BaseTower
-            {
-                *game_state = GameState::Victory {
-                    winner: attacker_team,
-                };
-            }
-        }
+        apply_structure_damage(structures, target_id, damage, attacker_team, game_state);
     }
 
     for (target_id, damage, attacker_id) in neutral_damage_events {
@@ -2045,6 +2089,44 @@ fn simulate_projectiles(
             attacker_id,
             now,
         );
+    }
+}
+
+/// A team's base is protected until any one of its own lane towers has fallen.
+fn structure_is_protected(structures: &HashMap<u64, Structure>, target_id: u64) -> bool {
+    let Some(target) = structures.get(&target_id) else {
+        return false;
+    };
+    target.state.kind == StructureKind::BaseTower
+        && !structures.values().any(|structure| {
+            structure.state.team == target.state.team
+                && structure.state.kind == StructureKind::Tower
+                && structure.state.hp <= 0.0
+        })
+}
+
+/// Both hero projectiles and minion attacks pass through the same siege gate.
+fn apply_structure_damage(
+    structures: &mut HashMap<u64, Structure>,
+    target_id: u64,
+    damage: f32,
+    attacker_team: Team,
+    game_state: &mut GameState,
+) {
+    if structure_is_protected(structures, target_id) {
+        return;
+    }
+    let Some(target) = structures.get_mut(&target_id) else {
+        return;
+    };
+    if target.state.hp <= 0.0 || target.state.team == attacker_team {
+        return;
+    }
+    target.state.hp = (target.state.hp - damage).max(0.0);
+    if target.state.hp <= 0.0 && target.state.kind == StructureKind::BaseTower {
+        *game_state = GameState::Victory {
+            winner: attacker_team,
+        };
     }
 }
 
@@ -2363,7 +2445,7 @@ fn award_minion_kill_rewards(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,
     attacker_team: Team,
 ) {
-    let recipients = players
+    let mut recipients = players
         .iter()
         .filter(|(_, player)| player.joined && player.state.team == attacker_team)
         .map(|(addr, _)| *addr)
@@ -2372,6 +2454,8 @@ fn award_minion_kill_rewards(
         return;
     }
 
+    // Stable identity order makes integer remainder allocation reproducible.
+    recipients.sort_unstable_by_key(|addr| players[addr].state.id);
     let per_player_gold = MINION_KILL_GOLD / recipients.len() as u32;
     let per_player_xp = MINION_KILL_XP / recipients.len() as u32;
     let bonus_gold_receivers = MINION_KILL_GOLD % recipients.len() as u32;
@@ -2652,20 +2736,7 @@ fn simulate_minions(
     }
 
     for (target_id, damage, attacker_team) in structure_damage_events {
-        let Some(target_structure) = structures.get_mut(&target_id) else {
-            continue;
-        };
-        if target_structure.state.hp <= 0.0 {
-            continue;
-        }
-        target_structure.state.hp = (target_structure.state.hp - damage).max(0.0);
-        if target_structure.state.hp <= 0.0
-            && target_structure.state.kind == StructureKind::BaseTower
-        {
-            *game_state = GameState::Victory {
-                winner: attacker_team,
-            };
-        }
+        apply_structure_damage(structures, target_id, damage, attacker_team, game_state);
     }
 }
 
@@ -2819,6 +2890,8 @@ mod tests {
 
     fn empty_snapshot() -> ServerPacket {
         ServerPacket::Snapshot {
+            meta: Default::default(),
+            join_error: None,
             your_id: 1,
             players: Vec::new(),
             projectiles: Vec::new(),
@@ -2857,6 +2930,8 @@ mod tests {
         player.state.avatar = Some("x".repeat(IPV4_UDP_MAX_PAYLOAD_BYTES));
 
         let packet = ServerPacket::Snapshot {
+            meta: Default::default(),
+            join_error: None,
             your_id: player.state.id,
             players: build_players_snapshot(&players),
             projectiles: Vec::new(),
@@ -3965,7 +4040,9 @@ mod tests {
             assert_eq!(state.avatar.as_deref(), Some(valid_slug.as_str()));
         }
 
-        // Unknown or malicious avatar slugs must fall back to None without panicking.
+        // Unknown or malicious avatar slugs on a fresh admission fall back safely.
+        players.remove(&addr);
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
         handle_join_request(
             players.get_mut(&addr).unwrap(),
             Team::Blue,
@@ -4853,18 +4930,19 @@ mod tests {
             &layout,
             &mut last_wave_spawn_at,
             &mut game_state,
+            now,
         );
 
-        assert!(matches!(game_state, GameState::Running));
+        assert!(matches!(game_state, GameState::Lobby));
         // Buffs cleared for both teams.
         let later = now + Duration::from_secs(1);
         for team in [Team::Green, Team::Blue] {
             assert!((team_buffs.damage_multiplier(team, later) - 1.0).abs() < EPSILON);
         }
-        // Bosses re-gated on the fresh schedule; camps untouched.
+        // Bosses dormant until the fresh Running transition; ordinary camps restored.
         for neutral in neutrals.values() {
             if neutral.state.camp_type.is_boss() {
-                assert!(neutral.dead_until.is_some());
+                assert!(neutral.dead_until.is_none());
                 assert!(neutral.state.hp <= 0.0);
             } else {
                 assert!(neutral.dead_until.is_none());

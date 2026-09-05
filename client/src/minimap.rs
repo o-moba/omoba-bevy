@@ -26,7 +26,12 @@ impl Plugin for MinimapPlugin {
         app.init_resource::<MinimapUiState>()
             .init_resource::<MinimapNavigationState>()
             .add_systems(Startup, setup_minimap_ui)
-            .add_systems(PreUpdate, handle_minimap_navigation_system)
+            .add_systems(
+                Update,
+                handle_minimap_navigation_system
+                    .in_set(crate::input_context::InputContextSet::Actions)
+                    .before(crate::combat::CombatPointerInputSet),
+            )
             .add_systems(
                 PostUpdate,
                 (
@@ -107,8 +112,12 @@ fn handle_minimap_navigation_system(
     map_layout: Res<MapLayout>,
     mut cam_state: ResMut<CameraState>,
     mut nav_state: ResMut<MinimapNavigationState>,
+    context: Res<crate::input_context::GameplayInputContext>,
 ) {
     nav_state.consumed_primary_click = false;
+    if !context.gameplay_allowed() {
+        return;
+    }
 
     let Ok(window) = window_query.single() else {
         return;
@@ -417,5 +426,67 @@ fn structure_color(team: Team, kind: StructureKind) -> Color {
         (Team::Blue, StructureKind::Tower) => Color::srgba(0.26, 0.47, 0.88, 0.95),
         (Team::Green, StructureKind::BaseTower) => Color::srgba(0.66, 1.0, 0.64, 1.0),
         (Team::Blue, StructureKind::BaseTower) => Color::srgba(0.70, 0.84, 1.0, 1.0),
+    }
+}
+
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+    use crate::input_context::GameplayInputContext;
+
+    #[test]
+    fn minimap_click_does_not_escape_modal_or_debug_flight() {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<Touches>()
+            .init_resource::<MapLayout>()
+            .init_resource::<CameraState>()
+            .init_resource::<MinimapNavigationState>()
+            .init_resource::<GameplayInputContext>()
+            .add_systems(Update, handle_minimap_navigation_system);
+        let mut window = Window::default();
+        window.set_cursor_position(Some(Vec2::new(120.0, 120.0)));
+        app.world_mut().spawn((window, bevy::window::PrimaryWindow));
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        app.world_mut()
+            .resource_mut::<GameplayInputContext>()
+            .modal_open = true;
+        app.update();
+        assert!(
+            app.world()
+                .resource::<MinimapNavigationState>()
+                .focus_target
+                .is_none()
+        );
+        app.world_mut()
+            .resource_mut::<GameplayInputContext>()
+            .modal_open = false;
+        app.world_mut()
+            .resource_mut::<GameplayInputContext>()
+            .debug_flight = true;
+        app.update();
+        assert!(
+            app.world()
+                .resource::<MinimapNavigationState>()
+                .focus_target
+                .is_none()
+        );
+        app.world_mut()
+            .resource_mut::<GameplayInputContext>()
+            .debug_flight = false;
+        app.update();
+        assert!(
+            app.world()
+                .resource::<MinimapNavigationState>()
+                .focus_target
+                .is_some()
+        );
+        assert!(
+            app.world()
+                .resource::<MinimapNavigationState>()
+                .consumed_primary_click
+        );
     }
 }

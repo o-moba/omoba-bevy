@@ -2,20 +2,15 @@
 
 use bevy::prelude::*;
 
-use crate::combat::{CombatStats, LocalCastCooldown, TargetState};
-use crate::input_bindings::{
-    SKILL_SLOT_KEY_LABELS, help_key_display, skill_keys_display, upgrade_key_display,
-};
+use crate::combat::{CombatStats, TargetState};
+use crate::input_bindings::{help_key_display, skill_keys_display, upgrade_key_display};
 use crate::net::{
     GameState, GameStateSnapshot, NetworkHeroClass, NetworkStructure, PlayerProgression,
     StructureKind, TargetId, TargetKind, TeamBuffKind, TeamBuffState,
 };
 use crate::player::Player;
 use crate::team::{Team, TeamSelection};
-use shared::{
-    AbilityDefinition, HeroClass, SLOT_UNLOCK_LEVELS, SkillSlot, ability_for_class_slot,
-    unlocked_slots_for_level,
-};
+use shared::HeroClass;
 
 pub struct MatchHudPlugin;
 
@@ -185,8 +180,15 @@ fn update_match_hud(
     team_selection: Res<TeamSelection>,
     player: Query<(&CombatStats, &PlayerProgression, Option<&NetworkHeroClass>), With<Player>>,
     local_team: Query<&Team, With<Player>>,
-    enemy_bases: Query<(&CombatStats, &Team, &StructureKind), With<NetworkStructure>>,
-    cast_cd: Res<LocalCastCooldown>,
+    enemy_bases: Query<
+        (
+            &CombatStats,
+            &Team,
+            &StructureKind,
+            Option<&crate::net::NetworkStructureProtected>,
+        ),
+        With<NetworkStructure>,
+    >,
     target_state: Res<TargetState>,
     mut prog: Query<
         &mut Text,
@@ -310,10 +312,8 @@ fn update_match_hud(
     status_text.0 = running_status_text(
         *stats,
         hero_class,
-        progression,
         target_state.selected_target,
         &objective_line,
-        cast_cd.remaining_secs,
     );
 }
 
@@ -371,59 +371,12 @@ fn team_buff_hud_text(buffs: &[TeamBuffState], local_team: Team) -> String {
 }
 
 /// Short effect summary for an ability tooltip line (single effect per ability).
-fn ability_effect_summary(def: &AbilityDefinition) -> String {
-    if let Some(damage) = def.projectile_damage {
-        format!("{damage:.0} dmg, rng {:.0}", def.cast_range)
-    } else if let Some(heal) = def.self_heal {
-        format!("{heal:.0} heal, self")
-    } else if let Some(restore) = def.self_mana_restore {
-        format!("+{restore:.0} mana, self")
-    } else {
-        "no effect".to_string()
-    }
-}
-
-/// One hotbar tooltip line per slot: key, class ability name, effect numbers,
-/// and readiness (locked / cooldown / ready).
-fn class_ability_lines(
-    hero_class: HeroClass,
-    progression: &PlayerProgression,
-    cooldowns: [f32; 4],
-) -> String {
-    let unlocked = unlocked_slots_for_level(progression.level.max(1));
-    SkillSlot::ALL
-        .iter()
-        .map(|slot| {
-            let index = slot.index();
-            let def = ability_for_class_slot(hero_class, *slot);
-            let status = if !unlocked[index] {
-                format!("locked (Lv {})", SLOT_UNLOCK_LEVELS[index])
-            } else if cooldowns[index] > 0.0 {
-                format!("cd {:.1}s", cooldowns[index])
-            } else {
-                "ready".to_string()
-            };
-            format!(
-                "[{}] {} ({}) — {}",
-                SKILL_SLOT_KEY_LABELS[index],
-                def.name,
-                ability_effect_summary(def),
-                status
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 fn running_status_text(
     stats: CombatStats,
     hero_class: HeroClass,
-    progression: &PlayerProgression,
     selected_target: Option<TargetId>,
     objective_line: &str,
-    cooldown_remaining_secs: [f32; 4],
 ) -> String {
-    let ability_lines = class_ability_lines(hero_class, progression, cooldown_remaining_secs);
     let target_line = match selected_target {
         Some(t) => {
             let kind = match t.kind {
@@ -432,7 +385,7 @@ fn running_status_text(
                 TargetKind::Structure => "Structure",
                 TargetKind::Neutral => "Neutral",
             };
-            format!("Target: {kind} #{}", t.id)
+            format!("Target: enemy {kind} — Q attacks; approach happens automatically")
         }
         None => {
             "Target: none — click/tap a foe to attack, Tab selects, Backspace clears".to_string()
@@ -446,7 +399,6 @@ fn running_status_text(
         "HP {:.0}/{:.0}   Mana {:.0}/{:.0}   Class: {}\n\
 {target_line}\n\
 {objective_line}\n\
-{ability_lines}\n\
 Keys: {} — cast   |   Upgrade {}   |   {} help",
         hp,
         max_hp,
@@ -461,7 +413,15 @@ Keys: {} — cast   |   Upgrade {}   |   {} help",
 
 fn enemy_base_objective_line(
     local_team: &Query<&Team, With<Player>>,
-    structures: &Query<(&CombatStats, &Team, &StructureKind), With<NetworkStructure>>,
+    structures: &Query<
+        (
+            &CombatStats,
+            &Team,
+            &StructureKind,
+            Option<&crate::net::NetworkStructureProtected>,
+        ),
+        With<NetworkStructure>,
+    >,
 ) -> String {
     let Ok(team) = local_team.single() else {
         return "Goal: destroy the enemy base tower.".to_string();
@@ -469,14 +429,18 @@ fn enemy_base_objective_line(
     let mut hp_sum = 0.0f32;
     let mut max_sum = 0.0f32;
     let mut any = false;
-    for (stats, st_team, kind) in structures.iter() {
+    let mut protected = false;
+    for (stats, st_team, kind, protection) in structures.iter() {
         if *kind == StructureKind::BaseTower && *st_team != *team {
+            protected |= protection.is_some_and(|protection| protection.0);
             hp_sum += stats.hp.max(0.0);
             max_sum += stats.max_hp.max(0.0);
             any = true;
         }
     }
-    if any && max_sum > 0.0 {
+    if protected {
+        "Goal: destroy an enemy lane tower — the enemy base is protected.".to_string()
+    } else if any && max_sum > 0.0 {
         format!(
             "Goal: destroy enemy base — {:.0} / {:.0} HP remaining",
             hp_sum.min(max_sum),
@@ -491,13 +455,6 @@ fn enemy_base_objective_line(
 mod tests {
     use super::*;
 
-    fn level_progression(level: u32) -> PlayerProgression {
-        PlayerProgression {
-            level,
-            ..Default::default()
-        }
-    }
-
     #[test]
     fn running_status_text_shows_resources_objective_and_class_kit() {
         let text = running_status_text(
@@ -508,21 +465,13 @@ mod tests {
                 max_mana: 100.0,
             },
             HeroClass::Mage,
-            &level_progression(1),
             None,
             "Goal: destroy enemy base — 650 / 650 HP remaining",
-            [0.0; 4],
         );
         assert!(text.contains("HP 75/100   Mana 40/100"));
         assert!(text.contains("Class: Mage"));
         assert!(text.contains("Goal: destroy enemy base"));
-        // Class kit lines with correct names, unlock gating, and readiness.
-        assert!(text.contains("[Q] Arc Bolt"));
-        assert!(text.contains("ready"));
-        assert!(text.contains("[W] Mana Surge"));
-        assert!(text.contains("locked (Lv 2)"));
-        assert!(text.contains("[R] Pyroblast"));
-        assert!(text.contains("locked (Lv 6)"));
+        assert!(text.contains("Keys: Q / W / E / R") || text.contains("Keys: Q"));
     }
 
     #[test]
@@ -535,19 +484,14 @@ mod tests {
                 max_mana: 60.0,
             },
             HeroClass::Cleric,
-            &level_progression(6),
             Some(TargetId {
                 kind: TargetKind::Player,
                 id: 42,
             }),
             "Goal: destroy enemy base",
-            [1.26, 0.0, 0.0, 0.0],
         );
-        assert!(text.contains("Target: Player #42"));
-        assert!(text.contains("[Q] Smite"));
-        assert!(text.contains("cd 1.3s"));
-        assert!(text.contains("[W] Renew (26 heal, self) — ready"));
-        assert!(text.contains("[R] Guardian's Blessing"));
+        assert!(text.contains("Target: enemy Player"));
+        assert!(!text.contains("#42"));
     }
 
     #[test]
@@ -611,16 +555,5 @@ mod tests {
         let text = team_buff_hud_text(&buffs, Team::Green);
         assert_eq!(text.lines().count(), 2);
         assert!(text.contains("Wendigo's Favor") && text.contains("Mutatio's Might"));
-    }
-
-    #[test]
-    fn class_ability_lines_follow_the_selected_class() {
-        let warrior = class_ability_lines(HeroClass::Warrior, &level_progression(6), [0.0; 4]);
-        let ranger = class_ability_lines(HeroClass::Ranger, &level_progression(6), [0.0; 4]);
-        assert!(warrior.contains("Shield Bash"));
-        assert!(warrior.contains("Rampage"));
-        assert!(ranger.contains("Quick Shot"));
-        assert!(ranger.contains("Longshot"));
-        assert_ne!(warrior, ranger);
     }
 }

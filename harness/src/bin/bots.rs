@@ -23,13 +23,16 @@ use std::{
 
 use harness::{
     Bot, Character, GameState, HeroClass, Team,
-    bot_ai::{BotBrain, Lane, WorldView, step_toward},
+    bot_ai::{
+        BotBrain, Lane, WorldView, can_cast_slot, choose_self_sustain, choose_skill_upgrade,
+        step_toward,
+    },
 };
 
 const TICK_INTERVAL: Duration = Duration::from_millis(100);
 const STATUS_INTERVAL: Duration = Duration::from_secs(2);
-/// Client-side Q throttle; the server enforces the real cooldown.
-const CAST_INTERVAL: Duration = Duration::from_millis(700);
+/// Bound upgrade requests while waiting for the authoritative rank update.
+const UPGRADE_INTERVAL: Duration = Duration::from_millis(250);
 
 const CLASSES: [HeroClass; 4] = [
     HeroClass::Warrior,
@@ -96,7 +99,9 @@ struct BotRunner {
     /// Last known own position/health from a snapshot.
     position: Option<(f32, f32)>,
     alive: bool,
-    last_cast_at: Instant,
+    last_cast_at: [Option<Instant>; 4],
+    last_upgrade_at: Instant,
+    round_key: Option<(u64, u64)>,
     last_join_sent: Instant,
 }
 
@@ -109,7 +114,7 @@ fn main() {
 
     let mut runners: Vec<BotRunner> = Vec::with_capacity(args.count);
     for index in 0..args.count {
-        let bot = Bot::connect(args.server);
+        let bot = Bot::connect_framed(args.server);
         let team = if index % 2 == 0 {
             Team::Blue
         } else {
@@ -133,7 +138,9 @@ fn main() {
             brain: None,
             position: None,
             alive: true,
-            last_cast_at: Instant::now() - CAST_INTERVAL,
+            last_cast_at: [None; 4],
+            last_upgrade_at: Instant::now() - UPGRADE_INTERVAL,
+            round_key: None,
             last_join_sent: Instant::now(),
         });
     }
@@ -183,6 +190,16 @@ fn main() {
                 continue;
             };
 
+            let meta = snapshot.meta();
+            let round_key = (meta.server_epoch, meta.match_id);
+            if runner.round_key != Some(round_key) {
+                runner.round_key = Some(round_key);
+                runner.brain = None;
+                runner.last_cast_at = [None; 4];
+                runner.position = None;
+                runner.my_id = None;
+                runner.my_team = None;
+            }
             let my_id = snapshot.your_id();
             let me = snapshot.player(my_id).cloned();
             if let Some(me) = &me {
@@ -198,16 +215,19 @@ fn main() {
                     && let Some(brain) = runner.brain.as_mut()
                 {
                     brain.resync(me.x, me.z);
+                    runner.last_cast_at = [None; 4];
                 }
                 runner.alive = now_alive;
-            } else if runner.my_id.is_none()
-                && runner.last_join_sent.elapsed() > Duration::from_secs(1)
-            {
-                let (team, class, avatar) = loadouts[index];
-                runner
-                    .bot
-                    .join_with_loadout(team, Character::Ipfs, class, avatar);
-                runner.last_join_sent = Instant::now();
+            } else {
+                runner.my_id = None;
+                runner.position = None;
+                if runner.last_join_sent.elapsed() > Duration::from_secs(1) {
+                    let (team, class, avatar) = loadouts[index];
+                    runner
+                        .bot
+                        .join_with_loadout(team, Character::Ipfs, class, avatar);
+                    runner.last_join_sent = Instant::now();
+                }
                 continue;
             }
 
@@ -234,6 +254,14 @@ fn main() {
 
             match snapshot.game_state() {
                 GameState::Running if runner.alive => {
+                    let me = me.as_ref().expect("admitted bot has its own state");
+                    let now = Instant::now();
+                    if runner.last_upgrade_at.elapsed() >= UPGRADE_INTERVAL {
+                        if let Some(slot) = choose_skill_upgrade(me) {
+                            runner.bot.upgrade_skill(slot);
+                            runner.last_upgrade_at = now;
+                        }
+                    }
                     let brain = runner.brain.get_or_insert_with(|| {
                         let mut brain = BotBrain::new(runner.lane, team, runner.class);
                         brain.resync(x, z);
@@ -247,11 +275,14 @@ fn main() {
                         runner.bot.send_transform(nx, 0.5, nz, yaw);
                         runner.position = Some((nx, nz));
                     }
-                    if let Some(target) = decision.cast
-                        && runner.last_cast_at.elapsed() >= CAST_INTERVAL
+                    if let Some(slot) = choose_self_sustain(me, &runner.last_cast_at, now) {
+                        runner.bot.cast_slot(harness::TargetId::player(my_id), slot);
+                        runner.last_cast_at[slot as usize] = Some(now);
+                    } else if let Some(target) = decision.cast
+                        && can_cast_slot(me, 0, &runner.last_cast_at, now)
                     {
                         runner.bot.cast_slot(target, 0);
-                        runner.last_cast_at = Instant::now();
+                        runner.last_cast_at[0] = Some(now);
                     }
                 }
                 GameState::Running => {

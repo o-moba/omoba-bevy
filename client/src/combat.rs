@@ -4,8 +4,8 @@ use bevy::{
 };
 
 use crate::camera::MainCamera;
-use crate::debug_console::DebugConsole;
 use crate::input_bindings::{SKILL_CAST_KEYS, SKILL_UPGRADE_KEY};
+use crate::input_context::{GameplayInputContext, InputContextSet};
 use crate::minimap::MinimapNavigationState;
 use crate::model_scale::NormalizeModelScale;
 use crate::net::{
@@ -33,6 +33,87 @@ pub struct LocalCastCooldown {
     pub remaining_secs: [f32; 4],
 }
 
+/// One visible action message, replaced in place and expired after three seconds.
+#[derive(Resource, Default)]
+pub(crate) struct ActionFeedback {
+    pub text: String,
+    remaining: f32,
+}
+
+impl ActionFeedback {
+    pub(crate) fn push_line(&mut self, text: impl Into<String>) {
+        self.text = text.into();
+        self.remaining = 3.0;
+    }
+}
+
+#[derive(Component)]
+struct ActionFeedbackText;
+
+fn update_action_feedback(
+    time: Res<Time>,
+    mut feedback: ResMut<ActionFeedback>,
+    mut labels: Query<(&mut Text, &mut Node), With<ActionFeedbackText>>,
+) {
+    feedback.remaining = (feedback.remaining - time.delta_secs()).max(0.0);
+    if feedback.remaining == 0.0 {
+        feedback.text.clear();
+    }
+    for (mut label, mut node) in &mut labels {
+        label.0.clone_from(&feedback.text);
+        node.display = if feedback.text.is_empty() {
+            Display::None
+        } else {
+            Display::Flex
+        };
+    }
+}
+
+/// Keep valid identity across a transient disconnect (whose snapshot is empty).
+#[derive(Resource, Default)]
+struct CombatRoundIdentity(Option<(u64, u64)>);
+
+fn reset_round_input_state(
+    mut commands: Commands,
+    snapshot: Res<GameStateSnapshot>,
+    mut previous: ResMut<CombatRoundIdentity>,
+    mut target: ResMut<TargetState>,
+    mut pending: ResMut<PendingCast>,
+    mut cooldowns: ResMut<LocalCastCooldown>,
+    mut feedback: ResMut<ActionFeedback>,
+    moving: Query<Entity, With<MovementTarget>>,
+    mut queued: ResMut<Messages<NetworkCommand>>,
+) {
+    let identity = (snapshot.meta.server_epoch, snapshot.meta.match_id);
+    if identity.0 == 0 || identity.1 == 0 {
+        return;
+    }
+    let changed = previous.0.is_some_and(|last| last != identity);
+    previous.0 = Some(identity);
+    if !changed {
+        return;
+    }
+    target.selected_entity = None;
+    target.selected_target = None;
+    pending.cancel();
+    cooldowns.remaining_secs = [0.0; 4];
+    feedback.text.clear();
+    feedback.remaining = 0.0;
+    for entity in &moving {
+        commands.entity(entity).remove::<MovementTarget>();
+    }
+    let preserved: Vec<_> = queued
+        .drain()
+        .filter(|command| {
+            !matches!(
+                command,
+                NetworkCommand::Cast { .. } | NetworkCommand::UpgradeSkill { .. }
+            )
+        })
+        .collect();
+    queued.write_batch(preserved);
+}
+
 const BAR_WIDTH: f32 = 1.45;
 const BAR_HEIGHT: f32 = 0.09;
 const BAR_LAYER_OFFSET: f32 = 0.01;
@@ -58,7 +139,7 @@ const MINION_MARKER_RADIUS: f32 = 1.05;
 const NEUTRAL_MARKER_RADIUS: f32 = 1.1;
 const TOWER_MARKER_RADIUS: f32 = 2.0;
 const BASE_TOWER_MARKER_RADIUS: f32 = 3.75;
-const SKILL_SLOT_SIZE: f32 = 64.0;
+const SKILL_SLOT_SIZE: f32 = 112.0;
 const SKILL_SLOT_GAP: f32 = 8.0;
 const SKILL_BUTTON_MARGIN: f32 = 20.0;
 const SKILL_BUTTON_COLOR: Color = Color::srgba(0.12, 0.12, 0.12, 0.75);
@@ -82,13 +163,27 @@ impl Plugin for CombatPlugin {
             .init_resource::<LocalCastCooldown>()
             .init_resource::<WorldPointerState>()
             .init_resource::<PendingCast>()
+            .init_resource::<ActionFeedback>()
+            .init_resource::<CombatRoundIdentity>()
+            .add_systems(
+                Update,
+                reset_round_input_state
+                    .after(crate::net::ClientNetPipeline::ApplySnapshot)
+                    .before(InputContextSet::Modal),
+            )
             .add_systems(Startup, setup_combat_visual_assets)
             .add_systems(Startup, setup_combat_ui)
-            .add_systems(Update, select_target_system.in_set(CombatPointerInputSet))
+            .add_systems(
+                Update,
+                select_target_system
+                    .in_set(CombatPointerInputSet)
+                    .in_set(InputContextSet::Actions),
+            )
             .add_systems(
                 Update,
                 (
                     tick_local_cast_cooldown,
+                    update_action_feedback,
                     clear_invalid_target_system,
                     cast_spell_system,
                     skill_button_system,
@@ -98,7 +193,8 @@ impl Plugin for CombatPlugin {
                     update_target_marker_system,
                 )
                     .chain()
-                    .after(WorldMovementInputSet),
+                    .after(WorldMovementInputSet)
+                    .in_set(InputContextSet::Actions),
             );
         app.add_systems(
             PostUpdate,
@@ -142,6 +238,8 @@ struct CombatVisualAssets {
     is_2d: bool,
     hp_bg_material: Handle<StandardMaterial>,
     hp_fill_material: Handle<StandardMaterial>,
+    hp_local_material: Handle<StandardMaterial>,
+    hp_friendly_material: Handle<StandardMaterial>,
     mana_bg_material: Handle<StandardMaterial>,
     mana_fill_material: Handle<StandardMaterial>,
     bar_mesh: Handle<Mesh>,
@@ -313,6 +411,16 @@ fn setup_combat_visual_assets(
         unlit: true,
         ..default()
     });
+    let hp_local_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.85, 0.2),
+        unlit: true,
+        ..default()
+    });
+    let hp_friendly_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.2, 0.85, 0.6),
+        unlit: true,
+        ..default()
+    });
     let mana_bg_material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.04, 0.06, 0.18),
         perceptual_roughness: 1.0,
@@ -399,6 +507,8 @@ fn setup_combat_visual_assets(
         is_2d,
         hp_bg_material,
         hp_fill_material,
+        hp_local_material,
+        hp_friendly_material,
         mana_bg_material,
         mana_fill_material,
         bar_mesh,
@@ -410,6 +520,26 @@ fn setup_combat_visual_assets(
 }
 
 fn setup_combat_ui(mut commands: Commands) {
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            bottom: Val::Px(184.0),
+            right: Val::Px(20.0),
+            max_width: Val::Px(490.0),
+            padding: UiRect::all(Val::Px(8.0)),
+            ..default()
+        },
+        Text::new(""),
+        TextFont {
+            font_size: 18.0,
+            ..default()
+        },
+        TextColor(Color::srgb(1.0, 0.88, 0.5)),
+        BackgroundColor(Color::srgba(0.02, 0.03, 0.05, 0.8)),
+        ZIndex(14),
+        ActionFeedbackText,
+        Name::new("ActionFeedback"),
+    ));
     commands
         .spawn((
             Node {
@@ -489,7 +619,7 @@ fn setup_combat_ui(mut commands: Commands) {
                         slot.spawn((
                             Text::new(""),
                             TextFont {
-                                font_size: 9.5,
+                                font_size: 13.0,
                                 ..default()
                             },
                             TextColor(Color::srgba(0.88, 0.90, 0.94, 1.0)),
@@ -515,7 +645,19 @@ fn setup_combat_ui(mut commands: Commands) {
 /// slot is below the shared max rank.
 #[allow(clippy::type_complexity)]
 fn update_skill_bar_system(
-    progression: Query<(&PlayerProgression, Option<&NetworkHeroClass>), With<Player>>,
+    progression: Query<
+        (
+            &PlayerProgression,
+            Option<&NetworkHeroClass>,
+            &CombatStats,
+            &Transform,
+        ),
+        With<Player>,
+    >,
+    cooldowns: Res<LocalCastCooldown>,
+    pending: Res<PendingCast>,
+    target: Res<TargetState>,
+    targets: Query<&Transform, Without<Player>>,
     team_selection: Res<TeamSelection>,
     mut rank_labels: Query<(&SkillRankLabel, &mut Text), Without<SkillNameLabel>>,
     mut name_labels: Query<(&SkillNameLabel, &mut Text), Without<SkillRankLabel>>,
@@ -530,8 +672,8 @@ fn update_skill_bar_system(
     >,
 ) {
     let local = progression.iter().next();
-    let prog = local.map(|(prog, _)| *prog).unwrap_or_default();
-    let class = local_hero_class(local.map(|(_, class)| class), &team_selection);
+    let prog = local.map(|(prog, ..)| *prog).unwrap_or_default();
+    let class = local_hero_class(local.map(|(_, class, ..)| class), &team_selection);
 
     for (label, mut text) in &mut name_labels {
         let Some(slot) = SkillSlot::from_index(label.slot as u8) else {
@@ -545,7 +687,44 @@ fn update_skill_bar_system(
 
     for (label, mut text) in &mut rank_labels {
         let rank = prog.ranks.get(label.slot).copied().unwrap_or(1).max(1);
-        let next = format!("Lv {rank}");
+        let slot = SkillSlot::from_index(label.slot as u8).expect("hotbar slot");
+        let definition = ability_for_class_slot(class, slot);
+        let cost = scaled_mana_cost(definition, rank);
+        let status = if !unlocked_slots_for_level(prog.level.max(1))[label.slot] {
+            format!("Locked Lv {}", shared::SLOT_UNLOCK_LEVELS[label.slot])
+        } else if cooldowns.remaining_secs[label.slot] > 0.0 {
+            format!("{:.1}s cooldown", cooldowns.remaining_secs[label.slot])
+        } else if local.is_some_and(|(_, _, stats, _)| stats.mana < cost) {
+            "Need mana".to_string()
+        } else if pending
+            .request
+            .is_some_and(|request| request.slot == label.slot && request.approach_announced)
+        {
+            "Approaching".to_string()
+        } else if definition.targeting == TargetingMode::UnitTarget
+            && target.selected_entity.is_none()
+        {
+            "Select target".to_string()
+        } else if definition.targeting == TargetingMode::UnitTarget
+            && local
+                .zip(
+                    target
+                        .selected_entity
+                        .and_then(|entity| targets.get(entity).ok()),
+                )
+                .is_some_and(|((_, _, _, player), target)| {
+                    !within_cast_range(
+                        player.translation,
+                        target.translation,
+                        scaled_cast_range(definition, rank),
+                    )
+                })
+        {
+            "Out of range".to_string()
+        } else {
+            "Ready".to_string()
+        };
+        let next = format!("Rank {rank} · {cost:.0} MP\n{status}");
         if text.0 != next {
             text.0 = next;
         }
@@ -553,7 +732,9 @@ fn update_skill_bar_system(
 
     for (button, interaction, mut color, mut node) in &mut upgrade_buttons {
         let rank = prog.ranks.get(button.slot).copied().unwrap_or(1).max(1);
-        let can_upgrade = prog.skill_points > 0 && rank < MAX_ABILITY_RANK;
+        let can_upgrade = prog.skill_points > 0
+            && rank < MAX_ABILITY_RANK
+            && unlocked_slots_for_level(prog.level.max(1))[button.slot];
         // Arrow only shows when a point can actually be spent on this slot.
         let display = if can_upgrade {
             Display::Flex
@@ -582,18 +763,26 @@ fn skill_upgrade_input_system(
         (Changed<Interaction>, With<Button>),
     >,
     mut command_writer: MessageWriter<NetworkCommand>,
+    context: Res<GameplayInputContext>,
 ) {
-    let can_spend = progression
-        .iter()
-        .next()
-        .is_some_and(|prog| prog.skill_points > 0);
-
-    if can_spend && keyboard.just_pressed(SKILL_UPGRADE_KEY) {
-        command_writer.write(NetworkCommand::UpgradeSkill { slot: 0 });
+    if !context.gameplay_allowed() {
+        return;
     }
 
+    let Some(prog) = progression.iter().next() else {
+        return;
+    };
+    let unlocked = unlocked_slots_for_level(prog.level.max(1));
+    let eligible = |slot: usize| {
+        prog.skill_points > 0 && unlocked[slot] && prog.ranks[slot] < MAX_ABILITY_RANK
+    };
+    if keyboard.just_pressed(SKILL_UPGRADE_KEY) {
+        if let Some(slot) = (0..4).find(|slot| eligible(*slot)) {
+            command_writer.write(NetworkCommand::UpgradeSkill { slot: slot as u8 });
+        }
+    }
     for (button, interaction) in &upgrade_buttons {
-        if matches!(interaction, Interaction::Pressed) && can_spend {
+        if matches!(interaction, Interaction::Pressed) && eligible(button.slot) {
             command_writer.write(NetworkCommand::UpgradeSkill {
                 slot: button.slot as u8,
             });
@@ -616,7 +805,13 @@ fn select_target_system(
     visual_mode: Res<PlayerVisualMode>,
     minimap_nav: Option<Res<MinimapNavigationState>>,
     ui_interactions: Query<&Interaction, With<Button>>,
+    context: Res<GameplayInputContext>,
 ) {
+    if !context.gameplay_allowed() {
+        pointer_state.consumed_primary_press = false;
+        return;
+    }
+
     pointer_state.consumed_primary_press = false;
     if let Some(game_state) = game_state.as_ref() {
         if !matches!(game_state.state, GameState::Running) {
@@ -713,7 +908,12 @@ fn clear_invalid_target_system(
     mut target_state: ResMut<TargetState>,
     mut pending_cast: ResMut<PendingCast>,
     combat_stats_query: Query<&CombatStats>,
+    context: Res<GameplayInputContext>,
 ) {
+    if !context.gameplay_allowed() {
+        return;
+    }
+
     if keyboard_input.just_pressed(KeyCode::Backspace) {
         target_state.selected_entity = None;
         target_state.selected_target = None;
@@ -745,7 +945,7 @@ fn try_cast_slot(
     local: (&CombatStats, PlayerProgression, Option<&NetworkPlayerId>),
     selected_target: Option<TargetId>,
     command_writer: &mut MessageWriter<NetworkCommand>,
-    console: &mut DebugConsole,
+    feedback: &mut ActionFeedback,
     cast_cd: &mut LocalCastCooldown,
 ) -> bool {
     let Some(slot) = SkillSlot::from_index(slot_index as u8) else {
@@ -762,7 +962,7 @@ fn try_cast_slot(
             def.name,
             shared::SLOT_UNLOCK_LEVELS[slot.index()]
         );
-        console.push_line(message.clone());
+        feedback.push_line(message.clone());
         info!("{message}");
         return false;
     }
@@ -772,7 +972,7 @@ fn try_cast_slot(
             def.name,
             cast_cd.remaining_secs[slot.index()]
         );
-        console.push_line(message.clone());
+        feedback.push_line(message.clone());
         info!("{message}");
         return false;
     }
@@ -791,7 +991,7 @@ fn try_cast_slot(
             }
             TargetingMode::SelfTarget => "Not connected yet; self-cast unavailable.",
         };
-        console.push_line(message);
+        feedback.push_line(message);
         info!("{message}");
         return false;
     };
@@ -803,7 +1003,7 @@ fn try_cast_slot(
             "Not enough mana for {} ({:.0}/{:.0}).",
             def.name, stats.mana, mana_cost
         );
-        console.push_line(message.clone());
+        feedback.push_line(message.clone());
         info!("{message}");
         return false;
     }
@@ -812,19 +1012,8 @@ fn try_cast_slot(
         target,
         slot: slot.index() as u8,
     });
-    let message = format!(
-        "Cast {} -> {} {} (mana {:.0})",
-        def.name,
-        match target.kind {
-            TargetKind::Player => "player",
-            TargetKind::Minion => "minion",
-            TargetKind::Structure => "structure",
-            TargetKind::Neutral => "neutral",
-        },
-        target.id,
-        stats.mana
-    );
-    console.push_line(message.clone());
+    let message = format!("Casting {}.", def.name);
+    feedback.push_line(message.clone());
     info!("{message}");
     true
 }
@@ -834,7 +1023,7 @@ fn queue_cast_request(
     class: HeroClass,
     target_state: &TargetState,
     pending_cast: &mut PendingCast,
-    console: &mut DebugConsole,
+    feedback: &mut ActionFeedback,
 ) {
     let Some(slot) = SkillSlot::from_index(slot_index as u8) else {
         return;
@@ -847,7 +1036,7 @@ fn queue_cast_request(
                 (target_state.selected_entity, target_state.selected_target)
             else {
                 let message = "No target available. Click or tap an enemy, or use Tab to select.";
-                console.push_line(message);
+                feedback.push_line(message);
                 info!("{message}");
                 return;
             };
@@ -878,8 +1067,13 @@ fn cast_spell_system(
     >,
     target_state: Res<TargetState>,
     mut pending_cast: ResMut<PendingCast>,
-    mut console: ResMut<DebugConsole>,
+    mut feedback: ResMut<ActionFeedback>,
+    context: Res<GameplayInputContext>,
 ) {
+    if !context.gameplay_allowed() {
+        return;
+    }
+
     if let Some(game_state) = game_state.as_ref() {
         if !matches!(game_state.state, GameState::Running) {
             return;
@@ -901,7 +1095,7 @@ fn cast_spell_system(
         class,
         &target_state,
         &mut pending_cast,
-        &mut console,
+        &mut feedback,
     );
 }
 
@@ -924,8 +1118,13 @@ fn skill_button_system(
     >,
     target_state: Res<TargetState>,
     mut pending_cast: ResMut<PendingCast>,
-    mut console: ResMut<DebugConsole>,
+    mut feedback: ResMut<ActionFeedback>,
+    context: Res<GameplayInputContext>,
 ) {
+    if !context.gameplay_allowed() {
+        return;
+    }
+
     if let Some(game_state) = game_state.as_ref() {
         if !matches!(game_state.state, GameState::Running) {
             return;
@@ -944,7 +1143,7 @@ fn skill_button_system(
                     class,
                     &target_state,
                     &mut pending_cast,
-                    &mut console,
+                    &mut feedback,
                 );
             }
             Interaction::Hovered => {
@@ -975,9 +1174,16 @@ fn resolve_pending_cast_system(
     target_query: Query<(&Transform, &CombatStats), Without<Player>>,
     mut pending_cast: ResMut<PendingCast>,
     mut command_writer: MessageWriter<NetworkCommand>,
-    mut console: ResMut<DebugConsole>,
+    mut feedback: ResMut<ActionFeedback>,
     mut cast_cd: ResMut<LocalCastCooldown>,
+    context: Res<GameplayInputContext>,
+    protection: Query<&crate::net::NetworkStructureProtected>,
 ) {
+    if !context.gameplay_allowed() {
+        pending_cast.cancel();
+        return;
+    }
+
     let Some(request) = pending_cast.request else {
         return;
     };
@@ -993,6 +1199,44 @@ fn resolve_pending_cast_system(
         return;
     };
     let definition = ability_for_class_slot(class, slot);
+    let prog = progression.copied().unwrap_or_default();
+    let rank = prog.ranks[slot.index()].clamp(1, definition.max_rank);
+    let rejection = if !stats.is_alive() {
+        Some("Wait for respawn.".to_string())
+    } else if !unlocked_slots_for_level(prog.level.max(1))[slot.index()] {
+        Some(format!(
+            "{} unlocks at level {}.",
+            definition.name,
+            shared::SLOT_UNLOCK_LEVELS[slot.index()]
+        ))
+    } else if cast_cd.remaining_secs[slot.index()] > 0.0 {
+        Some(format!(
+            "{} ready in {:.1}s.",
+            definition.name,
+            cast_cd.remaining_secs[slot.index()]
+        ))
+    } else if stats.mana < scaled_mana_cost(definition, rank) {
+        Some(format!(
+            "Not enough mana for {} ({:.0}/{:.0}).",
+            definition.name,
+            stats.mana,
+            scaled_mana_cost(definition, rank)
+        ))
+    } else if request
+        .target_entity
+        .and_then(|entity| protection.get(entity).ok())
+        .is_some_and(|protected| protected.0)
+    {
+        Some("Base protected — destroy an enemy lane tower first.".to_string())
+    } else {
+        None
+    };
+    if let Some(message) = rejection {
+        feedback.push_line(message);
+        pending_cast.cancel();
+        commands.entity(player_entity).remove::<MovementTarget>();
+        return;
+    }
 
     if definition.targeting == TargetingMode::UnitTarget {
         let (Some(target_entity), Some(_target)) = (request.target_entity, request.target) else {
@@ -1020,7 +1264,7 @@ fn resolve_pending_cast_system(
             });
             if !request.approach_announced {
                 let message = format!("Approaching target for {}.", definition.name);
-                console.push_line(message.clone());
+                feedback.push_line(message.clone());
                 info!("{message}");
                 if let Some(request) = pending_cast.request.as_mut() {
                     request.approach_announced = true;
@@ -1037,7 +1281,7 @@ fn resolve_pending_cast_system(
         (stats, progression.copied().unwrap_or_default(), net_id),
         request.target,
         &mut command_writer,
-        &mut console,
+        &mut feedback,
         &mut cast_cd,
     );
     pending_cast.cancel();
@@ -1172,10 +1416,13 @@ fn spawn_combat_bars_system(
 }
 
 fn update_combat_bars_system(
-    owners: Query<(&CombatStats, &CombatBars)>,
+    owners: Query<(&CombatStats, &CombatBars, Option<&Team>, Has<Player>)>,
+    local_team: Query<&Team, With<Player>>,
+    assets: Res<CombatVisualAssets>,
+    mut fills: Query<&mut MeshMaterial3d<StandardMaterial>>,
     mut transforms: Query<&mut Transform>,
 ) {
-    for (stats, bars) in owners.iter() {
+    for (stats, bars, team, is_local) in owners.iter() {
         let hp_ratio = if stats.max_hp > 0.0 {
             (stats.hp / stats.max_hp).clamp(0.0, 1.0)
         } else {
@@ -1188,6 +1435,18 @@ fn update_combat_bars_system(
         };
 
         if let Some(hp_fill) = bars.hp_fill {
+            if let Ok(mut material) = fills.get_mut(hp_fill) {
+                material.0 = if is_local {
+                    assets.hp_local_material.clone()
+                } else if team
+                    .zip(local_team.single().ok())
+                    .is_some_and(|(team, local)| team == local)
+                {
+                    assets.hp_friendly_material.clone()
+                } else {
+                    assets.hp_fill_material.clone()
+                };
+            }
             if let Ok(mut transform) = transforms.get_mut(hp_fill) {
                 transform.scale.x = hp_ratio.max(0.001);
                 transform.translation.x = (hp_ratio - 1.0) * BAR_WIDTH * 0.5;
@@ -1709,13 +1968,13 @@ mod tests {
             marker_entity: None,
         };
         let mut pending = PendingCast::default();
-        let mut console = DebugConsole::default();
+        let mut feedback = ActionFeedback::default();
         queue_cast_request(
             SkillSlot::Q.index(),
             HeroClass::Warrior,
             &state,
             &mut pending,
-            &mut console,
+            &mut feedback,
         );
         assert_eq!(
             pending.request,
@@ -1749,7 +2008,8 @@ mod tests {
             .insert_resource(TeamSelection::default())
             .insert_resource(PendingCast::default())
             .insert_resource(LocalCastCooldown::default())
-            .insert_resource(DebugConsole::default())
+            .insert_resource(ActionFeedback::default())
+            .init_resource::<GameplayInputContext>()
             .add_systems(Update, resolve_pending_cast_system);
 
         let player = app
@@ -1823,7 +2083,8 @@ mod tests {
             .insert_resource(TeamSelection::default())
             .insert_resource(PendingCast::default())
             .insert_resource(LocalCastCooldown::default())
-            .insert_resource(DebugConsole::default())
+            .insert_resource(ActionFeedback::default())
+            .init_resource::<GameplayInputContext>()
             .add_systems(Update, resolve_pending_cast_system);
 
         let exhausted = CombatStats {
@@ -1871,13 +2132,13 @@ mod tests {
     fn self_target_hotbar_request_needs_no_selected_enemy() {
         let state = TargetState::default();
         let mut pending = PendingCast::default();
-        let mut console = DebugConsole::default();
+        let mut feedback = ActionFeedback::default();
         queue_cast_request(
             SkillSlot::W.index(),
             HeroClass::Warrior,
             &state,
             &mut pending,
-            &mut console,
+            &mut feedback,
         );
         assert_eq!(
             pending.request,
@@ -1887,6 +2148,362 @@ mod tests {
                 target: None,
                 approach_announced: false,
             })
+        );
+    }
+
+    #[test]
+    fn actual_cast_and_upgrade_systems_obey_help_pause_and_debug_context() {
+        let mut app = App::new();
+        app.add_message::<NetworkCommand>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<TeamSelection>()
+            .init_resource::<PendingCast>()
+            .init_resource::<TargetState>()
+            .init_resource::<ActionFeedback>()
+            .init_resource::<LocalCastCooldown>()
+            .init_resource::<crate::pause_menu::PauseMenuState>()
+            .insert_resource(GameStateSnapshot {
+                state: GameState::Running,
+                ..default()
+            })
+            .add_plugins((
+                crate::input_context::InputContextPlugin,
+                crate::help_overlay::HelpOverlayPlugin,
+            ))
+            .add_systems(
+                Update,
+                (
+                    cast_spell_system,
+                    skill_upgrade_input_system,
+                    resolve_pending_cast_system,
+                )
+                    .chain()
+                    .in_set(InputContextSet::Actions),
+            );
+        app.world_mut().spawn((
+            Player,
+            Transform::default(),
+            CombatStats::default(),
+            PlayerProgression {
+                level: 6,
+                skill_points: 2,
+                ..default()
+            },
+            NetworkHeroClass(HeroClass::Cleric),
+            NetworkPlayerId(1),
+        ));
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyW);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyU);
+        app.update(); // Automatic first-match help must suppress these same-frame keys.
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .count(),
+            0
+        );
+        assert!(app.world().resource::<GameplayInputContext>().modal_open);
+        app.world_mut()
+            .resource_mut::<crate::help_overlay::HelpOverlayVisible>()
+            .0 = false;
+        app.world_mut()
+            .resource_mut::<crate::pause_menu::PauseMenuState>()
+            .open = true;
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .count(),
+            0
+        );
+        app.world_mut()
+            .resource_mut::<crate::pause_menu::PauseMenuState>()
+            .open = false;
+        let mut debug = crate::debug_console::DebugConsole::default();
+        debug.ui_enabled = true;
+        app.insert_resource(debug);
+        app.world_mut()
+            .resource_mut::<GameplayInputContext>()
+            .debug_flight = true;
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .count(),
+            0
+        );
+        app.world_mut()
+            .resource_mut::<GameplayInputContext>()
+            .debug_flight = false;
+        app.update();
+        let emitted: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<NetworkCommand>>()
+            .drain()
+            .collect();
+        assert!(
+            emitted
+                .iter()
+                .any(|command| matches!(command, NetworkCommand::Cast { slot: 1, .. }))
+        );
+        assert!(
+            emitted
+                .iter()
+                .any(|command| matches!(command, NetworkCommand::UpgradeSkill { .. }))
+        );
+    }
+
+    #[test]
+    fn protected_base_rejection_is_visible_and_does_not_approach_or_start_cooldown() {
+        let mut app = App::new();
+        app.add_message::<NetworkCommand>()
+            .init_resource::<TeamSelection>()
+            .init_resource::<PendingCast>()
+            .init_resource::<ActionFeedback>()
+            .init_resource::<LocalCastCooldown>()
+            .init_resource::<GameplayInputContext>()
+            .add_systems(Update, resolve_pending_cast_system);
+        let player = app
+            .world_mut()
+            .spawn((
+                Player,
+                Transform::default(),
+                CombatStats::default(),
+                PlayerProgression::default(),
+                NetworkHeroClass(HeroClass::Warrior),
+                NetworkPlayerId(1),
+            ))
+            .id();
+        let base = app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(100.0, 0.0, 0.0),
+                CombatStats::default(),
+                crate::net::NetworkStructureProtected(true),
+            ))
+            .id();
+        app.world_mut().resource_mut::<PendingCast>().request = Some(PendingCastRequest {
+            slot: 0,
+            target_entity: Some(base),
+            target: Some(TargetId {
+                kind: TargetKind::Structure,
+                id: 2,
+            }),
+            approach_announced: false,
+        });
+        app.update();
+        assert!(
+            app.world()
+                .resource::<ActionFeedback>()
+                .text
+                .contains("Base protected")
+        );
+        assert!(app.world().resource::<PendingCast>().request.is_none());
+        assert!(!app.world().entity(player).contains::<MovementTarget>());
+        assert_eq!(
+            app.world().resource::<LocalCastCooldown>().remaining_secs,
+            [0.0; 4]
+        );
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn feedback_expires_in_place_and_hotbar_shows_server_rank_lock_mana_and_cooldown() {
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<ActionFeedback>()
+            .init_resource::<TeamSelection>()
+            .init_resource::<LocalCastCooldown>()
+            .init_resource::<TargetState>()
+            .init_resource::<PendingCast>()
+            .add_systems(Startup, setup_combat_ui)
+            .add_systems(Update, (update_action_feedback, update_skill_bar_system));
+        let player = app
+            .world_mut()
+            .spawn((
+                Player,
+                Transform::default(),
+                CombatStats {
+                    mana: 0.0,
+                    ..default()
+                },
+                PlayerProgression {
+                    level: 2,
+                    ranks: [2, 1, 1, 1],
+                    ..default()
+                },
+                NetworkHeroClass(HeroClass::Cleric),
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<LocalCastCooldown>()
+            .remaining_secs[0] = 1.5;
+        app.world_mut()
+            .resource_mut::<ActionFeedback>()
+            .push_line("Not enough mana.");
+        app.update();
+        let mut labels = app.world_mut().query::<(&SkillRankLabel, &Text)>();
+        let text: Vec<_> = labels
+            .iter(app.world())
+            .map(|(slot, text)| (slot.slot, text.0.clone()))
+            .collect();
+        assert!(text.iter().any(|(slot, text)| *slot == 0
+            && text.contains("Rank 2")
+            && text.contains("1.5s cooldown")));
+        assert!(
+            text.iter()
+                .any(|(slot, text)| *slot == 1 && text.contains("Need mana"))
+        );
+        assert!(
+            text.iter()
+                .any(|(slot, text)| *slot == 3 && text.contains("Locked Lv 6"))
+        );
+        let count = app.world().entities().len();
+        for _ in 0..5 {
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_secs(1));
+            app.update();
+        }
+        assert!(app.world().resource::<ActionFeedback>().text.is_empty());
+        assert_eq!(app.world().entities().len(), count);
+        assert!(app.world().entity(player).contains::<CombatStats>());
+    }
+
+    #[test]
+    fn target_selection_keys_obey_modal_context_at_the_ecs_boundary() {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<Touches>()
+            .init_resource::<GameplayInputContext>()
+            .init_resource::<TargetState>()
+            .init_resource::<PendingCast>()
+            .init_resource::<WorldPointerState>()
+            .insert_resource(PlayerVisualMode::Models3d)
+            .add_systems(Update, select_target_system);
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+        app.world_mut()
+            .spawn((Player, Transform::default(), Team::Green));
+        let enemy = app
+            .world_mut()
+            .spawn((
+                RemotePlayer,
+                Transform::from_xyz(2.0, 0.0, 0.0),
+                Team::Blue,
+                NetworkPlayerId(2),
+                CombatStats::default(),
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Tab);
+        app.world_mut()
+            .resource_mut::<GameplayInputContext>()
+            .modal_open = true;
+        app.update();
+        assert!(
+            app.world()
+                .resource::<TargetState>()
+                .selected_entity
+                .is_none()
+        );
+        app.world_mut()
+            .resource_mut::<GameplayInputContext>()
+            .modal_open = false;
+        app.update();
+        assert_eq!(
+            app.world().resource::<TargetState>().selected_entity,
+            Some(enemy)
+        );
+    }
+
+    #[test]
+    fn round_identity_clears_old_intents_cooldowns_and_queued_casts_but_reconnect_does_not() {
+        let mut app = App::new();
+        app.add_message::<NetworkCommand>()
+            .init_resource::<CombatRoundIdentity>()
+            .init_resource::<TargetState>()
+            .init_resource::<PendingCast>()
+            .init_resource::<LocalCastCooldown>()
+            .init_resource::<ActionFeedback>()
+            .insert_resource(GameStateSnapshot {
+                meta: shared::protocol::SnapshotMeta::new(10, 1, 50),
+                state: GameState::Running,
+                ..default()
+            })
+            .add_systems(Update, reset_round_input_state);
+        app.update();
+        let actor = app
+            .world_mut()
+            .spawn(MovementTarget {
+                target: Vec3::X * 50.0,
+            })
+            .id();
+        app.world_mut()
+            .resource_mut::<TargetState>()
+            .selected_entity = Some(actor);
+        app.world_mut()
+            .resource_mut::<LocalCastCooldown>()
+            .remaining_secs[3] = 40.0;
+        app.world_mut().resource_mut::<PendingCast>().request = Some(PendingCastRequest {
+            slot: 3,
+            target_entity: Some(actor),
+            target: None,
+            approach_announced: true,
+        });
+        app.world_mut().resource_mut::<GameStateSnapshot>().meta = default(); // teardown gap
+        app.update();
+        app.world_mut().resource_mut::<GameStateSnapshot>().meta =
+            shared::protocol::SnapshotMeta::new(10, 1, 55);
+        app.update();
+        assert_eq!(
+            app.world().resource::<LocalCastCooldown>().remaining_secs[3],
+            40.0
+        );
+        assert!(app.world().entity(actor).contains::<MovementTarget>());
+        app.world_mut()
+            .resource_mut::<Messages<NetworkCommand>>()
+            .write(NetworkCommand::Cast {
+                target: TargetId {
+                    kind: TargetKind::Player,
+                    id: 2,
+                },
+                slot: 3,
+            });
+        app.world_mut().resource_mut::<GameStateSnapshot>().meta =
+            shared::protocol::SnapshotMeta::new(10, 2, 2); // zero snapshot was dropped
+        app.update();
+        assert_eq!(
+            app.world().resource::<LocalCastCooldown>().remaining_secs,
+            [0.0; 4]
+        );
+        assert!(app.world().resource::<PendingCast>().request.is_none());
+        assert!(
+            app.world()
+                .resource::<TargetState>()
+                .selected_entity
+                .is_none()
+        );
+        assert!(!app.world().entity(actor).contains::<MovementTarget>());
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .count(),
+            0
         );
     }
 }

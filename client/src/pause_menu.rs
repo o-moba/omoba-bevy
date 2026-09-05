@@ -44,9 +44,13 @@ impl Plugin for PauseMenuPlugin {
             .add_systems(Startup, setup_pause_menu_ui)
             .add_systems(
                 Update,
+                (toggle_pause_menu, close_pause_menu_when_disconnected)
+                    .chain()
+                    .in_set(crate::input_context::InputContextSet::Modal),
+            )
+            .add_systems(
+                Update,
                 (
-                    toggle_pause_menu,
-                    close_pause_menu_when_disconnected,
                     handle_settings_navigation_buttons,
                     sync_pause_menu_visibility,
                     sync_pause_menu_sections,
@@ -65,8 +69,8 @@ impl Plugin for PauseMenuPlugin {
 }
 
 #[derive(Resource, Default)]
-struct PauseMenuState {
-    open: bool,
+pub(crate) struct PauseMenuState {
+    pub(crate) open: bool,
     in_settings: bool,
 }
 

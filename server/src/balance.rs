@@ -53,6 +53,7 @@ pub const MINION_ATTACK_COOLDOWN: Duration = Duration::from_millis(950);
 pub const MINION_VISION_RANGE: f32 = 10.0;
 pub const MINION_RADIUS: f32 = 0.55;
 pub const MINION_SPAWN_HEIGHT: f32 = 0.5;
+pub const FIRST_MINION_WAVE_DELAY: Duration = Duration::from_secs(10);
 pub const MINION_WAVE_INTERVAL: Duration = Duration::from_secs(60);
 pub const MINIONS_PER_WAVE: usize = 3;
 pub const MINION_KILL_GOLD: u32 = 18;
@@ -61,6 +62,7 @@ pub const PLAYER_SPAWN_OFFSET: f32 = 7.0;
 pub const PLAYER_GROUND_Y: f32 = 0.5;
 pub const MOVEMENT_POSITION_TOLERANCE: f32 = 0.10;
 pub const MOVEMENT_MAX_DELTA_SECONDS: f32 = 0.5;
+pub const EMPTY_ROSTER_GRACE: Duration = Duration::from_secs(10);
 pub const SESSION_RECLAIM_WINDOW: Duration = Duration::from_secs(30);
 
 // --- Level curve & stat growth ---
@@ -70,8 +72,8 @@ pub const STARTING_LEVEL: u32 = 1;
 pub const MAX_LEVEL: u32 = 10;
 pub const LEVEL_UP_HP_BONUS: f32 = 18.0;
 pub const LEVEL_UP_MANA_BONUS: f32 = 12.0;
-// First level is reachable in ~3 minion kills (3 * MINION_KILL_XP = 96 ≥ 90) so the
-// skill-upgrade flow is easy to exercise; later levels keep the original curve.
+// Team-shared kill XP depends on roster size. The full-roster deterministic
+// baseline is covered in release_tests; solo kill estimates do not apply to 5v5.
 pub const LEVEL_XP_THRESHOLDS: [u32; 9] = [90, 150, 180, 220, 260, 300, 340, 380, 420];
 
 // --- Jungle neutrals (camp stats & reward pacing) ---
