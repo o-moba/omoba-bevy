@@ -44,10 +44,6 @@ const SERVER_DATAGRAM_RECEIVE_CAPACITY: usize = 65_536;
 const _: () = assert!(SERVER_DATAGRAM_RECEIVE_CAPACITY > IPV4_UDP_MAX_PAYLOAD_BYTES);
 const DECODE_ERROR_LOG_INTERVAL: Duration = Duration::from_secs(1);
 const PROJECTILE_RADIUS: f32 = 0.22;
-const TOWER_SIZE: f32 = 2.6;
-const TOWER_HEIGHT: f32 = 6.0;
-const BASE_TOWER_SIZE: f32 = 6.0;
-const BASE_TOWER_HEIGHT: f32 = 8.0;
 const MINION_RADIUS: f32 = 0.55;
 const NEUTRAL_RADIUS: f32 = 0.62;
 const LOCAL_SNAP_DISTANCE: f32 = 4.0;
@@ -336,6 +332,7 @@ impl Plugin for NetworkingPlugin {
 /// their ramps), matching how the local player is grounded.
 fn ground_networked_entities(
     map_layout: Res<MapLayout>,
+    visual_mode: Res<PlayerVisualMode>,
     mut remote_players: Query<
         (&mut Transform, Option<&NormalizeModelScale>),
         (With<RemotePlayer>, Without<NetworkMinion>),
@@ -348,13 +345,18 @@ fn ground_networked_entities(
     for (mut transform, normalization) in &mut remote_players {
         transform.translation.y = crate::player::ground_origin_y(
             &map_layout,
+            *visual_mode,
             normalization,
             transform.translation.x,
             transform.translation.z,
         );
     }
     for (mut transform, normalization) in &mut minions {
-        let terrain = map_layout.terrain_height(transform.translation.x, transform.translation.z);
+        let terrain = if *visual_mode == PlayerVisualMode::Models3d {
+            map_layout.terrain_height_3d(transform.translation.x, transform.translation.z)
+        } else {
+            map_layout.terrain_height(transform.translation.x, transform.translation.z)
+        };
         // Slime models rest on their measured foot offset; the sphere radius
         // remains the fallback until the model is measured.
         let offset = match normalization.and_then(NormalizeModelScale::foot_local_y) {
@@ -819,7 +821,7 @@ pub struct NetworkStructureProtected(pub bool);
 pub struct NetworkMinion;
 
 /// Replicated minion AI state, mirrored onto the entity so the minion
-/// animation systems can pick walk/attack clips (TASK-24).
+/// presentation systems can animate walking and attacks.
 #[derive(Component, Clone, Copy)]
 pub struct NetworkMinionBrainState(pub MinionBrainState);
 
@@ -864,37 +866,16 @@ pub struct NetworkVisualAssets {
     projectile_mesh: Handle<Mesh>,
     friendly_projectile_material: Handle<StandardMaterial>,
     hostile_projectile_material: Handle<StandardMaterial>,
-    tower_mesh: Handle<Mesh>,
-    base_tower_mesh: Handle<Mesh>,
-    green_structure_material: Handle<StandardMaterial>,
-    blue_structure_material: Handle<StandardMaterial>,
     neutral_mesh: Handle<Mesh>,
     neutral_material: Handle<StandardMaterial>,
-    /// Team slime creep models (TASK-24): scene for rendering + gltf for
-    /// the bind-pose scale analysis and the animation library.
-    pub green_minion_scene: Handle<Scene>,
-    pub green_minion_gltf: Handle<Gltf>,
-    pub blue_minion_scene: Handle<Scene>,
-    pub blue_minion_gltf: Handle<Gltf>,
 }
 
 fn setup_network_visual_assets(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
 ) {
     let projectile_mesh = meshes.add(Mesh::from(Sphere::new(PROJECTILE_RADIUS)));
-    let tower_mesh = meshes.add(Mesh::from(Cuboid::new(
-        TOWER_SIZE,
-        TOWER_HEIGHT,
-        TOWER_SIZE,
-    )));
-    let base_tower_mesh = meshes.add(Mesh::from(Cuboid::new(
-        BASE_TOWER_SIZE,
-        BASE_TOWER_HEIGHT,
-        BASE_TOWER_SIZE,
-    )));
     let friendly_projectile_material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.35, 0.92, 1.0),
         unlit: true,
@@ -903,16 +884,6 @@ fn setup_network_visual_assets(
     let hostile_projectile_material = materials.add(StandardMaterial {
         base_color: Color::srgb(1.0, 0.36, 0.36),
         unlit: true,
-        ..default()
-    });
-    let green_structure_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.14, 0.55, 0.22),
-        perceptual_roughness: 0.75,
-        ..default()
-    });
-    let blue_structure_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.18, 0.35, 0.75),
-        perceptual_roughness: 0.75,
         ..default()
     });
     let neutral_mesh = meshes.add(Mesh::from(Sphere::new(NEUTRAL_RADIUS)));
@@ -926,16 +897,8 @@ fn setup_network_visual_assets(
         projectile_mesh,
         friendly_projectile_material,
         hostile_projectile_material,
-        tower_mesh,
-        base_tower_mesh,
-        green_structure_material,
-        blue_structure_material,
         neutral_mesh,
         neutral_material,
-        green_minion_scene: asset_server.load("minions/slime-green.glb#Scene0"),
-        green_minion_gltf: asset_server.load("minions/slime-green.glb"),
-        blue_minion_scene: asset_server.load("minions/slime-blue.glb#Scene0"),
-        blue_minion_gltf: asset_server.load("minions/slime-blue.glb"),
     });
 }
 
@@ -1930,16 +1893,7 @@ fn apply_server_snapshot(
             continue;
         }
 
-        let material = match structure.team {
-            Team::Green => visuals.green_structure_material.clone(),
-            Team::Blue => visuals.blue_structure_material.clone(),
-        };
-        let mesh = match structure.kind {
-            StructureKind::Tower => visuals.tower_mesh.clone(),
-            StructureKind::BaseTower => visuals.base_tower_mesh.clone(),
-        };
-
-        let mut entity_commands = commands.spawn((
+        let entity_commands = commands.spawn((
             Transform::from_xyz(structure.x, structure.y, structure.z),
             Visibility::default(),
             NetworkStructure,
@@ -1950,9 +1904,6 @@ fn apply_server_snapshot(
             structure_state_to_combat_stats(structure),
             Name::new(format!("Structure-{}", structure.id)),
         ));
-        if **visual_mode == PlayerVisualMode::Models3d {
-            entity_commands.insert((Mesh3d(mesh), MeshMaterial3d(material)));
-        }
         let entity = entity_commands.id();
 
         network_state.structures.insert(structure.id, entity);
@@ -2002,19 +1953,6 @@ fn apply_server_snapshot(
             continue;
         }
 
-        let (scene, gltf, key) = match minion.team {
-            Team::Green => (
-                visuals.green_minion_scene.clone(),
-                visuals.green_minion_gltf.clone(),
-                "slime-green",
-            ),
-            Team::Blue => (
-                visuals.blue_minion_scene.clone(),
-                visuals.blue_minion_gltf.clone(),
-                "slime-blue",
-            ),
-        };
-
         let mut entity_commands = commands.spawn((
             Transform::from_translation(target_translation).with_rotation(target_rotation),
             Visibility::default(),
@@ -2034,21 +1972,8 @@ fn apply_server_snapshot(
             Name::new(format!("Minion-{}-{:?}", minion.id, minion.lane)),
         ));
         if **visual_mode == PlayerVisualMode::Models3d {
-            entity_commands.insert((
-                NormalizeModelScale::scaled_by(MINION_MODEL_HEIGHT_SCALE),
-                ModelScaleSource {
-                    gltf,
-                    key: key.to_owned(),
-                },
-            ));
-            entity_commands.with_children(|parent| {
-                parent.spawn((
-                    SceneRoot(scene),
-                    Transform::from_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
-                    Visibility::default(),
-                    Name::new("MinionModel"),
-                ));
-            });
+            // Original procedural meshes attach once in MinionVisualsPlugin.
+            entity_commands.insert(NormalizeModelScale::scaled_by(MINION_MODEL_HEIGHT_SCALE));
         }
         let entity = entity_commands.id();
         network_state.minions.insert(minion.id, entity);
@@ -2304,24 +2229,24 @@ fn sync_connection_status_ui(
         }
         ClientConnectionState::Connected => {
             text.0 = if client_session.join_confirmed() {
-                "Joined — connected to match.".to_owned()
+                "Joined - connected to match.".to_owned()
             } else if client_session.last_join.is_some() {
                 format!(
                     "Joining match… attempt {}/{}. Waiting for server admission.",
                     client_session.join_attempts, MAX_JOIN_ATTEMPTS
                 )
             } else {
-                "Connected — choose a hero and team to join.".to_owned()
+                "Connected - choose a hero and team to join.".to_owned()
             };
         }
         ClientConnectionState::Disconnected if client_session.reconnect.active => {
             text.0 = format!(
-                "Connection lost — reconnecting (attempt {})...",
+                "Connection lost - reconnecting (attempt {})...",
                 client_session.reconnect.attempts.max(1)
             );
         }
         ClientConnectionState::Disconnected => {
-            text.0 = "Disconnected — connection lost or timed out. Use Retry when the server is back, then choose your team again."
+            text.0 = "Disconnected - connection lost or timed out. Use Retry when the server is back, then choose your team again."
                 .to_string();
         }
     }
@@ -2826,6 +2751,94 @@ mod tests {
             value["players"] = json!([]);
         }
         serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn admitted_snapshot_and_world_fallback_keep_one_local_root_in_the_same_frame() {
+        use crate::{
+            camera::CameraState,
+            maps::MapLayout,
+            player::Player,
+            sprite::PlayerVisualMode,
+            world::{AvatarAssetCache, PlayerAssets, PlayerModelCatalog},
+        };
+        let (outgoing, _outgoing_rx) = crossbeam_channel::unbounded();
+        let (incoming, incoming_rx) = crossbeam_channel::unbounded();
+        let (_signal_tx, signals) = crossbeam_channel::unbounded();
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+            .insert_resource(super::NetworkChannels {
+                outgoing,
+                incoming: incoming_rx,
+                signals,
+            })
+            .insert_resource(super::ClientSession {
+                state: ClientConnectionState::Connected,
+                ..default()
+            })
+            .insert_resource(TeamSelection {
+                team: Some(crate::team::Team::Green),
+                ..default()
+            })
+            .insert_resource(PlayerVisualMode::Models3d)
+            .insert_resource(PlayerAssets {
+                scene: None,
+                gltf: None,
+                mesh: default(),
+                material: default(),
+            })
+            .init_resource::<PlayerModelCatalog>()
+            .init_resource::<AvatarAssetCache>()
+            .init_resource::<CameraState>()
+            .init_resource::<MapLayout>()
+            .init_resource::<super::NetworkState>()
+            .init_resource::<super::GameStateSnapshot>()
+            .init_resource::<super::PendingServerSnapshotFrame>()
+            .init_resource::<super::NetIncomingDisconnected>()
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .add_systems(Startup, super::setup_network_visual_assets)
+            .add_systems(
+                Update,
+                (
+                    super::ingest_server_snapshot_packets
+                        .in_set(super::ClientNetPipeline::IngestSnapshot),
+                    super::apply_server_snapshot.in_set(super::ClientNetPipeline::ApplySnapshot),
+                ),
+            );
+        super::configure_network_pipeline(&mut app);
+        crate::world::register_local_player_spawn(&mut app);
+        for tick in 1..=3 {
+            let mut snapshot =
+                serde_json::to_value(admission_snapshot(1, tick, true, None)).unwrap();
+            let mut hero = snapshot["players"][0].clone();
+            hero["avatar"] = serde_json::Value::Null;
+            snapshot["players"] = json!([hero]);
+            for field in ["structures", "minions", "neutrals", "projectiles"] {
+                snapshot[field] = json!([]);
+            }
+            incoming
+                .send(serde_json::from_value(snapshot).unwrap())
+                .unwrap();
+            app.update();
+            assert!(
+                app.world()
+                    .resource::<super::ClientSession>()
+                    .join_confirmed()
+            );
+            let mut players = app
+                .world_mut()
+                .query_filtered::<Option<&super::NetworkPlayerId>, With<Player>>();
+            let ids: Vec<_> = players
+                .iter(app.world())
+                .map(|id| id.map(|id| id.0))
+                .collect();
+            assert_eq!(
+                ids,
+                vec![Some(1)],
+                "the admitted snapshot must be the sole creator; no transient untagged world duplicate"
+            );
+        }
     }
 
     #[test]

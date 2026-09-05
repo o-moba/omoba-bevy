@@ -134,15 +134,6 @@
       "slug": "orion",
       "source_url": "https://gateway.pinata.cloud/ipfs/Qmed8jVF5FvBn6Jerxk8Wm5DwRjuAHRfBXgofTue37orBC/Avatar_Orion.vrm",
       "thumbnail": "orion.png"
-    },
-    {
-      "author": "NeonGlitch86",
-      "collection": "NeonGlitch86 Collection",
-      "display_name": "EL BUENO",
-      "license": "CC0",
-      "slug": "el-bueno",
-      "source_url": "https://raw.githubusercontent.com/neonglitch86/vrm/main/G_C.vrm",
-      "thumbnail": "el-bueno.png"
     }
   ]
 }

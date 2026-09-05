@@ -4,6 +4,7 @@
 
 use bevy::prelude::*;
 
+use crate::debug_console::DebugConsole;
 use crate::net::{ClientSession, NetworkCommand};
 use crate::player::DebugSpeedBoost;
 
@@ -24,7 +25,8 @@ pub struct GodModePlugin;
 
 impl Plugin for GodModePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<DebugToggleState>()
+        app.init_resource::<DebugConsole>()
+            .init_resource::<DebugToggleState>()
             .add_systems(Startup, setup_debug_buttons)
             .add_systems(
                 Update,
@@ -35,7 +37,8 @@ impl Plugin for GodModePlugin {
                     periodically_assert_debug_toggles,
                     sync_debug_button_labels,
                 )
-                    .chain(),
+                    .chain()
+                    .run_if(debug_controls_enabled),
             );
     }
 }
@@ -57,7 +60,14 @@ struct SpeedBoostButton;
 #[derive(Component)]
 struct SpeedBoostButtonLabel;
 
-fn setup_debug_buttons(mut commands: Commands) {
+fn debug_controls_enabled(console: Res<DebugConsole>) -> bool {
+    console.ui_enabled
+}
+
+fn setup_debug_buttons(mut commands: Commands, console: Res<DebugConsole>) {
+    if !console.ui_enabled {
+        return;
+    }
     spawn_toggle_button(
         &mut commands,
         BUTTON_LEFT,
@@ -259,5 +269,62 @@ fn speed_color(enabled: bool, interaction: Interaction) -> Color {
         (true, false) => SPEED_ON_COLOR,
         (false, true) => OFF_HOVER_COLOR,
         (false, false) => OFF_COLOR,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disabled_debug_ui_spawns_no_controls_and_ignores_admin_keys() {
+        let mut app = App::new();
+        let mut console = DebugConsole::default();
+        console.ui_enabled = false;
+        app.insert_resource(console)
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<DebugToggleState>()
+            .init_resource::<DebugSpeedBoost>()
+            .init_resource::<ClientSession>()
+            .add_message::<NetworkCommand>()
+            .add_systems(Startup, setup_debug_buttons)
+            .add_systems(
+                Update,
+                keyboard_debug_toggles.run_if(debug_controls_enabled),
+            );
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::F2);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::F3);
+        app.update();
+        assert_eq!(
+            app.world_mut().query::<&Button>().iter(app.world()).count(),
+            0
+        );
+        assert!(!app.world().resource::<DebugToggleState>().god_mode);
+        assert!(!app.world().resource::<DebugSpeedBoost>().0);
+        assert!(
+            app.world()
+                .resource::<Messages<NetworkCommand>>()
+                .is_empty()
+        );
+
+        let mut enabled = App::new();
+        let mut console = DebugConsole::default();
+        console.ui_enabled = true;
+        enabled
+            .insert_resource(console)
+            .add_systems(Startup, setup_debug_buttons);
+        enabled.update();
+        assert_eq!(
+            enabled
+                .world_mut()
+                .query::<&Button>()
+                .iter(enabled.world())
+                .count(),
+            2
+        );
     }
 }

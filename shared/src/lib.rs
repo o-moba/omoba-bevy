@@ -856,6 +856,18 @@ mod tests {
     }
 
     #[test]
+    fn approved_release_roster_retains_fifteen_heroes_and_removed_selections_fall_back() {
+        let shipped: AvatarManifest = serde_json::from_str(AVATAR_MANIFEST_JSON).unwrap();
+        assert_eq!(shipped.avatars.len(), 15);
+        for removed in ["el-bueno", "slime-green", "slime-blue", "wendigo-hollow"] {
+            assert!(shipped.avatars.iter().all(|avatar| avatar.slug != removed));
+            assert_eq!(normalize_avatar_slug(Some(removed)), None);
+            assert_eq!(normalize_avatar_slug(Some(&format!(" {removed} "))), None);
+            assert!(avatar_definition(removed).is_none());
+        }
+    }
+
+    #[test]
     fn avatar_slug_normalization_rejects_unknown_values() {
         let first = &avatar_roster()[0];
         assert_eq!(

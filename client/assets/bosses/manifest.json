@@ -1,15 +1,6 @@
 {
   "avatars": [
     {
-      "slug": "wendigo-hollow",
-      "display_name": "Wendigo: Hollow",
-      "collection": "Halloween Rising",
-      "license": "CC0",
-      "source_url": "https://dweb.link/ipfs/QmXyEuwbgUfMG7WzRZys6JnS6DJvxqkPGDseZmHM8wLJm1/Avatar05_v2_Stylized_Black.vrm",
-      "author": "Polygonal-Mind",
-      "thumbnail": "wendigo-hollow.png"
-    },
-    {
       "slug": "king-mutatio",
       "display_name": "King Mutatio",
       "collection": "ToxSam",
@@ -17,6 +8,13 @@
       "source_url": "https://dweb.link/ipfs/QmVXPeQzJhhfjPJyeHdt4PfZddLSLPwNEHuPTu1RauLSsW/king_mutatio.vrm",
       "author": "toxsam",
       "thumbnail": "king-mutatio.png"
+    }
+  ],
+  "procedural": [
+    {
+      "id": "wendigo-boss",
+      "source": "client/src/creatures3d.rs",
+      "provenance": "original project-authored geometry"
     }
   ]
 }

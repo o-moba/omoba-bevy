@@ -46,11 +46,16 @@ const RESPAWN_DELAY_SECONDS: f32 = 5.0;
 /// loading) keep the legacy half-cube offset.
 pub(crate) fn ground_origin_y(
     layout: &MapLayout,
+    mode: PlayerVisualMode,
     normalization: Option<&NormalizeModelScale>,
     x: f32,
     z: f32,
 ) -> f32 {
-    let terrain = layout.terrain_height(x, z);
+    let terrain = if mode == PlayerVisualMode::Models3d {
+        layout.terrain_height_3d(x, z)
+    } else {
+        layout.terrain_height(x, z)
+    };
     let offset = match normalization.and_then(NormalizeModelScale::foot_local_y) {
         Some(foot_local_y) => -foot_local_y,
         None => PLAYER_SIZE * 0.5,
@@ -845,6 +850,7 @@ fn move_player(
 fn animate_jump(
     time: Res<Time>,
     map_layout: Res<MapLayout>,
+    visual_mode: Res<PlayerVisualMode>,
     mut query: Query<
         (&mut Transform, &mut Jumping, Option<&NormalizeModelScale>),
         (With<Player>, With<MovementTarget>),
@@ -860,6 +866,7 @@ fn animate_jump(
         // Base follows the terrain so hops track ramps instead of clipping.
         let base_y = ground_origin_y(
             &map_layout,
+            *visual_mode,
             normalization,
             transform.translation.x,
             transform.translation.z,
@@ -871,6 +878,7 @@ fn animate_jump(
 fn apply_gravity(
     time: Res<Time>,
     map_layout: Res<MapLayout>,
+    visual_mode: Res<PlayerVisualMode>,
     mut query: Query<
         (
             &mut Transform,
@@ -891,6 +899,7 @@ fn apply_gravity(
 
         let ground_y = ground_origin_y(
             &map_layout,
+            *visual_mode,
             normalization,
             transform.translation.x,
             transform.translation.z,
@@ -1099,6 +1108,32 @@ fn resolve_player_structure_overlap(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn player_grounding_preserves_sprite_corners_and_tracks_verdant_walktops() {
+        let layout = MapLayout::default();
+        let c = layout.home_spawn;
+        let sprite_y = ground_origin_y(
+            &layout,
+            PlayerVisualMode::Sprite2d,
+            None,
+            c.x + 24.0,
+            c.z + 26.0,
+        );
+        let model_y = ground_origin_y(
+            &layout,
+            PlayerVisualMode::Models3d,
+            None,
+            c.x + 24.0,
+            c.z + 26.0,
+        );
+        assert!((sprite_y - (0.7 * 5.0 / 6.0 + PLAYER_SIZE * 0.5)).abs() < 0.00001);
+        assert!((model_y - (0.35 + PLAYER_SIZE * 0.5)).abs() < 0.00001);
+        assert_eq!(
+            ground_origin_y(&layout, PlayerVisualMode::Models3d, None, 0.0, 0.0),
+            PLAYER_SIZE * 0.5
+        );
+    }
 
     #[test]
     fn modal_ground_press_never_creates_movement_intent() {

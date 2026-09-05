@@ -9,6 +9,8 @@ import platform
 import shutil
 import subprocess
 
+from validate_candidate_assets import validate
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -20,11 +22,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--profile", choices=("dev", "release"), default="dev")
-    parser.add_argument("--internal-review", action="store_true",
-                        help="acknowledge unresolved asset provenance; do not distribute this package")
     args = parser.parse_args()
-    if not args.internal_review:
-        parser.error("asset provenance conflicts block distribution; use --internal-review only for local review (see TESTING guide RG5)")
+    source_gate = validate(ROOT / "client/assets")
+    if source_gate["status"] != "PASS":
+        parser.error("asset content gate failed: " + "; ".join(source_gate["errors"]))
     destination = args.output.resolve()
     if destination.exists():
         parser.error("output must be a new directory; existing packages are never overwritten")
@@ -44,11 +45,11 @@ def main():
         output = destination / "assets" / source.relative_to(ROOT / "client/assets")
         output.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, output)
-    for name in ("avatars", "bosses", "minions"):
-        manifest = json.loads((destination / "assets" / name / "manifest.json").read_text())
-        for avatar in manifest["avatars"]:
-            if not (destination / "assets" / name / (avatar["slug"] + ".glb")).is_file():
-                raise RuntimeError(f"missing required {name} model: {avatar['slug']}")
+    # Inspect the bytes that will actually ship, using the repository review policy.
+    asset_gate = validate(destination / "assets")
+    (destination / "ASSET-REVIEW.json").write_text(json.dumps(asset_gate, indent=2) + "\n")
+    if asset_gate["status"] != "PASS":
+        raise RuntimeError("packaged asset content gate failed: " + "; ".join(asset_gate["errors"]))
     for kind in ("client", "server", "bots"):
         launcher = destination / f"launch-{kind}.sh"
         launcher.write_text('''#!/bin/sh
@@ -64,7 +65,10 @@ export OMOBA_TEAM_SIZE="${OMOBA_TEAM_SIZE:-5}"
 exec "$PACKAGE_DIR/''' + kind + '''" "$@"
 ''')
         launcher.chmod(0o755)
-    shutil.copy2(ROOT / "docs/progress/2026-09-05-release-test-guide.md", destination / "TESTING.md")
+    shutil.copy2(ROOT / "docs/progress/2026-09-05-verdant-test-guide.md", destination / "TESTING.md")
+    shutil.copy2(ROOT / "ATTRIBUTION.md", destination / "ATTRIBUTION.md")
+    shutil.copy2(ROOT / "art/verdant-confluence/PROVENANCE.md", destination / "VERDANT-PROVENANCE.md")
+    shutil.copy2(ROOT / "assets-src/animations/README.md", destination / "ANIMATION-ATTRIBUTION.md")
     shutil.copy2(ROOT / "docs/progress/2026-09-05-distribution-review.md", destination / "2026-09-05-distribution-review.md")
     metadata = json.loads(run("cargo", "metadata", "--no-deps", "--format-version", "1", "--locked"))
     version = next(item["version"] for item in metadata["packages"] if item["name"] == "client")
@@ -74,7 +78,9 @@ exec "$PACKAGE_DIR/''' + kind + '''" "$@"
                     source_dirty=bool(run("git", "status", "--porcelain")),
                     source_diff_sha256=hashlib.sha256(run("git", "diff", "HEAD").encode()).hexdigest(),
                     platform=platform.platform(), machine=platform.machine(), profile=args.profile,
-                    certification="INTERNAL REVIEW ONLY: asset provenance and external release gates BLOCKED", sha256=files)
+                    asset_content_gate="PASS",
+                    certification="Controlled playtest candidate; human, soak, platform/network and remaining dependency gates unverified",
+                    sha256=files)
     (destination / "BUILD.json").write_text(json.dumps(identity, indent=2) + "\n")
     print(json.dumps({"package": str(destination), "version": version, "files": len(files),
                       "bytes": sum(p.stat().st_size for p in destination.rglob("*") if p.is_file())}))

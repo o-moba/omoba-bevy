@@ -12,8 +12,8 @@ use crate::player::{PLAYER_SIZE, Player};
 use crate::sprite::PlayerVisualMode;
 use crate::world2d::simulation_xz_to_render_xy;
 
-pub const CAMERA_DISTANCE: f32 = 15.0;
-pub const CAMERA_HEIGHT: f32 = 12.0;
+pub const CAMERA_DISTANCE: f32 = 24.0;
+pub const CAMERA_HEIGHT: f32 = 28.0;
 pub const CAMERA_MIN_ZOOM: f32 = 0.55;
 pub const CAMERA_MAX_ZOOM: f32 = 2.25;
 const CAMERA_ZOOM_SPEED: f32 = 0.1;

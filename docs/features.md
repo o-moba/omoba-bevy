@@ -1,8 +1,18 @@
 # Feature Inventory
 
-Canonical version: `0.18.0-rc.1`
+Canonical version: `0.18.0-rc.2`
 
 ## Current Playable Surface
+
+- **Verdant Confluence native arena (2026-09-05, iteration 03):** the supplied
+  Blender scene now supplies the 3D environment, foliage and live faction
+  structures. Walk surfaces match actor grounding, structures follow death and
+  rematch, and cached original creatures replace the disputed imported models.
+  The 15-hero roster and King Mutatio remain. A content-based package gate
+  checks model bytes and provenance; an opt-in native capture scenario records
+  the actual renderer. See the [integration record](progress/2026-09-05-verdant-runtime-release.md)
+  and [current test guide](progress/2026-09-05-verdant-test-guide.md). This
+  supersedes earlier roster, primitive-map and four-asset-blocker descriptions.
 
 - **Native 3D release candidate (2026-09-05, iteration 02):** idempotent admission,
   full-state reconnect, complete rematches, release roster/debug policy, bounded

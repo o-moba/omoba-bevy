@@ -1,5 +1,10 @@
 # Distribution review — 2026-09-05
 
+> Historical rc.1 record. The rc.2 exclusion/replacement of all four disputed
+> models is recorded in [the Verdant integration](2026-09-05-verdant-runtime-release.md).
+> Use [the current test guide](2026-09-05-verdant-test-guide.md) for rc.2 packages.
+> The findings below are preserved as evidence of the earlier candidate.
+
 Raw evidence directory: `.agent/tasks/RELEASE-3D-2026-09-05/`. All raw filenames below refer to that directory. This report is the durable repository copy of the current review.
 
 Status: **RG5 remains BLOCKED** pending resolution/exclusion of conflicting asset licenses and the remaining distribution obligations. The final local build review subsequently passed at `ccbf573`: 249 tests, strict checks, package hashes and independent native startup; this does not resolve the licensing conflicts. This is a current read-only review plus one explicitly authorized dependency patch; it does not grant distribution approval. The coordinator retains the source assets and labels the produced local package **INTERNAL REVIEW ONLY** behind an explicit packaging guard. No public asset/package publishing is authorized by this review.

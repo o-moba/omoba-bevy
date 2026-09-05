@@ -6,6 +6,32 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.18.0-rc.2] - 2026-09-05
+
+### Changed
+- Bring the original Verdant Confluence Blender arena into native 3D: jade/sage
+  forests, pale stone routes, turquoise river, ruins, sanctuaries and watchtowers.
+  Warm sun/cool fill and a wider play camera support the new architectural scale.
+- Derive runtime assets deterministically from the preserved scene; normalize
+  walk surfaces and reconcile mitered base ramps without changing server routes.
+- Attach faction structures to authoritative owners, including destruction and
+  rematch; share environment/actor assets and preserve optional 2D behavior.
+- Remove El Bueno, both imported slimes and Wendigo Hollow plus their previews.
+  Keep 15 heroes and King Mutatio; original animated stone/crystal minions and
+  guardian retain the removed creatures' gameplay roles.
+- Replace the unconditional internal-review package guard with a content check
+  of actual files, denied hashes, approved provenance and embedded permissions.
+- Add opt-in native GPU screenshot evidence and an isolated capture runner.
+- Order local-player fallback spawning after snapshot admission to prevent a
+  duplicate entity and startup panic. Hide development controls/hotkeys when
+  debug UI is disabled; use supported ASCII separators in gameplay text.
+
+### Release status
+- The four-model asset conflict is addressed by exclusion and original
+  replacements. The package remains a controlled playtest candidate; human
+  sessions, long performance runs, platform/network coverage and remaining
+  dependency dispositions are separate gates. See the dated Verdant test guide.
+
 ## [0.18.0-rc.1] - 2026-09-05
 
 ### Changed

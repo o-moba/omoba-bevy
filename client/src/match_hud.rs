@@ -300,7 +300,7 @@ fn update_match_hud(
 
     if !running {
         status_text.0 = format!(
-            "Press {} for controls help.\nClass: {}   Skills: {} — cast on target.",
+            "Press {} for controls help.\nClass: {}   Skills: {} - cast on target.",
             help_key_display(),
             hero_class.display_name(),
             skill_keys_display()
@@ -359,10 +359,10 @@ fn team_buff_hud_text(buffs: &[TeamBuffState], local_team: Team) -> String {
             let secs = buff.remaining_secs.max(0.0).ceil() as u32;
             match buff.kind {
                 TeamBuffKind::WendigoFavor => {
-                    format!("Wendigo's Favor: +15% ability damage — {secs}s")
+                    format!("Wendigo's Favor: +15% ability damage - {secs}s")
                 }
                 TeamBuffKind::MutatioMight => {
-                    format!("Mutatio's Might: +25% ability damage, +2 HP/s — {secs}s")
+                    format!("Mutatio's Might: +25% ability damage, +2 HP/s - {secs}s")
                 }
             }
         })
@@ -385,10 +385,10 @@ fn running_status_text(
                 TargetKind::Structure => "Structure",
                 TargetKind::Neutral => "Neutral",
             };
-            format!("Target: enemy {kind} — Q attacks; approach happens automatically")
+            format!("Target: enemy {kind} - Q attacks; approach happens automatically")
         }
         None => {
-            "Target: none — click/tap a foe to attack, Tab selects, Backspace clears".to_string()
+            "Target: none - click/tap a foe to attack, Tab selects, Backspace clears".to_string()
         }
     };
     let hp = stats.hp.max(0.0);
@@ -399,7 +399,7 @@ fn running_status_text(
         "HP {:.0}/{:.0}   Mana {:.0}/{:.0}   Class: {}\n\
 {target_line}\n\
 {objective_line}\n\
-Keys: {} — cast   |   Upgrade {}   |   {} help",
+Keys: {} - cast   |   Upgrade {}   |   {} help",
         hp,
         max_hp,
         mana,
@@ -439,10 +439,10 @@ fn enemy_base_objective_line(
         }
     }
     if protected {
-        "Goal: destroy an enemy lane tower — the enemy base is protected.".to_string()
+        "Goal: destroy an enemy lane tower - the enemy base is protected.".to_string()
     } else if any && max_sum > 0.0 {
         format!(
-            "Goal: destroy enemy base — {:.0} / {:.0} HP remaining",
+            "Goal: destroy enemy base - {:.0} / {:.0} HP remaining",
             hp_sum.min(max_sum),
             max_sum
         )
@@ -466,7 +466,7 @@ mod tests {
             },
             HeroClass::Mage,
             None,
-            "Goal: destroy enemy base — 650 / 650 HP remaining",
+            "Goal: destroy enemy base - 650 / 650 HP remaining",
         );
         assert!(text.contains("HP 75/100   Mana 40/100"));
         assert!(text.contains("Class: Mage"));
