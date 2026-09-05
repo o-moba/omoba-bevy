@@ -12,6 +12,7 @@ use shared::{HeroClass, avatar_roster};
 use std::collections::HashMap;
 
 use crate::net::{ClientConnectionState, ClientSession, NetworkCommand, SessionUiCommand};
+use crate::sprite::{PlayerVisualMode, SpriteVisualAssets};
 pub use ekza_bevy_sdk::EkzaCharacter as CharacterChoice;
 
 const TEAM_BUTTON_SIZE: f32 = 110.0;
@@ -24,10 +25,12 @@ const AVATAR_BUTTON_HEIGHT: f32 = 92.0;
 const AVATAR_THUMBNAIL_SIZE: f32 = 56.0;
 const AVATAR_GRID_GAP: f32 = 8.0;
 const AVATAR_GRID_COLUMNS: usize = 8;
-const TEAM_OVERLAY_COLOR: Color = Color::srgba(0.02, 0.02, 0.02, 0.55);
-const SELECT_BUTTON_COLOR: Color = Color::srgba(0.18, 0.18, 0.18, 0.95);
-const SELECT_BUTTON_HOVER_COLOR: Color = Color::srgba(0.25, 0.25, 0.25, 0.98);
-const SELECT_BUTTON_SELECTED_COLOR: Color = Color::srgba(0.78, 0.62, 0.18, 0.98);
+const SPRITE_GRID_MAX_COLUMNS: usize = 5;
+const SPRITE_GRID_WIDTH_PERCENT: f32 = 92.0;
+const TEAM_OVERLAY_COLOR: Color = Color::srgba(0.035, 0.075, 0.09, 0.88);
+const SELECT_BUTTON_COLOR: Color = Color::srgba(0.07, 0.14, 0.17, 0.96);
+const SELECT_BUTTON_HOVER_COLOR: Color = Color::srgba(0.10, 0.23, 0.27, 0.98);
+const SELECT_BUTTON_SELECTED_COLOR: Color = Color::srgba(0.96, 0.69, 0.20, 0.98);
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -68,6 +71,8 @@ pub struct TeamSelection {
     pub hero_class: HeroClass,
     /// Selected roster avatar slug (cosmetic; primary demo path).
     pub avatar: Option<String>,
+    /// Selected 2D sprite character, preserved independently of the 3D avatar.
+    pub sprite_character: String,
 }
 
 impl Default for TeamSelection {
@@ -79,6 +84,7 @@ impl Default for TeamSelection {
             // Preselect the first shipped avatar so a plain "click a team"
             // flow already exercises the roster path.
             avatar: avatar_roster().first().map(|avatar| avatar.slug.clone()),
+            sprite_character: shared::DEFAULT_SPRITE_CHARACTER_ID.to_owned(),
         }
     }
 }
@@ -95,7 +101,9 @@ impl Plugin for TeamSelectPlugin {
             .init_resource::<AvatarThumbnails>()
             .add_systems(
                 Startup,
-                setup_team_select_ui.after(crate::persistence::load_persistent_client_settings),
+                setup_team_select_ui
+                    .after(crate::persistence::load_persistent_client_settings)
+                    .after(crate::sprite::load_sprite_visual_assets),
             )
             .add_systems(Update, team_select_ui_system)
             .add_systems(Update, attach_avatar_thumbnails)
@@ -128,8 +136,51 @@ struct AvatarThumbnailSlot {
     slug: String,
 }
 
+#[derive(Component)]
+struct VisualModeButton(PlayerVisualMode);
+
+#[derive(Component)]
+struct ModelAvatarGrid;
+
+#[derive(Component)]
+struct SpriteAvatarGrid;
+
+#[derive(Component)]
+struct SpriteSelectButton {
+    id: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct SpriteGridLayout {
+    columns: usize,
+    rows: usize,
+    max_width: f32,
+}
+
+fn sprite_grid_layout(character_count: usize) -> SpriteGridLayout {
+    let columns = character_count.clamp(1, SPRITE_GRID_MAX_COLUMNS);
+    SpriteGridLayout {
+        columns,
+        rows: character_count.div_ceil(columns),
+        max_width: columns as f32 * AVATAR_BUTTON_WIDTH
+            + columns.saturating_sub(1) as f32 * AVATAR_GRID_GAP,
+    }
+}
+
+fn update_sprite_selection(selection: &mut TeamSelection, requested: &str) -> bool {
+    let normalized = shared::normalize_sprite_character_id(Some(requested));
+    if selection.sprite_character == normalized {
+        false
+    } else {
+        selection.sprite_character = normalized.to_owned();
+        true
+    }
+}
+
 fn setup_team_select_ui(
     selection: Res<TeamSelection>,
+    visual_mode: Res<PlayerVisualMode>,
+    sprite_assets: Res<SpriteVisualAssets>,
     asset_server: Res<AssetServer>,
     mut thumbnails: ResMut<AvatarThumbnails>,
     mut commands: Commands,
@@ -142,10 +193,17 @@ fn setup_team_select_ui(
             );
         }
     }
-    spawn_team_select_ui(&mut commands, &selection);
+    spawn_team_select_ui(&mut commands, &selection, *visual_mode, &sprite_assets);
 }
 
-pub fn spawn_team_select_ui(commands: &mut Commands, selection: &TeamSelection) {
+pub fn spawn_team_select_ui(
+    commands: &mut Commands,
+    selection: &TeamSelection,
+    visual_mode: PlayerVisualMode,
+    sprite_assets: &SpriteVisualAssets,
+) {
+    let ui_frame = sprite_assets.ui_frame();
+    let sprite_grid = sprite_grid_layout(shared::sprite_character_roster().len());
     commands
         .spawn((
             Node {
@@ -161,6 +219,13 @@ pub fn spawn_team_select_ui(commands: &mut Commands, selection: &TeamSelection) 
                 ..default()
             },
             BackgroundColor(TEAM_OVERLAY_COLOR),
+            ImageNode::from_atlas_image(
+                ui_frame.0,
+                TextureAtlas {
+                    layout: ui_frame.1,
+                    index: 0,
+                },
+            ),
             TeamSelectRoot,
             Name::new("TeamSelectOverlay"),
         ))
@@ -187,6 +252,30 @@ pub fn spawn_team_select_ui(commands: &mut Commands, selection: &TeamSelection) 
             parent
                 .spawn((
                     Node {
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(CLASS_BUTTON_GAP),
+                        ..default()
+                    },
+                    Name::new("PlayerVisualModeRow"),
+                ))
+                .with_children(|row| {
+                    spawn_visual_mode_button(
+                        row,
+                        PlayerVisualMode::Models3d,
+                        "3D Models",
+                        visual_mode == PlayerVisualMode::Models3d,
+                    );
+                    spawn_visual_mode_button(
+                        row,
+                        PlayerVisualMode::Sprite2d,
+                        "2D Sprites",
+                        visual_mode == PlayerVisualMode::Sprite2d,
+                    );
+                });
+
+            parent
+                .spawn((
+                    Node {
                         width: Val::Px(
                             AVATAR_GRID_COLUMNS as f32 * (AVATAR_BUTTON_WIDTH + AVATAR_GRID_GAP),
                         ),
@@ -197,6 +286,12 @@ pub fn spawn_team_select_ui(commands: &mut Commands, selection: &TeamSelection) 
                         row_gap: Val::Px(AVATAR_GRID_GAP),
                         ..default()
                     },
+                    if visual_mode == PlayerVisualMode::Models3d {
+                        Visibility::Visible
+                    } else {
+                        Visibility::Hidden
+                    },
+                    ModelAvatarGrid,
                     Name::new("AvatarGrid"),
                 ))
                 .with_children(|grid| {
@@ -206,6 +301,37 @@ pub fn spawn_team_select_ui(commands: &mut Commands, selection: &TeamSelection) 
                             &avatar.slug,
                             &avatar.display_name,
                             selection.avatar.as_deref() == Some(avatar.slug.as_str()),
+                        );
+                    }
+                });
+
+            parent
+                .spawn((
+                    Node {
+                        width: Val::Percent(SPRITE_GRID_WIDTH_PERCENT),
+                        max_width: Val::Px(sprite_grid.max_width),
+                        flex_direction: FlexDirection::Row,
+                        flex_wrap: FlexWrap::Wrap,
+                        justify_content: JustifyContent::Center,
+                        column_gap: Val::Px(AVATAR_GRID_GAP),
+                        row_gap: Val::Px(AVATAR_GRID_GAP),
+                        ..default()
+                    },
+                    if visual_mode == PlayerVisualMode::Sprite2d {
+                        Visibility::Visible
+                    } else {
+                        Visibility::Hidden
+                    },
+                    SpriteAvatarGrid,
+                    Name::new("SpriteCharacterGrid"),
+                ))
+                .with_children(|grid| {
+                    for (index, character) in shared::sprite_character_roster().iter().enumerate() {
+                        spawn_sprite_button(
+                            grid,
+                            character,
+                            sprite_assets.portrait(index),
+                            selection.sprite_character == character.id,
                         );
                     }
                 });
@@ -236,6 +362,99 @@ pub fn spawn_team_select_ui(commands: &mut Commands, selection: &TeamSelection) 
                 Name::new("TeamSelectHint"),
             ));
         });
+}
+
+fn spawn_visual_mode_button(
+    row: &mut ChildSpawnerCommands,
+    mode: PlayerVisualMode,
+    label: &str,
+    selected: bool,
+) {
+    row.spawn((
+        Button,
+        Node {
+            width: Val::Px(150.0),
+            height: Val::Px(38.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        },
+        BackgroundColor(if selected {
+            SELECT_BUTTON_SELECTED_COLOR
+        } else {
+            SELECT_BUTTON_COLOR
+        }),
+        VisualModeButton(mode),
+        Name::new(format!("VisualModeButton-{}", mode.id())),
+    ))
+    .with_children(|button| {
+        button.spawn((
+            Text::new(if selected {
+                label.to_owned()
+            } else {
+                format!("{label} · restart")
+            }),
+            TextFont {
+                font_size: 15.0,
+                ..default()
+            },
+            TextColor::WHITE,
+        ));
+    });
+}
+
+fn spawn_sprite_button(
+    grid: &mut ChildSpawnerCommands,
+    character: &shared::SpriteCharacterDefinition,
+    portrait: (Handle<Image>, Handle<TextureAtlasLayout>, usize),
+    selected: bool,
+) {
+    grid.spawn((
+        Button,
+        Node {
+            width: Val::Px(AVATAR_BUTTON_WIDTH),
+            height: Val::Px(AVATAR_BUTTON_HEIGHT),
+            flex_direction: FlexDirection::Column,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            row_gap: Val::Px(3.0),
+            ..default()
+        },
+        BackgroundColor(if selected {
+            SELECT_BUTTON_SELECTED_COLOR
+        } else {
+            SELECT_BUTTON_COLOR
+        }),
+        SpriteSelectButton {
+            id: character.id.clone(),
+        },
+        Name::new(format!("SpriteButton-{}", character.id)),
+    ))
+    .with_children(|button| {
+        let mut entity = button.spawn((
+            Node {
+                width: Val::Px(AVATAR_THUMBNAIL_SIZE),
+                height: Val::Px(AVATAR_THUMBNAIL_SIZE),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.10, 0.10, 0.12, 0.9)),
+        ));
+        entity.insert(ImageNode::from_atlas_image(
+            portrait.0,
+            TextureAtlas {
+                layout: portrait.1,
+                index: portrait.2,
+            },
+        ));
+        button.spawn((
+            Text::new(&character.display_name),
+            TextFont {
+                font_size: 9.5,
+                ..default()
+            },
+            TextColor(Color::srgba(0.86, 0.88, 0.92, 1.0)),
+        ));
+    });
 }
 
 fn spawn_section_title(parent: &mut ChildSpawnerCommands, title: &str, name: &str) {
@@ -390,6 +609,7 @@ fn team_select_ui_system(
     mut commands: Commands,
     client_session: Res<ClientSession>,
     mut selection: ResMut<TeamSelection>,
+    visual_mode: Res<PlayerVisualMode>,
     mut interaction_sets: ParamSet<(
         Query<
             (&Interaction, &TeamSelectButton, &mut BackgroundColor),
@@ -403,9 +623,18 @@ fn team_select_ui_system(
             (&Interaction, &AvatarSelectButton, &mut BackgroundColor),
             (Changed<Interaction>, With<Button>),
         >,
+        Query<
+            (&Interaction, &VisualModeButton, &mut BackgroundColor),
+            (Changed<Interaction>, With<Button>),
+        >,
+        Query<
+            (&Interaction, &SpriteSelectButton, &mut BackgroundColor),
+            (Changed<Interaction>, With<Button>),
+        >,
     )>,
     class_buttons: Query<(Entity, &ClassSelectButton), With<Button>>,
     avatar_buttons: Query<(Entity, &AvatarSelectButton), With<Button>>,
+    sprite_buttons: Query<(Entity, &SpriteSelectButton), With<Button>>,
     overlay_query: Query<Entity, With<TeamSelectRoot>>,
     mut command_writer: MessageWriter<NetworkCommand>,
     mut session_ui_writer: MessageWriter<SessionUiCommand>,
@@ -475,6 +704,47 @@ fn team_select_ui_system(
         }
     }
 
+    for (interaction, button, mut color) in interaction_sets.p3().iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                if *visual_mode != button.0 {
+                    warn!(
+                        "Renderer changes are applied at startup; restart with OMOBA_PLAYER_VISUAL_MODE={} (or use make game2d)",
+                        button.0.id()
+                    );
+                }
+            }
+            Interaction::Hovered if *visual_mode != button.0 => {
+                *color = SELECT_BUTTON_HOVER_COLOR.into()
+            }
+            Interaction::None if *visual_mode != button.0 => *color = SELECT_BUTTON_COLOR.into(),
+            _ => {}
+        }
+    }
+
+    let mut sprite_changed = false;
+    for (interaction, button, mut color) in interaction_sets.p4().iter_mut() {
+        let selected = selection.sprite_character == button.id;
+        match *interaction {
+            Interaction::Pressed => {
+                sprite_changed |= update_sprite_selection(&mut selection, &button.id);
+            }
+            Interaction::Hovered if !selected => *color = SELECT_BUTTON_HOVER_COLOR.into(),
+            Interaction::None if !selected => *color = SELECT_BUTTON_COLOR.into(),
+            _ => {}
+        }
+    }
+    if sprite_changed {
+        for (entity, button) in &sprite_buttons {
+            let color = if button.id == selection.sprite_character {
+                SELECT_BUTTON_SELECTED_COLOR
+            } else {
+                SELECT_BUTTON_COLOR
+            };
+            commands.entity(entity).try_insert(BackgroundColor(color));
+        }
+    }
+
     for (interaction, button, mut color) in interaction_sets.p0().iter_mut() {
         match *interaction {
             Interaction::Pressed => {
@@ -505,6 +775,7 @@ fn team_select_ui_system(
                     character: selection.character,
                     hero_class: selection.hero_class,
                     avatar: selection.avatar.clone(),
+                    sprite_character: Some(selection.sprite_character.clone()),
                 });
                 if let Ok(overlay) = overlay_query.single() {
                     commands
@@ -523,7 +794,7 @@ fn team_select_ui_system(
     }
 }
 
-/// Debug/automation hook: `OMOBA_AUTOJOIN="<class>:<avatar-slug|->:<team>"`
+/// Debug/automation hook: `OMOBA_AUTOJOIN="<class>:<avatar-slug|->:<team>[:<sprite-id>]"`
 /// (e.g. `mage:agnes:green`) joins immediately without UI interaction. Used by
 /// the headless evidence runs; ignored when unset.
 fn autojoin_from_env(
@@ -554,10 +825,12 @@ fn autojoin_from_env(
         Some("blue") => Team::Blue,
         _ => Team::Green,
     };
+    let sprite_character = shared::normalize_sprite_character_id(parts.next()).to_owned();
 
     selection.hero_class = class;
     selection.avatar = avatar.clone();
     selection.team = Some(team);
+    selection.sprite_character.clone_from(&sprite_character);
     info!(
         "[omoba:cli] event=autojoin team={:?} class={} avatar={:?}",
         team,
@@ -569,11 +842,54 @@ fn autojoin_from_env(
         character: selection.character,
         hero_class: class,
         avatar,
+        sprite_character: Some(sprite_character),
     });
     for overlay in &overlay_query {
         commands
             .entity(overlay)
             .despawn_related::<Children>()
             .despawn();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use shared::SPRITE_CHARACTER_IDS;
+
+    #[test]
+    fn ten_sprite_buttons_use_a_bounded_two_row_grid() {
+        let layout = sprite_grid_layout(SPRITE_CHARACTER_IDS.len());
+        assert_eq!(
+            layout,
+            SpriteGridLayout {
+                columns: 5,
+                rows: 2,
+                max_width: 412.0,
+            }
+        );
+        assert!(layout.max_width < 480.0);
+    }
+
+    #[test]
+    fn smaller_rosters_do_not_reserve_empty_columns() {
+        assert_eq!(sprite_grid_layout(3).columns, 3);
+        assert_eq!(sprite_grid_layout(3).rows, 1);
+        assert_eq!(sprite_grid_layout(0).rows, 0);
+    }
+
+    #[test]
+    fn every_frozen_sprite_button_selects_its_roster_id() {
+        let mut selection = TeamSelection::default();
+        for id in SPRITE_CHARACTER_IDS {
+            let changed = update_sprite_selection(&mut selection, id);
+            assert_eq!(selection.sprite_character, id);
+            assert_eq!(changed, id != shared::DEFAULT_SPRITE_CHARACTER_ID);
+        }
+        assert!(update_sprite_selection(&mut selection, "unknown"));
+        assert_eq!(
+            selection.sprite_character,
+            shared::DEFAULT_SPRITE_CHARACTER_ID
+        );
     }
 }

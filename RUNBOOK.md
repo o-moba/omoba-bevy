@@ -61,8 +61,12 @@ make play-bots
 This starts a release-mode server, nine fill bots in the background, and your
 client in the foreground. Pick a class/avatar/team in the client — you are
 the 10th player: the overlay shows the queue filling, `Match found!`, the
-countdown, and the match starts as a real 5v5 (the bots wander near their
-spawns; they test matchmaking and match-start UX, not combat).
+countdown, and the match starts as a real 5v5. Once the match runs, the bots
+play their lanes: each pushes Mid/Top/Bot toward the enemy base, fights the
+enemy players and minions it meets with its Q ability, sieges towers in
+reach, and rejoins its lane after a respawn. It is deliberately simple
+nearest-target AI (no retreat, no combos) — built to playtest matchmaking
+and basic playability, not to be challenging opponents.
 
 Manual variant (separate terminals):
 
@@ -71,6 +75,39 @@ make server            # terminal 1: release-mode server
 make game              # terminal 2: your client, join the queue
 make bots              # terminal 3: fill the remaining 9 seats
 # make bots BOTS=4     #   ...or any other number of bots
+```
+
+Use `make game2d` instead of `make game` to launch that client directly in
+the genuine orthographic 2D game mode. It uses a planar XY render world and
+keeps server-authoritative simulation coordinates in XZ (`x → x`, `z → y`).
+The mode starts one `Camera2d`; it does not render the 3D arena, GLBs, mesh
+billboards, or directional-light scene. Both client commands explicitly target
+`127.0.0.1:4000` by default so an old persisted server address cannot redirect
+the local run; `GAME_SERVER_ADDR=<host:port>` overrides that default.
+
+2D camera controls: mouse wheel zooms within map-safe limits; **Y** toggles
+hero-follow/free-pan; arrow keys pan while unlocked; **Space** restores follow
+and clears a minimap focus override. Pressing **Y** while a minimap focus is
+active also returns directly to the hero. Minimap clicks focus the camera
+without leaking a world movement command. Ground movement remains available
+while camera follow is unlocked; right-click and Alt are reserved for their
+legacy 3D camera behavior and do not capture or toggle the 2D camera.
+
+Desktop/mobile combat input uses one pointer intent per press. Click or tap
+empty ground to move. Click or tap a living hostile actor to select it and
+request Q; the gold marker confirms selection, and the hero approaches the
+moving target when it is outside the shared ability range before emitting one
+server-authoritative cast. Tab still selects the nearest hostile, middle-click
+selects without attacking, and Q/W/E/R or the four 64-pixel on-screen buttons
+cast the chosen slot. Ground, minimap, and HUD presses are isolated so a touch
+cannot both cast and redirect movement.
+
+Validate the offline assets before a playtest:
+
+```sh
+python3 scripts/validate_world2d_assets.py --self-test
+python3 scripts/validate_sprite_assets.py --self-test
+python3 scripts/validate_2d_readability.py --json
 ```
 
 Checking matchmaking behavior quickly without a GPU:
@@ -86,6 +123,7 @@ make verify-gameplay   # includes the release-mode formation harness test
 | Start server (release matchmaking) | `make server` |
 | Start server (dev instant-start) | `make server-dev` |
 | Start one client | `make game` |
+| Start one 2D client | `make game2d` |
 | Dev quick-start: dev server + 2 clients | `make start` |
 | Release server + 1 client | `make start-release` |
 | Full solo 5v5 demo (server + 9 bots + client) | `make play-bots` |
@@ -150,6 +188,9 @@ server is not running or is on a different address/port.
 | Client never receives first snapshot | Port mismatch between server bind and client target | Parse port from `SERVER_ADDR` (e.g. `0.0.0.0:5000` → clients use `127.0.0.1:5000` in `GAME_SERVER_ADDR`) |
 | Second machine on LAN cannot connect | Client still points at localhost | On the client machine set `GAME_SERVER_ADDR=<server-LAN-IP>:4000`; on the server keep `SERVER_ADDR=0.0.0.0:4000` so it accepts non-local interfaces |
 | `Connection refused` (tools) or immediate disconnect | Nothing listening on declared port | Start server first; verify with server log line; check VPN or corporate proxy is not blocking UDP loopback |
+| Repeated JSON EOF at column `8192` | Client/server binaries are from different revisions, or an old client still uses the former 8 KiB receive buffer | Rebuild both with `cargo build --workspace`, restart the server and client, and confirm both use the same checkout. Current clients receive up to a complete legal 65,507-byte IPv4 UDP payload. |
+| Server logs `Failed to send complete ... snapshot` / `Message too long` | The populated one-datagram JSON snapshot exceeds the host kernel's UDP send ceiling (measured as 9,216 bytes on the current macOS host) | Reduce the playtest roster/entity load. Do not raise buffers blindly: payload reduction or versioned fragmentation/compression is a separate protocol change. |
+| Towers or minions seem absent in 2D | Old assets/binary, extreme camera state, or the match has not reached `running` | Rebuild, use `make game2d`, press **Space** to restore hero follow, and verify the server snapshot has 8 structures and 18 minions with `cargo test -p harness --test udp_datagrams -- --nocapture`. Green actors use square badges; Blue actors use diamonds; lane towers also show TOP/MID/BOT. |
 | `Failed to bind client UDP socket` | OS port exhaustion (rare) | Close other clients; reboot if needed; retry `make game` |
 | Client exits immediately | Build error or asset load failure | Run `cargo build --workspace` from repo root and fix compile errors; check client stderr for asset path errors (the client uses `client/assets/` under the crate, including an auto-created downloads subfolder) |
 | `make stop` did not clear processes | Processes not started via `make start` | Manually kill `target/debug/server` and `target/debug/client` (or `pkill -f target/debug/server` / `client`) then confirm the port is free |

@@ -9,7 +9,10 @@ use std::collections::{HashMap, HashSet};
 use std::f32::consts::PI;
 
 use crate::camera::{CameraState, MainCamera};
-use crate::combat::{CombatStats, MAX_HP};
+use crate::combat::{
+    CombatPointerInputSet, CombatStats, MAX_HP, PendingCast, WorldMovementInputSet,
+    WorldPointerState,
+};
 use crate::debug_console::DebugConsole;
 use crate::maps::MapLayout;
 use crate::minimap::MinimapNavigationState;
@@ -18,8 +21,10 @@ use crate::net::{
     GameState, GameStateSnapshot, NetworkAvatar, NetworkCharacterChoice, NetworkStructure,
     RemotePlayer, StructureKind,
 };
+use crate::sprite::PlayerVisualMode;
 use crate::team::{CharacterChoice, Team};
 use crate::world::{AvatarAssetCache, PlayerModelCatalog, model_assets_for_choice};
+use crate::world2d::render_xy_to_simulation_xz;
 
 pub const PLAYER_SPEED: f32 = 5.0;
 /// Debug movement multiplier; mirror of `server/src/balance.rs::DEBUG_SPEED_MULTIPLIER`.
@@ -65,7 +70,9 @@ impl Plugin for PlayerPlugin {
                 animate_jump,
                 move_player,
             )
-                .chain(),
+                .chain()
+                .after(CombatPointerInputSet)
+                .in_set(WorldMovementInputSet),
         )
         .add_systems(
             Update,
@@ -115,8 +122,8 @@ impl Default for RespawnCountdown {
 struct RespawnCountdownText;
 
 #[derive(Component)]
-struct MovementTarget {
-    target: Vec3,
+pub(crate) struct MovementTarget {
+    pub(crate) target: Vec3,
 }
 
 #[derive(Component)]
@@ -216,7 +223,10 @@ fn setup_player_animation_library(
     })
     .collect();
     for (slug, gltf_handle) in avatar_cache.requested() {
-        candidates.push((AvatarKey::Roster(slug.to_owned()), Some(gltf_handle.clone())));
+        candidates.push((
+            AvatarKey::Roster(slug.to_owned()),
+            Some(gltf_handle.clone()),
+        ));
     }
 
     for (key, maybe_gltf) in candidates {
@@ -238,7 +248,9 @@ fn setup_player_animation_library(
             continue;
         };
         library.evaluated_keys.insert(key.clone());
-        library.source_gltfs.insert(key.clone(), gltf_handle.clone());
+        library
+            .source_gltfs
+            .insert(key.clone(), gltf_handle.clone());
 
         let find_clip = |substrings: &[&str]| -> Option<(String, Handle<AnimationClip>)> {
             for needle in substrings {
@@ -489,6 +501,7 @@ fn sync_player_animation_state(
 fn handle_player_input(
     mut commands: Commands,
     mouse_button_input: Res<ButtonInput<MouseButton>>,
+    touches: Res<Touches>,
     camera_query: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     player_query: Query<
@@ -505,13 +518,17 @@ fn handle_player_input(
     minimap_nav: Option<Res<MinimapNavigationState>>,
     map_layout: Option<Res<MapLayout>>,
     game_state: Option<Res<GameStateSnapshot>>,
+    visual_mode: Res<PlayerVisualMode>,
+    pointer_state: Res<WorldPointerState>,
+    mut pending_cast: ResMut<PendingCast>,
+    ui_interactions: Query<&Interaction, With<Button>>,
 ) {
     if let Some(game_state) = game_state.as_ref() {
         if !matches!(game_state.state, GameState::Running) {
             return;
         }
     }
-    if !cam_state.locked {
+    if !accepts_ground_movement_input(*visual_mode, cam_state.locked) {
         return;
     }
     let Ok(window) = window_query.single() else {
@@ -528,46 +545,93 @@ fn handle_player_input(
         return;
     }
 
-    if mouse_button_input.just_pressed(MouseButton::Left) {
-        if minimap_nav
+    let Some(pointer_position) =
+        primary_world_press_position(&mouse_button_input, &touches, window)
+    else {
+        return;
+    };
+    if !should_issue_ground_move(
+        pointer_state.consumed_primary_press,
+        minimap_nav
             .as_ref()
-            .is_some_and(|nav_state| nav_state.consumed_primary_click)
-        {
-            return;
+            .is_some_and(|nav_state| nav_state.consumed_primary_click),
+        ui_interactions
+            .iter()
+            .any(|interaction| *interaction != Interaction::None),
+    ) {
+        return;
+    }
+    pending_cast.cancel();
+    if let Some(mut target_pos) = viewport_to_simulation_world(
+        camera,
+        camera_transform,
+        pointer_position,
+        *visual_mode,
+        0.0,
+    ) {
+        if let Some(map_layout) = map_layout.as_ref() {
+            target_pos = map_layout.clamp_position(target_pos);
         }
-        if let Some(cursor_pos) = window.cursor_position() {
-            if let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_pos) {
-                if let Ok(plane_normal) = Dir3::new(Vec3::Y) {
-                    let plane_origin = Vec3::ZERO;
-                    let infinite_plane = InfinitePlane3d::new(plane_normal);
-                    if let Some(distance) = ray.intersect_plane(plane_origin, infinite_plane) {
-                        if distance >= 0.0 {
-                            let mut target_pos = ray.get_point(distance);
-                            if let Some(map_layout) = map_layout.as_ref() {
-                                target_pos = map_layout.clamp_position(target_pos);
-                            }
-                            commands
-                                .entity(player_entity)
-                                .insert(MovementTarget { target: target_pos });
-                            let character = character
-                                .map(|selected| selected.0)
-                                .unwrap_or(CharacterChoice::Ipfs);
-                            let key = avatar_key(character, avatar);
-                            if !animation_library.should_use_jump_fallback(&key) {
-                                commands.entity(player_entity).remove::<Jumping>();
-                            } else {
-                                commands.entity(player_entity).insert(Jumping {
-                                    timer: Timer::from_seconds(JUMP_DURATION, TimerMode::Repeating),
-                                });
-                            }
-                        }
-                    }
-                } else {
-                    warn!("Plane normal is zero, cannot raycast");
-                }
-            }
+        commands
+            .entity(player_entity)
+            .insert(MovementTarget { target: target_pos });
+        let character = character
+            .map(|selected| selected.0)
+            .unwrap_or(CharacterChoice::Ipfs);
+        let key = avatar_key(character, avatar);
+        if !animation_library.should_use_jump_fallback(&key) {
+            commands.entity(player_entity).remove::<Jumping>();
+        } else {
+            commands.entity(player_entity).insert(Jumping {
+                timer: Timer::from_seconds(JUMP_DURATION, TimerMode::Repeating),
+            });
         }
     }
+}
+
+fn primary_world_press_position(
+    mouse_input: &ButtonInput<MouseButton>,
+    touches: &Touches,
+    window: &Window,
+) -> Option<Vec2> {
+    if mouse_input.just_pressed(MouseButton::Left) {
+        return window.cursor_position();
+    }
+    touches
+        .iter_just_pressed()
+        .next()
+        .map(|touch| touch.position())
+}
+
+const fn should_issue_ground_move(
+    target_consumed: bool,
+    minimap_consumed: bool,
+    pointer_over_ui: bool,
+) -> bool {
+    !target_consumed && !minimap_consumed && !pointer_over_ui
+}
+
+fn accepts_ground_movement_input(mode: PlayerVisualMode, camera_locked: bool) -> bool {
+    mode == PlayerVisualMode::Sprite2d || camera_locked
+}
+
+/// Maps the active camera viewport into authoritative simulation XZ.
+pub(crate) fn viewport_to_simulation_world(
+    camera: &Camera,
+    camera_transform: &GlobalTransform,
+    viewport_position: Vec2,
+    mode: PlayerVisualMode,
+    simulation_y: f32,
+) -> Option<Vec3> {
+    let ray = camera
+        .viewport_to_world(camera_transform, viewport_position)
+        .ok()?;
+    if mode == PlayerVisualMode::Sprite2d {
+        return Some(render_xy_to_simulation_xz(ray.origin.xy(), simulation_y));
+    }
+    let plane_normal = Dir3::new(Vec3::Y).ok()?;
+    let distance = ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(plane_normal))?;
+    (distance >= 0.0).then(|| ray.get_point(distance))
 }
 
 fn move_player(
@@ -911,4 +975,41 @@ fn resolve_player_structure_overlap(
 
     player_transform.translation.x = resolved.x;
     player_transform.translation.z = resolved.z;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sprite_ground_movement_does_not_depend_on_camera_follow() {
+        assert!(accepts_ground_movement_input(
+            PlayerVisualMode::Sprite2d,
+            true
+        ));
+        assert!(accepts_ground_movement_input(
+            PlayerVisualMode::Sprite2d,
+            false
+        ));
+    }
+
+    #[test]
+    fn model_ground_movement_preserves_legacy_camera_gate() {
+        assert!(accepts_ground_movement_input(
+            PlayerVisualMode::Models3d,
+            true
+        ));
+        assert!(!accepts_ground_movement_input(
+            PlayerVisualMode::Models3d,
+            false
+        ));
+    }
+
+    #[test]
+    fn target_minimap_and_ui_presses_never_leak_ground_movement() {
+        assert!(should_issue_ground_move(false, false, false));
+        assert!(!should_issue_ground_move(true, false, false));
+        assert!(!should_issue_ground_move(false, true, false));
+        assert!(!should_issue_ground_move(false, false, true));
+    }
 }

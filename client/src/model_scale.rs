@@ -214,7 +214,9 @@ fn read_overrides(overrides: &mut ModelScaleOverrides) {
     let Some(path) = overrides_path() else {
         return;
     };
-    let modified = std::fs::metadata(&path).and_then(|meta| meta.modified()).ok();
+    let modified = std::fs::metadata(&path)
+        .and_then(|meta| meta.modified())
+        .ok();
     if modified.is_some() && modified == overrides.last_modified {
         return;
     }
@@ -234,7 +236,10 @@ fn read_overrides(overrides: &mut ModelScaleOverrides) {
                 overrides.multipliers = multipliers;
                 overrides.last_modified = modified;
             }
-            Err(error) => warn!("model-scale: invalid overrides file {}: {error}", path.display()),
+            Err(error) => warn!(
+                "model-scale: invalid overrides file {}: {error}",
+                path.display()
+            ),
         },
         Err(error) => warn!("model-scale: cannot read {}: {error}", path.display()),
     }
@@ -348,7 +353,16 @@ fn accumulate_node_bounds(
         }
     }
     for child in &node.children {
-        accumulate_node_bounds(child, world, nodes, gltf_meshes, meshes, min, max, has_bounds)?;
+        accumulate_node_bounds(
+            child,
+            world,
+            nodes,
+            gltf_meshes,
+            meshes,
+            min,
+            max,
+            has_bounds,
+        )?;
     }
     Some(())
 }
@@ -359,8 +373,7 @@ fn fold_aabb_corners(aabb: &Aabb, world: &Affine3A, min: &mut Vec3, max: &mut Ve
     for sx in [-1.0_f32, 1.0] {
         for sy in [-1.0_f32, 1.0] {
             for sz in [-1.0_f32, 1.0] {
-                let corner =
-                    world.transform_point3(center + half * Vec3::new(sx, sy, sz));
+                let corner = world.transform_point3(center + half * Vec3::new(sx, sy, sz));
                 *min = min.min(corner);
                 *max = max.max(corner);
             }
@@ -380,11 +393,7 @@ fn apply_model_scale_system(
     gltf_mesh_assets: Res<Assets<GltfMesh>>,
     mesh_assets: Res<Assets<Mesh>>,
     mut analysis: ResMut<ModelSizeAnalysis>,
-    mut roots: Query<(
-        &mut Transform,
-        &mut NormalizeModelScale,
-        &ModelScaleSource,
-    )>,
+    mut roots: Query<(&mut Transform, &mut NormalizeModelScale, &ModelScaleSource)>,
 ) {
     for (mut transform, mut normalization, source) in &mut roots {
         let target_height =
@@ -397,18 +406,14 @@ fn apply_model_scale_system(
         }
 
         let gltf_id = source.gltf.id();
-        if let std::collections::hash_map::Entry::Vacant(vacant) =
-            analysis.measured.entry(gltf_id)
+        if let std::collections::hash_map::Entry::Vacant(vacant) = analysis.measured.entry(gltf_id)
         {
             let Some(gltf) = gltf_assets.get(&source.gltf) else {
                 continue; // Still loading; retry next frame.
             };
-            let Some(measurement) = measure_gltf_bind_pose(
-                gltf,
-                &node_assets,
-                &gltf_mesh_assets,
-                &mesh_assets,
-            ) else {
+            let Some(measurement) =
+                measure_gltf_bind_pose(gltf, &node_assets, &gltf_mesh_assets, &mesh_assets)
+            else {
                 continue; // Sub-assets still loading; retry next frame.
             };
             match measurement {
@@ -454,10 +459,7 @@ fn apply_model_scale_system(
 /// like the glTF path.
 fn normalize_model_scale_fallback_system(
     settings: Res<ModelScaleSettings>,
-    mut roots: Query<
-        (Entity, &mut Transform, &mut NormalizeModelScale),
-        Without<ModelScaleSource>,
-    >,
+    mut roots: Query<(Entity, &mut Transform, &mut NormalizeModelScale), Without<ModelScaleSource>>,
     children_query: Query<&Children>,
     aabb_query: Query<&Aabb>,
     globals_query: Query<&GlobalTransform>,
@@ -557,7 +559,7 @@ pub fn run_model_measurement_analyzer() {
     app.cleanup();
 
     let mut relative_paths: Vec<String> = Vec::new();
-    for dir in ["downloaded", "avatars", "bosses"] {
+    for dir in ["downloaded", "avatars", "bosses", "minions"] {
         let Ok(entries) = std::fs::read_dir(assets_root.join(dir)) else {
             continue;
         };
@@ -576,7 +578,10 @@ pub fn run_model_measurement_analyzer() {
         .map(|path| (path.clone(), asset_server.load(path)))
         .collect();
 
-    println!("model-scale analyzer: measuring {} GLBs (bind pose)", pending.len());
+    println!(
+        "model-scale analyzer: measuring {} GLBs (bind pose)",
+        pending.len()
+    );
     println!(
         "{:<45} {:>10} {:>10} {:>10} {:>12}",
         "model",
@@ -634,10 +639,9 @@ mod tests {
 
     #[test]
     fn parse_overrides_reads_flat_map_and_skips_comments() {
-        let parsed = parse_overrides(
-            r#"{ "_comment": "docs", "agnes": 1.2, "paco": 0.9, "bad": "nope" }"#,
-        )
-        .unwrap();
+        let parsed =
+            parse_overrides(r#"{ "_comment": "docs", "agnes": 1.2, "paco": 0.9, "bad": "nope" }"#)
+                .unwrap();
         assert_eq!(parsed.len(), 2);
         assert_eq!(parsed["agnes"], 1.2);
         assert_eq!(parsed["paco"], 0.9);

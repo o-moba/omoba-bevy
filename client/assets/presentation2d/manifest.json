@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "actors_sheet": "actors.png",
+  "actors_grid": [8, 8],
+  "effects_sheet": "effects.png",
+  "effects_grid": [8, 4],
+  "frame_size": [256, 256],
+  "arena_texture": "arena.png",
+  "ui_frame": "ui-frame.png",
+  "portraits": "portraits.png",
+  "portraits_grid": [10, 1],
+  "portrait_character_ids": [
+    "mossback-teapot",
+    "neon-axolotl-courier",
+    "origami-storm-heron",
+    "clockwork-turnip-oracle",
+    "void-jelly-astronaut",
+    "cathedral-moth-bellringer",
+    "tidal-typewriter-crab",
+    "lunar-marionette-giraffe",
+    "aurora-magnet-ram",
+    "orchard-comet-centaur"
+  ],
+  "actors": {
+    "green_tower": { "frame": 0, "world_height": 4.5, "pivot": [0.5, 0.08], "occupied_bounds": [66, 94, 123, 152] },
+    "blue_tower": { "frame": 1, "world_height": 4.5, "pivot": [0.5, 0.08], "occupied_bounds": [68, 95, 120, 151] },
+    "green_base_tower": { "frame": 2, "world_height": 6.0, "pivot": [0.5, 0.08], "occupied_bounds": [62, 111, 131, 135] },
+    "blue_base_tower": { "frame": 3, "world_height": 6.0, "pivot": [0.5, 0.08], "occupied_bounds": [64, 114, 128, 132] },
+    "green_minion_idle": { "frame": 8, "world_height": 2.2, "pivot": [0.5, 0.08], "occupied_bounds": [70, 118, 115, 128] },
+    "green_minion_march": { "frame": 9, "world_height": 2.2, "pivot": [0.5, 0.08], "occupied_bounds": [66, 115, 123, 131] },
+    "blue_minion_idle": { "frame": 12, "world_height": 2.2, "pivot": [0.5, 0.08], "occupied_bounds": [73, 118, 110, 128] },
+    "blue_minion_march": { "frame": 13, "world_height": 2.2, "pivot": [0.5, 0.08], "occupied_bounds": [70, 114, 115, 132] },
+    "neutral": { "frame": 16, "world_height": 2.0, "pivot": [0.5, 0.08], "occupied_bounds": [69, 121, 117, 125] },
+    "wendigo_idle": { "frame": 24, "world_height": 4.8, "pivot": [0.5, 0.08], "occupied_bounds": [28, 25, 200, 221] },
+    "wendigo_aggro": { "frame": 25, "world_height": 4.8, "pivot": [0.5, 0.08], "occupied_bounds": [23, 26, 209, 220] },
+    "king_mutatio_idle": { "frame": 32, "world_height": 4.8, "pivot": [0.5, 0.08], "occupied_bounds": [30, 57, 196, 189] },
+    "king_mutatio_aggro": { "frame": 33, "world_height": 4.8, "pivot": [0.5, 0.08], "occupied_bounds": [23, 57, 209, 189] },
+    "green_projectile": { "frame": 40, "world_height": 1.6, "pivot": [0.5, 0.5], "occupied_bounds": [56, 187, 142, 59] },
+    "blue_projectile": { "frame": 43, "world_height": 1.6, "pivot": [0.5, 0.5], "occupied_bounds": [38, 135, 180, 111] }
+  },
+  "effects": {
+    "green_cast": { "start": 0, "count": 4, "fps": 10.0, "world_height": 1.6 },
+    "blue_cast": { "start": 4, "count": 4, "fps": 10.0, "world_height": 1.6 },
+    "green_hit": { "start": 8, "count": 4, "fps": 14.0, "world_height": 1.25 },
+    "blue_hit": { "start": 12, "count": 4, "fps": 14.0, "world_height": 1.25 },
+    "heal": { "start": 16, "count": 8, "fps": 12.0, "world_height": 1.5 },
+    "death": { "start": 24, "count": 8, "fps": 10.0, "world_height": 1.8 }
+  }
+}

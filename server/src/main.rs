@@ -16,12 +16,13 @@ use progression::*;
 use serde::{Deserialize, Serialize};
 use session::*;
 use shared::{
-    HeroClass, SkillSlot, TargetingMode, ability_for_class_slot, rank_effect_scale,
-    scaled_cast_range, scaled_cooldown, scaled_mana_cost, unlocked_slots_for_level,
+    HeroClass, PlayerActionKind, SkillSlot, TargetingMode, ability_for_class_slot,
+    rank_effect_scale, scaled_cast_range, scaled_cooldown, scaled_mana_cost,
+    unlocked_slots_for_level,
 };
 use std::{
     collections::{HashMap, HashSet},
-    io,
+    fmt, io,
     net::{SocketAddr, UdpSocket},
     time::{Duration, Instant},
 };
@@ -31,7 +32,15 @@ const DEFAULT_BIND_ADDR: &str = "0.0.0.0:4000";
 const SNAPSHOT_INTERVAL: Duration = Duration::from_millis(50);
 const PLAYER_TIMEOUT: Duration = Duration::from_secs(5);
 const SIMULATION_STEP_SLEEP: Duration = Duration::from_millis(10);
-const MAX_PACKET_SIZE: usize = 8 * 1024;
+/// Existing application bound for client -> server request datagrams.
+const MAX_CLIENT_REQUEST_PAYLOAD_BYTES: usize = 8 * 1024;
+/// Full receive storage lets the server identify and reject an oversized
+/// request instead of accidentally accepting a valid truncated prefix.
+const CLIENT_DATAGRAM_RECEIVE_CAPACITY: usize = 65_536;
+/// Largest application payload that can be carried by one IPv4 UDP datagram.
+const IPV4_UDP_MAX_PAYLOAD_BYTES: usize = 65_507;
+const _: () = assert!(CLIENT_DATAGRAM_RECEIVE_CAPACITY > IPV4_UDP_MAX_PAYLOAD_BYTES);
+const NETWORK_DIAGNOSTIC_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -59,6 +68,9 @@ enum ClientPacket {
         /// Cosmetic roster avatar slug; validated against the shipped roster.
         #[serde(default)]
         avatar: Option<String>,
+        /// Optional sprite cosmetic; validated against the frozen shared roster.
+        #[serde(default)]
+        sprite_character: Option<String>,
         #[serde(default)]
         session_id: Option<String>,
     },
@@ -142,6 +154,18 @@ struct PlayerState {
     /// the legacy `character` model is used.
     #[serde(default)]
     avatar: Option<String>,
+    /// Cosmetic sprite id replicated to clients; old packets default safely.
+    #[serde(default)]
+    sprite_character: Option<String>,
+    /// Monotonic cosmetic event id. It advances only after a cast is accepted.
+    #[serde(default)]
+    action_sequence: u64,
+    /// Last accepted cosmetic action; unknown/legacy values are safely inert.
+    #[serde(default)]
+    action_kind: PlayerActionKind,
+    /// Q/W/E/R hotbar index associated with `action_sequence`.
+    #[serde(default)]
+    action_slot: u8,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -393,6 +417,40 @@ enum ServerPacket {
     },
 }
 
+#[derive(Debug)]
+enum SnapshotDatagramError {
+    Serialize(serde_json::Error),
+    PayloadTooLarge { actual: usize, limit: usize },
+}
+
+impl fmt::Display for SnapshotDatagramError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Serialize(error) => write!(formatter, "failed to serialize snapshot: {error}"),
+            Self::PayloadTooLarge { actual, limit } => write!(
+                formatter,
+                "serialized snapshot is {actual} bytes; IPv4 UDP payload limit is {limit} bytes"
+            ),
+        }
+    }
+}
+
+fn serialize_snapshot_datagram(packet: &ServerPacket) -> Result<Vec<u8>, SnapshotDatagramError> {
+    let payload = serde_json::to_vec(packet).map_err(SnapshotDatagramError::Serialize)?;
+    validate_snapshot_payload_size(payload.len())?;
+    Ok(payload)
+}
+
+fn validate_snapshot_payload_size(payload_len: usize) -> Result<(), SnapshotDatagramError> {
+    if payload_len > IPV4_UDP_MAX_PAYLOAD_BYTES {
+        return Err(SnapshotDatagramError::PayloadTooLarge {
+            actual: payload_len,
+            limit: IPV4_UDP_MAX_PAYLOAD_BYTES,
+        });
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum GameState {
@@ -438,7 +496,10 @@ const MAX_TEAM_SIZE: u32 = 16;
 const MATCH_START_COUNTDOWN_MS: u32 = 3_000;
 
 fn parse_match_mode(raw: Option<&str>) -> MatchMode {
-    match raw.map(|value| value.trim().to_ascii_lowercase()).as_deref() {
+    match raw
+        .map(|value| value.trim().to_ascii_lowercase())
+        .as_deref()
+    {
         None | Some("") | Some("release") | Some("normal") => MatchMode::Release,
         Some("dev") | Some("debug") => MatchMode::Dev,
         Some(other) => {
@@ -816,6 +877,28 @@ struct TickContext {
     dt: f32,
 }
 
+#[derive(Default)]
+struct RateLimitedDiagnostic {
+    last_emitted_at: Option<Instant>,
+    suppressed: u64,
+}
+
+impl RateLimitedDiagnostic {
+    /// Returns the number of suppressed events when this occurrence should be
+    /// logged. Calls inside the interval are counted without producing output.
+    fn record(&mut self, now: Instant) -> Option<u64> {
+        if self
+            .last_emitted_at
+            .is_none_or(|last| now.duration_since(last) >= NETWORK_DIAGNOSTIC_INTERVAL)
+        {
+            self.last_emitted_at = Some(now);
+            return Some(std::mem::take(&mut self.suppressed));
+        }
+        self.suppressed = self.suppressed.saturating_add(1);
+        None
+    }
+}
+
 #[derive(Resource)]
 struct ServerRuntime {
     socket: UdpSocket,
@@ -832,7 +915,9 @@ struct ServerRuntime {
     next_minion_id: u64,
     neutrals: HashMap<u64, Neutral>,
     team_buffs: TeamBuffs,
-    recv_buf: [u8; MAX_PACKET_SIZE],
+    recv_buf: Vec<u8>,
+    invalid_request_diagnostic: RateLimitedDiagnostic,
+    snapshot_send_diagnostic: RateLimitedDiagnostic,
     last_snapshot_at: Instant,
     last_simulation_at: Instant,
     last_wave_spawn_at: Instant,
@@ -863,7 +948,9 @@ impl ServerRuntime {
             next_minion_id: 1,
             neutrals,
             team_buffs: TeamBuffs::default(),
-            recv_buf: [0_u8; MAX_PACKET_SIZE],
+            recv_buf: vec![0_u8; CLIENT_DATAGRAM_RECEIVE_CAPACITY],
+            invalid_request_diagnostic: RateLimitedDiagnostic::default(),
+            snapshot_send_diagnostic: RateLimitedDiagnostic::default(),
             last_snapshot_at: Instant::now(),
             last_simulation_at: Instant::now(),
             last_wave_spawn_at: Instant::now()
@@ -891,16 +978,35 @@ impl ServerRuntime {
             neutrals,
             team_buffs,
             match_config,
+            invalid_request_diagnostic,
             ..
         } = self;
 
         loop {
             match socket.recv_from(recv_buf) {
                 Ok((len, addr)) => {
+                    if len > MAX_CLIENT_REQUEST_PAYLOAD_BYTES {
+                        if let Some(suppressed) = invalid_request_diagnostic.record(Instant::now())
+                        {
+                            eprintln!(
+                                "Rejected oversized client datagram from {addr}: {len} bytes \
+                                 exceeds request limit {MAX_CLIENT_REQUEST_PAYLOAD_BYTES}; \
+                                 suppressed {suppressed} similar errors"
+                            );
+                        }
+                        continue;
+                    }
                     let packet = match serde_json::from_slice::<ClientPacket>(&recv_buf[..len]) {
                         Ok(packet) => packet,
                         Err(error) => {
-                            eprintln!("Invalid packet from {addr}: {error}");
+                            if let Some(suppressed) =
+                                invalid_request_diagnostic.record(Instant::now())
+                            {
+                                eprintln!(
+                                    "Invalid client datagram from {addr} ({len} bytes): {error}; \
+                                     suppressed {suppressed} similar errors"
+                                );
+                            }
                             continue;
                         }
                     };
@@ -945,6 +1051,7 @@ impl ServerRuntime {
                             character,
                             hero_class,
                             avatar,
+                            sprite_character,
                             session_id,
                         } => {
                             let session_id = normalize_session_id(session_id);
@@ -969,8 +1076,9 @@ impl ServerRuntime {
                                         .get(&addr)
                                         .filter(|player| player.joined)
                                         .map(|player| player.state.team);
-                                    existing_team
-                                        .or_else(|| assign_release_team(players, match_config.team_size))
+                                    existing_team.or_else(|| {
+                                        assign_release_team(players, match_config.team_size)
+                                    })
                                 }
                             };
                             let Some(assigned_team) = assigned_team else {
@@ -981,12 +1089,13 @@ impl ServerRuntime {
                                 continue;
                             };
                             if let Some(player) = players.get_mut(&addr) {
-                                handle_join_request(
+                                handle_join_request_with_sprite(
                                     player,
                                     assigned_team,
                                     character,
                                     hero_class,
                                     avatar.as_deref(),
+                                    sprite_character.as_deref(),
                                     map_layout,
                                     now,
                                 );
@@ -1109,6 +1218,7 @@ impl ServerRuntime {
             last_wave_spawn_at,
             last_snapshot_at,
             match_config,
+            snapshot_send_diagnostic,
             ..
         } = self;
 
@@ -1270,13 +1380,26 @@ impl ServerRuntime {
                     rematch_in_secs,
                 };
 
-                match serde_json::to_vec(&packet) {
+                match serialize_snapshot_datagram(&packet) {
                     Ok(payload) => {
                         if let Err(error) = socket.send_to(&payload, addr) {
-                            eprintln!("Failed to send snapshot to {addr}: {error}");
+                            if let Some(suppressed) = snapshot_send_diagnostic.record(now) {
+                                eprintln!(
+                                    "Failed to send complete {}-byte snapshot to {addr}: {error}; \
+                                     suppressed {suppressed} similar errors",
+                                    payload.len()
+                                );
+                            }
                         }
                     }
-                    Err(error) => eprintln!("Failed to serialize snapshot: {error}"),
+                    Err(error) => {
+                        if let Some(suppressed) = snapshot_send_diagnostic.record(now) {
+                            eprintln!(
+                                "Rejected snapshot for {addr}: {error}; \
+                                 suppressed {suppressed} similar errors"
+                            );
+                        }
+                    }
                 }
             }
 
@@ -1452,9 +1575,9 @@ fn main() -> io::Result<()> {
             "Match mode: release - matches form to {}v{} before starting (OMOBA_MATCH_MODE=dev for instant start)",
             match_config.team_size, match_config.team_size
         ),
-        MatchMode::Dev => println!(
-            "Match mode: dev - first join starts the match immediately (NOT for release)"
-        ),
+        MatchMode::Dev => {
+            println!("Match mode: dev - first join starts the match immediately (NOT for release)")
+        }
     }
 
     App::new()
@@ -1550,6 +1673,7 @@ fn handle_cast_request(
         };
         caster_mut.state.mana -= mana_cost;
         caster_mut.last_cast_at[skill_slot.index()] = Some(now);
+        record_player_action(caster_mut, skill_slot);
         if let Some(heal) = def.self_heal {
             caster_mut.state.hp =
                 (caster_mut.state.hp + heal * effect_scale).min(caster_mut.state.max_hp);
@@ -1659,6 +1783,7 @@ fn handle_cast_request(
     };
     caster_mut.state.mana -= mana_cost;
     caster_mut.last_cast_at[skill_slot.index()] = Some(now);
+    record_player_action(caster_mut, skill_slot);
 
     // Higher invested rank = proportionally more projectile damage; active
     // boss team buffs multiply the outgoing ability damage authoritatively.
@@ -1693,6 +1818,19 @@ fn handle_cast_request(
             expires_at: now + PROJECTILE_LIFETIME,
         },
     );
+}
+
+fn record_player_action(player: &mut ConnectedPlayer, slot: SkillSlot) {
+    player.state.action_sequence = player.state.action_sequence.wrapping_add(1);
+    if player.state.action_sequence == 0 {
+        player.state.action_sequence = 1;
+    }
+    player.state.action_kind = if slot == SkillSlot::Q {
+        PlayerActionKind::Attack
+    } else {
+        PlayerActionKind::Cast
+    };
+    player.state.action_slot = slot.index() as u8;
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1899,7 +2037,13 @@ fn simulate_projectiles(
 
     for (target_id, damage, attacker_id) in neutral_damage_events {
         apply_neutral_damage(
-            players, neutrals, team_buffs, target_id, damage, attacker_id, now,
+            players,
+            neutrals,
+            team_buffs,
+            target_id,
+            damage,
+            attacker_id,
+            now,
         );
     }
 }
@@ -2673,6 +2817,82 @@ mod tests {
         (dx * dx + dz * dz).sqrt()
     }
 
+    fn empty_snapshot() -> ServerPacket {
+        ServerPacket::Snapshot {
+            your_id: 1,
+            players: Vec::new(),
+            projectiles: Vec::new(),
+            structures: Vec::new(),
+            minions: Vec::new(),
+            neutrals: Vec::new(),
+            team_buffs: Vec::new(),
+            game_state: GameState::Running,
+            rematch_in_secs: None,
+        }
+    }
+
+    #[test]
+    fn udp_payload_guard_accepts_limit_and_rejects_one_byte_over() {
+        assert!(validate_snapshot_payload_size(IPV4_UDP_MAX_PAYLOAD_BYTES - 1).is_ok());
+        assert!(validate_snapshot_payload_size(IPV4_UDP_MAX_PAYLOAD_BYTES).is_ok());
+        assert!(matches!(
+            validate_snapshot_payload_size(IPV4_UDP_MAX_PAYLOAD_BYTES + 1),
+            Err(SnapshotDatagramError::PayloadTooLarge {
+                actual: 65_508,
+                limit: 65_507
+            })
+        ));
+    }
+
+    #[test]
+    fn snapshot_serializer_rejects_whole_over_limit_payload() {
+        let layout = build_map_layout();
+        let mut players = HashMap::new();
+        let mut next_player_id = 1;
+        let addr: SocketAddr = "127.0.0.1:34600".parse().unwrap();
+        let now = Instant::now();
+        ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        let player = players.get_mut(&addr).unwrap();
+        player.joined = true;
+        player.state.avatar = Some("x".repeat(IPV4_UDP_MAX_PAYLOAD_BYTES));
+
+        let packet = ServerPacket::Snapshot {
+            your_id: player.state.id,
+            players: build_players_snapshot(&players),
+            projectiles: Vec::new(),
+            structures: Vec::new(),
+            minions: Vec::new(),
+            neutrals: Vec::new(),
+            team_buffs: Vec::new(),
+            game_state: GameState::Running,
+            rematch_in_secs: None,
+        };
+        let error = serialize_snapshot_datagram(&packet).unwrap_err();
+        assert!(matches!(
+            error,
+            SnapshotDatagramError::PayloadTooLarge { actual, limit }
+                if actual > IPV4_UDP_MAX_PAYLOAD_BYTES
+                    && limit == IPV4_UDP_MAX_PAYLOAD_BYTES
+        ));
+
+        let legal = serialize_snapshot_datagram(&empty_snapshot()).unwrap();
+        assert!(legal.len() < IPV4_UDP_MAX_PAYLOAD_BYTES);
+        assert!(serde_json::from_slice::<ServerPacket>(&legal).is_ok());
+    }
+
+    #[test]
+    fn network_diagnostic_bursts_are_suppressed_and_reported() {
+        let started = Instant::now();
+        let mut diagnostic = RateLimitedDiagnostic::default();
+        assert_eq!(diagnostic.record(started), Some(0));
+        assert_eq!(diagnostic.record(started + Duration::from_millis(1)), None);
+        assert_eq!(diagnostic.record(started + Duration::from_millis(2)), None);
+        assert_eq!(
+            diagnostic.record(started + NETWORK_DIAGNOSTIC_INTERVAL),
+            Some(2)
+        );
+    }
+
     #[test]
     fn map_layout_is_symmetric() {
         let layout = build_map_layout();
@@ -3156,6 +3376,63 @@ mod tests {
     }
 
     #[test]
+    fn opposing_minions_engage_take_damage_die_and_leave_the_next_snapshot_set() {
+        let make_minion = |id: u64, team: Team, x: f32, hp: f32| Minion {
+            state: MinionState {
+                id,
+                team,
+                lane: Lane::Mid,
+                x,
+                y: MINION_SPAWN_HEIGHT,
+                z: 0.0,
+                yaw: 0.0,
+                hp,
+                max_hp: MINION_MAX_HP,
+                state: MinionBrainState::Marching,
+                target_kind: None,
+                target_id: None,
+            },
+            path: Vec::new(),
+            next_waypoint: 0,
+            last_attack_at: None,
+            aggro_target: None,
+        };
+
+        let mut minions = HashMap::from([
+            (1, make_minion(1, Team::Green, 0.0, MINION_MAX_HP)),
+            (2, make_minion(2, Team::Blue, 1.0, MINION_ATTACK_DAMAGE)),
+        ]);
+        let mut players = HashMap::new();
+        let mut structures = HashMap::new();
+        let mut game_state = GameState::Running;
+
+        simulate_minions(
+            &mut players,
+            &mut minions,
+            &mut structures,
+            &mut game_state,
+            0.1,
+            Instant::now(),
+        );
+
+        let survivor = minions.get(&1).expect("green minion remains live");
+        assert_eq!(survivor.state.state, MinionBrainState::Attacking);
+        assert_eq!(survivor.state.target_kind, Some(MinionTargetKind::Minion));
+        assert_eq!(survivor.state.target_id, Some(2));
+        assert_eq!(survivor.state.hp, MINION_MAX_HP - MINION_ATTACK_DAMAGE);
+        let defeated = minions.get(&2).expect("dead state is observable this tick");
+        assert_eq!(defeated.state.hp, 0.0);
+        assert_eq!(defeated.state.state, MinionBrainState::Dead);
+        assert_eq!(defeated.state.target_kind, None);
+        assert_eq!(defeated.state.target_id, None);
+
+        // The production tick applies this retention before serializing the
+        // next snapshot, which in turn drives client owner/proxy cleanup.
+        minions.retain(|_, minion| minion.state.hp > 0.0);
+        assert_eq!(minions.keys().copied().collect::<Vec<_>>(), [1]);
+    }
+
+    #[test]
     fn progression_levels_up_and_scales_stats() {
         let layout = build_map_layout();
         let mut players = HashMap::new();
@@ -3598,6 +3875,12 @@ mod tests {
             now,
         );
         assert_eq!(projectiles.len(), 1);
+        {
+            let action = &players.get(&addr_a).unwrap().state;
+            assert_eq!(action.action_sequence, 1);
+            assert_eq!(action.action_kind, PlayerActionKind::Attack);
+            assert_eq!(action.action_slot, 0);
+        }
         let mana_after_first = players.get(&addr_a).unwrap().state.mana;
         assert!((mana_after_first - (a_mana_before - scaled_mana_cost(q, 1))).abs() < EPSILON);
 
@@ -3615,6 +3898,11 @@ mod tests {
             1,
             "second cast at same instant must be cooldown-blocked"
         );
+        assert_eq!(
+            players.get(&addr_a).unwrap().state.action_sequence,
+            1,
+            "rejected casts must not advance cosmetic action state"
+        );
 
         let later = now + scaled_cooldown(q, 1) + Duration::from_millis(1);
         cast_slot(
@@ -3631,6 +3919,7 @@ mod tests {
             2,
             "cast after cooldown should spawn another projectile"
         );
+        assert_eq!(players.get(&addr_a).unwrap().state.action_sequence, 2);
 
         players.get_mut(&addr_a).unwrap().state.mana = 0.0;
         let mut next_id = 99_u64;
@@ -3648,6 +3937,7 @@ mod tests {
             2,
             "zero mana must not create a projectile"
         );
+        assert_eq!(players.get(&addr_a).unwrap().state.action_sequence, 2);
     }
 
     #[test]
@@ -3695,7 +3985,10 @@ mod tests {
         let layout = build_map_layout();
         let now = Instant::now();
         let mut results = Vec::new();
-        for (index, class) in [HeroClass::Warrior, HeroClass::Mage].into_iter().enumerate() {
+        for (index, class) in [HeroClass::Warrior, HeroClass::Mage]
+            .into_iter()
+            .enumerate()
+        {
             let mut players = HashMap::new();
             let caster: SocketAddr = format!("127.0.0.1:5210{index}").parse().unwrap();
             let victim: SocketAddr = format!("127.0.0.1:5220{index}").parse().unwrap();
@@ -3784,6 +4077,7 @@ mod tests {
             assert!((state.hp - 40.0).abs() < EPSILON, "locked W must not heal");
             assert!((state.mana - MAX_MANA).abs() < EPSILON);
             assert!(projectiles.is_empty());
+            assert_eq!(state.action_sequence, 0);
         }
 
         // Level 2 unlocks W: heal appears, mana is drained, still no projectile.
@@ -3809,7 +4103,13 @@ mod tests {
             "unlocked W must heal by the kit amount"
         );
         assert!((state.mana - (state.max_mana - w.base_mana_cost)).abs() < EPSILON);
-        assert!(projectiles.is_empty(), "self ability must not spawn a projectile");
+        assert_eq!(state.action_sequence, 1);
+        assert_eq!(state.action_kind, PlayerActionKind::Cast);
+        assert_eq!(state.action_slot, 1);
+        assert!(
+            projectiles.is_empty(),
+            "self ability must not spawn a projectile"
+        );
     }
 
     #[test]
@@ -4125,7 +4425,13 @@ mod tests {
 
         // Just before the bottom-boss delay: still no boss.
         let before_bottom = now + BOTTOM_BOSS_SPAWN_DELAY - Duration::from_millis(1);
-        simulate_neutrals(&mut players, &mut neutrals, &GameState::Running, 0.1, before_bottom);
+        simulate_neutrals(
+            &mut players,
+            &mut neutrals,
+            &GameState::Running,
+            0.1,
+            before_bottom,
+        );
         assert!(
             visible_camp_types(&neutrals)
                 .iter()
@@ -4135,7 +4441,13 @@ mod tests {
         // At/after the bottom delay: Wendigo up at its pit with full boss HP,
         // top boss still gated.
         let after_bottom = now + BOTTOM_BOSS_SPAWN_DELAY + Duration::from_millis(1);
-        simulate_neutrals(&mut players, &mut neutrals, &GameState::Running, 0.1, after_bottom);
+        simulate_neutrals(
+            &mut players,
+            &mut neutrals,
+            &GameState::Running,
+            0.1,
+            after_bottom,
+        );
         let visible = visible_camp_types(&neutrals);
         assert!(visible.contains(&NeutralCampType::WendigoBoss));
         assert!(!visible.contains(&NeutralCampType::KingMutatioBoss));
@@ -4149,7 +4461,13 @@ mod tests {
 
         // At/after the top delay: King Mutatio up as well.
         let after_top = now + TOP_BOSS_SPAWN_DELAY + Duration::from_millis(1);
-        simulate_neutrals(&mut players, &mut neutrals, &GameState::Running, 0.1, after_top);
+        simulate_neutrals(
+            &mut players,
+            &mut neutrals,
+            &GameState::Running,
+            0.1,
+            after_top,
+        );
         let visible = visible_camp_types(&neutrals);
         assert!(visible.contains(&NeutralCampType::KingMutatioBoss));
         let mutatio = neutrals
@@ -4185,7 +4503,13 @@ mod tests {
         let mut neutrals = build_camps_and_bosses();
         schedule_boss_spawns(&mut neutrals, now);
         let spawn_at = now + BOTTOM_BOSS_SPAWN_DELAY + Duration::from_millis(1);
-        simulate_neutrals(&mut players, &mut neutrals, &GameState::Running, 0.1, spawn_at);
+        simulate_neutrals(
+            &mut players,
+            &mut neutrals,
+            &GameState::Running,
+            0.1,
+            spawn_at,
+        );
 
         let wendigo_id = find_boss_id(&neutrals, NeutralCampType::WendigoBoss);
         let mut team_buffs = TeamBuffs::default();
@@ -4415,7 +4739,10 @@ mod tests {
             &mut next_projectile_id,
             later,
         );
-        let double_buffed = projectiles.values().next().expect("double-buffed cast fires");
+        let double_buffed = projectiles
+            .values()
+            .next()
+            .expect("double-buffed cast fires");
         let expected = base_damage * BOTTOM_BOSS_BUFF_DAMAGE_MULT * TOP_BOSS_BUFF_DAMAGE_MULT;
         assert!((double_buffed.damage - expected).abs() < EPSILON);
 
@@ -4470,7 +4797,13 @@ mod tests {
         assert!(players.get(&dead_addr).unwrap().state.hp == 0.0);
 
         // Regen clamps to max HP.
-        regenerate_team_buff_hp(&mut players, &team_buffs, &GameState::Running, 10_000.0, now);
+        regenerate_team_buff_hp(
+            &mut players,
+            &team_buffs,
+            &GameState::Running,
+            10_000.0,
+            now,
+        );
         let green = players.get(&green_addr).unwrap();
         assert!((green.state.hp - green.state.max_hp).abs() < EPSILON);
 
@@ -4579,7 +4912,13 @@ mod tests {
         let mut neutrals = build_camps_and_bosses();
         schedule_boss_spawns(&mut neutrals, now);
         let spawn_at = now + BOTTOM_BOSS_SPAWN_DELAY + Duration::from_millis(1);
-        simulate_neutrals(&mut players, &mut neutrals, &GameState::Running, 0.1, spawn_at);
+        simulate_neutrals(
+            &mut players,
+            &mut neutrals,
+            &GameState::Running,
+            0.1,
+            spawn_at,
+        );
         let wendigo_id = find_boss_id(&neutrals, NeutralCampType::WendigoBoss);
         let anchor = neutrals.get(&wendigo_id).unwrap().anchor;
 

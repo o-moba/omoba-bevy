@@ -17,7 +17,8 @@ SNAPSHOT_WAIT_SECONDS = 3.0
 SERVER_START_WAIT_SECONDS = 1.0
 PING_INTERVAL_SECONDS = 0.4
 SERVER_ADDR = ("127.0.0.1", 4010)
-MAX_PACKET_SIZE = 8 * 1024
+# Full receive storage for any legal IPv4 UDP payload (max payload: 65,507).
+MAX_PACKET_SIZE = 65_536
 
 TARGET_BASE_RUN_TIME_SECONDS = 45.0
 PLAYER_SPEED = 5.0
@@ -85,6 +86,9 @@ class ServerHandle:
     def start(self) -> None:
         env = os.environ.copy()
         env["SERVER_ADDR"] = f"{self.server_addr[0]}:{self.server_addr[1]}"
+        # These legacy session-flow scenarios predate release matchmaking and
+        # require first-join start semantics; pin the documented dev mode.
+        env["OMOBA_MATCH_MODE"] = "dev"
         server_bin = self.repo_root / "target" / "debug" / "server"
         if not server_bin.exists():
             raise AssertionError(f"Missing server binary at {server_bin}; build the workspace first.")
@@ -358,14 +362,16 @@ def scenario_server_restart(repo_root: Path, server_addr: tuple[str, int]) -> Sc
 
         snapshot_after_restart = pump_until(
             [client],
-            lambda snapshots: snapshots[0] is not None and len(snapshots[0]["players"]) == 1,
+            lambda snapshots: snapshots[0] is not None and len(snapshots[0]["players"]) == 0,
             SNAPSHOT_WAIT_SECONDS,
-            "fresh snapshot after server restart",
+            "fresh pre-join snapshot after server restart",
         )[0]
         assert snapshot_after_restart is not None
         restart_id = snapshot_after_restart["your_id"]
-        default_player = expect_player_state(snapshot_after_restart, restart_id, "green", "ipfs")
-        assert_true(default_player["team"] == "green", "Post-restart player did not reset to default team")
+        assert_true(
+            restart_id > 0,
+            "Restarted server did not reserve an endpoint id for the pre-join client",
+        )
 
         client.join("blue", "toka")
         restored_snapshot = pump_until(
@@ -382,7 +388,7 @@ def scenario_server_restart(repo_root: Path, server_addr: tuple[str, int]) -> Sc
             name="M4 server restart",
             details=(
                 f"client recovered as a fresh session after restart (id {first_id} -> {restart_id}) "
-                "and restored team/character after resending Join"
+                "while hidden before Join, then restored team/character after resending Join"
             ),
         )
     finally:

@@ -5,7 +5,7 @@ edition.workspace = true
 
 [dependencies]
 bevy = { version = "0.18.0", default-features = false }
-ekza-bevy-sdk = { path = "../../ekza-bevy-sdk", default-features = false }
+ekza-bevy-sdk = { git = "https://github.com/ekza-space/ekza-bevy-sdk", branch = "main", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
 shared = { path = "../shared" }

@@ -12,14 +12,18 @@ mod input_bindings;
 mod maps;
 mod match_hud;
 mod minimap;
+mod minions;
 mod model_scale;
 mod net;
 mod pause_menu;
 mod persistence;
 mod player;
+mod presentation2d;
 mod session_config;
+mod sprite;
 mod team;
 mod world;
+mod world2d;
 
 use bosses::BossesPlugin;
 use camera::CameraPlugin;
@@ -32,13 +36,17 @@ use help_overlay::HelpOverlayPlugin;
 use maps::MapsPlugin;
 use match_hud::MatchHudPlugin;
 use minimap::MinimapPlugin;
+use minions::MinionVisualsPlugin;
 use model_scale::ModelScalePlugin;
 use net::NetworkingPlugin;
 use pause_menu::PauseMenuPlugin;
 use persistence::ClientPersistencePlugin;
 use player::PlayerPlugin;
+use presentation2d::Presentation2dPlugin;
+use sprite::SpriteVisualsPlugin;
 use team::TeamSelectPlugin;
 use world::SetupPlugin;
+use world2d::World2dPlugin;
 
 fn main() {
     // Headless model size analyzer (prints a bind-pose height table and exits).
@@ -54,9 +62,12 @@ fn main() {
         .add_plugins((
             CameraPlugin,
             PlayerPlugin,
+            SpriteVisualsPlugin,
+            Presentation2dPlugin,
             MapsPlugin,
             ClientPersistencePlugin,
             SetupPlugin,
+            World2dPlugin,
             NetworkingPlugin,
             BossesPlugin,
             MinimapPlugin,
@@ -71,6 +82,7 @@ fn main() {
             PauseMenuPlugin,
             GodModePlugin,
             ModelScalePlugin,
+            MinionVisualsPlugin,
         ))
         // Separate call: the plugin tuple above is at Bevy's 15-element limit.
         .add_plugins(DecorPlugin)

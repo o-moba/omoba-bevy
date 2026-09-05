@@ -146,11 +146,12 @@ fn help_overlay_body() -> String {
     let upgrade = upgrade_key_display();
     format!(
         "Quick guide (press {help_key} to close)\n\n\
-MOVE: Left-click the ground to walk.\n\
-CAMERA: Mouse wheel zoom. Right-click or Alt toggles free camera; use WASD + Q/E while free.\n\
+MOVE: Click or tap the ground to walk.\n\
+CAMERA: Mouse wheel zoom. Y toggles hero follow; Space returns to your hero. Use arrow keys to pan while free in 2D.\n\
 MINIMAP: Top-left — click to move the camera focus.\n\
-TARGET: Tab selects nearest hostile, middle-click near units/structures, Backspace clears.\n\
-CAST: Skill keys {skills} — each key casts that slot of your class kit (W/E/R unlock by level).\n\
+ATTACK: Click or tap a hostile to select it and use Q; your hero approaches if needed.\n\
+TARGET: Tab selects the nearest hostile, middle-click selects without attacking, Backspace clears.\n\
+CAST: Skill keys {skills} or the on-screen buttons cast at the selected target (W/E/R unlock by level).\n\
 SKILL POINTS: Spend with {upgrade} or the arrows above the hotbar to rank up abilities.\n\
 OBJECTIVE: Destroy the enemy base tower.\n\
 PAUSE: Escape opens the menu."
@@ -166,8 +167,11 @@ mod tests {
         let body = help_overlay_body();
         assert!(body.contains("MOVE:"));
         assert!(body.contains("TARGET:"));
+        assert!(body.contains("Click or tap a hostile"));
+        assert!(body.contains("on-screen buttons"));
         assert!(body.contains("CAST:"));
         assert!(body.contains("OBJECTIVE:"));
+        assert!(body.contains("Y toggles hero follow"));
         assert!(body.contains(&skill_keys_display()));
     }
 

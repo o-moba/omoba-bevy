@@ -29,10 +29,8 @@ where
 
 #[test]
 fn release_mode_forms_and_starts_a_full_match() {
-    let server = ServerProcess::spawn_with_env(&[
-        ("OMOBA_MATCH_MODE", "release"),
-        ("OMOBA_TEAM_SIZE", "1"),
-    ]);
+    let server =
+        ServerProcess::spawn_with_env(&[("OMOBA_MATCH_MODE", "release"), ("OMOBA_TEAM_SIZE", "1")]);
 
     // First player queues: the match forms but must NOT start.
     let mut first = Bot::connect(server.addr());
@@ -64,12 +62,11 @@ fn release_mode_forms_and_starts_a_full_match() {
     let mut second = Bot::connect(server.addr());
     // Both bots ask for Green: the server must still balance to 1v1.
     second.join(Team::Green, Character::Ipfs);
-    wait_for_state(&mut second, "starting countdown after full roster", |state| {
-        matches!(
-            state,
-            GameState::Starting { .. } | GameState::Running
-        )
-    });
+    wait_for_state(
+        &mut second,
+        "starting countdown after full roster",
+        |state| matches!(state, GameState::Starting { .. } | GameState::Running),
+    );
     let running = wait_for_state(&mut second, "running after countdown", |state| {
         matches!(state, GameState::Running)
     });
@@ -83,8 +80,14 @@ fn release_mode_forms_and_starts_a_full_match() {
             .expect("snapshot while running");
         let players = snapshot.players();
         if players.len() == 2 {
-            let greens = players.iter().filter(|p| p.team == Some(Team::Green)).count();
-            let blues = players.iter().filter(|p| p.team == Some(Team::Blue)).count();
+            let greens = players
+                .iter()
+                .filter(|p| p.team == Some(Team::Green))
+                .count();
+            let blues = players
+                .iter()
+                .filter(|p| p.team == Some(Team::Blue))
+                .count();
             assert_eq!((greens, blues), (1, 1), "teams must balance to 1v1");
             break;
         }

@@ -29,12 +29,13 @@
 //! human QA pass, respectively.
 
 pub mod bot;
+pub mod bot_ai;
 pub mod protocol;
 pub mod server;
 
 pub use bot::Bot;
 pub use protocol::{
-    Character, ClientPacket, GameState, HeroClass, NeutralCampType, NeutralState, PlayerState,
-    ServerPacket, TargetId, TargetKind, Team, TeamBuffKind, TeamBuffState,
+    Character, ClientPacket, GameState, HeroClass, NeutralCampType, NeutralState, PlayerActionKind,
+    PlayerState, ServerPacket, TargetId, TargetKind, Team, TeamBuffKind, TeamBuffState,
 };
 pub use server::ServerProcess;

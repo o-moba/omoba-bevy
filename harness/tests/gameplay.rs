@@ -12,8 +12,8 @@
 
 use std::time::{Duration, Instant};
 
-use harness::{Bot, Character, HeroClass, NeutralCampType, ServerProcess, Team};
 use harness::protocol::PlayerState;
+use harness::{Bot, Character, HeroClass, NeutralCampType, ServerProcess, Team};
 
 // --- Constants mirrored from server balance (source of truth in
 // `server/src/balance.rs`). Used only to shape inputs and pick thresholds. ---
@@ -98,7 +98,11 @@ fn join_produces_snapshot_with_player() {
         .expect("joined bot should appear in a snapshot at full hp");
 
     assert_eq!(me.id, id);
-    assert!((me.hp - MAX_HP).abs() < 0.001, "expected full hp, got {}", me.hp);
+    assert!(
+        (me.hp - MAX_HP).abs() < 0.001,
+        "expected full hp, got {}",
+        me.hp
+    );
     assert_eq!(me.team, Some(Team::Green));
 }
 
@@ -359,7 +363,10 @@ fn upgrade_skill_without_points_is_noop() {
         .latest_player(id, POLL_TIMEOUT)
         .expect("player snapshot");
 
-    assert_eq!(after.ranks[0], 1, "rank must not rise without a skill point");
+    assert_eq!(
+        after.ranks[0], 1,
+        "rank must not rise without a skill point"
+    );
     assert_eq!(after.skill_points, 0, "skill points must stay at zero");
 
     // TODO: the real consume-and-cap path (spend a point -> rank rises and is
@@ -412,7 +419,10 @@ fn bottom_boss_spawns_on_schedule_with_boss_stats() {
             saw_camps = true;
         }
     }
-    assert!(saw_camps, "the three jungle camps should replicate from the start");
+    assert!(
+        saw_camps,
+        "the three jungle camps should replicate from the start"
+    );
 
     // Up to shortly before the delay: still no boss.
     let gated_until = match_start + Duration::from_secs(BOTTOM_BOSS_SPAWN_DELAY_SECS - 10);
@@ -420,7 +430,9 @@ fn bottom_boss_spawns_on_schedule_with_boss_stats() {
         bot.ping();
         if let Some(packet) = bot.recv_snapshot(Instant::now() + POLL_TIMEOUT) {
             assert!(
-                packet.neutral_of_type(NeutralCampType::WendigoBoss).is_none(),
+                packet
+                    .neutral_of_type(NeutralCampType::WendigoBoss)
+                    .is_none(),
                 "bottom boss appeared before its spawn delay"
             );
         }

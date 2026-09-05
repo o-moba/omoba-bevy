@@ -4,6 +4,188 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [Unreleased]
+
+## [0.17.0] - 2026-07-29
+
+### Added
+- Desktop and mobile now share direct screen-space combat input: click or tap a
+  living hostile hero, minion, neutral, tower, or base to select it and request
+  the Q attack. Touch-sized logical-pixel hit areas remain stable across 2D
+  camera zoom, while Tab and middle-click selection remain available.
+- Out-of-range unit casts now queue a bounded approach to the moving selected
+  actor and emit exactly one cast after entering the shared scaled ability
+  range. Manual ground movement, target death, or target removal cancels it.
+- Ground taps provide the same 2D click-to-move path as desktop primary clicks;
+  target, minimap, and UI presses are consumed so one gesture has one action.
+
+### Changed
+- Keyboard Q/W/E/R and the 64-pixel on-screen skill buttons now queue through
+  the same target-aware cast path. Self-target skills still cast without an
+  enemy. Missing-target, cooldown, mana, and approach states have explicit
+  diagnostic feedback.
+
+### Fixed
+- Local cooldowns no longer begin for out-of-range requests that the server
+  would reject without producing an attack. Direct 2D target selection no
+  longer depends on a middle mouse button or a zoom-sensitive ground radius.
+
+## [0.16.1] - 2026-07-28
+
+### Changed
+- `Y` now toggles hero camera follow in both visual modes. If the minimap is
+  currently supplying a focus override, `Y` clears it and immediately restores
+  hero follow; `Space` remains the force-recenter shortcut.
+- 2D player nameplates now scale against hero height and estimated label width
+  instead of using a fixed oversized transform.
+
+### Fixed
+- 2D ground movement no longer stops accepting commands when camera follow is
+  unlocked. Right-click and Alt also no longer accidentally toggle follow or
+  capture the cursor in `sprite2d`; their legacy 3D behavior is preserved.
+
+## [0.16.0] - 2026-07-28
+
+### Added
+- **TASK-2D-PRODUCTION-READINESS-01 — readable match actors.** Genuine 2D
+  mode now presents the six authoritative lane towers with Green-square or
+  Blue-diamond team badges and explicit TOP/MID/BOT labels. Both teams' lane
+  minions use the same color-plus-shape language. Proxy reconciliation runs
+  after snapshot/interpolation updates, remains one-to-one with authoritative
+  owners, and recursively removes its bounded cues when an owner disappears.
+- Added occupied-alpha bounds to every non-player 2D actor definition and an
+  offline screen-space readability validator. Focused ECS tests cover the
+  exact six-lane-tower plus two-base plus 18-minion render world, idempotent
+  24→23 lane-tower/minion cleanup, sustained teardown/recreate bounds,
+  team/lane cues, authoritative projection, and `models3d` isolation.
+- Added a real-server 5v5 UDP regression which receives and verifies a full
+  runtime-dependent JSON datagram in the asserted `8192 < bytes <= 65507`
+  range containing ten players, eight structures, and 18 minions, then proves
+  the server recovers after malformed and oversized client datagrams.
+
+### Changed
+- The genuine 2D camera is twice as close and render-only actor sizes now use
+  occupied pixels to preserve the tower > hero > minion hierarchy at default
+  zoom and maximum zoom-out. The selection portrait atlas now covers all ten
+  manifest characters while preserving the original five cells byte-for-byte.
+- Client and harness receive storage is now 65,536 bytes, covering the legal
+  IPv4 UDP application-payload ceiling of 65,507 bytes. The server checks a
+  complete serialized snapshot against that ceiling before sending, rejects
+  oversized client requests whole, and rate-limits malformed/send diagnostics.
+
+### Fixed
+- Removed the exact-8-KiB receive truncation that produced repeated Serde EOF
+  failures at column 8192 and intermittently hid trailing structures/minions.
+- Lane towers and minions no longer collapse to near-subpixel silhouettes at
+  supported 2D camera zooms.
+
+## [0.15.0] - 2026-07-28
+
+### Added
+- **TASK-FULL-2D-WORLD — genuine orthographic 2D game mode.** `sprite2d` now
+  creates a planar XY render world with one `Camera2d`, deterministic 55×55
+  tiled terrain, paths, a traversable diagonal river, forest belts, both
+  bases, all lane structures, camps, and boss pits. Heroes, minions,
+  structures, neutrals, bosses, projectiles, markers, bars, labels, and
+  bounded combat VFX use cached Bevy 2D sprites; the mode no longer renders
+  the old 3D arena, GLBs, mesh billboards, or directional-light scene.
+- Added a tested XZ↔XY projection/picking layer, orthographic follow/free-pan
+  camera with clamped zoom and minimap focus, stable foot-Y layer sorting,
+  deterministic prop placement, a 4,096 static-entity ceiling, and a 256 VFX
+  cap with two-second cleanup.
+- Added original CC0 world art produced through Higgsfield Recraft V4.1,
+  `client/assets/world2d/manifest.json`, a topology-aware offline validator,
+  negative fixtures, and final world/contact-board proof artifacts.
+- **TASK-2D-RELEASE-VERTICAL-SLICE — networked 2D combat presentation.** All
+  five sprite heroes now have manifest-driven attack, cast, hit, and death
+  one-shots in addition to idle/run. Accepted server casts replicate a safe
+  action sequence/kind/slot so local and remote clients play each action once;
+  HP deltas drive hit/death/respawn transitions with deterministic priority.
+- Added an art-directed `presentation2d` layer for the arena, towers, bases,
+  team minions, neutrals, both raid bosses, projectiles, cast/hit/heal/death
+  VFX, portraits, and UI framing. Sprite mode replaces primitive/GLB combat
+  actors with cached billboard art while preserving their gameplay roots;
+  the default 3D path remains available.
+- Added a frozen style bible/gap matrix, expanded asset validation for the
+  sprite manifest v2 and presentation atlas, and a real-UDP two-client combat
+  action test covering accepted, rejected, sequential, legacy, and unknown
+  action fields.
+- Added `make game2d` as the direct single-client launcher for the illustrated
+  presentation; it preserves `GAME_SERVER_ADDR` behavior from `make game`.
+- **TASK-2D-SPRITE-PROTOTYPE — optional animated 2D player visuals.** The
+  pre-join screen now keeps independent 3D-avatar and 2D-sprite selections
+  and offers five original characters: Mossback Teapot, Neon Axolotl Courier,
+  Origami Storm Heron, Clockwork Turnip Oracle, and Void Jelly Astronaut.
+  `models3d` remains the default; set `OMOBA_PLAYER_VISUAL_MODE=sprite2d` for
+  billboarded, unlit sprite-sheet visuals in the existing 3D arena. Local and
+  remote sprites select idle/run loops from owner movement, and the optional
+  cosmetic id is validated, reconnect-retained, and snapshot-replicated.
+- Added `client/assets/sprites/manifest.json` as the runtime source of truth,
+  CC0 provenance documentation, and `scripts/validate_sprite_assets.py` for
+  structural PNG/manifest validation (including negative contract tests).
+
+### Changed
+- **`ekza-bevy-sdk` is now a git dependency.** `client` and `server` depend on
+  https://github.com/ekza-space/ekza-bevy-sdk (branch `main`) instead of a
+  relative `../../ekza-bevy-sdk` path, so a fresh clone of this repo builds
+  without any sibling checkout. Local development still uses the on-disk SDK
+  via a gitignored `.cargo/config.toml` `[patch]` override.
+
+## [0.12.1] - 2026-07-06
+
+### Fixed
+- **Character select popped up mid-game (TASK-25).** Any client-side
+  connection teardown (3 s snapshot staleness, transport failure, wait
+  timeout) respawned the team-select overlay even for a joined player — a
+  transient hiccup silently kicked you back to "pick a character" and let
+  you re-enter. Now every teardown logs its reason, and a session with a
+  committed join never shows the select screen again: the client
+  auto-reconnects on the 2 s retry cadence and auto-rejoins with the
+  remembered loadout + persistent session id (the server reclaims the
+  session for up to 30 s, so hero/team/position survive short outages).
+  The connection panel shows "Connection lost — reconnecting (attempt
+  N)..." meanwhile; the select screen still appears for players who never
+  joined, and the manual Retry button keeps working.
+
+## [0.12.0] - 2026-07-06
+
+### Added
+- **TASK-24 — slime minion models.** Lane minions render as team-colored
+  CC0 "Mimic Slime" creeps (Halloween Rising, Polygonal-Mind; green
+  "Classic" / blue "Water") staged from the Open Source Avatars collection
+  with retargeted UAL clips, replacing the placeholder spheres. Minions go
+  through the shared model-scale pipeline (0.6× hero height, tweakable via
+  `model_scale_overrides.json` keys `slime-green`/`slime-blue`), stand on
+  their measured foot offset, get the VRM double-sided material fix, and
+  animate from the replicated AI state (marching/chasing → walk,
+  attacking → attack). Headless analyzer now measures `minions/` too
+  (36 models).
+
+### Fixed
+- **Camps and raid bosses were entombed in decorative boxes.** The three
+  neutral camps and both boss pits sit exactly at jungle-block centers, so
+  the 12×4×12 decorative boxes fully enclosed the creatures. Blocks within
+  10 units of a camp/boss anchor are no longer spawned (5 of 10 removed):
+  camps and bosses now stand in open clearings and are visible from the
+  battlefield.
+
+## [0.11.0] - 2026-07-06
+
+### Added
+- **TASK-23 — bot lane-push AI.** Fill bots now actually play instead of
+  wandering at spawn: each bot takes a lane (Mid/Top/Bot round-robin),
+  walks its lane waypoints toward the enemy base (geometry mirrors the
+  server's lane control points, oriented by the server-assigned team),
+  fights enemy players and minions it meets (approach into Q cast range,
+  hold, cast — ranges from the shared per-class ability kits), sieges
+  enemy towers in reach, and rejoins its lane from the nearest waypoint
+  after a respawn. The server stays fully authoritative: bot movement
+  steps fit the speed budget and the server enforces cast range/cooldown/
+  damage. New `harness::bot_ai` module (pure, unit-tested brain), harness
+  snapshot mirror now models minions and structures for targeting, and a
+  live integration test proves a brain-driven bot pushes ≥20 units along
+  its lane on a real server with server-accepted positions.
+
 ## [0.10.0] - 2026-07-06
 
 ### Added

@@ -55,7 +55,9 @@ impl ServerProcess {
         for attempt in 1..=MAX_SPAWN_ATTEMPTS {
             match Self::try_spawn_once(envs) {
                 Ok(server) => return server,
-                Err(error) => last_error = format!("attempt {attempt}/{MAX_SPAWN_ATTEMPTS}: {error}"),
+                Err(error) => {
+                    last_error = format!("attempt {attempt}/{MAX_SPAWN_ATTEMPTS}: {error}")
+                }
             }
         }
         panic!(
@@ -206,5 +208,9 @@ fn prebuilt_binary() -> Option<PathBuf> {
 }
 
 fn server_bin_name() -> &'static str {
-    if cfg!(windows) { "server.exe" } else { "server" }
+    if cfg!(windows) {
+        "server.exe"
+    } else {
+        "server"
+    }
 }

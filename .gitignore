@@ -7,7 +7,14 @@ client/assets/*
 !client/assets/avatars/
 !client/assets/bosses/
 !client/assets/config/
+!client/assets/sprites/
+!client/assets/presentation2d/
+!client/assets/world2d/
 .claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/omoba-sprite-character/
+!.claude/skills/omoba-sprite-character/**
 .claude/rules/
 .claude/rules/**
 .cursor/*
@@ -35,3 +42,6 @@ tasks/*
 client/assets/avatars/osa-*.glb
 client/assets/avatars/osa-*.png
 client/assets/avatars/osa-*.jpg
+
+# Local dev override for ekza-bevy-sdk (patch to on-disk checkout)
+.cargo/

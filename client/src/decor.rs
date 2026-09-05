@@ -15,6 +15,7 @@
 
 use bevy::prelude::*;
 
+use crate::sprite::PlayerVisualMode;
 use layout::PropKind;
 
 /// Number of distinct shared decor meshes (one per primitive shape used).
@@ -27,7 +28,7 @@ pub struct DecorPlugin;
 impl Plugin for DecorPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_decor)
-            .add_systems(Update, toggle_decor_visibility);
+            .add_systems(Update, (sync_decor_visual_mode, toggle_decor_visibility));
     }
 }
 
@@ -72,10 +73,7 @@ enum PartMaterial {
 }
 
 impl DecorAssets {
-    fn build(
-        meshes: &mut Assets<Mesh>,
-        materials: &mut Assets<StandardMaterial>,
-    ) -> Self {
+    fn build(meshes: &mut Assets<Mesh>, materials: &mut Assets<StandardMaterial>) -> Self {
         let mut matte = |color: Color| {
             materials.add(StandardMaterial {
                 base_color: color,
@@ -156,72 +154,207 @@ fn prop_parts(kind: PropKind) -> Vec<PartSpec> {
     match kind {
         // Round tree: trunk plus a clustered three-sphere canopy.
         PropKind::TreeOak => vec![
-            PartSpec::new(P::Cylinder, M::TrunkBrown, Vec3::new(0.0, 1.2, 0.0), Vec3::new(0.7, 2.4, 0.7)),
-            PartSpec::new(P::Sphere, M::CanopyBright, Vec3::new(0.0, 3.3, 0.0), Vec3::splat(3.2)),
-            PartSpec::new(P::Sphere, M::CanopyBright, Vec3::new(1.0, 2.8, 0.4), Vec3::splat(2.2)),
-            PartSpec::new(P::Sphere, M::CanopyDeep, Vec3::new(-0.9, 2.9, -0.4), Vec3::splat(2.0)),
+            PartSpec::new(
+                P::Cylinder,
+                M::TrunkBrown,
+                Vec3::new(0.0, 1.2, 0.0),
+                Vec3::new(0.7, 2.4, 0.7),
+            ),
+            PartSpec::new(
+                P::Sphere,
+                M::CanopyBright,
+                Vec3::new(0.0, 3.3, 0.0),
+                Vec3::splat(3.2),
+            ),
+            PartSpec::new(
+                P::Sphere,
+                M::CanopyBright,
+                Vec3::new(1.0, 2.8, 0.4),
+                Vec3::splat(2.2),
+            ),
+            PartSpec::new(
+                P::Sphere,
+                M::CanopyDeep,
+                Vec3::new(-0.9, 2.9, -0.4),
+                Vec3::splat(2.0),
+            ),
         ],
         // Conifer: trunk plus two stacked cones.
         PropKind::TreePine => vec![
-            PartSpec::new(P::Cylinder, M::TrunkBrown, Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.55, 2.0, 0.55)),
-            PartSpec::new(P::Cone, M::CanopyDeep, Vec3::new(0.0, 3.0, 0.0), Vec3::new(3.2, 2.6, 3.2)),
-            PartSpec::new(P::Cone, M::CanopyDeep, Vec3::new(0.0, 4.6, 0.0), Vec3::new(2.2, 2.2, 2.2)),
+            PartSpec::new(
+                P::Cylinder,
+                M::TrunkBrown,
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(0.55, 2.0, 0.55),
+            ),
+            PartSpec::new(
+                P::Cone,
+                M::CanopyDeep,
+                Vec3::new(0.0, 3.0, 0.0),
+                Vec3::new(3.2, 2.6, 3.2),
+            ),
+            PartSpec::new(
+                P::Cone,
+                M::CanopyDeep,
+                Vec3::new(0.0, 4.6, 0.0),
+                Vec3::new(2.2, 2.2, 2.2),
+            ),
         ],
         // Slender pale-trunk tree with a tall two-sphere canopy.
         PropKind::TreeBirch => vec![
-            PartSpec::new(P::Cylinder, M::TrunkPale, Vec3::new(0.0, 1.5, 0.0), Vec3::new(0.42, 3.0, 0.42)),
-            PartSpec::new(P::Sphere, M::CanopyBright, Vec3::new(0.0, 3.9, 0.0), Vec3::new(2.0, 2.6, 2.0)),
-            PartSpec::new(P::Sphere, M::CanopyBright, Vec3::new(0.5, 3.0, 0.3), Vec3::splat(1.4)),
+            PartSpec::new(
+                P::Cylinder,
+                M::TrunkPale,
+                Vec3::new(0.0, 1.5, 0.0),
+                Vec3::new(0.42, 3.0, 0.42),
+            ),
+            PartSpec::new(
+                P::Sphere,
+                M::CanopyBright,
+                Vec3::new(0.0, 3.9, 0.0),
+                Vec3::new(2.0, 2.6, 2.0),
+            ),
+            PartSpec::new(
+                P::Sphere,
+                M::CanopyBright,
+                Vec3::new(0.5, 3.0, 0.3),
+                Vec3::splat(1.4),
+            ),
         ],
         // Two overlapping flattened spheres.
         PropKind::BushRound => vec![
-            PartSpec::new(P::Sphere, M::BushGreen, Vec3::new(0.0, 0.55, 0.0), Vec3::new(1.8, 1.3, 1.8)),
-            PartSpec::new(P::Sphere, M::BushGreen, Vec3::new(0.7, 0.45, 0.2), Vec3::new(1.2, 0.9, 1.2)),
+            PartSpec::new(
+                P::Sphere,
+                M::BushGreen,
+                Vec3::new(0.0, 0.55, 0.0),
+                Vec3::new(1.8, 1.3, 1.8),
+            ),
+            PartSpec::new(
+                P::Sphere,
+                M::BushGreen,
+                Vec3::new(0.7, 0.45, 0.2),
+                Vec3::new(1.2, 0.9, 1.2),
+            ),
         ],
         // Low hedge: a capsule lying on its side.
         PropKind::BushLow => vec![
-            PartSpec::new(P::Capsule, M::BushGreen, Vec3::new(0.0, 0.5, 0.0), Vec3::new(1.2, 1.2, 1.4))
-                .rotated(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
+            PartSpec::new(
+                P::Capsule,
+                M::BushGreen,
+                Vec3::new(0.0, 0.5, 0.0),
+                Vec3::new(1.2, 1.2, 1.4),
+            )
+            .rotated(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
         ],
         // Three thin, slightly splayed cones as grass blades.
         PropKind::GrassTuft => vec![
-            PartSpec::new(P::Cone, M::GrassGreen, Vec3::new(0.0, 0.45, 0.0), Vec3::new(0.25, 0.9, 0.25)),
-            PartSpec::new(P::Cone, M::GrassGreen, Vec3::new(0.18, 0.38, 0.10), Vec3::new(0.20, 0.75, 0.20))
-                .rotated(Quat::from_rotation_z(-0.25)),
-            PartSpec::new(P::Cone, M::GrassGreen, Vec3::new(-0.15, 0.38, 0.12), Vec3::new(0.20, 0.7, 0.20))
-                .rotated(Quat::from_rotation_x(0.22)),
+            PartSpec::new(
+                P::Cone,
+                M::GrassGreen,
+                Vec3::new(0.0, 0.45, 0.0),
+                Vec3::new(0.25, 0.9, 0.25),
+            ),
+            PartSpec::new(
+                P::Cone,
+                M::GrassGreen,
+                Vec3::new(0.18, 0.38, 0.10),
+                Vec3::new(0.20, 0.75, 0.20),
+            )
+            .rotated(Quat::from_rotation_z(-0.25)),
+            PartSpec::new(
+                P::Cone,
+                M::GrassGreen,
+                Vec3::new(-0.15, 0.38, 0.12),
+                Vec3::new(0.20, 0.7, 0.20),
+            )
+            .rotated(Quat::from_rotation_x(0.22)),
         ],
         // Stem plus a round white head.
         PropKind::FlowerDaisy => vec![
-            PartSpec::new(P::Cylinder, M::StemGreen, Vec3::new(0.0, 0.35, 0.0), Vec3::new(0.08, 0.7, 0.08)),
-            PartSpec::new(P::Sphere, M::FlowerWhite, Vec3::new(0.0, 0.78, 0.0), Vec3::splat(0.36)),
+            PartSpec::new(
+                P::Cylinder,
+                M::StemGreen,
+                Vec3::new(0.0, 0.35, 0.0),
+                Vec3::new(0.08, 0.7, 0.08),
+            ),
+            PartSpec::new(
+                P::Sphere,
+                M::FlowerWhite,
+                Vec3::new(0.0, 0.78, 0.0),
+                Vec3::splat(0.36),
+            ),
         ],
         // Stem plus a larger yellow head.
         PropKind::FlowerSun => vec![
-            PartSpec::new(P::Cylinder, M::StemGreen, Vec3::new(0.0, 0.4, 0.0), Vec3::new(0.08, 0.8, 0.08)),
-            PartSpec::new(P::Sphere, M::FlowerYellow, Vec3::new(0.0, 0.88, 0.0), Vec3::splat(0.42)),
+            PartSpec::new(
+                P::Cylinder,
+                M::StemGreen,
+                Vec3::new(0.0, 0.4, 0.0),
+                Vec3::new(0.08, 0.8, 0.08),
+            ),
+            PartSpec::new(
+                P::Sphere,
+                M::FlowerYellow,
+                Vec3::new(0.0, 0.88, 0.0),
+                Vec3::splat(0.42),
+            ),
         ],
         // Stem plus a red cone bud.
         PropKind::FlowerTulip => vec![
-            PartSpec::new(P::Cylinder, M::StemGreen, Vec3::new(0.0, 0.35, 0.0), Vec3::new(0.08, 0.7, 0.08)),
-            PartSpec::new(P::Cone, M::FlowerRed, Vec3::new(0.0, 0.85, 0.0), Vec3::new(0.30, 0.35, 0.30)),
+            PartSpec::new(
+                P::Cylinder,
+                M::StemGreen,
+                Vec3::new(0.0, 0.35, 0.0),
+                Vec3::new(0.08, 0.7, 0.08),
+            ),
+            PartSpec::new(
+                P::Cone,
+                M::FlowerRed,
+                Vec3::new(0.0, 0.85, 0.0),
+                Vec3::new(0.30, 0.35, 0.30),
+            ),
         ],
         // Stem plus a drooping violet bell (elongated sphere).
         PropKind::FlowerBell => vec![
-            PartSpec::new(P::Cylinder, M::StemGreen, Vec3::new(0.0, 0.32, 0.0), Vec3::new(0.08, 0.64, 0.08)),
-            PartSpec::new(P::Sphere, M::FlowerViolet, Vec3::new(0.0, 0.72, 0.0), Vec3::new(0.30, 0.40, 0.30)),
+            PartSpec::new(
+                P::Cylinder,
+                M::StemGreen,
+                Vec3::new(0.0, 0.32, 0.0),
+                Vec3::new(0.08, 0.64, 0.08),
+            ),
+            PartSpec::new(
+                P::Sphere,
+                M::FlowerViolet,
+                Vec3::new(0.0, 0.72, 0.0),
+                Vec3::new(0.30, 0.40, 0.30),
+            ),
         ],
         // Single tilted cuboid, partially sunk into the ground.
         PropKind::RockSmall => vec![
-            PartSpec::new(P::Cuboid, M::RockGray, Vec3::new(0.0, 0.25, 0.0), Vec3::new(0.9, 0.6, 0.7))
-                .rotated(Quat::from_rotation_z(0.2)),
+            PartSpec::new(
+                P::Cuboid,
+                M::RockGray,
+                Vec3::new(0.0, 0.25, 0.0),
+                Vec3::new(0.9, 0.6, 0.7),
+            )
+            .rotated(Quat::from_rotation_z(0.2)),
         ],
         // Two overlapping cuboids forming a larger boulder.
         PropKind::RockBoulder => vec![
-            PartSpec::new(P::Cuboid, M::RockGray, Vec3::new(0.0, 0.45, 0.0), Vec3::new(1.6, 1.1, 1.3))
-                .rotated(Quat::from_rotation_x(0.12)),
-            PartSpec::new(P::Cuboid, M::RockGray, Vec3::new(0.7, 0.35, 0.4), Vec3::new(1.0, 0.8, 0.9))
-                .rotated(Quat::from_rotation_y(0.6)),
+            PartSpec::new(
+                P::Cuboid,
+                M::RockGray,
+                Vec3::new(0.0, 0.45, 0.0),
+                Vec3::new(1.6, 1.1, 1.3),
+            )
+            .rotated(Quat::from_rotation_x(0.12)),
+            PartSpec::new(
+                P::Cuboid,
+                M::RockGray,
+                Vec3::new(0.7, 0.35, 0.4),
+                Vec3::new(1.0, 0.8, 0.9),
+            )
+            .rotated(Quat::from_rotation_y(0.6)),
         ],
     }
 }
@@ -230,9 +363,15 @@ fn prop_parts(kind: PropKind) -> Vec<PartSpec> {
 /// every prop part as a child entity reusing the shared handles.
 fn spawn_decor(
     mut commands: Commands,
+    visual_mode: Res<PlayerVisualMode>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    // `World2dPlugin` owns the sprite-mode prop layer.  Do not instantiate
+    // hidden Mesh3d decoration in a genuine 2D session.
+    if *visual_mode == PlayerVisualMode::Sprite2d {
+        return;
+    }
     let assets = DecorAssets::build(&mut meshes, &mut materials);
     let placements = layout::generate_layout(layout::DECOR_SEED);
 
@@ -241,7 +380,11 @@ fn spawn_decor(
         .spawn((
             DecorRoot,
             Transform::default(),
-            Visibility::Visible,
+            if *visual_mode == PlayerVisualMode::Sprite2d {
+                Visibility::Hidden
+            } else {
+                Visibility::Visible
+            },
             Name::new("DecorRoot"),
         ))
         .with_children(|root| {
@@ -281,13 +424,30 @@ fn spawn_decor(
     );
 }
 
+fn sync_decor_visual_mode(
+    mode: Res<PlayerVisualMode>,
+    mut roots: Query<&mut Visibility, With<DecorRoot>>,
+) {
+    if !mode.is_changed() {
+        return;
+    }
+    for mut visibility in &mut roots {
+        *visibility = if *mode == PlayerVisualMode::Sprite2d {
+            Visibility::Hidden
+        } else {
+            Visibility::Visible
+        };
+    }
+}
+
 /// Client-local debug toggle (F4): flips `Visibility` on the `DecorRoot`, so
 /// the whole decoration layer hides/shows at once. No network message.
 fn toggle_decor_visibility(
     keyboard: Res<ButtonInput<KeyCode>>,
+    mode: Option<Res<PlayerVisualMode>>,
     mut roots: Query<&mut Visibility, With<DecorRoot>>,
 ) {
-    if !keyboard.just_pressed(KeyCode::F4) {
+    if mode.as_deref() == Some(&PlayerVisualMode::Sprite2d) || !keyboard.just_pressed(KeyCode::F4) {
         return;
     }
     for mut visibility in &mut roots {
@@ -695,9 +855,9 @@ mod tests {
     use bevy::prelude::*;
 
     use super::layout::{
-        ALL_PROP_KINDS, BASE_PAD_CLEAR, CAMP_CLEAR, DECOR_SEED, ExclusionZones,
-        JUNGLE_BLOCK_CLEAR, LANE_CLEAR, MAX_DECOR_ENTITIES, PropKind, RIVER_CLEAR, TOWER_CLEAR,
-        chebyshev, generate_layout, point_segment_distance, polyline_distance,
+        ALL_PROP_KINDS, BASE_PAD_CLEAR, CAMP_CLEAR, DECOR_SEED, ExclusionZones, JUNGLE_BLOCK_CLEAR,
+        LANE_CLEAR, MAX_DECOR_ENTITIES, PropKind, RIVER_CLEAR, TOWER_CLEAR, chebyshev,
+        generate_layout, point_segment_distance, polyline_distance,
     };
     use super::{DecorRoot, prop_parts, toggle_decor_visibility};
 
@@ -723,7 +883,10 @@ mod tests {
         for placement in generate_layout(DECOR_SEED) {
             let p = placement.position;
             assert!(
-                p.x >= zones.min.x && p.x <= zones.max.x && p.y >= zones.min.y && p.y <= zones.max.y,
+                p.x >= zones.min.x
+                    && p.x <= zones.max.x
+                    && p.y >= zones.min.y
+                    && p.y <= zones.max.y,
                 "{p:?} outside arena bounds"
             );
             for lane in &zones.lanes {
@@ -820,9 +983,7 @@ mod tests {
             Visibility::Hidden
         );
 
-        let mut input = app
-            .world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>();
+        let mut input = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
         input.release(KeyCode::F4);
         input.clear();
         input.press(KeyCode::F4);

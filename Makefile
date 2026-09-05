@@ -1,4 +1,4 @@
-.PHONY: server server-dev game start start-release play-bots bots stop restart verify-task-12 verify-gameplay
+.PHONY: server server-dev game game2d start start-release play-bots bots stop restart verify-task-12 verify-gameplay
 
 # ---------------------------------------------------------------------------
 # Match modes (TASK-22)
@@ -15,6 +15,8 @@
 # OMOBA_AUTOJOIN=<class>:<avatar|->:<team> (client joins without UI).
 # ---------------------------------------------------------------------------
 
+GAME_SERVER_ADDR ?= 127.0.0.1:4000
+
 # Run the game server in RELEASE match mode (matches form to 5v5 before starting).
 server:
 	cargo run -p server
@@ -25,7 +27,13 @@ server-dev:
 
 # Run a single game client (env: GAME_SERVER_ADDR, default 127.0.0.1:4000)
 game:
-	cargo run -p client
+	GAME_SERVER_ADDR=$(GAME_SERVER_ADDR) cargo run -p client
+
+# Run one client in the genuine orthographic XY renderer.  The inline mode
+# assignment intentionally overrides any conflicting caller environment.
+# GAME_SERVER_ADDR is inherited exactly like `make game`.
+game2d:
+	GAME_SERVER_ADDR=$(GAME_SERVER_ADDR) OMOBA_PLAYER_VISUAL_MODE=sprite2d cargo run -p client
 
 # DEV quick-start: dev-mode server and two clients for single-machine testing.
 # Instant match start, no matchmaking gate. Server and first client run in the
@@ -53,8 +61,9 @@ play-bots:
 	cargo run -p harness --bin bots -- --count 9 &
 	cargo run -p client
 
-# Fill bots for a running server: joins BOTS dummy players (default 9) that
-# ping and wander so one developer can form a full 5v5 match.
+# Fill bots for a running server: joins BOTS players (default 9) that queue,
+# then push their lanes and fight (simple lane AI) so one developer can form
+# and actually play a full 5v5 match.
 # Usage: make bots [BOTS=4] [BOTS_SERVER=127.0.0.1:4000]
 BOTS ?= 9
 BOTS_SERVER ?= 127.0.0.1:4000

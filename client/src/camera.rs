@@ -5,18 +5,29 @@ use bevy::{
 };
 use std::f32::consts::PI;
 
+use crate::maps::MapLayout;
 use crate::minimap::MinimapNavigationState;
 use crate::player::{PLAYER_SIZE, Player};
+use crate::sprite::PlayerVisualMode;
+use crate::world2d::simulation_xz_to_render_xy;
 
 pub const CAMERA_DISTANCE: f32 = 15.0;
 pub const CAMERA_HEIGHT: f32 = 12.0;
-const CAMERA_MIN_ZOOM: f32 = 0.4;
-const CAMERA_MAX_ZOOM: f32 = 2.5;
+pub const CAMERA_MIN_ZOOM: f32 = 0.55;
+pub const CAMERA_MAX_ZOOM: f32 = 2.25;
 const CAMERA_ZOOM_SPEED: f32 = 0.1;
+/// World-units-per-logical-pixel baseline for the genuine 2D camera.
+///
+/// At `0.16` the 217-unit arena nearly fit across a 1280px viewport and
+/// gameplay actors collapsed to 2–8 occupied pixels. `0.08` gives the default
+/// view a lane-scale composition while the existing maximum zoom-out still
+/// reaches the whole arena.
+pub const CAMERA2D_BASE_SCALE: f32 = 0.08;
 const CAMERA_ISO_X: f32 = -1.0;
 const CAMERA_ISO_Z: f32 = -1.0;
 const CAMERA_FREE_FLY_SPEED: f32 = 18.0;
 const CAMERA_FREE_FLY_SPRINT_MULTIPLIER: f32 = 2.2;
+const CAMERA2D_FREE_PAN_SPEED: f32 = 85.0;
 
 pub struct CameraPlugin;
 
@@ -24,7 +35,7 @@ impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CameraState>().add_systems(
             Update,
-            (update_cursor_grab, toggle_camera_lock, update_camera),
+            (update_cursor_grab, toggle_camera_lock, update_camera).chain(),
         );
     }
 }
@@ -64,37 +75,68 @@ fn toggle_camera_lock(
     mouse_button_input: Res<ButtonInput<MouseButton>>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut cam_state: ResMut<CameraState>,
+    mode: Res<PlayerVisualMode>,
+    mut minimap_nav: Option<ResMut<MinimapNavigationState>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
 ) {
     if window_query.single().is_ok() {
-        let mut toggled = false;
-        if mouse_button_input.just_pressed(MouseButton::Right) {
-            toggled = true;
-        }
-        if keyboard_input.just_pressed(KeyCode::AltLeft)
-            || keyboard_input.just_pressed(KeyCode::AltRight)
-        {
-            toggled = true;
-        }
+        let y_pressed = keyboard_input.just_pressed(KeyCode::KeyY);
+        let legacy_3d_toggle = legacy_camera_toggle_requested(
+            *mode,
+            mouse_button_input.just_pressed(MouseButton::Right),
+            keyboard_input.just_pressed(KeyCode::AltLeft)
+                || keyboard_input.just_pressed(KeyCode::AltRight),
+        );
 
-        if toggled {
+        if y_pressed {
+            // A minimap click temporarily replaces the hero as the follow
+            // target. Treat Y as "return to hero" in that state instead of
+            // making the user press it twice to unlock and relock.
+            let had_focus_override = minimap_nav
+                .as_deref()
+                .is_some_and(|nav| nav.focus_target.is_some());
+            cam_state.locked = y_follow_state(cam_state.locked, had_focus_override);
+            if cam_state.locked {
+                if let Some(nav) = minimap_nav.as_deref_mut() {
+                    nav.focus_target = None;
+                }
+            }
+            info!("Camera follow: {}", cam_state.locked);
+        } else if legacy_3d_toggle {
             cam_state.locked = !cam_state.locked;
-            info!("Camera Locked: {}", cam_state.locked);
+            info!("Camera follow: {}", cam_state.locked);
         }
     } else {
         warn!("No primary window found.");
     }
 }
 
+fn legacy_camera_toggle_requested(
+    mode: PlayerVisualMode,
+    right_pressed: bool,
+    alt_pressed: bool,
+) -> bool {
+    mode == PlayerVisualMode::Models3d && (right_pressed || alt_pressed)
+}
+
+const fn y_follow_state(currently_locked: bool, has_focus_override: bool) -> bool {
+    has_focus_override || !currently_locked
+}
+
+fn should_capture_cursor(mode: PlayerVisualMode, right_held: bool) -> bool {
+    mode == PlayerVisualMode::Models3d && right_held
+}
+
 fn update_cursor_grab(
     mouse_button_input: Res<ButtonInput<MouseButton>>,
+    mode: Res<PlayerVisualMode>,
     mut cursor_query: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     let Ok(mut cursor_options) = cursor_query.single_mut() else {
         return;
     };
 
-    let should_grab = mouse_button_input.pressed(MouseButton::Right);
+    let should_grab = should_capture_cursor(*mode, mouse_button_input.pressed(MouseButton::Right));
     let target_grab_mode = if should_grab {
         CursorGrabMode::Locked
     } else {
@@ -112,15 +154,20 @@ fn update_cursor_grab(
 
 fn update_camera(
     time: Res<Time>,
-    mut camera_query: Query<&mut Transform, (With<MainCamera>, Without<Player>)>,
+    mut camera_query: Query<
+        (&Camera, &mut Projection, &mut Transform),
+        (With<MainCamera>, Without<Player>),
+    >,
     player_query: Query<&Transform, (With<Player>, Without<MainCamera>)>,
     mut cam_state: ResMut<CameraState>,
+    mode: Res<PlayerVisualMode>,
+    map_layout: Res<MapLayout>,
     mut minimap_nav: Option<ResMut<MinimapNavigationState>>,
     mut mouse_motion_events: MessageReader<MouseMotion>,
     mut mouse_wheel_events: MessageReader<MouseWheel>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
 ) {
-    let Ok(mut camera_transform) = camera_query.single_mut() else {
+    let Ok((camera, mut projection, mut camera_transform)) = camera_query.single_mut() else {
         return;
     };
 
@@ -128,6 +175,22 @@ fn update_camera(
     let mut delta_xy = Vec2::ZERO;
     for event in mouse_motion_events.read() {
         delta_xy += event.delta;
+    }
+
+    if *mode == PlayerVisualMode::Sprite2d {
+        update_camera_2d(
+            &time,
+            camera,
+            &mut projection,
+            &mut camera_transform,
+            &player_query,
+            &mut cam_state,
+            &map_layout,
+            minimap_nav.as_deref_mut(),
+            &mut mouse_wheel_events,
+            &keyboard_input,
+        );
+        return;
     }
 
     if cam_state.locked {
@@ -217,5 +280,175 @@ fn update_camera(
         };
         camera_transform.translation +=
             move_direction.normalize_or_zero() * move_speed * time.delta_secs();
+    }
+}
+
+fn clamp_2d_camera_center(
+    desired: Vec2,
+    map_layout: &MapLayout,
+    viewport_size: Vec2,
+    projection_scale: f32,
+) -> Vec2 {
+    let half = viewport_size * projection_scale * 0.5;
+    let min = map_layout.min + half;
+    let max = map_layout.max - half;
+    Vec2::new(
+        if min.x <= max.x {
+            desired.x.clamp(min.x, max.x)
+        } else {
+            (map_layout.min.x + map_layout.max.x) * 0.5
+        },
+        if min.y <= max.y {
+            desired.y.clamp(min.y, max.y)
+        } else {
+            (map_layout.min.y + map_layout.max.y) * 0.5
+        },
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn update_camera_2d(
+    time: &Time,
+    camera: &Camera,
+    projection: &mut Projection,
+    camera_transform: &mut Transform,
+    player_query: &Query<&Transform, (With<Player>, Without<MainCamera>)>,
+    cam_state: &mut CameraState,
+    map_layout: &MapLayout,
+    mut minimap_nav: Option<&mut MinimapNavigationState>,
+    mouse_wheel_events: &mut MessageReader<MouseWheel>,
+    keyboard_input: &ButtonInput<KeyCode>,
+) {
+    let Projection::Orthographic(orthographic) = projection else {
+        return;
+    };
+
+    let mut scroll_delta = 0.0;
+    for event in mouse_wheel_events.read() {
+        let scale = match event.unit {
+            MouseScrollUnit::Line => 1.0,
+            MouseScrollUnit::Pixel => 0.02,
+        };
+        scroll_delta += event.y * scale;
+    }
+    if scroll_delta.abs() > 0.001 {
+        cam_state.zoom = (cam_state.zoom - scroll_delta * CAMERA_ZOOM_SPEED)
+            .clamp(CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM);
+    }
+    orthographic.scale = CAMERA2D_BASE_SCALE * cam_state.zoom;
+
+    if keyboard_input.just_pressed(KeyCode::Space) {
+        cam_state.locked = true;
+        if let Some(nav) = minimap_nav.as_deref_mut() {
+            nav.focus_target = None;
+        }
+    }
+
+    let mut desired = camera_transform.translation.xy();
+    if cam_state.locked {
+        let focus = minimap_nav
+            .as_deref()
+            .and_then(|nav| nav.focus_target)
+            .or_else(|| {
+                player_query
+                    .single()
+                    .ok()
+                    .map(|transform| transform.translation)
+            });
+        if let Some(simulation_focus) = focus {
+            let target = simulation_xz_to_render_xy(simulation_focus);
+            let factor = (time.delta_secs() * 8.0).min(1.0);
+            desired = desired.lerp(target, factor);
+        }
+    } else {
+        let mut direction = Vec2::ZERO;
+        if keyboard_input.pressed(KeyCode::ArrowUp) {
+            direction.y += 1.0;
+        }
+        if keyboard_input.pressed(KeyCode::ArrowDown) {
+            direction.y -= 1.0;
+        }
+        if keyboard_input.pressed(KeyCode::ArrowLeft) {
+            direction.x -= 1.0;
+        }
+        if keyboard_input.pressed(KeyCode::ArrowRight) {
+            direction.x += 1.0;
+        }
+        desired += direction.normalize_or_zero()
+            * CAMERA2D_FREE_PAN_SPEED
+            * cam_state.zoom
+            * time.delta_secs();
+    }
+
+    let viewport = camera
+        .logical_viewport_size()
+        .unwrap_or(Vec2::new(1280.0, 720.0));
+    let clamped = clamp_2d_camera_center(desired, map_layout, viewport, orthographic.scale);
+    camera_transform.translation.x = clamped.x;
+    camera_transform.translation.y = clamped.y;
+    camera_transform.rotation = Quat::IDENTITY;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zoom_limits_are_ordered_and_usable() {
+        const {
+            assert!(CAMERA_MIN_ZOOM > 0.0);
+            assert!(CAMERA_MAX_ZOOM > CAMERA_MIN_ZOOM);
+            assert!(CAMERA2D_BASE_SCALE * CAMERA_MAX_ZOOM < 1.0);
+            assert!(CAMERA2D_BASE_SCALE * CAMERA_MAX_ZOOM <= 0.18);
+        }
+    }
+
+    #[test]
+    fn clamp_accounts_for_zoom_and_aspect_ratio() {
+        let layout = MapLayout::default();
+        let viewport = Vec2::new(1600.0, 900.0);
+        let scale = CAMERA2D_BASE_SCALE * CAMERA_MIN_ZOOM;
+        let clamped = clamp_2d_camera_center(Vec2::splat(10_000.0), &layout, viewport, scale);
+        let half = viewport * scale * 0.5;
+        assert!(clamped.x <= layout.max.x - half.x + 0.001);
+        assert!(clamped.y <= layout.max.y - half.y + 0.001);
+
+        let zoomed_out = clamp_2d_camera_center(
+            Vec2::splat(-10_000.0),
+            &layout,
+            Vec2::new(900.0, 1600.0),
+            CAMERA2D_BASE_SCALE * CAMERA_MAX_ZOOM,
+        );
+        assert!(zoomed_out.x >= layout.min.x - 0.001);
+        assert!(zoomed_out.y >= layout.min.y - 0.001);
+    }
+
+    #[test]
+    fn y_toggles_follow_and_recenters_a_minimap_override() {
+        assert!(y_follow_state(false, false));
+        assert!(!y_follow_state(true, false));
+        assert!(y_follow_state(true, true));
+        assert!(y_follow_state(false, true));
+    }
+
+    #[test]
+    fn sprite_mode_does_not_repurpose_right_click_or_alt() {
+        assert!(!legacy_camera_toggle_requested(
+            PlayerVisualMode::Sprite2d,
+            true,
+            false
+        ));
+        assert!(!legacy_camera_toggle_requested(
+            PlayerVisualMode::Sprite2d,
+            false,
+            true
+        ));
+        assert!(!should_capture_cursor(PlayerVisualMode::Sprite2d, true));
+        assert!(legacy_camera_toggle_requested(
+            PlayerVisualMode::Models3d,
+            true,
+            false
+        ));
+        assert!(should_capture_cursor(PlayerVisualMode::Models3d, true));
     }
 }

@@ -1,8 +1,100 @@
 # Feature Inventory
 
-Canonical version: `0.10.0`
+Canonical version: `0.17.0`
 
 ## Current Playable Surface
+
+- **Pointer-first desktop/mobile combat (TASK-POINTER-COMBAT-MOBILE-01):** a
+  primary click or touch tap resolves living hostile actors by their projected
+  screen position with 48–68 logical-pixel hit radii, selects the exact
+  authoritative `TargetId`, shows the existing marker, and requests Q. Empty
+  ground moves on both input types; target, minimap, and UI presses are
+  consumed before movement. Keyboard and 64-pixel hotbar buttons share one
+  pending-cast path. An out-of-range unit cast follows the moving target until
+  it enters the shared scaled range, emits once, and only then starts the local
+  cooldown. Manual movement or invalidation cancels the pending request.
+- **Stable 2D controls and proportional nameplates
+  (TASK-2D-CONTROLS-FOLLOW-01):** click-to-move remains active independently
+  of camera follow, `Y` toggles follow and clears a minimap focus when returning
+  to the hero, and 2D right-click/Alt no longer capture the cursor or silently
+  disable movement input. Hero labels are bounded by hero height and estimated
+  text width, including the long Orchard Comet Centaur display name. Legacy 3D
+  camera controls remain available.
+- **2D production-readiness pass (TASK-2D-PRODUCTION-READINESS-01):** the
+  orthographic camera now starts twice as close, and actor sizes are validated
+  from occupied alpha pixels rather than transparent atlas cells. The six lane
+  towers are one-to-one with authoritative owners and carry Green-square or
+  Blue-diamond badges plus TOP/MID/BOT labels. The initial 18-minion wave uses
+  larger state-aware sprites and the same non-color team language; owner
+  removal recursively cleans its bounded visual cues. A headless ECS fixture
+  proves exactly 24 primary proxies for six towers plus 18 minions, then 23
+  after one minion disappears, with no duplicates on replay.
+- **Complete UDP datagrams above 8 KiB:** client/harness receive storage is
+  65,536 bytes and the server validates the whole serialized snapshot against
+  the 65,507-byte IPv4 UDP payload ceiling before sending. Boundary tests cover
+  8,191/8,192/8,193 bytes, malformed traffic, near-limit decode, and whole
+  over-limit rejection. A real release 5v5 server test receives a complete,
+  runtime-dependent snapshot satisfying `8192 < bytes <= 65507`, with 10
+  players, 8 structures, and 18 minions. The measured macOS kernel send ceiling
+  remains 9,216 bytes; larger future snapshots need a separately scoped
+  payload-reduction/framing design.
+
+- **Genuine full-2D world (TASK-FULL-2D-WORLD):** `sprite2d` is now a true
+  orthographic XY renderer rather than a billboard layer over the 3D arena.
+  A centralized tested projection maps authoritative simulation XZ to render
+  XY (`x → x`, `z → y`) and back for cursor picking. One `Camera2d` supports
+  hero follow, bounded arrow-key free pan, clamped wheel zoom, resize-safe map
+  edges, and minimap focus/recenter. `models3d` remains selectable and starts
+  independently with its existing perspective scene.
+- The deterministic 55×55 tiled map reproduces the authoritative three lanes,
+  two bases, six towers, two base objectives, diagonal traversable river,
+  three camps, and two boss pits. Original CC0 Higgsfield/Recraft terrain and
+  prop atlases are declared in `client/assets/world2d/manifest.json`; forest
+  and water visuals do not invent client-only collision. Static tiles plus
+  props remain below 4,096 entities, transient VFX are capped at 256 and
+  normally expire within two seconds, and cached atlas handles avoid per-frame
+  asset creation. Validate with
+  `python3 scripts/validate_world2d_assets.py --self-test`.
+- Heroes, structures, team minions, normal neutrals, Wendigo, King Mutatio,
+  projectiles, selection markers, health/mana bars, names, and combat effects
+  all use Bevy 2D render components in this mode with deterministic foot-Y
+  sorting and explicit layer bands. Gameplay, combat, AI, collision,
+  matchmaking, buffs, victory, and reconnect remain server-authoritative.
+
+- **Release-like 2D combat presentation (TASK-2D-RELEASE-VERTICAL-SLICE):**
+  the five sprite heroes now cover idle, run, attack, cast, hit, and death.
+  Accepted Q/W/E/R casts carry an authoritative monotonic cosmetic action
+  sequence through snapshots, so local and remote clients play each one-shot
+  once; HP loss interrupts with hit, death holds its last frame, and respawn
+  resumes locomotion. Sprite manifest schema v2 keeps separate 8×2 locomotion
+  and 8×4 action sheets with sheet/playback metadata. The same client-local
+  mode now supplies art-directed billboards for towers, bases, team minions,
+  normal neutrals, Wendigo, King Mutatio, and projectiles, plus bounded
+  cast/hit/heal/death effects and a painted arena treatment. All visuals stay
+  attached to the existing authoritative roots and do not change combat,
+  collision, interpolation, AI, or map topology. The default 3D path remains
+  intact. Asset contracts live in `client/assets/sprites/manifest.json` and
+  `client/assets/presentation2d/manifest.json`; validate both with
+  `python3 scripts/validate_sprite_assets.py --self-test`.
+
+- **Selectable 2D sprite player visuals (TASK-2D-SPRITE-PROTOTYPE):** the
+  pre-join screen selects either **3D Models** (the default and safe fallback)
+  or **2D Sprites**. The sprite roster contains Mossback Teapot, Neon Axolotl
+  Courier, Origami Storm Heron, Clockwork Turnip Oracle, and Void Jelly
+  Astronaut; its five 2048×512 RGBA sheets follow an 8-column × 2-row contract
+  (eight 6 fps idle frames, eight 12 fps run frames) declared once in
+  `client/assets/sprites/manifest.json`. Sprite mode renders transparent,
+  unlit camera-facing quads as children of the unchanged gameplay roots and
+  chooses idle/run from local or interpolated remote movement with a 0.25 s
+  idle grace. Renderer mode is client-local, while the optional validated
+  sprite character id is replicated and retained through reconnect. Set
+  `OMOBA_PLAYER_VISUAL_MODE=models3d|sprite2d` to choose the initial mode;
+  unset or invalid values use `models3d`. Validate the offline asset contract
+  with `python3 scripts/validate_sprite_assets.py --self-test`.
+  The manifest and selection portrait strip now contain ten named slots. Four
+  added heroes have complete runtime sheets; Orchard Comet Centaur still lacks
+  its six generated runtime animation clips/sheets, so that selection remains
+  an explicit release blocker rather than silently substituting another hero.
 
 - **Matchmaking and gated match start (TASK-22):** in release mode (server
   default) players who join land in a queue; the match forms to a full 5v5
@@ -12,8 +104,22 @@ Canonical version: `0.10.0`
   match..." → "Waiting for players — X/10" → "Match found! Starting in N...".
   `OMOBA_MATCH_MODE=dev` keeps the instant-start dev flow (`make start`,
   `make server-dev`); `OMOBA_TEAM_SIZE` scales the roster (1–16 per team)
-  for playtests. `make play-bots` / `make bots` fill the queue with dummy
-  UDP bots so one developer can walk the whole flow (see RUNBOOK.md).
+  for playtests. `make play-bots` / `make bots` fill the queue with UDP
+  bots so one developer can walk the whole flow (see RUNBOOK.md).
+- **Slime lane minions + visible camps (TASK-24):** lane minions are
+  team-colored CC0 "Mimic Slime" models (green Classic / blue Water,
+  Halloween Rising) with walk/attack animations driven by the replicated
+  AI state, normalized to 0.6× hero height through the shared model-scale
+  pipeline (`client/assets/minions/`, overrides keys
+  `slime-green`/`slime-blue`). Decorative jungle boxes no longer spawn on
+  neutral-camp or boss-pit anchors, so camps and raid bosses stand in open
+  clearings instead of being hidden inside geometry.
+- **Bot lane-push AI (TASK-23):** fill bots play once the match runs — each
+  takes a lane, pushes its waypoints toward the enemy base, fights enemy
+  players/minions with its class Q (server-authoritative ranges/cooldowns),
+  sieges towers in reach, and rejoins the lane after a respawn
+  (`harness/src/bot_ai.rs`). Simple nearest-target logic, no retreat or
+  skill combos — built for playtesting matchmaking and basic playability.
 - **Character scale normalization (TASK-20/21):** every character and boss GLB
   (legacy SDK models, roster avatars, raid bosses — authored anywhere from
   0.64 m to 2.41 m tall) is measured once in bind pose directly from the
@@ -64,8 +170,9 @@ Canonical version: `0.10.0`
   replicates to all clients, models load lazily, and every roster avatar
   plays idle when stationary and walk while moving (idle-grace hysteresis
   smooths snapshot interpolation). Unknown avatar slugs and class ids fall
-  back safely (default model / Warrior). `OMOBA_AUTOJOIN=<class>:<slug>:<team>`
-  joins without UI for automation.
+  back safely (default model / Warrior).
+  `OMOBA_AUTOJOIN=<class>:<slug>:<team>[:<sprite-id>]` joins without UI for
+  automation.
 - **Raid bosses with team buffs (TASK-19):** two epic neutral objectives built
   on the jungle-neutral system — **Wendigo** (bottom river/jungle pit, spawns
   at 60 s match time, 900 HP) and **King Mutatio** (top jungle pit, spawns at
@@ -113,7 +220,7 @@ Canonical version: `0.10.0`
 - Account-backed identity, cryptographic session authentication, and long-lived reconnect across server restarts.
 - Publishable SDK packaging: registry metadata, versioning policy, examples, entitlement/auth hooks, and non-blocking asset delivery are still future work.
 - Full reconnect slot reclaim across disconnects and NAT changes.
-- Ability VFX/animation sync for attack/cast/death clips (embedded in every roster avatar, not yet gameplay-triggered), richer tooltip UX, and balance passes over the class kits.
+- Directional sprite movement, richer tooltip UX, and balance passes over the class kits.
 
 ## Release gate and balance (TASK-12)
 

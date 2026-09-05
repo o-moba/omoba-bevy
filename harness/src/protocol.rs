@@ -67,6 +67,17 @@ pub enum HeroClass {
     Cleric,
 }
 
+/// Cosmetic action kind mirrored from `shared::PlayerActionKind`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlayerActionKind {
+    Attack,
+    Cast,
+    #[default]
+    #[serde(other)]
+    None,
+}
+
 /// A cast target reference. Mirrors `server::TargetId`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TargetId {
@@ -94,19 +105,35 @@ impl TargetId {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientPacket {
-    Transform { x: f32, y: f32, z: f32, yaw: f32 },
-    Cast { target: TargetId, slot: u8 },
+    Transform {
+        x: f32,
+        y: f32,
+        z: f32,
+        yaw: f32,
+    },
+    Cast {
+        target: TargetId,
+        slot: u8,
+    },
     Join {
         team: Team,
         character: Character,
         hero_class: HeroClass,
         avatar: Option<String>,
+        #[serde(default)]
+        sprite_character: Option<String>,
         session_id: Option<String>,
     },
     Ping,
-    SetGodMode { enabled: bool },
-    SetSpeedBoost { enabled: bool },
-    UpgradeSkill { slot: u8 },
+    SetGodMode {
+        enabled: bool,
+    },
+    SetSpeedBoost {
+        enabled: bool,
+    },
+    UpgradeSkill {
+        slot: u8,
+    },
 }
 
 /// A single player's networked state. Minimal mirror of `server::PlayerState`.
@@ -149,6 +176,16 @@ pub struct PlayerState {
     /// legacy character model.
     #[serde(default)]
     pub avatar: Option<String>,
+    /// Replicated 2D sprite character id.
+    #[serde(default)]
+    pub sprite_character: Option<String>,
+    /// Advances exactly once for each accepted authoritative cast.
+    #[serde(default)]
+    pub action_sequence: u64,
+    #[serde(default)]
+    pub action_kind: PlayerActionKind,
+    #[serde(default)]
+    pub action_slot: u8,
 }
 
 fn default_ranks() -> [u8; 4] {
@@ -209,6 +246,36 @@ pub struct TeamBuffState {
     pub remaining_secs: f32,
 }
 
+/// One replicated lane minion. Mirrors `server::MinionState` (only the
+/// fields the harness targets on; unknown fields are ignored).
+#[derive(Debug, Clone, Deserialize)]
+pub struct MinionState {
+    pub id: u64,
+    #[serde(default)]
+    pub team: Option<Team>,
+    #[serde(default)]
+    pub x: f32,
+    #[serde(default)]
+    pub z: f32,
+    #[serde(default)]
+    pub hp: f32,
+}
+
+/// One replicated structure (tower). Mirrors `server::StructureState`
+/// (targeting fields only).
+#[derive(Debug, Clone, Deserialize)]
+pub struct StructureState {
+    pub id: u64,
+    #[serde(default)]
+    pub team: Option<Team>,
+    #[serde(default)]
+    pub x: f32,
+    #[serde(default)]
+    pub z: f32,
+    #[serde(default)]
+    pub hp: f32,
+}
+
 /// Match phase. Mirrors `server::GameState` (internally tagged, snake_case).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -216,11 +283,18 @@ pub enum GameState {
     #[default]
     Lobby,
     /// Release-mode matchmaking: players joined so far vs. roster size.
-    Forming { ready: u32, needed: u32 },
+    Forming {
+        ready: u32,
+        needed: u32,
+    },
     /// Full roster found; match starts when the countdown elapses.
-    Starting { countdown_ms: u32 },
+    Starting {
+        countdown_ms: u32,
+    },
     Running,
-    Victory { winner: Team },
+    Victory {
+        winner: Team,
+    },
 }
 
 /// Inbound server -> client packets. Mirror of `server::ServerPacket`.
@@ -244,6 +318,12 @@ pub enum ServerPacket {
         /// Match phase (Lobby/Forming/Starting/Running/Victory).
         #[serde(default)]
         game_state: GameState,
+        /// Lane minions (bot AI targeting).
+        #[serde(default)]
+        minions: Vec<MinionState>,
+        /// Structures/towers (bot AI targeting).
+        #[serde(default)]
+        structures: Vec<StructureState>,
     },
 }
 
@@ -292,6 +372,20 @@ impl ServerPacket {
     pub fn game_state(&self) -> &GameState {
         match self {
             ServerPacket::Snapshot { game_state, .. } => game_state,
+        }
+    }
+
+    /// Borrows the lane minions carried by a snapshot.
+    pub fn minions(&self) -> &[MinionState] {
+        match self {
+            ServerPacket::Snapshot { minions, .. } => minions,
+        }
+    }
+
+    /// Borrows the structures carried by a snapshot.
+    pub fn structures(&self) -> &[StructureState] {
+        match self {
+            ServerPacket::Snapshot { structures, .. } => structures,
         }
     }
 }

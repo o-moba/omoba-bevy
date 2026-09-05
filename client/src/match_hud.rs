@@ -214,7 +214,10 @@ fn update_match_hud(
     >,
     mut bars_root: Query<&mut Visibility, With<HudBarsRoot>>,
     mut hp_fill: Query<(&mut Node, &mut BackgroundColor), (With<HpBarFill>, Without<ManaBarFill>)>,
-    mut mana_fill: Query<(&mut Node, &mut BackgroundColor), (With<ManaBarFill>, Without<HpBarFill>)>,
+    mut mana_fill: Query<
+        (&mut Node, &mut BackgroundColor),
+        (With<ManaBarFill>, Without<HpBarFill>),
+    >,
 ) {
     let Ok(mut prog_text) = prog.single_mut() else {
         return;
@@ -239,7 +242,13 @@ fn update_match_hud(
         .as_ref()
         .is_some_and(|g| matches!(g.state, GameState::Running));
 
-    update_stat_bars(running, *stats, &mut bars_root, &mut hp_fill, &mut mana_fill);
+    update_stat_bars(
+        running,
+        *stats,
+        &mut bars_root,
+        &mut hp_fill,
+        &mut mana_fill,
+    );
 
     // Boss team-buff indicator: only the LOCAL team's active buffs, with
     // remaining seconds; empty (invisible) when nothing is active.
@@ -313,7 +322,10 @@ fn update_stat_bars(
     stats: CombatStats,
     bars_root: &mut Query<&mut Visibility, With<HudBarsRoot>>,
     hp_fill: &mut Query<(&mut Node, &mut BackgroundColor), (With<HpBarFill>, Without<ManaBarFill>)>,
-    mana_fill: &mut Query<(&mut Node, &mut BackgroundColor), (With<ManaBarFill>, Without<HpBarFill>)>,
+    mana_fill: &mut Query<
+        (&mut Node, &mut BackgroundColor),
+        (With<ManaBarFill>, Without<HpBarFill>),
+    >,
 ) {
     if let Ok(mut v) = bars_root.single_mut() {
         *v = if running {
@@ -423,7 +435,7 @@ fn running_status_text(
             format!("Target: {kind} #{}", t.id)
         }
         None => {
-            "Target: none — Tab (nearest foe), middle-click near foe, Backspace clear".to_string()
+            "Target: none — click/tap a foe to attack, Tab selects, Backspace clears".to_string()
         }
     };
     let hp = stats.hp.max(0.0);
@@ -556,7 +568,10 @@ mod tests {
         let green = team_buff_hud_text(&buffs, Team::Green);
         assert!(green.contains("Wendigo's Favor"));
         assert!(green.contains("+15% ability damage"));
-        assert!(green.contains("72s"), "remaining time must round up: {green}");
+        assert!(
+            green.contains("72s"),
+            "remaining time must round up: {green}"
+        );
         assert!(
             !green.contains("Mutatio"),
             "enemy team's buff must not show: {green}"
