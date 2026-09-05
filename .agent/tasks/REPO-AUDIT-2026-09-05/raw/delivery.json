@@ -1,0 +1,16 @@
+{
+  "reviewed_commit": "3a74303597ac5938359afe0c748be31f6c3c1b16",
+  "remote": "origin",
+  "branch": "main",
+  "remote_sha": "3a74303597ac5938359afe0c748be31f6c3c1b16",
+  "snapshot_commit": "52aa7737387083ad29565ad1ed03418a0f01f72b",
+  "delivery_verified": true,
+  "reported_by_github_push": {
+    "open_dependency_alerts": 16,
+    "high": 6,
+    "moderate": 6,
+    "low": 4,
+    "triaged_in_this_audit": false
+  },
+  "note": "Final verifier artifacts are committed separately without production changes."
+}

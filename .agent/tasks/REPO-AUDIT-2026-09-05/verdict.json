@@ -1,0 +1,199 @@
+{
+  "schema_version": 1,
+  "task_id": "REPO-AUDIT-2026-09-05",
+  "overall_verdict": "PASS",
+  "verified_at_utc": "2026-09-05T17:28:08.934384+00:00",
+  "verifier_role": "fresh independent task-verifier",
+  "scope": "Assessment, preservation and narrow packaging/test-fixture repairs; not product release certification.",
+  "verified_commit": "3a74303597ac5938359afe0c748be31f6c3c1b16",
+  "snapshot_commit": "52aa7737387083ad29565ad1ed03418a0f01f72b",
+  "remote_ref": "origin/main",
+  "remote_sha": "3a74303597ac5938359afe0c748be31f6c3c1b16",
+  "product_readiness": "NOT_READY_FOR_UNATTENDED_EXTERNAL_PLAYTESTS",
+  "acceptance_criteria": [
+    {
+      "id": "AC1",
+      "text": "Existing tracked modifications and intended untracked source/assets are preserved in a Conventional Commit; no secrets, local configuration or generated task media are included.",
+      "status": "PASS",
+      "evidence": [
+        "Snapshot 52aa7737387083ad29565ad1ed03418a0f01f72b has Conventional Commit subject feat(game): preserve accumulated gameplay and renderer development.",
+        "Independent read-only helper compared all 42 saved tracked-diff after-blob hashes with snapshot blobs and confirmed all 56 initially untracked paths were committed and byte-matched the original checkout.",
+        "Snapshot path review and credential-pattern scan found no included local configuration, credentials or generated task media. Original 28-entry avatar manifest remains available in snapshot history."
+      ]
+    },
+    {
+      "id": "AC2",
+      "text": "Current build, format, test, lint, asset and startup checks are attempted; exact results and limitations are recorded. Failed product checks must remain visible; audit PASS does not mean release-ready.",
+      "status": "PASS",
+      "evidence": [
+        "Independently reran locked workspace build, format, diff whitespace check, Clippy, avatar/boss/minion validators, World2D self-tests/full validation, sprite self-tests/full validation, readability validation, real UDP datagram regression and six legacy session-flow scenarios; results appear in rerun_checks.",
+        "All 20 evidence.json artifact SHA-256 values were recomputed and matched. Independently parsed raw/test-workspace-final.log: 204 passed, 0 failed across 16 result groups. Historical 203-pass/1-fail run and diagnosis remain recorded separately.",
+        "Inspected native startup JSON/client/server logs: 20-second Models3d startup, autojoin, first snapshot and loaded animations, with missing Orchard sheets and SDK asset errors retained. GUI attempt failure and lack of manual layout/FPS evidence are explicitly recorded."
+      ]
+    },
+    {
+      "id": "AC3",
+      "text": "Architecture, code, gameplay, 3D presentation and UI/UX findings cite implementation evidence, identify player impact, prioritize fixes, and distinguish observations from hypotheses.",
+      "status": "PASS",
+      "evidence": [
+        "Read the complete report and independently spot-checked current source for fresh Join state reset, incomplete rematch reset, ungated release debug commands, single-send Join, unordered snapshots, free-camera/input conflict, modal input gaps, hidden cast feedback, 2D-only combat effects, siege ranges, XP arithmetic and bot decisions.",
+        "Parsed all 16 shipped avatar GLBs: each has idle/walk/attack/cast/death. Confirmed player animation graph/state uses only idle/walk.",
+        "Report cites implementation paths/lines, prioritizes player impact and smallest next tasks, separates source observations and live probe measurements from layout, enjoyment and pacing hypotheses."
+      ]
+    },
+    {
+      "id": "AC4",
+      "text": "The report defines a bounded first-playtest slice and measurable go/no-go criteria; a fresh independent verifier inspects the report and reruns representative checks.",
+      "status": "PASS",
+      "evidence": [
+        "Report bounds the first slice to a repeatable 8-12 minute 3D match, 1v1 smoke followed by two humans plus eight bots, a curated roster and mandatory victory/rematch.",
+        "Go/no-go criteria include 720p usability, four of five new testers understanding controls/objective within two minutes, dropped-Join recovery, preserved reconnect state, five full-roster sessions, 30-minute soak and explicitly proposed pacing targets.",
+        "This fresh independent verification inspected the report/current source and reran representative checks. Unattended product readiness remains NOT_READY; audit completion does not claim those future gates already pass."
+      ]
+    },
+    {
+      "id": "AC5",
+      "text": "Snapshot and report are committed and pushed to origin, with remote SHA confirmed. Any repository changes beyond preservation/docs must be narrowly justified and implemented in a dedicated worktree after this freeze.",
+      "status": "PASS",
+      "evidence": [
+        "Dedicated worktree /Users/wotori/git/ekza/omoba-bevy-playtest-audit uses branch feature/3d-playtest-readiness-audit. Snapshot 52aa773 is an ancestor of delivery commit 3a74303597ac5938359afe0c748be31f6c3c1b16.",
+        "Independent git ls-remote origin refs/heads/main returned 3a74303597ac5938359afe0c748be31f6c3c1b16, matching audited HEAD. Snapshot, report and evidence are committed in the delivered history. Worktree/index were clean before verifier output.",
+        "Compared post-snapshot diff: packaging, version/release documentation, audit/evidence and only harness/tests/udp_datagrams.rs among Rust files. No production Rust behavior changes, dependency upgrades, system-setting changes or broad refactors. Narrow .gitattributes exception preserves only captured log blank-at-EOF whitespace."
+      ]
+    },
+    {
+      "id": "AC6",
+      "text": "Clean checkout uses a lockfile with the existing git SDK revision (no dependency upgrades), includes the existing two minion GLBs and provenance manifest, and the shipped avatar manifest references only the 16 committed offline avatars. The existing minion/hero asset validators pass in this worktree; local runtime-synced files in the original checkout are preserved. Patch version and release documentation describe these fixes.",
+      "status": "PASS",
+      "evidence": [
+        "Cargo.lock restores git SDK source at existing revision 6e4123aa284cd6faecc44037b2bad25494e29f10; independent helper compared the original clean sibling SDK HEAD and package differences. Only workspace package versions change to 0.17.1, without dependency upgrades.",
+        "The two committed minion GLBs and CC0 provenance manifest byte-match original files. Avatar manifest references exactly 16 committed offline models/thumbnails. All 12 local osa avatar models and thumbnails remain in the original checkout after fast-forward.",
+        "Fresh locked workspace build and existing validators pass: 16 avatars, 2 minions, 2 bosses. Version 0.17.1 is canonical in Cargo.toml and described consistently in CHANGELOG.md, docs/features.md and the session report. Missing optional thumbnails remain validator warnings."
+      ]
+    },
+    {
+      "id": "AC7",
+      "text": "the large real-UDP snapshot regression derives its avatar from the shipped roster, proves that identity round-trips, and retains the original >8KiB /10-player /8-structure /18-minion assertions. The targeted regression must pass with the16-avatar clean checkout; no transport, system settings or gameplay behavior changes.",
+      "status": "PASS",
+      "evidence": [
+        "Current fixture derives the longest valid identity from shared::avatar_roster() and asserts that every snapshot player retains that identity.",
+        "Independent source diff confirms original >8192-byte condition, 10-player/8-structure/18-minion qualification, 65507-byte upper limit, final entity IDs and malformed-request recovery assertions remain.",
+        "Fresh cargo test -p harness --test udp_datagrams --locked -- --nocapture passed: 8197-byte real server snapshot with 10 players, 8 structures and 18 minions. No transport, system-setting or gameplay changes accompany the fixture repair."
+      ]
+    }
+  ],
+  "rerun_checks": [
+    {
+      "command": "cargo build --workspace --locked",
+      "exit_code": 0,
+      "status": "PASS",
+      "result": "Finished dev profile successfully; current server built before UDP tests."
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "exit_code": 0,
+      "status": "PASS",
+      "result": "No formatting differences."
+    },
+    {
+      "command": "git diff --check; git diff --check HEAD^ HEAD",
+      "exit_code": 0,
+      "status": "PASS",
+      "result": "No whitespace errors in worktree or delivered patch."
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --locked -- -D warnings",
+      "exit_code": 0,
+      "status": "PASS",
+      "result": "Finished successfully with warnings denied."
+    },
+    {
+      "command": "python3 scripts/validate_avatar_assets.py",
+      "exit_code": 0,
+      "status": "PASS",
+      "result": "16 avatars, 121.6 MB; optional Bao thumbnail warning."
+    },
+    {
+      "command": "python3 scripts/validate_avatar_assets.py --avatars-dir client/assets/minions --roster-min 2 --roster-max 2",
+      "exit_code": 0,
+      "status": "PASS",
+      "result": "2 minions, 15.1 MB; optional thumbnail warnings."
+    },
+    {
+      "command": "python3 scripts/validate_avatar_assets.py --avatars-dir client/assets/bosses --roster-min 2 --roster-max 2",
+      "exit_code": 0,
+      "status": "PASS",
+      "result": "2 bosses, 18.4 MB."
+    },
+    {
+      "command": "python3 scripts/validate_world2d_assets.py --self-test",
+      "exit_code": 0,
+      "status": "PASS",
+      "result": "6 negative contract tests passed."
+    },
+    {
+      "command": "python3 scripts/validate_world2d_assets.py",
+      "exit_code": 1,
+      "status": "FAIL",
+      "result": "missing task provenance/evidence: provenance.json; expected documented product failure."
+    },
+    {
+      "command": "python3 scripts/validate_sprite_assets.py --self-test",
+      "exit_code": 1,
+      "status": "FAIL",
+      "result": "All 15 negative contract tests passed; actual sheet set validation failed because orchard-comet-centaur.png is missing."
+    },
+    {
+      "command": "python3 scripts/validate_2d_readability.py --json",
+      "exit_code": 1,
+      "status": "FAIL",
+      "result": "orchard-comet-centaur: missing runtime sheet orchard-comet-centaur.png; expected documented product failure."
+    },
+    {
+      "command": "cargo test -p harness --test udp_datagrams --locked -- --nocapture",
+      "exit_code": 0,
+      "status": "PASS",
+      "result": "1 passed, 0 failed in 3.45s; 8197-byte snapshot, 10 players, 8 structures, 18 minions."
+    },
+    {
+      "command": "python3 scripts/verify_task_02_multiplayer_session_flow.py",
+      "exit_code": 0,
+      "status": "PASS",
+      "result": "All six legacy scenarios passed. Repeated Join expects last-Join-wins; this is not proof of proposed in-match idempotence."
+    },
+    {
+      "command": "git ls-remote origin refs/heads/main",
+      "exit_code": 0,
+      "status": "PASS",
+      "result": "3a74303597ac5938359afe0c748be31f6c3c1b16 refs/heads/main"
+    },
+    {
+      "command": "git merge-base --is-ancestor 52aa7737387083ad29565ad1ed03418a0f01f72b HEAD",
+      "exit_code": 0,
+      "status": "PASS",
+      "result": "Preservation snapshot is included in delivery history."
+    }
+  ],
+  "evidence_integrity": {
+    "listed_artifacts_verified": 20,
+    "hash_mismatches": 0,
+    "full_workspace_log_passed": 204,
+    "full_workspace_log_failed": 0,
+    "full_workspace_log_rerun_by": "builder; verifier independently inspected final raw log and reran representative checks"
+  },
+  "inspected_commit_file_hashes": {
+    ".agent/tasks/REPO-AUDIT-2026-09-05/spec.md": "5121b5ca4a63acc0bf7dcd5b64fc549427c54831b04e57f2fbaddee485c65314",
+    ".agent/tasks/REPO-AUDIT-2026-09-05/evidence.md": "6d775889556eeb2e4f1890fe09e6525ed207d03a99e97189ecc8c9a234f3080a",
+    ".agent/tasks/REPO-AUDIT-2026-09-05/evidence.json": "b15a0fcefe0dafd5666ecaf72842f7518e723c1797aaa974ca310754619641b3",
+    "docs/progress/2026-09-05-3d-readiness-audit.md": "3e27199f7ffc43f64eda1526d7b1a13563db6fc296af143451dba70541f81984"
+  },
+  "remaining_product_limitations": [
+    "Documented gameplay/session/network/input issues remain unfixed by design.",
+    "Three 2D validation commands fail as recorded; failures do not contradict this assessment task scope.",
+    "Native startup is startup-only evidence and has optional sprite/SDK loading errors. No manual UX, controls, screenshots, FPS, supported-OS certification or external-network readiness was verified.",
+    "204 passing existing Rust tests do not establish proposed future gameplay invariants."
+  ],
+  "verifier_changes": [
+    ".agent/tasks/REPO-AUDIT-2026-09-05/verdict.json"
+  ]
+}
