@@ -195,5 +195,12 @@
   ],
   "verifier_changes": [
     ".agent/tasks/REPO-AUDIT-2026-09-05/verdict.json"
-  ]
+  ],
+  "delivery_boundary": {
+    "verified_code_and_initial_report_commit": "3a74303597ac5938359afe0c748be31f6c3c1b16",
+    "remote_confirmation_applies_to": "3a74303597ac5938359afe0c748be31f6c3c1b16",
+    "subsequent_proof_commit": "Contains verifier/delivery artifacts and one reviewed report note only; final proof-commit remote confirmation is performed separately by the coordinator.",
+    "reviewed_report_note": "Architecture item 7 attributes dependency-alert counts to GitHub push and explicitly leaves reachability/exploitability untriaged; this adds no implementation or readiness claim.",
+    "report_with_note_sha256": "04d85ca034ce550f58c7e1ad848454c463d6a89ff1694a8af84b84340bf2dfa7"
+  }
 }
