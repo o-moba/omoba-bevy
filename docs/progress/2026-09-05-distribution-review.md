@@ -2,7 +2,7 @@
 
 Raw evidence directory: `.agent/tasks/RELEASE-3D-2026-09-05/`. All raw filenames below refer to that directory. This report is the durable repository copy of the current review.
 
-Status: **RG5 remains BLOCKED** pending resolution/exclusion of conflicting asset licenses and completion of the final candidate build review. This is a current read-only review plus one explicitly authorized dependency patch; it does not grant distribution approval. The coordinator retains the source assets and labels the produced local package **INTERNAL REVIEW ONLY** behind an explicit packaging guard. No public asset/package publishing is authorized by this review.
+Status: **RG5 remains BLOCKED** pending resolution/exclusion of conflicting asset licenses and the remaining distribution obligations. The final local build review subsequently passed at `ccbf573`: 249 tests, strict checks, package hashes and independent native startup; this does not resolve the licensing conflicts. This is a current read-only review plus one explicitly authorized dependency patch; it does not grant distribution approval. The coordinator retains the source assets and labels the produced local package **INTERNAL REVIEW ONLY** behind an explicit packaging guard. No public asset/package publishing is authorized by this review.
 
 ## Current alerts and the narrow repair
 
