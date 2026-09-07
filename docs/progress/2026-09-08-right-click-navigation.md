@@ -96,8 +96,8 @@ its own Green navigation run: exit 0, four frames, 16.20m planned/15.88m observe
 with independent server arrival confirmation. `BUILD.json` identifies the
 clean code revision and binaries; the profile is development with optimized
 dependencies. No hardware-performance or manual human-input certification is
-claimed. Independent AC1–AC6 findings and resolution are in `verdict.json` and
-`problems.md`, with raw checks in `raw/fresh-verification/`.
+claimed. The independent AC1–AC6 decision is in `verdict.json`; resolved
+findings and raw checks are in `raw/fresh-verification/`.
 
 From the original repository directory, the unchanged development command is:
 
