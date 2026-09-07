@@ -50,6 +50,8 @@ impl Plugin for MinimapPlugin {
 pub struct MinimapNavigationState {
     pub focus_target: Option<Vec3>,
     pub consumed_primary_click: bool,
+    /// A one-frame move order, separate from the persistent camera focus.
+    pub movement_target: Option<Vec3>,
 }
 #[derive(Resource, Default)]
 struct MinimapUiState {
@@ -282,6 +284,7 @@ fn handle_minimap_navigation_system(
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     containers: Query<(&ComputedNode, &UiGlobalTransform), With<MinimapContainer>>,
     mouse: Res<ButtonInput<MouseButton>>,
+    keyboard: Res<ButtonInput<KeyCode>>,
     touches: Res<Touches>,
     layout: Res<MapLayout>,
     mut camera: ResMut<CameraState>,
@@ -289,6 +292,7 @@ fn handle_minimap_navigation_system(
     context: Res<crate::input_context::GameplayInputContext>,
 ) {
     navigation.consumed_primary_click = false;
+    navigation.movement_target = None;
     if !context.gameplay_allowed() {
         return;
     }
@@ -300,6 +304,11 @@ fn handle_minimap_navigation_system(
     };
     if let Some(cursor) = window.cursor_position() {
         let target = minimap_cursor_to_world(*layout, rect, cursor);
+        if mouse.just_pressed(MouseButton::Right)
+            && !keyboard.any_pressed([KeyCode::AltLeft, KeyCode::AltRight])
+        {
+            navigation.movement_target = target;
+        }
         if mouse.just_pressed(MouseButton::Left) && target.is_some() {
             navigation.consumed_primary_click = true;
         }
@@ -758,6 +767,7 @@ mod tests {
             .init_resource::<PlayerVisualMode>()
             .init_resource::<ClientSession>()
             .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<Touches>()
             .init_resource::<CameraState>()
             .init_resource::<GameplayInputContext>()
@@ -1154,9 +1164,113 @@ mod tests {
         assert_eq!(rect.center(), Vec2::new(1128.0, 580.0));
     }
     #[test]
+    fn right_click_emits_one_move_without_panning_and_alt_does_not_reuse_it() {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<Touches>()
+            .init_resource::<MapLayout>()
+            .init_resource::<CameraState>()
+            .init_resource::<MinimapNavigationState>()
+            .init_resource::<GameplayInputContext>()
+            .add_systems(Update, handle_minimap_navigation_system);
+        let mut window = Window::default();
+        window.set_cursor_position(Some(Vec2::new(1120.0, 580.0)));
+        let window_entity = app
+            .world_mut()
+            .spawn((window, bevy::window::PrimaryWindow))
+            .id();
+        app.world_mut().spawn((
+            MinimapContainer,
+            ComputedNode {
+                size: Vec2::splat(464.0),
+                inverse_scale_factor: 0.5,
+                ..default()
+            },
+            UiGlobalTransform::from_translation(Vec2::new(2240.0, 1160.0)),
+        ));
+        app.world_mut().resource_mut::<CameraState>().locked = false;
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Right);
+        app.update();
+        let nav = app.world().resource::<MinimapNavigationState>();
+        assert_eq!(nav.movement_target.unwrap().xz(), Vec2::ZERO);
+        assert!(nav.focus_target.is_none());
+        assert!(!app.world().resource::<CameraState>().locked);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .clear();
+        app.update();
+        assert!(
+            app.world()
+                .resource::<MinimapNavigationState>()
+                .movement_target
+                .is_none()
+        );
+        for alt in [KeyCode::AltLeft, KeyCode::AltRight] {
+            app.world_mut()
+                .resource_mut::<ButtonInput<MouseButton>>()
+                .reset_all();
+            app.world_mut()
+                .resource_mut::<ButtonInput<MouseButton>>()
+                .press(MouseButton::Right);
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(alt);
+            app.update();
+            assert!(
+                app.world()
+                    .resource::<MinimapNavigationState>()
+                    .movement_target
+                    .is_none()
+            );
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .reset_all();
+        }
+        app.world_mut()
+            .get_mut::<Window>(window_entity)
+            .unwrap()
+            .set_cursor_position(Some(Vec2::new(50.0, 50.0)));
+        app.update();
+        assert!(
+            app.world()
+                .resource::<MinimapNavigationState>()
+                .movement_target
+                .is_none()
+        );
+        app.world_mut()
+            .get_mut::<Window>(window_entity)
+            .unwrap()
+            .set_cursor_position(Some(Vec2::new(1120.0, 580.0)));
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        app.update();
+        assert!(
+            app.world()
+                .resource::<MinimapNavigationState>()
+                .focus_target
+                .is_some()
+        );
+        assert!(
+            app.world()
+                .resource::<MinimapNavigationState>()
+                .movement_target
+                .is_none()
+        );
+        assert!(app.world().resource::<CameraState>().locked);
+    }
+
+    #[test]
     fn minimap_click_does_not_escape_modal_or_debug_flight() {
         let mut app = App::new();
         app.init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<Touches>()
             .init_resource::<MapLayout>()
             .init_resource::<CameraState>()

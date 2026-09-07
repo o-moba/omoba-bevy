@@ -17,6 +17,8 @@ mod match_hud;
 mod minimap;
 mod minions;
 mod model_scale;
+mod navigation;
+mod navigation_qa;
 mod net;
 mod pause_menu;
 mod persistence;

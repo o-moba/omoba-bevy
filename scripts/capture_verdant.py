@@ -3,6 +3,8 @@
 
 Example: python3 scripts/capture_verdant.py --package /tmp/omoba-rc2 --output /tmp/verdant-qa
 Use --scenario beta-ui --bots 0 for 1280x720 entry/help/gameplay/result layouts.
+Use --scenario navigation --bots 0 --timeout 110 for genuine scripted RMB input,
+route detour/arrival and modal isolation, with an independent snapshot observer.
 The beta result is a labeled synthetic snapshot, never complete-match evidence.
 No source working directory, user configuration, CUA, or additional dependency is required.
 This is a bounded automated renderer scenario, not an interactive gameplay certification.
@@ -23,6 +25,7 @@ import time
 
 EXPECTED_IMAGES = ("01-overview.png", "03-river-gameplay.png", "02-sanctuary.png", "04-follow-gameplay.png", "05-orbit-zoom-gameplay.png")
 BETA_IMAGES = ("01-entry-720p.png", "02-help-720p.png", "03-gameplay-720p.png", "04-shop-720p.png", "05-purchase-720p.png", "06-shop-closed-720p.png", "07-result-fixture-720p.png")
+NAVIGATION_IMAGES = ("01-minimap-route.png", "02-minimap-arrival.png", "03-world-route.png", "04-navigation-complete.png")
 FRAME_HEADER = struct.Struct("<4sHQQHHI")
 
 
@@ -103,6 +106,111 @@ class ScenarioPeer:
         self.socket.close()
 
 
+class SnapshotObserver:
+    """Hello-only endpoint. Receives authoritative snapshots without joining."""
+    def __init__(self, address, output):
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.socket.connect(address)
+        self.socket.setblocking(False)
+        self.last_hello = -1.0
+        self.pending = {}
+        self.samples = []
+        self.output = output.open("w")
+
+    def update(self, now):
+        if now - self.last_hello >= 1.0:
+            self.last_hello = now
+            self.socket.send(b'{"type":"hello","protocol_version":1}')
+        self.pending = {key: value for key, value in self.pending.items() if now - value[0] < 2.0}
+        while True:
+            try:
+                data = self.socket.recv(65536)
+            except BlockingIOError:
+                break
+            if data.startswith(b"OMB1"):
+                if len(data) < FRAME_HEADER.size or len(data) > 1200:
+                    raise RuntimeError("invalid observer snapshot frame size")
+                _, version, epoch, tick, index, count, total = FRAME_HEADER.unpack_from(data)
+                if version != 1 or not 0 < count <= 56 or not index < count or total > 65507:
+                    raise RuntimeError("invalid observer snapshot frame header")
+                key = (epoch, tick)
+                if key not in self.pending and len(self.pending) >= 4:
+                    del self.pending[min(self.pending, key=lambda old: self.pending[old][0])]
+                chunks = self.pending.setdefault(key, (now, {}))[1]
+                chunks[index] = data[FRAME_HEADER.size:]
+                if len(chunks) != count:
+                    continue
+                data = b"".join(chunks[index] for index in range(count))
+                del self.pending[key]
+                if len(data) != total:
+                    raise RuntimeError("incomplete observer snapshot reconstruction")
+            packet = json.loads(data)
+            if packet.get("type") != "snapshot":
+                continue
+            sample = {key: packet.get(key) for key in ("server_epoch", "round_id", "snapshot_tick", "players", "structures")}
+            self.samples.append(sample)
+            self.output.write(json.dumps(sample, separators=(",", ":")) + "\n")
+            self.output.flush()
+
+    def close(self):
+        self.socket.close()
+        self.output.close()
+
+
+def verify_navigation(summary, snapshots):
+    """Require input telemetry plus independent server-side arrival and detour."""
+    player_id = summary.get("player_id")
+    samples = [(snapshot["snapshot_tick"], player) for snapshot in snapshots
+               for player in snapshot.get("players", []) if player["id"] == player_id]
+    events = {event["event"]: event for event in summary.get("events", [])}
+    required = {"minimap_rmb_input", "minimap_order_accepted", "minimap_arrival", "world_rmb_input",
+                "world_order_accepted", "world_arrival", "alt_world_blocked", "alt_minimap_blocked",
+                "shop_world_blocked", "shop_minimap_blocked", "pause_world_blocked",
+                "pause_minimap_blocked", "lmb_minimap_pan"}
+    arrivals = {}
+    for name in ("minimap_arrival", "world_arrival"):
+        event = events.get(name)
+        if event is None:
+            continue
+        target = event["detail"]["destination"]
+        # Client waits 800ms here so several independently observed snapshots
+        # must confirm the stopped target before the next real input order.
+        distances = [math.hypot(player["x"] - target[0], player["z"] - target[2])
+                     for tick, player in samples
+                     if event["snapshot_tick"] <= tick <= event["snapshot_tick"] + 12 and player["hp"] > 0]
+        arrivals[name] = dict(nearby_snapshots=sum(distance <= 0.7 for distance in distances),
+                              minimum_distance=min(distances, default=None))
+    obstacle = summary.get("obstacle", {})
+    center = obstacle.get("center", [0, 0, 0])
+    radius = obstacle.get("collision_radius", 3.7)
+    first_tick = events.get("minimap_rmb_input", {}).get("snapshot_tick", 0)
+    last_tick = events.get("minimap_arrival", {}).get("snapshot_tick", 0)
+    travel = [player for tick, player in sorted(samples, key=lambda sample: sample[0]) if first_tick <= tick <= last_tick]
+    traversal_length = sum(math.hypot(end["x"] - begin["x"], end["z"] - begin["z"])
+                           for begin, end in zip(travel, travel[1:]))
+    clearance = min((math.hypot(player["x"] - center[0], player["z"] - center[2]) for player in travel), default=None)
+    start = summary.get("start", [0, 0, 0])
+    waypoints = events.get("minimap_order_accepted", {}).get("detail", {}).get("waypoints", [])
+    planned_length = (sum(math.hypot(end[0] - begin[0], end[2] - begin[2])
+                          for begin, end in zip([start] + waypoints, waypoints)) if waypoints else None)
+    target = events.get("minimap_rmb_input", {}).get("detail", {}).get("destination", start)
+    dx, dz = target[0] - start[0], target[2] - start[2]
+    length = math.hypot(dx, dz)
+    detour = max((abs(dx * (player["z"] - start[2]) - dz * (player["x"] - start[0])) / length
+                  for player in travel if length > 0.0), default=0.0)
+    result = dict(observer="hello-only UDP snapshots; no Join or Transform commands", player_id=player_id,
+                  authoritative_samples=len(samples), arrivals=arrivals, minimum_structure_distance=clearance,
+                  collision_radius=radius, maximum_deviation_from_direct_line=detour,
+                  planned_route_length=planned_length, authoritative_traversal_length=traversal_length,
+                  missing_input_events=sorted(required - events.keys()))
+    result["pass"] = (summary.get("pass") is True and summary.get("scripted_input") is True
+                      and not result["missing_input_events"] and len(arrivals) == 2
+                      and all(value["nearby_snapshots"] >= 2 for value in arrivals.values())
+                      and clearance is not None and clearance >= radius - 0.1 and detour >= radius - 0.3
+                      and planned_length is not None and planned_length < 25.0 and traversal_length <= 30.0)
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--package", type=Path)
@@ -114,10 +222,11 @@ def main():
     parser.add_argument("--team", choices=("green", "blue"), default="green")
     parser.add_argument("--width", type=int, choices=(1280, 1920), default=1280)
     parser.add_argument("--height", type=int, choices=(720, 1080), default=720)
-    parser.add_argument("--scenario", choices=("verdant", "beta-ui"), default="verdant")
+    parser.add_argument("--scenario", choices=("verdant", "beta-ui", "navigation"), default="verdant")
     parser.add_argument("--bots", type=int, choices=range(5), default=2)
     args = parser.parse_args()
-    expected_images = tuple(name.replace("720p", f"{args.height}p") for name in BETA_IMAGES) if args.scenario == "beta-ui" else EXPECTED_IMAGES
+    expected_images = (tuple(name.replace("720p", f"{args.height}p") for name in BETA_IMAGES) if args.scenario == "beta-ui"
+                       else NAVIGATION_IMAGES if args.scenario == "navigation" else EXPECTED_IMAGES)
     package = args.package.resolve() if args.package else None
     suffix = ".exe" if os.name == "nt" else ""
     client = args.client_bin or (package / ("client" + suffix) if package else None)
@@ -137,6 +246,7 @@ def main():
         reservation.bind(("127.0.0.1", 0))
         address = reservation.getsockname()
     children, peers = [], []
+    observer = None
     result = dict(platform=platform.platform(), machine=platform.machine(),
                   client=str(client), server=str(server), assets=str(assets),
                   binary_sha256=dict(client=sha256(client), server=sha256(server)),
@@ -144,7 +254,7 @@ def main():
                   if package and (package / "BUILD.json").exists() else None,
                   capture_method="Bevy Screenshot::primary_window + save_to_disk",
                   manual_interaction_verified=False, timeout_seconds=timeout,
-                  pixels=[args.width, args.height] if args.scenario == "beta-ui" else None, team=args.team, scenario=args.scenario, result_fixture=args.scenario == "beta-ui",
+                  pixels=[args.width, args.height] if args.scenario in ("beta-ui", "navigation") else None, team=args.team, scenario=args.scenario, result_fixture=args.scenario == "beta-ui",
                   scripted_peers=args.bots, server_mode="dev; production commands; no cheats")
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="omoba-verdant-capture-") as isolated:
@@ -169,6 +279,8 @@ def main():
                     raise RuntimeError("fresh native server did not report listening")
                 time.sleep(0.05)
             peers = [ScenarioPeer(address, index) for index in range(args.bots)]
+            if args.scenario == "navigation":
+                observer = SnapshotObserver(address, output / "authoritative-snapshots.jsonl")
             with (output / "client.log").open("w") as log:
                 client_process = subprocess.Popen([str(client)], cwd=isolated, env=env,
                                                   stdout=log, stderr=subprocess.STDOUT)
@@ -178,6 +290,8 @@ def main():
                     raise RuntimeError("native server exited during capture")
                 for peer in peers:
                     peer.update(time.monotonic())
+                if observer:
+                    observer.update(time.monotonic())
                 time.sleep(0.05)
             result["client_exit_code"] = client_process.poll()
             result["timed_out"] = client_process.poll() is None
@@ -186,6 +300,8 @@ def main():
         finally:
             for peer in peers:
                 peer.close()
+            if observer:
+                observer.close()
             for child in reversed(children):
                 if child.poll() is None:
                     child.terminate()
@@ -201,12 +317,17 @@ def main():
     result["snapshot_received"] = "First snapshot received" in client_log
     result["asset_root_confirmed"] = str(assets) in client_log
     result["errors"] = [line for line in client_log.splitlines() if any(text in line for text in
-                         ("panicked at", "does not exist", "Path not found", "Downloading model", "VERDANT_QA failed", "BETA_UI_QA failed"))]
+                         ("panicked at", "does not exist", "Path not found", "Downloading model", "VERDANT_QA failed", "BETA_UI_QA failed", "NAVIGATION_QA failed"))]
     result["capture_pass"] = (result.get("client_exit_code") == 0 and not result.get("error")
                               and len(result["images"]) == len(expected_images)
                               and (output / "qa-summary.json").is_file()
                               and result["snapshot_received"] and result["asset_root_confirmed"]
                               and not result["errors"])
+    if args.scenario == "navigation":
+        summary_path = output / "qa-summary.json"
+        result["navigation"] = verify_navigation(json.loads(summary_path.read_text()) if summary_path.is_file() else {},
+                                                  observer.samples if observer else [])
+        result["capture_pass"] = result["capture_pass"] and result["navigation"]["pass"]
     (output / "capture-run.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, indent=2))
     raise SystemExit(0 if result["capture_pass"] else 1)

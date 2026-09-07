@@ -282,6 +282,23 @@ impl PendingCast {
     pub(crate) fn cancel(&mut self) {
         self.request = None;
     }
+
+    #[cfg(test)]
+    pub(crate) fn queued_for_movement_test() -> Self {
+        Self {
+            request: Some(PendingCastRequest {
+                slot: 0,
+                target_entity: None,
+                target: None,
+                approach_announced: true,
+            }),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn has_queued_request(&self) -> bool {
+        self.request.is_some()
+    }
 }
 
 #[derive(SystemParam)]

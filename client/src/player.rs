@@ -65,13 +65,31 @@ pub(crate) fn ground_origin_y(
 
 pub struct PlayerPlugin;
 
+#[derive(Default, Reflect, GizmoConfigGroup)]
+struct NavigationGizmos;
+
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.insert_gizmo_config(
+            NavigationGizmos,
+            GizmoConfig {
+                line: GizmoLineConfig {
+                    width: 3.0,
+                    ..default()
+                },
+                // A navigation cue must remain legible through sanctuary art.
+                // This only draws the local order; it reveals no world actors.
+                // Leave headroom below the exact near clip plane on the GPU.
+                depth_bias: -0.95,
+                ..default()
+            },
+        )
+        .add_systems(
             Update,
             (
                 sync_jump_fallback_mode,
                 handle_player_input.after(crate::input_context::InputContextSet::Resolve),
+                plan_movement_routes,
                 animate_jump,
                 move_player,
             )
@@ -89,6 +107,7 @@ impl Plugin for PlayerPlugin {
                 .chain(),
         )
         .add_systems(Update, resolve_player_structure_overlap.after(move_player))
+        .add_systems(Update, draw_movement_route.after(move_player))
         .add_systems(PostUpdate, apply_gravity)
         .init_resource::<RespawnCountdown>()
         .init_resource::<DebugSpeedBoost>()
@@ -130,6 +149,13 @@ struct RespawnCountdownText;
 #[derive(Component)]
 pub(crate) struct MovementTarget {
     pub(crate) target: Vec3,
+}
+
+#[derive(Component, Debug)]
+pub(crate) struct MovementRoute {
+    requested_target: Vec3,
+    pub(crate) destination: Vec3,
+    pub(crate) waypoints: Vec<Vec3>,
 }
 
 #[derive(Component)]
@@ -629,6 +655,7 @@ fn sync_player_animation_state(
 fn handle_player_input(
     mut commands: Commands,
     mouse_button_input: Res<ButtonInput<MouseButton>>,
+    keyboard: Res<ButtonInput<KeyCode>>,
     touches: Res<Touches>,
     camera_query: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
@@ -659,13 +686,6 @@ fn handle_player_input(
     if !context.gameplay_allowed() {
         return;
     }
-    let Ok(window) = window_query.single() else {
-        return;
-    };
-    let Ok((camera, camera_transform)) = camera_query.single() else {
-        return;
-    };
-
     let Ok((player_entity, stats, character, avatar)) = player_query.single() else {
         return;
     };
@@ -673,30 +693,39 @@ fn handle_player_input(
         return;
     }
 
-    let Some(pointer_position) =
-        primary_world_press_position(&mouse_button_input, &touches, window)
-    else {
-        return;
+    let secondary_move = secondary_move_pressed(&mouse_button_input, &keyboard);
+    let minimap_target = minimap_nav.as_ref().and_then(|nav| nav.movement_target);
+    let target = if let Some(target) = minimap_target.filter(|_| secondary_move) {
+        // The minimap is deliberately a UI surface. Its bounds and input gate
+        // were checked before world picking; never raycast through it.
+        Some(target)
+    } else {
+        let (Ok(window), Ok((camera, camera_transform))) =
+            (window_query.single(), camera_query.single())
+        else {
+            return;
+        };
+        let position = if secondary_move {
+            window.cursor_position()
+        } else {
+            primary_world_press_position(&mouse_button_input, &touches, window)
+        };
+        let Some(position) = position else { return };
+        if !should_issue_ground_move(
+            !secondary_move && pointer_state.consumed_primary_press,
+            minimap_nav
+                .as_ref()
+                .is_some_and(|nav| nav.consumed_primary_click),
+            ui_interactions
+                .iter()
+                .any(|interaction| *interaction != Interaction::None),
+        ) {
+            return;
+        }
+        viewport_to_simulation_world(camera, camera_transform, position, *visual_mode, 0.0)
     };
-    if !should_issue_ground_move(
-        pointer_state.consumed_primary_press,
-        minimap_nav
-            .as_ref()
-            .is_some_and(|nav_state| nav_state.consumed_primary_click),
-        ui_interactions
-            .iter()
-            .any(|interaction| *interaction != Interaction::None),
-    ) {
-        return;
-    }
-    pending_cast.cancel();
-    if let Some(mut target_pos) = viewport_to_simulation_world(
-        camera,
-        camera_transform,
-        pointer_position,
-        *visual_mode,
-        0.0,
-    ) {
+    if let Some(mut target_pos) = target {
+        pending_cast.cancel();
         if let Some(map_layout) = map_layout.as_ref() {
             target_pos = map_layout.clamp_position(target_pos);
         }
@@ -713,6 +742,87 @@ fn handle_player_input(
             commands.entity(player_entity).insert(Jumping {
                 timer: Timer::from_seconds(JUMP_DURATION, TimerMode::Repeating),
             });
+        }
+    }
+}
+
+fn secondary_move_pressed(
+    mouse: &ButtonInput<MouseButton>,
+    keyboard: &ButtonInput<KeyCode>,
+) -> bool {
+    mouse.just_pressed(MouseButton::Right)
+        && !keyboard.any_pressed([KeyCode::AltLeft, KeyCode::AltRight])
+}
+
+/// Plan once per new destination. Attack approach targets use the same route
+/// machinery, while transient hero overlap remains the existing local resolver.
+fn plan_movement_routes(
+    mut commands: Commands,
+    players: Query<
+        (
+            Entity,
+            &Transform,
+            Option<&MovementTarget>,
+            Option<&MovementRoute>,
+            &CombatStats,
+        ),
+        With<Player>,
+    >,
+    structures: Query<(&Transform, &StructureKind), With<NetworkStructure>>,
+    layout: Option<Res<MapLayout>>,
+    context: Option<Res<crate::input_context::GameplayInputContext>>,
+    mut feedback: Option<ResMut<crate::combat::ActionFeedback>>,
+) {
+    let structures: Vec<_> = structures
+        .iter()
+        .map(|(transform, kind)| (transform.translation, *kind))
+        .collect();
+    let layout = layout.as_deref().copied().unwrap_or_default();
+    let running = context.as_ref().is_none_or(|context| context.running);
+    for (entity, transform, target, route, stats) in &players {
+        let Some(target) = target.filter(|_| stats.is_alive() && running) else {
+            if route.is_some() {
+                commands.entity(entity).remove::<MovementRoute>();
+            }
+            if !stats.is_alive() || !running {
+                commands
+                    .entity(entity)
+                    .remove::<(MovementTarget, Jumping)>();
+            }
+            continue;
+        };
+        if route.is_some_and(|route| {
+            route
+                .requested_target
+                .xz()
+                .distance_squared(target.target.xz())
+                < 0.000001
+        }) {
+            continue;
+        }
+        match crate::navigation::plan_route(
+            &layout,
+            transform.translation,
+            target.target,
+            &structures,
+        ) {
+            Some(waypoints) if !waypoints.is_empty() => {
+                commands.entity(entity).insert(MovementRoute {
+                    requested_target: target.target,
+                    destination: *waypoints.last().unwrap(),
+                    waypoints,
+                });
+            }
+            result => {
+                commands
+                    .entity(entity)
+                    .remove::<(MovementTarget, MovementRoute, Jumping)>();
+                if result.is_none() {
+                    if let Some(feedback) = feedback.as_deref_mut() {
+                        feedback.push_line("No walkable route to that point.");
+                    }
+                }
+            }
         }
     }
 }
@@ -766,11 +876,11 @@ fn move_player(
             (
                 Entity,
                 &mut Transform,
-                &MovementTarget,
+                &mut MovementRoute,
                 &CombatStats,
                 Option<&crate::net::PlayerEquipment>,
             ),
-            With<Player>,
+            (With<Player>, With<MovementTarget>),
         >,
         Query<&Transform, (With<PlayerBody>, Without<Player>)>,
         Query<(&Transform, &StructureKind), With<NetworkStructure>>,
@@ -796,19 +906,22 @@ fn move_player(
         .collect::<Vec<_>>();
 
     let mut player_query = transform_sets.p0();
-    for (entity, mut transform, movement_target, stats, equipment) in player_query.iter_mut() {
+    for (entity, mut transform, mut route, stats, equipment) in player_query.iter_mut() {
         if !stats.is_alive() {
-            commands.entity(entity).remove::<MovementTarget>();
-            commands.entity(entity).remove::<Jumping>();
+            commands
+                .entity(entity)
+                .remove::<(MovementTarget, MovementRoute, Jumping)>();
             continue;
         }
+        let Some(waypoint) = route.waypoints.first().copied() else {
+            commands
+                .entity(entity)
+                .remove::<(MovementTarget, MovementRoute, Jumping)>();
+            continue;
+        };
         let current_pos = transform.translation;
 
-        let target_pos_flat = Vec3::new(
-            movement_target.target.x,
-            current_pos.y,
-            movement_target.target.z,
-        );
+        let target_pos_flat = Vec3::new(waypoint.x, current_pos.y, waypoint.z);
         let direction = (target_pos_flat - current_pos).normalize_or_zero();
         let distance = current_pos.xz().distance(target_pos_flat.xz());
         let speed = if speed_boost.0 {
@@ -823,19 +936,23 @@ fn move_player(
         let move_delta = speed * time.delta_secs();
 
         if distance < move_delta || distance < 0.01 {
-            let mut desired = Vec3::new(
-                movement_target.target.x,
-                current_pos.y,
-                movement_target.target.z,
-            );
+            let mut desired = target_pos_flat;
             desired = resolve_player_collisions(desired, &other_players, &structures);
             if let Some(map_layout) = map_layout.as_ref() {
                 desired = map_layout.clamp_position(desired);
             }
             transform.translation.x = desired.x;
             transform.translation.z = desired.z;
-            commands.entity(entity).remove::<MovementTarget>();
-            commands.entity(entity).remove::<Jumping>();
+            // Do not cut corners by advancing before the actual collision-
+            // resolved position reaches this waypoint.
+            if desired.xz().distance(waypoint.xz()) <= 0.01 {
+                route.waypoints.remove(0);
+                if route.waypoints.is_empty() {
+                    commands
+                        .entity(entity)
+                        .remove::<(MovementTarget, MovementRoute, Jumping)>();
+                }
+            }
         } else {
             let mut desired = current_pos + direction * move_delta;
             desired = resolve_player_collisions(desired, &other_players, &structures);
@@ -857,6 +974,44 @@ fn move_player(
                     .slerp(target_rotation, time.delta_secs() * 10.0);
             }
         }
+    }
+}
+
+fn draw_movement_route(
+    mut gizmos: Gizmos<NavigationGizmos>,
+    players: Query<(&Transform, &MovementRoute), (With<Player>, With<MovementTarget>)>,
+    layout: Res<MapLayout>,
+    mode: Res<PlayerVisualMode>,
+) {
+    let color = Color::srgba(1.0, 0.82, 0.28, 0.85);
+    let render_position = |point: Vec3| {
+        if *mode == PlayerVisualMode::Sprite2d {
+            crate::world2d::simulation_xz_to_render_xy(point).extend(crate::world2d::layer::VFX)
+        } else {
+            Vec3::new(
+                point.x,
+                layout.terrain_height_3d(point.x, point.z) + 0.15,
+                point.z,
+            )
+        }
+    };
+    for (transform, route) in &players {
+        gizmos.linestrip(
+            std::iter::once(transform.translation)
+                .chain(route.waypoints.iter().copied())
+                .map(render_position),
+            color,
+        );
+        let rotation = if *mode == PlayerVisualMode::Sprite2d {
+            Quat::IDENTITY
+        } else {
+            Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)
+        };
+        gizmos.circle(
+            Isometry3d::new(render_position(route.destination), rotation),
+            0.5,
+            color,
+        );
     }
 }
 
@@ -1039,7 +1194,6 @@ fn resolve_player_collisions(
 ) -> Vec3 {
     let mut resolved = desired;
     let min_distance = PLAYER_SIZE;
-    let player_radius = PLAYER_SIZE * 0.5;
 
     for &other_pos in other_players.iter() {
         let delta = Vec3::new(resolved.x - other_pos.x, 0.0, resolved.z - other_pos.z);
@@ -1056,11 +1210,7 @@ fn resolve_player_collisions(
     }
 
     for &(obstacle_pos, kind) in structures.iter() {
-        let obstacle_radius = match kind {
-            StructureKind::Tower => 1.3,
-            StructureKind::BaseTower => 3.2,
-        };
-        let min_distance = player_radius + obstacle_radius;
+        let min_distance = crate::navigation::structure_collision_radius(kind);
         let delta = Vec3::new(
             resolved.x - obstacle_pos.x,
             0.0,
@@ -1088,15 +1238,10 @@ fn resolve_player_structure_overlap(
     let Ok(mut player_transform) = player_query.single_mut() else {
         return;
     };
-    let player_radius = PLAYER_SIZE * 0.5;
     let mut resolved = player_transform.translation;
 
     for (structure_transform, kind) in structures.iter() {
-        let obstacle_radius = match kind {
-            StructureKind::Tower => 1.3,
-            StructureKind::BaseTower => 3.2,
-        };
-        let min_distance = player_radius + obstacle_radius;
+        let min_distance = crate::navigation::structure_collision_radius(*kind);
         let delta = Vec3::new(
             resolved.x - structure_transform.translation.x,
             0.0,
@@ -1152,6 +1297,7 @@ mod tests {
     fn modal_ground_press_never_creates_movement_intent() {
         let mut app = App::new();
         app.init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<Touches>()
             .init_resource::<crate::input_context::GameplayInputContext>()
             .init_resource::<PlayerAnimationLibrary>()
@@ -1176,6 +1322,217 @@ mod tests {
             .debug_flight = true;
         app.update();
         assert!(!app.world().entity(player).contains::<MovementTarget>());
+    }
+
+    fn navigation_input_app() -> (App, Entity) {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<Touches>()
+            .init_resource::<crate::input_context::GameplayInputContext>()
+            .init_resource::<PlayerAnimationLibrary>()
+            .init_resource::<PendingCast>()
+            .init_resource::<WorldPointerState>()
+            .init_resource::<MinimapNavigationState>()
+            .init_resource::<DebugSpeedBoost>()
+            .init_resource::<MapLayout>()
+            .init_resource::<Time>()
+            .insert_resource(PlayerVisualMode::Models3d)
+            .add_systems(
+                Update,
+                (handle_player_input, plan_movement_routes, move_player)
+                    .chain()
+                    .after(crate::input_context::InputContextSet::Resolve),
+            );
+        let player = app
+            .world_mut()
+            .spawn((
+                Player,
+                Transform::from_xyz(-8.0, 0.5, 0.0),
+                CombatStats::default(),
+            ))
+            .id();
+        (app, player)
+    }
+
+    fn minimap_order(app: &mut App, target: Vec3) {
+        app.world_mut()
+            .resource_mut::<MinimapNavigationState>()
+            .movement_target = Some(target);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Right);
+    }
+
+    #[test]
+    fn right_minimap_order_cancels_pending_cast_and_replaces_route_without_camera_ray() {
+        let (mut app, player) = navigation_input_app();
+        app.insert_resource(PendingCast::queued_for_movement_test());
+        // Minimap hover must allow its own move order even though it is UI.
+        app.world_mut().spawn((Button, Interaction::Hovered));
+        minimap_order(&mut app, Vec3::new(8.0, 0.0, 0.0));
+        app.update();
+        assert!(!app.world().resource::<PendingCast>().has_queued_request());
+        assert_eq!(
+            app.world()
+                .get::<MovementRoute>(player)
+                .unwrap()
+                .destination
+                .xz(),
+            Vec2::new(8.0, 0.0)
+        );
+        minimap_order(&mut app, Vec3::new(-8.0, 0.0, 12.0));
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<MovementRoute>(player)
+                .unwrap()
+                .destination
+                .xz(),
+            Vec2::new(-8.0, 12.0)
+        );
+    }
+
+    #[test]
+    fn right_minimap_order_obeys_modal_flight_running_death_and_both_alt_keys() {
+        for blocked in 0..6 {
+            let (mut app, player) = navigation_input_app();
+            minimap_order(&mut app, Vec3::new(8.0, 0.0, 0.0));
+            match blocked {
+                0 => {
+                    app.world_mut()
+                        .resource_mut::<crate::input_context::GameplayInputContext>()
+                        .modal_open = true
+                }
+                1 => {
+                    app.world_mut()
+                        .resource_mut::<crate::input_context::GameplayInputContext>()
+                        .debug_flight = true
+                }
+                2 => {
+                    app.world_mut()
+                        .resource_mut::<crate::input_context::GameplayInputContext>()
+                        .running = false
+                }
+                3 => app.world_mut().get_mut::<CombatStats>(player).unwrap().hp = 0.0,
+                4 => app
+                    .world_mut()
+                    .resource_mut::<ButtonInput<KeyCode>>()
+                    .press(KeyCode::AltLeft),
+                _ => app
+                    .world_mut()
+                    .resource_mut::<ButtonInput<KeyCode>>()
+                    .press(KeyCode::AltRight),
+            }
+            app.update();
+            assert!(
+                app.world().get::<MovementTarget>(player).is_none(),
+                "gate {blocked}"
+            );
+            assert!(
+                app.world().get::<MovementRoute>(player).is_none(),
+                "gate {blocked}"
+            );
+        }
+    }
+
+    #[test]
+    fn persistent_route_reaches_destination_around_tower_at_normal_speed_after_release() {
+        let (mut app, player) = navigation_input_app();
+        app.world_mut().spawn((
+            NetworkStructure,
+            StructureKind::Tower,
+            Transform::from_xyz(0.0, 0.5, 0.0),
+        ));
+        let target = Vec3::new(8.0, 0.5, 0.0);
+        minimap_order(&mut app, target);
+        app.update();
+        assert!(
+            app.world()
+                .get::<MovementRoute>(player)
+                .unwrap()
+                .waypoints
+                .len()
+                > 1
+        );
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<MinimapNavigationState>()
+            .movement_target = None;
+        let mut previous = app.world().get::<Transform>(player).unwrap().translation;
+        let mut reached = false;
+        for _ in 0..180 {
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_millis(50));
+            app.update();
+            let current = app.world().get::<Transform>(player).unwrap().translation;
+            assert!(previous.xz().distance(current.xz()) <= PLAYER_SPEED * 0.05 + 0.001);
+            assert!(current.xz().length() >= 1.8 - 0.001);
+            previous = current;
+            if app.world().get::<MovementTarget>(player).is_none() {
+                reached = true;
+                break;
+            }
+        }
+        assert!(reached, "route must terminate at arrival");
+        assert!(previous.xz().distance(target.xz()) < 0.01);
+        assert!(app.world().get::<MovementRoute>(player).is_none());
+    }
+
+    #[test]
+    fn admission_and_disconnect_gate_real_input_context_and_discard_stale_route() {
+        let (mut app, player) = navigation_input_app();
+        app.add_plugins(crate::input_context::InputContextPlugin)
+            .insert_resource(GameStateSnapshot {
+                state: GameState::Running,
+                ..default()
+            })
+            .init_resource::<crate::net::ClientSession>();
+        minimap_order(&mut app, Vec3::new(8.0, 0.5, 0.0));
+        app.update();
+        assert!(app.world().get::<MovementTarget>(player).is_none());
+        app.insert_resource(crate::net::ClientSession::admitted_for_test());
+        minimap_order(&mut app, Vec3::new(8.0, 0.5, 0.0));
+        app.update();
+        assert!(app.world().get::<MovementRoute>(player).is_some());
+        app.world_mut()
+            .resource_mut::<crate::net::ClientSession>()
+            .state = crate::net::ClientConnectionState::Disconnected;
+        minimap_order(&mut app, Vec3::new(12.0, 0.5, 0.0));
+        app.update();
+        assert!(app.world().get::<MovementTarget>(player).is_none());
+        assert!(app.world().get::<MovementRoute>(player).is_none());
+    }
+
+    #[test]
+    fn removed_intent_and_death_discard_cached_route() {
+        for dead in [false, true] {
+            let (mut app, player) = navigation_input_app();
+            minimap_order(&mut app, Vec3::new(8.0, 0.0, 0.0));
+            app.update();
+            app.world_mut()
+                .resource_mut::<ButtonInput<MouseButton>>()
+                .reset_all();
+            app.world_mut()
+                .resource_mut::<MinimapNavigationState>()
+                .movement_target = None;
+            if dead {
+                app.world_mut().get_mut::<CombatStats>(player).unwrap().hp = 0.0;
+            } else {
+                app.world_mut()
+                    .entity_mut(player)
+                    .remove::<MovementTarget>();
+            }
+            app.update();
+            assert!(app.world().get::<MovementRoute>(player).is_none());
+            assert!(app.world().get::<MovementTarget>(player).is_none());
+        }
     }
 
     #[test]
