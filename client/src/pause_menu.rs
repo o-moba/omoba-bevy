@@ -31,8 +31,8 @@ const SCALE_STEP: f32 = 0.04;
 const ILLUMINANCE_STEP: f32 = 2_000.0;
 const AMBIENT_STEP: f32 = 50.0;
 const ANGLE_STEP_DEG: f32 = 5.0;
-const BUTTON_COLOR: Color = Color::srgb(0.25, 0.25, 0.25);
-const BUTTON_HOVER_COLOR: Color = Color::srgb(0.35, 0.35, 0.35);
+const BUTTON_COLOR: Color = crate::ui_theme::TILE;
+const BUTTON_HOVER_COLOR: Color = crate::ui_theme::HOVER;
 
 pub struct PauseMenuPlugin;
 
@@ -45,6 +45,7 @@ impl Plugin for PauseMenuPlugin {
                 (toggle_pause_menu, close_pause_menu_when_disconnected)
                     .chain()
                     .after(crate::help_overlay::HelpOverlaySet::Input)
+                    .after(crate::shop::ShopModalSet)
                     .in_set(crate::input_context::InputContextSet::Modal),
             )
             .add_systems(
@@ -177,7 +178,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                         padding: UiRect::all(Val::Px(20.0)),
                         ..default()
                     },
-                    BackgroundColor(Color::srgb(0.12, 0.12, 0.12)),
+                    BackgroundColor(crate::ui_theme::PANEL),
                     Name::new("PauseMenuPanel"),
                 ))
                 .with_children(|panel| {
@@ -486,7 +487,7 @@ fn close_pause_menu_when_disconnected(
     }
 }
 
-fn toggle_pause_menu(
+pub(crate) fn toggle_pause_menu(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut menu_state: ResMut<PauseMenuState>,
 ) {
@@ -974,7 +975,9 @@ mod tests {
             .add_plugins(crate::help_overlay::HelpOverlayPlugin)
             .add_systems(
                 Update,
-                toggle_pause_menu.after(crate::help_overlay::HelpOverlaySet::Input),
+                toggle_pause_menu
+                    .after(crate::help_overlay::HelpOverlaySet::Input)
+                    .after(crate::shop::ShopModalSet),
             );
         app.update();
         assert!(

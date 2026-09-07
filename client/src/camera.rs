@@ -26,7 +26,7 @@ const CAMERA_ZOOM_SPEED: f32 = 0.1;
 /// reaches the whole arena.
 pub const CAMERA2D_BASE_SCALE: f32 = 0.08;
 const CAMERA_ISO_X: f32 = -1.0;
-const CAMERA_ISO_Z: f32 = -1.0;
+const CAMERA_ISO_Z: f32 = 0.0;
 const CAMERA_FREE_FLY_SPEED: f32 = 18.0;
 const CAMERA_FREE_FLY_SPRINT_MULTIPLIER: f32 = 2.2;
 const CAMERA2D_FREE_PAN_SPEED: f32 = 85.0;
@@ -79,16 +79,10 @@ pub fn locked_camera_offset(zoom: f32) -> Vec3 {
     )
 }
 
-/// Face the home spawn from the lane side so its sanctuary is behind the
-/// hero, rather than between the default camera and a newly spawned hero.
-/// Keep this orientation for the whole round; crossing the map never spins it.
-pub fn locked_camera_offset_for_team(zoom: f32, team: Team) -> Vec3 {
-    let offset = locked_camera_offset(zoom);
-    if team == Team::Green {
-        Vec3::new(-offset.x, offset.y, -offset.z)
-    } else {
-        offset
-    }
+/// Fixed map orientation for both teams: +Z is screen-right, +X screen-up.
+/// The base-to-base midlane therefore matches the minimap's rising diagonal.
+pub fn locked_camera_offset_for_team(zoom: f32, _team: Team) -> Vec3 {
+    locked_camera_offset(zoom)
 }
 
 fn toggle_camera_lock(
@@ -472,21 +466,20 @@ mod tests {
     }
 
     #[test]
-    fn default_follow_views_both_home_spawns_from_the_lane_side() {
+    fn default_follow_keeps_both_teams_on_the_minimap_diagonal() {
         let layout = MapLayout::default();
         for team in [Team::Green, Team::Blue] {
             let spawn = layout.team_spawn(team);
-            let base = if team == Team::Green {
-                layout.home_spawn
-            } else {
-                layout.away_spawn
-            };
             let offset = locked_camera_offset_for_team(1.0, team);
-            // The base lies behind the hero, outside the horizontal segment
-            // from camera to hero. This holds for initial join and respawn.
-            assert!((base - spawn).dot(Vec3::new(offset.x, 0.0, offset.z)) < 0.0);
+            let view = Transform::from_translation(spawn + offset).looking_at(spawn, Vec3::Y);
+            let mid = (layout.away_spawn - layout.home_spawn).normalize();
+            assert!(view.right().dot(Vec3::Z) > 0.99);
+            assert!(view.up().dot(Vec3::X) > 0.5);
+            assert!(view.right().dot(mid) > 0.5);
+            assert!(view.up().dot(mid) > 0.4);
             assert_eq!(offset.y, CAMERA_HEIGHT);
             assert!((offset.x.hypot(offset.z) - CAMERA_DISTANCE).abs() < 0.001);
+            assert_eq!(offset, locked_camera_offset(1.0));
         }
     }
 

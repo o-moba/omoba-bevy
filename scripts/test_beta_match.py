@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Negative controls for the full-match evidence checker (synthetic snapshots)."""
 import copy
+import json
 from pathlib import Path
 import subprocess
 import sys
 import unittest
 
-from verify_beta_match import MatchProof
+from verify_beta_match import BASE_ITEM_BONUSES, STARTING_GOLD, MatchProof, TelemetryLineBuffer
 
 
 def countdown(match_id=1, elapsed=0, tick=1):
@@ -14,7 +15,8 @@ def countdown(match_id=1, elapsed=0, tick=1):
                 elapsed_secs=elapsed, phase='starting', state='Starting { countdown_ms: 3000 }',
                 join_error='None', minions=0, buffs=0,
                 players=[dict(id=i, team='Some(Blue)' if i % 2 else 'Some(Green)',
-                              level=1, xp=0, gold=0, ranks=[1] * 4, hp=100, max_hp=100,
+                              level=1, xp=0, gold=STARTING_GOLD, inventory=[], item_bonuses=dict(BASE_ITEM_BONUSES), last_purchase=None,
+                              ranks=[1] * 4, hp=100, max_hp=100,
                               mana=100, max_mana=100, action_sequence=0, action_slot=0)
                          for i in range(1, 11)],
                 peers=[dict(id=i, snapshot_age_ms=0) for i in range(1, 11)],
@@ -23,6 +25,31 @@ def countdown(match_id=1, elapsed=0, tick=1):
 
 
 class EvidenceNegativeControls(unittest.TestCase):
+    def test_growing_file_partial_lines_are_not_parsed_or_discarded(self):
+        line = 'BOT_SAMPLE ' + json.dumps(countdown()) + '\n'
+        reader = TelemetryLineBuffer()
+        split = line.index('"players"') + 12
+        self.assertIsNone(reader.push(line[:split]))
+        self.assertIsNone(reader.push(''))
+        complete = reader.push(line[split:])
+        self.assertEqual(complete, line)
+        self.assertEqual(json.loads(complete.removeprefix('BOT_SAMPLE ')), countdown())
+        self.assertEqual(reader.push('next complete line\n'), 'next complete line\n')
+        with self.assertRaisesRegex(AssertionError, 'Unbounded'):
+            reader.push('x' * 262145)
+
+    def record_purchases(self, proof, sample):
+        for player in sample['players']:
+            player.update(gold=0, inventory=['ember_blade'], last_purchase=dict(request_id=1,
+                          match_id=sample['meta']['match_id'], item_id='ember_blade', error=None))
+            player['item_bonuses']['damage_multiplier'] = 1.12
+        proof.observe(sample)
+        sample['meta']['snapshot_tick'] += 1
+        player = sample['players'][0]
+        player['inventory'].append('swift_grip')
+        player['item_bonuses']['attack_speed_multiplier'] = 1.12
+        player['last_purchase'].update(request_id=2, item_id='swift_grip')
+
     def running(self):
         proof = MatchProof(60)
         sample = countdown()
@@ -78,6 +105,7 @@ class EvidenceNegativeControls(unittest.TestCase):
 
     def test_rejects_unclean_rematch_and_requires_second_victory(self):
         proof, sample = self.running()
+        self.record_purchases(proof, sample)
         sample['structures'] = [s for s in sample['structures'] if s['id'] not in (1, 7)]
         sample.update(phase='victory', state='Victory { winner: Green }', elapsed_secs=20)
         self.assertFalse(proof.observe(sample), 'One victory must not satisfy two rounds')
@@ -91,10 +119,26 @@ class EvidenceNegativeControls(unittest.TestCase):
         next_round.update(phase='running', elapsed_secs=33)
         next_round['meta']['snapshot_tick'] = 6
         self.assertFalse(proof.observe(next_round))
+        next_round['meta']['snapshot_tick'] = 7
+        self.record_purchases(proof, next_round)
         next_round.update(phase='victory', state='Victory { winner: Green }', elapsed_secs=50)
         next_round['structures'] = [s for s in next_round['structures'] if s['id'] not in (1, 7)]
-        next_round['meta']['snapshot_tick'] = 7
+        next_round['meta']['snapshot_tick'] = 9
         self.assertTrue(proof.observe(next_round))
+
+    def test_rejects_victory_without_purchases_and_invalid_equipment_reset(self):
+        proof, sample = self.running()
+        sample['structures'] = [s for s in sample['structures'] if s['id'] not in (1, 7)]
+        sample.update(phase='victory', state='Victory { winner: Green }', elapsed_secs=20)
+        with self.assertRaisesRegex(AssertionError, 'authoritative purchase'):
+            proof.observe(sample)
+        for field, value in [('inventory', ['ember_blade']), ('last_purchase', {'request_id': 1}),
+                             ('item_bonuses', dict(BASE_ITEM_BONUSES, damage_multiplier=1.12))]:
+            with self.subTest(field=field):
+                sample = countdown()
+                sample['players'][0][field] = value
+                with self.assertRaisesRegex(AssertionError, 'leaked'):
+                    MatchProof(60).observe(sample)
 
 
 if __name__ == '__main__':

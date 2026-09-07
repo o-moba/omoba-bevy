@@ -21,8 +21,8 @@ import tempfile
 import time
 
 
-EXPECTED_IMAGES = ("01-overview.png", "03-river-gameplay.png", "02-sanctuary.png", "04-follow-gameplay.png")
-BETA_IMAGES = ("01-entry-720p.png", "02-help-720p.png", "03-gameplay-720p.png", "04-result-fixture-720p.png")
+EXPECTED_IMAGES = ("01-overview.png", "03-river-gameplay.png", "02-sanctuary.png", "04-follow-gameplay.png", "05-orbit-zoom-gameplay.png")
+BETA_IMAGES = ("01-entry-720p.png", "02-help-720p.png", "03-gameplay-720p.png", "04-shop-720p.png", "05-purchase-720p.png", "06-shop-closed-720p.png", "07-result-fixture-720p.png")
 FRAME_HEADER = struct.Struct("<4sHQQHHI")
 
 
@@ -111,10 +111,13 @@ def main():
     parser.add_argument("--assets", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--timeout", type=int, default=300)
+    parser.add_argument("--team", choices=("green", "blue"), default="green")
+    parser.add_argument("--width", type=int, choices=(1280, 1920), default=1280)
+    parser.add_argument("--height", type=int, choices=(720, 1080), default=720)
     parser.add_argument("--scenario", choices=("verdant", "beta-ui"), default="verdant")
     parser.add_argument("--bots", type=int, choices=range(5), default=2)
     args = parser.parse_args()
-    expected_images = BETA_IMAGES if args.scenario == "beta-ui" else EXPECTED_IMAGES
+    expected_images = tuple(name.replace("720p", f"{args.height}p") for name in BETA_IMAGES) if args.scenario == "beta-ui" else EXPECTED_IMAGES
     package = args.package.resolve() if args.package else None
     suffix = ".exe" if os.name == "nt" else ""
     client = args.client_bin or (package / ("client" + suffix) if package else None)
@@ -141,7 +144,7 @@ def main():
                   if package and (package / "BUILD.json").exists() else None,
                   capture_method="Bevy Screenshot::primary_window + save_to_disk",
                   manual_interaction_verified=False, timeout_seconds=timeout,
-                  scenario=args.scenario, result_fixture=args.scenario == "beta-ui",
+                  pixels=[args.width, args.height] if args.scenario == "beta-ui" else None, team=args.team, scenario=args.scenario, result_fixture=args.scenario == "beta-ui",
                   scripted_peers=args.bots, server_mode="dev; production commands; no cheats")
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="omoba-verdant-capture-") as isolated:
@@ -151,6 +154,7 @@ def main():
                    OMOBA_CLIENT_CONFIG_DIR=str(Path(isolated) / "config"),
                    OMOBA_ASSET_DIR=str(assets), OMOBA_MATCH_MODE="dev", OMOBA_TEAM_SIZE="5",
                    OMOBA_PLAYER_VISUAL_MODE="models3d", OMOBA_DEBUG_UI="0",
+                   OMOBA_QA_TEAM=args.team, OMOBA_QA_WIDTH=str(args.width), OMOBA_QA_HEIGHT=str(args.height),
                    OMOBA_VISUAL_QA_DIR=str(output), OMOBA_VISUAL_QA_SCENARIO=args.scenario, OMOBA_VISUAL_QA_TIMEOUT=str(timeout - 20))
         for key in ("OMOBA_AUTOJOIN", "OMOBA_MEASURE_MODELS", "OMOBA_AVATAR_MANIFEST"):
             env.pop(key, None)

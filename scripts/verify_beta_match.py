@@ -16,6 +16,27 @@ import socket
 import subprocess
 import time
 
+STARTING_GOLD = 80
+ITEM_COSTS = dict(ember_blade=80, swift_grip=80, trail_boots=80,
+                  vitality_gem=80, focus_charm=100, guardian_crest=120)
+BASE_ITEM_BONUSES = dict(damage_multiplier=1.0, attack_speed_multiplier=1.0,
+                        move_speed_multiplier=1.0, spell_haste_multiplier=1.0,
+                        max_hp=0.0, max_mana=0.0)
+
+
+class TelemetryLineBuffer:
+    """A growing regular file can expose one stdout line across several reads."""
+    def __init__(self):
+        self.pending = ''
+
+    def push(self, chunk: str) -> str | None:
+        self.pending += chunk
+        assert len(self.pending) <= 262144, 'Unbounded or corrupted telemetry line'
+        if not self.pending.endswith('\n'):
+            return None
+        complete, self.pending = self.pending, ''
+        return complete
+
 
 if not __debug__:
     raise SystemExit("Full-match verification requires assertions: remove Python -O/PYTHONOPTIMIZE")
@@ -74,12 +95,14 @@ class MatchProof:
             assert all(s['hp'] == self.initial_structures[s['id']]['hp'] for s in sample['structures']), 'Structures were not reset to production HP'
             assert sample['minions'] == 0 and sample['buffs'] == 0, 'Round retained waves or team buffs'
             for player in players:
-                assert player['level'] == 1 and player['xp'] == player['gold'] == 0, 'Progression leaked into rematch'
+                assert player['level'] == 1 and player['xp'] == 0 and player['gold'] == STARTING_GOLD, 'Progression leaked into rematch'
+                assert player['inventory'] == [] and player['last_purchase'] is None, 'Equipment or purchase receipt leaked into rematch'
+                assert player['item_bonuses'] == BASE_ITEM_BONUSES, 'Item bonuses leaked into rematch'
                 assert player['ranks'] == [1, 1, 1, 1], 'Ability ranks leaked into rematch'
                 assert player['hp'] == player['max_hp'] == 100 and player['mana'] == player['max_mana'] == 100, 'Resources not reset'
             self.rounds.append(dict(match_id=match_id, countdown=sample['elapsed_secs'], running=None,
                                     victory=None, winner=None, objectives=[], progression={},
-                                    offensive_slots=[], clean_reset=True, final_structures=None))
+                                    offensive_slots=[], purchases=[], clean_reset=True, final_structures=None))
         current = self.rounds[-1]
         if sample['phase'] == 'running' and current['running'] is None:
             current['running'] = sample['elapsed_secs']
@@ -98,6 +121,17 @@ class MatchProof:
                     if reached and key not in current['progression']:
                         current['progression'][key] = elapsed
             for player in players:
+                inventory = player['inventory']
+                assert len(inventory) <= 6 and len(set(inventory)) == len(inventory), 'Invalid inventory capacity or duplicate items'
+                assert all(item in ITEM_COSTS for item in inventory), 'Unknown replicated item'
+                receipt = player['last_purchase']
+                if receipt and receipt['error'] is None:
+                    assert receipt['match_id'] == match_id, 'Purchase receipt is from the wrong round'
+                    assert receipt['item_id'] in inventory, 'Successful purchase is absent from inventory'
+                    key = (player['id'], receipt['request_id'])
+                    if not any((p['player_id'], p['request_id']) == key for p in current['purchases']):
+                        current['purchases'].append(dict(player_id=player['id'], request_id=receipt['request_id'],
+                            item_id=receipt['item_id'], cost=ITEM_COSTS[receipt['item_id']], elapsed_secs=elapsed))
                 offensive = player['action_slot'] == 0 or (
                     player.get('class') in ('warrior', 'mage', 'ranger')
                     and player['action_slot'] in (2, 3))
@@ -119,6 +153,8 @@ class MatchProof:
         if sample['phase'] == 'victory' and current['victory'] is None:
             assert current['running'] is not None, 'Victory without Running'
             assert any(o['base'] for o in current['objectives']), 'Victory without destroyed base'
+            assert {p['player_id'] for p in current['purchases']} == set(self.roster), 'Not every player completed an authoritative purchase'
+            assert len(current['purchases']) > 10, 'No later base purchase was observed after starter items'
             current['victory'] = sample['elapsed_secs']
             current['duration_secs'] = current['victory'] - current['running']
             current['winner'] = sample['state']
@@ -179,6 +215,7 @@ def main() -> int:
             bots = subprocess.Popen([str(args.bots_binary.resolve()), '--server', address, '--count', '10', '--telemetry'],
                                     cwd=out, env=env, stdout=bots_output, stderr=subprocess.STDOUT)
             last_sample = time.monotonic()
+            telemetry_lines = TelemetryLineBuffer()
             with bots_log.open() as stream, (out / 'samples.jsonl').open('w') as raw:
                 while True:
                     assert server.poll() is None, 'Server exited during the match'
@@ -187,7 +224,7 @@ def main() -> int:
                     assert now - last_sample < 10, 'No fresh telemetry/snapshots for ten seconds'
                     assert now - started < args.round_timeout * 2 + 60, 'Two-round lifecycle deadline exceeded'
                     assert proof.rounds or now - started < 30, 'Ten-player formation/countdown not observed within thirty seconds'
-                    line = stream.readline()
+                    line = telemetry_lines.push(stream.readline())
                     if not line:
                         time.sleep(.1)
                         continue
@@ -208,7 +245,7 @@ def main() -> int:
         metrics = [line for line in server_log.read_text(errors='replace').splitlines() if 'MATCH_METRIC ' in line]
         (out / 'metrics.log').write_text('\n'.join(metrics) + '\n')
         if result['status'] == 'PASS':
-            for event, minimum in [('round_start', 2), ('victory', 2), ('round_reset', 1), ('objective', 4)]:
+            for event, minimum in [('round_start', 2), ('victory', 2), ('round_reset', 1), ('objective', 4), ('purchase', 22)]:
                 if sum(f'event={event} ' in line for line in metrics) < minimum:
                     result.update(status='FAIL', error=f'Missing authoritative {event} metrics')
             if any('event=disconnect ' in line or 'event=abandoned ' in line for line in metrics):

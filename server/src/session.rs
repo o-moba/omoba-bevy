@@ -42,7 +42,11 @@ pub(crate) fn ensure_player_connected(
                 max_hp: MAX_HP,
                 mana: MAX_MANA,
                 max_mana: MAX_MANA,
-                gold: 0,
+                gold: STARTING_GOLD,
+                inventory: Vec::new(),
+                item_bonuses: ItemBonuses::NONE,
+                shop_available: false,
+                last_purchase: None,
                 xp: 0,
                 level: STARTING_LEVEL,
                 next_level_xp: xp_threshold_for_level(STARTING_LEVEL),
@@ -67,6 +71,8 @@ pub(crate) fn ensure_player_connected(
             respawn_at: None,
             god_mode: false,
             speed_mult: 1.0,
+            purchase_sequence: 0,
+            gold_income_remainder: 0.0,
         }
     });
 }
@@ -243,7 +249,13 @@ fn reset_player_round(player: &mut ConnectedPlayer, map_layout: &MapLayoutState,
     player.state.max_hp = MAX_HP;
     player.state.mana = MAX_MANA;
     player.state.max_mana = MAX_MANA;
-    player.state.gold = 0;
+    player.state.gold = STARTING_GOLD;
+    player.state.inventory.clear();
+    player.state.item_bonuses = ItemBonuses::NONE;
+    player.state.shop_available = false;
+    player.state.last_purchase = None;
+    player.purchase_sequence = 0;
+    player.gold_income_remainder = 0.0;
     player.state.xp = 0;
     player.state.level = STARTING_LEVEL;
     player.state.next_level_xp = xp_threshold_for_level(STARTING_LEVEL);
@@ -287,7 +299,9 @@ pub(crate) fn handle_transform_request(
         .as_secs_f32()
         .clamp(0.0, MOVEMENT_MAX_DELTA_SECONDS);
     let speed_mult = player.speed_mult.max(1.0);
-    let max_distance = PLAYER_SPEED * speed_mult * elapsed + MOVEMENT_POSITION_TOLERANCE;
+    let max_distance =
+        PLAYER_SPEED * speed_mult * player.state.item_bonuses.move_speed_multiplier * elapsed
+            + MOVEMENT_POSITION_TOLERANCE;
 
     let accepted = if distance <= max_distance || distance <= 0.000_1 {
         requested

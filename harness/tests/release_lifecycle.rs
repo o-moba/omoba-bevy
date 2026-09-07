@@ -59,7 +59,7 @@ impl Peer {
         }
     }
 }
-fn wait(peer: &mut Peer, others: &[&Peer], predicate: impl Fn(&Value) -> bool) -> Value {
+fn wait(peer: &mut Peer, others: &[&Peer], mut predicate: impl FnMut(&Value) -> bool) -> Value {
     let deadline = Instant::now() + Duration::from_secs(9);
     let mut last = None;
     while Instant::now() < deadline {
@@ -85,6 +85,21 @@ fn own(snapshot: &Value) -> &Value {
         .unwrap()
 }
 
+fn assert_preserved_with_income(before: &Value, after: &Value, max_gold_gain: u64) {
+    let before_gold = before["gold"].as_u64().unwrap();
+    let after_gold = after["gold"].as_u64().unwrap();
+    assert!(
+        (before_gold..=before_gold + max_gold_gain).contains(&after_gold),
+        "passive income was lost or unexpectedly increased: {before_gold} -> {after_gold}"
+    );
+    let mut comparable = after.clone();
+    comparable["gold"] = before["gold"].clone();
+    assert_eq!(
+        &comparable, before,
+        "gameplay, equipment or loadout changed"
+    );
+}
+
 #[test]
 fn launched_release_server_duplicate_reservation_conflict_and_reconnect_preserve_state() {
     let server =
@@ -97,7 +112,15 @@ fn launched_release_server_duplicate_reservation_conflict_and_reconnect_preserve
         s["game_state"]["type"] == "running"
     });
     let id = admitted["your_id"].clone();
-    let start = own(&admitted);
+    first.send(
+        json!({"type":"buy_item", "item_id":"vitality_gem", "request_id":1,
+        "server_epoch":admitted["server_epoch"], "match_id":admitted["match_id"]}),
+    );
+    let purchased = wait(&mut first, &[&second], |s| {
+        own(s)["inventory"] == json!(["vitality_gem"])
+    });
+    assert_eq!(own(&purchased)["max_hp"], 130.0);
+    let start = own(&purchased);
     first.send(
         json!({"type":"transform","x":start["x"].as_f64().unwrap()+0.5,
         "y":0.5,"z":start["z"],"yaw":0.75}),
@@ -110,15 +133,12 @@ fn launched_release_server_duplicate_reservation_conflict_and_reconnect_preserve
             .any(|p| p["id"] == id && p["yaw"] == 0.75)
     });
     let before = own(&moved).clone();
+    let before_at = Instant::now();
     first.join("replacement-identity", "blue", "cube");
     let duplicate = wait(&mut first, &[&second], |s| {
         s["snapshot_tick"].as_u64() > moved["snapshot_tick"].as_u64()
     });
-    assert_eq!(
-        own(&duplicate),
-        &before,
-        "duplicate Join mutated authoritative gameplay"
-    );
+    assert_preserved_with_income(&before, own(&duplicate), before_at.elapsed().as_secs() + 1);
     let mut conflict = Peer::connect(server.addr());
     conflict.join("live-a", "blue", "cube");
     wait(&mut conflict, &[&first, &second], |s| {
@@ -126,8 +146,21 @@ fn launched_release_server_duplicate_reservation_conflict_and_reconnect_preserve
     });
     drop(conflict);
     drop(first);
+    // A silent socket remains joined until its timeout and earns gold. Keep
+    // the latest observed state rather than comparing with the older wallet.
+    let mut before_reservation = before;
     wait(&mut second, &[], |s| {
-        s["players"].as_array().unwrap().len() == 1
+        if let Some(player) = s["players"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["id"] == id)
+        {
+            before_reservation = player.clone();
+            false
+        } else {
+            true
+        }
     });
     let mut replacement = Peer::connect(server.addr());
     replacement.join("replacement", "green", "cube");
@@ -135,14 +168,17 @@ fn launched_release_server_duplicate_reservation_conflict_and_reconnect_preserve
         s["join_error"] == "match_full"
     });
     let mut reclaimed = Peer::connect(server.addr());
+    let reclaimed_at = Instant::now();
     reclaimed.join("live-a", "blue", "cube");
     let restored = wait(&mut reclaimed, &[&second], |s| {
         s["your_id"] == id && s["players"].as_array().unwrap().len() == 2
     });
-    assert_eq!(
+    // At most one income boundary can fall between the last live snapshot and
+    // timeout. Income resumes after reclaim; all other fields must be exact.
+    assert_preserved_with_income(
+        &before_reservation,
         own(&restored),
-        &before,
-        "reclaim reinitialized gameplay or loadout"
+        reclaimed_at.elapsed().as_secs() + 2,
     );
     assert_eq!(restored["join_error"], Value::Null);
     assert_eq!(restored["match_id"], admitted["match_id"]);

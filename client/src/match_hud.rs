@@ -3,13 +3,18 @@
 use bevy::prelude::*;
 
 use crate::combat::{CombatStats, TargetState};
-use crate::input_bindings::{help_key_display, skill_keys_display, upgrade_key_display};
+#[cfg(test)]
+use crate::input_bindings::upgrade_key_display;
+use crate::input_bindings::{help_key_display, skill_keys_display};
 use crate::net::{
     GameState, GameStateSnapshot, NetworkHeroClass, NetworkStructure, PlayerProgression,
-    StructureKind, TargetId, TargetKind, TeamBuffKind, TeamBuffState,
+    StructureKind, TeamBuffKind, TeamBuffState,
 };
+#[cfg(test)]
+use crate::net::{TargetId, TargetKind};
 use crate::player::Player;
 use crate::team::{Team, TeamSelection};
+#[cfg(test)]
 use shared::HeroClass;
 
 pub struct MatchHudPlugin;
@@ -17,7 +22,11 @@ pub struct MatchHudPlugin;
 impl Plugin for MatchHudPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup_match_hud)
-            .add_systems(Update, update_match_hud)
+            .add_systems(
+                Update,
+                (update_match_hud, update_hero_details)
+                    .after(crate::net::ClientNetPipeline::ApplySnapshot),
+            )
             .add_systems(
                 Update,
                 sync_gameplay_hud_visibility.after(crate::net::ClientNetPipeline::SyncConnectionUi),
@@ -35,8 +44,6 @@ struct MatchHudStatusText;
 #[derive(Component)]
 struct MatchHudBuffText;
 
-const BUFF_TEXT_COLOR: Color = Color::srgba(1.0, 0.82, 0.35, 1.0);
-
 /// Container for the HP/Mana bars; hidden until the match is running.
 #[derive(Component)]
 struct HudBarsRoot;
@@ -47,12 +54,6 @@ struct HpBarFill;
 #[derive(Component)]
 struct ManaBarFill;
 
-const HUD_LEFT: f32 = 16.0;
-/// Below the minimap (minimap top margin + outer size ~ 236px).
-const HUD_TOP: f32 = 248.0;
-
-const BAR_TRACK_WIDTH: f32 = 200.0;
-const BAR_HEIGHT: f32 = 14.0;
 const BAR_TRACK_COLOR: Color = Color::srgba(0.10, 0.11, 0.14, 0.92);
 const MANA_BAR_COLOR: Color = Color::srgb(0.30, 0.55, 0.95);
 
@@ -68,66 +69,193 @@ fn hp_bar_color(ratio: f32) -> Color {
 }
 
 fn setup_match_hud(mut commands: Commands) {
+    use crate::ui_theme as ui;
+    commands
+        .spawn((
+            Button,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(16.0),
+                bottom: Val::Px(16.0),
+                width: Val::Px(230.0),
+                height: Val::Px(150.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(6.0),
+                ..ui::panel_node()
+            },
+            BackgroundColor(ui::PANEL),
+            BorderColor::all(ui::EDGE),
+            ZIndex(12),
+            Name::new("MatchHudColumn"),
+        ))
+        .with_children(|panel| {
+            panel
+                .spawn((Node {
+                    column_gap: Val::Px(10.0),
+                    align_items: AlignItems::Center,
+                    ..default()
+                },))
+                .with_children(|row| {
+                    row.spawn((
+                        Node {
+                            width: Val::Px(44.0),
+                            height: Val::Px(44.0),
+                            flex_shrink: 0.0,
+                            border_radius: BorderRadius::all(Val::Px(22.0)),
+                            overflow: Overflow::clip(),
+                            border: UiRect::all(Val::Px(2.0)),
+                            ..default()
+                        },
+                        BorderColor::all(ui::GOLD),
+                        BackgroundColor(ui::TILE),
+                        HudPortrait,
+                        Name::new("HudHeroPortrait"),
+                    ));
+                    row.spawn((
+                        Text::new("YOUR HERO"),
+                        ui::text(15.0),
+                        TextColor(ui::IVORY),
+                        MatchHudProgressionText,
+                    ));
+                });
+            panel
+                .spawn((
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(5.0),
+                        ..default()
+                    },
+                    Visibility::Hidden,
+                    HudBarsRoot,
+                    Name::new("MatchHudBars"),
+                ))
+                .with_children(|bars| {
+                    spawn_stat_bar(bars, "HP", hp_bar_color(1.0), HpBarFill);
+                    spawn_stat_bar(bars, "MP", MANA_BAR_COLOR, ManaBarFill);
+                });
+            panel.spawn((
+                Text::new("XP 0 / 0"),
+                ui::text(12.0),
+                TextColor(ui::MUTED),
+                HudXpText,
+            ));
+        });
     commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(HUD_LEFT),
-                top: Val::Px(HUD_TOP),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(6.0),
-                width: Val::Px(356.0),
-                padding: UiRect::all(Val::Px(12.0)),
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(14.0),
+                justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.025, 0.045, 0.055, 0.92)),
+            Pickable::IGNORE,
             ZIndex(8),
-            Name::new("MatchHudColumn"),
+            Name::new("MatchObjectiveRoot"),
         ))
-        .with_children(|col| {
-            col.spawn((
-                Text::new("Level --   XP --/--   Skill points --"),
-                TextFont {
-                    font_size: 18.0,
-                    ..default()
-                },
-                TextColor::WHITE,
-                MatchHudProgressionText,
-            ));
-            col.spawn((
+        .with_children(|root| {
+            root.spawn((
+                Button,
                 Node {
+                    max_width: Val::Px(630.0),
                     flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(5.0),
-                    ..default()
+                    align_items: AlignItems::Center,
+                    row_gap: Val::Px(4.0),
+                    padding: UiRect::axes(Val::Px(18.0), Val::Px(10.0)),
+                    ..ui::panel_node()
                 },
-                Visibility::Hidden,
-                HudBarsRoot,
-                Name::new("MatchHudBars"),
+                BackgroundColor(ui::PANEL),
+                BorderColor::all(ui::EDGE),
+                Name::new("MatchObjectivePanel"),
             ))
-            .with_children(|bars| {
-                spawn_stat_bar(bars, "HP", hp_bar_color(1.0), HpBarFill);
-                spawn_stat_bar(bars, "Mana", MANA_BAR_COLOR, ManaBarFill);
+            .with_children(|panel| {
+                panel.spawn((
+                    Text::new(""),
+                    ui::text(15.0),
+                    TextColor(ui::IVORY),
+                    MatchHudStatusText,
+                ));
+                panel.spawn((
+                    Text::new(""),
+                    ui::text(13.0),
+                    TextColor(ui::GOLD),
+                    MatchHudBuffText,
+                ));
             });
-            col.spawn((
-                Text::new(""),
-                TextFont {
-                    font_size: 16.0,
-                    ..default()
-                },
-                TextColor(BUFF_TEXT_COLOR),
-                MatchHudBuffText,
-                Name::new("MatchHudBuffText"),
-            ));
-            col.spawn((
-                Text::new(""),
-                TextFont {
-                    font_size: 16.0,
-                    ..default()
-                },
-                TextColor(Color::srgba(0.88, 0.90, 0.94, 1.0)),
-                MatchHudStatusText,
-            ));
         });
+}
+
+#[derive(Component)]
+struct HudPortrait;
+#[derive(Component)]
+struct HudXpText;
+#[derive(Component)]
+struct HudResourceText(&'static str);
+
+fn update_hero_details(
+    mut commands: Commands,
+    assets: Res<AssetServer>,
+    player: Query<
+        (
+            &CombatStats,
+            &PlayerProgression,
+            Option<&crate::net::NetworkAvatar>,
+        ),
+        With<Player>,
+    >,
+    mut labels: Query<(&HudResourceText, &mut Text), Without<HudXpText>>,
+    mut xp: Query<&mut Text, (With<HudXpText>, Without<HudResourceText>)>,
+    portraits: Query<Entity, With<HudPortrait>>,
+    mut previous: Local<Option<String>>,
+) {
+    let Ok((stats, progression, avatar)) = player.single() else {
+        return;
+    };
+    for (label, mut text) in &mut labels {
+        text.0 = if label.0 == "HP" {
+            format!("{:.0} / {:.0}", stats.hp.max(0.0), stats.max_hp)
+        } else {
+            format!("{:.0} / {:.0}", stats.mana.max(0.0), stats.max_mana)
+        };
+    }
+    for mut text in &mut xp {
+        text.0 = if progression.next_level_xp == 0 {
+            "MAX LEVEL".into()
+        } else {
+            format!(
+                "XP {} / {}   |   {} points",
+                progression.xp, progression.next_level_xp, progression.skill_points
+            )
+        };
+    }
+    let slug = avatar
+        .and_then(|avatar| avatar.0.as_deref())
+        .unwrap_or("agnes");
+    if previous.as_deref() != Some(slug) {
+        *previous = Some(slug.to_owned());
+        for entity in &portraits {
+            commands.entity(entity).despawn_related::<Children>();
+            // A shipped portrait is preferred; the neutral hero silhouette is a
+            // deliberate fallback for the one roster entry without a thumbnail.
+            if let Some(file) =
+                shared::avatar_definition(slug).and_then(|avatar| avatar.thumbnail.as_deref())
+            {
+                commands
+                    .entity(entity)
+                    .insert(ImageNode::new(assets.load(format!("avatars/{file}"))));
+            } else {
+                commands.entity(entity).remove::<ImageNode>();
+                commands.entity(entity).with_children(|portrait| {
+                    portrait.spawn((
+                        Text::new("H"),
+                        crate::ui_theme::text(24.0),
+                        TextColor(crate::ui_theme::GOLD),
+                    ));
+                });
+            }
+        }
+    }
 }
 
 /// Keep entry and result cards clear; these controls only describe a live,
@@ -137,16 +265,22 @@ fn sync_gameplay_hud_visibility(
     session: Res<crate::net::ClientSession>,
     help: Option<Res<crate::help_overlay::HelpOverlayVisible>>,
     pause: Option<Res<crate::pause_menu::PauseMenuState>>,
+    shop: Option<Res<crate::shop::ShopState>>,
     mut roots: Query<(&Name, &mut Node, &mut Visibility), Without<ChildOf>>,
 ) {
     let show = session.join_confirmed()
         && matches!(game.state, GameState::Running)
         && !help.is_some_and(|help| help.0)
-        && !pause.is_some_and(|pause| pause.open);
+        && !pause.is_some_and(|pause| pause.open)
+        && !shop.is_some_and(|shop| shop.open);
     for (name, mut node, mut visibility) in &mut roots {
         if matches!(
             name.as_str(),
-            "MatchHudColumn" | "SkillBarRoot" | "ActionFeedback"
+            "MatchHudColumn"
+                | "SkillBarRoot"
+                | "ActionFeedback"
+                | "EquipmentHud"
+                | "MatchObjectiveRoot"
         ) {
             // Transient feedback owns its own empty/expired layout state.
             if name.as_str() != "ActionFeedback" {
@@ -163,51 +297,43 @@ fn sync_gameplay_hud_visibility(
 
 fn spawn_stat_bar<F: Component>(
     col: &mut ChildSpawnerCommands,
-    label: &str,
+    label: &'static str,
     fill_color: Color,
     fill_marker: F,
 ) {
     col.spawn((
         Node {
-            flex_direction: FlexDirection::Row,
+            width: Val::Percent(100.0),
+            height: Val::Px(19.0),
             align_items: AlignItems::Center,
-            column_gap: Val::Px(8.0),
+            justify_content: JustifyContent::Center,
+            border_radius: BorderRadius::all(Val::Px(3.0)),
+            overflow: Overflow::clip(),
             ..default()
         },
+        BackgroundColor(BAR_TRACK_COLOR),
         Name::new(format!("MatchHudBar-{label}")),
     ))
-    .with_children(|row| {
-        row.spawn((
-            Text::new(label),
-            TextFont {
-                font_size: 14.0,
-                ..default()
-            },
-            TextColor(Color::srgba(0.85, 0.87, 0.92, 1.0)),
+    .with_children(|track| {
+        track.spawn((
             Node {
-                width: Val::Px(44.0),
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
                 ..default()
             },
+            BackgroundColor(fill_color),
+            fill_marker,
         ));
-        row.spawn((
-            Node {
-                width: Val::Px(BAR_TRACK_WIDTH),
-                height: Val::Px(BAR_HEIGHT),
-                ..default()
-            },
-            BackgroundColor(BAR_TRACK_COLOR),
-        ))
-        .with_children(|track| {
-            track.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    ..default()
-                },
-                BackgroundColor(fill_color),
-                fill_marker,
-            ));
-        });
+        track.spawn((
+            Text::new("100 / 100"),
+            crate::ui_theme::text(12.0),
+            TextColor(Color::WHITE),
+            HudResourceText(label),
+            ZIndex(1),
+        ));
     });
 }
 
@@ -315,25 +441,11 @@ fn update_match_hud(
         }
     }
 
-    let up = upgrade_key_display();
-    if progression.next_level_xp == 0 {
-        prog_text.0 = format!(
-            "Level {}   XP MAX\nSkill points {}   Upgrade: {}",
-            progression.level.max(1),
-            progression.skill_points,
-            up
-        );
-    } else {
-        let displayed_xp = progression.xp.min(progression.next_level_xp);
-        prog_text.0 = format!(
-            "Level {}   XP {}/{}\nSkill points {}   Upgrade: {}",
-            progression.level.max(1),
-            displayed_xp,
-            progression.next_level_xp,
-            progression.skill_points,
-            up
-        );
-    }
+    prog_text.0 = format!(
+        "{}\nLEVEL {}",
+        hero_class.display_name(),
+        progression.level.max(1)
+    );
 
     if !running {
         status_text.0 = format!(
@@ -346,12 +458,14 @@ fn update_match_hud(
     }
 
     let objective_line = enemy_base_objective_line(&local_team, &enemy_bases);
-    status_text.0 = running_status_text(
-        *stats,
-        hero_class,
-        target_state.selected_target,
-        &objective_line,
-    );
+    let target = if !stats.is_alive() {
+        "Defeated - respawning soon"
+    } else if target_state.selected_target.is_some() {
+        "Target selected: Q attacks"
+    } else {
+        "Click a foe to attack  /  P shop  /  F1 help"
+    };
+    status_text.0 = format!("{}\n{target}", objective_line.replace("Goal: ", ""));
 }
 
 fn update_stat_bars(
@@ -408,6 +522,7 @@ fn team_buff_hud_text(buffs: &[TeamBuffState], local_team: Team) -> String {
 }
 
 /// Short effect summary for an ability tooltip line (single effect per ability).
+#[cfg(test)]
 fn running_status_text(
     stats: CombatStats,
     hero_class: HeroClass,

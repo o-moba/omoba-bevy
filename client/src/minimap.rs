@@ -1,26 +1,28 @@
+//! Tactical overlay. Detection affects enemy hero markers only; world rendering
+//! and network snapshots do not yet implement fog of war.
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
-use crate::camera::CameraState;
+use crate::camera::{CameraState, MainCamera};
 use crate::combat::CombatStats;
 use crate::maps::MapLayout;
-use crate::net::{ClientSession, NetworkMinion, NetworkStructure, RemotePlayer, StructureKind};
-use crate::player::PLAYER_SIZE;
-use crate::player::Player;
-use crate::team::Team;
+use crate::net::{
+    ClientSession, NetworkAvatar, NetworkHeroClass, NetworkMinion, NetworkSpriteCharacter,
+    NetworkStructure, RemotePlayer, StructureKind,
+};
+use crate::player::{PLAYER_SIZE, Player};
+use crate::sprite::{PlayerVisualMode, SpriteVisualAssets};
+use crate::team::{AvatarThumbnails, Team};
+use crate::ui_theme;
 
-const MINIMAP_MARGIN: f32 = 16.0;
-const MINIMAP_SIZE: f32 = 220.0;
-const MINIMAP_INNER_SIZE: f32 = 200.0;
-const MINIMAP_PADDING: f32 = (MINIMAP_SIZE - MINIMAP_INNER_SIZE) * 0.5;
-
-const PLAYER_ICON_SIZE: f32 = 6.0;
-const MINION_ICON_SIZE: f32 = 3.0;
-const TOWER_ICON_SIZE: f32 = 8.0;
-const BASE_ICON_SIZE: f32 = 12.0;
+const MINIMAP_SIZE: f32 = 252.0;
+const MINIMAP_INNER_SIZE: f32 = 232.0;
+const HERO_SIGHT: f32 = 32.0;
+const MINION_SIGHT: f32 = 22.0;
+const TOWER_SIGHT: f32 = 28.0;
+const BASE_SIGHT: f32 = 34.0;
 
 pub struct MinimapPlugin;
-
 impl Plugin for MinimapPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MinimapUiState>()
@@ -36,8 +38,10 @@ impl Plugin for MinimapPlugin {
                 PostUpdate,
                 (
                     update_minimap_icons_system,
-                    sync_minimap_visibility_for_session.after(update_minimap_icons_system),
-                ),
+                    sync_minimap_visibility_for_session,
+                    update_camera_footprint.after(bevy::camera::CameraUpdateSystems),
+                )
+                    .before(bevy::ui::UiSystems::Layout),
             );
     }
 }
@@ -47,222 +51,564 @@ pub struct MinimapNavigationState {
     pub focus_target: Option<Vec3>,
     pub consumed_primary_click: bool,
 }
-
 #[derive(Resource, Default)]
 struct MinimapUiState {
     container: Option<Entity>,
-    player_icons: HashMap<Entity, Entity>,
+    player_icons: HashMap<Entity, (Entity, String)>,
     structure_icons: HashMap<Entity, Entity>,
     minion_icons: HashMap<Entity, Entity>,
 }
-
 #[derive(Component)]
 struct MinimapRoot;
-
 #[derive(Component)]
 struct MinimapContainer;
-
 #[derive(Component)]
-struct MinimapIcon;
+struct CameraFootprintEdge(usize);
 
-fn setup_minimap_ui(mut commands: Commands, mut state: ResMut<MinimapUiState>) {
-    let mut container_entity = None;
+/// Read-only diagnostics for opt-in native QA. These inspect the actual UI
+/// entities and computed transforms; they do not fabricate marker fixtures.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct MinimapQaScene<'w, 's> {
+    state: Res<'w, MinimapUiState>,
+    nodes: Query<
+        'w,
+        's,
+        (
+            &'static Node,
+            &'static ComputedNode,
+            &'static UiGlobalTransform,
+            Option<&'static InheritedVisibility>,
+        ),
+    >,
+    edges: Query<'w, 's, (Entity, &'static CameraFootprintEdge)>,
+    heroes: Query<
+        'w,
+        's,
+        (&'static Team, Option<&'static Player>),
+        Or<(With<Player>, With<RemotePlayer>)>,
+    >,
+}
 
+impl MinimapQaScene<'_, '_> {
+    pub(crate) fn diagnostics(&self) -> serde_json::Value {
+        let rendered_rect = |entity| {
+            let (node, computed, transform, visibility) = self.nodes.get(entity).ok()?;
+            if node.display == Display::None || visibility.is_some_and(|value| !value.get()) {
+                return None;
+            }
+            container_rect(computed, transform)
+        };
+        let rect_json = |rect: Rect| [rect.min.x, rect.min.y, rect.max.x, rect.max.y];
+        let local_team = self
+            .heroes
+            .iter()
+            .find(|(_, player)| player.is_some())
+            .map(|(team, _)| *team);
+        let mut local = 0;
+        let mut allied = 0;
+        let mut enemy = 0;
+        let mut markers = Vec::new();
+        for (hero, (icon, _)) in &self.state.player_icons {
+            let (Some(rect), Ok((team, player))) = (rendered_rect(*icon), self.heroes.get(*hero))
+            else {
+                continue;
+            };
+            if player.is_some() {
+                local += 1;
+            } else if Some(*team) == local_team {
+                allied += 1;
+            } else {
+                enemy += 1;
+            }
+            markers.push(serde_json::json!({
+                "entity": hero.to_bits(), "team": format!("{team:?}"),
+                "local": player.is_some(), "rect": rect_json(rect),
+            }));
+        }
+        markers.sort_by_key(|marker| marker["entity"].as_u64());
+        let mut camera_edges = Vec::new();
+        for (entity, edge) in &self.edges {
+            if rendered_rect(entity).is_none() {
+                continue;
+            }
+            let (_, computed, transform, _) = self.nodes.get(entity).unwrap();
+            let half = computed.size() * 0.5;
+            let scale = computed.inverse_scale_factor();
+            let a = transform.transform_point2(Vec2::new(-half.x, 0.0)) * scale;
+            let b = transform.transform_point2(Vec2::new(half.x, 0.0)) * scale;
+            camera_edges.push(serde_json::json!({
+                "edge": edge.0, "a": [a.x, a.y], "b": [b.x, b.y],
+            }));
+        }
+        camera_edges.sort_by_key(|edge| edge["edge"].as_u64());
+        serde_json::json!({
+            "source": "computed Bevy minimap UI nodes in logical pixels",
+            "visibility_policy": "shared radial enemy hero minimap detection; no world or network fog",
+            "container_rect": self.state.container.and_then(rendered_rect).map(rect_json),
+            "hero_markers": {"local": local, "allied": allied, "enemy": enemy},
+            "marker_rects": markers,
+            "minion_markers": self.state.minion_icons.values().filter(|icon| rendered_rect(**icon).is_some()).count(),
+            "structure_markers": self.state.structure_icons.values().filter(|icon| rendered_rect(**icon).is_some()).count(),
+            "camera_edges": camera_edges,
+        })
+    }
+}
+
+fn setup_minimap_ui(
+    mut commands: Commands,
+    mut state: ResMut<MinimapUiState>,
+    layout: Res<MapLayout>,
+) {
     commands
         .spawn((
+            // Block world clicks on the decorative frame as well as the map.
+            Button,
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(MINIMAP_MARGIN),
-                top: Val::Px(MINIMAP_MARGIN),
+                right: Val::Px(16.0),
+                bottom: Val::Px(16.0),
                 width: Val::Px(MINIMAP_SIZE),
                 height: Val::Px(MINIMAP_SIZE),
-                padding: UiRect::all(Val::Px(MINIMAP_PADDING)),
+                padding: UiRect::all(Val::Px(9.0)),
                 border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(10.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.03, 0.04, 0.07, 0.80)),
-            BorderColor::all(Color::srgba(0.73, 0.78, 0.88, 0.65)),
+            BackgroundColor(ui_theme::PANEL),
+            BorderColor::all(ui_theme::EDGE),
+            ZIndex(8),
             MinimapRoot,
             Name::new("MinimapRoot"),
         ))
         .with_children(|parent| {
-            let container = parent
-                .spawn((
-                    Node {
-                        position_type: PositionType::Relative,
-                        width: Val::Px(MINIMAP_INNER_SIZE),
-                        height: Val::Px(MINIMAP_INNER_SIZE),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgba(0.08, 0.12, 0.10, 0.95)),
-                    MinimapContainer,
-                    Name::new("MinimapContainer"),
-                ))
-                .id();
-            container_entity = Some(container);
+            let mut map = parent.spawn((
+                Node {
+                    width: Val::Px(MINIMAP_INNER_SIZE),
+                    height: Val::Px(MINIMAP_INNER_SIZE),
+                    overflow: Overflow::clip(),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.055, 0.135, 0.115)),
+                MinimapContainer,
+                Name::new("MinimapContainer"),
+            ));
+            state.container = Some(map.id());
+            map.with_children(|map| {
+                for center in layout.jungle_block_centers() {
+                    let point = map_point(*layout, Vec3::new(center.x, 0.0, center.y));
+                    map.spawn((
+                        marker_node(point, 32.0),
+                        BackgroundColor(Color::srgb(0.07, 0.19, 0.145)),
+                    ));
+                }
+                let river = layout.river_polyline();
+                spawn_map_line(
+                    map,
+                    *layout,
+                    river[0],
+                    river[1],
+                    13.0,
+                    Color::srgb(0.08, 0.27, 0.29),
+                );
+                for lane in layout.lane_polylines() {
+                    for segment in lane.windows(2) {
+                        spawn_map_line(
+                            map,
+                            *layout,
+                            segment[0],
+                            segment[1],
+                            5.0,
+                            Color::srgb(0.40, 0.43, 0.29),
+                        );
+                    }
+                }
+                for edge in 0..4 {
+                    map.spawn((
+                        Node {
+                            display: Display::None,
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(1.0, 0.85, 0.24)),
+                        CameraFootprintEdge(edge),
+                        ZIndex(5),
+                        Name::new("MinimapCameraEdge"),
+                    ));
+                }
+            });
         });
+}
 
-    state.container = container_entity;
+fn spawn_map_line(
+    parent: &mut ChildSpawnerCommands,
+    layout: MapLayout,
+    a: Vec2,
+    b: Vec2,
+    width: f32,
+    color: Color,
+) {
+    let a = map_point(layout, Vec3::new(a.x, 0.0, a.y));
+    let b = map_point(layout, Vec3::new(b.x, 0.0, b.y));
+    let (node, transform) = line_node(a, b, width);
+    parent.spawn((node, transform, BackgroundColor(color)));
+}
+fn line_node(a: Vec2, b: Vec2, width: f32) -> (Node, UiTransform) {
+    let delta = b - a;
+    let middle = (a + b) * 0.5;
+    (
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(middle.x - delta.length() * 0.5),
+            top: Val::Px(middle.y - width * 0.5),
+            width: Val::Px(delta.length()),
+            height: Val::Px(width),
+            ..default()
+        },
+        UiTransform::from_rotation(Rot2::radians(delta.y.atan2(delta.x))),
+    )
+}
+fn marker_node(point: Vec2, size: f32) -> Node {
+    Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px((point.x - size * 0.5).clamp(0.0, MINIMAP_INNER_SIZE - size)),
+        top: Val::Px((point.y - size * 0.5).clamp(0.0, MINIMAP_INNER_SIZE - size)),
+        width: Val::Px(size),
+        height: Val::Px(size),
+        border_radius: BorderRadius::MAX,
+        ..default()
+    }
 }
 
 fn handle_minimap_navigation_system(
-    window_query: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    mouse_input: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    containers: Query<(&ComputedNode, &UiGlobalTransform), With<MinimapContainer>>,
+    mouse: Res<ButtonInput<MouseButton>>,
     touches: Res<Touches>,
-    map_layout: Res<MapLayout>,
-    mut cam_state: ResMut<CameraState>,
-    mut nav_state: ResMut<MinimapNavigationState>,
+    layout: Res<MapLayout>,
+    mut camera: ResMut<CameraState>,
+    mut navigation: ResMut<MinimapNavigationState>,
     context: Res<crate::input_context::GameplayInputContext>,
 ) {
-    nav_state.consumed_primary_click = false;
+    navigation.consumed_primary_click = false;
     if !context.gameplay_allowed() {
         return;
     }
-
-    let Ok(window) = window_query.single() else {
+    let (Ok(window), Ok((node, transform))) = (windows.single(), containers.single()) else {
         return;
     };
-
+    let Some(rect) = container_rect(node, transform) else {
+        return;
+    };
     if let Some(cursor) = window.cursor_position() {
-        let world_target = minimap_cursor_to_world(*map_layout, cursor);
-        if mouse_input.just_pressed(MouseButton::Left) && world_target.is_some() {
-            nav_state.consumed_primary_click = true;
+        let target = minimap_cursor_to_world(*layout, rect, cursor);
+        if mouse.just_pressed(MouseButton::Left) && target.is_some() {
+            navigation.consumed_primary_click = true;
         }
-        if mouse_input.pressed(MouseButton::Left) {
-            if let Some(target) = world_target {
-                nav_state.focus_target = Some(target);
-                cam_state.locked = true;
+        if mouse.pressed(MouseButton::Left) {
+            if let Some(target) = target {
+                navigation.focus_target = Some(target);
+                camera.locked = true;
             }
         }
     }
-
     for touch in touches.iter_just_pressed() {
-        if minimap_cursor_to_world(*map_layout, touch.position()).is_some() {
-            nav_state.consumed_primary_click = true;
+        if minimap_cursor_to_world(*layout, rect, touch.position()).is_some() {
+            navigation.consumed_primary_click = true;
         }
     }
     for touch in touches.iter() {
-        if let Some(target) = minimap_cursor_to_world(*map_layout, touch.position()) {
-            nav_state.focus_target = Some(target);
-            cam_state.locked = true;
+        if let Some(target) = minimap_cursor_to_world(*layout, rect, touch.position()) {
+            navigation.focus_target = Some(target);
+            camera.locked = true;
         }
     }
+}
+fn container_rect(node: &ComputedNode, transform: &UiGlobalTransform) -> Option<Rect> {
+    // Computed UI positions are physical pixels; input cursors are logical.
+    let scale = node.inverse_scale_factor();
+    let size = node.size() * scale;
+    (size.min_element() > 0.0).then(|| Rect::from_center_size(transform.translation * scale, size))
 }
 
 fn update_minimap_icons_system(
     mut commands: Commands,
-    map_layout: Res<MapLayout>,
+    layout: Res<MapLayout>,
     mut state: ResMut<MinimapUiState>,
-    local_players: Query<(Entity, &Transform, &Team, &CombatStats), With<Player>>,
-    remote_players: Query<
-        (Entity, &Transform, &Team, &CombatStats),
-        (With<RemotePlayer>, Without<Player>),
+    heroes: Query<
+        (
+            Entity,
+            &Transform,
+            &Team,
+            &CombatStats,
+            Option<&Player>,
+            Option<&NetworkAvatar>,
+            Option<&NetworkSpriteCharacter>,
+            Option<&NetworkHeroClass>,
+        ),
+        Or<(With<Player>, With<RemotePlayer>)>,
     >,
     structures: Query<
         (Entity, &Transform, &Team, &StructureKind, &CombatStats),
         With<NetworkStructure>,
     >,
     minions: Query<(Entity, &Transform, &Team, &CombatStats), With<NetworkMinion>>,
+    thumbnails: Res<AvatarThumbnails>,
+    sprites: Res<SpriteVisualAssets>,
+    mode: Res<PlayerVisualMode>,
 ) {
     let Some(container) = state.container else {
         return;
     };
-    let map_layout = *map_layout;
-
-    let mut seen_players = HashSet::new();
-    for (entity, transform, team, stats) in local_players.iter() {
-        if !stats.is_alive() {
-            continue;
+    let local_team = heroes
+        .iter()
+        .find(|hero| hero.4.is_some())
+        .map(|hero| *hero.2);
+    let mut observers = Vec::new();
+    for (_, transform, team, stats, ..) in &heroes {
+        if Some(*team) == local_team && stats.is_alive() {
+            observers.push((transform.translation.xz(), HERO_SIGHT));
         }
-        seen_players.insert(entity);
-        sync_minimap_icon(
-            &mut commands,
-            container,
-            &mut state.player_icons,
-            entity,
-            transform.translation,
-            PLAYER_ICON_SIZE,
-            player_color(*team, true),
-            map_layout,
-            "MinimapLocalPlayer",
-        );
     }
-    for (entity, transform, team, stats) in remote_players.iter() {
-        if !stats.is_alive() {
-            continue;
+    for (_, transform, team, stats) in &minions {
+        if Some(*team) == local_team && stats.is_alive() {
+            observers.push((transform.translation.xz(), MINION_SIGHT));
         }
-        seen_players.insert(entity);
-        sync_minimap_icon(
-            &mut commands,
-            container,
-            &mut state.player_icons,
-            entity,
-            transform.translation,
-            PLAYER_ICON_SIZE,
-            player_color(*team, false),
-            map_layout,
-            "MinimapRemotePlayer",
-        );
     }
-    despawn_removed_icons(&mut commands, &mut state.player_icons, &seen_players);
-
-    let mut seen_structures = HashSet::new();
-    for (entity, transform, team, kind, stats) in structures.iter() {
-        if !stats.is_alive() {
+    for (_, transform, team, kind, stats) in &structures {
+        if Some(*team) == local_team && stats.is_alive() {
+            observers.push((
+                transform.translation.xz(),
+                match kind {
+                    StructureKind::Tower => TOWER_SIGHT,
+                    StructureKind::BaseTower => BASE_SIGHT,
+                },
+            ));
+        }
+    }
+    let mut seen = HashSet::new();
+    for (entity, transform, team, stats, local, avatar, sprite, class) in &heroes {
+        if !hero_marker_visible(
+            local_team,
+            *team,
+            stats.is_alive(),
+            transform.translation.xz(),
+            &observers,
+        ) {
             continue;
         }
-        seen_structures.insert(entity);
-        let icon_size = match kind {
-            StructureKind::Tower => TOWER_ICON_SIZE,
-            StructureKind::BaseTower => BASE_ICON_SIZE,
+        seen.insert(entity);
+        let is_local = local.is_some();
+        let slug = avatar.and_then(|avatar| avatar.0.as_deref());
+        let sprite_id = sprite
+            .and_then(|sprite| sprite.0.as_deref())
+            .unwrap_or(shared::DEFAULT_SPRITE_CHARACTER_ID);
+        let thumbnail = slug.and_then(|slug| thumbnails.0.get(slug));
+        let key = format!(
+            "{mode:?}:{team:?}:{is_local}:{slug:?}:{sprite_id}:{:?}:{:?}",
+            class.map(|class| class.0),
+            thumbnail.map(Handle::id),
+        );
+        let size = if is_local { 30.0 } else { 24.0 };
+        let mut node = marker_node(map_point(*layout, transform.translation), size);
+        node.border = UiRect::all(Val::Px(if is_local { 2.5 } else { 2.0 }));
+        node.justify_content = JustifyContent::Center;
+        node.align_items = AlignItems::Center;
+        if let Some((icon, previous_key)) = state.player_icons.get(&entity) {
+            if previous_key == &key {
+                commands.entity(*icon).insert(node);
+                continue;
+            }
+            commands.entity(*icon).despawn();
+        }
+        let mut image = if *mode == PlayerVisualMode::Sprite2d {
+            let index = shared::sprite_character_roster()
+                .iter()
+                .position(|entry| entry.id == sprite_id)
+                .unwrap_or(0);
+            let (image, layout, index) = sprites.portrait(index);
+            Some(ImageNode::from_atlas_image(
+                image,
+                TextureAtlas { layout, index },
+            ))
+        } else {
+            thumbnail.map(|image| ImageNode::new(image.clone()))
         };
-        sync_minimap_icon(
+        if let Some(image) = image.as_mut() {
+            image.image_mode = NodeImageMode::Stretch;
+        }
+        let fallback = slug
+            .and_then(|slug| slug.chars().next())
+            .map(|c| c.to_ascii_uppercase().to_string())
+            .unwrap_or_else(|| {
+                match class.map(|class| class.0) {
+                    Some(shared::HeroClass::Mage) => "M",
+                    Some(shared::HeroClass::Cleric) => "C",
+                    Some(shared::HeroClass::Ranger) => "R",
+                    _ => "W",
+                }
+                .to_owned()
+            });
+        let icon = commands
+            .spawn((
+                node,
+                BackgroundColor(if is_local {
+                    ui_theme::GOLD
+                } else {
+                    team_color(*team)
+                }),
+                BorderColor::all(if is_local {
+                    ui_theme::GOLD
+                } else {
+                    team_color(*team)
+                }),
+                ZIndex(if is_local { 20 } else { 10 }),
+                Name::new(if is_local {
+                    "MinimapLocalPlayer"
+                } else {
+                    "MinimapRemotePlayer"
+                }),
+                ChildOf(container),
+            ))
+            .with_children(|parent| {
+                let mut portrait = parent.spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(100.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        border: UiRect::all(Val::Px(if is_local { 2.0 } else { 0.0 })),
+                        border_radius: BorderRadius::MAX,
+                        ..default()
+                    },
+                    BackgroundColor(ui_theme::PANEL),
+                    BorderColor::all(team_color(*team)),
+                    Name::new("MinimapHeroPortrait"),
+                ));
+                if let Some(image) = image {
+                    portrait.insert(image);
+                } else {
+                    portrait.with_children(|portrait| {
+                        portrait.spawn((
+                            Text::new(fallback),
+                            ui_theme::text(12.0),
+                            TextColor(ui_theme::IVORY),
+                        ));
+                    });
+                }
+            })
+            .id();
+        state.player_icons.insert(entity, (icon, key));
+    }
+    state.player_icons.retain(|entity, (icon, _)| {
+        if seen.contains(entity) {
+            true
+        } else {
+            commands.entity(*icon).despawn();
+            false
+        }
+    });
+    let mut seen = HashSet::new();
+    for (entity, transform, team, kind, stats) in &structures {
+        if !stats.is_alive() {
+            continue;
+        }
+        seen.insert(entity);
+        let size = match kind {
+            StructureKind::Tower => 8.0,
+            StructureKind::BaseTower => 12.0,
+        };
+        sync_dot(
             &mut commands,
             container,
             &mut state.structure_icons,
             entity,
-            transform.translation,
-            icon_size,
-            structure_color(*team, *kind),
-            map_layout,
+            map_point(*layout, transform.translation),
+            size,
+            team_color(*team),
             "MinimapStructure",
         );
     }
-    despawn_removed_icons(&mut commands, &mut state.structure_icons, &seen_structures);
-
-    let mut seen_minions = HashSet::new();
-    for (entity, transform, team, stats) in minions.iter() {
+    despawn_removed_icons(&mut commands, &mut state.structure_icons, &seen);
+    let mut seen = HashSet::new();
+    for (entity, transform, team, stats) in &minions {
         if !stats.is_alive() {
             continue;
         }
-        seen_minions.insert(entity);
-        sync_minimap_icon(
+        seen.insert(entity);
+        sync_dot(
             &mut commands,
             container,
             &mut state.minion_icons,
             entity,
-            transform.translation,
-            MINION_ICON_SIZE,
-            minion_color(*team),
-            map_layout,
+            map_point(*layout, transform.translation),
+            3.5,
+            team_color(*team),
             "MinimapMinion",
         );
     }
-    despawn_removed_icons(&mut commands, &mut state.minion_icons, &seen_minions);
+    despawn_removed_icons(&mut commands, &mut state.minion_icons, &seen);
 }
-
-fn sync_minimap_visibility_for_session(
-    client_session: Res<ClientSession>,
-    mut roots: Query<(&mut Visibility, &mut Node), With<MinimapRoot>>,
+fn hero_marker_visible(
+    local_team: Option<Team>,
+    team: Team,
+    alive: bool,
+    position: Vec2,
+    observers: &[(Vec2, f32)],
+) -> bool {
+    alive
+        && local_team.is_some()
+        && (local_team == Some(team)
+            || observers
+                .iter()
+                .any(|(origin, radius)| position.distance_squared(*origin) <= radius * radius))
+}
+fn sync_dot(
+    commands: &mut Commands,
+    container: Entity,
+    icons: &mut HashMap<Entity, Entity>,
+    world: Entity,
+    point: Vec2,
+    size: f32,
+    color: Color,
+    name: &'static str,
 ) {
-    let vis = if client_session.join_confirmed() {
-        Visibility::Visible
+    let node = marker_node(point, size);
+    if let Some(icon) = icons.get(&world) {
+        commands
+            .entity(*icon)
+            .insert((node, BackgroundColor(color)));
     } else {
-        Visibility::Hidden
-    };
-    for (mut visibility, mut node) in &mut roots {
-        *visibility = vis;
-        node.display = if client_session.join_confirmed() {
+        let icon = commands
+            .spawn((
+                node,
+                BackgroundColor(color),
+                ZIndex(2),
+                Name::new(name),
+                ChildOf(container),
+            ))
+            .id();
+        icons.insert(world, icon);
+    }
+}
+fn despawn_removed_icons(
+    commands: &mut Commands,
+    icons: &mut HashMap<Entity, Entity>,
+    seen: &HashSet<Entity>,
+) {
+    icons.retain(|entity, icon| {
+        if seen.contains(entity) {
+            true
+        } else {
+            commands.entity(*icon).despawn();
+            false
+        }
+    });
+}
+fn sync_minimap_visibility_for_session(
+    session: Res<ClientSession>,
+    mut roots: Query<&mut Node, With<MinimapRoot>>,
+) {
+    for mut node in &mut roots {
+        node.display = if session.join_confirmed() {
             Display::Flex
         } else {
             Display::None
@@ -270,175 +616,543 @@ fn sync_minimap_visibility_for_session(
     }
 }
 
-fn sync_minimap_icon(
-    commands: &mut Commands,
-    container: Entity,
-    icon_map: &mut HashMap<Entity, Entity>,
-    world_entity: Entity,
-    world_pos: Vec3,
-    icon_size: f32,
-    color: Color,
-    map_layout: MapLayout,
-    icon_name: &str,
-) {
-    let (left, top) = world_to_minimap(map_layout, world_pos, icon_size);
-
-    if let Some(icon_entity) = icon_map.get(&world_entity).copied() {
-        let mut icon_commands = commands.entity(icon_entity);
-        icon_commands.insert((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(left),
-                top: Val::Px(top),
-                width: Val::Px(icon_size),
-                height: Val::Px(icon_size),
-                ..default()
-            },
-            BackgroundColor(color),
-            Visibility::Visible,
-        ));
-        return;
+/// Unclamped projection also serves footprint clipping; clamping its endpoints
+/// independently would distort off-map camera edges.
+fn map_point(layout: MapLayout, world: Vec3) -> Vec2 {
+    let normalized = (world.xz() - layout.min) / layout.size();
+    Vec2::new(normalized.y, 1.0 - normalized.x) * MINIMAP_INNER_SIZE
+}
+fn minimap_cursor_to_world(layout: MapLayout, rect: Rect, cursor: Vec2) -> Option<Vec3> {
+    if !rect.contains(cursor) || rect.size().min_element() <= 0.0 {
+        return None;
     }
-
-    let mut created = None;
-    commands.entity(container).with_children(|parent| {
-        let icon = parent.spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(left),
-                top: Val::Px(top),
-                width: Val::Px(icon_size),
-                height: Val::Px(icon_size),
-                ..default()
-            },
-            BackgroundColor(color),
-            MinimapIcon,
-            Name::new(icon_name.to_owned()),
-        ));
-        created = Some(icon.id());
-    });
-
-    if let Some(icon_entity) = created {
-        icon_map.insert(world_entity, icon_entity);
+    let normalized = (cursor - rect.min) / rect.size();
+    let world = layout.min + Vec2::new(1.0 - normalized.y, normalized.x) * layout.size();
+    Some(layout.clamp_position(Vec3::new(world.x, PLAYER_SIZE * 0.5, world.y)))
+}
+fn team_color(team: Team) -> Color {
+    match team {
+        Team::Green => Color::srgb(0.30, 0.93, 0.58),
+        Team::Blue => Color::srgb(0.35, 0.65, 1.0),
     }
 }
-
-fn despawn_removed_icons(
-    commands: &mut Commands,
-    icon_map: &mut HashMap<Entity, Entity>,
-    seen: &HashSet<Entity>,
+fn update_camera_footprint(
+    mut commands: Commands,
+    cameras: Query<(Entity, &Camera), With<MainCamera>>,
+    transforms: bevy::transform::helper::TransformHelper,
+    edges: Query<(Entity, &CameraFootprintEdge)>,
+    layout: Res<MapLayout>,
+    mode: Res<PlayerVisualMode>,
 ) {
-    let stale_entities = icon_map
-        .keys()
-        .copied()
-        .filter(|entity| !seen.contains(entity))
-        .collect::<Vec<_>>();
-
-    for stale_entity in stale_entities {
-        if let Some(icon_entity) = icon_map.remove(&stale_entity) {
-            commands.entity(icon_entity).despawn();
+    let corners = cameras.single().ok().and_then(|(entity, camera)| {
+        // Bevy UI layout precedes TransformSystems::Propagate. Resolve
+        // this camera's current pose directly so its footprint reaches
+        // this frame's layout without a scheduling cycle or frame lag.
+        let transform = transforms.compute_global_transform(entity).ok()?;
+        camera_ground_corners(camera, &transform, *mode)
+    });
+    for (entity, edge) in &edges {
+        let segment = corners.and_then(|corners| {
+            clip_map_segment(
+                map_point(*layout, corners[edge.0]),
+                map_point(*layout, corners[(edge.0 + 1) % 4]),
+            )
+        });
+        if let Some((a, b)) = segment {
+            let (node, transform) = line_node(a, b, 1.8);
+            commands.entity(entity).insert((node, transform));
+        } else {
+            commands.entity(entity).insert(Node {
+                display: Display::None,
+                ..default()
+            });
         }
     }
 }
-
-fn world_to_minimap(layout: MapLayout, world_pos: Vec3, icon_size: f32) -> (f32, f32) {
-    let map_size = layout.size();
-    let normalized_x = ((world_pos.x - layout.min.x) / map_size.x.max(0.001)).clamp(0.0, 1.0);
-    let normalized_z = ((world_pos.z - layout.min.y) / map_size.y.max(0.001)).clamp(0.0, 1.0);
-
-    // Base orientation chosen to match team side placement and movement direction.
-    let base_x = 1.0 - normalized_x;
-    let base_y = 1.0 - normalized_z;
-
-    // Rotate minimap projection 90 degrees clockwise around the minimap center.
-    let theta = std::f32::consts::FRAC_PI_2;
-    let cos_t = theta.cos();
-    let sin_t = theta.sin();
-
-    let centered_x = base_x - 0.5;
-    let centered_y_up = 0.5 - base_y;
-    let rotated_x = centered_x * cos_t + centered_y_up * sin_t;
-    let rotated_y_up = -centered_x * sin_t + centered_y_up * cos_t;
-
-    let rotated_x_norm = rotated_x + 0.5;
-    let rotated_y_norm = 0.5 - rotated_y_up;
-
-    let left = (rotated_x_norm * MINIMAP_INNER_SIZE - icon_size * 0.5)
-        .clamp(0.0, MINIMAP_INNER_SIZE - icon_size);
-    let top = (rotated_y_norm * MINIMAP_INNER_SIZE - icon_size * 0.5)
-        .clamp(0.0, MINIMAP_INNER_SIZE - icon_size);
-
-    (left, top)
+fn camera_ground_corners(
+    camera: &Camera,
+    transform: &GlobalTransform,
+    mode: PlayerVisualMode,
+) -> Option<[Vec3; 4]> {
+    let viewport = camera.logical_viewport_rect()?;
+    let pixels = [
+        viewport.min,
+        Vec2::new(viewport.max.x, viewport.min.y),
+        viewport.max,
+        Vec2::new(viewport.min.x, viewport.max.y),
+    ];
+    let mut corners = [Vec3::ZERO; 4];
+    for (index, pixel) in pixels.into_iter().enumerate() {
+        if mode == PlayerVisualMode::Sprite2d {
+            let world = camera.viewport_to_world_2d(transform, pixel).ok()?;
+            corners[index] = crate::world2d::render_xy_to_simulation_xz(world, 0.0);
+        } else {
+            let ray = camera.viewport_to_world(transform, pixel).ok()?;
+            corners[index] = ray_ground_point(ray.origin, *ray.direction)?;
+        }
+    }
+    Some(corners)
 }
-
-fn minimap_cursor_to_world(layout: MapLayout, cursor_pos: Vec2) -> Option<Vec3> {
-    let inner_left = MINIMAP_MARGIN + MINIMAP_PADDING;
-    let inner_top = MINIMAP_MARGIN + MINIMAP_PADDING;
-    let inner_right = inner_left + MINIMAP_INNER_SIZE;
-    let inner_bottom = inner_top + MINIMAP_INNER_SIZE;
-
-    if cursor_pos.x < inner_left
-        || cursor_pos.x > inner_right
-        || cursor_pos.y < inner_top
-        || cursor_pos.y > inner_bottom
-    {
+fn ray_ground_point(origin: Vec3, direction: Vec3) -> Option<Vec3> {
+    if direction.y >= -0.00001 {
         return None;
     }
-
-    let rotated_x_norm = ((cursor_pos.x - inner_left) / MINIMAP_INNER_SIZE).clamp(0.0, 1.0);
-    let rotated_y_norm = ((cursor_pos.y - inner_top) / MINIMAP_INNER_SIZE).clamp(0.0, 1.0);
-
-    let rotated_x = rotated_x_norm - 0.5;
-    let rotated_y_up = 0.5 - rotated_y_norm;
-
-    let theta = std::f32::consts::FRAC_PI_2;
-    let cos_t = theta.cos();
-    let sin_t = theta.sin();
-    let centered_x = rotated_x * cos_t - rotated_y_up * sin_t;
-    let centered_y_up = rotated_x * sin_t + rotated_y_up * cos_t;
-
-    let base_x = centered_x + 0.5;
-    let base_y = 0.5 - centered_y_up;
-    let normalized_x = (1.0 - base_x).clamp(0.0, 1.0);
-    let normalized_z = (1.0 - base_y).clamp(0.0, 1.0);
-
-    let map_size = layout.size();
-    let world_x = layout.min.x + normalized_x * map_size.x;
-    let world_z = layout.min.y + normalized_z * map_size.y;
-    let clamped = layout.clamp_position(Vec3::new(world_x, PLAYER_SIZE * 0.5, world_z));
-    Some(clamped)
+    let distance = -origin.y / direction.y;
+    let point = origin + direction * distance;
+    (distance >= 0.0 && point.is_finite()).then_some(point)
 }
-
-fn player_color(team: Team, is_local: bool) -> Color {
-    match (team, is_local) {
-        (Team::Green, true) => Color::srgba(0.45, 1.0, 0.55, 1.0),
-        (Team::Blue, true) => Color::srgba(0.50, 0.74, 1.0, 1.0),
-        (Team::Green, false) => Color::srgba(0.18, 0.86, 0.30, 0.95),
-        (Team::Blue, false) => Color::srgba(0.24, 0.50, 0.96, 0.95),
+/// Liang–Barsky clipping preserves rotated camera edges at the arena border.
+fn clip_map_segment(a: Vec2, b: Vec2) -> Option<(Vec2, Vec2)> {
+    if !a.is_finite() || !b.is_finite() {
+        return None;
     }
-}
-
-fn minion_color(team: Team) -> Color {
-    match team {
-        Team::Green => Color::srgba(0.30, 0.84, 0.34, 0.92),
-        Team::Blue => Color::srgba(0.35, 0.59, 0.98, 0.92),
+    let delta = b - a;
+    let mut enter: f32 = 0.0;
+    let mut leave: f32 = 1.0;
+    for (p, q) in [
+        (-delta.x, a.x),
+        (delta.x, MINIMAP_INNER_SIZE - a.x),
+        (-delta.y, a.y),
+        (delta.y, MINIMAP_INNER_SIZE - a.y),
+    ] {
+        if p.abs() < 0.00001 {
+            if q < 0.0 {
+                return None;
+            }
+        } else if p < 0.0 {
+            enter = enter.max(q / p);
+        } else {
+            leave = leave.min(q / p);
+        }
     }
-}
-
-fn structure_color(team: Team, kind: StructureKind) -> Color {
-    match (team, kind) {
-        (Team::Green, StructureKind::Tower) => Color::srgba(0.22, 0.72, 0.30, 0.95),
-        (Team::Blue, StructureKind::Tower) => Color::srgba(0.26, 0.47, 0.88, 0.95),
-        (Team::Green, StructureKind::BaseTower) => Color::srgba(0.66, 1.0, 0.64, 1.0),
-        (Team::Blue, StructureKind::BaseTower) => Color::srgba(0.70, 0.84, 1.0, 1.0),
-    }
+    (enter <= leave).then_some((a + delta * enter, a + delta * leave))
 }
 
 #[cfg(test)]
-mod input_tests {
+mod tests {
     use super::*;
     use crate::input_context::GameplayInputContext;
 
+    fn marker_app() -> App {
+        let mut app = App::new();
+        app.init_resource::<MapLayout>()
+            .init_resource::<MinimapUiState>()
+            .init_resource::<AvatarThumbnails>()
+            .init_resource::<SpriteVisualAssets>()
+            .init_resource::<PlayerVisualMode>()
+            .add_systems(Update, update_minimap_icons_system);
+        let container = app
+            .world_mut()
+            .spawn((Node::default(), MinimapContainer))
+            .id();
+        app.world_mut().resource_mut::<MinimapUiState>().container = Some(container);
+        app
+    }
+
+    #[test]
+    fn minimap_schedule_works_with_bevys_camera_layout_transform_order() {
+        let mut app = App::new();
+        app.init_resource::<MapLayout>()
+            .init_resource::<AvatarThumbnails>()
+            .init_resource::<SpriteVisualAssets>()
+            .init_resource::<PlayerVisualMode>()
+            .init_resource::<ClientSession>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<Touches>()
+            .init_resource::<CameraState>()
+            .init_resource::<GameplayInputContext>()
+            .add_plugins(MinimapPlugin)
+            // This is the real Bevy UI constraint that a standalone marker
+            // system test would miss: UI layout precedes transform propagation.
+            .configure_sets(
+                PostUpdate,
+                (
+                    bevy::camera::CameraUpdateSystems,
+                    bevy::ui::UiSystems::Layout,
+                    bevy::transform::TransformSystems::Propagate,
+                )
+                    .chain(),
+            )
+            .add_systems(
+                PostUpdate,
+                (
+                    (|| {}).in_set(bevy::ui::UiSystems::Layout),
+                    (|| {}).in_set(bevy::transform::TransformSystems::Propagate),
+                ),
+            );
+        app.update();
+        assert!(app.world().resource::<MinimapUiState>().container.is_some());
+    }
+
+    fn spawn_hero(app: &mut App, local: bool, team: Team, position: Vec3, hp: f32) -> Entity {
+        let mut entity = app.world_mut().spawn((
+            team,
+            Transform::from_translation(position),
+            CombatStats { hp, ..default() },
+            NetworkHeroClass(shared::HeroClass::Ranger),
+        ));
+        if local {
+            entity.insert(Player);
+        } else {
+            entity.insert(RemotePlayer);
+        }
+        entity.id()
+    }
+
+    fn has_hero_marker(app: &App, hero: Entity) -> bool {
+        app.world()
+            .resource::<MinimapUiState>()
+            .player_icons
+            .contains_key(&hero)
+    }
+
+    #[test]
+    fn actual_marker_system_uses_only_living_allied_observers_of_every_supported_kind() {
+        for (kind, sight) in [
+            ("hero", HERO_SIGHT),
+            ("minion", MINION_SIGHT),
+            ("tower", TOWER_SIGHT),
+            ("base", BASE_SIGHT),
+        ] {
+            let mut app = marker_app();
+            // A dead local hero still shares its living team's vision, but
+            // cannot itself reveal the nearby enemy being tested.
+            spawn_hero(&mut app, true, Team::Green, Vec3::ZERO, 0.0);
+            let enemy = spawn_hero(
+                &mut app,
+                false,
+                Team::Blue,
+                Vec3::new(sight, 0.0, 0.0),
+                100.0,
+            );
+            let mut observer =
+                app.world_mut()
+                    .spawn((Team::Green, Transform::default(), CombatStats::default()));
+            match kind {
+                "hero" => {
+                    observer.insert(RemotePlayer);
+                }
+                "minion" => {
+                    observer.insert(NetworkMinion);
+                }
+                "tower" => {
+                    observer.insert((NetworkStructure, StructureKind::Tower));
+                }
+                "base" => {
+                    observer.insert((NetworkStructure, StructureKind::BaseTower));
+                }
+                _ => unreachable!(),
+            }
+            let observer = observer.id();
+            app.update();
+            assert!(
+                has_hero_marker(&app, enemy),
+                "{kind} should reveal at its radius"
+            );
+
+            app.world_mut()
+                .get_mut::<Transform>(enemy)
+                .unwrap()
+                .translation
+                .x += 0.01;
+            app.update();
+            assert!(
+                !has_hero_marker(&app, enemy),
+                "{kind} must respect its own radius"
+            );
+            app.world_mut()
+                .get_mut::<Transform>(enemy)
+                .unwrap()
+                .translation
+                .x = sight;
+
+            app.world_mut().get_mut::<CombatStats>(observer).unwrap().hp = 0.0;
+            app.update();
+            assert!(!has_hero_marker(&app, enemy), "dead {kind} cannot reveal");
+
+            app.world_mut().get_mut::<CombatStats>(observer).unwrap().hp = 100.0;
+            *app.world_mut().get_mut::<Team>(observer).unwrap() = Team::Blue;
+            app.update();
+            assert!(!has_hero_marker(&app, enemy), "enemy {kind} cannot reveal");
+
+            *app.world_mut().get_mut::<Team>(observer).unwrap() = Team::Green;
+            app.update();
+            assert!(has_hero_marker(&app, enemy));
+            app.world_mut().despawn(observer);
+            app.update();
+            assert!(
+                !has_hero_marker(&app, enemy),
+                "removed {kind} leaves no stale vision"
+            );
+        }
+    }
+
+    #[test]
+    fn allies_are_shared_out_of_range_but_dead_heroes_and_missing_local_team_have_no_markers() {
+        let mut app = marker_app();
+        let local = spawn_hero(&mut app, true, Team::Green, Vec3::ZERO, 100.0);
+        let ally = spawn_hero(&mut app, false, Team::Green, Vec3::splat(200.0), 100.0);
+        let enemy = spawn_hero(&mut app, false, Team::Blue, Vec3::X, 100.0);
+        app.update();
+        assert!(has_hero_marker(&app, local));
+        assert!(has_hero_marker(&app, ally));
+        assert!(has_hero_marker(&app, enemy));
+        for hero in [ally, enemy] {
+            app.world_mut().get_mut::<CombatStats>(hero).unwrap().hp = 0.0;
+        }
+        app.update();
+        assert!(has_hero_marker(&app, local));
+        assert!(!has_hero_marker(&app, ally));
+        assert!(!has_hero_marker(&app, enemy));
+        app.world_mut().despawn(local);
+        app.world_mut().get_mut::<CombatStats>(ally).unwrap().hp = 100.0;
+        app.update();
+        assert!(
+            app.world()
+                .resource::<MinimapUiState>()
+                .player_icons
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn portraits_keep_round_team_rings_local_halo_and_recover_from_missing_thumbnail() {
+        let mut app = marker_app();
+        let local = spawn_hero(&mut app, true, Team::Green, Vec3::ZERO, 100.0);
+        let ally = spawn_hero(&mut app, false, Team::Green, Vec3::X, 100.0);
+        let enemy = spawn_hero(&mut app, false, Team::Blue, Vec3::Z, 100.0);
+        app.world_mut()
+            .entity_mut(ally)
+            .insert(NetworkAvatar(Some("agnes".to_owned())));
+        app.world_mut()
+            .entity_mut(enemy)
+            .insert(NetworkAvatar(Some("unavailable-avatar".to_owned())));
+        app.world_mut()
+            .resource_mut::<AvatarThumbnails>()
+            .0
+            .insert("agnes".to_owned(), Handle::default());
+        app.update();
+
+        for (hero, team, is_local, has_image, fallback) in [
+            (local, Team::Green, true, false, "R"),
+            (ally, Team::Green, false, true, ""),
+            (enemy, Team::Blue, false, false, "U"),
+        ] {
+            let (icon, _) = app.world().resource::<MinimapUiState>().player_icons[&hero];
+            let icon = app.world().entity(icon);
+            let node = icon.get::<Node>().unwrap();
+            assert_eq!(node.border_radius, BorderRadius::MAX);
+            assert_eq!(node.width, Val::Px(if is_local { 30.0 } else { 24.0 }));
+            assert_eq!(
+                *icon.get::<BorderColor>().unwrap(),
+                BorderColor::all(if is_local {
+                    ui_theme::GOLD
+                } else {
+                    team_color(team)
+                })
+            );
+            let portrait = app.world().entity(icon.get::<Children>().unwrap()[0]);
+            let portrait_node = portrait.get::<Node>().unwrap();
+            assert_eq!(portrait_node.border_radius, BorderRadius::MAX);
+            assert_eq!(
+                *portrait.get::<BorderColor>().unwrap(),
+                BorderColor::all(team_color(team))
+            );
+            assert_eq!(
+                portrait_node.border,
+                UiRect::all(Val::Px(if is_local { 2.0 } else { 0.0 }))
+            );
+            assert_eq!(portrait.get::<ImageNode>().is_some(), has_image);
+            if !has_image {
+                let text = app.world().entity(portrait.get::<Children>().unwrap()[0]);
+                assert_eq!(text.get::<Text>().unwrap().0, fallback);
+            }
+        }
+
+        let old_icon = app.world().resource::<MinimapUiState>().player_icons[&enemy].0;
+        app.world_mut()
+            .resource_mut::<AvatarThumbnails>()
+            .0
+            .insert("unavailable-avatar".to_owned(), Handle::default());
+        app.update();
+        let new_icon = app.world().resource::<MinimapUiState>().player_icons[&enemy].0;
+        assert_ne!(old_icon, new_icon);
+        assert!(app.world().get_entity(old_icon).is_err());
+        let portrait = app.world().entity(new_icon).get::<Children>().unwrap()[0];
+        assert!(app.world().entity(portrait).get::<ImageNode>().is_some());
+    }
+
+    #[test]
+    fn qa_diagnostics_reports_computed_dpi_and_rotated_edges_and_excludes_hidden_nodes() {
+        let mut app = marker_app();
+        let local = spawn_hero(&mut app, true, Team::Green, Vec3::ZERO, 100.0);
+        app.update();
+        let state = app.world().resource::<MinimapUiState>();
+        let container = state.container.unwrap();
+        let icon = state.player_icons[&local].0;
+        for (entity, size) in [(container, 464.0), (icon, 60.0)] {
+            app.world_mut().entity_mut(entity).insert((
+                ComputedNode {
+                    size: Vec2::splat(size),
+                    inverse_scale_factor: 0.5,
+                    ..default()
+                },
+                UiGlobalTransform::from_translation(Vec2::new(600.0, 800.0)),
+                // This fixture supplies computed layout without the render
+                // visibility plugin; mirror its resolved visible state too.
+                InheritedVisibility::VISIBLE,
+            ));
+        }
+        let edge = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ComputedNode {
+                    size: Vec2::new(80.0, 2.0),
+                    inverse_scale_factor: 0.5,
+                    ..default()
+                },
+                UiGlobalTransform::from(bevy::math::Affine2::from_angle_translation(
+                    std::f32::consts::FRAC_PI_2,
+                    Vec2::new(300.0, 400.0),
+                )),
+                CameraFootprintEdge(0),
+                InheritedVisibility::VISIBLE,
+            ))
+            .id();
+        let mut diagnostics =
+            bevy::ecs::system::SystemState::<MinimapQaScene>::new(app.world_mut());
+        let summary = diagnostics.get(app.world()).diagnostics();
+        assert_eq!(
+            summary["container_rect"],
+            serde_json::json!([184.0, 284.0, 416.0, 516.0])
+        );
+        assert_eq!(summary["hero_markers"]["local"], 1);
+        assert_eq!(
+            summary["camera_edges"][0]["a"],
+            serde_json::json!([150.0, 180.0])
+        );
+        assert_eq!(
+            summary["camera_edges"][0]["b"],
+            serde_json::json!([150.0, 220.0])
+        );
+        app.world_mut().get_mut::<Node>(edge).unwrap().display = Display::None;
+        app.world_mut().get_mut::<Node>(icon).unwrap().display = Display::None;
+        let summary = diagnostics.get(app.world()).diagnostics();
+        assert_eq!(summary["hero_markers"]["local"], 0);
+        assert_eq!(summary["camera_edges"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn map_projection_and_clicks_round_trip_at_both_viewport_sizes() {
+        let layout = MapLayout::default();
+        for window in [Vec2::new(1280.0, 720.0), Vec2::new(1920.0, 1080.0)] {
+            let rect = Rect::from_corners(
+                window - Vec2::splat(16.0 + MINIMAP_SIZE - 10.0),
+                window - Vec2::splat(26.0),
+            );
+            for world in [
+                layout.home_spawn,
+                layout.away_spawn,
+                Vec3::ZERO,
+                Vec3::new(-20.0, 0.0, 50.0),
+            ] {
+                let result =
+                    minimap_cursor_to_world(layout, rect, rect.min + map_point(layout, world))
+                        .unwrap();
+                assert!(result.xz().distance(world.xz()) < 0.001);
+            }
+            assert!(minimap_cursor_to_world(layout, rect, Vec2::new(120.0, 120.0)).is_none());
+        }
+        let home = map_point(layout, layout.home_spawn);
+        let away = map_point(layout, layout.away_spawn);
+        assert!(home.x < away.x && home.y > away.y);
+    }
+    #[test]
+    fn shared_detection_reveals_enemy_only_in_living_allied_observer_range() {
+        let observers = [
+            (Vec2::ZERO, HERO_SIGHT),
+            (Vec2::new(80.0, 0.0), MINION_SIGHT),
+        ];
+        assert!(hero_marker_visible(
+            Some(Team::Green),
+            Team::Green,
+            true,
+            Vec2::splat(200.0),
+            &[]
+        ));
+        assert!(hero_marker_visible(
+            Some(Team::Green),
+            Team::Blue,
+            true,
+            Vec2::new(32.0, 0.0),
+            &observers
+        ));
+        assert!(!hero_marker_visible(
+            Some(Team::Green),
+            Team::Blue,
+            true,
+            Vec2::new(32.1, 0.0),
+            &observers
+        ));
+        assert!(hero_marker_visible(
+            Some(Team::Green),
+            Team::Blue,
+            true,
+            Vec2::new(100.0, 0.0),
+            &observers
+        ));
+        assert!(!hero_marker_visible(
+            Some(Team::Green),
+            Team::Blue,
+            true,
+            Vec2::ZERO,
+            &[]
+        ));
+        assert!(!hero_marker_visible(
+            Some(Team::Green),
+            Team::Green,
+            false,
+            Vec2::ZERO,
+            &observers
+        ));
+        assert!(!hero_marker_visible(
+            None,
+            Team::Green,
+            true,
+            Vec2::ZERO,
+            &observers
+        ));
+    }
+    #[test]
+    fn camera_edges_preserve_ground_projection_and_clip_without_distortion() {
+        let origin = Vec3::new(-24.0, 28.0, 0.0);
+        assert!(
+            ray_ground_point(origin, -origin.normalize())
+                .unwrap()
+                .length()
+                < 0.001
+        );
+        assert!(ray_ground_point(origin, Vec3::X).is_none());
+        assert!(ray_ground_point(origin, Vec3::Y).is_none());
+        let (a, b) = clip_map_segment(Vec2::new(-20.0, 10.0), Vec2::new(20.0, 50.0)).unwrap();
+        assert_eq!(a, Vec2::new(0.0, 30.0));
+        assert_eq!(b, Vec2::new(20.0, 50.0));
+        assert!(clip_map_segment(Vec2::new(-20.0, 0.0), Vec2::new(-10.0, 20.0)).is_none());
+        assert!(clip_map_segment(Vec2::splat(f32::NAN), Vec2::ZERO).is_none());
+    }
+    #[test]
+    fn high_dpi_computed_bounds_use_logical_cursor_coordinates() {
+        let node = ComputedNode {
+            size: Vec2::splat(464.0),
+            inverse_scale_factor: 0.5,
+            ..default()
+        };
+        let transform = UiGlobalTransform::from_translation(Vec2::new(2256.0, 1160.0));
+        let rect = container_rect(&node, &transform).unwrap();
+        assert_eq!(rect.size(), Vec2::splat(232.0));
+        assert_eq!(rect.center(), Vec2::new(1128.0, 580.0));
+    }
     #[test]
     fn minimap_click_does_not_escape_modal_or_debug_flight() {
         let mut app = App::new();
@@ -450,8 +1164,16 @@ mod input_tests {
             .init_resource::<GameplayInputContext>()
             .add_systems(Update, handle_minimap_navigation_system);
         let mut window = Window::default();
-        window.set_cursor_position(Some(Vec2::new(120.0, 120.0)));
+        window.set_cursor_position(Some(Vec2::new(1120.0, 580.0)));
         app.world_mut().spawn((window, bevy::window::PrimaryWindow));
+        app.world_mut().spawn((
+            MinimapContainer,
+            ComputedNode {
+                size: Vec2::splat(232.0),
+                ..default()
+            },
+            UiGlobalTransform::from_translation(Vec2::new(1120.0, 580.0)),
+        ));
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
             .press(MouseButton::Left);

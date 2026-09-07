@@ -4,8 +4,8 @@
 //! roster avatars, raid bosses) with wildly different authored heights
 //! (0.6 m .. 2.4 m). This module measures each model's bind-pose bounds
 //! straight from the loaded glTF asset data — independent of animation state
-//! or spawn timing — and rescales every model root so all characters share
-//! the same world height by default.
+//! or spawn timing — and rescales model roots to readable hero heights while
+//! keeping lane creatures and bosses at their established world sizes.
 //!
 //! Per-model tweaks live in `assets/config/model_scale_overrides.json`
 //! (slug -> multiplier, missing slug = 1.0). The file is polled at runtime so
@@ -25,8 +25,11 @@ use crate::team::CharacterChoice;
 
 /// World-relative hero height: the map is tuned for `PLAYER_SIZE = 1.0`
 /// (46-unit base pads, 4-unit jungle blocks, ~3-4-unit trees, camera at
-/// ~19 units), so heroes render slightly above one world unit tall.
-pub const DEFAULT_MODEL_TARGET_HEIGHT: f32 = 1.15;
+/// ~19 units), so a 1.45-unit hero remains distinct from lane creatures.
+pub const DEFAULT_MODEL_TARGET_HEIGHT: f32 = 1.45;
+/// Creature multipliers were authored against the previous 1.15-unit hero
+/// height. Keep that reference independent of hero readability preferences.
+pub const CREATURE_MODEL_TARGET_HEIGHT: f32 = 1.15;
 pub const MIN_MODEL_TARGET_HEIGHT: f32 = 0.3;
 pub const MAX_MODEL_TARGET_HEIGHT: f32 = 3.0;
 const NORMALIZATION_MIN_HEIGHT: f32 = 0.001;
@@ -54,7 +57,7 @@ impl Plugin for ModelScalePlugin {
     }
 }
 
-/// Shared normalized character height, adjustable from the pause menu and
+/// Normalized hero height, adjustable from the pause menu and
 /// persisted across sessions.
 #[derive(Resource, Clone, Copy)]
 pub struct ModelScaleSettings {
@@ -73,9 +76,12 @@ impl Default for ModelScaleSettings {
 #[derive(Component)]
 pub struct NormalizeModelScale {
     base_scale: Vec3,
-    /// Multiplier on the shared normalized target height (1.0 = player-sized;
-    /// raid bosses use [`crate::bosses::BOSS_MODEL_HEIGHT_SCALE`]).
+    /// Multiplier on the selected reference height; raid bosses use
+    /// [`crate::bosses::BOSS_MODEL_HEIGHT_SCALE`] with the creature reference.
     height_scale: f32,
+    /// Heroes follow the player preference; creatures retain their authored
+    /// reference size when the hero default or preference changes.
+    uses_creature_reference: bool,
     /// Effective target height last applied to the root transform. Skips
     /// redundant re-application; a target/override change invalidates it.
     last_applied_target_height: Option<f32>,
@@ -104,6 +110,7 @@ impl NormalizeModelScale {
         Self {
             base_scale: Vec3::ONE,
             height_scale: 1.0,
+            uses_creature_reference: false,
             last_applied_target_height: None,
             fallback_raw_height: None,
             fallback_raw_top: None,
@@ -120,11 +127,12 @@ impl NormalizeModelScale {
         self.foot_local_y
     }
 
-    /// Like [`Self::for_player_model`], but normalized to `height_scale` times
-    /// the player target height (raid-boss presence).
+    /// Normalizes a creature to `height_scale` times the stable creature
+    /// reference height, independently of the player's hero size setting.
     pub fn scaled_by(height_scale: f32) -> Self {
         Self {
             height_scale: height_scale.max(0.1),
+            uses_creature_reference: true,
             ..Self::for_player_model()
         }
     }
@@ -266,18 +274,21 @@ fn scale_for_height(raw_height: f32, target_height: f32) -> Option<f32> {
     (raw_height > NORMALIZATION_MIN_HEIGHT).then(|| target_height / raw_height)
 }
 
-/// Effective per-entity target height: shared setting x entity multiplier
-/// (bosses) x per-model override.
+/// Effective per-entity target height: hero preference or stable creature
+/// reference, multiplied by the entity scale and per-model override.
 fn effective_target_height(
     settings: &ModelScaleSettings,
     normalization: &NormalizeModelScale,
     override_multiplier: f32,
 ) -> f32 {
-    settings
-        .target_height
-        .clamp(MIN_MODEL_TARGET_HEIGHT, MAX_MODEL_TARGET_HEIGHT)
-        * normalization.height_scale
-        * override_multiplier
+    let reference_height = if normalization.uses_creature_reference {
+        CREATURE_MODEL_TARGET_HEIGHT
+    } else {
+        settings
+            .target_height
+            .clamp(MIN_MODEL_TARGET_HEIGHT, MAX_MODEL_TARGET_HEIGHT)
+    };
+    reference_height * normalization.height_scale * override_multiplier
 }
 
 /// Walks the glTF node graph (bind pose, no animation) and folds every mesh
@@ -674,13 +685,19 @@ mod tests {
     }
 
     #[test]
-    fn effective_target_combines_setting_boss_scale_and_override() {
+    fn hero_preferences_and_overrides_preserve_creature_reference_sizes() {
         let settings = ModelScaleSettings { target_height: 1.0 };
         let player = NormalizeModelScale::for_player_model();
         let boss = NormalizeModelScale::scaled_by(3.0);
+        let minion = NormalizeModelScale::scaled_by(0.6);
         assert!((effective_target_height(&settings, &player, 1.0) - 1.0).abs() < 1e-6);
-        assert!((effective_target_height(&settings, &boss, 1.0) - 3.0).abs() < 1e-6);
         assert!((effective_target_height(&settings, &player, 1.5) - 1.5).abs() < 1e-6);
+        for target_height in [DEFAULT_MODEL_TARGET_HEIGHT, 0.5, 2.4] {
+            let settings = ModelScaleSettings { target_height };
+            assert!((effective_target_height(&settings, &boss, 1.0) - 3.45).abs() < 1e-6);
+            assert!((effective_target_height(&settings, &minion, 1.0) - 0.69).abs() < 1e-6);
+            assert!((effective_target_height(&settings, &boss, 1.2) - 4.14).abs() < 1e-6);
+        }
         // Out-of-range settings are clamped before multipliers apply.
         let wild = ModelScaleSettings { target_height: 9.0 };
         assert!(
@@ -689,18 +706,86 @@ mod tests {
     }
 
     #[test]
-    fn foot_offset_scales_with_measurement() {
-        // Toka-like model: geometry hangs 0.33 below the origin, 0.84 tall.
+    fn gltf_and_fallback_retargeting_keep_feet_and_head_anchors_absolute() {
+        // A center-pivot avatar with geometry below the origin must stay
+        // grounded and retain its head offset through repeated size changes.
         let measured = ModelMeasurement {
             min_y: -0.3328,
             max_y: 0.5036,
         };
-        let scale = scale_for_height(measured.height(), 1.15).unwrap();
-        let foot = measured.min_y * scale;
-        assert!(foot < 0.0);
-        // Feet land exactly on the surface when the origin is lifted by -foot.
-        assert!((measured.min_y * scale - foot).abs() < 1e-6);
-        assert!(((measured.max_y - measured.min_y) * scale - 1.15).abs() < 1e-4);
+        let mut app = App::new();
+        app.init_resource::<ModelScaleSettings>()
+            .init_resource::<ModelScaleOverrides>()
+            .init_resource::<ModelSizeAnalysis>()
+            .init_resource::<Assets<Gltf>>()
+            .init_resource::<Assets<GltfNode>>()
+            .init_resource::<Assets<GltfMesh>>()
+            .init_resource::<Assets<Mesh>>()
+            .add_systems(
+                Update,
+                (
+                    apply_model_scale_system,
+                    normalize_model_scale_fallback_system,
+                ),
+            );
+        let source = Handle::<Gltf>::default();
+        app.world_mut()
+            .resource_mut::<ModelSizeAnalysis>()
+            .measured
+            .insert(source.id(), Some(measured));
+        let gltf = app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(0.0, 5.0, 0.0),
+                NormalizeModelScale::for_player_model(),
+                ModelScaleSource {
+                    gltf: source,
+                    key: "anchor-test".to_owned(),
+                },
+            ))
+            .id();
+        let fallback = app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(0.0, 5.0, 0.0),
+                NormalizeModelScale::for_player_model(),
+            ))
+            .with_children(|parent| {
+                parent.spawn((
+                    Aabb::from_min_max(
+                        Vec3::new(-0.2, measured.min_y, -0.2),
+                        Vec3::new(0.2, measured.max_y, 0.2),
+                    ),
+                    GlobalTransform::from_translation(Vec3::new(0.0, 5.0, 0.0)),
+                ));
+            })
+            .id();
+
+        for target_height in [
+            DEFAULT_MODEL_TARGET_HEIGHT,
+            2.0,
+            DEFAULT_MODEL_TARGET_HEIGHT,
+        ] {
+            app.world_mut()
+                .resource_mut::<ModelScaleSettings>()
+                .target_height = target_height;
+            app.update();
+            app.update(); // Reapplying the same height must not compound it.
+            for entity in [gltf, fallback] {
+                let root = app.world().entity(entity);
+                let scale = root.get::<Transform>().unwrap().scale.y;
+                let normalization = root.get::<NormalizeModelScale>().unwrap();
+                let foot = normalization.foot_local_y().unwrap();
+                let head = normalization.head_local_y.unwrap();
+                assert!((scale * measured.height() - target_height).abs() < 1e-5);
+                assert!((foot - measured.min_y * scale).abs() < 1e-5);
+                assert!((head - measured.max_y * scale).abs() < 1e-5);
+                assert!(foot < 0.0);
+                let ground_y = 0.75;
+                let grounded_origin_y = ground_y - foot;
+                assert!((grounded_origin_y + head - (ground_y + target_height)).abs() < 1e-5);
+            }
+        }
     }
 
     #[test]

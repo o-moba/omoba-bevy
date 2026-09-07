@@ -2,6 +2,14 @@
 
 Third-party assets bundled in this repository and their licenses.
 
+## UI typography
+
+Inter is bundled unmodified in `client/assets/ui/Inter.ttf` under the SIL Open
+Font License 1.1. Copyright 2020 The Inter Project Authors
+(https://github.com/rsms/inter). The complete copyright/license notice is in
+`client/assets/ui/OFL-Inter.txt`; source URL and SHA-256 are in that directory's
+README. The native package includes these files alongside the font.
+
 ## Original Omoba 2D assets
 
 The terrain/prop atlases in `client/assets/world2d/` were generated specifically

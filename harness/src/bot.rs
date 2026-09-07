@@ -162,6 +162,22 @@ impl Bot {
         self.send(&ClientPacket::UpgradeSkill { slot });
     }
 
+    /// Retries reuse both request and round identity until a receipt arrives.
+    pub fn buy_item(
+        &self,
+        item: shared::shop::ItemId,
+        request_id: u64,
+        match_id: u64,
+        server_epoch: u64,
+    ) {
+        self.send(&ClientPacket::BuyItem {
+            item_id: item.id().to_owned(),
+            request_id,
+            match_id,
+            server_epoch,
+        });
+    }
+
     /// Toggles the debug invulnerability ("god mode") flag.
     pub fn set_god_mode(&self, enabled: bool) {
         self.send(&ClientPacket::SetGodMode { enabled });

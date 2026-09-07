@@ -66,7 +66,9 @@ the 10th player: the overlay shows the queue filling, `Match found!`, the
 countdown, and the match starts as a real 5v5. Once the match runs, the bots
 play their lanes: each pushes Mid/Top/Bot toward the enemy base, fights the
 enemy players and minions with legal unlocked abilities, uses self-sustain,
-waits for wave support at towers, and rejoins its lane after a respawn.
+waits for wave support at towers, buys recommended equipment at base, and
+rejoins its lane after a respawn. Press **P** to buy your starter at the base;
+earned gold supports further purchases, retained through respawn and reconnect.
 Bots support matchmaking and complete-session playtests; human strategic
 balance remains a beta observation.
 

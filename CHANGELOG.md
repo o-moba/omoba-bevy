@@ -6,6 +6,27 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.18.0-rc.4] - 2026-09-07
+
+### Added
+- Add a server-authoritative six-item base shop, class recommendations, starter
+  gold and passive match income. Equipment affects damage, attack/spell rate,
+  movement and resources; paid purchases survive death/reconnect and reset on rematch.
+- Add circular hero portraits, a gold local-player halo, lane/river markings
+  and the actual yellow camera ground-footprint outline to the bottom-right minimap.
+- Add shared radial detection for enemy hero minimap markers. This is minimap
+  detection only; world rendering and network snapshots still expose full positions.
+
+### Changed
+- Increase default hero presentation height by 26% with a one-time saved-default
+  migration; preserve custom hero settings and existing creature sizes.
+- Give both teams a fixed camera orientation with a diagonal midlane matching
+  the minimap; retain deliberate orbit, zoom, follow and recenter controls.
+- Rebuild the playable HUD with compact resource bars, ability states,
+  inventory/gold and a modal shop using bundled OFL-licensed Inter typography.
+- Extend native UI capture to real receipt-confirmed purchases, shop dismissal,
+  both team spawns and 720p/1080p; extend normal-rules match acceptance to equipment.
+
 ## [0.18.0-rc.3] - 2026-09-07
 
 ### Fixed

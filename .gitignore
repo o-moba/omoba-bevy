@@ -14,6 +14,7 @@ client/assets/*
 !client/assets/presentation2d/
 !client/assets/world2d/
 !client/assets/verdant/
+!client/assets/ui/
 .claude/*
 !.claude/skills/
 .claude/skills/*

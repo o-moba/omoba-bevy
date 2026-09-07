@@ -7,6 +7,7 @@ mod progression;
 #[cfg(test)]
 mod release_tests;
 mod session;
+mod shop;
 mod world;
 
 use balance::*;
@@ -17,11 +18,14 @@ use neutrals::*;
 use progression::*;
 use serde::{Deserialize, Serialize};
 use session::*;
+#[cfg(test)]
+use shared::scaled_cooldown;
+use shared::shop::{ItemBonuses, ItemId, PurchaseReceipt, STARTING_GOLD, item_cooldown};
 use shared::{
     HeroClass, PlayerActionKind, SkillSlot, TargetingMode, ability_for_class_slot,
-    rank_effect_scale, scaled_cast_range, scaled_cooldown, scaled_mana_cost,
-    unlocked_slots_for_level,
+    rank_effect_scale, scaled_cast_range, scaled_mana_cost, unlocked_slots_for_level,
 };
+use shop::*;
 use std::{
     collections::{HashMap, HashSet},
     fmt, io,
@@ -90,6 +94,12 @@ enum ClientPacket {
     UpgradeSkill {
         slot: u8,
     },
+    BuyItem {
+        item_id: String,
+        request_id: u64,
+        match_id: u64,
+        server_epoch: u64,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -144,6 +154,14 @@ struct PlayerState {
     mana: f32,
     max_mana: f32,
     gold: u32,
+    #[serde(default)]
+    inventory: Vec<ItemId>,
+    #[serde(default)]
+    item_bonuses: ItemBonuses,
+    #[serde(default)]
+    shop_available: bool,
+    #[serde(default)]
+    last_purchase: Option<PurchaseReceipt>,
     xp: u32,
     level: u32,
     next_level_xp: u32,
@@ -773,6 +791,8 @@ struct ConnectedPlayer {
     /// Debug movement multiplier (1.0 = normal). Raises the server's accepted
     /// movement distance so a boosted client is not clamped as a teleport.
     speed_mult: f32,
+    purchase_sequence: u64,
+    gold_income_remainder: f32,
 }
 
 struct DisconnectedSession {
@@ -1039,6 +1059,8 @@ impl ServerRuntime {
             neutrals,
             team_buffs,
             match_config,
+            match_id,
+            server_epoch,
             ..
         } = self;
         match packet {
@@ -1231,6 +1253,24 @@ impl ServerRuntime {
                     }
                 }
             }
+            ClientPacket::BuyItem {
+                item_id,
+                request_id,
+                match_id: requested_match,
+                server_epoch: requested_epoch,
+            } => {
+                if requested_match != *match_id || requested_epoch != *server_epoch {
+                    // A delayed datagram must not consume the new round's sequence.
+                    return;
+                }
+                ensure_player_connected(players, map_layout, addr, next_player_id, now);
+                if let Some(player) = players.get_mut(&addr) {
+                    player.last_seen = now;
+                    handle_purchase(
+                        player, map_layout, game_state, &item_id, request_id, *match_id,
+                    );
+                }
+            }
         }
         self.track_round_start(now);
     }
@@ -1249,6 +1289,12 @@ impl ServerRuntime {
 
     fn simulate_after_mana(&mut self, now: Instant, dt: f32) {
         self.maintain_roster(now);
+        // Formation's final interval belongs to the countdown, not earned income.
+        let gold_dt = if matches!(self.game_state, GameState::Running) {
+            dt
+        } else {
+            0.0
+        };
         if self
             .victory_at
             .is_some_and(|at| now.saturating_duration_since(at) >= VICTORY_REMATCH_DELAY)
@@ -1317,6 +1363,7 @@ impl ServerRuntime {
         );
         simulate_neutrals(players, neutrals, game_state, dt, now);
         regenerate_team_buff_hp(players, team_buffs, game_state, dt, now);
+        accrue_passive_gold(players, game_state, gold_dt);
         restore_god_mode_players(players);
         handle_respawns(players, structures, map_layout, game_state, now);
 
@@ -1341,7 +1388,10 @@ impl ServerRuntime {
 
         if now.duration_since(*last_snapshot_at) >= SNAPSHOT_INTERVAL {
             *snapshot_tick = snapshot_tick.saturating_add(1);
-            let players_snapshot = build_players_snapshot(players);
+            let mut players_snapshot = build_players_snapshot(players);
+            for state in &mut players_snapshot {
+                state.shop_available = shop_is_available(state, map_layout, game_state);
+            }
 
             let mut projectiles_snapshot = projectiles
                 .values()
@@ -1713,9 +1763,10 @@ fn handle_cast_request(
     if caster.state.mana < mana_cost {
         return;
     }
-    if caster.last_cast_at[skill_slot.index()]
-        .is_some_and(|last_cast| now.duration_since(last_cast) < scaled_cooldown(def, rank))
-    {
+    if caster.last_cast_at[skill_slot.index()].is_some_and(|last_cast| {
+        now.duration_since(last_cast)
+            < item_cooldown(def, rank, skill_slot, caster.state.item_bonuses)
+    }) {
         return;
     }
 
@@ -1845,6 +1896,7 @@ fn handle_cast_request(
     // boss team buffs multiply the outgoing ability damage authoritatively.
     let rank_damage = def.projectile_damage.unwrap_or(0.0)
         * effect_scale
+        * caster_mut.state.item_bonuses.damage_multiplier
         * team_buffs.damage_multiplier(caster_team, now);
 
     let projectile_id = *next_projectile_id;
@@ -3204,7 +3256,7 @@ mod tests {
         );
 
         let killer = players.get(&addr).unwrap();
-        assert_eq!(killer.state.gold, template.kill_gold);
+        assert_eq!(killer.state.gold, STARTING_GOLD + template.kill_gold);
         assert_eq!(killer.state.xp, template.kill_xp);
 
         let neutral = neutrals.get(&neutral_id).unwrap();
@@ -4603,7 +4655,7 @@ mod tests {
 
         // Killer got the individual reward; the whole killing team got the buff.
         let killer = players.get(&killer_addr).unwrap();
-        assert_eq!(killer.state.gold, WENDIGO_KILL_GOLD);
+        assert_eq!(killer.state.gold, STARTING_GOLD + WENDIGO_KILL_GOLD);
         assert!(team_buffs.is_active(Team::Green, TeamBuffKind::WendigoFavor, kill_at));
         assert!(!team_buffs.is_active(Team::Blue, TeamBuffKind::WendigoFavor, kill_at));
         assert!(

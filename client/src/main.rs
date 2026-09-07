@@ -24,8 +24,10 @@ mod player;
 mod presentation2d;
 mod presentation3d;
 mod session_config;
+mod shop;
 mod sprite;
 mod team;
+mod ui_theme;
 mod verdant3d;
 mod visual_qa;
 mod world;
@@ -86,6 +88,8 @@ fn main() {
         ))
         .add_plugins((
             input_context::InputContextPlugin,
+            ui_theme::UiThemePlugin,
+            shop::ShopPlugin,
             HelpOverlayPlugin,
             DebugConsolePlugin,
             PauseMenuPlugin,

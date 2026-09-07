@@ -12,9 +12,11 @@
 //! `lane_control_points` (constants from `server/src/balance.rs`). Keep in
 //! sync with the server, same convention as `protocol.rs`.
 
+#[cfg(test)]
+use shared::scaled_cooldown;
 use shared::{
-    HeroClass as SharedClass, SkillSlot, TargetingMode, ability_for_class_slot, scaled_cooldown,
-    scaled_mana_cost, unlocked_slots_for_level,
+    HeroClass as SharedClass, SkillSlot, TargetingMode, ability_for_class_slot, scaled_mana_cost,
+    unlocked_slots_for_level,
 };
 use std::time::Instant;
 
@@ -346,6 +348,18 @@ pub fn choose_skill_upgrade(me: &PlayerState) -> Option<u8> {
     })
 }
 
+/// Buy only where the authoritative snapshot permits it, honoring class preference.
+pub fn choose_shop_item(me: &PlayerState) -> Option<shared::shop::ItemId> {
+    if !me.shop_available || me.hp <= 0.0 || me.inventory.len() >= shared::shop::INVENTORY_CAPACITY
+    {
+        return None;
+    }
+    shared::shop::recommended_items(authoritative_class(me))
+        .iter()
+        .copied()
+        .find(|id| !me.inventory.contains(id) && shared::shop::item(*id).cost <= me.gold)
+}
+
 /// Shared-kit affordability/unlock/cooldown checks before any outbound cast.
 pub fn can_cast_slot(
     me: &PlayerState,
@@ -362,8 +376,10 @@ pub fn can_cast_slot(
     me.hp > 0.0
         && unlocked_slots_for_level(me.level)[index]
         && me.mana >= scaled_mana_cost(def, rank)
-        && last_casts[index]
-            .is_none_or(|last| now.saturating_duration_since(last) >= scaled_cooldown(def, rank))
+        && last_casts[index].is_none_or(|last| {
+            now.saturating_duration_since(last)
+                >= shared::shop::item_cooldown(def, rank, skill_slot, me.item_bonuses)
+        })
 }
 
 /// A self heal or mana restore is useful after at least 20% of that resource is missing.
@@ -877,6 +893,25 @@ mod tests {
         }
         assert_eq!(class_for_bot(2), HeroClass::Mage);
         assert_eq!(class_for_bot(6), HeroClass::Cleric);
+    }
+
+    #[test]
+    fn shop_respects_authoritative_eligibility_budget_and_class_order() {
+        let mut me = hero("ranger", 1);
+        me.gold = shared::shop::STARTING_GOLD;
+        assert_eq!(choose_shop_item(&me), None);
+        me.shop_available = true;
+        assert_eq!(choose_shop_item(&me), Some(shared::shop::ItemId::SwiftGrip));
+        me.inventory.push(shared::shop::ItemId::SwiftGrip);
+        assert_eq!(
+            choose_shop_item(&me),
+            Some(shared::shop::ItemId::EmberBlade)
+        );
+        me.gold = 79;
+        assert_eq!(choose_shop_item(&me), None);
+        me.gold = 1000;
+        me.hp = 0.0;
+        assert_eq!(choose_shop_item(&me), None);
     }
 
     #[test]

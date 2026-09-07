@@ -7,6 +7,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 pub mod protocol;
+pub mod shop;
 pub mod transport;
 
 /// Resolve packaged assets before the development checkout. Launchers can
