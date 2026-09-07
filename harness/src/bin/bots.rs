@@ -25,7 +25,7 @@ use harness::{
     Bot, Character, GameState, HeroClass, Team,
     bot_ai::{
         BotBrain, Lane, WorldView, choose_offensive_skill, choose_rally_lane, choose_self_sustain,
-        choose_skill_upgrade, class_for_bot, step_toward,
+        choose_shop_item, choose_skill_upgrade, class_for_bot, step_toward,
     },
 };
 
@@ -116,6 +116,8 @@ struct BotRunner {
     round_key: Option<(u64, u64)>,
     last_join_sent: Instant,
     last_snapshot_at: Option<Instant>,
+    last_shop_at: Instant,
+    pending_purchase: Option<(shared::shop::ItemId, u64)>,
 }
 
 fn main() {
@@ -157,6 +159,8 @@ fn main() {
             round_key: None,
             last_join_sent: Instant::now(),
             last_snapshot_at: None,
+            last_shop_at: Instant::now() - UPGRADE_INTERVAL,
+            pending_purchase: None,
         });
     }
 
@@ -222,6 +226,7 @@ fn main() {
                 runner.position = None;
                 runner.my_id = None;
                 runner.my_team = None;
+                runner.pending_purchase = None;
             }
             let my_id = snapshot.your_id();
             let me = snapshot.player(my_id).cloned();
@@ -279,6 +284,30 @@ fn main() {
                 GameState::Running if runner.alive => {
                     let me = me.as_ref().expect("admitted bot has its own state");
                     let now = Instant::now();
+                    if let Some((_, request)) = runner.pending_purchase
+                        && me.last_purchase.as_ref().is_some_and(|receipt| {
+                            receipt.match_id == meta.match_id && receipt.request_id >= request
+                        })
+                    {
+                        runner.pending_purchase = None;
+                    }
+                    if runner.pending_purchase.is_none()
+                        && let Some(item) = choose_shop_item(me)
+                    {
+                        let request = me
+                            .last_purchase
+                            .as_ref()
+                            .map_or(1, |receipt| receipt.request_id.saturating_add(1));
+                        runner.pending_purchase = Some((item, request));
+                    }
+                    if runner.last_shop_at.elapsed() >= UPGRADE_INTERVAL
+                        && let Some((item, request)) = runner.pending_purchase
+                    {
+                        runner
+                            .bot
+                            .buy_item(item, request, meta.match_id, meta.server_epoch);
+                        runner.last_shop_at = now;
+                    }
                     if runner.last_upgrade_at.elapsed() >= UPGRADE_INTERVAL {
                         if let Some(slot) = choose_skill_upgrade(me) {
                             runner.bot.upgrade_skill(slot);
@@ -301,8 +330,11 @@ fn main() {
                     let view = WorldView::from_snapshot(&snapshot, my_id, team);
                     let decision = brain.decide(x, z, &view);
                     if let Some(target) = decision.move_target {
-                        let (nx, nz, yaw) =
-                            step_toward((x, z), target, TICK_INTERVAL.as_secs_f32());
+                        let (nx, nz, yaw) = step_toward(
+                            (x, z),
+                            target,
+                            TICK_INTERVAL.as_secs_f32() * me.item_bonuses.move_speed_multiplier,
+                        );
                         runner.bot.send_transform(nx, 0.5, nz, yaw);
                         runner.position = Some((nx, nz));
                     }
@@ -350,6 +382,7 @@ fn main() {
                 let players: Vec<_> = snapshot.players().iter().map(|p| serde_json::json!({
                     "id":p.id, "team":format!("{:?}",p.team), "class":p.hero_class,
                     "level":p.level, "xp":p.xp, "gold":p.gold, "ranks":p.ranks,
+                    "inventory":p.inventory, "item_bonuses":p.item_bonuses, "shop_available":p.shop_available, "last_purchase":p.last_purchase,
                     "hp":p.hp, "max_hp":p.max_hp, "mana":p.mana, "max_mana":p.max_mana,
                     "x":p.x,"z":p.z,"action_sequence":p.action_sequence,"action_slot":p.action_slot
                 })).collect();

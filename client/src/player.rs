@@ -762,7 +762,16 @@ fn move_player(
     mut commands: Commands,
     time: Res<Time>,
     mut transform_sets: ParamSet<(
-        Query<(Entity, &mut Transform, &MovementTarget, &CombatStats), With<Player>>,
+        Query<
+            (
+                Entity,
+                &mut Transform,
+                &MovementTarget,
+                &CombatStats,
+                Option<&crate::net::PlayerEquipment>,
+            ),
+            With<Player>,
+        >,
         Query<&Transform, (With<PlayerBody>, Without<Player>)>,
         Query<(&Transform, &StructureKind), With<NetworkStructure>>,
     )>,
@@ -787,7 +796,7 @@ fn move_player(
         .collect::<Vec<_>>();
 
     let mut player_query = transform_sets.p0();
-    for (entity, mut transform, movement_target, stats) in player_query.iter_mut() {
+    for (entity, mut transform, movement_target, stats, equipment) in player_query.iter_mut() {
         if !stats.is_alive() {
             commands.entity(entity).remove::<MovementTarget>();
             commands.entity(entity).remove::<Jumping>();
@@ -807,6 +816,10 @@ fn move_player(
         } else {
             PLAYER_SPEED
         };
+        let speed = speed
+            * equipment.map_or(1.0, |equipment| {
+                equipment.item_bonuses.move_speed_multiplier
+            });
         let move_delta = speed * time.delta_secs();
 
         if distance < move_delta || distance < 0.01 {

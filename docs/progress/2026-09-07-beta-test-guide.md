@@ -1,6 +1,6 @@
 # Native beta — 8 September 2026
 
-Candidate version: **0.18.0-rc.3**. This is a controlled native 3D beta with
+Candidate version: **0.18.0-rc.4**. This is a controlled native 3D beta with
 human players and fill bots, using the Verdant Confluence arena. The delivered
 package is built and checked on macOS ARM64. Python 3.9+ is needed for the
 convenience launchers; no Python packages, Rust toolchain or source checkout
@@ -56,11 +56,17 @@ public service. Stop the host with Ctrl+C when the session is over.
 - Click open ground to move. Click an enemy to approach and attack with Q.
 - Use Q/W/E/R or click the four ability buttons. Unlocks are levels 1/2/4/6;
   press U for skill upgrades. The hotbar shows mana, cooldown and rank.
+- Press P or click **Shop** to browse six items. Buy while alive at your own
+  base: the 80 starting gold buys one starter, class recommendations help you
+  choose, and passive income plus farming pays for later items. Purchases
+  change your actual stats. Escape closes the shop; play continues online.
 - Follow allied minions down a lane. Destroy an enemy lane tower to remove
   the enemy base's protection, then destroy the base to win. The HUD states
   the current objective. Jungle camps and the two bosses are optional.
 - Alt + right mouse orbits the 3D camera; Space recovers the hero view;
-  Y toggles follow. The minimap can move your view.
+  Y toggles follow. Both teams use the same diagonal map orientation. Click or
+  drag the bottom-right minimap to move your view; its yellow outline shows
+  camera ground coverage. Your portrait has a gold halo inside the team ring.
 - The first-run help has a **Play** button; Escape dismisses it. F1 reopens
   help. Escape opens the pause menu, which resumes or exits the game; an
   online match continues while the menu is open.
@@ -70,8 +76,12 @@ public service. Stop the host with Ctrl+C when the session is over.
   new round after ten seconds. Keep the game open: the server restores
   structures and player progression, forms the roster and counts down again.
 
-Gold is currently a score/reward counter; this beta has no item shop. Bots
-support complete sessions but are not a substitute for human balance testing.
+Equipment survives respawn and reconnect; a new round clears it and restores
+80 starting gold. Each item can be bought once, all classes may use every item,
+and this simplified shop has no selling or crafting. Enemy hero minimap markers
+appear within shared allied detection range. This does not hide heroes in the
+world or conceal their network positions. Bots support complete sessions but
+are not a substitute for human balance testing.
 
 ## Recovery and reporting
 
@@ -91,7 +101,8 @@ are sufficient for first triage.
 
 ## Operator acceptance before inviting the group
 
-1. Run local practice, join, dismiss help and move/cast at 1280×720 or larger.
+1. Run local practice, join, dismiss help, buy a starter, close the shop and
+   move/cast at 1280×720 or larger. Earn gold, return to base and buy again.
 2. Host the announced human count; confirm ten total players, two teams of
    five, and the countdown. Verify one client's same-profile reconnect.
 3. Play through lane tower destruction, base destruction, the result screen
@@ -109,7 +120,7 @@ and the remaining dependency review are not certified by those checks.
 ## Maintainer build and verification
 
 ```sh
-python3 scripts/package_native.py --output /tmp/omoba-0.18.0-rc.3
+python3 scripts/package_native.py --output /tmp/omoba-0.18.0-rc.4
 python3 scripts/test_beta_launcher.py
 ```
 

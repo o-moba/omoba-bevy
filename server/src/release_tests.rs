@@ -258,7 +258,14 @@ fn assert_clean_round(rt: &ServerRuntime) {
             ),
             (0, STARTING_LEVEL, xp_threshold_for_level(STARTING_LEVEL))
         );
-        assert_eq!((player.state.gold, player.state.skill_points), (0, 0));
+        assert_eq!(
+            (player.state.gold, player.state.skill_points),
+            (STARTING_GOLD, 0)
+        );
+        assert!(player.state.inventory.is_empty());
+        assert_eq!(player.state.item_bonuses, ItemBonuses::NONE);
+        assert!(player.state.last_purchase.is_none());
+        assert_eq!(player.purchase_sequence, 0);
         assert_eq!(player.state.ranks, [1; 4]);
         assert_eq!(player.state.action_sequence, 0);
         assert_eq!(player.state.action_kind, PlayerActionKind::None);
@@ -491,7 +498,8 @@ fn full_roster_progression_baseline_is_reproducible_and_conserves_rewards() {
                     milestones.entry((level, "all")).or_insert(wave);
                 }
             }
-            let expected_gold = wave as u32 * MINIONS_PER_WAVE as u32 * 3 * MINION_KILL_GOLD;
+            let expected_gold = u32::from(team_size) * STARTING_GOLD
+                + wave as u32 * MINIONS_PER_WAVE as u32 * 3 * MINION_KILL_GOLD;
             assert_eq!(
                 rt.players.values().map(|p| p.state.gold).sum::<u32>(),
                 expected_gold

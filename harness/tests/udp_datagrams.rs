@@ -9,6 +9,7 @@ use std::{
 
 use harness::{Bot, Character, HeroClass, ServerProcess, Team};
 use serde_json::Value;
+use shared::transport::{MAX_DATAGRAM_BYTES, SnapshotAssembler};
 
 const OLD_CLIENT_BOUNDARY: usize = 8 * 1024;
 const IPV4_UDP_MAX_PAYLOAD_BYTES: usize = 65_507;
@@ -164,8 +165,9 @@ fn real_server_legacy_json_compatibility_survives_malformed_requests() {
     );
 }
 
-// Keep the original populated legacy regression wherever the host can deliver it.
-// A real host-size failure remains a failure, and the ceiling probe explains it.
+// Equipment expands full-roster snapshots beyond some hosts' single-datagram
+// limit. Keep the populated/malformed-recovery regression on the production
+// framed transport; the small legacy contract and actual OS limit are above.
 const POLL_BUDGET: Duration = Duration::from_secs(25);
 const LONGEST_SPRITE_ID: &str = "cathedral-moth-bellringer";
 
@@ -176,8 +178,28 @@ fn last_entity_id(snapshot: &Value, field: &str) -> Option<u64> {
         .and_then(|entity| entity["id"].as_u64())
 }
 
+fn receive_native_payload(
+    bot: &mut Bot,
+    assembler: &mut SnapshotAssembler,
+    deadline: Instant,
+) -> Option<Vec<u8>> {
+    while let Some(bytes) = bot.recv_raw_datagram(deadline) {
+        if !bytes.starts_with(b"OMB1") {
+            continue; // A queued small legacy response may precede negotiation.
+        }
+        assert!(bytes.len() <= MAX_DATAGRAM_BYTES);
+        if let Some(payload) = assembler
+            .push(&bytes, Instant::now())
+            .expect("valid native frame")
+        {
+            return Some(payload);
+        }
+    }
+    None
+}
+
 #[test]
-fn real_server_emits_complete_populated_snapshot_above_8_kib() {
+fn real_server_framed_populated_snapshot_above_8_kib_survives_malformed_requests() {
     // Arena-synced avatars are local-only; use the same available roster
     // that the server validates instead of naming an optional download.
     let avatar = shared::avatar_roster()
@@ -187,7 +209,7 @@ fn real_server_emits_complete_populated_snapshot_above_8_kib() {
     let server =
         ServerProcess::spawn_with_env(&[("OMOBA_MATCH_MODE", "release"), ("OMOBA_TEAM_SIZE", "5")]);
     let mut bots = (0..10)
-        .map(|_| Bot::connect(server.addr()))
+        .map(|_| Bot::connect_framed(server.addr()))
         .collect::<Vec<_>>();
     for bot in &bots {
         // Release mode assigns authoritative balanced teams. Longest valid
@@ -203,13 +225,17 @@ fn real_server_emits_complete_populated_snapshot_above_8_kib() {
     }
 
     let deadline = Instant::now() + POLL_BUDGET;
+    let mut assembler = SnapshotAssembler::default();
     let mut qualifying: Option<(Vec<u8>, Value)> = None;
     while Instant::now() < deadline {
         for bot in &bots {
             bot.ping();
         }
-        let Some(payload) = bots[0].recv_raw_datagram(Instant::now() + Duration::from_millis(250))
-        else {
+        let Some(payload) = receive_native_payload(
+            &mut bots[0],
+            &mut assembler,
+            Instant::now() + Duration::from_millis(250),
+        ) else {
             continue;
         };
         let Ok(snapshot) = serde_json::from_slice::<Value>(&payload) else {
@@ -231,7 +257,7 @@ fn real_server_emits_complete_populated_snapshot_above_8_kib() {
         "real server never produced a complete >8 KiB 5v5 snapshot with 8 structures and 18 minions",
     );
     eprintln!(
-        "received complete real-server snapshot: {} bytes (runtime-dependent; asserted {} < bytes <= {}), 10 players, 8 structures, 18 minions",
+        "received complete framed real-server snapshot: {} bytes (runtime-dependent; asserted {} < bytes <= {}), 10 players, 8 structures, 18 minions; each datagram <=1200 bytes",
         payload.len(),
         OLD_CLIENT_BOUNDARY,
         IPV4_UDP_MAX_PAYLOAD_BYTES,
@@ -258,9 +284,11 @@ fn real_server_emits_complete_populated_snapshot_above_8_kib() {
         for bot in &bots {
             bot.ping();
         }
-        let Some(next_payload) =
-            bots[0].recv_raw_datagram(Instant::now() + Duration::from_millis(250))
-        else {
+        let Some(next_payload) = receive_native_payload(
+            &mut bots[0],
+            &mut assembler,
+            Instant::now() + Duration::from_millis(250),
+        ) else {
             continue;
         };
         let Ok(next) = serde_json::from_slice::<Value>(&next_payload) else {

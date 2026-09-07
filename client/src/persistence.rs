@@ -27,7 +27,8 @@ use crate::world::{
     MIN_LIGHT_YAW_DEG,
 };
 
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
+const PREVIOUS_DEFAULT_MODEL_TARGET_HEIGHT: f32 = 1.15;
 const PREFS_FILENAME: &str = "client_preferences.json";
 const CLIENT_SESSION_ID_MAX_LEN: usize = 64;
 
@@ -56,7 +57,7 @@ impl Plugin for ClientPersistencePlugin {
         app.init_resource::<FileGameServerAddr>()
             .init_resource::<ResolvedServerAddressForPrefs>()
             .init_resource::<ClientSessionId>()
-            .init_resource::<ClientSessionIdInitialSavePending>()
+            .init_resource::<ClientPreferencesInitialSavePending>()
             .init_resource::<ClientPrefsSaveGate>()
             .add_systems(Startup, load_persistent_client_settings)
             .add_systems(Update, save_client_preferences_on_change);
@@ -70,7 +71,7 @@ pub struct ClientPrefsSaveGate {
 }
 
 #[derive(Resource, Default)]
-pub(crate) struct ClientSessionIdInitialSavePending(bool);
+pub(crate) struct ClientPreferencesInitialSavePending(bool);
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ClientPreferencesFile {
@@ -95,7 +96,8 @@ struct ClientPreferencesFile {
 }
 
 fn default_schema_version() -> u32 {
-    SCHEMA_VERSION
+    // Files without an explicit version predate the current preference schema.
+    1
 }
 
 fn generate_client_session_id() -> String {
@@ -168,12 +170,15 @@ pub fn clamp_model_target_height(value: f32) -> f32 {
     value.clamp(MIN_MODEL_TARGET_HEIGHT, MAX_MODEL_TARGET_HEIGHT)
 }
 
-/// Resolves a persisted model target height against the current valid range.
-/// Values below the minimum come from the legacy world scale (default used to
-/// be 0.26) and are migrated to the current default instead of being clamped
-/// to the minimum, which would keep characters near-invisible.
-pub fn migrate_model_target_height(stored: f32) -> f32 {
-    if stored < MIN_MODEL_TARGET_HEIGHT {
+/// Migrates old defaults once, preserving custom sizes in the supported range.
+/// Schema 3 records the larger hero default; a deliberate 1.15 saved under
+/// schema 3 therefore survives subsequent launches. Earlier subminimum values
+/// belong to the obsolete world scale (whose default was 0.26).
+pub fn migrate_model_target_height(stored: f32, schema_version: u32) -> f32 {
+    if schema_version < 3
+        && (stored < MIN_MODEL_TARGET_HEIGHT
+            || (stored - PREVIOUS_DEFAULT_MODEL_TARGET_HEIGHT).abs() < f32::EPSILON)
+    {
         DEFAULT_MODEL_TARGET_HEIGHT
     } else {
         clamp_model_target_height(stored)
@@ -215,12 +220,12 @@ pub fn load_persistent_client_settings(
     mut model: ResMut<ModelScaleSettings>,
     mut team: ResMut<crate::team::TeamSelection>,
     mut client_session_id: ResMut<ClientSessionId>,
-    mut session_id_save_pending: ResMut<ClientSessionIdInitialSavePending>,
+    mut initial_save_pending: ResMut<ClientPreferencesInitialSavePending>,
     mut gate: ResMut<ClientPrefsSaveGate>,
 ) {
     gate.suppress_saves = 3;
     file_addr.0 = None;
-    session_id_save_pending.0 = false;
+    initial_save_pending.0 = false;
 
     let Some(path) = preferences_path() else {
         warn!("No home/config directory for client preferences; using defaults only.");
@@ -228,7 +233,7 @@ pub fn load_persistent_client_settings(
     };
 
     if !path.exists() {
-        session_id_save_pending.0 = true;
+        initial_save_pending.0 = true;
         return;
     }
 
@@ -247,6 +252,9 @@ pub fn load_persistent_client_settings(
         );
         return;
     }
+    // Startup's save gate outlives Bevy's resource change tick. Explicitly
+    // queue the migrated schema so the one-time default migration is persisted.
+    initial_save_pending.0 = disk.schema_version < SCHEMA_VERSION;
 
     if let Some(addr_raw) = disk.game_server_addr.as_deref() {
         if let Some(addr) = validate_game_server_addr(addr_raw) {
@@ -261,10 +269,10 @@ pub fn load_persistent_client_settings(
             client_session_id.0 = session_id;
         } else {
             warn!("Ignoring invalid client_session_id in preferences file.");
-            session_id_save_pending.0 = true;
+            initial_save_pending.0 = true;
         }
     } else {
-        session_id_save_pending.0 = true;
+        initial_save_pending.0 = true;
     }
 
     if let Some(ch) = disk.character {
@@ -272,9 +280,9 @@ pub fn load_persistent_client_settings(
     }
 
     if let Some(h) = disk.model_target_height {
-        let resolved = migrate_model_target_height(h);
-        if (resolved - h).abs() > f32::EPSILON && h < MIN_MODEL_TARGET_HEIGHT {
-            info!("Migrating legacy model target height {h:.3} -> {resolved:.3} (world rescale).");
+        let resolved = migrate_model_target_height(h, disk.schema_version);
+        if (resolved - h).abs() > f32::EPSILON && disk.schema_version < SCHEMA_VERSION {
+            info!("Migrating legacy model target height {h:.3} -> {resolved:.3}.");
         }
         model.target_height = resolved;
     }
@@ -346,7 +354,7 @@ pub fn save_client_preferences_to_disk(
 
 fn save_client_preferences_on_change(
     mut gate: ResMut<ClientPrefsSaveGate>,
-    mut session_id_save_pending: ResMut<ClientSessionIdInitialSavePending>,
+    mut initial_save_pending: ResMut<ClientPreferencesInitialSavePending>,
     lighting: Res<LightingSettings>,
     model: Res<ModelScaleSettings>,
     team: Res<crate::team::TeamSelection>,
@@ -363,12 +371,11 @@ fn save_client_preferences_on_change(
         || team.is_changed()
         || resolved_addr.is_changed()
         || client_session_id.is_changed();
-    if !changed && !session_id_save_pending.0 {
+    if !changed && !initial_save_pending.0 {
         return;
     }
 
     let addr = resolved_addr.0.as_str();
-    let initial_session_id_save = session_id_save_pending.0;
     if let Err(e) = save_client_preferences_to_disk(
         lighting.as_ref(),
         model.as_ref(),
@@ -381,12 +388,8 @@ fn save_client_preferences_on_change(
         client_session_id.0.as_str(),
     ) {
         warn!("Failed to save client preferences: {e}");
-        if initial_session_id_save {
-            session_id_save_pending.0 = false;
-        }
-    } else {
-        session_id_save_pending.0 = false;
     }
+    initial_save_pending.0 = false;
 }
 
 /// Resets graphics settings to defaults, persists, and re-opens save gate briefly.
@@ -462,21 +465,67 @@ mod tests {
     }
 
     #[test]
-    fn migrate_model_target_height_resets_legacy_values() {
+    fn migrate_model_target_height_resets_only_legacy_defaults() {
         // Legacy world scale (old default 0.26, old range 0.08..1.2): below
         // the current minimum means "saved before the world rescale".
         assert_eq!(
-            migrate_model_target_height(0.26),
+            migrate_model_target_height(0.26, 1),
             DEFAULT_MODEL_TARGET_HEIGHT
         );
         assert_eq!(
-            migrate_model_target_height(0.08),
+            migrate_model_target_height(0.08, 2),
             DEFAULT_MODEL_TARGET_HEIGHT
         );
-        // In-range values survive as-is; above-range values clamp.
-        assert_eq!(migrate_model_target_height(1.2), 1.2);
-        assert_eq!(migrate_model_target_height(0.5), 0.5);
-        assert_eq!(migrate_model_target_height(99.0), MAX_MODEL_TARGET_HEIGHT);
+        assert_eq!(
+            migrate_model_target_height(PREVIOUS_DEFAULT_MODEL_TARGET_HEIGHT, 2),
+            DEFAULT_MODEL_TARGET_HEIGHT
+        );
+        // Old custom values survive, including values near the old default.
+        for custom in [0.3, 0.5, 1.149, 1.151, 1.2, 2.4, 3.0] {
+            assert_eq!(migrate_model_target_height(custom, 2), custom);
+        }
+        assert_eq!(
+            migrate_model_target_height(99.0, 2),
+            MAX_MODEL_TARGET_HEIGHT
+        );
+        // A user deliberately restoring the old height after this release
+        // must not have it upgraded again on every launch.
+        assert_eq!(migrate_model_target_height(1.15, SCHEMA_VERSION), 1.15);
+        assert_eq!(
+            migrate_model_target_height(0.26, SCHEMA_VERSION),
+            MIN_MODEL_TARGET_HEIGHT
+        );
+    }
+
+    #[test]
+    fn unversioned_preferences_migrate_and_current_serialization_keeps_custom_size() {
+        let legacy: ClientPreferencesFile =
+            serde_json::from_str(r#"{"model_target_height":1.15}"#).unwrap();
+        assert_eq!(legacy.schema_version, 1);
+        assert_eq!(
+            migrate_model_target_height(legacy.model_target_height.unwrap(), legacy.schema_version),
+            DEFAULT_MODEL_TARGET_HEIGHT
+        );
+
+        for target_height in [1.15, DEFAULT_MODEL_TARGET_HEIGHT, 2.4] {
+            let saved = build_file_from_state(
+                &LightingSettings::default(),
+                &ModelScaleSettings { target_height },
+                CharacterChoice::Paco,
+                DEFAULT_GAME_SERVER_ADDR,
+                "scale-migration-test",
+            );
+            let round_trip: ClientPreferencesFile =
+                serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+            assert_eq!(round_trip.schema_version, SCHEMA_VERSION);
+            assert_eq!(
+                migrate_model_target_height(
+                    round_trip.model_target_height.unwrap(),
+                    round_trip.schema_version
+                ),
+                target_height
+            );
+        }
     }
 
     #[test]

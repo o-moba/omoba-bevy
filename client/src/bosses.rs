@@ -398,7 +398,7 @@ mod tests {
     use super::*;
     use crate::combat::CombatStats;
     use crate::creatures3d::{CreatureAssets, test_app};
-    use crate::model_scale::DEFAULT_MODEL_TARGET_HEIGHT;
+    use crate::model_scale::CREATURE_MODEL_TARGET_HEIGHT;
 
     fn boss_app(mode: PlayerVisualMode) -> App {
         let mut app = test_app(mode);
@@ -452,7 +452,7 @@ mod tests {
             let scale = root.get::<NormalizeModelScale>().unwrap();
             assert!(
                 (scale.head_local_y.unwrap()
-                    - DEFAULT_MODEL_TARGET_HEIGHT * BOSS_MODEL_HEIGHT_SCALE)
+                    - CREATURE_MODEL_TARGET_HEIGHT * BOSS_MODEL_HEIGHT_SCALE)
                     .abs()
                     < 0.001
             );

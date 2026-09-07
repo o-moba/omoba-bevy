@@ -192,6 +192,16 @@ fn should_attempt_reconnect(
 }
 
 impl ClientSession {
+    #[cfg(test)]
+    pub(crate) fn admitted_for_test() -> Self {
+        Self {
+            state: ClientConnectionState::Connected,
+            admitted: true,
+            join_flow_committed: true,
+            ..default()
+        }
+    }
+
     pub fn join_confirmed(&self) -> bool {
         self.is_connected() && self.admitted
     }
@@ -394,6 +404,12 @@ pub enum NetworkCommand {
     UpgradeSkill {
         slot: u8,
     },
+    BuyItem {
+        server_epoch: u64,
+        item_id: String,
+        request_id: u64,
+        match_id: u64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -437,6 +453,12 @@ enum ClientPacket {
     UpgradeSkill {
         slot: u8,
     },
+    BuyItem {
+        server_epoch: u64,
+        item_id: String,
+        request_id: u64,
+        match_id: u64,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -473,6 +495,14 @@ struct PlayerState {
     max_mana: f32,
     #[serde(default)]
     gold: u32,
+    #[serde(default)]
+    inventory: Vec<shared::shop::ItemId>,
+    #[serde(default)]
+    item_bonuses: shared::shop::ItemBonuses,
+    #[serde(default)]
+    shop_available: bool,
+    #[serde(default)]
+    last_purchase: Option<shared::shop::PurchaseReceipt>,
     #[serde(default)]
     xp: u32,
     #[serde(default = "default_player_level")]
@@ -779,6 +809,16 @@ impl From<&PlayerState> for PlayerCosmeticAction {
 /// Authoritative hero class replicated from the server.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkHeroClass(pub HeroClass);
+
+/// Equipment is authoritative, including receipt and current base eligibility.
+#[derive(Component, Clone, Debug, Default)]
+pub struct PlayerEquipment {
+    pub gold: u32,
+    pub inventory: Vec<shared::shop::ItemId>,
+    pub item_bonuses: shared::shop::ItemBonuses,
+    pub shop_available: bool,
+    pub last_purchase: Option<shared::shop::PurchaseReceipt>,
+}
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct PlayerProgression {
@@ -1285,6 +1325,21 @@ fn send_network_commands(
                     .outgoing
                     .send(ClientPacket::SetSpeedBoost { enabled: *enabled });
             }
+            NetworkCommand::BuyItem {
+                server_epoch,
+                item_id,
+                request_id,
+                match_id,
+            } => {
+                if client_session.join_confirmed() {
+                    let _ = channels.outgoing.send(ClientPacket::BuyItem {
+                        server_epoch: *server_epoch,
+                        item_id: item_id.clone(),
+                        request_id: *request_id,
+                        match_id: *match_id,
+                    });
+                }
+            }
             NetworkCommand::UpgradeSkill { slot } => {
                 if !client_session.join_confirmed() {
                     continue;
@@ -1537,6 +1592,7 @@ fn apply_server_snapshot(
                 NetworkSpriteCharacter(local_player_state.sprite_character.clone()),
                 NetworkHeroClass(local_player_state.hero_class),
                 player_state_to_progression(local_player_state),
+                player_state_to_equipment(local_player_state),
             ));
             let next_action = PlayerCosmeticAction::from(local_player_state);
             if action_query.get(local_entity).ok().flatten().copied() != Some(next_action) {
@@ -1616,6 +1672,7 @@ fn apply_server_snapshot(
                     ),
                     player_state_to_combat_stats(local_player_state),
                     player_state_to_progression(local_player_state),
+                    player_state_to_equipment(local_player_state),
                     Name::new("Player"),
                 ))
                 .id()
@@ -1644,6 +1701,7 @@ fn apply_server_snapshot(
                 ),
                 player_state_to_combat_stats(local_player_state),
                 player_state_to_progression(local_player_state),
+                player_state_to_equipment(local_player_state),
                 Name::new("Player"),
             ));
             if let Some(gltf) = local_gltf {
@@ -1676,6 +1734,7 @@ fn apply_server_snapshot(
                     ),
                     player_state_to_combat_stats(local_player_state),
                     player_state_to_progression(local_player_state),
+                    player_state_to_equipment(local_player_state),
                     Name::new("Player"),
                 ))
                 .id()
@@ -1729,6 +1788,7 @@ fn apply_server_snapshot(
                 NetworkHeroClass(player.hero_class),
                 player_state_to_combat_stats(player),
                 player_state_to_progression(player),
+                player_state_to_equipment(player),
             ));
             let next_action = PlayerCosmeticAction::from(player);
             if action_query.get(entity).ok().flatten().copied() != Some(next_action) {
@@ -1770,6 +1830,7 @@ fn apply_server_snapshot(
             },
             Name::new(format!("RemotePlayer-{}", player.id)),
         ));
+        entity_commands.insert(player_state_to_equipment(player));
         if **visual_mode == PlayerVisualMode::Models3d {
             entity_commands.insert(NormalizeModelScale::for_player_model());
             if let Some(gltf) = gltf_handle {
@@ -2628,6 +2689,16 @@ fn player_state_to_combat_stats(player: &PlayerState) -> CombatStats {
         max_hp: player.max_hp.max(1.0),
         mana: player.mana,
         max_mana: player.max_mana.max(1.0),
+    }
+}
+
+fn player_state_to_equipment(player: &PlayerState) -> PlayerEquipment {
+    PlayerEquipment {
+        gold: player.gold,
+        inventory: player.inventory.clone(),
+        item_bonuses: player.item_bonuses,
+        shop_available: player.shop_available,
+        last_purchase: player.last_purchase.clone(),
     }
 }
 

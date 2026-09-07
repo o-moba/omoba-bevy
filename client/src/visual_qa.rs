@@ -88,9 +88,11 @@ struct View {
     pixels: UVec2,
     hud: bool,
     perspective: bool,
+    orbit_yaw: f32,
+    zoom: f32,
 }
 
-fn views() -> [View; 4] {
+fn views() -> [View; 5] {
     // Exact art-script cameras mapped once: Blender (x,y,z) -> Bevy (x,z,-y).
     let base = -225.0_f32 / 2.0_f32.sqrt() / 2.0;
     [
@@ -102,6 +104,8 @@ fn views() -> [View; 4] {
             pixels: UVec2::new(1600, 1400),
             hud: false,
             perspective: false,
+            orbit_yaw: 0.0,
+            zoom: 1.0,
         },
         View {
             file: "03-river-gameplay.png",
@@ -111,6 +115,8 @@ fn views() -> [View; 4] {
             pixels: UVec2::new(1600, 1200),
             hud: true,
             perspective: false,
+            orbit_yaw: 0.0,
+            zoom: 1.0,
         },
         View {
             file: "02-sanctuary.png",
@@ -120,6 +126,8 @@ fn views() -> [View; 4] {
             pixels: UVec2::new(1400, 1400),
             hud: false,
             perspective: false,
+            orbit_yaw: 0.0,
+            zoom: 1.0,
         },
         View {
             file: "04-follow-gameplay.png",
@@ -130,6 +138,19 @@ fn views() -> [View; 4] {
             pixels: UVec2::new(1600, 1000),
             hud: true,
             perspective: true,
+            orbit_yaw: 0.0,
+            zoom: 1.0,
+        },
+        View {
+            file: "05-orbit-zoom-gameplay.png",
+            position: QA_DESTINATION,
+            target: QA_DESTINATION,
+            width: 0.0,
+            pixels: UVec2::new(1600, 1000),
+            hud: true,
+            perspective: true,
+            orbit_yaw: 0.6,
+            zoom: 1.5,
         },
     ]
 }
@@ -343,9 +364,13 @@ fn capture_qa(
     game: Res<GameStateSnapshot>,
     asset_server: Res<AssetServer>,
     spawner: Res<SceneSpawner>,
-    mut world: CaptureWorld,
+    mut scenes: ParamSet<(CaptureWorld, crate::minimap::MinimapQaScene)>,
     mut exit: MessageWriter<AppExit>,
 ) {
+    // Inspect the previous settled layout before temporarily changing root
+    // visibility for this explicitly requested view; avoid overlapping UI borrows.
+    let minimap_summary = scenes.p1().diagnostics();
+    let mut world = scenes.p0();
     if *mode != PlayerVisualMode::Models3d || qa.started.elapsed() >= qa.timeout {
         error!(
             "VERDANT_QA failed: 3D-only capture did not finish within {:?}; captures={}",
@@ -371,8 +396,9 @@ fn capture_qa(
     if view.perspective
         && let Ok((local, _)) = world.local.single()
     {
-        view.position =
-            local.translation + crate::camera::locked_camera_offset_for_team(1.0, Team::Green);
+        view.position = local.translation
+            + Quat::from_rotation_y(view.orbit_yaw)
+                * crate::camera::locked_camera_offset_for_team(view.zoom, Team::Green);
         view.target = Vec3::new(
             local.translation.x,
             crate::player::PLAYER_SIZE / 2.0,
@@ -534,7 +560,8 @@ fn capture_qa(
         "qa_render_fixtures":world.fixtures.iter().count(),"render_mesh_entities":ready.meshes,
         "shared_material_assets":world.materials.len(),"snapshot_tick":game.meta.snapshot_tick,
         "asset_root":shared::client_asset_root(),"version":env!("CARGO_PKG_VERSION"),
-        "source_camera":if view.perspective {"client/src/camera.rs::locked_camera_offset_for_team(1.0, Team::Green)"} else {"art/verdant-confluence/scripts/build_scene.py"},"stable_frames":qa.stable_frames,
+        "source_camera":if view.perspective {"production follow offset with declared QA orbit/zoom"} else {"art/verdant-confluence/scripts/build_scene.py"},"stable_frames":qa.stable_frames,
+        "orbit_yaw_radians":view.orbit_yaw,"zoom":view.zoom,"minimap":minimap_summary,
         "setup":"authoritative server structures and local agnes; five tagged render-only production creature fixtures" });
     info!("VERDANT_QA capture_request={capture}");
     qa.captures.push(capture);
@@ -639,8 +666,10 @@ mod tests {
     #[test]
     fn cameras_match_art_axis_conversion_and_capture_set_is_finite() {
         let plan = views();
-        assert_eq!(plan.len(), 4);
+        assert_eq!(plan.len(), 5);
         assert!(plan[3].perspective && plan[3].hud);
+        assert!(plan[4].perspective && plan[4].hud && plan[4].zoom > plan[3].zoom);
+        assert!(plan[4].orbit_yaw > 0.0);
         assert_eq!(plan[0].position, Vec3::new(230.0, 290.0, 300.0));
         assert_eq!(plan[1].position, Vec3::new(44.0, 49.0, 55.0));
         assert!(plan[1].hud);

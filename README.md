@@ -6,7 +6,8 @@ For the September 8 controlled beta, use the
 [tester/host guide](docs/progress/2026-09-07-beta-test-guide.md): the native
 package includes `practice.sh`, `host.sh --humans N` and
 `join-server.sh HOST:PORT`. See the
-[dated readiness record](docs/progress/2026-09-07-beta-readiness.md) for measured
+[current HUD/shop iteration](docs/progress/2026-09-07-hud-shop-iteration.md) and
+[match readiness record](docs/progress/2026-09-07-beta-readiness.md) for measured
 checks and remaining coverage. The commands below are development workflows.
 
 ## Prerequisites
@@ -107,6 +108,7 @@ states the current delivery boundary.
 | --- | --- |
 | **Arrow keys** (2D) | Pan the orthographic camera while follow is unlocked |
 | **Mouse wheel** | Zoom the active camera; 2D zoom is clamped to the map |
+| **P / Shop** | Browse items; buy while alive at your own base; Escape closes the shop |
 | **Y** | Toggle hero follow/free camera; a minimap focus returns directly to the hero |
 | **Space** | Restore hero follow and clear a minimap focus override |
 | **Alt + right mouse** (3D only) | Hold to orbit the camera |
@@ -118,7 +120,7 @@ states the current delivery boundary.
 | **Backspace** | Clear target |
 | **Q / W / E / R** | Cast that class ability at the selected target |
 | On-screen **skill** button | Touch/click alternative to Q/W/E/R |
-| **Esc** | Pause menu |
+| **Esc** | Close Help/Shop first, otherwise open the pause menu |
 
 Gameplay: lane map, minions, structures, combat, respawn, match phases (lobby → running → victory / rematch), and progression HUD as described in [docs/features.md](docs/features.md).
 

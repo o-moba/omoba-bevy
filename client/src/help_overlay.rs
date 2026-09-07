@@ -109,11 +109,13 @@ fn setup_help_overlay(mut commands: Commands) {
                         max_width: Val::Px(760.0),
                         flex_direction: FlexDirection::Column,
                         row_gap: Val::Px(18.0),
-                        padding: UiRect::all(Val::Px(18.0)),
+                        padding: UiRect::all(Val::Px(22.0)),
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(12.0)),
                         ..default()
                     },
-                    BackgroundColor(Color::srgba(0.04, 0.05, 0.08, 0.92)),
-                    BorderColor::all(Color::srgba(0.5, 0.55, 0.62, 0.85)),
+                    BackgroundColor(crate::ui_theme::PANEL),
+                    BorderColor::all(crate::ui_theme::GOLD),
                 ))
                 .with_children(|panel| {
                     panel.spawn((
@@ -229,7 +231,8 @@ SKILL POINTS: Use {upgrade} or the arrows above the hotbar to rank up abilities.
 TARGET: Tab selects the nearest hostile; Backspace clears.\n\
 TEAMS: You have a double ring; allies have squares; enemies have triangles.\n\n\
 OBJECTIVE: Follow a lane with your minions. Destroy an enemy lane tower to unlock its base, then destroy the base to win.\n\
-RECOVER: Let minions take tower fire. If defeated, wait for your respawn.\n\n\
+RECOVER: Let minions take tower fire. If defeated, wait for your respawn.\n\
+SHOP: Press P or click Open shop. Buy recommended items at your base with earned gold.\n\n\
 CAMERA: Y toggles hero follow; Space returns to your hero. Wheel zooms. Hold Alt + right mouse to orbit in 3D. Click the minimap to look around.\n\
 MENU: Escape opens settings. The online match continues; a rematch starts automatically after victory."
     )

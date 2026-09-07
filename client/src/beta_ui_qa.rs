@@ -22,13 +22,19 @@ use crate::{
     verdant3d::VerdantEnvironment,
 };
 
-const FILES: [&str; 4] = [
+const FILES: [&str; 7] = [
     "01-entry-720p.png",
     "02-help-720p.png",
     "03-gameplay-720p.png",
-    "04-result-fixture-720p.png",
+    "04-shop-720p.png",
+    "05-purchase-720p.png",
+    "06-shop-closed-720p.png",
+    "07-result-fixture-720p.png",
 ];
 const SETTLE_FRAMES: u32 = 45;
+fn capture_file(qa: &BetaUiQa, index: usize) -> String {
+    FILES[index].replace("720p", &format!("{}p", qa.height))
+}
 
 pub(crate) struct BetaUiQaPlugin;
 impl Plugin for BetaUiQaPlugin {
@@ -54,6 +60,14 @@ impl Plugin for BetaUiQaPlugin {
             readbacks: Vec::new(),
             captures: Vec::new(),
             fixture_label: false,
+            width: std::env::var("OMOBA_QA_WIDTH")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(1280),
+            height: std::env::var("OMOBA_QA_HEIGHT")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(720),
         })
         .add_systems(
             PreUpdate,
@@ -81,6 +95,8 @@ struct BetaUiQa {
     readbacks: Vec<usize>,
     captures: Vec<serde_json::Value>,
     fixture_label: bool,
+    width: u32,
+    height: u32,
 }
 #[derive(Component)]
 struct BetaUiShot(usize);
@@ -91,19 +107,44 @@ fn prepare_controls(
     help: Res<HelpOverlayVisible>,
     mut buttons: Query<(&Name, &mut Interaction), With<Button>>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
+    shop: Res<crate::shop::ShopState>,
+    equipment: Query<&crate::net::PlayerEquipment, With<crate::player::Player>>,
+    mut keys: ResMut<ButtonInput<KeyCode>>,
 ) {
     if let Ok(mut window) = windows.single_mut() {
         window.resolution.set_scale_factor_override(Some(1.0));
-        if window.physical_width() != 1280 || window.physical_height() != 720 {
-            window.resolution.set_physical_resolution(1280, 720);
+        if window.physical_width() != qa.width || window.physical_height() != qa.height {
+            window
+                .resolution
+                .set_physical_resolution(qa.width, qa.height);
         }
+    }
+    if qa.stage == 5 && shop.open {
+        keys.press(KeyCode::Escape);
+    } else {
+        keys.release(KeyCode::Escape);
     }
     for (name, mut interaction) in &mut buttons {
         let press = (qa.stage == 1
             && session.is_connected()
             && !session.join_confirmed()
-            && name.as_str() == "TeamGreenButton")
-            || (qa.stage == 2 && help.0 && name.as_str() == "HelpDismissButton");
+            && name.as_str()
+                == if std::env::var("OMOBA_QA_TEAM").as_deref() == Ok("blue") {
+                    "TeamBlueButton"
+                } else {
+                    "TeamGreenButton"
+                })
+            || (qa.stage == 2 && help.0 && name.as_str() == "HelpDismissButton")
+            || (qa.stage == 3 && !shop.open && name.as_str() == "ShopOpenButton")
+            || (qa.stage == 4
+                && shop.open
+                && !shop.purchase_pending()
+                && name.as_str() == "ShopBuy-EB"
+                && equipment.single().is_ok_and(|equipment| {
+                    !equipment
+                        .inventory
+                        .contains(&shared::shop::ItemId::EmberBlade)
+                }));
         if press {
             *interaction = Interaction::Pressed;
         }
@@ -115,7 +156,7 @@ fn prepare_result_fixture(
     mut qa: ResMut<BetaUiQa>,
     mut game: ResMut<GameStateSnapshot>,
 ) {
-    if qa.stage != 3 {
+    if qa.stage != 6 {
         return;
     }
     // Applied after each real network snapshot, exclusively in this opt-in
@@ -170,9 +211,14 @@ fn capture(
     session: Res<ClientSession>,
     game: Res<GameStateSnapshot>,
     help: Res<HelpOverlayVisible>,
+    shop: Res<crate::shop::ShopState>,
+    pause: Res<crate::pause_menu::PauseMenuState>,
+    equipment: Query<&crate::net::PlayerEquipment, With<crate::player::Player>>,
+    context: Res<crate::input_context::GameplayInputContext>,
     assets: Res<AssetServer>,
     spawner: Res<SceneSpawner>,
     scene: UiScene,
+    minimap: crate::minimap::MinimapQaScene,
     mut exit: MessageWriter<AppExit>,
 ) {
     if qa.stage >= FILES.len() {
@@ -190,7 +236,7 @@ fn capture(
         if qa.readbacks.contains(&qa.stage)
             && qa
                 .directory
-                .join(FILES[qa.stage])
+                .join(capture_file(&qa, qa.stage))
                 .metadata()
                 .is_ok_and(|p| p.len() > 32)
         {
@@ -198,10 +244,11 @@ fn capture(
             qa.frames = 0;
             qa.in_flight = false;
             if qa.stage == FILES.len() {
-                let summary = serde_json::json!({"version":env!("CARGO_PKG_VERSION"), "scenario":"beta-ui", "pixels":[1280,720],
+                let summary = serde_json::json!({"version":env!("CARGO_PKG_VERSION"), "scenario":"beta-ui", "pixels":[qa.width,qa.height],
                     "method":"Bevy Screenshot::primary_window + save_to_disk", "captures":qa.captures,
                     "elapsed_seconds":qa.started.elapsed().as_secs_f64(), "manual_interaction_verified":false,
-                    "button_handler_interactions":"scripted Interaction::Pressed on production Join and Help buttons",
+                    "button_handler_interactions":"scripted Interaction::Pressed on production Join, Help, Shop and purchase buttons; Escape uses production keyboard modal closure",
+                    "real_purchase_verified":true,
                     "full_match_proof":false, "result_snapshot":"synthetic presentation fixture only"});
                 let saved = std::fs::write(
                     qa.directory.join("qa-summary.json"),
@@ -246,7 +293,22 @@ fn capture(
                     && !help.0
                     && scene.join.is_empty()
             }
-            3 => session.join_confirmed() && matches!(game.state, GameState::Victory { .. }),
+            3 => shop.open && !context.gameplay_allowed(),
+            4 => {
+                shop.open
+                    && !context.gameplay_allowed()
+                    && equipment.single().is_ok_and(|equipment| {
+                        equipment
+                            .inventory
+                            .contains(&shared::shop::ItemId::EmberBlade)
+                            && equipment
+                                .last_purchase
+                                .as_ref()
+                                .is_some_and(|receipt| receipt.error.is_none())
+                    })
+            }
+            5 => !shop.open && !pause.open && context.gameplay_allowed(),
+            6 => session.join_confirmed() && matches!(game.state, GameState::Victory { .. }),
             _ => false,
         };
     qa.frames = if ready { qa.frames + 1 } else { 0 };
@@ -259,27 +321,36 @@ fn capture(
         return;
     }
     let primary_nodes: Vec<_> = scene.nodes.iter().filter(|(name, _, _, _)| matches!(name.as_str(),
-        "TeamGreenButton" | "TeamBlueButton" | "AvatarGrid" | "HelpDismissButton" | "HelpOverlayRoot" | "GameStateLabel" | "ConnectionStatusPanel" | "MinimapRoot" | "MatchHudColumn" | "SkillBarRoot" | "SkillSlot-Q" | "SkillSlot-R"))
+        "TeamGreenButton" | "TeamBlueButton" | "AvatarGrid" | "HelpDismissButton" | "HelpOverlayRoot" | "GameStateLabel" | "ConnectionStatusPanel" | "MinimapRoot" | "MatchHudColumn" | "SkillBarRoot" | "SkillSlot-Q" | "SkillSlot-R" | "EquipmentHud" | "ShopOpenButton" | "ShopPanel" | "ShopCloseButton" | "ShopBuy-EB" | "ShopBuy-GC" | "ShopSummary" | "ShopFeedback"))
         .map(|(name, node, transform, visible)| {
             let center = transform.translation;
             let size = node.size();
             serde_json::json!({"name":name.as_str(), "center":[center.x,center.y], "size":[size.x,size.y],
                 "visible":visible.is_none_or(|visibility| visibility.get()),
                 "fits_viewport": center.x-size.x/2.0 >= -1.0 && center.y-size.y/2.0 >= -1.0
-                    && center.x+size.x/2.0 <= 1281.0 && center.y+size.y/2.0 <= 721.0})
+                    && center.x+size.x/2.0 <= qa.width as f32 + 1.0 && center.y+size.y/2.0 <= qa.height as f32 + 1.0})
         }).collect();
     let stage = qa.stage;
     let required: &[&str] = match stage {
         0 => &["TeamGreenButton", "TeamBlueButton", "AvatarGrid"],
         1 => &["HelpDismissButton", "HelpOverlayRoot"],
-        2 => &[
+        2 | 5 => &[
             "MinimapRoot",
             "MatchHudColumn",
             "SkillBarRoot",
             "SkillSlot-Q",
             "SkillSlot-R",
+            "EquipmentHud",
+            "ShopOpenButton",
         ],
-        3 => &["GameStateLabel"],
+        3 | 4 => &[
+            "ShopPanel",
+            "ShopCloseButton",
+            "ShopBuy-EB",
+            "ShopBuy-GC",
+            "ShopSummary",
+        ],
+        6 => &["GameStateLabel"],
         _ => &[],
     };
     let controls_fit = required.iter().all(|name| {
@@ -291,6 +362,35 @@ fn capture(
                 && node["size"][1].as_f64().is_some_and(|size| size > 0.0)
         })
     });
+    let dock_names = [
+        "MinimapRoot",
+        "MatchHudColumn",
+        "SkillBarRoot",
+        "EquipmentHud",
+    ];
+    let dock: Vec<_> = primary_nodes
+        .iter()
+        .filter(|node| {
+            dock_names.iter().any(|name| node["name"] == *name) && node["visible"] == true
+        })
+        .collect();
+    let dock_clear = !matches!(stage, 2 | 5)
+        || dock.iter().enumerate().all(|(i, a)| {
+            dock.iter().skip(i + 1).all(|b| {
+                let delta_x =
+                    (a["center"][0].as_f64().unwrap() - b["center"][0].as_f64().unwrap()).abs();
+                let delta_y =
+                    (a["center"][1].as_f64().unwrap() - b["center"][1].as_f64().unwrap()).abs();
+                delta_x >= (a["size"][0].as_f64().unwrap() + b["size"][0].as_f64().unwrap()) / 2.0
+                    || delta_y
+                        >= (a["size"][1].as_f64().unwrap() + b["size"][1].as_f64().unwrap()) / 2.0
+            })
+        });
+    if !dock_clear {
+        error!("BETA_UI_QA failed: HUD panels overlap: {dock:?}");
+        exit.write(AppExit::error());
+        return;
+    }
     if !controls_fit {
         error!(
             "BETA_UI_QA failed: primary controls are missing, hidden or outside 720p: {primary_nodes:?}"
@@ -298,15 +398,17 @@ fn capture(
         exit.write(AppExit::error());
         return;
     }
-    let record = serde_json::json!({"file":FILES[stage], "stage":stage, "pixels":[1280,720],
-        "admitted":session.join_confirmed(), "snapshot_tick":game.meta.snapshot_tick,
-        "synthetic_result":stage == 3, "primary_controls_fit":controls_fit, "primary_nodes":primary_nodes});
+    let record = serde_json::json!({"file":capture_file(&qa, stage), "stage":stage, "pixels":[qa.width,qa.height],
+        "admitted":session.join_confirmed(), "server_epoch":game.meta.server_epoch, "snapshot_tick":game.meta.snapshot_tick,
+        "synthetic_result":stage == 6,
+        "minimap":minimap.diagnostics(), "shop_modal":shop.open, "gameplay_allowed":context.gameplay_allowed(), "pause_open":pause.open,
+        "equipment":equipment.single().ok().map(|e|serde_json::json!({"gold":e.gold,"inventory":e.inventory,"bonuses":e.item_bonuses,"receipt":e.last_purchase})), "primary_controls_fit":controls_fit, "primary_nodes":primary_nodes});
     info!("BETA_UI_QA capture_request={record}");
     qa.captures.push(record);
     qa.in_flight = true;
     commands
         .spawn((Screenshot::primary_window(), BetaUiShot(stage)))
-        .observe(save_to_disk(qa.directory.join(FILES[stage])))
+        .observe(save_to_disk(qa.directory.join(capture_file(&qa, stage))))
         .observe(record_readback);
 }
 
@@ -316,7 +418,7 @@ fn record_readback(
     mut qa: ResMut<BetaUiQa>,
 ) {
     if let Ok(shot) = shots.get(captured.entity) {
-        if captured.image.width() != 1280 || captured.image.height() != 720 {
+        if captured.image.width() != qa.width || captured.image.height() != qa.height {
             error!("BETA_UI_QA failed: readback dimensions must be 1280x720");
         }
         qa.readbacks.push(shot.0);

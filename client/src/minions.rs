@@ -46,7 +46,7 @@ mod tests {
     use super::*;
     use crate::combat::CombatStats;
     use crate::creatures3d::test_app;
-    use crate::model_scale::{DEFAULT_MODEL_TARGET_HEIGHT, ModelScaleSource, NormalizeModelScale};
+    use crate::model_scale::{CREATURE_MODEL_TARGET_HEIGHT, ModelScaleSource, NormalizeModelScale};
     use crate::net::{MinionBrainState, NetworkMinionBrainState};
 
     fn spawn_minion(app: &mut App, team: Team) -> Entity {
@@ -89,7 +89,8 @@ mod tests {
                 assert_eq!(root.get::<CombatStats>().unwrap().hp, 17.0);
                 let scale = root.get::<NormalizeModelScale>().unwrap();
                 assert!(
-                    (scale.head_local_y.unwrap() - DEFAULT_MODEL_TARGET_HEIGHT * 0.6).abs() < 0.001
+                    (scale.head_local_y.unwrap() - CREATURE_MODEL_TARGET_HEIGHT * 0.6).abs()
+                        < 0.001
                 );
                 assert!(scale.foot_local_y().unwrap().abs() < 0.001);
                 let children = root.get::<Children>().unwrap();

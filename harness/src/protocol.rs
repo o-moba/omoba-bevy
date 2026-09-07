@@ -137,6 +137,12 @@ pub enum ClientPacket {
     UpgradeSkill {
         slot: u8,
     },
+    BuyItem {
+        item_id: String,
+        request_id: u64,
+        match_id: u64,
+        server_epoch: u64,
+    },
 }
 
 /// A single player's networked state. Minimal mirror of `server::PlayerState`.
@@ -162,6 +168,14 @@ pub struct PlayerState {
     pub max_mana: f32,
     #[serde(default)]
     pub gold: u32,
+    #[serde(default)]
+    pub inventory: Vec<shared::shop::ItemId>,
+    #[serde(default)]
+    pub item_bonuses: shared::shop::ItemBonuses,
+    #[serde(default)]
+    pub shop_available: bool,
+    #[serde(default)]
+    pub last_purchase: Option<shared::shop::PurchaseReceipt>,
     #[serde(default)]
     pub xp: u32,
     #[serde(default)]

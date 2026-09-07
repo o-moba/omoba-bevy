@@ -31,6 +31,9 @@ pub const MAX_MANA: f32 = 100.0;
 #[derive(Resource, Default)]
 pub struct LocalCastCooldown {
     pub remaining_secs: [f32; 4],
+    /// Total duration last applied to each active cooldown. Lets an equipment
+    /// or rank update change the deadline without rescaling elapsed time.
+    total_secs: [f32; 4],
 }
 
 /// One visible action message, replaced in place and expired after three seconds.
@@ -97,6 +100,7 @@ fn reset_round_input_state(
     target.selected_target = None;
     pending.cancel();
     cooldowns.remaining_secs = [0.0; 4];
+    cooldowns.total_secs = [0.0; 4];
     feedback.text.clear();
     feedback.remaining = 0.0;
     for entity in &moving {
@@ -107,7 +111,9 @@ fn reset_round_input_state(
         .filter(|command| {
             !matches!(
                 command,
-                NetworkCommand::Cast { .. } | NetworkCommand::UpgradeSkill { .. }
+                NetworkCommand::Cast { .. }
+                    | NetworkCommand::UpgradeSkill { .. }
+                    | NetworkCommand::BuyItem { .. }
             )
         })
         .collect();
@@ -139,12 +145,11 @@ const MINION_MARKER_RADIUS: f32 = 1.05;
 const NEUTRAL_MARKER_RADIUS: f32 = 1.1;
 const TOWER_MARKER_RADIUS: f32 = 2.0;
 const BASE_TOWER_MARKER_RADIUS: f32 = 3.75;
-const SKILL_SLOT_SIZE: f32 = 112.0;
+const SKILL_SLOT_SIZE: f32 = 100.0;
 const SKILL_SLOT_GAP: f32 = 8.0;
-const SKILL_BUTTON_MARGIN: f32 = 20.0;
-const SKILL_BUTTON_COLOR: Color = Color::srgba(0.12, 0.12, 0.12, 0.75);
-const SKILL_BUTTON_HOVER_COLOR: Color = Color::srgba(0.18, 0.18, 0.18, 0.85);
-const SKILL_BUTTON_PRESS_COLOR: Color = Color::srgba(0.28, 0.28, 0.28, 0.95);
+const SKILL_BUTTON_COLOR: Color = crate::ui_theme::PANEL;
+const SKILL_BUTTON_HOVER_COLOR: Color = crate::ui_theme::HOVER;
+const SKILL_BUTTON_PRESS_COLOR: Color = crate::ui_theme::TILE;
 const SKILL_UPGRADE_READY_COLOR: Color = Color::srgba(0.20, 0.62, 0.26, 0.95);
 const SKILL_UPGRADE_HOVER_COLOR: Color = Color::srgba(0.26, 0.72, 0.32, 0.98);
 const SKILL_UPGRADE_IDLE_COLOR: Color = Color::srgba(0.16, 0.16, 0.18, 0.55);
@@ -183,6 +188,7 @@ impl Plugin for CombatPlugin {
                 Update,
                 (
                     tick_local_cast_cooldown,
+                    sync_authoritative_cooldown_durations,
                     update_action_feedback,
                     clear_invalid_target_system,
                     cast_spell_system,
@@ -368,6 +374,44 @@ fn tick_local_cast_cooldown(time: Res<Time>, mut cd: ResMut<LocalCastCooldown>) 
     }
 }
 
+/// Mirror the server's deadline: last cast time + current kit/item duration.
+/// Reducing haste after elapsed time must subtract the duration difference,
+/// rather than multiplying the remaining time (which incorrectly rescales history).
+fn sync_authoritative_cooldown_durations(
+    player: Query<
+        (
+            &PlayerProgression,
+            &NetworkHeroClass,
+            &crate::net::PlayerEquipment,
+        ),
+        With<Player>,
+    >,
+    mut cooldowns: ResMut<LocalCastCooldown>,
+) {
+    let Ok((progression, class, equipment)) = player.single() else {
+        return;
+    };
+    for slot in SkillSlot::ALL {
+        let index = slot.index();
+        let definition = ability_for_class_slot(class.0, slot);
+        let duration = shared::shop::item_cooldown(
+            definition,
+            progression.ranks[index],
+            slot,
+            equipment.item_bonuses,
+        )
+        .as_secs_f32();
+        if cooldowns.remaining_secs[index] > 0.0
+            && cooldowns.total_secs[index] > 0.0
+            && cooldowns.total_secs[index] != duration
+        {
+            cooldowns.remaining_secs[index] =
+                (cooldowns.remaining_secs[index] + duration - cooldowns.total_secs[index]).max(0.0);
+        }
+        cooldowns.total_secs[index] = duration;
+    }
+}
+
 /// The class whose kit drives the local HUD: server-replicated when available,
 /// otherwise the pre-join selection.
 fn local_hero_class(
@@ -523,8 +567,8 @@ fn setup_combat_ui(mut commands: Commands) {
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
-            bottom: Val::Px(184.0),
-            right: Val::Px(20.0),
+            bottom: Val::Px(178.0),
+            left: Val::Px(264.0),
             max_width: Val::Px(490.0),
             padding: UiRect::all(Val::Px(8.0)),
             ..default()
@@ -544,11 +588,11 @@ fn setup_combat_ui(mut commands: Commands) {
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                right: Val::Px(SKILL_BUTTON_MARGIN),
-                bottom: Val::Px(SKILL_BUTTON_MARGIN),
+                left: Val::Px(264.0),
+                bottom: Val::Px(24.0),
                 flex_direction: FlexDirection::Row,
                 column_gap: Val::Px(SKILL_SLOT_GAP),
-                align_items: AlignItems::Center,
+                align_items: AlignItems::FlexEnd,
                 ..default()
             },
             ZIndex(12),
@@ -583,9 +627,9 @@ fn setup_combat_ui(mut commands: Commands) {
                     ))
                     .with_children(|arrow| {
                         arrow.spawn((
-                            Text::new("\u{2191}"),
+                            Text::new("+  UPGRADE"),
                             TextFont {
-                                font_size: 16.0,
+                                font_size: 11.0,
                                 ..default()
                             },
                             TextColor::WHITE,
@@ -597,6 +641,9 @@ fn setup_combat_ui(mut commands: Commands) {
                         Node {
                             width: Val::Px(SKILL_SLOT_SIZE),
                             height: Val::Px(SKILL_SLOT_SIZE),
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(8.0)),
+                            padding: UiRect::all(Val::Px(4.0)),
                             flex_direction: FlexDirection::Column,
                             justify_content: JustifyContent::Center,
                             align_items: AlignItems::Center,
@@ -604,14 +651,16 @@ fn setup_combat_ui(mut commands: Commands) {
                             ..default()
                         },
                         BackgroundColor(SKILL_BUTTON_COLOR),
+                        BorderColor::all(crate::ui_theme::EDGE),
                         SkillBarSlot { slot: i },
                         Name::new(format!("SkillSlot-{label}")),
                     ))
                     .with_children(|slot| {
                         slot.spawn((
                             Text::new(label),
+                            TextLayout::new_with_justify(Justify::Center),
                             TextFont {
-                                font_size: 20.0,
+                                font_size: 24.0,
                                 ..default()
                             },
                             TextColor::WHITE,
@@ -623,6 +672,7 @@ fn setup_combat_ui(mut commands: Commands) {
                                 ..default()
                             },
                             TextColor(Color::srgba(0.88, 0.90, 0.94, 1.0)),
+                            TextLayout::new_with_justify(Justify::Center),
                             SkillNameLabel { slot: i },
                         ));
                         slot.spawn((
@@ -632,6 +682,7 @@ fn setup_combat_ui(mut commands: Commands) {
                                 ..default()
                             },
                             TextColor(Color::srgba(0.82, 0.84, 0.90, 1.0)),
+                            TextLayout::new_with_justify(Justify::Center),
                             SkillRankLabel { slot: i },
                         ));
                     });
@@ -1008,6 +1059,7 @@ fn try_cast_slot(
         return false;
     }
     cast_cd.remaining_secs[slot.index()] = scaled_cooldown(def, rank).as_secs_f32();
+    cast_cd.total_secs[slot.index()] = cast_cd.remaining_secs[slot.index()];
     command_writer.write(NetworkCommand::Cast {
         target,
         slot: slot.index() as u8,
@@ -1178,6 +1230,7 @@ fn resolve_pending_cast_system(
     mut cast_cd: ResMut<LocalCastCooldown>,
     context: Res<GameplayInputContext>,
     protection: Query<&crate::net::NetworkStructureProtected>,
+    equipment: Query<&crate::net::PlayerEquipment, With<Player>>,
 ) {
     if !context.gameplay_allowed() {
         pending_cast.cancel();
@@ -1275,7 +1328,7 @@ fn resolve_pending_cast_system(
     }
 
     commands.entity(player_entity).remove::<MovementTarget>();
-    let _sent = try_cast_slot(
+    let sent = try_cast_slot(
         request.slot,
         class,
         (stats, progression.copied().unwrap_or_default(), net_id),
@@ -1284,6 +1337,15 @@ fn resolve_pending_cast_system(
         &mut feedback,
         &mut cast_cd,
     );
+    if sent {
+        let bonuses = equipment
+            .single()
+            .map(|equipment| equipment.item_bonuses)
+            .unwrap_or_default();
+        cast_cd.remaining_secs[slot.index()] =
+            shared::shop::item_cooldown(definition, rank, slot, bonuses).as_secs_f32();
+        cast_cd.total_secs[slot.index()] = cast_cd.remaining_secs[slot.index()];
+    }
     pending_cast.cancel();
 }
 
@@ -2504,6 +2566,63 @@ mod tests {
                 .drain()
                 .count(),
             0
+        );
+    }
+    #[test]
+    fn buying_haste_adjusts_active_deadlines_without_rescaling_elapsed_time() {
+        use crate::net::PlayerEquipment;
+        use shared::shop::{ItemId, item_bonuses, item_cooldown};
+        let mut app = App::new();
+        app.init_resource::<LocalCastCooldown>()
+            .add_systems(Update, sync_authoritative_cooldown_durations);
+        let hero = app
+            .world_mut()
+            .spawn((
+                Player,
+                PlayerProgression::default(),
+                NetworkHeroClass(HeroClass::Mage),
+                PlayerEquipment::default(),
+            ))
+            .id();
+        app.update();
+        let old = app.world().resource::<LocalCastCooldown>().total_secs;
+        for (index, duration) in old.iter().enumerate() {
+            app.world_mut()
+                .resource_mut::<LocalCastCooldown>()
+                .remaining_secs[index] = *duration * 0.5;
+        }
+        let bonuses = item_bonuses(&[ItemId::FocusCharm, ItemId::SwiftGrip]);
+        app.world_mut().entity_mut(hero).insert(PlayerEquipment {
+            item_bonuses: bonuses,
+            ..default()
+        });
+        app.update();
+        for slot in SkillSlot::ALL {
+            let index = slot.index();
+            let current = item_cooldown(
+                ability_for_class_slot(HeroClass::Mage, slot),
+                1,
+                slot,
+                bonuses,
+            )
+            .as_secs_f32();
+            let expected = (old[index] * 0.5 + current - old[index]).max(0.0);
+            assert!(
+                (app.world().resource::<LocalCastCooldown>().remaining_secs[index] - expected)
+                    .abs()
+                    < 0.0001
+            );
+            assert!(
+                expected < current * 0.5,
+                "elapsed time is preserved, not scaled"
+            );
+        }
+        // A second identical authoritative snapshot cannot repeatedly shorten it.
+        let once = app.world().resource::<LocalCastCooldown>().remaining_secs;
+        app.update();
+        assert_eq!(
+            app.world().resource::<LocalCastCooldown>().remaining_secs,
+            once
         );
     }
 }

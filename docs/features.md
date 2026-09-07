@@ -1,8 +1,21 @@
 # Feature Inventory
 
-Canonical version: `0.18.0-rc.3`
+Canonical version: `0.18.0-rc.4`
 
 ## Current Playable Surface
+
+- **HUD, camera and equipment iteration (2026-09-07, iteration 05):** default
+  heroes are 26% larger with saved-default migration and unchanged creature
+  sizes. Both teams see a diagonal midlane matching the minimap. The compact
+  resource/ability/inventory HUD exposes a six-item base shop: 80 starting gold,
+  one gold per second during play, class recommendations and authoritative
+  purchases with round-bound retry receipts. Damage, Q attack rate, W/E/R haste,
+  movement, HP and mana bonuses affect play; death/reconnect preserve equipment
+  and rematch resets it. The bottom-right map uses team-colored hero portraits,
+  a separate local gold halo and actual camera ground coverage. Enemy hero
+  markers use shared radial team detection; this is **not world/network fog of
+  war**. See the [dated analysis and evidence](progress/2026-09-07-hud-shop-iteration.md)
+  and [tester guide](progress/2026-09-07-beta-test-guide.md).
 
 - **Complete-match beta preparation (2026-09-07, iteration 04):** dead-player
   progression preserves the respawn timer; full-roster lane XP and ordinary
