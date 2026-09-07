@@ -224,7 +224,7 @@ fn help_overlay_body() -> String {
     let upgrade = upgrade_key_display();
     format!(
         "Quick guide (press {help_key} or Escape to close)\n\n\
-MOVE: Click or tap the ground to walk.\n\
+MOVE: Right-click ground or minimap to follow a golden route. Left-click/tap ground also moves.\n\
 ATTACK: Click or tap a hostile to select it and use Q; your hero approaches if needed.\n\
 CAST: Use {skills} or the on-screen buttons. W/E/R unlock by level.\n\
 SKILL POINTS: Use {upgrade} or the arrows above the hotbar to rank up abilities.\n\
@@ -233,7 +233,7 @@ TEAMS: You have a double ring; allies have squares; enemies have triangles.\n\n\
 OBJECTIVE: Follow a lane with your minions. Destroy an enemy lane tower to unlock its base, then destroy the base to win.\n\
 RECOVER: Let minions take tower fire. If defeated, wait for your respawn.\n\
 SHOP: Press P or click Open shop. Buy recommended items at your base with earned gold.\n\n\
-CAMERA: Y toggles hero follow; Space returns to your hero. Wheel zooms. Hold Alt + right mouse to orbit in 3D. Click the minimap to look around.\n\
+CAMERA: Y toggles hero follow; Space returns to your hero. Wheel zooms. Hold Alt + right mouse to orbit in 3D. Left-click the minimap to look around.\n\
 MENU: Escape opens settings. The online match continues; a rematch starts automatically after victory."
     )
 }

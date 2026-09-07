@@ -1,6 +1,6 @@
 # Native beta — 8 September 2026
 
-Candidate version: **0.18.0-rc.4**. This is a controlled native 3D beta with
+Candidate version: **0.18.0-rc.5**. This is a controlled native 3D beta with
 human players and fill bots, using the Verdant Confluence arena. The delivered
 package is built and checked on macOS ARM64. Python 3.9+ is needed for the
 convenience launchers; no Python packages, Rust toolchain or source checkout
@@ -53,7 +53,10 @@ public service. Stop the host with Ctrl+C when the session is over.
 
 ## Play a complete match
 
-- Click open ground to move. Click an enemy to approach and attack with Q.
+- Right-click open ground or the minimap to set a route; the hero follows it
+  after you release the button. The golden path goes around towers and bases.
+  Another order replaces the route. Left-click/tap ground also moves; left-click
+  an enemy to approach and attack with Q.
 - Use Q/W/E/R or click the four ability buttons. Unlocks are levels 1/2/4/6;
   press U for skill upgrades. The hotbar shows mana, cooldown and rank.
 - Press P or click **Shop** to browse six items. Buy while alive at your own
@@ -64,7 +67,7 @@ public service. Stop the host with Ctrl+C when the session is over.
   the enemy base's protection, then destroy the base to win. The HUD states
   the current objective. Jungle camps and the two bosses are optional.
 - Alt + right mouse orbits the 3D camera; Space recovers the hero view;
-  Y toggles follow. Both teams use the same diagonal map orientation. Click or
+  Y toggles follow. Both teams use the same diagonal map orientation. Left-click or
   drag the bottom-right minimap to move your view; its yellow outline shows
   camera ground coverage. Your portrait has a gold halo inside the team ring.
 - The first-run help has a **Play** button; Escape dismisses it. F1 reopens
@@ -120,7 +123,7 @@ and the remaining dependency review are not certified by those checks.
 ## Maintainer build and verification
 
 ```sh
-python3 scripts/package_native.py --output /tmp/omoba-0.18.0-rc.4
+python3 scripts/package_native.py --output /tmp/omoba-0.18.0-rc.5
 python3 scripts/test_beta_launcher.py
 ```
 

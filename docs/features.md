@@ -1,8 +1,18 @@
 # Feature Inventory
 
-Canonical version: `0.18.0-rc.4`
+Canonical version: `0.18.0-rc.5`
 
 ## Current Playable Surface
+
+- **Right-click routes (2026-09-08):** right-click ground or the minimap to move
+  to a persistent destination, shown as a golden local route and arrival ring.
+  Routes detour around solid towers/bases; blocked destinations project to
+  reachable clearance. Orders replace previous routes and cancel pending casts.
+  Left minimap clicks still pan the camera, and Alt+right-click still orbits.
+  Menus, unadmitted/dead/non-running heroes and debug flight cannot issue orders.
+  Static structure discs and bounds define navigation; decorative scenery has
+  no terrain walkability mask, and transient players use existing overlap
+  resolution. See the [session record](progress/2026-09-08-right-click-navigation.md).
 
 - **HUD, camera and equipment iteration (2026-09-07, iteration 05):** default
   heroes are 26% larger with saved-default migration and unchanged creature

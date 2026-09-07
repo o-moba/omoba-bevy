@@ -6,6 +6,22 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.18.0-rc.5] - 2026-09-08
+
+### Added
+- Right-click the battlefield or minimap to order a persistent hero route. Local
+  golden waypoints and a destination ring show the intended movement; another
+  order replaces it and cancels a pending approach/cast.
+- Route around solid towers and bases using their existing collision radii;
+  project obstructed destinations to reachable clearance and stop on arrival.
+  This uses the current collision model, not a terrain navmesh.
+- Native input-driven navigation capture with independent UDP confirmation of
+  obstacle detouring, destination arrival, menu/orbit isolation and camera pan.
+
+### Preserved
+- Left-click/touch movement and attacks, left-click/touch minimap camera pan,
+  Alt+right-click orbit, speed limits and server movement authority.
+
 ## [0.18.0-rc.4] - 2026-09-07
 
 ### Added
