@@ -1,8 +1,8 @@
 # Playtest iteration 05 — camera, HUD and item progression
 
 Date: 2026-09-07. Candidate: 0.18.0-rc.4. Task: BETA-HUD-SHOP-2026-09-07.
-Implementation is complete. Exact package verification and the fresh independent
-pass are being recorded before the final release handoff.
+The iteration is implemented, packaged and exercised through a complete match
+and rematch. The dated record below identifies the changes and their evidence.
 
 ## Assessment of the previous playtest
 
@@ -73,12 +73,12 @@ paid purchases and an equipment reset, not only base destruction.
 Task specification and raw results are kept under
 `.agent/tasks/BETA-HUD-SHOP-2026-09-07/`.
 
-- Client tests: 172 PASS. Server/shared/skills: 74/19/5 PASS. Harness unit tests:
-  20 PASS; all 18 integration tests pass across the suite and targeted corrected
-  runs. The fresh verifier will rerun the canonical workspace command.
-- Python tests: 38 PASS. Workspace clippy with warnings denied, locked workspace
-  build, formatting, candidate content gate, Verdant geometry and 15-avatar
-  validation pass. No production dependencies changed.
+- Fresh canonical `cargo test --workspace --locked`: all 308 Rust tests PASS
+  (172 client, 74 server, 19 shared, 5 skills, 20 harness unit and 18 integration).
+  This includes the corrected paid-item reconnect and framed snapshot tests.
+- Fresh Python tests: 38 PASS. Fresh workspace clippy with warnings denied,
+  locked workspace build, formatting, candidate content gate and Verdant geometry
+  pass. The 15-avatar validation also passes. No production dependencies changed.
 - Source-binary full match proof: two ordinary release 5v5 rounds in 461.23s and
   455.90s, 119 paid purchases, complete reset and 889 telemetry samples. These
   independently built binaries are identified in `raw/full-match-shop-03/`.
@@ -97,9 +97,62 @@ legacy send ceiling; their populated/malformed-recovery regression now uses the
 existing native <=1,200-byte framing. Small legacy compatibility and the actual
 OS ceiling remain separately tested. No OS settings were changed.
 
-Package identity, exact-package results and fresh verification are recorded below
-when available. Source and final workspace package binaries are distinguished:
-workspace dependency feature unification can change their hashes.
+## Packaged candidate and visual record
+
+The macOS ARM64 package was built from clean, published code commit
+`9483bb48717b8dde09f696c9f4b5ef71e8f00392` on
+`feature/beta-hud-shop-2026-09-07`. Its archive is
+`omoba-0.18.0-rc.4-macos-arm64.zip` (167,523,694 bytes), stored under this task's
+`artifacts/` directory. SHA-256:
+`ab0b12375f3067a50fcc6ead4b534fcc2ca313046b69b72ca978ab5b38a2926b`.
+All 93 manifest files match their hashes; the ZIP contains those files plus
+`BUILD.json`, and passes the archive integrity check. The package uses the
+development Cargo profile with optimized dependencies, rather than claiming a
+measured shipping performance budget. A subsequent documentation-only commit
+does not change the tested runtime or assets.
+
+Exact-package native checks produced 19 frames with successful client exits:
+Green 720p (7), Blue 1080p (7), and Verdant views (5). The shop capture below
+contains a real authoritative paid purchase. Gameplay captures include declared
+render fixtures; the result-layout fixture is synthetic. These are actual Bevy
+readbacks with scripted input, not a claim of manual human playtesting.
+The independent verifier reran the packaged Green 720p flow: all seven frames,
+the real purchase and modal dismissal passed again with client exit 0.
+
+![Default diagonal camera and playable HUD](2026-09-07-hud-shop/gameplay.png)
+
+![Confirmed purchase and class recommendations at 720p](2026-09-07-hud-shop/shop.png)
+
+![Same camera orientation and visible hero at the Blue base](2026-09-07-hud-shop/blue-base.png)
+
+Extract the package and run `./practice.sh` to start a release-mode server,
+nine bots and a client. Select a class and hero, then press Join. `P` opens the
+shop; purchase a starter at your base, and use `Escape` to return to play.
+`Space` restores the default camera. See the
+[beta test guide](2026-09-07-beta-test-guide.md) for hosting and controls.
+
+Exact-package normal release 5v5 proof passed with ten ordinary UDP bots:
+
+| Round | Winner | Duration | Paid purchases |
+| --- | --- | ---: | ---: |
+| 1 | Green | 7:17.5 | 56 |
+| 2 | Blue | 7:32.3 | 59 |
+
+Both countdowns and the complete rematch reset passed. The trace contains 849
+complete samples; maximum driver-observed peer snapshot age was 14ms on local
+UDP. The clock and game rules were not accelerated. Both executable hashes were
+checked again after the run. `raw/package-full-match/` contains the checker
+result, metrics and telemetry; the wrapper exited 0.
+
+The independent verifier reran the complete test/build/content checks, inspected
+the current implementation and native PNGs, checked all ZIP contents against the
+manifest, and repeated the real client purchase flow. Its command logs and
+artifact checker are under `raw/fresh-verification/`; the acceptance decision
+for AC1–AC9 is recorded in the task's `verdict.json`. The proof bundle contains
+`spec.md`, `evidence.md`, `evidence.json` and raw artifacts, including retained
+failed attempts and the corrections they prompted. Source and final workspace
+package binaries are distinguished because workspace dependency feature
+unification can change their hashes.
 
 ## Follow-up after this iteration
 
