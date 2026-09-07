@@ -10,6 +10,7 @@ use crate::maps::MapLayout;
 use crate::minimap::MinimapNavigationState;
 use crate::player::{PLAYER_SIZE, Player};
 use crate::sprite::PlayerVisualMode;
+use crate::team::Team;
 use crate::world2d::simulation_xz_to_render_xy;
 
 pub const CAMERA_DISTANCE: f32 = 24.0;
@@ -76,6 +77,18 @@ pub fn locked_camera_offset(zoom: f32) -> Vec3 {
         CAMERA_HEIGHT * zoom,
         iso_dir.y * CAMERA_DISTANCE * zoom,
     )
+}
+
+/// Face the home spawn from the lane side so its sanctuary is behind the
+/// hero, rather than between the default camera and a newly spawned hero.
+/// Keep this orientation for the whole round; crossing the map never spins it.
+pub fn locked_camera_offset_for_team(zoom: f32, team: Team) -> Vec3 {
+    let offset = locked_camera_offset(zoom);
+    if team == Team::Green {
+        Vec3::new(-offset.x, offset.y, -offset.z)
+    } else {
+        offset
+    }
 }
 
 fn toggle_camera_lock(
@@ -164,6 +177,7 @@ fn update_camera(
         (With<MainCamera>, Without<Player>),
     >,
     player_query: Query<&Transform, (With<Player>, Without<MainCamera>)>,
+    player_team: Query<&Team, With<Player>>,
     mut cam_state: ResMut<CameraState>,
     mode: Res<PlayerVisualMode>,
     map_layout: Res<MapLayout>,
@@ -247,8 +261,9 @@ fn update_camera(
         };
         if let Some(target) = follow_target {
             let zoom = cam_state.zoom;
-            let mut offset =
-                Quat::from_rotation_y(cam_state.orbit_yaw) * locked_camera_offset(zoom);
+            let team = player_team.single().copied().unwrap_or(Team::Blue);
+            let mut offset = Quat::from_rotation_y(cam_state.orbit_yaw)
+                * locked_camera_offset_for_team(zoom, team);
             offset.y *= cam_state.orbit_height;
             let target_position = target + offset;
             let lerp_factor = (time.delta_secs() * 2.0).min(1.0);
@@ -454,6 +469,25 @@ mod tests {
         assert!(!y_follow_state(true, false));
         assert!(y_follow_state(true, true));
         assert!(y_follow_state(false, true));
+    }
+
+    #[test]
+    fn default_follow_views_both_home_spawns_from_the_lane_side() {
+        let layout = MapLayout::default();
+        for team in [Team::Green, Team::Blue] {
+            let spawn = layout.team_spawn(team);
+            let base = if team == Team::Green {
+                layout.home_spawn
+            } else {
+                layout.away_spawn
+            };
+            let offset = locked_camera_offset_for_team(1.0, team);
+            // The base lies behind the hero, outside the horizontal segment
+            // from camera to hero. This holds for initial join and respawn.
+            assert!((base - spawn).dot(Vec3::new(offset.x, 0.0, offset.z)) < 0.0);
+            assert_eq!(offset.y, CAMERA_HEIGHT);
+            assert!((offset.x.hypot(offset.z) - CAMERA_DISTANCE).abs() < 0.001);
+        }
     }
 
     #[test]

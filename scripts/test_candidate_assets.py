@@ -240,7 +240,7 @@ class CandidateAssetGateTests(unittest.TestCase):
         output = repository / "candidate"
         with mock.patch.object(package_native, "ROOT", repository), \
                 mock.patch("sys.argv", ["package_native.py", "--output", str(output)]), \
-                mock.patch.object(package_native.subprocess, "run") as cargo, \
+                mock.patch.object(package_native, "build_executables") as cargo, \
                 mock.patch("sys.stderr"):
             with self.assertRaises(SystemExit) as failure:
                 package_native.main()
@@ -270,7 +270,10 @@ class CandidateAssetGateTests(unittest.TestCase):
         with mock.patch.object(package_native, "ROOT", repository), \
                 mock.patch("sys.argv", ["package_native.py", "--output", str(output)]), \
                 mock.patch.dict(os.environ, {"CARGO_TARGET_DIR": str(target)}), \
-                mock.patch.object(package_native.subprocess, "run") as cargo, \
+                mock.patch.object(package_native, "source_identity", return_value={}), \
+                mock.patch.object(package_native, "build_executables", return_value={
+                    name: target / "debug" / (name + suffix) for name in ("client", "server", "bots")
+                }) as cargo, \
                 mock.patch.object(package_native, "run", return_value=listed), \
                 mock.patch.object(package_native.shutil, "copy2", side_effect=corrupted_copy):
             with self.assertRaisesRegex(RuntimeError, "packaged asset content gate failed"):

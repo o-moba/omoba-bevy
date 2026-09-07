@@ -49,6 +49,7 @@ const TOWER_HOLD_RADIUS: f32 = TOWER_CAUTION_RADIUS + 2.0;
 const MINION_SUPPORT_RADIUS: f32 = 24.0;
 const MIN_SUPPORT_MINIONS: usize = 2;
 const MIN_SIEGE_HEALTH: f32 = 0.5;
+const MIN_SIEGE_HEROES: usize = 3;
 
 /// Lanes, ordered like the server's minion lanes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,6 +146,8 @@ pub struct WorldView {
     pub units: Vec<EnemyRef>,
     pub structures: Vec<EnemyRef>,
     pub friendly_minions: Vec<EnemyRef>,
+    /// Living allies (including self) with enough HP to share tower damage.
+    pub friendly_siegers: Vec<EnemyRef>,
     pub protected_structures: Vec<u64>,
     pub health_fraction: f32,
 }
@@ -155,6 +158,7 @@ impl Default for WorldView {
             units: Vec::new(),
             structures: Vec::new(),
             friendly_minions: Vec::new(),
+            friendly_siegers: Vec::new(),
             protected_structures: Vec::new(),
             health_fraction: 1.0,
         }
@@ -175,8 +179,22 @@ impl WorldView {
         }
         for player in snapshot.players() {
             let PlayerState {
-                id, x, z, team, hp, ..
+                id,
+                x,
+                z,
+                team,
+                hp,
+                max_hp,
+                ..
             } = player;
+            if *team == Some(my_team) && *max_hp > 0.0 && *hp >= *max_hp * MIN_SIEGE_HEALTH {
+                view.friendly_siegers.push(EnemyRef {
+                    kind: TargetKind::Player,
+                    id: *id,
+                    x: *x,
+                    z: *z,
+                });
+            }
             if *id != my_id && is_enemy_team(team) && *hp > 0.0 {
                 view.units.push(EnemyRef {
                     kind: TargetKind::Player,
@@ -260,8 +278,20 @@ fn nearest(from: (f32, f32), enemies: &[EnemyRef]) -> Option<(&EnemyRef, f32)> {
 }
 
 fn tower_supported(me: (f32, f32), tower: &EnemyRef, view: &WorldView) -> bool {
-    view.health_fraction >= MIN_SIEGE_HEALTH
-        && view
+    if view.health_fraction < MIN_SIEGE_HEALTH {
+        return false;
+    }
+    // A healthy coordinated team can tank a structure itself. Requiring a
+    // minion wave even with all five heroes ready caused indefinite base rings.
+    let healthy_group = view
+        .friendly_siegers
+        .iter()
+        .filter(|hero| distance((hero.x, hero.z), (tower.x, tower.z)) <= TOWER_HOLD_RADIUS + 1.0)
+        .take(MIN_SIEGE_HEROES)
+        .count()
+        >= MIN_SIEGE_HEROES;
+    healthy_group
+        || view
             .friendly_minions
             .iter()
             .filter(|minion| {
@@ -356,6 +386,81 @@ pub fn choose_self_sustain(
         def.targeting == TargetingMode::SelfTarget
             && (needs_hp || needs_mana)
             && can_cast_slot(me, index, last_casts, now)
+    })
+}
+
+/// Alternate admissions receive the same class, preventing release team balancing
+/// from putting every ranged caster on one side and every melee hero on the other.
+pub fn class_for_bot(index: usize) -> HeroClass {
+    [
+        HeroClass::Warrior,
+        HeroClass::Mage,
+        HeroClass::Ranger,
+        HeroClass::Cleric,
+    ][(index / 2) % 4]
+}
+
+/// Midgame teams rally through an open lane, or the weakest remaining tower.
+/// Without a rotation, evenly matched fill bots can trade respawns in three
+/// separate lanes indefinitely while each new minion wave gets cleared.
+/// The current map has diagonal Mid towers, Top above that diagonal and Bot
+/// below it; base positions are excluded explicitly from tower selection.
+pub fn choose_rally_lane(snapshot: &ServerPacket, team: Team) -> Lane {
+    let map = map_points();
+    let enemy_base = if team == Team::Green {
+        map.away
+    } else {
+        map.home
+    };
+    Lane::ALL
+        .into_iter()
+        .min_by(|left, right| {
+            let health = |lane: Lane| {
+                snapshot
+                    .structures()
+                    .iter()
+                    .filter(|s| {
+                        s.team.is_some_and(|other| other != team)
+                            && distance((s.x, s.z), enemy_base) > 1.0
+                            && if (s.x - s.z).abs() < 1.0 {
+                                lane == Lane::Mid
+                            } else if s.x < s.z {
+                                lane == Lane::Top
+                            } else {
+                                lane == Lane::Bot
+                            }
+                    })
+                    .map(|s| s.hp)
+                    .sum::<f32>()
+            };
+            health(*left).total_cmp(&health(*right))
+        })
+        .unwrap_or(Lane::Mid)
+}
+
+/// Prefer unlocked burst skills, then Q, and respect their individual range.
+pub fn choose_offensive_skill(
+    me: &PlayerState,
+    target: TargetId,
+    view: &WorldView,
+    last_casts: &[Option<Instant>; 4],
+    now: Instant,
+) -> Option<u8> {
+    let enemy = view
+        .units
+        .iter()
+        .chain(&view.structures)
+        .find(|enemy| enemy.kind == target.kind && enemy.id == target.id)?;
+    let range = distance((me.x, me.z), (enemy.x, enemy.z));
+    [3, 2, 0].into_iter().find(|&slot| {
+        let def = ability_for_class_slot(
+            authoritative_class(me),
+            SkillSlot::from_index(slot).unwrap(),
+        );
+        def.targeting == TargetingMode::UnitTarget
+            && def.projectile_damage.is_some_and(|damage| damage > 0.0)
+            && range <= def.cast_range * 0.98
+            && can_cast_slot(me, slot, last_casts, now)
     })
 }
 
@@ -695,10 +800,11 @@ mod tests {
             "type": "snapshot",
             "your_id": 1,
             "players": [
-                { "id": 1, "x": 0.0, "z": 0.0, "team": "green", "hp": 100.0 },
+                { "id": 1, "x": 0.0, "z": 0.0, "team": "green", "hp": 100.0, "max_hp": 100.0 },
                 { "id": 2, "x": 1.0, "z": 0.0, "team": "blue", "hp": 100.0 },
                 { "id": 3, "x": 2.0, "z": 0.0, "team": "blue", "hp": 0.0 },
-                { "id": 4, "x": 3.0, "z": 0.0, "team": "green", "hp": 100.0 }
+                { "id": 4, "x": 3.0, "z": 0.0, "team": "green", "hp": 100.0, "max_hp": 100.0 },
+                { "id": 5, "x": 4.0, "z": 0.0, "team": "green", "hp": 40.0, "max_hp": 100.0 }
             ],
             "minions": [
                 { "id": 10, "x": 5.0, "z": 0.0, "team": "blue", "hp": 30.0 },
@@ -713,6 +819,14 @@ mod tests {
         });
         let snapshot: ServerPacket = serde_json::from_value(raw).unwrap();
         let view = WorldView::from_snapshot(&snapshot, 1, Team::Green);
+        assert_eq!(
+            view.friendly_siegers
+                .iter()
+                .map(|hero| hero.id)
+                .collect::<Vec<_>>(),
+            vec![1, 4],
+            "only healthy own-team heroes support a siege"
+        );
         let unit_ids: Vec<u64> = view.units.iter().map(|u| u.id).collect();
         assert_eq!(
             unit_ids,
@@ -732,6 +846,102 @@ mod tests {
     fn hero(class: &str, level: u32) -> PlayerState {
         serde_json::from_value(serde_json::json!({"id":1,"hp":50.0,"max_hp":100.0,
             "mana":100.0,"max_mana":100.0,"level":level,"hero_class":class,"skill_points":3,"ranks":[1,1,1,1]})).unwrap()
+    }
+
+    #[test]
+    fn midgame_rally_uses_an_open_lane_then_the_weakest_tower() {
+        let base = map_points().away;
+        let raw = serde_json::json!({"type":"snapshot","your_id":1,
+        "structures":[
+            {"id":2,"x":40.0,"z":96.0,"team":"blue","hp":240.0},
+            {"id":4,"x":30.0,"z":30.0,"team":"blue","hp":120.0},
+            {"id":6,"x":96.0,"z":40.0,"team":"blue","hp":240.0},
+            {"id":8,"x":base.0,"z":base.1,"team":"blue","hp":650.0}
+        ]});
+        let snapshot: ServerPacket = serde_json::from_value(raw.clone()).unwrap();
+        assert_eq!(choose_rally_lane(&snapshot, Team::Green), Lane::Mid);
+        let mut opened = raw;
+        opened["structures"].as_array_mut().unwrap().remove(2);
+        let snapshot: ServerPacket = serde_json::from_value(opened).unwrap();
+        assert_eq!(
+            choose_rally_lane(&snapshot, Team::Green),
+            Lane::Bot,
+            "missing Bot tower opens a path even while the base and other towers survive"
+        );
+    }
+
+    #[test]
+    fn alternating_release_admissions_get_equivalent_team_classes() {
+        for seat in 0..5 {
+            assert_eq!(class_for_bot(seat * 2), class_for_bot(seat * 2 + 1));
+        }
+        assert_eq!(class_for_bot(2), HeroClass::Mage);
+        assert_eq!(class_for_bot(6), HeroClass::Cleric);
+    }
+
+    #[test]
+    fn offense_uses_unlocked_burst_without_out_of_range_or_cooldown_spam() {
+        let now = Instant::now();
+        let target = TargetId {
+            kind: TargetKind::Minion,
+            id: 7,
+        };
+        let mut view = WorldView {
+            units: vec![unit(7, 8.0, 0.0)],
+            ..Default::default()
+        };
+        let mut me = hero("warrior", 1);
+        assert_eq!(
+            choose_offensive_skill(&me, target, &view, &[None; 4], now),
+            Some(0)
+        );
+        me.level = 4;
+        assert_eq!(
+            choose_offensive_skill(&me, target, &view, &[None; 4], now),
+            Some(2)
+        );
+        me.level = 6;
+        assert_eq!(
+            choose_offensive_skill(&me, target, &view, &[None; 4], now),
+            Some(3)
+        );
+        assert_eq!(
+            choose_offensive_skill(&me, target, &view, &[None, None, None, Some(now)], now),
+            Some(2)
+        );
+        assert_eq!(
+            choose_offensive_skill(&me, target, &view, &[Some(now); 4], now),
+            None
+        );
+        view.units[0].x = 11.0;
+        me.level = 4;
+        assert_eq!(
+            choose_offensive_skill(&me, target, &view, &[None; 4], now),
+            Some(0)
+        );
+        view.units[0].x = 20.0;
+        assert_eq!(
+            choose_offensive_skill(&me, target, &view, &[None; 4], now),
+            None
+        );
+        view.units[0].x = 8.0;
+        me.mana = 0.0;
+        assert_eq!(
+            choose_offensive_skill(&me, target, &view, &[None; 4], now),
+            None
+        );
+        me.mana = 100.0;
+        me.hp = 0.0;
+        assert_eq!(
+            choose_offensive_skill(&me, target, &view, &[None; 4], now),
+            None
+        );
+        me = hero("cleric", 6);
+        assert_eq!(
+            choose_offensive_skill(&me, target, &view, &[None; 4], now),
+            Some(0),
+            "self-heals must not be targeted at enemies"
+        );
     }
 
     #[test]
@@ -818,6 +1028,70 @@ mod tests {
         assert!(brain.decide(0.0, 0.0, &view).cast.is_some());
         view.health_fraction = 0.49;
         assert_eq!(brain.decide(0.0, 0.0, &view).cast, None);
+    }
+
+    #[test]
+    fn healthy_group_crosses_base_caution_and_casts_but_falls_back_after_losses() {
+        let base = map_points().away;
+        let outside = (base.0 + 27.0, base.1);
+        let inside = (base.0 + 9.0, base.1);
+        let hero = |id, x| EnemyRef {
+            kind: TargetKind::Player,
+            id,
+            x,
+            z: base.1,
+        };
+        let mut brain = BotBrain::new(Lane::Bot, Team::Green, HeroClass::Warrior);
+        brain.resync(outside.0, outside.1);
+        let mut view = WorldView {
+            structures: vec![tower(8, base.0, base.1)],
+            friendly_siegers: vec![
+                hero(1, outside.0),
+                hero(2, outside.0 - 1.0),
+                hero(3, outside.0 - 2.0),
+            ],
+            ..Default::default()
+        };
+        let entry = brain.decide(outside.0, outside.1, &view);
+        assert!(
+            distance(entry.move_target.unwrap(), base) < TOWER_CAUTION_RADIUS,
+            "healthy group follows the lane inside the caution ring"
+        );
+        assert_eq!(
+            brain
+                .decide(inside.0, inside.1, &view)
+                .cast
+                .map(|target| target.id),
+            Some(8)
+        );
+        view.protected_structures.push(8);
+        assert_eq!(
+            brain.decide(inside.0, inside.1, &view).cast,
+            None,
+            "team support never bypasses base protection"
+        );
+        view.protected_structures.clear();
+        view.friendly_siegers.pop();
+        let retreat = brain.decide(inside.0, inside.1, &view);
+        assert_eq!(
+            retreat.cast, None,
+            "losing the third healthy teammate cancels the dive"
+        );
+        assert!(distance(retreat.move_target.unwrap(), base) >= TOWER_HOLD_RADIUS - 0.01);
+        view.friendly_siegers.push(hero(3, outside.0 - 2.0));
+        view.health_fraction = 0.3;
+        assert_eq!(
+            brain.decide(inside.0, inside.1, &view).cast,
+            None,
+            "wounded heroes leave even a supported siege"
+        );
+        view.health_fraction = 1.0;
+        view.friendly_siegers[2].x = base.0 + 100.0;
+        assert_eq!(
+            brain.decide(inside.0, inside.1, &view).cast,
+            None,
+            "distant allies cannot support a tower dive"
+        );
     }
 
     #[test]

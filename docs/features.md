@@ -1,8 +1,21 @@
 # Feature Inventory
 
-Canonical version: `0.18.0-rc.2`
+Canonical version: `0.18.0-rc.3`
 
 ## Current Playable Surface
+
+- **Complete-match beta preparation (2026-09-07, iteration 04):** dead-player
+  progression preserves the respawn timer; full-roster lane XP and ordinary
+  fill-bot ability selection support useful complete sessions. A bounded
+  two-round real-UDP acceptance command observes normal release matchmaking,
+  objectives, victory and clean rematch. Help has a clickable dismissal,
+  Escape has modal precedence, Pause resumes/exits safely and the result panel
+  explains automatic rematch. Native 720p UI captures and packaged practice,
+  host and remote-join commands support the first cohort. See the
+  [dated readiness record](progress/2026-09-07-beta-readiness.md) and
+  [beta tester guide](progress/2026-09-07-beta-test-guide.md) for the actual
+  evidence and coverage limits; this entry does not certify human balance,
+  untested platforms or public Internet operation.
 
 - **Verdant Confluence native arena (2026-09-05, iteration 03):** the supplied
   Blender scene now supplies the 3D environment, foliage and live faction

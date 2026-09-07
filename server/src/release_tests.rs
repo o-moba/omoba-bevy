@@ -502,12 +502,9 @@ fn full_roster_progression_baseline_is_reproducible_and_conserves_rewards() {
             }
         }
         if team_size == 5 {
-            assert_eq!((milestones[&(2, "first")], milestones[&(2, "all")]), (2, 2));
-            assert_eq!((milestones[&(4, "first")], milestones[&(4, "all")]), (7, 8));
-            assert_eq!(
-                (milestones[&(6, "first")], milestones[&(6, "all")]),
-                (15, 17)
-            );
+            assert_eq!((milestones[&(2, "first")], milestones[&(2, "all")]), (1, 1));
+            assert_eq!((milestones[&(4, "first")], milestones[&(4, "all")]), (3, 3));
+            assert_eq!((milestones[&(6, "first")], milestones[&(6, "all")]), (6, 6));
             for level in [2, 4, 6] {
                 let seconds = |key| {
                     FIRST_MINION_WAVE_DELAY.as_secs()
@@ -677,4 +674,49 @@ fn live_udp_victory_rematch_uses_real_cast_receiver_and_framed_snapshots() {
         second_meta.match_id,
         shared::transport::MAX_DATAGRAM_BYTES
     );
+}
+
+#[test]
+fn shared_xp_level_up_preserves_death_until_the_scheduled_respawn() {
+    let mut rt = runtime(MatchConfig::dev());
+    let now = Instant::now();
+    rt.handle_packet(addr(55800), join("dead", Team::Green), now);
+    rt.handle_packet(addr(55801), join("alive", Team::Green), now);
+    let respawn_at = now + RESPAWN_DELAY;
+    for player in rt.players.values_mut() {
+        player.state.xp = player.state.next_level_xp - 1;
+        player.state.hp = 0.0;
+        player.respawn_at = Some(respawn_at);
+    }
+    rt.players.get_mut(&addr(55801)).unwrap().state.hp = 40.0;
+    rt.players.get_mut(&addr(55801)).unwrap().respawn_at = None;
+    award_minion_kill_rewards(&mut rt.players, Team::Green);
+    let dead = &rt.players[&addr(55800)];
+    assert_eq!(dead.state.level, 2);
+    assert_eq!(dead.state.hp, 0.0);
+    assert_eq!(dead.respawn_at, Some(respawn_at));
+    let alive = &rt.players[&addr(55801)];
+    assert_eq!(alive.state.level, 2);
+    assert_eq!(alive.state.hp, 40.0 + LEVEL_UP_HP_BONUS);
+    handle_respawns(
+        &mut rt.players,
+        &rt.structures,
+        &rt.map_layout,
+        &GameState::Running,
+        respawn_at - Duration::from_millis(1),
+    );
+    assert_eq!(rt.players[&addr(55800)].state.hp, 0.0);
+    handle_respawns(
+        &mut rt.players,
+        &rt.structures,
+        &rt.map_layout,
+        &GameState::Running,
+        respawn_at,
+    );
+    let dead = &rt.players[&addr(55800)];
+    assert_eq!(dead.state.hp, MAX_HP + LEVEL_UP_HP_BONUS);
+    assert_eq!(dead.state.hp, dead.state.max_hp);
+    assert_eq!(dead.respawn_at, None);
+    let spawn = spawn_position_for_team_from_base(&rt.structures, &rt.map_layout, Team::Green);
+    assert_eq!((dead.state.x, dead.state.z), (spawn.x, spawn.z));
 }

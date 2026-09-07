@@ -15,7 +15,7 @@ use std::{
 };
 
 use crate::bosses::BossVisual;
-use crate::camera::{CameraState, MainCamera, locked_camera_offset};
+use crate::camera::{CameraState, MainCamera, locked_camera_offset_for_team};
 use crate::combat::{CombatStats, MAX_HP, MAX_MANA};
 use crate::maps::MapLayout;
 use crate::model_scale::{ModelScaleSource, NormalizeModelScale, model_scale_key};
@@ -1690,7 +1690,8 @@ fn apply_server_snapshot(
                 camera_transform.translation.y = xy.y;
             } else {
                 let zoom = cam_state.zoom;
-                camera_transform.translation = spawn + locked_camera_offset(zoom);
+                camera_transform.translation =
+                    spawn + locked_camera_offset_for_team(zoom, local_player_state.team);
                 let look_target = Vec3::new(spawn.x, PLAYER_SIZE * 0.5, spawn.z);
                 *camera_transform = camera_transform.looking_at(look_target, Vec3::Y);
             }
@@ -2146,7 +2147,9 @@ fn setup_connection_status_ui(mut commands: Commands) {
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(16.0),
+                right: Val::Px(16.0),
+                width: Val::Px(340.0),
+                max_width: Val::Percent(90.0),
                 top: Val::Px(12.0),
                 padding: UiRect::all(Val::Px(12.0)),
                 flex_direction: FlexDirection::Column,
@@ -2173,6 +2176,7 @@ fn setup_connection_status_ui(mut commands: Commands) {
                 .spawn((
                     Button,
                     Node {
+                        display: Display::None,
                         width: Val::Px(120.0),
                         height: Val::Px(36.0),
                         justify_content: JustifyContent::Center,
@@ -2210,8 +2214,30 @@ fn handle_connection_retry_button(
 fn sync_connection_status_ui(
     client_session: Res<ClientSession>,
     mut label_q: Query<&mut Text, With<ConnectionStatusLabel>>,
-    mut retry_vis: Query<&mut Visibility, With<ConnectionRetryButton>>,
+    mut root: Query<
+        (&mut Visibility, &mut Node),
+        (With<ConnectionStatusRoot>, Without<ConnectionRetryButton>),
+    >,
+    mut retry: Query<
+        (&mut Visibility, &mut Node),
+        (With<ConnectionRetryButton>, Without<ConnectionStatusRoot>),
+    >,
 ) {
+    let healthy_admission = client_session.join_confirmed()
+        && client_session.join_error.is_none()
+        && !client_session.join_exhausted;
+    if let Ok((mut visibility, mut node)) = root.single_mut() {
+        *visibility = if healthy_admission {
+            Visibility::Hidden
+        } else {
+            Visibility::Visible
+        };
+        node.display = if healthy_admission {
+            Display::None
+        } else {
+            Display::Flex
+        };
+    }
     let Ok(mut text) = label_q.single_mut() else {
         return;
     };
@@ -2257,17 +2283,21 @@ fn sync_connection_status_ui(
         text.0 = "The server did not confirm your Join. Use Retry to try again.".to_owned();
     }
 
-    let Ok(mut retry_vis) = retry_vis.single_mut() else {
-        return;
-    };
-    *retry_vis = if client_session.state == ClientConnectionState::Disconnected
-        || client_session.join_error.is_some()
-        || client_session.join_exhausted
-    {
-        Visibility::Visible
-    } else {
-        Visibility::Hidden
-    };
+    if let Ok((mut visibility, mut node)) = retry.single_mut() {
+        let can_retry = client_session.state == ClientConnectionState::Disconnected
+            || client_session.join_error.is_some()
+            || client_session.join_exhausted;
+        *visibility = if can_retry {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        node.display = if can_retry {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
 }
 
 fn despawn_tracked_net_entities(
@@ -3385,5 +3415,73 @@ mod tests {
             }
             Err(error) => panic!("legal IPv4 UDP payload failed on loopback: {error}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod connection_ui_tests {
+    use super::*;
+
+    #[test]
+    fn admission_hides_status_and_disconnection_exposes_working_retry_without_empty_layout() {
+        let mut app = App::new();
+        app.init_resource::<ClientSession>()
+            .add_message::<SessionUiCommand>()
+            .add_systems(Startup, setup_connection_status_ui)
+            .add_systems(
+                Update,
+                (handle_connection_retry_button, sync_connection_status_ui).chain(),
+            );
+        app.update();
+        let root = app
+            .world_mut()
+            .query_filtered::<Entity, With<ConnectionStatusRoot>>()
+            .single(app.world())
+            .unwrap();
+        let retry = app
+            .world_mut()
+            .query_filtered::<Entity, With<ConnectionRetryButton>>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(
+            app.world().get::<Node>(retry).unwrap().display,
+            Display::None
+        );
+        {
+            let mut session = app.world_mut().resource_mut::<ClientSession>();
+            session.state = ClientConnectionState::Connected;
+            session.admitted = true;
+        }
+        app.update();
+        assert_eq!(
+            app.world().get::<Node>(root).unwrap().display,
+            Display::None
+        );
+        assert_eq!(
+            *app.world().get::<Visibility>(root).unwrap(),
+            Visibility::Hidden
+        );
+        app.world_mut().resource_mut::<ClientSession>().state = ClientConnectionState::Disconnected;
+        app.update();
+        assert_eq!(
+            app.world().get::<Node>(root).unwrap().display,
+            Display::Flex
+        );
+        assert_eq!(
+            app.world().get::<Node>(retry).unwrap().display,
+            Display::Flex
+        );
+        assert_eq!(
+            *app.world().get::<Visibility>(retry).unwrap(),
+            Visibility::Visible
+        );
+        app.world_mut()
+            .entity_mut(retry)
+            .insert(Interaction::Pressed);
+        app.update();
+        assert_eq!(
+            app.world().resource::<Messages<SessionUiCommand>>().len(),
+            1
+        );
     }
 }

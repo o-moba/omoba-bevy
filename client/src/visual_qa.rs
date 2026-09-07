@@ -49,6 +49,10 @@ impl Plugin for VisualQaPlugin {
         let Some(directory) = qa_output(std::env::var_os("OMOBA_VISUAL_QA_DIR")) else {
             return;
         };
+        if std::env::var("OMOBA_VISUAL_QA_SCENARIO").is_ok_and(|value| value == "beta-ui") {
+            app.add_plugins(crate::beta_ui_qa::BetaUiQaPlugin);
+            return;
+        }
         let max_seconds = bounded_timeout(std::env::var("OMOBA_VISUAL_QA_TIMEOUT").ok().as_deref());
         app.insert_resource(QaState::new(directory, max_seconds))
             .add_systems(
@@ -119,7 +123,8 @@ fn views() -> [View; 4] {
         },
         View {
             file: "04-follow-gameplay.png",
-            position: QA_DESTINATION + crate::camera::locked_camera_offset(1.0),
+            position: QA_DESTINATION
+                + crate::camera::locked_camera_offset_for_team(1.0, Team::Green),
             target: QA_DESTINATION,
             width: 0.0,
             pixels: UVec2::new(1600, 1000),
@@ -326,7 +331,7 @@ struct CaptureWorld<'w, 's> {
         (With<MainCamera>, Without<Player>),
     >,
     shadows: Query<'w, 's, &'static mut CascadeShadowConfig, With<DirectionalLight>>,
-    windows: Query<'w, 's, &'static mut Window, With<PrimaryWindow>>,
+    windows: Query<'w, 's, (Entity, &'static mut Window), With<PrimaryWindow>>,
     ui: Query<'w, 's, (Entity, &'static mut Node, Option<&'static Name>), Without<ChildOf>>,
 }
 
@@ -366,7 +371,8 @@ fn capture_qa(
     if view.perspective
         && let Ok((local, _)) = world.local.single()
     {
-        view.position = local.translation + crate::camera::locked_camera_offset(1.0);
+        view.position =
+            local.translation + crate::camera::locked_camera_offset_for_team(1.0, Team::Green);
         view.target = Vec3::new(
             local.translation.x,
             crate::player::PLAYER_SIZE / 2.0,
@@ -407,7 +413,7 @@ fn capture_qa(
             ..OrthographicProjection::default_3d()
         })
     };
-    if let Ok(mut window) = world.windows.single_mut() {
+    if let Ok((_, mut window)) = world.windows.single_mut() {
         if window.physical_width() != view.pixels.x || window.physical_height() != view.pixels.y {
             window.resolution.set_scale_factor_override(Some(1.0));
             window
@@ -453,6 +459,10 @@ fn capture_qa(
                     "VERDANT_QA completed images={} summary={summary}",
                     views().len()
                 );
+                // Use the production Exit-button window cleanup before AppExit.
+                if let Ok((window, _)) = world.windows.single() {
+                    commands.entity(window).despawn();
+                }
                 exit.write(if result.is_ok() {
                     AppExit::Success
                 } else {
@@ -524,7 +534,7 @@ fn capture_qa(
         "qa_render_fixtures":world.fixtures.iter().count(),"render_mesh_entities":ready.meshes,
         "shared_material_assets":world.materials.len(),"snapshot_tick":game.meta.snapshot_tick,
         "asset_root":shared::client_asset_root(),"version":env!("CARGO_PKG_VERSION"),
-        "source_camera":if view.perspective {"client/src/camera.rs::locked_camera_offset(1.0)"} else {"art/verdant-confluence/scripts/build_scene.py"},"stable_frames":qa.stable_frames,
+        "source_camera":if view.perspective {"client/src/camera.rs::locked_camera_offset_for_team(1.0, Team::Green)"} else {"art/verdant-confluence/scripts/build_scene.py"},"stable_frames":qa.stable_frames,
         "setup":"authoritative server structures and local agnes; five tagged render-only production creature fixtures" });
     info!("VERDANT_QA capture_request={capture}");
     qa.captures.push(capture);

@@ -12,9 +12,8 @@ use crate::net::{ClientConnectionState, ClientSession};
 use crate::persistence::{
     ClientPrefsSaveGate, ClientSessionId, ResolvedServerAddressForPrefs, reset_graphics_to_defaults,
 };
-use crate::player::Player;
 use crate::session_config::DEFAULT_GAME_SERVER_ADDR;
-use crate::team::{TeamSelectRoot, TeamSelection, spawn_team_select_ui};
+use crate::team::TeamSelection;
 use crate::world::{
     DEFAULT_AMBIENT_BRIGHTNESS, DEFAULT_LIGHT_ILLUMINANCE, DEFAULT_LIGHT_PITCH_DEG,
     DEFAULT_LIGHT_YAW_DEG, LightingSettings, MAX_AMBIENT_BRIGHTNESS, MAX_LIGHT_ILLUMINANCE,
@@ -40,12 +39,12 @@ pub struct PauseMenuPlugin;
 impl Plugin for PauseMenuPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PauseMenuState>()
-            .init_resource::<RestartRequest>()
             .add_systems(Startup, setup_pause_menu_ui)
             .add_systems(
                 Update,
                 (toggle_pause_menu, close_pause_menu_when_disconnected)
                     .chain()
+                    .after(crate::help_overlay::HelpOverlaySet::Input)
                     .in_set(crate::input_context::InputContextSet::Modal),
             )
             .add_systems(
@@ -58,13 +57,12 @@ impl Plugin for PauseMenuPlugin {
                     handle_lighting_buttons,
                     update_model_scale_label,
                     update_lighting_labels,
-                    handle_restart_button_request,
+                    handle_resume_button,
                     handle_reset_graphics_defaults_button,
                     handle_exit_button,
                     sync_settings_server_addr_label,
                 ),
-            )
-            .add_systems(Last, process_restart_request);
+            );
     }
 }
 
@@ -72,11 +70,6 @@ impl Plugin for PauseMenuPlugin {
 pub(crate) struct PauseMenuState {
     pub(crate) open: bool,
     in_settings: bool,
-}
-
-#[derive(Resource, Default)]
-struct RestartRequest {
-    pending: bool,
 }
 
 #[derive(Component)]
@@ -101,7 +94,7 @@ struct ResetGraphicsDefaultsButton;
 struct ExitButton;
 
 #[derive(Component)]
-struct RestartButton;
+struct ResumeButton;
 
 #[derive(Component)]
 struct ScaleDecreaseButton;
@@ -213,7 +206,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                         ))
                         .with_children(|main| {
                             main.spawn((
-                                Text::new("Pause"),
+                                Text::new("The online match continues"),
                                 TextFont {
                                     font_size: 20.0,
                                     ..default()
@@ -230,11 +223,11 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                             );
                             spawn_menu_button(
                                 main,
-                                "Restart",
-                                RestartButton,
-                                "PauseMenuRestartButton",
+                                "Resume match",
+                                ResumeButton,
+                                "PauseMenuResumeButton",
                             );
-                            spawn_menu_button(main, "Exit", ExitButton, "PauseMenuExitButton");
+                            spawn_menu_button(main, "Exit game", ExitButton, "PauseMenuExitButton");
                         });
 
                     panel
@@ -881,62 +874,131 @@ fn handle_exit_button(
     }
 }
 
-fn handle_restart_button_request(
-    mut restart_request: ResMut<RestartRequest>,
-    mut restart_query: Query<
+fn handle_resume_button(
+    mut menu_state: ResMut<PauseMenuState>,
+    mut buttons: Query<
         (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<Button>, With<RestartButton>),
+        (Changed<Interaction>, With<Button>, With<ResumeButton>),
     >,
 ) {
-    for (interaction, mut color) in &mut restart_query {
+    for (interaction, mut color) in &mut buttons {
         match *interaction {
             Interaction::Pressed => {
-                info!("Restart selected from pause menu.");
-                restart_request.pending = true;
+                menu_state.open = false;
+                menu_state.in_settings = false;
             }
-            Interaction::Hovered => {
-                *color = BUTTON_HOVER_COLOR.into();
-            }
-            Interaction::None => {
-                *color = BUTTON_COLOR.into();
-            }
+            Interaction::Hovered => *color = BUTTON_HOVER_COLOR.into(),
+            Interaction::None => *color = BUTTON_COLOR.into(),
         }
     }
 }
 
-fn process_restart_request(
-    mut commands: Commands,
-    mut menu_state: ResMut<PauseMenuState>,
-    mut team_selection: ResMut<TeamSelection>,
-    mut restart_request: ResMut<RestartRequest>,
-    local_players: Query<Entity, With<Player>>,
-    overlay_query: Query<Entity, With<TeamSelectRoot>>,
-    mut cursor_query: Query<&mut CursorOptions, With<PrimaryWindow>>,
-    visual_mode: Res<crate::sprite::PlayerVisualMode>,
-    sprite_assets: Res<crate::sprite::SpriteVisualAssets>,
-) {
-    if !restart_request.pending {
-        return;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resume_button_keeps_authoritative_player_and_loadout_intact() {
+        let mut app = App::new();
+        app.insert_resource(PauseMenuState {
+            open: true,
+            in_settings: false,
+        })
+        .init_resource::<TeamSelection>()
+        .add_systems(Startup, setup_pause_menu_ui)
+        .add_systems(
+            Update,
+            (handle_resume_button, sync_pause_menu_visibility).chain(),
+        );
+        app.world_mut().resource_mut::<TeamSelection>().team = Some(crate::team::Team::Green);
+        let player = app.world_mut().spawn(crate::player::Player).id();
+        app.update();
+        let button = app
+            .world_mut()
+            .query_filtered::<Entity, With<ResumeButton>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut()
+            .entity_mut(button)
+            .insert(Interaction::Pressed);
+        app.update();
+        assert!(!app.world().resource::<PauseMenuState>().open);
+        assert!(app.world().get_entity(player).is_ok());
+        assert_eq!(
+            app.world().resource::<TeamSelection>().team,
+            Some(crate::team::Team::Green)
+        );
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<crate::team::TeamSelectRoot>>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+        let mut root = app
+            .world_mut()
+            .query_filtered::<(&Node, &Visibility), With<PauseMenuRoot>>();
+        let (node, visibility) = root.single(app.world()).unwrap();
+        assert_eq!(node.display, Display::None);
+        assert_eq!(*visibility, Visibility::Hidden);
     }
-    restart_request.pending = false;
 
-    menu_state.open = false;
-    menu_state.in_settings = false;
-    team_selection.team = None;
-
-    if let Ok(mut cursor) = cursor_query.single_mut() {
-        cursor.grab_mode = CursorGrabMode::None;
-        cursor.visible = true;
+    #[test]
+    fn exit_button_emits_clean_application_exit() {
+        let mut app = App::new();
+        app.add_message::<AppExit>()
+            .add_systems(Startup, setup_pause_menu_ui)
+            .add_systems(Update, handle_exit_button);
+        app.update();
+        let button = app
+            .world_mut()
+            .query_filtered::<Entity, With<ExitButton>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut()
+            .entity_mut(button)
+            .insert(Interaction::Pressed);
+        app.update();
+        assert_eq!(app.world().resource::<Messages<AppExit>>().len(), 1);
     }
 
-    for entity in &local_players {
-        commands
-            .entity(entity)
-            .despawn_related::<Children>()
-            .despawn();
-    }
-
-    if overlay_query.single().is_err() {
-        spawn_team_select_ui(&mut commands, &team_selection, *visual_mode, &sprite_assets);
+    #[test]
+    fn escape_dismisses_help_before_opening_menu() {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<PauseMenuState>()
+            .insert_resource(crate::net::GameStateSnapshot {
+                state: crate::net::GameState::Running,
+                ..default()
+            })
+            .add_plugins(crate::help_overlay::HelpOverlayPlugin)
+            .add_systems(
+                Update,
+                toggle_pause_menu.after(crate::help_overlay::HelpOverlaySet::Input),
+            );
+        app.update();
+        assert!(
+            app.world()
+                .resource::<crate::help_overlay::HelpOverlayVisible>()
+                .0
+        );
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+        app.update();
+        assert!(
+            !app.world()
+                .resource::<crate::help_overlay::HelpOverlayVisible>()
+                .0
+        );
+        assert!(!app.world().resource::<PauseMenuState>().open);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+        app.update();
+        assert!(app.world().resource::<PauseMenuState>().open);
     }
 }

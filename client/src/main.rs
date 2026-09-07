@@ -1,5 +1,6 @@
 use bevy::{asset::AssetPlugin, prelude::*};
 
+mod beta_ui_qa;
 mod bosses;
 mod camera;
 mod combat;

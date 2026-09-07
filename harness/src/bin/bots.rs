@@ -24,8 +24,8 @@ use std::{
 use harness::{
     Bot, Character, GameState, HeroClass, Team,
     bot_ai::{
-        BotBrain, Lane, WorldView, can_cast_slot, choose_self_sustain, choose_skill_upgrade,
-        step_toward,
+        BotBrain, Lane, WorldView, choose_offensive_skill, choose_rally_lane, choose_self_sustain,
+        choose_skill_upgrade, class_for_bot, step_toward,
     },
 };
 
@@ -34,12 +34,6 @@ const STATUS_INTERVAL: Duration = Duration::from_secs(2);
 /// Bound upgrade requests while waiting for the authoritative rank update.
 const UPGRADE_INTERVAL: Duration = Duration::from_millis(250);
 
-const CLASSES: [HeroClass; 4] = [
-    HeroClass::Warrior,
-    HeroClass::Mage,
-    HeroClass::Ranger,
-    HeroClass::Cleric,
-];
 const AVATARS: [Option<&str>; 6] = [
     Some("agnes"),
     Some("crowley"),
@@ -52,30 +46,43 @@ const AVATARS: [Option<&str>; 6] = [
 struct CliArgs {
     count: usize,
     server: SocketAddr,
+    telemetry: bool,
 }
 
 fn parse_args() -> CliArgs {
     let mut count = 9usize;
+    let mut telemetry = false;
     let mut server: SocketAddr = "127.0.0.1:4000".parse().expect("default addr parses");
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--count" | "-n" => {
                 let value = args.next().unwrap_or_default();
-                count = value.parse().unwrap_or_else(|_| {
-                    eprintln!("Invalid --count '{value}', using 9");
-                    9
-                });
+                count = value
+                    .parse()
+                    .ok()
+                    .filter(|count| (1..=10).contains(count))
+                    .unwrap_or_else(|| {
+                        eprintln!("Invalid --count '{value}': expected 1..10");
+                        std::process::exit(2);
+                    });
             }
             "--server" | "-s" => {
                 let value = args.next().unwrap_or_default();
-                server = value.parse().unwrap_or_else(|_| {
-                    eprintln!("Invalid --server '{value}', using 127.0.0.1:4000");
-                    "127.0.0.1:4000".parse().expect("default addr parses")
-                });
+                server = value
+                    .parse::<SocketAddr>()
+                    .ok()
+                    .filter(|address| address.port() != 0 && !address.ip().is_unspecified())
+                    .unwrap_or_else(|| {
+                        eprintln!(
+                            "Invalid --server '{value}': expected IP:PORT with a nonzero port"
+                        );
+                        std::process::exit(2);
+                    });
             }
+            "--telemetry" => telemetry = true,
             "--help" | "-h" => {
-                println!("Usage: bots [--count N] [--server HOST:PORT]");
+                println!("Usage: bots [--count 1..10] [--server IP:PORT] [--telemetry]");
                 std::process::exit(0);
             }
             other => {
@@ -84,7 +91,11 @@ fn parse_args() -> CliArgs {
             }
         }
     }
-    CliArgs { count, server }
+    CliArgs {
+        count,
+        server,
+        telemetry,
+    }
 }
 
 /// Everything one bot tracks between ticks.
@@ -96,6 +107,7 @@ struct BotRunner {
     my_id: Option<u64>,
     my_team: Option<Team>,
     brain: Option<BotBrain>,
+    rally_lane: Option<Lane>,
     /// Last known own position/health from a snapshot.
     position: Option<(f32, f32)>,
     alive: bool,
@@ -103,6 +115,7 @@ struct BotRunner {
     last_upgrade_at: Instant,
     round_key: Option<(u64, u64)>,
     last_join_sent: Instant,
+    last_snapshot_at: Option<Instant>,
 }
 
 fn main() {
@@ -120,7 +133,7 @@ fn main() {
         } else {
             Team::Green
         };
-        let class = CLASSES[index % CLASSES.len()];
+        let class = class_for_bot(index);
         let avatar = AVATARS[index % AVATARS.len()];
         bot.join_with_loadout(team, Character::Ipfs, class, avatar);
         println!(
@@ -136,12 +149,14 @@ fn main() {
             my_id: None,
             my_team: None,
             brain: None,
+            rally_lane: None,
             position: None,
             alive: true,
             last_cast_at: [None; 4],
             last_upgrade_at: Instant::now() - UPGRADE_INTERVAL,
             round_key: None,
             last_join_sent: Instant::now(),
+            last_snapshot_at: None,
         });
     }
 
@@ -153,7 +168,7 @@ fn main() {
                 } else {
                     Team::Green
                 },
-                CLASSES[index % CLASSES.len()],
+                class_for_bot(index),
                 AVATARS[index % AVATARS.len()],
             )
         })
@@ -162,7 +177,10 @@ fn main() {
     let started = Instant::now();
     let mut last_status = Instant::now() - STATUS_INTERVAL;
 
+    let mut last_telemetry = Instant::now() - Duration::from_secs(1);
+    let mut last_phase = String::new();
     loop {
+        let mut observed = None;
         let elapsed = started.elapsed().as_secs_f32();
         for (index, runner) in runners.iter_mut().enumerate() {
             // One call per tick: `recv_snapshot` blocks briefly for a
@@ -190,11 +208,16 @@ fn main() {
                 continue;
             };
 
+            runner.last_snapshot_at = Some(Instant::now());
+            if index == 0 {
+                observed = Some(snapshot.clone());
+            }
             let meta = snapshot.meta();
             let round_key = (meta.server_epoch, meta.match_id);
             if runner.round_key != Some(round_key) {
                 runner.round_key = Some(round_key);
                 runner.brain = None;
+                runner.rally_lane = None;
                 runner.last_cast_at = [None; 4];
                 runner.position = None;
                 runner.my_id = None;
@@ -262,8 +285,16 @@ fn main() {
                             runner.last_upgrade_at = now;
                         }
                     }
+                    if me.level >= 6 && runner.rally_lane.is_none() {
+                        runner.rally_lane = Some(choose_rally_lane(&snapshot, team));
+                        runner.brain = None;
+                    }
                     let brain = runner.brain.get_or_insert_with(|| {
-                        let mut brain = BotBrain::new(runner.lane, team, runner.class);
+                        let mut brain = BotBrain::new(
+                            runner.rally_lane.unwrap_or(runner.lane),
+                            team,
+                            runner.class,
+                        );
                         brain.resync(x, z);
                         brain
                     });
@@ -279,10 +310,11 @@ fn main() {
                         runner.bot.cast_slot(harness::TargetId::player(my_id), slot);
                         runner.last_cast_at[slot as usize] = Some(now);
                     } else if let Some(target) = decision.cast
-                        && can_cast_slot(me, 0, &runner.last_cast_at, now)
+                        && let Some(slot) =
+                            choose_offensive_skill(me, target, &view, &runner.last_cast_at, now)
                     {
-                        runner.bot.cast_slot(target, 0);
-                        runner.last_cast_at[0] = Some(now);
+                        runner.bot.cast_slot(target, slot);
+                        runner.last_cast_at[slot as usize] = Some(now);
                     }
                 }
                 GameState::Running => {
@@ -300,6 +332,43 @@ fn main() {
                     let yaw = (-phase.sin()).atan2(-phase.cos());
                     runner.bot.send_transform(wx, 0.5, wz, yaw);
                 }
+            }
+        }
+        if args.telemetry
+            && let Some(snapshot) = observed
+        {
+            let phase = match snapshot.game_state() {
+                GameState::Lobby => "lobby",
+                GameState::Forming { .. } => "forming",
+                GameState::Starting { .. } => "starting",
+                GameState::Running => "running",
+                GameState::Victory { .. } => "victory",
+            };
+            if last_telemetry.elapsed() >= Duration::from_secs(1) || phase != last_phase {
+                last_telemetry = Instant::now();
+                last_phase = phase.to_owned();
+                let players: Vec<_> = snapshot.players().iter().map(|p| serde_json::json!({
+                    "id":p.id, "team":format!("{:?}",p.team), "class":p.hero_class,
+                    "level":p.level, "xp":p.xp, "gold":p.gold, "ranks":p.ranks,
+                    "hp":p.hp, "max_hp":p.max_hp, "mana":p.mana, "max_mana":p.max_mana,
+                    "x":p.x,"z":p.z,"action_sequence":p.action_sequence,"action_slot":p.action_slot
+                })).collect();
+                let structures: Vec<_> = snapshot.structures().iter().map(|s| serde_json::json!({
+                    "id":s.id,"team":format!("{:?}",s.team),"hp":s.hp,"protected":s.protected
+                })).collect();
+                let peers: Vec<_> = runners.iter().map(|r| serde_json::json!({
+                    "id":r.my_id,"snapshot_age_ms":r.last_snapshot_at.map(|at|at.elapsed().as_millis())
+                })).collect();
+                println!(
+                    "BOT_SAMPLE {}",
+                    serde_json::json!({
+                        "elapsed_secs":started.elapsed().as_secs_f64(),"meta":snapshot.meta(),
+                        "phase":phase,"state":format!("{:?}",snapshot.game_state()),
+                        "players":players,"structures":structures,"peers":peers,
+                        "minions":snapshot.minions().len(),"buffs":snapshot.team_buffs().len(),
+                        "join_error":format!("{:?}",snapshot.join_error())
+                    })
+                );
             }
         }
         std::thread::sleep(TICK_INTERVAL);

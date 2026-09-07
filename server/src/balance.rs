@@ -57,7 +57,8 @@ pub const FIRST_MINION_WAVE_DELAY: Duration = Duration::from_secs(10);
 pub const MINION_WAVE_INTERVAL: Duration = Duration::from_secs(60);
 pub const MINIONS_PER_WAVE: usize = 3;
 pub const MINION_KILL_GOLD: u32 = 18;
-pub const MINION_KILL_XP: u32 = 32;
+/// Team pool: 18 XP per player in 5v5, about six fully cleared waves to R.
+pub const MINION_KILL_XP: u32 = 90;
 pub const PLAYER_SPAWN_OFFSET: f32 = 7.0;
 pub const PLAYER_GROUND_Y: f32 = 0.5;
 pub const MOVEMENT_POSITION_TOLERANCE: f32 = 0.10;
