@@ -45,8 +45,9 @@ claimed. The previous rc.4 distribution remains a separately identified artifact
 ## Measured result and retained findings
 
 - Fresh full workspace run: 324 Rust tests PASS (188 client); Python: 44 PASS.
-  Formatting, strict workspace clippy and locked build pass. A final scoped
-  rerun covers the route cue and delayed capture changes.
+  Formatting, strict workspace clippy and locked build pass. The final scoped
+  client, formatting, strict clippy and build reruns also pass after the route
+  cue and delayed capture changes.
 - Corrected Green 720p native run: all four images, real input isolation checks
   and independent UDP arrival checks PASS; client exit 0 in 10.59s. The planned
   base detour is 16.20m, with 16.03m observed authoritative traversal, 3.851m minimum
@@ -70,3 +71,38 @@ this navigation iteration. Ordinary match and rematch evidence for rc.4 remains
 in its dated HUD/shop record; this iteration adds focused client/server route
 proof. Human path-feel, terrain collision expansion and crowd navigation remain
 separate follow-up work.
+
+
+## Final delivery
+
+The fresh verifier repeated the native scenario from the Blue base at 1920×1080:
+all four frames and input/isolation/authority checks PASS, exit 0 in 8.19s. The
+base route measured 16.20m planned and 15.73m observed, with 3.852m clearance and
+13 snapshots confirming each arrival. Actual PNG inspection confirms the route
+and ring are visible during movement and disappear at arrival.
+
+Code commit: `856111ef620e2e779b085b047b376b414fa4f671`. The dedicated branch is
+`feature/minimap-right-click-2026-09-07`; the existing beta worktree/branch
+`feature/beta-hud-shop-2026-09-07` is fast-forwarded to the same implementation,
+so the previous Make launch path remains current. Original main is preserved.
+A later documentation-only commit records this handoff without changing runtime.
+
+The clean-source macOS ARM64 archive is
+`artifacts/omoba-0.18.0-rc.5-macos-arm64.zip` under the task directory
+(167,668,708 bytes; SHA-256
+`9a60010dfe41dc223c350cf9078a768cccd2df0753c8dfdfe9f9ac78496c6769`).
+All 93 manifest files and the ZIP integrity pass. The exact package also passes
+its own Green navigation run: exit 0, four frames, 16.20m planned/15.88m observed,
+with independent server arrival confirmation. `BUILD.json` identifies the
+clean code revision and binaries; the profile is development with optimized
+dependencies. No hardware-performance or manual human-input certification is
+claimed. Independent AC1–AC6 findings and resolution are in `verdict.json` and
+`problems.md`, with raw checks in `raw/fresh-verification/`.
+
+From the original repository directory, the unchanged development command is:
+
+```sh
+CARGO_TARGET_DIR=../omoba-bevy-playtest-audit/target make -C ../omoba-bevy-beta-hud-shop play-bots
+```
+
+The extracted native package also supports `./practice.sh`.
