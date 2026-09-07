@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Capture actual Bevy overview/river/sanctuary/follow frames using isolated native binaries.
+"""Capture actual Bevy Verdant views or beta UI using isolated native binaries.
 
 Example: python3 scripts/capture_verdant.py --package /tmp/omoba-rc2 --output /tmp/verdant-qa
+Use --scenario beta-ui --bots 0 for 1280x720 entry/help/gameplay/result layouts.
+The beta result is a labeled synthetic snapshot, never complete-match evidence.
 No source working directory, user configuration, CUA, or additional dependency is required.
 This is a bounded automated renderer scenario, not an interactive gameplay certification.
 """
@@ -20,6 +22,7 @@ import time
 
 
 EXPECTED_IMAGES = ("01-overview.png", "03-river-gameplay.png", "02-sanctuary.png", "04-follow-gameplay.png")
+BETA_IMAGES = ("01-entry-720p.png", "02-help-720p.png", "03-gameplay-720p.png", "04-result-fixture-720p.png")
 FRAME_HEADER = struct.Struct("<4sHQQHHI")
 
 
@@ -108,8 +111,10 @@ def main():
     parser.add_argument("--assets", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--timeout", type=int, default=300)
+    parser.add_argument("--scenario", choices=("verdant", "beta-ui"), default="verdant")
     parser.add_argument("--bots", type=int, choices=range(5), default=2)
     args = parser.parse_args()
+    expected_images = BETA_IMAGES if args.scenario == "beta-ui" else EXPECTED_IMAGES
     package = args.package.resolve() if args.package else None
     suffix = ".exe" if os.name == "nt" else ""
     client = args.client_bin or (package / ("client" + suffix) if package else None)
@@ -122,7 +127,7 @@ def main():
         parser.error("both binaries and the explicit asset directory must exist")
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    if any((output / name).exists() for name in (*EXPECTED_IMAGES, "capture-run.json")):
+    if any((output / name).exists() for name in (*expected_images, "capture-run.json")):
         parser.error("output already has captures; choose a new directory to preserve evidence")
     timeout = min(660, max(60, args.timeout))
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reservation:
@@ -136,6 +141,7 @@ def main():
                   if package and (package / "BUILD.json").exists() else None,
                   capture_method="Bevy Screenshot::primary_window + save_to_disk",
                   manual_interaction_verified=False, timeout_seconds=timeout,
+                  scenario=args.scenario, result_fixture=args.scenario == "beta-ui",
                   scripted_peers=args.bots, server_mode="dev; production commands; no cheats")
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="omoba-verdant-capture-") as isolated:
@@ -145,7 +151,7 @@ def main():
                    OMOBA_CLIENT_CONFIG_DIR=str(Path(isolated) / "config"),
                    OMOBA_ASSET_DIR=str(assets), OMOBA_MATCH_MODE="dev", OMOBA_TEAM_SIZE="5",
                    OMOBA_PLAYER_VISUAL_MODE="models3d", OMOBA_DEBUG_UI="0",
-                   OMOBA_VISUAL_QA_DIR=str(output), OMOBA_VISUAL_QA_TIMEOUT=str(timeout - 20))
+                   OMOBA_VISUAL_QA_DIR=str(output), OMOBA_VISUAL_QA_SCENARIO=args.scenario, OMOBA_VISUAL_QA_TIMEOUT=str(timeout - 20))
         for key in ("OMOBA_AUTOJOIN", "OMOBA_MEASURE_MODELS", "OMOBA_AVATAR_MANIFEST"):
             env.pop(key, None)
         try:
@@ -187,13 +193,13 @@ def main():
     client_log = (output / "client.log").read_text(errors="replace") if (output / "client.log").exists() else ""
     result["elapsed_seconds"] = time.monotonic() - started
     result["images"] = {name: dict(bytes=(output / name).stat().st_size, sha256=sha256(output / name))
-                        for name in EXPECTED_IMAGES if (output / name).is_file()}
+                        for name in expected_images if (output / name).is_file()}
     result["snapshot_received"] = "First snapshot received" in client_log
     result["asset_root_confirmed"] = str(assets) in client_log
     result["errors"] = [line for line in client_log.splitlines() if any(text in line for text in
-                         ("panicked at", "does not exist", "Path not found", "Downloading model", "VERDANT_QA failed"))]
+                         ("panicked at", "does not exist", "Path not found", "Downloading model", "VERDANT_QA failed", "BETA_UI_QA failed"))]
     result["capture_pass"] = (result.get("client_exit_code") == 0 and not result.get("error")
-                              and len(result["images"]) == len(EXPECTED_IMAGES)
+                              and len(result["images"]) == len(expected_images)
                               and (output / "qa-summary.json").is_file()
                               and result["snapshot_received"] and result["asset_root_confirmed"]
                               and not result["errors"])

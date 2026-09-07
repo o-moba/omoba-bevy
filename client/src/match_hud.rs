@@ -17,7 +17,11 @@ pub struct MatchHudPlugin;
 impl Plugin for MatchHudPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup_match_hud)
-            .add_systems(Update, update_match_hud);
+            .add_systems(Update, update_match_hud)
+            .add_systems(
+                Update,
+                sync_gameplay_hud_visibility.after(crate::net::ClientNetPipeline::SyncConnectionUi),
+            );
     }
 }
 
@@ -72,9 +76,11 @@ fn setup_match_hud(mut commands: Commands) {
                 top: Val::Px(HUD_TOP),
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(6.0),
-                max_width: Val::Px(420.0),
+                width: Val::Px(356.0),
+                padding: UiRect::all(Val::Px(12.0)),
                 ..default()
             },
+            BackgroundColor(Color::srgba(0.025, 0.045, 0.055, 0.92)),
             ZIndex(8),
             Name::new("MatchHudColumn"),
         ))
@@ -82,7 +88,7 @@ fn setup_match_hud(mut commands: Commands) {
             col.spawn((
                 Text::new("Level --   XP --/--   Skill points --"),
                 TextFont {
-                    font_size: 22.0,
+                    font_size: 18.0,
                     ..default()
                 },
                 TextColor::WHITE,
@@ -115,13 +121,44 @@ fn setup_match_hud(mut commands: Commands) {
             col.spawn((
                 Text::new(""),
                 TextFont {
-                    font_size: 17.0,
+                    font_size: 16.0,
                     ..default()
                 },
                 TextColor(Color::srgba(0.88, 0.90, 0.94, 1.0)),
                 MatchHudStatusText,
             ));
         });
+}
+
+/// Keep entry and result cards clear; these controls only describe a live,
+/// admitted hero. Visibility and layout agree so hidden panels reserve no space.
+fn sync_gameplay_hud_visibility(
+    game: Res<GameStateSnapshot>,
+    session: Res<crate::net::ClientSession>,
+    help: Option<Res<crate::help_overlay::HelpOverlayVisible>>,
+    pause: Option<Res<crate::pause_menu::PauseMenuState>>,
+    mut roots: Query<(&Name, &mut Node, &mut Visibility), Without<ChildOf>>,
+) {
+    let show = session.join_confirmed()
+        && matches!(game.state, GameState::Running)
+        && !help.is_some_and(|help| help.0)
+        && !pause.is_some_and(|pause| pause.open);
+    for (name, mut node, mut visibility) in &mut roots {
+        if matches!(
+            name.as_str(),
+            "MatchHudColumn" | "SkillBarRoot" | "ActionFeedback"
+        ) {
+            // Transient feedback owns its own empty/expired layout state.
+            if name.as_str() != "ActionFeedback" {
+                node.display = if show { Display::Flex } else { Display::None };
+            }
+            *visibility = if show {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+        }
+    }
 }
 
 fn spawn_stat_bar<F: Component>(
@@ -281,7 +318,7 @@ fn update_match_hud(
     let up = upgrade_key_display();
     if progression.next_level_xp == 0 {
         prog_text.0 = format!(
-            "Level {}   XP MAX   Skill points {}   Upgrade: {} (when available)",
+            "Level {}   XP MAX\nSkill points {}   Upgrade: {}",
             progression.level.max(1),
             progression.skill_points,
             up
@@ -289,7 +326,7 @@ fn update_match_hud(
     } else {
         let displayed_xp = progression.xp.min(progression.next_level_xp);
         prog_text.0 = format!(
-            "Level {}   XP {}/{}   Skill points {}   Upgrade: {} (when available)",
+            "Level {}   XP {}/{}\nSkill points {}   Upgrade: {}",
             progression.level.max(1),
             displayed_xp,
             progression.next_level_xp,
@@ -385,11 +422,9 @@ fn running_status_text(
                 TargetKind::Structure => "Structure",
                 TargetKind::Neutral => "Neutral",
             };
-            format!("Target: enemy {kind} - Q attacks; approach happens automatically")
+            format!("Target: enemy {kind} - Q attacks")
         }
-        None => {
-            "Target: none - click/tap a foe to attack, Tab selects, Backspace clears".to_string()
-        }
+        None => "Target: none - click a foe or use Tab".to_string(),
     };
     let hp = stats.hp.max(0.0);
     let max_hp = stats.max_hp.max(1.0);
@@ -399,7 +434,7 @@ fn running_status_text(
         "HP {:.0}/{:.0}   Mana {:.0}/{:.0}   Class: {}\n\
 {target_line}\n\
 {objective_line}\n\
-Keys: {} - cast   |   Upgrade {}   |   {} help",
+Keys: {} cast | {} upgrade | {} help",
         hp,
         max_hp,
         mana,

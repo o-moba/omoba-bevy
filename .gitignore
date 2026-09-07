@@ -1,4 +1,6 @@
 /target
+__pycache__/
+*.pyc
 assets/
 # Re-include the client assets dir so the committed avatar roster stays versioned,
 # while everything else under client/assets/ (e.g. downloaded/) remains ignored.

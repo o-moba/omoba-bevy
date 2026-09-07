@@ -1,6 +1,13 @@
 # omoba-bevy
 
-Authoritative-server MOBA-style prototype (Bevy client, Rust UDP server).
+MOBA-style native 3D beta (Bevy client, authoritative Rust UDP server).
+
+For the September 8 controlled beta, use the
+[tester/host guide](docs/progress/2026-09-07-beta-test-guide.md): the native
+package includes `practice.sh`, `host.sh --humans N` and
+`join-server.sh HOST:PORT`. See the
+[dated readiness record](docs/progress/2026-09-07-beta-readiness.md) for measured
+checks and remaining coverage. The commands below are development workflows.
 
 ## Prerequisites
 
@@ -81,9 +88,10 @@ Do not rely on tribal knowledge for ports or addresses: use the tables in `RUNBO
 
 ## Tester-facing documentation
 
-The [2026-09-05 3D readiness audit](docs/progress/2026-09-05-3d-readiness-audit.md)
-contains the current limitations and ordered next steps. This is a development
-prototype; the external-playtest gate is not yet satisfied.
+The [2026-09-07 beta guide](docs/progress/2026-09-07-beta-test-guide.md) is the
+current tester entry point. Earlier audits and MVP documents below retain
+historical context; the [dated beta readiness record](docs/progress/2026-09-07-beta-readiness.md)
+states the current delivery boundary.
 
 | Document | Purpose |
 | --- | --- |
@@ -101,7 +109,7 @@ prototype; the external-playtest gate is not yet satisfied.
 | **Mouse wheel** | Zoom the active camera; 2D zoom is clamped to the map |
 | **Y** | Toggle hero follow/free camera; a minimap focus returns directly to the hero |
 | **Space** | Restore hero follow and clear a minimap focus override |
-| **Alt**, **right click**, **W A S D / mouse look** (3D only) | Legacy free-camera toggle and movement |
+| **Alt + right mouse** (3D only) | Hold to orbit the camera |
 | Team / character UI | Click team and character before play; server snapshot is authoritative |
 | **Click/tap ground** | Move the hero on desktop or touch devices |
 | **Click/tap hostile** | Select it and use Q; the hero approaches into range automatically |

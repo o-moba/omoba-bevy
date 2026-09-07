@@ -11,10 +11,17 @@ const LOBBY_COLOR: Color = Color::srgba(0.10, 0.10, 0.35, OVERLAY_ALPHA);
 
 pub struct GameStateUiPlugin;
 
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct GameStateUiSet;
+
 impl Plugin for GameStateUiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_game_state_ui)
-            .add_systems(Update, update_game_state_ui);
+        app.add_systems(Startup, setup_game_state_ui).add_systems(
+            Update,
+            update_game_state_ui
+                .after(crate::net::ClientNetPipeline::ApplySnapshot)
+                .in_set(GameStateUiSet),
+        );
     }
 }
 
@@ -47,17 +54,31 @@ fn setup_game_state_ui(mut commands: Commands) {
             Name::new("GameStateOverlay"),
         ))
         .with_children(|parent| {
-            parent.spawn((
-                Text::new(""),
-                TextFont {
-                    font_size: 48.0,
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-                Pickable::IGNORE,
-                GameStateLabel,
-                Name::new("GameStateLabel"),
-            ));
+            parent
+                .spawn((
+                    Node {
+                        width: Val::Percent(88.0),
+                        max_width: Val::Px(660.0),
+                        padding: UiRect::all(Val::Px(28.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.025, 0.055, 0.065, 0.95)),
+                    Pickable::IGNORE,
+                    Name::new("GameStateCard"),
+                ))
+                .with_children(|card| {
+                    card.spawn((
+                        Text::new(""),
+                        TextFont {
+                            font_size: 28.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                        Pickable::IGNORE,
+                        GameStateLabel,
+                        Name::new("GameStateLabel"),
+                    ));
+                });
         });
 }
 
@@ -68,9 +89,9 @@ fn matchmaking_status_text(state: &GameState, join_committed: bool) -> Option<St
         return None;
     }
     match state {
-        GameState::Lobby => Some("Searching for match...".to_owned()),
+        GameState::Lobby => Some("Waiting for players...".to_owned()),
         GameState::Forming { ready, needed } => Some(format!(
-            "Searching for match...\nWaiting for players - {ready}/{needed}"
+            "Waiting for players - {ready}/{needed}\nTeams start automatically when all 10 players have joined."
         )),
         GameState::Starting { countdown_ms } => Some(format!(
             "Match found!\nStarting in {}...",
@@ -127,23 +148,15 @@ fn update_game_state_ui(
             *visibility = Visibility::Visible;
             let is_winner = local_team.iter().next().is_some_and(|team| *team == winner);
             *background = BackgroundColor(if is_winner { WIN_COLOR } else { LOSE_COLOR });
-            let base_msg = if is_winner {
-                format!(
-                    "Victory! Team {} destroyed the enemy base tower.",
-                    winner.as_str()
-                )
-            } else {
-                format!(
-                    "Defeat. Team {} destroyed your base tower.",
-                    winner.as_str()
-                )
-            };
-            let next_steps = "\nPress Escape for the menu. Wait for an automatic rematch countdown when shown, or restart the client from the pause menu if needed.";
-            label.0 = if let Some(secs) = game_state.rematch_in_secs {
-                format!("{base_msg}\nRematch in {secs}s...{next_steps}")
-            } else {
-                format!("{base_msg}{next_steps}")
-            };
+            let result = if is_winner { "Victory!" } else { "Defeat" };
+            let next_round = game_state.rematch_in_secs.map_or_else(
+                || "Preparing the next round...".to_owned(),
+                |secs| format!("Next round in {secs}s"),
+            );
+            label.0 = format!(
+                "{result}\n{} destroyed the enemy base.\n\n{next_round}\nStay connected to play again with your hero.\nEscape: settings or exit game.",
+                winner.as_str()
+            );
         }
     }
 }
@@ -158,7 +171,12 @@ mod tests {
         app.init_resource::<GameStateSnapshot>();
         app.init_resource::<ClientSession>();
         app.add_systems(Startup, setup_game_state_ui);
-        app.add_systems(Update, update_game_state_ui);
+        app.add_systems(
+            Update,
+            update_game_state_ui
+                .after(crate::net::ClientNetPipeline::ApplySnapshot)
+                .in_set(GameStateUiSet),
+        );
         app
     }
 
@@ -238,7 +256,7 @@ mod tests {
         // Committed: every pre-match state has a distinct, readable message.
         assert_eq!(
             matchmaking_status_text(&GameState::Lobby, true).unwrap(),
-            "Searching for match..."
+            "Waiting for players..."
         );
         let forming = matchmaking_status_text(
             &GameState::Forming {
@@ -260,5 +278,54 @@ mod tests {
         );
         // In-match states render no matchmaking overlay.
         assert_eq!(matchmaking_status_text(&GameState::Running, true), None);
+    }
+    #[test]
+    fn victory_is_bounded_and_automatically_returns_to_countdown_then_gameplay() {
+        let mut app = spawn_ui_app();
+        app.world_mut().resource_mut::<ClientSession>().state = ClientConnectionState::Connected;
+        app.world_mut()
+            .resource_mut::<ClientSession>()
+            .join_flow_committed = true;
+        app.world_mut().spawn((Player, Team::Green));
+        app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Victory {
+            winner: Team::Green,
+        };
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .rematch_in_secs = Some(10);
+        app.update();
+        let label = app
+            .world_mut()
+            .query_filtered::<Entity, With<GameStateLabel>>()
+            .single(app.world())
+            .unwrap();
+        let text = &app.world().get::<Text>(label).unwrap().0;
+        assert!(text.starts_with("Victory!"));
+        assert!(text.contains("Next round in 10s"));
+        assert!(text.contains("Stay connected"));
+        assert!(!text.contains("restart"));
+        assert!(text.len() < 240);
+        let card = app.world().get::<ChildOf>(label).unwrap().parent();
+        assert_eq!(
+            app.world().get::<Node>(card).unwrap().max_width,
+            Val::Px(660.0)
+        );
+        app.world_mut().resource_mut::<GameStateSnapshot>().state =
+            GameState::Starting { countdown_ms: 3000 };
+        app.update();
+        assert!(
+            app.world()
+                .get::<Text>(label)
+                .unwrap()
+                .0
+                .contains("Starting in 3")
+        );
+        app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Running;
+        app.update();
+        let overlay = overlay_entity(&mut app);
+        assert_eq!(
+            *app.world().get::<Visibility>(overlay).unwrap(),
+            Visibility::Hidden
+        );
     }
 }

@@ -14,7 +14,11 @@ pub(crate) fn apply_level_up(state: &mut PlayerState) {
     state.skill_points = state.skill_points.saturating_add(1);
     state.max_hp += LEVEL_UP_HP_BONUS;
     state.max_mana += LEVEL_UP_MANA_BONUS;
-    state.hp = (state.hp + LEVEL_UP_HP_BONUS).clamp(0.0, state.max_hp);
+    // Shared team XP also reaches dead players. Stat growth must not revive
+    // them before the authoritative respawn timer teleports them home.
+    if state.hp > 0.0 {
+        state.hp = (state.hp + LEVEL_UP_HP_BONUS).min(state.max_hp);
+    }
     state.mana = (state.mana + LEVEL_UP_MANA_BONUS).clamp(0.0, state.max_mana);
     state.next_level_xp = xp_threshold_for_level(state.level);
 }

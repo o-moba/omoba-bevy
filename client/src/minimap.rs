@@ -253,15 +253,20 @@ fn update_minimap_icons_system(
 
 fn sync_minimap_visibility_for_session(
     client_session: Res<ClientSession>,
-    mut roots: Query<&mut Visibility, With<MinimapRoot>>,
+    mut roots: Query<(&mut Visibility, &mut Node), With<MinimapRoot>>,
 ) {
-    let vis = if client_session.is_connected() {
+    let vis = if client_session.join_confirmed() {
         Visibility::Visible
     } else {
         Visibility::Hidden
     };
-    for mut v in &mut roots {
-        *v = vis;
+    for (mut visibility, mut node) in &mut roots {
+        *visibility = vis;
+        node.display = if client_session.join_confirmed() {
+            Display::Flex
+        } else {
+            Display::None
+        };
     }
 }
 

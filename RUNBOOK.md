@@ -1,6 +1,8 @@
 # Local Development Runbook
 
-Single-machine multiplayer testing for omoba-bevy.
+Single-machine multiplayer development for omoba-bevy. For the packaged native
+beta, start with the [current tester/host guide](docs/progress/2026-09-07-beta-test-guide.md).
+Its practice/host launchers stop only their owned processes and need no checkout.
 
 Entry point: see [README.md](README.md) for first-time setup and a controls summary. This file focuses on processes, logs, and recovery.
 
@@ -63,10 +65,10 @@ client in the foreground. Pick a class/avatar/team in the client — you are
 the 10th player: the overlay shows the queue filling, `Match found!`, the
 countdown, and the match starts as a real 5v5. Once the match runs, the bots
 play their lanes: each pushes Mid/Top/Bot toward the enemy base, fights the
-enemy players and minions it meets with its Q ability, sieges towers in
-reach, and rejoins its lane after a respawn. It is deliberately simple
-nearest-target AI (no retreat, no combos) — built to playtest matchmaking
-and basic playability, not to be challenging opponents.
+enemy players and minions with legal unlocked abilities, uses self-sustain,
+waits for wave support at towers, and rejoins its lane after a respawn.
+Bots support matchmaking and complete-session playtests; human strategic
+balance remains a beta observation.
 
 Manual variant (separate terminals):
 

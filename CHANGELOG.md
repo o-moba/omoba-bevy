@@ -6,6 +6,33 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.18.0-rc.3] - 2026-09-07
+
+### Fixed
+- Keep dead heroes at zero HP when shared XP grants a level, until the normal
+  authoritative respawn restores them.
+- Remove the pause-menu local restart that stranded an admitted player. Add
+  clickable help dismissal and make Escape close help before opening Pause.
+- Hide healthy connection status over the minimap, improve HUD contrast and
+  bound the result panel with an accurate automatic-rematch countdown.
+- Face both home spawns from the lane side so the sanctuary cannot hide a
+  newly admitted hero behind its arches in the default camera view.
+
+### Changed
+- Tune team-shared lane XP for the full five-player roster; fill bots use legal
+  unlocked offensive abilities, distribute classes across both factions and
+  rally through an open lane after level 6 to finish the base push.
+- Add a bounded real-UDP, normal-rules two-round acceptance runner with roster,
+  objective protection, reset, progression and snapshot-health evidence.
+- Add source-independent practice, host and remote-join launchers with validated
+  player counts/addresses, session logs and cleanup of their owned processes.
+- Add native 720p UI capture coverage and a tester-first beta guide for September 8.
+
+### Release status
+- Controlled native 3D beta candidate for the tested macOS ARM64 package.
+  See the dated beta readiness record for measured match/UI evidence and
+  remaining human, hardware, platform/network and dependency-review limits.
+
 ## [0.18.0-rc.2] - 2026-09-05
 
 ### Changed

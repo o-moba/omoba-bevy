@@ -30,13 +30,6 @@ pub enum PlayerVisualMode {
 }
 
 impl PlayerVisualMode {
-    pub const fn id(self) -> &'static str {
-        match self {
-            Self::Models3d => "models3d",
-            Self::Sprite2d => "sprite2d",
-        }
-    }
-
     pub fn parse(raw: &str) -> Option<Self> {
         match raw.trim() {
             "models3d" => Some(Self::Models3d),

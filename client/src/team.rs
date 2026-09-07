@@ -248,17 +248,27 @@ pub fn spawn_team_select_ui(
             spawn_section_title(parent, "Choose Avatar", "AvatarSelectTitle");
 
             parent.spawn((
-                Text::new(format!("Renderer: {} (fixed for this session) · Scroll avatars with wheel / Page Up / Page Down", visual_mode.id())),
-                TextFont { font_size: 15.0, ..default() }, TextColor::WHITE,
+                Text::new("Scroll heroes: mouse wheel / Page Up / Page Down"),
+                TextFont {
+                    font_size: 15.0,
+                    ..default()
+                },
+                TextColor::WHITE,
                 Name::new("RendererStatus"),
             ));
 
             parent
                 .spawn((
                     Node {
-                        display: if visual_mode == PlayerVisualMode::Models3d { Display::Flex } else { Display::None },
+                        display: if visual_mode == PlayerVisualMode::Models3d {
+                            Display::Flex
+                        } else {
+                            Display::None
+                        },
                         width: Val::Percent(92.0),
-                        max_width: Val::Px(AVATAR_GRID_COLUMNS as f32 * (AVATAR_BUTTON_WIDTH + AVATAR_GRID_GAP)),
+                        max_width: Val::Px(
+                            AVATAR_GRID_COLUMNS as f32 * (AVATAR_BUTTON_WIDTH + AVATAR_GRID_GAP),
+                        ),
                         max_height: Val::Vh(32.0),
                         overflow: Overflow::scroll_y(),
                         flex_shrink: 0.0,
@@ -279,7 +289,10 @@ pub fn spawn_team_select_ui(
                     Name::new("AvatarGrid"),
                 ))
                 .with_children(|grid| {
-                    for avatar in avatar_roster().iter().filter(|_| visual_mode == PlayerVisualMode::Models3d) {
+                    for avatar in avatar_roster()
+                        .iter()
+                        .filter(|_| visual_mode == PlayerVisualMode::Models3d)
+                    {
                         spawn_avatar_button(
                             grid,
                             &avatar.slug,
@@ -292,7 +305,11 @@ pub fn spawn_team_select_ui(
             parent
                 .spawn((
                     Node {
-                        display: if visual_mode == PlayerVisualMode::Sprite2d { Display::Flex } else { Display::None },
+                        display: if visual_mode == PlayerVisualMode::Sprite2d {
+                            Display::Flex
+                        } else {
+                            Display::None
+                        },
                         max_height: Val::Vh(32.0),
                         overflow: Overflow::scroll_y(),
                         flex_shrink: 0.0,
@@ -315,7 +332,11 @@ pub fn spawn_team_select_ui(
                     Name::new("SpriteCharacterGrid"),
                 ))
                 .with_children(|grid| {
-                    for (index, character) in shared::sprite_character_roster().iter().enumerate().filter(|_| visual_mode == PlayerVisualMode::Sprite2d) {
+                    for (index, character) in shared::sprite_character_roster()
+                        .iter()
+                        .enumerate()
+                        .filter(|_| visual_mode == PlayerVisualMode::Sprite2d)
+                    {
                         spawn_sprite_button(
                             grid,
                             character,
@@ -350,7 +371,8 @@ pub fn spawn_team_select_ui(
                 TextColor(Color::srgba(0.78, 0.80, 0.86, 1.0)),
                 Name::new("TeamSelectHint"),
             ));
-        }).id();
+        })
+        .id();
     if visual_mode == PlayerVisualMode::Sprite2d {
         let (image, layout) = sprite_assets.ui_frame();
         commands.entity(root).insert(ImageNode::from_atlas_image(
