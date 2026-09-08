@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 use std::time::Duration;
 
+pub mod navigation;
 pub mod protocol;
 pub mod shop;
 pub mod transport;

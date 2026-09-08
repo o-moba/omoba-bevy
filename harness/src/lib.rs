@@ -30,6 +30,7 @@
 
 pub mod bot;
 pub mod bot_ai;
+pub mod navigation;
 pub mod protocol;
 pub mod server;
 

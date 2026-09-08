@@ -72,6 +72,24 @@ class NavigationEvidenceTest(unittest.TestCase):
         self.assertGreater(result["authoritative_traversal_length"], 30)
         self.assertTrue(all(arrival["nearby_snapshots"] >= 2 for arrival in result["arrivals"].values()))
 
+    def test_forest_requires_continuous_polygon_clearance_and_minimap_nodes(self):
+        summary, snapshots = evidence()
+        summary["obstacle"].update(kind="tree", id="actual-tree")
+        summary["route_display"] = "minimap_only"
+        summary["events"].append(dict(event="forest_approach_input", snapshot_tick=0, detail={}))
+        for index in range(2):
+            summary["events"].append(dict(event="travel_capture_after_settle", snapshot_tick=3+index,
+                detail=dict(minimap=dict(route_segments=[dict(a=[1,2],b=[4,5])], route_destination=[3,4,5,6]))))
+        document = dict(obstacles=[dict(id="actual-tree", kind="tree", vertices=[[-2,-2],[2,-2],[2,2],[-2,2]])])
+        self.assertTrue(verify_navigation(summary, snapshots, document)["pass"])
+        broken = copy.deepcopy(summary)
+        broken["events"][-1]["detail"]["minimap"]["route_segments"] = []
+        self.assertFalse(verify_navigation(broken, snapshots, document)["pass"])
+        # Endpoints can both be clear while their connecting chord crosses wood.
+        crossed = copy.deepcopy(snapshots)
+        crossed[2]["players"][0].update(x=3, z=0)
+        self.assertFalse(verify_navigation(summary, crossed, document)["pass"])
+
     def test_hello_only_observer_reassembles_real_udp_chunks(self):
         with tempfile.TemporaryDirectory() as directory, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server:
             server.bind(("127.0.0.1", 0))

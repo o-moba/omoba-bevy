@@ -65,26 +65,9 @@ pub(crate) fn ground_origin_y(
 
 pub struct PlayerPlugin;
 
-#[derive(Default, Reflect, GizmoConfigGroup)]
-struct NavigationGizmos;
-
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_gizmo_config(
-            NavigationGizmos,
-            GizmoConfig {
-                line: GizmoLineConfig {
-                    width: 3.0,
-                    ..default()
-                },
-                // A navigation cue must remain legible through sanctuary art.
-                // This only draws the local order; it reveals no world actors.
-                // Leave headroom below the exact near clip plane on the GPU.
-                depth_bias: -0.95,
-                ..default()
-            },
-        )
-        .add_systems(
+        app.add_systems(
             Update,
             (
                 sync_jump_fallback_mode,
@@ -107,7 +90,6 @@ impl Plugin for PlayerPlugin {
                 .chain(),
         )
         .add_systems(Update, resolve_player_structure_overlap.after(move_player))
-        .add_systems(Update, draw_movement_route.after(move_player))
         .add_systems(PostUpdate, apply_gravity)
         .init_resource::<RespawnCountdown>()
         .init_resource::<DebugSpeedBoost>()
@@ -153,7 +135,8 @@ pub(crate) struct MovementTarget {
 
 #[derive(Component, Debug)]
 pub(crate) struct MovementRoute {
-    requested_target: Vec3,
+    pub(crate) requested_target: Vec3,
+    pub(crate) structure_revision: u64,
     pub(crate) destination: Vec3,
     pub(crate) waypoints: Vec<Vec3>,
 }
@@ -768,15 +751,17 @@ fn plan_movement_routes(
         ),
         With<Player>,
     >,
-    structures: Query<(&Transform, &StructureKind), With<NetworkStructure>>,
+    structures: Query<(&Transform, &StructureKind, Option<&CombatStats>), With<NetworkStructure>>,
     layout: Option<Res<MapLayout>>,
     context: Option<Res<crate::input_context::GameplayInputContext>>,
     mut feedback: Option<ResMut<crate::combat::ActionFeedback>>,
 ) {
     let structures: Vec<_> = structures
         .iter()
-        .map(|(transform, kind)| (transform.translation, *kind))
+        .filter(|(_, _, stats)| stats.is_none_or(|stats| stats.is_alive()))
+        .map(|(transform, kind, _)| (transform.translation, *kind))
         .collect();
+    let structure_revision = structure_revision(&structures);
     let layout = layout.as_deref().copied().unwrap_or_default();
     let running = context.as_ref().is_none_or(|context| context.running);
     for (entity, transform, target, route, stats) in &players {
@@ -792,11 +777,27 @@ fn plan_movement_routes(
             continue;
         };
         if route.is_some_and(|route| {
-            route
-                .requested_target
-                .xz()
-                .distance_squared(target.target.xz())
-                < 0.000001
+            route.structure_revision == structure_revision
+                && route.waypoints.first().is_none_or(|next| {
+                    let discs: Vec<_> = structures
+                        .iter()
+                        .map(|(p, kind)| shared::navigation::Disc {
+                            center: [p.x, p.z],
+                            radius: crate::navigation::structure_collision_radius(*kind)
+                                - shared::navigation::HERO_RADIUS,
+                        })
+                        .collect();
+                    shared::navigation::world_navigation().segment_clear_with_discs(
+                        transform.translation.xz().to_array(),
+                        next.xz().to_array(),
+                        &discs,
+                    )
+                })
+                && route
+                    .requested_target
+                    .xz()
+                    .distance_squared(target.target.xz())
+                    < 0.000001
         }) {
             continue;
         }
@@ -809,6 +810,7 @@ fn plan_movement_routes(
             Some(waypoints) if !waypoints.is_empty() => {
                 commands.entity(entity).insert(MovementRoute {
                     requested_target: target.target,
+                    structure_revision,
                     destination: *waypoints.last().unwrap(),
                     waypoints,
                 });
@@ -883,7 +885,7 @@ fn move_player(
             (With<Player>, With<MovementTarget>),
         >,
         Query<&Transform, (With<PlayerBody>, Without<Player>)>,
-        Query<(&Transform, &StructureKind), With<NetworkStructure>>,
+        Query<(&Transform, &StructureKind, Option<&CombatStats>), With<NetworkStructure>>,
     )>,
     speed_boost: Res<DebugSpeedBoost>,
     map_layout: Option<Res<MapLayout>>,
@@ -902,7 +904,8 @@ fn move_player(
     let structures = transform_sets
         .p2()
         .iter()
-        .map(|(transform, kind)| (transform.translation, *kind))
+        .filter(|(_, _, stats)| stats.is_none_or(|stats| stats.is_alive()))
+        .map(|(transform, kind, _)| (transform.translation, *kind))
         .collect::<Vec<_>>();
 
     let mut player_query = transform_sets.p0();
@@ -941,6 +944,7 @@ fn move_player(
             if let Some(map_layout) = map_layout.as_ref() {
                 desired = map_layout.clamp_position(desired);
             }
+            desired = clip_static_movement(current_pos, desired);
             transform.translation.x = desired.x;
             transform.translation.z = desired.z;
             // Do not cut corners by advancing before the actual collision-
@@ -959,6 +963,7 @@ fn move_player(
             if let Some(map_layout) = map_layout.as_ref() {
                 desired = map_layout.clamp_position(desired);
             }
+            desired = clip_static_movement(current_pos, desired);
             transform.translation.x = desired.x;
             transform.translation.z = desired.z;
 
@@ -974,44 +979,6 @@ fn move_player(
                     .slerp(target_rotation, time.delta_secs() * 10.0);
             }
         }
-    }
-}
-
-fn draw_movement_route(
-    mut gizmos: Gizmos<NavigationGizmos>,
-    players: Query<(&Transform, &MovementRoute), (With<Player>, With<MovementTarget>)>,
-    layout: Res<MapLayout>,
-    mode: Res<PlayerVisualMode>,
-) {
-    let color = Color::srgba(1.0, 0.82, 0.28, 0.85);
-    let render_position = |point: Vec3| {
-        if *mode == PlayerVisualMode::Sprite2d {
-            crate::world2d::simulation_xz_to_render_xy(point).extend(crate::world2d::layer::VFX)
-        } else {
-            Vec3::new(
-                point.x,
-                layout.terrain_height_3d(point.x, point.z) + 0.15,
-                point.z,
-            )
-        }
-    };
-    for (transform, route) in &players {
-        gizmos.linestrip(
-            std::iter::once(transform.translation)
-                .chain(route.waypoints.iter().copied())
-                .map(render_position),
-            color,
-        );
-        let rotation = if *mode == PlayerVisualMode::Sprite2d {
-            Quat::IDENTITY
-        } else {
-            Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)
-        };
-        gizmos.circle(
-            Isometry3d::new(render_position(route.destination), rotation),
-            0.5,
-            color,
-        );
     }
 }
 
@@ -1187,6 +1154,32 @@ fn respawn_countdown_system(
     state.last_hp = stats.hp;
 }
 
+/// Shared swept collision is applied after local crowd/structure resolution,
+/// so a push or long frame cannot move the hero through static forest geometry.
+fn clip_static_movement(from: Vec3, desired: Vec3) -> Vec3 {
+    let [x, z] = shared::navigation::world_navigation()
+        .clip_movement([from.x, from.z], [desired.x, desired.z]);
+    Vec3::new(x, desired.y, z)
+}
+
+fn structure_revision(structures: &[(Vec3, StructureKind)]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut keys: Vec<_> = structures
+        .iter()
+        .map(|(position, kind)| {
+            (
+                position.x.to_bits(),
+                position.z.to_bits(),
+                matches!(kind, StructureKind::BaseTower),
+            )
+        })
+        .collect();
+    keys.sort_unstable();
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    keys.hash(&mut hash);
+    hash.finish()
+}
+
 fn resolve_player_collisions(
     desired: Vec3,
     other_players: &[Vec3],
@@ -1233,14 +1226,20 @@ fn resolve_player_collisions(
 
 fn resolve_player_structure_overlap(
     mut player_query: Query<&mut Transform, With<Player>>,
-    structures: Query<(&Transform, &StructureKind), (With<NetworkStructure>, Without<Player>)>,
+    structures: Query<
+        (&Transform, &StructureKind, Option<&CombatStats>),
+        (With<NetworkStructure>, Without<Player>),
+    >,
 ) {
     let Ok(mut player_transform) = player_query.single_mut() else {
         return;
     };
     let mut resolved = player_transform.translation;
 
-    for (structure_transform, kind) in structures.iter() {
+    for (structure_transform, kind, stats) in structures.iter() {
+        if stats.is_some_and(|stats| !stats.is_alive()) {
+            continue;
+        }
         let min_distance = crate::navigation::structure_collision_radius(*kind);
         let delta = Vec3::new(
             resolved.x - structure_transform.translation.x,
@@ -1259,6 +1258,7 @@ fn resolve_player_structure_overlap(
         }
     }
 
+    resolved = clip_static_movement(player_transform.translation, resolved);
     player_transform.translation.x = resolved.x;
     player_transform.translation.z = resolved.z;
 }
@@ -1482,6 +1482,131 @@ mod tests {
         }
         assert!(reached, "route must terminate at arrival");
         assert!(previous.xz().distance(target.xz()) < 0.01);
+        assert!(app.world().get::<MovementRoute>(player).is_none());
+    }
+
+    #[test]
+    fn a_destroyed_structure_replans_the_current_order_without_another_click() {
+        let (mut app, player) = navigation_input_app();
+        let tower = app
+            .world_mut()
+            .spawn((
+                NetworkStructure,
+                StructureKind::Tower,
+                Transform::from_xyz(0.0, 0.5, 0.0),
+                CombatStats::default(),
+            ))
+            .id();
+        minimap_order(&mut app, Vec3::new(8.0, 0.5, 0.0));
+        app.update();
+        assert!(
+            app.world()
+                .get::<MovementRoute>(player)
+                .unwrap()
+                .waypoints
+                .len()
+                > 1
+        );
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<MinimapNavigationState>()
+            .movement_target = None;
+        app.world_mut().get_mut::<CombatStats>(tower).unwrap().hp = 0.0;
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<MovementRoute>(player)
+                .unwrap()
+                .waypoints
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn forest_rmb_route_survives_release_and_reaches_the_other_side() {
+        let map = shared::navigation::world_navigation();
+        let (start, end, center) = map
+            .obstacles()
+            .iter()
+            .filter(|o| o.kind == "tree_trunk")
+            .find_map(|o| {
+                let center = o
+                    .vertices
+                    .iter()
+                    .fold(Vec2::ZERO, |a, p| a + Vec2::from_array(*p))
+                    / o.vertices.len() as f32;
+                let a = center - Vec2::X * 4.0;
+                let b = center + Vec2::X * 4.0;
+                (map.point_clear(a.to_array())
+                    && map.point_clear(b.to_array())
+                    && !map.segment_clear(a.to_array(), b.to_array())
+                    && map.plan_route(a.to_array(), b.to_array(), &[]).is_some())
+                .then_some((a, b, center))
+            })
+            .unwrap();
+        let (mut app, player) = navigation_input_app();
+        app.world_mut()
+            .get_mut::<Transform>(player)
+            .unwrap()
+            .translation = Vec3::new(start.x, 0.5, start.y);
+        minimap_order(&mut app, Vec3::new(end.x, 0.5, end.y));
+        app.update();
+        assert!(
+            app.world()
+                .get::<MovementRoute>(player)
+                .unwrap()
+                .waypoints
+                .len()
+                > 1
+        );
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<MinimapNavigationState>()
+            .movement_target = None;
+        let next = app.world().get::<MovementRoute>(player).unwrap().waypoints[0].xz();
+        let away = (center - next).normalize();
+        let displaced = [3.0, 4.0, 5.0]
+            .into_iter()
+            .map(|r| center + away * r)
+            .find(|p| {
+                map.point_clear(p.to_array()) && !map.segment_clear(p.to_array(), next.to_array())
+            })
+            .unwrap();
+        app.world_mut()
+            .get_mut::<Transform>(player)
+            .unwrap()
+            .translation = Vec3::new(displaced.x, 0.5, displaced.y);
+        app.update();
+        let replanned = app.world().get::<MovementRoute>(player).unwrap().waypoints[0].xz();
+        assert!(
+            map.segment_clear(displaced.to_array(), replanned.to_array()),
+            "off-route correction must replan"
+        );
+        let mut previous = displaced;
+        for _ in 0..300 {
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_millis(50));
+            app.update();
+            let current = app
+                .world()
+                .get::<Transform>(player)
+                .unwrap()
+                .translation
+                .xz();
+            assert!(map.segment_clear(previous.to_array(), current.to_array()));
+            assert!(previous.distance(current) <= PLAYER_SPEED * 0.05 + 0.001);
+            previous = current;
+            if app.world().get::<MovementTarget>(player).is_none() {
+                break;
+            }
+        }
+        assert!(previous.distance(end) < 0.01);
         assert!(app.world().get::<MovementRoute>(player).is_none());
     }
 

@@ -157,7 +157,7 @@ class SnapshotObserver:
         self.output.close()
 
 
-def verify_navigation(summary, snapshots):
+def verify_navigation(summary, snapshots, collision_document=None):
     """Require input telemetry plus independent server-side arrival and detour."""
     player_id = summary.get("player_id")
     samples = [(snapshot["snapshot_tick"], player) for snapshot in snapshots
@@ -207,7 +207,35 @@ def verify_navigation(summary, snapshots):
                       and not result["missing_input_events"] and len(arrivals) == 2
                       and all(value["nearby_snapshots"] >= 2 for value in arrivals.values())
                       and clearance is not None and clearance >= radius - 0.1 and detour >= radius - 0.3
-                      and planned_length is not None and planned_length < 25.0 and traversal_length <= 30.0)
+                      and planned_length is not None and planned_length < max(25.0, length * 1.8)
+                      and traversal_length <= max(30.0, length * 2.0))
+    if obstacle.get("kind") == "tree":
+        # Independently test continuous authoritative segments against the
+        # versioned polygons. Client route/collision claims cannot replace this.
+        from generate_verdant_collision import polygon_segment_distance
+        collision_document = collision_document or json.loads(
+            (Path(__file__).resolve().parents[1] / "shared/assets/verdant-collision.json").read_text())
+        polygons = collision_document["obstacles"]
+        selected = next((item for item in polygons if item["id"] == obstacle.get("id")), None)
+        minimum = min((polygon_segment_distance(item["vertices"], (a["x"], a["z"]), (b["x"], b["z"]))
+                       for a,b in zip(travel, travel[1:]) for item in polygons), default=None)
+        direct_blocked = selected is not None and polygon_segment_distance(
+            selected["vertices"], (start[0],start[2]), (target[0],target[2])) < 0.5
+        captures = [event for event in summary.get("events", [])
+                    if event["event"] == "travel_capture_after_settle"]
+        minimap_visible = len(captures) == 2 and all(
+            event["detail"].get("minimap", {}).get("route_segments")
+            and event["detail"]["minimap"].get("route_destination") for event in captures)
+        minimap_cleared = all(not events[name]["detail"].get("minimap", {}).get("route_segments")
+                              and not events[name]["detail"].get("minimap", {}).get("route_destination")
+                              for name in ("minimap_arrival", "world_arrival") if name in events)
+        result["forest"] = dict(selected_id=obstacle.get("id"), obstacles=len(polygons),
+                                minimum_polygon_clearance=minimum, direct_line_blocked=direct_blocked,
+                                minimap_visible=minimap_visible, minimap_cleared=minimap_cleared)
+        result["pass"] = bool(result["pass"] and minimum is not None and minimum >= 0.49
+                              and direct_blocked and minimap_visible and minimap_cleared
+                              and summary.get("route_display") == "minimap_only"
+                              and "forest_approach_input" in events)
     return result
 
 

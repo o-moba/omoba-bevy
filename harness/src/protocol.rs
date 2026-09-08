@@ -283,6 +283,8 @@ pub struct MinionState {
 #[derive(Debug, Clone, Deserialize)]
 pub struct StructureState {
     #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
     pub protected: bool,
     pub id: u64,
     #[serde(default)]

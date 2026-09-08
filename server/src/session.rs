@@ -314,9 +314,13 @@ pub(crate) fn handle_transform_request(
         ))
     };
 
-    player.state.x = accepted.x;
+    // Validate the entire swept XZ segment, including long/debug-speed steps.
+    // This is the same immutable forest collision map used for client routes.
+    let accepted_xz = shared::navigation::world_navigation()
+        .clip_movement([current.x, current.z], [accepted.x, accepted.z]);
+    player.state.x = accepted_xz[0];
     player.state.y = PLAYER_GROUND_Y;
-    player.state.z = accepted.z;
+    player.state.z = accepted_xz[1];
     if yaw.is_finite() {
         player.state.yaw = yaw;
     }

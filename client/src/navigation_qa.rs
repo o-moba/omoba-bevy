@@ -20,10 +20,7 @@ use crate::{
     help_overlay::HelpOverlayVisible,
     maps::MapLayout,
     minimap::MinimapNavigationState,
-    net::{
-        ClientSession, GameState, GameStateSnapshot, NetworkPlayerId, NetworkStructure,
-        StructureKind,
-    },
+    net::{ClientSession, GameState, GameStateSnapshot, NetworkPlayerId},
     player::{MovementRoute, MovementTarget, Player},
     team::Team,
     verdant3d::VerdantEnvironment,
@@ -60,6 +57,9 @@ impl Plugin for NavigationQaPlugin {
             minimap_target: Vec3::ZERO,
             world_target: Vec3::ZERO,
             obstacle: Vec3::ZERO,
+            obstacle_radius: 0.0,
+            obstacle_id: String::new(),
+            approach: Vec3::ZERO,
             camera_focus: None,
             player_id: 0,
             events: Vec::new(),
@@ -138,6 +138,9 @@ struct NavigationQa {
     minimap_target: Vec3,
     world_target: Vec3,
     obstacle: Vec3,
+    obstacle_radius: f32,
+    obstacle_id: String,
+    approach: Vec3,
     camera_focus: Option<Vec3>,
     player_id: u64,
     events: Vec<serde_json::Value>,
@@ -248,15 +251,71 @@ struct NavigationScene<'w, 's> {
         With<Player>,
     >,
     cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<MainCamera>>,
-    structures: Query<
-        'w,
-        's,
-        (&'static Transform, &'static StructureKind, &'static Team),
-        With<NetworkStructure>,
-    >,
     environment: Query<'w, 's, Entity, With<VerdantEnvironment>>,
     scenes: Query<'w, 's, (&'static SceneRoot, Option<&'static SceneInstance>)>,
     windows: Query<'w, 's, Entity, With<PrimaryWindow>>,
+}
+
+/// Choose an actual tree between two reachable forest points. Approach is
+/// performed by ordinary RMB input from spawn, never by editing a transform.
+fn forest_crossing(spawn: Vec3) -> Option<(Vec3, Vec3, Vec3, f32, String)> {
+    let map = shared::navigation::world_navigation();
+    let mut candidates: Vec<_> = map
+        .obstacles()
+        .iter()
+        .filter(|o| o.kind == "tree_trunk")
+        .map(|o| {
+            let center = o
+                .vertices
+                .iter()
+                .fold(Vec2::ZERO, |a, p| a + Vec2::from_array(*p))
+                / o.vertices.len() as f32;
+            (center, o)
+        })
+        .collect();
+    candidates.sort_by(|a, b| {
+        a.0.distance_squared(spawn.xz())
+            .total_cmp(&b.0.distance_squared(spawn.xz()))
+    });
+    for (center, obstacle) in candidates {
+        let direction = (center - spawn.xz()).normalize_or_zero();
+        let a = center - direction * 15.0;
+        let b = center + direction * 15.0;
+        if !map.point_clear(a.to_array()) || !map.point_clear(b.to_array()) {
+            continue;
+        }
+        let Some(route) = map.plan_route(a.to_array(), b.to_array(), &[]) else {
+            continue;
+        };
+        let mut previous = a;
+        let length: f32 = route
+            .iter()
+            .map(|p| {
+                let point = Vec2::from_array(*p);
+                let distance = previous.distance(point);
+                previous = point;
+                distance
+            })
+            .sum();
+        if route.len() < 2 || length >= 54.0 {
+            continue;
+        }
+        let radius = obstacle
+            .vertices
+            .iter()
+            .map(|p| center.distance(Vec2::from_array(*p)))
+            .fold(0.0_f32, f32::max)
+            * (std::f32::consts::PI / 16.0).cos()
+            + shared::navigation::HERO_RADIUS;
+        return Some((
+            Vec3::new(a.x, 0.5, a.y),
+            Vec3::new(b.x, 0.5, b.y),
+            Vec3::new(center.x, 0.5, center.y),
+            radius,
+            obstacle.id.clone(),
+        ));
+    }
+    None
 }
 
 fn minimap_cursor(
@@ -305,7 +364,7 @@ fn observe_navigation(
         return;
     }
     qa.frames += 1;
-    let Ok((transform, stats, team, id, target, route)) = scene.players.single() else {
+    let Ok((transform, stats, _team, id, target, route)) = scene.players.single() else {
         return;
     };
     let position = transform.translation;
@@ -314,7 +373,7 @@ fn observe_navigation(
     if tick != qa.last_tick {
         qa.last_tick = tick;
         let stage = qa.stage;
-        qa.samples.push(serde_json::json!({"snapshot_tick":tick,"stage":stage,"position":position.to_array(),"hp":stats.hp,"movement_target":target.map(|t|t.target.to_array()),"route":route.map(|r|r.waypoints.iter().map(|p|p.to_array()).collect::<Vec<_>>()),"rmb_held":mouse.pressed(MouseButton::Right)}));
+        qa.samples.push(serde_json::json!({"snapshot_tick":tick,"stage":stage,"position":position.to_array(),"hp":stats.hp,"movement_target":target.map(|t|t.target.to_array()),"route":route.map(|r|r.waypoints.iter().map(|p|p.to_array()).collect::<Vec<_>>()),"rmb_held":mouse.pressed(MouseButton::Right),"minimap":diagnostics}));
     }
     let idle = target.is_none() && route.is_none();
     if qa.stage > 0
@@ -351,26 +410,49 @@ fn observe_navigation(
             if qa.frames < 45 {
                 return;
             }
-            let Some((base, _, _)) = scene.structures.iter().find(|(_, kind, structure_team)| {
-                **kind == StructureKind::BaseTower && *structure_team == team
-            }) else {
+            let Some((approach, destination, center, radius, obstacle_id)) =
+                forest_crossing(position)
+            else {
+                fail(
+                    &mut qa,
+                    &mut exit,
+                    "no bounded real forest crossing is available",
+                );
                 return;
             };
-            qa.start = position;
-            qa.obstacle = base.translation;
-            qa.minimap_target = Vec3::new(base.translation.x, 0.5, base.translation.z)
-                + (base.translation - position)
-                    .with_y(0.0)
-                    .normalize_or_zero()
-                    * 7.0;
-            qa.camera_focus = nav.focus_target;
+            qa.approach = approach;
+            qa.obstacle = center;
+            qa.obstacle_radius = radius;
+            qa.obstacle_id = obstacle_id;
+            qa.minimap_target = destination;
             qa.player_id = id.0;
+            let Some(cursor) = minimap_cursor(*layout, &diagnostics, approach) else {
+                return;
+            };
+            qa.event("forest_approach_input", position, tick,
+                serde_json::json!({"destination":approach.to_array(),"cursor_logical":cursor.to_array(),"ordinary_movement":true}));
+            qa.click(cursor, MouseButton::Right, false);
+            qa.advance(100);
+        }
+        100 => {
+            if idle && position.xz().distance(qa.approach.xz()) < 0.3 {
+                qa.advance(101);
+            }
+        }
+        101 => {
+            if qa.stage_started.elapsed() < Duration::from_millis(800) {
+                return;
+            }
+            qa.start = position;
+            qa.camera_focus = nav.focus_target;
             let Some(cursor) = minimap_cursor(*layout, &diagnostics, qa.minimap_target) else {
                 return;
             };
-            let destination = qa.minimap_target.to_array();
-            let obstacle = qa.obstacle.to_array();
-            qa.event("minimap_rmb_input", position, tick, serde_json::json!({"destination":destination,"cursor_logical":cursor.to_array(),"minimap":diagnostics,"obstacle_center":obstacle,"collision_radius":3.7}));
+            let detail = serde_json::json!({"destination":qa.minimap_target.to_array(),
+                "cursor_logical":cursor.to_array(),"minimap":diagnostics,
+                "obstacle_center":qa.obstacle.to_array(),"collision_radius":qa.obstacle_radius,
+                "forest_obstacle_id":qa.obstacle_id});
+            qa.event("minimap_rmb_input", position, tick, detail);
             qa.click(cursor, MouseButton::Right, false);
             qa.advance(1);
         }
@@ -397,11 +479,14 @@ fn observe_navigation(
                     distance
                 })
                 .sum();
-            if !planned_length.is_finite() || planned_length >= 25.0 {
+            if !planned_length.is_finite()
+                || planned_length
+                    >= (qa.start.xz().distance(qa.minimap_target.xz()) * 1.8).max(25.0)
+            {
                 fail(
                     &mut qa,
                     &mut exit,
-                    "14m minimap base crossing planned an excessive route (limit <25m)",
+                    "forest crossing planned an excessive detour",
                 );
                 return;
             }
@@ -429,6 +514,7 @@ fn observe_navigation(
                 tick,
                 target,
                 route,
+                &diagnostics,
             ) {
                 return;
             }
@@ -448,7 +534,7 @@ fn observe_navigation(
                     return;
                 }
                 let destination = qa.minimap_target.to_array();
-                qa.event("minimap_arrival", position, tick, serde_json::json!({"destination":destination,"intent_cleared":true,"travel_after_release":true}));
+                qa.event("minimap_arrival", position, tick, serde_json::json!({"destination":destination,"intent_cleared":true,"travel_after_release":true,"minimap":diagnostics}));
                 capture(&mut commands, &mut qa, 1, position, tick);
                 qa.advance(3);
             }
@@ -459,7 +545,20 @@ fn observe_navigation(
             if qa.stage_started.elapsed() < Duration::from_millis(800) {
                 return;
             }
-            qa.world_target = position + Vec3::new(5.0, 0.0, -4.0);
+            let navigation = shared::navigation::world_navigation();
+            let Some(world_target) = [
+                Vec3::new(5.0, 0.0, -4.0),
+                Vec3::new(-5.0, 0.0, -4.0),
+                Vec3::new(4.0, 0.0, 5.0),
+                Vec3::new(-4.0, 0.0, 5.0),
+            ]
+            .into_iter()
+            .map(|offset| position + offset)
+            .find(|p| navigation.segment_clear(position.xz().to_array(), p.xz().to_array())) else {
+                fail(&mut qa, &mut exit, "no nearby open ground order");
+                return;
+            };
+            qa.world_target = world_target;
             let Some(cursor) = world_cursor(&scene, qa.world_target) else {
                 fail(
                     &mut qa,
@@ -508,6 +607,7 @@ fn observe_navigation(
                 tick,
                 target,
                 route,
+                &diagnostics,
             ) {
                 return;
             }
@@ -517,7 +617,7 @@ fn observe_navigation(
                     "world_arrival",
                     position,
                     tick,
-                    serde_json::json!({"destination":destination,"intent_cleared":true}),
+                    serde_json::json!({"destination":destination,"intent_cleared":true,"minimap":diagnostics}),
                 );
                 qa.advance(6);
             }
@@ -660,7 +760,7 @@ fn observe_navigation(
             {
                 return;
             }
-            let summary = serde_json::json!({"version":env!("CARGO_PKG_VERSION"),"scenario":"navigation","scripted_input":true,"input_method":"ButtonInput mouse/key press and release with actual logical Window cursor; production admission/help button interactions","manual_interaction_verified":false,"teleport_or_movement_fixture":false,"capture_method":"Bevy Screenshot::primary_window + save_to_disk","player_id":qa.player_id,"start":qa.start.to_array(),"obstacle":{"center":qa.obstacle.to_array(),"collision_radius":3.7},"events":qa.events,"samples":qa.samples,"captures":qa.captures,"pixels":[qa.width,qa.height],"elapsed_seconds":qa.started.elapsed().as_secs_f64(),"pass":true});
+            let summary = serde_json::json!({"version":env!("CARGO_PKG_VERSION"),"scenario":"navigation","scripted_input":true,"input_method":"ButtonInput mouse/key press and release with actual logical Window cursor; production admission/help button interactions","manual_interaction_verified":false,"teleport_or_movement_fixture":false,"capture_method":"Bevy Screenshot::primary_window + save_to_disk","player_id":qa.player_id,"start":qa.start.to_array(),"obstacle":{"center":qa.obstacle.to_array(),"collision_radius":qa.obstacle_radius,"id":qa.obstacle_id,"kind":"tree"},"route_display":"minimap_only","events":qa.events,"samples":qa.samples,"captures":qa.captures,"pixels":[qa.width,qa.height],"elapsed_seconds":qa.started.elapsed().as_secs_f64(),"pass":true});
             if std::fs::write(
                 qa.directory.join("qa-summary.json"),
                 serde_json::to_vec_pretty(&summary).unwrap(),
@@ -693,9 +793,10 @@ fn capture_travel_after_settle(
     tick: u64,
     target: Option<&MovementTarget>,
     route: Option<&MovementRoute>,
+    minimap: &serde_json::Value,
 ) -> bool {
     // Preserve first-frame acceptance telemetry, then allow the renderer to
-    // extract/prepare the route mesh before reading it back during real travel.
+    // lay out the minimap route before reading it back during real travel.
     if qa.frames > 8 {
         return true;
     }
@@ -704,10 +805,22 @@ fn capture_travel_after_settle(
         return false;
     };
     if qa.frames == 8 {
+        if minimap["route_segments"]
+            .as_array()
+            .is_none_or(|segments| segments.is_empty())
+            || minimap["route_destination"].is_null()
+        {
+            fail(
+                qa,
+                exit,
+                "active route has no computed minimap line/destination",
+            );
+            return false;
+        }
         qa.event("travel_capture_after_settle", position, tick, serde_json::json!({
             "file":FILES[index], "frames_after_acceptance":8,
             "remaining_waypoints":route.waypoints.iter().map(|point|point.to_array()).collect::<Vec<_>>(),
-            "destination":route.destination.to_array(), "movement_target_present":true,
+            "destination":route.destination.to_array(), "movement_target_present":true, "minimap":minimap,
         }));
         capture(commands, qa, index, position, tick);
     }

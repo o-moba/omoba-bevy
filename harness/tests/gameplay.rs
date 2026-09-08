@@ -189,18 +189,23 @@ fn speed_boost_widens_movement_clamp() {
     );
 }
 
-/// Sends a large +x transform repeatedly at a fixed cadence and returns how far
-/// the server actually let the player advance along x.
+/// Request the distant center along the authored open midlane. Forest contact
+/// must not become the limiting factor in this speed-budget regression.
 fn drive_forward(bot: &mut Bot, id: u64) -> f32 {
     let start = bot
         .latest_player(id, POLL_TIMEOUT)
         .expect("player should be present before driving");
     let start_x = start.x;
     let start_z = start.z;
+    let destination = [0.0, 0.0];
+    assert!(
+        shared::navigation::world_navigation().segment_clear([start_x, start_z], destination),
+        "speed fixture must follow an open corridor"
+    );
 
     for _ in 0..30 {
         // Request a far target so the server is always the limiting factor.
-        bot.send_transform(start_x + 1000.0, GROUND_Y, start_z, 0.0);
+        bot.send_transform(destination[0], GROUND_Y, destination[1], 0.0);
         // Input-pacing sleep (not an assertion wait): spaces transforms so each
         // is a distinct tick. The boosted/unboosted ratio is load-insensitive —
         // both runs use this same cadence, so they scale together.
@@ -210,7 +215,7 @@ fn drive_forward(bot: &mut Bot, id: u64) -> f32 {
     let end = bot
         .latest_player(id, POLL_TIMEOUT)
         .expect("player should still be present after driving");
-    end.x - start_x
+    (end.x - start_x).hypot(end.z - start_z)
 }
 
 /// Casts the given slot once and returns the caster's lowest observed own mana

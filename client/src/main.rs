@@ -15,6 +15,7 @@ mod input_context;
 mod maps;
 mod match_hud;
 mod minimap;
+mod minimap_route;
 mod minions;
 mod model_scale;
 mod navigation;
