@@ -1,18 +1,20 @@
 # Feature Inventory
 
-Canonical version: `0.18.0-rc.5`
+Canonical version: `0.18.0-rc.6`
 
 ## Current Playable Surface
 
-- **Right-click routes (2026-09-08):** right-click ground or the minimap to move
-  to a persistent destination, shown as a golden local route and arrival ring.
-  Routes detour around solid towers/bases; blocked destinations project to
-  reachable clearance. Orders replace previous routes and cancel pending casts.
-  Left minimap clicks still pan the camera, and Alt+right-click still orbits.
-  Menus, unadmitted/dead/non-running heroes and debug flight cannot issue orders.
-  Static structure discs and bounds define navigation; decorative scenery has
-  no terrain walkability mask, and transient players use existing overlap
-  resolution. See the [session record](progress/2026-09-08-right-click-navigation.md).
+- **Forest navigation and minimap routes (2026-09-08):** right-click ground or
+  the minimap to walk around trunks, solid rocks/walls and live towers/bases.
+  A mint line and destination ring show the remaining route on the minimap;
+  world movement-path gizmos are removed. The same generated obstacle data,
+  spatial index and bounded A* module govern client routes, authoritative
+  swept movement checks and fill-bot traversal. The minimap shows the shared
+  solid forest footprint under portraits and the yellow camera rectangle.
+  Input replacement, pending-cast cancellation and modal/orbit behavior remain
+  intact. Canopies/grass are decorative; projectiles, vision and dynamic crowd
+  planning are outside this collision change. See the
+  [architectural/session record](progress/2026-09-08-forest-navigation.md).
 
 - **HUD, camera and equipment iteration (2026-09-07, iteration 05):** default
   heroes are 26% larger with saved-default migration and unchanged creature

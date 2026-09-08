@@ -107,6 +107,7 @@ struct BotRunner {
     my_id: Option<u64>,
     my_team: Option<Team>,
     brain: Option<BotBrain>,
+    navigation: harness::navigation::BotNavigator,
     rally_lane: Option<Lane>,
     /// Last known own position/health from a snapshot.
     position: Option<(f32, f32)>,
@@ -151,6 +152,7 @@ fn main() {
             my_id: None,
             my_team: None,
             brain: None,
+            navigation: harness::navigation::BotNavigator::default(),
             rally_lane: None,
             position: None,
             alive: true,
@@ -221,6 +223,7 @@ fn main() {
             if runner.round_key != Some(round_key) {
                 runner.round_key = Some(round_key);
                 runner.brain = None;
+                runner.navigation.clear();
                 runner.rally_lane = None;
                 runner.last_cast_at = [None; 4];
                 runner.position = None;
@@ -243,6 +246,7 @@ fn main() {
                     && let Some(brain) = runner.brain.as_mut()
                 {
                     brain.resync(me.x, me.z);
+                    runner.navigation.clear();
                     runner.last_cast_at = [None; 4];
                 }
                 runner.alive = now_alive;
@@ -317,6 +321,7 @@ fn main() {
                     if me.level >= 6 && runner.rally_lane.is_none() {
                         runner.rally_lane = Some(choose_rally_lane(&snapshot, team));
                         runner.brain = None;
+                        runner.navigation.clear();
                     }
                     let brain = runner.brain.get_or_insert_with(|| {
                         let mut brain = BotBrain::new(
@@ -329,10 +334,23 @@ fn main() {
                     });
                     let view = WorldView::from_snapshot(&snapshot, my_id, team);
                     let decision = brain.decide(x, z, &view);
-                    if let Some(target) = decision.move_target {
+                    let structures: Vec<_> = snapshot
+                        .structures()
+                        .iter()
+                        .filter(|s| s.hp > 0.0)
+                        .map(|s| shared::navigation::Disc {
+                            center: [s.x, s.z],
+                            radius: if s.kind == "base_tower" { 3.2 } else { 1.3 },
+                        })
+                        .collect();
+                    if let Some(target) = decision.move_target.and_then(|target| {
+                        runner
+                            .navigation
+                            .next([x, z], [target.0, target.1], &structures)
+                    }) {
                         let (nx, nz, yaw) = step_toward(
                             (x, z),
-                            target,
+                            (target[0], target[1]),
                             TICK_INTERVAL.as_secs_f32() * me.item_bonuses.move_speed_multiplier,
                         );
                         runner.bot.send_transform(nx, 0.5, nz, yaw);
@@ -351,10 +369,12 @@ fn main() {
                 }
                 GameState::Running => {
                     // Dead: wait for the server-side respawn.
+                    runner.navigation.clear();
                 }
                 GameState::Victory { .. } => {
                     // Server auto-rematches; brains restart from the base.
                     runner.brain = None;
+                    runner.navigation.clear();
                 }
                 _ => {
                     // Queue warm-up: small wander near spawn so bots look alive.

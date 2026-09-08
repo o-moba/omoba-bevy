@@ -50,3 +50,7 @@ client/assets/avatars/osa-*.jpg
 
 # Local dev override for ekza-bevy-sdk (patch to on-disk checkout)
 .cargo/
+
+# Generated shared collision data is a runtime contract, not a downloaded asset.
+!shared/assets/
+!shared/assets/verdant-collision.json

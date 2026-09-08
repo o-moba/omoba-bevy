@@ -1,43 +1,22 @@
-//! Local XZ navigation for the same structure discs used by player collision.
-//! This is a bounded visibility graph, not terrain or dynamic-player navigation.
+//! Bevy coordinate adapter for the shared forest/structure navigation module.
 
 use bevy::prelude::*;
+use shared::navigation::{Bounds, Disc, HERO_RADIUS, NavigationMap, world_navigation};
 
 use crate::maps::MapLayout;
 use crate::net::StructureKind;
-use crate::player::PLAYER_SIZE;
 
-const CLEARANCE: f32 = 0.15;
-const NODE_CLEARANCE: f32 = 0.001;
-const RING_SAMPLES: usize = 24;
-// The current map has eight structures. Fail closed on unexpectedly large input
-// instead of allowing an unbounded visibility graph on the input thread.
-const MAX_OBSTACLES: usize = 32;
-const EPSILON: f32 = 0.00001;
-
-#[derive(Clone, Copy)]
-struct Obstacle {
-    center: Vec2,
-    radius: f32,
-}
-
-/// Physical hero-center clearance, shared with the movement collision solver.
+/// Physical hero-center clearance used by the existing structure collision.
 pub(crate) fn structure_collision_radius(kind: StructureKind) -> f32 {
-    PLAYER_SIZE * 0.5
+    HERO_RADIUS
         + match kind {
             StructureKind::Tower => 1.3,
             StructureKind::BaseTower => 3.2,
         }
 }
 
-/// Plan once per order. Waypoints exclude `start` and preserve its Y coordinate.
-/// An empty route means arrival; `None` means invalid input or no safe route.
-///
-/// Destinations are clamped to the map. A destination inside a padded structure
-/// is projected to the nearest reachable graph candidate (including the radial
-/// projection), so overlapping discs or map edges cannot produce an unsafe end.
-/// A start already overlapping a disc may only move monotonically outward until
-/// clear; the normal collision solver remains responsible for overlap recovery.
+/// Plan once per order; waypoints exclude the start and retain its height.
+/// Custom test arenas get their own empty static map instead of global trees.
 pub(crate) fn plan_route(
     layout: &MapLayout,
     start: Vec3,
@@ -48,204 +27,50 @@ pub(crate) fn plan_route(
         || !destination.is_finite()
         || !layout.min.is_finite()
         || !layout.max.is_finite()
-        || !layout.size().is_finite()
-        || (layout.max - layout.min).min_element() <= EPSILON
-        || structures.len() > MAX_OBSTACLES
+        || structures.iter().any(|(position, _)| !position.is_finite())
     {
         return None;
     }
-    let start_xz = Vec2::new(start.x, start.z);
-    if !in_bounds(layout, start_xz) {
-        return None;
-    }
-    let destination = Vec2::new(destination.x, destination.z).clamp(layout.min, layout.max);
-    let mut obstacles = Vec::with_capacity(structures.len());
-    for &(position, kind) in structures {
-        if !position.is_finite() {
-            return None;
-        }
-        obstacles.push(Obstacle {
-            center: Vec2::new(position.x, position.z),
-            radius: structure_collision_radius(kind) + CLEARANCE,
-        });
-    }
-    // ECS query order must not change which equally short side of a tower wins.
-    obstacles.sort_by(|a, b| {
-        a.center
-            .x
-            .total_cmp(&b.center.x)
-            .then_with(|| a.center.y.total_cmp(&b.center.y))
-            .then_with(|| a.radius.total_cmp(&b.radius))
-    });
-    let destination_clear = point_clear(destination, &obstacles);
-    if destination_clear && segment_clear(start_xz, destination, &obstacles, true) {
-        return Some(
-            if start_xz.distance_squared(destination) <= EPSILON * EPSILON {
-                Vec::new()
-            } else {
-                vec![Vec3::new(destination.x, start.y, destination.y)]
-            },
-        );
-    }
-
-    let mut nodes = vec![start_xz];
-    if destination_clear {
-        nodes.push(destination);
-    }
-    for obstacle in &obstacles {
-        // Leave positive clearance at each chord, because adding small offsets
-        // to large world coordinates rounds f32 vertices. Exactly tangent
-        // chords can otherwise round inside the disc and disconnect its ring.
-        // Every actual graph edge still passes the unchanged clearance check.
-        let ring_radius =
-            (obstacle.radius + NODE_CLEARANCE) / (std::f32::consts::PI / RING_SAMPLES as f32).cos();
-        for sample in 0..RING_SAMPLES {
-            let angle = std::f32::consts::TAU * sample as f32 / RING_SAMPLES as f32;
-            let point = obstacle.center + Vec2::new(angle.cos(), angle.sin()) * ring_radius;
-            add_node(&mut nodes, point, layout, &obstacles);
-        }
-        for reference in [destination, start_xz] {
-            let mut direction = reference - obstacle.center;
-            if direction.length_squared() <= EPSILON * EPSILON {
-                direction = start_xz - obstacle.center;
-            }
-            let direction = direction.try_normalize().unwrap_or(Vec2::X);
-            let point = obstacle.center + direction * (obstacle.radius + NODE_CLEARANCE);
-            add_node(&mut nodes, point, layout, &obstacles);
-        }
-        // Ring samples alone can miss the narrow space between a disc and the
-        // arena edge. Include exact ring/edge intersections, then check edges.
-        for edge_x in [layout.min.x, layout.max.x] {
-            let remainder = ring_radius * ring_radius - (edge_x - obstacle.center.x).powi(2);
-            if remainder >= 0.0 {
-                for side in [-1.0, 1.0] {
-                    add_node(
-                        &mut nodes,
-                        Vec2::new(edge_x, obstacle.center.y + side * remainder.sqrt()),
-                        layout,
-                        &obstacles,
-                    );
-                }
-            }
-        }
-        for edge_z in [layout.min.y, layout.max.y] {
-            let remainder = ring_radius * ring_radius - (edge_z - obstacle.center.y).powi(2);
-            if remainder >= 0.0 {
-                for side in [-1.0, 1.0] {
-                    add_node(
-                        &mut nodes,
-                        Vec2::new(obstacle.center.x + side * remainder.sqrt(), edge_z),
-                        layout,
-                        &obstacles,
-                    );
-                }
-            }
-        }
-    }
-    for corner in [
-        layout.min,
-        Vec2::new(layout.min.x, layout.max.y),
-        layout.max,
-        Vec2::new(layout.max.x, layout.min.y),
-    ] {
-        add_node(&mut nodes, corner, layout, &obstacles);
-    }
-
-    let mut distance = vec![f32::INFINITY; nodes.len()];
-    let mut previous = vec![None; nodes.len()];
-    let mut visited = vec![false; nodes.len()];
-    distance[0] = 0.0;
-    for _ in 0..nodes.len() {
-        let Some(current) = (0..nodes.len())
-            .filter(|&index| !visited[index] && distance[index].is_finite())
-            .min_by(|&a, &b| distance[a].total_cmp(&distance[b]))
-        else {
-            break;
-        };
-        visited[current] = true;
-        if destination_clear && current == 1 {
-            break;
-        }
-        for next in 1..nodes.len() {
-            if visited[next] {
-                continue;
-            }
-            let candidate = distance[current] + nodes[current].distance(nodes[next]);
-            if candidate < distance[next]
-                && segment_clear(nodes[current], nodes[next], &obstacles, current == 0)
-            {
-                distance[next] = candidate;
-                previous[next] = Some(current);
-            }
-        }
-    }
-    let end = if destination_clear {
-        distance[1].is_finite().then_some(1)?
-    } else {
-        (1..nodes.len())
-            .filter(|&index| distance[index].is_finite())
-            .min_by(|&a, &b| {
-                nodes[a]
-                    .distance_squared(destination)
-                    .total_cmp(&nodes[b].distance_squared(destination))
-                    .then_with(|| distance[a].total_cmp(&distance[b]))
-            })?
+    let bounds = Bounds {
+        min: layout.min.to_array(),
+        max: layout.max.to_array(),
     };
-    let mut route = Vec::new();
-    let mut current = end;
-    while current != 0 {
-        let point = nodes[current];
-        route.push(Vec3::new(point.x, start.y, point.y));
-        current = previous[current]?;
-    }
-    route.reverse();
-    Some(route)
-}
-
-fn in_bounds(layout: &MapLayout, point: Vec2) -> bool {
-    point.cmpge(layout.min).all() && point.cmple(layout.max).all()
-}
-
-fn point_clear(point: Vec2, obstacles: &[Obstacle]) -> bool {
-    obstacles.iter().all(|obstacle| {
-        point.distance_squared(obstacle.center) + EPSILON >= obstacle.radius * obstacle.radius
-    })
-}
-
-fn add_node(nodes: &mut Vec<Vec2>, point: Vec2, layout: &MapLayout, obstacles: &[Obstacle]) {
-    if point.is_finite()
-        && in_bounds(layout, point)
-        && point_clear(point, obstacles)
-        && !nodes
-            .iter()
-            .any(|node| node.distance_squared(point) <= EPSILON * EPSILON)
-    {
-        nodes.push(point);
-    }
-}
-
-fn segment_clear(from: Vec2, to: Vec2, obstacles: &[Obstacle], allow_start_escape: bool) -> bool {
-    let step = to - from;
-    let length_squared = step.length_squared();
-    obstacles.iter().all(|obstacle| {
-        let offset = from - obstacle.center;
-        let radius_squared = obstacle.radius * obstacle.radius;
-        if allow_start_escape && offset.length_squared() + EPSILON < radius_squared {
-            return offset.dot(step) >= -EPSILON
-                && to.distance_squared(obstacle.center) + EPSILON >= radius_squared;
-        }
-        let projection = if length_squared > EPSILON * EPSILON {
-            (-offset.dot(step) / length_squared).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        (offset + step * projection).length_squared() + EPSILON >= radius_squared
-    })
+    let world = world_navigation();
+    let world_bounds = world.bounds();
+    let custom;
+    let map = if (0..2).all(|axis| {
+        (bounds.min[axis] - world_bounds.min[axis]).abs() < 0.001
+            && (bounds.max[axis] - world_bounds.max[axis]).abs() < 0.001
+    }) {
+        world
+    } else {
+        custom = NavigationMap::new(bounds, Vec::new()).ok()?;
+        &custom
+    };
+    let dynamic: Vec<_> = structures
+        .iter()
+        .map(|&(position, kind)| Disc {
+            center: [position.x, position.z],
+            radius: structure_collision_radius(kind) - HERO_RADIUS,
+        })
+        .collect();
+    map.plan_route([start.x, start.z], [destination.x, destination.z], &dynamic)
+        .map(|route| {
+            route
+                .into_iter()
+                .map(|point| Vec3::new(point[0], start.y, point[1]))
+                .collect()
+        })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shared::navigation::{MAX_DYNAMIC_DISCS as MAX_OBSTACLES, PLANNING_CLEARANCE as CLEARANCE};
+
+    fn in_bounds(layout: &MapLayout, point: Vec2) -> bool {
+        point.cmpge(layout.min).all() && point.cmple(layout.max).all()
+    }
 
     fn arena(half_size: f32) -> MapLayout {
         MapLayout {
@@ -304,7 +129,7 @@ mod tests {
             let start = Vec3::new(-10.0, 0.5, 0.0);
             let destination = Vec3::new(10.0, 0.5, 0.0);
             let route = plan_route(&layout, start, destination, &structures).unwrap();
-            assert!(route.len() >= 3);
+            assert!(route.len() >= 2);
             assert_eq!(route.last(), Some(&destination));
             assert_safe(&layout, start, &route, &structures);
         }

@@ -233,6 +233,7 @@ impl WorldView {
                 z,
                 hp,
                 protected,
+                ..
             } = structure;
             if is_enemy_team(team) && *hp > 0.0 {
                 if *protected {
@@ -489,14 +490,15 @@ impl BotBrain {
         }
     }
 
-    /// Re-aims at the nearest waypoint; call after a respawn teleports the
-    /// bot back to base so it resumes pushing instead of chasing a stale
-    /// mid-lane waypoint from spawn.
+    /// Re-aim at a forward lane waypoint after spawn/respawn. Index zero is
+    /// the solid friendly base's center, an anchor rather than a walk target;
+    /// its collision boundary lies outside the normal waypoint arrival radius.
     pub fn resync(&mut self, x: f32, z: f32) {
         self.next_waypoint = self
             .waypoints
             .iter()
             .enumerate()
+            .skip(1)
             .min_by(|a, b| distance((x, z), *a.1).total_cmp(&distance((x, z), *b.1)))
             .map(|(index, _)| index)
             .unwrap_or(0);
@@ -780,14 +782,14 @@ mod tests {
     }
 
     #[test]
-    fn resync_after_respawn_picks_nearest_waypoint() {
+    fn resync_after_respawn_picks_nearest_forward_waypoint() {
         let mut brain = BotBrain::new(Lane::Top, Team::Green, HeroClass::Warrior);
         // Simulate mid-lane progress...
         brain.next_waypoint = 3;
-        // ...then death + respawn at base: resync back to the start.
+        // ...then death + respawn: target the first lane point beyond the solid base.
         let home = brain.waypoints[0];
         brain.resync(home.0, home.1);
-        assert_eq!(brain.next_waypoint, 0);
+        assert_eq!(brain.next_waypoint, 1);
         // Respawn resync from near the 3rd waypoint keeps pushing there.
         let wp3 = brain.waypoints[3];
         brain.resync(wp3.0 + 1.0, wp3.1);

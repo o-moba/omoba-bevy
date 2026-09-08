@@ -224,7 +224,7 @@ fn help_overlay_body() -> String {
     let upgrade = upgrade_key_display();
     format!(
         "Quick guide (press {help_key} or Escape to close)\n\n\
-MOVE: Right-click ground or minimap to follow a golden route. Left-click/tap ground also moves.\n\
+MOVE: Right-click ground or minimap to move around forest; your route appears on the minimap. Left-click/tap ground also moves.\n\
 ATTACK: Click or tap a hostile to select it and use Q; your hero approaches if needed.\n\
 CAST: Use {skills} or the on-screen buttons. W/E/R unlock by level.\n\
 SKILL POINTS: Use {upgrade} or the arrows above the hotbar to rank up abilities.\n\

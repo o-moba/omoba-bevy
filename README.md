@@ -6,7 +6,7 @@ For the September 8 controlled beta, use the
 [tester/host guide](docs/progress/2026-09-07-beta-test-guide.md): the native
 package includes `practice.sh`, `host.sh --humans N` and
 `join-server.sh HOST:PORT`. See the
-[current navigation iteration](docs/progress/2026-09-08-right-click-navigation.md) and
+[current forest navigation iteration](docs/progress/2026-09-08-forest-navigation.md) and
 [match readiness record](docs/progress/2026-09-07-beta-readiness.md) for measured
 checks and remaining coverage. The commands below are development workflows.
 
@@ -113,7 +113,7 @@ states the current delivery boundary.
 | **Space** | Restore hero follow and clear a minimap focus override |
 | **Alt + right mouse** (3D only) | Hold to orbit the camera |
 | Team / character UI | Click team and character before play; server snapshot is authoritative |
-| **Right-click ground / minimap** | Set a persistent route around towers and bases; another order replaces it |
+| **Right-click ground / minimap** | Set a route around solid forest and structures, shown on the minimap; another order replaces it |
 | **Click/tap ground** | Move the hero on desktop or touch devices |
 | **Left-click/drag minimap** | Pan the camera without issuing movement |
 | **Click/tap hostile** | Select it and use Q; the hero approaches into range automatically |

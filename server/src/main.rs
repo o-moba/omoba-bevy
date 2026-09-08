@@ -2,6 +2,8 @@
 
 mod balance;
 mod gameplay;
+#[cfg(test)]
+mod navigation_tests;
 mod neutrals;
 mod progression;
 #[cfg(test)]

@@ -16,7 +16,7 @@ use crate::team::{AvatarThumbnails, Team};
 use crate::ui_theme;
 
 const MINIMAP_SIZE: f32 = 252.0;
-const MINIMAP_INNER_SIZE: f32 = 232.0;
+pub(crate) const MINIMAP_INNER_SIZE: f32 = 232.0;
 const HERO_SIGHT: f32 = 32.0;
 const MINION_SIGHT: f32 = 22.0;
 const TOWER_SIGHT: f32 = 28.0;
@@ -25,7 +25,8 @@ const BASE_SIGHT: f32 = 34.0;
 pub struct MinimapPlugin;
 impl Plugin for MinimapPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<MinimapUiState>()
+        app.add_plugins(crate::minimap_route::MinimapRoutePlugin)
+            .init_resource::<MinimapUiState>()
             .init_resource::<MinimapNavigationState>()
             .add_systems(Startup, setup_minimap_ui)
             .add_systems(
@@ -63,7 +64,7 @@ struct MinimapUiState {
 #[derive(Component)]
 struct MinimapRoot;
 #[derive(Component)]
-struct MinimapContainer;
+pub(crate) struct MinimapContainer;
 #[derive(Component)]
 struct CameraFootprintEdge(usize);
 
@@ -83,6 +84,8 @@ pub(crate) struct MinimapQaScene<'w, 's> {
         ),
     >,
     edges: Query<'w, 's, (Entity, &'static CameraFootprintEdge)>,
+    routes: Query<'w, 's, (Entity, &'static crate::minimap_route::RouteSegment)>,
+    destinations: Query<'w, 's, Entity, With<crate::minimap_route::RouteDestination>>,
     heroes: Query<
         'w,
         's,
@@ -152,6 +155,16 @@ impl MinimapQaScene<'_, '_> {
             "minion_markers": self.state.minion_icons.values().filter(|icon| rendered_rect(**icon).is_some()).count(),
             "structure_markers": self.state.structure_icons.values().filter(|icon| rendered_rect(**icon).is_some()).count(),
             "camera_edges": camera_edges,
+            "route_segments": self.routes.iter().filter_map(|(entity, index)| {
+                rendered_rect(entity)?;
+                let (_, computed, transform, _) = self.nodes.get(entity).ok()?;
+                let half = computed.size().x * 0.5;
+                let scale = computed.inverse_scale_factor();
+                let a = transform.transform_point2(Vec2::new(-half, 0.0)) * scale;
+                let b = transform.transform_point2(Vec2::new(half, 0.0)) * scale;
+                Some(serde_json::json!({"index":index.0,"a":[a.x,a.y],"b":[b.x,b.y]}))
+            }).collect::<Vec<_>>(),
+            "route_destination": self.destinations.iter().find_map(rendered_rect).map(rect_json),
         })
     }
 }
@@ -253,7 +266,7 @@ fn spawn_map_line(
     let (node, transform) = line_node(a, b, width);
     parent.spawn((node, transform, BackgroundColor(color)));
 }
-fn line_node(a: Vec2, b: Vec2, width: f32) -> (Node, UiTransform) {
+pub(crate) fn line_node(a: Vec2, b: Vec2, width: f32) -> (Node, UiTransform) {
     let delta = b - a;
     let middle = (a + b) * 0.5;
     (
@@ -627,7 +640,7 @@ fn sync_minimap_visibility_for_session(
 
 /// Unclamped projection also serves footprint clipping; clamping its endpoints
 /// independently would distort off-map camera edges.
-fn map_point(layout: MapLayout, world: Vec3) -> Vec2 {
+pub(crate) fn map_point(layout: MapLayout, world: Vec3) -> Vec2 {
     let normalized = (world.xz() - layout.min) / layout.size();
     Vec2::new(normalized.y, 1.0 - normalized.x) * MINIMAP_INNER_SIZE
 }
@@ -763,6 +776,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<MapLayout>()
             .init_resource::<AvatarThumbnails>()
+            .init_resource::<Assets<Image>>()
             .init_resource::<SpriteVisualAssets>()
             .init_resource::<PlayerVisualMode>()
             .init_resource::<ClientSession>()

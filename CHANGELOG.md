@@ -6,6 +6,21 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.18.0-rc.6] - 2026-09-08
+
+### Changed
+- Move the local hero's remaining route and destination to the minimap; remove
+  movement-path gizmos from the world. Show the shared forest collision mask
+  beneath tactical markers and the camera footprint.
+- Derive 236 solid footprints from shipped Verdant geometry: 113 tree trunks,
+  boulders, rock outcrops and ruin walls. Canopies, grass and walkable surfaces
+  remain passable; authored lanes, spawns and objective approaches stay open.
+- Share a cached spatial index, bounded A* search and swept collision between
+  the native client, server movement authority and fill bots. Routes respect
+  hero clearance, smooth safe segments and replan when live structures change.
+- Enforce tree/stone collision on movement packets, including long steps;
+  preserve normal movement speed and the existing input/modal controls.
+
 ## [0.18.0-rc.5] - 2026-09-08
 
 ### Added
