@@ -4,6 +4,8 @@ mod balance;
 mod basic_attack;
 mod gameplay;
 #[cfg(test)]
+mod minion_path_tests;
+#[cfg(test)]
 mod navigation_tests;
 mod neutrals;
 mod progression;

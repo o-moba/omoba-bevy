@@ -1,0 +1,807 @@
+{
+  "version": "0.18.0-rc.10",
+  "base_commit": "fab5f23a15cde7256a52329ea8cf6d900048b7bb",
+  "source_sha256": {
+    "Cargo.toml": "b0df1433dc59381cb8a280c395577f7645aedd3c43a0206c638ea74af67a4172",
+    "Cargo.lock": "5feb5264eed43b1c9cec752067153c73479df98c915beddcadc76c087d72f42f",
+    "server/src/main.rs": "ac4f8f65a161867f51f5f6afcf1833a498ef3bf03139c94961595ac7b4ef45ae",
+    "server/src/world.rs": "e4fb3d7ae74dd610633eb8ad1939ae490f67b9fcf983d1b7d538ca7e2865390f",
+    "server/src/minion_path_tests.rs": "4e049a3b8fd12010b304e1ca20988943bb0cb8c55889ae227f6a1b8c6a13f1ae"
+  },
+  "checks": [
+    {
+      "name": "fmt",
+      "command": [
+        "cargo",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.453,
+      "log": ".agent/tasks/DRAGON-LANE-2026-09-11/raw/fmt.log"
+    },
+    {
+      "name": "build",
+      "command": [
+        "cargo",
+        "--config",
+        "profile.dev.package.client.debug=0",
+        "--config",
+        "profile.dev.package.client.incremental=false",
+        "build",
+        "-p",
+        "server",
+        "-p",
+        "client",
+        "--locked",
+        "--offline"
+      ],
+      "exit_code": 0,
+      "seconds": 0.4,
+      "log": ".agent/tasks/DRAGON-LANE-2026-09-11/raw/build.log"
+    },
+    {
+      "name": "server-shared-tests",
+      "command": [
+        "cargo",
+        "--config",
+        "profile.dev.package.client.debug=0",
+        "--config",
+        "profile.dev.package.client.incremental=false",
+        "test",
+        "-p",
+        "server",
+        "-p",
+        "shared",
+        "--locked",
+        "--offline"
+      ],
+      "exit_code": 0,
+      "seconds": 4.543,
+      "log": ".agent/tasks/DRAGON-LANE-2026-09-11/raw/server-shared-tests.log"
+    },
+    {
+      "name": "client-map-tests",
+      "command": [
+        "cargo",
+        "--config",
+        "profile.dev.package.client.debug=0",
+        "--config",
+        "profile.dev.package.client.incremental=false",
+        "test",
+        "-p",
+        "client",
+        "--lib",
+        "maps::",
+        "--locked",
+        "--offline"
+      ],
+      "exit_code": 0,
+      "seconds": 0.295,
+      "log": ".agent/tasks/DRAGON-LANE-2026-09-11/raw/client-map-tests.log"
+    },
+    {
+      "name": "clippy",
+      "command": [
+        "cargo",
+        "--config",
+        "profile.dev.package.client.debug=0",
+        "--config",
+        "profile.dev.package.client.incremental=false",
+        "clippy",
+        "--workspace",
+        "--all-targets",
+        "--locked",
+        "--offline",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 1.326,
+      "log": ".agent/tasks/DRAGON-LANE-2026-09-11/raw/clippy.log"
+    }
+  ],
+  "test_counts": {
+    "server": 86,
+    "shared": 31,
+    "client_maps": 9
+  },
+  "trace_method": "ordinary development match admission; real server clock, spawn positions and AI; hello/join-only peers",
+  "native_rendered": false,
+  "before": {
+    "pass_check": false,
+    "errors": [
+      "blue/top/4: reverse X=16.878, Z=0.000",
+      "blue/top/5: reverse X=16.886, Z=0.000",
+      "blue/top/6: reverse X=16.850, Z=0.000",
+      "green/bot/13: reverse X=16.878, Z=0.000",
+      "green/bot/14: reverse X=16.886, Z=0.000",
+      "green/bot/15: reverse X=16.850, Z=0.000"
+    ],
+    "minions": {
+      "1": {
+        "team": "green",
+        "lane": "top",
+        "samples": 299,
+        "first": [
+          -79.6223,
+          -79.549515
+        ],
+        "last": [
+          -96.49267,
+          -40.68645
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.71756824893106
+      },
+      "2": {
+        "team": "green",
+        "lane": "top",
+        "samples": 299,
+        "first": [
+          -78.1223,
+          -79.549515
+        ],
+        "last": [
+          -96.497894,
+          -42.192303
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.68401745245448
+      },
+      "3": {
+        "team": "green",
+        "lane": "top",
+        "samples": 299,
+        "first": [
+          -76.6223,
+          -79.549515
+        ],
+        "last": [
+          -96.47475,
+          -43.663746
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.68922699835214
+      },
+      "4": {
+        "team": "blue",
+        "lane": "top",
+        "samples": 299,
+        "first": [
+          79.549515,
+          79.6223
+        ],
+        "last": [
+          74.520294,
+          96.549164
+        ],
+        "reverse_x": 16.878021000000004,
+        "reverse_z": 0,
+        "distance": 55.63991824994313
+      },
+      "5": {
+        "team": "blue",
+        "lane": "top",
+        "samples": 299,
+        "first": [
+          79.549515,
+          78.1223
+        ],
+        "last": [
+          76.03381,
+          96.54921
+        ],
+        "reverse_x": 16.885970999999998,
+        "reverse_z": 0,
+        "distance": 55.61471306482252
+      },
+      "6": {
+        "team": "blue",
+        "lane": "top",
+        "samples": 299,
+        "first": [
+          79.549515,
+          76.6223
+        ],
+        "last": [
+          77.51863,
+          96.5491
+        ],
+        "reverse_x": 16.849694999999997,
+        "reverse_z": 0,
+        "distance": 55.53415564450765
+      },
+      "7": {
+        "team": "green",
+        "lane": "mid",
+        "samples": 299,
+        "first": [
+          -79.49805,
+          -79.49805
+        ],
+        "last": [
+          -40.099804,
+          -40.099804
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.71753382691159
+      },
+      "8": {
+        "team": "green",
+        "lane": "mid",
+        "samples": 299,
+        "first": [
+          -80.55871,
+          -80.55871
+        ],
+        "last": [
+          -41.160458,
+          -41.160458
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.71754231219294
+      },
+      "9": {
+        "team": "green",
+        "lane": "mid",
+        "samples": 299,
+        "first": [
+          -81.61937,
+          -81.61937
+        ],
+        "last": [
+          -42.221092,
+          -42.221092
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.717579081745576
+      },
+      "10": {
+        "team": "blue",
+        "lane": "mid",
+        "samples": 299,
+        "first": [
+          79.49805,
+          79.49805
+        ],
+        "last": [
+          40.099804,
+          40.099804
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.71753382691159
+      },
+      "11": {
+        "team": "blue",
+        "lane": "mid",
+        "samples": 299,
+        "first": [
+          80.55871,
+          80.55871
+        ],
+        "last": [
+          41.160458,
+          41.160458
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.71754231219294
+      },
+      "12": {
+        "team": "blue",
+        "lane": "mid",
+        "samples": 299,
+        "first": [
+          81.61937,
+          81.61937
+        ],
+        "last": [
+          42.221092,
+          42.221092
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.717579081745576
+      },
+      "13": {
+        "team": "green",
+        "lane": "bot",
+        "samples": 299,
+        "first": [
+          -79.549515,
+          -79.6223
+        ],
+        "last": [
+          -74.520294,
+          -96.549164
+        ],
+        "reverse_x": 16.878021000000004,
+        "reverse_z": 0,
+        "distance": 55.63991824994313
+      },
+      "14": {
+        "team": "green",
+        "lane": "bot",
+        "samples": 299,
+        "first": [
+          -79.549515,
+          -78.1223
+        ],
+        "last": [
+          -76.03381,
+          -96.54921
+        ],
+        "reverse_x": 16.885970999999998,
+        "reverse_z": 0,
+        "distance": 55.61471306482252
+      },
+      "15": {
+        "team": "green",
+        "lane": "bot",
+        "samples": 299,
+        "first": [
+          -79.549515,
+          -76.6223
+        ],
+        "last": [
+          -77.51863,
+          -96.5491
+        ],
+        "reverse_x": 16.849694999999997,
+        "reverse_z": 0,
+        "distance": 55.53415564450765
+      },
+      "16": {
+        "team": "blue",
+        "lane": "bot",
+        "samples": 299,
+        "first": [
+          79.6223,
+          79.549515
+        ],
+        "last": [
+          96.49267,
+          40.68645
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.71756824893106
+      },
+      "17": {
+        "team": "blue",
+        "lane": "bot",
+        "samples": 299,
+        "first": [
+          78.1223,
+          79.549515
+        ],
+        "last": [
+          96.497894,
+          42.192303
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.68401745245448
+      },
+      "18": {
+        "team": "blue",
+        "lane": "bot",
+        "samples": 299,
+        "first": [
+          76.6223,
+          79.549515
+        ],
+        "last": [
+          96.47475,
+          43.663746
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.68922699835214
+      }
+    },
+    "server_sha256": "8bdac3ae57e73a213c65aacc6c75e8a4c99dabb50cec665b04ffb120f9a021ec",
+    "snapshot_count": 464,
+    "elapsed_secs": 28.115371542000002,
+    "setup": "ordinary development match admission; real server clock, spawn positions and AI; hello/join-only peers",
+    "native_rendered": false,
+    "source_error": null
+  },
+  "after": {
+    "pass_check": true,
+    "errors": [],
+    "minions": {
+      "1": {
+        "team": "green",
+        "lane": "top",
+        "samples": 307,
+        "first": [
+          -79.588234,
+          -79.549515
+        ],
+        "last": [
+          -96.49142,
+          -40.72542
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.67905426943776
+      },
+      "2": {
+        "team": "green",
+        "lane": "top",
+        "samples": 307,
+        "first": [
+          -78.088234,
+          -79.549515
+        ],
+        "last": [
+          -96.4806,
+          -42.214413
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.711051634146294
+      },
+      "3": {
+        "team": "green",
+        "lane": "top",
+        "samples": 307,
+        "first": [
+          -76.588234,
+          -79.549515
+        ],
+        "last": [
+          -96.4763,
+          -43.70711
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.6773210100806
+      },
+      "4": {
+        "team": "blue",
+        "lane": "top",
+        "samples": 307,
+        "first": [
+          79.549515,
+          79.588234
+        ],
+        "last": [
+          40.72542,
+          96.49142
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.67905426943776
+      },
+      "5": {
+        "team": "blue",
+        "lane": "top",
+        "samples": 307,
+        "first": [
+          79.549515,
+          78.088234
+        ],
+        "last": [
+          42.214413,
+          96.4806
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.711051634146294
+      },
+      "6": {
+        "team": "blue",
+        "lane": "top",
+        "samples": 307,
+        "first": [
+          79.549515,
+          76.588234
+        ],
+        "last": [
+          43.70711,
+          96.4763
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.6773210100806
+      },
+      "7": {
+        "team": "green",
+        "lane": "mid",
+        "samples": 307,
+        "first": [
+          -79.52214,
+          -79.52214
+        ],
+        "last": [
+          -40.12844,
+          -40.12844
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.71110481205704
+      },
+      "8": {
+        "team": "green",
+        "lane": "mid",
+        "samples": 307,
+        "first": [
+          -80.5828,
+          -80.5828
+        ],
+        "last": [
+          -41.189087,
+          -41.189087
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.71112319683336
+      },
+      "9": {
+        "team": "green",
+        "lane": "mid",
+        "samples": 307,
+        "first": [
+          -81.64346,
+          -81.64346
+        ],
+        "last": [
+          -42.249744,
+          -42.249744
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.71112743947398
+      },
+      "10": {
+        "team": "blue",
+        "lane": "mid",
+        "samples": 307,
+        "first": [
+          79.52214,
+          79.52214
+        ],
+        "last": [
+          40.12844,
+          40.12844
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.71110481205704
+      },
+      "11": {
+        "team": "blue",
+        "lane": "mid",
+        "samples": 307,
+        "first": [
+          80.5828,
+          80.5828
+        ],
+        "last": [
+          41.189087,
+          41.189087
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.71112319683336
+      },
+      "12": {
+        "team": "blue",
+        "lane": "mid",
+        "samples": 307,
+        "first": [
+          81.64346,
+          81.64346
+        ],
+        "last": [
+          42.249744,
+          42.249744
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.71112743947398
+      },
+      "13": {
+        "team": "green",
+        "lane": "bot",
+        "samples": 307,
+        "first": [
+          -79.549515,
+          -79.588234
+        ],
+        "last": [
+          -40.72542,
+          -96.49142
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.67905426943776
+      },
+      "14": {
+        "team": "green",
+        "lane": "bot",
+        "samples": 307,
+        "first": [
+          -79.549515,
+          -78.088234
+        ],
+        "last": [
+          -42.214413,
+          -96.4806
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.711051634146294
+      },
+      "15": {
+        "team": "green",
+        "lane": "bot",
+        "samples": 307,
+        "first": [
+          -79.549515,
+          -76.588234
+        ],
+        "last": [
+          -43.70711,
+          -96.4763
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.6773210100806
+      },
+      "16": {
+        "team": "blue",
+        "lane": "bot",
+        "samples": 307,
+        "first": [
+          79.588234,
+          79.549515
+        ],
+        "last": [
+          96.49142,
+          40.72542
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.67905426943776
+      },
+      "17": {
+        "team": "blue",
+        "lane": "bot",
+        "samples": 307,
+        "first": [
+          78.088234,
+          79.549515
+        ],
+        "last": [
+          96.4806,
+          42.214413
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.711051634146294
+      },
+      "18": {
+        "team": "blue",
+        "lane": "bot",
+        "samples": 307,
+        "first": [
+          76.588234,
+          79.549515
+        ],
+        "last": [
+          96.4763,
+          43.70711
+        ],
+        "reverse_x": 0,
+        "reverse_z": 0,
+        "distance": 55.6773210100806
+      }
+    },
+    "server_sha256": "d54f9817c20e4d66040745ed6acfbbd190254afcd7837271990abcf65a182dc3",
+    "snapshot_count": 476,
+    "elapsed_secs": 29.401786334,
+    "setup": "ordinary development match admission; real server clock, spawn positions and AI; hello/join-only peers",
+    "native_rendered": false,
+    "source_error": null
+  },
+  "unchanged_structures": [
+    {
+      "id": 1,
+      "kind": "tower",
+      "team": "green",
+      "x": -96.549515,
+      "y": 3.0,
+      "z": 29.509903,
+      "hp": 240.0,
+      "max_hp": 240.0
+    },
+    {
+      "id": 2,
+      "kind": "tower",
+      "team": "blue",
+      "x": 4.4901047,
+      "y": 3.0,
+      "z": 96.549515,
+      "hp": 240.0,
+      "max_hp": 240.0
+    },
+    {
+      "id": 3,
+      "kind": "tower",
+      "team": "green",
+      "x": -31.819805,
+      "y": 3.0,
+      "z": -31.819805,
+      "hp": 240.0,
+      "max_hp": 240.0
+    },
+    {
+      "id": 4,
+      "kind": "tower",
+      "team": "blue",
+      "x": 31.819817,
+      "y": 3.0,
+      "z": 31.819817,
+      "hp": 240.0,
+      "max_hp": 240.0
+    },
+    {
+      "id": 5,
+      "kind": "tower",
+      "team": "green",
+      "x": -4.4900894,
+      "y": 3.0,
+      "z": -96.549515,
+      "hp": 240.0,
+      "max_hp": 240.0
+    },
+    {
+      "id": 6,
+      "kind": "tower",
+      "team": "blue",
+      "x": 96.549515,
+      "y": 3.0,
+      "z": -29.509903,
+      "hp": 240.0,
+      "max_hp": 240.0
+    },
+    {
+      "id": 7,
+      "kind": "base_tower",
+      "team": "green",
+      "x": -79.549515,
+      "y": 4.0,
+      "z": -79.549515,
+      "hp": 650.0,
+      "max_hp": 650.0
+    },
+    {
+      "id": 8,
+      "kind": "base_tower",
+      "team": "blue",
+      "x": 79.549515,
+      "y": 4.0,
+      "z": 79.549515,
+      "hp": 650.0,
+      "max_hp": 650.0
+    }
+  ],
+  "raw_trace_sha256": {
+    "before": "9dbd3f81e8e23ef6fdbc353db8cffc0a3b632b8c6c6f2c533c8454fbe9e7efbe",
+    "after": "5d73a387e1890ab98e752f8f1a1ceeb7556b0111d52b3a45f5ae02519c9b4bf6"
+  }
+}

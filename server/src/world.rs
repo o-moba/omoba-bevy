@@ -207,6 +207,18 @@ pub(crate) fn sample_polyline_position(points: &[Vec3f], t: f32) -> Vec3f {
 
 pub(crate) fn build_minion_path(layout: &MapLayoutState, lane: Lane, team: Team) -> Vec<Vec3f> {
     let mut points = lane_control_points(layout, lane);
+    // The authored outer road extends past one base entrance into a dead end.
+    // March straight from that entrance along the lane instead of visiting the
+    // corner and retracing the same segment. Keep the authored road/tower
+    // geometry intact; only the minions' ordered destinations omit this spur.
+    let unused_corner = match lane {
+        Lane::Top => Some((layout.right_x, layout.top_z)),
+        Lane::Bot => Some((layout.left_x, layout.bottom_z)),
+        Lane::Mid => None,
+    };
+    if let Some((x, z)) = unused_corner {
+        points.retain(|point| point.x != x || point.z != z);
+    }
     if team == Team::Blue {
         points.reverse();
     }

@@ -1,8 +1,14 @@
 # Feature Inventory
 
-Canonical version: `0.18.0-rc.9`
+Canonical version: `0.18.0-rc.10`
 
 ## Current Playable Surface
+
+- **Minion lane entry (2026-09-11):** outer-lane waves skip the unused corner
+  beyond the base entrance, eliminating a 34-unit out-and-back detour. Both
+  teams enter their assigned lane directly; mid, spawn spacing/speed/cadence,
+  map artwork and tower anchors are preserved. See the
+  [route verification record](progress/2026-09-11-minion-lane-entry.md).
 
 - **Mouse targeting and phone attack lock (2026-09-11):** desktop left click
   selects, right click on a hostile approaches and repeats basic attacks, and
