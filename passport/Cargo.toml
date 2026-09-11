@@ -1,12 +1,15 @@
 [package]
-name = "shared"
+name = "omoba-passport"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
 ekza-bevy-sdk = { git = "https://github.com/ekza-space/ekza-bevy-sdk", rev = "8254ed5e94d4709c11c83bef604ebe4481467847", default-features = false }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+shared = { path = "../shared" }
 
 [lints]
 workspace = true

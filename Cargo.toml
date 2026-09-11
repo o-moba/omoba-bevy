@@ -1,9 +1,9 @@
 [workspace]
-members = ["arena-sync", "client", "harness", "server", "shared", "skills"]
+members = ["arena-sync", "client", "harness", "passport", "server", "shared", "skills"]
 resolver = "2"
 
 [workspace.package]
-version = "0.18.0-rc.6"
+version = "0.19.0-rc.1"
 edition = "2024"
 
 # Bevy-style codebase: systems legitimately take many params and complex query
