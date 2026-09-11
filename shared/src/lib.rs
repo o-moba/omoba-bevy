@@ -14,6 +14,16 @@ pub mod transport;
 /// Resolve packaged assets before the development checkout. Launchers can
 /// pin this path without requiring a source-tree working directory.
 pub fn client_asset_root() -> std::path::PathBuf {
+    // Android's AssetManager addresses paths inside the APK, not the build host.
+    #[cfg(target_os = "android")]
+    return std::path::PathBuf::from("assets");
+
+    #[cfg(not(target_os = "android"))]
+    desktop_or_ios_asset_root()
+}
+
+#[cfg(not(target_os = "android"))]
+fn desktop_or_ios_asset_root() -> std::path::PathBuf {
     if let Some(path) = std::env::var_os("OMOBA_ASSET_DIR") {
         return path.into();
     }

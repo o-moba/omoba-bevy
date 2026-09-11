@@ -29,6 +29,49 @@ NAVIGATION_IMAGES = ("01-minimap-route.png", "02-minimap-arrival.png", "03-world
 FRAME_HEADER = struct.Struct("<4sHQQHHI")
 
 
+def verify_beta_ui_profile(summary, requested_touch_controls, expected_images):
+    """Require actual profile evidence for every expected beta UI capture stage."""
+    requested = "mobile" if requested_touch_controls else "desktop"
+    errors, stages, seen, actual_values = [], [], set(), set()
+    captures = summary.get("captures") if isinstance(summary, dict) else None
+    if not isinstance(captures, list):
+        errors.append("qa-summary.json must contain a captures array with UI profile evidence.")
+        captures = []
+    for index, capture in enumerate(captures):
+        if not isinstance(capture, dict):
+            errors.append(f"Capture record {index} must be an object.")
+            continue
+        stage, filename, mobile = (capture.get(key) for key in ("stage", "file", "mobile_controls"))
+        valid_mobile = type(mobile) is bool
+        stages.append(dict(stage=stage, file=filename, mobile_controls=mobile,
+                           actual_profile=("mobile" if mobile else "desktop") if valid_mobile else "unknown"))
+        if type(stage) is not int or not 0 <= stage < len(expected_images):
+            errors.append(f"Capture record {index} has an invalid stage: {stage!r}.")
+        else:
+            if stage in seen:
+                errors.append(f"Duplicate capture stage {stage}.")
+            seen.add(stage)
+            if filename != expected_images[stage]:
+                errors.append(f"Stage {stage} must reference {expected_images[stage]!r}, got {filename!r}.")
+        if not valid_mobile:
+            errors.append(f"Capture record {index} must have a boolean mobile_controls value.")
+        else:
+            actual_values.add(mobile)
+            if mobile != requested_touch_controls:
+                errors.append(f"Stage {stage!r} reports {'mobile' if mobile else 'desktop'} UI; requested {requested} UI.")
+    missing = sorted(set(range(len(expected_images))) - seen)
+    if missing:
+        errors.append(f"Missing UI profile evidence for capture stages {missing}.")
+    if actual_values - {requested_touch_controls}:
+        errors.append("Desktop mobile preview requires a development/debug client build: point --client-bin "
+                      "at that build and use --touch-controls. Desktop release builds ignore OMOBA_TOUCH_CONTROLS; "
+                      "omit --touch-controls to capture their desktop UI. Native mobile builds always use mobile UI.")
+    actual = ("mobile" if True in actual_values else "desktop") if len(actual_values) == 1 else (
+        "mixed" if actual_values else "unknown")
+    return {"pass": not errors, "requested_profile": requested, "requested_touch_controls": requested_touch_controls,
+            "actual_profile": actual, "expected_stages": len(expected_images), "stages": stages, "errors": errors}
+
+
 def sha256(path):
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -248,11 +291,14 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--timeout", type=int, default=300)
     parser.add_argument("--team", choices=("green", "blue"), default="green")
-    parser.add_argument("--width", type=int, choices=(1280, 1920), default=1280)
-    parser.add_argument("--height", type=int, choices=(720, 1080), default=720)
+    parser.add_argument("--width", type=int, default=1280)
+    parser.add_argument("--height", type=int, default=720)
+    parser.add_argument("--touch-controls", action="store_true", help="Preview phone UI at the requested viewport; requires a desktop development build")
     parser.add_argument("--scenario", choices=("verdant", "beta-ui", "navigation"), default="verdant")
     parser.add_argument("--bots", type=int, choices=range(5), default=2)
     args = parser.parse_args()
+    if not (320 <= args.width <= 3840 and 320 <= args.height <= 2160):
+        parser.error("viewport must be 320..3840 wide and 320..2160 high")
     expected_images = (tuple(name.replace("720p", f"{args.height}p") for name in BETA_IMAGES) if args.scenario == "beta-ui"
                        else NAVIGATION_IMAGES if args.scenario == "navigation" else EXPECTED_IMAGES)
     package = args.package.resolve() if args.package else None
@@ -294,6 +340,7 @@ def main():
                    OMOBA_PLAYER_VISUAL_MODE="models3d", OMOBA_DEBUG_UI="0",
                    OMOBA_QA_TEAM=args.team, OMOBA_QA_WIDTH=str(args.width), OMOBA_QA_HEIGHT=str(args.height),
                    OMOBA_VISUAL_QA_DIR=str(output), OMOBA_VISUAL_QA_SCENARIO=args.scenario, OMOBA_VISUAL_QA_TIMEOUT=str(timeout - 20))
+        env["OMOBA_TOUCH_CONTROLS"] = "1" if args.touch_controls else "0"
         for key in ("OMOBA_AUTOJOIN", "OMOBA_MEASURE_MODELS", "OMOBA_AVATAR_MANIFEST"):
             env.pop(key, None)
         try:
@@ -351,6 +398,17 @@ def main():
                               and (output / "qa-summary.json").is_file()
                               and result["snapshot_received"] and result["asset_root_confirmed"]
                               and not result["errors"])
+    if args.scenario == "beta-ui":
+        try:
+            summary = json.loads((output / "qa-summary.json").read_text())
+            summary_error = None
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            summary, summary_error = None, str(error)
+        result["ui_profile"] = verify_beta_ui_profile(summary, args.touch_controls, expected_images)
+        if summary_error:
+            result["ui_profile"]["errors"].append(f"Cannot read qa-summary.json: {summary_error}")
+        result["errors"].extend(result["ui_profile"]["errors"])
+        result["capture_pass"] = result["capture_pass"] and result["ui_profile"]["pass"]
     if args.scenario == "navigation":
         summary_path = output / "qa-summary.json"
         result["navigation"] = verify_navigation(json.loads(summary_path.read_text()) if summary_path.is_file() else {},

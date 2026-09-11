@@ -1,0 +1,7 @@
+# Build artifacts, SDKs and developer signing keys belong under root target/mobile/.
+*.keystore
+*.jks
+*.apk
+*.ipa
+*.app/
+__pycache__/

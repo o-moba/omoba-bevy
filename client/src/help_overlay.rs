@@ -116,6 +116,7 @@ fn setup_help_overlay(mut commands: Commands) {
                     },
                     BackgroundColor(crate::ui_theme::PANEL),
                     BorderColor::all(crate::ui_theme::GOLD),
+                    Name::new("HelpPanel"),
                 ))
                 .with_children(|panel| {
                     panel.spawn((
@@ -126,6 +127,7 @@ fn setup_help_overlay(mut commands: Commands) {
                         },
                         TextColor(Color::WHITE),
                         HelpOverlayPanel,
+                        Name::new("HelpBody"),
                     ));
                     panel
                         .spawn((
@@ -145,6 +147,7 @@ fn setup_help_overlay(mut commands: Commands) {
                         .with_children(|button| {
                             button.spawn((
                                 Text::new("Got it - play  [Escape / F1]"),
+                                Name::new("HelpDismissLabel"),
                                 TextFont {
                                     font_size: 18.0,
                                     ..default()

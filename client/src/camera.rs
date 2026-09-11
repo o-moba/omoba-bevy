@@ -181,6 +181,7 @@ fn update_camera(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mouse_input: Res<ButtonInput<MouseButton>>,
     context: Res<GameplayInputContext>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
 ) {
     let Ok((camera, mut projection, mut camera_transform)) = camera_query.single_mut() else {
         return;
@@ -195,6 +196,19 @@ fn update_camera(
     if !context.camera_allowed() {
         mouse_wheel_events.clear();
         return;
+    }
+    if mobile.as_ref().is_some_and(|mobile| mobile.enabled) {
+        cam_state.locked = true;
+        cam_state.orbit_yaw = 0.0;
+        cam_state.orbit_height = 1.0;
+        if mobile
+            .as_ref()
+            .is_some_and(|mobile| mobile.movement.length_squared() > 0.001)
+        {
+            if let Some(nav) = minimap_nav.as_deref_mut() {
+                nav.focus_target = None;
+            }
+        }
     }
     let rotating = should_capture_cursor(
         *mode,

@@ -4,14 +4,29 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-# `jpeg` on top of the defaults: several CC0 roster thumbnails are JPEGs.
-bevy = { workspace = true, features = ["jpeg"] }
+# Keep the Bevy name visible to its derive-macro crate resolver on every target.
+bevy = { version = "0.18.0", default-features = false, features = ["jpeg"] }
 crossbeam-channel.workspace = true
-ekza-bevy-sdk = { git = "https://github.com/ekza-space/ekza-bevy-sdk", branch = "main" }
 serde.workspace = true
 serde_json.workspace = true
 shared = { path = "../shared" }
 winit.workspace = true
+
+# The desktop feature set stays unchanged. Android selects NativeActivity explicitly:
+# Bevy's default_platform enables GameActivity, which is mutually exclusive with it.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+bevy = { workspace = true, features = ["jpeg"] }
+ekza-bevy-sdk = { git = "https://github.com/ekza-space/ekza-bevy-sdk", branch = "main" }
+
+[target.'cfg(target_os = "android")'.dependencies]
+bevy = { version = "0.18.0", default-features = false, features = [
+    "default_app", "2d_bevy_render", "3d_bevy_render", "ui_bevy_render",
+    "scene", "audio", "picking", "std", "bevy_winit", "default_font",
+    "multi_threaded", "android-native-activity", "jpeg",
+] }
+# Identity and validation are platform-independent. The legacy empty model catalog
+# is provided locally on Android, avoiding the SDK's desktop-only download stack.
+ekza-bevy-sdk = { git = "https://github.com/ekza-space/ekza-bevy-sdk", branch = "main", default-features = false }
 
 [lints]
 workspace = true

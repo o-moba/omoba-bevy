@@ -53,6 +53,8 @@ pub struct MinimapNavigationState {
     pub consumed_primary_click: bool,
     /// A one-frame move order, separate from the persistent camera focus.
     pub movement_target: Option<Vec3>,
+    /// Only a finger that started on the map may pan it.
+    touch_id: Option<u64>,
 }
 #[derive(Resource, Default)]
 struct MinimapUiState {
@@ -307,6 +309,7 @@ fn handle_minimap_navigation_system(
     navigation.consumed_primary_click = false;
     navigation.movement_target = None;
     if !context.gameplay_allowed() {
+        navigation.touch_id = None;
         return;
     }
     let (Ok(window), Ok((node, transform))) = (windows.single(), containers.single()) else {
@@ -332,22 +335,31 @@ fn handle_minimap_navigation_system(
             }
         }
     }
-    for touch in touches.iter_just_pressed() {
-        if minimap_cursor_to_world(*layout, rect, touch.position()).is_some() {
-            navigation.consumed_primary_click = true;
+    if let Some(id) = navigation.touch_id {
+        if let Some(touch) = touches.get_pressed(id) {
+            if let Some(target) = minimap_cursor_to_world(*layout, rect, touch.position()) {
+                navigation.focus_target = Some(target);
+                camera.locked = true;
+            }
+        } else {
+            navigation.touch_id = None;
         }
-    }
-    for touch in touches.iter() {
-        if let Some(target) = minimap_cursor_to_world(*layout, rect, touch.position()) {
-            navigation.focus_target = Some(target);
-            camera.locked = true;
+    } else {
+        for touch in touches.iter_just_pressed() {
+            if let Some(target) = minimap_cursor_to_world(*layout, rect, touch.position()) {
+                navigation.consumed_primary_click = true;
+                navigation.touch_id = Some(touch.id());
+                navigation.focus_target = Some(target);
+                camera.locked = true;
+                break;
+            }
         }
     }
 }
 fn container_rect(node: &ComputedNode, transform: &UiGlobalTransform) -> Option<Rect> {
     // Computed UI positions are physical pixels; input cursors are logical.
     let scale = node.inverse_scale_factor();
-    let size = node.size() * scale;
+    let size = node.size() * transform.to_scale_angle_translation().0.abs() * scale;
     (size.min_element() > 0.0).then(|| Rect::from_center_size(transform.translation * scale, size))
 }
 

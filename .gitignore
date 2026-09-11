@@ -54,3 +54,9 @@ client/assets/avatars/osa-*.jpg
 # Generated shared collision data is a runtime contract, not a downloaded asset.
 !shared/assets/
 !shared/assets/verdant-collision.json
+
+# Mobile beta delivery checklist and native build outputs.
+!tasks/TASK-MOBILE-BETA-2026-09-11.md
+/mobile/build/
+/mobile/android/build/
+/mobile/ios/build/

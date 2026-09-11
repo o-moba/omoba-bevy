@@ -1,8 +1,24 @@
 # Feature Inventory
 
-Canonical version: `0.18.0-rc.6`
+Canonical version: `0.18.0-rc.7`
 
 ## Current Playable Surface
+
+- **Native phone implementation candidate (2026-09-11):** landscape two-thumb
+  controls share the existing movement, collision and legal ability paths with
+  desktop. The compiled target OS selects one stable interface family:
+  Android/iOS use mobile UI, Windows/macOS/Linux use desktop UI. Resizing,
+  rotation and DPI only affect layout; desktop mobile preview is development-only.
+  Per-finger capture, dead zones, drag cancellation and interruption
+  cleanup protect simultaneous movement/casting. The phone layout reflows the
+  HUD, entry, shop, help and results. A compact right-thumb ability fan follows
+  the supplied Wild Rift reference; HP/mana/progression sit at upper right,
+  with the minimap and shop at upper left. A server form removes the need for shell
+  configuration. Android NativeActivity build scripts, mobile assets/preferences
+  and early iOS Simulator scaffolding are included. These are implementation
+  features, not proof of installable packages or mobile beta readiness. See the
+  [implementation and remaining gates](progress/2026-09-11-mobile-beta.md)
+  and [platform build guide](../mobile/README.md).
 
 - **Forest navigation and minimap routes (2026-09-08):** right-click ground or
   the minimap to walk around trunks, solid rocks/walls and live towers/bases.

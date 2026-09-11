@@ -19,12 +19,16 @@ use shared::HeroClass;
 
 pub struct MatchHudPlugin;
 
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct MatchHudVisuals;
+
 impl Plugin for MatchHudPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup_match_hud)
             .add_systems(
                 Update,
                 (update_match_hud, update_hero_details)
+                    .in_set(MatchHudVisuals)
                     .after(crate::net::ClientNetPipeline::ApplySnapshot),
             )
             .add_systems(
@@ -175,6 +179,7 @@ fn setup_match_hud(mut commands: Commands) {
                     ui::text(15.0),
                     TextColor(ui::IVORY),
                     MatchHudStatusText,
+                    Name::new("MatchStatusText"),
                 ));
                 panel.spawn((
                     Text::new(""),
@@ -266,6 +271,7 @@ fn sync_gameplay_hud_visibility(
     help: Option<Res<crate::help_overlay::HelpOverlayVisible>>,
     pause: Option<Res<crate::pause_menu::PauseMenuState>>,
     shop: Option<Res<crate::shop::ShopState>>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     mut roots: Query<(&Name, &mut Node, &mut Visibility), Without<ChildOf>>,
 ) {
     let show = session.join_confirmed()
@@ -284,7 +290,14 @@ fn sync_gameplay_hud_visibility(
         ) {
             // Transient feedback owns its own empty/expired layout state.
             if name.as_str() != "ActionFeedback" {
-                node.display = if show { Display::Flex } else { Display::None };
+                node.display = if show
+                    && !(name.as_str() == "SkillBarRoot"
+                        && mobile.as_ref().is_some_and(|mobile| mobile.enabled))
+                {
+                    Display::Flex
+                } else {
+                    Display::None
+                };
             }
             *visibility = if show {
                 Visibility::Inherited

@@ -12,7 +12,9 @@
 //! multipliers can be tuned while the game is running.
 
 use std::collections::{HashMap, HashSet};
+#[cfg(not(target_os = "android"))]
 use std::path::PathBuf;
+#[cfg(not(target_os = "android"))]
 use std::time::SystemTime;
 
 use bevy::asset::AssetId;
@@ -35,8 +37,14 @@ pub const MAX_MODEL_TARGET_HEIGHT: f32 = 3.0;
 const NORMALIZATION_MIN_HEIGHT: f32 = 0.001;
 const MIN_OVERRIDE_MULTIPLIER: f32 = 0.1;
 const MAX_OVERRIDE_MULTIPLIER: f32 = 10.0;
+#[cfg(not(target_os = "android"))]
 const OVERRIDES_POLL_SECONDS: f32 = 1.0;
+#[cfg(not(target_os = "android"))]
 const OVERRIDES_RELATIVE_PATH: &str = "config/model_scale_overrides.json";
+
+#[cfg(any(target_os = "android", test))]
+const BUNDLED_MODEL_SCALE_OVERRIDES: &str =
+    include_str!("../assets/config/model_scale_overrides.json");
 
 pub struct ModelScalePlugin;
 
@@ -49,11 +57,14 @@ impl Plugin for ModelScalePlugin {
             .add_systems(
                 Update,
                 (
-                    poll_model_scale_overrides,
                     apply_model_scale_system,
                     normalize_model_scale_fallback_system,
                 ),
             );
+        // APK assets are immutable and not filesystem paths. Desktop/iOS developer
+        // overrides retain their existing live reload behavior.
+        #[cfg(not(target_os = "android"))]
+        app.add_systems(Update, poll_model_scale_overrides);
     }
 }
 
@@ -181,6 +192,7 @@ pub struct ModelSizeAnalysis {
 #[derive(Resource, Default)]
 pub struct ModelScaleOverrides {
     multipliers: HashMap<String, f32>,
+    #[cfg(not(target_os = "android"))]
     last_modified: Option<SystemTime>,
 }
 
@@ -209,11 +221,13 @@ fn parse_overrides(raw: &str) -> Result<HashMap<String, f32>, serde_json::Error>
         .collect())
 }
 
+#[cfg(not(target_os = "android"))]
 fn overrides_path() -> Option<PathBuf> {
     let path = shared::client_asset_root().join(OVERRIDES_RELATIVE_PATH);
     path.exists().then_some(path)
 }
 
+#[cfg(not(target_os = "android"))]
 fn read_overrides(overrides: &mut ModelScaleOverrides) {
     let Some(path) = overrides_path() else {
         return;
@@ -250,11 +264,18 @@ fn read_overrides(overrides: &mut ModelScaleOverrides) {
 }
 
 fn load_model_scale_overrides(mut overrides: ResMut<ModelScaleOverrides>) {
+    #[cfg(not(target_os = "android"))]
     read_overrides(&mut overrides);
+    #[cfg(target_os = "android")]
+    match parse_overrides(BUNDLED_MODEL_SCALE_OVERRIDES) {
+        Ok(multipliers) => overrides.multipliers = multipliers,
+        Err(error) => warn!("model-scale: invalid bundled Android overrides: {error}"),
+    }
 }
 
 /// Re-reads the overrides file when its mtime changes, so per-model
 /// multipliers can be tweaked live while the game runs.
+#[cfg(not(target_os = "android"))]
 fn poll_model_scale_overrides(
     time: Res<Time>,
     mut accumulated: Local<f32>,
@@ -643,6 +664,17 @@ pub fn run_model_measurement_analyzer() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn android_bundled_model_overrides_are_valid_for_shipped_roster() {
+        let multipliers = parse_overrides(BUNDLED_MODEL_SCALE_OVERRIDES).unwrap();
+        assert!(!multipliers.is_empty());
+        for definition in shared::avatar_roster() {
+            let multiplier = multipliers.get(&definition.slug).copied().unwrap_or(1.0);
+            assert!(multiplier.is_finite());
+            assert!((MIN_OVERRIDE_MULTIPLIER..=MAX_OVERRIDE_MULTIPLIER).contains(&multiplier));
+        }
+    }
 
     #[test]
     fn parse_overrides_reads_flat_map_and_skips_comments() {
