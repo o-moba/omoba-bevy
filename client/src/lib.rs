@@ -32,6 +32,8 @@ mod presentation3d;
 mod session_config;
 mod shop;
 mod sprite;
+mod targeting;
+mod targeting_qa;
 mod team;
 mod ui_theme;
 mod verdant3d;
@@ -116,5 +118,6 @@ pub fn main() {
         mobile_controls::MobileControlsPlugin,
         mobile_ui::MobileUiPlugin,
     ))
+    .add_plugins(targeting_qa::TargetingQaPlugin)
     .run();
 }

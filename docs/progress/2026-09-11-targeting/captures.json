@@ -1,0 +1,592 @@
+{
+  "version": "0.18.0-rc.9",
+  "base_commit": "8663fd677822cc86641f47aaf75136c467ab3537",
+  "capture_method": "native Bevy renderer; unmodified PNGs",
+  "manual_interaction_verified": false,
+  "physical_phone_verified": false,
+  "targeting_setup": "development-only deterministic placement and passive peers; production mouse/TouchInput and authoritative combat",
+  "beta_ui_result_fixture": true,
+  "binary_sha256": {
+    "client": "c98f0b3c4a5f353f22b88003d65902e831d949f9830e28ef9741a864d229bdd9",
+    "server": "8bdac3ae57e73a213c65aacc6c75e8a4c99dabb50cec665b04ffb120f9a021ec"
+  },
+  "code_sha256": {
+    "Cargo.lock": "270f3394f785a2b871354c738273e16424d8cb9e10151063bfe9f6a6b4c47f06",
+    "Cargo.toml": "45d36f794ac6a19d94856ed13d1d6e8336204878b4736807f2baf05c7161e3ae",
+    "client/src/beta_ui_qa.rs": "f215cb0aa2f9ef09ec6e329d2ab240b0d5afba012d9c76944f8881fb9cc1d257",
+    "client/src/combat.rs": "d4938992d44411d534962c9f0dcc6d0ab00e33ea1dab1b034ac55657ac8e676a",
+    "client/src/help_overlay.rs": "3923e89d5c720f3fa59655525cbf7a0bd75c1d0b4d599cfe3079dfca6107d366",
+    "client/src/lib.rs": "cbae9332835274986610485741196e3c3c01d99724754c5c8a1a3450e48fb1a9",
+    "client/src/match_hud.rs": "25037713fc29b7640c249ca7da47f5ef4e041985c2b73fe92948a36df3594d89",
+    "client/src/mobile_controls.rs": "e0ba87bf0f25fc9fdd2e09486cfa428c24bd07d07c2d3bdc48fa7600e5f997c7",
+    "client/src/mobile_ui.rs": "47f7c32feeb9470accc02d8059c73f86e06b02a459214ac870b9e40f26be01bb",
+    "client/src/net.rs": "8b3097831be6b39b2c46f4bd5d4369744a77d30450c775418f7a2d963f5d630b",
+    "client/src/player.rs": "43d50a07c3a55ae3c22dbb5b02e2d8caecd6b9d403f16fd05800230ee88041f4",
+    "client/src/targeting.rs": "b24ddd50c6fb34b4aeb4a71fdd5742daacb96b974f56f07b89b34867451c3aca",
+    "client/src/targeting_qa.rs": "b164970e8b14aaff83f969e862673d1b0cbd0a5f366274a8c40ccf904b6a79c0",
+    "client/src/visual_qa.rs": "aec41da2d771f76b08a6381f4c59354d167935e8d0d0582b1f8755df3d3379bb",
+    "scripts/capture_targeting.py": "45d9bc31da6278a8834aecfc1096a2dd22e6b81e7857288c7c75b8de3c02684b",
+    "scripts/capture_verdant.py": "5e39b7abb47e7d76f3312ba402218f513e3b7d3ea7c36ce1c9dd317983b05ba1",
+    "scripts/test_capture_targeting.py": "470833d044fb75dc34bfe47002c03826d7ca291c162d3a3000ba7af9b00d7773",
+    "scripts/test_navigation_capture.py": "198b6baabab9b69286a806b244382d6577f2d577fc00ba99b51f92653f71ff57",
+    "scripts/verify_beta_match.py": "dc33a6fd68c4b7fa676bc589a91541133879f94d6168324f7f535ec50b3f8f9d",
+    "server/src/balance.rs": "32316f08ce4cd176080800423d393569b5ac10f8c054dc15d7ac9ce97aaf4edd",
+    "server/src/basic_attack.rs": "daff9cb2e96d81fc568074b9950a4596cce4de0e2850bf238ae5fe15a00861b6",
+    "server/src/basic_attack/tests.rs": "9396918eac49970cdbc1e666451253350fea2bdd2e7dc8c2b4fab1dc59d502a4",
+    "server/src/main.rs": "d581ead8e0ad11dfbf30b4c1480559c02f0e762e2b3c4e314adec8a075ce288d",
+    "server/src/session.rs": "e6ac600a4e1e82579591627f40494f30fc63c314bd4203de70a56425a96cb5a6",
+    "server/src/targeting_qa.rs": "000b8f43bf6483a0d3a66a774b985b2b66c339c9dba7fc06a54856420c1cbf1b",
+    "shared/src/lib.rs": "b2854a5dd72676a4b1cae17f0aff95839ddfe342088bd98e4ff173f421d871b6",
+    "shared/src/protocol.rs": "1e6c6ad564460cbdb6894d36fed047619a2fe988e7c9d3af7db5574360a1c253",
+    "shared/src/shop.rs": "6829172c26a30d331a5ff0dfb370eb7fc87cdd58bb4d2ee093bf16ec781246bf",
+    "shared/src/transport.rs": "5fe6ecb4a955cab692ca0ebc2691e59672f118d9a80b7190d1bbd75cf05e6983"
+  },
+  "exported_images": {
+    "desktop-targeting.png": {
+      "source": ".agent/tasks/TARGETING-2026-09-11/raw/desktop-final-v3/03-basic-attack.png",
+      "sha256": "13fd756ecaddaaf5f119d10eb6867f6c9a0053cfc7820e8cf0d0ee9145592b9d",
+      "pixels": [
+        1280,
+        720
+      ]
+    },
+    "mobile-target-aim.png": {
+      "source": ".agent/tasks/TARGETING-2026-09-11/raw/mobile-final-v3/02-target-preview.png",
+      "sha256": "7a75181ee6bf56b80bf5501085e30da7327f1d56bc5b8598c9ed89a68118e1d3",
+      "pixels": [
+        844,
+        390
+      ]
+    },
+    "mobile-target-lock.png": {
+      "source": ".agent/tasks/TARGETING-2026-09-11/raw/mobile-final-v3/03-basic-attack.png",
+      "sha256": "fdb84c20a5f3693f53dbe1e256426c8f381887d9c473a85996502f3fe4ece5eb",
+      "pixels": [
+        844,
+        390
+      ]
+    },
+    "phone-667-controls.png": {
+      "source": ".agent/tasks/TARGETING-2026-09-11/raw/phone-667-final-v3/03-gameplay-375p.png",
+      "sha256": "ef4e2dd8bdeb72c681afb0d9e37bf563360a24e2f934e4195ac60741fe257dd4",
+      "pixels": [
+        667,
+        375
+      ]
+    },
+    "phone-667-help.png": {
+      "source": ".agent/tasks/TARGETING-2026-09-11/raw/phone-667-final-v3/02-help-375p.png",
+      "sha256": "c2913f6c3ccc66d1266ef0abc111fd12d59c355d189f5bf0d2c5bff5bf9efc1e",
+      "pixels": [
+        667,
+        375
+      ]
+    }
+  },
+  "runs": {
+    "desktop-final-v3": {
+      "pixels": [
+        1280,
+        720
+      ],
+      "capture_pass": true,
+      "images": {
+        "01-target-ready.png": {
+          "bytes": 879283,
+          "sha256": "26079764584d688cf6fecc80f3bd93e244e5825f38bac8d2f2218611857c768a"
+        },
+        "02-target-preview.png": {
+          "bytes": 880404,
+          "sha256": "cb44e2a3e466458c2dccc4565ba18b9f27e85d72cf0f006d0c7376b8faef05de"
+        },
+        "03-basic-attack.png": {
+          "bytes": 880677,
+          "sha256": "13fd756ecaddaaf5f119d10eb6867f6c9a0053cfc7820e8cf0d0ee9145592b9d"
+        },
+        "04-target-canceled.png": {
+          "bytes": 874351,
+          "sha256": "cb41d2e543c8381745acb978ed58c264e49a7ef473ab4e852f95395a09448e99"
+        }
+      },
+      "targeting": {
+        "errors": [],
+        "ui_profile": {
+          "pass": true,
+          "requested_profile": "desktop",
+          "requested_touch_controls": false,
+          "actual_profile": "desktop",
+          "expected_stages": 4,
+          "stages": [
+            {
+              "stage": 0,
+              "file": "01-target-ready.png",
+              "mobile_controls": false,
+              "actual_profile": "desktop"
+            },
+            {
+              "stage": 1,
+              "file": "02-target-preview.png",
+              "mobile_controls": false,
+              "actual_profile": "desktop"
+            },
+            {
+              "stage": 2,
+              "file": "03-basic-attack.png",
+              "mobile_controls": false,
+              "actual_profile": "desktop"
+            },
+            {
+              "stage": 3,
+              "file": "04-target-canceled.png",
+              "mobile_controls": false,
+              "actual_profile": "desktop"
+            }
+          ],
+          "errors": []
+        },
+        "locked_target_indicators": [
+          {
+            "stage": 0,
+            "selected_target": null,
+            "indicator_visible": false,
+            "size": [
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "stage": 1,
+            "selected_target": {
+              "id": 1,
+              "kind": "player"
+            },
+            "indicator_visible": true,
+            "size": [
+              46.0,
+              59.0
+            ]
+          },
+          {
+            "stage": 2,
+            "selected_target": {
+              "id": 1,
+              "kind": "player"
+            },
+            "indicator_visible": true,
+            "size": [
+              46.0,
+              59.0
+            ]
+          },
+          {
+            "stage": 3,
+            "selected_target": null,
+            "indicator_visible": false,
+            "size": [
+              0.0,
+              0.0
+            ]
+          }
+        ],
+        "basic_requests": 2,
+        "authoritative_hp_drops": [
+          [
+            57,
+            8.0
+          ],
+          [
+            76,
+            8.0
+          ]
+        ],
+        "accepted_basic_action_sequences": [
+          1,
+          2
+        ],
+        "quiet_intervals": {
+          "preview": {
+            "snapshots": 11,
+            "hp_decreases": 0
+          },
+          "canceled": {
+            "snapshots": 35,
+            "hp_decreases": 0
+          }
+        },
+        "skill_cooldown_evidence_source": "native client LocalCastCooldown; server timestamp isolation is tested separately",
+        "observed_target_snapshots": 24,
+        "observed_caster_snapshots": 24,
+        "observed_snapshot_ticks": 111,
+        "synthetic_damage": false,
+        "manual_interaction_verified": false,
+        "pass": true
+      }
+    },
+    "mobile-final-v3": {
+      "pixels": [
+        844,
+        390
+      ],
+      "capture_pass": true,
+      "images": {
+        "01-target-ready.png": {
+          "bytes": 349307,
+          "sha256": "2f27ca1bb98337f9c3c9881fe3bc3ff83558b259ac2ac405036eefb3bffce8e1"
+        },
+        "02-target-preview.png": {
+          "bytes": 347934,
+          "sha256": "7a75181ee6bf56b80bf5501085e30da7327f1d56bc5b8598c9ed89a68118e1d3"
+        },
+        "03-basic-attack.png": {
+          "bytes": 349840,
+          "sha256": "fdb84c20a5f3693f53dbe1e256426c8f381887d9c473a85996502f3fe4ece5eb"
+        },
+        "04-target-canceled.png": {
+          "bytes": 352914,
+          "sha256": "39d5b9e673f88c644c9895237266f69fe9122fbc0df183f926aa6fb818eac3d7"
+        }
+      },
+      "targeting": {
+        "errors": [],
+        "ui_profile": {
+          "pass": true,
+          "requested_profile": "mobile",
+          "requested_touch_controls": true,
+          "actual_profile": "mobile",
+          "expected_stages": 4,
+          "stages": [
+            {
+              "stage": 0,
+              "file": "01-target-ready.png",
+              "mobile_controls": true,
+              "actual_profile": "mobile"
+            },
+            {
+              "stage": 1,
+              "file": "02-target-preview.png",
+              "mobile_controls": true,
+              "actual_profile": "mobile"
+            },
+            {
+              "stage": 2,
+              "file": "03-basic-attack.png",
+              "mobile_controls": true,
+              "actual_profile": "mobile"
+            },
+            {
+              "stage": 3,
+              "file": "04-target-canceled.png",
+              "mobile_controls": true,
+              "actual_profile": "mobile"
+            }
+          ],
+          "errors": []
+        },
+        "locked_target_indicators": [
+          {
+            "stage": 0,
+            "selected_target": null,
+            "indicator_visible": false,
+            "size": [
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "stage": 1,
+            "selected_target": null,
+            "indicator_visible": false,
+            "size": [
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "stage": 2,
+            "selected_target": {
+              "id": 1,
+              "kind": "player"
+            },
+            "indicator_visible": true,
+            "size": [
+              46.0,
+              42.0
+            ]
+          },
+          {
+            "stage": 3,
+            "selected_target": {
+              "id": 1,
+              "kind": "player"
+            },
+            "indicator_visible": true,
+            "size": [
+              46.0,
+              42.0
+            ]
+          }
+        ],
+        "basic_requests": 1,
+        "authoritative_hp_drops": [
+          [
+            36,
+            8.0
+          ]
+        ],
+        "accepted_basic_action_sequences": [
+          1
+        ],
+        "quiet_intervals": {
+          "preview": {
+            "snapshots": 11,
+            "hp_decreases": 0
+          },
+          "canceled": {
+            "snapshots": 35,
+            "hp_decreases": 0
+          }
+        },
+        "skill_cooldown_evidence_source": "native client LocalCastCooldown; server timestamp isolation is tested separately",
+        "observed_target_snapshots": 6,
+        "observed_caster_snapshots": 6,
+        "observed_snapshot_ticks": 71,
+        "synthetic_damage": false,
+        "manual_interaction_verified": false,
+        "pass": true
+      }
+    },
+    "phone-667-final-v3": {
+      "pixels": [
+        667,
+        375
+      ],
+      "capture_pass": true,
+      "images": {
+        "01-entry-375p.png": {
+          "bytes": 219845,
+          "sha256": "1ff87ec4950f87b7551aa706d36178485f9783da818083bed7d53356702a072e"
+        },
+        "02-help-375p.png": {
+          "bytes": 242775,
+          "sha256": "c2913f6c3ccc66d1266ef0abc111fd12d59c355d189f5bf0d2c5bff5bf9efc1e"
+        },
+        "03-gameplay-375p.png": {
+          "bytes": 255152,
+          "sha256": "ef4e2dd8bdeb72c681afb0d9e37bf563360a24e2f934e4195ac60741fe257dd4"
+        },
+        "04-shop-375p.png": {
+          "bytes": 136719,
+          "sha256": "5448f1c7091dd82a77d7f8053404806d7fbe711a57ed8015cb4e11d45b8c8883"
+        },
+        "05-purchase-375p.png": {
+          "bytes": 141389,
+          "sha256": "4975a938d1cca4656af48c47f2ac9e5586d77dea30d329a118b478c4dc1d5654"
+        },
+        "06-shop-closed-375p.png": {
+          "bytes": 256248,
+          "sha256": "06ead6f8a62232b7d24533450cc3f6cf79f366e832a4ab7ad19fcf93711daef8"
+        },
+        "07-result-fixture-375p.png": {
+          "bytes": 179805,
+          "sha256": "29a50a010e09d6628b4009c1d69ac5c01d8b09c6ed710b084570e100102bf743"
+        }
+      },
+      "ui_profile": {
+        "pass": true,
+        "requested_profile": "mobile",
+        "requested_touch_controls": true,
+        "actual_profile": "mobile",
+        "expected_stages": 7,
+        "stages": [
+          {
+            "stage": 0,
+            "file": "01-entry-375p.png",
+            "mobile_controls": true,
+            "actual_profile": "mobile"
+          },
+          {
+            "stage": 1,
+            "file": "02-help-375p.png",
+            "mobile_controls": true,
+            "actual_profile": "mobile"
+          },
+          {
+            "stage": 2,
+            "file": "03-gameplay-375p.png",
+            "mobile_controls": true,
+            "actual_profile": "mobile"
+          },
+          {
+            "stage": 3,
+            "file": "04-shop-375p.png",
+            "mobile_controls": true,
+            "actual_profile": "mobile"
+          },
+          {
+            "stage": 4,
+            "file": "05-purchase-375p.png",
+            "mobile_controls": true,
+            "actual_profile": "mobile"
+          },
+          {
+            "stage": 5,
+            "file": "06-shop-closed-375p.png",
+            "mobile_controls": true,
+            "actual_profile": "mobile"
+          },
+          {
+            "stage": 6,
+            "file": "07-result-fixture-375p.png",
+            "mobile_controls": true,
+            "actual_profile": "mobile"
+          }
+        ],
+        "errors": []
+      }
+    },
+    "desktop-960-final-v3": {
+      "pixels": [
+        960,
+        540
+      ],
+      "capture_pass": true,
+      "images": {
+        "01-entry-540p.png": {
+          "bytes": 372521,
+          "sha256": "ef6f58abaaa19f5e5edb027ff49dec68a5e89b9d9ba21fe0e2ecd51bd4b50dae"
+        },
+        "02-help-540p.png": {
+          "bytes": 475454,
+          "sha256": "ebc0922e8b492d63f235157e94c5a7c69e41e19e9ed83a013ec0f6a748e913a8"
+        },
+        "03-gameplay-540p.png": {
+          "bytes": 457080,
+          "sha256": "3e2fa41871cf212aafc031d43a8701ab67eeab746e98fab5323d5fd155977107"
+        },
+        "04-shop-540p.png": {
+          "bytes": 228082,
+          "sha256": "85c1ce7bdfa0636a110780eeaa30679d51d1fbaee18a8ff8c8ebcd68fcf5797b"
+        },
+        "05-purchase-540p.png": {
+          "bytes": 226890,
+          "sha256": "40278f476e0e9d514f8af2e2e8839b828f33aa08c1aef1f9883a7d136bd32f08"
+        },
+        "06-shop-closed-540p.png": {
+          "bytes": 459911,
+          "sha256": "e88f5b09b89e5b4b3179e3b2aad791a8d6b88592663f6c29873db2ac0988e70f"
+        },
+        "07-result-fixture-540p.png": {
+          "bytes": 348741,
+          "sha256": "c1794690f0adf0031aa2c4d404415f117d66b0ca171b34e4d25a3eece7260bc8"
+        }
+      },
+      "ui_profile": {
+        "pass": true,
+        "requested_profile": "desktop",
+        "requested_touch_controls": false,
+        "actual_profile": "desktop",
+        "expected_stages": 7,
+        "stages": [
+          {
+            "stage": 0,
+            "file": "01-entry-540p.png",
+            "mobile_controls": false,
+            "actual_profile": "desktop"
+          },
+          {
+            "stage": 1,
+            "file": "02-help-540p.png",
+            "mobile_controls": false,
+            "actual_profile": "desktop"
+          },
+          {
+            "stage": 2,
+            "file": "03-gameplay-540p.png",
+            "mobile_controls": false,
+            "actual_profile": "desktop"
+          },
+          {
+            "stage": 3,
+            "file": "04-shop-540p.png",
+            "mobile_controls": false,
+            "actual_profile": "desktop"
+          },
+          {
+            "stage": 4,
+            "file": "05-purchase-540p.png",
+            "mobile_controls": false,
+            "actual_profile": "desktop"
+          },
+          {
+            "stage": 5,
+            "file": "06-shop-closed-540p.png",
+            "mobile_controls": false,
+            "actual_profile": "desktop"
+          },
+          {
+            "stage": 6,
+            "file": "07-result-fixture-540p.png",
+            "mobile_controls": false,
+            "actual_profile": "desktop"
+          }
+        ],
+        "errors": []
+      }
+    },
+    "navigation-final-v3": {
+      "pixels": [
+        1280,
+        720
+      ],
+      "capture_pass": true,
+      "images": {
+        "01-minimap-route.png": {
+          "bytes": 850350,
+          "sha256": "1cee9f7c6a4812adadeb857ac6b62e319c7609ea1a8fb5b79f44b0836b2c215c"
+        },
+        "02-minimap-arrival.png": {
+          "bytes": 948336,
+          "sha256": "86b4f38c6ff45784c0071ebf17460177b38a2037a518ed8842f57ea6a007a146"
+        },
+        "03-world-route.png": {
+          "bytes": 944490,
+          "sha256": "712bdbb8dd1d5d7fcfd94bfc7102014169cdd9ea3b282b5b57484e8dfc823715"
+        },
+        "04-navigation-complete.png": {
+          "bytes": 948872,
+          "sha256": "181c6712b8774c1bf876b6c74d9ca336ddb8189508acedf55734ba17be70e72a"
+        }
+      },
+      "navigation": {
+        "observer": "hello-only UDP snapshots; no Join or Transform commands",
+        "player_id": 2,
+        "authoritative_samples": 241,
+        "arrivals": {
+          "minimap_arrival": {
+            "nearby_snapshots": 13,
+            "minimum_distance": 1.2164622783259542e-05
+          },
+          "world_arrival": {
+            "nearby_snapshots": 13,
+            "minimum_distance": 7.13675456923576e-06
+          }
+        },
+        "minimum_structure_distance": 1.461471835843074,
+        "collision_radius": 1.2854070663452148,
+        "maximum_deviation_from_direct_line": 2.161548416473891,
+        "planned_route_length": 31.041110823158306,
+        "authoritative_traversal_length": 30.642802103797127,
+        "missing_input_events": [],
+        "pass": true,
+        "forest": {
+          "selected_id": "foliage.glb:tree_jade_canopy / 0122",
+          "obstacles": 236,
+          "minimum_polygon_clearance": 0.6628261774182947,
+          "direct_line_blocked": true,
+          "minimap_visible": true,
+          "minimap_cleared": true
+        }
+      }
+    }
+  }
+}

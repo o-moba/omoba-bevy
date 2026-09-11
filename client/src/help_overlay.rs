@@ -227,11 +227,11 @@ fn help_overlay_body() -> String {
     let upgrade = upgrade_key_display();
     format!(
         "Quick guide (press {help_key} or Escape to close)\n\n\
-MOVE: Right-click ground or minimap to move around forest; your route appears on the minimap. Left-click/tap ground also moves.\n\
-ATTACK: Click or tap a hostile to select it and use Q; your hero approaches if needed.\n\
+MOVE: Right-click ground or minimap to move around forest; your route appears on the minimap. Left click selects without moving.\n\
+ATTACK: Right-click a hostile to approach and repeat basic attacks; left-click only selects. Basic attacks cost no mana.\n\
 CAST: Use {skills} or the on-screen buttons. W/E/R unlock by level.\n\
 SKILL POINTS: Use {upgrade} or the arrows above the hotbar to rank up abilities.\n\
-TARGET: Tab selects the nearest hostile; Backspace clears.\n\
+TARGET: Tab selects the nearest hostile; Backspace clears. S stops attacks and movement.\n\
 TEAMS: You have a double ring; allies have squares; enemies have triangles.\n\n\
 OBJECTIVE: Follow a lane with your minions. Destroy an enemy lane tower to unlock its base, then destroy the base to win.\n\
 RECOVER: Let minions take tower fire. If defeated, wait for your respawn.\n\
@@ -250,7 +250,7 @@ mod tests {
         let body = help_overlay_body();
         assert!(body.contains("MOVE:"));
         assert!(body.contains("TARGET:"));
-        assert!(body.contains("Click or tap a hostile"));
+        assert!(body.contains("Right-click a hostile"));
         assert!(body.contains("on-screen buttons"));
         assert!(body.contains("CAST:"));
         assert!(body.contains("OBJECTIVE:"));

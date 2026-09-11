@@ -1,8 +1,20 @@
 # Feature Inventory
 
-Canonical version: `0.18.0-rc.8`
+Canonical version: `0.18.0-rc.9`
 
 ## Current Playable Surface
+
+- **Mouse targeting and phone attack lock (2026-09-11):** desktop left click
+  selects, right click on a hostile approaches and repeats basic attacks, and
+  right click on ground/minimap cancels attacks and moves. S/Backspace stop
+  movement and attacks and clear the lock. Phone has a separate large ATTACK button plus Q/W/E/R. Tap
+  attacks once; stationary hold repeats; drag extends a reticle to preview and
+  lock the exact foe. Drag to X to cancel. Phone basic attacks never chase.
+  Basic attacks cost no mana and have class/equipment damage and independent
+  server-enforced cooldowns. Skills retain their existing balance and use the
+  selected target. Protocol 2 rejects incompatible old peers and binds strikes
+  to server epoch, match and monotonic request IDs. Rebuild client and server
+  together. See the [controls and verification record](progress/2026-09-11-targeting.md).
 
 - **Hero and environment readability (2026-09-11):** the desktop minimap now
   sits at upper left with reserved objective space and inventory fit at 960px.

@@ -99,13 +99,13 @@ class NavigationEvidenceTest(unittest.TestCase):
             try:
                 observer.update(1)
                 hello, address = server.recvfrom(65536)
-                self.assertEqual(json.loads(hello), dict(type="hello", protocol_version=1))
+                self.assertEqual(json.loads(hello), dict(type="hello", protocol_version=2))
                 packet = dict(type="snapshot", server_epoch=9, round_id=1, snapshot_tick=42,
                               players=[dict(id=7, x=1, z=2, hp=100)], structures=[])
                 data = json.dumps(packet).encode()
                 halves = (data[:len(data) // 2], data[len(data) // 2:])
                 for index in (1, 0):
-                    server.sendto(FRAME_HEADER.pack(b"OMB1", 1, 9, 42, index, 2, len(data)) + halves[index], address)
+                    server.sendto(FRAME_HEADER.pack(b"OMB1", 2, 9, 42, index, 2, len(data)) + halves[index], address)
                 deadline = time.monotonic() + 1
                 while not observer.samples and time.monotonic() < deadline:
                     select.select([observer.socket], [], [], max(0, deadline - time.monotonic()))

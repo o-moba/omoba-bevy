@@ -47,6 +47,9 @@ pub(crate) fn ensure_player_connected(
                 item_bonuses: ItemBonuses::NONE,
                 shop_available: false,
                 last_purchase: None,
+                basic_attack_cooldown_secs: 0.0,
+                basic_attack_remaining_secs: 0.0,
+                basic_attack_request_id: 0,
                 xp: 0,
                 level: STARTING_LEVEL,
                 next_level_xp: xp_threshold_for_level(STARTING_LEVEL),
@@ -68,6 +71,7 @@ pub(crate) fn ensure_player_connected(
             last_seen: now,
             last_movement_at: now,
             last_cast_at: [None; 4],
+            last_basic_attack_at: None,
             respawn_at: None,
             god_mode: false,
             speed_mult: 1.0,
@@ -266,6 +270,14 @@ fn reset_player_round(player: &mut ConnectedPlayer, map_layout: &MapLayoutState,
     player.state.action_slot = 0;
     player.last_movement_at = now;
     player.last_cast_at = [None; 4];
+    player.last_basic_attack_at = None;
+    player.state.basic_attack_cooldown_secs = shared::shop::basic_attack_cooldown(
+        shared::basic_attack_for_class(player.state.hero_class),
+        player.state.item_bonuses,
+    )
+    .as_secs_f32();
+    player.state.basic_attack_remaining_secs = 0.0;
+    player.state.basic_attack_request_id = 0;
     player.respawn_at = None;
     player.god_mode = false;
     player.speed_mult = 1.0;
@@ -354,6 +366,10 @@ pub(crate) fn handle_respawns(
         player.respawn_at = None;
         player.last_movement_at = now;
         player.last_cast_at = [None; 4];
+        player.last_basic_attack_at = None;
+        player.state.basic_attack_remaining_secs = 0.0;
+        // Preserve request high-water through death; delayed strikes from the
+        // same round must not become fresh attacks after respawn.
     }
 }
 

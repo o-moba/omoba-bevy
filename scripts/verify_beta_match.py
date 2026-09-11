@@ -57,7 +57,7 @@ class MatchProof:
         self.samples += 1
         meta = sample['meta']
         match_id, epoch, tick = meta['match_id'], meta['server_epoch'], meta['snapshot_tick']
-        assert meta.get('protocol_version', 1) == 1, 'Unexpected snapshot protocol'
+        assert meta.get('protocol_version') == 2, 'Unexpected snapshot protocol'
         if self.epoch is None:
             self.epoch = epoch
         assert epoch == self.epoch, 'Server epoch changed unexpectedly'

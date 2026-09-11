@@ -39,6 +39,10 @@ pub(crate) struct MobileSafeInsets {
 pub(crate) struct MobileLayout {
     pub joystick_center: Vec2,
     pub joystick_radius: f32,
+    pub attack_center: Vec2,
+    pub attack_radius: f32,
+    pub cancel_center: Vec2,
+    pub cancel_radius: f32,
     pub ability_centers: [Vec2; 4],
     pub ability_radii: [f32; 4],
     pub upgrade_centers: [Vec2; 4],
@@ -51,9 +55,28 @@ pub(crate) struct MobileCastIntent {
     pub aim: Option<Vec2>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct MobileAttackAim {
+    /// Logical screen axes, normalized. Positive Y points down.
+    pub direction: Vec2,
+    /// Fraction of the legal target-selector reach, never additional attack range.
+    pub extent: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct MobileAttackIntent {
+    pub aim: Option<MobileAttackAim>,
+    pub gesture: u64,
+}
+
+const ATTACK_HOLD_SECONDS: f32 = 0.18;
+const ATTACK_DRAG_DEAD_ZONE: f32 = 12.0;
+const ATTACK_DRAG_REACH: f32 = 96.0;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Control {
     Joystick,
+    Attack,
     Ability(usize),
     Upgrade(usize),
 }
@@ -64,6 +87,10 @@ struct Capture {
     origin: Vec2,
     position: Vec2,
     canceled: bool,
+    held_seconds: f32,
+    hold_exposed: bool,
+    dragged: bool,
+    gesture: u64,
 }
 
 #[derive(Resource)]
@@ -77,11 +104,15 @@ pub(crate) struct MobileControls {
     /// Screen axes: positive X right, positive Y down; magnitude is analog 0..1.
     pub movement: Vec2,
     pub casts: Vec<MobileCastIntent>,
+    pub attacks: Vec<MobileAttackIntent>,
     pub upgrades: Vec<usize>,
     captures: HashMap<u64, Capture>,
     upgrade_enabled: [bool; 4],
     layout_changed: bool,
     round_identity: Option<(u64, u64)>,
+    next_attack_gesture: u64,
+    attack_canceled_this_frame: bool,
+    skill_released_this_frame: bool,
 }
 
 impl Default for MobileControls {
@@ -99,11 +130,15 @@ impl Default for MobileControls {
             focused: true,
             movement: Vec2::ZERO,
             casts: Vec::new(),
+            attacks: Vec::new(),
             upgrades: Vec::new(),
             captures: HashMap::new(),
             upgrade_enabled: [false; 4],
             layout_changed: false,
             round_identity: None,
+            next_attack_gesture: 0,
+            attack_canceled_this_frame: false,
+            skill_released_this_frame: false,
         }
     }
 }
@@ -118,35 +153,42 @@ impl MobileControls {
         let edge = self.viewport.x - self.safe.right;
         let bottom = self.viewport.y - self.safe.bottom;
         let attack = Vec2::new(edge - 48.0 * s, bottom - 48.0 * s);
-        // Q is Omoba's basic attack. The three abilities form a compact
-        // thumb fan above/left of it, with at least six logical pixels of
-        // separation at our smallest supported phone viewport. Upgrades sit
-        // outside the fan so they never steal an attack/ability touch.
+        // Four separate skills arc around the larger basic attack. Upgrade
+        // targets remain outside the fan and clear of the HP card above it.
         let centers = [
-            attack,
-            attack + Vec2::new(-91.0, -37.0) * s,
-            attack + Vec2::new(-60.0, -98.0) * s,
-            attack + Vec2::new(12.0, -98.0) * s,
+            attack + Vec2::new(-90.0, 15.0) * s,
+            attack + Vec2::new(-140.0, -39.0) * s,
+            attack + Vec2::new(-96.0, -107.0) * s,
+            attack + Vec2::new(-25.0, -122.0) * s,
         ];
         MobileLayout {
             joystick_center: Vec2::new(self.safe.left + 76.0 * s, bottom - 72.0 * s),
             joystick_radius: 58.0 * s,
+            attack_center: attack,
+            attack_radius: 44.0 * s,
+            cancel_center: Vec2::new(edge - 38.0 * s, self.safe.top + 85.0 * s),
+            cancel_radius: 24.0 * s,
             ability_centers: centers,
-            ability_radii: [44.0 * s, 31.0 * s, 31.0 * s, 34.0 * s],
+            ability_radii: [28.0 * s, 28.0 * s, 28.0 * s, 31.0 * s],
             upgrade_centers: [
-                attack + Vec2::new(-65.0, 25.0) * s,
-                attack + Vec2::new(-149.0, -37.0) * s,
-                attack + Vec2::new(-67.0, -157.0) * s,
-                attack + Vec2::new(12.0, -157.0) * s,
+                attack + Vec2::new(-147.0, 23.0) * s,
+                attack + Vec2::new(-197.0, -40.0) * s,
+                attack + Vec2::new(-154.0, -111.0) * s,
+                attack + Vec2::new(-71.0, -175.0) * s,
             ],
             upgrade_radius: 22.0 * s,
         }
     }
 
     fn clear(&mut self) {
+        self.attack_canceled_this_frame |= self
+            .captures
+            .values()
+            .any(|capture| matches!(capture.control, Control::Attack | Control::Ability(_)));
         self.captures.clear();
         self.movement = Vec2::ZERO;
         self.casts.clear();
+        self.attacks.clear();
         self.upgrades.clear();
     }
 
@@ -158,6 +200,9 @@ impl MobileControls {
             {
                 return Some((Control::Upgrade(slot), l.upgrade_centers[slot]));
             }
+        }
+        if point.distance(l.attack_center) <= l.attack_radius {
+            return Some((Control::Attack, l.attack_center));
         }
         for slot in 0..4 {
             if point.distance(l.ability_centers[slot]) <= l.ability_radii[slot] {
@@ -171,53 +216,112 @@ impl MobileControls {
 
     fn event(&mut self, id: u64, phase: TouchPhase, position: Vec2) {
         if !position.is_finite() {
-            self.captures.remove(&id);
+            if let Some(capture) = self.captures.remove(&id) {
+                self.attack_canceled_this_frame |=
+                    matches!(capture.control, Control::Attack | Control::Ability(_));
+                self.skill_released_this_frame |= matches!(capture.control, Control::Ability(_));
+            }
             self.refresh_movement();
             return;
         }
         match phase {
             TouchPhase::Started => {
+                if self.captures.contains_key(&id) {
+                    return;
+                }
                 let Some((control, origin)) = self.hit_control(position) else {
                     return;
                 };
-                if self.captures.values().any(|c| c.control == control) {
+                if self.captures.values().any(|c| {
+                    c.control == control
+                        || matches!(
+                            (control, c.control),
+                            (Control::Ability(_), Control::Ability(_))
+                        )
+                }) {
                     return;
                 }
+                let gesture = if control == Control::Attack {
+                    let Some(next) = self.next_attack_gesture.checked_add(1) else {
+                        return;
+                    };
+                    self.next_attack_gesture = next;
+                    next
+                } else {
+                    0
+                };
                 self.captures.insert(
                     id,
                     Capture {
                         control,
-                        origin,
+                        origin: if control == Control::Attack {
+                            position
+                        } else {
+                            origin
+                        },
                         position,
                         canceled: false,
+                        held_seconds: 0.0,
+                        hold_exposed: false,
+                        dragged: false,
+                        gesture,
                     },
                 );
-                if control == Control::Ability(0) {
-                    self.casts.push(MobileCastIntent { slot: 0, aim: None });
-                }
             }
             TouchPhase::Moved => {
-                let cancel_distance = 158.0 * self.scale();
+                let layout = self.layout();
+                let dead_zone = ATTACK_DRAG_DEAD_ZONE * self.scale();
                 if let Some(capture) = self.captures.get_mut(&id) {
                     capture.position = position;
-                    capture.canceled = position.distance(capture.origin) > cancel_distance;
+                    capture.dragged |= position.distance(capture.origin) > dead_zone;
+                    capture.canceled =
+                        position.distance(layout.cancel_center) <= layout.cancel_radius;
                 }
             }
             TouchPhase::Ended | TouchPhase::Canceled => {
                 if let Some(mut capture) = self.captures.remove(&id) {
+                    self.skill_released_this_frame |=
+                        matches!(capture.control, Control::Ability(_));
                     capture.position = position;
-                    capture.canceled |= position.distance(capture.origin) > 158.0 * self.scale();
+                    capture.dragged |=
+                        position.distance(capture.origin) > ATTACK_DRAG_DEAD_ZONE * self.scale();
+                    capture.canceled = position.distance(self.layout().cancel_center)
+                        <= self.layout().cancel_radius;
+                    self.attack_canceled_this_frame |= capture.control == Control::Attack
+                        && (phase == TouchPhase::Canceled
+                            || capture.canceled
+                            || (capture.dragged
+                                && attack_aim_vector(
+                                    capture.position - capture.origin,
+                                    self.scale(),
+                                )
+                                .is_none()));
                     if phase == TouchPhase::Ended && !capture.canceled {
                         match capture.control {
-                            Control::Ability(slot) if slot != 0 => {
-                                self.casts.push(MobileCastIntent {
-                                    slot,
-                                    aim: aim_vector(
+                            Control::Attack if !self.skill_aiming() && self.casts.is_empty() => {
+                                if capture.dragged {
+                                    if let Some(aim) = attack_aim_vector(
                                         capture.position - capture.origin,
                                         self.scale(),
-                                    ),
-                                })
+                                    ) {
+                                        self.attacks.push(MobileAttackIntent {
+                                            aim: Some(aim),
+                                            gesture: capture.gesture,
+                                        });
+                                    }
+                                } else if !capture.hold_exposed {
+                                    // A stationary hold has already requested repeats; releasing it
+                                    // must not enqueue an extra attack at the next cooldown boundary.
+                                    self.attacks.push(MobileAttackIntent {
+                                        aim: None,
+                                        gesture: capture.gesture,
+                                    });
+                                }
                             }
+                            Control::Ability(slot) => self.casts.push(MobileCastIntent {
+                                slot,
+                                aim: aim_vector(capture.position - capture.origin, self.scale()),
+                            }),
                             Control::Upgrade(slot)
                                 if position.distance(capture.origin)
                                     <= self.layout().upgrade_radius * 1.3 =>
@@ -242,21 +346,92 @@ impl MobileControls {
             .unwrap_or(Vec2::ZERO);
     }
 
-    /// A held thumb remains a request; the combat system schedules it against
-    /// the real rank/equipment cooldown each frame instead of a fixed repeat rate.
-    pub(crate) fn held_attack(&self) -> Option<MobileCastIntent> {
+    /// Includes a skill release for the current frame even after combat drains casts.
+    pub(crate) fn skill_aiming(&self) -> bool {
+        self.skill_released_this_frame
+            || self
+                .captures
+                .values()
+                .any(|capture| matches!(capture.control, Control::Ability(_)))
+    }
+
+    pub(crate) fn attack_pressed(&self) -> bool {
+        self.attack_gesture().is_some()
+    }
+
+    pub(crate) fn attack_gesture(&self) -> Option<u64> {
         self.captures
             .values()
-            .find(|capture| capture.control == Control::Ability(0) && !capture.canceled)
-            .map(|capture| MobileCastIntent {
-                slot: 0,
-                aim: aim_vector(capture.position - capture.origin, self.scale()),
+            .find(|capture| capture.control == Control::Attack)
+            .map(|capture| capture.gesture)
+    }
+
+    fn begin_input_frame(&mut self) {
+        self.casts.clear();
+        self.attacks.clear();
+        self.upgrades.clear();
+        self.attack_canceled_this_frame = false;
+        self.skill_released_this_frame = false;
+    }
+
+    fn advance_hold_time(&mut self, seconds: f32) {
+        if !seconds.is_finite() || seconds <= 0.0 {
+            return;
+        }
+        for capture in self.captures.values_mut() {
+            capture.held_seconds += seconds;
+        }
+    }
+
+    fn acknowledge_hold(&mut self) {
+        if self.held_basic_attack() {
+            for capture in self
+                .captures
+                .values_mut()
+                .filter(|capture| capture.control == Control::Attack)
+            {
+                capture.hold_exposed = true;
+            }
+        }
+    }
+
+    /// Repetition is scheduled by combat against the independent basic cooldown.
+    pub(crate) fn held_basic_attack(&self) -> bool {
+        !self.skill_aiming()
+            && self.casts.is_empty()
+            && self.captures.values().any(|capture| {
+                capture.control == Control::Attack
+                    && !capture.canceled
+                    && !capture.dragged
+                    && capture.held_seconds >= ATTACK_HOLD_SECONDS
+            })
+    }
+
+    pub(crate) fn attack_aim(&self) -> Option<MobileAttackAim> {
+        if self.skill_aiming() {
+            return None;
+        }
+        self.captures
+            .values()
+            .find(|capture| {
+                capture.control == Control::Attack && capture.dragged && !capture.canceled
+            })
+            .and_then(|capture| attack_aim_vector(capture.position - capture.origin, self.scale()))
+    }
+
+    pub(crate) fn attack_cancelled(&self) -> bool {
+        self.attack_canceled_this_frame
+            || self.captures.values().any(|capture| {
+                capture.control == Control::Attack
+                    && (capture.canceled || (capture.dragged && self.attack_aim().is_none()))
             })
     }
 
     #[cfg(test)]
     pub(crate) fn start_attack_hold_for_test(&mut self) {
-        self.event(1, TouchPhase::Started, self.layout().ability_centers[0]);
+        self.event(1, TouchPhase::Started, self.layout().attack_center);
+        self.advance_hold_time(ATTACK_HOLD_SECONDS);
+        self.acknowledge_hold();
     }
 }
 
@@ -270,6 +445,15 @@ fn joystick_vector(delta: Vec2, radius: f32) -> Vec2 {
 }
 fn aim_vector(delta: Vec2, scale: f32) -> Option<Vec2> {
     (delta.length() > 20.0 * scale).then(|| delta.normalize_or_zero())
+}
+
+fn attack_aim_vector(delta: Vec2, scale: f32) -> Option<MobileAttackAim> {
+    let distance = delta.length() / scale;
+    (distance > ATTACK_DRAG_DEAD_ZONE).then(|| MobileAttackAim {
+        direction: delta.normalize_or_zero(),
+        extent: ((distance - ATTACK_DRAG_DEAD_ZONE) / (ATTACK_DRAG_REACH - ATTACK_DRAG_DEAD_ZONE))
+            .clamp(0.0, 1.0),
+    })
 }
 
 pub(crate) struct MobileControlsPlugin;
@@ -331,6 +515,7 @@ fn refresh_mobile_layout(
 }
 
 fn read_mobile_controls(
+    time: Res<Time>,
     mut events: MessageReader<TouchInput>,
     mouse: Res<ButtonInput<MouseButton>>,
     touches: Res<Touches>,
@@ -340,6 +525,7 @@ fn read_mobile_controls(
     mut mobile: ResMut<MobileControls>,
     snapshot: Option<Res<crate::net::GameStateSnapshot>>,
 ) {
+    mobile.begin_input_frame();
     if let Some(snapshot) = snapshot {
         let identity = (snapshot.meta.server_epoch, snapshot.meta.match_id);
         if identity.0 != 0 && identity.1 != 0 {
@@ -353,8 +539,6 @@ fn read_mobile_controls(
             mobile.round_identity = Some(identity);
         }
     }
-    mobile.casts.clear();
-    mobile.upgrades.clear();
     let alive = local.single().is_ok_and(|(stats, _)| stats.is_alive());
     if !mobile.enabled
         || !mobile.landscape
@@ -380,6 +564,7 @@ fn read_mobile_controls(
         events.clear();
         return;
     };
+    mobile.advance_hold_time(time.delta_secs());
     for event in events.read() {
         if event.window == window_entity {
             mobile.event(event.id, event.phase, event.position);
@@ -407,12 +592,17 @@ fn read_mobile_controls(
             mobile.refresh_movement();
         }
     }
+    mobile.acknowledge_hold();
 }
 
 #[derive(Component)]
 enum MobileVisual {
     Joystick,
     Thumb,
+    Attack,
+    AttackVector,
+    AttackThumb,
+    Cancel,
     Ability(usize),
     Upgrade(usize),
     AimHint,
@@ -423,6 +613,10 @@ fn setup_mobile_controls(mut commands: Commands) {
     for visual in [
         MobileVisual::Joystick,
         MobileVisual::Thumb,
+        MobileVisual::Attack,
+        MobileVisual::AttackVector,
+        MobileVisual::AttackThumb,
+        MobileVisual::Cancel,
         MobileVisual::Ability(0),
         MobileVisual::Ability(1),
         MobileVisual::Ability(2),
@@ -448,6 +642,7 @@ fn setup_mobile_controls(mut commands: Commands) {
                     ..default()
                 },
                 BackgroundColor(crate::ui_theme::PANEL),
+                UiTransform::default(),
                 BorderColor::all(crate::ui_theme::EDGE),
                 ZIndex(if is_rotate { 250 } else { 30 }),
                 if is_rotate {
@@ -458,6 +653,10 @@ fn setup_mobile_controls(mut commands: Commands) {
                 Name::new(match &visual {
                     MobileVisual::Joystick => "MobileJoystick".to_owned(),
                     MobileVisual::Thumb => "MobileThumb".to_owned(),
+                    MobileVisual::Attack => "MobileAttack".to_owned(),
+                    MobileVisual::AttackVector => "MobileAttackVector".to_owned(),
+                    MobileVisual::AttackThumb => "MobileAttackThumb".to_owned(),
+                    MobileVisual::Cancel => "MobileAttackCancel".to_owned(),
                     MobileVisual::Ability(slot) => format!("MobileAbility-{slot}"),
                     MobileVisual::Upgrade(slot) => format!("MobileUpgrade-{slot}"),
                     MobileVisual::AimHint => "MobileAimHint".to_owned(),
@@ -493,11 +692,13 @@ fn draw_mobile_controls(
     >,
     selection: Res<TeamSelection>,
     cooldown: Res<LocalCastCooldown>,
+    basic_attack: Option<Res<crate::targeting::BasicAttackState>>,
     mut visuals: Query<(
         &MobileVisual,
         &mut Node,
         &mut BackgroundColor,
         &mut BorderColor,
+        &mut UiTransform,
         &Children,
     )>,
     mut texts: Query<(&mut Text, &mut TextFont)>,
@@ -517,8 +718,25 @@ fn draw_mobile_controls(
     let aiming = mobile
         .captures
         .values()
-        .find(|c| matches!(c.control, Control::Ability(slot) if slot != 0));
-    for (visual, mut node, mut color, mut border, children) in &mut visuals {
+        .find(|c| matches!(c.control, Control::Ability(_)))
+        .or_else(|| {
+            mobile
+                .captures
+                .values()
+                .find(|c| c.control == Control::Attack)
+        });
+    let attack = mobile
+        .captures
+        .values()
+        .find(|c| c.control == Control::Attack);
+    let attack_remaining = basic_attack.map_or(0.0, |state| state.remaining_secs);
+    let attack_cooling = attack_remaining > 0.0;
+    let attack_held = mobile.held_basic_attack();
+    let drag = attack
+        .filter(|capture| capture.dragged)
+        .map(|capture| (capture.position - capture.origin).clamp_length_max(ATTACK_DRAG_REACH * s));
+    let canceled_color = Color::srgb(0.90, 0.28, 0.24);
+    for (visual, mut node, mut color, mut border, mut ui_transform, children) in &mut visuals {
         let (center, radius, label, show, fill, edge) = match *visual {
             MobileVisual::Joystick => (
                 layout.joystick_center,
@@ -536,6 +754,71 @@ fn draw_mobile_controls(
                 Color::srgba(0.43, 0.7, 0.62, 0.72),
                 crate::ui_theme::JADE,
             ),
+            MobileVisual::Attack => (
+                layout.attack_center,
+                layout.attack_radius,
+                if attack_cooling {
+                    format!(
+                        "ATTACK\n{attack_remaining:.1}{}",
+                        if attack_held { "\nHOLD" } else { "" }
+                    )
+                } else if attack_held {
+                    "ATTACK\nHOLD".into()
+                } else {
+                    "ATTACK\nREADY".into()
+                },
+                visible,
+                if attack_cooling {
+                    if attack_held {
+                        crate::ui_theme::TILE
+                    } else {
+                        crate::ui_theme::PANEL
+                    }
+                } else if attack.is_some() {
+                    crate::ui_theme::HOVER
+                } else {
+                    crate::ui_theme::TILE
+                },
+                if mobile.attack_cancelled() {
+                    canceled_color
+                } else if attack_cooling {
+                    crate::ui_theme::EDGE
+                } else if attack_held {
+                    crate::ui_theme::JADE
+                } else {
+                    crate::ui_theme::GOLD
+                },
+            ),
+            MobileVisual::AttackVector | MobileVisual::AttackThumb => (
+                layout.attack_center
+                    + drag.unwrap_or_default()
+                        * if matches!(visual, MobileVisual::AttackVector) {
+                            0.5
+                        } else {
+                            1.0
+                        },
+                16.0 * s,
+                String::new(),
+                visible && drag.is_some() && !mobile.skill_aiming(),
+                if mobile.attack_cancelled() {
+                    canceled_color
+                } else {
+                    crate::ui_theme::JADE
+                },
+                crate::ui_theme::IVORY,
+            ),
+            MobileVisual::Cancel => (
+                layout.cancel_center,
+                layout.cancel_radius,
+                "×".into(),
+                visible && aiming.is_some(),
+                if aiming.is_some_and(|capture| capture.canceled) {
+                    canceled_color
+                } else {
+                    crate::ui_theme::PANEL
+                },
+                canceled_color,
+            ),
             MobileVisual::Ability(slot) => {
                 let def = ability_for_class_slot(class, SkillSlot::from_index(slot as u8).unwrap());
                 let unlocked = unlocked_slots_for_level(prog.level.max(1))[slot];
@@ -546,11 +829,7 @@ fn draw_mobile_controls(
                     .captures
                     .values()
                     .any(|c| c.control == Control::Ability(slot) && !c.canceled);
-                let tag = if slot == 0 {
-                    "ATTACK"
-                } else {
-                    ["", "W", "E", "R"][slot]
-                };
+                let tag = ["Q", "W", "E", "R"][slot];
                 let status = if !unlocked {
                     format!("Lv {}", shared::SLOT_UNLOCK_LEVELS[slot])
                 } else if cooldown.remaining_secs[slot] > 0.0 {
@@ -572,8 +851,6 @@ fn draw_mobile_controls(
                     },
                     if !unlocked || !mana || cooldown.remaining_secs[slot] > 0.0 {
                         crate::ui_theme::EDGE
-                    } else if slot == 0 {
-                        crate::ui_theme::GOLD
                     } else {
                         crate::ui_theme::JADE
                     },
@@ -590,16 +867,23 @@ fn draw_mobile_controls(
             MobileVisual::AimHint => {
                 let message = aiming
                     .map(|c| {
-                        if c.canceled {
-                            "CANCEL · release to discard"
+                        if c.canceled || (c.control == Control::Attack && mobile.attack_cancelled())
+                        {
+                            "CANCEL\nRelease to discard"
+                        } else if c.control == Control::Attack {
+                            "Drag to select · release to attack\nMove to × to cancel"
                         } else {
-                            "Drag to aim · release to cast\nDrag farther to cancel"
+                            "Drag to aim · release to cast\nMove to × to cancel"
                         }
                     })
                     .unwrap_or("");
                 (
                     Vec2::new(
-                        mobile.viewport.x * 0.5,
+                        (layout.joystick_center.x
+                            + layout.joystick_radius
+                            + layout.upgrade_centers[1].x
+                            - layout.upgrade_radius)
+                            * 0.5,
                         mobile.viewport.y - mobile.safe.bottom - 36.0 * s,
                     ),
                     1.0,
@@ -620,10 +904,18 @@ fn draw_mobile_controls(
         };
         node.display = if show { Display::Flex } else { Display::None };
         let rectangular = matches!(visual, MobileVisual::AimHint | MobileVisual::Rotate);
-        let size = if matches!(visual, MobileVisual::Rotate) {
+        let is_vector = matches!(visual, MobileVisual::AttackVector);
+        let size = if is_vector {
+            Vec2::new(drag.unwrap_or_default().length(), 3.0 * s)
+        } else if matches!(visual, MobileVisual::Rotate) {
             mobile.viewport
         } else if rectangular {
-            Vec2::new(260.0 * s, 60.0 * s)
+            let available = layout.upgrade_centers[1].x
+                - layout.upgrade_radius
+                - layout.joystick_center.x
+                - layout.joystick_radius
+                - 24.0 * s;
+            Vec2::new(available.clamp(120.0 * s, 260.0 * s), 60.0 * s)
         } else {
             Vec2::splat(radius * 2.0)
         };
@@ -631,6 +923,14 @@ fn draw_mobile_controls(
         node.top = Val::Px(center.y - size.y * 0.5);
         node.width = Val::Px(size.x);
         node.height = Val::Px(size.y);
+        node.padding = UiRect::all(Val::Px(if is_vector { 0.0 } else { 4.0 }));
+        node.border = UiRect::all(Val::Px(if is_vector { 0.0 } else { 2.0 }));
+        ui_transform.rotation = if is_vector {
+            let delta = drag.unwrap_or_default();
+            Rot2::radians(delta.y.atan2(delta.x))
+        } else {
+            Rot2::IDENTITY
+        };
         node.border_radius = BorderRadius::all(if rectangular {
             Val::Px(8.0)
         } else {
@@ -643,6 +943,10 @@ fn draw_mobile_controls(
                 text.0.clone_from(&label);
                 font.font_size = if matches!(visual, MobileVisual::Rotate) {
                     24.0 * s
+                } else if matches!(visual, MobileVisual::Cancel) {
+                    28.0 * s
+                } else if matches!(visual, MobileVisual::AimHint) {
+                    12.0 * s
                 } else {
                     14.0 * s
                 };
@@ -660,6 +964,197 @@ mod tests {
             ..default()
         }
     }
+    #[test]
+    fn basic_taps_and_holds_are_independent_from_all_four_skills() {
+        let mut m = controls();
+        let layout = m.layout();
+        let press = layout.attack_center + Vec2::X * 30.0;
+        m.event(1, TouchPhase::Started, press);
+        assert!(m.attacks.is_empty() && m.casts.is_empty());
+        m.advance_hold_time(0.179);
+        assert!(!m.held_basic_attack());
+        m.event(1, TouchPhase::Moved, press);
+        m.advance_hold_time(0.002);
+        assert!(m.held_basic_attack());
+        assert!(m.attack_aim().is_none());
+        m.acknowledge_hold();
+        m.event(1, TouchPhase::Ended, press);
+        assert!(
+            m.attacks.is_empty(),
+            "releasing a repeating hold must not attack again"
+        );
+        m.event(1, TouchPhase::Started, press);
+        m.event(1, TouchPhase::Ended, press);
+        assert_eq!(
+            m.attacks,
+            [MobileAttackIntent {
+                aim: None,
+                gesture: 2
+            }]
+        );
+        m.attacks.clear();
+        // Even a long frame ending the gesture before combat saw a hold is one tap.
+        m.event(1, TouchPhase::Started, press);
+        m.advance_hold_time(0.3);
+        m.event(1, TouchPhase::Ended, press);
+        assert_eq!(
+            m.attacks,
+            [MobileAttackIntent {
+                aim: None,
+                gesture: 3
+            }]
+        );
+        m.attacks.clear();
+        for slot in 0..4 {
+            m.event(2, TouchPhase::Started, layout.ability_centers[slot]);
+            assert_eq!(m.casts.len(), slot);
+            m.event(2, TouchPhase::Ended, layout.ability_centers[slot]);
+            assert_eq!(m.casts[slot], MobileCastIntent { slot, aim: None });
+            assert!(m.attacks.is_empty());
+        }
+    }
+
+    #[test]
+    fn attack_drag_grows_caps_and_releases_exact_aim_without_repeat_or_fallback() {
+        let mut m = controls();
+        let center = m.layout().attack_center;
+        m.event(1, TouchPhase::Started, center);
+        m.event(1, TouchPhase::Moved, center + Vec2::NEG_X * 54.0);
+        let short = m.attack_aim().unwrap();
+        assert_eq!(short.direction, Vec2::NEG_X);
+        assert!((short.extent - 0.5).abs() < 0.001);
+        m.advance_hold_time(1.0);
+        assert!(!m.held_basic_attack());
+        assert!(m.attacks.is_empty());
+        let far = center + Vec2::NEG_X * 300.0;
+        m.event(1, TouchPhase::Moved, far);
+        let full = m.attack_aim().unwrap();
+        assert_eq!(full.extent, 1.0);
+        assert!(
+            !m.attack_cancelled(),
+            "long drag caps reach rather than canceling"
+        );
+        m.event(1, TouchPhase::Ended, far);
+        assert_eq!(
+            m.attacks,
+            [MobileAttackIntent {
+                aim: Some(full),
+                gesture: 1
+            }]
+        );
+        m.attacks.clear();
+        m.event(1, TouchPhase::Started, center);
+        m.event(1, TouchPhase::Moved, far);
+        m.event(1, TouchPhase::Moved, center);
+        assert!(m.attack_cancelled());
+        assert!(!m.held_basic_attack());
+        m.event(1, TouchPhase::Ended, center);
+        assert!(
+            m.attacks.is_empty(),
+            "returning a drag to dead zone cannot auto-select"
+        );
+    }
+
+    #[test]
+    fn attack_cancel_region_and_os_cancel_discard_only_the_owned_gesture() {
+        let mut m = controls();
+        let layout = m.layout();
+        m.event(1, TouchPhase::Started, layout.joystick_center);
+        m.event(
+            1,
+            TouchPhase::Moved,
+            layout.joystick_center + Vec2::X * 58.0,
+        );
+        for phase in [TouchPhase::Ended, TouchPhase::Canceled] {
+            m.event(2, TouchPhase::Started, layout.attack_center);
+            m.event(2, TouchPhase::Moved, layout.cancel_center);
+            assert!(m.attack_cancelled());
+            assert!(m.attack_aim().is_none());
+            m.event(2, phase, layout.cancel_center);
+            assert!(m.attacks.is_empty() && !m.held_basic_attack());
+            assert_eq!(m.movement, Vec2::X);
+        }
+        m.event(2, TouchPhase::Started, layout.attack_center);
+        m.event(2, TouchPhase::Canceled, layout.attack_center);
+        assert!(m.attacks.is_empty());
+    }
+
+    #[test]
+    fn skill_owner_suspends_basic_hold_without_stealing_movement() {
+        let mut m = controls();
+        let layout = m.layout();
+        m.event(1, TouchPhase::Started, layout.joystick_center);
+        m.event(
+            1,
+            TouchPhase::Moved,
+            layout.joystick_center + Vec2::X * 58.0,
+        );
+        m.event(2, TouchPhase::Started, layout.attack_center);
+        m.advance_hold_time(0.2);
+        assert!(m.held_basic_attack());
+        m.event(3, TouchPhase::Started, layout.ability_centers[0]);
+        m.event(4, TouchPhase::Started, layout.ability_centers[1]);
+        assert!(!m.held_basic_attack());
+        assert!(!m.captures.contains_key(&4));
+        // Repeated Started with an owned id cannot turn the joystick into attack.
+        m.event(1, TouchPhase::Started, layout.attack_center);
+        assert_eq!(m.movement, Vec2::X);
+        m.event(3, TouchPhase::Ended, layout.ability_centers[0]);
+        m.event(4, TouchPhase::Ended, layout.ability_centers[1]);
+        assert_eq!(m.casts, [MobileCastIntent { slot: 0, aim: None }]);
+        assert!(!m.held_basic_attack(), "skill release wins this frame");
+        m.casts.clear();
+        assert!(
+            !m.held_basic_attack(),
+            "draining skill requests must not erase their frame priority"
+        );
+        m.begin_input_frame();
+        assert!(m.held_basic_attack());
+    }
+
+    #[test]
+    fn release_cancellation_survives_capture_removal_and_touch_ids_are_not_gesture_ids() {
+        let mut m = controls();
+        let layout = m.layout();
+        let mut previous = 0;
+        for (phase, position) in [
+            (TouchPhase::Ended, layout.cancel_center),
+            (TouchPhase::Canceled, layout.attack_center),
+            (TouchPhase::Ended, Vec2::splat(f32::NAN)),
+        ] {
+            m.begin_input_frame();
+            m.event(17, TouchPhase::Started, layout.attack_center);
+            let gesture = m.attack_gesture().unwrap();
+            assert!(gesture > previous);
+            previous = gesture;
+            assert!(m.attack_pressed());
+            m.event(17, phase, position);
+            assert!(!m.attack_pressed());
+            assert!(
+                m.attack_cancelled(),
+                "root must observe even a same-frame cancellation"
+            );
+            assert!(m.attacks.is_empty());
+            m.begin_input_frame();
+            assert!(!m.attack_cancelled());
+        }
+        m.event(17, TouchPhase::Started, layout.attack_center);
+        let final_gesture = m.attack_gesture().unwrap();
+        assert!(final_gesture > previous);
+        m.event(
+            17,
+            TouchPhase::Moved,
+            layout.attack_center + Vec2::NEG_X * 54.0,
+        );
+        m.clear();
+        assert!(
+            m.attack_cancelled(),
+            "layout reset must cancel queued attacks too"
+        );
+        m.event(17, TouchPhase::Ended, layout.attack_center);
+        assert!(m.attacks.is_empty());
+    }
+
     #[test]
     fn independent_fingers_move_and_cast_without_stealing_joystick() {
         let mut m = controls();
@@ -751,12 +1246,8 @@ mod tests {
         let l = m.layout();
         for phase in [TouchPhase::Canceled, TouchPhase::Ended] {
             m.event(1, TouchPhase::Started, l.ability_centers[1]);
-            m.event(
-                1,
-                TouchPhase::Moved,
-                l.ability_centers[1] + Vec2::NEG_Y * 200.0,
-            );
-            m.event(1, phase, l.ability_centers[1] + Vec2::NEG_Y * 200.0);
+            m.event(1, TouchPhase::Moved, l.cancel_center);
+            m.event(1, phase, l.cancel_center);
         }
         m.event(1, TouchPhase::Started, l.ability_centers[2]);
         m.event(2, TouchPhase::Started, l.joystick_center);
@@ -788,6 +1279,8 @@ mod tests {
                 (1, TouchPhase::Started, l.joystick_center),
                 (1, TouchPhase::Moved, l.joystick_center + Vec2::X * 55.0),
                 (2, TouchPhase::Started, l.ability_centers[2]),
+                (3, TouchPhase::Started, l.attack_center),
+                (3, TouchPhase::Moved, l.attack_center + Vec2::NEG_X * 54.0),
             ] {
                 app.world_mut().write_message(TouchInput {
                     id,
@@ -831,6 +1324,14 @@ mod tests {
                 Vec2::ZERO
             );
             assert!(app.world().resource::<MobileControls>().captures.is_empty());
+            assert!(app.world().resource::<MobileControls>().attacks.is_empty());
+            assert!(!app.world().resource::<MobileControls>().held_basic_attack());
+            assert!(
+                app.world()
+                    .resource::<MobileControls>()
+                    .attack_aim()
+                    .is_none()
+            );
             app.world_mut()
                 .resource_mut::<GameplayInputContext>()
                 .modal_open = false;
@@ -886,12 +1387,14 @@ mod tests {
                 bottom: 20.0 * scale,
             };
             let l = m.layout();
-            let attack = l.ability_centers[0];
+            let attack = l.attack_center;
             // Reach bounds protect the compact fan while the spacing lower
             // bound prevents achieving compactness with ambiguous touch areas.
-            for (slot, center) in l.ability_centers.iter().enumerate().skip(1) {
-                assert!(center.distance(attack) <= 116.0 * scale);
-                assert!(attack.y - (center.y - l.ability_radii[slot]) <= 133.0 * scale);
+            for (slot, center) in l.ability_centers.iter().enumerate() {
+                assert!(center.distance(attack) <= 150.0 * scale);
+                assert!(attack.y - (center.y - l.ability_radii[slot]) <= 154.0 * scale);
+                assert!(l.ability_radii[slot] * 2.0 >= 48.0);
+                assert!(center.distance(attack) - l.ability_radii[slot] - l.attack_radius >= 6.0);
             }
             for (i, center) in l.ability_centers.iter().enumerate() {
                 for j in i + 1..4 {
@@ -905,8 +1408,8 @@ mod tests {
                 }
             }
             for center in l.upgrade_centers {
-                assert!(center.distance(attack) <= 172.0 * scale);
-                assert!(attack.y - (center.y - l.upgrade_radius) <= 180.0 * scale);
+                assert!(center.distance(attack) <= 202.0 * scale);
+                assert!(attack.y - (center.y - l.upgrade_radius) <= 198.0 * scale);
             }
             // Reserve the right HP/progression card above the combat fan.
             let edge = viewport.x - m.safe.right;
@@ -925,7 +1428,11 @@ mod tests {
                         .copied()
                         .map(|p| (p, l.upgrade_radius)),
                 )
-                .chain([(l.joystick_center, l.joystick_radius)])
+                .chain([
+                    (l.joystick_center, l.joystick_radius),
+                    (l.attack_center, l.attack_radius),
+                    (l.cancel_center, l.cancel_radius),
+                ])
                 .collect();
             for (i, (p, r)) in circles.iter().enumerate() {
                 let nearest = p.clamp(hero.min, hero.max);

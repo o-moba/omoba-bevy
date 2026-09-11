@@ -6,6 +6,23 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.18.0-rc.9] - 2026-09-11
+
+### Added
+- Separate no-mana basic attacks with class/equipment stats, independent server
+  cooldowns, hostile/range/protection checks and round-bound replay protection.
+- Phone ATTACK button surrounded by Q/W/E/R, stationary hold repeat and growing
+  drag reticle with explicit candidate preview, target lock and cancel control.
+
+### Changed
+- Desktop left click selects; right click attacks hostiles or moves to ground.
+  Movement cancels attack orders; S/Backspace stop movement and attacks and clear target.
+- Phone skills use an explicit locked target without silently choosing another
+  when the selected foe is out of range. Phone attacks do not chase.
+- Wire protocol is now 2; old clients/servers fail compatibility checks clearly.
+  Existing Q/W/E/R values and Q attack-speed item behavior are preserved.
+
+
 ## [0.18.0-rc.8] - 2026-09-11
 
 ### Changed

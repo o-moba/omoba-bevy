@@ -100,7 +100,7 @@ class ScenarioPeer:
     def update(self, now):
         if now - self.last_hello >= 1.0:
             self.last_hello = now
-            self.send(dict(type="hello", protocol_version=1))
+            self.send(dict(type="hello", protocol_version=2))
             if not self.joined:
                 self.send(dict(type="join", team="green" if self.index % 2 == 0 else "blue",
                                character="cube", hero_class="warrior", avatar="agnes",
@@ -115,7 +115,7 @@ class ScenarioPeer:
                 if len(data) < FRAME_HEADER.size or len(data) > 1200:
                     raise RuntimeError("invalid native frame size")
                 _, version, epoch, tick, index, count, total = FRAME_HEADER.unpack_from(data)
-                if version != 1 or not 0 < count <= 56 or not index < count or total > 65507:
+                if version != 2 or not 0 < count <= 56 or not index < count or total > 65507:
                     raise RuntimeError("invalid native frame header")
                 key = (epoch, tick)
                 if key not in self.pending and len(self.pending) >= 4:
@@ -163,7 +163,7 @@ class SnapshotObserver:
     def update(self, now):
         if now - self.last_hello >= 1.0:
             self.last_hello = now
-            self.socket.send(b'{"type":"hello","protocol_version":1}')
+            self.socket.send(b'{"type":"hello","protocol_version":2}')
         self.pending = {key: value for key, value in self.pending.items() if now - value[0] < 2.0}
         while True:
             try:
@@ -174,7 +174,7 @@ class SnapshotObserver:
                 if len(data) < FRAME_HEADER.size or len(data) > 1200:
                     raise RuntimeError("invalid observer snapshot frame size")
                 _, version, epoch, tick, index, count, total = FRAME_HEADER.unpack_from(data)
-                if version != 1 or not 0 < count <= 56 or not index < count or total > 65507:
+                if version != 2 or not 0 < count <= 56 or not index < count or total > 65507:
                     raise RuntimeError("invalid observer snapshot frame header")
                 key = (epoch, tick)
                 if key not in self.pending and len(self.pending) >= 4:
