@@ -4,6 +4,9 @@ Canonical version: `0.19.0-rc.1`
 
 ## Current Playable Surface
 
+- **Local source launch:** `make play` builds locked sources and runs local 3D
+  practice with nine bots; closing the client stops its server and bots.
+
 - **Purchased avatar passport (2026-09-11):** opt-in terminal pairing connects
   Omoba to the buyer's browser wallet. The owned library filters paid avatar
   choices; a trusted HTTP service consumes a one-use ticket before the game

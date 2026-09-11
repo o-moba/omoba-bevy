@@ -72,6 +72,22 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(run(arguments(["practice", "--bind", self.free_address()]), self.package), 0)
         self.assertNotEqual(first_profile, self.invocation("client")["env"]["OMOBA_CLIENT_CONFIG_DIR"])
 
+    def test_source_binaries_and_assets_work_outside_session_directory(self):
+        binaries_dir = self.package / "configured-target"
+        binaries_dir.mkdir()
+        executables = {}
+        for kind in ("client", "server", "bots"):
+            destination = binaries_dir / kind
+            (self.package / kind).rename(destination)
+            executables[kind] = destination
+        assets = self.package / "checkout-assets"
+        assets.mkdir()
+        self.assertEqual(run(arguments(["practice", "--bind", self.free_address()]),
+                             self.package, executables=executables, assets=assets), 0)
+        for kind in ("client", "server", "bots"):
+            self.assertEqual(self.invocation(kind)["env"]["OMOBA_ASSET_DIR"], str(assets))
+            self.assert_stopped(kind)
+
     def test_join_resolves_and_uses_named_persistent_profile(self):
         args = arguments(["join", "localhost:4000", "--profile", "tester-2"])
         self.assertEqual(run(args, self.package), 0)

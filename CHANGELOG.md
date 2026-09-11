@@ -6,6 +6,10 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Developer workflow
+- Add `make play` / `make play-bots` to build locked current sources and launch
+  supervised local 3D practice with nine bots, with owned-process cleanup.
+
 ## [0.19.0-rc.1] - 2026-09-11
 
 ### Added
