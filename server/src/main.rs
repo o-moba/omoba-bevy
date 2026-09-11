@@ -2351,10 +2351,9 @@ fn apply_neutral_damage(
         return;
     }
     neutral.state.hp = (neutral.state.hp - damage).max(0.0);
-    if players
-        .values()
-        .any(|player| player.state.id == attacker_player_id && player.state.hp > 0.0)
-    {
+    if players.values().any(|player| {
+        player.joined && player.state.id == attacker_player_id && player.state.hp > 0.0
+    }) {
         neutral.target_player_id = Some(attacker_player_id);
         neutral.state.ai_state = NeutralAiState::Aggro;
     }
@@ -2416,6 +2415,11 @@ fn award_neutral_kill_to_player(
         if player.state.id == killer_id {
             player.state.gold = player.state.gold.saturating_add(rewards.kill_gold);
             grant_player_xp(&mut player.state, rewards.kill_xp);
+            if !camp_type.is_boss() && player.state.hp > 0.0 {
+                player.state.hp = (player.state.hp
+                    + player.state.max_hp * NEUTRAL_KILL_HEAL_FRACTION)
+                    .min(player.state.max_hp);
+            }
             break;
         }
     }
@@ -2445,15 +2449,8 @@ fn simulate_neutrals(
             if now >= dead_until {
                 let template = neutral_template(neutral.state.camp_type);
                 neutral.dead_until = None;
-                neutral.state.hp = template.max_hp;
                 neutral.state.max_hp = template.max_hp;
-                neutral.state.x = neutral.anchor.x;
-                neutral.state.y = neutral.anchor.y;
-                neutral.state.z = neutral.anchor.z;
-                neutral.state.yaw = 0.0;
-                neutral.state.ai_state = NeutralAiState::Idle;
-                neutral.target_player_id = None;
-                neutral.last_attack_at = None;
+                reset_neutral_at_anchor(neutral);
             } else {
                 continue;
             }
@@ -2480,7 +2477,7 @@ fn simulate_neutrals(
                     (player.state.id, neutral_pos.distance_squared(hit))
                 })
                 .filter(|(_, dist_sq)| *dist_sq <= aggro_sq)
-                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+                .min_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
             if let Some((player_id, _)) = best {
                 neutral.target_player_id = Some(player_id);
                 neutral.state.ai_state = NeutralAiState::Aggro;
@@ -2488,28 +2485,23 @@ fn simulate_neutrals(
         }
 
         let Some(target_id) = neutral.target_player_id else {
-            neutral.state.ai_state = NeutralAiState::Idle;
+            // A projectile can outlive its owner and land after the previous
+            // target-loss reset. With no living proximity target, discard that
+            // orphan chip damage instead of leaving an abandoned wounded camp.
+            reset_neutral_at_anchor(neutral);
             continue;
         };
 
         let Some(target_player) = players
             .values()
-            .find(|player| player.state.id == target_id && player.state.hp > 0.0)
+            .find(|player| player.joined && player.state.id == target_id && player.state.hp > 0.0)
         else {
-            neutral.target_player_id = None;
-            neutral.state.ai_state = NeutralAiState::Idle;
+            reset_neutral_at_anchor(neutral);
             continue;
         };
 
         if neutral_horizontal_distance_sq_from_anchor(anchor, &target_player.state) > leash_sq {
-            neutral.state.x = anchor.x;
-            neutral.state.y = anchor.y;
-            neutral.state.z = anchor.z;
-            neutral.state.hp = neutral.state.max_hp;
-            neutral.state.ai_state = NeutralAiState::Idle;
-            neutral.target_player_id = None;
-            neutral.last_attack_at = None;
-            neutral.state.yaw = 0.0;
+            reset_neutral_at_anchor(neutral);
             continue;
         }
 
@@ -2535,17 +2527,12 @@ fn simulate_neutrals(
             }
         } else {
             neutral.state.ai_state = NeutralAiState::Aggro;
-            let dir_x = target_hit.x - neutral.state.x;
-            let dir_z = target_hit.z - neutral.state.z;
-            let dist_flat_sq = dir_x * dir_x + dir_z * dir_z;
-            let dist_flat = dist_flat_sq.sqrt();
-            if dist_flat > 0.0001 {
-                let travel = (NEUTRAL_CHASE_SPEED * dt).min(dist_flat);
-                let inv = dist_flat.recip();
-                neutral.state.x += dir_x * inv * travel;
-                neutral.state.z += dir_z * inv * travel;
-                neutral.state.yaw = dir_x.atan2(dir_z);
-            }
+            chase_neutral(
+                neutral,
+                [target_hit.x, target_hit.z],
+                dt,
+                shared::navigation::world_navigation(),
+            );
         }
     }
 
@@ -3362,12 +3349,11 @@ mod tests {
         let mut next_neutral_id = 9_001;
         let neutrals = build_neutral_camps(&mut next_neutral_id);
 
-        assert_eq!(neutrals.len(), 3);
+        assert_eq!(neutrals.len(), 6);
 
         let mut camp_types = Vec::new();
         for neutral in neutrals.values() {
             let template = neutral_template(neutral.state.camp_type);
-            assert!(!camp_types.contains(&neutral.state.camp_type));
             camp_types.push(neutral.state.camp_type);
             assert!((neutral.state.x - neutral.anchor.x).abs() < EPSILON);
             assert!((neutral.state.y - neutral.anchor.y).abs() < EPSILON);
@@ -3376,6 +3362,13 @@ mod tests {
             assert!((neutral.state.max_hp - template.max_hp).abs() < EPSILON);
             assert_eq!(neutral.state.ai_state, NeutralAiState::Idle);
             assert!(neutral.dead_until.is_none());
+        }
+        for kind in [
+            NeutralCampType::Skirmisher,
+            NeutralCampType::Bruiser,
+            NeutralCampType::Spitter,
+        ] {
+            assert_eq!(camp_types.iter().filter(|&&value| value == kind).count(), 2);
         }
     }
 
@@ -4698,9 +4691,9 @@ mod tests {
         let mut neutrals = build_camps_and_bosses();
         let now = Instant::now();
 
-        // Before match start (Lobby): bosses dormant, only the 3 camps visible.
+        // Before match start (Lobby): bosses dormant, only the six camps visible.
         let visible = visible_camp_types(&neutrals);
-        assert_eq!(visible.len(), 3);
+        assert_eq!(visible.len(), 6);
         assert!(visible.iter().all(|camp_type| !camp_type.is_boss()));
 
         schedule_boss_spawns(&mut neutrals, now);
@@ -4765,7 +4758,7 @@ mod tests {
             .iter()
             .filter(|camp_type| !camp_type.is_boss())
             .count();
-        assert_eq!(camp_count, 3);
+        assert_eq!(camp_count, 6);
     }
 
     #[test]
@@ -5190,6 +5183,7 @@ mod tests {
         let addr: SocketAddr = "127.0.0.1:47401".parse().unwrap();
         let now = Instant::now();
         ensure_player_connected(&mut players, &layout, addr, &mut next_player_id, now);
+        players.get_mut(&addr).unwrap().joined = true;
         let player_id = players.get(&addr).unwrap().state.id;
 
         let mut neutrals = build_camps_and_bosses();

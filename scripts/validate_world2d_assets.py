@@ -281,11 +281,13 @@ def validate_manifest(data: dict, root: Path, *, check_pixels: bool = True) -> d
     close_pair(topology.get("bounds", {}).get("max"), (half_map, half_map), "bounds.max", 1e-4)
     close_pair(topology.get("bases", {}).get("green"), (-half_inner, -half_inner), "bases.green", 1e-4)
     close_pair(topology.get("bases", {}).get("blue"), (half_inner, half_inner), "bases.blue", 1e-4)
-    expected_camps = [(-outer, inner), (outer, -inner), (-inner, -outer)]
+    expected_camps = [(-outer, inner), (outer, -inner),
+                      (-map_size * 0.30, -map_size * 0.227), (map_size * 0.30, map_size * 0.227),
+                      (-inner, -outer), (inner, outer)]
     expected_bosses = [(inner, -outer), (-inner, outer)]
     camps, bosses = topology.get("camps"), topology.get("boss_pits")
-    if not isinstance(camps, list) or len(camps) != 3 or not isinstance(bosses, list) or len(bosses) != 2:
-        raise ValidationError("topology must define three camps and two boss pits")
+    if not isinstance(camps, list) or len(camps) != 6 or not isinstance(bosses, list) or len(bosses) != 2:
+        raise ValidationError("topology must define six camps and two boss pits")
     for index, expected in enumerate(expected_camps):
         close_pair(camps[index], expected, f"camps[{index}]", 1e-4)
     for index, expected in enumerate(expected_bosses):

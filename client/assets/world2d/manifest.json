@@ -107,7 +107,7 @@
       { "team": "green", "xz": [-79.549513, -79.549513] },
       { "team": "blue", "xz": [79.549513, 79.549513] }
     ],
-    "camps": [[-73.813669, 47.761786], [73.813669, -47.761786], [-47.761786, -73.813669]],
+    "camps": [[-73.813669, 47.761786], [73.813669, -47.761786], [-65.129708, -49.281479], [65.129708, 49.281479], [-47.761786, -73.813669], [47.761786, 73.813669]],
     "boss_pits": [[47.761786, -73.813669], [-47.761786, 73.813669]],
     "clearances": { "lane_half_width": 6.0, "camp_radius": 10.0, "boss_radius": 12.0, "base_half_size": 23.0 }
   },
@@ -117,7 +117,7 @@
     "grid": { "columns": 55, "rows": 55, "origin_xz": [-108.0, -108.0], "static_tile_count": 3025, "max_static_entities": 4096 },
     "priority": ["base", "lane_river_crossing", "lane", "camp", "boss", "river", "forest", "grass"],
     "neighbor_transitions": { "edge_mask": "cardinal_4bit", "corner_mask": "diagonal_4bit", "rotation_order": [0, 90, 180, 270] },
-    "forest_cluster_centers": [[-47.761786, 73.813669], [-73.813669, -47.761786], [47.761786, 73.813669], [73.813669, 47.761786], [47.761786, -73.813669], [0.0, 60.787727], [0.0, -60.787727]],
+    "forest_cluster_centers": [[0.0, 60.787727], [0.0, -60.787727]],
     "prop_policy": { "seeded": true, "max_props": 256, "avoid_topology_clearances": true, "server_collision": false }
   }
 }

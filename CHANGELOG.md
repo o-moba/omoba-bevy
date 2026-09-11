@@ -10,6 +10,20 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 - Add `make play` / `make play-bots` to build locked current sources and launch
   supervised local 3D practice with nine bots, with owned-process cleanup.
 
+## [0.19.0-rc.2] - 2026-09-11
+
+### Added
+- Six point-symmetric ordinary jungle camps, three types on each side, using
+  shared reachable positions. Anyone can farm them for last-hit gold and XP;
+  ordinary monsters return with full HP 40 seconds after death. The living
+  last hitter also recovers 20% maximum HP, capped at their maximum.
+- Distinct original procedural jungle creatures with grounded models and
+  persistent living/depleted minimap camp markers on desktop and phone.
+
+### Fixed
+- Reset stranded jungle monsters when their target dies, disconnects or leaves
+  the leash. Ordinary chase respects static forest obstacles.
+
 ## [0.19.0-rc.1] - 2026-09-11
 
 ### Added

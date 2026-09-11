@@ -7,8 +7,9 @@ use crate::camera::{CameraState, MainCamera};
 use crate::combat::CombatStats;
 use crate::maps::MapLayout;
 use crate::net::{
-    ClientSession, NetworkAvatar, NetworkHeroClass, NetworkMinion, NetworkSpriteCharacter,
-    NetworkStructure, RemotePlayer, StructureKind,
+    ClientSession, NetworkAvatar, NetworkHeroClass, NetworkMinion, NetworkNeutral,
+    NetworkNeutralCampType, NetworkSpriteCharacter, NetworkStructure, NeutralCampType,
+    RemotePlayer, StructureKind,
 };
 use crate::player::{PLAYER_SIZE, Player};
 use crate::sprite::{PlayerVisualMode, SpriteVisualAssets};
@@ -63,9 +64,17 @@ struct MinimapUiState {
     player_icons: HashMap<Entity, (Entity, String)>,
     structure_icons: HashMap<Entity, Entity>,
     minion_icons: HashMap<Entity, Entity>,
+    camp_icons: [Option<Entity>; 6],
 }
 #[derive(Component)]
 struct MinimapRoot;
+
+/// Persistent anchor marker; life state comes only from current neutral entities.
+#[derive(Component, Clone, Copy, Debug)]
+struct MinimapCamp {
+    index: usize,
+    alive: bool,
+}
 #[derive(Component)]
 pub(crate) struct MinimapContainer;
 #[derive(Component)]
@@ -88,6 +97,7 @@ pub(crate) struct MinimapQaScene<'w, 's> {
     >,
     edges: Query<'w, 's, (Entity, &'static CameraFootprintEdge)>,
     routes: Query<'w, 's, (Entity, &'static crate::minimap_route::RouteSegment)>,
+    camps: Query<'w, 's, (Entity, &'static MinimapCamp)>,
     destinations: Query<'w, 's, Entity, With<crate::minimap_route::RouteDestination>>,
     heroes: Query<
         'w,
@@ -156,6 +166,10 @@ impl MinimapQaScene<'_, '_> {
             "hero_markers": {"local": local, "allied": allied, "enemy": enemy},
             "marker_rects": markers,
             "minion_markers": self.state.minion_icons.values().filter(|icon| rendered_rect(**icon).is_some()).count(),
+            "camp_markers": self.camps.iter().filter_map(|(entity, camp)| {
+                let rect = rendered_rect(entity)?;
+                Some(serde_json::json!({"index": camp.index, "alive": camp.alive, "rect": rect_json(rect)}))
+            }).collect::<Vec<_>>(),
             "structure_markers": self.state.structure_icons.values().filter(|icon| rendered_rect(**icon).is_some()).count(),
             "camera_edges": camera_edges,
             "route_segments": self.routes.iter().filter_map(|(entity, index)| {
@@ -386,6 +400,7 @@ fn update_minimap_icons_system(
         With<NetworkStructure>,
     >,
     minions: Query<(Entity, &Transform, &Team, &CombatStats), With<NetworkMinion>>,
+    neutrals: Query<(&Transform, &NetworkNeutralCampType, &CombatStats), With<NetworkNeutral>>,
     thumbnails: Res<AvatarThumbnails>,
     sprites: Res<SpriteVisualAssets>,
     mode: Res<PlayerVisualMode>,
@@ -581,6 +596,77 @@ fn update_minimap_icons_system(
         );
     }
     despawn_removed_icons(&mut commands, &mut state.minion_icons, &seen);
+    let camps = shared::jungle::camp_layout(layout.size().x);
+    let mut living = [false; 6];
+    for (transform, kind, stats) in &neutrals {
+        if !stats.is_alive() || kind.0.is_boss() {
+            continue;
+        }
+        // A roaming mob remains attached to its home marker. Matching types
+        // are on opposite sides, much farther apart than the server leash.
+        let closest = camps
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, camp_kind))| NeutralCampType::from(*camp_kind) == kind.0)
+            .min_by(|(_, (a, _)), (_, (b, _))| {
+                transform
+                    .translation
+                    .xz()
+                    .distance_squared(Vec2::from_array(*a))
+                    .total_cmp(
+                        &transform
+                            .translation
+                            .xz()
+                            .distance_squared(Vec2::from_array(*b)),
+                    )
+            })
+            .map(|(index, _)| index);
+        if let Some(index) = closest {
+            living[index] = true;
+        }
+    }
+    for (index, (anchor, kind)) in camps.into_iter().enumerate() {
+        let alive = living[index];
+        let color = match kind {
+            shared::jungle::JungleCampKind::Skirmisher => Color::srgb(0.46, 0.96, 0.40),
+            shared::jungle::JungleCampKind::Bruiser => Color::srgb(1.0, 0.71, 0.26),
+            shared::jungle::JungleCampKind::Spitter => Color::srgb(0.84, 0.52, 1.0),
+        };
+        let mut node = marker_node(
+            map_point(*layout, Vec3::new(anchor[0], 0.0, anchor[1])),
+            10.0,
+        );
+        node.border = UiRect::all(Val::Px(2.0));
+        node.border_radius = BorderRadius::all(Val::Px(5.0));
+        let components = (
+            node,
+            BackgroundColor(if alive {
+                color
+            } else {
+                Color::srgb(0.07, 0.10, 0.09)
+            }),
+            BorderColor::all(if alive {
+                Color::srgb(0.10, 0.13, 0.09)
+            } else {
+                Color::srgb(0.47, 0.50, 0.44)
+            }),
+            MinimapCamp { index, alive },
+        );
+        if let Some(icon) = state.camp_icons[index] {
+            commands.entity(icon).insert(components);
+        } else {
+            state.camp_icons[index] = Some(
+                commands
+                    .spawn((
+                        components,
+                        ZIndex(2),
+                        Name::new(format!("MinimapCamp-{index}")),
+                        ChildOf(container),
+                    ))
+                    .id(),
+            );
+        }
+    }
 }
 fn hero_marker_visible(
     local_team: Option<Team>,
@@ -802,6 +888,96 @@ mod tests {
             .id();
         app.world_mut().resource_mut::<MinimapUiState>().container = Some(container);
         app
+    }
+
+    #[test]
+    fn six_persistent_camp_markers_follow_authoritative_death_roaming_and_respawn() {
+        let mut app = marker_app();
+        let layout = *app.world().resource::<MapLayout>();
+        let camps = shared::jungle::camp_layout(layout.size().x);
+        app.update();
+        let icons = app.world().resource::<MinimapUiState>().camp_icons;
+        assert!(icons.iter().all(Option::is_some));
+        for icon in icons {
+            assert!(
+                !app.world()
+                    .entity(icon.unwrap())
+                    .get::<MinimapCamp>()
+                    .unwrap()
+                    .alive
+            );
+        }
+        let entities = camps.map(|(anchor, kind)| {
+            app.world_mut()
+                .spawn((
+                    NetworkNeutral,
+                    NetworkNeutralCampType(kind.into()),
+                    Transform::from_xyz(anchor[0], 0.5, anchor[1]),
+                    CombatStats {
+                        hp: 72.0,
+                        max_hp: 72.0,
+                        ..default()
+                    },
+                ))
+                .id()
+        });
+        app.update();
+        for icon in icons {
+            assert!(
+                app.world()
+                    .entity(icon.unwrap())
+                    .get::<MinimapCamp>()
+                    .unwrap()
+                    .alive
+            );
+        }
+        app.world_mut()
+            .entity_mut(entities[0])
+            .get_mut::<Transform>()
+            .unwrap()
+            .translation
+            .x += 10.0;
+        app.world_mut()
+            .entity_mut(entities[2])
+            .get_mut::<CombatStats>()
+            .unwrap()
+            .hp = 0.0;
+        app.world_mut().despawn(entities[4]);
+        app.update();
+        for (index, icon) in icons.into_iter().enumerate() {
+            let marker = app
+                .world()
+                .entity(icon.unwrap())
+                .get::<MinimapCamp>()
+                .unwrap();
+            assert_eq!(marker.alive, index != 2 && index != 4);
+        }
+        let (anchor, kind) = camps[4];
+        app.world_mut().spawn((
+            NetworkNeutral,
+            NetworkNeutralCampType(kind.into()),
+            Transform::from_xyz(anchor[0], 0.5, anchor[1]),
+            CombatStats {
+                hp: 72.0,
+                ..default()
+            },
+        ));
+        app.update();
+        assert_eq!(app.world().resource::<MinimapUiState>().camp_icons, icons);
+        assert!(
+            app.world()
+                .entity(icons[4].unwrap())
+                .get::<MinimapCamp>()
+                .unwrap()
+                .alive
+        );
+        assert_eq!(
+            app.world_mut()
+                .query::<&MinimapCamp>()
+                .iter(app.world())
+                .count(),
+            6
+        );
     }
 
     #[test]

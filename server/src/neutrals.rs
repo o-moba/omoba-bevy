@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) fn neutral_template(camp_type: NeutralCampType) -> NeutralTemplate {
     match camp_type {
         NeutralCampType::Skirmisher => NeutralTemplate {
@@ -79,29 +82,22 @@ fn jungle_map_size() -> f32 {
 }
 
 pub(crate) fn jungle_camp_blueprints() -> Vec<(Vec3f, NeutralCampType)> {
-    let map_size = jungle_map_size();
-    let jungle_outer = map_size * JUNGLE_MAP_OUTER_FRAC;
-    let jungle_inner = map_size * JUNGLE_MAP_INNER_FRAC;
-    let y = NEUTRAL_SPAWN_HEIGHT;
-    vec![
-        (
-            Vec3f::new(-jungle_outer, y, jungle_inner),
-            NeutralCampType::Skirmisher,
-        ),
-        (
-            Vec3f::new(jungle_outer, y, -jungle_inner),
-            NeutralCampType::Bruiser,
-        ),
-        (
-            Vec3f::new(-jungle_inner, y, -jungle_outer),
-            NeutralCampType::Spitter,
-        ),
-    ]
+    shared::jungle::camp_layout(jungle_map_size())
+        .into_iter()
+        .map(|([x, z], kind)| {
+            let camp_type = match kind {
+                shared::jungle::JungleCampKind::Skirmisher => NeutralCampType::Skirmisher,
+                shared::jungle::JungleCampKind::Bruiser => NeutralCampType::Bruiser,
+                shared::jungle::JungleCampKind::Spitter => NeutralCampType::Spitter,
+            };
+            (Vec3f::new(x, NEUTRAL_SPAWN_HEIGHT, z), camp_type)
+        })
+        .collect()
 }
 
 /// Boss pit anchors: 180-degree rotationally symmetric points (team-fair) in
 /// the bottom-lane region (Wendigo) and the top-lane region (King Mutatio),
-/// clear of the three camp slots, lanes, and towers.
+/// clear of the ordinary camp slots, lanes, and towers.
 pub(crate) fn boss_blueprints() -> Vec<(Vec3f, NeutralCampType)> {
     let map_size = jungle_map_size();
     let boss_outer = map_size * BOSS_PIT_OUTER_FRAC;
@@ -200,4 +196,49 @@ pub(crate) fn schedule_boss_spawns(neutrals: &mut HashMap<u64, Neutral>, now: In
         neutral.state.z = neutral.anchor.z;
         neutral.state.yaw = 0.0;
     }
+}
+
+/// Shared evade/respawn cleanup. A lost target must not leave a wounded mob
+/// parked away from its camp, or carry an old attack timer into the next fight.
+pub(crate) fn reset_neutral_at_anchor(neutral: &mut Neutral) {
+    neutral.state.x = neutral.anchor.x;
+    neutral.state.y = neutral.anchor.y;
+    neutral.state.z = neutral.anchor.z;
+    neutral.state.yaw = 0.0;
+    neutral.state.hp = neutral.state.max_hp;
+    neutral.state.ai_state = NeutralAiState::Idle;
+    neutral.target_player_id = None;
+    neutral.last_attack_at = None;
+}
+
+/// Ordinary camps evade when a chase step meets solid scenery. The same swept
+/// clearance used by heroes prevents tunneling even for a large tick; returning
+/// home also avoids an indefinitely stuck, farmable target behind a wall.
+/// Boss movement retains its existing pit behavior.
+pub(crate) fn chase_neutral(
+    neutral: &mut Neutral,
+    destination: shared::navigation::Point,
+    dt: f32,
+    navigation: &shared::navigation::NavigationMap,
+) {
+    let dx = destination[0] - neutral.state.x;
+    let dz = destination[1] - neutral.state.z;
+    let distance = dx.hypot(dz);
+    if distance <= 0.0001 || dt <= 0.0 {
+        return;
+    }
+    let travel = (NEUTRAL_CHASE_SPEED * dt).min(distance);
+    let next = [
+        neutral.state.x + dx / distance * travel,
+        neutral.state.z + dz / distance * travel,
+    ];
+    if !neutral.state.camp_type.is_boss()
+        && !navigation.segment_clear([neutral.state.x, neutral.state.z], next)
+    {
+        reset_neutral_at_anchor(neutral);
+        return;
+    }
+    neutral.state.x = next[0];
+    neutral.state.z = next[1];
+    neutral.state.yaw = dx.atan2(dz);
 }

@@ -215,17 +215,9 @@ impl MapLayout {
         height(self.home_spawn).max(height(self.away_spawn))
     }
 
-    /// XZ centers of the three neutral jungle camps
-    /// (mirrors `jungle_camp_blueprints` in server/src/neutrals.rs).
-    pub(crate) fn camp_centers(self) -> [Vec2; 3] {
-        let map_size = self.size().x;
-        let outer = map_size * JUNGLE_MAP_OUTER_FRAC;
-        let inner = map_size * JUNGLE_MAP_INNER_FRAC;
-        [
-            Vec2::new(-outer, inner),
-            Vec2::new(outer, -inner),
-            Vec2::new(-inner, -outer),
-        ]
+    /// Six authoritative camp anchors shared by server and both visual modes.
+    pub(crate) fn camp_centers(self) -> [Vec2; 6] {
+        shared::jungle::camp_layout(self.size().x).map(|(point, _)| Vec2::from_array(point))
     }
 
     /// XZ anchors of the two raid-boss pits
@@ -372,12 +364,8 @@ mod tests {
                 );
             }
         }
-        // Exactly the 5 non-hosting blocks remain (3 camps + 2 boss pits
-        // each claim one of the 10 block slots).
-        assert_eq!(
-            spawned.len(),
-            layout.jungle_block_centers().len() - anchors.len()
-        );
+        // New camps claim six slots, bosses two, leaving the mid-jungle pair.
+        assert_eq!(spawned.len(), 2);
     }
 
     #[test]

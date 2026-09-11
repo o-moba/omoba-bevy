@@ -12,6 +12,7 @@ mod god_mode;
 mod help_overlay;
 mod input_bindings;
 mod input_context;
+mod jungle;
 mod maps;
 mod match_hud;
 mod minimap;
@@ -114,7 +115,11 @@ pub fn main() {
         MinionVisualsPlugin,
     ))
     // Separate call: the plugin tuple above is at Bevy's 15-element limit.
-    .add_plugins((DecorPlugin, presentation3d::Presentation3dPlugin))
+    .add_plugins((
+        DecorPlugin,
+        presentation3d::Presentation3dPlugin,
+        jungle::JungleVisualsPlugin,
+    ))
     .add_plugins((verdant3d::Verdant3dPlugin, visual_qa::VisualQaPlugin))
     .add_plugins((
         mobile_controls::MobileControlsPlugin,

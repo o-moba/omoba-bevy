@@ -85,6 +85,9 @@ pub const NEUTRAL_LEASH_DISTANCE: f32 = 13.0;
 pub const NEUTRAL_ATTACK_COOLDOWN: Duration = Duration::from_millis(850);
 pub const NEUTRAL_CHASE_SPEED: f32 = 2.9;
 pub const NEUTRAL_RESPAWN_COOLDOWN: Duration = Duration::from_secs(40);
+/// Small last-hit recovery lets every class continue a jungle route. Applied
+/// once to living ordinary-camp killers, never to bosses or dead players.
+pub const NEUTRAL_KILL_HEAL_FRACTION: f32 = 0.20;
 
 pub const SKIRMISHER_MAX_HP: f32 = 72.0;
 pub const SKIRMISHER_ATTACK_DAMAGE: f32 = 7.0;

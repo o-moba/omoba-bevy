@@ -28,8 +28,9 @@ use crate::{
     model_scale::NormalizeModelScale,
     net::{
         ClientSession, GameState, GameStateSnapshot, MinionBrainState, NetworkCommand,
-        NetworkMinion, NetworkMinionBrainState, NetworkNeutral, NetworkPlayerId, NetworkStructure,
-        NeutralAiState, NeutralAiStateTag, NeutralCampType,
+        NetworkMinion, NetworkMinionBrainState, NetworkNeutral, NetworkNeutralCampType,
+        NetworkNeutralId, NetworkPlayerId, NetworkStructure, NeutralAiState, NeutralAiStateTag,
+        NeutralCampType,
     },
     pause_menu::PauseMenuState,
     player::{MovementTarget, Player},
@@ -41,6 +42,14 @@ use crate::{
 const SETTLE_FRAMES: u32 = 45;
 const MAX_SECONDS: u64 = 240;
 const QA_DESTINATION: Vec3 = Vec3::new(2.0, 0.0, 1.0);
+const MOBILE_PRIMARY_CONTROLS: [&str; 6] = [
+    "MobileJoystick",
+    "MobileAttack",
+    "MobileAbility-0",
+    "MobileAbility-1",
+    "MobileAbility-2",
+    "MobileAbility-3",
+];
 
 pub struct VisualQaPlugin;
 
@@ -69,6 +78,7 @@ impl Plugin for VisualQaPlugin {
             .add_systems(
                 PostUpdate,
                 capture_qa
+                    .after(crate::jungle::ground_jungle_creatures)
                     .before(bevy::transform::TransformSystems::Propagate)
                     .before(CameraUpdateSystems)
                     .before(bevy::ui::UiSystems::Layout),
@@ -162,12 +172,56 @@ fn views() -> [View; 5] {
     ]
 }
 
+fn jungle_views() -> [View; 4] {
+    let anchors = MapLayout::default().camp_centers();
+    let dimension = |key, fallback, min, max| {
+        std::env::var(key)
+            .ok()
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(fallback)
+            .clamp(min, max)
+    };
+    let pixels = UVec2::new(
+        dimension("OMOBA_QA_WIDTH", 1280, 320, 3840),
+        dimension("OMOBA_QA_HEIGHT", 720, 180, 2160),
+    );
+    let mut overview = views()[0];
+    overview.file = "01-jungle-overview.png";
+    overview.hud = true;
+    overview.pixels = pixels;
+    // Keep the entire board in frame even on a landscape phone viewport.
+    overview.width = 315.0_f32.max(260.0 * pixels.x as f32 / pixels.y as f32);
+    let closeup = |index: usize, file| {
+        let target = Vec3::new(anchors[index].x, 0.8, anchors[index].y);
+        View {
+            file,
+            position: target + Vec3::new(9.0, 15.0, 13.0),
+            target,
+            width: 20.0,
+            pixels,
+            hud: true,
+            perspective: false,
+            orbit_yaw: 0.0,
+            zoom: 1.0,
+        }
+    };
+    [
+        overview,
+        closeup(0, "02-jungle-skirmisher.png"),
+        closeup(2, "03-jungle-bruiser.png"),
+        closeup(4, "04-jungle-spitter.png"),
+    ]
+}
+
 #[derive(Resource)]
 struct QaState {
     directory: PathBuf,
+    jungle: bool,
+    views: Vec<View>,
     started: Instant,
     timeout: Duration,
     joined: bool,
+    focus_requested: bool,
     fixtures_spawned: bool,
     view: usize,
     stable_frames: u32,
@@ -180,11 +234,19 @@ struct QaState {
 
 impl QaState {
     fn new(directory: PathBuf, max_seconds: u64) -> Self {
+        let jungle = std::env::var("OMOBA_VISUAL_QA_SCENARIO").is_ok_and(|v| v == "jungle");
         Self {
             directory,
+            jungle,
+            views: if jungle {
+                jungle_views().to_vec()
+            } else {
+                views().to_vec()
+            },
             started: Instant::now(),
             timeout: Duration::from_secs(max_seconds),
             joined: false,
+            focus_requested: false,
             fixtures_spawned: false,
             view: 0,
             stable_frames: 0,
@@ -213,7 +275,17 @@ fn prepare_qa(
     mut pause: ResMut<PauseMenuState>,
     players: Query<(Entity, &Transform, &CombatStats, Option<&MovementTarget>), With<Player>>,
     join_ui: Query<Entity, With<TeamSelectRoot>>,
+    mut windows: Query<&mut Window, With<PrimaryWindow>>,
 ) {
+    if qa.jungle
+        && !qa.focus_requested
+        && let Ok(mut window) = windows.single_mut()
+    {
+        // This short-lived QA window requests real OS focus once. Production
+        // focus events and input policy still decide whether controls appear.
+        window.focused = true;
+        qa.focus_requested = true;
+    }
     help.0 = false;
     pause.open = false;
     if !qa.joined && session.is_connected() {
@@ -241,7 +313,8 @@ fn prepare_qa(
         }
         info!("VERDANT_QA autojoin={avatar} team=green method=normal_network_command");
     }
-    if session.join_confirmed()
+    if !qa.jungle
+        && session.join_confirmed()
         && let Ok((entity, transform, stats, target)) = players.single()
         && stats.is_alive()
         && target.is_none()
@@ -252,7 +325,7 @@ fn prepare_qa(
         });
         info!("VERDANT_QA movement=production_local_path destination={QA_DESTINATION:?}");
     }
-    if session.join_confirmed() && !qa.fixtures_spawned {
+    if !qa.jungle && session.join_confirmed() && !qa.fixtures_spawned {
         qa.fixtures_spawned = true;
         // Explicit render fixtures exercise the exact production factories.
         // They have no server identity and are counted separately in evidence.
@@ -346,6 +419,18 @@ struct CaptureWorld<'w, 's> {
     local_avatar: Query<'w, 's, &'static crate::net::NetworkAvatar, With<Player>>,
     animations: Query<'w, 's, &'static AnimationPlayer>,
     fixtures: Query<'w, 's, (), With<QaActor>>,
+    neutrals: Query<
+        'w,
+        's,
+        (
+            &'static NetworkNeutralId,
+            &'static NetworkNeutralCampType,
+            &'static CombatStats,
+            &'static NormalizeModelScale,
+            &'static Transform,
+        ),
+        (With<NetworkNeutral>, Without<MainCamera>),
+    >,
     meshes: Query<'w, 's, (), With<Mesh3d>>,
     materials: Res<'w, Assets<StandardMaterial>>,
     local: Query<
@@ -366,7 +451,27 @@ struct CaptureWorld<'w, 's> {
     >,
     shadows: Query<'w, 's, &'static mut CascadeShadowConfig, With<DirectionalLight>>,
     windows: Query<'w, 's, (Entity, &'static mut Window), With<PrimaryWindow>>,
-    ui: Query<'w, 's, (Entity, &'static mut Node, Option<&'static Name>), Without<ChildOf>>,
+    ui: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static mut Node,
+            Option<&'static Name>,
+            Option<&'static ComputedNode>,
+            Option<&'static UiGlobalTransform>,
+            Option<&'static InheritedVisibility>,
+        ),
+        Without<ChildOf>,
+    >,
+}
+
+fn primary_mobile_controls_fit(nodes: &[serde_json::Value]) -> bool {
+    MOBILE_PRIMARY_CONTROLS.iter().all(|name| {
+        nodes.iter().any(|node| {
+            node["name"] == *name && node["visible"] == true && node["fits_viewport"] == true
+        })
+    })
 }
 
 fn capture_qa(
@@ -375,6 +480,8 @@ fn capture_qa(
     mode: Res<PlayerVisualMode>,
     session: Res<ClientSession>,
     game: Res<GameStateSnapshot>,
+    context: Res<crate::input_context::GameplayInputContext>,
+    mobile: Res<crate::mobile_controls::MobileControls>,
     asset_server: Res<AssetServer>,
     spawner: Res<SceneSpawner>,
     mut scenes: ParamSet<(CaptureWorld, crate::minimap::MinimapQaScene)>,
@@ -402,10 +509,10 @@ fn capture_qa(
         exit.write(AppExit::error());
         return;
     }
-    if qa.view >= views().len() {
+    if qa.view >= qa.views.len() {
         return;
     }
-    let mut view = views()[qa.view];
+    let mut view = qa.views[qa.view];
     if view.perspective
         && let Ok((local, _)) = world.local.single()
     {
@@ -460,7 +567,12 @@ fn capture_qa(
                 .set_physical_resolution(view.pixels.x, view.pixels.y);
         }
     }
-    for (entity, mut node, name) in &mut world.ui {
+    let window_focused = world
+        .windows
+        .single()
+        .is_ok_and(|(_, window)| window.focused);
+    let mut primary_nodes = Vec::new();
+    for (entity, mut node, name, computed, transform, visibility) in &mut world.ui {
         let overlay = name.is_some_and(|name| {
             matches!(
                 name.as_str(),
@@ -473,7 +585,33 @@ fn capture_qa(
         } else if let Some(display) = qa.hidden_ui.remove(&entity) {
             node.display = display;
         }
+        if let (Some(name), Some(computed), Some(transform)) = (name, computed, transform)
+            && MOBILE_PRIMARY_CONTROLS.contains(&name.as_str())
+        {
+            let center = transform.translation * computed.inverse_scale_factor();
+            let size = computed.size()
+                * transform.to_scale_angle_translation().0.abs()
+                * computed.inverse_scale_factor();
+            let minimum = center - size * 0.5;
+            let maximum = center + size * 0.5;
+            let visible = node.display != Display::None
+                && visibility.is_none_or(|value| value.get())
+                && size.is_finite()
+                && size.x > 0.0
+                && size.y > 0.0;
+            primary_nodes.push(serde_json::json!({
+                "name":name.as_str(), "visible":visible,
+                "logical_min":minimum.to_array(), "logical_size":size.to_array(),
+                "fits_viewport":minimum.is_finite() && maximum.is_finite()
+                    && minimum.x >= -1.0 && minimum.y >= -1.0
+                    && maximum.x <= view.pixels.x as f32 + 1.0
+                    && maximum.y <= view.pixels.y as f32 + 1.0,
+            }));
+        }
     }
+    let primary_controls_fit = primary_mobile_controls_fit(&primary_nodes);
+    let mobile_ready =
+        !mobile.enabled || (context.gameplay_allowed() && window_focused && primary_controls_fit);
     if qa.in_flight {
         if qa.finished_readbacks.contains(&qa.view)
             && qa
@@ -485,7 +623,7 @@ fn capture_qa(
             qa.view += 1;
             qa.in_flight = false;
             qa.stable_frames = 0;
-            if qa.view == views().len() {
+            if qa.view == qa.views.len() {
                 let summary = serde_json::json!({ "version":env!("CARGO_PKG_VERSION"),
                     "method":"Bevy Screenshot::primary_window + save_to_disk", "captures":qa.captures,
                     "elapsed_seconds":qa.started.elapsed().as_secs_f64(), "authoritative_structures":world.structures.iter().count(),
@@ -496,7 +634,7 @@ fn capture_qa(
                 );
                 info!(
                     "VERDANT_QA completed images={} summary={summary}",
-                    views().len()
+                    qa.views.len()
                 );
                 // Use the production Exit-button window cleanup before AppExit.
                 if let Ok((window, _)) = world.windows.single() {
@@ -536,22 +674,38 @@ fn capture_qa(
                 )
             })
             .count(),
-        local_at_river: world.local.single().is_ok_and(|(transform, stats)| {
-            stats.is_alive() && transform.translation.xz().distance(QA_DESTINATION.xz()) < 3.0
-        }),
-        peers_at_river: world
-            .actors
-            .iter()
-            .all(|actor| actor.translation.xz().distance(QA_DESTINATION.xz()) < 12.0),
+        local_at_river: qa.jungle
+            || world.local.single().is_ok_and(|(transform, stats)| {
+                stats.is_alive() && transform.translation.xz().distance(QA_DESTINATION.xz()) < 3.0
+            }),
+        peers_at_river: qa.jungle
+            || world
+                .actors
+                .iter()
+                .all(|actor| actor.translation.xz().distance(QA_DESTINATION.xz()) < 12.0),
         meshes: world.meshes.iter().count(),
     };
-    qa.stable_frames = advance_stability(qa.stable_frames, ready_for_capture(ready));
+    let jungle_mobs = world
+        .neutrals
+        .iter()
+        .filter(|(_, kind, stats, scale, _)| {
+            !kind.0.is_boss() && stats.is_alive() && scale.head_local_y.is_some()
+        })
+        .count();
+    qa.stable_frames = advance_stability(
+        qa.stable_frames,
+        ready_for_capture(ready) && (!qa.jungle || (jungle_mobs == 6 && mobile_ready)),
+    );
     let diagnostic = qa.started.elapsed().as_secs() as u32 / 5;
     if diagnostic > qa.last_diagnostic {
         qa.last_diagnostic = diagnostic;
         info!(
-            "VERDANT_QA readiness={ready:?} stable_frames={} view={}",
-            qa.stable_frames, qa.view
+            "VERDANT_QA readiness={ready:?} stable_frames={} view={} gameplay_allowed={} window_focused={} primary_controls_fit={}",
+            qa.stable_frames,
+            qa.view,
+            context.gameplay_allowed(),
+            window_focused,
+            primary_controls_fit
         );
     }
     if qa.stable_frames < SETTLE_FRAMES {
@@ -564,8 +718,9 @@ fn capture_qa(
     }
     let index = qa.view;
     let path = qa.directory.join(view.file);
-    let capture = serde_json::json!({ "file":view.file, "position":view.position.to_array(),
+    let mut capture = serde_json::json!({ "file":view.file, "position":view.position.to_array(),
         "target":view.target.to_array(),"orthographic_width":view.width,"pixels":view.pixels.to_array(),
+        "ui_profile":format!("{:?}", crate::platform::ui_profile()),
         "hud":view.hud,"projection":if view.perspective {"production_default_perspective"} else {"source_orthographic"},
         "shadow_maximum_distance":shadow_range,"overview_shadow_range_override":qa.view == 0,"ready_scenes":ready.ready_scenes,"scenes":ready.scenes,
         "environment_roots":ready.environments,"foliage_roots":ready.foliage,"authoritative_structures":ready.structures,
@@ -576,9 +731,17 @@ fn capture_qa(
         "animation_players":world.animations.iter().count(),
         "playing_animation_nodes":world.animations.iter().map(|player| player.playing_animations().count()).sum::<usize>(),
         "asset_root":shared::client_asset_root(),"version":env!("CARGO_PKG_VERSION"),
-        "source_camera":if view.perspective {"production follow offset with declared QA orbit/zoom"} else {"art/verdant-confluence/scripts/build_scene.py"},"stable_frames":qa.stable_frames,
+        "source_camera":if qa.jungle {"shared jungle camp anchors and bounded QA closeup offsets"} else if view.perspective {"production follow offset with declared QA orbit/zoom"} else {"art/verdant-confluence/scripts/build_scene.py"},"stable_frames":qa.stable_frames,
         "orbit_yaw_radians":view.orbit_yaw,"zoom":view.zoom,"minimap":minimap_summary,
-        "setup":"authoritative server structures and selected local avatar; five tagged render-only production creature fixtures" });
+        "jungle_mobs":world.neutrals.iter().filter(|(_, kind, _, _, _)| !kind.0.is_boss()).map(|(id, kind, stats, scale, transform)|
+            serde_json::json!({"id":id.0,"kind":format!("{:?}",kind.0),"hp":stats.hp,
+                "position":transform.translation.to_array(),"foot_local_y":scale.foot_local_y(),"head_local_y":scale.head_local_y})).collect::<Vec<_>>(),
+        "setup":if qa.jungle {"six authoritative server camp creatures; no render fixtures"} else {"authoritative server structures and selected local avatar; five tagged render-only production creature fixtures"} });
+    capture["mobile_controls"] = mobile.enabled.into();
+    capture["gameplay_allowed"] = context.gameplay_allowed().into();
+    capture["window_focused"] = window_focused.into();
+    capture["primary_controls_fit"] = primary_controls_fit.into();
+    capture["primary_nodes"] = primary_nodes.into();
     info!("VERDANT_QA capture_request={capture}");
     qa.captures.push(capture);
     qa.in_flight = true;
@@ -607,6 +770,14 @@ fn record_readback(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capture_queries_keep_neutral_transforms_disjoint_from_camera_mutation() {
+        let mut world = World::new();
+        world.init_resource::<Assets<StandardMaterial>>();
+        let mut parameters = bevy::ecs::system::SystemState::<CaptureWorld>::new(&mut world);
+        let _ = parameters.get_mut(&mut world);
+    }
 
     #[test]
     fn output_is_strictly_opt_in_and_time_budget_is_bounded() {
