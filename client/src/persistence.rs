@@ -27,8 +27,9 @@ use crate::world::{
     MIN_LIGHT_YAW_DEG,
 };
 
-const SCHEMA_VERSION: u32 = 3;
-const PREVIOUS_DEFAULT_MODEL_TARGET_HEIGHT: f32 = 1.15;
+const SCHEMA_VERSION: u32 = 4;
+const LEGACY_DEFAULT_MODEL_TARGET_HEIGHT: f32 = 1.15;
+const SCHEMA_3_DEFAULT_MODEL_TARGET_HEIGHT: f32 = 1.45;
 const PREFS_FILENAME: &str = "client_preferences.json";
 const CLIENT_SESSION_ID_MAX_LEN: usize = 64;
 
@@ -166,14 +167,17 @@ pub fn clamp_model_target_height(value: f32) -> f32 {
 }
 
 /// Migrates old defaults once, preserving custom sizes in the supported range.
-/// Schema 3 records the larger hero default; a deliberate 1.15 saved under
-/// schema 3 therefore survives subsequent launches. Earlier subminimum values
-/// belong to the obsolete world scale (whose default was 0.26).
+/// Schema 4 records the Verdant readability default. Only schema 3's exact 1.45
+/// default and pre-schema-3 defaults (1.15 or obsolete subminimum values) migrate.
+/// A deliberate 1.15 under schema 3, or either old default saved under schema 4,
+/// survives subsequent launches.
 pub fn migrate_model_target_height(stored: f32, schema_version: u32) -> f32 {
-    if schema_version < 3
+    let legacy_default = schema_version < 3
         && (stored < MIN_MODEL_TARGET_HEIGHT
-            || (stored - PREVIOUS_DEFAULT_MODEL_TARGET_HEIGHT).abs() < f32::EPSILON)
-    {
+            || (stored - LEGACY_DEFAULT_MODEL_TARGET_HEIGHT).abs() < f32::EPSILON);
+    let previous_default =
+        schema_version == 3 && (stored - SCHEMA_3_DEFAULT_MODEL_TARGET_HEIGHT).abs() < f32::EPSILON;
+    if legacy_default || previous_default {
         DEFAULT_MODEL_TARGET_HEIGHT
     } else {
         clamp_model_target_height(stored)
@@ -498,11 +502,11 @@ mod tests {
             DEFAULT_MODEL_TARGET_HEIGHT
         );
         assert_eq!(
-            migrate_model_target_height(PREVIOUS_DEFAULT_MODEL_TARGET_HEIGHT, 2),
+            migrate_model_target_height(LEGACY_DEFAULT_MODEL_TARGET_HEIGHT, 2),
             DEFAULT_MODEL_TARGET_HEIGHT
         );
         // Old custom values survive, including values near the old default.
-        for custom in [0.3, 0.5, 1.149, 1.151, 1.2, 2.4, 3.0] {
+        for custom in [0.3, 0.5, 1.149, 1.151, 1.2, 1.45, 2.4, 3.0] {
             assert_eq!(migrate_model_target_height(custom, 2), custom);
         }
         assert_eq!(
@@ -511,11 +515,28 @@ mod tests {
         );
         // A user deliberately restoring the old height after this release
         // must not have it upgraded again on every launch.
-        assert_eq!(migrate_model_target_height(1.15, SCHEMA_VERSION), 1.15);
+        for custom in [1.15, 1.45] {
+            assert_eq!(migrate_model_target_height(custom, SCHEMA_VERSION), custom);
+        }
         assert_eq!(
             migrate_model_target_height(0.26, SCHEMA_VERSION),
             MIN_MODEL_TARGET_HEIGHT
         );
+    }
+
+    #[test]
+    fn schema_three_migrates_only_its_default_and_preserves_custom_sizes() {
+        assert_eq!(
+            migrate_model_target_height(SCHEMA_3_DEFAULT_MODEL_TARGET_HEIGHT, 3),
+            DEFAULT_MODEL_TARGET_HEIGHT
+        );
+        for custom in [0.3, 0.5, 1.15, 1.449, 1.451, 1.8, 2.4, 3.0] {
+            assert_eq!(migrate_model_target_height(custom, 3), custom);
+        }
+        // Older and future schemas must not mistake a custom 1.45 for schema 3's default.
+        for schema in [1, 2, SCHEMA_VERSION, SCHEMA_VERSION + 1] {
+            assert_eq!(migrate_model_target_height(1.45, schema), 1.45);
+        }
     }
 
     #[test]
@@ -528,7 +549,17 @@ mod tests {
             DEFAULT_MODEL_TARGET_HEIGHT
         );
 
-        for target_height in [1.15, DEFAULT_MODEL_TARGET_HEIGHT, 2.4] {
+        let previous: ClientPreferencesFile =
+            serde_json::from_str(r#"{"schema_version":3,"model_target_height":1.45}"#).unwrap();
+        assert_eq!(
+            migrate_model_target_height(
+                previous.model_target_height.unwrap(),
+                previous.schema_version
+            ),
+            DEFAULT_MODEL_TARGET_HEIGHT
+        );
+
+        for target_height in [1.15, 1.45, DEFAULT_MODEL_TARGET_HEIGHT, 2.4] {
             let saved = build_file_from_state(
                 &LightingSettings::default(),
                 &ModelScaleSettings { target_height },

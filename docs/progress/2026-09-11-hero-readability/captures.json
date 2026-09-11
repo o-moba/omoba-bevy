@@ -1,0 +1,66 @@
+{
+  "capture_method": "Actual Bevy renderer readback; isolated local server",
+  "manual_interaction_verified": false,
+  "captures": [
+    {
+      "path": "before-desktop.png",
+      "caption": "Desktop reference with declared creature render fixtures",
+      "version": "0.18.0-rc.7",
+      "dimensions": [
+        1600,
+        1000
+      ],
+      "bytes": 1554664,
+      "sha256": "4b009797d7c6912bfd6c4e1f86dcf274c5e0cb2b1632e370ba2c348bbc7791eb",
+      "source_artifact": ".agent/tasks/HERO-READABILITY-2026-09-11/raw/before-verdant/04-follow-gameplay.png",
+      "client_sha256": "d97fc80c6b3a53f3cbe3b270a69b83d1301191d243b0d0abfe91209e281cb66b",
+      "server_sha256": "90820ca20be2d6ce1b597554c3a6be8db002512e34e794553b04ab77031ed669",
+      "image_modified": false
+    },
+    {
+      "path": "after-desktop.png",
+      "caption": "Desktop follow view with declared creature render fixtures",
+      "version": "0.18.0-rc.8",
+      "dimensions": [
+        1600,
+        1000
+      ],
+      "bytes": 1548671,
+      "sha256": "c2e5ceed1939a654d6acef99d88138c0bc481b503a793e1881bedddc6b820b79",
+      "source_artifact": ".agent/tasks/HERO-READABILITY-2026-09-11/raw/after-verdant/04-follow-gameplay.png",
+      "client_sha256": "5eef40afb5d576939ca1d054ffe40b87b4fea5a1a8d7c460814eed5e0ff36e3f",
+      "server_sha256": "963d6e072b9ce96227053cb1ce0944147ccc5bdd690e61c1404b0a8ec5635640",
+      "image_modified": false
+    },
+    {
+      "path": "desktop-960.png",
+      "caption": "Native desktop HUD at 960x540",
+      "version": "0.18.0-rc.8",
+      "dimensions": [
+        960,
+        540
+      ],
+      "bytes": 458395,
+      "sha256": "b1edc3698b54921c8cf4d7b9d93af5b21a40a796509f02028d9e885b0f203d8c",
+      "source_artifact": ".agent/tasks/HERO-READABILITY-2026-09-11/raw/desktop-960/03-gameplay-540p.png",
+      "client_sha256": "5eef40afb5d576939ca1d054ffe40b87b4fea5a1a8d7c460814eed5e0ff36e3f",
+      "server_sha256": "963d6e072b9ce96227053cb1ce0944147ccc5bdd690e61c1404b0a8ec5635640",
+      "image_modified": false
+    },
+    {
+      "path": "mobile-preview.png",
+      "caption": "Mobile UI development preview on macOS, not a physical phone",
+      "version": "0.18.0-rc.8",
+      "dimensions": [
+        844,
+        390
+      ],
+      "bytes": 338815,
+      "sha256": "0345246cc8cd54832e9a592d474b75dc3a15ff76d9324ea1b17b2cacbbe323bd",
+      "source_artifact": ".agent/tasks/HERO-READABILITY-2026-09-11/raw/mobile-844/03-gameplay-390p.png",
+      "client_sha256": "5eef40afb5d576939ca1d054ffe40b87b4fea5a1a8d7c460814eed5e0ff36e3f",
+      "server_sha256": "963d6e072b9ce96227053cb1ce0944147ccc5bdd690e61c1404b0a8ec5635640",
+      "image_modified": false
+    }
+  ]
+}

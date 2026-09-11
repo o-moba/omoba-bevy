@@ -13,8 +13,10 @@ use crate::sprite::PlayerVisualMode;
 use crate::team::Team;
 use crate::world2d::simulation_xz_to_render_xy;
 
-pub const CAMERA_DISTANCE: f32 = 24.0;
-pub const CAMERA_HEIGHT: f32 = 28.0;
+/// A slightly closer follow view keeps hero silhouettes readable while
+/// retaining the existing angle, map orientation and user zoom range.
+pub const CAMERA_DISTANCE: f32 = 20.4;
+pub const CAMERA_HEIGHT: f32 = 23.8;
 pub const CAMERA_MIN_ZOOM: f32 = 0.55;
 pub const CAMERA_MAX_ZOOM: f32 = 2.25;
 const CAMERA_ZOOM_SPEED: f32 = 0.1;

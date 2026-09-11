@@ -15887,11 +15887,11 @@
       },
       {
         "path": "client/assets/verdant/foliage.glb",
-        "sha256": "a5989c4d1814951391182ab4a8906bb87f87f4c630782f64bc32a18484325be6",
+        "sha256": "6c44678f30713f3aa64557ac9e3655c410fdd82d9c5fc0e1115ed1cd9d0d1a73",
         "selected_roots": 216
       }
     ],
-    "runtime_manifest_sha256": "25a3717741813d028d9fd7b96ed75e31e1454eb4413bb5d876074af48f201e22"
+    "runtime_manifest_sha256": "ce596c28a93e8708fd381b55956604720272392a833b5e89d6eec924385acb3d"
   },
   "rules": {
     "coordinates": "physical XZ = fully composed shipped glTF world (x,z), meters; no axis conversion",

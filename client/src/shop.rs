@@ -57,6 +57,11 @@ struct ShopFeedback;
 #[derive(Component)]
 struct EquipmentGold;
 #[derive(Component)]
+enum EquipmentLayoutPart {
+    Panel,
+    Slot,
+}
+#[derive(Component)]
 struct InventoryLabel(usize);
 #[derive(Component)]
 struct InventoryIcon {
@@ -68,6 +73,7 @@ impl Plugin for ShopPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ShopState>()
             .add_systems(Startup, setup_shop)
+            .add_systems(Update, adapt_desktop_equipment_width)
             .add_systems(
                 Update,
                 (toggle_shop, sync_shop_visibility)
@@ -118,6 +124,7 @@ fn setup_shop(mut commands: Commands) {
             BackgroundColor(ui::PANEL),
             BorderColor::all(ui::EDGE),
             ZIndex(12),
+            EquipmentLayoutPart::Panel,
             Name::new("EquipmentHud"),
         ))
         .with_children(|panel| {
@@ -154,6 +161,7 @@ fn setup_shop(mut commands: Commands) {
                                 },
                                 BackgroundColor(ui::TILE),
                                 BorderColor::all(ui::EDGE),
+                                EquipmentLayoutPart::Slot,
                                 Name::new(format!("InventorySlot-{index}")),
                             ))
                             .with_children(|slot| {
@@ -242,6 +250,27 @@ fn setup_shop(mut commands: Commands) {
                         ui::text(13.0), TextColor(ui::MUTED), Name::new("ShopFooter")));
                 });
         });
+}
+
+fn adapt_desktop_equipment_width(
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    mut nodes: Query<(&EquipmentLayoutPart, &mut Node)>,
+) {
+    if mobile.is_some_and(|mobile| mobile.enabled) {
+        return;
+    }
+    let Ok(window) = windows.single() else { return };
+    let width = (window.width() - 706.0 - 16.0).clamp(0.0, 260.0);
+    // Keep all six slots in two rows as the panel approaches the right edge.
+    // The panel has 12px padding + 1px border, and two 5px column gaps.
+    let slot_width = ((width - 26.0 - 10.0) / 3.0).clamp(0.0, 73.0);
+    for (part, mut node) in &mut nodes {
+        node.width = Val::Px(match part {
+            EquipmentLayoutPart::Panel => width,
+            EquipmentLayoutPart::Slot => slot_width,
+        });
+    }
 }
 
 /// Small original silhouettes built from UI geometry, shared by shop and
@@ -721,6 +750,67 @@ fn short_item_name(id: ItemId) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn equipment_resizes_in_logical_pixels_and_keeps_three_slots_per_row() {
+        let mut app = App::new();
+        app.add_systems(Startup, setup_shop)
+            .add_systems(Update, adapt_desktop_equipment_width);
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), bevy::window::PrimaryWindow))
+            .id();
+        for (width, height, scale) in [
+            (960, 540, 1.0),
+            (1280, 720, 1.0),
+            (1600, 1000, 1.0),
+            (1920, 1080, 2.0),
+        ] {
+            app.world_mut()
+                .get_mut::<Window>(window)
+                .unwrap()
+                .resolution = bevy::window::WindowResolution::new(width, height)
+                .with_scale_factor_override(scale);
+            app.update();
+            let mut parts = app.world_mut().query::<(&EquipmentLayoutPart, &Node)>();
+            let mut panel_width = 0.0;
+            let mut slot_widths = Vec::new();
+            for (part, node) in parts.iter(app.world()) {
+                let Val::Px(value) = node.width else {
+                    panic!("equipment uses logical pixels")
+                };
+                match part {
+                    EquipmentLayoutPart::Panel => panel_width = value,
+                    EquipmentLayoutPart::Slot => slot_widths.push(value),
+                }
+            }
+            assert_eq!(slot_widths.len(), 6);
+            assert!(706.0 + panel_width + 16.0 <= width as f32 / scale + 0.01);
+            assert!(slot_widths[0] * 3.0 + 10.0 <= panel_width - 26.0 + 0.01);
+            assert!(slot_widths[0] >= 67.0);
+            if scale == 1.0 && width >= 1280 {
+                assert_eq!(panel_width, 260.0);
+                assert_eq!(slot_widths[0], 73.0);
+            }
+        }
+        // Mobile's separate layout must retain its own width after this system runs.
+        let mut controls = crate::mobile_controls::MobileControls::default();
+        controls.enabled = true;
+        app.insert_resource(controls);
+        let panel = app
+            .world_mut()
+            .query::<(Entity, &EquipmentLayoutPart)>()
+            .iter(app.world())
+            .find(|(_, part)| matches!(part, EquipmentLayoutPart::Panel))
+            .unwrap()
+            .0;
+        app.world_mut().get_mut::<Node>(panel).unwrap().width = Val::Px(132.0);
+        app.update();
+        assert_eq!(
+            app.world().get::<Node>(panel).unwrap().width,
+            Val::Px(132.0)
+        );
+    }
 
     #[test]
     fn production_shop_bootstraps_distinct_close_label_and_footer() {

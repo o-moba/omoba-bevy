@@ -1,8 +1,17 @@
 # Feature Inventory
 
-Canonical version: `0.18.0-rc.7`
+Canonical version: `0.18.0-rc.8`
 
 ## Current Playable Surface
+
+- **Hero and environment readability (2026-09-11):** the desktop minimap now
+  sits at upper left with reserved objective space and inventory fit at 960px.
+  The mobile HUD retains its own layout. Heroes normalize to 2.1 world units;
+  the 3D follow camera is 15% closer at the existing angle. Decorative reeds
+  are half-height and grass fans 35% shorter with ground anchors preserved.
+  Trees, rocks, creature sizes and the 236 solid collision polygons are unchanged.
+  Saved previous defaults migrate once; deliberate custom scales remain.
+  See the [measurements and comparison captures](progress/2026-09-11-hero-readability.md).
 
 - **Native phone implementation candidate (2026-09-11):** landscape two-thumb
   controls share the existing movement, collision and legal ability paths with
@@ -39,7 +48,7 @@ Canonical version: `0.18.0-rc.7`
   one gold per second during play, class recommendations and authoritative
   purchases with round-bound retry receipts. Damage, Q attack rate, W/E/R haste,
   movement, HP and mana bonuses affect play; death/reconnect preserve equipment
-  and rematch resets it. The bottom-right map uses team-colored hero portraits,
+  and rematch resets it. The minimap uses team-colored hero portraits,
   a separate local gold halo and actual camera ground coverage. Enemy hero
   markers use shared radial team detection; this is **not world/network fog of
   war**. See the [dated analysis and evidence](progress/2026-09-07-hud-shop-iteration.md)

@@ -2,7 +2,8 @@
 """Deterministically derive the playable Verdant scene from the saved GLB export.
 
 No Blender process or third-party module is needed for this derivation. The
-source scene stays intact; only explicitly documented walking surfaces change.
+source scene stays intact; only documented walking surfaces and decorative
+plant proportions change in the runtime derivative.
 """
 import argparse
 import copy
@@ -18,6 +19,10 @@ OUTPUT = ROOT / "client/assets/verdant"
 STRUCTURES = ("watchtower_green", "watchtower_blue", "sanctuary_green", "sanctuary_blue")
 FOLIAGE_ROLES = {"forest_tree", "understory", "forest_rock", "groundcover", "riverbank",
                  "riverbank_rock", "riverbank_shelf", "riverbank_detail", "forest_story", "base_garden"}
+# These assets have ground-pivot roots with upright Y axes. Keep their XZ
+# footprints and placements, while letting the 2.1m heroes read above them.
+# Trees, rocks and every shared collision surface retain their authored scale.
+FOLIAGE_HEIGHT_FACTORS = {"river_reeds": 0.5, "grass_fan": 0.65}
 
 
 def sha(path):
@@ -222,6 +227,7 @@ def derive(output):
     source = ART / "exports/verdant-confluence.glb"
     gltf, binary = read_glb(source)
     static, foliage, excluded, adjustments = [], [], [], []
+    foliage_counts = {asset: 0 for asset in FOLIAGE_HEIGHT_FACTORS}
     for index in gltf["scenes"][0]["nodes"]:
         node = gltf["nodes"][index]
         name = node.get("name", "")
@@ -229,6 +235,13 @@ def derive(output):
         if role in {"base_landmark", "lane_tower"}:
             excluded.append(name)
             continue
+        asset_id = node.get("extras", {}).get("asset_id")
+        if asset_id in FOLIAGE_HEIGHT_FACTORS:
+            # The measured mesh bottom is exactly at this root's Y origin.
+            # Scaling here preserves contact with the ground, rotations,
+            # material/mesh sharing and every authored instance location.
+            node.setdefault("scale", [1., 1., 1.])[1] *= FOLIAGE_HEIGHT_FACTORS[asset_id]
+            foliage_counts[asset_id] += 1
         dy = 0.
         if name.startswith("Landscape / meadow"):
             dy = .015
@@ -276,6 +289,10 @@ def derive(output):
                     source_sha256=sha(source), source_blend_sha256=sha(ART / "verdant-confluence.blend"),
                     files=inventory, excluded_live_structure_roots=excluded,
                     node_translation_adjustments=adjustments,
+                    foliage_readability={asset: {"vertical_scale_factor": factor,
+                                                 "instances": foliage_counts[asset],
+                                                 "ground_pivot_and_xz_preserved": True}
+                                         for asset, factor in FOLIAGE_HEIGHT_FACTORS.items()},
                     surfaces=dict(open_ground=0, meadow_top=-.02, road_top=0, water_top=-.015, bridge_paver_top=.02,
                                   outer_crossing_top=.02, base_pad_top=.7, pad_half_extent=23, ramp_reach=29,
                                   pad_corner_rule="0.7 * clamp((29 - max(abs(dx), abs(dz))) / 6, 0, 1)",
@@ -285,6 +302,7 @@ def derive(output):
                                  "Square the base pad upper bevel ring at the existing 46m by 0.7m walktop so it meets the miter skirt without corner dips.",
                                  "Compress sanctuary bottom 1.1m to 0.03m; translate upper architecture down 1.07m to expose spawn/walk floor.",
                                  "Runtime sanctuaries rotate 45 degrees around Y to clear original diagonal spawn points.",
+                                 "Reduce decorative reed height by 50% and grass-fan height by 35% around their ground pivots; preserve XZ footprints and all solid geometry.",
                                  "Two scenes split static architecture from F4-controlled foliage; eight live structures are separate assets."],
                     layout=json.loads((ART / "manifest.json").read_text())["layout"])
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")

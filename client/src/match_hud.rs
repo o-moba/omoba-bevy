@@ -148,8 +148,12 @@ fn setup_match_hud(mut commands: Commands) {
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
+                // Reserve the desktop map and a gap even when the window narrows.
+                // The phone layout supplies its own anchors and panel width.
+                left: Val::Px(
+                    crate::minimap::DESKTOP_MINIMAP_INSET + crate::minimap::MINIMAP_SIZE + 16.0,
+                ),
+                right: Val::Px(16.0),
                 top: Val::Px(14.0),
                 justify_content: JustifyContent::Center,
                 ..default()
@@ -163,6 +167,7 @@ fn setup_match_hud(mut commands: Commands) {
                 Button,
                 Node {
                     max_width: Val::Px(630.0),
+                    min_width: Val::Px(0.0),
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
                     row_gap: Val::Px(4.0),
