@@ -37,6 +37,7 @@ fn transform_packets_cannot_tunnel_through_trees_but_a_legal_route_arrives() {
             avatar: None,
             sprite_character: None,
             session_id: Some("forest-authority-test".into()),
+            passport_ticket: None,
         },
         now,
     );

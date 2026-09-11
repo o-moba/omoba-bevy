@@ -1,8 +1,19 @@
 # Feature Inventory
 
-Canonical version: `0.18.0-rc.6`
+Canonical version: `0.19.0-rc.1`
 
 ## Current Playable Surface
+
+- **Purchased avatar passport (2026-09-11):** opt-in terminal pairing connects
+  Omoba to the buyer's browser wallet. The owned library filters paid avatar
+  choices; a trusted HTTP service consumes a one-use ticket before the game
+  server admits the exact approved cosmetic. Free avatars remain available.
+  Curated imports validate SHA-256, size, GLB skinning and required animation
+  clips, then produce a public manifest shared by both binaries after restart.
+  The native renderer and snapshots use that same protected slug, while class
+  and gameplay stats remain independent. See the [setup and evidence scope](
+  progress/2026-09-11-avatar-passport-roundtrip.md). This first delivery requires
+  staged distribution and explicit development-service configuration.
 
 - **Forest navigation and minimap routes (2026-09-08):** right-click ground or
   the minimap to walk around trunks, solid rocks/walls and live towers/bases.
@@ -261,7 +272,7 @@ Canonical version: `0.18.0-rc.6`
 - Server-authoritative hardening for player movement and casts: client transforms are speed/map clamped, non-finite positions are ignored, and casts require the authoritative caster position to be in range of the live target.
 - Local multiplayer flow with server startup plus multi-client local play via `make start`.
 - Team join flow with character selection and player spawning.
-- Ekza Bevy SDK extraction: shared sibling `ekza-bevy-sdk` repository owns stable character ids, built-in 3D model manifest metadata, GLB validation, and Bevy model catalog loading for future dependency publishing.
+- Ekza Bevy SDK extraction: the commit-pinned `ekza-bevy-sdk` Git dependency owns stable character ids, built-in 3D model manifest metadata, GLB validation, purchased-avatar contracts, and Bevy model catalog loading. A sibling checkout is optional for SDK development.
 - VRM avatar support: VRM 0.x avatars (glTF 2.0 binary with extra `VRM`/spring-bone/blendshape extensions) load through the existing glTF model catalog by staging them as `.glb` (the VRM extensions are `extensionsUsed`-only, so Bevy's loader ignores them and keeps the mesh + skeleton). Ships one selectable CC0 humanoid, `Paco` (ToxSam 100Avatars R3); see `ATTRIBUTION.md` and `scripts/convert_vrm_to_glb.py`. The avatar carries no animation clips, so it renders as a static skinned mesh via `NormalizeModelScale` like other models.
 - Core combat loop with projectiles, structures, minions, death, respawn, mana regeneration, and base-destruction win condition.
 - Map layout with three lanes and simple jungle blocks.

@@ -86,7 +86,10 @@ impl Default for TeamSelection {
             hero_class: HeroClass::default(),
             // Preselect the first shipped avatar so a plain "click a team"
             // flow already exercises the roster path.
-            avatar: avatar_roster().first().map(|avatar| avatar.slug.clone()),
+            avatar: avatar_roster()
+                .iter()
+                .find(|avatar| crate::passport::can_select(avatar))
+                .map(|avatar| avatar.slug.clone()),
             sprite_character: shared::DEFAULT_SPRITE_CHARACTER_ID.to_owned(),
         }
     }
@@ -246,6 +249,15 @@ pub fn spawn_team_select_ui(
                 });
 
             spawn_section_title(parent, "Choose Avatar", "AvatarSelectTitle");
+            parent.spawn((
+                Text::new(crate::passport::status()),
+                TextFont {
+                    font_size: 13.0,
+                    ..default()
+                },
+                TextColor::WHITE,
+                Name::new("PassportStatus"),
+            ));
 
             parent.spawn((
                 Text::new("Scroll heroes: mouse wheel / Page Up / Page Down"),
@@ -292,6 +304,7 @@ pub fn spawn_team_select_ui(
                     for avatar in avatar_roster()
                         .iter()
                         .filter(|_| visual_mode == PlayerVisualMode::Models3d)
+                        .filter(|avatar| crate::passport::can_select(avatar))
                     {
                         spawn_avatar_button(
                             grid,

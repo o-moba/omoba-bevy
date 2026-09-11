@@ -30,6 +30,7 @@ pub enum JoinRejection {
     MatchFull,
     SessionActive,
     ProtocolMismatch,
+    AvatarNotAuthorized,
 }
 
 impl JoinRejection {
@@ -41,6 +42,9 @@ impl JoinRejection {
             }
             Self::ProtocolMismatch => {
                 "Client and server versions differ. Use the same release build."
+            }
+            Self::AvatarNotAuthorized => {
+                "Purchased avatar approval failed. Reconnect your wallet or choose a free avatar."
             }
         }
     }

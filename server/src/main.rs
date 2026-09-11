@@ -5,6 +5,7 @@ mod gameplay;
 #[cfg(test)]
 mod navigation_tests;
 mod neutrals;
+mod passport_admission;
 mod progression;
 #[cfg(test)]
 mod release_tests;
@@ -84,6 +85,8 @@ enum ClientPacket {
         sprite_character: Option<String>,
         #[serde(default)]
         session_id: Option<String>,
+        #[serde(default)]
+        passport_ticket: Option<String>,
     },
     Ping,
     RequestRematch,
@@ -938,6 +941,7 @@ impl RateLimitedDiagnostic {
 
 #[derive(Resource)]
 struct ServerRuntime {
+    passport_admissions: passport_admission::PassportAdmissions,
     socket: UdpSocket,
     players: HashMap<SocketAddr, ConnectedPlayer>,
     disconnected_sessions: HashMap<String, DisconnectedSession>,
@@ -978,6 +982,7 @@ impl ServerRuntime {
         neutrals.extend(build_boss_neutrals(&mut next_neutral_id));
 
         Self {
+            passport_admissions: passport_admission::PassportAdmissions::default(),
             socket,
             players: HashMap::new(),
             disconnected_sessions: HashMap::new(),
@@ -1014,6 +1019,24 @@ impl ServerRuntime {
     }
 
     fn receive_packets(&mut self) {
+        for completion in self.passport_admissions.completed() {
+            // Approval cannot change an already admitted loadout. A timed-out
+            // endpoint is required to reconnect rather than resurrected here.
+            if completion.allowed
+                && self
+                    .players
+                    .get(&completion.addr)
+                    .is_some_and(|player| !player.joined)
+            {
+                self.handle_packet_authorized(completion.addr, completion.packet, Instant::now());
+            } else if let Some(player) = self
+                .players
+                .get_mut(&completion.addr)
+                .filter(|player| !player.joined)
+            {
+                player.join_error = Some(shared::protocol::JoinRejection::AvatarNotAuthorized);
+            }
+        }
         loop {
             match self.socket.recv_from(&mut self.recv_buf) {
                 Ok((len, addr)) => {
@@ -1047,6 +1070,78 @@ impl ServerRuntime {
     }
 
     fn handle_packet(&mut self, addr: SocketAddr, packet: ClientPacket, now: Instant) {
+        if matches!(&packet, ClientPacket::Join { .. })
+            && !self.players.get(&addr).is_some_and(|player| player.joined)
+        {
+            ensure_player_connected(
+                &mut self.players,
+                &self.map_layout,
+                addr,
+                &mut self.next_player_id,
+                now,
+            );
+            // A reconnect may restore an old paid loadout. A client must not
+            // bypass ticket verification by requesting a free avatar while
+            // presenting the retained session id.
+            if let ClientPacket::Join {
+                avatar,
+                session_id: Some(session),
+                ..
+            } = &packet
+            {
+                // Reclaim uses the normalized value too; whitespace must not
+                // make this authorization check inspect a different session.
+                let session = normalize_session_id(Some(session.clone()));
+                let retained = self
+                    .players
+                    .values()
+                    .find(|player| session.is_some() && player.session_id == session)
+                    .or_else(|| {
+                        session
+                            .as_ref()
+                            .and_then(|session| self.disconnected_sessions.get(session))
+                            .map(|saved| &saved.player)
+                    })
+                    .and_then(|player| player.state.avatar.as_deref());
+                if retained.is_some_and(|slug| {
+                    (slug.starts_with("ekza-")
+                        || shared::avatar_definition(slug)
+                            .is_some_and(|entry| entry.passport.is_some()))
+                        && avatar.as_deref().map(str::trim) != Some(slug)
+                }) {
+                    ensure_player_connected(
+                        &mut self.players,
+                        &self.map_layout,
+                        addr,
+                        &mut self.next_player_id,
+                        now,
+                    );
+                    self.players.get_mut(&addr).unwrap().join_error =
+                        Some(shared::protocol::JoinRejection::AvatarNotAuthorized);
+                    return;
+                }
+            }
+            match self.passport_admissions.begin(addr, &packet) {
+                passport_admission::Admission::Free => {}
+                passport_admission::Admission::Pending => return,
+                passport_admission::Admission::Denied => {
+                    ensure_player_connected(
+                        &mut self.players,
+                        &self.map_layout,
+                        addr,
+                        &mut self.next_player_id,
+                        now,
+                    );
+                    self.players.get_mut(&addr).unwrap().join_error =
+                        Some(shared::protocol::JoinRejection::AvatarNotAuthorized);
+                    return;
+                }
+            }
+        }
+        self.handle_packet_authorized(addr, packet, now);
+    }
+
+    fn handle_packet_authorized(&mut self, addr: SocketAddr, packet: ClientPacket, now: Instant) {
         self.maintain_roster(now);
         let Self {
             players,
@@ -1114,6 +1209,7 @@ impl ServerRuntime {
                 avatar,
                 sprite_character,
                 session_id,
+                passport_ticket: _,
             } => {
                 ensure_player_connected(players, map_layout, addr, next_player_id, now);
                 let player = players.get_mut(&addr).unwrap();

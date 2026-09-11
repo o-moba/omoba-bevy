@@ -112,6 +112,7 @@ mod tests {
             avatar: None,
             sprite_character: None,
             session_id: Some(session.to_owned()),
+            passport_ticket: None,
         }
     }
 
