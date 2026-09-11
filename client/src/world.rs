@@ -119,6 +119,17 @@ impl PlayerModelResolver<'_> {
         if let Some(slug) = avatar
             && shared::avatar_definition(slug).is_some()
         {
+            if let Some(protected) =
+                shared::avatar_definition(slug).and_then(|entry| entry.passport.as_ref())
+            {
+                let path = shared::client_asset_root()
+                    .join("avatars")
+                    .join(format!("{slug}.glb"));
+                if let Err(error) = omoba_passport::verify_local(protected, &path) {
+                    warn!("Purchased avatar integrity check failed: {error}");
+                    return self.catalog.handles_for(character);
+                }
+            }
             let (scene, gltf) = self.avatars.ensure_loaded(&self.asset_server, slug);
             return (Some(scene), Some(gltf));
         }

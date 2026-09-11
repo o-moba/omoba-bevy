@@ -19,6 +19,7 @@ fn join(session: &str, team: Team) -> ClientPacket {
         avatar: Some(shared::avatar_roster()[0].slug.clone()),
         sprite_character: None,
         session_id: Some(session.to_owned()),
+        passport_ticket: None,
     }
 }
 

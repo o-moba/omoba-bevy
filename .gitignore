@@ -48,6 +48,10 @@ client/assets/avatars/osa-*.glb
 client/assets/avatars/osa-*.png
 client/assets/avatars/osa-*.jpg
 
+# The verified Robert rendition and importer sidecar are reproducible runtime output.
+client/assets/avatars/ekza-dbd08c9e5440ce0e45556e44468cdbe037e61c8d9a712d1d4ad4167db75d4868.glb
+client/assets/avatars/passport-manifest.json
+
 # Local dev override for ekza-bevy-sdk (patch to on-disk checkout)
 .cargo/
 
@@ -60,3 +64,7 @@ client/assets/avatars/osa-*.jpg
 /mobile/build/
 /mobile/android/build/
 /mobile/ios/build/
+
+# Local cinematic scenes, rendered frames and encoded video materials.
+/art/verdant-confluence/cinematic/
+.DS_Store

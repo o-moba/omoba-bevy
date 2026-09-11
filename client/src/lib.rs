@@ -23,6 +23,7 @@ mod model_scale;
 mod navigation;
 mod navigation_qa;
 mod net;
+mod passport;
 mod pause_menu;
 mod persistence;
 mod platform;
@@ -66,6 +67,7 @@ use world2d::World2dPlugin;
 
 #[bevy_main]
 pub fn main() {
+    passport::initialize();
     // Headless model size analyzer (prints a bind-pose height table and exits).
     if std::env::var("OMOBA_MEASURE_MODELS").is_ok_and(|value| value == "1") {
         model_scale::run_model_measurement_analyzer();

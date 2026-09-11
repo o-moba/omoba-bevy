@@ -6,6 +6,25 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.19.0-rc.1] - 2026-09-11
+
+### Added
+- Pair the native client to a browser wallet through the Ekza passport device
+  flow. Keep the free roster and show only owned, explicitly approved Omoba
+  renditions among protected choices. Tokens remain in process memory.
+- Stage purchased GLBs through a bounded SHA-256 importer and versioned public
+  roster; client and server restart against the same manifest. Preserve
+  canonical template identity separately from the buyer's NFT mint.
+- Consume a project/session-bound one-use ticket before authoritative paid
+  admission, asynchronously and with bounded concurrency. Reject forged slugs,
+  missing or rejected proofs, mismatched renditions and paid-session downgrade
+  bypasses. Replicate the exact protected slug through the normal game path.
+
+### Verification
+- Native build, SDK/parser/importer tests and real UDP admission with a local
+  passport fixture. Live devnet and renderer results are recorded separately in
+  [the integration note](docs/progress/2026-09-11-avatar-passport-roundtrip.md).
+
 ## [0.18.0-rc.10] - 2026-09-11
 
 ### Fixed

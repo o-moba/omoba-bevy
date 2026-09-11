@@ -217,16 +217,20 @@ fn prepare_qa(
     help.0 = false;
     pause.open = false;
     if !qa.joined && session.is_connected() {
+        let avatar = std::env::var("OMOBA_VISUAL_QA_AVATAR")
+            .ok()
+            .and_then(|slug| shared::normalize_avatar_slug(Some(&slug)).map(str::to_owned))
+            .unwrap_or_else(|| "agnes".to_owned());
         qa.joined = true;
         selection.team = Some(Team::Green);
         selection.character = CharacterChoice::Cube;
         selection.hero_class = shared::HeroClass::Warrior;
-        selection.avatar = Some("agnes".to_owned());
+        selection.avatar = Some(avatar.clone());
         writer.write(NetworkCommand::Join {
             team: Team::Green,
             character: CharacterChoice::Cube,
             hero_class: shared::HeroClass::Warrior,
-            avatar: Some("agnes".to_owned()),
+            avatar: Some(avatar.clone()),
             sprite_character: None,
         });
         for entity in &join_ui {
@@ -235,7 +239,7 @@ fn prepare_qa(
                 .despawn_related::<Children>()
                 .despawn();
         }
-        info!("VERDANT_QA autojoin=agnes team=green method=normal_network_command");
+        info!("VERDANT_QA autojoin={avatar} team=green method=normal_network_command");
     }
     if session.join_confirmed()
         && let Ok((entity, transform, stats, target)) = players.single()
@@ -339,6 +343,8 @@ struct CaptureWorld<'w, 's> {
     structures: Query<'w, 's, (), With<NetworkStructure>>,
     styled: Query<'w, 's, (), With<VerdantStructureVisual>>,
     actors: Query<'w, 's, &'static Transform, (With<NetworkPlayerId>, Without<MainCamera>)>,
+    local_avatar: Query<'w, 's, &'static crate::net::NetworkAvatar, With<Player>>,
+    animations: Query<'w, 's, &'static AnimationPlayer>,
     fixtures: Query<'w, 's, (), With<QaActor>>,
     meshes: Query<'w, 's, (), With<Mesh3d>>,
     materials: Res<'w, Assets<StandardMaterial>>,
@@ -566,10 +572,13 @@ fn capture_qa(
         "styled_structure_visuals":ready.styled_structures,"network_player_entities":world.actors.iter().count(),
         "qa_render_fixtures":world.fixtures.iter().count(),"render_mesh_entities":ready.meshes,
         "shared_material_assets":world.materials.len(),"snapshot_tick":game.meta.snapshot_tick,
+        "local_avatar":world.local_avatar.single().ok().and_then(|avatar| avatar.0.clone()),
+        "animation_players":world.animations.iter().count(),
+        "playing_animation_nodes":world.animations.iter().map(|player| player.playing_animations().count()).sum::<usize>(),
         "asset_root":shared::client_asset_root(),"version":env!("CARGO_PKG_VERSION"),
         "source_camera":if view.perspective {"production follow offset with declared QA orbit/zoom"} else {"art/verdant-confluence/scripts/build_scene.py"},"stable_frames":qa.stable_frames,
         "orbit_yaw_radians":view.orbit_yaw,"zoom":view.zoom,"minimap":minimap_summary,
-        "setup":"authoritative server structures and local agnes; five tagged render-only production creature fixtures" });
+        "setup":"authoritative server structures and selected local avatar; five tagged render-only production creature fixtures" });
     info!("VERDANT_QA capture_request={capture}");
     qa.captures.push(capture);
     qa.in_flight = true;
