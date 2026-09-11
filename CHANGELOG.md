@@ -6,6 +6,14 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.18.0-rc.10] - 2026-09-11
+
+### Fixed
+- Remove the dead-end corner detour from side-lane minion routes. Dragon/bottom
+  waves now leave the green base directly toward their lane; the mirrored top
+  route is corrected for blue, including the opposite far-base approaches.
+  Preserve road artwork, tower locations, spawn formation and wave timing.
+
 ## [0.18.0-rc.9] - 2026-09-11
 
 ### Added
