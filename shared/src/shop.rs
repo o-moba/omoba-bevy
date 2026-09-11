@@ -1,5 +1,5 @@
 //! Small, shared item catalog. Purchases and replicated bonuses are server-owned.
-use crate::{AbilityDefinition, HeroClass, SkillSlot, scaled_cooldown};
+use crate::{AbilityDefinition, BasicAttackDefinition, HeroClass, SkillSlot, scaled_cooldown};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -91,7 +91,7 @@ pub const ITEMS: [ItemDefinition; INVENTORY_CAPACITY] = [
     ItemDefinition {
         id: ItemId::SwiftGrip,
         name: "Swift Grip",
-        description: "+12% Q attack rate",
+        description: "+12% basic attack and Q rate",
         cost: 80,
         bonuses: ItemBonuses {
             attack_speed_multiplier: 1.12,
@@ -218,6 +218,14 @@ pub fn item_cooldown(
     scaled_cooldown(def, rank).div_f32(rate.max(1.0))
 }
 
+pub fn basic_attack_damage(def: &BasicAttackDefinition, bonuses: ItemBonuses) -> f32 {
+    def.damage * bonuses.damage_multiplier.max(1.0)
+}
+
+pub fn basic_attack_cooldown(def: &BasicAttackDefinition, bonuses: ItemBonuses) -> Duration {
+    Duration::from_secs_f32(def.cooldown_secs).div_f32(bonuses.attack_speed_multiplier.max(1.0))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PurchaseError {
@@ -291,5 +299,29 @@ mod tests {
             serde_json::from_str::<ItemBonuses>("{}").unwrap(),
             ItemBonuses::NONE
         );
+    }
+    #[test]
+    fn basic_attack_uses_damage_and_attack_speed_without_skill_haste_or_ranks() {
+        for class in HeroClass::ALL {
+            let definition = crate::basic_attack_for_class(class);
+            assert!(
+                definition.range > 0.0 && definition.damage > 0.0 && definition.cooldown_secs > 0.0
+            );
+            assert!(definition.range < class.ability(SkillSlot::Q).cast_range);
+            let base = basic_attack_cooldown(definition, ItemBonuses::NONE);
+            let haste = item_bonuses(&[ItemId::FocusCharm]);
+            assert_eq!(basic_attack_cooldown(definition, haste), base);
+            let attack_items = item_bonuses(&[ItemId::SwiftGrip, ItemId::EmberBlade]);
+            assert!(
+                (basic_attack_damage(definition, attack_items) - definition.damage * 1.12).abs()
+                    < 0.0001
+            );
+            assert!(
+                (basic_attack_cooldown(definition, attack_items).as_secs_f32() * 1.12
+                    - base.as_secs_f32())
+                .abs()
+                    < 0.0001
+            );
+        }
     }
 }

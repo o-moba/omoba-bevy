@@ -114,14 +114,15 @@ states the current delivery boundary.
 | **Alt + right mouse** (3D only) | Hold to orbit the camera |
 | Team / character UI | Click team and character before play; server snapshot is authoritative |
 | **Right-click ground / minimap** | Set a route around solid forest and structures, shown on the minimap; another order replaces it |
-| **Click/tap ground** | Move the hero on desktop or touch devices |
+| **Left-click hostile** | Select the exact target without moving or casting |
 | **Left-click/drag minimap** | Pan the camera without issuing movement |
-| **Click/tap hostile** | Select it and use Q; the hero approaches into range automatically |
+| **Right-click hostile** | Approach through normal navigation and repeat basic attacks |
 | **Tab** | Select nearest enemy target |
-| **Middle mouse** | Select a target without immediately attacking |
-| **Backspace** | Clear target |
+| **S / Backspace** | Stop movement and attacks, and clear target selection |
 | **Q / W / E / R** | Cast that class ability at the selected target |
-| On-screen **skill** button | Touch/click alternative to Q/W/E/R |
+| Phone **ATTACK** | Tap for a basic attack; stationary hold repeats without mana cost |
+| Phone **drag ATTACK** | Extend reticle, preview a foe, release to lock and attack once; drag to X to cancel |
+| On-screen **Q/W/E/R** | Separate abilities around ATTACK; tap uses locked target, drag aims a skill |
 | **Esc** | Close Help/Shop first, otherwise open the pause menu |
 
 Gameplay: lane map, minions, structures, combat, respawn, match phases (lobby → running → victory / rematch), and progression HUD as described in [docs/features.md](docs/features.md).

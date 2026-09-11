@@ -87,6 +87,52 @@ pub enum PlayerActionKind {
     None,
 }
 
+/// Basic attacks are not a Q/W/E/R slot. Cosmetic action consumers can still
+/// play the Attack animation without treating this event as a Q cast.
+pub const BASIC_ATTACK_ACTION_SLOT: u8 = u8::MAX;
+
+/// Shared target surfaces for authoritative attack reach and client approach.
+/// These are the existing simulation radii, independent of visual model scale.
+pub const PLAYER_TARGET_RADIUS: f32 = 0.62;
+pub const MINION_TARGET_RADIUS: f32 = 0.55;
+pub const NEUTRAL_TARGET_RADIUS: f32 = 0.62;
+pub const TOWER_TARGET_RADIUS: f32 = 1.3;
+pub const BASE_TOWER_TARGET_RADIUS: f32 = 3.0;
+
+/// An always-available, mana-free strike. Skill ranks and Q/W/E/R cooldowns
+/// never participate in this definition.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BasicAttackDefinition {
+    pub range: f32,
+    pub damage: f32,
+    pub cooldown_secs: f32,
+}
+
+pub const fn basic_attack_for_class(class: HeroClass) -> &'static BasicAttackDefinition {
+    match class {
+        HeroClass::Warrior => &BasicAttackDefinition {
+            range: 4.0,
+            damage: 12.0,
+            cooldown_secs: 0.9,
+        },
+        HeroClass::Mage => &BasicAttackDefinition {
+            range: 14.0,
+            damage: 8.0,
+            cooldown_secs: 1.1,
+        },
+        HeroClass::Ranger => &BasicAttackDefinition {
+            range: 16.0,
+            damage: 10.0,
+            cooldown_secs: 0.85,
+        },
+        HeroClass::Cleric => &BasicAttackDefinition {
+            range: 12.0,
+            damage: 8.0,
+            cooldown_secs: 1.0,
+        },
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TargetingMode {

@@ -433,7 +433,7 @@ fn capture(
         return;
     }
     let primary_nodes: Vec<_> = scene.nodes.iter().filter(|(name, _, _, _)| matches!(name.as_str(),
-        "TeamGreenButton" | "TeamBlueButton" | "AvatarGrid" | "HelpDismissButton" | "HelpOverlayRoot" | "GameStateLabel" | "ConnectionStatusPanel" | "MinimapRoot" | "MatchObjectivePanel" | "MatchHudColumn" | "SkillBarRoot" | "SkillSlot-Q" | "SkillSlot-R" | "EquipmentHud" | "ShopOpenButton" | "ShopPanel" | "ShopCloseButton" | "ShopBuy-EB" | "ShopBuy-GC" | "ShopSummary" | "ShopFeedback" | "MobileJoystick" | "MobileAbility-0" | "MobileAbility-1" | "MobileAbility-2" | "MobileAbility-3" | "MobileUpgrade-0" | "MobileUpgrade-1" | "MobileUpgrade-2" | "MobileUpgrade-3" | "PhoneMenuBar" | "QaSkillUpgradeFixtureLabel")
+        "TeamGreenButton" | "TeamBlueButton" | "AvatarGrid" | "HelpDismissButton" | "HelpOverlayRoot" | "GameStateLabel" | "ConnectionStatusPanel" | "MinimapRoot" | "MatchObjectivePanel" | "MatchHudColumn" | "SkillBarRoot" | "SkillSlot-Q" | "SkillSlot-R" | "EquipmentHud" | "ShopOpenButton" | "ShopPanel" | "ShopCloseButton" | "ShopBuy-EB" | "ShopBuy-GC" | "ShopSummary" | "ShopFeedback" | "MobileJoystick" | "MobileAttack" | "MobileAbility-0" | "MobileAbility-1" | "MobileAbility-2" | "MobileAbility-3" | "MobileUpgrade-0" | "MobileUpgrade-1" | "MobileUpgrade-2" | "MobileUpgrade-3" | "PhoneMenuBar" | "QaSkillUpgradeFixtureLabel")
             || name.as_str().starts_with("ShopBuy-") || name.as_str().starts_with("ShopDescription-") || name.as_str().starts_with("ShopDetails-"))
         .map(|(name, node, transform, visible)| {
             let center = transform.translation;
@@ -511,6 +511,7 @@ fn capture(
             "EquipmentHud",
             "ShopOpenButton",
             "MobileJoystick",
+            "MobileAttack",
             "MobileAbility-0",
             "MobileAbility-1",
             "MobileAbility-2",
@@ -568,6 +569,7 @@ fn capture(
         "SkillBarRoot",
         "EquipmentHud",
         "MobileJoystick",
+        "MobileAttack",
         "MobileAbility-0",
         "MobileAbility-1",
         "MobileAbility-2",
@@ -599,6 +601,7 @@ fn capture(
                 let circle = |node: &serde_json::Value| {
                     node["name"].as_str().is_some_and(|name| {
                         name == "MobileJoystick"
+                            || name == "MobileAttack"
                             || name.starts_with("MobileAbility-")
                             || name.starts_with("MobileUpgrade-")
                     })

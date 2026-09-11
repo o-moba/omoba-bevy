@@ -479,9 +479,9 @@ fn update_match_hud(
     let target = if !stats.is_alive() {
         "Defeated - respawning soon"
     } else if target_state.selected_target.is_some() {
-        "Target selected: Q attacks"
+        "Target locked — basic attack or Q/W/E/R"
     } else {
-        "Click a foe to attack  /  P shop  /  F1 help"
+        "Select a foe  /  P shop  /  F1 help"
     };
     status_text.0 = format!("{}\n{target}", objective_line.replace("Goal: ", ""));
 }
@@ -555,7 +555,7 @@ fn running_status_text(
                 TargetKind::Structure => "Structure",
                 TargetKind::Neutral => "Neutral",
             };
-            format!("Target: enemy {kind} - Q attacks")
+            format!("Target: enemy {kind} - locked")
         }
         None => "Target: none - click a foe or use Tab".to_string(),
     };

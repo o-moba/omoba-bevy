@@ -1,5 +1,5 @@
 use shared::protocol::{JoinRejection, PROTOCOL_VERSION, SnapshotMeta, SnapshotOrder};
-use shared::transport::SnapshotAssembler;
+use shared::transport::{SnapshotAssembler, TransportError};
 
 use bevy::ecs::query::Or;
 use bevy::prelude::*;
@@ -70,6 +70,8 @@ pub enum ClientConnectionState {
 pub enum NetThreadSignal {
     /// Recv/send error streak exceeded fixed thresholds (P3 transport rule).
     TransportFailure,
+    /// A framed reply uses a different application protocol. No payload was applied.
+    ProtocolMismatch,
 }
 
 #[derive(Message, Clone, Debug)]
@@ -161,6 +163,7 @@ enum TeardownReason {
     TransportFailure,
     ServerWaitTimeout,
     IncomingChannelClosed,
+    ProtocolMismatch,
 }
 
 impl std::fmt::Display for TeardownReason {
@@ -172,6 +175,7 @@ impl std::fmt::Display for TeardownReason {
             Self::TransportFailure => write!(f, "transport failure reported by the UDP thread"),
             Self::ServerWaitTimeout => write!(f, "server did not answer within the wait budget"),
             Self::IncomingChannelClosed => write!(f, "incoming packet channel closed"),
+            Self::ProtocolMismatch => write!(f, "client and server protocol versions differ"),
         }
     }
 }
@@ -389,6 +393,9 @@ fn ground_networked_entities(
 
 #[derive(Message, Clone, Debug)]
 pub enum NetworkCommand {
+    BasicAttack {
+        target: TargetId,
+    },
     Cast {
         target: TargetId,
         /// Hotbar slot index (0=Q .. 3=R).
@@ -438,6 +445,12 @@ enum ClientPacket {
         target: TargetId,
         #[serde(default)]
         slot: u8,
+    },
+    BasicAttack {
+        target: TargetId,
+        server_epoch: u64,
+        match_id: u64,
+        request_id: u64,
     },
     Join {
         team: Team,
@@ -513,6 +526,12 @@ struct PlayerState {
     shop_available: bool,
     #[serde(default)]
     last_purchase: Option<shared::shop::PurchaseReceipt>,
+    #[serde(default)]
+    basic_attack_cooldown_secs: f32,
+    #[serde(default)]
+    basic_attack_remaining_secs: f32,
+    #[serde(default)]
+    basic_attack_request_id: u64,
     #[serde(default)]
     xp: u32,
     #[serde(default = "default_player_level")]
@@ -785,6 +804,35 @@ pub struct RemotePlayer;
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkPlayerId(pub u64);
+
+/// Latest server strike deadline and replay acknowledgment. Reconcile local
+/// feedback from snapshots; skill cooldown mirrors remain independent.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+pub struct PlayerBasicAttackCooldown {
+    pub duration_secs: f32,
+    pub remaining_secs: f32,
+    pub last_request_id: u64,
+}
+
+impl From<&PlayerState> for PlayerBasicAttackCooldown {
+    fn from(player: &PlayerState) -> Self {
+        let duration_secs = if player.basic_attack_cooldown_secs.is_finite() {
+            player.basic_attack_cooldown_secs.max(0.0)
+        } else {
+            0.0
+        };
+        let remaining_secs = if player.basic_attack_remaining_secs.is_finite() {
+            player.basic_attack_remaining_secs.clamp(0.0, duration_secs)
+        } else {
+            0.0
+        };
+        Self {
+            duration_secs,
+            remaining_secs,
+            last_request_id: player.basic_attack_request_id,
+        }
+    }
+}
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkCharacterChoice(pub CharacterChoice);
@@ -1131,6 +1179,13 @@ fn run_udp_client(
                     let payload = match assembler.push(&recv_buf[..len], Instant::now()) {
                         Ok(Some(payload)) => payload,
                         Ok(None) => continue,
+                        Err(TransportError::Version) => {
+                            // Old framed servers are rejected before their JSON can
+                            // reach admission. Surface that exact failure instead of
+                            // waiting for a generic network timeout.
+                            let _ = signals.send(NetThreadSignal::ProtocolMismatch);
+                            return;
+                        }
                         Err(error) => {
                             if last_decode_error_log_at
                                 .is_none_or(|at: Instant| at.elapsed() >= T_RETRY)
@@ -1312,6 +1367,9 @@ fn send_network_commands(
     channels: Option<Res<NetworkChannels>>,
     mut client_session: ResMut<ClientSession>,
     client_session_id: Res<ClientSessionId>,
+    snapshot: Option<Res<GameStateSnapshot>>,
+    basic_cooldown: Query<&PlayerBasicAttackCooldown, With<Player>>,
+    mut basic_sequence: Local<u64>,
 ) {
     let Some(channels) = channels else {
         return;
@@ -1319,6 +1377,32 @@ fn send_network_commands(
 
     for command in command_events.read() {
         match command {
+            NetworkCommand::BasicAttack { target } => {
+                if !client_session.join_confirmed() {
+                    continue;
+                }
+                let Some(meta) = snapshot
+                    .as_ref()
+                    .map(|s| s.meta)
+                    .filter(|meta| meta.server_epoch != 0 && meta.match_id != 0)
+                else {
+                    continue;
+                };
+                let acknowledged = basic_cooldown
+                    .single()
+                    .map(|c| c.last_request_id)
+                    .unwrap_or(0);
+                let Some(request_id) = (*basic_sequence).max(acknowledged).checked_add(1) else {
+                    continue;
+                };
+                *basic_sequence = request_id;
+                let _ = channels.outgoing.send(ClientPacket::BasicAttack {
+                    target: *target,
+                    server_epoch: meta.server_epoch,
+                    match_id: meta.match_id,
+                    request_id,
+                });
+            }
             NetworkCommand::Cast { target, slot } => {
                 if !client_session.join_confirmed() {
                     continue;
@@ -1639,6 +1723,7 @@ fn apply_server_snapshot(
                 NetworkHeroClass(local_player_state.hero_class),
                 player_state_to_progression(local_player_state),
                 player_state_to_equipment(local_player_state),
+                PlayerBasicAttackCooldown::from(local_player_state),
             ));
             let next_action = PlayerCosmeticAction::from(local_player_state);
             if action_query.get(local_entity).ok().flatten().copied() != Some(next_action) {
@@ -1719,6 +1804,7 @@ fn apply_server_snapshot(
                     player_state_to_combat_stats(local_player_state),
                     player_state_to_progression(local_player_state),
                     player_state_to_equipment(local_player_state),
+                    PlayerBasicAttackCooldown::from(local_player_state),
                     Name::new("Player"),
                 ))
                 .id()
@@ -1748,6 +1834,7 @@ fn apply_server_snapshot(
                 player_state_to_combat_stats(local_player_state),
                 player_state_to_progression(local_player_state),
                 player_state_to_equipment(local_player_state),
+                PlayerBasicAttackCooldown::from(local_player_state),
                 Name::new("Player"),
             ));
             if let Some(gltf) = local_gltf {
@@ -1781,6 +1868,7 @@ fn apply_server_snapshot(
                     player_state_to_combat_stats(local_player_state),
                     player_state_to_progression(local_player_state),
                     player_state_to_equipment(local_player_state),
+                    PlayerBasicAttackCooldown::from(local_player_state),
                     Name::new("Player"),
                 ))
                 .id()
@@ -1835,6 +1923,7 @@ fn apply_server_snapshot(
                 player_state_to_combat_stats(player),
                 player_state_to_progression(player),
                 player_state_to_equipment(player),
+                PlayerBasicAttackCooldown::from(player),
             ));
             let next_action = PlayerCosmeticAction::from(player);
             if action_query.get(entity).ok().flatten().copied() != Some(next_action) {
@@ -1876,7 +1965,10 @@ fn apply_server_snapshot(
             },
             Name::new(format!("RemotePlayer-{}", player.id)),
         ));
-        entity_commands.insert(player_state_to_equipment(player));
+        entity_commands.insert((
+            player_state_to_equipment(player),
+            PlayerBasicAttackCooldown::from(player),
+        ));
         if **visual_mode == PlayerVisualMode::Models3d {
             entity_commands.insert(NormalizeModelScale::for_player_model());
             if let Some(gltf) = gltf_handle {
@@ -2658,6 +2750,32 @@ fn update_session_lifecycle(
 
     while let Ok(signal) = channels.signals.try_recv() {
         match signal {
+            NetThreadSignal::ProtocolMismatch => {
+                if client_session.state != ClientConnectionState::Disconnected {
+                    perform_network_teardown(
+                        TeardownReason::ProtocolMismatch,
+                        &mut commands,
+                        &mut client_session,
+                        &mut network_state,
+                        &mut game_state_snapshot,
+                        &mut team_selection,
+                        &mut cam_state,
+                        overlay_query,
+                        remote_query,
+                        projectile_query,
+                        structure_query,
+                        minion_query,
+                        neutral_query,
+                        player_query,
+                        *visual_mode,
+                        &sprite_assets,
+                    );
+                }
+                // Retrying the same incompatible release cannot recover a
+                // joined session. Preserve the actionable message until Retry.
+                client_session.join_error = Some(JoinRejection::ProtocolMismatch);
+                client_session.reconnect = ReconnectState::default();
+            }
             NetThreadSignal::TransportFailure => {
                 if client_session.state != ClientConnectionState::Disconnected {
                     perform_network_teardown(
@@ -2836,6 +2954,110 @@ fn default_max_mana() -> f32 {
 
 fn default_minion_brain_state() -> MinionBrainState {
     MinionBrainState::Marching
+}
+
+#[cfg(test)]
+mod basic_attack_network_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn basic_sender_uses_current_identity_and_advances_above_reconnect_acknowledgment() {
+        let (outgoing, received) = crossbeam_channel::unbounded();
+        let (_, incoming) = crossbeam_channel::unbounded();
+        let (_, signals) = crossbeam_channel::unbounded();
+        let mut app = App::new();
+        app.add_message::<NetworkCommand>()
+            .insert_resource(NetworkChannels {
+                outgoing,
+                incoming,
+                signals,
+            })
+            .insert_resource(ClientSession::admitted_for_test())
+            .init_resource::<ClientSessionId>()
+            .insert_resource(GameStateSnapshot {
+                meta: SnapshotMeta::new(17, 3, 9),
+                ..default()
+            })
+            .add_systems(Update, send_network_commands);
+        let player = app
+            .world_mut()
+            .spawn((
+                Player,
+                PlayerBasicAttackCooldown {
+                    last_request_id: 5,
+                    ..default()
+                },
+            ))
+            .id();
+        let target = TargetId {
+            kind: TargetKind::Player,
+            id: 42,
+        };
+        for request_id in [6, 7] {
+            app.world_mut()
+                .write_message(NetworkCommand::BasicAttack { target });
+            app.update();
+            let encoded = serde_json::to_value(received.try_recv().unwrap()).unwrap();
+            assert_eq!(
+                encoded,
+                json!({"type":"basic_attack","target":{"kind":"player","id":42},
+                "server_epoch":17,"match_id":3,"request_id":request_id})
+            );
+            let decoded: ClientPacket = serde_json::from_value(encoded).unwrap();
+            assert!(matches!(decoded, ClientPacket::BasicAttack { .. }));
+        }
+        app.world_mut()
+            .get_mut::<PlayerBasicAttackCooldown>(player)
+            .unwrap()
+            .last_request_id = 100;
+        app.world_mut()
+            .write_message(NetworkCommand::BasicAttack { target });
+        app.update();
+        assert!(matches!(
+            received.try_recv().unwrap(),
+            ClientPacket::BasicAttack {
+                request_id: 101,
+                ..
+            }
+        ));
+        app.world_mut().resource_mut::<ClientSession>().admitted = false;
+        app.world_mut()
+            .write_message(NetworkCommand::BasicAttack { target });
+        app.update();
+        assert!(
+            received.try_recv().is_err(),
+            "pre-admission strike cannot leave the client"
+        );
+    }
+
+    #[test]
+    fn replicated_basic_timing_defaults_safely_and_is_separate_from_q_action() {
+        let legacy = json!({"id":1,"x":0.0,"y":0.5,"z":0.0,"yaw":0.0,"team":"green"});
+        let mut player: PlayerState = serde_json::from_value(legacy).unwrap();
+        assert_eq!(
+            PlayerBasicAttackCooldown::from(&player),
+            PlayerBasicAttackCooldown::default()
+        );
+        player.basic_attack_cooldown_secs = 0.9;
+        player.basic_attack_remaining_secs = 0.4;
+        player.basic_attack_request_id = 8;
+        player.action_kind = PlayerActionKind::Attack;
+        player.action_slot = shared::BASIC_ATTACK_ACTION_SLOT;
+        let decoded: PlayerState =
+            serde_json::from_slice(&serde_json::to_vec(&player).unwrap()).unwrap();
+        let cooldown = PlayerBasicAttackCooldown::from(&decoded);
+        assert_eq!(
+            cooldown,
+            PlayerBasicAttackCooldown {
+                duration_secs: 0.9,
+                remaining_secs: 0.4,
+                last_request_id: 8
+            }
+        );
+        assert_eq!(PlayerCosmeticAction::from(&decoded).slot, u8::MAX);
+        assert_eq!(decoded.ranks, [1; 4]);
+    }
 }
 
 #[cfg(test)]
@@ -3134,7 +3356,7 @@ mod tests {
 
     fn exact_size_snapshot_fixture(size: usize, sentinel: u64) -> Vec<u8> {
         let prefix = String::from(
-            r#"{"type":"snapshot","protocol_version":1,"server_epoch":1,"match_id":1,"snapshot_tick":2,"your_id":7,"padding":""#,
+            r#"{"type":"snapshot","protocol_version":2,"server_epoch":1,"match_id":1,"snapshot_tick":2,"your_id":7,"padding":""#,
         );
         let suffix = format!(
             r#"","players":[],"structures":[{{"id":808,"kind":"tower","team":"blue","x":1.0,"y":2.0,"z":3.0,"hp":4.0,"max_hp":5.0}}],"minions":[{{"id":909,"team":"green","lane":"bot","x":6.0,"y":0.5,"z":7.0,"yaw":0.0,"hp":8.0,"max_hp":9.0,"state":"marching","target_kind":null,"target_id":null}}],"rematch_in_secs":{sentinel}}}"#
@@ -3265,7 +3487,7 @@ mod tests {
 
         serde_json::to_vec(&json!({
             "type": "snapshot",
-            "protocol_version": 1, "server_epoch": 1, "match_id": 1, "snapshot_tick": 1,
+            "protocol_version": shared::protocol::PROTOCOL_VERSION, "server_epoch": 1, "match_id": 1, "snapshot_tick": 1,
             "your_id": 10,
             "players": players,
             "projectiles": projectiles,
@@ -3551,6 +3773,115 @@ mod tests {
 #[cfg(test)]
 mod connection_ui_tests {
     use super::*;
+
+    #[test]
+    fn old_framed_server_reports_protocol_mismatch_and_stops_automatic_reconnect() {
+        let server = UdpSocket::bind("127.0.0.1:0").unwrap();
+        server
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let server_addr = server.local_addr().unwrap().to_string();
+        let (outgoing, outgoing_rx) = crossbeam_channel::unbounded();
+        let (incoming_tx, incoming) = crossbeam_channel::unbounded();
+        let (signals_tx, signals_rx) = crossbeam_channel::unbounded();
+        let worker = std::thread::spawn(move || {
+            run_udp_client(server_addr, outgoing_rx, incoming_tx, signals_tx);
+        });
+        let mut packet = [0_u8; 1200];
+        let (length, client_addr) = server.recv_from(&mut packet).unwrap();
+        assert!(matches!(
+            serde_json::from_slice::<ClientPacket>(&packet[..length]).unwrap(),
+            ClientPacket::Hello {
+                protocol_version: PROTOCOL_VERSION
+            }
+        ));
+        let mut old_frame = shared::transport::encode_snapshot(
+            br#"{"type":"snapshot","protocol_version":1,"players":[]}"#,
+            7,
+            1,
+        )
+        .unwrap()
+        .remove(0);
+        old_frame[4..6].copy_from_slice(&1_u16.to_le_bytes());
+        server.send_to(&old_frame, client_addr).unwrap();
+        let signal = match signals_rx.recv_timeout(Duration::from_secs(2)) {
+            Ok(signal) => signal,
+            Err(error) => {
+                drop(outgoing);
+                worker.join().unwrap();
+                panic!("old framed server did not report incompatibility: {error}");
+            }
+        };
+        worker.join().unwrap();
+        assert!(matches!(signal, NetThreadSignal::ProtocolMismatch));
+        assert!(
+            incoming.try_recv().is_err(),
+            "incompatible JSON must never be applied"
+        );
+
+        // Feed the real thread's signal through the production lifecycle and UI.
+        let (signals_tx, signals) = crossbeam_channel::unbounded();
+        signals_tx.send(signal).unwrap();
+        let mut app = App::new();
+        app.insert_resource(NetworkChannels {
+            outgoing,
+            incoming,
+            signals,
+        })
+        .insert_resource(ClientSession {
+            state: ClientConnectionState::Connected,
+            admitted: true,
+            last_join: Some(CommittedJoin {
+                team: Team::Green,
+                character: CharacterChoice::Ipfs,
+                hero_class: shared::HeroClass::Warrior,
+                avatar: None,
+                sprite_character: None,
+            }),
+            ..default()
+        })
+        .init_resource::<NetIncomingDisconnected>()
+        .init_resource::<PendingServerSnapshotFrame>()
+        .init_resource::<NetworkState>()
+        .init_resource::<GameStateSnapshot>()
+        .init_resource::<TeamSelection>()
+        .init_resource::<CameraState>()
+        .init_resource::<PlayerVisualMode>()
+        .init_resource::<SpriteVisualAssets>()
+        .add_message::<SessionUiCommand>()
+        .add_systems(Startup, setup_connection_status_ui)
+        .add_systems(
+            Update,
+            (
+                ingest_server_snapshot_packets,
+                update_session_lifecycle,
+                sync_connection_status_ui,
+            )
+                .chain(),
+        );
+        let actor = app.world_mut().spawn(Player).id();
+        for _ in 0..2 {
+            app.update();
+            let session = app.world().resource::<ClientSession>();
+            assert_eq!(session.state, ClientConnectionState::Disconnected);
+            assert_eq!(session.join_error, Some(JoinRejection::ProtocolMismatch));
+            assert!(!session.join_confirmed());
+            assert!(!session.reconnect.active);
+            let label = app
+                .world_mut()
+                .query_filtered::<&Text, With<ConnectionStatusLabel>>()
+                .single(app.world())
+                .unwrap();
+            assert_eq!(label.0, JoinRejection::ProtocolMismatch.message());
+            let retry = app
+                .world_mut()
+                .query_filtered::<&Node, With<ConnectionRetryButton>>()
+                .single(app.world())
+                .unwrap();
+            assert_eq!(retry.display, Display::Flex);
+        }
+        assert!(app.world().get_entity(actor).is_err());
+    }
 
     #[test]
     fn admission_hides_status_and_disconnection_exposes_working_retry_without_empty_layout() {

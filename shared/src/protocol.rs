@@ -2,7 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u16 = 1;
+// Version 2 adds independent basic attacks and their authoritative cooldowns.
+// Reject v1 peers explicitly instead of silently dropping the new strike packet.
+pub const PROTOCOL_VERSION: u16 = 2;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]

@@ -227,6 +227,21 @@ mod tests {
     }
 
     #[test]
+    fn old_protocol_frame_is_rejected_before_allocating_or_publishing_payload() {
+        let payload = br#"{"protocol_version":1,"players":[]}"#;
+        let current = encode_snapshot(payload, 7, 1).unwrap().remove(0);
+        let mut old = current.clone();
+        old[4..6].copy_from_slice(&1_u16.to_le_bytes());
+        let mut assembler = SnapshotAssembler::default();
+        let now = Instant::now();
+        assert_eq!(assembler.push(&old, now), Err(TransportError::Version));
+        assert_eq!(assembler.pending_count(), 0);
+        assert_eq!(assembler.retained_bytes(), 0);
+        // Rejection does not poison assembly identity for a compatible frame.
+        assert_eq!(assembler.push(&current, now), Ok(Some(payload.to_vec())));
+    }
+
+    #[test]
     fn malformed_conflicting_and_oversized_frames_are_rejected() {
         assert!(encode_snapshot(&vec![0; MAX_SNAPSHOT_BYTES + 1], 1, 1).is_err());
         let now = Instant::now();

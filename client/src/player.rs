@@ -1,3 +1,4 @@
+use crate::targeting::BasicAttackState;
 use bevy::{
     gltf::Gltf,
     input::mouse::MouseButton,
@@ -662,10 +663,11 @@ fn handle_player_input(
     game_state: Option<Res<GameStateSnapshot>>,
     visual_mode: Res<PlayerVisualMode>,
     pointer_state: Res<WorldPointerState>,
-    mut pending_cast: ResMut<PendingCast>,
+    orders: (ResMut<PendingCast>, ResMut<BasicAttackState>),
     ui_interactions: Query<&Interaction, With<Button>>,
 ) {
-    let (touches, mobile) = touch_input;
+    let (_touches, mobile) = touch_input;
+    let (mut pending_cast, mut basic) = orders;
     if mobile.as_ref().is_some_and(|mobile| mobile.enabled) {
         return;
     }
@@ -685,6 +687,9 @@ fn handle_player_input(
     }
 
     let secondary_move = secondary_move_pressed(&mouse_button_input, &keyboard);
+    if !secondary_move || pointer_state.consumed_secondary_press {
+        return;
+    }
     let minimap_target = minimap_nav.as_ref().and_then(|nav| nav.movement_target);
     let target = if let Some(target) = minimap_target.filter(|_| secondary_move) {
         // The minimap is deliberately a UI surface. Its bounds and input gate
@@ -696,14 +701,10 @@ fn handle_player_input(
         else {
             return;
         };
-        let position = if secondary_move {
-            window.cursor_position()
-        } else {
-            primary_world_press_position(&mouse_button_input, &touches, window)
-        };
+        let position = window.focused.then(|| window.cursor_position()).flatten();
         let Some(position) = position else { return };
         if !should_issue_ground_move(
-            !secondary_move && pointer_state.consumed_primary_press,
+            pointer_state.consumed_secondary_press,
             minimap_nav
                 .as_ref()
                 .is_some_and(|nav| nav.consumed_primary_click),
@@ -717,6 +718,7 @@ fn handle_player_input(
     };
     if let Some(mut target_pos) = target {
         pending_cast.cancel();
+        basic.cancel_for_movement();
         if let Some(map_layout) = map_layout.as_ref() {
             target_pos = map_layout.clamp_position(target_pos);
         }
@@ -763,6 +765,7 @@ fn move_player_mobile(
     map: Option<Res<MapLayout>>,
     boost: Res<DebugSpeedBoost>,
     mut pending: ResMut<PendingCast>,
+    mut basic: ResMut<BasicAttackState>,
 ) {
     let Some(mobile) = mobile.filter(|mobile| mobile.enabled) else {
         return;
@@ -790,6 +793,7 @@ fn move_player_mobile(
             .remove::<(MovementTarget, MovementRoute, Jumping)>();
         if !allowed || !stats.is_alive() {
             pending.cancel();
+            basic.cancel_for_movement();
             continue;
         }
         if direction.length_squared() < 0.0001 {
@@ -926,20 +930,6 @@ fn plan_movement_routes(
             }
         }
     }
-}
-
-fn primary_world_press_position(
-    mouse_input: &ButtonInput<MouseButton>,
-    touches: &Touches,
-    window: &Window,
-) -> Option<Vec2> {
-    if mouse_input.just_pressed(MouseButton::Left) {
-        return window.cursor_position();
-    }
-    touches
-        .iter_just_pressed()
-        .next()
-        .map(|touch| touch.position())
 }
 
 const fn should_issue_ground_move(
@@ -1424,6 +1414,7 @@ mod tests {
             .init_resource::<crate::input_context::GameplayInputContext>()
             .init_resource::<PlayerAnimationLibrary>()
             .init_resource::<PendingCast>()
+            .init_resource::<BasicAttackState>()
             .init_resource::<WorldPointerState>()
             .insert_resource(PlayerVisualMode::Models3d)
             .add_systems(Update, handle_player_input);
@@ -1454,6 +1445,7 @@ mod tests {
             .init_resource::<crate::input_context::GameplayInputContext>()
             .init_resource::<PlayerAnimationLibrary>()
             .init_resource::<PendingCast>()
+            .init_resource::<BasicAttackState>()
             .init_resource::<WorldPointerState>()
             .init_resource::<MinimapNavigationState>()
             .init_resource::<DebugSpeedBoost>()

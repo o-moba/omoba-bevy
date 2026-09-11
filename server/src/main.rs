@@ -1,6 +1,7 @@
 #![allow(clippy::items_after_test_module)]
 
 mod balance;
+mod basic_attack;
 mod gameplay;
 #[cfg(test)]
 mod navigation_tests;
@@ -10,9 +11,11 @@ mod progression;
 mod release_tests;
 mod session;
 mod shop;
+mod targeting_qa;
 mod world;
 
 use balance::*;
+use basic_attack::*;
 use bevy::{app::ScheduleRunnerPlugin, prelude::*};
 use ekza_bevy_sdk::EkzaCharacter as CharacterChoice;
 use gameplay::GameplayPlugin;
@@ -68,6 +71,12 @@ enum ClientPacket {
         /// from the caster's class kit. Defaults to Q for legacy packets.
         #[serde(default)]
         slot: u8,
+    },
+    BasicAttack {
+        target: TargetId,
+        server_epoch: u64,
+        match_id: u64,
+        request_id: u64,
     },
     Join {
         team: Team,
@@ -164,6 +173,13 @@ struct PlayerState {
     shop_available: bool,
     #[serde(default)]
     last_purchase: Option<PurchaseReceipt>,
+    #[serde(default)]
+    basic_attack_cooldown_secs: f32,
+    #[serde(default)]
+    basic_attack_remaining_secs: f32,
+    /// Replay high-water mark, retained across reconnect and respawn in this round.
+    #[serde(default)]
+    basic_attack_request_id: u64,
     xp: u32,
     level: u32,
     next_level_xp: u32,
@@ -182,13 +198,13 @@ struct PlayerState {
     /// Cosmetic sprite id replicated to clients; old packets default safely.
     #[serde(default)]
     sprite_character: Option<String>,
-    /// Monotonic cosmetic event id. It advances only after a cast is accepted.
+    /// Monotonic cosmetic event id. Advances after an accepted skill or basic attack.
     #[serde(default)]
     action_sequence: u64,
     /// Last accepted cosmetic action; unknown/legacy values are safely inert.
     #[serde(default)]
     action_kind: PlayerActionKind,
-    /// Q/W/E/R hotbar index associated with `action_sequence`.
+    /// Q/W/E/R index, or BASIC_ATTACK_ACTION_SLOT for a basic strike.
     #[serde(default)]
     action_slot: u8,
 }
@@ -786,6 +802,8 @@ struct ConnectedPlayer {
     last_movement_at: Instant,
     /// Per-slot cast timestamps (Q/W/E/R); each ability cools down independently.
     last_cast_at: [Option<Instant>; 4],
+    /// Independent of Q/W/E/R and never charged against mana.
+    last_basic_attack_at: Option<Instant>,
     respawn_at: Option<Instant>,
     /// Debug invulnerability toggle (TASK04). Not networked; the requesting
     /// client owns the toggle and the server skips damage while it is set.
@@ -959,6 +977,7 @@ struct ServerRuntime {
     last_simulation_at: Instant,
     last_wave_spawn_at: Instant,
     match_config: MatchConfig,
+    targeting_qa: bool,
     server_epoch: u64,
     match_id: u64,
     snapshot_tick: u64,
@@ -999,6 +1018,7 @@ impl ServerRuntime {
             last_simulation_at: Instant::now(),
             last_wave_spawn_at: Instant::now(),
             match_config,
+            targeting_qa: targeting_qa::enabled(match_config.mode),
             server_epoch: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -1049,6 +1069,7 @@ impl ServerRuntime {
     fn handle_packet(&mut self, addr: SocketAddr, packet: ClientPacket, now: Instant) {
         self.maintain_roster(now);
         let Self {
+            targeting_qa,
             players,
             disconnected_sessions,
             projectiles,
@@ -1102,6 +1123,30 @@ impl ServerRuntime {
                     addr,
                     target,
                     slot,
+                    next_projectile_id,
+                    game_state,
+                    now,
+                );
+            }
+            ClientPacket::BasicAttack {
+                target,
+                server_epoch: requested_epoch,
+                match_id: requested_match,
+                request_id,
+            } => {
+                if requested_epoch != *server_epoch || requested_match != *match_id {
+                    return;
+                }
+                handle_basic_attack_request(
+                    players,
+                    projectiles,
+                    minions,
+                    structures,
+                    neutrals,
+                    team_buffs,
+                    addr,
+                    target,
+                    request_id,
                     next_projectile_id,
                     game_state,
                     now,
@@ -1188,6 +1233,9 @@ impl ServerRuntime {
                         map_layout,
                         now,
                     );
+                }
+                if *targeting_qa {
+                    targeting_qa::place_initial_join(players, addr);
                 }
                 advance_formation_on_join(game_state, players, neutrals, *match_config, now);
             }
@@ -1334,24 +1382,26 @@ impl ServerRuntime {
             ..
         } = self;
 
-        spawn_minion_waves_if_due(
-            map_layout,
-            minions,
-            next_minion_id,
-            game_state,
-            now,
-            last_wave_spawn_at,
-        );
-        simulate_minions(players, minions, structures, game_state, dt, now);
-        simulate_tower_attacks(
-            players,
-            minions,
-            projectiles,
-            structures,
-            next_projectile_id,
-            game_state,
-            now,
-        );
+        if !self.targeting_qa {
+            spawn_minion_waves_if_due(
+                map_layout,
+                minions,
+                next_minion_id,
+                game_state,
+                now,
+                last_wave_spawn_at,
+            );
+            simulate_minions(players, minions, structures, game_state, dt, now);
+            simulate_tower_attacks(
+                players,
+                minions,
+                projectiles,
+                structures,
+                next_projectile_id,
+                game_state,
+                now,
+            );
+        }
         simulate_projectiles(
             players,
             minions,
@@ -1363,11 +1413,14 @@ impl ServerRuntime {
             dt,
             now,
         );
-        simulate_neutrals(players, neutrals, game_state, dt, now);
+        if !self.targeting_qa {
+            simulate_neutrals(players, neutrals, game_state, dt, now);
+        }
         regenerate_team_buff_hp(players, team_buffs, game_state, dt, now);
         accrue_passive_gold(players, game_state, gold_dt);
         restore_god_mode_players(players);
         handle_respawns(players, structures, map_layout, game_state, now);
+        refresh_basic_attack_cooldowns(players, now);
 
         let live_player_ids = players
             .values()

@@ -25,7 +25,7 @@ pub const PROJECTILE_SPEED: f32 = 19.0;
 pub const SKILL_SLOT_COUNT: usize = 4;
 pub const PROJECTILE_RADIUS: f32 = 0.22;
 pub const PROJECTILE_LIFETIME: Duration = Duration::from_secs(3);
-pub const PLAYER_HIT_RADIUS: f32 = 0.62;
+pub const PLAYER_HIT_RADIUS: f32 = shared::PLAYER_TARGET_RADIUS;
 pub const CAST_SPAWN_HEIGHT: f32 = 0.85;
 pub const AIM_HEIGHT: f32 = 0.55;
 pub const RESPAWN_DELAY: Duration = Duration::from_secs(5);
@@ -33,8 +33,8 @@ pub const RESPAWN_DELAY: Duration = Duration::from_secs(5);
 // --- Lane towers & base tower threat ---
 pub const TOWER_MAX_HP: f32 = 240.0;
 pub const BASE_TOWER_MAX_HP: f32 = 650.0;
-pub const TOWER_SIZE: f32 = 2.6;
-pub const BASE_TOWER_SIZE: f32 = 6.0;
+pub const TOWER_SIZE: f32 = shared::TOWER_TARGET_RADIUS * 2.0;
+pub const BASE_TOWER_SIZE: f32 = shared::BASE_TOWER_TARGET_RADIUS * 2.0;
 pub const TOWER_RANGE: f32 = 20.0;
 pub const TOWER_DAMAGE: f32 = 14.0;
 pub const TOWER_COOLDOWN: Duration = Duration::from_millis(900);
@@ -51,7 +51,7 @@ pub const MINION_ATTACK_RANGE: f32 = 2.4;
 pub const MINION_ATTACK_DAMAGE: f32 = 8.0;
 pub const MINION_ATTACK_COOLDOWN: Duration = Duration::from_millis(950);
 pub const MINION_VISION_RANGE: f32 = 10.0;
-pub const MINION_RADIUS: f32 = 0.55;
+pub const MINION_RADIUS: f32 = shared::MINION_TARGET_RADIUS;
 pub const MINION_SPAWN_HEIGHT: f32 = 0.5;
 pub const FIRST_MINION_WAVE_DELAY: Duration = Duration::from_secs(10);
 pub const MINION_WAVE_INTERVAL: Duration = Duration::from_secs(60);
@@ -78,7 +78,7 @@ pub const LEVEL_UP_MANA_BONUS: f32 = 12.0;
 pub const LEVEL_XP_THRESHOLDS: [u32; 9] = [90, 150, 180, 220, 260, 300, 340, 380, 420];
 
 // --- Jungle neutrals (camp stats & reward pacing) ---
-pub const NEUTRAL_RADIUS: f32 = 0.62;
+pub const NEUTRAL_RADIUS: f32 = shared::NEUTRAL_TARGET_RADIUS;
 pub const NEUTRAL_SPAWN_HEIGHT: f32 = 0.5;
 pub const NEUTRAL_AGGRO_RADIUS: f32 = 7.5;
 pub const NEUTRAL_LEASH_DISTANCE: f32 = 13.0;
