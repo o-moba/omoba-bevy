@@ -72,6 +72,7 @@ impl Plugin for PlayerPlugin {
             (
                 sync_jump_fallback_mode,
                 handle_player_input.after(crate::input_context::InputContextSet::Resolve),
+                move_player_mobile,
                 plan_movement_routes,
                 animate_jump,
                 move_player,
@@ -639,7 +640,10 @@ fn handle_player_input(
     mut commands: Commands,
     mouse_button_input: Res<ButtonInput<MouseButton>>,
     keyboard: Res<ButtonInput<KeyCode>>,
-    touches: Res<Touches>,
+    touch_input: (
+        Res<Touches>,
+        Option<Res<crate::mobile_controls::MobileControls>>,
+    ),
     camera_query: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     player_query: Query<
@@ -661,6 +665,10 @@ fn handle_player_input(
     mut pending_cast: ResMut<PendingCast>,
     ui_interactions: Query<&Interaction, With<Button>>,
 ) {
+    let (touches, mobile) = touch_input;
+    if mobile.as_ref().is_some_and(|mobile| mobile.enabled) {
+        return;
+    }
     if let Some(game_state) = game_state.as_ref() {
         if !matches!(game_state.state, GameState::Running) {
             return;
@@ -727,6 +735,97 @@ fn handle_player_input(
             });
         }
     }
+}
+
+/// Thumb motion is a direct, analog step through the existing collision and map
+/// clipping path. It never creates a long-lived route or an automatic chase.
+#[allow(clippy::type_complexity)]
+fn move_player_mobile(
+    mut commands: Commands,
+    time: Res<Time>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    context: Res<crate::input_context::GameplayInputContext>,
+    mode: Res<PlayerVisualMode>,
+    camera: Query<&GlobalTransform, With<MainCamera>>,
+    mut transforms: ParamSet<(
+        Query<
+            (
+                Entity,
+                &mut Transform,
+                &CombatStats,
+                Option<&crate::net::PlayerEquipment>,
+            ),
+            With<Player>,
+        >,
+        Query<&Transform, (With<PlayerBody>, Without<Player>)>,
+        Query<(&Transform, &StructureKind, Option<&CombatStats>), With<NetworkStructure>>,
+    )>,
+    map: Option<Res<MapLayout>>,
+    boost: Res<DebugSpeedBoost>,
+    mut pending: ResMut<PendingCast>,
+) {
+    let Some(mobile) = mobile.filter(|mobile| mobile.enabled) else {
+        return;
+    };
+    let other_players = transforms
+        .p1()
+        .iter()
+        .map(|t| t.translation)
+        .collect::<Vec<_>>();
+    let structures = transforms
+        .p2()
+        .iter()
+        .filter(|(_, _, stats)| stats.is_none_or(|s| s.is_alive()))
+        .map(|(t, kind, _)| (t.translation, *kind))
+        .collect::<Vec<_>>();
+    let allowed = context.gameplay_allowed() && mobile.focused && mobile.landscape;
+    let direction = camera
+        .single()
+        .ok()
+        .map(|camera| mobile_screen_direction(mobile.movement, camera, *mode))
+        .unwrap_or(Vec3::ZERO);
+    for (entity, mut transform, stats, equipment) in &mut transforms.p0() {
+        commands
+            .entity(entity)
+            .remove::<(MovementTarget, MovementRoute, Jumping)>();
+        if !allowed || !stats.is_alive() {
+            pending.cancel();
+            continue;
+        }
+        if direction.length_squared() < 0.0001 {
+            continue;
+        }
+        let current = transform.translation;
+        let speed = PLAYER_SPEED
+            * if boost.0 { DEBUG_SPEED_MULTIPLIER } else { 1.0 }
+            * equipment.map_or(1.0, |e| e.item_bonuses.move_speed_multiplier);
+        // Bound a resumed/hitched frame; the server movement envelope remains authoritative.
+        let desired = current + direction * speed * time.delta_secs().min(0.1);
+        let mut desired = resolve_player_collisions(desired, &other_players, &structures);
+        if let Some(map) = map.as_ref() {
+            desired = map.clamp_position(desired);
+        }
+        desired = clip_static_movement(current, desired);
+        transform.translation.x = desired.x;
+        transform.translation.z = desired.z;
+        let yaw = (-direction.x).atan2(-direction.z);
+        transform.rotation = transform.rotation.slerp(
+            Quat::from_rotation_y(yaw),
+            (time.delta_secs() * 10.0).min(1.0),
+        );
+    }
+}
+
+fn mobile_screen_direction(screen: Vec2, camera: &GlobalTransform, mode: PlayerVisualMode) -> Vec3 {
+    if mode == PlayerVisualMode::Sprite2d {
+        return render_xy_to_simulation_xz(Vec2::new(screen.x, -screen.y), 0.0).normalize_or_zero()
+            * screen.length().min(1.0);
+    }
+    let right = *camera.right();
+    let up = *camera.up();
+    let right = Vec3::new(right.x, 0.0, right.z).normalize_or_zero();
+    let up = Vec3::new(up.x, 0.0, up.z).normalize_or_zero();
+    (right * screen.x - up * screen.y).normalize_or_zero() * screen.length().min(1.0)
 }
 
 fn secondary_move_pressed(
@@ -1265,6 +1364,29 @@ fn resolve_player_structure_overlap(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn mobile_joystick_uses_screen_axes_and_retains_analog_speed() {
+        let camera = GlobalTransform::from(
+            Transform::from_translation(crate::camera::locked_camera_offset(1.0))
+                .looking_at(Vec3::ZERO, Vec3::Y),
+        );
+        let right = super::mobile_screen_direction(Vec2::X, &camera, PlayerVisualMode::Models3d);
+        let up = super::mobile_screen_direction(Vec2::NEG_Y, &camera, PlayerVisualMode::Models3d);
+        assert!(right.dot(Vec3::Z) > 0.99);
+        assert!(up.dot(Vec3::X) > 0.99);
+        let half =
+            super::mobile_screen_direction(Vec2::X * 0.5, &camera, PlayerVisualMode::Models3d);
+        assert!((half.length() - 0.5).abs() < 0.001);
+        assert_eq!(
+            super::mobile_screen_direction(Vec2::X, &camera, PlayerVisualMode::Sprite2d),
+            Vec3::X
+        );
+        assert_eq!(
+            super::mobile_screen_direction(Vec2::NEG_Y, &camera, PlayerVisualMode::Sprite2d),
+            Vec3::Z
+        );
+    }
+
     use super::*;
 
     #[test]

@@ -19,7 +19,7 @@ use crate::model_scale::{
     DEFAULT_MODEL_TARGET_HEIGHT, MAX_MODEL_TARGET_HEIGHT, MIN_MODEL_TARGET_HEIGHT,
     ModelScaleSettings,
 };
-use crate::session_config::DEFAULT_GAME_SERVER_ADDR;
+use crate::session_config::{DEFAULT_GAME_SERVER_ADDR, FALLBACK_GAME_SERVER_ADDR};
 use crate::team::CharacterChoice;
 use crate::world::{
     LightingSettings, MAX_AMBIENT_BRIGHTNESS, MAX_LIGHT_ILLUMINANCE, MAX_LIGHT_PITCH_DEG,
@@ -123,26 +123,11 @@ pub fn validate_client_session_id(raw: &str) -> Option<String> {
 }
 
 fn preferences_path() -> Option<PathBuf> {
-    if let Ok(dir) = std::env::var("OMOBA_CLIENT_CONFIG_DIR") {
-        let trimmed = dir.trim();
-        if !trimmed.is_empty() {
-            return Some(PathBuf::from(trimmed).join(PREFS_FILENAME));
-        }
-    }
-    #[cfg(target_os = "windows")]
-    {
-        return std::env::var_os("APPDATA")
-            .map(|base| PathBuf::from(base).join("omoba-bevy").join(PREFS_FILENAME));
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        std::env::var_os("HOME").map(|h| {
-            PathBuf::from(h)
-                .join(".config")
-                .join("omoba-bevy")
-                .join(PREFS_FILENAME)
-        })
-    }
+    crate::platform::preferences_file_path(
+        std::env::var("OMOBA_CLIENT_CONFIG_DIR").ok().as_deref(),
+        crate::platform::preferences_directory(),
+        PREFS_FILENAME,
+    )
 }
 
 /// Validates `host:port` or a parseable [`SocketAddr`] string for client config.
@@ -151,19 +136,29 @@ pub fn validate_game_server_addr(raw: &str) -> Option<String> {
     if t.is_empty() {
         return None;
     }
-    if t.parse::<SocketAddr>().is_ok() {
-        return Some(t.to_string());
+    if let Ok(address) = t.parse::<SocketAddr>() {
+        return (address.port() != 0).then(|| address.to_string());
     }
     let (host, port_str) = t.rsplit_once(':')?;
     let host = host.trim();
-    if host.is_empty() || host.contains([' ', '\t', '\n', '\r']) {
-        return None;
-    }
-    if host.len() > 253 {
+    // This is a UDP host:port field, never a web URL or an arbitrary path.
+    let dns_name = host.strip_suffix('.').unwrap_or(host);
+    if dns_name.is_empty()
+        || dns_name.len() > 253
+        || dns_name.split('.').any(|label| {
+            label.is_empty()
+                || label.len() > 63
+                || label.starts_with('-')
+                || label.ends_with('-')
+                || !label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+    {
         return None;
     }
     let port: u16 = port_str.trim().parse().ok()?;
-    Some(format!("{host}:{port}"))
+    (port != 0).then(|| format!("{host}:{port}"))
 }
 
 pub fn clamp_model_target_height(value: f32) -> f32 {
@@ -344,7 +339,7 @@ pub fn save_client_preferences_to_disk(
     };
     let addr = validate_game_server_addr(game_server_addr).unwrap_or_else(|| {
         validate_game_server_addr(DEFAULT_GAME_SERVER_ADDR)
-            .expect("default game server addr must validate")
+            .unwrap_or_else(|| FALLBACK_GAME_SERVER_ADDR.to_string())
     });
     let session_id =
         validate_client_session_id(client_session_id).unwrap_or_else(generate_client_session_id);
@@ -441,6 +436,32 @@ mod tests {
         assert!(validate_game_server_addr("   ").is_none());
         assert!(validate_game_server_addr("nocolon").is_none());
         assert!(validate_game_server_addr("host:").is_none());
+    }
+
+    #[test]
+    fn server_entry_accepts_lan_and_ipv6_but_rejects_urls_and_zero_port() {
+        assert_eq!(
+            validate_game_server_addr(" [::1]:4000 ").as_deref(),
+            Some("[::1]:4000")
+        );
+        assert_eq!(
+            validate_game_server_addr(" game.local.:4000 ").as_deref(),
+            Some("game.local.:4000")
+        );
+        for invalid in [
+            "https://game.local:4000",
+            "game.local/path:4000",
+            "127.0.0.1:0",
+            "[::1]:0",
+            "game..local:4000",
+            "-game.local:4000",
+            "game.local:65536",
+        ] {
+            assert!(
+                validate_game_server_addr(invalid).is_none(),
+                "accepted {invalid}"
+            );
+        }
     }
 
     #[test]

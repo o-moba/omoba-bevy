@@ -1,6 +1,7 @@
 //! Explicit 720p UI readbacks. Entry/help/gameplay use real admission and
-//! production button handlers. Only the final result snapshot is synthetic;
-//! it is labeled in the image, filename and report, never full-match evidence.
+//! production button handlers. The final result snapshot is synthetic. An explicit
+//! OMOBA_BETA_UI_SKILL_UPGRADES=1 additionally enables a client-only progression
+//! fixture in gameplay captures. Both are labeled and reported, never match proof.
 use std::{
     path::PathBuf,
     time::{Duration, Instant},
@@ -60,6 +61,8 @@ impl Plugin for BetaUiQaPlugin {
             readbacks: Vec::new(),
             captures: Vec::new(),
             fixture_label: false,
+            skill_upgrades: std::env::var("OMOBA_BETA_UI_SKILL_UPGRADES")
+                .is_ok_and(|value| value == "1"),
             width: std::env::var("OMOBA_QA_WIDTH")
                 .ok()
                 .and_then(|s| s.parse().ok())
@@ -81,6 +84,16 @@ impl Plugin for BetaUiQaPlugin {
                 .before(crate::input_context::InputContextSet::Modal),
         )
         .add_systems(PostUpdate, capture.after(bevy::ui::UiSystems::Layout));
+        if app.world().resource::<BetaUiQa>().skill_upgrades {
+            app.init_resource::<SkillUpgradeFixtureState>().add_systems(
+                Update,
+                prepare_skill_upgrade_fixture
+                    .after(crate::net::ClientNetPipeline::ApplySnapshot)
+                    .before(crate::mobile_controls::MobileControlsSet::Input)
+                    .before(crate::mobile_controls::MobileControlsSet::Visuals)
+                    .before(crate::match_hud::MatchHudVisuals),
+            );
+        }
     }
 }
 
@@ -95,6 +108,7 @@ struct BetaUiQa {
     readbacks: Vec<usize>,
     captures: Vec<serde_json::Value>,
     fixture_label: bool,
+    skill_upgrades: bool,
     width: u32,
     height: u32,
 }
@@ -110,8 +124,15 @@ fn prepare_controls(
     shop: Res<crate::shop::ShopState>,
     equipment: Query<&crate::net::PlayerEquipment, With<crate::player::Player>>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
+    mut focus_requested: Local<bool>,
 ) {
     if let Ok(mut window) = windows.single_mut() {
+        // The capture command owns this short-lived window. Request real OS
+        // focus once; do not bypass the production focus-loss input gate.
+        if !window.focused && !*focus_requested {
+            window.focused = true;
+            *focus_requested = true;
+        }
         window.resolution.set_scale_factor_override(Some(1.0));
         if window.physical_width() != qa.width || window.physical_height() != qa.height {
             window
@@ -187,6 +208,93 @@ fn prepare_result_fixture(
     }
 }
 
+#[derive(Resource, Default)]
+struct SkillUpgradeFixtureState {
+    saved: Option<(Entity, crate::net::PlayerProgression)>,
+    applied: bool,
+    label_spawned: bool,
+}
+
+#[derive(Component)]
+struct SkillUpgradeFixtureLabel;
+
+fn has_fixture_progression(progression: &crate::net::PlayerProgression) -> bool {
+    progression.level == 6 && progression.skill_points == 4 && progression.ranks == [1; 4]
+}
+
+fn prepare_skill_upgrade_fixture(
+    mut commands: Commands,
+    qa: Res<BetaUiQa>,
+    mut fixture: ResMut<SkillUpgradeFixtureState>,
+    mut player: Query<(Entity, &mut crate::net::PlayerProgression), With<crate::player::Player>>,
+    mut labels: Query<&mut Node, With<SkillUpgradeFixtureLabel>>,
+) {
+    let active = qa.skill_upgrades && matches!(qa.stage, 2 | 5);
+    if let Ok((entity, mut progression)) = player.single_mut() {
+        if active {
+            // Refresh the saved value whenever a real snapshot replaced our local
+            // fixture. Never send a rank-up command or mutate authoritative actors.
+            if fixture.saved.is_none_or(|(saved, _)| saved != entity)
+                || !has_fixture_progression(&progression)
+            {
+                fixture.saved = Some((entity, *progression));
+            }
+            progression.level = 6;
+            progression.skill_points = 4;
+            progression.ranks = [1; 4];
+            fixture.applied = true;
+        } else {
+            // Do not let the fixture leak into the shop/result stages when a
+            // network snapshot has not arrived on the exact transition frame.
+            if fixture.applied
+                && has_fixture_progression(&progression)
+                && let Some((saved_entity, saved)) = fixture.saved
+                && saved_entity == entity
+            {
+                *progression = saved;
+            }
+            fixture.saved = None;
+            fixture.applied = false;
+        }
+    } else {
+        fixture.saved = None;
+        fixture.applied = false;
+    }
+    for mut label in &mut labels {
+        label.display = if fixture.applied {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
+    if fixture.applied && !fixture.label_spawned {
+        fixture.label_spawned = true;
+        commands
+            .spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    bottom: Val::Px(4.0),
+                    width: Val::Percent(100.0),
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                ZIndex(200),
+                SkillUpgradeFixtureLabel,
+                Name::new("QaSkillUpgradeFixtureLabel"),
+            ))
+            .with_child((
+                Text::new("QA: skill-upgrade layout fixture"),
+                TextFont {
+                    font_size: 12.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(1.0, 0.8, 0.3)),
+                BackgroundColor(Color::srgba(0.02, 0.02, 0.02, 0.92)),
+            ));
+    }
+}
+
 #[derive(bevy::ecs::system::SystemParam)]
 struct UiScene<'w, 's> {
     windows: Query<'w, 's, Entity, With<PrimaryWindow>>,
@@ -215,10 +323,12 @@ fn capture(
     pause: Res<crate::pause_menu::PauseMenuState>,
     equipment: Query<&crate::net::PlayerEquipment, With<crate::player::Player>>,
     context: Res<crate::input_context::GameplayInputContext>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     assets: Res<AssetServer>,
     spawner: Res<SceneSpawner>,
     scene: UiScene,
     minimap: crate::minimap::MinimapQaScene,
+    progression_fixture: Option<Res<SkillUpgradeFixtureState>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     if qa.stage >= FILES.len() {
@@ -249,7 +359,9 @@ fn capture(
                     "elapsed_seconds":qa.started.elapsed().as_secs_f64(), "manual_interaction_verified":false,
                     "button_handler_interactions":"scripted Interaction::Pressed on production Join, Help, Shop and purchase buttons; Escape uses production keyboard modal closure",
                     "real_purchase_verified":true,
-                    "full_match_proof":false, "result_snapshot":"synthetic presentation fixture only"});
+                    "full_match_proof":false, "result_snapshot":"synthetic presentation fixture only",
+                    "synthetic_progression":qa.skill_upgrades,
+                    "progression_fixture":"opt-in local level 6, four skill points and rank 1 abilities during stages 2/5 only; server unchanged"});
                 let saved = std::fs::write(
                     qa.directory.join("qa-summary.json"),
                     serde_json::to_vec_pretty(&summary).unwrap(),
@@ -321,19 +433,65 @@ fn capture(
         return;
     }
     let primary_nodes: Vec<_> = scene.nodes.iter().filter(|(name, _, _, _)| matches!(name.as_str(),
-        "TeamGreenButton" | "TeamBlueButton" | "AvatarGrid" | "HelpDismissButton" | "HelpOverlayRoot" | "GameStateLabel" | "ConnectionStatusPanel" | "MinimapRoot" | "MatchHudColumn" | "SkillBarRoot" | "SkillSlot-Q" | "SkillSlot-R" | "EquipmentHud" | "ShopOpenButton" | "ShopPanel" | "ShopCloseButton" | "ShopBuy-EB" | "ShopBuy-GC" | "ShopSummary" | "ShopFeedback"))
+        "TeamGreenButton" | "TeamBlueButton" | "AvatarGrid" | "HelpDismissButton" | "HelpOverlayRoot" | "GameStateLabel" | "ConnectionStatusPanel" | "MinimapRoot" | "MatchObjectivePanel" | "MatchHudColumn" | "SkillBarRoot" | "SkillSlot-Q" | "SkillSlot-R" | "EquipmentHud" | "ShopOpenButton" | "ShopPanel" | "ShopCloseButton" | "ShopBuy-EB" | "ShopBuy-GC" | "ShopSummary" | "ShopFeedback" | "MobileJoystick" | "MobileAbility-0" | "MobileAbility-1" | "MobileAbility-2" | "MobileAbility-3" | "MobileUpgrade-0" | "MobileUpgrade-1" | "MobileUpgrade-2" | "MobileUpgrade-3" | "PhoneMenuBar" | "QaSkillUpgradeFixtureLabel")
+            || name.as_str().starts_with("ShopBuy-") || name.as_str().starts_with("ShopDescription-") || name.as_str().starts_with("ShopDetails-"))
         .map(|(name, node, transform, visible)| {
             let center = transform.translation;
-            let size = node.size();
+            let size = node.size() * transform.to_scale_angle_translation().0.abs();
             serde_json::json!({"name":name.as_str(), "center":[center.x,center.y], "size":[size.x,size.y],
                 "visible":visible.is_none_or(|visibility| visibility.get()),
                 "fits_viewport": center.x-size.x/2.0 >= -1.0 && center.y-size.y/2.0 >= -1.0
                     && center.x+size.x/2.0 <= qa.width as f32 + 1.0 && center.y+size.y/2.0 <= qa.height as f32 + 1.0})
         }).collect();
     let stage = qa.stage;
+    // Measure the real laid-out description and affordability text, including
+    // wrapping. A card fitting the viewport alone does not prove its text fits.
+    let shop_text_fits = !matches!(stage, 3 | 4)
+        || primary_nodes
+            .iter()
+            .filter(|node| {
+                node["name"].as_str().is_some_and(|name| {
+                    name.starts_with("ShopDescription-") || name.starts_with("ShopDetails-")
+                })
+            })
+            .all(|text| {
+                let name = text["name"].as_str().unwrap();
+                let code = name.split_once('-').unwrap().1;
+                primary_nodes
+                    .iter()
+                    .find(|node| node["name"] == format!("ShopBuy-{code}"))
+                    .is_some_and(|card| {
+                        (0..2).all(|axis| {
+                            let center = text["center"][axis].as_f64().unwrap();
+                            let half = text["size"][axis].as_f64().unwrap() * 0.5;
+                            let card_center = card["center"][axis].as_f64().unwrap();
+                            let card_half = card["size"][axis].as_f64().unwrap() * 0.5;
+                            center - half >= card_center - card_half - 1.0
+                                && center + half <= card_center + card_half + 1.0
+                        })
+                    })
+            });
+    if !shop_text_fits {
+        error!("BETA_UI_QA failed: shop description/price text leaves its card: {primary_nodes:?}");
+        exit.write(AppExit::error());
+        return;
+    }
     let required: &[&str] = match stage {
         0 => &["TeamGreenButton", "TeamBlueButton", "AvatarGrid"],
         1 => &["HelpDismissButton", "HelpOverlayRoot"],
+        2 | 5 if mobile.as_ref().is_some_and(|mobile| mobile.enabled) => &[
+            "MinimapRoot",
+            "MatchObjectivePanel",
+            "MatchHudColumn",
+            "EquipmentHud",
+            "ShopOpenButton",
+            "MobileJoystick",
+            "MobileAbility-0",
+            "MobileAbility-1",
+            "MobileAbility-2",
+            "MobileAbility-3",
+            "PhoneMenuBar",
+        ],
         2 | 5 => &[
             "MinimapRoot",
             "MatchHudColumn",
@@ -353,7 +511,22 @@ fn capture(
         6 => &["GameStateLabel"],
         _ => &[],
     };
-    let controls_fit = required.iter().all(|name| {
+    let synthetic_progression = progression_fixture
+        .as_ref()
+        .is_some_and(|fixture| fixture.applied);
+    let upgrade_required: &[&str] =
+        if synthetic_progression && mobile.as_ref().is_some_and(|mobile| mobile.enabled) {
+            &[
+                "MobileUpgrade-0",
+                "MobileUpgrade-1",
+                "MobileUpgrade-2",
+                "MobileUpgrade-3",
+                "QaSkillUpgradeFixtureLabel",
+            ]
+        } else {
+            &[]
+        };
+    let controls_fit = required.iter().chain(upgrade_required).all(|name| {
         primary_nodes.iter().any(|node| {
             node["name"] == *name
                 && node["visible"] == true
@@ -364,14 +537,28 @@ fn capture(
     });
     let dock_names = [
         "MinimapRoot",
+        "MatchObjectivePanel",
         "MatchHudColumn",
         "SkillBarRoot",
         "EquipmentHud",
+        "MobileJoystick",
+        "MobileAbility-0",
+        "MobileAbility-1",
+        "MobileAbility-2",
+        "MobileAbility-3",
+        "MobileUpgrade-0",
+        "MobileUpgrade-1",
+        "MobileUpgrade-2",
+        "MobileUpgrade-3",
+        "PhoneMenuBar",
     ];
     let dock: Vec<_> = primary_nodes
         .iter()
         .filter(|node| {
-            dock_names.iter().any(|name| node["name"] == *name) && node["visible"] == true
+            dock_names.iter().any(|name| node["name"] == *name)
+                && node["visible"] == true
+                && node["size"][0].as_f64().is_some_and(|size| size > 0.0)
+                && node["size"][1].as_f64().is_some_and(|size| size > 0.0)
         })
         .collect();
     let dock_clear = !matches!(stage, 2 | 5)
@@ -381,6 +568,19 @@ fn capture(
                     (a["center"][0].as_f64().unwrap() - b["center"][0].as_f64().unwrap()).abs();
                 let delta_y =
                     (a["center"][1].as_f64().unwrap() - b["center"][1].as_f64().unwrap()).abs();
+                // Raw mobile touch controls are circles. Their bounding-square
+                // corners may overlap without overlapping visible/hit regions.
+                let circle = |node: &serde_json::Value| {
+                    node["name"].as_str().is_some_and(|name| {
+                        name == "MobileJoystick"
+                            || name.starts_with("MobileAbility-")
+                            || name.starts_with("MobileUpgrade-")
+                    })
+                };
+                if circle(a) && circle(b) {
+                    return delta_x.hypot(delta_y)
+                        >= (a["size"][0].as_f64().unwrap() + b["size"][0].as_f64().unwrap()) / 2.0;
+                }
                 delta_x >= (a["size"][0].as_f64().unwrap() + b["size"][0].as_f64().unwrap()) / 2.0
                     || delta_y
                         >= (a["size"][1].as_f64().unwrap() + b["size"][1].as_f64().unwrap()) / 2.0
@@ -393,16 +593,20 @@ fn capture(
     }
     if !controls_fit {
         error!(
-            "BETA_UI_QA failed: primary controls are missing, hidden or outside 720p: {primary_nodes:?}"
+            "BETA_UI_QA failed: primary controls are missing, hidden or outside requested viewport; gameplay_allowed={} modal_open={} focused={:?}: {primary_nodes:?}",
+            context.gameplay_allowed(),
+            context.modal_open,
+            mobile.as_ref().map(|m| m.focused)
         );
         exit.write(AppExit::error());
         return;
     }
     let record = serde_json::json!({"file":capture_file(&qa, stage), "stage":stage, "pixels":[qa.width,qa.height],
-        "admitted":session.join_confirmed(), "server_epoch":game.meta.server_epoch, "snapshot_tick":game.meta.snapshot_tick,
-        "synthetic_result":stage == 6,
+        "mobile_controls":mobile.as_ref().is_some_and(|mobile| mobile.enabled), "admitted":session.join_confirmed(), "server_epoch":game.meta.server_epoch, "snapshot_tick":game.meta.snapshot_tick,
+        "synthetic_result":stage == 6, "synthetic_progression":synthetic_progression,
+        "progression_fixture":synthetic_progression.then(||serde_json::json!({"level":6,"skill_points":4,"ranks":[1,1,1,1],"server_unchanged":true})),
         "minimap":minimap.diagnostics(), "shop_modal":shop.open, "gameplay_allowed":context.gameplay_allowed(), "pause_open":pause.open,
-        "equipment":equipment.single().ok().map(|e|serde_json::json!({"gold":e.gold,"inventory":e.inventory,"bonuses":e.item_bonuses,"receipt":e.last_purchase})), "primary_controls_fit":controls_fit, "primary_nodes":primary_nodes});
+        "equipment":equipment.single().ok().map(|e|serde_json::json!({"gold":e.gold,"inventory":e.inventory,"bonuses":e.item_bonuses,"receipt":e.last_purchase})), "primary_controls_fit":controls_fit, "shop_text_fits":shop_text_fits, "primary_nodes":primary_nodes});
     info!("BETA_UI_QA capture_request={record}");
     qa.captures.push(record);
     qa.in_flight = true;

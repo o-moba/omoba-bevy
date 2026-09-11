@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="space.ekza.omoba.beta"
+    android:versionCode="1"
+    android:versionName="__VERSION__">
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-feature android:name="android.hardware.vulkan.level" android:version="1" android:required="true" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="true" />
+    <application android:label="Omoba Beta" android:hasCode="false"
+        android:allowBackup="false" android:extractNativeLibs="true"
+        android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen">
+        <activity android:name="android.app.NativeActivity" android:exported="true"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|density|keyboard|navigation|uiMode"
+            android:windowSoftInputMode="adjustNothing">
+            <meta-data android:name="android.app.lib_name" android:value="client" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

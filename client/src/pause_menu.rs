@@ -1,5 +1,6 @@
 use bevy::{
     app::AppExit,
+    input::touch::{TouchInput, TouchPhase},
     prelude::*,
     window::{CursorGrabMode, CursorOptions, PrimaryWindow},
 };
@@ -50,6 +51,12 @@ impl Plugin for PauseMenuPlugin {
             )
             .add_systems(
                 Update,
+                collect_pause_button_taps
+                    .after(close_pause_menu_when_disconnected)
+                    .in_set(crate::input_context::InputContextSet::Modal),
+            )
+            .add_systems(
+                Update,
                 (
                     handle_settings_navigation_buttons,
                     sync_pause_menu_visibility,
@@ -62,7 +69,8 @@ impl Plugin for PauseMenuPlugin {
                     handle_reset_graphics_defaults_button,
                     handle_exit_button,
                     sync_settings_server_addr_label,
-                ),
+                )
+                    .after(collect_pause_button_taps),
             );
     }
 }
@@ -359,6 +367,7 @@ fn spawn_menu_button<M: Component>(
     parent
         .spawn((
             Button,
+            PauseButtonGesture::default(),
             Node {
                 width: Val::Px(BUTTON_WIDTH),
                 height: Val::Px(BUTTON_HEIGHT),
@@ -414,6 +423,7 @@ fn spawn_adjust_row<Dec: Component, ValueMarker: Component, Inc: Component>(
 
             row.spawn((
                 Button,
+                PauseButtonGesture::default(),
                 Node {
                     width: Val::Px(ADJUST_BUTTON_SIZE),
                     height: Val::Px(ADJUST_BUTTON_SIZE),
@@ -449,6 +459,7 @@ fn spawn_adjust_row<Dec: Component, ValueMarker: Component, Inc: Component>(
 
             row.spawn((
                 Button,
+                PauseButtonGesture::default(),
                 Node {
                     width: Val::Px(ADJUST_BUTTON_SIZE),
                     height: Val::Px(ADJUST_BUTTON_SIZE),
@@ -566,24 +577,231 @@ fn sync_pause_menu_sections(
     }
 }
 
+/// Scrollable mobile menus activate only on a short release within the same
+/// visible button. Desktop mouse Interaction behavior remains unchanged.
+#[derive(Component, Default, Clone, Copy, PartialEq, Eq)]
+struct PauseButtonGesture {
+    touch_mode: bool,
+    activated: bool,
+}
+
+impl PauseButtonGesture {
+    fn effective(&self, interaction: Interaction) -> Interaction {
+        if !self.touch_mode {
+            return interaction;
+        }
+        if self.activated {
+            Interaction::Pressed
+        } else if interaction == Interaction::Pressed {
+            Interaction::Hovered
+        } else {
+            interaction
+        }
+    }
+}
+
+#[derive(Default)]
+struct PauseTapState {
+    held: Option<PauseTap>,
+    menu: Option<(bool, bool, Vec2)>,
+}
+
+struct PauseTap {
+    id: u64,
+    button: Entity,
+    start: Vec2,
+    canceled: bool,
+}
+
+impl PauseTapState {
+    fn event(
+        &mut self,
+        id: u64,
+        phase: TouchPhase,
+        point: Vec2,
+        buttons: &[(Entity, Rect)],
+    ) -> Option<Entity> {
+        if !point.is_finite() {
+            self.held = None;
+            return None;
+        }
+        if phase == TouchPhase::Started {
+            if self.held.is_none() {
+                if let Some((button, _)) = buttons.iter().find(|(_, rect)| rect.contains(point)) {
+                    self.held = Some(PauseTap {
+                        id,
+                        button: *button,
+                        start: point,
+                        canceled: false,
+                    });
+                }
+            }
+            return None;
+        }
+        let tap = self.held.as_mut().filter(|tap| tap.id == id)?;
+        // Sticky cancellation: scrolling away then back cannot revive a tap.
+        tap.canceled |= tap.start.distance(point) > 10.0;
+        let candidate = tap.button;
+        let released = phase == TouchPhase::Ended
+            && !tap.canceled
+            && buttons
+                .iter()
+                .any(|(entity, rect)| *entity == candidate && rect.contains(point));
+        if matches!(phase, TouchPhase::Ended | TouchPhase::Canceled) {
+            self.held = None;
+        }
+        released.then_some(candidate)
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn collect_pause_button_taps(
+    mut state: Local<PauseTapState>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    menu: Res<PauseMenuState>,
+    server: Option<Res<crate::mobile_ui::ServerEntry>>,
+    touches: Res<Touches>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    window: Query<(Entity, &Window), With<PrimaryWindow>>,
+    mut events: MessageReader<TouchInput>,
+    lifecycle: Option<Res<Messages<bevy::window::AppLifecycle>>>,
+    mut lifecycle_cursor: Local<bevy::ecs::message::MessageCursor<bevy::window::AppLifecycle>>,
+    mut buttons: Query<(
+        Entity,
+        &mut PauseButtonGesture,
+        Option<&ComputedNode>,
+        Option<&UiGlobalTransform>,
+        Option<&InheritedVisibility>,
+        Option<&bevy::ui::CalculatedClip>,
+    )>,
+) {
+    let touch_mode = mobile.as_ref().is_some_and(|m| m.enabled);
+    for (_, mut gesture, _, _, _, _) in &mut buttons {
+        gesture.set_if_neq(PauseButtonGesture {
+            touch_mode,
+            activated: false,
+        });
+    }
+    let Some(mobile) = mobile.filter(|m| m.enabled && m.landscape && m.focused) else {
+        state.held = None;
+        events.clear();
+        return;
+    };
+    let interrupted = lifecycle.as_ref().is_some_and(|events| {
+        lifecycle_cursor.read(events).any(|event| {
+            matches!(
+                event,
+                bevy::window::AppLifecycle::WillSuspend
+                    | bevy::window::AppLifecycle::Suspended
+                    | bevy::window::AppLifecycle::WillResume
+            )
+        })
+    });
+    if interrupted {
+        state.held = None;
+        events.clear();
+        return;
+    }
+    let current_menu = (menu.open, menu.in_settings, mobile.viewport);
+    if state.menu != Some(current_menu) {
+        state.held = None;
+        state.menu = Some(current_menu);
+    }
+    if !menu.open || server.as_ref().is_some_and(|entry| entry.open) {
+        state.held = None;
+        events.clear();
+        return;
+    }
+    let visible: Vec<_> = buttons
+        .iter()
+        .filter_map(|(entity, _, node, transform, visibility, clip)| {
+            if visibility.is_some_and(|v| !v.get()) {
+                return None;
+            }
+            let (Some(node), Some(transform)) = (node, transform) else {
+                return None;
+            };
+            let factor = node.inverse_scale_factor();
+            let size = node.size() * transform.to_scale_angle_translation().0.abs() * factor;
+            if size.min_element() <= 0.0 {
+                return None;
+            }
+            let mut rect = Rect::from_center_size(transform.translation * factor, size);
+            if let Some(clip) = clip {
+                rect = rect.intersect(Rect::from_corners(
+                    clip.clip.min * factor,
+                    clip.clip.max * factor,
+                ));
+            }
+            (rect.width() > 0.0 && rect.height() > 0.0).then_some((entity, rect))
+        })
+        .collect();
+    let Ok((window_entity, window)) = window.single() else {
+        state.held = None;
+        events.clear();
+        return;
+    };
+    let mut activated = Vec::new();
+    for event in events.read() {
+        if event.window == window_entity {
+            if let Some(entity) = state.event(event.id, event.phase, event.position, &visible) {
+                activated.push(entity);
+            }
+        }
+    }
+    // Mouse QA follows the same release rule. Native touch devices ignore
+    // synthesized mouse events so a physical release cannot activate twice.
+    if !cfg!(any(target_os = "android", target_os = "ios"))
+        && touches.iter().next().is_none()
+        && !touches.any_just_released()
+        && !touches.any_just_canceled()
+    {
+        if let Some(point) = window.cursor_position() {
+            let phase = if mouse.just_pressed(MouseButton::Left) {
+                Some(TouchPhase::Started)
+            } else if mouse.just_released(MouseButton::Left) {
+                Some(TouchPhase::Ended)
+            } else if mouse.pressed(MouseButton::Left) {
+                Some(TouchPhase::Moved)
+            } else {
+                None
+            };
+            if let Some(phase) = phase {
+                if let Some(entity) = state.event(u64::MAX, phase, point, &visible) {
+                    activated.push(entity);
+                }
+            }
+        }
+    }
+    for entity in activated {
+        if let Ok((_, mut gesture, _, _, _, _)) = buttons.get_mut(entity) {
+            gesture.activated = true;
+        }
+    }
+}
+
 fn handle_settings_navigation_buttons(
     mut menu_state: ResMut<PauseMenuState>,
     mut button_query: Query<
         (
             &Interaction,
+            &PauseButtonGesture,
             Option<&SettingsOpenButton>,
             Option<&SettingsBackButton>,
             &mut BackgroundColor,
         ),
-        (Changed<Interaction>, With<Button>),
+        (
+            Or<(Changed<Interaction>, Changed<PauseButtonGesture>)>,
+            With<Button>,
+        ),
     >,
 ) {
-    for (interaction, open_button, back_button, mut color) in &mut button_query {
+    for (interaction, gesture, open_button, back_button, mut color) in &mut button_query {
         if open_button.is_none() && back_button.is_none() {
             continue;
         }
 
-        match *interaction {
+        match gesture.effective(*interaction) {
             Interaction::Pressed => {
                 if open_button.is_some() {
                     menu_state.in_settings = true;
@@ -608,19 +826,23 @@ fn handle_model_scale_buttons(
     mut button_query: Query<
         (
             &Interaction,
+            &PauseButtonGesture,
             Option<&ScaleDecreaseButton>,
             Option<&ScaleIncreaseButton>,
             &mut BackgroundColor,
         ),
-        (Changed<Interaction>, With<Button>),
+        (
+            Or<(Changed<Interaction>, Changed<PauseButtonGesture>)>,
+            With<Button>,
+        ),
     >,
 ) {
-    for (interaction, is_down, is_up, mut color) in &mut button_query {
+    for (interaction, gesture, is_down, is_up, mut color) in &mut button_query {
         if is_down.is_none() && is_up.is_none() {
             continue;
         }
 
-        match *interaction {
+        match gesture.effective(*interaction) {
             Interaction::Pressed => {
                 if is_down.is_some() {
                     scale_settings.target_height =
@@ -646,6 +868,7 @@ fn handle_lighting_buttons(
     mut button_query: Query<
         (
             &Interaction,
+            &PauseButtonGesture,
             Option<&LightDecreaseButton>,
             Option<&LightIncreaseButton>,
             Option<&AmbientDecreaseButton>,
@@ -656,11 +879,15 @@ fn handle_lighting_buttons(
             Option<&YawIncreaseButton>,
             &mut BackgroundColor,
         ),
-        (Changed<Interaction>, With<Button>),
+        (
+            Or<(Changed<Interaction>, Changed<PauseButtonGesture>)>,
+            With<Button>,
+        ),
     >,
 ) {
     for (
         interaction,
+        gesture,
         light_down,
         light_up,
         ambient_down,
@@ -685,7 +912,7 @@ fn handle_lighting_buttons(
             continue;
         }
 
-        match *interaction {
+        match gesture.effective(*interaction) {
             Interaction::Pressed => {
                 if light_down.is_some() {
                     lighting_settings.illuminance = (lighting_settings.illuminance
@@ -802,9 +1029,9 @@ fn handle_reset_graphics_defaults_button(
     client_session_id: Res<ClientSessionId>,
     team: Res<TeamSelection>,
     mut button_query: Query<
-        (&Interaction, &mut BackgroundColor),
+        (&Interaction, &PauseButtonGesture, &mut BackgroundColor),
         (
-            Changed<Interaction>,
+            Or<(Changed<Interaction>, Changed<PauseButtonGesture>)>,
             With<Button>,
             With<ResetGraphicsDefaultsButton>,
         ),
@@ -819,8 +1046,8 @@ fn handle_reset_graphics_defaults_button(
         }
     };
 
-    for (interaction, mut color) in &mut button_query {
-        match *interaction {
+    for (interaction, gesture, mut color) in &mut button_query {
+        match gesture.effective(*interaction) {
             Interaction::Pressed => {
                 reset_graphics_to_defaults(
                     lighting.as_mut(),
@@ -845,15 +1072,19 @@ fn handle_reset_graphics_defaults_button(
 fn handle_exit_button(
     mut commands: Commands,
     mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<Button>, With<ExitButton>),
+        (&Interaction, &PauseButtonGesture, &mut BackgroundColor),
+        (
+            Or<(Changed<Interaction>, Changed<PauseButtonGesture>)>,
+            With<Button>,
+            With<ExitButton>,
+        ),
     >,
     mut cursor_query: Query<&mut CursorOptions, With<PrimaryWindow>>,
     window_query: Query<Entity, With<PrimaryWindow>>,
     mut app_exit_writer: MessageWriter<AppExit>,
 ) {
-    for (interaction, mut color) in &mut interaction_query {
-        match *interaction {
+    for (interaction, gesture, mut color) in &mut interaction_query {
+        match gesture.effective(*interaction) {
             Interaction::Pressed => {
                 info!("Exit selected from pause menu.");
                 if let Ok(mut cursor) = cursor_query.single_mut() {
@@ -878,12 +1109,16 @@ fn handle_exit_button(
 fn handle_resume_button(
     mut menu_state: ResMut<PauseMenuState>,
     mut buttons: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<Button>, With<ResumeButton>),
+        (&Interaction, &PauseButtonGesture, &mut BackgroundColor),
+        (
+            Or<(Changed<Interaction>, Changed<PauseButtonGesture>)>,
+            With<Button>,
+            With<ResumeButton>,
+        ),
     >,
 ) {
-    for (interaction, mut color) in &mut buttons {
-        match *interaction {
+    for (interaction, gesture, mut color) in &mut buttons {
+        match gesture.effective(*interaction) {
             Interaction::Pressed => {
                 menu_state.open = false;
                 menu_state.in_settings = false;
@@ -897,6 +1132,151 @@ fn handle_resume_button(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pause_tap_cancels_a_scroll_even_after_returning_to_the_button() {
+        let entity = Entity::PLACEHOLDER;
+        let rect = Rect::from_center_size(Vec2::new(100.0, 100.0), Vec2::new(180.0, 46.0));
+        let buttons = [(entity, rect)];
+        let mut state = PauseTapState::default();
+        assert_eq!(
+            state.event(1, TouchPhase::Started, rect.center(), &buttons),
+            None
+        );
+        assert_eq!(
+            state.event(2, TouchPhase::Ended, rect.center(), &buttons),
+            None
+        );
+        assert_eq!(
+            state.event(
+                1,
+                TouchPhase::Moved,
+                rect.center() + Vec2::Y * 30.0,
+                &buttons
+            ),
+            None
+        );
+        assert_eq!(
+            state.event(1, TouchPhase::Ended, rect.center(), &buttons),
+            None
+        );
+        state.event(3, TouchPhase::Started, rect.center(), &buttons);
+        assert_eq!(
+            state.event(3, TouchPhase::Canceled, rect.center(), &buttons),
+            None
+        );
+        state.event(4, TouchPhase::Started, rect.center(), &buttons);
+        assert_eq!(
+            state.event(
+                4,
+                TouchPhase::Ended,
+                rect.center() + Vec2::X * 4.0,
+                &buttons
+            ),
+            Some(entity)
+        );
+        assert_eq!(
+            state.event(4, TouchPhase::Ended, rect.center(), &buttons),
+            None
+        );
+    }
+
+    #[test]
+    fn mobile_exit_requires_release_and_focus_loss_cancels_the_pending_tap() {
+        let mut app = App::new();
+        let mut mobile = crate::mobile_controls::MobileControls::default();
+        mobile.enabled = true;
+        app.insert_resource(mobile)
+            .insert_resource(PauseMenuState {
+                open: true,
+                in_settings: false,
+            })
+            .init_resource::<Touches>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .add_message::<TouchInput>()
+            .add_message::<AppExit>()
+            .add_systems(
+                Update,
+                (collect_pause_button_taps, handle_exit_button).chain(),
+            );
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
+        let button = app
+            .world_mut()
+            .spawn((
+                Button,
+                Node::default(),
+                ExitButton,
+                PauseButtonGesture::default(),
+                Interaction::Pressed,
+                BackgroundColor(BUTTON_COLOR),
+                ComputedNode {
+                    size: Vec2::new(180.0, 46.0),
+                    inverse_scale_factor: 1.0,
+                    ..default()
+                },
+                UiGlobalTransform::from_translation(Vec2::new(300.0, 150.0)),
+                InheritedVisibility::VISIBLE,
+            ))
+            .id();
+        let event = |id, phase, position| TouchInput {
+            id,
+            phase,
+            position,
+            window,
+            force: None,
+        };
+        let center = Vec2::new(300.0, 150.0);
+        app.world_mut()
+            .write_message(event(1, TouchPhase::Started, center));
+        app.update();
+        assert!(app.world().resource::<Messages<AppExit>>().is_empty());
+        app.world_mut()
+            .write_message(event(1, TouchPhase::Moved, center + Vec2::Y * 40.0));
+        app.world_mut()
+            .write_message(event(1, TouchPhase::Ended, center));
+        app.update();
+        assert!(app.world().resource::<Messages<AppExit>>().is_empty());
+        app.world_mut()
+            .write_message(event(2, TouchPhase::Started, center));
+        app.update();
+        app.world_mut()
+            .resource_mut::<crate::mobile_controls::MobileControls>()
+            .focused = false;
+        app.update();
+        app.world_mut()
+            .resource_mut::<crate::mobile_controls::MobileControls>()
+            .focused = true;
+        app.world_mut()
+            .write_message(event(2, TouchPhase::Ended, center));
+        app.update();
+        assert!(app.world().resource::<Messages<AppExit>>().is_empty());
+        // A clipped-away button cannot receive a new tap through the scroll panel.
+        app.world_mut()
+            .entity_mut(button)
+            .insert(bevy::ui::CalculatedClip {
+                clip: Rect::from_corners(Vec2::ZERO, Vec2::splat(10.0)),
+            });
+        app.world_mut()
+            .write_message(event(3, TouchPhase::Started, center));
+        app.world_mut()
+            .write_message(event(3, TouchPhase::Ended, center));
+        app.update();
+        assert!(app.world().resource::<Messages<AppExit>>().is_empty());
+        app.world_mut()
+            .entity_mut(button)
+            .remove::<bevy::ui::CalculatedClip>();
+        app.world_mut()
+            .write_message(event(4, TouchPhase::Started, center));
+        app.update();
+        assert!(app.world().resource::<Messages<AppExit>>().is_empty());
+        app.world_mut()
+            .write_message(event(4, TouchPhase::Ended, center + Vec2::X * 3.0));
+        app.update();
+        assert_eq!(app.world().resource::<Messages<AppExit>>().len(), 1);
+    }
 
     #[test]
     fn resume_button_keeps_authoritative_player_and_loadout_intact() {

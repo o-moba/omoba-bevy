@@ -110,6 +110,10 @@ impl Plugin for TeamSelectPlugin {
             )
             .add_systems(Update, (team_select_ui_system, scroll_avatar_roster))
             .add_systems(Update, attach_avatar_thumbnails)
+            .add_systems(
+                Update,
+                adapt_mobile_selection_contrast.after(team_select_ui_system),
+            )
             .add_systems(Update, autojoin_from_env);
     }
 }
@@ -622,6 +626,55 @@ fn spawn_team_button(row: &mut ChildSpawnerCommands, team: Team, name: &str) {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Small phone labels retain their pale text on a dark selected tile. A gold
+/// outline distinguishes selection without reducing text contrast or tile space.
+#[allow(clippy::type_complexity)]
+fn adapt_mobile_selection_contrast(
+    mut commands: Commands,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    selection: Res<TeamSelection>,
+    mut tiles: Query<
+        (
+            Entity,
+            Option<&ClassSelectButton>,
+            Option<&AvatarSelectButton>,
+            Option<&SpriteSelectButton>,
+            &mut BackgroundColor,
+            Option<&mut Outline>,
+        ),
+        Or<(
+            With<ClassSelectButton>,
+            With<AvatarSelectButton>,
+            With<SpriteSelectButton>,
+        )>,
+    >,
+) {
+    if !mobile.as_ref().is_some_and(|mobile| mobile.enabled) {
+        return;
+    }
+    for (entity, class, avatar, sprite, mut background, outline) in &mut tiles {
+        let selected = class.is_some_and(|button| button.class == selection.hero_class)
+            || avatar
+                .is_some_and(|button| selection.avatar.as_deref() == Some(button.slug.as_str()))
+            || sprite.is_some_and(|button| button.id == selection.sprite_character);
+        if selected {
+            *background = crate::ui_theme::TILE.into();
+        }
+        let color = if selected {
+            crate::ui_theme::GOLD
+        } else {
+            Color::NONE
+        };
+        if let Some(mut outline) = outline {
+            outline.color = color;
+        } else {
+            commands
+                .entity(entity)
+                .insert(Outline::new(Val::Px(2.0), Val::ZERO, color));
+        }
+    }
+}
+
 fn team_select_ui_system(
     mut commands: Commands,
     client_session: Res<ClientSession>,

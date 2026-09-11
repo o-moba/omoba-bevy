@@ -19,8 +19,14 @@
 
 use std::time::Duration;
 
+/// Safe local fallback even when a developer supplies an invalid build-time endpoint.
+pub const FALLBACK_GAME_SERVER_ADDR: &str = "127.0.0.1:4000";
+
 /// Default UDP server address when env and saved preferences do not supply one.
-pub const DEFAULT_GAME_SERVER_ADDR: &str = "127.0.0.1:4000";
+pub const DEFAULT_GAME_SERVER_ADDR: &str = match option_env!("OMOBA_DEFAULT_GAME_SERVER_ADDR") {
+    Some(address) => address,
+    None => FALLBACK_GAME_SERVER_ADDR,
+};
 
 /// Outbound keepalive / retry interval while waiting for the first qualifying snapshot (P1).
 pub const T_RETRY: Duration = Duration::from_secs(2);
@@ -77,6 +83,9 @@ mod tests {
         assert_eq!(T_STALE_SNAPSHOT, Duration::from_secs(3));
         assert_eq!(TRANSPORT_CONSECUTIVE_RECV_ERRORS, 8);
         assert_eq!(TRANSPORT_CONSECUTIVE_SEND_ERRORS, 6);
-        assert_eq!(DEFAULT_GAME_SERVER_ADDR, "127.0.0.1:4000");
+        assert_eq!(
+            DEFAULT_GAME_SERVER_ADDR,
+            option_env!("OMOBA_DEFAULT_GAME_SERVER_ADDR").unwrap_or("127.0.0.1:4000")
+        );
     }
 }

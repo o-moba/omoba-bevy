@@ -6,6 +6,33 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.18.0-rc.7] - 2026-09-11
+
+### Added
+- Add native phone controls: an independent left joystick, right attack/ability
+  cluster, drag targeting/cancellation, upgrades and focus/modal/rotation cleanup.
+- Add a landscape phone HUD, compact minimap, reflowed entry/shop/help/results,
+  touch-accessible menu and in-game server address entry for hosted playtests.
+- Prepare Android NativeActivity packaging and an iOS Simulator bundle scaffold,
+  shared native entry, packaged asset handling and private mobile preferences.
+- Extend the existing actual-renderer capture command with phone dimensions and
+  an explicit touch-control mode; retain desktop input and the shared UDP protocol.
+
+### Changed
+- Select desktop/mobile UI once from the compiled target OS. Android/iOS use
+  mobile UI; Windows/macOS/Linux use desktop UI. Restrict mobile preview on a
+  desktop to development builds and exclude phone forms/IME handlers there.
+- Refine the phone HUD against the supplied Wild Rift reference: a tighter
+  right-thumb skill fan, HP/mana/progression at upper right, minimap at upper
+  left and shop below it. Reserve separate space for the objective and menu.
+- Include objective-panel overlap checks and an explicitly labelled opt-in
+  skill-upgrade layout fixture in native HUD capture verification.
+
+### Release status
+- Mobile implementation candidate, with Android/iOS toolchain, installable-build,
+  real-phone and public-server gates still open. No phone download is published.
+  See `mobile/README.md` and the dated mobile beta progress record for evidence.
+
 ## [0.18.0-rc.6] - 2026-09-08
 
 ### Changed

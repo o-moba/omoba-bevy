@@ -193,9 +193,11 @@ impl Plugin for CombatPlugin {
                     clear_invalid_target_system,
                     cast_spell_system,
                     skill_button_system,
+                    mobile_cast_system,
                     resolve_pending_cast_system,
                     skill_upgrade_input_system,
                     update_skill_bar_system,
+                    adapt_mobile_combat_feedback,
                     update_target_marker_system,
                 )
                     .chain()
@@ -874,7 +876,12 @@ fn select_target_system(
     minimap_nav: Option<Res<MinimapNavigationState>>,
     ui_interactions: Query<&Interaction, With<Button>>,
     context: Res<GameplayInputContext>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
 ) {
+    if mobile.as_ref().is_some_and(|mobile| mobile.enabled) {
+        pointer_state.consumed_primary_press = true;
+        return;
+    }
     if !context.gameplay_allowed() {
         pointer_state.consumed_primary_press = false;
         return;
@@ -1189,8 +1196,9 @@ fn skill_button_system(
     mut pending_cast: ResMut<PendingCast>,
     mut feedback: ResMut<ActionFeedback>,
     context: Res<GameplayInputContext>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
 ) {
-    if !context.gameplay_allowed() {
+    if !context.gameplay_allowed() || mobile.as_ref().is_some_and(|mobile| mobile.enabled) {
         return;
     }
 
@@ -1248,7 +1256,9 @@ fn resolve_pending_cast_system(
     context: Res<GameplayInputContext>,
     protection: Query<&crate::net::NetworkStructureProtected>,
     equipment: Query<&crate::net::PlayerEquipment, With<Player>>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
 ) {
+    let touch_mode = mobile.as_ref().is_some_and(|mobile| mobile.enabled);
     if !context.gameplay_allowed() {
         pending_cast.cancel();
         return;
@@ -1329,6 +1339,11 @@ fn resolve_pending_cast_system(
             target_transform.translation,
             cast_range,
         ) {
+            if touch_mode {
+                feedback.push_line("Target out of range — move closer.");
+                pending_cast.cancel();
+                return;
+            }
             commands.entity(player_entity).insert(MovementTarget {
                 target: target_transform.translation,
             });
@@ -1364,6 +1379,269 @@ fn resolve_pending_cast_system(
         cast_cd.total_secs[slot.index()] = cast_cd.remaining_secs[slot.index()];
     }
     pending_cast.cancel();
+}
+
+/// Mobile abilities share the existing PendingCast/try_cast_slot path. The
+/// assistance step changes only target choice, never range, mana or cooldowns.
+#[allow(clippy::type_complexity)]
+fn mobile_cast_system(
+    mut mobile: Option<ResMut<crate::mobile_controls::MobileControls>>,
+    context: Res<GameplayInputContext>,
+    selection: Res<TeamSelection>,
+    local: Query<
+        (
+            &Transform,
+            &Team,
+            &CombatStats,
+            Option<&PlayerProgression>,
+            Option<&NetworkHeroClass>,
+        ),
+        With<Player>,
+    >,
+    candidates: TargetCandidates,
+    protection: Query<&crate::net::NetworkStructureProtected>,
+    camera: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
+    visual_mode: Res<PlayerVisualMode>,
+    cooldowns: Res<LocalCastCooldown>,
+    mut target: ResMut<TargetState>,
+    mut pending: ResMut<PendingCast>,
+    mut feedback: ResMut<ActionFeedback>,
+    mut commands: MessageWriter<NetworkCommand>,
+    time: Res<Time>,
+    mut next_attack_feedback: Local<f32>,
+) {
+    let Some(mobile) = mobile.as_deref_mut().filter(|mobile| mobile.enabled) else {
+        return;
+    };
+    if !context.gameplay_allowed() {
+        mobile.casts.clear();
+        mobile.upgrades.clear();
+        return;
+    }
+    let Ok((transform, team, stats, prog, class)) = local.single() else {
+        return;
+    };
+    if !stats.is_alive() {
+        mobile.casts.clear();
+        mobile.upgrades.clear();
+        return;
+    }
+    let prog = prog.copied().unwrap_or_default();
+    for slot in mobile.upgrades.drain(..) {
+        if slot < 4
+            && prog.skill_points > 0
+            && prog.ranks[slot] < MAX_ABILITY_RANK
+            && unlocked_slots_for_level(prog.level.max(1))[slot]
+        {
+            commands.write(NetworkCommand::UpgradeSkill { slot: slot as u8 });
+        }
+    }
+    let class = class.map(|class| class.0).unwrap_or(selection.hero_class);
+    // A skill release wins over a simultaneous repeat from the attack hold.
+    let intent = mobile
+        .casts
+        .iter()
+        .rev()
+        .find(|intent| intent.slot != 0)
+        .or_else(|| mobile.casts.last())
+        .copied();
+    let initial_press = intent.is_some();
+    let intent = intent.or_else(|| mobile.held_attack());
+    mobile.casts.clear();
+    let Some(intent) = intent else {
+        return;
+    };
+    let Some(slot) = SkillSlot::from_index(intent.slot as u8) else {
+        return;
+    };
+    // Repeating the attack thumb must not spam rejection messages each frame.
+    if slot == SkillSlot::Q && cooldowns.remaining_secs[0] > 0.0 {
+        return;
+    }
+    let definition = ability_for_class_slot(class, slot);
+    if slot == SkillSlot::Q && stats.mana < scaled_mana_cost(definition, prog.ranks[0].max(1)) {
+        if !initial_press && time.elapsed_secs() < *next_attack_feedback {
+            return;
+        }
+        *next_attack_feedback = time.elapsed_secs() + 0.75;
+    }
+    if definition.targeting == TargetingMode::UnitTarget {
+        let Ok((camera, camera_transform)) = camera.single() else {
+            return;
+        };
+        let range = scaled_cast_range(definition, prog.ranks[intent.slot].max(1));
+        let pick = mobile_assisted_target(
+            transform.translation,
+            *team,
+            range,
+            intent.aim,
+            &candidates,
+            &protection,
+            camera,
+            camera_transform,
+            *visual_mode,
+            target.selected_entity,
+        );
+        let Some((entity, id)) = pick else {
+            if initial_press || time.elapsed_secs() >= *next_attack_feedback {
+                feedback.push_line(if intent.aim.is_some() {
+                    "No enemy in that direction and range."
+                } else {
+                    "No enemy in range — move closer."
+                });
+                *next_attack_feedback = time.elapsed_secs() + 0.75;
+            }
+            return;
+        };
+        target.selected_entity = Some(entity);
+        target.selected_target = Some(id);
+    }
+    queue_cast_request(intent.slot, class, &target, &mut pending, &mut feedback);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn mobile_assisted_target(
+    position: Vec3,
+    team: Team,
+    range: f32,
+    aim: Option<Vec2>,
+    candidates: &TargetCandidates,
+    protection: &Query<&crate::net::NetworkStructureProtected>,
+    camera: &Camera,
+    camera_transform: &GlobalTransform,
+    mode: PlayerVisualMode,
+    selected: Option<Entity>,
+) -> Option<(Entity, TargetId)> {
+    let screen = |p: Vec3| {
+        let render = if mode == PlayerVisualMode::Sprite2d {
+            crate::world2d::simulation_xz_to_render_xy(p).extend(0.0)
+        } else {
+            p
+        };
+        camera.world_to_viewport(camera_transform, render).ok()
+    };
+    let origin = screen(position)?;
+    let viewport = camera.logical_viewport_size()?;
+    let mut best: Option<(Entity, TargetId, f32)> = None;
+    let mut consider = |entity: Entity, id: TargetId, p: Vec3, stats: &CombatStats, enemy: bool| {
+        if !enemy || !stats.is_alive() || protection.get(entity).is_ok_and(|p| p.0) {
+            return;
+        }
+        let distance = position.xz().distance(p.xz());
+        if distance > range {
+            return;
+        }
+        let Some(projected) = screen(p) else {
+            return;
+        };
+        if projected.x < 0.0
+            || projected.y < 0.0
+            || projected.x > viewport.x
+            || projected.y > viewport.y
+        {
+            return;
+        }
+        let Some(score) = mobile_target_score(
+            distance,
+            range,
+            projected - origin,
+            aim,
+            selected == Some(entity),
+        ) else {
+            return;
+        };
+        if best.is_none_or(|(_, _, previous)| score < previous) {
+            best = Some((entity, id, score));
+        }
+    };
+    for (e, t, id, s, target_team) in &candidates.players {
+        consider(
+            e,
+            TargetId {
+                kind: TargetKind::Player,
+                id: id.0,
+            },
+            t.translation,
+            s,
+            *target_team != team,
+        );
+    }
+    for (e, t, id, s, target_team) in &candidates.minions {
+        consider(
+            e,
+            TargetId {
+                kind: TargetKind::Minion,
+                id: id.0,
+            },
+            t.translation,
+            s,
+            *target_team != team,
+        );
+    }
+    for (e, t, id, s) in &candidates.neutrals {
+        consider(
+            e,
+            TargetId {
+                kind: TargetKind::Neutral,
+                id: id.0,
+            },
+            t.translation,
+            s,
+            true,
+        );
+    }
+    for (e, t, id, s, target_team, _) in &candidates.structures {
+        consider(
+            e,
+            TargetId {
+                kind: TargetKind::Structure,
+                id: id.0,
+            },
+            t.translation,
+            s,
+            *target_team != team,
+        );
+    }
+    best.map(|(entity, id, _)| (entity, id))
+}
+
+fn mobile_target_score(
+    distance: f32,
+    range: f32,
+    screen_delta: Vec2,
+    aim: Option<Vec2>,
+    selected: bool,
+) -> Option<f32> {
+    if !distance.is_finite() || distance > range || range <= 0.0 {
+        return None;
+    }
+    if let Some(aim) = aim {
+        let alignment = screen_delta
+            .normalize_or_zero()
+            .dot(aim.normalize_or_zero());
+        // Directional assist uses a 45-degree half cone and has no fallback
+        // behind the player when the requested direction contains no enemy.
+        (alignment >= std::f32::consts::FRAC_1_SQRT_2)
+            .then_some((1.0 - alignment) * 4.0 + distance / range)
+    } else {
+        Some(distance / range - if selected { 2.0 } else { 0.0 })
+    }
+}
+
+fn adapt_mobile_combat_feedback(
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    mut feedback: Query<(&mut Node, &mut TextFont), With<ActionFeedbackText>>,
+) {
+    let Some(mobile) = mobile.filter(|mobile| mobile.enabled) else {
+        return;
+    };
+    for (mut node, mut font) in &mut feedback {
+        let width = (mobile.viewport.x * 0.38).min(340.0);
+        node.left = Val::Px((mobile.viewport.x - width) * 0.5);
+        node.bottom = Val::Px(mobile.safe.bottom + 84.0 * mobile.scale());
+        node.max_width = Val::Px(width);
+        font.font_size = 13.0 * mobile.scale();
+    }
 }
 
 fn within_cast_range(local_position: Vec3, target_position: Vec3, cast_range: f32) -> bool {
@@ -2013,6 +2291,206 @@ fn screen_pick_distance(pointer: Vec2, actor_center: Vec2, radius_px: f32) -> Op
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn held_attack_fires_on_actual_class_rank_and_equipment_deadlines() {
+        use bevy::camera::{ComputedCameraValues, RenderTargetInfo};
+        use std::time::Duration;
+        for (class, rank, inventory) in [
+            (HeroClass::Mage, 1, vec![]),
+            (HeroClass::Mage, 3, vec![]),
+            (HeroClass::Ranger, 3, vec![shared::shop::ItemId::SwiftGrip]),
+        ] {
+            let bonuses = shared::shop::item_bonuses(&inventory);
+            let deadline = shared::shop::item_cooldown(
+                ability_for_class_slot(class, SkillSlot::Q),
+                rank,
+                SkillSlot::Q,
+                bonuses,
+            )
+            .as_secs_f32();
+            let mut app = App::new();
+            let mut mobile = crate::mobile_controls::MobileControls::default();
+            mobile.enabled = true;
+            mobile.start_attack_hold_for_test();
+            app.insert_resource(mobile)
+                .init_resource::<Time>()
+                .add_message::<NetworkCommand>()
+                .init_resource::<TeamSelection>()
+                .init_resource::<TargetState>()
+                .init_resource::<PendingCast>()
+                .init_resource::<ActionFeedback>()
+                .init_resource::<LocalCastCooldown>()
+                .init_resource::<GameplayInputContext>()
+                .insert_resource(PlayerVisualMode::Models3d)
+                .add_systems(
+                    Update,
+                    (
+                        tick_local_cast_cooldown,
+                        mobile_cast_system,
+                        resolve_pending_cast_system,
+                    )
+                        .chain(),
+                );
+            app.world_mut().spawn((
+                Player,
+                Team::Green,
+                Transform::default(),
+                CombatStats::default(),
+                PlayerProgression {
+                    level: 20,
+                    ranks: [rank; 4],
+                    ..default()
+                },
+                NetworkHeroClass(class),
+                NetworkPlayerId(1),
+                crate::net::PlayerEquipment {
+                    inventory,
+                    item_bonuses: bonuses,
+                    ..default()
+                },
+            ));
+            app.world_mut().spawn((
+                RemotePlayer,
+                Team::Blue,
+                Transform::from_xyz(0.1, 0.0, 0.0),
+                CombatStats::default(),
+                NetworkPlayerId(2),
+            ));
+            app.world_mut().spawn((
+                MainCamera,
+                GlobalTransform::IDENTITY,
+                Camera {
+                    computed: ComputedCameraValues {
+                        clip_from_view: Mat4::IDENTITY,
+                        target_info: Some(RenderTargetInfo {
+                            physical_size: UVec2::new(844, 390),
+                            scale_factor: 1.0,
+                        }),
+                        ..default()
+                    },
+                    ..default()
+                },
+            ));
+            let mut fired = Vec::new();
+            for frame in 0..=250 {
+                if frame > 0 {
+                    app.world_mut()
+                        .resource_mut::<Time>()
+                        .advance_by(Duration::from_millis(10));
+                }
+                app.update();
+                for command in app
+                    .world_mut()
+                    .resource_mut::<Messages<NetworkCommand>>()
+                    .drain()
+                {
+                    if matches!(command, NetworkCommand::Cast { slot: 0, .. }) {
+                        fired.push(frame as f32 * 0.01);
+                    }
+                }
+            }
+            assert!(
+                fired.len() >= 5,
+                "no sustained attacks for {class:?}: {fired:?}"
+            );
+            for pair in fired.windows(2) {
+                let interval = pair[1] - pair[0];
+                assert!(
+                    interval >= deadline - 0.0001 && interval <= deadline + 0.0101,
+                    "{class:?} rank{rank}: held interval {interval} differs from real cooldown {deadline}"
+                );
+            }
+            if class == HeroClass::Ranger {
+                assert!(deadline < 0.25);
+            }
+        }
+    }
+
+    #[test]
+    fn directional_mobile_assist_respects_range_and_does_not_snap_behind_aim() {
+        assert!(mobile_target_score(6.0, 5.0, Vec2::X, Some(Vec2::X), false).is_none());
+        assert!(mobile_target_score(3.0, 5.0, Vec2::NEG_X, Some(Vec2::X), true).is_none());
+        assert!(mobile_target_score(3.0, 5.0, Vec2::Y, Some(Vec2::X), false).is_none());
+        let forward = mobile_target_score(3.0, 5.0, Vec2::X, Some(Vec2::X), false).unwrap();
+        let edge =
+            mobile_target_score(3.0, 5.0, Vec2::new(1.0, 0.5), Some(Vec2::X), false).unwrap();
+        assert!(forward < edge);
+        assert!(
+            mobile_target_score(4.0, 5.0, Vec2::X, None, true)
+                < mobile_target_score(1.0, 5.0, Vec2::X, None, false)
+        );
+    }
+
+    #[test]
+    fn mobile_pending_cast_in_range_emits_and_out_of_range_never_starts_a_chase() {
+        let mut app = App::new();
+        let mut mobile = crate::mobile_controls::MobileControls::default();
+        mobile.enabled = true;
+        app.insert_resource(mobile)
+            .add_message::<NetworkCommand>()
+            .init_resource::<TeamSelection>()
+            .init_resource::<PendingCast>()
+            .init_resource::<ActionFeedback>()
+            .init_resource::<LocalCastCooldown>()
+            .init_resource::<GameplayInputContext>()
+            .add_systems(Update, resolve_pending_cast_system);
+        let player = app
+            .world_mut()
+            .spawn((
+                Player,
+                Transform::default(),
+                CombatStats::default(),
+                PlayerProgression::default(),
+                NetworkHeroClass(HeroClass::Warrior),
+                NetworkPlayerId(1),
+            ))
+            .id();
+        let enemy = app
+            .world_mut()
+            .spawn((Transform::from_xyz(100.0, 0.0, 0.0), CombatStats::default()))
+            .id();
+        let request = PendingCastRequest {
+            slot: 0,
+            target_entity: Some(enemy),
+            target: Some(TargetId {
+                kind: TargetKind::Player,
+                id: 2,
+            }),
+            approach_announced: false,
+        };
+        app.world_mut().resource_mut::<PendingCast>().request = Some(request);
+        app.update();
+        assert!(app.world().resource::<PendingCast>().request.is_none());
+        assert!(!app.world().entity(player).contains::<MovementTarget>());
+        assert_eq!(
+            app.world().resource::<LocalCastCooldown>().remaining_secs,
+            [0.0; 4]
+        );
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .count(),
+            0
+        );
+        app.world_mut()
+            .entity_mut(enemy)
+            .get_mut::<Transform>()
+            .unwrap()
+            .translation = Vec3::X;
+        app.world_mut().resource_mut::<PendingCast>().request = Some(request);
+        app.update();
+        let emitted: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<NetworkCommand>>()
+            .drain()
+            .collect();
+        assert_eq!(emitted.len(), 1);
+        assert!(matches!(emitted[0], NetworkCommand::Cast { slot: 0, .. }));
+        assert!(app.world().resource::<LocalCastCooldown>().remaining_secs[0] > 0.0);
+        assert!(!app.world().entity(player).contains::<MovementTarget>());
+    }
 
     #[test]
     fn pointer_hit_areas_are_touch_sized_and_screen_bounded() {

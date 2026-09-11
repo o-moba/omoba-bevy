@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     io,
-    net::UdpSocket,
+    net::{SocketAddr, ToSocketAddrs, UdpSocket},
     thread,
     time::{Duration, Instant},
 };
@@ -33,7 +33,8 @@ use crate::team::{CharacterChoice, Team, TeamSelectRoot, spawn_team_select_ui};
 use crate::world::{PlayerAssets, PlayerModelResolver};
 use shared::{HeroClass, PlayerActionKind};
 
-const LOCAL_BIND_ADDR: &str = "0.0.0.0:0";
+/// Bound both allocation-free candidate iteration and repeated socket creation.
+const MAX_RESOLVED_SERVER_ADDRESSES: usize = 16;
 const UPDATE_INTERVAL_SECONDS: f32 = 0.05;
 const NETWORK_LOOP_SLEEP: Duration = Duration::from_millis(16);
 /// Largest application payload that can be carried by one IPv4 UDP datagram.
@@ -71,10 +72,12 @@ pub enum NetThreadSignal {
     TransportFailure,
 }
 
-#[derive(Message, Clone, Copy, Debug)]
+#[derive(Message, Clone, Debug)]
 pub enum SessionUiCommand {
     /// User explicitly resumes waiting for snapshots after **Disconnected** (P2 manual recovery).
     Retry,
+    /// Validated address chosen in the pre-join UI. Never transfers an active match.
+    ConnectTo(String),
 }
 
 /// Set by [`ingest_server_snapshot_packets`] when the UDP thread dropped the snapshot sender
@@ -204,6 +207,13 @@ impl ClientSession {
 
     pub fn join_confirmed(&self) -> bool {
         self.is_connected() && self.admitted
+    }
+
+    pub(crate) fn is_choosing_loadout(&self) -> bool {
+        self.is_connected()
+            && !self.join_flow_committed
+            && self.join_error.is_none()
+            && !self.join_exhausted
     }
 
     fn clear_join_attempt(&mut self) {
@@ -964,7 +974,7 @@ fn start_networking(
 fn validated_server_addr_or_default(raw: &str) -> String {
     crate::persistence::validate_game_server_addr(raw)
         .or_else(|| crate::persistence::validate_game_server_addr(DEFAULT_GAME_SERVER_ADDR))
-        .expect("default game server address must validate")
+        .unwrap_or_else(|| "127.0.0.1:4000".to_owned())
 }
 
 fn spawn_network_transport(
@@ -998,6 +1008,47 @@ fn spawn_network_transport(
     });
 }
 
+/// Resolve exactly once on the existing network thread. Each address needs a
+/// socket bound to its own IP family: an IPv4 wildcard cannot connect to IPv6.
+/// UDP connect checks local routing, not server reachability; the normal snapshot
+/// timeout still decides whether the selected server is actually responding.
+fn connect_udp_server(server: impl ToSocketAddrs) -> io::Result<UdpSocket> {
+    connect_resolved_udp_server(server.to_socket_addrs()?)
+}
+
+fn connect_resolved_udp_server(
+    candidates: impl IntoIterator<Item = SocketAddr>,
+) -> io::Result<UdpSocket> {
+    let mut last_error = None;
+    for address in candidates.into_iter().take(MAX_RESOLVED_SERVER_ADDRESSES) {
+        if address.port() == 0 {
+            last_error = Some(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "game server UDP port must be nonzero",
+            ));
+            continue;
+        }
+        let local = match address {
+            SocketAddr::V4(_) => "0.0.0.0:0",
+            SocketAddr::V6(_) => "[::]:0",
+        };
+        let connected = UdpSocket::bind(local).and_then(|socket| {
+            socket.connect(address)?;
+            Ok(socket)
+        });
+        match connected {
+            Ok(socket) => return Ok(socket),
+            Err(error) => last_error = Some(error),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::AddrNotAvailable,
+            "game server resolved to no UDP addresses",
+        )
+    }))
+}
+
 fn run_udp_client(
     server_addr: String,
     outgoing: Receiver<ClientPacket>,
@@ -1005,20 +1056,15 @@ fn run_udp_client(
     signals: Sender<NetThreadSignal>,
 ) {
     println!("Connecting to server at {server_addr}");
-    let socket = match UdpSocket::bind(LOCAL_BIND_ADDR) {
+    let socket = match connect_udp_server(server_addr.as_str()) {
         Ok(socket) => socket,
         Err(error) => {
-            eprintln!("Failed to bind client UDP socket: {error}");
+            eprintln!("Failed to resolve/bind/connect UDP server {server_addr}: {error}");
             let _ = signals.send(NetThreadSignal::TransportFailure);
             return;
         }
     };
 
-    if let Err(error) = socket.connect(&server_addr) {
-        eprintln!("Failed to connect UDP socket to {server_addr}: {error}");
-        let _ = signals.send(NetThreadSignal::TransportFailure);
-        return;
-    }
     if let Err(error) = socket.set_nonblocking(true) {
         eprintln!("Failed to set UDP client socket nonblocking: {error}");
         let _ = signals.send(NetThreadSignal::TransportFailure);
@@ -2247,6 +2293,7 @@ fn setup_connection_status_ui(mut commands: Commands) {
                     BackgroundColor(Color::srgb(0.25, 0.42, 0.32)),
                     Visibility::Hidden,
                     ConnectionRetryButton,
+                    Name::new("ConnectionRetryButton"),
                 ))
                 .with_children(|button| {
                     button.spawn((
@@ -2528,6 +2575,18 @@ fn update_session_lifecycle(
     let mut retried_this_frame = false;
     for event in session_ui.read() {
         match event {
+            SessionUiCommand::ConnectTo(raw) => {
+                if client_session.join_flow_committed || client_session.last_join.is_some() {
+                    continue;
+                }
+                let Some(address) = crate::persistence::validate_game_server_addr(raw) else {
+                    continue;
+                };
+                commands.remove_resource::<NetworkChannels>();
+                spawn_network_transport(&mut commands, &mut client_session, address);
+                incoming_dead.0 = false;
+                retried_this_frame = true;
+            }
             SessionUiCommand::Retry => {
                 if client_session.state == ClientConnectionState::Disconnected
                     || client_session.join_error.is_some()
@@ -3554,5 +3613,118 @@ mod connection_ui_tests {
             app.world().resource::<Messages<SessionUiCommand>>().len(),
             1
         );
+    }
+}
+
+#[cfg(test)]
+mod udp_connection_tests {
+    use super::{MAX_RESOLVED_SERVER_ADDRESSES, connect_resolved_udp_server, connect_udp_server};
+    use std::{
+        cell::Cell,
+        io,
+        net::{SocketAddr, ToSocketAddrs, UdpSocket},
+        time::Duration,
+    };
+
+    fn assert_loopback_round_trip(bind_address: &str) {
+        let server = UdpSocket::bind(bind_address).expect("bind loopback server");
+        server
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let server_address = server.local_addr().unwrap();
+        let client = connect_udp_server(server_address).expect("connect matching IP family");
+        client
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        assert_eq!(client.peer_addr().unwrap(), server_address);
+        assert_eq!(
+            client.local_addr().unwrap().is_ipv6(),
+            server_address.is_ipv6()
+        );
+
+        client.send(b"phone hello").unwrap();
+        let mut payload = [0u8; 32];
+        let (received, peer) = server.recv_from(&mut payload).unwrap();
+        assert_eq!(&payload[..received], b"phone hello");
+        server.send_to(b"match reply", peer).unwrap();
+        let received = client.recv(&mut payload).unwrap();
+        assert_eq!(&payload[..received], b"match reply");
+    }
+
+    #[test]
+    fn ipv4_loopback_uses_ipv4_socket_and_round_trips() {
+        assert_loopback_round_trip("127.0.0.1:0");
+    }
+
+    #[test]
+    fn ipv6_loopback_uses_ipv6_socket_and_round_trips() {
+        assert_loopback_round_trip("[::1]:0");
+    }
+
+    struct StubResolver<'a> {
+        calls: &'a Cell<usize>,
+        addresses: Vec<SocketAddr>,
+        error: Option<io::ErrorKind>,
+    }
+
+    impl ToSocketAddrs for StubResolver<'_> {
+        type Iter = std::vec::IntoIter<SocketAddr>;
+
+        fn to_socket_addrs(&self) -> io::Result<Self::Iter> {
+            self.calls.set(self.calls.get() + 1);
+            match self.error {
+                Some(kind) => Err(io::Error::new(kind, "resolution failed")),
+                None => Ok(self.addresses.clone().into_iter()),
+            }
+        }
+    }
+
+    #[test]
+    fn resolves_once_and_tries_next_candidate_after_invalid_port() {
+        let server = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let address = server.local_addr().unwrap();
+        let calls = Cell::new(0);
+        let resolver = StubResolver {
+            calls: &calls,
+            addresses: vec!["[::1]:0".parse().unwrap(), address],
+            error: None,
+        };
+        let client = connect_udp_server(resolver).unwrap();
+        assert_eq!(calls.get(), 1);
+        assert_eq!(client.peer_addr().unwrap(), address);
+    }
+
+    #[test]
+    fn empty_and_failed_resolution_surface_as_errors_without_retrying_dns() {
+        let calls = Cell::new(0);
+        let empty = StubResolver {
+            calls: &calls,
+            addresses: vec![],
+            error: None,
+        };
+        assert_eq!(
+            connect_udp_server(empty).unwrap_err().kind(),
+            io::ErrorKind::AddrNotAvailable
+        );
+        assert_eq!(calls.get(), 1);
+        let failed = StubResolver {
+            calls: &calls,
+            addresses: vec![],
+            error: Some(io::ErrorKind::NotFound),
+        };
+        let error = connect_udp_server(failed).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert_eq!(error.to_string(), "resolution failed");
+        assert_eq!(calls.get(), 2);
+    }
+
+    #[test]
+    fn candidate_failures_preserve_last_error_and_iteration_is_bounded() {
+        let attempted = Cell::new(0);
+        let candidates = std::iter::repeat("127.0.0.1:0".parse::<SocketAddr>().unwrap())
+            .inspect(|_| attempted.set(attempted.get() + 1));
+        let error = connect_resolved_udp_server(candidates).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(attempted.get(), MAX_RESOLVED_SERVER_ADDRESSES);
     }
 }

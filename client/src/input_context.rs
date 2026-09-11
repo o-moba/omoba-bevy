@@ -71,6 +71,8 @@ fn resolve_input_context(
     debug: Option<Res<DebugConsole>>,
     join_ui: Query<Entity, With<crate::team::TeamSelectRoot>>,
     mut context: ResMut<GameplayInputContext>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    server_entry: Option<Res<crate::mobile_ui::ServerEntry>>,
 ) {
     context.running = game
         .as_ref()
@@ -78,7 +80,11 @@ fn resolve_input_context(
         && session
             .as_ref()
             .is_none_or(|session| session.join_confirmed());
-    context.modal_open = shop.as_ref().is_some_and(|shop| shop.open)
+    context.modal_open = mobile
+        .as_ref()
+        .is_some_and(|mobile| mobile.enabled && (!mobile.landscape || !mobile.focused))
+        || server_entry.as_ref().is_some_and(|entry| entry.open)
+        || shop.as_ref().is_some_and(|shop| shop.open)
         || !join_ui.is_empty()
         || pause.as_ref().is_some_and(|pause| pause.open)
         || (context.running && help.as_ref().is_some_and(|help| help.0));

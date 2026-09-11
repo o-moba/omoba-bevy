@@ -5,6 +5,7 @@ use bevy::light::CascadeShadowConfigBuilder;
 use bevy::prelude::*;
 use bevy::render::view::Hdr;
 use bevy::scene::SceneRoot;
+#[cfg(not(target_os = "android"))]
 use ekza_bevy_sdk::bevy::EkzaModelCatalog;
 use std::collections::HashMap;
 
@@ -38,7 +39,25 @@ pub struct PlayerAssets {
     pub material: Handle<StandardMaterial>,
 }
 
+#[cfg(not(target_os = "android"))]
 pub type PlayerModelCatalog = EkzaModelCatalog;
+
+// The shipped game uses its packaged roster. Android does not need the SDK's
+// unused remote-model loader (and its different Activity/HTTP dependencies).
+#[cfg(target_os = "android")]
+#[derive(Resource, Default, Clone)]
+pub struct PlayerModelCatalog;
+
+#[cfg(target_os = "android")]
+impl PlayerModelCatalog {
+    pub fn handles_for(&self, _: CharacterChoice) -> (Option<Handle<Scene>>, Option<Handle<Gltf>>) {
+        (None, None)
+    }
+
+    pub fn label_for(&self, character: CharacterChoice) -> String {
+        character.as_str().to_owned()
+    }
+}
 
 pub fn model_assets_for_choice(
     catalog: &PlayerModelCatalog,
@@ -216,7 +235,8 @@ fn setup_scene(
             illuminance: lighting_settings
                 .illuminance
                 .clamp(MIN_LIGHT_ILLUMINANCE, MAX_LIGHT_ILLUMINANCE),
-            shadows_enabled: true,
+            // Bevy's Android example disables shadows for affected mobile drivers.
+            shadows_enabled: !cfg!(target_os = "android"),
             ..default()
         },
         light_transform,
@@ -248,6 +268,8 @@ fn setup_main_camera(
         cam_state.yaw = 0.0;
         commands.spawn((
             Camera2d,
+            #[cfg(target_os = "android")]
+            Msaa::Off,
             Projection::Orthographic(OrthographicProjection {
                 scale: CAMERA2D_BASE_SCALE * cam_state.zoom,
                 ..OrthographicProjection::default_2d()
@@ -268,6 +290,9 @@ fn setup_main_camera(
     cam_state.yaw = yaw;
     commands.spawn((
         Camera3d::default(),
+        // Conservative Android default from Bevy 0.18's mobile example.
+        #[cfg(target_os = "android")]
+        Msaa::Off,
         Camera {
             clear_color: ClearColorConfig::Custom(Color::srgb(0.12, 0.19, 0.20)),
             ..default()

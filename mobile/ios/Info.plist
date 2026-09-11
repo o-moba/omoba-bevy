@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+    <key>CFBundleName</key><string>Omoba Beta</string>
+    <key>CFBundleDisplayName</key><string>Omoba Beta</string>
+    <key>CFBundleIdentifier</key><string>space.ekza.omoba.beta</string>
+    <key>CFBundleExecutable</key><string>client</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>0.18.0</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>MinimumOSVersion</key><string>15.0</string>
+    <key>LSRequiresIPhoneOS</key><true/>
+    <key>UIRequiresFullScreen</key><true/>
+    <key>UIRequiredDeviceCapabilities</key><array><string>arm64</string><string>metal</string></array>
+    <key>UISupportedInterfaceOrientations</key><array>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UISupportedInterfaceOrientations~ipad</key><array>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UIViewControllerBasedStatusBarAppearance</key><true/>
+    <key>UILaunchScreen</key><dict/>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Omoba connects to the game server you choose for multiplayer playtests on your local network.</string>
+</dict></plist>

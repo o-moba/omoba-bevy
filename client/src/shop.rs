@@ -126,14 +126,18 @@ fn setup_shop(mut commands: Commands) {
                 ui::text(15.0),
                 TextColor(ui::GOLD),
                 EquipmentGold,
+                Name::new("EquipmentGold"),
             ));
             panel
-                .spawn((Node {
-                    flex_wrap: FlexWrap::Wrap,
-                    column_gap: Val::Px(5.0),
-                    row_gap: Val::Px(5.0),
-                    ..default()
-                },))
+                .spawn((
+                    Node {
+                        flex_wrap: FlexWrap::Wrap,
+                        column_gap: Val::Px(5.0),
+                        row_gap: Val::Px(5.0),
+                        ..default()
+                    },
+                    Name::new("InventorySlots"),
+                ))
                 .with_children(|slots| {
                     for index in 0..shop::INVENTORY_CAPACITY {
                         slots
@@ -188,6 +192,7 @@ fn setup_shop(mut commands: Commands) {
                 .with_children(|button| {
                     button.spawn((
                         Text::new("P   OPEN SHOP"),
+                        Name::new("ShopOpenLabel"),
                         ui::text(14.0),
                         TextColor(ui::GOLD),
                     ));
@@ -208,10 +213,10 @@ fn setup_shop(mut commands: Commands) {
                             row.spawn((Text::new("Sanctuary shop"), ui::text(26.0), TextColor(ui::IVORY)));
                             row.spawn((Button, Node { padding: UiRect::axes(Val::Px(12.0), Val::Px(7.0)), ..default() },
                                 BackgroundColor(ui::TILE), ShopClose, Name::new("ShopCloseButton")))
-                                .with_children(|button| { button.spawn((Text::new("ESC  CLOSE"), ui::text(13.0), TextColor(ui::MUTED))); });
+                                .with_children(|button| { button.spawn((Text::new("ESC  CLOSE"), Name::new("ShopCloseLabel"), ui::text(13.0), TextColor(ui::MUTED))); });
                         });
                     panel.spawn((Text::new(""), ui::text(16.0), TextColor(ui::GOLD), ShopSummary, Name::new("ShopSummary")));
-                    panel.spawn((Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(10.0), row_gap: Val::Px(10.0), ..default() },))
+                    panel.spawn((Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(10.0), row_gap: Val::Px(10.0), ..default() }, Name::new("ShopCards")))
                         .with_children(|cards| { for definition in shop::ITEMS {
                             cards.spawn((Button, Node { width: Val::Px(264.0), height: Val::Px(150.0),
                                 padding: UiRect::all(Val::Px(13.0)), flex_direction: FlexDirection::Column,
@@ -225,14 +230,16 @@ fn setup_shop(mut commands: Commands) {
                                         row.spawn((Text::new(definition.name), ui::text(18.0), TextColor(ui::IVORY)));
                                     });
                                     card.spawn((Text::new(definition.description), ui::text(14.0), TextColor(ui::MUTED),
+                                        Name::new(format!("ShopDescription-{}", item_code(definition.id))),
                                         Node { flex_grow: 1.0, ..default() }));
-                                    card.spawn((Text::new(""), ui::text(14.0), TextColor(ui::GOLD), ShopCardLabel(definition.id)));
+                                    card.spawn((Text::new(""), ui::text(14.0), TextColor(ui::GOLD), ShopCardLabel(definition.id),
+                                        Name::new(format!("ShopDetails-{}", item_code(definition.id)))));
                                 });
                         }});
                     panel.spawn((Text::new(""), ui::text(15.0), TextColor(ui::JADE), ShopFeedback,
                         Node { min_height: Val::Px(21.0), ..default() }, Name::new("ShopFeedback")));
                     panel.spawn((Text::new("Unique permanent items. Buy at your base; keep them through respawn.\nEarn 1 gold / second during the match, plus combat rewards. Equipment resets each new round."),
-                        ui::text(13.0), TextColor(ui::MUTED)));
+                        ui::text(13.0), TextColor(ui::MUTED), Name::new("ShopFooter")));
                 });
         });
 }
@@ -618,6 +625,7 @@ struct ShopLabels<'w, 's> {
 }
 fn update_shop(
     state: Res<ShopState>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     player: Query<(&PlayerEquipment, &CombatStats, &NetworkHeroClass), With<Player>>,
     mut labels: ShopLabels,
     mut cards: Query<(
@@ -673,7 +681,11 @@ fn update_shop(
                 "{}g  {}\n{}",
                 shop::item(label.0).cost,
                 if recommended { "RECOMMENDED" } else { "" },
-                reason.unwrap_or_else(|| "CLICK TO PURCHASE".into())
+                reason.unwrap_or_else(|| if mobile.as_ref().is_some_and(|m| m.enabled) {
+                    "TAP TO BUY".into()
+                } else {
+                    "CLICK TO PURCHASE".into()
+                })
             )
         };
     }
@@ -709,6 +721,27 @@ fn short_item_name(id: ItemId) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn production_shop_bootstraps_distinct_close_label_and_footer() {
+        let mut app = App::new();
+        app.add_systems(Startup, setup_shop);
+        app.update();
+        let mut labels = app.world_mut().query::<(&Name, &Text)>();
+        let close: Vec<_> = labels
+            .iter(app.world())
+            .filter(|(name, _)| name.as_str() == "ShopCloseLabel")
+            .map(|(_, text)| text.0.clone())
+            .collect();
+        let footer: Vec<_> = labels
+            .iter(app.world())
+            .filter(|(name, _)| name.as_str() == "ShopFooter")
+            .map(|(_, text)| text.0.clone())
+            .collect();
+        assert_eq!(close, ["ESC  CLOSE"]);
+        assert_eq!(footer.len(), 1);
+        assert!(footer[0].starts_with("Unique permanent items."));
+    }
     #[test]
     fn browse_reasons_prioritize_life_ownership_base_and_price() {
         let mut gear = PlayerEquipment {
