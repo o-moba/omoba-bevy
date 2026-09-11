@@ -9,7 +9,7 @@ Entry point: see [README.md](README.md) for first-time setup and a controls summ
 ## Prerequisites
 
 - Rust toolchain (`rustup`) installed.
-- Repository cloned and dependencies fetched (`cargo build --workspace`).
+- Repository cloned; Python 3.9+ and Make installed. `make play` builds the source automatically.
 
 ## Match Modes (TASK-22)
 
@@ -57,11 +57,23 @@ make restart
 One developer can walk through the real matchmaking UX end-to-end:
 
 ```sh
-make play-bots
+make play
+# Alias: make play-bots
 ```
 
-This starts a release-mode server, nine fill bots in the background, and your
-client in the foreground. Pick a class/avatar/team in the client — you are
+This first builds the locked source, then starts a local 3D release-mode server,
+nine bots and your client under one supervised launcher. Cargo build failure
+stops startup; the launcher waits for the server to report readiness. Closing
+the client or pressing Ctrl+C stops this session's children. Logs are under
+`target/local-play/sessions/`; use `make play LOCAL_SERVER_ADDR=127.0.0.1:4010`
+when the default port is occupied. Cargo's configured target directory is
+supported without copying binaries or assets into a package.
+
+The launcher explicitly selects local server/client addresses, the repository
+assets, 3D visuals, release matchmaking and five players per team. It isolates
+session preferences from an old saved remote server address.
+
+Pick a class/avatar/team in the client — you are
 the 10th player: the overlay shows the queue filling, `Match found!`, the
 countdown, and the match starts as a real 5v5. Once the match runs, the bots
 play their lanes: each pushes Mid/Top/Bot toward the enemy base, fights the

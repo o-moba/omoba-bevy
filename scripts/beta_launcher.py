@@ -59,18 +59,23 @@ def stop(children):
             child.wait(timeout=5)
 
 
-def run(args, package):
+def run(args, package, *, executables=None, assets=None):
+    """Supervise a session, optionally using source-built binaries and assets."""
     package = package.resolve()
     children, logs = [], []
     suffix = ".exe" if os.name == "nt" else ""
     required = ("client",) if args.action == "join" else ("server", "bots", "client")
+    paths = ({name: package / (name + suffix) for name in required}
+             if executables is None else {name: Path(path).resolve() for name, path in executables.items()})
     for binary in required:
-        if not (package / (binary + suffix)).is_file():
+        if binary not in paths or not paths[binary].is_file():
+            if executables is not None:
+                raise RuntimeError(f"missing built {binary}; Cargo must provide every required executable")
             raise RuntimeError(f"missing packaged {binary}; launch this from a complete native package")
     run_dir = package / "sessions" / (time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:8])
     run_dir.mkdir(parents=True)
     print(f"Session logs: {run_dir}", flush=True)
-    env = dict(os.environ, OMOBA_ASSET_DIR=str(package / "assets"),
+    env = dict(os.environ, OMOBA_ASSET_DIR=str(Path(assets).resolve() if assets is not None else package / "assets"),
                OMOBA_PLAYER_VISUAL_MODE="models3d", OMOBA_DEBUG_UI="0",
                OMOBA_MATCH_MODE="release", OMOBA_TEAM_SIZE="5")
     # QA/developer switches must never silently change a tester's session.
@@ -81,7 +86,7 @@ def run(args, package):
     def launch(name, extra=()):
         log = (run_dir / f"{name}.log").open("w")
         logs.append(log)
-        child = subprocess.Popen([str(package / (name + suffix)), *extra], cwd=package,
+        child = subprocess.Popen([str(paths[name]), *extra], cwd=package,
                                  env=env, stdout=log, stderr=subprocess.STDOUT)
         children.append(child)
         return child

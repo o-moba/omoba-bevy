@@ -14,34 +14,37 @@ checks and remaining coverage. The commands below are development workflows.
 
 - [Rust toolchain](https://rustup.rs/) (`rustc`, `cargo`).
 - Git and a clone of this repository.
+- Python 3.9+ and Make for the local practice launcher.
 
-## First-time setup
+## Build and play locally
 
-From the **repository root** (the directory that contains this `README.md` and the `Makefile`):
+From the **repository root** (the folder containing this `README.md` and `Makefile`):
 
 ```sh
-cargo build --workspace
+make play
 ```
 
-This compiles the `server` and `client` crates. Expect several minutes on the first run while dependencies build.
+This builds the current source with the locked dependencies, starts a local
+release-mode server and nine bots, and opens the 3D game. Choose your hero and
+press **Join** to start a 5v5 match. No separate build, package, environment
+variable or sibling checkout is required. The first build can take several
+minutes; later runs reuse Cargo's cache. `make play-bots` is the same command.
 
-## Run the game (happy path)
+Close the game window or press **Ctrl+C** in its terminal to stop this session's
+client, bots and server. Logs are printed at startup and saved under
+`target/local-play/sessions/`. If port 4000 is already occupied, close the
+previous session or use `make play LOCAL_SERVER_ADDR=127.0.0.1:4010`.
 
-All startup commands, environment variables, log expectations, and shutdown steps are documented in **[RUNBOOK.md](RUNBOOK.md)**.
+The launcher uses Cargo's reported executable paths, including a configured
+`CARGO_TARGET_DIR`, and loads this checkout's `client/assets`. It forces local
+3D practice settings so saved server addresses and developer/QA environment
+variables cannot silently redirect the run.
 
-Typical local two-client dev session (instant match start, dev mode):
+For other development workflows, see **[RUNBOOK.md](RUNBOOK.md)**. A local
+two-client dev session (instant match start, dev mode) remains available:
 
 ```sh
 make start
-```
-
-Full release-like matchmaking flow solo (release server + 9 fill bots + your
-client; the match forms to a real 5v5 through the queue, and once it starts
-the bots actively play — they push their lanes toward the enemy base and
-fight players, minions, and towers with simple nearest-target AI):
-
-```sh
-make play-bots
 ```
 
 Production-like server on its own (matches start only after a full 5v5 queue;
@@ -51,7 +54,7 @@ instant start is dev-only via `make server-dev` / `make start`):
 make server
 ```
 
-Stop background processes afterward:
+For the older multi-terminal/dev commands, stop background processes afterward:
 
 ```sh
 make stop
@@ -62,7 +65,7 @@ make stop
 | Command | What it does |
 | --- | --- |
 | `make start` | **Dev quick-start**: dev-mode server + 2 clients, instant match start |
-| `make play-bots` | **Solo 5v5 demo**: release server + 9 fill bots + your client (you are the 10th player, full matchmaking flow) |
+| `make play` / `make play-bots` | Build current sources, then run local 3D 5v5 with 9 bots; close the window or Ctrl+C to stop the session |
 | `make server` | Server in **release** matchmaking mode (queue to full 5v5 before start) |
 | `make server-dev` | Server in **dev** mode (first join starts the match; dev only) |
 | `make game` | One client (defaults explicitly to `127.0.0.1:4000`; set `GAME_SERVER_ADDR` for another server) |

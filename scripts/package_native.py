@@ -40,12 +40,22 @@ def build_executables(profile):
         ["cargo", "build", "--workspace", "--locked", "--profile", profile,
          "--message-format=json-render-diagnostics"], cwd=ROOT, stdout=subprocess.PIPE, text=True)
     binaries = {}
-    for line in process.stdout:
-        event = json.loads(line)
-        if event.get("reason") == "compiler-artifact" and event.get("executable"):
-            binaries[event["target"]["name"]] = Path(event["executable"])
-    if process.wait() != 0:
-        raise RuntimeError("locked native workspace build failed")
+    try:
+        for line in process.stdout:
+            event = json.loads(line)
+            if event.get("reason") == "compiler-artifact" and event.get("executable"):
+                binaries[event["target"]["name"]] = Path(event["executable"])
+        if process.wait() != 0:
+            raise RuntimeError("locked native workspace build failed")
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+        process.stdout.close()
     missing = {"client", "server", "bots"} - binaries.keys()
     if missing:
         raise RuntimeError("Cargo did not emit required executables: " + ", ".join(sorted(missing)))

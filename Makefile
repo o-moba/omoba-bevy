@@ -1,4 +1,4 @@
-.PHONY: server server-dev game game2d start start-release play-bots bots stop restart verify-task-12 verify-gameplay
+.PHONY: server server-dev game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay
 
 # ---------------------------------------------------------------------------
 # Match modes (TASK-22)
@@ -16,6 +16,7 @@
 # ---------------------------------------------------------------------------
 
 GAME_SERVER_ADDR ?= 127.0.0.1:4000
+LOCAL_SERVER_ADDR ?= 127.0.0.1:4000
 
 # Run the game server in RELEASE match mode (matches form to 5v5 before starting).
 server:
@@ -50,16 +51,13 @@ start-release:
 	cargo run -p server &
 	cargo run -p client
 
-# One-command full-match demo for a single developer: release-mode server and
-# nine fill bots in the background, your client in the foreground. Pick a
-# class/avatar/team in the client: the match forms to 5v5 and starts through
-# the real matchmaking flow. Clean up with `make stop`.
-play-bots:
-	cargo run -p server &
-	cargo build -p server
-	sleep 2
-	cargo run -p harness --bin bots -- --count 9 &
-	cargo run -p client
+# Build current locked sources once, then start a local 3D release 5v5 with
+# nine bots. Choose a hero and Join. Closing the client or pressing Ctrl+C
+# stops this session's server and bots. Override LOCAL_SERVER_ADDR if needed.
+play:
+	python3 scripts/play_local.py --bind "$(LOCAL_SERVER_ADDR)"
+
+play-bots: play
 
 # Fill bots for a running server: joins BOTS players (default 9) that queue,
 # then push their lanes and fight (simple lane AI) so one developer can form
