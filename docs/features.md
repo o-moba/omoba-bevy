@@ -379,3 +379,5 @@ third-party/CC0/OFL notices and user-avatar rights remain separate. Commercial
 forks are permitted. See [licensing](../LICENSING.md), [mission](../MISSION.md)
 and [source delivery](../SOURCE.md). Legal notices are included by all three
 packagers; this does not certify store approval or completed source publication.
+
+The [project mission](../MISSION.md) records the official long-term direction; it adds no restrictions to the standard licenses or to independently operated forks.
