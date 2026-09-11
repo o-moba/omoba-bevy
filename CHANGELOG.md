@@ -10,6 +10,14 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 - Add `make play` / `make play-bots` to build locked current sources and launch
   supervised local 3D practice with nine bots, with owned-process cleanup.
 
+## [0.19.0-rc.3] - 2026-09-12
+
+### Added
+- Standard reciprocal open-source licenses: AGPL-3.0-only server and MPL-2.0
+  client/shared source, with separate content and third-party scope.
+- Open Moba mission, contributor rights, brand and exact-source distribution
+  guidance. Packagers include the project license texts and notices.
+
 ## [0.19.0-rc.2] - 2026-09-11
 
 ### Added

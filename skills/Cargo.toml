@@ -2,6 +2,7 @@
 name = "skills"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 description = "Shared hero skill definitions (costs, cooldowns, scaling) for client and server"
 
 [dependencies]

@@ -3,8 +3,9 @@ members = ["arena-sync", "client", "harness", "passport", "server", "shared", "s
 resolver = "2"
 
 [workspace.package]
-version = "0.19.0-rc.2"
+version = "0.19.0-rc.3"
 edition = "2024"
+license = "MPL-2.0"
 
 # Bevy-style codebase: systems legitimately take many params and complex query
 # types, and `if let`+condition nesting is used for readability. These style

@@ -1,0 +1,30 @@
+Open Moba licensing
+===================
+
+Original project source code, build scripts and configuration are licensed under
+Mozilla Public License 2.0 (MPL-2.0), except original server/ code, which is
+licensed under GNU Affero General Public License version 3 only (AGPL-3.0-only).
+These are separate scopes, not a choice of licenses for the server.
+
+MPL notice for the source outside server/:
+This Source Code Form is subject to the terms of the Mozilla Public License,
+v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain
+one at https://mozilla.org/MPL/2.0/.
+
+AGPL notice for the source in server/:
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, version 3 of the License.
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for details.
+
+Original standalone project documentation and the original Verdant Confluence visual
+assets identified in LICENSING.md are licensed under Creative Commons
+Attribution 4.0 International (CC-BY-4.0).
+
+Full unmodified license texts are in LICENSES/. LICENSING.md defines the scope
+and explains distribution. Existing specific third-party/asset notices prevail;
+this notice does not relicense dependencies, imported assets or user avatars.
+Trademark permissions are separate; see TRADEMARKS.md.
+Individual authors retain their copyright. No ownership assignment is required.

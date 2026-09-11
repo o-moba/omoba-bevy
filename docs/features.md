@@ -1,6 +1,6 @@
 # Feature Inventory
 
-Canonical version: `0.19.0-rc.2`
+Canonical version: `0.19.0-rc.3`
 
 ## Current Playable Surface
 
@@ -370,3 +370,12 @@ Canonical version: `0.19.0-rc.2`
 - [docs/bug-report-template.md](bug-report-template.md) — internal report format.
 - [docs/mvp-scope-and-limitations.md](mvp-scope-and-limitations.md) — explicit MVP scope and limitations.
 - [tasks/MVP-CHECKLIST.md](../tasks/MVP-CHECKLIST.md) — MVP-blocking vs deferrable classification.
+
+## Open-source mission and licensing
+
+The server is AGPL-3.0-only; the client and shared/reusable code are MPL-2.0.
+Original documentation and identified Verdant art use CC-BY-4.0. Existing
+third-party/CC0/OFL notices and user-avatar rights remain separate. Commercial
+forks are permitted. See [licensing](../LICENSING.md), [mission](../MISSION.md)
+and [source delivery](../SOURCE.md). Legal notices are included by all three
+packagers; this does not certify store approval or completed source publication.

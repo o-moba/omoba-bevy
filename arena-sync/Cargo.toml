@@ -2,6 +2,7 @@
 name = "arena-sync"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 description = "Pull Ekza Arena avatar cards from the chain into the omoba roster (VRM/GLB download + manifest merge)"
 
 [dependencies]

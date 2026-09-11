@@ -1,2 +1,6 @@
 # Preserve captured command output, including final blank lines.
 .agent/tasks/REPO-AUDIT-2026-09-05/raw/*.log whitespace=-blank-at-eof
+
+# Preserve verbatim upstream license texts, including their trailing spaces.
+LICENSES/*.txt whitespace=-blank-at-eol
+*/LICENSE whitespace=-blank-at-eol

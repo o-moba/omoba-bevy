@@ -1,6 +1,7 @@
 # Asset Attribution
 
-Third-party assets bundled in this repository and their licenses.
+Assets bundled in this repository and their licenses. See [LICENSING.md](LICENSING.md)
+for the source/content boundary; existing specific asset notices take precedence.
 
 ## UI typography
 
@@ -73,6 +74,9 @@ geometry/materials and motion from `client/src/creatures3d.rs`.
 `art/verdant-confluence/`. No external mesh or texture was used for this scene.
 See `art/verdant-confluence/PROVENANCE.md` and the runtime `manifest.json` for
 source hashes, derivation details, normalized walk surfaces and output hashes.
+The original Verdant visual assets are licensed under CC-BY-4.0; credit Open Moba
+contributors and preserve supplied individual credits. Its source scripts and
+configuration remain MPL-2.0. This does not relicense imported avatars or CC0 art.
 The runtime step preserves the source and is reproducible with
 `python3 scripts/stage_verdant.py`.
 

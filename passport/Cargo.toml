@@ -2,6 +2,7 @@
 name = "omoba-passport"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 ekza-bevy-sdk = { git = "https://github.com/ekza-space/ekza-bevy-sdk", rev = "8254ed5e94d4709c11c83bef604ebe4481467847", default-features = false }
