@@ -2,6 +2,7 @@
 name = "client"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 # Keep the Bevy name visible to its derive-macro crate resolver on every target.

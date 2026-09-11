@@ -7,4 +7,4 @@ All 24 modular asset variants and the assembled arena are original geometry auth
 - Organic modeling: nature-modeler agent, reproducible in scripts/nature.py.
 - Terrain, layout assembly, lighting, export and revision: primary agent, scripts/build_scene.py.
 
-These project-created assets introduce no third-party attribution requirements. Repository licensing applies as chosen by the project owner; this note does not relicense the repository or grant rights to unrelated existing game assets.
+These project-created assets introduce no third-party attribution requirements. The original visual assets are licensed under CC-BY-4.0 as specified in the root LICENSING.md; credit Open Moba contributors and preserve individual credits. Source scripts and configuration are MPL-2.0. This grant does not change licenses on unrelated or third-party game assets.

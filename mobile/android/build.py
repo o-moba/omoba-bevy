@@ -20,6 +20,9 @@ import re
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts"))
+from package_licenses import add_legal_notices_to_zip, collect_legal_notices
+
 TARGET = "aarch64-linux-android"
 API = 26
 
@@ -41,6 +44,7 @@ def main():
     args = parser.parse_args()
     if args.version_code < 1:
         parser.error("--version-code must be positive")
+    legal_notices = None if args.check else collect_legal_notices(ROOT)
     sdk = args.sdk.expanduser().resolve() if args.sdk else None
     ndk = args.ndk.expanduser().resolve() if args.ndk else None
     if ndk is None and sdk and (sdk / "ndk").is_dir():
@@ -134,6 +138,7 @@ def main():
          "-A", ROOT / "client/assets", "-o", unaligned])
     with zipfile.ZipFile(unaligned, "a") as apk:
         apk.write(packaged_lib, "lib/arm64-v8a/libclient.so", compress_type=zipfile.ZIP_STORED)
+        add_legal_notices_to_zip(legal_notices, apk)
     run([paths["zipalign"], "-P", "16", "-f", "4", unaligned, unsigned])
     artifact = unsigned
     if not args.unsigned:

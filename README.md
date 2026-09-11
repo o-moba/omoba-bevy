@@ -1,6 +1,14 @@
-# omoba-bevy
+# Open Moba
 
-MOBA-style native 3D beta (Bevy client, authoritative Rust UDP server).
+An open-source MOBA and reusable engine where people can bring their avatars
+into a shared competitive game. Native 3D beta: Bevy client and authoritative
+Rust UDP server. See our [mission](MISSION.md) and [contribution guide](CONTRIBUTING.md).
+
+**Licenses:** server **AGPL-3.0-only**; client and reusable source **MPL-2.0**.
+Original documentation and identified Verdant art use **CC-BY-4.0**; existing
+CC0/OFL and other asset/dependency terms remain unchanged. Commercial forks are
+welcome under the applicable terms. Read the [license map](LICENSING.md),
+[brand policy](TRADEMARKS.md) and [source distribution guide](SOURCE.md).
 
 For the September 8 controlled beta, use the
 [tester/host guide](docs/progress/2026-09-07-beta-test-guide.md): the native

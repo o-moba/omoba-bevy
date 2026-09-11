@@ -13,6 +13,9 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts"))
+from package_licenses import collect_legal_notices, copy_legal_notices
+
 TARGET = "aarch64-apple-ios-sim"
 
 
@@ -22,6 +25,7 @@ def main():
     parser.add_argument("--output", type=Path, default=ROOT / "target/mobile/ios-simulator")
     parser.add_argument("--server", help="optional real host:port compiled as the editable initial server")
     args = parser.parse_args()
+    legal_notices = None if args.check else collect_legal_notices(ROOT)
     problems = []
     sdk = None
     for name in ["cargo", "rustc", "xcrun", "codesign"]:
@@ -63,6 +67,7 @@ def main():
     bundle.mkdir(exist_ok=True)
     shutil.copy2(out / f"cargo/{TARGET}/debug/client", bundle / "client")
     shutil.copytree(ROOT / "client/assets", bundle / "assets", dirs_exist_ok=True)
+    copy_legal_notices(legal_notices, bundle / "assets/legal")
     with Path(__file__).with_name("Info.plist").open("rb") as source:
         info = plistlib.load(source)
     version = re.search(r'(?ms)^\[workspace\.package\]\s*\n(?:(?!^\[).)*?^version\s*=\s*"([^"\n]+)"', (ROOT / "Cargo.toml").read_text()).group(1)
@@ -80,6 +85,6 @@ def main():
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except (OSError, subprocess.CalledProcessError) as error:
+    except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
         print(f"iOS Simulator build failed: {error}", file=sys.stderr)
         sys.exit(1)

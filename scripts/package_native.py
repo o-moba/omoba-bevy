@@ -10,6 +10,7 @@ import shutil
 import subprocess
 
 from validate_candidate_assets import validate
+from package_licenses import collect_legal_notices, copy_legal_notices
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -67,6 +68,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--profile", choices=("dev", "release"), default="dev")
     args = parser.parse_args()
+    legal_notices = collect_legal_notices(ROOT)
     source_gate = validate(ROOT / "client/assets")
     if source_gate["status"] != "PASS":
         parser.error("asset content gate failed: " + "; ".join(source_gate["errors"]))
@@ -116,6 +118,8 @@ exec python3 "$PACKAGE_DIR/beta.py" ''' + action + ''' "$@"
         launcher.chmod(0o755)
     shutil.copy2(ROOT / "docs/progress/2026-09-07-beta-test-guide.md", destination / "TESTING.md")
     shutil.copy2(ROOT / "ATTRIBUTION.md", destination / "ATTRIBUTION.md")
+    # Keep server/LICENSE under legal/: the package root contains a server executable.
+    copy_legal_notices(legal_notices, destination / "legal")
     shutil.copy2(ROOT / "art/verdant-confluence/PROVENANCE.md", destination / "VERDANT-PROVENANCE.md")
     shutil.copy2(ROOT / "assets-src/animations/README.md", destination / "ANIMATION-ATTRIBUTION.md")
     shutil.copy2(ROOT / "docs/progress/2026-09-05-distribution-review.md", destination / "2026-09-05-distribution-review.md")
