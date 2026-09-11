@@ -18,6 +18,7 @@ fn fixture() -> (ServerRuntime, SocketAddr, SocketAddr, TargetId, Instant) {
                 avatar: None,
                 sprite_character: None,
                 session_id: Some(format!("basic-{}", addr.port())),
+                passport_ticket: None,
             },
             now,
         );
@@ -316,6 +317,7 @@ fn actual_udp_receiver_accepts_the_basic_wire_contract_once() {
             avatar: None,
             sprite_character: None,
             session_id: Some("udp-basic".to_owned()),
+            passport_ticket: None,
         },
         Instant::now(),
     );

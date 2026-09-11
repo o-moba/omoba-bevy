@@ -221,6 +221,7 @@ impl ClientSession {
     }
 
     fn clear_join_attempt(&mut self) {
+        crate::passport::clear_tickets();
         self.admitted = false;
         self.join_last_sent = None;
         self.join_attempts = 0;
@@ -464,6 +465,8 @@ enum ClientPacket {
         sprite_character: Option<String>,
         #[serde(default)]
         session_id: Option<String>,
+        #[serde(default)]
+        passport_ticket: Option<String>,
     },
     Ping,
     RequestRematch,
@@ -1508,6 +1511,21 @@ fn send_join_attempt(
         session.join_exhausted = true;
         return;
     }
+    let passport_ticket =
+        match crate::passport::ticket_for_slug(join.avatar.as_deref(), &session_id.0) {
+            crate::passport::TicketPoll::Free => None,
+            crate::passport::TicketPoll::Ready(ticket) => Some(ticket),
+            crate::passport::TicketPoll::Pending => {
+                session.join_last_sent = Some(Instant::now());
+                return;
+            }
+            crate::passport::TicketPoll::Denied(error) => {
+                warn!("Purchased avatar admission unavailable: {error}");
+                session.join_error = Some(JoinRejection::AvatarNotAuthorized);
+                session.join_exhausted = true;
+                return;
+            }
+        };
     let result = channels.outgoing.send(ClientPacket::Join {
         team: join.team,
         character: join.character,
@@ -1515,6 +1533,7 @@ fn send_join_attempt(
         avatar: join.avatar,
         sprite_character: join.sprite_character,
         session_id: Some(session_id.0.clone()),
+        passport_ticket,
     });
     session.join_last_sent = Some(Instant::now());
     session.join_attempts += 1;

@@ -562,7 +562,7 @@ impl PlayerAbilitySnapshot {
 
 /// One shipped avatar. All roster avatars are CC0 VRM models staged as GLB
 /// under `client/assets/avatars/<slug>.glb` with retargeted animation clips.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AvatarDefinition {
     pub slug: String,
     pub display_name: String,
@@ -574,6 +574,9 @@ pub struct AvatarDefinition {
     /// Thumbnail file name relative to `client/assets/avatars/`, if shipped.
     #[serde(default)]
     pub thumbnail: Option<String>,
+    /// Explicit paid-cosmetic boundary. Never inferred from URL or format.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub passport: Option<ekza_bevy_sdk::passport::ProtectedAvatar>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -1,8 +1,19 @@
 # Feature Inventory
 
-Canonical version: `0.18.0-rc.10`
+Canonical version: `0.19.0-rc.1`
 
 ## Current Playable Surface
+
+- **Purchased avatar passport (2026-09-11):** opt-in terminal pairing connects
+  Omoba to the buyer's browser wallet. The owned library filters paid avatar
+  choices; a trusted HTTP service consumes a one-use ticket before the game
+  server admits the exact approved cosmetic. Free avatars remain available.
+  Curated imports validate SHA-256, size, GLB skinning and required animation
+  clips, then produce a public manifest shared by both binaries after restart.
+  The native renderer and snapshots use that same protected slug, while class
+  and gameplay stats remain independent. See the [setup and evidence scope](
+  progress/2026-09-11-avatar-passport-roundtrip.md). This first delivery requires
+  staged distribution and explicit development-service configuration.
 
 - **Minion lane entry (2026-09-11):** outer-lane waves skip the unused corner
   beyond the base entrance, eliminating a 34-unit out-and-back detour. Both
