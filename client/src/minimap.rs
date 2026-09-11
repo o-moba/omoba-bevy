@@ -15,7 +15,8 @@ use crate::sprite::{PlayerVisualMode, SpriteVisualAssets};
 use crate::team::{AvatarThumbnails, Team};
 use crate::ui_theme;
 
-const MINIMAP_SIZE: f32 = 252.0;
+pub(crate) const MINIMAP_SIZE: f32 = 252.0;
+pub(crate) const DESKTOP_MINIMAP_INSET: f32 = 16.0;
 pub(crate) const MINIMAP_INNER_SIZE: f32 = 232.0;
 const HERO_SIGHT: f32 = 32.0;
 const MINION_SIGHT: f32 = 22.0;
@@ -182,8 +183,8 @@ fn setup_minimap_ui(
             Button,
             Node {
                 position_type: PositionType::Absolute,
-                right: Val::Px(16.0),
-                bottom: Val::Px(16.0),
+                left: Val::Px(DESKTOP_MINIMAP_INSET),
+                top: Val::Px(DESKTOP_MINIMAP_INSET),
                 width: Val::Px(MINIMAP_SIZE),
                 height: Val::Px(MINIMAP_SIZE),
                 padding: UiRect::all(Val::Px(9.0)),
@@ -767,6 +768,26 @@ mod tests {
     use super::*;
     use crate::input_context::GameplayInputContext;
 
+    #[test]
+    fn desktop_map_keeps_click_shield_on_its_upper_left_frame() {
+        let mut app = App::new();
+        app.init_resource::<MapLayout>()
+            .init_resource::<MinimapUiState>()
+            .add_systems(Startup, setup_minimap_ui);
+        app.update();
+        let mut roots = app
+            .world_mut()
+            .query_filtered::<(&Node, Option<&Button>), With<MinimapRoot>>();
+        let (root, shield) = roots.single(app.world()).unwrap();
+        assert!(shield.is_some());
+        assert_eq!(root.left, Val::Px(16.0));
+        assert_eq!(root.top, Val::Px(16.0));
+        assert_eq!(root.right, Val::Auto);
+        assert_eq!(root.bottom, Val::Auto);
+        assert_eq!(root.width, Val::Px(252.0));
+        assert_eq!(root.height, Val::Px(252.0));
+    }
+
     fn marker_app() -> App {
         let mut app = App::new();
         app.init_resource::<MapLayout>()
@@ -1080,25 +1101,37 @@ mod tests {
     }
 
     #[test]
-    fn map_projection_and_clicks_round_trip_at_both_viewport_sizes() {
+    fn map_projection_and_clicks_round_trip_at_upper_left_and_phone_scales() {
         let layout = MapLayout::default();
-        for window in [Vec2::new(1280.0, 720.0), Vec2::new(1920.0, 1080.0)] {
-            let rect = Rect::from_corners(
-                window - Vec2::splat(16.0 + MINIMAP_SIZE - 10.0),
-                window - Vec2::splat(26.0),
-            );
+        for (inset, scale) in [
+            (Vec2::splat(26.0), 1.0),
+            (Vec2::new(37.0, 17.0), 132.0 / 252.0),
+        ] {
+            let rect = Rect::from_corners(inset, inset + Vec2::splat(MINIMAP_INNER_SIZE * scale));
             for world in [
                 layout.home_spawn,
                 layout.away_spawn,
                 Vec3::ZERO,
                 Vec3::new(-20.0, 0.0, 50.0),
             ] {
-                let result =
-                    minimap_cursor_to_world(layout, rect, rect.min + map_point(layout, world))
-                        .unwrap();
+                let result = minimap_cursor_to_world(
+                    layout,
+                    rect,
+                    rect.min + map_point(layout, world) * scale,
+                )
+                .unwrap();
                 assert!(result.xz().distance(world.xz()) < 0.001);
             }
-            assert!(minimap_cursor_to_world(layout, rect, Vec2::new(120.0, 120.0)).is_none());
+            // Decorative frame clicks must not become map orders.
+            assert!(minimap_cursor_to_world(layout, rect, rect.min - Vec2::X).is_none());
+            for viewport in [
+                Vec2::new(960.0, 540.0),
+                Vec2::new(1280.0, 720.0),
+                Vec2::new(1600.0, 1000.0),
+            ] {
+                let old_lower_right = viewport - Vec2::splat(142.0);
+                assert!(minimap_cursor_to_world(layout, rect, old_lower_right).is_none());
+            }
         }
         let home = map_point(layout, layout.home_spawn);
         let away = map_point(layout, layout.away_spawn);
@@ -1184,10 +1217,11 @@ mod tests {
             inverse_scale_factor: 0.5,
             ..default()
         };
-        let transform = UiGlobalTransform::from_translation(Vec2::new(2256.0, 1160.0));
+        let transform = UiGlobalTransform::from_translation(Vec2::splat(284.0));
         let rect = container_rect(&node, &transform).unwrap();
         assert_eq!(rect.size(), Vec2::splat(232.0));
-        assert_eq!(rect.center(), Vec2::new(1128.0, 580.0));
+        assert_eq!(rect.min, Vec2::splat(26.0));
+        assert_eq!(rect.center(), Vec2::splat(142.0));
     }
     #[test]
     fn right_click_emits_one_move_without_panning_and_alt_does_not_reuse_it() {
@@ -1201,7 +1235,7 @@ mod tests {
             .init_resource::<GameplayInputContext>()
             .add_systems(Update, handle_minimap_navigation_system);
         let mut window = Window::default();
-        window.set_cursor_position(Some(Vec2::new(1120.0, 580.0)));
+        window.set_cursor_position(Some(Vec2::splat(142.0)));
         let window_entity = app
             .world_mut()
             .spawn((window, bevy::window::PrimaryWindow))
@@ -1213,7 +1247,7 @@ mod tests {
                 inverse_scale_factor: 0.5,
                 ..default()
             },
-            UiGlobalTransform::from_translation(Vec2::new(2240.0, 1160.0)),
+            UiGlobalTransform::from_translation(Vec2::splat(284.0)),
         ));
         app.world_mut().resource_mut::<CameraState>().locked = false;
         app.world_mut()
@@ -1258,7 +1292,7 @@ mod tests {
         app.world_mut()
             .get_mut::<Window>(window_entity)
             .unwrap()
-            .set_cursor_position(Some(Vec2::new(50.0, 50.0)));
+            .set_cursor_position(Some(Vec2::new(20.0, 142.0)));
         app.update();
         assert!(
             app.world()
@@ -1269,7 +1303,7 @@ mod tests {
         app.world_mut()
             .get_mut::<Window>(window_entity)
             .unwrap()
-            .set_cursor_position(Some(Vec2::new(1120.0, 580.0)));
+            .set_cursor_position(Some(Vec2::splat(142.0)));
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
             .reset_all();
@@ -1304,7 +1338,7 @@ mod tests {
             .init_resource::<GameplayInputContext>()
             .add_systems(Update, handle_minimap_navigation_system);
         let mut window = Window::default();
-        window.set_cursor_position(Some(Vec2::new(1120.0, 580.0)));
+        window.set_cursor_position(Some(Vec2::splat(142.0)));
         app.world_mut().spawn((window, bevy::window::PrimaryWindow));
         app.world_mut().spawn((
             MinimapContainer,
@@ -1312,7 +1346,7 @@ mod tests {
                 size: Vec2::splat(232.0),
                 ..default()
             },
-            UiGlobalTransform::from_translation(Vec2::new(1120.0, 580.0)),
+            UiGlobalTransform::from_translation(Vec2::splat(142.0)),
         ));
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()

@@ -438,12 +438,37 @@ fn capture(
         .map(|(name, node, transform, visible)| {
             let center = transform.translation;
             let size = node.size() * transform.to_scale_angle_translation().0.abs();
+            let logical_min = (center - size * 0.5) * node.inverse_scale_factor();
+            let logical_size = size * node.inverse_scale_factor();
             serde_json::json!({"name":name.as_str(), "center":[center.x,center.y], "size":[size.x,size.y],
+                "logical_min":[logical_min.x,logical_min.y], "logical_size":[logical_size.x,logical_size.y],
                 "visible":visible.is_none_or(|visibility| visibility.get()),
                 "fits_viewport": center.x-size.x/2.0 >= -1.0 && center.y-size.y/2.0 >= -1.0
                     && center.x+size.x/2.0 <= qa.width as f32 + 1.0 && center.y+size.y/2.0 <= qa.height as f32 + 1.0})
         }).collect();
     let stage = qa.stage;
+    let desktop_minimap_upper_left = (matches!(stage, 2 | 5)
+        && !mobile.as_ref().is_some_and(|mobile| mobile.enabled))
+    .then(|| {
+        primary_nodes.iter().any(|node| {
+            node["name"] == "MinimapRoot"
+                && node["visible"] == true
+                && (0..2).all(|axis| {
+                    node["logical_min"][axis].as_f64().is_some_and(|value| {
+                        (value - crate::minimap::DESKTOP_MINIMAP_INSET as f64).abs() <= 1.0
+                    }) && node["logical_size"][axis].as_f64().is_some_and(|value| {
+                        (value - crate::minimap::MINIMAP_SIZE as f64).abs() <= 1.0
+                    })
+                })
+        })
+    });
+    if desktop_minimap_upper_left == Some(false) {
+        error!(
+            "BETA_UI_QA failed: desktop minimap must be 252px at logical inset16: {primary_nodes:?}"
+        );
+        exit.write(AppExit::error());
+        return;
+    }
     // Measure the real laid-out description and affordability text, including
     // wrapping. A card fitting the viewport alone does not prove its text fits.
     let shop_text_fits = !matches!(stage, 3 | 4)
@@ -494,6 +519,7 @@ fn capture(
         ],
         2 | 5 => &[
             "MinimapRoot",
+            "MatchObjectivePanel",
             "MatchHudColumn",
             "SkillBarRoot",
             "SkillSlot-Q",
@@ -605,7 +631,7 @@ fn capture(
         "mobile_controls":mobile.as_ref().is_some_and(|mobile| mobile.enabled), "admitted":session.join_confirmed(), "server_epoch":game.meta.server_epoch, "snapshot_tick":game.meta.snapshot_tick,
         "synthetic_result":stage == 6, "synthetic_progression":synthetic_progression,
         "progression_fixture":synthetic_progression.then(||serde_json::json!({"level":6,"skill_points":4,"ranks":[1,1,1,1],"server_unchanged":true})),
-        "minimap":minimap.diagnostics(), "shop_modal":shop.open, "gameplay_allowed":context.gameplay_allowed(), "pause_open":pause.open,
+        "minimap":minimap.diagnostics(), "desktop_minimap_upper_left":desktop_minimap_upper_left, "shop_modal":shop.open, "gameplay_allowed":context.gameplay_allowed(), "pause_open":pause.open,
         "equipment":equipment.single().ok().map(|e|serde_json::json!({"gold":e.gold,"inventory":e.inventory,"bonuses":e.item_bonuses,"receipt":e.last_purchase})), "primary_controls_fit":controls_fit, "shop_text_fits":shop_text_fits, "primary_nodes":primary_nodes});
     info!("BETA_UI_QA capture_request={record}");
     qa.captures.push(record);

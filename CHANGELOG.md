@@ -6,6 +6,26 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.18.0-rc.8] - 2026-09-11
+
+### Changed
+- Move the desktop minimap to the upper-left corner and reserve objective-panel
+  space beside it. Keep the desktop inventory inside narrower windows and retain
+  the separate phone HUD and computed-coordinate minimap navigation.
+- Increase the normalized hero height from 1.45 to 2.1 world units and move the
+  default 3D follow camera 15% closer at the same angle. Creature sizes, combat
+  ranges, navigation clearance, 2D projection and zoom controls are unchanged.
+- Halve decorative reed height and reduce grass-fan height by 35% in the
+  deterministic runtime art derivative. Preserve ground contact, XZ placement,
+  trees, rocks, materials and all 236 solid collision polygons.
+- Migrate the previous 1.45 default once through preference schema 4 while
+  preserving custom scales and the older default migration rules.
+
+### Verification
+- Add actual-vertex plant-height/grounding checks, narrow desktop inventory and
+  saved-preference regressions, and native upper-left minimap placement evidence.
+  See the dated [readability record](docs/progress/2026-09-11-hero-readability.md).
+
 ## [0.18.0-rc.7] - 2026-09-11
 
 ### Added

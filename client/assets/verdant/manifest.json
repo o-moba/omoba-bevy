@@ -5,7 +5,7 @@
   "units": "meters; exported glTF Y-up; no additional axis conversion",
   "provenance": "Original project-authored geometry; see art/verdant-confluence/PROVENANCE.md",
   "source_sha256": "d24189e03f5999abdbdaa33cd533df5b9ff9e341dac921de4fee54e77ec8faae",
-  "source_blend_sha256": "d75c2606155ac0cc7cce0c35168ce9d383aaa6747044f427e2d2a7c84a7b6c57",
+  "source_blend_sha256": "04653b828e82a5cb5f3306dba8ee9283c8b6908f06c27f1013f1779f1e6076aa",
   "files": [
     {
       "id": "environment",
@@ -21,8 +21,8 @@
     {
       "id": "foliage",
       "path": "foliage.glb",
-      "sha256": "a5989c4d1814951391182ab4a8906bb87f87f4c630782f64bc32a18484325be6",
-      "bytes": 3856528,
+      "sha256": "6c44678f30713f3aa64557ac9e3655c410fdd82d9c5fc0e1115ed1cd9d0d1a73",
+      "bytes": 3856584,
       "nodes": 1792,
       "meshes": 13,
       "primitives": 55,
@@ -1462,6 +1462,18 @@
       "translation_y_delta": -0.23
     }
   ],
+  "foliage_readability": {
+    "river_reeds": {
+      "vertical_scale_factor": 0.5,
+      "instances": 60,
+      "ground_pivot_and_xz_preserved": true
+    },
+    "grass_fan": {
+      "vertical_scale_factor": 0.65,
+      "instances": 241,
+      "ground_pivot_and_xz_preserved": true
+    }
+  },
   "surfaces": {
     "open_ground": 0,
     "meadow_top": -0.02,
@@ -1482,6 +1494,7 @@
     "Square the base pad upper bevel ring at the existing 46m by 0.7m walktop so it meets the miter skirt without corner dips.",
     "Compress sanctuary bottom 1.1m to 0.03m; translate upper architecture down 1.07m to expose spawn/walk floor.",
     "Runtime sanctuaries rotate 45 degrees around Y to clear original diagonal spawn points.",
+    "Reduce decorative reed height by 50% and grass-fan height by 35% around their ground pivots; preserve XZ footprints and all solid geometry.",
     "Two scenes split static architecture from F4-controlled foliage; eight live structures are separate assets."
   ],
   "layout": {
