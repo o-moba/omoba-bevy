@@ -1,8 +1,15 @@
 # Feature Inventory
 
-Canonical version: `0.19.0-rc.1`
+Canonical version: `0.19.0-rc.2`
 
 ## Current Playable Surface
+
+- **Jungle farming:** six ordinary camps, with mirrored skirmisher, bruiser and
+  spitter encounters. All heroes can earn authoritative last-hit XP and gold;
+  killed monsters respawn after 40 seconds. Ordinary camp kills restore 20%
+  maximum HP to the living last hitter. Distinct 3D creatures and persistent
+  camp markers expose living/depleted locations in desktop and phone UI.
+  See [the implementation and verification record](progress/2026-09-11-jungle-camps.md).
 
 - **Local source launch:** `make play` builds locked sources and runs local 3D
   practice with nine bots; closing the client stops its server and bots.

@@ -174,7 +174,7 @@ mod layout {
         pub river: [Vec2; 2],
         pub base_pads: [Vec2; 2],
         pub towers: Vec<Vec2>,
-        pub camps: [Vec2; 3],
+        pub camps: [Vec2; 6],
         pub jungle_blocks: [Vec2; 10],
     }
 

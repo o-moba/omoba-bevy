@@ -29,6 +29,54 @@ NAVIGATION_IMAGES = ("01-minimap-route.png", "02-minimap-arrival.png", "03-world
 FRAME_HEADER = struct.Struct("<4sHQQHHI")
 
 
+JUNGLE_IMAGES = ("01-jungle-overview.png", "02-jungle-skirmisher.png", "03-jungle-bruiser.png", "04-jungle-spitter.png")
+
+
+def verify_jungle(summary, samples, width, height, mobile):
+    errors = []
+    captures = summary.get("captures", [])
+    if len(captures) != 4 or summary.get("qa_fixtures") != 0:
+        errors.append("Expected four real camp captures and no render fixtures")
+    if {capture.get("file") for capture in captures} != set(JUNGLE_IMAGES):
+        errors.append("Expected exactly the four distinct jungle views")
+    by_tick = {sample["snapshot_tick"]: sample for sample in samples}
+    for capture in captures:
+        tick = capture.get("snapshot_tick")
+        # Observer and renderer are independent endpoints; use the exact tick.
+        snapshot = by_tick.get(tick, {})
+        authoritative = {mob["id"]: mob for mob in snapshot.get("neutrals", [])
+                         if not mob["camp_type"].endswith("boss")}
+        mobs = capture.get("jungle_mobs", [])
+        if len(mobs) != 6 or {mob.get("id") for mob in mobs} != set(authoritative):
+            errors.append(f"Capture {tick}: six rendered camps must match server IDs")
+        for mob in mobs:
+            if mob.get("hp", 0) <= 0 or mob.get("hp") != authoritative.get(mob.get("id"), {}).get("hp"):
+                errors.append(f"Capture {tick}: inconsistent HP")
+            source = authoritative.get(mob.get("id"), {})
+            if mob.get("kind", "").lower() != source.get("camp_type") or any(
+                    abs(mob["position"][axis] - source.get(key, float("inf"))) > .02
+                    for axis, key in ((0, "x"), (2, "z"))):
+                errors.append(f"Capture {tick}: rendered camp type/position differs from server")
+            if mob.get("head_local_y") is None or mob.get("foot_local_y") is None:
+                errors.append(f"Capture {tick}: missing normalized model bounds")
+            elif abs(mob["position"][1] + mob["foot_local_y"]) > .02:
+                errors.append(f"Capture {tick}: floating camp creature")
+        markers = capture.get("minimap", {}).get("camp_markers", [])
+        if len(markers) != 6 or {marker.get("index") for marker in markers} != set(range(6)) or not all(marker.get("alive") for marker in markers):
+            errors.append(f"Capture {tick}: minimap must show six living camp markers")
+        if mobile and not (capture.get("gameplay_allowed") is True and capture.get("window_focused") is True
+                           and capture.get("primary_controls_fit") is True and len(capture.get("primary_nodes", [])) == 6):
+            errors.append(f"Capture {tick}: mobile attack/skills/joystick not ready in focused viewport")
+        if capture.get("ui_profile") != ("Mobile" if mobile else "Desktop"):
+            errors.append(f"Capture {tick}: wrong platform UI profile")
+        if capture.get("pixels") != [width, height]:
+            errors.append(f"Capture {tick}: viewport differs from requested device preview")
+        if capture.get("qa_render_fixtures") != 0:
+            errors.append(f"Capture {tick}: unexpected synthetic creature")
+    return {"pass": not errors, "errors": errors, "captures": len(captures), "observer_ticks": len(by_tick),
+            "requested_mobile_preview": mobile, "manual_interaction_verified": False}
+
+
 def verify_beta_ui_profile(summary, requested_touch_controls, expected_images):
     """Require actual profile evidence for every expected beta UI capture stage."""
     requested = "mobile" if requested_touch_controls else "desktop"
@@ -190,7 +238,7 @@ class SnapshotObserver:
             packet = json.loads(data)
             if packet.get("type") != "snapshot":
                 continue
-            sample = {key: packet.get(key) for key in ("server_epoch", "round_id", "snapshot_tick", "players", "structures")}
+            sample = {key: packet.get(key) for key in ("server_epoch", "round_id", "snapshot_tick", "players", "structures", "neutrals")}
             self.samples.append(sample)
             self.output.write(json.dumps(sample, separators=(",", ":")) + "\n")
             self.output.flush()
@@ -294,13 +342,13 @@ def main():
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--touch-controls", action="store_true", help="Preview phone UI at the requested viewport; requires a desktop development build")
-    parser.add_argument("--scenario", choices=("verdant", "beta-ui", "navigation"), default="verdant")
+    parser.add_argument("--scenario", choices=("verdant", "beta-ui", "navigation", "jungle"), default="verdant")
     parser.add_argument("--bots", type=int, choices=range(5), default=2)
     args = parser.parse_args()
     if not (320 <= args.width <= 3840 and 320 <= args.height <= 2160):
         parser.error("viewport must be 320..3840 wide and 320..2160 high")
     expected_images = (tuple(name.replace("720p", f"{args.height}p") for name in BETA_IMAGES) if args.scenario == "beta-ui"
-                       else NAVIGATION_IMAGES if args.scenario == "navigation" else EXPECTED_IMAGES)
+                       else NAVIGATION_IMAGES if args.scenario == "navigation" else JUNGLE_IMAGES if args.scenario == "jungle" else EXPECTED_IMAGES)
     package = args.package.resolve() if args.package else None
     suffix = ".exe" if os.name == "nt" else ""
     client = args.client_bin or (package / ("client" + suffix) if package else None)
@@ -328,7 +376,7 @@ def main():
                   if package and (package / "BUILD.json").exists() else None,
                   capture_method="Bevy Screenshot::primary_window + save_to_disk",
                   manual_interaction_verified=False, timeout_seconds=timeout,
-                  pixels=[args.width, args.height] if args.scenario in ("beta-ui", "navigation") else None, team=args.team, scenario=args.scenario, result_fixture=args.scenario == "beta-ui",
+                  pixels=[args.width, args.height] if args.scenario in ("beta-ui", "navigation", "jungle") else None, team=args.team, scenario=args.scenario, result_fixture=args.scenario == "beta-ui",
                   scripted_peers=args.bots, server_mode="dev; production commands; no cheats")
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="omoba-verdant-capture-") as isolated:
@@ -354,7 +402,7 @@ def main():
                     raise RuntimeError("fresh native server did not report listening")
                 time.sleep(0.05)
             peers = [ScenarioPeer(address, index) for index in range(args.bots)]
-            if args.scenario == "navigation":
+            if args.scenario in ("navigation", "jungle"):
                 observer = SnapshotObserver(address, output / "authoritative-snapshots.jsonl")
             with (output / "client.log").open("w") as log:
                 client_process = subprocess.Popen([str(client)], cwd=isolated, env=env,
@@ -414,6 +462,19 @@ def main():
         result["navigation"] = verify_navigation(json.loads(summary_path.read_text()) if summary_path.is_file() else {},
                                                   observer.samples if observer else [])
         result["capture_pass"] = result["capture_pass"] and result["navigation"]["pass"]
+    if args.scenario == "jungle":
+        summary_path = output / "qa-summary.json"
+        result["jungle"] = verify_jungle(json.loads(summary_path.read_text()) if summary_path.is_file() else {},
+                                           observer.samples if observer else [], args.width, args.height, args.touch_controls)
+        import struct
+        for filename in JUNGLE_IMAGES:
+            path = output / filename
+            header = path.read_bytes()[:24] if path.is_file() else b""
+            if len(header) != 24 or header[:8] != b"\x89PNG\r\n\x1a\n" or struct.unpack(">II", header[16:24]) != (args.width, args.height):
+                result["jungle"]["errors"].append(f"{filename}: actual PNG dimensions differ from requested viewport")
+                result["jungle"]["pass"] = False
+        result["errors"].extend(result["jungle"]["errors"])
+        result["capture_pass"] = result["capture_pass"] and result["jungle"]["pass"]
     (output / "capture-run.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, indent=2))
     raise SystemExit(0 if result["capture_pass"] else 1)

@@ -404,7 +404,7 @@ fn bottom_boss_spawns_on_schedule_with_boss_stats() {
     // within ~100 ms of that, so this reference is accurate to well under 1 s.
     let match_start = Instant::now();
 
-    // Early window: the three camps are up, no boss, no team buffs.
+    // Early window: the six camps are up, no boss, no team buffs.
     let early_deadline = match_start + Duration::from_secs(5);
     let mut saw_camps = false;
     while Instant::now() < early_deadline {
@@ -420,13 +420,13 @@ fn bottom_boss_spawns_on_schedule_with_boss_stats() {
             packet.team_buffs().is_empty(),
             "no team buff may be active without a boss kill"
         );
-        if packet.neutrals().len() == 3 {
+        if packet.neutrals().len() == 6 {
             saw_camps = true;
         }
     }
     assert!(
         saw_camps,
-        "the three jungle camps should replicate from the start"
+        "the six jungle camps should replicate from the start"
     );
 
     // Up to shortly before the delay: still no boss.

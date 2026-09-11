@@ -685,7 +685,10 @@ mod tests {
         ] {
             assert!(Vec2::from_array(actual).distance(Vec2::from_array(expected)) < 0.001);
         }
-        assert_eq!(manifest.topology.camps.len(), 3);
+        assert_eq!(manifest.topology.camps.len(), 6);
+        for (actual, expected) in manifest.topology.camps.iter().zip(layout.camp_centers()) {
+            assert!(Vec2::from_array(*actual).distance(expected) < 0.001);
+        }
         assert_eq!(manifest.topology.boss_pits.len(), 2);
         for id in [
             "grass_a",

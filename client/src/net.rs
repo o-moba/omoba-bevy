@@ -46,7 +46,6 @@ const _: () = assert!(SERVER_DATAGRAM_RECEIVE_CAPACITY > IPV4_UDP_MAX_PAYLOAD_BY
 const DECODE_ERROR_LOG_INTERVAL: Duration = Duration::from_secs(1);
 const PROJECTILE_RADIUS: f32 = 0.22;
 const MINION_RADIUS: f32 = 0.55;
-const NEUTRAL_RADIUS: f32 = 0.62;
 const LOCAL_SNAP_DISTANCE: f32 = 4.0;
 const DEFAULT_PLAYER_LEVEL: u32 = 1;
 const DEFAULT_NEXT_LEVEL_XP: u32 = 120;
@@ -652,6 +651,16 @@ pub enum NeutralCampType {
     KingMutatioBoss,
 }
 
+impl From<shared::jungle::JungleCampKind> for NeutralCampType {
+    fn from(kind: shared::jungle::JungleCampKind) -> Self {
+        match kind {
+            shared::jungle::JungleCampKind::Skirmisher => Self::Skirmisher,
+            shared::jungle::JungleCampKind::Bruiser => Self::Bruiser,
+            shared::jungle::JungleCampKind::Spitter => Self::Spitter,
+        }
+    }
+}
+
 impl NeutralCampType {
     pub fn is_boss(self) -> bool {
         matches!(
@@ -938,6 +947,10 @@ pub struct NetworkNeutral;
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkNeutralId(pub u64);
 
+/// Authoritative camp identity retained for creature visuals and minimap status.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NetworkNeutralCampType(pub NeutralCampType);
+
 /// Replicated neutral AI state (drives the boss idle/walk animation switch).
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NeutralAiStateTag(pub NeutralAiState);
@@ -967,8 +980,6 @@ pub struct NetworkVisualAssets {
     projectile_mesh: Handle<Mesh>,
     friendly_projectile_material: Handle<StandardMaterial>,
     hostile_projectile_material: Handle<StandardMaterial>,
-    neutral_mesh: Handle<Mesh>,
-    neutral_material: Handle<StandardMaterial>,
 }
 
 fn setup_network_visual_assets(
@@ -987,19 +998,11 @@ fn setup_network_visual_assets(
         unlit: true,
         ..default()
     });
-    let neutral_mesh = meshes.add(Mesh::from(Sphere::new(NEUTRAL_RADIUS)));
-    let neutral_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.55, 0.38, 0.18),
-        perceptual_roughness: 0.8,
-        ..default()
-    });
 
     commands.insert_resource(NetworkVisualAssets {
         projectile_mesh,
         friendly_projectile_material,
         hostile_projectile_material,
-        neutral_mesh,
-        neutral_material,
     });
 }
 
@@ -2218,6 +2221,7 @@ fn apply_server_snapshot(
             }
             commands.entity(entity).insert((
                 NetworkNeutralId(neutral.id),
+                NetworkNeutralCampType(neutral.camp_type),
                 neutral_state_to_combat_stats(neutral),
                 NeutralAiStateTag(neutral.ai_state),
             ));
@@ -2229,6 +2233,7 @@ fn apply_server_snapshot(
             Visibility::default(),
             NetworkNeutral,
             NetworkNeutralId(neutral.id),
+            NetworkNeutralCampType(neutral.camp_type),
             NetEntityInterpolation {
                 from_translation: target_translation,
                 to_translation: target_translation,
@@ -2241,8 +2246,7 @@ fn apply_server_snapshot(
             NeutralAiStateTag(neutral.ai_state),
         );
 
-        // Raid bosses render their staged GLB model (attached by the bosses
-        // module) instead of the generic neutral sphere.
+        // Bosses and ordinary camps attach their role-specific visuals independently.
         let entity = if neutral.camp_type.is_boss() {
             commands
                 .spawn((
@@ -2255,15 +2259,6 @@ fn apply_server_snapshot(
                         neutral.id,
                         crate::bosses::boss_display_name(neutral.camp_type)
                     )),
-                ))
-                .id()
-        } else if **visual_mode == PlayerVisualMode::Models3d {
-            commands
-                .spawn((
-                    base_components,
-                    Mesh3d(visuals.neutral_mesh.clone()),
-                    MeshMaterial3d(visuals.neutral_material.clone()),
-                    Name::new(format!("Neutral-{}", neutral.id)),
                 ))
                 .id()
         } else {
