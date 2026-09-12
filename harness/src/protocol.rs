@@ -267,6 +267,13 @@ pub struct TeamBuffState {
 /// fields the harness targets on; unknown fields are ignored).
 #[derive(Debug, Clone, Deserialize)]
 pub struct MinionState {
+    #[serde(default)]
+    pub kind: shared::combat::MinionKind,
+    #[serde(default)]
+    pub attack_sequence: u64,
+    #[serde(default)]
+    pub lane: String,
+
     pub id: u64,
     #[serde(default)]
     pub team: Option<Team>,
@@ -276,6 +283,24 @@ pub struct MinionState {
     pub z: f32,
     #[serde(default)]
     pub hp: f32,
+}
+
+/// Authoritative projectile presentation, without any client damage authority.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProjectileState {
+    pub id: u64,
+    pub owner_id: u64,
+    #[serde(default)]
+    pub source_kind: shared::combat::CombatEntityKind,
+    #[serde(default)]
+    pub style: shared::combat::ProjectileStyle,
+    #[serde(default)]
+    pub action_slot: Option<u8>,
+    #[serde(default)]
+    pub direction: [f32; 3],
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
 }
 
 /// One replicated structure (tower). Mirrors `server::StructureState`
@@ -333,6 +358,10 @@ pub enum ServerPacket {
         join_error: Option<shared::protocol::JoinRejection>,
         your_id: u64,
         #[serde(default)]
+        combat_events: Vec<shared::combat::CombatEvent>,
+        #[serde(default)]
+        projectiles: Vec<ProjectileState>,
+        #[serde(default)]
         players: Vec<PlayerState>,
         /// Alive (non-respawn-gated) jungle neutrals, including raid bosses.
         #[serde(default)]
@@ -353,6 +382,17 @@ pub enum ServerPacket {
 }
 
 impl ServerPacket {
+    pub fn combat_events(&self) -> &[shared::combat::CombatEvent] {
+        match self {
+            Self::Snapshot { combat_events, .. } => combat_events,
+        }
+    }
+    pub fn projectiles(&self) -> &[ProjectileState] {
+        match self {
+            Self::Snapshot { projectiles, .. } => projectiles,
+        }
+    }
+
     pub fn meta(&self) -> shared::protocol::SnapshotMeta {
         match self {
             Self::Snapshot { meta, .. } => *meta,

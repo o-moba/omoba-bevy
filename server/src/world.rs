@@ -264,6 +264,12 @@ pub(crate) fn spawn_minion_wave_for_team_lane(
     let spawn = path[0];
 
     for wave_index in 0..MINIONS_PER_WAVE {
+        let kind = if wave_index == 2 {
+            MinionKind::Caster
+        } else {
+            MinionKind::Melee
+        };
+        let max_hp = minion_stats(kind).0;
         let minion_id = *next_minion_id;
         *next_minion_id += 1;
 
@@ -287,6 +293,8 @@ pub(crate) fn spawn_minion_wave_for_team_lane(
             minion_id,
             Minion {
                 state: MinionState {
+                    kind,
+                    attack_sequence: 0,
                     id: minion_id,
                     team,
                     lane,
@@ -294,8 +302,8 @@ pub(crate) fn spawn_minion_wave_for_team_lane(
                     y: MINION_SPAWN_HEIGHT,
                     z: spawn_z,
                     yaw,
-                    hp: MINION_MAX_HP,
-                    max_hp: MINION_MAX_HP,
+                    hp: max_hp,
+                    max_hp,
                     state: MinionBrainState::Marching,
                     target_kind: None,
                     target_id: None,

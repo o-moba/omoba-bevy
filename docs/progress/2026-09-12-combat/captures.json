@@ -1,0 +1,62 @@
+[
+  {
+    "scenario": "ranger-final",
+    "pass": true,
+    "image": "ranger-arrow.png",
+    "sha256": "38041f51cd912db436d85392fe2d6e7a18495c11f456cff2fa94153f00193301",
+    "client_sha256": "2ee67195c5584a91a841ef76a986f3f2552f99039c4c797c069c4a86ee9b3f74",
+    "server_sha256": "0ae757606bf858233911bdb70b6b7449d5d389ed8f26de511191499c9464e496",
+    "physical_device_verified": false,
+    "synthetic_damage": false
+  },
+  {
+    "scenario": "mage-mobile",
+    "pass": true,
+    "image": "mage-mobile.png",
+    "sha256": "903d7cf21c681820aff2b4ae0818e9ea9803a192e2b113d744d66e75fbb024d6",
+    "client_sha256": "2ee67195c5584a91a841ef76a986f3f2552f99039c4c797c069c4a86ee9b3f74",
+    "server_sha256": "0ae757606bf858233911bdb70b6b7449d5d389ed8f26de511191499c9464e496",
+    "physical_device_verified": false,
+    "synthetic_damage": false
+  },
+  {
+    "scenario": "cleric-desktop",
+    "pass": true,
+    "image": "cleric-holy.png",
+    "sha256": "dd1caaed439cef3b4da6dff477863274d7bf885190ad93106e254e0d10f19f41",
+    "client_sha256": "2ee67195c5584a91a841ef76a986f3f2552f99039c4c797c069c4a86ee9b3f74",
+    "server_sha256": "0ae757606bf858233911bdb70b6b7449d5d389ed8f26de511191499c9464e496",
+    "physical_device_verified": false,
+    "synthetic_damage": false
+  },
+  {
+    "scenario": "warrior-desktop",
+    "pass": true,
+    "image": "warrior-crescent.png",
+    "sha256": "501293c9582e346b21865f25995972690faffbe145b5e97eb23f8ebe93ce58ed",
+    "client_sha256": "2ee67195c5584a91a841ef76a986f3f2552f99039c4c797c069c4a86ee9b3f74",
+    "server_sha256": "0ae757606bf858233911bdb70b6b7449d5d389ed8f26de511191499c9464e496",
+    "physical_device_verified": false,
+    "synthetic_damage": false
+  },
+  {
+    "scenario": "ranger-2d",
+    "pass": true,
+    "image": "ranger-2d.png",
+    "sha256": "4b1c39b8315ac3d510d5054ab1ed5da3ab1fa38866533a7f14216149672752dd",
+    "client_sha256": "2ee67195c5584a91a841ef76a986f3f2552f99039c4c797c069c4a86ee9b3f74",
+    "server_sha256": "0ae757606bf858233911bdb70b6b7449d5d389ed8f26de511191499c9464e496",
+    "physical_device_verified": false,
+    "synthetic_damage": false
+  },
+  {
+    "scenario": "mixed-wave",
+    "pass": true,
+    "image": "mixed-wave.png",
+    "sha256": "e6507ae97cbcac7c3aa416c910faeb9366d2944e35d840cb5ff852738eafc95f",
+    "client_sha256": "2ee67195c5584a91a841ef76a986f3f2552f99039c4c797c069c4a86ee9b3f74",
+    "server_sha256": "0ae757606bf858233911bdb70b6b7449d5d389ed8f26de511191499c9464e496",
+    "physical_device_verified": false,
+    "synthetic_damage": false
+  }
+]

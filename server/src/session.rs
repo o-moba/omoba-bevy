@@ -494,6 +494,7 @@ impl ServerRuntime {
         // Only currently connected admitted identities participate in a rematch.
         self.disconnected_sessions.clear();
         self.match_id = self.match_id.saturating_add(1);
+        self.combat_log = CombatLog::default();
         self.match_started_at = None;
         self.victory_at = None;
         self.empty_since = None;

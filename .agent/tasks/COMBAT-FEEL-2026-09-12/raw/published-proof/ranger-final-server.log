@@ -1,0 +1,14 @@
+UDP game server is listening on 127.0.0.1:53473
+Match mode: dev - first join starts the match immediately (NOT for release)
+Endpoint 127.0.0.1:65508 connected (pre-join), reserved player id 1
+Player 1 joined team Blue as Cube (class warrior, avatar Some("agnes"), sprite "mossback-teapot")
+TARGETING_QA initial_join player=1 team=Blue x=-4 z=-8; ambient AI disabled; player damage authoritative
+First player joined - match starting (dev mode)
+Match running. Boss schedule armed: wendigo_boss in 60s, king_mutatio_boss in 180s
+MATCH_METRIC event=round_start epoch=1789210732057938001 match=1 connected=1 first_wave_secs=10
+Endpoint 127.0.0.1:59256 connected (pre-join), reserved player id 2
+MATCH_METRIC event=progression epoch=1789210732057938001 match=1 player=1 team=Blue level=1 xp=0 gold=80 elapsed_ms=66
+Endpoint 127.0.0.1:60547 connected (pre-join), reserved player id 3
+Player 3 joined team Green as Ipfs (class ranger, avatar Some("agnes"), sprite "mossback-teapot")
+TARGETING_QA initial_join player=3 team=Green x=-8 z=-8; ambient AI disabled; player damage authoritative
+MATCH_METRIC event=progression epoch=1789210732057938001 match=1 player=3 team=Green level=1 xp=0 gold=80 elapsed_ms=2055

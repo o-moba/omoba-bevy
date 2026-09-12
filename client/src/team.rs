@@ -176,6 +176,11 @@ fn sprite_grid_layout(character_count: usize) -> SpriteGridLayout {
 
 fn update_sprite_selection(selection: &mut TeamSelection, requested: &str) -> bool {
     let normalized = shared::normalize_sprite_character_id(Some(requested));
+    if shared::sprite_character_definition(normalized)
+        .is_some_and(|entry| entry.render_fallback.is_some())
+    {
+        return false;
+    }
     if selection.sprite_character == normalized {
         false
     } else {
@@ -441,11 +446,11 @@ fn spawn_sprite_button(
     portrait: (Handle<Image>, Handle<TextureAtlasLayout>, usize),
     selected: bool,
 ) {
-    grid.spawn((
-        Button,
+    let draft = character.render_fallback.is_some();
+    let mut tile = grid.spawn((
         Node {
             width: Val::Px(AVATAR_BUTTON_WIDTH),
-            height: Val::Px(AVATAR_BUTTON_HEIGHT),
+            height: Val::Px(AVATAR_BUTTON_HEIGHT + if draft { 24.0 } else { 0.0 }),
             flex_shrink: 0.0,
             flex_direction: FlexDirection::Column,
             justify_content: JustifyContent::Center,
@@ -458,12 +463,17 @@ fn spawn_sprite_button(
         } else {
             SELECT_BUTTON_COLOR
         }),
-        SpriteSelectButton {
-            id: character.id.clone(),
-        },
         Name::new(format!("SpriteButton-{}", character.id)),
-    ))
-    .with_children(|button| {
+    ));
+    if !draft {
+        tile.insert((
+            Button,
+            SpriteSelectButton {
+                id: character.id.clone(),
+            },
+        ));
+    }
+    tile.with_children(|button| {
         let mut entity = button.spawn((
             Node {
                 width: Val::Px(AVATAR_THUMBNAIL_SIZE),
@@ -479,8 +489,15 @@ fn spawn_sprite_button(
                 index: portrait.2,
             },
         ));
+        let label = if draft {
+            let fallback = shared::sprite_character_render_definition(Some(&character.id))
+                .map_or("default", |entry| entry.display_name.as_str());
+            format!("{}\nArt pending\nUses {fallback}", character.display_name)
+        } else {
+            character.display_name.clone()
+        };
         button.spawn((
-            Text::new(&character.display_name),
+            Text::new(label),
             TextFont {
                 font_size: 9.5,
                 ..default()
@@ -939,13 +956,18 @@ mod tests {
     }
 
     #[test]
-    fn every_frozen_sprite_button_selects_its_roster_id() {
+    fn shipped_sprite_buttons_select_their_ids_and_drafts_do_not_replace_selection() {
         let mut selection = TeamSelection::default();
-        for id in SPRITE_CHARACTER_IDS {
+        for id in &SPRITE_CHARACTER_IDS[..9] {
             let changed = update_sprite_selection(&mut selection, id);
-            assert_eq!(selection.sprite_character, id);
-            assert_eq!(changed, id != shared::DEFAULT_SPRITE_CHARACTER_ID);
+            assert_eq!(selection.sprite_character, *id);
+            assert_eq!(changed, *id != shared::DEFAULT_SPRITE_CHARACTER_ID);
         }
+        assert!(!update_sprite_selection(
+            &mut selection,
+            "orchard-comet-centaur"
+        ));
+        assert_eq!(selection.sprite_character, "aurora-magnet-ram");
         assert!(update_sprite_selection(&mut selection, "unknown"));
         assert_eq!(
             selection.sprite_character,

@@ -2,16 +2,23 @@
 
 use bevy::prelude::*;
 use serde::Deserialize;
-use shared::PlayerActionKind;
+use shared::{
+    PlayerActionKind,
+    combat::{CombatEntityKind, MinionKind},
+};
 use std::collections::{HashMap, VecDeque};
 
 use crate::bosses::BossVisual;
 use crate::combat::CombatStats;
+use crate::combat_visuals::{
+    CombatVisualProfile, CombatVisualRegistry, ProjectilePresentationRoot, ProjectileShape,
+};
 use crate::maps::MapLayout;
 use crate::net::{
-    MinionBrainState, NetworkMinion, NetworkMinionBrainState, NetworkNeutral, NetworkProjectile,
-    NetworkStructure, NeutralAiState, NeutralAiStateTag, PlayerCosmeticAction, RemotePlayer,
-    StructureKind,
+    MinionBrainState, NetworkAvatar, NetworkHeroClass, NetworkMinion, NetworkMinionAction,
+    NetworkMinionBrainState, NetworkMinionKind, NetworkNeutral, NetworkPlayerId, NetworkProjectile,
+    NetworkSpriteCharacter, NetworkStructure, NeutralAiState, NeutralAiStateTag,
+    PlayerCosmeticAction, RemotePlayer, StructureKind,
 };
 use crate::player::Player;
 use crate::sprite::PlayerVisualMode;
@@ -85,6 +92,26 @@ enum PresentationActorKind {
 #[derive(Component)]
 struct PresentationActorRoot;
 
+#[derive(Resource, Default)]
+struct ProjectileSpriteCache(HashMap<(u64, String), (Handle<Image>, Handle<TextureAtlasLayout>)>);
+
+#[derive(Component)]
+struct ProjectileSpriteVisual {
+    profile: CombatVisualProfile,
+    fallback: Entity,
+    custom: Option<(Entity, Handle<Image>)>,
+    elapsed: f32,
+}
+
+#[derive(Component)]
+struct MinionRoleVisual {
+    owner: Entity,
+    kind: MinionKind,
+    sequence: u64,
+    remaining: f32,
+    rest: Transform,
+}
+
 #[derive(Component, Clone, Copy, Debug)]
 struct PresentationActorVisual {
     owner: Entity,
@@ -146,7 +173,6 @@ fn evict_oldest_effect_if_full(live: &mut LivePresentationEffects) -> Option<Ent
 
 #[derive(Clone, Copy)]
 struct PreviousCombatState {
-    hp: f32,
     alive: bool,
     action_sequence: u64,
 }
@@ -159,6 +185,7 @@ pub struct Presentation2dPlugin;
 impl Plugin for Presentation2dPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Presentation2dAssets>()
+            .init_resource::<ProjectileSpriteCache>()
             .init_resource::<PreviousCombatStates>()
             .init_resource::<LivePresentationEffects>()
             .add_systems(
@@ -176,6 +203,8 @@ impl Plugin for Presentation2dPlugin {
                     attach_minion_visuals,
                     attach_neutral_visuals,
                     attach_projectile_visuals,
+                    animate_projectile_sprites,
+                    animate_minion_role_cues,
                     update_actor_frames,
                     sync_actor_visuals,
                 )
@@ -313,6 +342,8 @@ fn spawn_minion_cue(
     owner: Entity,
     team: Team,
     world_height: f32,
+    role: MinionKind,
+    sequence: u64,
 ) {
     commands.entity(visual).with_children(|parent| {
         spawn_team_badge(
@@ -323,6 +354,99 @@ fn spawn_minion_cue(
             0.72,
         );
     });
+    let rest = Transform::from_xyz(world_height * 0.37, -0.08, 0.25);
+    commands
+        .spawn((
+            rest,
+            MinionRoleVisual {
+                owner,
+                kind: role,
+                sequence,
+                remaining: 0.0,
+                rest,
+            },
+            Visibility::default(),
+            ChildOf(visual),
+            Name::new(format!("Presentation2d-MinionRole-{role:?}")),
+        ))
+        .with_children(|parent| {
+            let color = team_cue_color(team);
+            let mut part = |size: Vec2, position: Vec2, angle: f32, color: Color| {
+                parent.spawn((
+                    Sprite::from_color(color, size),
+                    Transform::from_xyz(position.x, position.y, 0.01)
+                        .with_rotation(Quat::from_rotation_z(angle)),
+                ));
+            };
+            match role {
+                MinionKind::Caster => {
+                    part(
+                        Vec2::new(0.16, 1.35),
+                        Vec2::ZERO,
+                        0.0,
+                        Color::srgb(0.95, 0.85, 0.60),
+                    );
+                    part(
+                        Vec2::splat(0.49),
+                        Vec2::new(0.0, 0.66),
+                        std::f32::consts::FRAC_PI_4,
+                        color,
+                    );
+                    part(
+                        Vec2::splat(0.18),
+                        Vec2::new(0.0, 0.66),
+                        std::f32::consts::FRAC_PI_4,
+                        Color::WHITE,
+                    );
+                }
+                MinionKind::Melee => {
+                    part(Vec2::new(0.48, 0.72), Vec2::new(0.0, -0.1), 0.0, color);
+                    part(
+                        Vec2::new(0.10, 0.57),
+                        Vec2::new(0.0, -0.1),
+                        0.0,
+                        Color::WHITE,
+                    );
+                    part(
+                        Vec2::new(0.23, 0.63),
+                        Vec2::new(0.0, 0.48),
+                        -0.22,
+                        Color::srgb(0.95, 0.91, 0.75),
+                    );
+                }
+            }
+        });
+}
+
+fn animate_minion_role_cues(
+    time: Option<Res<Time>>,
+    actors: Query<(&NetworkMinionBrainState, Option<&NetworkMinionAction>)>,
+    mut cues: Query<(&mut Transform, &mut MinionRoleVisual)>,
+) {
+    let delta = time.map_or(0.0, |time| time.delta_secs());
+    for (mut transform, mut cue) in &mut cues {
+        let Ok((_, action)) = actors.get(cue.owner) else {
+            continue;
+        };
+        let sequence = action.map_or(0, |action| action.0);
+        if sequence > cue.sequence {
+            cue.remaining = 0.30;
+        }
+        cue.sequence = sequence;
+        cue.remaining = (cue.remaining - delta).max(0.0);
+        let pulse = (cue.remaining / 0.30 * std::f32::consts::PI).sin();
+        *transform = cue.rest;
+        match cue.kind {
+            MinionKind::Caster => {
+                transform.translation.y += pulse * 0.24;
+                transform.scale *= 1.0 + pulse * 0.18;
+            }
+            MinionKind::Melee => {
+                transform.rotation = Quat::from_rotation_z(-pulse * 0.9);
+                transform.translation.x += pulse * 0.28;
+            }
+        }
+    }
 }
 
 fn sample_polyline(points: &[Vec2], t: f32) -> Vec2 {
@@ -499,14 +623,21 @@ fn attach_minion_visuals(
     mode: Res<PlayerVisualMode>,
     assets: Res<Presentation2dAssets>,
     roots: Query<
-        (Entity, &Transform, &Team, &NetworkMinionBrainState),
+        (
+            Entity,
+            &Transform,
+            &Team,
+            &NetworkMinionBrainState,
+            Option<&NetworkMinionKind>,
+            Option<&NetworkMinionAction>,
+        ),
         (With<NetworkMinion>, Without<PresentationActorRoot>),
     >,
 ) {
     if *mode != PlayerVisualMode::Sprite2d {
         return;
     }
-    for (entity, transform, team, state) in &roots {
+    for (entity, transform, team, state, kind, action) in &roots {
         if let Some((visual, world_height)) = attach_actor(
             &mut commands,
             &assets,
@@ -515,7 +646,15 @@ fn attach_minion_visuals(
             PresentationActorKind::Minion,
             minion_key(*team, state.0),
         ) {
-            spawn_minion_cue(&mut commands, visual, entity, *team, world_height);
+            spawn_minion_cue(
+                &mut commands,
+                visual,
+                entity,
+                *team,
+                world_height,
+                kind.map_or(MinionKind::Melee, |kind| kind.0),
+                action.map_or(0, |action| action.0),
+            );
         }
     }
 }
@@ -551,32 +690,265 @@ fn attach_neutral_visuals(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn attach_projectile_visuals(
     mut commands: Commands,
     mode: Res<PlayerVisualMode>,
-    assets: Res<Presentation2dAssets>,
+    registry: Option<Res<CombatVisualRegistry>>,
+    server: Option<Res<AssetServer>>,
+    mut layouts: Option<ResMut<Assets<TextureAtlasLayout>>>,
+    mut cache: ResMut<ProjectileSpriteCache>,
     roots: Query<(Entity, &Transform, &NetworkProjectile), Without<PresentationActorRoot>>,
+    owners: Query<(
+        &NetworkPlayerId,
+        Option<&NetworkHeroClass>,
+        Option<&NetworkAvatar>,
+        Option<&NetworkSpriteCharacter>,
+    )>,
 ) {
     if *mode != PlayerVisualMode::Sprite2d {
         return;
     }
-    for (entity, transform, projectile) in &roots {
-        commands
-            .entity(entity)
-            .remove::<Mesh3d>()
-            .remove::<MeshMaterial3d<StandardMaterial>>();
-        let key = match projectile.owner_team {
-            Team::Green => "green_projectile",
-            Team::Blue => "blue_projectile",
+    let defaults = CombatVisualRegistry::default();
+    let registry = registry.as_deref().unwrap_or(&defaults);
+    for (owner, transform, projectile) in &roots {
+        let identity = matches!(
+            projectile.source_kind,
+            CombatEntityKind::Player | CombatEntityKind::Unknown
+        )
+        .then(|| {
+            owners
+                .iter()
+                .find(|(id, _, _, _)| id.0 == projectile.owner_id)
+        })
+        .flatten();
+        let class = identity.and_then(|(_, class, _, _)| class.map(|class| class.0));
+        let avatar =
+            identity.and_then(|(_, _, avatar, _)| avatar.and_then(|avatar| avatar.0.as_deref()));
+        let sprite_id =
+            identity.and_then(|(_, _, _, sprite)| sprite.and_then(|sprite| sprite.0.as_deref()));
+        let profile = registry
+            .resolve(
+                class,
+                projectile.style,
+                projectile.action_slot,
+                avatar,
+                sprite_id,
+            )
+            .clone();
+        let xy = simulation_xz_to_render_xy(transform.translation);
+        let direction = simulation_xz_to_render_xy(projectile.direction);
+        let angle = if direction.is_finite() && direction.length_squared() > 0.000_001 {
+            direction.y.atan2(direction.x)
+        } else {
+            0.0
         };
-        let _ = attach_actor(
-            &mut commands,
-            &assets,
-            entity,
-            transform.translation,
-            PresentationActorKind::Projectile,
-            key,
-        );
+        commands.entity(owner).insert(PresentationActorRoot);
+        let proxy = commands
+            .spawn((
+                Transform::from_xyz(xy.x, xy.y, y_sorted_z(layer::PROJECTILE, xy.y, owner))
+                    .with_rotation(Quat::from_rotation_z(angle))
+                    .with_scale(Vec3::splat(profile.scale)),
+                Visibility::default(),
+                ProjectilePresentationRoot { owner },
+                PresentationActorVisual {
+                    owner,
+                    kind: PresentationActorKind::Projectile,
+                    world_height: 0.0,
+                    pivot: [0.5, 0.5],
+                    previous_xy: xy,
+                },
+                // The transparent container allows the existing proxy reconciliation to stay shared.
+                Sprite::from_color(Color::NONE, Vec2::ZERO),
+                Name::new(format!("Presentation2d-Projectile-{}", profile.id)),
+            ))
+            .id();
+        let fallback = commands
+            .spawn((
+                Transform::default(),
+                Visibility::default(),
+                ChildOf(proxy),
+                Name::new("Projectile2d-Procedural"),
+            ))
+            .with_children(|parent| {
+                spawn_projectile_shape_2d(parent, &profile, projectile.owner_team)
+            })
+            .id();
+        let custom = profile.sprite.as_ref().and_then(|sprite| {
+            let server = server.as_ref()?;
+            let layouts = layouts.as_mut()?;
+            let (image, layout) = cache
+                .0
+                .entry((registry.revision(), profile.id.clone()))
+                .or_insert_with(|| {
+                    (
+                        server.load(sprite.path.clone()),
+                        layouts.add(TextureAtlasLayout::from_grid(
+                            UVec2::from_array(sprite.frame_size),
+                            sprite.columns,
+                            sprite.rows,
+                            None,
+                            None,
+                        )),
+                    )
+                })
+                .clone();
+            let mut visual = Sprite::from_atlas_image(
+                image.clone(),
+                TextureAtlas {
+                    layout,
+                    index: sprite.first_frame,
+                },
+            );
+            visual.custom_size = Some(Vec2::new(
+                sprite.world_height * sprite.frame_size[0] as f32 / sprite.frame_size[1] as f32,
+                sprite.world_height,
+            ));
+            let entity = commands
+                .spawn((
+                    visual,
+                    Transform::default(),
+                    Visibility::Hidden,
+                    ChildOf(proxy),
+                    Name::new("Projectile2d-PackagedSprite"),
+                ))
+                .id();
+            Some((entity, image))
+        });
+        commands.entity(proxy).insert(ProjectileSpriteVisual {
+            profile,
+            fallback,
+            custom,
+            elapsed: 0.0,
+        });
+    }
+}
+
+fn spawn_projectile_shape_2d(
+    parent: &mut ChildSpawnerCommands,
+    profile: &CombatVisualProfile,
+    team: Team,
+) {
+    let tint = profile.color();
+    let mut part = |size: Vec2, center: Vec2, angle: f32, color: Color| {
+        parent.spawn((
+            Sprite::from_color(color, size),
+            Transform::from_xyz(center.x, center.y, 0.01)
+                .with_rotation(Quat::from_rotation_z(angle)),
+        ));
+    };
+    match profile.shape {
+        ProjectileShape::Arrow => {
+            part(Vec2::new(1.5, 0.10), Vec2::ZERO, 0.0, Color::WHITE);
+            part(Vec2::new(0.48, 0.10), Vec2::new(0.64, 0.14), -0.7, tint);
+            part(Vec2::new(0.48, 0.10), Vec2::new(0.64, -0.14), 0.7, tint);
+            for y in [-0.14, 0.14] {
+                part(
+                    Vec2::new(0.4, 0.13),
+                    Vec2::new(-0.52, y),
+                    y.signum() * 0.55,
+                    tint,
+                );
+            }
+        }
+        ProjectileShape::Arcane => {
+            part(
+                Vec2::splat(0.65),
+                Vec2::ZERO,
+                std::f32::consts::FRAC_PI_4,
+                tint,
+            );
+            part(Vec2::new(0.48, 0.10), Vec2::new(-0.6, 0.25), 0.0, tint);
+            part(Vec2::new(0.48, 0.10), Vec2::new(-0.6, -0.25), 0.0, tint);
+            part(
+                Vec2::splat(0.23),
+                Vec2::new(0.12, 0.0),
+                std::f32::consts::FRAC_PI_4,
+                Color::WHITE,
+            );
+        }
+        ProjectileShape::Holy => {
+            part(
+                Vec2::splat(0.58),
+                Vec2::ZERO,
+                std::f32::consts::FRAC_PI_4,
+                tint,
+            );
+            part(Vec2::new(0.12, 1.18), Vec2::ZERO, 0.0, Color::WHITE);
+            part(Vec2::new(1.0, 0.12), Vec2::ZERO, 0.0, Color::WHITE);
+        }
+        ProjectileShape::Crescent => {
+            for index in 0..9 {
+                let angle = -1.2 + index as f32 * 2.4 / 8.0;
+                part(
+                    Vec2::new(0.13, 0.30),
+                    Vec2::new(angle.cos() * 0.70 - 0.25, angle.sin() * 0.9),
+                    angle,
+                    tint,
+                );
+            }
+        }
+        ProjectileShape::Bolt => {
+            part(Vec2::new(1.2, 0.25), Vec2::ZERO, 0.0, tint);
+            part(
+                Vec2::new(0.4, 0.12),
+                Vec2::new(0.44, 0.0),
+                0.0,
+                Color::WHITE,
+            );
+        }
+    }
+    part(
+        Vec2::splat(0.19),
+        Vec2::new(-0.78, 0.0),
+        std::f32::consts::FRAC_PI_4,
+        team_cue_color(team),
+    );
+}
+
+fn animate_projectile_sprites(
+    time: Option<Res<Time>>,
+    images: Option<Res<Assets<Image>>>,
+    mut projectiles: Query<&mut ProjectileSpriteVisual>,
+    mut sprites: Query<&mut Sprite>,
+    mut visibility: Query<&mut Visibility>,
+) {
+    let delta = time.map_or(0.0, |time| time.delta_secs());
+    for mut visual in &mut projectiles {
+        visual.elapsed += delta;
+        let Some((entity, image)) = &visual.custom else {
+            continue;
+        };
+        let Some(config) = &visual.profile.sprite else {
+            continue;
+        };
+        let ready = images.as_ref().is_some_and(|images| {
+            images
+                .get(image)
+                .is_some_and(|image| config.matches_image(image))
+        });
+        if let Ok(mut state) = visibility.get_mut(*entity) {
+            *state = if ready {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+        }
+        if let Ok(mut state) = visibility.get_mut(visual.fallback) {
+            *state = if ready {
+                Visibility::Hidden
+            } else {
+                Visibility::Inherited
+            };
+        }
+        if ready {
+            if let Ok(mut sprite) = sprites.get_mut(*entity) {
+                if let Some(atlas) = sprite.texture_atlas.as_mut() {
+                    atlas.index =
+                        config.first_frame + (visual.elapsed * config.fps) as usize % config.frames;
+                }
+            }
+        }
     }
 }
 
@@ -721,7 +1093,6 @@ fn emit_combat_effects(
     previous.0.retain(|entity, _| actors.get(*entity).is_ok());
     for (entity, transform, stats, team, action) in &actors {
         let current = PreviousCombatState {
-            hp: stats.hp,
             alive: stats.is_alive(),
             action_sequence: action.sequence,
         };
@@ -732,24 +1103,6 @@ fn emit_combat_effects(
                     &assets,
                     &mut live,
                     "death",
-                    *team,
-                    transform.translation,
-                );
-            } else if current.hp < old.hp {
-                spawn_effect(
-                    &mut commands,
-                    &assets,
-                    &mut live,
-                    "hit",
-                    *team,
-                    transform.translation,
-                );
-            } else if current.hp > old.hp {
-                spawn_effect(
-                    &mut commands,
-                    &assets,
-                    &mut live,
-                    "heal",
                     *team,
                     transform.translation,
                 );
@@ -796,6 +1149,330 @@ fn animate_effects(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shared::combat::ProjectileStyle;
+
+    fn projectile_fixture(style: ProjectileStyle, id: u64) -> NetworkProjectile {
+        NetworkProjectile {
+            id,
+            owner_id: 42,
+            owner_team: Team::Green,
+            source_kind: CombatEntityKind::Player,
+            style,
+            action_slot: None,
+            direction: Vec3::X,
+        }
+    }
+
+    #[test]
+    fn procedural_projectile_classes_have_distinct_sprites_and_bounded_owner_cleanup() {
+        let mut app = App::new();
+        app.insert_resource(PlayerVisualMode::Sprite2d)
+            .init_resource::<CombatVisualRegistry>()
+            .init_resource::<ProjectileSpriteCache>()
+            .add_systems(
+                Update,
+                (
+                    attach_projectile_visuals,
+                    animate_projectile_sprites,
+                    sync_actor_visuals,
+                )
+                    .chain(),
+            );
+        let mut owners = Vec::new();
+        for (id, style) in [
+            ProjectileStyle::Arrow,
+            ProjectileStyle::Arcane,
+            ProjectileStyle::Holy,
+            ProjectileStyle::Crescent,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            owners.push(
+                app.world_mut()
+                    .spawn((
+                        Transform::from_xyz(id as f32, 1.0, 3.0),
+                        projectile_fixture(style, id as u64),
+                    ))
+                    .id(),
+            );
+        }
+        app.update();
+        app.update();
+        let shapes: std::collections::HashSet<_> = app
+            .world_mut()
+            .query::<&ProjectileSpriteVisual>()
+            .iter(app.world())
+            .map(|visual| visual.profile.shape)
+            .collect();
+        assert_eq!(shapes.len(), 4);
+        assert_eq!(
+            app.world_mut()
+                .query::<&ProjectilePresentationRoot>()
+                .iter(app.world())
+                .count(),
+            4
+        );
+        let sprite_count = app.world_mut().query::<&Sprite>().iter(app.world()).count();
+        assert!(sprite_count > 16 && sprite_count < 40);
+        app.update();
+        assert_eq!(
+            app.world_mut().query::<&Sprite>().iter(app.world()).count(),
+            sprite_count
+        );
+        for owner in owners {
+            app.world_mut().entity_mut(owner).despawn();
+        }
+        app.update();
+        assert_eq!(
+            app.world_mut().query::<&Sprite>().iter(app.world()).count(),
+            0
+        );
+    }
+
+    #[test]
+    fn configured_sprite_uses_cached_atlas_animates_and_falls_back_for_missing_or_wrong_image() {
+        let registry = CombatVisualRegistry::from_json(
+            r#"{"schema_version":1,
+            "profiles":{"custom":{"shape":"arrow","color":[1,0.5,0.2,1],
+              "sprite":{"path":"cosmetics/test.png","frame_size":[16,16],"columns":2,"rows":1,
+                "frames":2,"fps":8,"world_height":1.5}}},
+            "avatar_overrides":{"agnes":{"basic":"custom"}}}"#,
+        )
+        .unwrap();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(bevy::asset::AssetPlugin::default())
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::ZERO,
+            ))
+            .init_asset::<Image>()
+            .init_asset::<TextureAtlasLayout>()
+            .insert_resource(PlayerVisualMode::Sprite2d)
+            .insert_resource(registry)
+            .init_resource::<ProjectileSpriteCache>()
+            .add_systems(
+                Update,
+                (
+                    attach_projectile_visuals,
+                    animate_projectile_sprites,
+                    sync_actor_visuals,
+                )
+                    .chain(),
+            );
+        // Seed the real cache with a deliberately wrong-sized image. No disk/network
+        // loader is required; attachment and animation still run their production path.
+        let image = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(Image::default());
+        let layout = app
+            .world_mut()
+            .resource_mut::<Assets<TextureAtlasLayout>>()
+            .add(TextureAtlasLayout::from_grid(
+                UVec2::splat(16),
+                2,
+                1,
+                None,
+                None,
+            ));
+        app.world_mut()
+            .resource_mut::<ProjectileSpriteCache>()
+            .0
+            .insert((0, "custom".into()), (image.clone(), layout.clone()));
+        app.world_mut()
+            .spawn((NetworkPlayerId(42), NetworkAvatar(Some("agnes".into()))));
+        let owner = app
+            .world_mut()
+            .spawn((
+                Transform::default(),
+                projectile_fixture(ProjectileStyle::Arrow, 1),
+            ))
+            .id();
+        app.update();
+        let (proxy, fallback, custom) = app
+            .world_mut()
+            .query::<(Entity, &ProjectileSpriteVisual)>()
+            .iter(app.world())
+            .map(|(entity, visual)| (entity, visual.fallback, visual.custom.as_ref().unwrap().0))
+            .next()
+            .unwrap();
+        assert_eq!(
+            *app.world().get::<Visibility>(fallback).unwrap(),
+            Visibility::Inherited
+        );
+        assert_eq!(
+            *app.world().get::<Visibility>(custom).unwrap(),
+            Visibility::Hidden
+        );
+        app.world_mut()
+            .resource_mut::<Assets<Image>>()
+            .get_mut(&image)
+            .unwrap()
+            .resize(bevy::render::render_resource::Extent3d {
+                width: 32,
+                height: 16,
+                depth_or_array_layers: 1,
+            });
+        app.world_mut()
+            .get_mut::<ProjectileSpriteVisual>(proxy)
+            .unwrap()
+            .elapsed = 0.16;
+        app.update();
+        assert_eq!(
+            *app.world().get::<Visibility>(fallback).unwrap(),
+            Visibility::Hidden
+        );
+        assert_eq!(
+            *app.world().get::<Visibility>(custom).unwrap(),
+            Visibility::Inherited
+        );
+        let sprite = app.world().get::<Sprite>(custom).unwrap();
+        assert_eq!(sprite.texture_atlas.as_ref().unwrap().layout, layout);
+        assert_eq!(sprite.texture_atlas.as_ref().unwrap().index, 1);
+        assert_eq!(sprite.custom_size, Some(Vec2::splat(1.5)));
+        let second = app
+            .world_mut()
+            .spawn((
+                Transform::default(),
+                projectile_fixture(ProjectileStyle::Arrow, 2),
+            ))
+            .id();
+        app.update();
+        assert_eq!(
+            app.world().resource::<Assets<TextureAtlasLayout>>().len(),
+            1
+        );
+        assert_eq!(app.world().resource::<ProjectileSpriteCache>().0.len(), 1);
+        app.world_mut()
+            .resource_mut::<Assets<Image>>()
+            .remove(image.id());
+        app.update();
+        assert_eq!(
+            *app.world().get::<Visibility>(fallback).unwrap(),
+            Visibility::Inherited
+        );
+        assert_eq!(
+            *app.world().get::<Visibility>(custom).unwrap(),
+            Visibility::Hidden
+        );
+        for entity in [owner, second] {
+            app.world_mut().entity_mut(entity).despawn();
+        }
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .query::<&ProjectileSpriteVisual>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn minion_role_cues_are_distinct_release_from_sequence_and_clean_up_with_owner() {
+        let mut app = proxy_test_app(PlayerVisualMode::Sprite2d);
+        app.init_resource::<Time>()
+            .add_systems(PostUpdate, animate_minion_role_cues);
+        let owners: Vec<_> = [MinionKind::Melee, MinionKind::Caster]
+            .into_iter()
+            .map(|kind| {
+                app.world_mut()
+                    .spawn((
+                        Transform::default(),
+                        NetworkMinion,
+                        Team::Green,
+                        NetworkMinionBrainState(MinionBrainState::Attacking),
+                        NetworkMinionKind(kind),
+                        NetworkMinionAction(5),
+                    ))
+                    .id()
+            })
+            .collect();
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .query::<&MinionRoleVisual>()
+                .iter(app.world())
+                .count(),
+            2
+        );
+        assert!(
+            app.world_mut()
+                .query::<&MinionRoleVisual>()
+                .iter(app.world())
+                .all(|cue| cue.remaining == 0.0)
+        );
+        for owner in &owners {
+            app.world_mut()
+                .get_mut::<NetworkMinionAction>(*owner)
+                .unwrap()
+                .0 = 6;
+        }
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_secs_f32(0.1));
+        app.update();
+        for (transform, cue) in app
+            .world_mut()
+            .query::<(&Transform, &MinionRoleVisual)>()
+            .iter(app.world())
+        {
+            match cue.kind {
+                MinionKind::Melee => assert_ne!(transform.rotation, cue.rest.rotation),
+                MinionKind::Caster => assert!(transform.scale.x > cue.rest.scale.x),
+            }
+        }
+        for owner in owners {
+            app.world_mut().entity_mut(owner).despawn();
+        }
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .query::<&MinionRoleVisual>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn hp_changes_alone_do_not_create_inferred_hit_or_heal_effects() {
+        let mut app = App::new();
+        app.insert_resource(PlayerVisualMode::Sprite2d)
+            .insert_resource(manifest_assets())
+            .init_resource::<LivePresentationEffects>()
+            .init_resource::<PreviousCombatStates>()
+            .add_systems(Update, emit_combat_effects);
+        let actor = app
+            .world_mut()
+            .spawn((
+                Transform::default(),
+                CombatStats::default(),
+                Team::Green,
+                PlayerCosmeticAction::default(),
+                Player,
+            ))
+            .id();
+        app.update();
+        for hp in [80.0, 90.0, 100.0] {
+            app.world_mut().get_mut::<CombatStats>(actor).unwrap().hp = hp;
+            app.update();
+        }
+        assert!(
+            app.world()
+                .resource::<LivePresentationEffects>()
+                .0
+                .is_empty()
+        );
+        assert_eq!(
+            app.world_mut()
+                .query::<&PresentationEffect>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+    }
     #[test]
     fn models3d_startup_does_not_request_optional_2d_presentation_assets() {
         let mut app = App::new();

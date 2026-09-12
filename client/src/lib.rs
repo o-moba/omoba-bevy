@@ -4,6 +4,9 @@ mod beta_ui_qa;
 mod bosses;
 mod camera;
 mod combat;
+mod combat_feedback;
+mod combat_qa;
+mod combat_visuals;
 mod creatures3d;
 mod debug_console;
 mod decor;
@@ -31,6 +34,7 @@ mod platform;
 mod player;
 mod presentation2d;
 mod presentation3d;
+mod projectile_visuals;
 mod session_config;
 mod shop;
 mod sprite;
@@ -125,6 +129,12 @@ pub fn main() {
         mobile_controls::MobileControlsPlugin,
         mobile_ui::MobileUiPlugin,
     ))
+    .add_plugins((
+        combat_visuals::CombatVisualsPlugin,
+        projectile_visuals::ProjectileVisualsPlugin,
+        combat_feedback::CombatFeedbackPlugin,
+    ))
+    .add_plugins(combat_qa::CombatQaPlugin)
     .add_plugins(targeting_qa::TargetingQaPlugin)
     .run();
 }

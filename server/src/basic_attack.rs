@@ -136,6 +136,10 @@ pub(crate) fn handle_basic_attack_request(
         id,
         Projectile {
             state: ProjectileState {
+                source_kind: CombatEntityKind::Player,
+                style: ProjectileStyle::for_class(attacker.state.hero_class),
+                action_slot: Some(BASIC_ATTACK_ACTION_SLOT),
+                direction: [direction.x, direction.y, direction.z],
                 id,
                 owner_id: attacker.state.id,
                 owner_team: team,

@@ -219,6 +219,10 @@ fn contaminate_round(rt: &mut ServerRuntime, now: Instant) {
         99,
         Projectile {
             state: ProjectileState {
+                source_kind: CombatEntityKind::Unknown,
+                style: ProjectileStyle::Standard,
+                action_slot: None,
+                direction: [0.0; 3],
                 id: 99,
                 owner_id: 1,
                 owner_team: Team::Green,

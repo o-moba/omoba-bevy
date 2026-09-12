@@ -2,10 +2,12 @@
 //! survive waves/respawns; articulated parts belong to each actor root.
 
 use bevy::prelude::*;
+use shared::combat::MinionKind;
 
 use crate::model_scale::NormalizeModelScale;
 use crate::net::{
-    MinionBrainState, NetworkMinionBrainState, NeutralAiState, NeutralAiStateTag, NeutralCampType,
+    MinionBrainState, NetworkMinionAction, NetworkMinionBrainState, NeutralAiState,
+    NeutralAiStateTag, NeutralCampType,
 };
 use crate::sprite::PlayerVisualMode;
 use crate::team::Team;
@@ -24,7 +26,7 @@ pub(crate) struct CreatureAssets {
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ProceduralCreature {
-    Minion(Team),
+    Minion(Team, MinionKind),
     WendigoGuardian,
     Jungle(NeutralCampType),
 }
@@ -41,6 +43,39 @@ enum PartMotion {
     Still,
     Leg(f32),
     Arm(f32),
+    MinionHand(f32, MinionKind),
+}
+
+/// A replicated release starts one bounded pose; an unchanged attack state
+/// never fabricates another strike. Initial snapshots establish a baseline.
+#[derive(Component)]
+pub(crate) struct MinionAttackPulse {
+    sequence: u64,
+    remaining: f32,
+}
+
+impl MinionAttackPulse {
+    pub(crate) fn at_sequence(sequence: u64) -> Self {
+        Self {
+            sequence,
+            remaining: 0.0,
+        }
+    }
+}
+
+const MINION_ATTACK_POSE_SECONDS: f32 = 0.36;
+
+pub(crate) fn update_minion_attack_pulses(
+    time: Res<Time>,
+    mut minions: Query<(&NetworkMinionAction, &mut MinionAttackPulse)>,
+) {
+    for (action, mut pulse) in &mut minions {
+        pulse.remaining = (pulse.remaining - time.delta_secs()).max(0.0);
+        if action.0 > pulse.sequence {
+            pulse.sequence = action.0;
+            pulse.remaining = MINION_ATTACK_POSE_SECONDS;
+        }
+    }
 }
 
 /// A 2D startup allocates no procedural 3D resources or model loads.
@@ -104,11 +139,12 @@ pub(crate) fn spawn_creature(
         return;
     }
     let accent = match kind {
-        ProceduralCreature::Minion(Team::Green) => &assets.jade,
-        ProceduralCreature::Minion(Team::Blue) => &assets.azure,
+        ProceduralCreature::Minion(Team::Green, _) => &assets.jade,
+        ProceduralCreature::Minion(Team::Blue, _) => &assets.azure,
         ProceduralCreature::WendigoGuardian | ProceduralCreature::Jungle(_) => &assets.aether,
     };
     let guardian = kind == ProceduralCreature::WendigoGuardian;
+    let caster = matches!(kind, ProceduralCreature::Minion(_, MinionKind::Caster));
     commands.entity(owner).insert(kind).with_children(|parent| {
         let mut part = |name: &str,
                         mesh: &Handle<Mesh>,
@@ -138,7 +174,17 @@ pub(crate) fn spawn_creature(
             &assets.stone,
             &assets.ivory,
             Vec3::new(0.0, 0.87, 0.0),
-            Vec3::new(if guardian { 1.22 } else { 0.94 }, 1.05, 0.68),
+            Vec3::new(
+                if guardian {
+                    1.22
+                } else if caster {
+                    0.72
+                } else {
+                    1.10
+                },
+                1.05,
+                if caster { 0.54 } else { 0.68 },
+            ),
             0.0,
             PartMotion::Still,
         );
@@ -184,7 +230,13 @@ pub(crate) fn spawn_creature(
                 &assets.stone,
                 accent,
                 Vec3::new(side * 0.51, 1.14, 0.0),
-                Vec3::splat(if guardian { 0.52 } else { 0.39 }),
+                Vec3::splat(if guardian {
+                    0.52
+                } else if caster {
+                    0.28
+                } else {
+                    0.48
+                }),
                 0.0,
                 PartMotion::Still,
             );
@@ -195,7 +247,10 @@ pub(crate) fn spawn_creature(
                 Vec3::new(side * 0.59, 0.77, 0.04),
                 Vec3::new(0.26, 0.65, 0.28),
                 side * 0.12,
-                PartMotion::Arm(side),
+                match kind {
+                    ProceduralCreature::Minion(_, role) => PartMotion::MinionHand(side, role),
+                    _ => PartMotion::Arm(side),
+                },
             );
             part(
                 "eye",
@@ -230,7 +285,7 @@ pub(crate) fn spawn_creature(
             }
         }
         match kind {
-            ProceduralCreature::Minion(Team::Green) => part(
+            ProceduralCreature::Minion(Team::Green, _) => part(
                 "jade-crown",
                 &assets.crystal,
                 accent,
@@ -239,7 +294,7 @@ pub(crate) fn spawn_creature(
                 0.0,
                 PartMotion::Still,
             ),
-            ProceduralCreature::Minion(Team::Blue) => {
+            ProceduralCreature::Minion(Team::Blue, _) => {
                 for side in [-1.0, 1.0] {
                     part(
                         "azure-twin-crown",
@@ -253,6 +308,73 @@ pub(crate) fn spawn_creature(
                 }
             }
             ProceduralCreature::WendigoGuardian | ProceduralCreature::Jungle(_) => {}
+        }
+        match kind {
+            ProceduralCreature::Minion(_, MinionKind::Melee) => {
+                for (name, material, position, size, side) in [
+                    (
+                        "melee-shield-rim",
+                        &assets.brass,
+                        Vec3::new(-0.76, 0.86, 0.27),
+                        Vec3::new(0.58, 0.74, 0.18),
+                        -1.0,
+                    ),
+                    (
+                        "melee-shield",
+                        accent,
+                        Vec3::new(-0.76, 0.86, 0.38),
+                        Vec3::new(0.45, 0.59, 0.08),
+                        -1.0,
+                    ),
+                    (
+                        "melee-blade",
+                        &assets.ivory,
+                        Vec3::new(0.70, 1.12, 0.18),
+                        Vec3::new(0.17, 0.78, 0.10),
+                        1.0,
+                    ),
+                    (
+                        "melee-hilt",
+                        &assets.brass,
+                        Vec3::new(0.70, 0.76, 0.18),
+                        Vec3::new(0.38, 0.10, 0.16),
+                        1.0,
+                    ),
+                ] {
+                    part(
+                        name,
+                        &assets.block,
+                        material,
+                        position,
+                        size,
+                        0.0,
+                        PartMotion::MinionHand(side, MinionKind::Melee),
+                    );
+                }
+            }
+            ProceduralCreature::Minion(_, MinionKind::Caster) => {
+                part(
+                    "caster-staff",
+                    &assets.block,
+                    &assets.brass,
+                    Vec3::new(0.73, 0.97, 0.16),
+                    Vec3::new(0.11, 1.55, 0.11),
+                    0.0,
+                    PartMotion::MinionHand(1.0, MinionKind::Caster),
+                );
+                // The staff stays below the crown: normalization must not
+                // shrink the caster's body just to accommodate its weapon.
+                part(
+                    "caster-focus",
+                    &assets.crystal,
+                    accent,
+                    Vec3::new(0.73, 1.82, 0.16),
+                    Vec3::new(0.38, 0.48, 0.38),
+                    0.0,
+                    PartMotion::MinionHand(1.0, MinionKind::Caster),
+                );
+            }
+            _ => {}
         }
     });
 }
@@ -437,11 +559,12 @@ pub(crate) fn animate_creatures(
         &NormalizeModelScale,
         Option<&NetworkMinionBrainState>,
         Option<&NeutralAiStateTag>,
+        Option<&MinionAttackPulse>,
     )>,
     mut parts: Query<(&CreaturePart, &mut Transform)>,
 ) {
     for (part, mut transform) in &mut parts {
-        let Ok((scale, minion, neutral)) = owners.get(part.owner) else {
+        let Ok((scale, minion, neutral, attack)) = owners.get(part.owner) else {
             continue;
         };
         if scale.head_local_y.is_none() {
@@ -453,7 +576,14 @@ pub(crate) fn animate_creatures(
                 MinionBrainState::Marching | MinionBrainState::Chasing
             )
         }) || neutral.is_some_and(|state| state.0 == NeutralAiState::Aggro);
-        let attacking = minion.is_some_and(|state| state.0 == MinionBrainState::Attacking);
+        let attack_strength = attack.map_or(0.0, |pulse| {
+            if pulse.remaining <= 0.0 {
+                0.0
+            } else {
+                // Begin visibly at release, then recover exactly to rest.
+                (pulse.remaining / MINION_ATTACK_POSE_SECONDS).sqrt()
+            }
+        });
         *transform = part.rest;
         let phase = time.elapsed_secs() * 8.0 + part.owner.index_u32() as f32 * 0.7;
         match part.motion {
@@ -462,16 +592,29 @@ pub(crate) fn animate_creatures(
                 transform.translation.y += (phase.sin() * side).max(0.0) * 0.10;
                 transform.translation.z += phase.sin() * side * 0.14;
             }
-            PartMotion::Arm(side) if walking || attacking => {
-                let angle = if attacking {
-                    -0.65 - (phase * 1.4).sin() * 0.55
-                } else {
-                    phase.sin() * side * 0.28
-                };
+            PartMotion::Arm(side) if walking => {
+                let angle = phase.sin() * side * 0.28;
                 transform.rotation = part.rest.rotation * Quat::from_rotation_x(angle);
-                if attacking {
-                    transform.translation.z += 0.13;
-                }
+            }
+            PartMotion::MinionHand(side, role) if walking || attack_strength > 0.0 => {
+                let walk_angle = if walking {
+                    phase.sin() * side * 0.28
+                } else {
+                    0.0
+                };
+                let (strike_angle, sweep) = match role {
+                    MinionKind::Melee => (-1.15, side * 0.35),
+                    MinionKind::Caster => (-0.55, 0.0),
+                };
+                let rotation = Quat::from_rotation_y(sweep * attack_strength)
+                    * Quat::from_rotation_x(
+                        walk_angle * (1.0 - attack_strength) + strike_angle * attack_strength,
+                    );
+                // The hand, shield/blade or staff rotate as one rigid assembly
+                // around the shoulder, rather than each weapon's own centre.
+                let pivot = Vec3::new(side * 0.59, 1.095, 0.04);
+                transform.translation = pivot + rotation * (part.rest.translation - pivot);
+                transform.rotation = rotation * part.rest.rotation;
             }
             _ => {}
         }

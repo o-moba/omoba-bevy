@@ -1,0 +1,5 @@
+Omoba asset root: /Users/wotori/git/ekza/omoba-bevy-combat-feel/client/assets
+Connecting to server at 127.0.0.1:65499
+UDP socket connected to 127.0.0.1:65499; waiting for first snapshot
+First snapshot received from 127.0.0.1:65499; connection is live
+2026-09-12T10:58:57.526190Z  WARN bevy_winit::state: Skipped event Destroyed for unknown winit Window Id WindowId(51369185664)

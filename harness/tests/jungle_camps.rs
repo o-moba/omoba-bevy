@@ -1,6 +1,59 @@
 //! Real local UDP farming/respawn. No placement, invulnerability or clock fixture.
 use harness::{Bot, Character, HeroClass, NeutralCampType, ServerPacket, ServerProcess, Team};
-use std::time::{Duration, Instant};
+use shared::combat::CombatEntityKind;
+use std::{
+    collections::{HashMap, HashSet},
+    time::{Duration, Instant},
+};
+
+/// The real lanes keep fighting during the forty-second camp wait. Count their
+/// accepted kills independently so every assertion still proves exactly 55 XP
+/// per Spitter, rather than accepting any larger XP total.
+#[derive(Default)]
+struct LaneRewards {
+    teams: HashMap<u64, Team>,
+    rewarded: HashSet<u64>,
+}
+
+impl LaneRewards {
+    fn observe(&mut self, packet: &ServerPacket, own_team: Team) {
+        for minion in packet.minions() {
+            if let Some(team) = minion.team {
+                self.teams.insert(minion.id, team);
+            }
+        }
+        for event in packet
+            .combat_events()
+            .iter()
+            .filter(|event| event.killed && event.target.kind == CombatEntityKind::Minion)
+        {
+            let team = self
+                .teams
+                .get(&event.target.id)
+                .expect("saw wave before its confirmed death");
+            if *team != own_team {
+                self.rewarded.insert(event.target.id);
+            }
+        }
+    }
+
+    fn jungle_xp(&self, player: &harness::PlayerState) -> u32 {
+        // Independent published level-curve expectations from balance.rs.
+        // One admitted farmer per team receives the entire 90-XP minion pool.
+        const LEVEL_THRESHOLDS: [u32; 9] = [90, 150, 180, 220, 260, 300, 340, 380, 420];
+        assert!(
+            (1..=9).contains(&player.level),
+            "scenario must not reach XP-capped level 10"
+        );
+        let total = player.xp
+            + LEVEL_THRESHOLDS[..player.level as usize - 1]
+                .iter()
+                .sum::<u32>();
+        total
+            .checked_sub(self.rewarded.len() as u32 * 90)
+            .expect("observed lane kills cannot exceed awarded XP")
+    }
+}
 
 #[test]
 fn both_teams_farm_real_camps_and_observe_same_id_respawn_after_forty_seconds() {
@@ -24,6 +77,7 @@ fn both_teams_farm_real_camps_and_observe_same_id_respawn_after_forty_seconds() 
     let mut first_gold = [0; 2];
     let mut request_id = [0_u64; 2];
     let mut saw_six = [false; 2];
+    let mut lane_rewards: [LaneRewards; 2] = Default::default();
     let start = Instant::now();
     while !finished.into_iter().all(|done| done) && start.elapsed() < Duration::from_secs(85) {
         for index in 0..2 {
@@ -35,6 +89,7 @@ fn both_teams_farm_real_camps_and_observe_same_id_respawn_after_forty_seconds() 
             let Some(me) = packet.player(packet.your_id()) else {
                 continue;
             };
+            lane_rewards[index].observe(&packet, if index == 0 { Team::Green } else { Team::Blue });
             assert!(
                 me.hp > 0.0,
                 "farmer died before completing two camp kills: {me:?}"
@@ -64,8 +119,11 @@ fn both_teams_farm_real_camps_and_observe_same_id_respawn_after_forty_seconds() 
             let target = target_ids[index].unwrap();
             let mob = packet.neutrals().iter().find(|n| n.id == target);
             if first_death[index].is_none() && mob.is_none() {
-                assert_eq!(me.xp, 55, "one last hit grants exactly Spitter XP");
-                assert_eq!(me.level, 1);
+                assert_eq!(
+                    lane_rewards[index].jungle_xp(me),
+                    55,
+                    "one last hit grants exactly Spitter XP after accounted lane rewards"
+                );
                 assert!(me.gold >= first_gold[index] + 35);
                 first_death[index] = Some(Instant::now());
                 eprintln!(
@@ -77,7 +135,11 @@ fn both_teams_farm_real_camps_and_observe_same_id_respawn_after_forty_seconds() 
             }
             if let Some(dead_at) = first_death[index] {
                 if !respawned[index] {
-                    assert_eq!(me.xp, 55, "absent camp cannot pay repeated rewards");
+                    assert_eq!(
+                        lane_rewards[index].jungle_xp(me),
+                        55,
+                        "absent camp cannot pay repeated rewards, even while lanes award XP"
+                    );
                     if let Some(mob) = mob {
                         assert!(
                             dead_at.elapsed() >= Duration::from_secs(39),
@@ -96,8 +158,22 @@ fn both_teams_farm_real_camps_and_observe_same_id_respawn_after_forty_seconds() 
                         continue;
                     }
                 } else if mob.is_none() {
-                    assert_eq!((me.level, me.xp), (2, 20), "110 jungle XP crosses level 2");
+                    assert_eq!(
+                        lane_rewards[index].jungle_xp(me),
+                        110,
+                        "two Spitters grant exactly 110 jungle XP independently of lane kills"
+                    );
+                    assert!(
+                        me.level >= 2,
+                        "110 jungle XP crosses level 2 even without lane rewards"
+                    );
                     assert!(me.gold >= first_gold[index] + 70);
+                    eprintln!(
+                        "team {index}: two camps grant 110 XP; independently observed {} enemy-minion rewards, level={}, xp={}",
+                        lane_rewards[index].rewarded.len(),
+                        me.level,
+                        me.xp
+                    );
                     finished[index] = true;
                     continue;
                 }

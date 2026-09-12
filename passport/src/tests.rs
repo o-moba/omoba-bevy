@@ -14,7 +14,7 @@ fn model() -> Vec<u8> {
     let mut json = serde_json::to_vec(&json!({"asset":{"version":"2.0"},"nodes":[{"name":"Hips"}],
         "skins":[{"joints":[0]}],"animations":animations}))
     .unwrap();
-    while json.len() % 4 != 0 {
+    while !json.len().is_multiple_of(4) {
         json.push(b' ');
     }
     let size = 20 + json.len();

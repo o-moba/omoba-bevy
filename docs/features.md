@@ -1,8 +1,24 @@
 # Feature Inventory
 
-Canonical version: `0.19.0-rc.3`
+Canonical version: `0.19.0-rc.4`
 
 ## Current Playable Surface
+
+- **Combat presentation and skins:** Ranger arrows, Mage arcane bolts, Cleric
+  holy bolts and Warrior crescents, with confirmed damage numbers and impacts.
+  Packaged profiles choose class/action defaults and avatar/sprite overrides,
+  custom projectile GLBs or animated PNG atlases, trail/impact settings and exact
+  avatar animation-clip aliases. See [the contributor guide](combat-cosmetics.md).
+  Cosmetic configuration has no gameplay authority.
+- **Draft sprite handling:** an unfinished roster entry keeps its stable identity
+  and portrait, is marked art pending, and renders an explicit fallback for old
+  saved/network selections. The nine active sprite pairs have complete files.
+- **Mixed minion waves:** two melee fighters (65 HP, 8 damage, 2.4 reach,
+  0.95-second cooldown) and one caster (45 HP, 7 damage, 8 reach,
+  1.2-second cooldown). Caster damage occurs on projectile arrival.
+  Wave size, routes, cadence and rewards are preserved. Distinct weapons and
+  replicated release poses communicate roles; both models are 50% taller.
+  This is initial beta tuning, not a claim of competitive balance.
 
 - **Jungle farming:** six ordinary camps, with mirrored skirmisher, bruiser and
   spitter encounters. All heroes can earn authoritative last-hit XP and gold;

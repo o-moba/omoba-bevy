@@ -16,6 +16,7 @@ pub(crate) struct DamageEvent {
     pub(crate) target_id: u64,
     pub(crate) amount: f32,
     pub(crate) attacker_team: Team,
+    pub(crate) source: HitSource,
 }
 
 #[derive(Component)]
@@ -161,9 +162,11 @@ pub(crate) fn collect_projectile_minion_damage_system(
                     target_id: projectile.target.id,
                     amount: projectile.damage,
                     attacker_team: projectile.state.owner_team,
+                    source: HitSource::projectile(&projectile.state),
                 });
                 return false;
             }
+            projectile.state.direction = [direction.x, direction.y, direction.z];
             projectile.velocity = Vec3f::new(
                 direction.x * PROJECTILE_SPEED,
                 direction.y * PROJECTILE_SPEED,
@@ -182,6 +185,7 @@ pub(crate) fn collect_projectile_minion_damage_system(
                 target_id: projectile.target.id,
                 amount: projectile.damage,
                 attacker_team: projectile.state.owner_team,
+                source: HitSource::projectile(&projectile.state),
             });
             return false;
         }
@@ -195,17 +199,24 @@ pub(crate) fn collect_projectile_minion_damage_system(
 }
 
 pub(crate) fn apply_projectile_minion_damage_system(
+    tick: Res<TickContext>,
     mut runtime: ResMut<ServerRuntime>,
     mut damage_events: MessageReader<DamageEvent>,
 ) {
+    let Some(now) = tick.now else {
+        return;
+    };
     let runtime = runtime.as_mut();
     for damage_event in damage_events.read() {
-        apply_minion_damage(
+        let event = apply_minion_damage(
             &mut runtime.players,
             &mut runtime.minions,
             damage_event.target_id,
             damage_event.amount,
             damage_event.attacker_team,
         );
+        runtime
+            .combat_log
+            .extend(now, event.map(|event| damage_event.source.annotate(event)));
     }
 }

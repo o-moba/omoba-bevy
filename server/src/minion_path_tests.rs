@@ -89,6 +89,8 @@ fn every_wave_member_marches_forward_through_departure_and_far_base_approach() {
                     &mut players,
                     &mut minions,
                     &mut structures,
+                    &mut HashMap::new(),
+                    &mut 1,
                     &mut state,
                     0.05,
                     started + Duration::from_millis(step * 50),
@@ -111,7 +113,7 @@ fn every_wave_member_marches_forward_through_departure_and_far_base_approach() {
                         "{team:?}/{lane:?} member {id}: retraced progress {previous_progress:.3} -> {progress:.3}"
                     );
                     assert!(planar_distance(*previous, current) <= MINION_SPEED * 0.05 + 0.0001);
-                    assert_eq!(minion.state.hp, MINION_MAX_HP);
+                    assert_eq!(minion.state.hp, minion_stats(minion.state.kind).0);
                     assert_eq!(minion.state.y, MINION_SPAWN_HEIGHT);
                     assert_eq!(minion.state.state, MinionBrainState::Marching);
                     *previous = current;

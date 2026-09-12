@@ -1,0 +1,80 @@
+{
+  "scenario": "combat",
+  "class_name": "mage",
+  "mode": "models3d",
+  "waves": false,
+  "binary_sha256": {
+    "client": "2ee67195c5584a91a841ef76a986f3f2552f99039c4c797c069c4a86ee9b3f74",
+    "server": "0ae757606bf858233911bdb70b6b7449d5d389ed8f26de511191499c9464e496"
+  },
+  "platform": "macOS-26.6-arm64-arm-64bit",
+  "pixels": [
+    844,
+    390
+  ],
+  "requested_profile": "mobile",
+  "scripted_commands": true,
+  "synthetic_damage": false,
+  "physical_device_verified": false,
+  "client_exit_code": 0,
+  "timed_out": false,
+  "verification": {
+    "errors": [],
+    "ui_profile": {
+      "pass": true,
+      "requested_profile": "mobile",
+      "requested_touch_controls": true,
+      "actual_profile": "mobile",
+      "expected_stages": 3,
+      "stages": [
+        {
+          "stage": 0,
+          "file": "01-combat-ready.png",
+          "mobile_controls": true,
+          "actual_profile": "mobile"
+        },
+        {
+          "stage": 1,
+          "file": "02-projectile-flight.png",
+          "mobile_controls": true,
+          "actual_profile": "mobile"
+        },
+        {
+          "stage": 2,
+          "file": "03-confirmed-impact.png",
+          "mobile_controls": true,
+          "actual_profile": "mobile"
+        }
+      ],
+      "errors": []
+    },
+    "observer_snapshots": 35,
+    "captured_projectile_ids": [
+      1
+    ],
+    "captured_event_ids": [
+      1
+    ],
+    "synthetic_damage": false,
+    "physical_device_verified": false,
+    "pass": true
+  },
+  "images": {
+    "01-combat-ready.png": {
+      "bytes": 349365,
+      "sha256": "1199d5d121408b354d88d37051f7fe270f14838b3b5141fac29183b392fb9ecd"
+    },
+    "02-projectile-flight.png": {
+      "bytes": 349521,
+      "sha256": "0263b83af04b66283a0a279cab9bfdc7b0e394265683134b3ef453fa5864e6fe"
+    },
+    "03-confirmed-impact.png": {
+      "bytes": 348987,
+      "sha256": "903d7cf21c681820aff2b4ae0818e9ea9803a192e2b113d744d66e75fbb024d6"
+    }
+  },
+  "binary_unchanged": true,
+  "runtime_errors": [],
+  "elapsed_seconds": 2.431395417,
+  "capture_pass": true
+}

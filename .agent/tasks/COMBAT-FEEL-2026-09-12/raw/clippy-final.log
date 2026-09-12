@@ -1,0 +1,5 @@
+    Checking harness v0.19.0-rc.4 (/Users/wotori/git/ekza/omoba-bevy-combat-feel/harness)
+    Checking omoba-passport v0.19.0-rc.4 (/Users/wotori/git/ekza/omoba-bevy-combat-feel/passport)
+    Checking server v0.19.0-rc.4 (/Users/wotori/git/ekza/omoba-bevy-combat-feel/server)
+    Checking client v0.19.0-rc.4 (/Users/wotori/git/ekza/omoba-bevy-combat-feel/client)
+    Finished `dev` profile [optimized + debuginfo] target(s) in 2.24s
