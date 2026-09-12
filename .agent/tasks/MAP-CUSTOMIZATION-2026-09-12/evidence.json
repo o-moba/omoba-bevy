@@ -1,0 +1,156 @@
+{
+  "task_id": "MAP-CUSTOMIZATION-2026-09-12",
+  "status": "PASS",
+  "base_commit": "e3e30fb080994fdff0a7f675b89f363e95c6c79a",
+  "workspace_version": "0.19.0-rc.5",
+  "acceptance_criteria": [
+    {
+      "id": "AC1",
+      "status": "PASS",
+      "evidence": "Validated default and custom startup, exact 8/10 identities and combat overrides; invalid numeric/schema/geometry/placement failures; process-pinned profile and real rematch reconstruction.",
+      "checks": [
+        "workspace_tests",
+        "native_capture_matrix"
+      ]
+    },
+    {
+      "id": "AC2",
+      "status": "PASS",
+      "evidence": "Tier damage/base gates, live movement collision, both-team melee strikes on offset towers and caster flight, actual minion targeting, reachable marched-lane placement and replication.",
+      "checks": [
+        "workspace_tests",
+        "native_capture_matrix"
+      ]
+    },
+    {
+      "id": "AC3",
+      "status": "PASS",
+      "evidence": "Shared canonical Verdant layout, full-radius collision clearance and explicit geometry mismatch admission rejection.",
+      "checks": [
+        "workspace_tests"
+      ]
+    },
+    {
+      "id": "AC4",
+      "status": "PASS",
+      "evidence": "942 real authored props (236 solids); actual A-B-A-B loaded mesh replacement and bounded ownership/cache; same-ID structure rebind,2D atlas and cue updates, missing asset fallback.",
+      "checks": [
+        "workspace_tests",
+        "native_capture_matrix",
+        "manual_visual_review"
+      ]
+    },
+    {
+      "id": "AC5",
+      "status": "PASS",
+      "evidence": "Fresh 481 Rust tests,30 verifier checks, strict lint/format and five current-binary native scenarios with 19 exact-tick UDP-backed captures; fixed QA camera and 3025 actual2D terrain tiles.",
+      "checks": [
+        "workspace_tests",
+        "strict_clippy",
+        "format",
+        "native_build",
+        "capture_verifier",
+        "native_capture_matrix",
+        "manual_visual_review"
+      ]
+    },
+    {
+      "id": "AC6",
+      "status": "PASS",
+      "evidence": "Version 0.19.0-rc.5, changelog/features, contributor example and guide, session note and compact raw proof prepared in the task commit; original four cinematic files preserved. Git delivery verified separately after commit.",
+      "checks": [
+        "format",
+        "strict_clippy"
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "id": "workspace_tests",
+      "status": "PASS",
+      "command": "cargo test --workspace --locked",
+      "artifact": "raw/verified-workspace-tests.log.gz",
+      "artifact_sha256": "8ea2042bb4cdec4205d80b87b1ff065e25fb589b9cc9c5012a5a37fe196df90a",
+      "count": 481
+    },
+    {
+      "id": "strict_clippy",
+      "status": "PASS",
+      "command": "cargo clippy --workspace --all-targets --locked -- -D warnings",
+      "artifact": "raw/verified-clippy.log.gz",
+      "artifact_sha256": "751cbc493867d75ed69820dca38efce4f827a6cdd983affc07a3e1507d81d513",
+      "count": null
+    },
+    {
+      "id": "format",
+      "status": "PASS",
+      "command": "cargo fmt --all -- --check",
+      "artifact": "raw/verified-format.log.gz",
+      "artifact_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64",
+      "count": null
+    },
+    {
+      "id": "native_build",
+      "status": "PASS",
+      "command": "cargo build -p client -p server --locked",
+      "artifact": "raw/verified-native-build.log.gz",
+      "artifact_sha256": "935230f0fe83698559ad684bbe72fba6d53229e82f70d5eedee46b787bdbfb13",
+      "count": null
+    },
+    {
+      "id": "capture_verifier",
+      "status": "PASS",
+      "command": "python3 scripts/capture_map.py --self-test",
+      "artifact": "raw/capture-verifier-tests.log.gz",
+      "artifact_sha256": "c86df965b8fe36921cddee9ca75845fbcabe59bc9ac0b40d84fc44aa4ea4d96d",
+      "count": 30
+    },
+    {
+      "id": "native_capture_matrix",
+      "status": "PASS",
+      "command": "python3 scripts/capture_map.py (five recorded configurations)",
+      "artifact": "raw/published-proof/captures.json",
+      "artifact_sha256": "b0ad39ad7c2f488e40ca65ad6f4d61aa25d5dccb8175c2389ced486c9db6d298",
+      "count": 19
+    },
+    {
+      "id": "manual_visual_review",
+      "status": "PASS",
+      "command": "Direct inspection of published screenshots and tower detail",
+      "artifact": "raw/manual-visual-review.json",
+      "artifact_sha256": "7adbadf358a15ab95731c6047f72551937022e48c999a7979c5dafdd97c6dfcf",
+      "count": null
+    }
+  ],
+  "native_binary_sha256": {
+    "client": "f3a2f17dff39e7d83f4ca446cb385134032b2f14077470cc09f5785028c3c4bd",
+    "server": "58aa13cb2ceec4abb51c1b159ab0e801005fedbf525b18ba400a42d670b035ca"
+  },
+  "rust_tests": 481,
+  "failed": 0,
+  "ignored": 0,
+  "native_scenarios": 5,
+  "native_frames": 19,
+  "published_frames": 7,
+  "physical_device_verified": false,
+  "manual_gameplay_verified": false,
+  "test_environment": {
+    "platform": "macOS arm64",
+    "CARGO_TARGET_DIR": "/Users/wotori/git/ekza/omoba-bevy-mobile-beta/.agent/tasks/MOBILE-BETA-2026-09-11/target-native",
+    "CARGO_INCREMENTAL": "0",
+    "cargo_config": [
+      "profile.dev.package.client.debug=0",
+      "profile.dev.package.client.incremental=false"
+    ],
+    "HARNESS_SERVER_BIN": "<target>/debug/server",
+    "local_udp_permitted": true
+  },
+  "limitations": [
+    "Object and presentation tuning on fixed Verdant v1 terrain; moving pads, roads or static obstacle geometry needs matching export and geometry revision.",
+    "Server process pins gameplay configuration; client presentation JSON loads on startup. No remote assets or production dependencies added.",
+    "Native phone-size preview is not physical Android/iOS, touch-interaction or performance validation.",
+    "Two-tier example is not a claim of human-tested competitive balance.",
+    "Only seven representative PNGs are published; all 19 original PNGs remain in the ignored raw task folders and have hashes recorded in captures.json."
+  ],
+  "git_delivery_receipt": "raw/git-delivery.json is generated locally after the task commit/push to avoid a self-referential commit hash."
+}

@@ -233,7 +233,7 @@ CAST: Use {skills} or the on-screen buttons. W/E/R unlock by level.\n\
 SKILL POINTS: Use {upgrade} or the arrows above the hotbar to rank up abilities.\n\
 TARGET: Tab selects the nearest hostile; Backspace clears. S stops attacks and movement.\n\
 TEAMS: You have a double ring; allies have squares; enemies have triangles.\n\n\
-OBJECTIVE: Follow a lane with your minions. Destroy an enemy lane tower to unlock its base, then destroy the base to win.\n\
+OBJECTIVE: Follow a lane with your minions. Destroy all towers in one lane to unlock the enemy base, then destroy the base to win.\n\
 RECOVER: Let minions take tower fire. If defeated, wait for your respawn.\n\
 SHOP: Press P or click Open shop. Buy recommended items at your base with earned gold.\n\n\
 CAMERA: Y toggles hero follow; Space returns to your hero. Wheel zooms. Hold Alt + right mouse to orbit in 3D. Left-click the minimap to look around.\n\

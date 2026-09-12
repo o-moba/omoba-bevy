@@ -1,11 +1,9 @@
 use bevy::prelude::*;
 
-use crate::player::{PLAYER_SIZE, PLAYER_SPEED};
+use crate::player::PLAYER_SIZE;
 use crate::team::Team;
 
-pub const TARGET_BASE_RUN_TIME_SECONDS: f32 = 45.0;
-pub const TARGET_BASE_DISTANCE: f32 = PLAYER_SPEED * TARGET_BASE_RUN_TIME_SECONDS;
-pub(crate) const BASE_PAD_SIZE: f32 = 46.0;
+pub(crate) const BASE_PAD_SIZE: f32 = shared::map::BASE_PAD_SIZE;
 pub(crate) const BASE_PAD_HEIGHT: f32 = 0.7;
 /// Horizontal length of the walk-up ramps around each base pad. Characters
 /// ascend/descend over this distance (League-style client-side fake: the
@@ -14,10 +12,9 @@ pub(crate) const PAD_RAMP_LENGTH: f32 = 6.0;
 /// Blocks whose center is within this distance of a neutral-camp or
 /// boss-pit anchor get no decorative box (the creature must be visible).
 const JUNGLE_BLOCK_CLEARANCE: f32 = 10.0;
-const BASE_EDGE_MARGIN: f32 = 6.0;
 const PLAYER_SPAWN_OFFSET: f32 = 7.0;
-pub(crate) const LANE_WIDTH: f32 = 12.0;
-const LANE_EDGE_PADDING: f32 = 6.0;
+pub(crate) const LANE_WIDTH: f32 = shared::map::LANE_WIDTH;
+const LANE_EDGE_PADDING: f32 = shared::map::LANE_EDGE_PADDING;
 pub(crate) const RIVER_WIDTH: f32 = 18.0;
 /// Fraction of the map size where the outer jungle blocks/camps sit
 /// (mirrors `JUNGLE_MAP_OUTER_FRAC` in server/src/balance.rs).
@@ -65,18 +62,12 @@ pub struct MapLayout {
 
 impl Default for MapLayout {
     fn default() -> Self {
-        let inner_side = TARGET_BASE_DISTANCE / 2.0_f32.sqrt();
-        let half_inner_side = inner_side * 0.5;
-        let base_padding = BASE_PAD_SIZE * 0.5 + BASE_EDGE_MARGIN;
-        let half_map_size = half_inner_side + base_padding;
-        let home_spawn = Vec3::new(-half_inner_side, PLAYER_SIZE * 0.5, -half_inner_side);
-        let away_spawn = Vec3::new(half_inner_side, PLAYER_SIZE * 0.5, half_inner_side);
-
+        let geometry = shared::map::geometry();
         Self {
-            home_spawn,
-            away_spawn,
-            min: Vec2::new(-half_map_size, -half_map_size),
-            max: Vec2::new(half_map_size, half_map_size),
+            home_spawn: Vec3::new(geometry.home[0], PLAYER_SIZE * 0.5, geometry.home[1]),
+            away_spawn: Vec3::new(geometry.away[0], PLAYER_SIZE * 0.5, geometry.away[1]),
+            min: Vec2::from_array(geometry.bounds.min),
+            max: Vec2::from_array(geometry.bounds.max),
         }
     }
 }
@@ -130,33 +121,17 @@ impl MapLayout {
     /// These control points match the Verdant export and the 2D renderer and
     /// mirror the server's `lane_control_points` (server/src/world.rs).
     pub(crate) fn lane_polylines(self) -> [Vec<Vec2>; 3] {
-        let lane_edge_offset = self.lane_edge_offset();
-        let left_x = self.min.x + lane_edge_offset;
-        let right_x = self.max.x - lane_edge_offset;
-        let top_z = self.max.y - lane_edge_offset;
-        let bottom_z = self.min.y + lane_edge_offset;
-        let home = Vec2::new(self.home_spawn.x, self.home_spawn.z);
-        let away = Vec2::new(self.away_spawn.x, self.away_spawn.z);
-
         [
-            vec![home, away],
-            vec![
-                home,
-                Vec2::new(left_x, home.y),
-                Vec2::new(left_x, top_z),
-                Vec2::new(right_x, top_z),
-                Vec2::new(away.x, top_z),
-                away,
-            ],
-            vec![
-                home,
-                Vec2::new(home.x, bottom_z),
-                Vec2::new(left_x, bottom_z),
-                Vec2::new(right_x, bottom_z),
-                Vec2::new(right_x, away.y),
-                away,
-            ],
+            shared::map::Lane::Mid,
+            shared::map::Lane::Top,
+            shared::map::Lane::Bot,
         ]
+        .map(|lane| {
+            shared::map::lane_points(lane)
+                .into_iter()
+                .map(Vec2::from_array)
+                .collect()
+        })
     }
 
     /// River center line in the XZ plane (NW corner to SE corner).

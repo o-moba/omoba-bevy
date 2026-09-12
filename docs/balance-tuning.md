@@ -1,30 +1,22 @@
-# Balance tuning (gameplay slice)
+# Balance tuning
 
-## Authoritative server values
+Map-object settings live in the versioned `shared/assets/maps/verdant.json`
+default and optional `OMOBA_MAP_CONFIG` server startup file. This includes tower
+count, lane placement, HP, range, damage and cooldown. See
+[map customization](map-customization.md) and `examples/maps/two-tier.json`.
+The active profile stays pinned across rematches; restart to load edits.
 
-All simulation tuning for minions, towers, jungle neutrals, the level curve, mana regeneration, and the server-validated projectile ability lives in:
+Other authoritative simulation values remain in `server/src/balance.rs`:
+minion roles and wave cadence, jungle/boss stats and rewards, hero baselines,
+projectile speed, regeneration and the level curve. Change these constants and
+rebuild the server before testing. Tower constants there remain compatibility
+baselines for existing fixtures; the resolved map profile supplies live towers.
 
-- `server/src/balance.rs`
+Class skill kits and rank scaling live in `shared::HeroClass`; the server
+resolves all four ability slots and basic attacks authoritatively. Cosmetic
+profiles only change presentation. Hero client display defaults in
+`client/src/combat.rs` should agree with server baselines until a snapshot arrives.
 
-Change constants there, rebuild the server, and re-run `cargo test -p server` (or full workspace tests) before playtesting.
-
-Notable symbols:
-
-- `PRIMARY_ABILITY_DAMAGE_BY_RANK` — five damage tiers for the primary server-validated ability (index = rank − 1). The live loop uses index `0` until skill rank affects combat.
-- `SKILL_SLOT_COUNT` — matches the four UI skill slots / progression skill-point surface; only one cast is fully simulated today.
-
-The `balance` module includes lightweight unit tests (`balance::tests::*`) that assert positive tuning, coherent spell economy, and `LEVEL_XP_THRESHOLDS.len() == MAX_LEVEL - STARTING_LEVEL` so accidental edits do not desync the level curve.
-
-Jungle and minion kill XP both go through the same server level-up path (`grant_player_xp`) so XP thresholds stay coherent across sources.
-
-## Client display baselines
-
-The client uses local defaults for HUD and bars:
-
-- `client/src/combat.rs` — `MAX_HP`, `MAX_MANA`
-
-These **must match** the server `MAX_HP` and `MAX_MANA` in `balance.rs` so first-frame UI stays consistent until the first snapshot arrives.
-
-## Skill power note
-
-The server currently authorizes **one** ranged ability (mana cost, cooldown, projectile damage in `balance.rs`). Skill points accrue from leveling for UI and future skill work; per-rank curves for four distinct abilities are not yet driven from this module.
+Both jungle and minion XP use server progression. Evaluate pacing through real
+matches and telemetry alongside mechanical regression tests. A successful test
+suite is evidence of consistent rules, not proof of competitive balance.

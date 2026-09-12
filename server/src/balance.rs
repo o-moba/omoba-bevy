@@ -31,16 +31,24 @@ pub const AIM_HEIGHT: f32 = 0.55;
 pub const RESPAWN_DELAY: Duration = Duration::from_secs(5);
 
 // --- Lane towers & base tower threat ---
+#[cfg(test)]
 pub const TOWER_MAX_HP: f32 = 240.0;
+#[cfg(test)]
 pub const BASE_TOWER_MAX_HP: f32 = 650.0;
 pub const TOWER_SIZE: f32 = shared::TOWER_TARGET_RADIUS * 2.0;
 pub const BASE_TOWER_SIZE: f32 = shared::BASE_TOWER_TARGET_RADIUS * 2.0;
+#[cfg(test)]
 pub const TOWER_RANGE: f32 = 20.0;
+#[cfg(test)]
 pub const TOWER_DAMAGE: f32 = 14.0;
+#[cfg(test)]
 pub const TOWER_COOLDOWN: Duration = Duration::from_millis(900);
 pub const TOWER_SHOT_HEIGHT: f32 = 2.4;
+#[cfg(test)]
 pub const BASE_TOWER_RANGE: f32 = 24.0;
+#[cfg(test)]
 pub const BASE_TOWER_DAMAGE: f32 = 18.0;
+#[cfg(test)]
 pub const BASE_TOWER_COOLDOWN: Duration = Duration::from_millis(850);
 pub const BASE_TOWER_SHOT_HEIGHT: f32 = 3.2;
 
@@ -167,13 +175,11 @@ pub const TOP_BOSS_BUFF_DURATION: Duration = Duration::from_secs(90);
 pub const VICTORY_REMATCH_DELAY: Duration = Duration::from_secs(10);
 
 // --- Map generation (affects lane length and jungle placement) ---
+#[cfg(test)]
 pub const TARGET_BASE_RUN_TIME_SECONDS: f32 = 45.0;
 pub const PLAYER_SPEED: f32 = 5.0;
+#[cfg(test)]
 pub const TARGET_BASE_DISTANCE: f32 = PLAYER_SPEED * TARGET_BASE_RUN_TIME_SECONDS;
-pub const BASE_PAD_SIZE: f32 = 46.0;
-pub const BASE_EDGE_MARGIN: f32 = 6.0;
-pub const LANE_WIDTH: f32 = 12.0;
-pub const LANE_EDGE_PADDING: f32 = 6.0;
 
 #[cfg(test)]
 mod tests {

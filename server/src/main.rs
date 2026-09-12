@@ -5,6 +5,8 @@ mod basic_attack;
 mod combat_feedback;
 mod gameplay;
 #[cfg(test)]
+mod map_config_tests;
+#[cfg(test)]
 mod minion_path_tests;
 #[cfg(test)]
 mod navigation_tests;
@@ -228,6 +230,14 @@ enum StructureKind {
 struct StructureState {
     #[serde(default)]
     protected: bool,
+    #[serde(default)]
+    map_key: String,
+    #[serde(default)]
+    visual_profile: String,
+    #[serde(default)]
+    lane: Option<shared::map::Lane>,
+    #[serde(default)]
+    tier: u8,
     id: u64,
     kind: StructureKind,
     team: Team,
@@ -464,6 +474,10 @@ struct ProjectileState {
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ServerPacket {
     Snapshot {
+        #[serde(default)]
+        geometry_id: String,
+        #[serde(default)]
+        map_profile: String,
         #[serde(flatten, default)]
         meta: shared::protocol::SnapshotMeta,
         #[serde(default)]
@@ -793,14 +807,6 @@ impl Vec3f {
         Self { x, y, z }
     }
 
-    fn lerp(self, other: Self, t: f32) -> Self {
-        Self {
-            x: self.x + (other.x - self.x) * t,
-            y: self.y + (other.y - self.y) * t,
-            z: self.z + (other.z - self.z) * t,
-        }
-    }
-
     fn add_scaled(self, velocity: Self, dt: f32) -> Self {
         Self {
             x: self.x + velocity.x * dt,
@@ -1006,6 +1012,7 @@ struct ServerRuntime {
     disconnected_sessions: HashMap<String, DisconnectedSession>,
     projectiles: HashMap<u64, Projectile>,
     map_layout: MapLayoutState,
+    map_config: shared::map::ResolvedMap,
     structures: HashMap<u64, Structure>,
     minions: HashMap<u64, Minion>,
     game_state: GameState,
@@ -1033,7 +1040,16 @@ struct ServerRuntime {
 }
 
 impl ServerRuntime {
+    #[cfg(test)]
     fn new(socket: UdpSocket, match_config: MatchConfig) -> Self {
+        Self::new_with_map(socket, match_config, shared::map::ResolvedMap::default())
+    }
+
+    fn new_with_map(
+        socket: UdpSocket,
+        match_config: MatchConfig,
+        map_config: shared::map::ResolvedMap,
+    ) -> Self {
         let map_layout = build_map_layout();
         let mut next_neutral_id: u64 = 9_001;
         let mut neutrals = build_neutral_camps(&mut next_neutral_id);
@@ -1048,7 +1064,8 @@ impl ServerRuntime {
             players: HashMap::new(),
             disconnected_sessions: HashMap::new(),
             projectiles: HashMap::new(),
-            structures: build_structures(&map_layout),
+            structures: build_configured_structures(&map_config),
+            map_config,
             minions: HashMap::new(),
             game_state: GameState::Lobby,
             map_layout,
@@ -1242,7 +1259,9 @@ impl ServerRuntime {
                     && let Some(player) = players.get_mut(&addr)
                     && player.state.hp > 0.0
                 {
-                    handle_transform_request(player, map_layout, x, y, z, yaw, now);
+                    handle_transform_request_with_structures(
+                        player, map_layout, structures, x, y, z, yaw, now,
+                    );
                 }
             }
             ClientPacket::Cast { target, slot } => {
@@ -1504,6 +1523,7 @@ impl ServerRuntime {
             players,
             projectiles,
             map_layout,
+            map_config,
             structures,
             minions,
             game_state,
@@ -1649,6 +1669,8 @@ impl ServerRuntime {
 
             for (addr, player) in &*players {
                 let packet = ServerPacket::Snapshot {
+                    geometry_id: map_config.geometry_id.clone(),
+                    map_profile: map_config.map_profile.clone(),
                     meta: shared::protocol::SnapshotMeta::new(
                         *server_epoch,
                         *match_id,
@@ -1879,6 +1901,14 @@ fn server_finalize_tick_system(mut runtime: ResMut<ServerRuntime>, tick: Res<Tic
 }
 
 fn main() -> io::Result<()> {
+    let map_path = std::env::var_os("OMOBA_MAP_CONFIG").map(std::path::PathBuf::from);
+    let map_config = load_map_config(map_path.as_deref())?;
+    println!(
+        "Map profile: {} geometry: {} structures: {}",
+        map_config.map_profile,
+        map_config.geometry_id,
+        map_config.structures.len()
+    );
     let bind_addr = std::env::var("SERVER_ADDR").unwrap_or_else(|_| DEFAULT_BIND_ADDR.to_owned());
     let socket = UdpSocket::bind(&bind_addr)?;
     socket.set_nonblocking(true)?;
@@ -1898,7 +1928,11 @@ fn main() -> io::Result<()> {
     App::new()
         .add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(SIMULATION_STEP_SLEEP)))
         .add_plugins(GameplayPlugin)
-        .insert_resource(ServerRuntime::new(socket, match_config))
+        .insert_resource(ServerRuntime::new_with_map(
+            socket,
+            match_config,
+            map_config,
+        ))
         .init_resource::<TickContext>()
         .init_resource::<SimulationDeltaSeconds>()
         .init_resource::<EcsPlayerEntities>()
@@ -2373,20 +2407,42 @@ fn simulate_projectiles(
     receipts
 }
 
-/// A team's base is protected until any one of its own lane towers has fallen.
+/// Each defending lane unlocks front-to-back. A base unlocks when any
+/// configured nonempty lane is cleared; an arena with no lane towers is open.
 fn structure_is_protected(structures: &HashMap<u64, Structure>, target_id: u64) -> bool {
     let Some(target) = structures.get(&target_id) else {
         return false;
     };
-    target.state.kind == StructureKind::BaseTower
-        && !structures.values().any(|structure| {
-            structure.state.team == target.state.team
-                && structure.state.kind == StructureKind::Tower
-                && structure.state.hp <= 0.0
-        })
+    match target.role {
+        StructureRole::LaneTower { lane } => structures.values().any(|other| {
+            other.state.team == target.state.team
+                && other.role == StructureRole::LaneTower { lane }
+                && other.state.tier < target.state.tier
+                && other.state.hp > 0.0
+        }),
+        StructureRole::BaseTower => {
+            let mut has_lane = false;
+            for lane in [Lane::Top, Lane::Mid, Lane::Bot] {
+                let towers: Vec<_> = structures
+                    .values()
+                    .filter(|other| {
+                        other.state.team == target.state.team
+                            && other.role == StructureRole::LaneTower { lane }
+                    })
+                    .collect();
+                if towers.is_empty() {
+                    continue;
+                }
+                has_lane = true;
+                if towers.iter().all(|tower| tower.state.hp <= 0.0) {
+                    return false;
+                }
+            }
+            has_lane
+        }
+    }
 }
 
-/// Both hero projectiles and minion attacks pass through the same siege gate.
 fn apply_structure_damage(
     structures: &mut HashMap<u64, Structure>,
     target_id: u64,
@@ -2676,9 +2732,13 @@ struct MapLayoutState {
     max_x: f32,
     min_z: f32,
     max_z: f32,
+    #[cfg(test)]
     left_x: f32,
+    #[cfg(test)]
     right_x: f32,
+    #[cfg(test)]
     top_z: f32,
+    #[cfg(test)]
     bottom_z: f32,
 }
 
@@ -2968,7 +3028,10 @@ fn simulate_minions(
         let target = structures
             .values()
             .filter(|structure| {
-                if structure.state.hp <= 0.0 || structure.state.team == minion.state.team {
+                if structure.state.hp <= 0.0
+                    || structure.state.team == minion.state.team
+                    || structure_is_protected(structures, structure.state.id)
+                {
                     return false;
                 }
                 match structure.role {
@@ -2977,6 +3040,11 @@ fn simulate_minions(
                 }
             })
             .min_by(|left, right| {
+                let left_base = left.state.kind == StructureKind::BaseTower;
+                let right_base = right.state.kind == StructureKind::BaseTower;
+                if left_base != right_base {
+                    return left_base.cmp(&right_base);
+                }
                 let left_pos = Vec3f::new(left.state.x, left.state.y, left.state.z);
                 let right_pos = Vec3f::new(right.state.x, right.state.y, right.state.z);
                 minion_position
@@ -2986,7 +3054,11 @@ fn simulate_minions(
             })
             .map(|structure| {
                 let position = Vec3f::new(structure.state.x, structure.state.y, structure.state.z);
-                let distance_sq = minion_position.distance_squared(position);
+                // Ground units use horizontal reach. The legacy box-center Y
+                // is presentation/aim data, not extra distance to a lane tower.
+                let dx = position.x - minion_position.x;
+                let dz = position.z - minion_position.z;
+                let distance_sq = dx * dx + dz * dz;
                 (
                     structure.state.id,
                     structure.state.kind,
@@ -3255,6 +3327,8 @@ mod tests {
 
     fn empty_snapshot() -> ServerPacket {
         ServerPacket::Snapshot {
+            geometry_id: shared::map::GEOMETRY_ID.to_owned(),
+            map_profile: "verdant_default".to_owned(),
             meta: Default::default(),
             join_error: None,
             your_id: 1,
@@ -3296,6 +3370,8 @@ mod tests {
         player.state.avatar = Some("x".repeat(IPV4_UDP_MAX_PAYLOAD_BYTES));
 
         let packet = ServerPacket::Snapshot {
+            geometry_id: shared::map::GEOMETRY_ID.to_owned(),
+            map_profile: "verdant_default".to_owned(),
             meta: Default::default(),
             join_error: None,
             your_id: player.state.id,

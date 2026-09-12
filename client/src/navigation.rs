@@ -1,7 +1,9 @@
 //! Bevy coordinate adapter for the shared forest/structure navigation module.
 
 use bevy::prelude::*;
-use shared::navigation::{Bounds, Disc, HERO_RADIUS, NavigationMap, world_navigation};
+#[cfg(test)]
+use shared::navigation::NavigationMap;
+use shared::navigation::{Bounds, Disc, HERO_RADIUS, world_navigation};
 
 use crate::maps::MapLayout;
 use crate::net::StructureKind;
@@ -37,6 +39,7 @@ pub(crate) fn plan_route(
     };
     let world = world_navigation();
     let world_bounds = world.bounds();
+    #[cfg(test)]
     let custom;
     let map = if (0..2).all(|axis| {
         (bounds.min[axis] - world_bounds.min[axis]).abs() < 0.001
@@ -44,8 +47,17 @@ pub(crate) fn plan_route(
     }) {
         world
     } else {
-        custom = NavigationMap::new(bounds, Vec::new()).ok()?;
-        &custom
+        // Synthetic empty arenas are fixtures only. Production must never
+        // silently discard forest collision for an unsupported map geometry.
+        #[cfg(test)]
+        {
+            custom = NavigationMap::new(bounds, Vec::new()).ok()?;
+            &custom
+        }
+        #[cfg(not(test))]
+        {
+            return None;
+        }
     };
     let dynamic: Vec<_> = structures
         .iter()

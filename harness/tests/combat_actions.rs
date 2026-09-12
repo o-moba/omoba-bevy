@@ -2,7 +2,9 @@
 
 use std::time::{Duration, Instant};
 
+use harness::navigation::BotNavigator;
 use harness::{Bot, Character, PlayerActionKind, ServerPacket, ServerProcess, TargetId, Team};
+use shared::navigation::Disc;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 const GROUND_Y: f32 = 0.5;
@@ -14,16 +16,47 @@ fn distance(a: &harness::PlayerState, b: &harness::PlayerState) -> f32 {
 fn walk_into_range(observer: &mut Bot, caster: &Bot, observer_id: u64, caster_id: u64) {
     observer.set_speed_boost(true);
     caster.set_speed_boost(true);
+    let mut routes: [BotNavigator; 2] = Default::default();
     let deadline = Instant::now() + Duration::from_secs(40);
     while Instant::now() < deadline {
-        observer.send_transform(0.0, GROUND_Y, 0.0, 0.0);
-        caster.send_transform(0.0, GROUND_Y, 0.0, 0.0);
-        if let Some(snapshot) = observer.recv_snapshot(Instant::now() + TIMEOUT)
-            && let (Some(observer_state), Some(caster_state)) =
-                (snapshot.player(observer_id), snapshot.player(caster_id))
-            && distance(observer_state, caster_state) < 8.0
-        {
+        observer.ping();
+        caster.ping();
+        let Some(snapshot) = observer.recv_snapshot(deadline.min(Instant::now() + TIMEOUT)) else {
+            continue;
+        };
+        let (Some(observer_state), Some(caster_state)) =
+            (snapshot.player(observer_id), snapshot.player(caster_id))
+        else {
+            continue;
+        };
+        if distance(observer_state, caster_state) < 8.0 {
             return;
+        }
+        // The server clips live structure discs as well as authored terrain.
+        // Follow waypoints from acknowledged positions instead of repeatedly
+        // requesting the origin through the friendly midlane tower.
+        let structures: Vec<_> = snapshot
+            .structures()
+            .iter()
+            .filter(|s| s.hp > 0.0)
+            .map(|s| Disc {
+                center: [s.x, s.z],
+                radius: if s.kind == "base_tower" { 3.2 } else { 1.3 },
+            })
+            .collect();
+        for ((route, bot), state) in routes
+            .iter_mut()
+            .zip([&*observer, caster])
+            .zip([observer_state, caster_state])
+        {
+            if let Some(next) = route.next([state.x, state.z], [0.0, 0.0], &structures) {
+                bot.send_transform(
+                    next[0],
+                    GROUND_Y,
+                    next[1],
+                    (next[0] - state.x).atan2(next[1] - state.z),
+                );
+            }
         }
     }
     panic!("players did not enter authoritative Q cast range");

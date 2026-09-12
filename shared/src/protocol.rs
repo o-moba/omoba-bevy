@@ -32,6 +32,7 @@ pub enum JoinRejection {
     MatchFull,
     SessionActive,
     ProtocolMismatch,
+    MapGeometryMismatch,
     AvatarNotAuthorized,
 }
 
@@ -44,6 +45,9 @@ impl JoinRejection {
             }
             Self::ProtocolMismatch => {
                 "Client and server versions differ. Use the same release build."
+            }
+            Self::MapGeometryMismatch => {
+                "This server uses a different map geometry. Install the matching map release."
             }
             Self::AvatarNotAuthorized => {
                 "Purchased avatar approval failed. Reconnect your wallet or choose a free avatar."

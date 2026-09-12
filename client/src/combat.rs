@@ -1276,7 +1276,7 @@ fn resolve_pending_cast_system(
         .and_then(|entity| protection.get(entity).ok())
         .is_some_and(|protected| protected.0)
     {
-        Some("Base protected — destroy an enemy lane tower first.".to_string())
+        Some("Structure protected — destroy the preceding lane towers first.".to_string())
     } else if definition.targeting == TargetingMode::UnitTarget
         && request
             .target_entity
@@ -3132,7 +3132,7 @@ mod tests {
             app.world()
                 .resource::<ActionFeedback>()
                 .text
-                .contains("Base protected")
+                .contains("Structure protected")
         );
         assert!(app.world().resource::<PendingCast>().request.is_none());
         assert!(!app.world().entity(player).contains::<MovementTarget>());

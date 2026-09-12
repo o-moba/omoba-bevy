@@ -16,6 +16,8 @@ mod help_overlay;
 mod input_bindings;
 mod input_context;
 mod jungle;
+mod map_qa;
+mod map_visuals;
 mod maps;
 mod match_hud;
 mod minimap;
@@ -134,6 +136,8 @@ pub fn main() {
         projectile_visuals::ProjectileVisualsPlugin,
         combat_feedback::CombatFeedbackPlugin,
     ))
+    .add_plugins(map_visuals::MapVisualsPlugin)
+    .add_plugins(map_qa::MapQaPlugin)
     .add_plugins(combat_qa::CombatQaPlugin)
     .add_plugins(targeting_qa::TargetingQaPlugin)
     .run();

@@ -599,6 +599,14 @@ pub enum StructureKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StructureState {
     #[serde(default)]
+    lane: Option<Lane>,
+    #[serde(default)]
+    tier: u8,
+    #[serde(default)]
+    map_key: String,
+    #[serde(default)]
+    visual_profile: String,
+    #[serde(default)]
     protected: bool,
     id: u64,
     kind: StructureKind,
@@ -727,6 +735,10 @@ enum ServerPacket {
         #[serde(flatten, default)]
         meta: SnapshotMeta,
         #[serde(default)]
+        geometry_id: String,
+        #[serde(default)]
+        map_profile: String,
+        #[serde(default)]
         join_error: Option<JoinRejection>,
         your_id: u64,
         players: Vec<PlayerState>,
@@ -771,6 +783,8 @@ pub enum GameState {
 
 #[derive(Resource, Default, Clone)]
 pub struct GameStateSnapshot {
+    pub geometry_id: String,
+    pub map_profile: String,
     pub meta: SnapshotMeta,
     pub state: GameState,
     pub rematch_in_secs: Option<u64>,
@@ -808,6 +822,8 @@ struct PendingServerSnapshotFrame {
 }
 
 struct PendingSnapshotData {
+    geometry_id: String,
+    map_profile: String,
     meta: SnapshotMeta,
     wall_time: Instant,
     your_id: u64,
@@ -942,6 +958,26 @@ pub struct NetworkProjectile {
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkStructureId(pub u64);
+
+/// Server map-object identity; presentation uses a packaged profile with safe defaults.
+#[derive(Component, Debug, Clone, Default, PartialEq, Eq)]
+pub struct NetworkMapStructure {
+    pub lane: Option<Lane>,
+    pub tier: u8,
+    pub key: String,
+    pub visual_profile: String,
+}
+
+impl From<&StructureState> for NetworkMapStructure {
+    fn from(value: &StructureState) -> Self {
+        Self {
+            lane: value.lane,
+            tier: value.tier,
+            key: value.map_key.clone(),
+            visual_profile: value.visual_profile.clone(),
+        }
+    }
+}
 
 #[derive(Component)]
 pub struct NetworkStructure;
@@ -1602,6 +1638,8 @@ fn ingest_server_snapshot_packets(
             }
             Ok(packet) => match packet {
                 ServerPacket::Snapshot {
+                    geometry_id,
+                    map_profile,
                     meta,
                     join_error,
                     your_id,
@@ -1619,6 +1657,12 @@ fn ingest_server_snapshot_packets(
                         client_session.join_error = Some(JoinRejection::ProtocolMismatch);
                         continue;
                     }
+                    if !geometry_id.is_empty() && geometry_id != shared::map::GEOMETRY_ID {
+                        client_session.join_error = Some(JoinRejection::MapGeometryMismatch);
+                        client_session.admitted = false;
+                        latest_snapshot = None;
+                        continue;
+                    }
                     if !client_session.snapshot_order.accept(meta) {
                         continue;
                     }
@@ -1630,6 +1674,8 @@ fn ingest_server_snapshot_packets(
                         client_session.join_exhausted = false;
                     }
                     latest_snapshot = Some(PendingSnapshotData {
+                        geometry_id,
+                        map_profile,
                         meta,
                         wall_time: Instant::now(),
                         your_id,
@@ -1692,6 +1738,8 @@ fn apply_server_snapshot(
         return;
     };
     let PendingSnapshotData {
+        geometry_id,
+        map_profile,
         meta,
         wall_time: snapshot_wall_time,
         your_id,
@@ -1714,6 +1762,8 @@ fn apply_server_snapshot(
     client_session.last_qualifying_snapshot_wall = Some(snapshot_wall_time);
 
     network_state.local_id = Some(your_id);
+    game_state_snapshot.geometry_id = geometry_id;
+    game_state_snapshot.map_profile = map_profile;
     game_state_snapshot.meta = meta;
     game_state_snapshot.state = game_state;
     game_state_snapshot.rematch_in_secs = rematch_in_secs;
@@ -2111,6 +2161,7 @@ fn apply_server_snapshot(
                 structure.team,
                 NetworkStructureId(structure.id),
                 NetworkStructureProtected(structure.protected),
+                NetworkMapStructure::from(structure),
                 structure_state_to_combat_stats(structure),
             ));
             continue;
@@ -2122,6 +2173,7 @@ fn apply_server_snapshot(
             NetworkStructure,
             NetworkStructureId(structure.id),
             NetworkStructureProtected(structure.protected),
+            NetworkMapStructure::from(structure),
             structure.kind,
             structure.team,
             structure_state_to_combat_stats(structure),
@@ -3154,12 +3206,10 @@ mod tests {
         serde_json::from_value(value).unwrap()
     }
 
-    #[test]
-    fn admitted_snapshot_and_world_fallback_keep_one_local_root_in_the_same_frame() {
+    fn snapshot_app() -> (App, crossbeam_channel::Sender<ServerPacket>) {
         use crate::{
             camera::CameraState,
             maps::MapLayout,
-            player::Player,
             sprite::PlayerVisualMode,
             world::{AvatarAssetCache, PlayerAssets, PlayerModelCatalog},
         };
@@ -3208,6 +3258,13 @@ mod tests {
             );
         super::configure_network_pipeline(&mut app);
         crate::world::register_local_player_spawn(&mut app);
+        (app, incoming)
+    }
+
+    #[test]
+    fn admitted_snapshot_and_world_fallback_keep_one_local_root_in_the_same_frame() {
+        use crate::player::Player;
+        let (mut app, incoming) = snapshot_app();
         for tick in 1..=3 {
             let mut snapshot =
                 serde_json::to_value(admission_snapshot(1, tick, true, None)).unwrap();
@@ -3370,6 +3427,102 @@ mod tests {
                 .join_exhausted
         );
         assert!(outgoing.try_recv().is_err());
+    }
+
+    #[test]
+    fn incompatible_map_geometry_never_applies_and_legacy_default_still_works() {
+        let (mut app, incoming, _) = admission_app();
+        let mut incompatible = serde_json::to_value(admission_snapshot(1, 1, true, None)).unwrap();
+        incompatible["geometry_id"] = json!("unsupported-terrain-v9");
+        incoming
+            .send(serde_json::from_value(incompatible).unwrap())
+            .unwrap();
+        app.update();
+        assert_eq!(
+            app.world().resource::<super::ClientSession>().join_error,
+            Some(shared::protocol::JoinRejection::MapGeometryMismatch)
+        );
+        assert!(!app.world().resource::<super::ClientSession>().admitted);
+        assert!(
+            app.world()
+                .resource::<super::PendingServerSnapshotFrame>()
+                .frame
+                .is_none()
+        );
+        incoming.send(admission_snapshot(1, 2, true, None)).unwrap();
+        app.update();
+        assert!(app.world().resource::<super::ClientSession>().admitted);
+        assert!(
+            app.world()
+                .resource::<super::PendingServerSnapshotFrame>()
+                .frame
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn configured_structure_identity_reconciles_add_move_hp_profile_and_remove() {
+        use super::{GameStateSnapshot, NetworkMapStructure, NetworkState, NetworkStructureId};
+        use crate::combat::CombatStats;
+        let (mut app, incoming) = snapshot_app();
+        let mut first_root = None;
+        for tick in 1..=4 {
+            let mut snapshot =
+                serde_json::to_value(admission_snapshot(1, tick, true, None)).unwrap();
+            let count = if tick == 4 { 0 } else { tick as usize };
+            snapshot["geometry_id"] = json!(shared::map::GEOMETRY_ID);
+            snapshot["map_profile"] = json!("custom-siege");
+            snapshot["structures"] = json!(
+                (0..count)
+                    .map(|index| json!({
+                        "id": 101 + index, "map_key": format!("mid-{}", index),
+                        "visual_profile": if tick == 1 { "tower_blue" } else { "tower_alt" },
+                        "kind": "tower", "team": "blue", "x": tick as f32 * 5.0,
+                        "y": 3.0, "z": index as f32 * 10.0, "hp": 400.0 - tick as f32,
+                        "max_hp": 400.0, "protected": index > 0
+                    }))
+                    .collect::<Vec<_>>()
+            );
+            for field in ["players", "minions", "neutrals", "projectiles"] {
+                snapshot[field] = json!([]);
+            }
+            incoming
+                .send(serde_json::from_value(snapshot).unwrap())
+                .unwrap();
+            app.update();
+            assert_eq!(
+                app.world().resource::<GameStateSnapshot>().map_profile,
+                "custom-siege"
+            );
+            let roots = app.world().resource::<NetworkState>().structures.clone();
+            assert_eq!(roots.len(), count);
+            if count == 0 {
+                assert!(app.world().get_entity(first_root.unwrap()).is_err());
+                continue;
+            }
+            let entity = roots[&101];
+            if let Some(previous) = first_root {
+                assert_eq!(entity, previous);
+            }
+            first_root = Some(entity);
+            assert_eq!(
+                app.world().get::<NetworkStructureId>(entity).unwrap().0,
+                101
+            );
+            let identity = app.world().get::<NetworkMapStructure>(entity).unwrap();
+            assert_eq!(identity.key, "mid-0");
+            assert_eq!(
+                identity.visual_profile,
+                if tick == 1 { "tower_blue" } else { "tower_alt" }
+            );
+            assert_eq!(
+                app.world().get::<Transform>(entity).unwrap().translation.x,
+                tick as f32 * 5.0
+            );
+            let stats = app.world().get::<CombatStats>(entity).unwrap();
+            assert_eq!(stats.hp, 400.0 - tick as f32);
+            assert_eq!(stats.max_hp, 400.0);
+        }
     }
 
     fn exact_size_snapshot_fixture(size: usize, sentinel: u64) -> Vec<u8> {

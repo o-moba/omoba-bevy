@@ -14,6 +14,24 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 - Add `make play` / `make play-bots` to build locked current sources and launch
   supervised local 3D practice with nine bots, with owned-process cleanup.
 
+## [0.19.0-rc.5] - 2026-09-12
+
+### Added
+- Validated map-object profiles with stable IDs, configurable lane tower count,
+  placement, HP and attack parameters, loaded once at server startup.
+- Ordered lane siege tiers, configured rematch reconstruction and replicated
+  map/structure presentation identity.
+- Reusable prop archetypes, per-instance visual overrides and a shared palette
+  for live tower/base models and 2D sprites, with asset/collision fallbacks.
+- Contributor map-tuning documentation and native/UDP verification artifacts.
+
+### Changed
+- Share Verdant layout coordinates between client and server and reject a
+  mismatched map geometry instead of discarding static collision.
+- Preserve the existing eight-structure layout and gameplay numbers by default.
+- Clip player movement against live structures and measure minion siege reach
+  on the ground plane so valid lateral tower adjustments remain attackable.
+
 ## [0.19.0-rc.4] - 2026-09-12
 
 ### Added

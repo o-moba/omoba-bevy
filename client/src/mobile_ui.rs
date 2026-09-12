@@ -686,12 +686,12 @@ fn adapt_phone_layout(
             "ShopSummary" => text.0 = text.0.replace("click an item", "tap an item"),
             "HelpDismissLabel" => text.0 = "Got it — play".into(),
             "MatchStatusText" => text.0 = text.0
-                .replace("destroy an enemy lane tower - the enemy base is protected.", "Break a lane tower to unlock the enemy base.")
+                .replace("clear all towers in one lane to expose the enemy base.", "Clear a lane's towers to unlock the base.")
                 .replace("Select a foe  /  P shop  /  F1 help", "Tap ATTACK · Drag to lock")
                 .replace("Target locked — basic attack or Q/W/E/R", "Target locked · ATTACK or Q/W/E/R"),
             "ShopFooter" => text.0 = "Buy at your base. Items survive respawn and reset next round.".into(),
             name if name.starts_with("ShopDescription-") => text.0 = text.0.replace("maximum HP", "max HP"),
-            "HelpBody" => text.0 = "YOUR FIRST MATCH\n\nMOVE: Drag the left stick. Release to stop.\nATTACK: Tap the large right button; hold to repeat. No mana needed.\nTARGET: Drag ATTACK to extend the reticle. Release on a highlighted foe to lock. Drag to X to cancel.\nSKILLS: Q/W/E/R surround ATTACK. Tap to use the locked target, or drag to aim.\nGROW: Abilities unlock as you level. Tap + to spend skill points.\nWIN: Follow your minions, break a lane tower, then destroy the enemy base.\nRECOVER: Return to your base to shop. If defeated, wait to respawn.\nLOOK: Tap the minimap to scout. Move the stick to follow your hero again.\n\nThe match continues while menus are open. Stay connected for the next round.".into(),
+            "HelpBody" => text.0 = "YOUR FIRST MATCH\n\nMOVE: Drag the left stick. Release to stop.\nATTACK: Tap the large right button; hold to repeat. No mana needed.\nTARGET: Drag ATTACK to extend the reticle. Release on a highlighted foe to lock. Drag to X to cancel.\nSKILLS: Q/W/E/R surround ATTACK. Tap to use the locked target, or drag to aim.\nGROW: Abilities unlock as you level. Tap + to spend skill points.\nWIN: Follow your minions, clear all towers in one lane, then destroy the enemy base.\nRECOVER: Return to your base to shop. If defeated, wait to respawn.\nLOOK: Tap the minimap to scout. Move the stick to follow your hero again.\n\nThe match continues while menus are open. Stay connected for the next round.".into(),
             "GameStateLabel" => text.0 = text.0.replace("Escape: settings or exit game.", "MENU: settings or exit game."),
             _ => {}
         }

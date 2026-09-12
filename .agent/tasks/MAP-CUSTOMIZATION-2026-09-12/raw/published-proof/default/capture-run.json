@@ -1,0 +1,146 @@
+{
+  "scenario": "map",
+  "mode": "models3d",
+  "pixels": [
+    1280,
+    720
+  ],
+  "binary_sha256": {
+    "client": "f3a2f17dff39e7d83f4ca446cb385134032b2f14077470cc09f5785028c3c4bd",
+    "server": "58aa13cb2ceec4abb51c1b159ab0e801005fedbf525b18ba400a42d670b035ca"
+  },
+  "platform": "macOS-26.6-arm64-arm-64bit",
+  "requested_profile": "desktop",
+  "map_config_sha256": "693072b51116f112160e07da6df7c33a29c61661add433f27cc32ac26dfb8839",
+  "map_profile": "verdant_default",
+  "geometry_id": "verdant-confluence-v1",
+  "expected_structure_count": 8,
+  "verifier_sha256": "c9abc5154ab3435198d881f999f391aa137c3928f5ec9376cd4b97768718cd02",
+  "scripted_camera": true,
+  "scripted_cosmetic_registry": true,
+  "synthetic_structures": false,
+  "physical_device_verified": false,
+  "manual_interaction_verified": false,
+  "client_exit_code": 0,
+  "timed_out": false,
+  "verification": {
+    "pass": true,
+    "errors": [],
+    "ui_profile": {
+      "pass": true,
+      "requested_profile": "desktop",
+      "requested_touch_controls": false,
+      "actual_profile": "desktop",
+      "expected_stages": 5,
+      "stages": [
+        {
+          "stage": 0,
+          "file": "01-map-overview.png",
+          "mobile_controls": false,
+          "actual_profile": "desktop"
+        },
+        {
+          "stage": 1,
+          "file": "02-prop-a.png",
+          "mobile_controls": false,
+          "actual_profile": "desktop"
+        },
+        {
+          "stage": 2,
+          "file": "03-prop-b.png",
+          "mobile_controls": false,
+          "actual_profile": "desktop"
+        },
+        {
+          "stage": 3,
+          "file": "04-prop-a-restored.png",
+          "mobile_controls": false,
+          "actual_profile": "desktop"
+        },
+        {
+          "stage": 4,
+          "file": "05-prop-b-repeated.png",
+          "mobile_controls": false,
+          "actual_profile": "desktop"
+        }
+      ],
+      "errors": []
+    },
+    "matched_receipts": [
+      {
+        "stage": 0,
+        "snapshot_tick": 39,
+        "structure_count": 8
+      },
+      {
+        "stage": 1,
+        "snapshot_tick": 43,
+        "structure_count": 8
+      },
+      {
+        "stage": 2,
+        "snapshot_tick": 45,
+        "structure_count": 8
+      },
+      {
+        "stage": 3,
+        "snapshot_tick": 48,
+        "structure_count": 8
+      },
+      {
+        "stage": 4,
+        "snapshot_tick": 51,
+        "structure_count": 8
+      }
+    ],
+    "observer_snapshots": 52,
+    "physical_device_verified": false,
+    "geometry_scope": "actual inherited-visible mesh buffers; screenshot inspection separately confirms framing"
+  },
+  "images": {
+    "01-map-overview.png": {
+      "bytes": 746843,
+      "sha256": "23579e9893780954789c3ffeb1fa7f56764633bc452578f1c303a78d2adc0361",
+      "pixels": [
+        1280,
+        720
+      ]
+    },
+    "02-prop-a.png": {
+      "bytes": 806894,
+      "sha256": "27dead645c8e73fa96724d452265fe6b8cb4e78cb1448f80f56769602920efff",
+      "pixels": [
+        1280,
+        720
+      ]
+    },
+    "03-prop-b.png": {
+      "bytes": 808499,
+      "sha256": "b7c6c5e30926dbf81895e6894dced357983a10ff77dc0b47ba42ccf9c65c3329",
+      "pixels": [
+        1280,
+        720
+      ]
+    },
+    "04-prop-a-restored.png": {
+      "bytes": 806894,
+      "sha256": "27dead645c8e73fa96724d452265fe6b8cb4e78cb1448f80f56769602920efff",
+      "pixels": [
+        1280,
+        720
+      ]
+    },
+    "05-prop-b-repeated.png": {
+      "bytes": 808499,
+      "sha256": "b7c6c5e30926dbf81895e6894dced357983a10ff77dc0b47ba42ccf9c65c3329",
+      "pixels": [
+        1280,
+        720
+      ]
+    }
+  },
+  "binary_unchanged": true,
+  "runtime_errors": [],
+  "elapsed_seconds": 4.461712917,
+  "capture_pass": true
+}
