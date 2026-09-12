@@ -1,8 +1,19 @@
 # Feature Inventory
 
-Canonical version: `0.19.0-rc.4`
+Canonical version: `0.19.0-rc.5`
 
 ## Current Playable Surface
+
+- **Configurable map objects:** a validated server map profile supplies stable
+  tower identities, lane positions/counts and HP/range/damage/cooldown settings.
+  Ordered lane tiers control siege protection and base access. The profile is
+  pinned at startup and reused on rematch; live objects drive both client modes
+  and the minimap. Existing Verdant terrain/collision stays versioned and fixed.
+  See [map customization](map-customization.md).
+- **Reusable map presentation:** authored prop archetypes and stable instances
+  support packaged model/palette overrides; solid replacements preserve the
+  collision footprint. Live tower/base models and 2D sprite choices use the
+  same presentation registry. Cosmetic settings do not alter server rules.
 
 - **Combat presentation and skins:** Ranger arrows, Mage arcane bolts, Cleric
   holy bolts and Warrior crescents, with confirmed damage numbers and impacts.

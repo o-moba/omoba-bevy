@@ -12,8 +12,10 @@
 
 use std::time::{Duration, Instant};
 
+use harness::navigation::BotNavigator;
 use harness::protocol::PlayerState;
 use harness::{Bot, Character, HeroClass, NeutralCampType, ServerProcess, Team};
+use shared::navigation::Disc;
 
 // --- Constants mirrored from server balance (source of truth in
 // `server/src/balance.rs`). Used only to shape inputs and pick thresholds. ---
@@ -42,12 +44,13 @@ fn xz_distance(a: &PlayerState, b: &PlayerState) -> f32 {
 }
 
 /// Brings two enemy bots from their far apart spawns to within cast range by
-/// walking both toward the map origin (with the debug speed boost so it is
-/// quick). Reads positions from `observer`'s snapshots. Panics on timeout.
+/// following routes toward the map origin (with the debug speed boost so it
+/// is quick). Authoritative positions and live structures come from snapshots.
 fn walk_into_cast_range(observer: &mut Bot, mover: &Bot, observer_id: u64, mover_id: u64) {
     observer.set_speed_boost(true);
     mover.set_speed_boost(true);
 
+    let mut routes: [BotNavigator; 2] = Default::default();
     let target_gap = SHORTEST_Q_CAST_RANGE - 4.0; // comfortably inside range
     let deadline = Instant::now() + Duration::from_secs(40);
 
@@ -57,11 +60,10 @@ fn walk_into_cast_range(observer: &mut Bot, mover: &Bot, observer_id: u64, mover
             "players never converged into cast range"
         );
 
-        // Drive both toward the origin; the server clamps each step.
-        observer.send_transform(0.0, GROUND_Y, 0.0, 0.0);
-        mover.send_transform(0.0, GROUND_Y, 0.0, 0.0);
-
-        let Some(packet) = observer.recv_snapshot(Instant::now() + POLL_TIMEOUT) else {
+        observer.ping();
+        mover.ping();
+        let Some(packet) = observer.recv_snapshot(deadline.min(Instant::now() + POLL_TIMEOUT))
+        else {
             continue;
         };
         let (Some(a), Some(b)) = (packet.player(observer_id), packet.player(mover_id)) else {
@@ -69,6 +71,25 @@ fn walk_into_cast_range(observer: &mut Bot, mover: &Bot, observer_id: u64, mover
         };
         if xz_distance(a, b) <= target_gap {
             break;
+        }
+        let structures: Vec<_> = packet
+            .structures()
+            .iter()
+            .filter(|s| s.hp > 0.0)
+            .map(|s| Disc {
+                center: [s.x, s.z],
+                radius: if s.kind == "base_tower" { 3.2 } else { 1.3 },
+            })
+            .collect();
+        for ((route, bot), state) in routes.iter_mut().zip([&*observer, mover]).zip([a, b]) {
+            if let Some(next) = route.next([state.x, state.z], [0.0, 0.0], &structures) {
+                bot.send_transform(
+                    next[0],
+                    GROUND_Y,
+                    next[1],
+                    (next[0] - state.x).atan2(next[1] - state.z),
+                );
+            }
         }
     }
 }

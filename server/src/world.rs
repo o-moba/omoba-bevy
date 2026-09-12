@@ -1,53 +1,105 @@
 use super::*;
 
-pub(crate) fn build_structures(layout: &MapLayoutState) -> HashMap<u64, Structure> {
-    let mut structures = HashMap::new();
-    let mut next_id: u64 = 1;
-
-    for lane in [Lane::Top, Lane::Mid, Lane::Bot] {
-        let lane_points = lane_control_points(layout, lane);
-        let green_tower = sample_polyline_position(&lane_points, 0.30);
-        let blue_tower = sample_polyline_position(&lane_points, 0.70);
-        add_structure(
-            &mut structures,
-            &mut next_id,
-            StructureKind::Tower,
-            StructureRole::LaneTower { lane },
-            Team::Green,
-            Vec3f::new(green_tower.x, 3.0, green_tower.z),
-        );
-        add_structure(
-            &mut structures,
-            &mut next_id,
-            StructureKind::Tower,
-            StructureRole::LaneTower { lane },
-            Team::Blue,
-            Vec3f::new(blue_tower.x, 3.0, blue_tower.z),
-        );
-    }
-
-    let home_nexus = Vec3f::new(layout.home.x, 4.0, layout.home.z);
-    let away_nexus = Vec3f::new(layout.away.x, 4.0, layout.away.z);
-    add_structure(
-        &mut structures,
-        &mut next_id,
-        StructureKind::BaseTower,
-        StructureRole::BaseTower,
-        Team::Green,
-        home_nexus,
-    );
-    add_structure(
-        &mut structures,
-        &mut next_id,
-        StructureKind::BaseTower,
-        StructureRole::BaseTower,
-        Team::Blue,
-        away_nexus,
-    );
-
-    structures
+#[cfg(test)]
+pub(crate) fn build_structures(_layout: &MapLayoutState) -> HashMap<u64, Structure> {
+    build_configured_structures(&shared::map::ResolvedMap::default())
 }
 
+pub(crate) fn load_map_config(
+    path: Option<&std::path::Path>,
+) -> io::Result<shared::map::ResolvedMap> {
+    let Some(path) = path else {
+        return Ok(shared::map::ResolvedMap::default());
+    };
+    use std::io::Read;
+    let mut source = String::new();
+    std::fs::File::open(path)
+        .and_then(|file| {
+            file.take(shared::map::MAX_CONFIG_BYTES as u64 + 1)
+                .read_to_string(&mut source)
+        })
+        .map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("OMOBA_MAP_CONFIG {}: {error}", path.display()),
+            )
+        })?;
+    shared::map::MapDefinition::from_json(&source)
+        .and_then(|map| map.resolve())
+        .map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("OMOBA_MAP_CONFIG {}: {error}", path.display()),
+            )
+        })
+}
+
+pub(crate) fn build_configured_structures(
+    config: &shared::map::ResolvedMap,
+) -> HashMap<u64, Structure> {
+    config
+        .structures
+        .iter()
+        .map(|item| {
+            let team = match item.team {
+                shared::map::Team::Green => Team::Green,
+                shared::map::Team::Blue => Team::Blue,
+            };
+            let (kind, role, y) = match item.lane {
+                Some(lane) => (
+                    StructureKind::Tower,
+                    StructureRole::LaneTower {
+                        lane: server_lane(lane),
+                    },
+                    3.0,
+                ),
+                None => (StructureKind::BaseTower, StructureRole::BaseTower, 4.0),
+            };
+            (
+                item.id,
+                Structure {
+                    state: StructureState {
+                        protected: false,
+                        id: item.id,
+                        kind,
+                        team,
+                        map_key: item.key.clone(),
+                        visual_profile: item.visual_profile.clone(),
+                        lane: item.lane,
+                        tier: item.tier,
+                        x: item.position[0],
+                        y,
+                        z: item.position[1],
+                        hp: item.stats.max_hp,
+                        max_hp: item.stats.max_hp,
+                    },
+                    role,
+                    last_attack_at: None,
+                    attack_range: item.stats.attack_range,
+                    attack_damage: item.stats.attack_damage,
+                    attack_cooldown: Duration::from_millis(item.stats.attack_cooldown_ms),
+                },
+            )
+        })
+        .collect()
+}
+
+fn server_lane(lane: shared::map::Lane) -> Lane {
+    match lane {
+        shared::map::Lane::Top => Lane::Top,
+        shared::map::Lane::Mid => Lane::Mid,
+        shared::map::Lane::Bot => Lane::Bot,
+    }
+}
+fn shared_lane(lane: Lane) -> shared::map::Lane {
+    match lane {
+        Lane::Top => shared::map::Lane::Top,
+        Lane::Mid => shared::map::Lane::Mid,
+        Lane::Bot => shared::map::Lane::Bot,
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn add_structure(
     structures: &mut HashMap<u64, Structure>,
     next_id: &mut u64,
@@ -72,6 +124,13 @@ pub(crate) fn add_structure(
         Structure {
             state: StructureState {
                 protected: false,
+                map_key: format!("test_{id}"),
+                visual_profile: String::new(),
+                lane: match role {
+                    StructureRole::LaneTower { lane } => Some(shared_lane(lane)),
+                    StructureRole::BaseTower => None,
+                },
+                tier: 0,
                 id,
                 kind,
                 team,
@@ -91,30 +150,22 @@ pub(crate) fn add_structure(
 }
 
 pub(crate) fn build_map_layout() -> MapLayoutState {
-    let inner_side = TARGET_BASE_DISTANCE / 2.0_f32.sqrt();
-    let half_inner_side = inner_side * 0.5;
-    let base_padding = BASE_PAD_SIZE * 0.5 + BASE_EDGE_MARGIN;
-    let half_map_size = half_inner_side + base_padding;
-    let home = Vec3f::new(-half_inner_side, 0.0, -half_inner_side);
-    let away = Vec3f::new(half_inner_side, 0.0, half_inner_side);
-
-    let lane_edge_offset = LANE_EDGE_PADDING + LANE_WIDTH * 0.5;
-    let left_x = -half_map_size + lane_edge_offset;
-    let right_x = half_map_size - lane_edge_offset;
-    let top_z = half_map_size - lane_edge_offset;
-    let bottom_z = -half_map_size + lane_edge_offset;
-
+    let g = shared::map::geometry();
     MapLayoutState {
-        home,
-        away,
-        min_x: -half_map_size,
-        max_x: half_map_size,
-        min_z: -half_map_size,
-        max_z: half_map_size,
-        left_x,
-        right_x,
-        top_z,
-        bottom_z,
+        home: Vec3f::new(g.home[0], 0.0, g.home[1]),
+        away: Vec3f::new(g.away[0], 0.0, g.away[1]),
+        min_x: g.bounds.min[0],
+        max_x: g.bounds.max[0],
+        min_z: g.bounds.min[1],
+        max_z: g.bounds.max[1],
+        #[cfg(test)]
+        left_x: g.left_x,
+        #[cfg(test)]
+        right_x: g.right_x,
+        #[cfg(test)]
+        top_z: g.top_z,
+        #[cfg(test)]
+        bottom_z: g.bottom_z,
     }
 }
 
@@ -153,72 +204,19 @@ pub(crate) fn spawn_position_for_team_from_base(
     )
 }
 
-pub(crate) fn lane_control_points(layout: &MapLayoutState, lane: Lane) -> Vec<Vec3f> {
-    match lane {
-        Lane::Mid => vec![layout.home, layout.away],
-        Lane::Top => vec![
-            layout.home,
-            Vec3f::new(layout.left_x, 0.0, layout.home.z),
-            Vec3f::new(layout.left_x, 0.0, layout.top_z),
-            Vec3f::new(layout.right_x, 0.0, layout.top_z),
-            Vec3f::new(layout.away.x, 0.0, layout.top_z),
-            layout.away,
-        ],
-        Lane::Bot => vec![
-            layout.home,
-            Vec3f::new(layout.home.x, 0.0, layout.bottom_z),
-            Vec3f::new(layout.left_x, 0.0, layout.bottom_z),
-            Vec3f::new(layout.right_x, 0.0, layout.bottom_z),
-            Vec3f::new(layout.right_x, 0.0, layout.away.z),
-            layout.away,
-        ],
-    }
+#[cfg(test)]
+pub(crate) fn lane_control_points(_layout: &MapLayoutState, lane: Lane) -> Vec<Vec3f> {
+    shared::map::lane_points(shared_lane(lane))
+        .into_iter()
+        .map(|point| Vec3f::new(point[0], 0.0, point[1]))
+        .collect()
 }
 
-pub(crate) fn sample_polyline_position(points: &[Vec3f], t: f32) -> Vec3f {
-    if points.len() <= 1 {
-        return points.first().copied().unwrap_or(Vec3f::new(0.0, 0.0, 0.0));
-    }
-
-    let segment_lengths = points
-        .windows(2)
-        .map(|pair| pair[0].distance(pair[1]))
-        .collect::<Vec<_>>();
-    let total_length: f32 = segment_lengths.iter().sum();
-    if total_length <= 0.0001 {
-        return points[0];
-    }
-
-    let mut remaining = total_length * t.clamp(0.0, 1.0);
-    for (index, length) in segment_lengths.into_iter().enumerate() {
-        if remaining <= length {
-            let local_t = if length <= 0.0001 {
-                0.0
-            } else {
-                remaining / length
-            };
-            return points[index].lerp(points[index + 1], local_t);
-        }
-        remaining -= length;
-    }
-
-    points.last().copied().unwrap_or(points[0])
-}
-
-pub(crate) fn build_minion_path(layout: &MapLayoutState, lane: Lane, team: Team) -> Vec<Vec3f> {
-    let mut points = lane_control_points(layout, lane);
-    // The authored outer road extends past one base entrance into a dead end.
-    // March straight from that entrance along the lane instead of visiting the
-    // corner and retracing the same segment. Keep the authored road/tower
-    // geometry intact; only the minions' ordered destinations omit this spur.
-    let unused_corner = match lane {
-        Lane::Top => Some((layout.right_x, layout.top_z)),
-        Lane::Bot => Some((layout.left_x, layout.bottom_z)),
-        Lane::Mid => None,
-    };
-    if let Some((x, z)) = unused_corner {
-        points.retain(|point| point.x != x || point.z != z);
-    }
+pub(crate) fn build_minion_path(_layout: &MapLayoutState, lane: Lane, team: Team) -> Vec<Vec3f> {
+    let mut points: Vec<Vec3f> = shared::map::minion_lane_points(shared_lane(lane))
+        .into_iter()
+        .map(|point| Vec3f::new(point[0], 0.0, point[1]))
+        .collect();
     if team == Team::Blue {
         points.reverse();
     }

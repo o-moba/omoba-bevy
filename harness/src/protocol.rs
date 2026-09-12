@@ -308,6 +308,18 @@ pub struct ProjectileState {
 #[derive(Debug, Clone, Deserialize)]
 pub struct StructureState {
     #[serde(default)]
+    pub lane: Option<String>,
+    #[serde(default)]
+    pub tier: u8,
+    #[serde(default)]
+    pub map_key: String,
+    #[serde(default)]
+    pub visual_profile: String,
+    #[serde(default)]
+    pub max_hp: f32,
+    #[serde(default)]
+    pub y: f32,
+    #[serde(default)]
     pub kind: String,
     #[serde(default)]
     pub protected: bool,
@@ -355,6 +367,10 @@ pub enum ServerPacket {
         #[serde(flatten, default)]
         meta: shared::protocol::SnapshotMeta,
         #[serde(default)]
+        geometry_id: String,
+        #[serde(default)]
+        map_profile: String,
+        #[serde(default)]
         join_error: Option<shared::protocol::JoinRejection>,
         your_id: u64,
         #[serde(default)]
@@ -382,6 +398,17 @@ pub enum ServerPacket {
 }
 
 impl ServerPacket {
+    pub fn geometry_id(&self) -> &str {
+        match self {
+            Self::Snapshot { geometry_id, .. } => geometry_id,
+        }
+    }
+    pub fn map_profile(&self) -> &str {
+        match self {
+            Self::Snapshot { map_profile, .. } => map_profile,
+        }
+    }
+
     pub fn combat_events(&self) -> &[shared::combat::CombatEvent] {
         match self {
             Self::Snapshot { combat_events, .. } => combat_events,

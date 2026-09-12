@@ -1,0 +1,89 @@
+{
+  "scenario": "map",
+  "mode": "sprite2d",
+  "pixels": [
+    1280,
+    720
+  ],
+  "binary_sha256": {
+    "client": "f3a2f17dff39e7d83f4ca446cb385134032b2f14077470cc09f5785028c3c4bd",
+    "server": "58aa13cb2ceec4abb51c1b159ab0e801005fedbf525b18ba400a42d670b035ca"
+  },
+  "platform": "macOS-26.6-arm64-arm-64bit",
+  "requested_profile": "desktop",
+  "map_config_sha256": "f2e3e4c9b4ff4a91a3f69911da4156c052af2d773ab6de18a07309a589e66819",
+  "map_profile": "verdant_two_tier_example",
+  "geometry_id": "verdant-confluence-v1",
+  "expected_structure_count": 10,
+  "verifier_sha256": "c9abc5154ab3435198d881f999f391aa137c3928f5ec9376cd4b97768718cd02",
+  "scripted_camera": true,
+  "scripted_cosmetic_registry": false,
+  "synthetic_structures": false,
+  "physical_device_verified": false,
+  "manual_interaction_verified": false,
+  "client_exit_code": 0,
+  "timed_out": false,
+  "verification": {
+    "pass": true,
+    "errors": [],
+    "ui_profile": {
+      "pass": true,
+      "requested_profile": "desktop",
+      "requested_touch_controls": false,
+      "actual_profile": "desktop",
+      "expected_stages": 2,
+      "stages": [
+        {
+          "stage": 0,
+          "file": "01-map-overview.png",
+          "mobile_controls": false,
+          "actual_profile": "desktop"
+        },
+        {
+          "stage": 1,
+          "file": "02-tower-detail.png",
+          "mobile_controls": false,
+          "actual_profile": "desktop"
+        }
+      ],
+      "errors": []
+    },
+    "matched_receipts": [
+      {
+        "stage": 0,
+        "snapshot_tick": 13,
+        "structure_count": 10
+      },
+      {
+        "stage": 1,
+        "snapshot_tick": 15,
+        "structure_count": 10
+      }
+    ],
+    "observer_snapshots": 17,
+    "physical_device_verified": false,
+    "geometry_scope": "actual inherited-visible mesh buffers; screenshot inspection separately confirms framing"
+  },
+  "images": {
+    "01-map-overview.png": {
+      "bytes": 1046335,
+      "sha256": "60e1a436610827ff32822189cf267f47bab6d27ef3c025f136ce4eba6a740890",
+      "pixels": [
+        1280,
+        720
+      ]
+    },
+    "02-tower-detail.png": {
+      "bytes": 1552045,
+      "sha256": "3c3ae62ca3834ac357a45eb9b02b1b83defa7aa3fbdaca73f1a5a9a640b811b5",
+      "pixels": [
+        1280,
+        720
+      ]
+    }
+  },
+  "binary_unchanged": true,
+  "runtime_errors": [],
+  "elapsed_seconds": 1.253242542,
+  "capture_pass": true
+}

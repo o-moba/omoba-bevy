@@ -1,0 +1,756 @@
+{
+  "captures": [
+    {
+      "file": "01-map-overview.png",
+      "geometry_id": "verdant-confluence-v1",
+      "map_profile": "verdant_two_tier_example",
+      "map_visual_cache_counts": [
+        0,
+        0
+      ],
+      "match_id": 1,
+      "mesh_assets": 7,
+      "mobile_controls": false,
+      "nodes": [
+        {
+          "name": "MobileJoystick",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAttack",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-0",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-1",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-2",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-3",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        }
+      ],
+      "pixels": [
+        1280,
+        720
+      ],
+      "prop_instances": 0,
+      "ready_static_props": 0,
+      "scene_roots": 0,
+      "selected_prop": null,
+      "server_epoch": 1789220018822539001,
+      "snapshot_tick": 13,
+      "stage": 0,
+      "static_props_by_archetype": {},
+      "structures": [
+        {
+          "hp": 240.0,
+          "id": 1,
+          "kind": "tower",
+          "lane": "top",
+          "map_key": "top_green_outer",
+          "max_hp": 240.0,
+          "model_geometry": [],
+          "position": [
+            -96.54951477050781,
+            3.0,
+            29.509902954101562
+          ],
+          "protected": false,
+          "sprite_geometry": [
+            {
+              "entity": "3496v0",
+              "owner": "3414v0",
+              "profile_key": "tower_green",
+              "sprite_key": "green_tower",
+              "visible_drawables": 2
+            }
+          ],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 240.0,
+          "id": 2,
+          "kind": "tower",
+          "lane": "top",
+          "map_key": "top_blue_outer",
+          "max_hp": 240.0,
+          "model_geometry": [],
+          "position": [
+            4.490104675292969,
+            3.0,
+            96.54951477050781
+          ],
+          "protected": false,
+          "sprite_geometry": [
+            {
+              "entity": "3499v0",
+              "owner": "3415v0",
+              "profile_key": "tower_blue",
+              "sprite_key": "blue_tower",
+              "visible_drawables": 2
+            }
+          ],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "tower_blue"
+        },
+        {
+          "hp": 300.0,
+          "id": 3,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_green_outer",
+          "max_hp": 300.0,
+          "model_geometry": [],
+          "position": [
+            -22.273860931396484,
+            3.0,
+            -22.273860931396484
+          ],
+          "protected": false,
+          "sprite_geometry": [
+            {
+              "entity": "3502v0",
+              "owner": "3416v0",
+              "profile_key": "tower_green",
+              "sprite_key": "green_tower",
+              "visible_drawables": 2
+            }
+          ],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 300.0,
+          "id": 4,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_blue_outer",
+          "max_hp": 300.0,
+          "model_geometry": [],
+          "position": [
+            22.27386474609375,
+            3.0,
+            22.27386474609375
+          ],
+          "protected": false,
+          "sprite_geometry": [
+            {
+              "entity": "3505v0",
+              "owner": "3417v0",
+              "profile_key": "tower_blue",
+              "sprite_key": "blue_tower",
+              "visible_drawables": 2
+            }
+          ],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "tower_blue"
+        },
+        {
+          "hp": 240.0,
+          "id": 5,
+          "kind": "tower",
+          "lane": "bot",
+          "map_key": "bot_green_outer",
+          "max_hp": 240.0,
+          "model_geometry": [],
+          "position": [
+            -4.490089416503906,
+            3.0,
+            -96.54951477050781
+          ],
+          "protected": false,
+          "sprite_geometry": [
+            {
+              "entity": "3508v0",
+              "owner": "3418v0",
+              "profile_key": "tower_green",
+              "sprite_key": "green_tower",
+              "visible_drawables": 2
+            }
+          ],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 240.0,
+          "id": 6,
+          "kind": "tower",
+          "lane": "bot",
+          "map_key": "bot_blue_outer",
+          "max_hp": 240.0,
+          "model_geometry": [],
+          "position": [
+            96.54951477050781,
+            3.0,
+            -29.509902954101562
+          ],
+          "protected": false,
+          "sprite_geometry": [
+            {
+              "entity": "3511v0",
+              "owner": "3419v0",
+              "profile_key": "tower_blue",
+              "sprite_key": "blue_tower",
+              "visible_drawables": 2
+            }
+          ],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "tower_blue"
+        },
+        {
+          "hp": 650.0,
+          "id": 7,
+          "kind": "base_tower",
+          "lane": null,
+          "map_key": "base_green",
+          "max_hp": 650.0,
+          "model_geometry": [],
+          "position": [
+            -79.54951477050781,
+            4.0,
+            -79.54951477050781
+          ],
+          "protected": true,
+          "sprite_geometry": [
+            {
+              "entity": "3514v0",
+              "owner": "3420v0",
+              "profile_key": "base_green",
+              "sprite_key": "green_base_tower",
+              "visible_drawables": 2
+            }
+          ],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "base_green"
+        },
+        {
+          "hp": 650.0,
+          "id": 8,
+          "kind": "base_tower",
+          "lane": null,
+          "map_key": "base_blue",
+          "max_hp": 650.0,
+          "model_geometry": [],
+          "position": [
+            79.54951477050781,
+            4.0,
+            79.54951477050781
+          ],
+          "protected": true,
+          "sprite_geometry": [
+            {
+              "entity": "3517v0",
+              "owner": "3421v0",
+              "profile_key": "base_blue",
+              "sprite_key": "blue_base_tower",
+              "visible_drawables": 2
+            }
+          ],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "base_blue"
+        },
+        {
+          "hp": 420.0,
+          "id": 9,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_green_inner",
+          "max_hp": 420.0,
+          "model_geometry": [],
+          "position": [
+            -44.5477294921875,
+            3.0,
+            -44.5477294921875
+          ],
+          "protected": true,
+          "sprite_geometry": [
+            {
+              "entity": "3520v0",
+              "owner": "3422v0",
+              "profile_key": "tower_green",
+              "sprite_key": "green_tower",
+              "visible_drawables": 2
+            }
+          ],
+          "team": "green",
+          "tier": 1,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 420.0,
+          "id": 10,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_blue_inner",
+          "max_hp": 420.0,
+          "model_geometry": [],
+          "position": [
+            44.54772186279297,
+            3.0,
+            44.54772186279297
+          ],
+          "protected": true,
+          "sprite_geometry": [
+            {
+              "entity": "3523v0",
+              "owner": "3423v0",
+              "profile_key": "tower_blue",
+              "sprite_key": "blue_tower",
+              "visible_drawables": 2
+            }
+          ],
+          "team": "blue",
+          "tier": 1,
+          "visual_profile": "tower_blue"
+        }
+      ],
+      "visual_mode": "Sprite2d",
+      "world_2d": {
+        "camera_far": 1000.0,
+        "camera_near": -1000.0,
+        "camera_position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "ground_tiles_on_screen": 3025,
+        "ground_z": [
+          -100.0,
+          -80.0
+        ],
+        "loaded_atlas_tiles": 3025,
+        "static_sprites": 3065,
+        "tile_count": 3025,
+        "tiles_inside_depth": 3025
+      }
+    },
+    {
+      "file": "02-tower-detail.png",
+      "geometry_id": "verdant-confluence-v1",
+      "map_profile": "verdant_two_tier_example",
+      "map_visual_cache_counts": [
+        0,
+        0
+      ],
+      "match_id": 1,
+      "mesh_assets": 7,
+      "mobile_controls": false,
+      "nodes": [
+        {
+          "name": "MobileJoystick",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAttack",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-0",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-1",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-2",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-3",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        }
+      ],
+      "pixels": [
+        1280,
+        720
+      ],
+      "prop_instances": 0,
+      "ready_static_props": 0,
+      "scene_roots": 0,
+      "selected_prop": null,
+      "server_epoch": 1789220018822539001,
+      "snapshot_tick": 15,
+      "stage": 1,
+      "static_props_by_archetype": {},
+      "structures": [
+        {
+          "hp": 240.0,
+          "id": 1,
+          "kind": "tower",
+          "lane": "top",
+          "map_key": "top_green_outer",
+          "max_hp": 240.0,
+          "model_geometry": [],
+          "position": [
+            -96.54951477050781,
+            3.0,
+            29.509902954101562
+          ],
+          "protected": false,
+          "sprite_geometry": [
+            {
+              "entity": "3496v0",
+              "owner": "3414v0",
+              "profile_key": "tower_green",
+              "sprite_key": "green_tower",
+              "visible_drawables": 2
+            }
+          ],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 240.0,
+          "id": 2,
+          "kind": "tower",
+          "lane": "top",
+          "map_key": "top_blue_outer",
+          "max_hp": 240.0,
+          "model_geometry": [],
+          "position": [
+            4.490104675292969,
+            3.0,
+            96.54951477050781
+          ],
+          "protected": false,
+          "sprite_geometry": [
+            {
+              "entity": "3499v0",
+              "owner": "3415v0",
+              "profile_key": "tower_blue",
+              "sprite_key": "blue_tower",
+              "visible_drawables": 2
+            }
+          ],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "tower_blue"
+        },
+        {
+          "hp": 300.0,
+          "id": 3,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_green_outer",
+          "max_hp": 300.0,
+          "model_geometry": [],
+          "position": [
+            -22.273860931396484,
+            3.0,
+            -22.273860931396484
+          ],
+          "protected": false,
+          "sprite_geometry": [
+            {
+              "entity": "3502v0",
+              "owner": "3416v0",
+              "profile_key": "tower_green",
+              "sprite_key": "green_tower",
+              "visible_drawables": 2
+            }
+          ],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 300.0,
+          "id": 4,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_blue_outer",
+          "max_hp": 300.0,
+          "model_geometry": [],
+          "position": [
+            22.27386474609375,
+            3.0,
+            22.27386474609375
+          ],
+          "protected": false,
+          "sprite_geometry": [
+            {
+              "entity": "3505v0",
+              "owner": "3417v0",
+              "profile_key": "tower_blue",
+              "sprite_key": "blue_tower",
+              "visible_drawables": 2
+            }
+          ],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "tower_blue"
+        },
+        {
+          "hp": 240.0,
+          "id": 5,
+          "kind": "tower",
+          "lane": "bot",
+          "map_key": "bot_green_outer",
+          "max_hp": 240.0,
+          "model_geometry": [],
+          "position": [
+            -4.490089416503906,
+            3.0,
+            -96.54951477050781
+          ],
+          "protected": false,
+          "sprite_geometry": [
+            {
+              "entity": "3508v0",
+              "owner": "3418v0",
+              "profile_key": "tower_green",
+              "sprite_key": "green_tower",
+              "visible_drawables": 2
+            }
+          ],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 240.0,
+          "id": 6,
+          "kind": "tower",
+          "lane": "bot",
+          "map_key": "bot_blue_outer",
+          "max_hp": 240.0,
+          "model_geometry": [],
+          "position": [
+            96.54951477050781,
+            3.0,
+            -29.509902954101562
+          ],
+          "protected": false,
+          "sprite_geometry": [
+            {
+              "entity": "3511v0",
+              "owner": "3419v0",
+              "profile_key": "tower_blue",
+              "sprite_key": "blue_tower",
+              "visible_drawables": 2
+            }
+          ],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "tower_blue"
+        },
+        {
+          "hp": 650.0,
+          "id": 7,
+          "kind": "base_tower",
+          "lane": null,
+          "map_key": "base_green",
+          "max_hp": 650.0,
+          "model_geometry": [],
+          "position": [
+            -79.54951477050781,
+            4.0,
+            -79.54951477050781
+          ],
+          "protected": true,
+          "sprite_geometry": [
+            {
+              "entity": "3514v0",
+              "owner": "3420v0",
+              "profile_key": "base_green",
+              "sprite_key": "green_base_tower",
+              "visible_drawables": 2
+            }
+          ],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "base_green"
+        },
+        {
+          "hp": 650.0,
+          "id": 8,
+          "kind": "base_tower",
+          "lane": null,
+          "map_key": "base_blue",
+          "max_hp": 650.0,
+          "model_geometry": [],
+          "position": [
+            79.54951477050781,
+            4.0,
+            79.54951477050781
+          ],
+          "protected": true,
+          "sprite_geometry": [
+            {
+              "entity": "3517v0",
+              "owner": "3421v0",
+              "profile_key": "base_blue",
+              "sprite_key": "blue_base_tower",
+              "visible_drawables": 2
+            }
+          ],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "base_blue"
+        },
+        {
+          "hp": 420.0,
+          "id": 9,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_green_inner",
+          "max_hp": 420.0,
+          "model_geometry": [],
+          "position": [
+            -44.5477294921875,
+            3.0,
+            -44.5477294921875
+          ],
+          "protected": true,
+          "sprite_geometry": [
+            {
+              "entity": "3520v0",
+              "owner": "3422v0",
+              "profile_key": "tower_green",
+              "sprite_key": "green_tower",
+              "visible_drawables": 2
+            }
+          ],
+          "team": "green",
+          "tier": 1,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 420.0,
+          "id": 10,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_blue_inner",
+          "max_hp": 420.0,
+          "model_geometry": [],
+          "position": [
+            44.54772186279297,
+            3.0,
+            44.54772186279297
+          ],
+          "protected": true,
+          "sprite_geometry": [
+            {
+              "entity": "3523v0",
+              "owner": "3423v0",
+              "profile_key": "tower_blue",
+              "sprite_key": "blue_tower",
+              "visible_drawables": 2
+            }
+          ],
+          "team": "blue",
+          "tier": 1,
+          "visual_profile": "tower_blue"
+        }
+      ],
+      "visual_mode": "Sprite2d",
+      "world_2d": {
+        "camera_far": 1000.0,
+        "camera_near": -1000.0,
+        "camera_position": [
+          -22.273860931396484,
+          -22.273860931396484,
+          0.0
+        ],
+        "ground_tiles_on_screen": 112,
+        "ground_z": [
+          -100.0,
+          -80.0
+        ],
+        "loaded_atlas_tiles": 3025,
+        "static_sprites": 3065,
+        "tile_count": 3025,
+        "tiles_inside_depth": 3025
+      }
+    }
+  ],
+  "geometry_fingerprint": "FNV-1a over actual mesh position/index buffers; not a cryptographic asset hash",
+  "geometry_id": "verdant-confluence-v1",
+  "manual_interaction_verified": false,
+  "map_profile": "verdant_two_tier_example",
+  "map_visual_cache_counts": [
+    0,
+    0
+  ],
+  "operations": [],
+  "pass": true,
+  "physical_device_verified": false,
+  "pixels": [
+    1280,
+    720
+  ],
+  "scenario": "map",
+  "scripted_camera": true,
+  "scripted_cosmetic_registry": false,
+  "synthetic_structures": false,
+  "two_d_contract": "configured authoritative structure sprites; 3D prop model swaps are not applied",
+  "version": "0.19.0-rc.5",
+  "visual_mode": "Sprite2d"
+}

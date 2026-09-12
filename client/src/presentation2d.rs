@@ -13,12 +13,13 @@ use crate::combat::CombatStats;
 use crate::combat_visuals::{
     CombatVisualProfile, CombatVisualRegistry, ProjectilePresentationRoot, ProjectileShape,
 };
+use crate::map_visuals::MapVisualRegistry;
 use crate::maps::MapLayout;
 use crate::net::{
-    MinionBrainState, NetworkAvatar, NetworkHeroClass, NetworkMinion, NetworkMinionAction,
-    NetworkMinionBrainState, NetworkMinionKind, NetworkNeutral, NetworkPlayerId, NetworkProjectile,
-    NetworkSpriteCharacter, NetworkStructure, NeutralAiState, NeutralAiStateTag,
-    PlayerCosmeticAction, RemotePlayer, StructureKind,
+    MinionBrainState, NetworkAvatar, NetworkHeroClass, NetworkMapStructure, NetworkMinion,
+    NetworkMinionAction, NetworkMinionBrainState, NetworkMinionKind, NetworkNeutral,
+    NetworkPlayerId, NetworkProjectile, NetworkSpriteCharacter, NetworkStructure, NeutralAiState,
+    NeutralAiStateTag, PlayerCosmeticAction, RemotePlayer, StructureKind,
 };
 use crate::player::Player;
 use crate::sprite::PlayerVisualMode;
@@ -87,6 +88,16 @@ enum PresentationActorKind {
     Neutral,
     Boss,
     Projectile,
+}
+
+/// Actual 2D sprite proxy linked to its authoritative map structure.
+#[derive(Component, Debug)]
+pub struct MapStructure2dVisual {
+    pub owner: Entity,
+    pub sprite_key: String,
+    pub profile_key: String,
+    cue_team: Team,
+    cue_lane: Option<TowerLane>,
 }
 
 #[derive(Component)]
@@ -200,6 +211,7 @@ impl Plugin for Presentation2dPlugin {
                 PostUpdate,
                 (
                     attach_structure_visuals,
+                    sync_map_structure_visuals,
                     attach_minion_visuals,
                     attach_neutral_visuals,
                     attach_projectile_visuals,
@@ -590,14 +602,20 @@ fn attach_structure_visuals(
     assets: Res<Presentation2dAssets>,
     map_layout: Res<MapLayout>,
     roots: Query<
-        (Entity, &Transform, &Team, &StructureKind),
+        (
+            Entity,
+            &Transform,
+            &Team,
+            &StructureKind,
+            Option<&NetworkMapStructure>,
+        ),
         (With<NetworkStructure>, Without<PresentationActorRoot>),
     >,
 ) {
     if *mode != PlayerVisualMode::Sprite2d {
         return;
     }
-    for (entity, transform, team, kind) in &roots {
+    for (entity, transform, team, kind, identity) in &roots {
         commands
             .entity(entity)
             .remove::<Mesh3d>()
@@ -611,10 +629,119 @@ fn attach_structure_visuals(
             structure_key(*team, *kind),
         );
         if let Some((visual, world_height)) = actor {
-            let lane = (*kind == StructureKind::Tower)
-                .then(|| classify_tower_lane(&map_layout, *team, transform.translation));
+            let lane = structure_lane(identity, &map_layout, *team, *kind, transform.translation);
+            commands.entity(visual).insert(MapStructure2dVisual {
+                owner: entity,
+                sprite_key: structure_key(*team, *kind).to_owned(),
+                profile_key: String::new(),
+                cue_team: *team,
+                cue_lane: lane,
+            });
             spawn_structure_cues(&mut commands, visual, entity, *team, lane, world_height);
         }
+    }
+}
+
+fn structure_lane(
+    identity: Option<&NetworkMapStructure>,
+    layout: &MapLayout,
+    team: Team,
+    kind: StructureKind,
+    position: Vec3,
+) -> Option<TowerLane> {
+    (kind == StructureKind::Tower).then(|| {
+        identity.and_then(|identity| identity.lane).map_or_else(
+            || classify_tower_lane(layout, team, position),
+            |lane| match lane {
+                crate::net::Lane::Top => TowerLane::Top,
+                crate::net::Lane::Mid => TowerLane::Mid,
+                crate::net::Lane::Bot => TowerLane::Bot,
+            },
+        )
+    })
+}
+
+fn map_structure_profile(team: Team, kind: StructureKind) -> &'static str {
+    match (team, kind) {
+        (Team::Green, StructureKind::Tower) => "tower_green",
+        (Team::Blue, StructureKind::Tower) => "tower_blue",
+        (Team::Green, StructureKind::BaseTower) => "base_green",
+        (Team::Blue, StructureKind::BaseTower) => "base_blue",
+    }
+}
+
+fn sync_map_structure_visuals(
+    mut commands: Commands,
+    layout: Res<MapLayout>,
+    registry: Option<Res<MapVisualRegistry>>,
+    assets: Res<Presentation2dAssets>,
+    owners: Query<(
+        &Team,
+        &StructureKind,
+        &CombatStats,
+        &Transform,
+        Option<&NetworkMapStructure>,
+    )>,
+    mut visuals: Query<(
+        Entity,
+        &mut MapStructure2dVisual,
+        &mut PresentationActorVisual,
+        &mut Sprite,
+        &mut Visibility,
+    )>,
+) {
+    for (entity, mut marker, mut visual, mut sprite, mut visibility) in &mut visuals {
+        let Ok((team, kind, stats, transform, identity)) = owners.get(marker.owner) else {
+            continue;
+        };
+        let profile_key = identity
+            .map(|value| value.visual_profile.as_str())
+            .filter(|key| !key.is_empty())
+            .unwrap_or(map_structure_profile(*team, *kind));
+        let instance_key = identity.map_or("", |value| value.key.as_str());
+        let profile = registry
+            .as_ref()
+            .map(|registry| registry.resolve(profile_key, instance_key));
+        let key = profile
+            .as_ref()
+            .and_then(|profile| profile.sprite_key.as_deref())
+            .filter(|key| assets.actors.contains_key(*key))
+            .unwrap_or(structure_key(*team, *kind));
+        let previous_height = visual.world_height;
+        if marker.sprite_key != key {
+            if let Some(definition) = assets.actors.get(key) {
+                *sprite = actor_sprite(&assets, definition);
+                visual.world_height = definition.world_height;
+                visual.pivot = definition.pivot;
+                marker.sprite_key = key.to_owned();
+            }
+        }
+        let lane = structure_lane(identity, &layout, *team, *kind, transform.translation);
+        if previous_height != visual.world_height
+            || marker.cue_team != *team
+            || marker.cue_lane != lane
+        {
+            commands.entity(entity).despawn_related::<Children>();
+            spawn_structure_cues(
+                &mut commands,
+                entity,
+                marker.owner,
+                *team,
+                lane,
+                visual.world_height,
+            );
+            marker.cue_team = *team;
+            marker.cue_lane = lane;
+        }
+        marker.profile_key = profile_key.to_owned();
+        sprite.color = profile
+            .as_ref()
+            .map_or(Color::WHITE, |profile| profile.color());
+        *visibility = if stats.is_alive() {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
     }
 }
 
@@ -1565,6 +1692,7 @@ mod tests {
                 Update,
                 (
                     attach_structure_visuals,
+                    sync_map_structure_visuals,
                     attach_minion_visuals,
                     update_actor_frames,
                     sync_actor_visuals,
@@ -1572,6 +1700,127 @@ mod tests {
                     .chain(),
             );
         app
+    }
+
+    #[test]
+    fn map_structure_sprite_profile_rebinds_after_config_load_and_keeps_one_owned_proxy() {
+        let mut app = proxy_test_app(PlayerVisualMode::Sprite2d);
+        let owner = app
+            .world_mut()
+            .spawn((
+                NetworkStructure,
+                NetworkMapStructure {
+                    key: "mid_blue_outer".into(),
+                    visual_profile: "tower_blue".into(),
+                    lane: Some(crate::net::Lane::Mid),
+                    ..default()
+                },
+                Transform::from_xyz(20.0, 3.0, 20.0),
+                Team::Blue,
+                StructureKind::Tower,
+                CombatStats {
+                    hp: 300.0,
+                    max_hp: 300.0,
+                    ..default()
+                },
+            ))
+            .id();
+        app.update();
+        let mut query = app.world_mut().query::<(Entity, &MapStructure2dVisual)>();
+        let (visual, marker) = query.single(app.world()).unwrap();
+        assert_eq!(marker.owner, owner);
+        assert_eq!(marker.sprite_key, "blue_tower");
+        let original_index = app
+            .world()
+            .get::<Sprite>(visual)
+            .unwrap()
+            .texture_atlas
+            .as_ref()
+            .unwrap()
+            .index;
+        app.insert_resource(
+            MapVisualRegistry::from_json(
+                r#"{
+            "schema_version":1,
+            "archetypes":{"tower_blue":{"sprite_key":"blue_base_tower","tint":[0.6,0.8,1.0,1.0]}}
+        }"#,
+            )
+            .unwrap(),
+        );
+        app.update();
+        let marker = app.world().get::<MapStructure2dVisual>(visual).unwrap();
+        assert_eq!(marker.sprite_key, "blue_base_tower");
+        let height = app
+            .world()
+            .get::<PresentationActorVisual>(visual)
+            .unwrap()
+            .world_height;
+        let children = app.world().get::<Children>(visual).unwrap();
+        assert_eq!(children.len(), 2);
+        for child in children.iter() {
+            assert!(
+                (app.world().get::<Transform>(child).unwrap().translation.y - height * 0.54).abs()
+                    < 0.0001
+            );
+        }
+        let sprite = app.world().get::<Sprite>(visual).unwrap();
+        assert_ne!(sprite.texture_atlas.as_ref().unwrap().index, original_index);
+        assert_eq!(sprite.color, Color::srgba(0.6, 0.8, 1.0, 1.0));
+        assert_eq!(app.world().get::<CombatStats>(owner).unwrap().max_hp, 300.0);
+        app.world_mut()
+            .resource_mut::<MapVisualRegistry>()
+            .replace_json(
+                r#"{
+            "schema_version":1,"archetypes":{"tower_blue":{"sprite_key":"missing_actor"}}
+        }"#,
+            )
+            .unwrap();
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<MapStructure2dVisual>(visual)
+                .unwrap()
+                .sprite_key,
+            "blue_tower"
+        );
+        assert_eq!(
+            app.world()
+                .get::<Sprite>(visual)
+                .unwrap()
+                .texture_atlas
+                .as_ref()
+                .unwrap()
+                .index,
+            original_index
+        );
+        assert_eq!(query.iter(app.world()).count(), 1);
+        app.world_mut()
+            .get_mut::<NetworkMapStructure>(owner)
+            .unwrap()
+            .lane = Some(crate::net::Lane::Bot);
+        app.world_mut().entity_mut(owner).insert(Team::Green);
+        app.update();
+        let children = app.world().get::<Children>(visual).unwrap();
+        assert_eq!(children.len(), 2);
+        let cues: Vec<_> = children
+            .iter()
+            .filter_map(|child| {
+                app.world()
+                    .get::<PresentationActorCue>(child)
+                    .map(|cue| cue.kind)
+            })
+            .collect();
+        assert!(cues.contains(&PresentationCueKind::TeamBadge(Team::Green)));
+        assert!(cues.contains(&PresentationCueKind::LaneLabel(TowerLane::Bot)));
+        app.world_mut().get_mut::<CombatStats>(owner).unwrap().hp = 0.0;
+        app.update();
+        assert_eq!(
+            *app.world().get::<Visibility>(visual).unwrap(),
+            Visibility::Hidden
+        );
+        app.world_mut().entity_mut(owner).despawn();
+        app.update();
+        assert!(app.world().get_entity(visual).is_err());
     }
 
     #[test]

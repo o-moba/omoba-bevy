@@ -4,8 +4,9 @@ use bevy::prelude::*;
 
 use crate::combat::CombatStats;
 use crate::decor::DecorRoot;
+use crate::map_visuals::MapPropInstance;
 use crate::maps::MapLayout;
-use crate::net::{NetworkStructure, StructureKind};
+use crate::net::{NetworkMapStructure, NetworkStructure, StructureKind};
 use crate::sprite::PlayerVisualMode;
 use crate::team::Team;
 
@@ -56,6 +57,24 @@ impl VerdantAssets {
             (StructureKind::BaseTower, Team::Green) => self.sanctuary_green.clone(),
             (StructureKind::BaseTower, Team::Blue) => self.sanctuary_blue.clone(),
         }
+    }
+}
+
+pub(crate) fn default_structure_profile(kind: StructureKind, team: Team) -> &'static str {
+    match (kind, team) {
+        (StructureKind::Tower, Team::Green) => "tower_green",
+        (StructureKind::Tower, Team::Blue) => "tower_blue",
+        (StructureKind::BaseTower, Team::Green) => "base_green",
+        (StructureKind::BaseTower, Team::Blue) => "base_blue",
+    }
+}
+
+fn default_structure_model(kind: StructureKind, team: Team) -> &'static str {
+    match (kind, team) {
+        (StructureKind::Tower, Team::Green) => "verdant/watchtower_green.glb#Scene0",
+        (StructureKind::Tower, Team::Blue) => "verdant/watchtower_blue.glb#Scene0",
+        (StructureKind::BaseTower, Team::Green) => "verdant/sanctuary_green.glb#Scene0",
+        (StructureKind::BaseTower, Team::Blue) => "verdant/sanctuary_blue.glb#Scene0",
     }
 }
 
@@ -143,15 +162,17 @@ fn reconcile_structures(
             &Team,
             &CombatStats,
             Option<&AttachedStructure>,
+            Option<&NetworkMapStructure>,
         ),
         With<NetworkStructure>,
     >,
     mut visuals: Query<
         (
-            &mut SceneRoot,
+            &SceneRoot,
             &mut Transform,
             &mut Visibility,
             &VerdantStructureVisual,
+            Option<&mut MapPropInstance>,
         ),
         Without<NetworkStructure>,
     >,
@@ -160,7 +181,15 @@ fn reconcile_structures(
         return;
     }
     let Some(assets) = assets else { return };
-    for (owner, root, kind, team, stats, attached) in &roots {
+    for (owner, root, kind, team, stats, attached, config) in &roots {
+        let key = config.filter(|v| !v.key.is_empty()).map_or_else(
+            || format!("structure:{}", owner.to_bits()),
+            |v| v.key.clone(),
+        );
+        let profile = config.filter(|v| !v.visual_profile.is_empty()).map_or_else(
+            || default_structure_profile(*kind, *team).to_owned(),
+            |v| v.visual_profile.clone(),
+        );
         let transform = structure_transform(&layout, root, *kind);
         let visibility = if stats.hp > 0.0 {
             Visibility::Inherited
@@ -169,16 +198,28 @@ fn reconcile_structures(
         };
         let scene = assets.structure(*kind, *team);
         if let Some(attached) = attached
-            && let Ok((mut current_scene, mut current_transform, mut current_visibility, visual)) =
-                visuals.get_mut(attached.0)
+            && let Ok((
+                current_scene,
+                mut current_transform,
+                mut current_visibility,
+                visual,
+                marker,
+            )) = visuals.get_mut(attached.0)
             && visual.owner == owner
         {
-            if current_scene.0 != scene {
-                current_scene.0 = scene;
+            if current_scene.0 == scene {
+                *current_transform = transform;
+                *current_visibility = visibility;
+                if let Some(mut marker) = marker {
+                    marker.key = key;
+                    marker.archetype = profile;
+                }
+                continue;
             }
-            *current_transform = transform;
-            *current_visibility = visibility;
-            continue;
+            // A restarted server can reuse an ID for another kind/team. The
+            // old presentation owns both authored mesh IDs and cached bounds;
+            // replace that child as a unit while preserving the network owner.
+            commands.entity(attached.0).despawn();
         }
         let child = commands
             .spawn((
@@ -186,6 +227,11 @@ fn reconcile_structures(
                 transform,
                 visibility,
                 VerdantStructureVisual { owner },
+                MapPropInstance::structure(
+                    key,
+                    profile,
+                    default_structure_model(*kind, *team).into(),
+                ),
                 Name::new(format!("Verdant / {team:?} {kind:?}")),
             ))
             .id();
@@ -371,6 +417,57 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn reused_owner_kind_or_team_replaces_authored_visual_and_all_cached_descendants() {
+        let mut app = fixture(PlayerVisualMode::Models3d);
+        let owner = structure(&mut app, StructureKind::Tower, Team::Green);
+        app.update();
+        let original = app.world().get::<AttachedStructure>(owner).unwrap().0;
+        let old_model = app
+            .world_mut()
+            .spawn((Transform::IDENTITY, ChildOf(original)))
+            .id();
+        app.world_mut()
+            .entity_mut(owner)
+            .insert(NetworkMapStructure {
+                key: "same-id".into(),
+                visual_profile: "custom-tower".into(),
+                ..default()
+            });
+        app.update();
+        assert_eq!(
+            app.world().get::<AttachedStructure>(owner).unwrap().0,
+            original,
+            "profile changes use the normal safe replacement lifecycle"
+        );
+        for (kind, team, model) in [
+            (
+                StructureKind::BaseTower,
+                Team::Blue,
+                "verdant/sanctuary_blue.glb#Scene0",
+            ),
+            (
+                StructureKind::Tower,
+                Team::Green,
+                "verdant/watchtower_green.glb#Scene0",
+            ),
+        ] {
+            let previous = app.world().get::<AttachedStructure>(owner).unwrap().0;
+            app.world_mut().entity_mut(owner).insert((kind, team));
+            app.update();
+            let current = app.world().get::<AttachedStructure>(owner).unwrap().0;
+            assert_ne!(current, previous);
+            assert!(app.world().get_entity(previous).is_err());
+            assert!(app.world().get_entity(old_model).is_err());
+            assert_eq!(app.world().get::<Children>(owner).unwrap().len(), 1);
+            assert_eq!(app.world().get::<CombatStats>(owner).unwrap().hp, 100.0);
+            let binding = app.world().get::<MapPropInstance>(current).unwrap();
+            assert_eq!(binding.authored_model.as_deref(), Some(model));
+            assert!(!binding.geometry_ready);
+            assert_eq!(binding.key, "same-id");
+        }
     }
 
     #[test]

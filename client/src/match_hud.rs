@@ -607,7 +607,7 @@ fn enemy_base_objective_line(
         }
     }
     if protected {
-        "Goal: destroy an enemy lane tower - the enemy base is protected.".to_string()
+        "Goal: clear all towers in one lane to expose the enemy base.".to_string()
     } else if any && max_sum > 0.0 {
         format!(
             "Goal: destroy enemy base - {:.0} / {:.0} HP remaining",

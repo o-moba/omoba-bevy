@@ -67,7 +67,7 @@ impl Plugin for VisualQaPlugin {
             return;
         }
         if std::env::var("OMOBA_VISUAL_QA_SCENARIO")
-            .is_ok_and(|value| value == "targeting" || value == "combat")
+            .is_ok_and(|value| value == "targeting" || value == "combat" || value == "map")
         {
             return; // Dedicated production-input scenario registered by the client.
         }

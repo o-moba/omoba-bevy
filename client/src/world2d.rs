@@ -8,6 +8,7 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use std::collections::HashMap;
 
+use crate::map_visuals::MapVisualRegistry;
 use crate::maps::{LANE_WIDTH, MapLayout, RIVER_WIDTH};
 use crate::sprite::PlayerVisualMode;
 
@@ -58,6 +59,22 @@ pub fn y_sorted_z(band: f32, render_y: f32, owner: Entity) -> f32 {
 
 #[derive(Component)]
 pub struct World2dStatic;
+
+/// Registry binding on each actual repeated tree/anchor sprite, not ground tiles.
+#[derive(Component)]
+pub struct World2dMapProp {
+    pub key: String,
+    pub archetype: String,
+    pub active_sprite: String,
+    pub solid: bool,
+}
+
+#[derive(Component)]
+struct World2dPropDefault {
+    transform: Transform,
+    sprite: Sprite,
+    revision: Option<u64>,
+}
 
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct World2dCounts {
@@ -173,7 +190,8 @@ impl Plugin for World2dPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<World2dCounts>()
             .init_resource::<World2dAssets>()
-            .add_systems(Startup, (load_world2d_assets, setup_world2d).chain());
+            .add_systems(Startup, (load_world2d_assets, setup_world2d).chain())
+            .add_systems(Update, apply_prop_profiles);
     }
 }
 
@@ -526,6 +544,12 @@ fn setup_world2d(
                         ),
                     ),
                     World2dStatic,
+                    World2dMapProp {
+                        key: format!("world2d:tree:{column}:{row}"),
+                        archetype: prop_id.into(),
+                        active_sprite: prop_id.into(),
+                        solid: true,
+                    },
                     Name::new(format!("World2dTree-{column}-{row}")),
                 ));
                 spawned += 1;
@@ -581,6 +605,12 @@ fn setup_world2d(
                     ),
                 ),
                 World2dStatic,
+                World2dMapProp {
+                    key: format!("world2d:anchor:{index}"),
+                    archetype: prop_id.into(),
+                    active_sprite: prop_id.into(),
+                    solid: false,
+                },
                 Name::new(format!("World2dAnchorProp-{prop_id}-{index}")),
             ));
             spawned += 1;
@@ -592,9 +622,184 @@ fn setup_world2d(
     info!("Spawned deterministic 2D world: {spawned} static tile entities");
 }
 
+fn apply_prop_profiles(
+    mut commands: Commands,
+    registry: Option<Res<MapVisualRegistry>>,
+    assets: Res<World2dAssets>,
+    mut props: Query<(
+        Entity,
+        &mut World2dMapProp,
+        &mut Sprite,
+        &mut Transform,
+        Option<&mut World2dPropDefault>,
+    )>,
+) {
+    let Some(registry) = registry else {
+        return;
+    };
+    for (entity, mut binding, mut sprite, mut transform, original) in &mut props {
+        let Some(mut original) = original else {
+            commands.entity(entity).insert(World2dPropDefault {
+                transform: *transform,
+                sprite: sprite.clone(),
+                revision: None,
+            });
+            continue;
+        };
+        if original.revision == Some(registry.revision()) {
+            continue;
+        }
+        let profile = registry.resolve(&binding.archetype, &binding.key);
+        let sprite_key = profile
+            .sprite_key
+            .as_deref()
+            .filter(|key| assets.props.contains_key(*key))
+            .unwrap_or(&binding.archetype);
+        *sprite = original.sprite.clone();
+        if let Some(definition) = assets.props.get(sprite_key)
+            && let Some(atlas) = sprite.texture_atlas.as_mut()
+        {
+            atlas.index = definition.frame;
+        }
+        sprite.color = profile.color();
+        *transform = original.transform;
+        if !binding.solid {
+            let offset = profile.offset.unwrap_or([0.0; 3]);
+            transform.translation.x += offset[0];
+            transform.translation.y += offset[2] + offset[1];
+            transform.rotation =
+                Quat::from_rotation_z(profile.rotation_degrees.unwrap_or([0.0; 3])[1].to_radians());
+            let scale = profile.scale.unwrap_or([1.0; 3]);
+            transform.scale = Vec3::new(scale[0], scale[1], 1.0);
+        }
+        binding.active_sprite = sprite_key.to_owned();
+        original.revision = Some(registry.revision());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn real_prop_binding_swaps_atlas_frames_and_restores_without_respawning() {
+        let mut app = App::new();
+        let mut assets = World2dAssets::default();
+        for (key, frame) in [("tree_oak_a", 0), ("tree_oak_b", 2)] {
+            assets.props.insert(
+                key.into(),
+                PropDefinition {
+                    frame,
+                    pivot: [0.5, 0.1],
+                    world_size: [7.0, 8.0],
+                },
+            );
+        }
+        app.insert_resource(assets)
+            .init_resource::<MapVisualRegistry>()
+            .add_systems(Update, apply_prop_profiles);
+        let authored = Transform::from_xyz(10.0, 20.0, layer::LOW_PROP);
+        let prop = app
+            .world_mut()
+            .spawn((
+                World2dMapProp {
+                    key: "world2d:tree:4:5".into(),
+                    archetype: "tree_oak_a".into(),
+                    active_sprite: "tree_oak_a".into(),
+                    solid: true,
+                },
+                atlas_sprite(
+                    &Handle::default(),
+                    &Handle::default(),
+                    0,
+                    Vec2::new(7.0, 8.0),
+                ),
+                authored,
+            ))
+            .id();
+        for (json, expected_frame) in [
+            (
+                r#"{"schema_version":1,"archetypes":{"tree_oak_a":{"sprite_key":"tree_oak_b","tint":[0.4,1,0.7,1],"offset":[2,1,0],"scale":[2,2,2]}}}"#,
+                2,
+            ),
+            (
+                r#"{"schema_version":1,"archetypes":{"tree_oak_a":{"sprite_key":"unshipped"}}}"#,
+                0,
+            ),
+            (r#"{"schema_version":1}"#, 0),
+        ] {
+            app.world_mut()
+                .resource_mut::<MapVisualRegistry>()
+                .replace_json(json)
+                .unwrap();
+            for _ in 0..3 {
+                app.update();
+            }
+            assert_eq!(
+                app.world()
+                    .get::<Sprite>(prop)
+                    .unwrap()
+                    .texture_atlas
+                    .as_ref()
+                    .unwrap()
+                    .index,
+                expected_frame
+            );
+            assert_eq!(
+                *app.world().get::<Transform>(prop).unwrap(),
+                authored,
+                "forest anchors cannot be moved by cosmetics"
+            );
+            assert_eq!(
+                app.world_mut()
+                    .query::<&World2dMapProp>()
+                    .iter(app.world())
+                    .count(),
+                1
+            );
+        }
+        let restored = app.world().get::<Sprite>(prop).unwrap().color.to_srgba();
+        for channel in [restored.red, restored.green, restored.blue, restored.alpha] {
+            assert!((channel - 1.0).abs() < 0.000_001);
+        }
+    }
+
+    #[test]
+    fn nonblocking_anchor_overrides_use_xz_projection_and_restore_authored_transform() {
+        let mut app = App::new();
+        app.init_resource::<World2dAssets>()
+            .init_resource::<MapVisualRegistry>()
+            .add_systems(Update, apply_prop_profiles);
+        let authored = Transform::from_xyz(-20.0, 30.0, layer::LOW_PROP);
+        let prop = app
+            .world_mut()
+            .spawn((
+                World2dMapProp {
+                    key: "world2d:anchor:0".into(),
+                    archetype: "camp_totem".into(),
+                    active_sprite: "camp_totem".into(),
+                    solid: false,
+                },
+                Sprite::from_color(Color::WHITE, Vec2::ONE),
+                authored,
+            ))
+            .id();
+        app.world_mut().resource_mut::<MapVisualRegistry>().replace_json(r#"{"schema_version":1,"instances":{"world2d:anchor:0":{"offset":[2,0,3],"rotation_degrees":[0,90,0],"scale":[1.5,1.5,1.5]}}}"#).unwrap();
+        app.update();
+        app.update();
+        let changed = app.world().get::<Transform>(prop).unwrap();
+        assert_eq!(
+            changed.translation,
+            authored.translation + Vec3::new(2.0, 3.0, 0.0)
+        );
+        assert_eq!(changed.scale, Vec3::new(1.5, 1.5, 1.0));
+        app.world_mut()
+            .resource_mut::<MapVisualRegistry>()
+            .replace_json(r#"{"schema_version":1}"#)
+            .unwrap();
+        app.update();
+        assert_eq!(*app.world().get::<Transform>(prop).unwrap(), authored);
+    }
 
     #[test]
     fn projection_round_trips_map_corners_and_negative_points() {

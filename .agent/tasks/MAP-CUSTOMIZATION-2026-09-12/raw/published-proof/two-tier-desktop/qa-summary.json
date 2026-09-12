@@ -1,0 +1,2805 @@
+{
+  "captures": [
+    {
+      "file": "01-map-overview.png",
+      "geometry_id": "verdant-confluence-v1",
+      "map_profile": "verdant_two_tier_example",
+      "map_visual_cache_counts": [
+        0,
+        0
+      ],
+      "match_id": 1,
+      "mesh_assets": 543,
+      "mobile_controls": false,
+      "nodes": [
+        {
+          "name": "MobileJoystick",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAttack",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-0",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-1",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-2",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-3",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        }
+      ],
+      "pixels": [
+        1280,
+        720
+      ],
+      "prop_instances": 952,
+      "ready_static_props": 942,
+      "scene_roots": 13,
+      "selected_prop": {
+        "active_model": null,
+        "archetype": "lantern",
+        "desired_model": null,
+        "entity": "1496v0",
+        "geometry": {
+          "indices": 2052,
+          "mesh_count": 4,
+          "mesh_geometry_signatures": [
+            "5dd79e17a129048e:560:816",
+            "828c6e4fe8beb50a:84:132",
+            "a9c253221cd4d885:144:204",
+            "f47a15f2b20b9945:640:900"
+          ],
+          "vertices": 1428,
+          "world_max": [
+            67.2860107421875,
+            2.631999969482422,
+            -52.2894401550293
+          ],
+          "world_min": [
+            66.34132385253906,
+            0.0,
+            -53.234134674072266
+          ]
+        },
+        "geometry_ready": true,
+        "key": "environment.glb:lantern / 0056",
+        "role": "camp_accent",
+        "solid": false
+      },
+      "server_epoch": 1789220015300197001,
+      "snapshot_tick": 11,
+      "stage": 0,
+      "static_props_by_archetype": {
+        "environment.glb:banner_blue": 2,
+        "environment.glb:banner_green": 2,
+        "environment.glb:lantern": 19,
+        "environment.glb:rock_stratified_outcrop": 5,
+        "environment.glb:ruin_wall": 15,
+        "environment.glb:ruined_arch": 3,
+        "foliage.glb:boulder_moss_flat": 39,
+        "foliage.glb:boulder_moss_tall": 64,
+        "foliage.glb:fallen_log": 5,
+        "foliage.glb:fern_cluster": 249,
+        "foliage.glb:flowering_shrub": 121,
+        "foliage.glb:grass_fan": 241,
+        "foliage.glb:river_reeds": 60,
+        "foliage.glb:rooted_stump": 4,
+        "foliage.glb:tree_cypress_spire": 22,
+        "foliage.glb:tree_jade_canopy": 23,
+        "foliage.glb:tree_river_pine": 22,
+        "foliage.glb:tree_sage_elder": 23,
+        "foliage.glb:tree_windswept_oak": 23
+      },
+      "structures": [
+        {
+          "hp": 240.0,
+          "id": 1,
+          "kind": "tower",
+          "lane": "top",
+          "map_key": "top_green_outer",
+          "max_hp": 240.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                -93.56864929199219,
+                11.989999771118164,
+                32.49076843261719
+              ],
+              "world_min": [
+                -99.53038024902344,
+                0.019999980926513672,
+                26.529037475585938
+              ]
+            }
+          ],
+          "position": [
+            -96.54951477050781,
+            3.0,
+            29.509902954101562
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 240.0,
+          "id": 2,
+          "kind": "tower",
+          "lane": "top",
+          "map_key": "top_blue_outer",
+          "max_hp": 240.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                7.470970153808594,
+                11.989999771118164,
+                99.53038024902344
+              ],
+              "world_min": [
+                1.5092389583587646,
+                0.019999980926513672,
+                93.56864929199219
+              ]
+            }
+          ],
+          "position": [
+            4.490104675292969,
+            3.0,
+            96.54951477050781
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "tower_blue"
+        },
+        {
+          "hp": 300.0,
+          "id": 3,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_green_outer",
+          "max_hp": 300.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                -19.29299545288086,
+                11.989999771118164,
+                -19.29299545288086
+              ],
+              "world_min": [
+                -25.25472640991211,
+                0.019999980926513672,
+                -25.25472640991211
+              ]
+            }
+          ],
+          "position": [
+            -22.273860931396484,
+            3.0,
+            -22.273860931396484
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 300.0,
+          "id": 4,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_blue_outer",
+          "max_hp": 300.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                25.254730224609375,
+                11.989999771118164,
+                25.254730224609375
+              ],
+              "world_min": [
+                19.292999267578125,
+                0.019999980926513672,
+                19.292999267578125
+              ]
+            }
+          ],
+          "position": [
+            22.27386474609375,
+            3.0,
+            22.27386474609375
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "tower_blue"
+        },
+        {
+          "hp": 240.0,
+          "id": 5,
+          "kind": "tower",
+          "lane": "bot",
+          "map_key": "bot_green_outer",
+          "max_hp": 240.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                -1.5092236995697021,
+                11.989999771118164,
+                -93.56864929199219
+              ],
+              "world_min": [
+                -7.470954895019531,
+                0.019999980926513672,
+                -99.53038024902344
+              ]
+            }
+          ],
+          "position": [
+            -4.490089416503906,
+            3.0,
+            -96.54951477050781
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 240.0,
+          "id": 6,
+          "kind": "tower",
+          "lane": "bot",
+          "map_key": "bot_blue_outer",
+          "max_hp": 240.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                99.53038024902344,
+                11.989999771118164,
+                -26.529037475585938
+              ],
+              "world_min": [
+                93.56864929199219,
+                0.019999980926513672,
+                -32.49076843261719
+              ]
+            }
+          ],
+          "position": [
+            96.54951477050781,
+            3.0,
+            -29.509902954101562
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "tower_blue"
+        },
+        {
+          "hp": 650.0,
+          "id": 7,
+          "kind": "base_tower",
+          "lane": null,
+          "map_key": "base_green",
+          "max_hp": 650.0,
+          "model_geometry": [
+            {
+              "indices": 19188,
+              "mesh_count": 6,
+              "mesh_geometry_signatures": [
+                "414a258c5628ad8a:5248:9108",
+                "5b612e7d7e98deff:864:1416",
+                "aeefdb4ef862b337:84:132",
+                "b02df31b8ddf82e1:2856:4488",
+                "e0b297c3ef9dd988:832:1284",
+                "eb4f11bbb1230288:1664:2760"
+              ],
+              "vertices": 11548,
+              "world_max": [
+                -70.04951477050781,
+                17.580001831054688,
+                -70.04951477050781
+              ],
+              "world_min": [
+                -89.04951477050781,
+                0.7000000476837158,
+                -89.04951477050781
+              ]
+            }
+          ],
+          "position": [
+            -79.54951477050781,
+            4.0,
+            -79.54951477050781
+          ],
+          "protected": true,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "base_green"
+        },
+        {
+          "hp": 650.0,
+          "id": 8,
+          "kind": "base_tower",
+          "lane": null,
+          "map_key": "base_blue",
+          "max_hp": 650.0,
+          "model_geometry": [
+            {
+              "indices": 19188,
+              "mesh_count": 6,
+              "mesh_geometry_signatures": [
+                "414a258c5628ad8a:5248:9108",
+                "5b612e7d7e98deff:864:1416",
+                "aeefdb4ef862b337:84:132",
+                "b02df31b8ddf82e1:2856:4488",
+                "e0b297c3ef9dd988:832:1284",
+                "eb4f11bbb1230288:1664:2760"
+              ],
+              "vertices": 11548,
+              "world_max": [
+                89.04951477050781,
+                17.580001831054688,
+                89.04951477050781
+              ],
+              "world_min": [
+                70.04951477050781,
+                0.7000000476837158,
+                70.04951477050781
+              ]
+            }
+          ],
+          "position": [
+            79.54951477050781,
+            4.0,
+            79.54951477050781
+          ],
+          "protected": true,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "base_blue"
+        },
+        {
+          "hp": 420.0,
+          "id": 9,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_green_inner",
+          "max_hp": 420.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                -41.566864013671875,
+                11.989999771118164,
+                -41.566864013671875
+              ],
+              "world_min": [
+                -47.528594970703125,
+                0.019999980926513672,
+                -47.528594970703125
+              ]
+            }
+          ],
+          "position": [
+            -44.5477294921875,
+            3.0,
+            -44.5477294921875
+          ],
+          "protected": true,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 1,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 420.0,
+          "id": 10,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_blue_inner",
+          "max_hp": 420.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                47.528587341308594,
+                11.989999771118164,
+                47.528587341308594
+              ],
+              "world_min": [
+                41.566856384277344,
+                0.019999980926513672,
+                41.566856384277344
+              ]
+            }
+          ],
+          "position": [
+            44.54772186279297,
+            3.0,
+            44.54772186279297
+          ],
+          "protected": true,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 1,
+          "visual_profile": "tower_blue"
+        }
+      ],
+      "visual_mode": "Models3d",
+      "world_2d": null
+    },
+    {
+      "file": "02-prop-a.png",
+      "geometry_id": "verdant-confluence-v1",
+      "map_profile": "verdant_two_tier_example",
+      "map_visual_cache_counts": [
+        1,
+        0
+      ],
+      "match_id": 1,
+      "mesh_assets": 547,
+      "mobile_controls": false,
+      "nodes": [
+        {
+          "name": "MobileJoystick",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAttack",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-0",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-1",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-2",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-3",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        }
+      ],
+      "pixels": [
+        1280,
+        720
+      ],
+      "prop_instances": 952,
+      "ready_static_props": 942,
+      "scene_roots": 14,
+      "selected_prop": {
+        "active_model": "map-props/lantern.glb#Scene0",
+        "archetype": "lantern",
+        "desired_model": "map-props/lantern.glb#Scene0",
+        "entity": "1496v0",
+        "geometry": {
+          "indices": 2052,
+          "mesh_count": 4,
+          "mesh_geometry_signatures": [
+            "5dd79e17a129048e:560:816",
+            "828c6e4fe8beb50a:84:132",
+            "a9c253221cd4d885:144:204",
+            "f47a15f2b20b9945:640:900"
+          ],
+          "vertices": 1428,
+          "world_max": [
+            67.2860107421875,
+            2.631999969482422,
+            -52.2894401550293
+          ],
+          "world_min": [
+            66.34132385253906,
+            0.0,
+            -53.234134674072266
+          ]
+        },
+        "geometry_ready": true,
+        "key": "environment.glb:lantern / 0056",
+        "role": "camp_accent",
+        "solid": false
+      },
+      "server_epoch": 1789220015300197001,
+      "snapshot_tick": 14,
+      "stage": 1,
+      "static_props_by_archetype": {
+        "environment.glb:banner_blue": 2,
+        "environment.glb:banner_green": 2,
+        "environment.glb:lantern": 19,
+        "environment.glb:rock_stratified_outcrop": 5,
+        "environment.glb:ruin_wall": 15,
+        "environment.glb:ruined_arch": 3,
+        "foliage.glb:boulder_moss_flat": 39,
+        "foliage.glb:boulder_moss_tall": 64,
+        "foliage.glb:fallen_log": 5,
+        "foliage.glb:fern_cluster": 249,
+        "foliage.glb:flowering_shrub": 121,
+        "foliage.glb:grass_fan": 241,
+        "foliage.glb:river_reeds": 60,
+        "foliage.glb:rooted_stump": 4,
+        "foliage.glb:tree_cypress_spire": 22,
+        "foliage.glb:tree_jade_canopy": 23,
+        "foliage.glb:tree_river_pine": 22,
+        "foliage.glb:tree_sage_elder": 23,
+        "foliage.glb:tree_windswept_oak": 23
+      },
+      "structures": [
+        {
+          "hp": 240.0,
+          "id": 1,
+          "kind": "tower",
+          "lane": "top",
+          "map_key": "top_green_outer",
+          "max_hp": 240.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                -93.56864929199219,
+                11.989999771118164,
+                32.49076843261719
+              ],
+              "world_min": [
+                -99.53038024902344,
+                0.019999980926513672,
+                26.529037475585938
+              ]
+            }
+          ],
+          "position": [
+            -96.54951477050781,
+            3.0,
+            29.509902954101562
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 240.0,
+          "id": 2,
+          "kind": "tower",
+          "lane": "top",
+          "map_key": "top_blue_outer",
+          "max_hp": 240.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                7.470970153808594,
+                11.989999771118164,
+                99.53038024902344
+              ],
+              "world_min": [
+                1.5092389583587646,
+                0.019999980926513672,
+                93.56864929199219
+              ]
+            }
+          ],
+          "position": [
+            4.490104675292969,
+            3.0,
+            96.54951477050781
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "tower_blue"
+        },
+        {
+          "hp": 300.0,
+          "id": 3,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_green_outer",
+          "max_hp": 300.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                -19.29299545288086,
+                11.989999771118164,
+                -19.29299545288086
+              ],
+              "world_min": [
+                -25.25472640991211,
+                0.019999980926513672,
+                -25.25472640991211
+              ]
+            }
+          ],
+          "position": [
+            -22.273860931396484,
+            3.0,
+            -22.273860931396484
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 300.0,
+          "id": 4,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_blue_outer",
+          "max_hp": 300.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                25.254730224609375,
+                11.989999771118164,
+                25.254730224609375
+              ],
+              "world_min": [
+                19.292999267578125,
+                0.019999980926513672,
+                19.292999267578125
+              ]
+            }
+          ],
+          "position": [
+            22.27386474609375,
+            3.0,
+            22.27386474609375
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "tower_blue"
+        },
+        {
+          "hp": 240.0,
+          "id": 5,
+          "kind": "tower",
+          "lane": "bot",
+          "map_key": "bot_green_outer",
+          "max_hp": 240.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                -1.5092236995697021,
+                11.989999771118164,
+                -93.56864929199219
+              ],
+              "world_min": [
+                -7.470954895019531,
+                0.019999980926513672,
+                -99.53038024902344
+              ]
+            }
+          ],
+          "position": [
+            -4.490089416503906,
+            3.0,
+            -96.54951477050781
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 240.0,
+          "id": 6,
+          "kind": "tower",
+          "lane": "bot",
+          "map_key": "bot_blue_outer",
+          "max_hp": 240.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                99.53038024902344,
+                11.989999771118164,
+                -26.529037475585938
+              ],
+              "world_min": [
+                93.56864929199219,
+                0.019999980926513672,
+                -32.49076843261719
+              ]
+            }
+          ],
+          "position": [
+            96.54951477050781,
+            3.0,
+            -29.509902954101562
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "tower_blue"
+        },
+        {
+          "hp": 650.0,
+          "id": 7,
+          "kind": "base_tower",
+          "lane": null,
+          "map_key": "base_green",
+          "max_hp": 650.0,
+          "model_geometry": [
+            {
+              "indices": 19188,
+              "mesh_count": 6,
+              "mesh_geometry_signatures": [
+                "414a258c5628ad8a:5248:9108",
+                "5b612e7d7e98deff:864:1416",
+                "aeefdb4ef862b337:84:132",
+                "b02df31b8ddf82e1:2856:4488",
+                "e0b297c3ef9dd988:832:1284",
+                "eb4f11bbb1230288:1664:2760"
+              ],
+              "vertices": 11548,
+              "world_max": [
+                -70.04951477050781,
+                17.580001831054688,
+                -70.04951477050781
+              ],
+              "world_min": [
+                -89.04951477050781,
+                0.7000000476837158,
+                -89.04951477050781
+              ]
+            }
+          ],
+          "position": [
+            -79.54951477050781,
+            4.0,
+            -79.54951477050781
+          ],
+          "protected": true,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "base_green"
+        },
+        {
+          "hp": 650.0,
+          "id": 8,
+          "kind": "base_tower",
+          "lane": null,
+          "map_key": "base_blue",
+          "max_hp": 650.0,
+          "model_geometry": [
+            {
+              "indices": 19188,
+              "mesh_count": 6,
+              "mesh_geometry_signatures": [
+                "414a258c5628ad8a:5248:9108",
+                "5b612e7d7e98deff:864:1416",
+                "aeefdb4ef862b337:84:132",
+                "b02df31b8ddf82e1:2856:4488",
+                "e0b297c3ef9dd988:832:1284",
+                "eb4f11bbb1230288:1664:2760"
+              ],
+              "vertices": 11548,
+              "world_max": [
+                89.04951477050781,
+                17.580001831054688,
+                89.04951477050781
+              ],
+              "world_min": [
+                70.04951477050781,
+                0.7000000476837158,
+                70.04951477050781
+              ]
+            }
+          ],
+          "position": [
+            79.54951477050781,
+            4.0,
+            79.54951477050781
+          ],
+          "protected": true,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "base_blue"
+        },
+        {
+          "hp": 420.0,
+          "id": 9,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_green_inner",
+          "max_hp": 420.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                -41.566864013671875,
+                11.989999771118164,
+                -41.566864013671875
+              ],
+              "world_min": [
+                -47.528594970703125,
+                0.019999980926513672,
+                -47.528594970703125
+              ]
+            }
+          ],
+          "position": [
+            -44.5477294921875,
+            3.0,
+            -44.5477294921875
+          ],
+          "protected": true,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 1,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 420.0,
+          "id": 10,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_blue_inner",
+          "max_hp": 420.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                47.528587341308594,
+                11.989999771118164,
+                47.528587341308594
+              ],
+              "world_min": [
+                41.566856384277344,
+                0.019999980926513672,
+                41.566856384277344
+              ]
+            }
+          ],
+          "position": [
+            44.54772186279297,
+            3.0,
+            44.54772186279297
+          ],
+          "protected": true,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 1,
+          "visual_profile": "tower_blue"
+        }
+      ],
+      "visual_mode": "Models3d",
+      "world_2d": null
+    },
+    {
+      "file": "03-prop-b.png",
+      "geometry_id": "verdant-confluence-v1",
+      "map_profile": "verdant_two_tier_example",
+      "map_visual_cache_counts": [
+        2,
+        0
+      ],
+      "match_id": 1,
+      "mesh_assets": 553,
+      "mobile_controls": false,
+      "nodes": [
+        {
+          "name": "MobileJoystick",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAttack",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-0",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-1",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-2",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-3",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        }
+      ],
+      "pixels": [
+        1280,
+        720
+      ],
+      "prop_instances": 952,
+      "ready_static_props": 942,
+      "scene_roots": 14,
+      "selected_prop": {
+        "active_model": "map-props/flowering_shrub.glb#Scene0",
+        "archetype": "lantern",
+        "desired_model": "map-props/flowering_shrub.glb#Scene0",
+        "entity": "1496v0",
+        "geometry": {
+          "indices": 3420,
+          "mesh_count": 6,
+          "mesh_geometry_signatures": [
+            "10106a6b1d7e0747:300:468",
+            "19904f29e8c0151f:180:252",
+            "34c128803399a9cf:390:624",
+            "3516118310fc149d:324:396",
+            "41632da7348d6f41:900:900",
+            "ebd3a7f77115c71d:780:780"
+          ],
+          "vertices": 2874,
+          "world_max": [
+            67.93305969238281,
+            1.3362221717834473,
+            -51.891700744628906
+          ],
+          "world_min": [
+            65.82186126708984,
+            0.0,
+            -53.58860778808594
+          ]
+        },
+        "geometry_ready": true,
+        "key": "environment.glb:lantern / 0056",
+        "role": "camp_accent",
+        "solid": false
+      },
+      "server_epoch": 1789220015300197001,
+      "snapshot_tick": 17,
+      "stage": 2,
+      "static_props_by_archetype": {
+        "environment.glb:banner_blue": 2,
+        "environment.glb:banner_green": 2,
+        "environment.glb:lantern": 19,
+        "environment.glb:rock_stratified_outcrop": 5,
+        "environment.glb:ruin_wall": 15,
+        "environment.glb:ruined_arch": 3,
+        "foliage.glb:boulder_moss_flat": 39,
+        "foliage.glb:boulder_moss_tall": 64,
+        "foliage.glb:fallen_log": 5,
+        "foliage.glb:fern_cluster": 249,
+        "foliage.glb:flowering_shrub": 121,
+        "foliage.glb:grass_fan": 241,
+        "foliage.glb:river_reeds": 60,
+        "foliage.glb:rooted_stump": 4,
+        "foliage.glb:tree_cypress_spire": 22,
+        "foliage.glb:tree_jade_canopy": 23,
+        "foliage.glb:tree_river_pine": 22,
+        "foliage.glb:tree_sage_elder": 23,
+        "foliage.glb:tree_windswept_oak": 23
+      },
+      "structures": [
+        {
+          "hp": 240.0,
+          "id": 1,
+          "kind": "tower",
+          "lane": "top",
+          "map_key": "top_green_outer",
+          "max_hp": 240.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                -93.56864929199219,
+                11.989999771118164,
+                32.49076843261719
+              ],
+              "world_min": [
+                -99.53038024902344,
+                0.019999980926513672,
+                26.529037475585938
+              ]
+            }
+          ],
+          "position": [
+            -96.54951477050781,
+            3.0,
+            29.509902954101562
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 240.0,
+          "id": 2,
+          "kind": "tower",
+          "lane": "top",
+          "map_key": "top_blue_outer",
+          "max_hp": 240.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                7.470970153808594,
+                11.989999771118164,
+                99.53038024902344
+              ],
+              "world_min": [
+                1.5092389583587646,
+                0.019999980926513672,
+                93.56864929199219
+              ]
+            }
+          ],
+          "position": [
+            4.490104675292969,
+            3.0,
+            96.54951477050781
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "tower_blue"
+        },
+        {
+          "hp": 300.0,
+          "id": 3,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_green_outer",
+          "max_hp": 300.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                -19.29299545288086,
+                11.989999771118164,
+                -19.29299545288086
+              ],
+              "world_min": [
+                -25.25472640991211,
+                0.019999980926513672,
+                -25.25472640991211
+              ]
+            }
+          ],
+          "position": [
+            -22.273860931396484,
+            3.0,
+            -22.273860931396484
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 300.0,
+          "id": 4,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_blue_outer",
+          "max_hp": 300.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                25.254730224609375,
+                11.989999771118164,
+                25.254730224609375
+              ],
+              "world_min": [
+                19.292999267578125,
+                0.019999980926513672,
+                19.292999267578125
+              ]
+            }
+          ],
+          "position": [
+            22.27386474609375,
+            3.0,
+            22.27386474609375
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "tower_blue"
+        },
+        {
+          "hp": 240.0,
+          "id": 5,
+          "kind": "tower",
+          "lane": "bot",
+          "map_key": "bot_green_outer",
+          "max_hp": 240.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                -1.5092236995697021,
+                11.989999771118164,
+                -93.56864929199219
+              ],
+              "world_min": [
+                -7.470954895019531,
+                0.019999980926513672,
+                -99.53038024902344
+              ]
+            }
+          ],
+          "position": [
+            -4.490089416503906,
+            3.0,
+            -96.54951477050781
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 240.0,
+          "id": 6,
+          "kind": "tower",
+          "lane": "bot",
+          "map_key": "bot_blue_outer",
+          "max_hp": 240.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                99.53038024902344,
+                11.989999771118164,
+                -26.529037475585938
+              ],
+              "world_min": [
+                93.56864929199219,
+                0.019999980926513672,
+                -32.49076843261719
+              ]
+            }
+          ],
+          "position": [
+            96.54951477050781,
+            3.0,
+            -29.509902954101562
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "tower_blue"
+        },
+        {
+          "hp": 650.0,
+          "id": 7,
+          "kind": "base_tower",
+          "lane": null,
+          "map_key": "base_green",
+          "max_hp": 650.0,
+          "model_geometry": [
+            {
+              "indices": 19188,
+              "mesh_count": 6,
+              "mesh_geometry_signatures": [
+                "414a258c5628ad8a:5248:9108",
+                "5b612e7d7e98deff:864:1416",
+                "aeefdb4ef862b337:84:132",
+                "b02df31b8ddf82e1:2856:4488",
+                "e0b297c3ef9dd988:832:1284",
+                "eb4f11bbb1230288:1664:2760"
+              ],
+              "vertices": 11548,
+              "world_max": [
+                -70.04951477050781,
+                17.580001831054688,
+                -70.04951477050781
+              ],
+              "world_min": [
+                -89.04951477050781,
+                0.7000000476837158,
+                -89.04951477050781
+              ]
+            }
+          ],
+          "position": [
+            -79.54951477050781,
+            4.0,
+            -79.54951477050781
+          ],
+          "protected": true,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "base_green"
+        },
+        {
+          "hp": 650.0,
+          "id": 8,
+          "kind": "base_tower",
+          "lane": null,
+          "map_key": "base_blue",
+          "max_hp": 650.0,
+          "model_geometry": [
+            {
+              "indices": 19188,
+              "mesh_count": 6,
+              "mesh_geometry_signatures": [
+                "414a258c5628ad8a:5248:9108",
+                "5b612e7d7e98deff:864:1416",
+                "aeefdb4ef862b337:84:132",
+                "b02df31b8ddf82e1:2856:4488",
+                "e0b297c3ef9dd988:832:1284",
+                "eb4f11bbb1230288:1664:2760"
+              ],
+              "vertices": 11548,
+              "world_max": [
+                89.04951477050781,
+                17.580001831054688,
+                89.04951477050781
+              ],
+              "world_min": [
+                70.04951477050781,
+                0.7000000476837158,
+                70.04951477050781
+              ]
+            }
+          ],
+          "position": [
+            79.54951477050781,
+            4.0,
+            79.54951477050781
+          ],
+          "protected": true,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "base_blue"
+        },
+        {
+          "hp": 420.0,
+          "id": 9,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_green_inner",
+          "max_hp": 420.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                -41.566864013671875,
+                11.989999771118164,
+                -41.566864013671875
+              ],
+              "world_min": [
+                -47.528594970703125,
+                0.019999980926513672,
+                -47.528594970703125
+              ]
+            }
+          ],
+          "position": [
+            -44.5477294921875,
+            3.0,
+            -44.5477294921875
+          ],
+          "protected": true,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 1,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 420.0,
+          "id": 10,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_blue_inner",
+          "max_hp": 420.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                47.528587341308594,
+                11.989999771118164,
+                47.528587341308594
+              ],
+              "world_min": [
+                41.566856384277344,
+                0.019999980926513672,
+                41.566856384277344
+              ]
+            }
+          ],
+          "position": [
+            44.54772186279297,
+            3.0,
+            44.54772186279297
+          ],
+          "protected": true,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 1,
+          "visual_profile": "tower_blue"
+        }
+      ],
+      "visual_mode": "Models3d",
+      "world_2d": null
+    },
+    {
+      "file": "04-prop-a-restored.png",
+      "geometry_id": "verdant-confluence-v1",
+      "map_profile": "verdant_two_tier_example",
+      "map_visual_cache_counts": [
+        2,
+        0
+      ],
+      "match_id": 1,
+      "mesh_assets": 553,
+      "mobile_controls": false,
+      "nodes": [
+        {
+          "name": "MobileJoystick",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAttack",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-0",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-1",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-2",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-3",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        }
+      ],
+      "pixels": [
+        1280,
+        720
+      ],
+      "prop_instances": 952,
+      "ready_static_props": 942,
+      "scene_roots": 14,
+      "selected_prop": {
+        "active_model": "map-props/lantern.glb#Scene0",
+        "archetype": "lantern",
+        "desired_model": "map-props/lantern.glb#Scene0",
+        "entity": "1496v0",
+        "geometry": {
+          "indices": 2052,
+          "mesh_count": 4,
+          "mesh_geometry_signatures": [
+            "5dd79e17a129048e:560:816",
+            "828c6e4fe8beb50a:84:132",
+            "a9c253221cd4d885:144:204",
+            "f47a15f2b20b9945:640:900"
+          ],
+          "vertices": 1428,
+          "world_max": [
+            67.2860107421875,
+            2.631999969482422,
+            -52.2894401550293
+          ],
+          "world_min": [
+            66.34132385253906,
+            0.0,
+            -53.234134674072266
+          ]
+        },
+        "geometry_ready": true,
+        "key": "environment.glb:lantern / 0056",
+        "role": "camp_accent",
+        "solid": false
+      },
+      "server_epoch": 1789220015300197001,
+      "snapshot_tick": 19,
+      "stage": 3,
+      "static_props_by_archetype": {
+        "environment.glb:banner_blue": 2,
+        "environment.glb:banner_green": 2,
+        "environment.glb:lantern": 19,
+        "environment.glb:rock_stratified_outcrop": 5,
+        "environment.glb:ruin_wall": 15,
+        "environment.glb:ruined_arch": 3,
+        "foliage.glb:boulder_moss_flat": 39,
+        "foliage.glb:boulder_moss_tall": 64,
+        "foliage.glb:fallen_log": 5,
+        "foliage.glb:fern_cluster": 249,
+        "foliage.glb:flowering_shrub": 121,
+        "foliage.glb:grass_fan": 241,
+        "foliage.glb:river_reeds": 60,
+        "foliage.glb:rooted_stump": 4,
+        "foliage.glb:tree_cypress_spire": 22,
+        "foliage.glb:tree_jade_canopy": 23,
+        "foliage.glb:tree_river_pine": 22,
+        "foliage.glb:tree_sage_elder": 23,
+        "foliage.glb:tree_windswept_oak": 23
+      },
+      "structures": [
+        {
+          "hp": 240.0,
+          "id": 1,
+          "kind": "tower",
+          "lane": "top",
+          "map_key": "top_green_outer",
+          "max_hp": 240.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                -93.56864929199219,
+                11.989999771118164,
+                32.49076843261719
+              ],
+              "world_min": [
+                -99.53038024902344,
+                0.019999980926513672,
+                26.529037475585938
+              ]
+            }
+          ],
+          "position": [
+            -96.54951477050781,
+            3.0,
+            29.509902954101562
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 240.0,
+          "id": 2,
+          "kind": "tower",
+          "lane": "top",
+          "map_key": "top_blue_outer",
+          "max_hp": 240.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                7.470970153808594,
+                11.989999771118164,
+                99.53038024902344
+              ],
+              "world_min": [
+                1.5092389583587646,
+                0.019999980926513672,
+                93.56864929199219
+              ]
+            }
+          ],
+          "position": [
+            4.490104675292969,
+            3.0,
+            96.54951477050781
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "tower_blue"
+        },
+        {
+          "hp": 300.0,
+          "id": 3,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_green_outer",
+          "max_hp": 300.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                -19.29299545288086,
+                11.989999771118164,
+                -19.29299545288086
+              ],
+              "world_min": [
+                -25.25472640991211,
+                0.019999980926513672,
+                -25.25472640991211
+              ]
+            }
+          ],
+          "position": [
+            -22.273860931396484,
+            3.0,
+            -22.273860931396484
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 300.0,
+          "id": 4,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_blue_outer",
+          "max_hp": 300.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                25.254730224609375,
+                11.989999771118164,
+                25.254730224609375
+              ],
+              "world_min": [
+                19.292999267578125,
+                0.019999980926513672,
+                19.292999267578125
+              ]
+            }
+          ],
+          "position": [
+            22.27386474609375,
+            3.0,
+            22.27386474609375
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "tower_blue"
+        },
+        {
+          "hp": 240.0,
+          "id": 5,
+          "kind": "tower",
+          "lane": "bot",
+          "map_key": "bot_green_outer",
+          "max_hp": 240.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                -1.5092236995697021,
+                11.989999771118164,
+                -93.56864929199219
+              ],
+              "world_min": [
+                -7.470954895019531,
+                0.019999980926513672,
+                -99.53038024902344
+              ]
+            }
+          ],
+          "position": [
+            -4.490089416503906,
+            3.0,
+            -96.54951477050781
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 240.0,
+          "id": 6,
+          "kind": "tower",
+          "lane": "bot",
+          "map_key": "bot_blue_outer",
+          "max_hp": 240.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                99.53038024902344,
+                11.989999771118164,
+                -26.529037475585938
+              ],
+              "world_min": [
+                93.56864929199219,
+                0.019999980926513672,
+                -32.49076843261719
+              ]
+            }
+          ],
+          "position": [
+            96.54951477050781,
+            3.0,
+            -29.509902954101562
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "tower_blue"
+        },
+        {
+          "hp": 650.0,
+          "id": 7,
+          "kind": "base_tower",
+          "lane": null,
+          "map_key": "base_green",
+          "max_hp": 650.0,
+          "model_geometry": [
+            {
+              "indices": 19188,
+              "mesh_count": 6,
+              "mesh_geometry_signatures": [
+                "414a258c5628ad8a:5248:9108",
+                "5b612e7d7e98deff:864:1416",
+                "aeefdb4ef862b337:84:132",
+                "b02df31b8ddf82e1:2856:4488",
+                "e0b297c3ef9dd988:832:1284",
+                "eb4f11bbb1230288:1664:2760"
+              ],
+              "vertices": 11548,
+              "world_max": [
+                -70.04951477050781,
+                17.580001831054688,
+                -70.04951477050781
+              ],
+              "world_min": [
+                -89.04951477050781,
+                0.7000000476837158,
+                -89.04951477050781
+              ]
+            }
+          ],
+          "position": [
+            -79.54951477050781,
+            4.0,
+            -79.54951477050781
+          ],
+          "protected": true,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "base_green"
+        },
+        {
+          "hp": 650.0,
+          "id": 8,
+          "kind": "base_tower",
+          "lane": null,
+          "map_key": "base_blue",
+          "max_hp": 650.0,
+          "model_geometry": [
+            {
+              "indices": 19188,
+              "mesh_count": 6,
+              "mesh_geometry_signatures": [
+                "414a258c5628ad8a:5248:9108",
+                "5b612e7d7e98deff:864:1416",
+                "aeefdb4ef862b337:84:132",
+                "b02df31b8ddf82e1:2856:4488",
+                "e0b297c3ef9dd988:832:1284",
+                "eb4f11bbb1230288:1664:2760"
+              ],
+              "vertices": 11548,
+              "world_max": [
+                89.04951477050781,
+                17.580001831054688,
+                89.04951477050781
+              ],
+              "world_min": [
+                70.04951477050781,
+                0.7000000476837158,
+                70.04951477050781
+              ]
+            }
+          ],
+          "position": [
+            79.54951477050781,
+            4.0,
+            79.54951477050781
+          ],
+          "protected": true,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "base_blue"
+        },
+        {
+          "hp": 420.0,
+          "id": 9,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_green_inner",
+          "max_hp": 420.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                -41.566864013671875,
+                11.989999771118164,
+                -41.566864013671875
+              ],
+              "world_min": [
+                -47.528594970703125,
+                0.019999980926513672,
+                -47.528594970703125
+              ]
+            }
+          ],
+          "position": [
+            -44.5477294921875,
+            3.0,
+            -44.5477294921875
+          ],
+          "protected": true,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 1,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 420.0,
+          "id": 10,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_blue_inner",
+          "max_hp": 420.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                47.528587341308594,
+                11.989999771118164,
+                47.528587341308594
+              ],
+              "world_min": [
+                41.566856384277344,
+                0.019999980926513672,
+                41.566856384277344
+              ]
+            }
+          ],
+          "position": [
+            44.54772186279297,
+            3.0,
+            44.54772186279297
+          ],
+          "protected": true,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 1,
+          "visual_profile": "tower_blue"
+        }
+      ],
+      "visual_mode": "Models3d",
+      "world_2d": null
+    },
+    {
+      "file": "05-prop-b-repeated.png",
+      "geometry_id": "verdant-confluence-v1",
+      "map_profile": "verdant_two_tier_example",
+      "map_visual_cache_counts": [
+        2,
+        0
+      ],
+      "match_id": 1,
+      "mesh_assets": 553,
+      "mobile_controls": false,
+      "nodes": [
+        {
+          "name": "MobileJoystick",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAttack",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-0",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-1",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-2",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-3",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        }
+      ],
+      "pixels": [
+        1280,
+        720
+      ],
+      "prop_instances": 952,
+      "ready_static_props": 942,
+      "scene_roots": 14,
+      "selected_prop": {
+        "active_model": "map-props/flowering_shrub.glb#Scene0",
+        "archetype": "lantern",
+        "desired_model": "map-props/flowering_shrub.glb#Scene0",
+        "entity": "1496v0",
+        "geometry": {
+          "indices": 3420,
+          "mesh_count": 6,
+          "mesh_geometry_signatures": [
+            "10106a6b1d7e0747:300:468",
+            "19904f29e8c0151f:180:252",
+            "34c128803399a9cf:390:624",
+            "3516118310fc149d:324:396",
+            "41632da7348d6f41:900:900",
+            "ebd3a7f77115c71d:780:780"
+          ],
+          "vertices": 2874,
+          "world_max": [
+            67.93305969238281,
+            1.3362221717834473,
+            -51.891700744628906
+          ],
+          "world_min": [
+            65.82186126708984,
+            0.0,
+            -53.58860778808594
+          ]
+        },
+        "geometry_ready": true,
+        "key": "environment.glb:lantern / 0056",
+        "role": "camp_accent",
+        "solid": false
+      },
+      "server_epoch": 1789220015300197001,
+      "snapshot_tick": 22,
+      "stage": 4,
+      "static_props_by_archetype": {
+        "environment.glb:banner_blue": 2,
+        "environment.glb:banner_green": 2,
+        "environment.glb:lantern": 19,
+        "environment.glb:rock_stratified_outcrop": 5,
+        "environment.glb:ruin_wall": 15,
+        "environment.glb:ruined_arch": 3,
+        "foliage.glb:boulder_moss_flat": 39,
+        "foliage.glb:boulder_moss_tall": 64,
+        "foliage.glb:fallen_log": 5,
+        "foliage.glb:fern_cluster": 249,
+        "foliage.glb:flowering_shrub": 121,
+        "foliage.glb:grass_fan": 241,
+        "foliage.glb:river_reeds": 60,
+        "foliage.glb:rooted_stump": 4,
+        "foliage.glb:tree_cypress_spire": 22,
+        "foliage.glb:tree_jade_canopy": 23,
+        "foliage.glb:tree_river_pine": 22,
+        "foliage.glb:tree_sage_elder": 23,
+        "foliage.glb:tree_windswept_oak": 23
+      },
+      "structures": [
+        {
+          "hp": 240.0,
+          "id": 1,
+          "kind": "tower",
+          "lane": "top",
+          "map_key": "top_green_outer",
+          "max_hp": 240.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                -93.56864929199219,
+                11.989999771118164,
+                32.49076843261719
+              ],
+              "world_min": [
+                -99.53038024902344,
+                0.019999980926513672,
+                26.529037475585938
+              ]
+            }
+          ],
+          "position": [
+            -96.54951477050781,
+            3.0,
+            29.509902954101562
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 240.0,
+          "id": 2,
+          "kind": "tower",
+          "lane": "top",
+          "map_key": "top_blue_outer",
+          "max_hp": 240.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                7.470970153808594,
+                11.989999771118164,
+                99.53038024902344
+              ],
+              "world_min": [
+                1.5092389583587646,
+                0.019999980926513672,
+                93.56864929199219
+              ]
+            }
+          ],
+          "position": [
+            4.490104675292969,
+            3.0,
+            96.54951477050781
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "tower_blue"
+        },
+        {
+          "hp": 300.0,
+          "id": 3,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_green_outer",
+          "max_hp": 300.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                -19.29299545288086,
+                11.989999771118164,
+                -19.29299545288086
+              ],
+              "world_min": [
+                -25.25472640991211,
+                0.019999980926513672,
+                -25.25472640991211
+              ]
+            }
+          ],
+          "position": [
+            -22.273860931396484,
+            3.0,
+            -22.273860931396484
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 300.0,
+          "id": 4,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_blue_outer",
+          "max_hp": 300.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                25.254730224609375,
+                11.989999771118164,
+                25.254730224609375
+              ],
+              "world_min": [
+                19.292999267578125,
+                0.019999980926513672,
+                19.292999267578125
+              ]
+            }
+          ],
+          "position": [
+            22.27386474609375,
+            3.0,
+            22.27386474609375
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "tower_blue"
+        },
+        {
+          "hp": 240.0,
+          "id": 5,
+          "kind": "tower",
+          "lane": "bot",
+          "map_key": "bot_green_outer",
+          "max_hp": 240.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                -1.5092236995697021,
+                11.989999771118164,
+                -93.56864929199219
+              ],
+              "world_min": [
+                -7.470954895019531,
+                0.019999980926513672,
+                -99.53038024902344
+              ]
+            }
+          ],
+          "position": [
+            -4.490089416503906,
+            3.0,
+            -96.54951477050781
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 240.0,
+          "id": 6,
+          "kind": "tower",
+          "lane": "bot",
+          "map_key": "bot_blue_outer",
+          "max_hp": 240.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                99.53038024902344,
+                11.989999771118164,
+                -26.529037475585938
+              ],
+              "world_min": [
+                93.56864929199219,
+                0.019999980926513672,
+                -32.49076843261719
+              ]
+            }
+          ],
+          "position": [
+            96.54951477050781,
+            3.0,
+            -29.509902954101562
+          ],
+          "protected": false,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "tower_blue"
+        },
+        {
+          "hp": 650.0,
+          "id": 7,
+          "kind": "base_tower",
+          "lane": null,
+          "map_key": "base_green",
+          "max_hp": 650.0,
+          "model_geometry": [
+            {
+              "indices": 19188,
+              "mesh_count": 6,
+              "mesh_geometry_signatures": [
+                "414a258c5628ad8a:5248:9108",
+                "5b612e7d7e98deff:864:1416",
+                "aeefdb4ef862b337:84:132",
+                "b02df31b8ddf82e1:2856:4488",
+                "e0b297c3ef9dd988:832:1284",
+                "eb4f11bbb1230288:1664:2760"
+              ],
+              "vertices": 11548,
+              "world_max": [
+                -70.04951477050781,
+                17.580001831054688,
+                -70.04951477050781
+              ],
+              "world_min": [
+                -89.04951477050781,
+                0.7000000476837158,
+                -89.04951477050781
+              ]
+            }
+          ],
+          "position": [
+            -79.54951477050781,
+            4.0,
+            -79.54951477050781
+          ],
+          "protected": true,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 0,
+          "visual_profile": "base_green"
+        },
+        {
+          "hp": 650.0,
+          "id": 8,
+          "kind": "base_tower",
+          "lane": null,
+          "map_key": "base_blue",
+          "max_hp": 650.0,
+          "model_geometry": [
+            {
+              "indices": 19188,
+              "mesh_count": 6,
+              "mesh_geometry_signatures": [
+                "414a258c5628ad8a:5248:9108",
+                "5b612e7d7e98deff:864:1416",
+                "aeefdb4ef862b337:84:132",
+                "b02df31b8ddf82e1:2856:4488",
+                "e0b297c3ef9dd988:832:1284",
+                "eb4f11bbb1230288:1664:2760"
+              ],
+              "vertices": 11548,
+              "world_max": [
+                89.04951477050781,
+                17.580001831054688,
+                89.04951477050781
+              ],
+              "world_min": [
+                70.04951477050781,
+                0.7000000476837158,
+                70.04951477050781
+              ]
+            }
+          ],
+          "position": [
+            79.54951477050781,
+            4.0,
+            79.54951477050781
+          ],
+          "protected": true,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 0,
+          "visual_profile": "base_blue"
+        },
+        {
+          "hp": 420.0,
+          "id": 9,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_green_inner",
+          "max_hp": 420.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                -41.566864013671875,
+                11.989999771118164,
+                -41.566864013671875
+              ],
+              "world_min": [
+                -47.528594970703125,
+                0.019999980926513672,
+                -47.528594970703125
+              ]
+            }
+          ],
+          "position": [
+            -44.5477294921875,
+            3.0,
+            -44.5477294921875
+          ],
+          "protected": true,
+          "sprite_geometry": [],
+          "team": "green",
+          "tier": 1,
+          "visual_profile": "tower_green"
+        },
+        {
+          "hp": 420.0,
+          "id": 10,
+          "kind": "tower",
+          "lane": "mid",
+          "map_key": "mid_blue_inner",
+          "max_hp": 420.0,
+          "model_geometry": [
+            {
+              "indices": 5892,
+              "mesh_count": 5,
+              "mesh_geometry_signatures": [
+                "64380d2d2d984ae1:1248:1776",
+                "66c12b3cf27dfba8:464:660",
+                "cda62f871b456ae0:1008:1416",
+                "f587ef228920e591:168:264",
+                "fb01c48420da37ff:1168:1776"
+              ],
+              "vertices": 4056,
+              "world_max": [
+                47.528587341308594,
+                11.989999771118164,
+                47.528587341308594
+              ],
+              "world_min": [
+                41.566856384277344,
+                0.019999980926513672,
+                41.566856384277344
+              ]
+            }
+          ],
+          "position": [
+            44.54772186279297,
+            3.0,
+            44.54772186279297
+          ],
+          "protected": true,
+          "sprite_geometry": [],
+          "team": "blue",
+          "tier": 1,
+          "visual_profile": "tower_blue"
+        }
+      ],
+      "visual_mode": "Models3d",
+      "world_2d": null
+    }
+  ],
+  "geometry_fingerprint": "FNV-1a over actual mesh position/index buffers; not a cryptographic asset hash",
+  "geometry_id": "verdant-confluence-v1",
+  "manual_interaction_verified": false,
+  "map_profile": "verdant_two_tier_example",
+  "map_visual_cache_counts": [
+    2,
+    0
+  ],
+  "operations": [
+    {
+      "key": "environment.glb:lantern / 0056",
+      "model": "map-props/lantern.glb",
+      "registry_revision": 2,
+      "stage": 1
+    },
+    {
+      "key": "environment.glb:lantern / 0056",
+      "model": "map-props/flowering_shrub.glb",
+      "registry_revision": 3,
+      "stage": 2
+    },
+    {
+      "key": "environment.glb:lantern / 0056",
+      "model": "map-props/lantern.glb",
+      "registry_revision": 4,
+      "stage": 3
+    },
+    {
+      "key": "environment.glb:lantern / 0056",
+      "model": "map-props/flowering_shrub.glb",
+      "registry_revision": 5,
+      "stage": 4
+    }
+  ],
+  "pass": true,
+  "physical_device_verified": false,
+  "pixels": [
+    1280,
+    720
+  ],
+  "scenario": "map",
+  "scripted_camera": true,
+  "scripted_cosmetic_registry": true,
+  "synthetic_structures": false,
+  "two_d_contract": "configured authoritative structure sprites; 3D prop model swaps are not applied",
+  "version": "0.19.0-rc.5",
+  "visual_mode": "Models3d"
+}

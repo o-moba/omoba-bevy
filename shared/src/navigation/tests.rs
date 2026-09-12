@@ -260,3 +260,29 @@ fn current_world_cache_keeps_lane_access_and_routes_around_a_shipped_trunk() {
     assert_eq!(route.last(), Some(&destination));
     assert_safe(map, start, &route, &[]);
 }
+
+#[test]
+fn configured_object_footprints_respect_obstacles_edges_and_finite_radius() {
+    let map = NavigationMap::new(
+        bounds(10.0),
+        vec![rectangle("wall", [0.0, 0.0], [2.0, 2.0])],
+    )
+    .unwrap();
+    assert!(map.point_clear_with_radius([-2.0, 1.0], 1.3));
+    assert!(!map.point_clear_with_radius([-1.0, 1.0], 1.3));
+    assert!(!map.point_clear_with_radius([9.0, -4.0], 1.3));
+    assert!(map.point_clear_with_radius([8.0, -4.0], 1.3));
+    // A large structure reaches into a neighboring spatial bin beyond the
+    // hero-sized padding of that obstacle's cached broad phase.
+    let neighbor = NavigationMap::new(
+        bounds(20.0),
+        vec![rectangle("neighbor", [4.8, -1.0], [5.8, 1.0])],
+    )
+    .unwrap();
+    assert!(neighbor.point_clear([3.0, 0.0]));
+    assert!(!neighbor.point_clear_with_radius([3.0, 0.0], 2.0));
+    for radius in [-1.0, f32::NAN, f32::INFINITY] {
+        assert!(!map.point_clear_with_radius([-4.0, -4.0], radius));
+    }
+    assert!(!map.point_clear_with_radius([f32::NAN, 0.0], 1.3));
+}

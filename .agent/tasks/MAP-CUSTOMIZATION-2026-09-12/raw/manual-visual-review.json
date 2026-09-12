@@ -1,0 +1,18 @@
+{
+  "status": "PASS",
+  "method": "Direct image inspection in Codex after current-binary native capture; no image edits.",
+  "observations": [
+    "3D two-tier overview contains the added middle-lane structures and matching extra minimap markers.",
+    "The same decorative owner changes visibly from lantern to shrub; both are grounded at the same anchor.",
+    "Phone preview shows minimap top left, status top right, left movement control and right attack/skill controls.",
+    "Corrected 2D overview contains terrain, paths and props; close-up has the configured tower on the lane.",
+    "QA overview uses a deliberately distant scripted camera, not normal play zoom."
+  ],
+  "scope": [
+    "All seven published PNGs plus desktop and phone2D tower details inspected; all19 frames additionally checked for geometry, structure identity, positions/HP, image bytes and matching UDP tick receipts.",
+    "Native macOS phone-size preview only; no physical phone or human balance/performance claim."
+  ],
+  "rejected_preliminary": [
+    "final-two-tier-2d: QA camera clipped terrain; superseded by verified-two-tier-2d with visible ground."
+  ]
+}

@@ -1,0 +1,900 @@
+{
+  "binary_sha256": {
+    "client": "f3a2f17dff39e7d83f4ca446cb385134032b2f14077470cc09f5785028c3c4bd",
+    "server": "58aa13cb2ceec4abb51c1b159ab0e801005fedbf525b18ba400a42d670b035ca"
+  },
+  "manual_visual_review": {
+    "manual_interaction_verified": false,
+    "physical_device_verified": false,
+    "record": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/manual-visual-review.json",
+    "scope": "All seven published PNGs plus desktop and phone2D tower detail directly inspected by root.",
+    "status": "PASS"
+  },
+  "original_images": [
+    {
+      "bytes": 746843,
+      "original_file": "01-map-overview.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-default/01-map-overview.png",
+      "original_retained_locally": true,
+      "pixels": [
+        1280,
+        720
+      ],
+      "scenario": "default",
+      "sha256": "23579e9893780954789c3ffeb1fa7f56764633bc452578f1c303a78d2adc0361"
+    },
+    {
+      "bytes": 806894,
+      "original_file": "02-prop-a.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-default/02-prop-a.png",
+      "original_retained_locally": true,
+      "pixels": [
+        1280,
+        720
+      ],
+      "scenario": "default",
+      "sha256": "27dead645c8e73fa96724d452265fe6b8cb4e78cb1448f80f56769602920efff"
+    },
+    {
+      "bytes": 808499,
+      "original_file": "03-prop-b.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-default/03-prop-b.png",
+      "original_retained_locally": true,
+      "pixels": [
+        1280,
+        720
+      ],
+      "scenario": "default",
+      "sha256": "b7c6c5e30926dbf81895e6894dced357983a10ff77dc0b47ba42ccf9c65c3329"
+    },
+    {
+      "bytes": 806894,
+      "original_file": "04-prop-a-restored.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-default/04-prop-a-restored.png",
+      "original_retained_locally": true,
+      "pixels": [
+        1280,
+        720
+      ],
+      "scenario": "default",
+      "sha256": "27dead645c8e73fa96724d452265fe6b8cb4e78cb1448f80f56769602920efff"
+    },
+    {
+      "bytes": 808499,
+      "original_file": "05-prop-b-repeated.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-default/05-prop-b-repeated.png",
+      "original_retained_locally": true,
+      "pixels": [
+        1280,
+        720
+      ],
+      "scenario": "default",
+      "sha256": "b7c6c5e30926dbf81895e6894dced357983a10ff77dc0b47ba42ccf9c65c3329"
+    },
+    {
+      "bytes": 747435,
+      "original_file": "01-map-overview.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-desktop/01-map-overview.png",
+      "original_retained_locally": true,
+      "pixels": [
+        1280,
+        720
+      ],
+      "scenario": "two-tier-desktop",
+      "sha256": "afe866f6601f45132e9e9727c8b5e8f25b0178d39d1e93ce5990eb4ece876280"
+    },
+    {
+      "bytes": 807097,
+      "original_file": "02-prop-a.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-desktop/02-prop-a.png",
+      "original_retained_locally": true,
+      "pixels": [
+        1280,
+        720
+      ],
+      "scenario": "two-tier-desktop",
+      "sha256": "d163e1ed38f98f8212a721086fc7ec968d1b4feda668e11d3f636ec8a9eed9ba"
+    },
+    {
+      "bytes": 808702,
+      "original_file": "03-prop-b.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-desktop/03-prop-b.png",
+      "original_retained_locally": true,
+      "pixels": [
+        1280,
+        720
+      ],
+      "scenario": "two-tier-desktop",
+      "sha256": "c23400a65e89e2e5cddc90c53291432163b3308d5fb87f2ebf95d96328786ae8"
+    },
+    {
+      "bytes": 807097,
+      "original_file": "04-prop-a-restored.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-desktop/04-prop-a-restored.png",
+      "original_retained_locally": true,
+      "pixels": [
+        1280,
+        720
+      ],
+      "scenario": "two-tier-desktop",
+      "sha256": "d163e1ed38f98f8212a721086fc7ec968d1b4feda668e11d3f636ec8a9eed9ba"
+    },
+    {
+      "bytes": 808702,
+      "original_file": "05-prop-b-repeated.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-desktop/05-prop-b-repeated.png",
+      "original_retained_locally": true,
+      "pixels": [
+        1280,
+        720
+      ],
+      "scenario": "two-tier-desktop",
+      "sha256": "c23400a65e89e2e5cddc90c53291432163b3308d5fb87f2ebf95d96328786ae8"
+    },
+    {
+      "bytes": 289469,
+      "original_file": "01-map-overview.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone/01-map-overview.png",
+      "original_retained_locally": true,
+      "pixels": [
+        844,
+        390
+      ],
+      "scenario": "two-tier-phone",
+      "sha256": "829e71b5b0adfaec0523a07d59e1b641391c8368c3c789aea616218920aa7c7a"
+    },
+    {
+      "bytes": 316269,
+      "original_file": "02-prop-a.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone/02-prop-a.png",
+      "original_retained_locally": true,
+      "pixels": [
+        844,
+        390
+      ],
+      "scenario": "two-tier-phone",
+      "sha256": "615bbcfcbef1ecd93f91d1c039f8dba7fa3c56024430a31407555e3b95924e6e"
+    },
+    {
+      "bytes": 316765,
+      "original_file": "03-prop-b.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone/03-prop-b.png",
+      "original_retained_locally": true,
+      "pixels": [
+        844,
+        390
+      ],
+      "scenario": "two-tier-phone",
+      "sha256": "fc39f571881cfafc3cecdd08d7c9f86719276562c6894665d93c0d76ecb2f6af"
+    },
+    {
+      "bytes": 316269,
+      "original_file": "04-prop-a-restored.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone/04-prop-a-restored.png",
+      "original_retained_locally": true,
+      "pixels": [
+        844,
+        390
+      ],
+      "scenario": "two-tier-phone",
+      "sha256": "8d02d6e9619795af4c28d5213ba234941469818301df5f71ddcf0e9e1655a3b7"
+    },
+    {
+      "bytes": 316765,
+      "original_file": "05-prop-b-repeated.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone/05-prop-b-repeated.png",
+      "original_retained_locally": true,
+      "pixels": [
+        844,
+        390
+      ],
+      "scenario": "two-tier-phone",
+      "sha256": "41034bdf1d716195f93d26340b9c973cdbbb0c8e65ed321252277c80f0e77cc2"
+    },
+    {
+      "bytes": 1046335,
+      "original_file": "01-map-overview.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-2d/01-map-overview.png",
+      "original_retained_locally": true,
+      "pixels": [
+        1280,
+        720
+      ],
+      "scenario": "two-tier-2d",
+      "sha256": "60e1a436610827ff32822189cf267f47bab6d27ef3c025f136ce4eba6a740890"
+    },
+    {
+      "bytes": 1552045,
+      "original_file": "02-tower-detail.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-2d/02-tower-detail.png",
+      "original_retained_locally": true,
+      "pixels": [
+        1280,
+        720
+      ],
+      "scenario": "two-tier-2d",
+      "sha256": "3c3ae62ca3834ac357a45eb9b02b1b83defa7aa3fbdaca73f1a5a9a640b811b5"
+    },
+    {
+      "bytes": 368151,
+      "original_file": "01-map-overview.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone-2d/01-map-overview.png",
+      "original_retained_locally": true,
+      "pixels": [
+        844,
+        390
+      ],
+      "scenario": "two-tier-phone-2d",
+      "sha256": "ef30b70a268e2dd8e13f6c0e86a9933481fcafb403cf841852a4df6088751752"
+    },
+    {
+      "bytes": 653634,
+      "original_file": "02-tower-detail.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone-2d/02-tower-detail.png",
+      "original_retained_locally": true,
+      "pixels": [
+        844,
+        390
+      ],
+      "scenario": "two-tier-phone-2d",
+      "sha256": "c94e1e2e11e7c595f606683faf51024c56f48b43016f2306d4e0b9adc8285765"
+    }
+  ],
+  "packaged_records": [
+    {
+      "encoding": "unchanged",
+      "original_bytes": 3728,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-default/capture-run.json",
+      "original_sha256": "b7864705fd2d962a1505957612a9c27b60e0850a382350d6bb9d06e0f682e5b8",
+      "packaged_bytes": 3728,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/default/capture-run.json",
+      "packaged_sha256": "b7864705fd2d962a1505957612a9c27b60e0850a382350d6bb9d06e0f682e5b8",
+      "scenario": "default"
+    },
+    {
+      "encoding": "unchanged",
+      "original_bytes": 66559,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-default/qa-summary.json",
+      "original_sha256": "6b681fa49d9d032212e281d4be436cdf05f3024e48d47f773bc84ec1196585fd",
+      "packaged_bytes": 66559,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/default/qa-summary.json",
+      "packaged_sha256": "6b681fa49d9d032212e281d4be436cdf05f3024e48d47f773bc84ec1196585fd",
+      "scenario": "default"
+    },
+    {
+      "encoding": "unchanged",
+      "original_bytes": 1560,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-default/map-config.json",
+      "original_sha256": "693072b51116f112160e07da6df7c33a29c61661add433f27cc32ac26dfb8839",
+      "packaged_bytes": 1560,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/default/map-config.json",
+      "packaged_sha256": "693072b51116f112160e07da6df7c33a29c61661add433f27cc32ac26dfb8839",
+      "scenario": "default"
+    },
+    {
+      "encoding": "unchanged",
+      "original_bytes": 2516,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-default/expected-map.json",
+      "original_sha256": "b724f2282e007738bea79313dd54391844e5febd47fa471995ce137659c5178f",
+      "packaged_bytes": 2516,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/default/expected-map.json",
+      "packaged_sha256": "b724f2282e007738bea79313dd54391844e5febd47fa471995ce137659c5178f",
+      "scenario": "default"
+    },
+    {
+      "encoding": "gzip",
+      "gzip_mtime": 0,
+      "gzip_original_filename": "",
+      "original_bytes": 384,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-default/client.log",
+      "original_sha256": "17a3df9387acb253e4a10cf85a19dbd3681ebbd08714679f57c27d261e85ff27",
+      "packaged_bytes": 282,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/default/client.log.gz",
+      "packaged_sha256": "8550cc4d96159c120e3053a3386a05e1962ca8d0d008e96f3c498174dbd0bc47",
+      "scenario": "default"
+    },
+    {
+      "encoding": "gzip",
+      "gzip_mtime": 0,
+      "gzip_original_filename": "",
+      "original_bytes": 780,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-default/server.log",
+      "original_sha256": "081286b2e0ee2c30f54dc2e60d47c0d313eab037253999add2e370181d3610ac",
+      "packaged_bytes": 468,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/default/server.log.gz",
+      "packaged_sha256": "0df46a0b90944c1b73ae40cdbb107ac14e4dc554c29dc081ca3f2450f69a528c",
+      "scenario": "default"
+    },
+    {
+      "encoding": "gzip",
+      "gzip_mtime": 0,
+      "gzip_original_filename": "",
+      "original_bytes": 151729,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-default/authoritative-snapshots.jsonl",
+      "original_sha256": "bb2227654f5665b3afee84dc027294b342749980cd9e781b103e545530159864",
+      "packaged_bytes": 2199,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/default/authoritative-snapshots.jsonl.gz",
+      "packaged_sha256": "e45156198ece35b427ccbb9c47592387093c2c56e804bf716ffb15e4c450ed88",
+      "scenario": "default"
+    },
+    {
+      "encoding": "unchanged",
+      "original_bytes": 3750,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-desktop/capture-run.json",
+      "original_sha256": "44fe83268f65bce8ff1c5e4f0aa07e2f97a4181b8d862a291795cdba09035164",
+      "packaged_bytes": 3750,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-desktop/capture-run.json",
+      "packaged_sha256": "44fe83268f65bce8ff1c5e4f0aa07e2f97a4181b8d862a291795cdba09035164",
+      "scenario": "two-tier-desktop"
+    },
+    {
+      "encoding": "unchanged",
+      "original_bytes": 78693,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-desktop/qa-summary.json",
+      "original_sha256": "392f94712955cef97b48f141c4915969d6c6332b6b77622426bc656bac3336bd",
+      "packaged_bytes": 78693,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-desktop/qa-summary.json",
+      "packaged_sha256": "392f94712955cef97b48f141c4915969d6c6332b6b77622426bc656bac3336bd",
+      "scenario": "two-tier-desktop"
+    },
+    {
+      "encoding": "unchanged",
+      "original_bytes": 2687,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-desktop/map-config.json",
+      "original_sha256": "f2e3e4c9b4ff4a91a3f69911da4156c052af2d773ab6de18a07309a589e66819",
+      "packaged_bytes": 2687,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-desktop/map-config.json",
+      "packaged_sha256": "f2e3e4c9b4ff4a91a3f69911da4156c052af2d773ab6de18a07309a589e66819",
+      "scenario": "two-tier-desktop"
+    },
+    {
+      "encoding": "unchanged",
+      "original_bytes": 3127,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-desktop/expected-map.json",
+      "original_sha256": "749518b3493ff3e8db7a61fe9e6065abbd03fc03c32b8438c2b61f20338631a1",
+      "packaged_bytes": 3127,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-desktop/expected-map.json",
+      "packaged_sha256": "749518b3493ff3e8db7a61fe9e6065abbd03fc03c32b8438c2b61f20338631a1",
+      "scenario": "two-tier-desktop"
+    },
+    {
+      "encoding": "gzip",
+      "gzip_mtime": 0,
+      "gzip_original_filename": "",
+      "original_bytes": 384,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-desktop/client.log",
+      "original_sha256": "39ae6e89e4a7c482be5cc89229f6c772db73739c0e1eb52e9e6ee2e471356946",
+      "packaged_bytes": 283,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-desktop/client.log.gz",
+      "packaged_sha256": "4f136826da80aec85acd66b5b5749170ae53fb357e21ef4db829e786796111bc",
+      "scenario": "two-tier-desktop"
+    },
+    {
+      "encoding": "gzip",
+      "gzip_mtime": 0,
+      "gzip_original_filename": "",
+      "original_bytes": 790,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-desktop/server.log",
+      "original_sha256": "9cba274abac3c568fbf039e4a2b818834078e88d9d3d0bae7140e3ffa897adbc",
+      "packaged_bytes": 478,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-desktop/server.log.gz",
+      "packaged_sha256": "1040a9f0f86acfe01b367aed70e3b78edf8f0b80e8d31d1b6cf1d113aaf2c38b",
+      "scenario": "two-tier-desktop"
+    },
+    {
+      "encoding": "gzip",
+      "gzip_mtime": 0,
+      "gzip_original_filename": "",
+      "original_bytes": 81341,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-desktop/authoritative-snapshots.jsonl",
+      "original_sha256": "7c54ff50b97bed7d36499de04aa36b4b7a9ff99fe70e146e372427eb58482100",
+      "packaged_bytes": 1671,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-desktop/authoritative-snapshots.jsonl.gz",
+      "packaged_sha256": "406ddb571a5d8d0d1c6f003dbe7127cae73a78e05ea05ccf6d4bf1c3af8023db",
+      "scenario": "two-tier-desktop"
+    },
+    {
+      "encoding": "unchanged",
+      "original_bytes": 3730,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone/capture-run.json",
+      "original_sha256": "c7cfccd7620519f33e5ab51c11a0b1d7a00d4807e7084b54bc587e10a870392e",
+      "packaged_bytes": 3730,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-phone/capture-run.json",
+      "packaged_sha256": "c7cfccd7620519f33e5ab51c11a0b1d7a00d4807e7084b54bc587e10a870392e",
+      "scenario": "two-tier-phone"
+    },
+    {
+      "encoding": "unchanged",
+      "original_bytes": 78752,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone/qa-summary.json",
+      "original_sha256": "486b7379e0d13730ecb11713de0f82dfbafaf80c822ecc8e5a05ad581061eaaf",
+      "packaged_bytes": 78752,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-phone/qa-summary.json",
+      "packaged_sha256": "486b7379e0d13730ecb11713de0f82dfbafaf80c822ecc8e5a05ad581061eaaf",
+      "scenario": "two-tier-phone"
+    },
+    {
+      "encoding": "unchanged",
+      "original_bytes": 2687,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone/map-config.json",
+      "original_sha256": "f2e3e4c9b4ff4a91a3f69911da4156c052af2d773ab6de18a07309a589e66819",
+      "packaged_bytes": 2687,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-phone/map-config.json",
+      "packaged_sha256": "f2e3e4c9b4ff4a91a3f69911da4156c052af2d773ab6de18a07309a589e66819",
+      "scenario": "two-tier-phone"
+    },
+    {
+      "encoding": "unchanged",
+      "original_bytes": 3127,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone/expected-map.json",
+      "original_sha256": "749518b3493ff3e8db7a61fe9e6065abbd03fc03c32b8438c2b61f20338631a1",
+      "packaged_bytes": 3127,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-phone/expected-map.json",
+      "packaged_sha256": "749518b3493ff3e8db7a61fe9e6065abbd03fc03c32b8438c2b61f20338631a1",
+      "scenario": "two-tier-phone"
+    },
+    {
+      "encoding": "gzip",
+      "gzip_mtime": 0,
+      "gzip_original_filename": "",
+      "original_bytes": 384,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone/client.log",
+      "original_sha256": "1dc10e10d7f3eecf0a896d74461a8255a7638cd5109a5d0252aaea26adf68cc2",
+      "packaged_bytes": 282,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-phone/client.log.gz",
+      "packaged_sha256": "08d83c8376f7840f86abceabc44ae4729cc9146e9052608234da5f3498df4eb4",
+      "scenario": "two-tier-phone"
+    },
+    {
+      "encoding": "gzip",
+      "gzip_mtime": 0,
+      "gzip_original_filename": "",
+      "original_bytes": 790,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone/server.log",
+      "original_sha256": "1140102af0ba3c73bf8093423bb9334a8d6008417dfa7b1a6bf8eeab7c19d962",
+      "packaged_bytes": 477,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-phone/server.log.gz",
+      "packaged_sha256": "eb2034204f39c9c4672579fe74a6a23b7b62e039b9aa0e18cbcb0a6e896684b7",
+      "scenario": "two-tier-phone"
+    },
+    {
+      "encoding": "gzip",
+      "gzip_mtime": 0,
+      "gzip_original_filename": "",
+      "original_bytes": 82011,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone/authoritative-snapshots.jsonl",
+      "original_sha256": "0b75a16683281b16c9c164413439d806c95dbff09885dbcbf5ca2110b0b87c59",
+      "packaged_bytes": 1676,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-phone/authoritative-snapshots.jsonl.gz",
+      "packaged_sha256": "fec5b0d046af14cda6994866465922e0e23b0457c51a12a76bd14b96cb38937a",
+      "scenario": "two-tier-phone"
+    },
+    {
+      "encoding": "unchanged",
+      "original_bytes": 2411,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-2d/capture-run.json",
+      "original_sha256": "f00af54d9221d449826df650dffbece3d3b23d8fc37cf8b10a80dafa866b0301",
+      "packaged_bytes": 2411,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-2d/capture-run.json",
+      "packaged_sha256": "f00af54d9221d449826df650dffbece3d3b23d8fc37cf8b10a80dafa866b0301",
+      "scenario": "two-tier-2d"
+    },
+    {
+      "encoding": "unchanged",
+      "original_bytes": 18891,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-2d/qa-summary.json",
+      "original_sha256": "246c4103479a8c46e6596af134fbd27376b1444d5ceeaafb2ad95e851b849262",
+      "packaged_bytes": 18891,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-2d/qa-summary.json",
+      "packaged_sha256": "246c4103479a8c46e6596af134fbd27376b1444d5ceeaafb2ad95e851b849262",
+      "scenario": "two-tier-2d"
+    },
+    {
+      "encoding": "unchanged",
+      "original_bytes": 2687,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-2d/map-config.json",
+      "original_sha256": "f2e3e4c9b4ff4a91a3f69911da4156c052af2d773ab6de18a07309a589e66819",
+      "packaged_bytes": 2687,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-2d/map-config.json",
+      "packaged_sha256": "f2e3e4c9b4ff4a91a3f69911da4156c052af2d773ab6de18a07309a589e66819",
+      "scenario": "two-tier-2d"
+    },
+    {
+      "encoding": "unchanged",
+      "original_bytes": 3127,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-2d/expected-map.json",
+      "original_sha256": "749518b3493ff3e8db7a61fe9e6065abbd03fc03c32b8438c2b61f20338631a1",
+      "packaged_bytes": 3127,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-2d/expected-map.json",
+      "packaged_sha256": "749518b3493ff3e8db7a61fe9e6065abbd03fc03c32b8438c2b61f20338631a1",
+      "scenario": "two-tier-2d"
+    },
+    {
+      "encoding": "gzip",
+      "gzip_mtime": 0,
+      "gzip_original_filename": "",
+      "original_bytes": 384,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-2d/client.log",
+      "original_sha256": "a31792dc86467c05f2c2225d38baefcd53c03ab25cbec07c1a1e1d3951e66149",
+      "packaged_bytes": 283,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-2d/client.log.gz",
+      "packaged_sha256": "b3cfd3e8fa5d2ef2fd343e47dfbe8d0d7e6ad3aa538d4d09356250e3e8425387",
+      "scenario": "two-tier-2d"
+    },
+    {
+      "encoding": "gzip",
+      "gzip_mtime": 0,
+      "gzip_original_filename": "",
+      "original_bytes": 790,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-2d/server.log",
+      "original_sha256": "10e5a518fd0c541118b15df214fb2c70bbfc5f56f831639831a61f12196ca39c",
+      "packaged_bytes": 477,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-2d/server.log.gz",
+      "packaged_sha256": "3446b25862c3dce25d0eac99cc9a66a44a0713451ecd159f58fa11c711800470",
+      "scenario": "two-tier-2d"
+    },
+    {
+      "encoding": "gzip",
+      "gzip_mtime": 0,
+      "gzip_original_filename": "",
+      "original_bytes": 58051,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-2d/authoritative-snapshots.jsonl",
+      "original_sha256": "cfd697b49e1f36819516c2aeac186d7328d590be1711d229804d3035f23ac86e",
+      "packaged_bytes": 1504,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-2d/authoritative-snapshots.jsonl.gz",
+      "packaged_sha256": "8684fdfdefad20f6c5beb92c068f2040e06e500587dabe438fe5bfb255291b38",
+      "scenario": "two-tier-2d"
+    },
+    {
+      "encoding": "unchanged",
+      "original_bytes": 2405,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone-2d/capture-run.json",
+      "original_sha256": "f3eca10636c65108bc51208acd60ccb3e7dba4e86002e8181f5a5cd4c568b2ab",
+      "packaged_bytes": 2405,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-phone-2d/capture-run.json",
+      "packaged_sha256": "f3eca10636c65108bc51208acd60ccb3e7dba4e86002e8181f5a5cd4c568b2ab",
+      "scenario": "two-tier-phone-2d"
+    },
+    {
+      "encoding": "unchanged",
+      "original_bytes": 18914,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone-2d/qa-summary.json",
+      "original_sha256": "d077a3352b519ad0ad85101b6fe7a032c78d9b04cfe54e7fc18bedbab995d34e",
+      "packaged_bytes": 18914,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-phone-2d/qa-summary.json",
+      "packaged_sha256": "d077a3352b519ad0ad85101b6fe7a032c78d9b04cfe54e7fc18bedbab995d34e",
+      "scenario": "two-tier-phone-2d"
+    },
+    {
+      "encoding": "unchanged",
+      "original_bytes": 2687,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone-2d/map-config.json",
+      "original_sha256": "f2e3e4c9b4ff4a91a3f69911da4156c052af2d773ab6de18a07309a589e66819",
+      "packaged_bytes": 2687,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-phone-2d/map-config.json",
+      "packaged_sha256": "f2e3e4c9b4ff4a91a3f69911da4156c052af2d773ab6de18a07309a589e66819",
+      "scenario": "two-tier-phone-2d"
+    },
+    {
+      "encoding": "unchanged",
+      "original_bytes": 3127,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone-2d/expected-map.json",
+      "original_sha256": "749518b3493ff3e8db7a61fe9e6065abbd03fc03c32b8438c2b61f20338631a1",
+      "packaged_bytes": 3127,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-phone-2d/expected-map.json",
+      "packaged_sha256": "749518b3493ff3e8db7a61fe9e6065abbd03fc03c32b8438c2b61f20338631a1",
+      "scenario": "two-tier-phone-2d"
+    },
+    {
+      "encoding": "gzip",
+      "gzip_mtime": 0,
+      "gzip_original_filename": "",
+      "original_bytes": 384,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone-2d/client.log",
+      "original_sha256": "492abe260cf2f962a37d84b5a6fbe433d1accf949daa93d791d7278bd9d77a04",
+      "packaged_bytes": 284,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-phone-2d/client.log.gz",
+      "packaged_sha256": "7cbba58c34128ba14021455075bd2d1428661489a5284777b1ca3cec93c7d44b",
+      "scenario": "two-tier-phone-2d"
+    },
+    {
+      "encoding": "gzip",
+      "gzip_mtime": 0,
+      "gzip_original_filename": "",
+      "original_bytes": 790,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone-2d/server.log",
+      "original_sha256": "4d659c9d7004bf9c6090e3865fd165a6ca5d6a04cb72a09e33588050b4a41fa0",
+      "packaged_bytes": 478,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-phone-2d/server.log.gz",
+      "packaged_sha256": "92237c7c727dd1a7b06cdabf417127931093a7ed4b177140700e1405cc78b93a",
+      "scenario": "two-tier-phone-2d"
+    },
+    {
+      "encoding": "gzip",
+      "gzip_mtime": 0,
+      "gzip_original_filename": "",
+      "original_bytes": 60481,
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone-2d/authoritative-snapshots.jsonl",
+      "original_sha256": "47b74b3a7c4c2a993a7a9d32a71affa84edff4ffe3d715247d8689d3f2610c63",
+      "packaged_bytes": 1525,
+      "packaged_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-phone-2d/authoritative-snapshots.jsonl.gz",
+      "packaged_sha256": "e59b97f262f6d0720994bc2dbeaf83622503b628891f3e956f42b640efac0413",
+      "scenario": "two-tier-phone-2d"
+    }
+  ],
+  "provenance": {
+    "capture_runtime": "native macOS client and local authoritative server",
+    "manual_interaction_verified": false,
+    "manual_visual_inspection": "PASS: root inspected the published image after packaging",
+    "manual_visual_inspection_at_packaging": "pending root",
+    "packaging": "PNG and JSON files are exact byte copies; gzip logs and snapshots decompress to exact original bytes, with mtime=0 and no embedded filename.",
+    "phone_scope": "Native phone-sized touch previews; no physical Android/iOS device claim.",
+    "physical_device_verified": false,
+    "platform": "macOS-26.6-arm64-arm-64bit",
+    "scripted_camera": true,
+    "scripted_cosmetic_registry_scope": "Only the three Models3d scenarios perform model substitutions; the two Sprite2d scenarios verify authoritative structure sprites without GLB swaps.",
+    "synthetic_structures": false
+  },
+  "published_images": [
+    {
+      "bytes": 746843,
+      "caption": "Default eight-structure map overview",
+      "capture_report_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/default/capture-run.json",
+      "manual_interaction_verified": false,
+      "manual_visual_inspection": "PASS: root inspected the published image after packaging",
+      "manual_visual_inspection_at_packaging": "pending root",
+      "map_profile": "verdant_default",
+      "original_file": "01-map-overview.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-default/01-map-overview.png",
+      "original_retained_locally": true,
+      "physical_device_verified": false,
+      "pixels": [
+        1280,
+        720
+      ],
+      "provenance": "Exact unedited PNG captured by running native macOS client with authoritative server snapshots and scripted camera; no generated artwork, compositing, resizing or retouching.",
+      "published_file": "01-default-overview.png",
+      "published_path": "docs/progress/2026-09-12-map/01-default-overview.png",
+      "render_mode": "models3d",
+      "scenario": "default",
+      "scripted_camera": true,
+      "scripted_cosmetic_registry": true,
+      "sha256": "23579e9893780954789c3ffeb1fa7f56764633bc452578f1c303a78d2adc0361",
+      "ui_profile": "desktop"
+    },
+    {
+      "bytes": 747435,
+      "caption": "Custom ten-structure map overview",
+      "capture_report_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-desktop/capture-run.json",
+      "manual_interaction_verified": false,
+      "manual_visual_inspection": "PASS: root inspected the published image after packaging",
+      "manual_visual_inspection_at_packaging": "pending root",
+      "map_profile": "verdant_two_tier_example",
+      "original_file": "01-map-overview.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-desktop/01-map-overview.png",
+      "original_retained_locally": true,
+      "physical_device_verified": false,
+      "pixels": [
+        1280,
+        720
+      ],
+      "provenance": "Exact unedited PNG captured by running native macOS client with authoritative server snapshots and scripted camera; no generated artwork, compositing, resizing or retouching.",
+      "published_file": "02-custom-overview.png",
+      "published_path": "docs/progress/2026-09-12-map/02-custom-overview.png",
+      "render_mode": "models3d",
+      "scenario": "two-tier-desktop",
+      "scripted_camera": true,
+      "scripted_cosmetic_registry": true,
+      "sha256": "afe866f6601f45132e9e9727c8b5e8f25b0178d39d1e93ce5990eb4ece876280",
+      "ui_profile": "desktop"
+    },
+    {
+      "bytes": 807097,
+      "caption": "Actual selected prop using packaged lantern model A",
+      "capture_report_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-desktop/capture-run.json",
+      "manual_interaction_verified": false,
+      "manual_visual_inspection": "PASS: root inspected the published image after packaging",
+      "manual_visual_inspection_at_packaging": "pending root",
+      "map_profile": "verdant_two_tier_example",
+      "original_file": "02-prop-a.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-desktop/02-prop-a.png",
+      "original_retained_locally": true,
+      "physical_device_verified": false,
+      "pixels": [
+        1280,
+        720
+      ],
+      "provenance": "Exact unedited PNG captured by running native macOS client with authoritative server snapshots and scripted camera; no generated artwork, compositing, resizing or retouching.",
+      "published_file": "03-prop-a.png",
+      "published_path": "docs/progress/2026-09-12-map/03-prop-a.png",
+      "render_mode": "models3d",
+      "scenario": "two-tier-desktop",
+      "scripted_camera": true,
+      "scripted_cosmetic_registry": true,
+      "sha256": "d163e1ed38f98f8212a721086fc7ec968d1b4feda668e11d3f636ec8a9eed9ba",
+      "ui_profile": "desktop"
+    },
+    {
+      "bytes": 808702,
+      "caption": "Same actual prop using packaged flowering shrub model B",
+      "capture_report_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-desktop/capture-run.json",
+      "manual_interaction_verified": false,
+      "manual_visual_inspection": "PASS: root inspected the published image after packaging",
+      "manual_visual_inspection_at_packaging": "pending root",
+      "map_profile": "verdant_two_tier_example",
+      "original_file": "03-prop-b.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-desktop/03-prop-b.png",
+      "original_retained_locally": true,
+      "physical_device_verified": false,
+      "pixels": [
+        1280,
+        720
+      ],
+      "provenance": "Exact unedited PNG captured by running native macOS client with authoritative server snapshots and scripted camera; no generated artwork, compositing, resizing or retouching.",
+      "published_file": "04-prop-b.png",
+      "published_path": "docs/progress/2026-09-12-map/04-prop-b.png",
+      "render_mode": "models3d",
+      "scenario": "two-tier-desktop",
+      "scripted_camera": true,
+      "scripted_cosmetic_registry": true,
+      "sha256": "c23400a65e89e2e5cddc90c53291432163b3308d5fb87f2ebf95d96328786ae8",
+      "ui_profile": "desktop"
+    },
+    {
+      "bytes": 289469,
+      "caption": "Custom map in native phone-sized 3D touch preview",
+      "capture_report_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-phone/capture-run.json",
+      "manual_interaction_verified": false,
+      "manual_visual_inspection": "PASS: root inspected the published image after packaging",
+      "manual_visual_inspection_at_packaging": "pending root",
+      "map_profile": "verdant_two_tier_example",
+      "original_file": "01-map-overview.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone/01-map-overview.png",
+      "original_retained_locally": true,
+      "physical_device_verified": false,
+      "pixels": [
+        844,
+        390
+      ],
+      "provenance": "Exact unedited PNG captured by running native macOS client with authoritative server snapshots and scripted camera; no generated artwork, compositing, resizing or retouching.",
+      "published_file": "05-phone-3d-overview.png",
+      "published_path": "docs/progress/2026-09-12-map/05-phone-3d-overview.png",
+      "render_mode": "models3d",
+      "scenario": "two-tier-phone",
+      "scripted_camera": true,
+      "scripted_cosmetic_registry": true,
+      "sha256": "829e71b5b0adfaec0523a07d59e1b641391c8368c3c789aea616218920aa7c7a",
+      "ui_profile": "mobile"
+    },
+    {
+      "bytes": 1046335,
+      "caption": "Custom map in native desktop 2D mode",
+      "capture_report_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-2d/capture-run.json",
+      "manual_interaction_verified": false,
+      "manual_visual_inspection": "PASS: root inspected the published image after packaging",
+      "manual_visual_inspection_at_packaging": "pending root",
+      "map_profile": "verdant_two_tier_example",
+      "original_file": "01-map-overview.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-2d/01-map-overview.png",
+      "original_retained_locally": true,
+      "physical_device_verified": false,
+      "pixels": [
+        1280,
+        720
+      ],
+      "provenance": "Exact unedited PNG captured by running native macOS client with authoritative server snapshots and scripted camera; no generated artwork, compositing, resizing or retouching.",
+      "published_file": "06-2d-overview.png",
+      "published_path": "docs/progress/2026-09-12-map/06-2d-overview.png",
+      "render_mode": "sprite2d",
+      "scenario": "two-tier-2d",
+      "scripted_camera": true,
+      "scripted_cosmetic_registry": false,
+      "sha256": "60e1a436610827ff32822189cf267f47bab6d27ef3c025f136ce4eba6a740890",
+      "ui_profile": "desktop"
+    },
+    {
+      "bytes": 368151,
+      "caption": "Custom map in native phone-sized 2D touch preview",
+      "capture_report_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-phone-2d/capture-run.json",
+      "manual_interaction_verified": false,
+      "manual_visual_inspection": "PASS: root inspected the published image after packaging",
+      "manual_visual_inspection_at_packaging": "pending root",
+      "map_profile": "verdant_two_tier_example",
+      "original_file": "01-map-overview.png",
+      "original_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone-2d/01-map-overview.png",
+      "original_retained_locally": true,
+      "physical_device_verified": false,
+      "pixels": [
+        844,
+        390
+      ],
+      "provenance": "Exact unedited PNG captured by running native macOS client with authoritative server snapshots and scripted camera; no generated artwork, compositing, resizing or retouching.",
+      "published_file": "07-phone-2d-overview.png",
+      "published_path": "docs/progress/2026-09-12-map/07-phone-2d-overview.png",
+      "render_mode": "sprite2d",
+      "scenario": "two-tier-phone-2d",
+      "scripted_camera": true,
+      "scripted_cosmetic_registry": false,
+      "sha256": "ef30b70a268e2dd8e13f6c0e86a9933481fcafb403cf841852a4df6088751752",
+      "ui_profile": "mobile"
+    }
+  ],
+  "published_png_count": 7,
+  "raw_png_count": 19,
+  "scenario_count": 5,
+  "scenarios": [
+    {
+      "capture_pass": true,
+      "map_profile": "verdant_default",
+      "mode": "models3d",
+      "name": "default",
+      "original_directory": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-default",
+      "pixels": [
+        1280,
+        720
+      ],
+      "report_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/default/capture-run.json",
+      "scripted_camera": true,
+      "scripted_cosmetic_registry": true
+    },
+    {
+      "capture_pass": true,
+      "map_profile": "verdant_two_tier_example",
+      "mode": "models3d",
+      "name": "two-tier-desktop",
+      "original_directory": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-desktop",
+      "pixels": [
+        1280,
+        720
+      ],
+      "report_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-desktop/capture-run.json",
+      "scripted_camera": true,
+      "scripted_cosmetic_registry": true
+    },
+    {
+      "capture_pass": true,
+      "map_profile": "verdant_two_tier_example",
+      "mode": "models3d",
+      "name": "two-tier-phone",
+      "original_directory": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone",
+      "pixels": [
+        844,
+        390
+      ],
+      "report_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-phone/capture-run.json",
+      "scripted_camera": true,
+      "scripted_cosmetic_registry": true
+    },
+    {
+      "capture_pass": true,
+      "map_profile": "verdant_two_tier_example",
+      "mode": "sprite2d",
+      "name": "two-tier-2d",
+      "original_directory": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-2d",
+      "pixels": [
+        1280,
+        720
+      ],
+      "report_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-2d/capture-run.json",
+      "scripted_camera": true,
+      "scripted_cosmetic_registry": false
+    },
+    {
+      "capture_pass": true,
+      "map_profile": "verdant_two_tier_example",
+      "mode": "sprite2d",
+      "name": "two-tier-phone-2d",
+      "original_directory": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/verified-two-tier-phone-2d",
+      "pixels": [
+        844,
+        390
+      ],
+      "report_path": ".agent/tasks/MAP-CUSTOMIZATION-2026-09-12/raw/published-proof/two-tier-phone-2d/capture-run.json",
+      "scripted_camera": true,
+      "scripted_cosmetic_registry": false
+    }
+  ],
+  "schema_version": 1,
+  "task": "MAP-CUSTOMIZATION-2026-09-12",
+  "version": "0.19.0-rc.5"
+}

@@ -71,14 +71,10 @@ pub(crate) fn neutral_aggro_and_leash(camp_type: NeutralCampType) -> (f32, f32) 
     }
 }
 
-/// Full map extent derived exactly like `world::build_map_layout` (see the
-/// jungle ring formula used for camp anchors).
+/// Camp anchors share the fixed arena extent with structures and clients.
 fn jungle_map_size() -> f32 {
-    let inner_side = TARGET_BASE_DISTANCE / 2.0_f32.sqrt();
-    let half_inner_side = inner_side * 0.5;
-    let base_padding = BASE_PAD_SIZE * 0.5 + BASE_EDGE_MARGIN;
-    let half_map_size = half_inner_side + base_padding;
-    half_map_size * 2.0
+    let bounds = shared::map::geometry().bounds;
+    bounds.max[0] - bounds.min[0]
 }
 
 pub(crate) fn jungle_camp_blueprints() -> Vec<(Vec3f, NeutralCampType)> {

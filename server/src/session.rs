@@ -283,9 +283,34 @@ fn reset_player_round(player: &mut ConnectedPlayer, map_layout: &MapLayoutState,
     player.speed_mult = 1.0;
 }
 
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_transform_request(
     player: &mut ConnectedPlayer,
     map_layout: &MapLayoutState,
+    x: f32,
+    y: f32,
+    z: f32,
+    yaw: f32,
+    now: Instant,
+) {
+    handle_transform_request_with_structures(
+        player,
+        map_layout,
+        &HashMap::new(),
+        x,
+        y,
+        z,
+        yaw,
+        now,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn handle_transform_request_with_structures(
+    player: &mut ConnectedPlayer,
+    map_layout: &MapLayoutState,
+    structures: &HashMap<u64, Structure>,
     x: f32,
     y: f32,
     z: f32,
@@ -330,6 +355,7 @@ pub(crate) fn handle_transform_request(
     // This is the same immutable forest collision map used for client routes.
     let accepted_xz = shared::navigation::world_navigation()
         .clip_movement([current.x, current.z], [accepted.x, accepted.z]);
+    let accepted_xz = clip_live_structures([current.x, current.z], accepted_xz, structures);
     player.state.x = accepted_xz[0];
     player.state.y = PLAYER_GROUND_Y;
     player.state.z = accepted_xz[1];
@@ -337,6 +363,48 @@ pub(crate) fn handle_transform_request(
         player.state.yaw = yaw;
     }
     player.last_movement_at = now;
+}
+
+/// Sweep every live gameplay footprint. Starting overlaps may recover only
+/// outward, which also keeps reset/legacy-position recovery from freezing.
+fn clip_live_structures(
+    from: [f32; 2],
+    to: [f32; 2],
+    structures: &HashMap<u64, Structure>,
+) -> [f32; 2] {
+    let delta = [to[0] - from[0], to[1] - from[1]];
+    let length_sq = delta[0] * delta[0] + delta[1] * delta[1];
+    if length_sq <= 0.000_000_1 {
+        return to;
+    }
+    let mut fraction = 1.0_f32;
+    for structure in structures.values().filter(|s| s.state.hp > 0.0) {
+        let radius = match structure.state.kind {
+            StructureKind::Tower => shared::TOWER_TARGET_RADIUS,
+            StructureKind::BaseTower => 3.2,
+        } + shared::navigation::HERO_RADIUS;
+        let offset = [from[0] - structure.state.x, from[1] - structure.state.z];
+        let dot = offset[0] * delta[0] + offset[1] * delta[1];
+        let c = offset[0] * offset[0] + offset[1] * offset[1] - radius * radius;
+        if c < 0.0 {
+            if dot < 0.0 {
+                return from;
+            }
+            continue;
+        }
+        if dot >= 0.0 {
+            continue;
+        }
+        let discriminant = dot * dot - length_sq * c;
+        if discriminant < 0.0 {
+            continue;
+        }
+        let contact = (-dot - discriminant.sqrt()) / length_sq;
+        if (0.0..=fraction).contains(&contact) {
+            fraction = (contact - 0.001 / length_sq.sqrt()).max(0.0);
+        }
+    }
+    [from[0] + delta[0] * fraction, from[1] + delta[1] * fraction]
 }
 
 pub(crate) fn handle_respawns(
@@ -375,6 +443,7 @@ pub(crate) fn handle_respawns(
 
 /// Canonical clean-round state, before formation/start arms the clocks.
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 pub(crate) fn reset_match(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,
     structures: &mut HashMap<u64, Structure>,
@@ -387,7 +456,36 @@ pub(crate) fn reset_match(
     game_state: &mut GameState,
     now: Instant,
 ) {
-    *structures = build_structures(map_layout);
+    reset_match_with_map(
+        players,
+        structures,
+        minions,
+        projectiles,
+        neutrals,
+        team_buffs,
+        map_layout,
+        &shared::map::ResolvedMap::default(),
+        last_wave_spawn_at,
+        game_state,
+        now,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn reset_match_with_map(
+    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+    structures: &mut HashMap<u64, Structure>,
+    minions: &mut HashMap<u64, Minion>,
+    projectiles: &mut HashMap<u64, Projectile>,
+    neutrals: &mut HashMap<u64, Neutral>,
+    team_buffs: &mut TeamBuffs,
+    map_layout: &MapLayoutState,
+    map_config: &shared::map::ResolvedMap,
+    last_wave_spawn_at: &mut Instant,
+    game_state: &mut GameState,
+    now: Instant,
+) {
+    *structures = build_configured_structures(map_config);
     minions.clear();
     projectiles.clear();
     let mut next_neutral_id = 9_001;
@@ -479,7 +577,7 @@ impl ServerRuntime {
     }
 
     pub(crate) fn restart_round(&mut self, now: Instant) {
-        reset_match(
+        reset_match_with_map(
             &mut self.players,
             &mut self.structures,
             &mut self.minions,
@@ -487,6 +585,7 @@ impl ServerRuntime {
             &mut self.neutrals,
             &mut self.team_buffs,
             &self.map_layout,
+            &self.map_config,
             &mut self.last_wave_spawn_at,
             &mut self.game_state,
             now,

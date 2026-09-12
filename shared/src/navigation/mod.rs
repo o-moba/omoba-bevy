@@ -243,6 +243,27 @@ impl NavigationMap {
             })
     }
 
+    /// Validate a complete authored object's circular footprint, including
+    /// arena edges. This does not change the hero movement/edge contract.
+    pub fn point_clear_with_radius(&self, point: Point, radius: f32) -> bool {
+        finite(point)
+            && radius.is_finite()
+            && radius >= 0.0
+            && (0..2).all(|axis| {
+                point[axis] - radius >= self.bounds.min[axis]
+                    && point[axis] + radius <= self.bounds.max[axis]
+            })
+            && self
+                .candidates(
+                    [point[0] - radius, point[1] - radius],
+                    [point[0] + radius, point[1] + radius],
+                )
+                .into_iter()
+                .all(|index| {
+                    polygon_clearance(point, &self.obstacles[index].vertices).0 + EPSILON >= radius
+                })
+    }
+
     /// Static physical hero clearance, without optional route padding.
     pub fn point_clear(&self, point: Point) -> bool {
         self.static_point_clear(point, HERO_RADIUS)

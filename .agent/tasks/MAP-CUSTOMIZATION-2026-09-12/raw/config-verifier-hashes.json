@@ -1,0 +1,6 @@
+{
+  "scripts/capture_map.py": "c9abc5154ab3435198d881f999f391aa137c3928f5ec9376cd4b97768718cd02",
+  "shared/assets/maps/verdant.json": "693072b51116f112160e07da6df7c33a29c61661add433f27cc32ac26dfb8839",
+  "examples/maps/two-tier.json": "f2e3e4c9b4ff4a91a3f69911da4156c052af2d773ab6de18a07309a589e66819",
+  "client/assets/config/map_visuals.json": "53bd6468e22f52265730831bf8b714294d04147fa0203bb9edf7cb1f39905b43"
+}

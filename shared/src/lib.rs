@@ -8,6 +8,7 @@ use std::time::Duration;
 
 pub mod combat;
 pub mod jungle;
+pub mod map;
 pub mod navigation;
 pub mod protocol;
 pub mod shop;

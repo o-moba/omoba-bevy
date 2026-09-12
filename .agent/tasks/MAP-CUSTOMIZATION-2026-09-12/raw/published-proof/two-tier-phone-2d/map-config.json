@@ -1,0 +1,129 @@
+{
+  "format_version": 1,
+  "geometry_id": "verdant-confluence-v1",
+  "map_profile": "verdant_two_tier_example",
+  "profiles": {
+    "lane_tower": {
+      "max_hp": 240.0,
+      "attack_range": 20.0,
+      "attack_damage": 14.0,
+      "attack_cooldown_ms": 900
+    },
+    "base": {
+      "max_hp": 650.0,
+      "attack_range": 24.0,
+      "attack_damage": 18.0,
+      "attack_cooldown_ms": 850
+    },
+    "inner_tower": {
+      "max_hp": 420.0,
+      "attack_range": 20.0,
+      "attack_damage": 14.0,
+      "attack_cooldown_ms": 900
+    }
+  },
+  "structures": [
+    {
+      "id": 1,
+      "key": "top_green_outer",
+      "team": "green",
+      "kind": "tower",
+      "lane": "top",
+      "t": 0.3,
+      "profile": "lane_tower",
+      "visual_profile": "tower_green"
+    },
+    {
+      "id": 2,
+      "key": "top_blue_outer",
+      "team": "blue",
+      "kind": "tower",
+      "lane": "top",
+      "t": 0.7,
+      "profile": "lane_tower",
+      "visual_profile": "tower_blue"
+    },
+    {
+      "id": 3,
+      "key": "mid_green_outer",
+      "team": "green",
+      "kind": "tower",
+      "lane": "mid",
+      "t": 0.36,
+      "profile": "lane_tower",
+      "visual_profile": "tower_green",
+      "overrides": {
+        "max_hp": 300.0
+      }
+    },
+    {
+      "id": 4,
+      "key": "mid_blue_outer",
+      "team": "blue",
+      "kind": "tower",
+      "lane": "mid",
+      "t": 0.64,
+      "profile": "lane_tower",
+      "visual_profile": "tower_blue",
+      "overrides": {
+        "max_hp": 300.0
+      }
+    },
+    {
+      "id": 5,
+      "key": "bot_green_outer",
+      "team": "green",
+      "kind": "tower",
+      "lane": "bot",
+      "t": 0.3,
+      "profile": "lane_tower",
+      "visual_profile": "tower_green"
+    },
+    {
+      "id": 6,
+      "key": "bot_blue_outer",
+      "team": "blue",
+      "kind": "tower",
+      "lane": "bot",
+      "t": 0.7,
+      "profile": "lane_tower",
+      "visual_profile": "tower_blue"
+    },
+    {
+      "id": 7,
+      "key": "base_green",
+      "team": "green",
+      "kind": "base",
+      "profile": "base",
+      "visual_profile": "base_green"
+    },
+    {
+      "id": 8,
+      "key": "base_blue",
+      "team": "blue",
+      "kind": "base",
+      "profile": "base",
+      "visual_profile": "base_blue"
+    },
+    {
+      "id": 9,
+      "key": "mid_green_inner",
+      "team": "green",
+      "kind": "tower",
+      "lane": "mid",
+      "t": 0.22,
+      "profile": "inner_tower",
+      "visual_profile": "tower_green"
+    },
+    {
+      "id": 10,
+      "key": "mid_blue_inner",
+      "team": "blue",
+      "kind": "tower",
+      "lane": "mid",
+      "t": 0.78,
+      "profile": "inner_tower",
+      "visual_profile": "tower_blue"
+    }
+  ]
+}

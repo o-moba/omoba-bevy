@@ -71,3 +71,10 @@ client/assets/avatars/passport-manifest.json
 
 # Contributor-facing combat cosmetics schema and examples.
 !docs/combat-cosmetics.md
+
+# Versioned map tuning and packaged reusable prop models.
+!shared/assets/maps/
+!shared/assets/maps/**
+!client/assets/map-props/
+!docs/map-customization.md
+!docs/balance-tuning.md
