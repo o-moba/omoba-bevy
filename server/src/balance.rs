@@ -46,6 +46,10 @@ pub const BASE_TOWER_SHOT_HEIGHT: f32 = 3.2;
 
 // --- Minion waves & lane pressure ---
 pub const MINION_MAX_HP: f32 = 65.0;
+pub const CASTER_MINION_MAX_HP: f32 = 45.0;
+pub const CASTER_MINION_ATTACK_DAMAGE: f32 = 7.0;
+pub const CASTER_MINION_ATTACK_RANGE: f32 = 8.0;
+pub const CASTER_MINION_ATTACK_COOLDOWN: Duration = Duration::from_millis(1200);
 pub const MINION_SPEED: f32 = 3.1;
 pub const MINION_ATTACK_RANGE: f32 = 2.4;
 pub const MINION_ATTACK_DAMAGE: f32 = 8.0;

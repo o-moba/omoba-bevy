@@ -1,0 +1,80 @@
+{
+  "scenario": "combat",
+  "class_name": "ranger",
+  "mode": "models3d",
+  "waves": false,
+  "binary_sha256": {
+    "client": "2ee67195c5584a91a841ef76a986f3f2552f99039c4c797c069c4a86ee9b3f74",
+    "server": "0ae757606bf858233911bdb70b6b7449d5d389ed8f26de511191499c9464e496"
+  },
+  "platform": "macOS-26.6-arm64-arm-64bit",
+  "pixels": [
+    1280,
+    720
+  ],
+  "requested_profile": "desktop",
+  "scripted_commands": true,
+  "synthetic_damage": false,
+  "physical_device_verified": false,
+  "client_exit_code": 0,
+  "timed_out": false,
+  "verification": {
+    "errors": [],
+    "ui_profile": {
+      "pass": true,
+      "requested_profile": "desktop",
+      "requested_touch_controls": false,
+      "actual_profile": "desktop",
+      "expected_stages": 3,
+      "stages": [
+        {
+          "stage": 0,
+          "file": "01-combat-ready.png",
+          "mobile_controls": false,
+          "actual_profile": "desktop"
+        },
+        {
+          "stage": 1,
+          "file": "02-projectile-flight.png",
+          "mobile_controls": false,
+          "actual_profile": "desktop"
+        },
+        {
+          "stage": 2,
+          "file": "03-confirmed-impact.png",
+          "mobile_controls": false,
+          "actual_profile": "desktop"
+        }
+      ],
+      "errors": []
+    },
+    "observer_snapshots": 49,
+    "captured_projectile_ids": [
+      1
+    ],
+    "captured_event_ids": [
+      1
+    ],
+    "synthetic_damage": false,
+    "physical_device_verified": false,
+    "pass": true
+  },
+  "images": {
+    "01-combat-ready.png": {
+      "bytes": 879312,
+      "sha256": "99c9c197248cf0a2591e64adf8dadcf773cdf197c94461f14a6d7e5e9bda9b39"
+    },
+    "02-projectile-flight.png": {
+      "bytes": 880407,
+      "sha256": "38041f51cd912db436d85392fe2d6e7a18495c11f456cff2fa94153f00193301"
+    },
+    "03-confirmed-impact.png": {
+      "bytes": 879340,
+      "sha256": "7eeb374f1bdf8cd996f48b5ffa539337e3166a4f20b993ce7afcb4d14183d1b6"
+    }
+  },
+  "binary_unchanged": true,
+  "runtime_errors": [],
+  "elapsed_seconds": 4.081848667,
+  "capture_pass": true
+}

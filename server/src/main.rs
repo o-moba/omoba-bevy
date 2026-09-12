@@ -2,6 +2,7 @@
 
 mod balance;
 mod basic_attack;
+mod combat_feedback;
 mod gameplay;
 #[cfg(test)]
 mod minion_path_tests;
@@ -20,12 +21,14 @@ mod world;
 use balance::*;
 use basic_attack::*;
 use bevy::{app::ScheduleRunnerPlugin, prelude::*};
+use combat_feedback::*;
 use ekza_bevy_sdk::EkzaCharacter as CharacterChoice;
 use gameplay::GameplayPlugin;
 use neutrals::*;
 use progression::*;
 use serde::{Deserialize, Serialize};
 use session::*;
+use shared::combat::{CombatEntity, CombatEntityKind, CombatEvent, MinionKind, ProjectileStyle};
 #[cfg(test)]
 use shared::scaled_cooldown;
 use shared::shop::{ItemBonuses, ItemId, PurchaseReceipt, STARTING_GOLD, item_cooldown};
@@ -237,6 +240,10 @@ struct StructureState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct MinionState {
+    #[serde(default)]
+    kind: MinionKind,
+    #[serde(default)]
+    attack_sequence: u64,
     id: u64,
     team: Team,
     lane: Lane,
@@ -437,6 +444,14 @@ impl TeamBuffs {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ProjectileState {
+    #[serde(default)]
+    source_kind: CombatEntityKind,
+    #[serde(default)]
+    style: ProjectileStyle,
+    #[serde(default)]
+    action_slot: Option<u8>,
+    #[serde(default)]
+    direction: [f32; 3],
     id: u64,
     owner_id: u64,
     owner_team: Team,
@@ -456,6 +471,8 @@ enum ServerPacket {
         your_id: u64,
         players: Vec<PlayerState>,
         projectiles: Vec<ProjectileState>,
+        #[serde(default)]
+        combat_events: Vec<CombatEvent>,
         structures: Vec<StructureState>,
         minions: Vec<MinionState>,
         #[serde(default)]
@@ -488,7 +505,28 @@ impl fmt::Display for SnapshotDatagramError {
 }
 
 fn serialize_snapshot_datagram(packet: &ServerPacket) -> Result<Vec<u8>, SnapshotDatagramError> {
-    let payload = serde_json::to_vec(packet).map_err(SnapshotDatagramError::Serialize)?;
+    let mut payload = serde_json::to_vec(packet).map_err(SnapshotDatagramError::Serialize)?;
+    if payload.len() > IPV4_UDP_MAX_PAYLOAD_BYTES {
+        // Cosmetic history must never crowd otherwise-valid gameplay out of a
+        // snapshot. Keep the newest receipts that fit, without dropping state.
+        let mut trimmed = packet.clone();
+        let ServerPacket::Snapshot { combat_events, .. } = &mut trimmed;
+        let mut excess = payload.len() - IPV4_UDP_MAX_PAYLOAD_BYTES;
+        let mut remove = 0;
+        for event in combat_events.iter() {
+            if excess == 0 {
+                break;
+            }
+            let bytes = serde_json::to_vec(event)
+                .map_err(SnapshotDatagramError::Serialize)?
+                .len();
+            let comma = usize::from(remove + 1 < combat_events.len());
+            excess = excess.saturating_sub(bytes + comma);
+            remove += 1;
+        }
+        combat_events.drain(..remove);
+        payload = serde_json::to_vec(&trimmed).map_err(SnapshotDatagramError::Serialize)?;
+    }
     validate_snapshot_payload_size(payload.len())?;
     Ok(payload)
 }
@@ -961,6 +999,7 @@ impl RateLimitedDiagnostic {
 
 #[derive(Resource)]
 struct ServerRuntime {
+    combat_log: CombatLog,
     passport_admissions: passport_admission::PassportAdmissions,
     socket: UdpSocket,
     players: HashMap<SocketAddr, ConnectedPlayer>,
@@ -1003,6 +1042,7 @@ impl ServerRuntime {
         neutrals.extend(build_boss_neutrals(&mut next_neutral_id));
 
         Self {
+            combat_log: CombatLog::default(),
             passport_admissions: passport_admission::PassportAdmissions::default(),
             socket,
             players: HashMap::new(),
@@ -1460,6 +1500,7 @@ impl ServerRuntime {
         self.track_round_start(now);
         let Self {
             socket,
+            combat_log,
             players,
             projectiles,
             map_layout,
@@ -1489,8 +1530,20 @@ impl ServerRuntime {
                 now,
                 last_wave_spawn_at,
             );
-            simulate_minions(players, minions, structures, game_state, dt, now);
-            simulate_tower_attacks(
+            combat_log.extend(
+                now,
+                simulate_minions(
+                    players,
+                    minions,
+                    structures,
+                    projectiles,
+                    next_projectile_id,
+                    game_state,
+                    dt,
+                    now,
+                ),
+            );
+            let tower_events = simulate_tower_attacks(
                 players,
                 minions,
                 projectiles,
@@ -1499,8 +1552,9 @@ impl ServerRuntime {
                 game_state,
                 now,
             );
+            combat_log.extend(now, tower_events);
         }
-        simulate_projectiles(
+        let projectile_events = simulate_projectiles(
             players,
             minions,
             structures,
@@ -1511,8 +1565,12 @@ impl ServerRuntime {
             dt,
             now,
         );
+        combat_log.extend(now, projectile_events);
         if !self.targeting_qa {
-            simulate_neutrals(players, neutrals, game_state, dt, now);
+            combat_log.extend(
+                now,
+                simulate_neutrals(players, neutrals, game_state, dt, now),
+            );
         }
         regenerate_team_buff_hp(players, team_buffs, game_state, dt, now);
         accrue_passive_gold(players, game_state, gold_dt);
@@ -1600,6 +1658,7 @@ impl ServerRuntime {
                     your_id: player.state.id,
                     players: players_snapshot.clone(),
                     projectiles: projectiles_snapshot.clone(),
+                    combat_events: combat_log.snapshot(now),
                     structures: structures_snapshot.clone(),
                     minions: minions_snapshot.clone(),
                     neutrals: neutrals_snapshot.clone(),
@@ -1609,7 +1668,7 @@ impl ServerRuntime {
                 };
 
                 let payloads = if player.framed_snapshots {
-                    serde_json::to_vec(&packet)
+                    serialize_snapshot_datagram(&packet)
                         .map_err(|error| error.to_string())
                         .and_then(|payload| {
                             shared::transport::encode_snapshot(
@@ -2059,6 +2118,10 @@ fn handle_cast_request(
         projectile_id,
         Projectile {
             state: ProjectileState {
+                source_kind: CombatEntityKind::Player,
+                style: ProjectileStyle::for_class(caster_mut.state.hero_class),
+                action_slot: Some(slot),
+                direction: [direction.x, direction.y, direction.z],
                 id: projectile_id,
                 owner_id: caster_mut.state.id,
                 owner_team: caster_mut.state.team,
@@ -2105,13 +2168,13 @@ fn simulate_projectiles(
     game_state: &mut GameState,
     dt: f32,
     now: Instant,
-) {
+) -> Vec<CombatEvent> {
     if !matches!(game_state, GameState::Running) {
-        return;
+        return Vec::new();
     }
-    let mut player_damage_events: Vec<(u64, f32)> = Vec::new();
-    let mut structure_damage_events: Vec<(u64, f32, Team)> = Vec::new();
-    let mut neutral_damage_events: Vec<(u64, f32, u64)> = Vec::new();
+    let mut player_damage_events: Vec<(u64, f32, HitSource)> = Vec::new();
+    let mut structure_damage_events: Vec<(u64, f32, Team, HitSource)> = Vec::new();
+    let mut neutral_damage_events: Vec<(u64, f32, u64, HitSource)> = Vec::new();
 
     projectiles.retain(|_, projectile| {
         if !projectile.guaranteed_hit && now >= projectile.expires_at {
@@ -2137,9 +2200,14 @@ fn simulate_projectiles(
                     )
                     .normalize_or_zero();
                     if direction.x == 0.0 && direction.y == 0.0 && direction.z == 0.0 {
-                        player_damage_events.push((projectile.target.id, projectile.damage));
+                        player_damage_events.push((
+                            projectile.target.id,
+                            projectile.damage,
+                            HitSource::projectile(&projectile.state),
+                        ));
                         return false;
                     }
+                    projectile.state.direction = [direction.x, direction.y, direction.z];
                     projectile.velocity = Vec3f::new(
                         direction.x * PROJECTILE_SPEED,
                         direction.y * PROJECTILE_SPEED,
@@ -2153,7 +2221,11 @@ fn simulate_projectiles(
 
                 let combined_radius = projectile.radius + PLAYER_HIT_RADIUS;
                 if swept_sphere_intersects_target(start, end, target_pos, combined_radius) {
-                    player_damage_events.push((projectile.target.id, projectile.damage));
+                    player_damage_events.push((
+                        projectile.target.id,
+                        projectile.damage,
+                        HitSource::projectile(&projectile.state),
+                    ));
                     return false;
                 }
             }
@@ -2182,9 +2254,11 @@ fn simulate_projectiles(
                             projectile.target.id,
                             projectile.damage,
                             projectile.state.owner_team,
+                            HitSource::projectile(&projectile.state),
                         ));
                         return false;
                     }
+                    projectile.state.direction = [direction.x, direction.y, direction.z];
                     projectile.velocity = Vec3f::new(
                         direction.x * PROJECTILE_SPEED,
                         direction.y * PROJECTILE_SPEED,
@@ -2206,6 +2280,7 @@ fn simulate_projectiles(
                         projectile.target.id,
                         projectile.damage,
                         projectile.state.owner_team,
+                        HitSource::projectile(&projectile.state),
                     ));
                     return false;
                 }
@@ -2236,9 +2311,11 @@ fn simulate_projectiles(
                             projectile.target.id,
                             projectile.damage,
                             projectile.state.owner_id,
+                            HitSource::projectile(&projectile.state),
                         ));
                         return false;
                     }
+                    projectile.state.direction = [direction.x, direction.y, direction.z];
                     projectile.velocity = Vec3f::new(
                         direction.x * PROJECTILE_SPEED,
                         direction.y * PROJECTILE_SPEED,
@@ -2256,6 +2333,7 @@ fn simulate_projectiles(
                         projectile.target.id,
                         projectile.damage,
                         projectile.state.owner_id,
+                        HitSource::projectile(&projectile.state),
                     ));
                     return false;
                 }
@@ -2265,36 +2343,34 @@ fn simulate_projectiles(
         true
     });
 
-    for (target_id, damage) in player_damage_events {
-        if let Some(target_player) = players
-            .values_mut()
-            .find(|player| player.state.id == target_id && player.state.hp > 0.0)
-        {
-            if target_player.god_mode {
-                continue;
-            }
-            target_player.state.hp = (target_player.state.hp - damage).max(0.0);
-            if target_player.state.hp <= 0.0 && target_player.respawn_at.is_none() {
-                target_player.respawn_at = Some(now + RESPAWN_DELAY);
-            }
-        }
-    }
-
-    for (target_id, damage, attacker_team) in structure_damage_events {
-        apply_structure_damage(structures, target_id, damage, attacker_team, game_state);
-    }
-
-    for (target_id, damage, attacker_id) in neutral_damage_events {
-        apply_neutral_damage(
-            players,
-            neutrals,
-            team_buffs,
-            target_id,
-            damage,
-            attacker_id,
-            now,
+    let mut receipts = Vec::new();
+    for (target_id, damage, source) in player_damage_events {
+        receipts.extend(
+            apply_player_damage(players, target_id, damage, now)
+                .map(|event| source.annotate(event)),
         );
     }
+    for (target_id, damage, attacker_team, source) in structure_damage_events {
+        receipts.extend(
+            apply_structure_damage(structures, target_id, damage, attacker_team, game_state)
+                .map(|event| source.annotate(event)),
+        );
+    }
+    for (target_id, damage, attacker_id, source) in neutral_damage_events {
+        receipts.extend(
+            apply_neutral_damage(
+                players,
+                neutrals,
+                team_buffs,
+                target_id,
+                damage,
+                attacker_id,
+                now,
+            )
+            .map(|event| source.annotate(event)),
+        );
+    }
+    receipts
 }
 
 /// A team's base is protected until any one of its own lane towers has fallen.
@@ -2317,22 +2393,31 @@ fn apply_structure_damage(
     damage: f32,
     attacker_team: Team,
     game_state: &mut GameState,
-) {
+) -> Option<CombatEvent> {
+    if !damage.is_finite() || damage <= 0.0 {
+        return None;
+    }
     if structure_is_protected(structures, target_id) {
-        return;
+        return None;
     }
-    let Some(target) = structures.get_mut(&target_id) else {
-        return;
-    };
+    let target = structures.get_mut(&target_id)?;
     if target.state.hp <= 0.0 || target.state.team == attacker_team {
-        return;
+        return None;
     }
-    target.state.hp = (target.state.hp - damage).max(0.0);
+    let before = target.state.hp;
+    target.state.hp = (before - damage).max(0.0);
     if target.state.hp <= 0.0 && target.state.kind == StructureKind::BaseTower {
         *game_state = GameState::Victory {
             winner: attacker_team,
         };
     }
+    damage_receipt(
+        CombatEntityKind::Structure,
+        target_id,
+        before,
+        target.state.hp,
+        Vec3f::new(target.state.x, target.state.y, target.state.z),
+    )
 }
 
 fn apply_neutral_damage(
@@ -2343,14 +2428,16 @@ fn apply_neutral_damage(
     damage: f32,
     attacker_player_id: u64,
     now: Instant,
-) {
-    let Some(neutral) = neutrals.get_mut(&target_id) else {
-        return;
-    };
-    if neutral.dead_until.is_some() || neutral.state.hp <= 0.0 {
-        return;
+) -> Option<CombatEvent> {
+    if !damage.is_finite() || damage <= 0.0 {
+        return None;
     }
-    neutral.state.hp = (neutral.state.hp - damage).max(0.0);
+    let neutral = neutrals.get_mut(&target_id)?;
+    if neutral.dead_until.is_some() || neutral.state.hp <= 0.0 {
+        return None;
+    }
+    let before = neutral.state.hp;
+    neutral.state.hp = (before - damage).max(0.0);
     if players.values().any(|player| {
         player.joined && player.state.id == attacker_player_id && player.state.hp > 0.0
     }) {
@@ -2380,6 +2467,13 @@ fn apply_neutral_damage(
         neutral.last_attack_at = None;
         neutral.state.ai_state = NeutralAiState::Idle;
     }
+    damage_receipt(
+        CombatEntityKind::Neutral,
+        target_id,
+        before,
+        neutral.state.hp,
+        Vec3f::new(neutral.state.x, neutral.state.y, neutral.state.z),
+    )
 }
 
 /// Applies boss-buff HP regeneration to every alive player of a buffed team,
@@ -2437,12 +2531,12 @@ fn simulate_neutrals(
     game_state: &GameState,
     dt: f32,
     now: Instant,
-) {
+) -> Vec<CombatEvent> {
     if !matches!(game_state, GameState::Running) {
-        return;
+        return Vec::new();
     }
 
-    let mut player_damage_events: Vec<(u64, f32)> = Vec::new();
+    let mut player_damage_events: Vec<(u64, f32, HitSource)> = Vec::new();
 
     for neutral in neutrals.values_mut() {
         if let Some(dead_until) = neutral.dead_until {
@@ -2518,7 +2612,15 @@ fn simulate_neutrals(
                 .is_none_or(|last| now.duration_since(last) >= NEUTRAL_ATTACK_COOLDOWN);
             if can_attack {
                 neutral.last_attack_at = Some(now);
-                player_damage_events.push((target_id, template.attack_damage));
+                player_damage_events.push((
+                    target_id,
+                    template.attack_damage,
+                    HitSource::new(
+                        CombatEntityKind::Neutral,
+                        neutral.state.id,
+                        ProjectileStyle::Standard,
+                    ),
+                ));
             }
             let dir_x = target_hit.x - neutral.state.x;
             let dir_z = target_hit.z - neutral.state.z;
@@ -2536,20 +2638,12 @@ fn simulate_neutrals(
         }
     }
 
-    for (target_id, damage) in player_damage_events {
-        if let Some(target_player) = players
-            .values_mut()
-            .find(|player| player.state.id == target_id && player.state.hp > 0.0)
-        {
-            if target_player.god_mode {
-                continue;
-            }
-            target_player.state.hp = (target_player.state.hp - damage).max(0.0);
-            if target_player.state.hp <= 0.0 && target_player.respawn_at.is_none() {
-                target_player.respawn_at = Some(now + RESPAWN_DELAY);
-            }
-        }
-    }
+    player_damage_events
+        .into_iter()
+        .filter_map(|(id, damage, source)| {
+            apply_player_damage(players, id, damage, now).map(|event| source.annotate(event))
+        })
+        .collect()
 }
 
 fn swept_sphere_intersects_target(start: Vec3f, end: Vec3f, target: Vec3f, radius: f32) -> bool {
@@ -2604,20 +2698,33 @@ fn apply_minion_damage(
     target_id: u64,
     damage: f32,
     attacker_team: Team,
-) {
-    let Some(target_minion) = minions.get_mut(&target_id) else {
-        return;
-    };
-    if target_minion.state.hp <= 0.0 {
-        return;
+) -> Option<CombatEvent> {
+    if !damage.is_finite() || damage <= 0.0 {
+        return None;
     }
-    target_minion.state.hp = (target_minion.state.hp - damage).max(0.0);
+    let target_minion = minions.get_mut(&target_id)?;
+    if target_minion.state.hp <= 0.0 || target_minion.state.team == attacker_team {
+        return None;
+    }
+    let before = target_minion.state.hp;
+    target_minion.state.hp = (before - damage).max(0.0);
     if target_minion.state.hp <= 0.0 {
         target_minion.state.state = MinionBrainState::Dead;
         target_minion.state.target_kind = None;
         target_minion.state.target_id = None;
         award_minion_kill_rewards(players, attacker_team);
     }
+    damage_receipt(
+        CombatEntityKind::Minion,
+        target_id,
+        before,
+        target_minion.state.hp,
+        Vec3f::new(
+            target_minion.state.x,
+            target_minion.state.y,
+            target_minion.state.z,
+        ),
+    )
 }
 
 /// Bulletproof debug invulnerability: after all damage for the tick, force god-mode
@@ -2674,12 +2781,14 @@ fn simulate_minions(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,
     minions: &mut HashMap<u64, Minion>,
     structures: &mut HashMap<u64, Structure>,
+    projectiles: &mut HashMap<u64, Projectile>,
+    next_projectile_id: &mut u64,
     game_state: &mut GameState,
     dt: f32,
     now: Instant,
-) {
+) -> Vec<CombatEvent> {
     if !matches!(game_state, GameState::Running) {
-        return;
+        return Vec::new();
     }
 
     let player_targets = players
@@ -2705,9 +2814,9 @@ fn simulate_minions(
         })
         .collect::<Vec<_>>();
 
-    let mut player_damage_events: Vec<(u64, f32)> = Vec::new();
-    let mut minion_damage_events: Vec<(u64, f32, Team)> = Vec::new();
-    let mut structure_damage_events: Vec<(u64, f32, Team)> = Vec::new();
+    let mut player_damage_events: Vec<(u64, f32, HitSource)> = Vec::new();
+    let mut minion_damage_events: Vec<(u64, f32, Team, HitSource)> = Vec::new();
+    let mut structure_damage_events: Vec<(u64, f32, Team, HitSource)> = Vec::new();
     let minion_vision_sq = MINION_VISION_RANGE * MINION_VISION_RANGE;
 
     for minion in minions.values_mut() {
@@ -2721,6 +2830,12 @@ fn simulate_minions(
         minion.state.target_kind = None;
         minion.state.target_id = None;
 
+        let (_, attack_damage, attack_range, attack_cooldown) = minion_stats(minion.state.kind);
+        let source = HitSource::new(
+            CombatEntityKind::Minion,
+            minion.state.id,
+            ProjectileStyle::Standard,
+        );
         let minion_position = Vec3f::new(minion.state.x, minion.state.y, minion.state.z);
 
         // Enemy minions always take priority. A minion never targets a player while
@@ -2742,6 +2857,7 @@ fn simulate_minions(
                 left.3
                     .partial_cmp(&right.3)
                     .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| left.0.id().cmp(&right.0.id()))
             });
 
         let aggro_target = if let Some(minion_target) = best_minion {
@@ -2790,24 +2906,45 @@ fn simulate_minions(
             let dir_x = target_pos.x - minion.state.x;
             let dir_z = target_pos.z - minion.state.z;
             let distance_sq = dir_x * dir_x + dir_z * dir_z;
-            let attack_distance = MINION_ATTACK_RANGE + target_radius;
+            let attack_distance = attack_range + target_radius;
             if distance_sq <= attack_distance * attack_distance {
                 minion.state.state = MinionBrainState::Attacking;
                 let can_attack = minion
                     .last_attack_at
-                    .is_none_or(|last| now.duration_since(last) >= MINION_ATTACK_COOLDOWN);
+                    .is_none_or(|last| now.duration_since(last) >= attack_cooldown);
                 if can_attack {
                     minion.last_attack_at = Some(now);
-                    match target {
-                        MinionAggroTarget::Player(target_id) => {
-                            player_damage_events.push((target_id, MINION_ATTACK_DAMAGE));
-                        }
-                        MinionAggroTarget::Minion(target_id) => {
-                            minion_damage_events.push((
-                                target_id,
-                                MINION_ATTACK_DAMAGE,
-                                minion.state.team,
-                            ));
+                    minion.state.attack_sequence =
+                        minion.state.attack_sequence.wrapping_add(1).max(1);
+                    if minion.state.kind == MinionKind::Caster {
+                        let target_kind = match target {
+                            MinionAggroTarget::Player(_) => TargetKind::Player,
+                            MinionAggroTarget::Minion(_) => TargetKind::Minion,
+                        };
+                        spawn_caster_projectile(
+                            minion,
+                            TargetId {
+                                kind: target_kind,
+                                id: target.id(),
+                            },
+                            target_pos,
+                            projectiles,
+                            next_projectile_id,
+                            now,
+                        );
+                    } else {
+                        match target {
+                            MinionAggroTarget::Player(target_id) => {
+                                player_damage_events.push((target_id, attack_damage, source));
+                            }
+                            MinionAggroTarget::Minion(target_id) => {
+                                minion_damage_events.push((
+                                    target_id,
+                                    attack_damage,
+                                    minion.state.team,
+                                    source,
+                                ));
+                            }
                         }
                     }
                 }
@@ -2861,19 +2998,36 @@ fn simulate_minions(
         if let Some((target_id, target_kind, target_pos, distance_sq)) = target {
             minion.state.target_kind = Some(MinionTargetKind::Structure);
             minion.state.target_id = Some(target_id);
-            let attack_distance = MINION_ATTACK_RANGE + structure_radius(target_kind);
+            let attack_distance = attack_range + structure_radius(target_kind);
             if distance_sq <= attack_distance * attack_distance {
                 minion.state.state = MinionBrainState::Attacking;
                 let can_attack = minion
                     .last_attack_at
-                    .is_none_or(|last| now.duration_since(last) >= MINION_ATTACK_COOLDOWN);
+                    .is_none_or(|last| now.duration_since(last) >= attack_cooldown);
                 if can_attack {
                     minion.last_attack_at = Some(now);
-                    structure_damage_events.push((
-                        target_id,
-                        MINION_ATTACK_DAMAGE,
-                        minion.state.team,
-                    ));
+                    minion.state.attack_sequence =
+                        minion.state.attack_sequence.wrapping_add(1).max(1);
+                    if minion.state.kind == MinionKind::Caster {
+                        spawn_caster_projectile(
+                            minion,
+                            TargetId {
+                                kind: TargetKind::Structure,
+                                id: target_id,
+                            },
+                            target_pos,
+                            projectiles,
+                            next_projectile_id,
+                            now,
+                        );
+                    } else {
+                        structure_damage_events.push((
+                            target_id,
+                            attack_damage,
+                            minion.state.team,
+                            source,
+                        ));
+                    }
                 }
                 let dir_x = target_pos.x - minion.state.x;
                 let dir_z = target_pos.z - minion.state.z;
@@ -2908,28 +3062,26 @@ fn simulate_minions(
         }
     }
 
-    for (target_id, damage) in player_damage_events {
-        if let Some(target_player) = players
-            .values_mut()
-            .find(|player| player.state.id == target_id && player.state.hp > 0.0)
-        {
-            if target_player.god_mode {
-                continue;
-            }
-            target_player.state.hp = (target_player.state.hp - damage).max(0.0);
-            if target_player.state.hp <= 0.0 && target_player.respawn_at.is_none() {
-                target_player.respawn_at = Some(now + RESPAWN_DELAY);
-            }
-        }
+    let mut receipts = Vec::new();
+    for (target_id, damage, source) in player_damage_events {
+        receipts.extend(
+            apply_player_damage(players, target_id, damage, now)
+                .map(|event| source.annotate(event)),
+        );
     }
-
-    for (target_id, damage, attacker_team) in minion_damage_events {
-        apply_minion_damage(players, minions, target_id, damage, attacker_team);
+    for (target_id, damage, attacker_team, source) in minion_damage_events {
+        receipts.extend(
+            apply_minion_damage(players, minions, target_id, damage, attacker_team)
+                .map(|event| source.annotate(event)),
+        );
     }
-
-    for (target_id, damage, attacker_team) in structure_damage_events {
-        apply_structure_damage(structures, target_id, damage, attacker_team, game_state);
+    for (target_id, damage, attacker_team, source) in structure_damage_events {
+        receipts.extend(
+            apply_structure_damage(structures, target_id, damage, attacker_team, game_state)
+                .map(|event| source.annotate(event)),
+        );
     }
+    receipts
 }
 
 fn simulate_tower_attacks(
@@ -2940,12 +3092,12 @@ fn simulate_tower_attacks(
     next_projectile_id: &mut u64,
     game_state: &GameState,
     now: Instant,
-) {
+) -> Vec<CombatEvent> {
     if !matches!(game_state, GameState::Running) {
-        return;
+        return Vec::new();
     }
-    let mut towers_to_fire: Vec<(Team, Vec3f, u64, Vec3f, f32, f32)> = Vec::new();
-    let mut minion_damage_events: Vec<(u64, f32, Team)> = Vec::new();
+    let mut towers_to_fire: Vec<(u64, Team, Vec3f, u64, Vec3f, f32, f32)> = Vec::new();
+    let mut minion_damage_events: Vec<(u64, f32, Team, HitSource)> = Vec::new();
 
     for structure in structures.values_mut() {
         if structure.state.hp <= 0.0 {
@@ -2980,7 +3132,16 @@ fn simulate_tower_attacks(
 
         if let Some((target_id, _, _)) = best_minion {
             structure.last_attack_at = Some(now);
-            minion_damage_events.push((target_id, structure.attack_damage, structure.state.team));
+            minion_damage_events.push((
+                target_id,
+                structure.attack_damage,
+                structure.state.team,
+                HitSource::new(
+                    CombatEntityKind::Structure,
+                    structure.state.id,
+                    ProjectileStyle::TowerBolt,
+                ),
+            ));
             continue;
         }
 
@@ -3001,6 +3162,7 @@ fn simulate_tower_attacks(
         if let Some((target_id, target_pos, _)) = best_target {
             structure.last_attack_at = Some(now);
             towers_to_fire.push((
+                structure.state.id,
                 structure.state.team,
                 tower_position,
                 target_id,
@@ -3014,11 +3176,17 @@ fn simulate_tower_attacks(
         }
     }
 
-    for (target_id, damage, attacker_team) in minion_damage_events {
-        apply_minion_damage(players, minions, target_id, damage, attacker_team);
+    let mut receipts = Vec::new();
+    for (target_id, damage, attacker_team, source) in minion_damage_events {
+        receipts.extend(
+            apply_minion_damage(players, minions, target_id, damage, attacker_team)
+                .map(|event| source.annotate(event)),
+        );
     }
 
-    for (team, tower_position, target_id, target_pos, damage, shot_height) in towers_to_fire {
+    for (tower_id, team, tower_position, target_id, target_pos, damage, shot_height) in
+        towers_to_fire
+    {
         let origin = Vec3f::new(
             tower_position.x,
             tower_position.y + shot_height,
@@ -3042,8 +3210,12 @@ fn simulate_tower_attacks(
             projectile_id,
             Projectile {
                 state: ProjectileState {
+                    source_kind: CombatEntityKind::Structure,
+                    style: ProjectileStyle::TowerBolt,
+                    action_slot: None,
+                    direction: [direction.x, direction.y, direction.z],
                     id: projectile_id,
-                    owner_id: 0,
+                    owner_id: tower_id,
                     owner_team: team,
                     x: origin.x,
                     y: origin.y,
@@ -3066,6 +3238,7 @@ fn simulate_tower_attacks(
             },
         );
     }
+    receipts
 }
 
 #[cfg(test)]
@@ -3087,6 +3260,7 @@ mod tests {
             your_id: 1,
             players: Vec::new(),
             projectiles: Vec::new(),
+            combat_events: Vec::new(),
             structures: Vec::new(),
             minions: Vec::new(),
             neutrals: Vec::new(),
@@ -3127,6 +3301,7 @@ mod tests {
             your_id: player.state.id,
             players: build_players_snapshot(&players),
             projectiles: Vec::new(),
+            combat_events: Vec::new(),
             structures: Vec::new(),
             minions: Vec::new(),
             neutrals: Vec::new(),
@@ -3550,6 +3725,8 @@ mod tests {
             &mut players,
             &mut minions,
             &mut structures,
+            &mut HashMap::new(),
+            &mut 1,
             &mut game_state,
             0.5,
             now + Duration::from_millis(250),
@@ -3604,6 +3781,8 @@ mod tests {
 
         let make_minion = |id: u64, team: Team, x: f32| Minion {
             state: MinionState {
+                kind: MinionKind::Melee,
+                attack_sequence: 0,
                 id,
                 team,
                 lane: Lane::Mid,
@@ -3634,6 +3813,8 @@ mod tests {
             &mut players,
             &mut minions,
             &mut structures,
+            &mut HashMap::new(),
+            &mut 1,
             &mut game_state,
             0.1,
             now,
@@ -3652,6 +3833,8 @@ mod tests {
     fn opposing_minions_engage_take_damage_die_and_leave_the_next_snapshot_set() {
         let make_minion = |id: u64, team: Team, x: f32, hp: f32| Minion {
             state: MinionState {
+                kind: MinionKind::Melee,
+                attack_sequence: 0,
                 id,
                 team,
                 lane: Lane::Mid,
@@ -3683,6 +3866,8 @@ mod tests {
             &mut players,
             &mut minions,
             &mut structures,
+            &mut HashMap::new(),
+            &mut 1,
             &mut game_state,
             0.1,
             Instant::now(),
@@ -4490,6 +4675,8 @@ mod tests {
             10,
             Minion {
                 state: MinionState {
+                    kind: MinionKind::Melee,
+                    attack_sequence: 0,
                     id: 10,
                     team: Team::Blue,
                     lane: Lane::Mid,

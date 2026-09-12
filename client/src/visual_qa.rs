@@ -66,7 +66,9 @@ impl Plugin for VisualQaPlugin {
             app.add_plugins(crate::navigation_qa::NavigationQaPlugin);
             return;
         }
-        if std::env::var("OMOBA_VISUAL_QA_SCENARIO").is_ok_and(|value| value == "targeting") {
+        if std::env::var("OMOBA_VISUAL_QA_SCENARIO")
+            .is_ok_and(|value| value == "targeting" || value == "combat")
+        {
             return; // Dedicated production-input scenario registered by the client.
         }
         let max_seconds = bounded_timeout(std::env::var("OMOBA_VISUAL_QA_TIMEOUT").ok().as_deref());

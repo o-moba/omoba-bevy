@@ -1,0 +1,243 @@
+{
+  "task_id": "COMBAT-FEEL-2026-09-12",
+  "date": "2026-09-12",
+  "status": "PASS",
+  "base_commit": "6d46076ed25d02ed554a75e2dfa58d99e249da49",
+  "workspace_version": "0.19.0-rc.4",
+  "acceptance_criteria": [
+    {
+      "id": "AC1",
+      "status": "PASS",
+      "result": "Class-specific procedural arrows, arcane/holy bolts and crescent; unchanged authoritative travel and hero tuning.",
+      "checks": [
+        "workspace_tests",
+        "current_udp",
+        "native_capture_matrix"
+      ]
+    },
+    {
+      "id": "AC2",
+      "status": "PASS",
+      "result": "Two melee and one caster per existing wave; role silhouettes, one release per sequence, actual ranged arrival, symmetric lanes and unchanged reward/cadence contracts.",
+      "checks": [
+        "workspace_tests",
+        "current_udp",
+        "native_capture_matrix"
+      ]
+    },
+    {
+      "id": "AC3",
+      "status": "PASS",
+      "result": "Typed positive actual-damage receipts; overkill/protection/heal/reset handling, bounded history and labels, deduplication, 3D/2D camera projection.",
+      "checks": [
+        "workspace_tests",
+        "affected_tests",
+        "current_udp",
+        "native_capture_matrix"
+      ]
+    },
+    {
+      "id": "AC4",
+      "status": "PASS",
+      "result": "Versioned packaged registry with class/action and identity overrides, GLB/PNG presentation, clip aliases, validated bounds and immutable fallback; contributor guide supplied.",
+      "checks": [
+        "workspace_tests",
+        "strict_clippy",
+        "native_capture_matrix"
+      ]
+    },
+    {
+      "id": "AC5",
+      "status": "PASS",
+      "result": "Regression tests, current-server UDP proof and six real native scenarios pass; phone-preview/human-balance limitations explicit.",
+      "checks": [
+        "workspace_tests",
+        "affected_tests",
+        "current_udp",
+        "capture_verifier",
+        "native_capture_matrix",
+        "native_build",
+        "format",
+        "strict_clippy"
+      ]
+    },
+    {
+      "id": "AC6",
+      "status": "PASS",
+      "result": "Version 0.19.0-rc.4, changelog/features/session guide, raw evidence and published frames included in this task commit; four unrelated original cinematic files excluded.",
+      "checks": [
+        "format",
+        "strict_clippy"
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "id": "workspace_tests",
+      "command": "cargo test --workspace --locked",
+      "status": "PASS",
+      "exit_code": 0,
+      "artifact": "raw/workspace-tests-pass.log.gz",
+      "sha256": "d525e794de29c795d0b2fdd0c796f2113a9c7b78a51cc867a0add4f09ee6b2ca",
+      "passed_count": 453,
+      "uncompressed_sha256": "d0b93e01c3f3e641bffc0fb8906e4a91dd232a572145ca400fc0423300c34db8"
+    },
+    {
+      "id": "strict_clippy",
+      "command": "cargo clippy --workspace --all-targets --locked -- -D warnings",
+      "status": "PASS",
+      "exit_code": 0,
+      "artifact": "raw/clippy-final.log",
+      "sha256": "748254a1b61ab55ddd0081ec80497af97b9659e8ae33545ebd5eb2606191feb1"
+    },
+    {
+      "id": "format",
+      "command": "cargo fmt --all -- --check",
+      "status": "PASS",
+      "exit_code": 0,
+      "artifact": "raw/format-final.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "native_build",
+      "command": "cargo build -p client -p server --locked",
+      "status": "PASS",
+      "exit_code": 0,
+      "artifact": "raw/native-build-current.log",
+      "sha256": "89047a5975710808d22cf6c8e3e80bb3b750f25f7d22b6092cbae55dd7880673"
+    },
+    {
+      "id": "affected_tests",
+      "command": "cargo test -p server -p omoba-passport --locked",
+      "status": "PASS",
+      "exit_code": 0,
+      "artifact": "raw/affected-tests-final.log.gz",
+      "sha256": "67fa1fb2798159d28b309927615f8490ec6986dff5a17c27222db714a2ee129b",
+      "passed_count": 112,
+      "uncompressed_sha256": "95316f117fb3c5bcdb495f8d7d111a39ece3a88ccb2a5061c7638882685cbb52"
+    },
+    {
+      "id": "current_udp",
+      "command": "cargo test -p harness --test combat_feedback --locked -- --nocapture",
+      "status": "PASS",
+      "exit_code": 0,
+      "artifact": "raw/udp-current.log.gz",
+      "sha256": "07508041f1dde6b815a7d09710c3cb075f87b41ec757ddce9858d77221e0462a",
+      "passed_count": 3,
+      "uncompressed_sha256": "7f8d932a58b47f4d7ee9d32d00d61ebb6bb5f72423e6c5b63c93b64bce34cbd5"
+    },
+    {
+      "id": "capture_verifier",
+      "command": "python3 scripts/capture_combat.py --self-test",
+      "status": "PASS",
+      "exit_code": 0,
+      "artifact": "raw/capture-verifier-tests.log",
+      "sha256": "6cd6a056cb11a30c8dbda5823f51918cdb93389f1095a4e7c49d391903a02115",
+      "passed_count": 18
+    },
+    {
+      "id": "native_capture_matrix",
+      "command": "python3 .agent/tasks/COMBAT-FEEL-2026-09-12/run-captures.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "artifact": "raw/capture-matrix-final.log",
+      "sha256": "bfccf5a3e667e05c269b7579d65faf953a626424496f27c31cff386215e86566",
+      "passed_count": 6
+    }
+  ],
+  "execution_context": {
+    "platform": "macOS arm64",
+    "cargo_overrides": [
+      "profile.dev.package.client.debug=0",
+      "profile.dev.package.client.incremental=false"
+    ],
+    "CARGO_INCREMENTAL": "0",
+    "target_dir": "/Users/wotori/git/ekza/omoba-bevy-mobile-beta/.agent/tasks/MOBILE-BETA-2026-09-11/target-native",
+    "HARNESS_SERVER_BIN": "<target_dir>/debug/server",
+    "loopback_tests": "Run with local networking permitted."
+  },
+  "final_binary_sha256": {
+    "client": "2ee67195c5584a91a841ef76a986f3f2552f99039c4c797c069c4a86ee9b3f74",
+    "server": "a9b95c265d41eda364726964f57bbf29dd0739c5ee434179deae27eaf6ac34d9"
+  },
+  "capture_provenance": {
+    "client_byte_identical_to_final": true,
+    "server_sha256": "0ae757606bf858233911bdb70b6b7449d5d389ed8f26de511191499c9464e496",
+    "later_server_changes": "Three equivalent Option early returns changed to ?. Current server and UDP tests rerun successfully.",
+    "capture_count": 6,
+    "rendered_frame_count": 18,
+    "published_frame_count": 6,
+    "reports_and_raw_udp": "raw/published-proof/",
+    "screenshots": "docs/progress/2026-09-12-combat/",
+    "captures": [
+      {
+        "scenario": "ranger-final",
+        "pass": true,
+        "image": "ranger-arrow.png",
+        "sha256": "38041f51cd912db436d85392fe2d6e7a18495c11f456cff2fa94153f00193301",
+        "client_sha256": "2ee67195c5584a91a841ef76a986f3f2552f99039c4c797c069c4a86ee9b3f74",
+        "server_sha256": "0ae757606bf858233911bdb70b6b7449d5d389ed8f26de511191499c9464e496",
+        "physical_device_verified": false,
+        "synthetic_damage": false
+      },
+      {
+        "scenario": "mage-mobile",
+        "pass": true,
+        "image": "mage-mobile.png",
+        "sha256": "903d7cf21c681820aff2b4ae0818e9ea9803a192e2b113d744d66e75fbb024d6",
+        "client_sha256": "2ee67195c5584a91a841ef76a986f3f2552f99039c4c797c069c4a86ee9b3f74",
+        "server_sha256": "0ae757606bf858233911bdb70b6b7449d5d389ed8f26de511191499c9464e496",
+        "physical_device_verified": false,
+        "synthetic_damage": false
+      },
+      {
+        "scenario": "cleric-desktop",
+        "pass": true,
+        "image": "cleric-holy.png",
+        "sha256": "dd1caaed439cef3b4da6dff477863274d7bf885190ad93106e254e0d10f19f41",
+        "client_sha256": "2ee67195c5584a91a841ef76a986f3f2552f99039c4c797c069c4a86ee9b3f74",
+        "server_sha256": "0ae757606bf858233911bdb70b6b7449d5d389ed8f26de511191499c9464e496",
+        "physical_device_verified": false,
+        "synthetic_damage": false
+      },
+      {
+        "scenario": "warrior-desktop",
+        "pass": true,
+        "image": "warrior-crescent.png",
+        "sha256": "501293c9582e346b21865f25995972690faffbe145b5e97eb23f8ebe93ce58ed",
+        "client_sha256": "2ee67195c5584a91a841ef76a986f3f2552f99039c4c797c069c4a86ee9b3f74",
+        "server_sha256": "0ae757606bf858233911bdb70b6b7449d5d389ed8f26de511191499c9464e496",
+        "physical_device_verified": false,
+        "synthetic_damage": false
+      },
+      {
+        "scenario": "ranger-2d",
+        "pass": true,
+        "image": "ranger-2d.png",
+        "sha256": "4b1c39b8315ac3d510d5054ab1ed5da3ab1fa38866533a7f14216149672752dd",
+        "client_sha256": "2ee67195c5584a91a841ef76a986f3f2552f99039c4c797c069c4a86ee9b3f74",
+        "server_sha256": "0ae757606bf858233911bdb70b6b7449d5d389ed8f26de511191499c9464e496",
+        "physical_device_verified": false,
+        "synthetic_damage": false
+      },
+      {
+        "scenario": "mixed-wave",
+        "pass": true,
+        "image": "mixed-wave.png",
+        "sha256": "e6507ae97cbcac7c3aa416c910faeb9366d2944e35d840cb5ff852738eafc95f",
+        "client_sha256": "2ee67195c5584a91a841ef76a986f3f2552f99039c4c797c069c4a86ee9b3f74",
+        "server_sha256": "0ae757606bf858233911bdb70b6b7449d5d389ed8f26de511191499c9464e496",
+        "physical_device_verified": false,
+        "synthetic_damage": false
+      }
+    ]
+  },
+  "limitations": [
+    "No physical Android/iOS test or signed mobile package.",
+    "Native input is scripted; champion initial placement uses a developer fixture. Normal-wave scenario uses production spawning/routing.",
+    "No human competitive balance or mobile performance certification.",
+    "Cosmetic assets are packaged with the client; no remote skin download, marketplace, entitlement or arbitrary executable plugin system.",
+    "Orchard Comet Centaur animation art is still pending; nine active complete sprite packs plus an explicit stable-ID fallback."
+  ],
+  "test_count_note": "453 is the unique full-workspace count. The later 112 affected and 3 UDP results are rechecks, not additional unique tests."
+}

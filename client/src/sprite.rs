@@ -4,7 +4,8 @@ use bevy::prelude::*;
 use shared::{
     DEFAULT_SPRITE_CHARACTER_ID, PlayerActionKind, SpriteAnimationDefinition,
     SpriteAnimationPlayback, SpriteCharacterDefinition, SpriteSheetKind,
-    normalize_sprite_character_id, sprite_character_definition, sprite_character_roster,
+    normalize_sprite_character_id, sprite_character_definition, sprite_character_render_definition,
+    sprite_character_roster,
 };
 use std::collections::HashMap;
 
@@ -137,9 +138,11 @@ fn reconcile_sprite_identity(
     visuals: Query<(Entity, &PlayerSpriteVisual)>,
 ) {
     for (owner, selected) in &changed_owners {
-        let expected = normalize_sprite_character_id(selected.0.as_deref());
+        let Some(expected) = sprite_character_render_definition(selected.0.as_deref()) else {
+            continue;
+        };
         for (entity, visual) in &visuals {
-            if visual.owner == owner && visual.character_id != expected {
+            if visual.owner == owner && visual.character_id != expected.id {
                 commands
                     .entity(entity)
                     .despawn_related::<Children>()
@@ -171,6 +174,10 @@ pub(crate) fn load_sprite_visual_assets(
         None,
     ));
     for definition in sprite_character_roster() {
+        if definition.render_fallback.is_some() {
+            // Draft entries preserve their roster slot without requesting absent files.
+            continue;
+        }
         let image: Handle<Image> = asset_server.load(format!("sprites/{}", definition.sheet));
         let layout = atlas_layouts.add(TextureAtlasLayout::from_grid(
             UVec2::new(definition.frame_size[0], definition.frame_size[1]),
@@ -244,10 +251,17 @@ fn attach_sprite_visuals(
         if requested.is_some_and(|requested| requested != id) {
             warn!("Unknown sprite character {requested:?}; using {id:?}");
         }
-        let Some(definition) = sprite_character_definition(id) else {
+        let Some(definition) = sprite_character_render_definition(Some(id)) else {
             error!("Default sprite character {DEFAULT_SPRITE_CHARACTER_ID:?} is unavailable");
             continue;
         };
+        if definition.id != id {
+            info!(
+                "Sprite {id:?} artwork is pending; explicitly rendering fallback {:?}",
+                definition.id
+            );
+        }
+        let id = definition.id.as_str();
         let Some(render_set) = assets.get(id) else {
             warn!("Sprite render assets for {id:?} are not ready");
             continue;
@@ -580,7 +594,10 @@ mod tests {
 
     fn test_render_assets() -> SpriteVisualAssets {
         let mut sets = HashMap::new();
-        for definition in sprite_character_roster() {
+        for definition in sprite_character_roster()
+            .iter()
+            .filter(|definition| definition.render_fallback.is_none())
+        {
             sets.insert(
                 definition.id.clone(),
                 SpriteRenderSet {
@@ -717,11 +734,19 @@ mod tests {
     }
 
     #[test]
-    fn render_asset_registry_covers_all_ten_six_state_characters() {
+    fn every_stable_identity_resolves_to_a_complete_shipped_render_set() {
         let assets = test_render_assets();
-        assert_eq!(assets.sets.len(), SPRITE_CHARACTER_IDS.len());
+        assert_eq!(assets.sets.len(), 9);
+        assert!(
+            assets.get("orchard-comet-centaur").is_none(),
+            "draft sheets must not be requested"
+        );
         for id in SPRITE_CHARACTER_IDS {
-            let render_set = assets.get(id).expect("roster render set");
+            let definition =
+                sprite_character_render_definition(Some(id)).expect("roster rendering definition");
+            let render_set = assets
+                .get(&definition.id)
+                .expect("shipped render set or explicit draft fallback");
             assert!(render_set.action_image.is_some(), "{id}");
             assert!(render_set.action_layout.is_some(), "{id}");
         }
@@ -956,8 +981,84 @@ mod tests {
                 .iter()
                 .find(|(owner, _, _)| *owner == remote)
                 .expect("remote sprite visual");
-            assert_eq!(remote_visual.1, id);
+            assert_eq!(
+                remote_visual.1,
+                sprite_character_render_definition(Some(id)).unwrap().id
+            );
         }
+    }
+
+    #[test]
+    fn draft_identity_uses_shipped_animation_metadata_without_rebuilding_on_snapshots() {
+        let mut app = App::new();
+        app.insert_resource(PlayerVisualMode::Sprite2d)
+            .insert_resource(test_render_assets())
+            .insert_resource(Time::<()>::default())
+            .add_systems(
+                Update,
+                (
+                    reconcile_sprite_identity,
+                    attach_sprite_visuals,
+                    animate_sprite_visuals,
+                )
+                    .chain(),
+            );
+        let owner = app
+            .world_mut()
+            .spawn((
+                RemotePlayer,
+                Transform::default(),
+                CombatStats::default(),
+                NetworkSpriteCharacter(Some("orchard-comet-centaur".into())),
+                PlayerCosmeticAction::default(),
+            ))
+            .id();
+        app.update();
+        let first = app
+            .world_mut()
+            .query::<(Entity, &PlayerSpriteVisual)>()
+            .single(app.world())
+            .unwrap()
+            .0;
+        for sequence in 1..5 {
+            app.world_mut().entity_mut(owner).insert((
+                NetworkSpriteCharacter(Some("orchard-comet-centaur".into())),
+                PlayerCosmeticAction {
+                    sequence,
+                    kind: PlayerActionKind::Attack,
+                    slot: 255,
+                },
+            ));
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(Duration::from_secs_f32(0.05));
+            app.update();
+            let (entity, visual) = app
+                .world_mut()
+                .query::<(Entity, &PlayerSpriteVisual)>()
+                .single(app.world())
+                .unwrap();
+            assert_eq!(
+                entity, first,
+                "unchanged requested identity must not recreate its fallback"
+            );
+            assert_eq!(visual.character_id, DEFAULT_SPRITE_CHARACTER_ID);
+            assert_eq!(visual.last_action_sequence, sequence);
+            assert_eq!(
+                app.world()
+                    .get::<NetworkSpriteCharacter>(owner)
+                    .unwrap()
+                    .0
+                    .as_deref(),
+                Some("orchard-comet-centaur")
+            );
+        }
+        assert!(
+            !app.world()
+                .resource::<SpriteVisualAssets>()
+                .sets
+                .contains_key("orchard-comet-centaur")
+        );
     }
 
     #[test]

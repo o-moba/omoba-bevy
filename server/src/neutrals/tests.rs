@@ -310,7 +310,7 @@ fn fresh_level_one_heroes_can_clear_three_camps_with_basic_attacks_and_unlocked_
                 handle_basic_attack_request(
                     &mut players,
                     &mut projectiles,
-                    &mut minions,
+                    &minions,
                     &structures,
                     &camps,
                     &buffs,

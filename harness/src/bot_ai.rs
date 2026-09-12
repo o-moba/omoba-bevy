@@ -207,7 +207,9 @@ impl WorldView {
             }
         }
         for minion in snapshot.minions() {
-            let MinionState { id, team, x, z, hp } = minion;
+            let MinionState {
+                id, team, x, z, hp, ..
+            } = minion;
             if *team == Some(my_team) && *hp > 0.0 {
                 view.friendly_minions.push(EnemyRef {
                     kind: TargetKind::Minion,

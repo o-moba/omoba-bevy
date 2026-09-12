@@ -1,3 +1,4 @@
+use shared::combat::{CombatEntityKind, CombatEvent, MinionKind, ProjectileStyle};
 use shared::protocol::{JoinRejection, PROTOCOL_VERSION, SnapshotMeta, SnapshotOrder};
 use shared::transport::{SnapshotAssembler, TransportError};
 
@@ -44,7 +45,6 @@ const IPV4_UDP_MAX_PAYLOAD_BYTES: usize = 65_507;
 const SERVER_DATAGRAM_RECEIVE_CAPACITY: usize = 65_536;
 const _: () = assert!(SERVER_DATAGRAM_RECEIVE_CAPACITY > IPV4_UDP_MAX_PAYLOAD_BYTES);
 const DECODE_ERROR_LOG_INTERVAL: Duration = Duration::from_secs(1);
-const PROJECTILE_RADIUS: f32 = 0.22;
 const MINION_RADIUS: f32 = 0.55;
 const LOCAL_SNAP_DISTANCE: f32 = 4.0;
 const DEFAULT_PLAYER_LEVEL: u32 = 1;
@@ -299,7 +299,6 @@ impl Plugin for NetworkingPlugin {
             .add_systems(
                 Startup,
                 (
-                    setup_network_visual_assets,
                     start_networking.after(crate::persistence::load_persistent_client_settings),
                     setup_connection_status_ui,
                 ),
@@ -573,6 +572,14 @@ pub enum Lane {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ProjectileState {
+    #[serde(default)]
+    source_kind: CombatEntityKind,
+    #[serde(default)]
+    style: ProjectileStyle,
+    #[serde(default)]
+    action_slot: Option<u8>,
+    #[serde(default)]
+    direction: [f32; 3],
     id: u64,
     owner_id: u64,
     #[serde(default = "default_team")]
@@ -605,6 +612,10 @@ struct StructureState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct MinionState {
+    #[serde(default)]
+    kind: MinionKind,
+    #[serde(default)]
+    attack_sequence: u64,
     id: u64,
     team: Team,
     lane: Lane,
@@ -730,6 +741,8 @@ enum ServerPacket {
         #[serde(default)]
         team_buffs: Vec<TeamBuffState>,
         #[serde(default)]
+        combat_events: Vec<CombatEvent>,
+        #[serde(default)]
         game_state: GameState,
         #[serde(default)]
         rematch_in_secs: Option<u64>,
@@ -763,6 +776,8 @@ pub struct GameStateSnapshot {
     pub rematch_in_secs: Option<u64>,
     /// Active boss team buffs replicated from the server.
     pub team_buffs: Vec<TeamBuffState>,
+    /// Recent confirmed hits; presentation deduplicates by epoch, match and event id.
+    pub combat_events: Vec<CombatEvent>,
 }
 
 #[derive(Resource)]
@@ -802,6 +817,7 @@ struct PendingSnapshotData {
     minions: Vec<MinionState>,
     neutrals: Vec<NeutralState>,
     team_buffs: Vec<TeamBuffState>,
+    combat_events: Vec<CombatEvent>,
     game_state: GameState,
     rematch_in_secs: Option<u64>,
     /// Local team choice at ingest time (spawn gate when server has not yet mirrored selection).
@@ -914,6 +930,12 @@ impl Default for PlayerProgression {
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkProjectile {
+    pub id: u64,
+    pub owner_id: u64,
+    pub source_kind: CombatEntityKind,
+    pub style: ProjectileStyle,
+    pub action_slot: Option<u8>,
+    pub direction: Vec3,
     #[allow(dead_code)] // Consumed by the optional 2D presentation plugin.
     pub owner_team: Team,
 }
@@ -935,8 +957,14 @@ pub struct NetworkMinion;
 #[derive(Component, Clone, Copy)]
 pub struct NetworkMinionBrainState(pub MinionBrainState);
 
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct NetworkMinionKind(pub MinionKind);
+
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct NetworkMinionAction(pub u64);
+
 /// Minions render at this multiple of the shared normalized hero height.
-const MINION_MODEL_HEIGHT_SCALE: f32 = 0.6;
+const MINION_MODEL_HEIGHT_SCALE: f32 = 0.9;
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkMinionId(pub u64);
@@ -975,35 +1003,21 @@ struct RemotePlayerInterpolation {
     duration: f32,
 }
 
-#[derive(Resource)]
-pub struct NetworkVisualAssets {
-    projectile_mesh: Handle<Mesh>,
-    friendly_projectile_material: Handle<StandardMaterial>,
-    hostile_projectile_material: Handle<StandardMaterial>,
-}
-
-fn setup_network_visual_assets(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    let projectile_mesh = meshes.add(Mesh::from(Sphere::new(PROJECTILE_RADIUS)));
-    let friendly_projectile_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.35, 0.92, 1.0),
-        unlit: true,
-        ..default()
-    });
-    let hostile_projectile_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(1.0, 0.36, 0.36),
-        unlit: true,
-        ..default()
-    });
-
-    commands.insert_resource(NetworkVisualAssets {
-        projectile_mesh,
-        friendly_projectile_material,
-        hostile_projectile_material,
-    });
+fn network_projectile(state: &ProjectileState) -> NetworkProjectile {
+    let direction = Vec3::from_array(state.direction);
+    NetworkProjectile {
+        id: state.id,
+        owner_id: state.owner_id,
+        owner_team: state.owner_team,
+        source_kind: state.source_kind,
+        style: state.style,
+        action_slot: state.action_slot,
+        direction: if direction.is_finite() {
+            direction.normalize_or_zero()
+        } else {
+            Vec3::ZERO
+        },
+    }
 }
 
 fn start_networking(
@@ -1597,6 +1611,7 @@ fn ingest_server_snapshot_packets(
                     minions,
                     neutrals,
                     team_buffs,
+                    combat_events,
                     game_state,
                     rematch_in_secs,
                 } => {
@@ -1624,6 +1639,7 @@ fn ingest_server_snapshot_packets(
                         minions,
                         neutrals,
                         team_buffs,
+                        combat_events,
                         game_state,
                         rematch_in_secs,
                         selected_team_for_spawn: team_selection.team,
@@ -1664,7 +1680,6 @@ fn apply_server_snapshot(
     action_query: Query<Option<&PlayerCosmeticAction>>,
     player_assets: Res<PlayerAssets>,
     mut models: PlayerModelResolver,
-    visuals: Res<NetworkVisualAssets>,
     mut ui_state: SnapshotUiState,
 ) {
     let SnapshotUiState {
@@ -1686,6 +1701,7 @@ fn apply_server_snapshot(
         minions,
         neutrals,
         team_buffs,
+        combat_events,
         game_state,
         rematch_in_secs,
         selected_team_for_spawn,
@@ -1702,6 +1718,7 @@ fn apply_server_snapshot(
     game_state_snapshot.state = game_state;
     game_state_snapshot.rematch_in_secs = rematch_in_secs;
     game_state_snapshot.team_buffs = team_buffs;
+    game_state_snapshot.combat_events = combat_events;
 
     let local_player_state = players.iter().find(|player| player.id == your_id);
     let local_players = local_player_query
@@ -2047,36 +2064,20 @@ fn apply_server_snapshot(
             if let Ok(mut transform) = transform_sets.p0().get_mut(entity) {
                 transform.translation = Vec3::new(projectile.x, projectile.y, projectile.z);
             }
-            commands.entity(entity).insert(NetworkProjectile {
-                owner_team: projectile.owner_team,
-            });
+            commands
+                .entity(entity)
+                .insert(network_projectile(projectile));
             continue;
         }
 
-        let is_friendly = network_state
-            .local_team
-            .is_some_and(|team| team == projectile.owner_team);
-        let material = if is_friendly {
-            visuals.friendly_projectile_material.clone()
-        } else {
-            visuals.hostile_projectile_material.clone()
-        };
-
-        let mut entity_commands = commands.spawn((
-            Transform::from_xyz(projectile.x, projectile.y, projectile.z),
-            Visibility::default(),
-            NetworkProjectile {
-                owner_team: projectile.owner_team,
-            },
-            Name::new(format!("Projectile-{}", projectile.id)),
-        ));
-        if **visual_mode == PlayerVisualMode::Models3d {
-            entity_commands.insert((
-                Mesh3d(visuals.projectile_mesh.clone()),
-                MeshMaterial3d(material),
-            ));
-        }
-        let entity = entity_commands.id();
+        let entity = commands
+            .spawn((
+                Transform::from_xyz(projectile.x, projectile.y, projectile.z),
+                Visibility::default(),
+                network_projectile(projectile),
+                Name::new(format!("Projectile-{}", projectile.id)),
+            ))
+            .id();
         network_state.projectiles.insert(projectile.id, entity);
     }
 
@@ -2171,6 +2172,8 @@ fn apply_server_snapshot(
                 minion.team,
                 minion_state_to_combat_stats(minion),
                 NetworkMinionBrainState(minion.state),
+                NetworkMinionKind(minion.kind),
+                NetworkMinionAction(minion.attack_sequence),
             ));
             continue;
         }
@@ -2181,6 +2184,8 @@ fn apply_server_snapshot(
             NetworkMinion,
             NetworkMinionId(minion.id),
             NetworkMinionBrainState(minion.state),
+            NetworkMinionKind(minion.kind),
+            NetworkMinionAction(minion.attack_sequence),
             NetEntityInterpolation {
                 from_translation: target_translation,
                 to_translation: target_translation,
@@ -3193,7 +3198,6 @@ mod tests {
             .init_resource::<super::NetIncomingDisconnected>()
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<StandardMaterial>>()
-            .add_systems(Startup, super::setup_network_visual_assets)
             .add_systems(
                 Update,
                 (

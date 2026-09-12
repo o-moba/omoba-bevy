@@ -14,6 +14,28 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 - Add `make play` / `make play-bots` to build locked current sources and launch
   supervised local 3D practice with nine bots, with owned-process cleanup.
 
+## [0.19.0-rc.4] - 2026-09-12
+
+### Added
+- Class-specific arrow, arcane, holy and crescent projectiles, with a versioned
+  local cosmetic registry for class/action and avatar/sprite overrides, packaged
+  models/sprite animations, trails, impacts and avatar clip aliases.
+- Floating damage numbers and impact bursts sourced from bounded, deduplicated
+  server damage receipts with actual HP removed and typed actor identities.
+- Two melee fighters and one ranged caster per existing three-minion wave.
+  Casters launch traveling projectiles; both roles have distinct silhouettes
+  and sequence-driven attack poses. Minions are visually 50% taller.
+
+### Fixed
+- Mark the unfinished Orchard 2D animation pack as art pending, disable new
+  selection, and use an explicit render fallback for legacy identities. Retain
+  its stable ID/portrait without requesting absent files or claiming finished art.
+
+### Compatibility
+- Gameplay stays authoritative. Cosmetic configuration cannot change damage,
+  reach or projectile travel. Additive protocol-2 fields keep legacy defaults;
+  rebuild both peers to see the full presentation and mixed-minion behavior.
+
 ## [0.19.0-rc.3] - 2026-09-12
 
 ### Added

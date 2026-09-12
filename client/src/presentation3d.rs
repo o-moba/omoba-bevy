@@ -56,8 +56,6 @@ impl Allegiance {
 enum EffectKind {
     Attack,
     Cast,
-    Impact,
-    Heal,
     Death,
 }
 
@@ -66,8 +64,6 @@ impl EffectKind {
         match self {
             Self::Attack => 0.24,
             Self::Cast => 0.55,
-            Self::Impact => 0.30,
-            Self::Heal => 0.75,
             Self::Death => 1.1,
         }
     }
@@ -76,8 +72,6 @@ impl EffectKind {
         match self {
             Self::Attack => Color::srgb(1.0, 0.9, 0.55),
             Self::Cast => Color::srgb(0.65, 0.45, 1.0),
-            Self::Impact => Color::srgb(1.0, 0.3, 0.12),
-            Self::Heal => Color::srgb(0.25, 1.0, 0.45),
             Self::Death => Color::srgb(0.9, 0.9, 1.0),
         }
     }
@@ -142,10 +136,6 @@ impl CombatPresentation {
         };
         if old.hp > 0.0 && hp <= 0.0 {
             self.emit(position, EffectKind::Death);
-        } else if hp > 0.0 && hp < old.hp {
-            self.emit(position, EffectKind::Impact);
-        } else if old.hp > 0.0 && hp > old.hp + 0.01 {
-            self.emit(position, EffectKind::Heal);
         }
         if hp > 0.0 && old.hp > 0.0 && action.sequence > old.action_sequence {
             match action.kind {
@@ -263,7 +253,7 @@ fn draw_feedback(
         let color = effect.kind.color().with_alpha(1.0 - progress);
         let center = effect.position + Vec3::Y * 0.8;
         match effect.kind {
-            EffectKind::Attack | EffectKind::Impact => {
+            EffectKind::Attack => {
                 let radius = 0.25 + progress * 0.8;
                 for direction in [Vec3::X, Vec3::Y, Vec3::Z] {
                     gizmos.line(
@@ -274,12 +264,6 @@ fn draw_feedback(
                 }
             }
             EffectKind::Cast => ground_circle(&mut gizmos, center, 0.4 + 1.6 * progress, color),
-            EffectKind::Heal => {
-                let center = center + Vec3::Y * progress;
-                gizmos.line(center - Vec3::X * 0.35, center + Vec3::X * 0.35, color);
-                gizmos.line(center - Vec3::Y * 0.35, center + Vec3::Y * 0.35, color);
-                ground_circle(&mut gizmos, center, 0.5 + 0.3 * progress, color);
-            }
             EffectKind::Death => {
                 let center = center + Vec3::Y * progress * 1.5;
                 ground_circle(&mut gizmos, center, 0.9 * (1.0 - progress), color);
@@ -339,12 +323,7 @@ mod tests {
                 .iter()
                 .map(|effect| effect.kind)
                 .collect::<Vec<_>>(),
-            vec![
-                EffectKind::Cast,
-                EffectKind::Impact,
-                EffectKind::Heal,
-                EffectKind::Death
-            ]
+            vec![EffectKind::Cast, EffectKind::Death]
         );
         feedback.advance(2.0);
         assert!(feedback.effects.is_empty());
@@ -428,7 +407,7 @@ mod tests {
         );
         app.world_mut()
             .resource_mut::<CombatPresentation>()
-            .emit(Vec3::ZERO, EffectKind::Heal);
+            .emit(Vec3::ZERO, EffectKind::Cast);
         app.insert_resource(PlayerVisualMode::Sprite2d);
         app.update();
         assert!(

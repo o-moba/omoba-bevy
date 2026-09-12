@@ -170,6 +170,7 @@ struct PlayerAnimationLibrary {
     sets: HashMap<AvatarKey, CharacterAnimationSet>,
     source_gltfs: HashMap<AvatarKey, Handle<Gltf>>,
     evaluated_keys: HashSet<AvatarKey>,
+    cosmetic_revision: u64,
 }
 
 impl PlayerAnimationLibrary {
@@ -336,6 +337,7 @@ fn start_hero_animation(
 
 fn setup_player_animation_library(
     mut library: ResMut<PlayerAnimationLibrary>,
+    cosmetics: Option<Res<crate::combat_visuals::CombatVisualRegistry>>,
     catalog: Option<Res<PlayerModelCatalog>>,
     avatar_cache: Res<AvatarAssetCache>,
     gltf_assets: Res<Assets<Gltf>>,
@@ -344,6 +346,11 @@ fn setup_player_animation_library(
     let Some(catalog) = catalog else {
         return;
     };
+    let revision = cosmetics.as_ref().map_or(0, |registry| registry.revision());
+    if library.cosmetic_revision != revision {
+        library.cosmetic_revision = revision;
+        library.evaluated_keys.clear();
+    }
     // Candidates: legacy animated SDK characters + every roster avatar that has
     // been requested (local selection or a remote player wearing it).
     let mut candidates: Vec<(AvatarKey, Option<Handle<Gltf>>)> = [
@@ -402,9 +409,32 @@ fn setup_player_animation_library(
             None
         };
 
-        let idle = find_clip(&["idle"]);
-        // Prefer explicit walkcycle naming to avoid accidentally matching non-locomotion "walk*".
-        let walk = find_clip(&["walkcycle", "walk_cycle", "walk"]);
+        let cosmetic_key = match &key {
+            AvatarKey::Roster(slug) => slug.clone(),
+            AvatarKey::Character(character) => {
+                format!("character:{character:?}").to_ascii_lowercase()
+            }
+        };
+        let aliases = cosmetics
+            .as_ref()
+            .and_then(|registry| registry.animation_aliases(&cosmetic_key));
+        let exact_clip = |names: Option<&Vec<String>>| -> Option<(String, Handle<AnimationClip>)> {
+            names?.iter().find_map(|name| {
+                gltf.named_animations
+                    .get(name.as_str())
+                    .map(|handle| (name.clone(), handle.clone()))
+            })
+        };
+        let mut idle =
+            exact_clip(aliases.map(|aliases| &aliases.idle)).or_else(|| find_clip(&["idle"]));
+        let mut walk = exact_clip(aliases.map(|aliases| &aliases.walk))
+            .or_else(|| exact_clip(aliases.map(|aliases| &aliases.run)))
+            .or_else(|| find_clip(&["walkcycle", "walk_cycle", "walk"]));
+        if matches!((&idle, &walk), (Some((_, idle)), Some((_, walk))) if idle == walk) {
+            // A conflicting cosmetic alias must not disable valid built-in locomotion.
+            idle = find_clip(&["idle"]);
+            walk = find_clip(&["walkcycle", "walk_cycle", "walk"]);
+        }
         if let (Some((idle_name, idle_clip)), Some((walk_name, walk_clip))) = (idle, walk) {
             if idle_clip == walk_clip {
                 warn!(
@@ -414,9 +444,12 @@ fn setup_player_animation_library(
                 library.sets.remove(&key);
                 continue;
             }
-            let attack = find_clip(&["attack"]);
-            let cast = find_clip(&["cast", "spell"]);
-            let death = find_clip(&["death", "die"]);
+            let attack = exact_clip(aliases.map(|aliases| &aliases.attack))
+                .or_else(|| find_clip(&["attack"]));
+            let cast = exact_clip(aliases.map(|aliases| &aliases.cast))
+                .or_else(|| find_clip(&["cast", "spell"]));
+            let death = exact_clip(aliases.map(|aliases| &aliases.death))
+                .or_else(|| find_clip(&["death", "die"]));
             let mut clips = vec![idle_clip, walk_clip];
             let mut optional_indices = [None; 3];
             for (index, clip) in [attack, cast, death].into_iter().enumerate() {

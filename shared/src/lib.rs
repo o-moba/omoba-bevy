@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 use std::time::Duration;
 
+pub mod combat;
 pub mod jungle;
 pub mod navigation;
 pub mod protocol;
@@ -713,6 +714,10 @@ pub struct SpriteAnimationSet {
 #[derive(Debug, Clone, Deserialize)]
 pub struct SpriteCharacterDefinition {
     pub id: String,
+    /// Draft identities may retain their wire id/portrait while rendering an
+    /// explicitly declared, complete character. Never follow fallback chains.
+    #[serde(default)]
+    pub render_fallback: Option<String>,
     pub display_name: String,
     pub theme: String,
     pub palette: Vec<String>,
@@ -775,6 +780,37 @@ pub fn normalize_sprite_character_id(raw: Option<&str>) -> &'static str {
         .and_then(sprite_character_definition)
         .map(|character| character.id.as_str())
         .unwrap_or(DEFAULT_SPRITE_CHARACTER_ID)
+}
+
+fn resolve_sprite_render_definition<'a>(
+    roster: &'a [SpriteCharacterDefinition],
+    raw: Option<&str>,
+) -> Option<&'a SpriteCharacterDefinition> {
+    let default = roster
+        .iter()
+        .find(|entry| entry.id == DEFAULT_SPRITE_CHARACTER_ID && entry.render_fallback.is_none())?;
+    let requested = raw
+        .map(str::trim)
+        .and_then(|id| roster.iter().find(|entry| entry.id == id))
+        .unwrap_or(default);
+    match requested.render_fallback.as_deref() {
+        None => Some(requested),
+        Some(target) => Some(
+            roster
+                .iter()
+                .find(|entry| entry.id == target && entry.render_fallback.is_none())
+                .unwrap_or(default),
+        ),
+    }
+}
+
+/// Rendering only. Normalization/admission still preserve the requested stable id.
+/// An unknown, self-referencing or recursive fallback safely resolves to the
+/// complete default; an invalid default yields None instead of loading a draft.
+pub fn sprite_character_render_definition(
+    raw: Option<&str>,
+) -> Option<&'static SpriteCharacterDefinition> {
+    resolve_sprite_render_definition(sprite_character_roster(), raw)
 }
 
 #[cfg(test)]
@@ -962,6 +998,42 @@ mod tests {
                 DEFAULT_SPRITE_CHARACTER_ID
             );
         }
+    }
+
+    #[test]
+    fn draft_sprite_preserves_identity_and_only_renders_a_complete_one_hop_target() {
+        const DRAFT: &str = "orchard-comet-centaur";
+        assert_eq!(normalize_sprite_character_id(Some(DRAFT)), DRAFT);
+        assert_eq!(
+            sprite_character_roster()
+                .iter()
+                .position(|entry| entry.id == DRAFT),
+            Some(9)
+        );
+        assert_eq!(
+            sprite_character_render_definition(Some(DRAFT)).unwrap().id,
+            DEFAULT_SPRITE_CHARACTER_ID
+        );
+        let mut roster = sprite_character_roster().to_vec();
+        for invalid in ["missing", "../mossback-teapot", DRAFT] {
+            roster[9].render_fallback = Some(invalid.into());
+            assert_eq!(
+                resolve_sprite_render_definition(&roster, Some(DRAFT))
+                    .unwrap()
+                    .id,
+                DEFAULT_SPRITE_CHARACTER_ID
+            );
+        }
+        roster[9].render_fallback = Some(roster[1].id.clone());
+        roster[1].render_fallback = Some(roster[2].id.clone());
+        assert_eq!(
+            resolve_sprite_render_definition(&roster, Some(DRAFT))
+                .unwrap()
+                .id,
+            DEFAULT_SPRITE_CHARACTER_ID
+        );
+        roster[0].render_fallback = Some(DRAFT.into());
+        assert!(resolve_sprite_render_definition(&roster, Some(DRAFT)).is_none());
     }
 
     #[test]

@@ -1,0 +1,323 @@
+{
+  "captures": [
+    {
+      "combat_events": [],
+      "damage_numbers": [],
+      "file": "01-combat-ready.png",
+      "match_id": 1,
+      "minions": [],
+      "mobile_controls": false,
+      "nodes": [
+        {
+          "name": "ShopOpenButton",
+          "size": [
+            234.0,
+            29.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileJoystick",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAttack",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-0",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-1",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-2",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-3",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        }
+      ],
+      "pixels": [
+        1280,
+        720
+      ],
+      "player_position": [
+        -8.0,
+        0.0025490745902061462,
+        -8.0
+      ],
+      "projectiles": [],
+      "server_epoch": 1789210732057938001,
+      "snapshot_tick": 43,
+      "stage": 0,
+      "visual_mode": "Models3d"
+    },
+    {
+      "combat_events": [],
+      "damage_numbers": [],
+      "file": "02-projectile-flight.png",
+      "match_id": 1,
+      "minions": [],
+      "mobile_controls": false,
+      "nodes": [
+        {
+          "name": "ShopOpenButton",
+          "size": [
+            234.0,
+            29.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileJoystick",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAttack",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-0",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-1",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-2",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-3",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        }
+      ],
+      "pixels": [
+        1280,
+        720
+      ],
+      "player_position": [
+        -8.0,
+        0.0025490745902061462,
+        -8.0
+      ],
+      "projectiles": [
+        {
+          "action_slot": 0,
+          "entity": "6704v1",
+          "id": 1,
+          "owner_id": 3,
+          "position": [
+            -6.920192241668701,
+            1.2690143585205078,
+            -8.0
+          ],
+          "rendered_drawables": 5,
+          "screen": [
+            640.0,
+            320.2008972167969
+          ],
+          "source_kind": "player",
+          "style": "arrow"
+        }
+      ],
+      "server_epoch": 1789210732057938001,
+      "snapshot_tick": 45,
+      "stage": 1,
+      "visual_mode": "Models3d"
+    },
+    {
+      "combat_events": [
+        {
+          "action_slot": 0,
+          "amount": 14.0,
+          "id": 1,
+          "killed": false,
+          "source": {
+            "id": 3,
+            "kind": "player"
+          },
+          "style": "arrow",
+          "target": {
+            "id": 1,
+            "kind": "player"
+          },
+          "x": -4.0,
+          "y": 1.0499999523162842,
+          "z": -8.0
+        }
+      ],
+      "damage_numbers": [
+        {
+          "center": [
+            637.0,
+            217.0
+          ],
+          "event_id": 1,
+          "size": [
+            28.0,
+            28.0
+          ],
+          "text": "14",
+          "visible": true
+        }
+      ],
+      "file": "03-confirmed-impact.png",
+      "match_id": 1,
+      "minions": [],
+      "mobile_controls": false,
+      "nodes": [
+        {
+          "name": "ShopOpenButton",
+          "size": [
+            234.0,
+            29.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileJoystick",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAttack",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-0",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-1",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-2",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        },
+        {
+          "name": "MobileAbility-3",
+          "size": [
+            0.0,
+            0.0
+          ],
+          "visible": true
+        }
+      ],
+      "pixels": [
+        1280,
+        720
+      ],
+      "player_position": [
+        -8.0,
+        0.0025490745902061462,
+        -8.0
+      ],
+      "projectiles": [],
+      "server_epoch": 1789210732057938001,
+      "snapshot_tick": 48,
+      "stage": 2,
+      "visual_mode": "Models3d"
+    }
+  ],
+  "class": "ranger",
+  "manual_interaction_verified": false,
+  "pass": true,
+  "physical_device_verified": false,
+  "pixels": [
+    1280,
+    720
+  ],
+  "player_id": 3,
+  "requests": [
+    {
+      "kind": "cast",
+      "slot": 0,
+      "snapshot_tick": 43,
+      "target": {
+        "id": 1,
+        "kind": "player"
+      }
+    }
+  ],
+  "scenario": "combat",
+  "scripted_commands": true,
+  "setup_fixture": "development server initial player placement; ambient AI disabled",
+  "synthetic_damage": false,
+  "target_id": 1,
+  "version": "0.19.0-rc.4",
+  "waves": false
+}
