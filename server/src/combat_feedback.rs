@@ -10,6 +10,7 @@ pub(crate) const COMBAT_EVENT_RETENTION: Duration = Duration::from_secs(1);
 
 #[derive(Default)]
 pub(crate) struct CombatLog {
+    pub(crate) ledger: crate::match_stats::RoundLedger,
     next_id: u64,
     recent: VecDeque<(Instant, CombatEvent)>,
 }
@@ -20,6 +21,7 @@ impl CombatLog {
         for mut event in events {
             self.next_id = self.next_id.saturating_add(1);
             event.id = self.next_id;
+            self.ledger.record(now, &event);
             self.recent.push_back((now, event));
             while self.recent.len() > COMBAT_EVENT_CAPACITY {
                 self.recent.pop_front();

@@ -1,0 +1,732 @@
+   Compiling client v0.19.0-rc.6 (/Users/wotori/git/ekza/omoba-bevy-match-progression/client)
+    Finished `test` profile [unoptimized] target(s) in 11.09s
+     Running unittests src/main.rs (.agent/tasks/MATCH-PROGRESSION-2026-09-14/target/debug/deps/arena_sync-bc931eb648916050)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (.agent/tasks/MATCH-PROGRESSION-2026-09-14/target/debug/deps/client-4f6e62eecfd45c18)
+
+running 301 tests
+test camera::tests::y_toggles_follow_and_recenters_a_minimap_override ... ok
+test camera::tests::zoom_limits_are_ordered_and_usable ... ok
+test camera::tests::clamp_accounts_for_zoom_and_aspect_ratio ... ok
+test career::tests::history_dates_use_authoritative_utc_timestamps ... ok
+test career::tests::guest_result_identity_is_frozen_before_live_player_changes ... ok
+test career::tests::absent_live_player_is_not_a_false_defeat_and_detail_never_reuses_wrong_match ... ok
+test career::tests::late_history_page_cannot_complete_or_replace_a_newer_page ... ok
+test career::tests::legacy_or_silent_backend_cannot_leave_history_loading_forever ... ok
+test career::tests::detail_requires_matching_request_and_result_and_survives_live_snapshots ... ok
+test career::tests::namespace_reset_does_not_reuse_query_ids_or_accept_old_history ... ok
+test career::tests::friends_and_profile_payloads_are_correlated_and_survive_live_snapshots ... ok
+test career::tests::friend_codes_are_complete_hex_and_input_never_partially_accepts_bad_paste ... ok
+test career::tests::results_survive_live_reset_and_close_without_reopening ... ok
+test career::tests::retries_keep_request_and_payload_and_stop_on_reply_close_or_deadline ... ok
+test camera::tests::default_follow_keeps_both_teams_on_the_minimap_diagonal ... ok
+test career::tests::unicode_editor_is_bounded_and_does_not_split_utf8 ... ok
+test camera::tests::camera_gesture_and_recenter_are_explicit ... ok
+test career::tests::escape_closes_career_without_toggling_the_underlying_pause_menu ... ok
+test career::tests::native_ime_commit_is_not_duplicated_by_keyboard_text ... ok
+test career::tests::career_entry_and_dashboard_are_above_the_pause_overlay ... ok
+test career::tests::history_unloaded_and_loaded_empty_are_distinct ... ok
+test career::tests::queue_updates_preserve_scroll_but_screen_and_history_page_navigation_reset_it ... ok
+test career_visual_qa::tests::bounds_reject_zero_and_clipped_panels ... ok
+test career_identity::tests::unexpected_challenges_and_namespace_changes_are_refused ... ok
+test career_visual_qa::tests::fixture_is_explicit_and_has_full_teams_and_relationship_states ... ok
+test combat::tests::cast_range_uses_horizontal_gameplay_distance ... ok
+test career_identity::tests::competing_creators_use_one_complete_identity ... ok
+test combat::tests::directional_mobile_assist_respects_range_and_does_not_snap_behind_aim ... ok
+test combat::tests::explicit_q_skill_request_preserves_the_exact_authoritative_target ... ok
+test career_identity::tests::signed_actions_have_independent_monotonic_sequence_and_verify ... ok
+test bosses::tests::sprite2d_bosses_keep_gameplay_identity_without_3d_attachments ... ok
+test career::tests::rejected_unadmitted_selection_exposes_recovery_but_admitted_query_errors_do_not ... ok
+test career::tests::same_viewport_keeps_target_specific_results_and_scroll_ownership ... ok
+test combat::tests::buying_haste_adjusts_active_deadlines_without_rescaling_elapsed_time ... ok
+test career::tests::friends_render_real_names_presence_and_all_relationship_actions_in_both_modes ... ok
+test combat::tests::pointer_hit_areas_are_touch_sized_and_screen_bounded ... ok
+test combat::tests::hidden_and_protected_nearest_candidates_do_not_mask_visible_targets ... ok
+test combat::tests::self_target_hotbar_request_needs_no_selected_enemy ... ok
+test combat_feedback::tests::invalid_feedback_cannot_create_labels_and_feed_is_bounded ... ok
+test combat_feedback::tests::retained_history_is_not_replayed_and_duplicates_are_suppressed ... ok
+test combat_visuals::tests::embedded_classes_are_distinct_and_legacy_style_has_fallback ... ok
+test career_identity::tests::key_survives_reopen_and_corruption_is_not_overwritten ... ok
+test combat_visuals::tests::override_precedence_actions_and_animation_aliases_are_real ... ok
+test debug_console::tests::parse_debug_ui_flag_accepts_one_and_true ... ok
+test combat_visuals::tests::invalid_config_rejects_gameplay_values_paths_and_unbounded_settings ... ok
+test debug_console::tests::parse_debug_ui_flag_rejects_other_values ... ok
+test combat::tests::desktop_mouse_select_attack_ground_and_ui_are_distinct ... ok
+test combat::tests::actual_cast_and_upgrade_systems_obey_help_pause_and_debug_context ... ok
+test combat::tests::feedback_expires_in_place_and_hotbar_shows_server_rank_lock_mana_and_cooldown ... ok
+test decor::tests::layout_covers_every_prop_kind ... ok
+test career::tests::result_save_status_distinguishes_local_practice_pending_storage_and_saved ... ok
+test decor::tests::legacy_scatter_stays_bounded_and_dense ... ok
+test decor::tests::placements_stay_in_bounds_and_outside_gameplay_zones ... ok
+test game_state::tests::matchmaking_text_covers_all_search_states ... ok
+test combat::tests::insufficient_mana_rejects_without_phantom_cooldown ... ok
+test combat::tests::mobile_pending_cast_in_range_emits_and_out_of_range_never_starts_a_chase ... ok
+test decor::tests::layout_is_deterministic_for_the_same_seed ... ok
+test combat::tests::target_selection_keys_obey_modal_context_at_the_ecs_boundary ... ok
+test combat::tests::pending_unit_cast_approaches_then_emits_once_in_range ... ok
+test help_overlay::tests::help_overlay_copy_covers_core_first_match_actions ... ok
+test help_overlay::tests::help_overlay_copy_includes_toggle_hint ... ok
+test input_bindings::tests::cast_keys_and_slot_labels_same_length ... ok
+test input_bindings::tests::skill_keys_display_covers_every_slot_label ... ok
+test combat::tests::round_identity_clears_old_intents_cooldowns_and_queued_casts_but_reconnect_does_not ... ok
+test decor::tests::f4_toggles_decor_root_visibility ... ok
+test combat::tests::protected_base_rejection_is_visible_and_does_not_approach_or_start_cooldown ... ok
+test game_state::tests::lobby_overlay_stays_hidden_until_join_is_committed ... ok
+test game_state::tests::authoritative_queue_wait_is_visible_while_another_match_is_running ... ok
+test map_qa::tests::qa_two_d_camera_includes_ground_and_foreground_bands ... ok
+test game_state::tests::overlay_never_blocks_pointer_picking ... ok
+test map_visuals::tests::invalid_cosmetics_fail_atomically_and_cannot_hide_or_tune_gameplay ... ok
+test game_state::tests::prior_result_does_not_hide_a_new_victory_and_missing_player_is_neutral ... ok
+test map_visuals::tests::solid_replacement_checks_extent_pivot_and_ground ... ok
+test map_visuals::tests::validated_palette_and_instance_precedence_restore_defaults ... ok
+test game_state::tests::victory_is_bounded_and_automatically_returns_to_countdown_then_gameplay ... ok
+test maps::tests::clamp_position_stays_in_bounds ... ok
+test maps::tests::layout_is_square_and_symmetric ... ok
+test maps::tests::no_decorative_block_entombs_a_camp_or_boss ... ok
+test input_context::tests::career_history_blocks_live_combat_and_camera_without_a_player_entity ... ok
+test maps::tests::terrain_height_corner_matches_overlapping_ramps ... ok
+test maps::tests::terrain_height_covers_pad_top_and_spawn_points ... ok
+test maps::tests::terrain_height_open_ground_is_flat ... ok
+test maps::tests::terrain_height_ramp_descends_linearly_and_continuously ... ok
+test maps::verdant_surface_tests::mitered_pad_samples_cover_edges_sides_and_unequal_corners ... ok
+test match_hud::tests::running_status_text_shows_resources_objective_and_class_kit ... ok
+test maps::verdant_surface_tests::normalized_crossings_approaches_decks_and_exits_match_within_five_centimeters ... ok
+test match_hud::tests::running_status_text_shows_target_and_per_slot_cooldown ... ok
+test match_hud::tests::team_buff_hud_text_is_empty_without_active_buffs ... ok
+test match_hud::tests::team_buff_hud_text_lists_local_team_buffs_with_remaining_time ... ok
+test match_hud::tests::team_buff_hud_text_stacks_both_buffs_on_separate_lines ... ok
+test help_overlay::tests::first_match_help_button_dismisses_and_does_not_reopen_on_rematch ... ok
+test help_overlay::tests::running_server_does_not_show_first_match_help_before_local_admission ... ok
+test minimap::tests::camera_edges_preserve_ground_projection_and_clip_without_distortion ... ok
+test minimap::tests::high_dpi_computed_bounds_use_logical_cursor_coordinates ... ok
+test minimap::tests::map_projection_and_clicks_round_trip_at_upper_left_and_phone_scales ... ok
+test input_context::tests::same_frame_modal_toggle_blocks_actions_and_debug_flight_requires_opt_in ... ok
+test input_context::tests::production_pipeline_applies_snapshot_before_autohelp_and_sends_current_frame_input ... ok
+test god_mode::tests::disabled_debug_ui_spawns_no_controls_and_ignores_admin_keys ... ok
+test jungle::tests::sprite_jungle_keeps_authoritative_roots_without_allocating_3d_assets ... ok
+test minimap::tests::shared_detection_reveals_enemy_only_in_living_allied_observer_range ... ok
+test minimap::tests::desktop_map_keeps_click_shield_on_its_upper_left_frame ... ok
+test minimap::tests::allies_are_shared_out_of_range_but_dead_heroes_and_missing_local_team_have_no_markers ... ok
+test minimap::tests::minimap_click_does_not_escape_modal_or_debug_flight ... ok
+test minimap::tests::qa_diagnostics_reports_computed_dpi_and_rotated_edges_and_excludes_hidden_nodes ... ok
+test minimap::tests::portraits_keep_round_team_rings_local_halo_and_recover_from_missing_thumbnail ... ok
+test minimap_route::tests::actual_route_pool_tracks_progress_and_clears_on_cancel_or_death ... ok
+test mobile_controls::tests::attack_cancel_region_and_os_cancel_discard_only_the_owned_gesture ... ok
+test mobile_controls::tests::attack_drag_grows_caps_and_releases_exact_aim_without_repeat_or_fallback ... ok
+test minimap::tests::right_click_emits_one_move_without_panning_and_alt_does_not_reuse_it ... ok
+test mobile_controls::tests::basic_taps_and_holds_are_independent_from_all_four_skills ... ok
+test mobile_controls::tests::cancel_or_gate_reset_never_casts_and_requires_a_new_touch ... ok
+test mobile_controls::tests::dead_zone_clamping_and_capture_survive_crossing_controls ... ok
+test minimap::tests::six_persistent_camp_markers_follow_authoritative_death_roaming_and_respawn ... ok
+test mobile_controls::tests::independent_fingers_move_and_cast_without_stealing_joystick ... ok
+test mobile_controls::tests::phone_controls_and_upgrade_targets_fit_safe_area_without_overlap ... ok
+test mobile_controls::tests::release_cancellation_survives_capture_removal_and_touch_ids_are_not_gesture_ids ... ok
+test mobile_controls::tests::skill_owner_suspends_basic_hold_without_stealing_movement ... ok
+test mobile_ui::tests::address_keypad_filters_controls_and_supports_ipv4_hostnames ... ok
+test model_scale::tests::android_bundled_model_overrides_are_valid_for_shipped_roster ... ok
+test mobile_ui::tests::desktop_does_not_install_phone_forms_or_change_keyboard_ime ... ok
+test model_scale::tests::hero_preferences_and_overrides_preserve_creature_reference_sizes ... ok
+test model_scale::tests::missing_override_defaults_to_one ... ok
+test model_scale::tests::model_scale_key_prefers_known_avatar_slug ... ok
+test model_scale::tests::parse_overrides_clamps_extremes ... ok
+test model_scale::tests::gltf_and_fallback_retargeting_keep_feet_and_head_anchors_absolute ... ok
+test model_scale::tests::parse_overrides_reads_flat_map_and_skips_comments ... ok
+test model_scale::tests::parse_overrides_rejects_invalid_json ... ok
+test model_scale::tests::scale_for_height_is_absolute_and_idempotent ... ok
+test minions::tests::sprite2d_minions_do_not_allocate_or_attach_procedural_3d_assets ... ok
+test combat::tests::invalidated_pending_skill_stops_chase_without_cast_or_cooldown ... ok
+test mobile_controls::tests::resize_dpi_and_rotation_preserve_the_selected_interface_family ... ok
+test minimap::tests::actual_marker_system_uses_only_living_allied_observers_of_every_supported_kind ... ok
+test jungle::tests::jungle_respawns_keep_distinct_silhouettes_grounded_feet_and_bounded_resources ... ok
+test mobile_controls::tests::ecs_gates_flush_held_fingers_on_modal_death_focus_rotation_and_round_change ... ok
+test minions::tests::release_poses_require_new_server_sequence_and_recover_without_replaying_history ... ok
+test bosses::tests::both_boss_roles_keep_models_names_hp_and_clean_respawn_ownership ... ok
+test minions::tests::mixed_minions_keep_team_role_silhouettes_scale_and_bounded_wave_resources ... ok
+test net::basic_attack_network_tests::basic_sender_uses_current_identity_and_advances_above_reconnect_acknowledgment ... ok
+test net::basic_attack_network_tests::replicated_basic_timing_defaults_safely_and_is_separate_from_q_action ... ok
+test net::connection_ui_tests::admission_hides_status_and_disconnection_exposes_working_retry_without_empty_layout ... ok
+test net::connection_ui_tests::old_framed_server_reports_protocol_mismatch_and_stops_automatic_reconnect ... ok
+test net::tests::admission_rejection_exhaustion_and_snapshot_order_are_actionable ... ok
+test net::tests::admitted_snapshot_and_world_fallback_keep_one_local_root_in_the_same_frame ... ok
+test net::tests::choose_authoritative_local_player_falls_back_to_first_candidate ... ok
+test net::tests::choose_authoritative_local_player_prefers_matching_network_id ... ok
+test net::tests::choose_authoritative_local_player_returns_none_when_empty ... ok
+test net::tests::configured_structure_identity_reconciles_add_move_hp_profile_and_remove ... ok
+test net::tests::first_join_datagram_loss_retries_until_authoritative_admission ... ok
+test net::tests::incompatible_map_geometry_never_applies_and_legacy_default_still_works ... ok
+test net::tests::loopback_receives_8191_8192_8193_and_malformed_between_good_datagrams ... ok
+test net::tests::near_ipv4_limit_decodes_without_prefix_truncation ... ok
+test net::tests::old_8_kib_boundary_decodes_complete_trailing_entities ... ok
+test net::tests::outbound_payload_guard_uses_ipv4_udp_ceiling ... ok
+test net::tests::platform_near_limit_loopback_behavior_is_explicit ... ok
+test net::tests::production_datagram_forwarding_stages_complete_large_snapshots_only ... ok
+test net::tests::reconnect_gate_requires_disconnected_active_and_cooldown ... ok
+test net::tests::representative_populated_snapshot_larger_than_8_kib_decodes_completely ... ok
+test net::tests::teardown_reasons_render_distinct_messages ... ok
+test net::tests::teardown_shows_select_only_without_committed_join ... ok
+test net::udp_connection_tests::candidate_failures_preserve_last_error_and_iteration_is_bounded ... ok
+test net::udp_connection_tests::empty_and_failed_resolution_surface_as_errors_without_retrying_dns ... ok
+test net::udp_connection_tests::ipv4_loopback_uses_ipv4_socket_and_round_trips ... ok
+test net::udp_connection_tests::ipv6_loopback_uses_ipv6_socket_and_round_trips ... ok
+test net::udp_connection_tests::resolves_once_and_tries_next_candidate_after_invalid_port ... ok
+test pause_menu::tests::escape_dismisses_help_before_opening_menu ... ok
+test pause_menu::tests::exit_button_emits_clean_application_exit ... ok
+test pause_menu::tests::mobile_exit_requires_release_and_focus_loss_cancels_the_pending_tap ... ok
+test pause_menu::tests::pause_tap_cancels_a_scroll_even_after_returning_to_the_button ... ok
+test pause_menu::tests::resume_button_keeps_authoritative_player_and_loadout_intact ... ok
+test persistence::tests::clamp_lighting_respects_bounds ... ok
+test persistence::tests::clamp_model_respects_bounds ... ok
+test persistence::tests::migrate_model_target_height_resets_only_legacy_defaults ... ok
+test persistence::tests::schema_three_migrates_only_its_default_and_preserves_custom_sizes ... ok
+test persistence::tests::server_entry_accepts_lan_and_ipv6_but_rejects_urls_and_zero_port ... ok
+test persistence::tests::unversioned_preferences_migrate_and_current_serialization_keeps_custom_size ... ok
+test persistence::tests::validate_accepts_host_port ... ok
+test persistence::tests::validate_accepts_socket_addr ... ok
+test persistence::tests::validate_client_session_id_accepts_safe_tokens ... ok
+test persistence::tests::validate_client_session_id_rejects_empty_spaces_and_long_values ... ok
+test persistence::tests::validate_rejects_empty_and_garbage ... ok
+test platform::tests::blank_override_uses_private_storage_and_missing_storage_stays_unavailable ... ok
+test platform::tests::preferences_override_and_private_storage_are_separate_from_assets ... ok
+test platform::ui_profile::tests::compiled_platform_wins_and_preview_is_development_only ... ok
+test player::animation_tests::absent_action_clip_falls_back_and_round_zero_rearms_sequences ... ok
+test player::animation_tests::combat_animation_transitions_deduplicate_restart_and_hold_death ... ok
+test player::animation_tests::local_and_remote_scene_players_play_one_shots_once_and_respawn ... ok
+test player::animation_tests::new_round_action_rearms_even_when_initial_zero_snapshot_was_lost ... ok
+test player::animation_tests::unavailable_death_uses_a_paused_safe_pose ... ok
+test navigation::tests::wall_of_discs_and_fully_covered_map_return_no_route ... ok
+test navigation::tests::overlapped_start_escapes_outward_before_detouring ... ok
+test navigation::tests::obstacle_near_boundary_takes_the_open_side ... ok
+test navigation::tests::overlapping_discs_and_boundary_cannot_receive_an_unsafe_destination ... ok
+test player::tests::mobile_joystick_uses_screen_axes_and_retains_analog_speed ... ok
+test player::tests::a_destroyed_structure_replans_the_current_order_without_another_click ... ok
+test player::tests::player_grounding_preserves_sprite_corners_and_tracks_verdant_walktops ... ok
+test navigation::tests::blocked_destination_projects_to_near_reachable_boundary ... ok
+test navigation::tests::direct_route_preserves_height_clamps_destination_and_completes ... ok
+test navigation::tests::invalid_inputs_and_excessive_obstacle_count_fail_closed ... ok
+test player::tests::target_minimap_and_ui_presses_never_leak_ground_movement ... ok
+test player::tests::modal_ground_press_never_creates_movement_intent ... ok
+test presentation2d::tests::actor_scales_preserve_readability_at_gameplay_zoom ... ok
+test player::tests::admission_and_disconnect_gate_real_input_context_and_discard_stale_route ... ok
+test player::tests::right_minimap_order_cancels_pending_cast_and_replaces_route_without_camera_ray ... ok
+test navigation::tests::tower_and_base_routes_clear_every_segment ... ok
+test presentation2d::tests::lane_classification_uses_team_specific_authoritative_samples ... ok
+test navigation::tests::multiple_obstacles_are_deterministic_and_traversable_without_oscillation ... ok
+test presentation2d::tests::manifest_has_complete_actor_and_vfx_coverage ... ok
+test player::tests::removed_intent_and_death_discard_cached_route ... ok
+test presentation2d::tests::hp_changes_alone_do_not_create_inferred_hit_or_heal_effects ... ok
+test presentation2d::tests::cues_encode_team_shape_and_all_three_tower_lanes ... ok
+test presentation2d::tests::actor_proxy_attachment_is_idempotent_and_owner_cleanup_is_bounded ... ok
+test presentation2d::tests::minion_authoritative_state_and_movement_update_frame_facing_and_position ... ok
+test presentation2d::tests::configured_sprite_uses_cached_atlas_animates_and_falls_back_for_missing_or_wrong_image ... ok
+test player::tests::forest_rmb_route_survives_release_and_reaches_the_other_side ... ok
+test presentation2d::tests::team_and_state_keys_are_shape_distinct ... ok
+test presentation2d::tests::vfx_overflow_evicts_oldest_at_the_hard_cap ... ok
+test presentation3d::tests::allegiance_is_relative_and_local_does_not_depend_on_avatar_or_color ... ok
+test presentation2d::tests::map_structure_sprite_profile_rebinds_after_config_load_and_keeps_one_owned_proxy ... ok
+test presentation3d::tests::effect_storage_is_capped_even_during_a_large_burst ... ok
+test presentation3d::tests::replicated_combat_feedback_is_deduplicated_and_death_respawn_is_bounded ... ok
+test presentation2d::tests::minion_badges_use_team_color_and_different_shapes ... ok
+test presentation3d::tests::round_change_clears_old_effects_without_waiting_for_sequence_zero ... ok
+test projectile_visuals::tests::homing_direction_and_invalid_inputs_produce_finite_forward_orientation ... ok
+test projectile_visuals::tests::trail_is_bounded_expires_and_does_not_bridge_teleports ... ok
+test session_config::tests::is_stale_none_is_stale ... ok
+test presentation2d::tests::models3d_startup_does_not_request_optional_2d_presentation_assets ... ok
+test session_config::tests::is_stale_old_is_stale ... ok
+test session_config::tests::is_stale_recent_not_stale ... ok
+test presentation2d::tests::models3d_does_not_attach_2d_actor_proxies_or_cues ... ok
+test session_config::tests::task_14_timing_constants_match_frozen_spec ... ok
+test shop::tests::browse_reasons_prioritize_life_ownership_base_and_price ... ok
+test presentation2d::tests::minion_role_cues_are_distinct_release_from_sequence_and_clean_up_with_owner ... ok
+test presentation2d::tests::procedural_projectile_classes_have_distinct_sprites_and_bounded_owner_cleanup ... ok
+test presentation3d::tests::observers_are_removed_with_despawned_actors_and_sprite_mode_clears_state ... ok
+test shop::tests::lobby_shop_retries_and_help_overtake_does_not_purchase ... ok
+test shop::tests::production_shop_bootstraps_distinct_close_label_and_footer ... ok
+test sprite::tests::combat_priority_one_shots_death_hold_and_respawn_are_deterministic ... ok
+test shop::tests::reused_round_after_server_restart_cancels_pending_and_hidden_help_does_not_block_lobby_shop ... ok
+test sprite::tests::every_stable_identity_resolves_to_a_complete_shipped_render_set ... ok
+test shop::tests::equipment_resizes_in_logical_pixels_and_keeps_three_slots_per_row ... ok
+test sprite::tests::idle_and_run_frames_wrap_and_large_delta_advances ... ok
+test sprite::tests::long_nameplates_shrink_below_the_normal_cap ... ok
+test sprite::tests::missing_action_animation_falls_back_without_panicking ... ok
+test shop::tests::shop_open_stops_path_blocks_actions_and_escape_does_not_open_pause ... ok
+test sprite::tests::missing_action_sheet_render_assets_fall_back_without_panicking ... ok
+test shop::tests::purchase_retries_same_round_and_id_and_waits_for_authoritative_receipt ... ok
+test sprite::tests::movement_grace_returns_to_idle ... ok
+test sprite::tests::multiple_entities_keep_independent_animation_state ... ok
+test sprite::tests::one_shot_plays_once_and_long_delta_resumes_locomotion ... ok
+test sprite::tests::roster_nameplates_are_proportionate_to_each_hero ... ok
+test sprite::tests::portrait_layout_and_indices_follow_the_embedded_roster ... ok
+test projectile_visuals::tests::spawn_despawn_reuses_meshes_and_materials_and_cleans_children ... ok
+test sprite::tests::visual_mode_is_default_safe ... ok
+test player::tests::right_minimap_order_obeys_modal_flight_running_death_and_both_alt_keys ... ok
+test sprite::tests::animation_system_changes_mesh_for_position_and_time_deltas ... ok
+test player::tests::persistent_route_reaches_destination_around_tower_at_normal_speed_after_release ... ok
+test sprite::tests::draft_identity_uses_shipped_animation_metadata_without_rebuilding_on_snapshots ... ok
+test sprite::tests::models3d_mode_does_not_attach_sprite_visuals ... ok
+test sprite::tests::sprite_mode_attaches_all_new_remote_visuals_once ... ok
+test sprite::tests::models3d_startup_does_not_request_optional_sprite_sheets ... ok
+test sprite::tests::sprite_visual_is_independent_xy_proxy ... ok
+test targeting::tests::attack_order_replaces_an_old_ground_route_even_when_already_in_range ... ok
+test targeting::tests::reticle_growth_selects_distance_and_rejects_behind_or_empty_direction ... ok
+test targeting::tests::acknowledged_equipment_speed_changes_follow_actual_deadline_and_old_ids_cannot_rewind ... ok
+test targeting::tests::desktop_chase_tracks_a_moving_target_without_attacking_early ... ok
+test team::tests::shipped_sprite_buttons_select_their_ids_and_drafts_do_not_replace_selection ... ok
+test team::tests::smaller_rosters_do_not_reserve_empty_columns ... ok
+test team::tests::ten_sprite_buttons_use_a_bounded_two_row_grid ... ok
+test targeting::tests::movement_cancel_preserves_new_route_and_modal_or_focus_clears_attack ... ok
+test targeting::tests::snapshots_before_prediction_do_not_erase_it_but_acknowledgment_replaces_it ... ok
+test team::tests::model_join_ui_excludes_inactive_layout_and_scrolls_all_shipped_choices ... ok
+test targeting::tests::rejected_strike_acknowledgment_removes_phantom_cooldown_without_restarting_cancelled_order ... ok
+test ui_theme::tests::latin_cyrillic_keep_inter_and_cjk_names_use_the_packaged_fallback ... ok
+test verdant3d::tests::structure_offsets_cancel_authoritative_box_centers_and_open_spawn_approach ... ok
+test visual_qa::tests::cameras_match_art_axis_conversion_and_capture_set_is_finite ... ok
+test visual_qa::tests::capture_queries_keep_neutral_transforms_disjoint_from_camera_mutation ... ok
+test verdant3d::tests::damage_death_and_rematch_preserve_hp_ownership_without_scene_accumulation ... ok
+test visual_qa::tests::output_is_strictly_opt_in_and_time_budget_is_bounded ... ok
+test visual_qa::tests::screenshot_waits_for_authoritative_structures_scene_instances_assets_and_actor ... ok
+test world2d::tests::deterministic_world_covers_required_topology ... ok
+test targeting::tests::drag_release_never_substitutes_a_new_enemy_for_the_preview ... ok
+test world2d::tests::manifest_matches_authoritative_layout_and_budget ... ok
+test world2d::tests::projection_round_trips_map_corners_and_negative_points ... ok
+test world2d::tests::sorting_is_stable_and_layered ... ok
+test verdant3d::tests::reused_owner_kind_or_team_replaces_authored_visual_and_all_cached_descendants ... ok
+test verdant3d::tests::sprite2d_never_loads_or_spawns_the_verdant_scene ... ok
+test world::tests::models3d_scene_bootstraps_offline_with_primitive_legacy_fallbacks ... ok
+test world2d::tests::nonblocking_anchor_overrides_use_xz_projection_and_restore_authored_transform ... ok
+test presentation2d::tests::six_towers_two_bases_and_initial_wave_stay_one_to_one_and_bounded ... ok
+test verdant3d::tests::repeated_snapshots_keep_one_environment_and_eight_shared_structure_children ... ok
+test world2d::tests::real_prop_binding_swaps_atlas_frames_and_restores_without_respawning ... ok
+test world::tests::models3d_startup_is_mutually_exclusive ... ok
+test world::tests::removed_avatar_request_falls_back_without_loading_the_disputed_model ... ok
+test world::tests::sprite2d_startup_has_exactly_one_orthographic_camera_and_no_3d_scene ... ok
+test targeting::tests::chase_is_desktop_only_and_invalid_targets_never_emit ... ok
+test targeting::tests::held_phone_button_repeats_basic_without_touching_q_cooldown ... ok
+test minimap::tests::minimap_schedule_works_with_bevys_camera_layout_transform_order ... ok
+test map_visuals::tests::actual_loaded_prop_a_b_a_has_no_stale_descendants_and_bounded_cache ... ok
+test targeting::tests::repeat_uses_independent_class_equipment_deadlines_without_mana_or_skill ... ok
+test map_visuals::tests::shipped_glb_wrappers_import_all_real_props_and_keep_ground_unbound ... ok
+test navigation::tests::real_map_base_detours_stay_short_on_both_sides_and_after_translation ... ok
+
+test result: ok. 301 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.20s
+
+     Running unittests src/main.rs (.agent/tasks/MATCH-PROGRESSION-2026-09-14/target/debug/deps/client-27e18c3872c75481)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (.agent/tasks/MATCH-PROGRESSION-2026-09-14/target/debug/deps/harness-e0ec831f6ab06c64)
+
+running 22 tests
+test bot_ai::tests::alternating_release_admissions_get_equivalent_team_classes ... ok
+test bot_ai::tests::resync_after_respawn_picks_nearest_forward_waypoint ... ok
+test bot_ai::tests::lanes_start_at_own_base_and_end_at_enemy_base ... ok
+test bot_ai::tests::bot_retreats_without_two_frontline_minions_and_when_low_health ... ok
+test bot_ai::tests::pursuing_units_cannot_cross_an_unsupported_tower_circle ... ok
+test bot_ai::tests::holds_at_enemy_base ... ok
+test bot_ai::tests::prefers_units_over_structures ... ok
+test bot_ai::tests::follows_waypoints_and_advances_on_reach ... ok
+test bot_ai::tests::approaches_unit_in_aggro_and_casts_in_range ... ok
+test bot_ai::tests::protected_base_is_not_selected_even_with_minion_support ... ok
+test bot_ai::tests::sieges_tower_when_no_units_around ... ok
+test bot_ai::tests::step_toward_respects_speed_budget_and_faces_movement ... ok
+test bot_ai::tests::healthy_group_crosses_base_caution_and_casts_but_falls_back_after_losses ... ok
+test bot_ai::tests::cleric_uses_unlocked_mana_restore_at_zero_mana ... ok
+test bot_ai::tests::self_sustain_requires_need_unlock_mana_and_shared_cooldown ... ok
+test bot_ai::tests::upgrades_respect_authoritative_points_unlocks_and_caps ... ok
+test bot_ai::tests::offense_uses_unlocked_burst_without_out_of_range_or_cooldown_spam ... ok
+test bot_ai::tests::shop_respects_authoritative_eligibility_budget_and_class_order ... ok
+test bot_ai::tests::world_view_filters_enemies_and_dead_entities ... ok
+test bot_ai::tests::midgame_rally_uses_an_open_lane_then_the_weakest_tower ... ok
+test navigation::tests::bot_detours_through_real_forest_at_normal_speed_and_recovers_after_reset ... ok
+test navigation::tests::spawn_and_respawn_leave_the_solid_friendly_base_on_every_lane ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.35s
+
+     Running unittests src/bin/bots.rs (.agent/tasks/MATCH-PROGRESSION-2026-09-14/target/debug/deps/bots-65a5e53eebb69b84)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/bot_ai_live.rs (.agent/tasks/MATCH-PROGRESSION-2026-09-14/target/debug/deps/bot_ai_live-a96edb6881b9432a)
+
+running 1 test
+test brain_driven_bot_pushes_its_lane_on_a_live_server has been running for over 60 seconds
+test brain_driven_bot_pushes_its_lane_on_a_live_server ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 60.18s
+
+     Running tests/combat_actions.rs (.agent/tasks/MATCH-PROGRESSION-2026-09-14/target/debug/deps/combat_actions-e153005df6d3fe06)
+
+running 2 tests
+test legacy_and_unknown_action_fields_decode_safely ... ok
+test two_clients_observe_sequential_accepted_casts_once_and_defaults_are_inert ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.60s
+
+     Running tests/combat_feedback.rs (.agent/tasks/MATCH-PROGRESSION-2026-09-14/target/debug/deps/combat_feedback-93a31325f7eb9243)
+
+running 3 tests
+test legacy_snapshots_have_inert_combat_defaults ... ok
+test every_class_sends_styled_flight_then_one_confirmed_receipt_and_no_immune_hit ... ok
+test normal_waves_have_two_melee_one_caster_and_caster_damage_arrives_after_release ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 47.33s
+
+     Running tests/framed_snapshots.rs (.agent/tasks/MATCH-PROGRESSION-2026-09-14/target/debug/deps/framed_snapshots-4abf148cf1e66fe7)
+
+running 1 test
+test real_release_5v5_snapshots_fit_framed_datagrams_and_keep_complete_ordered_schema ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.90s
+
+     Running tests/gameplay.rs (.agent/tasks/MATCH-PROGRESSION-2026-09-14/target/debug/deps/gameplay-6cb571130b47fe57)
+
+running 8 tests
+test malformed_class_and_avatar_fall_back_without_crashing_the_server ... ok
+test join_produces_snapshot_with_player ... ok
+test upgrade_skill_without_points_is_noop ... ok
+test speed_boost_widens_movement_clamp ... ok
+test locked_slots_are_rejected_authoritatively ... ok
+test god_mode_keeps_player_alive_under_damage ... ok
+test join_replicates_class_and_avatar_and_applies_distinct_kits ... ok
+test bottom_boss_spawns_on_schedule_with_boss_stats has been running for over 60 seconds
+test bottom_boss_spawns_on_schedule_with_boss_stats ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 61.25s
+
+     Running tests/jungle_camps.rs (.agent/tasks/MATCH-PROGRESSION-2026-09-14/target/debug/deps/jungle_camps-923dd294420bd66d)
+
+running 1 test
+test both_teams_farm_real_camps_and_observe_same_id_respawn_after_forty_seconds ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 56.86s
+
+     Running tests/map_configuration.rs (.agent/tasks/MATCH-PROGRESSION-2026-09-14/target/debug/deps/map_configuration-ba7935c706c96a0b)
+
+running 2 tests
+test default_map_is_eight_exact_authoritative_objects_over_udp ... ok
+test custom_tower_count_position_hp_tiers_and_identity_are_pinned_after_startup ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.34s
+
+     Running tests/matchmaking.rs (.agent/tasks/MATCH-PROGRESSION-2026-09-14/target/debug/deps/matchmaking-f64f362bc7be73bf)
+
+running 1 test
+test release_mode_forms_and_starts_a_full_match ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.90s
+
+     Running tests/release_lifecycle.rs (.agent/tasks/MATCH-PROGRESSION-2026-09-14/target/debug/deps/release_lifecycle-1aaf3c7d5a969adc)
+
+running 1 test
+test launched_release_server_duplicate_reservation_conflict_and_reconnect_preserve_state ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.15s
+
+     Running tests/sprite_cosmetics.rs (.agent/tasks/MATCH-PROGRESSION-2026-09-14/target/debug/deps/sprite_cosmetics-0a3f97130abd1b03)
+
+running 1 test
+test distinct_sprite_ids_round_trip_and_invalid_or_omitted_values_default ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.89s
+
+     Running tests/udp_datagrams.rs (.agent/tasks/MATCH-PROGRESSION-2026-09-14/target/debug/deps/udp_datagrams-93e4f6e29acee820)
+
+running 3 tests
+test host_legacy_datagram_ceiling_is_measured_without_changing_settings ... ok
+test real_server_legacy_json_compatibility_survives_malformed_requests ... ok
+test real_server_framed_populated_snapshot_above_8_kib_survives_malformed_requests ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.91s
+
+     Running unittests src/lib.rs (.agent/tasks/MATCH-PROGRESSION-2026-09-14/target/debug/deps/omoba_passport-a9bf0c1503ce8ed7)
+
+running 7 tests
+test tests::rejects_corrupt_truncated_or_incomplete_approved_model ... ok
+test tests::library_owner_and_exact_support_selectability_are_independent_of_shared_roster ... ok
+test tests::only_explicit_secure_operator_origin_is_allowed ... ok
+test tests::imported_bytes_and_sidecar_retain_identity_and_preserve_original_roster ... ok
+test tests::download_is_bounded_checked_and_never_sends_session_token ... ok
+test tests::poll_uses_secret_body_and_reports_pending_then_approval ... ok
+test tests::denied_expired_replay_and_redirect_responses_never_grant ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running unittests src/bin/passport-import.rs (.agent/tasks/MATCH-PROGRESSION-2026-09-14/target/debug/deps/passport_import-5111b5435c7b3ac6)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (.agent/tasks/MATCH-PROGRESSION-2026-09-14/target/debug/deps/server-e87f92d3b9518ad0)
+
+running 170 tests
+test career_backend::resilience_tests::postgres_worker_rejected_start_discards_already_queued_terminal_without_resurrection ... ignored, requires isolated OMOBA_TEST_DATABASE_URL; real worker rejection tombstone
+test career_backend::resilience_tests::postgres_worker_renews_lease_with_full_reply_buffer_and_retries_critical_acks ... ignored, requires isolated OMOBA_TEST_DATABASE_URL; real worker heartbeat/backpressure
+test balance::tests::lane_tower_and_minion_tuning_is_positive ... ok
+test balance::tests::player_baselines_and_spell_economy_are_coherent ... ok
+test balance::tests::jungle_pacing_constants_are_positive ... ok
+test balance::tests::level_xp_table_matches_level_span ... ok
+test balance::tests::skill_slot_count_matches_shared_kits ... ok
+test balance::tests::boss_tuning_outclasses_camps_and_timings_are_positive ... ok
+test career_backend::tests::postgres_outbox_restart_restores_terminal_and_interrupts_live_checkpoint ... ignored, requires isolated OMOBA_TEST_DATABASE_URL; exercises a real PostgreSQL worker restart
+test career_backend::tests::receipt_paths_cannot_escape_outbox ... ok
+test career_backend::tests::late_duplicate_login_ack_cannot_reset_sequence ... ok
+test career_backend::tests::forged_and_replayed_account_actions_cannot_cancel_queue ... ok
+test career_backend::tests::signatures_bind_domain_nonce_epoch_sequence_and_action ... ok
+test basic_attack::tests::accepted_strike_deals_real_projectile_damage_and_death_retains_replay_guard ... ok
+test basic_attack::tests::equipment_changes_basic_deadline_without_rescaling_elapsed_time ... ok
+test basic_attack::tests::zero_mana_basic_attack_and_q_have_independent_costs_and_clocks ... ok
+test basic_attack::tests::packet_replay_and_wrong_round_cannot_attack_or_poison_fresh_sequence ... ok
+test career_runtime_tests::empty_roster_finalizes_abandoned_before_reset_without_ranked_winner ... ok
+test career_runtime_tests::frozen_result_contains_offline_totals_and_survives_round_reset_until_ack ... ok
+test basic_attack::tests::actual_udp_receiver_accepts_the_basic_wire_contract_once ... ok
+test career_runtime_tests::authenticated_reclaim_requires_profile_and_signed_session_preserving_round_id ... ok
+test career_store::tests::career_store_allocation_rechecks_current_experience_and_rating_after_remote_match ... ignored, requires OMOBA_TEST_DATABASE_URL and real PostgreSQL
+test career_store::tests::career_store_atomic_duplicate_settlement_and_conflicting_intent ... ignored, requires OMOBA_TEST_DATABASE_URL and real PostgreSQL
+test career_store::tests::career_store_bulk_presence_is_atomic_validates_foreign_owner_and_deduplicates ... ignored, requires OMOBA_TEST_DATABASE_URL and real PostgreSQL
+test career_store::tests::career_store_distinct_owners_can_share_legacy_epoch_and_round_metadata ... ignored, requires OMOBA_TEST_DATABASE_URL and real PostgreSQL
+test career_store::tests::career_store_ensure_allocation_replays_missing_start_and_late_unrated_checkpoint ... ignored, requires OMOBA_TEST_DATABASE_URL and real PostgreSQL
+test career_store::tests::career_store_failure_after_first_profile_update_rolls_back_and_recovers_intent ... ignored, requires OMOBA_TEST_DATABASE_URL and real PostgreSQL
+test career_store::tests::career_store_history_keyset_authorization_and_frozen_names ... ignored, requires OMOBA_TEST_DATABASE_URL and real PostgreSQL
+test career_store::tests::career_store_identity_reopen_and_explicit_rename ... ignored, requires OMOBA_TEST_DATABASE_URL and real PostgreSQL
+test career_store::tests::career_store_live_ownership_fencing_active_seats_and_interrupted_recovery ... ignored, requires OMOBA_TEST_DATABASE_URL and real PostgreSQL
+test career_store::tests::career_store_roster_policy_unrated_append_and_invalid_result_rejection ... ignored, requires OMOBA_TEST_DATABASE_URL and real PostgreSQL
+test career_store::tests::career_store_social_reverse_requests_idempotent_actions_and_cross_owner_presence ... ignored, requires OMOBA_TEST_DATABASE_URL and real PostgreSQL
+test basic_attack::tests::target_surface_range_and_base_protection_are_authoritative_for_all_kinds ... ok
+test career_runtime_tests::career_and_world_fragments_with_equal_logical_sequence_do_not_collide ... ok
+test career_runtime_tests::practice_results_are_explicitly_unrated_and_play_again_preserves_result_for_other_player ... ok
+test basic_attack::tests::rejects_unjoined_dead_friendly_missing_and_out_of_range_targets ... ok
+test career_runtime_tests::release_queue_uses_saved_skill_and_experience_and_waits_for_durable_allocation ... ok
+test combat_feedback::tests::ambient_melee_and_tower_sources_are_recorded_at_their_actual_damage_sinks ... ok
+test career_runtime_tests::tuned_default_label_is_unrated_and_running_roster_rejects_new_players ... ok
+test career_runtime_tests::permanent_allocation_conflict_releases_roster_and_requires_signed_retry_gesture ... ok
+test combat_feedback::tests::mixed_waves_are_symmetric_and_caster_uses_range_cooldown_and_real_impact ... ok
+test combat_feedback::tests::receipts_use_actual_damage_and_reject_overkill_repeats_protection_and_immunity ... ok
+test map_config_tests::instance_threat_overrides_drive_actual_range_damage_and_cooldown ... ok
+test map_config_tests::configured_tiers_gate_damage_then_base_and_ignore_empty_lanes ... ok
+test map_config_tests::minions_target_front_tier_even_when_nearer_to_inner_or_base ... ok
+test map_config_tests::pinned_configuration_reconstructs_same_round_objects_and_identity ... ok
+test map_config_tests::packet_transform_respects_configured_live_discs_and_death_removes_blocker ... ok
+test combat_feedback::tests::recent_receipts_are_bounded_repeated_for_loss_and_cleared_on_round_reset ... ok
+test match_stats::tests::accepted_overkill_amount_and_repeated_creep_ids_count_independent_lives ... ok
+test combat_feedback::tests::every_class_keeps_basic_and_skill_travel_with_confirmed_source_style_and_slot ... ok
+test map_config_tests::startup_loader_fails_explicit_invalid_path_and_resolves_example ... ok
+test match_stats::tests::duplicate_receipts_invalid_damage_and_unregistered_sources_never_credit_players ... ok
+test career_runtime_tests::live_udp_full_roster_career_result_exceeds_9kb_and_arrives_in_small_fragments ... ok
+test match_stats::tests::assists_include_exact_ten_seconds_exclude_killer_and_clear_on_victim_death ... ok
+test match_stats::tests::reconnect_preserves_match_identity_and_posthumous_damage_then_freeze_is_final ... ok
+test match_stats::tests::environmental_finisher_grants_recent_hostile_assist_without_a_player_kill ... ok
+test match_stats::tests::roster_budget_and_duplicates_are_atomic_and_guest_seats_are_supported ... ok
+test match_stats::tests::totals_survive_cosmetic_capacity_expiry_and_long_matches ... ok
+test match_stats::tests::unstarted_log_ignores_pre_match_damage_and_participant_career_values_reset ... ok
+test match_stats::tests::typed_nonplayer_sources_cannot_steal_kills_or_last_hits ... ok
+test matchmaking::tests::compatible_count_uses_one_hard_window_not_plus_minus_spread ... ok
+test matchmaking::tests::countdown_dropout_requeues_survivors_with_original_age ... ok
+test matchmaking::tests::invalid_input_never_mutates_queue ... ok
+test matchmaking::tests::newcomer_and_huge_skill_gaps_never_widen_with_wait ... ok
+test matchmaking::tests::later_feasible_cohort_is_not_blocked_by_an_isolated_oldest_player ... ok
+test combat_feedback::tests::cosmetic_history_yields_space_to_gameplay_and_keeps_newest_receipts ... ok
+test matchmaking::tests::oldest_feasible_cohort_compares_all_ages_not_just_adjacent_ratings ... ok
+test matchmaking::tests::rating_boundaries_clamp_independently_and_report_actual_non_zero_sum_deltas ... ok
+test matchmaking::tests::rating_is_team_outcome_only_symmetric_and_rewards_upsets ... ok
+test minion_path_tests::ordered_paths_have_no_corner_reversal_and_remain_team_symmetric ... ok
+test neutrals::tests::aggro_resets_after_target_death_disconnect_leave_or_leash_escape ... ok
+test minion_path_tests::spawn_formation_wave_cadence_and_authored_structure_anchors_are_preserved ... ok
+test matchmaking::tests::exact_equal_team_partition_beats_fill_order_and_matches_exhaustive_optimum ... ok
+test neutrals::tests::each_camp_pays_once_and_respawns_exactly_at_forty_seconds_only_when_running ... ok
+test neutrals::tests::lethal_posthumous_neutral_hit_still_pays_once_and_waits_for_respawn ... ok
+test neutrals::tests::ordinary_last_hit_recovery_is_bounded_once_only_and_never_revives_or_heals_boss_killers ... ok
+test career_runtime_tests::normative_32_player_results_64_full_names_and_history_page_fit_the_transport_budget ... ok
+test neutrals::tests::orphan_chip_damage_resets_uncontested_camps_but_living_nearby_players_keep_aggro ... ok
+test career_runtime_tests::oversized_combined_career_views_alternate_without_losing_rows_and_single_oversize_is_an_error ... ok
+test career_runtime_tests::live_udp_signed_cancellation_and_result_packet_order_use_real_receiver ... ok
+test neutrals::tests::fresh_level_one_heroes_can_clear_three_camps_with_basic_attacks_and_unlocked_skills ... ok
+test neutrals::tests::rematch_restores_all_six_camps_and_discards_old_deaths_and_targets ... ok
+test map_config_tests::melee_march_hits_maximum_lateral_offset_towers_on_both_teams ... ok
+test passport_admission::tests::nonowner_expired_replay_and_wrong_session_fail_closed ... ok
+test passport_admission::tests::owner_is_admitted_only_for_exact_rendition ... ok
+test passport_admission::tests::forged_paid_slug_cannot_bypass_gate_without_registry_entry ... ok
+test release_tests::handler_capacity_counts_reservations_and_expired_claim_is_fresh ... ok
+test release_tests::empty_roster_grace_clears_reservations_and_next_group_gets_clean_match ... ok
+test release_tests::canonical_rematch_resets_every_system_and_reforms_underfilled_release_roster ... ok
+test release_tests::handler_duplicate_and_reclaim_preserve_wounded_and_dead_full_state ... ok
+test release_tests::handler_release_rejects_debug_and_bad_protocol_while_explicit_dev_accepts_debug ... ok
+test release_tests::shared_xp_level_up_preserves_death_until_the_scheduled_respawn ... ok
+test release_tests::siege_blocks_cast_and_damage_until_own_lane_falls_and_resets ... ok
+test release_tests::full_roster_progression_baseline_is_reproducible_and_conserves_rewards ... ok
+test shop::tests::boots_change_authoritative_movement_allowance_and_level_growth_keeps_items ... ok
+test navigation_tests::transform_packets_cannot_tunnel_through_trees_but_a_legal_route_arrives ... ok
+test shop::tests::equipment_changes_authoritative_projectile_damage_and_both_cooldown_groups ... ok
+test shop::tests::passive_income_accumulates_fractions_only_during_running_including_dead_players ... ok
+test neutrals::tests::ordinary_chase_evades_obstacles_without_tunneling_and_boss_chase_is_unchanged ... ok
+test shop::tests::decoded_udp_purchase_is_atomic_and_retries_cannot_double_spend ... ok
+test matchmaking::tests::account_and_player_uniqueness_retries_and_capacity_include_reservations ... ok
+test shop::tests::purchases_survive_death_respawn_reconnect_and_reset_before_next_round ... ok
+test targeting_qa::tests::requires_all_explicit_development_gates_and_walkable_anchors ... ok
+test shop::tests::rejected_request_retries_need_a_new_id_and_reserved_sessions_do_not_earn ... ok
+test shop::tests::shop_boundary_is_own_base_and_dead_and_victory_are_unavailable ... ok
+test terminal_result_tests::first_base_kill_freezes_winner_and_retains_exact_final_blow ... ok
+test terminal_result_tests::projectile_batch_keeps_pre_victory_hit_but_blocks_later_hero_and_jungle_damage ... ok
+test shop::tests::stale_server_epoch_udp_purchase_cannot_spend_or_poison_a_restarted_round ... ok
+test terminal_result_tests::simultaneous_melee_base_kills_use_stable_minion_source_order ... ok
+test tests::active_session_id_cannot_be_stolen_by_another_endpoint ... ok
+test tests::blue_path_is_reverse_of_green ... ok
+test shop::tests::purchase_rejections_never_change_wallet_inventory_or_resources ... ok
+test terminal_result_tests::structure_damage_is_rejected_in_every_non_running_phase ... ok
+test tests::boss_leash_reset_uses_boss_distance_and_restores_full_hp ... ok
+test tests::boss_and_buff_wire_formats_are_snake_case_and_additive ... ok
+test tests::boss_templates_use_boss_constants_and_outclass_camps ... ok
+test tests::boss_kill_grants_team_buff_and_respawns_on_boss_cooldown ... ok
+test tests::boss_pits_are_point_symmetric_and_clear_of_camps ... ok
+test tests::bosses_are_gated_before_spawn_delays_and_spawn_with_full_stats ... ok
+test tests::camp_kills_do_not_grant_team_buffs ... ok
+test tests::cast_drains_mana_respects_cooldown_and_blocks_empty_mana ... ok
+test tests::cast_range_validation_covers_target_types_and_rejects_far_targets ... ok
+test tests::connected_placeholder_can_reclaim_timed_out_session_id ... ok
+test tests::class_kits_apply_distinct_authoritative_numbers ... ok
+test tests::dev_mode_first_join_starts_match_immediately ... ok
+test tests::forming_returns_to_lobby_when_queue_empties ... ok
+test tests::lane_paths_connect_bases ... ok
+test tests::mana_regenerates_and_is_clamped ... ok
+test tests::map_layout_is_symmetric ... ok
+test tests::join_applies_class_and_normalizes_avatar ... ok
+test tests::match_mode_parses_with_release_as_safe_default ... ok
+test tests::minion_prefers_enemy_minion_over_closer_player ... ok
+test tests::movement_authority_clamps_teleports_and_accepts_normal_steps ... ok
+test tests::network_diagnostic_bursts_are_suppressed_and_reported ... ok
+test tests::movement_authority_keeps_players_inside_map_bounds ... ok
+test tests::neutral_camps_spawn_alive_with_distinct_templates ... ok
+test tests::neutral_kills_award_rewards_and_respawn_on_cooldown ... ok
+test tests::neutral_leash_reset_restores_anchor_and_full_hp ... ok
+test tests::neutral_template_matches_balance_constants ... ok
+test tests::opposing_minions_engage_take_damage_die_and_leave_the_next_snapshot_set ... ok
+test tests::pre_join_endpoint_is_hidden_and_inert_until_join ... ok
+test tests::progression_levels_up_and_scales_stats ... ok
+test tests::rank_scaling_boosts_damage_and_upgrades_cap_at_max_rank ... ok
+test tests::release_match_starts_after_full_roster_and_countdown ... ok
+test tests::release_solo_join_forms_but_never_starts ... ok
+test tests::release_match_waits_at_nine_players ... ok
+test tests::release_team_assignment_always_fills_smaller_team ... ok
+test tests::release_teams_form_five_vs_five_and_full_match_rejects_joins ... ok
+test tests::neutrals_do_not_break_minion_waves_or_tower_attacks ... ok
+test tests::self_target_abilities_apply_heal_and_respect_unlock_gates ... ok
+test tests::respawn_restores_scaled_maximums ... ok
+test tests::session_id_reclaims_timed_out_player_from_new_endpoint ... ok
+test tests::stale_disconnected_session_gets_new_player_id ... ok
+test tests::starting_countdown_rolls_back_when_a_player_drops ... ok
+test tests::team_buff_multiplies_cast_damage_for_buffed_team_only ... ok
+test tests::team_buffs_expire_refresh_and_stack_multiplicatively ... ok
+test tests::team_size_parses_and_clamps ... ok
+test tests::reset_match_clears_buffs_and_restarts_boss_schedule ... ok
+test tests::top_buff_regenerates_hp_for_alive_buffed_players_only ... ok
+test tests::udp_payload_guard_accepts_limit_and_rejects_one_byte_over ... ok
+test tests::snapshot_serializer_rejects_whole_over_limit_payload ... ok
+test release_tests::live_udp_victory_rematch_uses_real_cast_receiver_and_framed_snapshots ... ok
+test terminal_result_tests::simultaneous_base_projectiles_resolve_by_creation_id_for_either_team ... ok
+test terminal_result_tests::queued_ecs_damage_is_discarded_after_terminal_and_cannot_leak_into_next_round ... ok
+test combat_feedback::tests::ecs_projectile_minion_receipts_preserve_nonplayer_identity_and_overkill_once ... ok
+test minion_path_tests::every_wave_member_marches_forward_through_departure_and_far_base_approach ... ok
+test matchmaking::tests::maximum_roster_handles_large_absolute_ratings_with_bounded_offsets ... ok
+test map_config_tests::default_and_example_preserve_ids_stats_and_reachable_placement ... ok
+test neutrals::tests::six_camps_have_shared_symmetric_reachable_anchors_and_stable_ids ... ok
+test career_runtime_tests::postgres_live_udp_signed_profiles_queue_real_cast_and_durable_history ... ok
+
+test result: ok. 156 passed; 0 failed; 14 ignored; 0 measured; 0 filtered out; finished in 2.27s
+
+     Running unittests src/lib.rs (.agent/tasks/MATCH-PROGRESSION-2026-09-14/target/debug/deps/shared-f224c5ee023aaa99)
+
+running 43 tests
+test career::tests::nickname_validation_preserves_unicode_and_rejects_controls ... ok
+test navigation::geometry::tests::swept_segments_cannot_tunnel_through_a_polygon_or_disc ... ok
+test navigation::geometry::tests::overlap_can_recover_only_outward_and_can_take_small_steps ... ok
+test career::tests::auth_message_is_domain_bound_and_injective_for_separators ... ok
+test combat::tests::absent_fields_and_unknown_future_enums_are_inert ... ok
+test career::tests::query_ids_round_trip_and_legacy_fields_default ... ok
+test navigation::tests::open_orders_clamp_bounds_preserve_arrival_and_reject_invalid_data ... ok
+test navigation::tests::authoritative_sweep_stops_large_steps_and_allows_only_outward_overlap_recovery ... ok
+test protocol::tests::incompatible_or_unidentified_data_is_not_applied ... ok
+test protocol::tests::late_duplicates_and_previous_rounds_cannot_roll_state_back ... ok
+test shop::tests::basic_attack_uses_damage_and_attack_speed_without_skill_haste_or_ranks ... ok
+test shop::tests::bonuses_do_not_stack_duplicates_and_cooldown_rates_have_distinct_slots ... ok
+test shop::tests::catalog_recommendations_and_starter_budget_are_coherent ... ok
+test tests::approved_release_roster_retains_fifteen_heroes_and_removed_selections_fall_back ... ok
+test tests::avatar_roster_is_committed_and_licensed ... ok
+test tests::avatar_slug_normalization_rejects_unknown_values ... ok
+test tests::boss_slugs_are_not_player_selectable ... ok
+test tests::draft_sprite_preserves_identity_and_only_renders_a_complete_one_hop_target ... ok
+test tests::every_class_resolves_a_full_distinct_kit ... ok
+test tests::every_new_sprite_has_the_frozen_six_state_contract ... ok
+test tests::hero_class_wire_format_is_snake_case_with_fallback ... ok
+test tests::kits_differ_between_classes_per_slot ... ok
+test tests::player_action_kind_unknown_wire_value_is_inert ... ok
+test tests::rank_scaling_applies_to_class_abilities ... ok
+test tests::sprite_manifest_matches_frozen_registry_and_safe_fallback ... ok
+test tests::unlock_slots_follow_level_gates ... ok
+test transport::tests::dropped_fragments_expire_and_unfinished_work_is_bounded ... ok
+test transport::tests::large_snapshots_survive_reordering_and_duplicates_without_partial_output ... ok
+test transport::tests::malformed_conflicting_and_oversized_frames_are_rejected ... ok
+test transport::tests::old_protocol_frame_is_rejected_before_allocating_or_publishing_payload ... ok
+test navigation::tests::occupied_endpoints_project_to_reachable_boundary_and_clear_unreachable_targets_fail ... ok
+test navigation::tests::configured_object_footprints_respect_obstacles_edges_and_finite_radius ... ok
+test navigation::tests::diagonal_contact_cannot_cut_the_shared_obstacle_corner ... ok
+test navigation::tests::forest_gap_uses_hero_clearance_and_detours_when_the_gap_is_too_small ... ok
+test navigation::tests::translation_and_structure_query_order_preserve_deterministic_routes ... ok
+test navigation::tests::concave_arrangement_routes_out_of_the_open_side_before_reaching_the_back ... ok
+test map::tests::defaults_preserve_authored_anchors_and_canonical_collision_bounds ... ok
+test map::tests::siege_tiers_follow_lane_progress_independent_of_id_and_json_order ... ok
+test map::tests::offsets_cannot_reverse_physical_siege_order_but_perpendicular_adjustments_work ... ok
+test map::tests::decorative_dead_end_spurs_are_rejected_without_shifting_supported_placements ... ok
+test map::tests::invalid_identity_numeric_placement_profiles_and_overlap_fail_closed ... ok
+test navigation::tests::current_world_cache_keeps_lane_access_and_routes_around_a_shipped_trunk ... ok
+test jungle::tests::mirrored_camps_have_equal_types_and_reachable_clear_fighting_space ... ok
+
+test result: ok. 43 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.76s
+
+     Running unittests src/lib.rs (.agent/tasks/MATCH-PROGRESSION-2026-09-14/target/debug/deps/skills-a9be06fe9bbf52a1)
+
+running 5 tests
+test tests::next_rank_primary_matches_incremented_rank_vector ... ok
+test tests::slot0_scales_with_rank ... ok
+test tests::next_rank_preview_is_some_until_max ... ok
+test tests::tooltip_current_line_matches_slot0_damage_text ... ok
+test tests::upgrade_only_when_points_and_below_cap ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests client
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests harness
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests omoba_passport
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests shared
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests skills
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

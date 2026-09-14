@@ -85,3 +85,13 @@ The runtime step preserves the source and is reproducible with
 Retained imported models include Quaternius Universal Animation Library clips,
 credited as CC0 in `assets-src/animations/README.md`, which records source links,
 clip names and retargeting. The native package includes that attribution record.
+
+## CJK interface font — 0.19.0-rc.6
+
+`client/assets/ui/NotoSansCJKsc-Regular.otf` is the unmodified Noto Sans CJK SC
+Regular font from the official Sans2.004 release, © 2014–2021 Adobe. It is
+distributed under the SIL Open Font License 1.1. The complete license is in
+`client/assets/ui/NotoSansCJK-OFL.txt`; version, official source links and the
+SHA-256 are recorded in `client/assets/ui/NotoSansCJK-SOURCE.md`. Preserve both
+notices when packaging the font. This covers CJK player names alongside the
+existing Inter font for Latin and Cyrillic interface text.

@@ -658,7 +658,10 @@ fn live_udp_victory_rematch_uses_real_cast_receiver_and_framed_snapshots() {
         meta: first_meta,
         game_state,
         ..
-    } = udp_snapshot(&mut rt, &first, &mut assembler);
+    } = udp_snapshot(&mut rt, &first, &mut assembler)
+    else {
+        panic!("expected snapshot")
+    };
     assert_eq!(
         game_state,
         GameState::Victory {
@@ -672,7 +675,10 @@ fn live_udp_victory_rematch_uses_real_cast_receiver_and_framed_snapshots() {
         meta: second_meta,
         game_state,
         ..
-    } = udp_snapshot(&mut rt, &first, &mut assembler);
+    } = udp_snapshot(&mut rt, &first, &mut assembler)
+    else {
+        panic!("expected snapshot")
+    };
     assert_eq!(second_meta.server_epoch, first_meta.server_epoch);
     assert_eq!(second_meta.match_id, first_meta.match_id + 1);
     assert!(second_meta.snapshot_tick > first_meta.snapshot_tick);

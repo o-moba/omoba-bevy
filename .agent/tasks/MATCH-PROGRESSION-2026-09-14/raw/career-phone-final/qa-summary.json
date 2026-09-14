@@ -1,0 +1,3865 @@
+{
+  "captures": [
+    {
+      "file": "01-profile.png",
+      "fixture": true,
+      "frame": 32,
+      "header_buttons_do_not_overlap": true,
+      "header_buttons_fit": true,
+      "logical_dimensions": [
+        844.0,
+        390.0
+      ],
+      "mobile": true,
+      "modal": "Profile",
+      "nodes": [
+        {
+          "min": [
+            0.0,
+            0.0
+          ],
+          "name": "CareerMobileRoot",
+          "size": [
+            844.0,
+            390.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            119.0,
+            27.0
+          ],
+          "name": "CareerHistoryTab",
+          "size": [
+            69.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            27.0
+          ],
+          "name": "CareerProfileTab",
+          "size": [
+            64.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            379.0,
+            27.0
+          ],
+          "name": "CareerClose",
+          "size": [
+            59.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            275.0,
+            27.0
+          ],
+          "name": "CareerLastResultButton",
+          "size": [
+            96.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            196.0,
+            27.0
+          ],
+          "name": "CareerFriendsTab",
+          "size": [
+            71.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            38.0,
+            18.0
+          ],
+          "name": "CareerPanel",
+          "size": [
+            768.0,
+            346.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            284.0,
+            40.0
+          ],
+          "name": "CareerLastResultButtonLabel",
+          "size": [
+            78.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            205.0,
+            40.0
+          ],
+          "name": "CareerFriendsTabLabel",
+          "size": [
+            53.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            128.0,
+            40.0
+          ],
+          "name": "CareerHistoryTabLabel",
+          "size": [
+            51.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            56.0,
+            40.0
+          ],
+          "name": "CareerProfileTabLabel",
+          "size": [
+            46.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            388.0,
+            40.0
+          ],
+          "name": "CareerCloseLabel",
+          "size": [
+            41.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            79.0
+          ],
+          "name": "CareerBody",
+          "size": [
+            750.0,
+            276.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            344.0
+          ],
+          "name": "CareerNicknameField",
+          "size": [
+            750.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            396.0
+          ],
+          "name": "CareerSaveNickname",
+          "size": [
+            750.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            79.0
+          ],
+          "name": "CareerProfileTitle",
+          "size": [
+            750.0,
+            32.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            119.0
+          ],
+          "name": "CareerFriendCodePrompt",
+          "size": [
+            750.0,
+            16.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            143.0
+          ],
+          "name": "CareerFriendCode",
+          "size": [
+            750.0,
+            72.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            223.0
+          ],
+          "name": "CareerProfileProgress",
+          "size": [
+            750.0,
+            62.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            293.0
+          ],
+          "name": "CareerNewcomer",
+          "size": [
+            750.0,
+            17.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            318.0
+          ],
+          "name": "CareerNicknamePrompt",
+          "size": [
+            750.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            376.0,
+            357.0
+          ],
+          "name": "CareerNicknameFieldLabel",
+          "size": [
+            93.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            383.0,
+            409.0
+          ],
+          "name": "CareerSaveNicknameLabel",
+          "size": [
+            79.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            448.0
+          ],
+          "name": "CareerRatingExplanation",
+          "size": [
+            750.0,
+            17.0
+          ],
+          "visible": true
+        }
+      ],
+      "pixels": [
+        844.0,
+        390.0
+      ],
+      "primary_roots_fit": true,
+      "scroll_y": 0.0,
+      "ui_profile": "Mobile"
+    },
+    {
+      "file": "02-friends-code.png",
+      "fixture": true,
+      "frame": 32,
+      "header_buttons_do_not_overlap": true,
+      "header_buttons_fit": true,
+      "logical_dimensions": [
+        844.0,
+        390.0
+      ],
+      "mobile": true,
+      "modal": "Friends",
+      "nodes": [
+        {
+          "min": [
+            0.0,
+            0.0
+          ],
+          "name": "CareerMobileRoot",
+          "size": [
+            844.0,
+            390.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            196.0,
+            27.0
+          ],
+          "name": "CareerFriendsTab",
+          "size": [
+            71.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            119.0,
+            27.0
+          ],
+          "name": "CareerHistoryTab",
+          "size": [
+            69.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            27.0
+          ],
+          "name": "CareerProfileTab",
+          "size": [
+            64.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            379.0,
+            27.0
+          ],
+          "name": "CareerClose",
+          "size": [
+            59.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            275.0,
+            27.0
+          ],
+          "name": "CareerLastResultButton",
+          "size": [
+            96.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            38.0,
+            18.0
+          ],
+          "name": "CareerPanel",
+          "size": [
+            768.0,
+            346.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            284.0,
+            40.0
+          ],
+          "name": "CareerLastResultButtonLabel",
+          "size": [
+            78.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            205.0,
+            40.0
+          ],
+          "name": "CareerFriendsTabLabel",
+          "size": [
+            53.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            128.0,
+            40.0
+          ],
+          "name": "CareerHistoryTabLabel",
+          "size": [
+            51.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            56.0,
+            40.0
+          ],
+          "name": "CareerProfileTabLabel",
+          "size": [
+            46.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            388.0,
+            40.0
+          ],
+          "name": "CareerCloseLabel",
+          "size": [
+            41.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            79.0
+          ],
+          "name": "CareerBody",
+          "size": [
+            750.0,
+            276.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            408.0
+          ],
+          "name": "CareerFriend-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": [
+            750.0,
+            115.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            561.0
+          ],
+          "name": "CareerFriend-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "size": [
+            750.0,
+            115.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            684.0
+          ],
+          "name": "CareerFriend-dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size": [
+            750.0,
+            115.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            837.0
+          ],
+          "name": "CareerFriend-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "size": [
+            750.0,
+            115.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            274.0
+          ],
+          "name": "CareerFriendCodeField",
+          "size": [
+            750.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            326.0
+          ],
+          "name": "CareerSendFriendRequest",
+          "size": [
+            113.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            168.0,
+            326.0
+          ],
+          "name": "CareerLookupProfile",
+          "size": [
+            103.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            279.0,
+            326.0
+          ],
+          "name": "CareerFriendsRefresh",
+          "size": [
+            73.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            471.0
+          ],
+          "name": "CareerFriendProfile",
+          "size": [
+            64.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            127.0,
+            471.0
+          ],
+          "name": "CareerFriendAccept",
+          "size": [
+            69.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            204.0,
+            471.0
+          ],
+          "name": "CareerFriendReject",
+          "size": [
+            72.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            624.0
+          ],
+          "name": "CareerFriendProfile",
+          "size": [
+            64.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            127.0,
+            624.0
+          ],
+          "name": "CareerFriendRemove",
+          "size": [
+            75.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            747.0
+          ],
+          "name": "CareerFriendProfile",
+          "size": [
+            64.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            127.0,
+            747.0
+          ],
+          "name": "CareerFriendRemove",
+          "size": [
+            75.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            900.0
+          ],
+          "name": "CareerFriendProfile",
+          "size": [
+            64.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            127.0,
+            900.0
+          ],
+          "name": "CareerFriendCancel",
+          "size": [
+            126.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            79.0
+          ],
+          "name": "CareerFriendsTitle",
+          "size": [
+            750.0,
+            32.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            119.0
+          ],
+          "name": "CareerFriendsScope",
+          "size": [
+            750.0,
+            17.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            144.0
+          ],
+          "name": "CareerFriendCodePrompt",
+          "size": [
+            750.0,
+            16.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            168.0
+          ],
+          "name": "CareerFriendCode",
+          "size": [
+            750.0,
+            72.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            248.0
+          ],
+          "name": "CareerFriendInputPrompt",
+          "size": [
+            750.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            361.0,
+            287.0
+          ],
+          "name": "CareerFriendCodeFieldLabel",
+          "size": [
+            123.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            56.0,
+            339.0
+          ],
+          "name": "CareerSendFriendRequestLabel",
+          "size": [
+            95.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            177.0,
+            339.0
+          ],
+          "name": "CareerLookupProfileLabel",
+          "size": [
+            85.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            288.0,
+            339.0
+          ],
+          "name": "CareerFriendsRefreshLabel",
+          "size": [
+            55.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            378.0
+          ],
+          "name": "CareerIncomingTitle",
+          "size": [
+            750.0,
+            22.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            416.0
+          ],
+          "name": "CareerFriendNickname",
+          "size": [
+            734.0,
+            22.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            446.0
+          ],
+          "name": "CareerFriendPresence",
+          "size": [
+            734.0,
+            17.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            64.0,
+            484.0
+          ],
+          "name": "CareerFriendProfileLabel",
+          "size": [
+            46.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            136.0,
+            484.0
+          ],
+          "name": "CareerFriendAcceptLabel",
+          "size": [
+            51.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            213.0,
+            484.0
+          ],
+          "name": "CareerFriendRejectLabel",
+          "size": [
+            54.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            531.0
+          ],
+          "name": "CareerFriendsListTitle",
+          "size": [
+            750.0,
+            22.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            569.0
+          ],
+          "name": "CareerFriendNickname",
+          "size": [
+            734.0,
+            22.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            599.0
+          ],
+          "name": "CareerFriendPresence",
+          "size": [
+            734.0,
+            17.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            64.0,
+            637.0
+          ],
+          "name": "CareerFriendProfileLabel",
+          "size": [
+            46.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            136.0,
+            637.0
+          ],
+          "name": "CareerFriendRemoveLabel",
+          "size": [
+            57.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            692.0
+          ],
+          "name": "CareerFriendNickname",
+          "size": [
+            734.0,
+            22.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            722.0
+          ],
+          "name": "CareerFriendPresence",
+          "size": [
+            734.0,
+            17.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            64.0,
+            760.0
+          ],
+          "name": "CareerFriendProfileLabel",
+          "size": [
+            46.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            136.0,
+            760.0
+          ],
+          "name": "CareerFriendRemoveLabel",
+          "size": [
+            57.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            807.0
+          ],
+          "name": "CareerOutgoingTitle",
+          "size": [
+            750.0,
+            22.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            845.0
+          ],
+          "name": "CareerFriendNickname",
+          "size": [
+            734.0,
+            22.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            875.0
+          ],
+          "name": "CareerFriendPresence",
+          "size": [
+            734.0,
+            17.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            64.0,
+            913.0
+          ],
+          "name": "CareerFriendProfileLabel",
+          "size": [
+            46.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            136.0,
+            913.0
+          ],
+          "name": "CareerFriendCancelLabel",
+          "size": [
+            108.0,
+            18.0
+          ],
+          "visible": true
+        }
+      ],
+      "pixels": [
+        844.0,
+        390.0
+      ],
+      "primary_roots_fit": true,
+      "scroll_y": 0.0,
+      "ui_profile": "Mobile"
+    },
+    {
+      "file": "03-friends-list.png",
+      "fixture": true,
+      "frame": 32,
+      "header_buttons_do_not_overlap": true,
+      "header_buttons_fit": true,
+      "logical_dimensions": [
+        844.0,
+        390.0
+      ],
+      "mobile": true,
+      "modal": "Friends",
+      "nodes": [
+        {
+          "min": [
+            0.0,
+            0.0
+          ],
+          "name": "CareerMobileRoot",
+          "size": [
+            844.0,
+            390.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            196.0,
+            27.0
+          ],
+          "name": "CareerFriendsTab",
+          "size": [
+            71.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            119.0,
+            27.0
+          ],
+          "name": "CareerHistoryTab",
+          "size": [
+            69.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            27.0
+          ],
+          "name": "CareerProfileTab",
+          "size": [
+            64.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            379.0,
+            27.0
+          ],
+          "name": "CareerClose",
+          "size": [
+            59.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            275.0,
+            27.0
+          ],
+          "name": "CareerLastResultButton",
+          "size": [
+            96.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            38.0,
+            18.0
+          ],
+          "name": "CareerPanel",
+          "size": [
+            768.0,
+            346.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            284.0,
+            40.0
+          ],
+          "name": "CareerLastResultButtonLabel",
+          "size": [
+            78.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            205.0,
+            40.0
+          ],
+          "name": "CareerFriendsTabLabel",
+          "size": [
+            53.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            128.0,
+            40.0
+          ],
+          "name": "CareerHistoryTabLabel",
+          "size": [
+            51.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            56.0,
+            40.0
+          ],
+          "name": "CareerProfileTabLabel",
+          "size": [
+            46.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            388.0,
+            40.0
+          ],
+          "name": "CareerCloseLabel",
+          "size": [
+            41.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            79.0
+          ],
+          "name": "CareerBody",
+          "size": [
+            750.0,
+            276.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            58.0
+          ],
+          "name": "CareerFriend-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": [
+            750.0,
+            115.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            211.0
+          ],
+          "name": "CareerFriend-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "size": [
+            750.0,
+            115.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            334.0
+          ],
+          "name": "CareerFriend-dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size": [
+            750.0,
+            115.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            487.0
+          ],
+          "name": "CareerFriend-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "size": [
+            750.0,
+            115.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            -76.0
+          ],
+          "name": "CareerFriendCodeField",
+          "size": [
+            750.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            -24.0
+          ],
+          "name": "CareerSendFriendRequest",
+          "size": [
+            113.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            168.0,
+            -24.0
+          ],
+          "name": "CareerLookupProfile",
+          "size": [
+            103.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            279.0,
+            -24.0
+          ],
+          "name": "CareerFriendsRefresh",
+          "size": [
+            73.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            121.0
+          ],
+          "name": "CareerFriendProfile",
+          "size": [
+            64.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            127.0,
+            121.0
+          ],
+          "name": "CareerFriendAccept",
+          "size": [
+            69.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            204.0,
+            121.0
+          ],
+          "name": "CareerFriendReject",
+          "size": [
+            72.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            274.0
+          ],
+          "name": "CareerFriendProfile",
+          "size": [
+            64.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            127.0,
+            274.0
+          ],
+          "name": "CareerFriendRemove",
+          "size": [
+            75.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            397.0
+          ],
+          "name": "CareerFriendProfile",
+          "size": [
+            64.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            127.0,
+            397.0
+          ],
+          "name": "CareerFriendRemove",
+          "size": [
+            75.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            550.0
+          ],
+          "name": "CareerFriendProfile",
+          "size": [
+            64.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            127.0,
+            550.0
+          ],
+          "name": "CareerFriendCancel",
+          "size": [
+            126.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            -271.0
+          ],
+          "name": "CareerFriendsTitle",
+          "size": [
+            750.0,
+            32.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            -231.0
+          ],
+          "name": "CareerFriendsScope",
+          "size": [
+            750.0,
+            17.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            -206.0
+          ],
+          "name": "CareerFriendCodePrompt",
+          "size": [
+            750.0,
+            16.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            -182.0
+          ],
+          "name": "CareerFriendCode",
+          "size": [
+            750.0,
+            72.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            -102.0
+          ],
+          "name": "CareerFriendInputPrompt",
+          "size": [
+            750.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            361.0,
+            -63.0
+          ],
+          "name": "CareerFriendCodeFieldLabel",
+          "size": [
+            123.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            56.0,
+            -11.0
+          ],
+          "name": "CareerSendFriendRequestLabel",
+          "size": [
+            95.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            177.0,
+            -11.0
+          ],
+          "name": "CareerLookupProfileLabel",
+          "size": [
+            85.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            288.0,
+            -11.0
+          ],
+          "name": "CareerFriendsRefreshLabel",
+          "size": [
+            55.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            28.0
+          ],
+          "name": "CareerIncomingTitle",
+          "size": [
+            750.0,
+            22.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            66.0
+          ],
+          "name": "CareerFriendNickname",
+          "size": [
+            734.0,
+            22.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            96.0
+          ],
+          "name": "CareerFriendPresence",
+          "size": [
+            734.0,
+            17.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            64.0,
+            134.0
+          ],
+          "name": "CareerFriendProfileLabel",
+          "size": [
+            46.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            136.0,
+            134.0
+          ],
+          "name": "CareerFriendAcceptLabel",
+          "size": [
+            51.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            213.0,
+            134.0
+          ],
+          "name": "CareerFriendRejectLabel",
+          "size": [
+            54.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            181.0
+          ],
+          "name": "CareerFriendsListTitle",
+          "size": [
+            750.0,
+            22.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            219.0
+          ],
+          "name": "CareerFriendNickname",
+          "size": [
+            734.0,
+            22.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            249.0
+          ],
+          "name": "CareerFriendPresence",
+          "size": [
+            734.0,
+            17.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            64.0,
+            287.0
+          ],
+          "name": "CareerFriendProfileLabel",
+          "size": [
+            46.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            136.0,
+            287.0
+          ],
+          "name": "CareerFriendRemoveLabel",
+          "size": [
+            57.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            342.0
+          ],
+          "name": "CareerFriendNickname",
+          "size": [
+            734.0,
+            22.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            372.0
+          ],
+          "name": "CareerFriendPresence",
+          "size": [
+            734.0,
+            17.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            64.0,
+            410.0
+          ],
+          "name": "CareerFriendProfileLabel",
+          "size": [
+            46.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            136.0,
+            410.0
+          ],
+          "name": "CareerFriendRemoveLabel",
+          "size": [
+            57.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            457.0
+          ],
+          "name": "CareerOutgoingTitle",
+          "size": [
+            750.0,
+            22.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            495.0
+          ],
+          "name": "CareerFriendNickname",
+          "size": [
+            734.0,
+            22.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            525.0
+          ],
+          "name": "CareerFriendPresence",
+          "size": [
+            734.0,
+            17.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            64.0,
+            563.0
+          ],
+          "name": "CareerFriendProfileLabel",
+          "size": [
+            46.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            136.0,
+            563.0
+          ],
+          "name": "CareerFriendCancelLabel",
+          "size": [
+            108.0,
+            18.0
+          ],
+          "visible": true
+        }
+      ],
+      "pixels": [
+        844.0,
+        390.0
+      ],
+      "primary_roots_fit": true,
+      "scroll_y": 350.0,
+      "ui_profile": "Mobile"
+    },
+    {
+      "file": "04-history.png",
+      "fixture": true,
+      "frame": 32,
+      "header_buttons_do_not_overlap": true,
+      "header_buttons_fit": true,
+      "logical_dimensions": [
+        844.0,
+        390.0
+      ],
+      "mobile": true,
+      "modal": "History",
+      "nodes": [
+        {
+          "min": [
+            0.0,
+            0.0
+          ],
+          "name": "CareerMobileRoot",
+          "size": [
+            844.0,
+            390.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            27.0
+          ],
+          "name": "CareerProfileTab",
+          "size": [
+            64.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            460.0,
+            27.0
+          ],
+          "name": "CareerClose",
+          "size": [
+            59.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            379.0,
+            27.0
+          ],
+          "name": "CareerHistoryRetry",
+          "size": [
+            73.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            275.0,
+            27.0
+          ],
+          "name": "CareerLastResultButton",
+          "size": [
+            96.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            196.0,
+            27.0
+          ],
+          "name": "CareerFriendsTab",
+          "size": [
+            71.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            119.0,
+            27.0
+          ],
+          "name": "CareerHistoryTab",
+          "size": [
+            69.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            38.0,
+            18.0
+          ],
+          "name": "CareerPanel",
+          "size": [
+            768.0,
+            346.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            388.0,
+            40.0
+          ],
+          "name": "CareerHistoryRetryLabel",
+          "size": [
+            55.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            284.0,
+            40.0
+          ],
+          "name": "CareerLastResultButtonLabel",
+          "size": [
+            78.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            205.0,
+            40.0
+          ],
+          "name": "CareerFriendsTabLabel",
+          "size": [
+            53.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            128.0,
+            40.0
+          ],
+          "name": "CareerHistoryTabLabel",
+          "size": [
+            51.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            56.0,
+            40.0
+          ],
+          "name": "CareerProfileTabLabel",
+          "size": [
+            46.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            469.0,
+            40.0
+          ],
+          "name": "CareerCloseLabel",
+          "size": [
+            41.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            79.0
+          ],
+          "name": "CareerBody",
+          "size": [
+            750.0,
+            276.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            119.0
+          ],
+          "name": "CareerHistoryRow-0",
+          "size": [
+            750.0,
+            84.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            211.0
+          ],
+          "name": "CareerHistoryRow-1",
+          "size": [
+            750.0,
+            84.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            303.0
+          ],
+          "name": "CareerHistoryRow-2",
+          "size": [
+            750.0,
+            84.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            395.0
+          ],
+          "name": "CareerHistoryRow-3",
+          "size": [
+            750.0,
+            84.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            487.0
+          ],
+          "name": "CareerHistoryRow-4",
+          "size": [
+            750.0,
+            84.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            722.0,
+            139.0
+          ],
+          "name": "CareerHistoryDetail",
+          "size": [
+            67.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            722.0,
+            231.0
+          ],
+          "name": "CareerHistoryDetail",
+          "size": [
+            67.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            722.0,
+            323.0
+          ],
+          "name": "CareerHistoryDetail",
+          "size": [
+            67.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            722.0,
+            415.0
+          ],
+          "name": "CareerHistoryDetail",
+          "size": [
+            67.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            722.0,
+            507.0
+          ],
+          "name": "CareerHistoryDetail",
+          "size": [
+            67.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            579.0
+          ],
+          "name": "CareerHistoryNext",
+          "size": [
+            57.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            112.0,
+            579.0
+          ],
+          "name": "CareerHistoryRefresh",
+          "size": [
+            73.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            79.0
+          ],
+          "name": "CareerHistoryTitle",
+          "size": [
+            750.0,
+            32.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            99.0,
+            127.0
+          ],
+          "name": "CareerHistoryOutcome",
+          "size": [
+            615.0,
+            20.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            99.0,
+            155.0
+          ],
+          "name": "CareerHistoryDate",
+          "size": [
+            615.0,
+            15.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            99.0,
+            178.0
+          ],
+          "name": "CareerHistoryStats",
+          "size": [
+            615.0,
+            17.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            731.0,
+            152.0
+          ],
+          "name": "CareerHistoryDetailLabel",
+          "size": [
+            49.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            99.0,
+            219.0
+          ],
+          "name": "CareerHistoryOutcome",
+          "size": [
+            615.0,
+            20.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            99.0,
+            247.0
+          ],
+          "name": "CareerHistoryDate",
+          "size": [
+            615.0,
+            15.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            99.0,
+            270.0
+          ],
+          "name": "CareerHistoryStats",
+          "size": [
+            615.0,
+            17.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            731.0,
+            244.0
+          ],
+          "name": "CareerHistoryDetailLabel",
+          "size": [
+            49.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            99.0,
+            311.0
+          ],
+          "name": "CareerHistoryOutcome",
+          "size": [
+            615.0,
+            20.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            99.0,
+            339.0
+          ],
+          "name": "CareerHistoryDate",
+          "size": [
+            615.0,
+            15.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            99.0,
+            362.0
+          ],
+          "name": "CareerHistoryStats",
+          "size": [
+            615.0,
+            17.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            731.0,
+            336.0
+          ],
+          "name": "CareerHistoryDetailLabel",
+          "size": [
+            49.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            99.0,
+            403.0
+          ],
+          "name": "CareerHistoryOutcome",
+          "size": [
+            615.0,
+            20.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            99.0,
+            431.0
+          ],
+          "name": "CareerHistoryDate",
+          "size": [
+            615.0,
+            15.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            99.0,
+            454.0
+          ],
+          "name": "CareerHistoryStats",
+          "size": [
+            615.0,
+            17.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            731.0,
+            428.0
+          ],
+          "name": "CareerHistoryDetailLabel",
+          "size": [
+            49.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            99.0,
+            495.0
+          ],
+          "name": "CareerHistoryOutcome",
+          "size": [
+            615.0,
+            20.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            99.0,
+            523.0
+          ],
+          "name": "CareerHistoryDate",
+          "size": [
+            615.0,
+            15.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            99.0,
+            546.0
+          ],
+          "name": "CareerHistoryStats",
+          "size": [
+            615.0,
+            17.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            731.0,
+            520.0
+          ],
+          "name": "CareerHistoryDetailLabel",
+          "size": [
+            49.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            56.0,
+            592.0
+          ],
+          "name": "CareerHistoryNextLabel",
+          "size": [
+            39.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            121.0,
+            592.0
+          ],
+          "name": "CareerHistoryRefreshLabel",
+          "size": [
+            55.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            143.0
+          ],
+          "name": "CareerPortrait",
+          "size": [
+            36.0,
+            36.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            235.0
+          ],
+          "name": "CareerPortrait",
+          "size": [
+            36.0,
+            36.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            327.0
+          ],
+          "name": "CareerPortrait",
+          "size": [
+            36.0,
+            36.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            419.0
+          ],
+          "name": "CareerPortrait",
+          "size": [
+            36.0,
+            36.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            511.0
+          ],
+          "name": "CareerPortrait",
+          "size": [
+            36.0,
+            36.0
+          ],
+          "visible": true
+        }
+      ],
+      "pixels": [
+        844.0,
+        390.0
+      ],
+      "primary_roots_fit": true,
+      "scroll_y": 0.0,
+      "ui_profile": "Mobile"
+    },
+    {
+      "file": "05-result.png",
+      "fixture": true,
+      "frame": 32,
+      "header_buttons_do_not_overlap": true,
+      "header_buttons_fit": true,
+      "logical_dimensions": [
+        844.0,
+        390.0
+      ],
+      "mobile": true,
+      "modal": "Result",
+      "nodes": [
+        {
+          "min": [
+            0.0,
+            0.0
+          ],
+          "name": "CareerMobileRoot",
+          "size": [
+            844.0,
+            390.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            146.0,
+            311.0
+          ],
+          "name": "CareerResultHistory",
+          "size": [
+            115.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            311.0
+          ],
+          "name": "CareerPlayAgain",
+          "size": [
+            91.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            379.0,
+            27.0
+          ],
+          "name": "CareerClose",
+          "size": [
+            59.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            275.0,
+            27.0
+          ],
+          "name": "CareerLastResultButton",
+          "size": [
+            96.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            196.0,
+            27.0
+          ],
+          "name": "CareerFriendsTab",
+          "size": [
+            71.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            119.0,
+            27.0
+          ],
+          "name": "CareerHistoryTab",
+          "size": [
+            69.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            27.0
+          ],
+          "name": "CareerProfileTab",
+          "size": [
+            64.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            38.0,
+            18.0
+          ],
+          "name": "CareerPanel",
+          "size": [
+            768.0,
+            346.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            155.0,
+            324.0
+          ],
+          "name": "CareerResultHistoryLabel",
+          "size": [
+            97.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            56.0,
+            324.0
+          ],
+          "name": "CareerPlayAgainLabel",
+          "size": [
+            73.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            388.0,
+            40.0
+          ],
+          "name": "CareerCloseLabel",
+          "size": [
+            41.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            284.0,
+            40.0
+          ],
+          "name": "CareerLastResultButtonLabel",
+          "size": [
+            78.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            205.0,
+            40.0
+          ],
+          "name": "CareerFriendsTabLabel",
+          "size": [
+            53.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            128.0,
+            40.0
+          ],
+          "name": "CareerHistoryTabLabel",
+          "size": [
+            51.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            56.0,
+            40.0
+          ],
+          "name": "CareerProfileTabLabel",
+          "size": [
+            46.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            79.0
+          ],
+          "name": "CareerBody",
+          "size": [
+            750.0,
+            224.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            222.0
+          ],
+          "name": "CareerMobilePlayer-1",
+          "size": [
+            750.0,
+            102.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            332.0
+          ],
+          "name": "CareerMobilePlayer-2",
+          "size": [
+            750.0,
+            102.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            442.0
+          ],
+          "name": "CareerMobilePlayer-3",
+          "size": [
+            750.0,
+            102.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            552.0
+          ],
+          "name": "CareerMobilePlayer-4",
+          "size": [
+            750.0,
+            102.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            662.0
+          ],
+          "name": "CareerMobilePlayer-5",
+          "size": [
+            750.0,
+            102.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            802.0
+          ],
+          "name": "CareerMobilePlayer-6",
+          "size": [
+            750.0,
+            102.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            912.0
+          ],
+          "name": "CareerMobilePlayer-7",
+          "size": [
+            750.0,
+            102.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            1022.0
+          ],
+          "name": "CareerMobilePlayer-8",
+          "size": [
+            750.0,
+            102.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            1132.0
+          ],
+          "name": "CareerMobilePlayer-9",
+          "size": [
+            750.0,
+            102.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            1242.0
+          ],
+          "name": "CareerMobilePlayer-10",
+          "size": [
+            750.0,
+            102.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            735.0,
+            230.0
+          ],
+          "name": "CareerPlayerDetails",
+          "size": [
+            54.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            735.0,
+            340.0
+          ],
+          "name": "CareerPlayerDetails",
+          "size": [
+            54.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            735.0,
+            450.0
+          ],
+          "name": "CareerPlayerDetails",
+          "size": [
+            54.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            735.0,
+            560.0
+          ],
+          "name": "CareerPlayerDetails",
+          "size": [
+            54.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            735.0,
+            670.0
+          ],
+          "name": "CareerPlayerDetails",
+          "size": [
+            54.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            735.0,
+            810.0
+          ],
+          "name": "CareerPlayerDetails",
+          "size": [
+            54.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            735.0,
+            920.0
+          ],
+          "name": "CareerPlayerDetails",
+          "size": [
+            54.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            735.0,
+            1030.0
+          ],
+          "name": "CareerPlayerDetails",
+          "size": [
+            54.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            735.0,
+            1140.0
+          ],
+          "name": "CareerPlayerDetails",
+          "size": [
+            54.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            735.0,
+            1250.0
+          ],
+          "name": "CareerPlayerDetails",
+          "size": [
+            54.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            79.0
+          ],
+          "name": "CareerResultTitle",
+          "size": [
+            750.0,
+            32.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            119.0
+          ],
+          "name": "CareerResultMeta",
+          "size": [
+            750.0,
+            36.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            163.0
+          ],
+          "name": "CareerMyProgress",
+          "size": [
+            750.0,
+            21.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            192.0
+          ],
+          "name": "CareerTeamLabel",
+          "size": [
+            750.0,
+            22.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            97.0,
+            231.0
+          ],
+          "name": "CareerPlayerNickname",
+          "size": [
+            630.0,
+            20.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            97.0,
+            259.0
+          ],
+          "name": "CareerPlayerHero",
+          "size": [
+            630.0,
+            15.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            744.0,
+            243.0
+          ],
+          "name": "CareerPlayerDetailsLabel",
+          "size": [
+            36.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            282.0
+          ],
+          "name": "CareerPlayerSummary",
+          "size": [
+            734.0,
+            34.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            97.0,
+            341.0
+          ],
+          "name": "CareerPlayerNickname",
+          "size": [
+            630.0,
+            20.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            97.0,
+            369.0
+          ],
+          "name": "CareerPlayerHero",
+          "size": [
+            630.0,
+            15.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            744.0,
+            353.0
+          ],
+          "name": "CareerPlayerDetailsLabel",
+          "size": [
+            36.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            392.0
+          ],
+          "name": "CareerPlayerSummary",
+          "size": [
+            734.0,
+            34.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            97.0,
+            451.0
+          ],
+          "name": "CareerPlayerNickname",
+          "size": [
+            630.0,
+            20.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            97.0,
+            479.0
+          ],
+          "name": "CareerPlayerHero",
+          "size": [
+            630.0,
+            15.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            744.0,
+            463.0
+          ],
+          "name": "CareerPlayerDetailsLabel",
+          "size": [
+            36.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            502.0
+          ],
+          "name": "CareerPlayerSummary",
+          "size": [
+            734.0,
+            34.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            97.0,
+            561.0
+          ],
+          "name": "CareerPlayerNickname",
+          "size": [
+            630.0,
+            20.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            97.0,
+            589.0
+          ],
+          "name": "CareerPlayerHero",
+          "size": [
+            630.0,
+            15.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            744.0,
+            573.0
+          ],
+          "name": "CareerPlayerDetailsLabel",
+          "size": [
+            36.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            612.0
+          ],
+          "name": "CareerPlayerSummary",
+          "size": [
+            734.0,
+            34.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            97.0,
+            671.0
+          ],
+          "name": "CareerPlayerNickname",
+          "size": [
+            630.0,
+            20.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            97.0,
+            699.0
+          ],
+          "name": "CareerPlayerHero",
+          "size": [
+            630.0,
+            15.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            744.0,
+            683.0
+          ],
+          "name": "CareerPlayerDetailsLabel",
+          "size": [
+            36.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            722.0
+          ],
+          "name": "CareerPlayerSummary",
+          "size": [
+            734.0,
+            34.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            772.0
+          ],
+          "name": "CareerTeamLabel",
+          "size": [
+            750.0,
+            22.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            97.0,
+            811.0
+          ],
+          "name": "CareerPlayerNickname",
+          "size": [
+            630.0,
+            20.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            97.0,
+            839.0
+          ],
+          "name": "CareerPlayerHero",
+          "size": [
+            630.0,
+            15.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            744.0,
+            823.0
+          ],
+          "name": "CareerPlayerDetailsLabel",
+          "size": [
+            36.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            862.0
+          ],
+          "name": "CareerPlayerSummary",
+          "size": [
+            734.0,
+            34.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            97.0,
+            921.0
+          ],
+          "name": "CareerPlayerNickname",
+          "size": [
+            630.0,
+            20.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            97.0,
+            949.0
+          ],
+          "name": "CareerPlayerHero",
+          "size": [
+            630.0,
+            15.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            744.0,
+            933.0
+          ],
+          "name": "CareerPlayerDetailsLabel",
+          "size": [
+            36.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            972.0
+          ],
+          "name": "CareerPlayerSummary",
+          "size": [
+            734.0,
+            34.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            97.0,
+            1031.0
+          ],
+          "name": "CareerPlayerNickname",
+          "size": [
+            630.0,
+            20.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            97.0,
+            1059.0
+          ],
+          "name": "CareerPlayerHero",
+          "size": [
+            630.0,
+            15.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            744.0,
+            1043.0
+          ],
+          "name": "CareerPlayerDetailsLabel",
+          "size": [
+            36.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            1082.0
+          ],
+          "name": "CareerPlayerSummary",
+          "size": [
+            734.0,
+            34.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            97.0,
+            1141.0
+          ],
+          "name": "CareerPlayerNickname",
+          "size": [
+            630.0,
+            20.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            97.0,
+            1169.0
+          ],
+          "name": "CareerPlayerHero",
+          "size": [
+            630.0,
+            15.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            744.0,
+            1153.0
+          ],
+          "name": "CareerPlayerDetailsLabel",
+          "size": [
+            36.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            1192.0
+          ],
+          "name": "CareerPlayerSummary",
+          "size": [
+            734.0,
+            34.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            97.0,
+            1251.0
+          ],
+          "name": "CareerPlayerNickname",
+          "size": [
+            630.0,
+            20.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            97.0,
+            1279.0
+          ],
+          "name": "CareerPlayerHero",
+          "size": [
+            630.0,
+            15.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            744.0,
+            1263.0
+          ],
+          "name": "CareerPlayerDetailsLabel",
+          "size": [
+            36.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            1302.0
+          ],
+          "name": "CareerPlayerSummary",
+          "size": [
+            734.0,
+            34.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            235.0
+          ],
+          "name": "CareerPortrait",
+          "size": [
+            34.0,
+            34.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            345.0
+          ],
+          "name": "CareerPortrait",
+          "size": [
+            34.0,
+            34.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            455.0
+          ],
+          "name": "CareerPortrait",
+          "size": [
+            34.0,
+            34.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            565.0
+          ],
+          "name": "CareerPortrait",
+          "size": [
+            34.0,
+            34.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            675.0
+          ],
+          "name": "CareerPortrait",
+          "size": [
+            34.0,
+            34.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            815.0
+          ],
+          "name": "CareerPortrait",
+          "size": [
+            34.0,
+            34.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            925.0
+          ],
+          "name": "CareerPortrait",
+          "size": [
+            34.0,
+            34.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            1035.0
+          ],
+          "name": "CareerPortrait",
+          "size": [
+            34.0,
+            34.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            1145.0
+          ],
+          "name": "CareerPortrait",
+          "size": [
+            34.0,
+            34.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            55.0,
+            1255.0
+          ],
+          "name": "CareerPortrait",
+          "size": [
+            34.0,
+            34.0
+          ],
+          "visible": true
+        }
+      ],
+      "pixels": [
+        844.0,
+        390.0
+      ],
+      "primary_roots_fit": true,
+      "scroll_y": 0.0,
+      "ui_profile": "Mobile"
+    },
+    {
+      "file": "06-friend-profile.png",
+      "fixture": true,
+      "frame": 32,
+      "header_buttons_do_not_overlap": true,
+      "header_buttons_fit": true,
+      "logical_dimensions": [
+        844.0,
+        390.0
+      ],
+      "mobile": true,
+      "modal": "FriendProfile",
+      "nodes": [
+        {
+          "min": [
+            0.0,
+            0.0
+          ],
+          "name": "CareerMobileRoot",
+          "size": [
+            844.0,
+            390.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            27.0
+          ],
+          "name": "CareerProfileTab",
+          "size": [
+            64.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            379.0,
+            27.0
+          ],
+          "name": "CareerClose",
+          "size": [
+            59.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            275.0,
+            27.0
+          ],
+          "name": "CareerLastResultButton",
+          "size": [
+            96.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            196.0,
+            27.0
+          ],
+          "name": "CareerFriendsTab",
+          "size": [
+            71.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            119.0,
+            27.0
+          ],
+          "name": "CareerHistoryTab",
+          "size": [
+            69.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            38.0,
+            18.0
+          ],
+          "name": "CareerPanel",
+          "size": [
+            768.0,
+            346.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            128.0,
+            40.0
+          ],
+          "name": "CareerHistoryTabLabel",
+          "size": [
+            51.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            56.0,
+            40.0
+          ],
+          "name": "CareerProfileTabLabel",
+          "size": [
+            46.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            388.0,
+            40.0
+          ],
+          "name": "CareerCloseLabel",
+          "size": [
+            41.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            284.0,
+            40.0
+          ],
+          "name": "CareerLastResultButtonLabel",
+          "size": [
+            78.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            205.0,
+            40.0
+          ],
+          "name": "CareerFriendsTabLabel",
+          "size": [
+            53.0,
+            18.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            79.0
+          ],
+          "name": "CareerBody",
+          "size": [
+            750.0,
+            276.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            355.0
+          ],
+          "name": "CareerVisitedBack",
+          "size": [
+            750.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            79.0
+          ],
+          "name": "CareerVisitedTitle",
+          "size": [
+            750.0,
+            32.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            119.0
+          ],
+          "name": "CareerVisitedNickname",
+          "size": [
+            750.0,
+            29.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            156.0
+          ],
+          "name": "CareerVisitedStats",
+          "size": [
+            750.0,
+            62.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            226.0
+          ],
+          "name": "CareerVisitedNewcomer",
+          "size": [
+            750.0,
+            17.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            251.0
+          ],
+          "name": "CareerFriendCodePrompt",
+          "size": [
+            750.0,
+            16.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            47.0,
+            275.0
+          ],
+          "name": "CareerFriendCode",
+          "size": [
+            750.0,
+            72.0
+          ],
+          "visible": true
+        },
+        {
+          "min": [
+            369.0,
+            368.0
+          ],
+          "name": "CareerVisitedBackLabel",
+          "size": [
+            107.0,
+            18.0
+          ],
+          "visible": true
+        }
+      ],
+      "pixels": [
+        844.0,
+        390.0
+      ],
+      "primary_roots_fit": true,
+      "scroll_y": 0.0,
+      "ui_profile": "Mobile"
+    }
+  ],
+  "fixture": true,
+  "live_account_or_database_evidence": false,
+  "manual_input_verified": false,
+  "method": "real Bevy primary_window ScreenshotCaptured + save_to_disk",
+  "physical_phone_verified": false,
+  "scenario": "career-ui-fixture",
+  "settle_frames": 32,
+  "status": "passed",
+  "version": "0.19.0-rc.6"
+}

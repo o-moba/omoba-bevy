@@ -131,6 +131,8 @@ pub struct ClientSession {
     join_error: Option<JoinRejection>,
     join_exhausted: bool,
     snapshot_order: SnapshotOrder,
+    career_server_epoch: u64,
+    career_packet_sequence: u64,
 }
 
 impl Default for ClientSession {
@@ -150,6 +152,8 @@ impl Default for ClientSession {
             join_error: None,
             join_exhausted: false,
             snapshot_order: SnapshotOrder::default(),
+            career_server_epoch: 0,
+            career_packet_sequence: 0,
         }
     }
 }
@@ -392,6 +396,8 @@ fn ground_networked_entities(
 
 #[derive(Message, Clone, Debug)]
 pub enum NetworkCommand {
+    /// Profile/history requests are valid before arena admission as well.
+    Career(shared::career::CareerRequest),
     BasicAttack {
         target: TargetId,
     },
@@ -431,6 +437,9 @@ pub enum NetworkCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ClientPacket {
+    Career {
+        request: shared::career::CareerRequest,
+    },
     Hello {
         protocol_version: u16,
     },
@@ -730,7 +739,14 @@ struct NeutralState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+// Keep the protocol's explicit flat fields; a lint alone does not warrant a wire DTO refactor.
+#[allow(clippy::large_enum_variant)]
 enum ServerPacket {
+    Career {
+        server_epoch: u64,
+        sequence: u64,
+        career: shared::career::CareerView,
+    },
     Snapshot {
         #[serde(flatten, default)]
         meta: SnapshotMeta,
@@ -758,6 +774,8 @@ enum ServerPacket {
         game_state: GameState,
         #[serde(default)]
         rematch_in_secs: Option<u64>,
+        #[serde(default)]
+        career: shared::career::CareerView,
     },
 }
 
@@ -1426,6 +1444,8 @@ fn send_network_commands(
     snapshot: Option<Res<GameStateSnapshot>>,
     basic_cooldown: Query<&PlayerBasicAttackCooldown, With<Player>>,
     mut basic_sequence: Local<u64>,
+    mut career_identity: Option<ResMut<crate::career_identity::CareerIdentity>>,
+    mut career_client: Option<ResMut<crate::career::CareerClient>>,
 ) {
     let Some(channels) = channels else {
         return;
@@ -1433,6 +1453,34 @@ fn send_network_commands(
 
     for command in command_events.read() {
         match command {
+            NetworkCommand::Career(request) => {
+                let Some(identity) = career_identity.as_mut() else {
+                    continue;
+                };
+                let epoch = snapshot.as_ref().map_or(0, |s| s.meta.server_epoch);
+                match identity.prepare_request(
+                    request,
+                    &client_session.server_addr_display,
+                    epoch,
+                    &client_session_id.0,
+                ) {
+                    Ok(signed) => {
+                        let _ = channels
+                            .outgoing
+                            .send(ClientPacket::Career { request: signed });
+                        if matches!(request, shared::career::CareerRequest::CancelQueue) {
+                            client_session.last_join = None;
+                            client_session.join_flow_committed = false;
+                            client_session.clear_join_attempt();
+                        }
+                    }
+                    Err(error) => {
+                        if let Some(career) = career_client.as_mut() {
+                            career.request_failed(error);
+                        }
+                    }
+                }
+            }
             NetworkCommand::BasicAttack { target } => {
                 if !client_session.join_confirmed() {
                     continue;
@@ -1616,6 +1664,7 @@ fn ingest_server_snapshot_packets(
     mut pending: ResMut<PendingServerSnapshotFrame>,
     mut incoming_dead: ResMut<NetIncomingDisconnected>,
     team_selection: Res<TeamSelection>,
+    mut career_client: Option<ResMut<crate::career::CareerClient>>,
 ) {
     pending.frame = None;
     let Some(channels) = channels.as_ref() else {
@@ -1637,6 +1686,32 @@ fn ingest_server_snapshot_packets(
                 break;
             }
             Ok(packet) => match packet {
+                ServerPacket::Career {
+                    server_epoch,
+                    sequence,
+                    career,
+                } => {
+                    if server_epoch == 0
+                        || server_epoch != client_session.career_server_epoch
+                        || sequence <= client_session.career_packet_sequence
+                    {
+                        continue;
+                    }
+                    client_session.career_packet_sequence = sequence;
+                    if matches!(
+                        career.queue,
+                        shared::career::QueueView::Waiting { .. }
+                            | shared::career::QueueView::Selected
+                    ) || career.auth_nonce.is_some() && !client_session.admitted
+                    {
+                        client_session.join_attempts = 0;
+                        client_session.join_exhausted = false;
+                        client_session.join_error = None;
+                    }
+                    if let Some(client) = career_client.as_mut() {
+                        client.apply_view(career);
+                    }
+                }
                 ServerPacket::Snapshot {
                     geometry_id,
                     map_profile,
@@ -1652,6 +1727,7 @@ fn ingest_server_snapshot_packets(
                     combat_events,
                     game_state,
                     rematch_in_secs,
+                    career,
                 } => {
                     if meta.protocol_version != PROTOCOL_VERSION {
                         client_session.join_error = Some(JoinRejection::ProtocolMismatch);
@@ -1665,6 +1741,16 @@ fn ingest_server_snapshot_packets(
                     }
                     if !client_session.snapshot_order.accept(meta) {
                         continue;
+                    }
+                    if client_session.career_server_epoch != meta.server_epoch {
+                        client_session.career_server_epoch = meta.server_epoch;
+                        client_session.career_packet_sequence = 0;
+                    }
+                    if let Some(career_client) = career_client.as_mut() {
+                        career_client.local_player_id = Some(your_id);
+                        if career != shared::career::CareerView::default() {
+                            career_client.apply_view(career);
+                        }
                     }
                     client_session.join_error = join_error;
                     client_session.admitted =
@@ -2725,6 +2811,7 @@ fn update_session_lifecycle(
     mut session_ui: MessageReader<SessionUiCommand>,
     visual_mode: Res<PlayerVisualMode>,
     sprite_assets: Res<SpriteVisualAssets>,
+    mut career: Option<ResMut<crate::career::CareerClient>>,
 ) {
     let TeardownQueries {
         overlay_query,
@@ -2745,6 +2832,13 @@ fn update_session_lifecycle(
                 let Some(address) = crate::persistence::validate_game_server_addr(raw) else {
                     continue;
                 };
+                if address != client_session.server_addr_display
+                    && let Some(career) = career.as_mut()
+                {
+                    // Clear transport-local views until the destination server
+                    // authenticates this account against its configured backend.
+                    career.clear_account();
+                }
                 commands.remove_resource::<NetworkChannels>();
                 spawn_network_transport(&mut commands, &mut client_session, address);
                 incoming_dead.0 = false;
@@ -3552,7 +3646,10 @@ mod tests {
             minions,
             rematch_in_secs,
             ..
-        } = packet;
+        } = packet
+        else {
+            panic!("expected snapshot");
+        };
         assert_eq!(structures.last().map(|structure| structure.id), Some(808));
         assert_eq!(minions.last().map(|minion| minion.id), Some(909));
         assert_eq!(rematch_in_secs, Some(expected_sentinel));
@@ -3769,7 +3866,10 @@ mod tests {
             neutrals,
             rematch_in_secs,
             ..
-        } = packet;
+        } = packet
+        else {
+            panic!("expected snapshot");
+        };
         assert_eq!(players.len(), 10);
         assert_eq!(projectiles.len(), 4);
         assert_eq!(structures.last().map(|structure| structure.id), Some(8));

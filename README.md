@@ -18,11 +18,17 @@ package includes `practice.sh`, `host.sh --humans N` and
 [match readiness record](docs/progress/2026-09-07-beta-readiness.md) for measured
 checks and remaining coverage. The commands below are development workflows.
 
+Version `0.19.0-rc.6` adds saved post-match statistics, player profiles, match
+history and friend requests with online/in-game presence. Career-enabled servers
+use PostgreSQL; see the [career setup and beta limits](docs/match-progression.md)
+and [verification record](docs/progress/2026-09-14-career-and-friends.md).
+
 ## Prerequisites
 
 - [Rust toolchain](https://rustup.rs/) (`rustc`, `cargo`).
 - Git and a clone of this repository.
 - Python 3.9+ and Make for the local practice launcher.
+- PostgreSQL for persistent profiles, results and friends (not required for local practice).
 
 ## Build and play locally
 
@@ -150,10 +156,9 @@ See the script header for prerequisites; it spawns its own server on `127.0.0.1:
 
 ## UDP snapshot size
 
-Snapshots remain one JSON object per UDP datagram. The client and harness use
-65,536-byte receive storage and the server rejects a serialized snapshot above
-the legal IPv4 UDP payload ceiling of 65,507 bytes instead of sending a partial
-object. This removes the former 8,192-byte truncation/Serde EOF failure. Some
-hosts impose a smaller practical send limit (the current macOS test host
-reports `EMSGSIZE` above 9,216 bytes), so snapshot growth beyond that point
-requires a separately designed payload-reduction or framing change.
+World snapshots and career replies use shared framing with datagrams capped at
+1,200 bytes. Receivers reassemble complete JSON objects before parsing; career
+replies use a separate assembly namespace and sequence. Bounded payloads preserve
+complete results and participant lists. Oversized combined career views are sent
+as separate complete views; a single view beyond the supported limit reports an
+error. This avoids relying on large datagrams or truncating JSON.

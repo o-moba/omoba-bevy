@@ -288,7 +288,7 @@ fn phone_menu_actions(
     }
 }
 
-fn address_keyboard(
+pub(crate) fn address_keyboard(
     mut entry: ResMut<ServerEntry>,
     mut input: MessageReader<KeyboardInput>,
     mut ime: MessageReader<Ime>,

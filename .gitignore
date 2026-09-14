@@ -78,3 +78,8 @@ client/assets/avatars/passport-manifest.json
 !client/assets/map-props/
 !docs/map-customization.md
 !docs/balance-tuning.md
+
+# Local career receipts and device identity are runtime data, never source.
+.omoba/
+career_identity.json
+career_nickname.json

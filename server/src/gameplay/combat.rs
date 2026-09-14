@@ -203,6 +203,11 @@ pub(crate) fn apply_projectile_minion_damage_system(
     mut runtime: ResMut<ServerRuntime>,
     mut damage_events: MessageReader<DamageEvent>,
 ) {
+    if !matches!(runtime.game_state, GameState::Running) {
+        // Drain queued impacts so they cannot leak into a subsequent round.
+        damage_events.clear();
+        return;
+    }
     let Some(now) = tick.now else {
         return;
     };

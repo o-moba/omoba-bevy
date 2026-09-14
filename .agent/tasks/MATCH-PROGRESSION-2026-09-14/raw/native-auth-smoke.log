@@ -1,0 +1,20 @@
+{
+  "status": "passed",
+  "method": "real native client device identity and server UDP handshake, then PostgreSQL lookup",
+  "fixture": false,
+  "private_key_recorded": false,
+  "profile": {
+    "profile_id": "c9cf9e42fae04468bf58c33cf3d92eafad0c4476966143eaa984504b63ab23de",
+    "nickname": "Player",
+    "rating": 1000,
+    "rated_matches": 0,
+    "matches_played": 0,
+    "wins": 0,
+    "losses": 0,
+    "progression_xp": 0
+  },
+  "client_alive": true,
+  "server_alive": true,
+  "key_permissions": "0o600",
+  "authenticated_key_is_public_only": true
+}

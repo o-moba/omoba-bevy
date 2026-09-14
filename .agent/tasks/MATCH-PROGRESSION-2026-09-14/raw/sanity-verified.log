@@ -1,0 +1,4 @@
+$ git -c core.whitespace=-blank-at-eof diff --cached --check
+exit=0
+$ cargo fmt --all -- --check
+exit=0

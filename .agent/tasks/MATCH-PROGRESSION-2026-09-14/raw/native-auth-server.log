@@ -1,0 +1,4 @@
+Map profile: verdant_default geometry: verdant-confluence-v1 structures: 8
+UDP game server is listening on 127.0.0.1:55440
+Match mode: dev - first join starts the match immediately (NOT for release)
+Endpoint 127.0.0.1:55789 connected (pre-join), reserved player id 1

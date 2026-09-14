@@ -163,7 +163,11 @@ fn toggle_help_overlay(
     mut keyboard: ResMut<ButtonInput<KeyCode>>,
     game: Res<GameStateSnapshot>,
     mut visible: ResMut<HelpOverlayVisible>,
+    career: Option<Res<crate::career::CareerClient>>,
 ) {
+    if career.as_ref().is_some_and(|career| career.modal_open()) {
+        return;
+    }
     if visible.0
         && matches!(game.state, GameState::Running)
         && keyboard.just_pressed(KeyCode::Escape)

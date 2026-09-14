@@ -3,6 +3,9 @@ use bevy::{asset::AssetPlugin, prelude::*};
 mod beta_ui_qa;
 mod bosses;
 mod camera;
+mod career;
+mod career_identity;
+mod career_visual_qa;
 mod combat;
 mod combat_feedback;
 mod combat_qa;
@@ -136,6 +139,9 @@ pub fn main() {
         projectile_visuals::ProjectileVisualsPlugin,
         combat_feedback::CombatFeedbackPlugin,
     ))
+    .add_plugins(career::CareerPlugin)
+    .add_plugins(career_identity::CareerIdentityPlugin)
+    .add_plugins(career_visual_qa::CareerVisualQaPlugin)
     .add_plugins(map_visuals::MapVisualsPlugin)
     .add_plugins(map_qa::MapQaPlugin)
     .add_plugins(combat_qa::CombatQaPlugin)

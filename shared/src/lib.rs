@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 use std::time::Duration;
 
+pub mod career;
 pub mod combat;
 pub mod jungle;
 pub mod map;

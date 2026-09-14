@@ -529,7 +529,10 @@ fn cosmetic_history_yields_space_to_gameplay_and_keeps_newest_receipts() {
         players,
         combat_events,
         ..
-    } = &mut packet;
+    } = &mut packet
+    else {
+        panic!("expected snapshot")
+    };
     players[0].avatar = Some("x".repeat(IPV4_UDP_MAX_PAYLOAD_BYTES - base_size - 400));
     let original_player = serde_json::to_value(&players[0]).unwrap();
     *combat_events = (1..=96)
@@ -548,7 +551,10 @@ fn cosmetic_history_yields_space_to_gameplay_and_keeps_newest_receipts() {
         players,
         combat_events,
         ..
-    } = decoded;
+    } = decoded
+    else {
+        panic!("expected snapshot")
+    };
     assert_eq!(serde_json::to_value(&players[0]).unwrap(), original_player);
     assert!(!combat_events.is_empty() && combat_events.len() < 96);
     assert_eq!(combat_events.last().unwrap().id, 96);

@@ -73,6 +73,7 @@ fn resolve_input_context(
     mut context: ResMut<GameplayInputContext>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     server_entry: Option<Res<crate::mobile_ui::ServerEntry>>,
+    career: Option<Res<crate::career::CareerClient>>,
 ) {
     context.running = game
         .as_ref()
@@ -83,6 +84,7 @@ fn resolve_input_context(
     context.modal_open = mobile
         .as_ref()
         .is_some_and(|mobile| mobile.enabled && (!mobile.landscape || !mobile.focused))
+        || career.as_ref().is_some_and(|career| career.modal_open())
         || server_entry.as_ref().is_some_and(|entry| entry.open)
         || shop.as_ref().is_some_and(|shop| shop.open)
         || !join_ui.is_empty()
@@ -229,6 +231,33 @@ mod tests {
         assert_eq!(
             app.world().resource::<PipelineTrace>().0,
             ["snapshot", "gameplay", "send:1"]
+        );
+    }
+    #[test]
+    fn career_history_blocks_live_combat_and_camera_without_a_player_entity() {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .insert_resource(GameStateSnapshot {
+                state: GameState::Running,
+                ..default()
+            })
+            .init_resource::<crate::career::CareerClient>()
+            .add_plugins(InputContextPlugin);
+        app.world_mut()
+            .resource_mut::<crate::career::CareerClient>()
+            .modal = crate::career::CareerModal::History;
+        app.update();
+        let context = app.world().resource::<GameplayInputContext>();
+        assert!(!context.gameplay_allowed());
+        assert!(!context.camera_allowed());
+        app.world_mut()
+            .resource_mut::<crate::career::CareerClient>()
+            .modal = crate::career::CareerModal::Closed;
+        app.update();
+        assert!(
+            app.world()
+                .resource::<GameplayInputContext>()
+                .gameplay_allowed()
         );
     }
 }

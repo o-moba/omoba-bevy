@@ -2,10 +2,17 @@
 
 mod balance;
 mod basic_attack;
+mod career_backend;
+mod career_runtime;
+#[cfg(test)]
+mod career_runtime_tests;
+mod career_store;
 mod combat_feedback;
 mod gameplay;
 #[cfg(test)]
 mod map_config_tests;
+mod match_stats;
+mod matchmaking;
 #[cfg(test)]
 mod minion_path_tests;
 #[cfg(test)]
@@ -18,6 +25,8 @@ mod release_tests;
 mod session;
 mod shop;
 mod targeting_qa;
+#[cfg(test)]
+mod terminal_result_tests;
 mod world;
 
 use balance::*;
@@ -64,6 +73,9 @@ const NETWORK_DIAGNOSTIC_INTERVAL: Duration = Duration::from_secs(1);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ClientPacket {
+    Career {
+        request: shared::career::CareerRequest,
+    },
     Hello {
         protocol_version: u16,
     },
@@ -472,7 +484,15 @@ struct ProjectileState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+// Outbound packets are serialized immediately, never queued as enum values.
+// Keep both envelopes inline to avoid an extra allocation per gameplay snapshot.
+#[allow(clippy::large_enum_variant)]
 enum ServerPacket {
+    Career {
+        server_epoch: u64,
+        sequence: u64,
+        career: shared::career::CareerView,
+    },
     Snapshot {
         #[serde(default)]
         geometry_id: String,
@@ -524,7 +544,12 @@ fn serialize_snapshot_datagram(packet: &ServerPacket) -> Result<Vec<u8>, Snapsho
         // Cosmetic history must never crowd otherwise-valid gameplay out of a
         // snapshot. Keep the newest receipts that fit, without dropping state.
         let mut trimmed = packet.clone();
-        let ServerPacket::Snapshot { combat_events, .. } = &mut trimmed;
+        let ServerPacket::Snapshot { combat_events, .. } = &mut trimmed else {
+            return Err(SnapshotDatagramError::PayloadTooLarge {
+                actual: payload.len(),
+                limit: IPV4_UDP_MAX_PAYLOAD_BYTES,
+            });
+        };
         let mut excess = payload.len() - IPV4_UDP_MAX_PAYLOAD_BYTES;
         let mut remove = 0;
         for event in combat_events.iter() {
@@ -839,6 +864,8 @@ impl Vec3f {
 
 struct ConnectedPlayer {
     state: PlayerState,
+    career_profile: Option<shared::career::ProfileSummary>,
+    career_capable: bool,
     /// False until the endpoint sends a `Join` packet. Pre-join endpoints are
     /// kept for addressing (snapshots are still sent to them) but are excluded
     /// from the replicated player list and from all gameplay simulation.
@@ -1005,6 +1032,7 @@ impl RateLimitedDiagnostic {
 
 #[derive(Resource)]
 struct ServerRuntime {
+    career: career_runtime::CareerRuntime,
     combat_log: CombatLog,
     passport_admissions: passport_admission::PassportAdmissions,
     socket: UdpSocket,
@@ -1057,7 +1085,13 @@ impl ServerRuntime {
         // their spawn schedule (see `schedule_boss_spawns`).
         neutrals.extend(build_boss_neutrals(&mut next_neutral_id));
 
+        let server_epoch = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64
+            | 1;
         Self {
+            career: career_runtime::CareerRuntime::new(server_epoch),
             combat_log: CombatLog::default(),
             passport_admissions: passport_admission::PassportAdmissions::default(),
             socket,
@@ -1083,11 +1117,7 @@ impl ServerRuntime {
             last_wave_spawn_at: Instant::now(),
             match_config,
             targeting_qa: targeting_qa::enabled(match_config.mode),
-            server_epoch: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos() as u64
-                | 1,
+            server_epoch,
             match_id: 1,
             snapshot_tick: 0,
             match_started_at: None,
@@ -1149,6 +1179,11 @@ impl ServerRuntime {
     }
 
     fn handle_packet(&mut self, addr: SocketAddr, packet: ClientPacket, now: Instant) {
+        if let ClientPacket::Career { request } = packet {
+            self.handle_career_request(addr, request, now);
+            return;
+        }
+        self.career.backend.touch(addr);
         if matches!(&packet, ClientPacket::Join { .. })
             && !self.players.get(&addr).is_some_and(|player| player.joined)
         {
@@ -1222,6 +1257,19 @@ impl ServerRuntime {
 
     fn handle_packet_authorized(&mut self, addr: SocketAddr, packet: ClientPacket, now: Instant) {
         self.maintain_roster(now);
+        if matches!(packet, ClientPacket::Join { .. }) {
+            if !self.authorize_career_join(addr, &packet, now) {
+                return;
+            }
+            if self.career_queue_enabled() {
+                self.join_career_queue(addr, packet, now);
+                return;
+            }
+        }
+        if matches!(packet, ClientPacket::RequestRematch) && self.career_flow_active() {
+            self.career_play_again(addr, now);
+            return;
+        }
         let Self {
             targeting_qa,
             players,
@@ -1241,6 +1289,7 @@ impl ServerRuntime {
             ..
         } = self;
         match packet {
+            ClientPacket::Career { .. } => unreachable!("handled before gameplay admission"),
             ClientPacket::Hello { protocol_version } => {
                 ensure_player_connected(players, map_layout, addr, next_player_id, now);
                 let player = players.get_mut(&addr).unwrap();
@@ -1480,9 +1529,11 @@ impl ServerRuntime {
             }
         }
         self.track_round_start(now);
+        self.register_career_participant(addr);
     }
 
     fn prepare_tick(&mut self) -> (Instant, f32) {
+        self.poll_career(Instant::now());
         self.receive_packets();
 
         let now = Instant::now();
@@ -1502,12 +1553,14 @@ impl ServerRuntime {
         } else {
             0.0
         };
-        if self
-            .victory_at
-            .is_some_and(|at| now.saturating_duration_since(at) >= VICTORY_REMATCH_DELAY)
+        if !self.career_flow_active()
+            && self
+                .victory_at
+                .is_some_and(|at| now.saturating_duration_since(at) >= VICTORY_REMATCH_DELAY)
         {
             self.restart_round(now);
         }
+        self.advance_career_queue(now);
         tick_match_formation(
             &mut self.game_state,
             &self.players,
@@ -1517,6 +1570,7 @@ impl ServerRuntime {
             now,
         );
         self.track_round_start(now);
+        let career_flow = self.career_flow_active();
         let Self {
             socket,
             combat_log,
@@ -1657,7 +1711,7 @@ impl ServerRuntime {
 
             let team_buffs_snapshot = team_buffs.snapshot(now);
 
-            let rematch_in_secs = if let GameState::Victory { .. } = game_state {
+            let rematch_in_secs = if !career_flow && let GameState::Victory { .. } = game_state {
                 victory_at.map(|t| {
                     VICTORY_REMATCH_DELAY
                         .saturating_sub(now.duration_since(t))
@@ -1742,6 +1796,8 @@ impl ServerRuntime {
             *last_snapshot_at = now;
         }
         self.record_match_metrics(now);
+        self.checkpoint_career_round(now);
+        self.send_career_views(now);
     }
 }
 
@@ -2206,9 +2262,7 @@ fn simulate_projectiles(
     if !matches!(game_state, GameState::Running) {
         return Vec::new();
     }
-    let mut player_damage_events: Vec<(u64, f32, HitSource)> = Vec::new();
-    let mut structure_damage_events: Vec<(u64, f32, Team, HitSource)> = Vec::new();
-    let mut neutral_damage_events: Vec<(u64, f32, u64, HitSource)> = Vec::new();
+    let mut damage_events: Vec<(u64, TargetId, f32, Team, HitSource)> = Vec::new();
 
     projectiles.retain(|_, projectile| {
         if !projectile.guaranteed_hit && now >= projectile.expires_at {
@@ -2234,9 +2288,11 @@ fn simulate_projectiles(
                     )
                     .normalize_or_zero();
                     if direction.x == 0.0 && direction.y == 0.0 && direction.z == 0.0 {
-                        player_damage_events.push((
-                            projectile.target.id,
+                        damage_events.push((
+                            projectile.state.id,
+                            projectile.target,
                             projectile.damage,
+                            projectile.state.owner_team,
                             HitSource::projectile(&projectile.state),
                         ));
                         return false;
@@ -2255,9 +2311,11 @@ fn simulate_projectiles(
 
                 let combined_radius = projectile.radius + PLAYER_HIT_RADIUS;
                 if swept_sphere_intersects_target(start, end, target_pos, combined_radius) {
-                    player_damage_events.push((
-                        projectile.target.id,
+                    damage_events.push((
+                        projectile.state.id,
+                        projectile.target,
                         projectile.damage,
+                        projectile.state.owner_team,
                         HitSource::projectile(&projectile.state),
                     ));
                     return false;
@@ -2284,8 +2342,9 @@ fn simulate_projectiles(
                     )
                     .normalize_or_zero();
                     if direction.x == 0.0 && direction.y == 0.0 && direction.z == 0.0 {
-                        structure_damage_events.push((
-                            projectile.target.id,
+                        damage_events.push((
+                            projectile.state.id,
+                            projectile.target,
                             projectile.damage,
                             projectile.state.owner_team,
                             HitSource::projectile(&projectile.state),
@@ -2310,8 +2369,9 @@ fn simulate_projectiles(
                 };
                 let combined_radius = projectile.radius + target_radius;
                 if swept_sphere_intersects_target(start, end, target_pos, combined_radius) {
-                    structure_damage_events.push((
-                        projectile.target.id,
+                    damage_events.push((
+                        projectile.state.id,
+                        projectile.target,
                         projectile.damage,
                         projectile.state.owner_team,
                         HitSource::projectile(&projectile.state),
@@ -2341,10 +2401,11 @@ fn simulate_projectiles(
                     )
                     .normalize_or_zero();
                     if direction.x == 0.0 && direction.y == 0.0 && direction.z == 0.0 {
-                        neutral_damage_events.push((
-                            projectile.target.id,
+                        damage_events.push((
+                            projectile.state.id,
+                            projectile.target,
                             projectile.damage,
-                            projectile.state.owner_id,
+                            projectile.state.owner_team,
                             HitSource::projectile(&projectile.state),
                         ));
                         return false;
@@ -2363,10 +2424,11 @@ fn simulate_projectiles(
 
                 let combined_radius = projectile.radius + NEUTRAL_RADIUS;
                 if swept_sphere_intersects_target(start, end, target_pos, combined_radius) {
-                    neutral_damage_events.push((
-                        projectile.target.id,
+                    damage_events.push((
+                        projectile.state.id,
+                        projectile.target,
                         projectile.damage,
-                        projectile.state.owner_id,
+                        projectile.state.owner_team,
                         HitSource::projectile(&projectile.state),
                     ));
                     return false;
@@ -2377,32 +2439,31 @@ fn simulate_projectiles(
         true
     });
 
+    // HashMap traversal must not decide which simultaneous base hit wins.
+    // Apply impacts in projectile creation order and retain the final blow receipt.
+    damage_events.sort_unstable_by_key(|(id, ..)| *id);
     let mut receipts = Vec::new();
-    for (target_id, damage, source) in player_damage_events {
-        receipts.extend(
-            apply_player_damage(players, target_id, damage, now)
-                .map(|event| source.annotate(event)),
-        );
-    }
-    for (target_id, damage, attacker_team, source) in structure_damage_events {
-        receipts.extend(
-            apply_structure_damage(structures, target_id, damage, attacker_team, game_state)
-                .map(|event| source.annotate(event)),
-        );
-    }
-    for (target_id, damage, attacker_id, source) in neutral_damage_events {
-        receipts.extend(
-            apply_neutral_damage(
+    for (_, target, damage, attacker_team, source) in damage_events {
+        if !matches!(game_state, GameState::Running) {
+            break;
+        }
+        let event = match target.kind {
+            TargetKind::Player => apply_player_damage(players, target.id, damage, now),
+            TargetKind::Structure => {
+                apply_structure_damage(structures, target.id, damage, attacker_team, game_state)
+            }
+            TargetKind::Neutral => apply_neutral_damage(
                 players,
                 neutrals,
                 team_buffs,
-                target_id,
+                target.id,
                 damage,
-                attacker_id,
+                source.entity.id,
                 now,
-            )
-            .map(|event| source.annotate(event)),
-        );
+            ),
+            TargetKind::Minion => None, // Applied in the earlier ECS combat phase.
+        };
+        receipts.extend(event.map(|event| source.annotate(event)));
     }
     receipts
 }
@@ -2450,7 +2511,7 @@ fn apply_structure_damage(
     attacker_team: Team,
     game_state: &mut GameState,
 ) -> Option<CombatEvent> {
-    if !damage.is_finite() || damage <= 0.0 {
+    if !matches!(game_state, GameState::Running) || !damage.is_finite() || damage <= 0.0 {
         return None;
     }
     if structure_is_protected(structures, target_id) {
@@ -3147,7 +3208,12 @@ fn simulate_minions(
                 .map(|event| source.annotate(event)),
         );
     }
+    // Stable source order resolves simultaneous melee base hits consistently.
+    structure_damage_events.sort_unstable_by_key(|(_, _, _, source)| source.entity.id);
     for (target_id, damage, attacker_team, source) in structure_damage_events {
+        if !matches!(game_state, GameState::Running) {
+            break;
+        }
         receipts.extend(
             apply_structure_damage(structures, target_id, damage, attacker_team, game_state)
                 .map(|event| source.annotate(event)),
@@ -5434,7 +5500,9 @@ mod tests {
         // The snapshot stays decodable without the new field (serde default).
         let legacy = r#"{"type":"snapshot","your_id":1,"players":[],"projectiles":[],"structures":[],"minions":[],"game_state":{"type":"lobby"}}"#;
         let packet: ServerPacket = serde_json::from_str(legacy).expect("legacy snapshot decodes");
-        let ServerPacket::Snapshot { team_buffs, .. } = packet;
+        let ServerPacket::Snapshot { team_buffs, .. } = packet else {
+            panic!("expected snapshot")
+        };
         assert!(team_buffs.is_empty());
     }
 

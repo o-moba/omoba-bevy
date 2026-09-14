@@ -1,0 +1,15 @@
+Omoba asset root: /Users/wotori/git/ekza/omoba-bevy-match-progression/client/assets
+Connecting to server at 127.0.0.1:59999
+UDP socket connected to 127.0.0.1:59999; waiting for first snapshot
+Client socket receive error: Connection refused (os error 61)
+Client socket receive error: Connection refused (os error 61)
+Client socket receive error: Connection refused (os error 61)
+Client socket receive error: Connection refused (os error 61)
+Client socket receive error: Connection refused (os error 61)
+Client socket receive error: Connection refused (os error 61)
+Client socket receive error: Connection refused (os error 61)
+Client socket receive error: Connection refused (os error 61)
+2026-09-14T11:11:42.973114Z  WARN client::net: Network teardown: transport failure reported by the UDP thread
+Client socket receive error: Connection refused (os error 61)
+Client socket receive error: Connection refused (os error 61)
+2026-09-14T11:11:47.664590Z  WARN bevy_winit::state: Skipped event Destroyed for unknown winit Window Id WindowId(51996627328)

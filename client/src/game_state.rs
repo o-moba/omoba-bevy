@@ -108,6 +108,7 @@ fn update_game_state_ui(
     game_state: Res<GameStateSnapshot>,
     client_session: Res<ClientSession>,
     local_team: Query<&Team, With<Player>>,
+    career: Option<Res<crate::career::CareerClient>>,
     mut overlay_query: Query<(&mut Visibility, &mut BackgroundColor), With<GameStateOverlay>>,
     mut text_query: Query<&mut Text, With<GameStateLabel>>,
 ) {
@@ -118,13 +119,33 @@ fn update_game_state_ui(
         return;
     };
 
-    if !client_session.is_connected() {
+    if career.as_ref().is_some_and(|career| career.modal_open()) || !client_session.is_connected() {
         *visibility = Visibility::Hidden;
         *background = BackgroundColor(Color::NONE);
         label.0.clear();
         return;
     }
 
+    if let Some(status) = career
+        .as_ref()
+        .and_then(|career| crate::career::queue_text(&career.view.queue))
+    {
+        *visibility = Visibility::Visible;
+        *background = BackgroundColor(LOBBY_COLOR);
+        label.0 = status;
+        return;
+    }
+    if career.as_ref().is_some_and(|career| {
+        career.view.last_result.as_ref().is_some_and(|result| {
+            result.server_epoch == game_state.meta.server_epoch
+                && result.match_id == game_state.meta.match_id
+        })
+    }) && matches!(game_state.state, GameState::Victory { .. })
+    {
+        *visibility = Visibility::Hidden;
+        label.0.clear();
+        return;
+    }
     match game_state.state {
         GameState::Lobby | GameState::Forming { .. } | GameState::Starting { .. } => {
             // Before the local join is committed the select screen is up;
@@ -149,9 +170,27 @@ fn update_game_state_ui(
         }
         GameState::Victory { winner } => {
             *visibility = Visibility::Visible;
-            let is_winner = local_team.iter().next().is_some_and(|team| *team == winner);
-            *background = BackgroundColor(if is_winner { WIN_COLOR } else { LOSE_COLOR });
-            let result = if is_winner { "Victory!" } else { "Defeat" };
+            let local_won = local_team.iter().next().map(|team| *team == winner);
+            *background = BackgroundColor(match local_won {
+                Some(true) => WIN_COLOR,
+                Some(false) => LOSE_COLOR,
+                None => LOBBY_COLOR,
+            });
+            let result = match local_won {
+                Some(true) => "Victory!",
+                Some(false) => "Defeat",
+                None => "Match complete",
+            };
+            if career
+                .as_ref()
+                .is_some_and(|career| career.view.profile.is_some())
+            {
+                label.0 = format!(
+                    "Match complete\n{} destroyed the enemy base.\nFinalizing your match results…",
+                    winner.as_str()
+                );
+                return;
+            }
             let next_round = game_state.rematch_in_secs.map_or_else(
                 || "Preparing the next round...".to_owned(),
                 |secs| format!("Next round in {secs}s"),
@@ -330,5 +369,72 @@ mod tests {
             *app.world().get::<Visibility>(overlay).unwrap(),
             Visibility::Hidden
         );
+    }
+    #[test]
+    fn prior_result_does_not_hide_a_new_victory_and_missing_player_is_neutral() {
+        let mut app = spawn_ui_app();
+        app.world_mut().resource_mut::<ClientSession>().state = ClientConnectionState::Connected;
+        {
+            let mut state = app.world_mut().resource_mut::<GameStateSnapshot>();
+            state.state = GameState::Victory {
+                winner: Team::Green,
+            };
+            state.meta = shared::protocol::SnapshotMeta::new(9, 2, 20);
+        }
+        let mut career = crate::career::CareerClient::default();
+        career.view.last_result = Some(shared::career::MatchResult {
+            result_id: "old".into(),
+            server_epoch: 9,
+            match_id: 1,
+            started_at_ms: 0,
+            ended_at_ms: 1,
+            duration_ms: 1,
+            map_profile: "default".into(),
+            ruleset: "default".into(),
+            outcome: shared::career::MatchOutcome::Completed,
+            winner: Some(shared::map::Team::Green),
+            rated: false,
+            unrated_reason: None,
+            participants: Vec::new(),
+            saved: true,
+        });
+        app.insert_resource(career);
+        app.update();
+        let entity = overlay_entity(&mut app);
+        assert_eq!(
+            app.world().get::<Visibility>(entity),
+            Some(&Visibility::Visible)
+        );
+        assert!(
+            app.world_mut()
+                .query_filtered::<&Text, With<GameStateLabel>>()
+                .single(app.world())
+                .unwrap()
+                .0
+                .starts_with("Match complete")
+        );
+    }
+    #[test]
+    fn authoritative_queue_wait_is_visible_while_another_match_is_running() {
+        let mut app = spawn_ui_app();
+        app.world_mut().resource_mut::<ClientSession>().state = ClientConnectionState::Connected;
+        app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Running;
+        let mut career = crate::career::CareerClient::default();
+        career.view.queue = shared::career::QueueView::Waiting {
+            compatible: 3,
+            needed: 10,
+            elapsed_secs: 12,
+            newcomer: true,
+        };
+        app.insert_resource(career);
+        app.update();
+        let text = &app
+            .world_mut()
+            .query_filtered::<&Text, With<GameStateLabel>>()
+            .single(app.world())
+            .unwrap()
+            .0;
+        assert!(text.contains("3/10 compatible players"));
+        assert!(text.contains("New players"));
     }
 }

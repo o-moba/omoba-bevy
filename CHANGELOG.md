@@ -14,6 +14,32 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 - Add `make play` / `make play-bots` to build locked current sources and launch
   supervised local 3D practice with nine bots, with owned-process cleanup.
 
+## [0.19.0-rc.6] - 2026-09-14
+
+### Added
+- Server-owned match totals and persistent PostgreSQL careers: historical nicknames,
+  heroes/skins, outcome, K/D/A, damage by target category, last hits, levels,
+  progression and outcome-based rating. Atomic immutable settlement prevents double credit.
+- Device-key profile authentication and signed account operations, with explicit
+  guest/unranked compatibility when career storage is not configured.
+- Separate desktop/mobile result, history, profile and friends panels. Persistent
+  friend requests, accept/reject/cancel/remove, friend profiles and presence.
+- Licensed bundled CJK font fallback for Chinese/Japanese/Korean names, with
+  existing Latin/Cyrillic typography preserved.
+- Authenticated release queues that use saved rating and newcomer experience;
+  a durable account allocation gates match start and prevents simultaneous seats.
+- Bounded background PostgreSQL work, durable local result outbox, owner leases,
+  expired-owner recovery, and explicit play-again after viewing results.
+
+### Fixed
+- Preserve actual accepted round totals through disconnect and cosmetic event expiry.
+- Freeze the first terminal winner before further same-tick projectile/minion impacts.
+
+### Release scope
+- PostgreSQL configuration and deployment remain operator tasks. This beta has one
+  arena/queue per process; global routing, party invitations, chat, account recovery
+  UI and replays are not implemented. Device keys currently identify installations.
+
 ## [0.19.0-rc.5] - 2026-09-12
 
 ### Added

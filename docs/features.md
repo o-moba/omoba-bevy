@@ -1,8 +1,18 @@
 # Feature Inventory
 
-Canonical version: `0.19.0-rc.5`
+Canonical version: `0.19.0-rc.6`
 
 ## Current Playable Surface
+
+- **Persistent career and friends:** PostgreSQL stores immutable match results,
+  historical nicknames/loadouts, K/D/A and accepted damage totals. Device-signed
+  profiles expose history, progress, outcome-based rating and durable friendship
+  requests/actions with online/in-game presence. Desktop and phone have separate
+  dashboard layouts; the result remains available after the live round ends.
+  Authenticated release queues use saved MMR and newcomer cohorts and wait for a
+  durable allocation before starting. Guest practice remains explicitly unranked.
+  See [career setup and release limits](match-progression.md).
+
 
 - **Configurable map objects:** a validated server map profile supplies stable
   tower identities, lane positions/counts and HP/range/damage/cooldown settings.

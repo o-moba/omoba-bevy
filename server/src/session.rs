@@ -31,6 +31,8 @@ pub(crate) fn ensure_player_connected(
         let spawn = spawn_position_for_team(map_layout, Team::Green);
 
         ConnectedPlayer {
+            career_profile: None,
+            career_capable: false,
             state: PlayerState {
                 id: player_id,
                 x: spawn.x,
@@ -90,6 +92,9 @@ pub(crate) fn ensure_player_for_join(
     next_player_id: &mut u64,
     now: Instant,
 ) -> bool {
+    let career_capable = players
+        .get(&addr)
+        .is_some_and(|player| player.career_capable);
     let framed_snapshots = players
         .get(&addr)
         .is_some_and(|player| player.framed_snapshots);
@@ -127,6 +132,7 @@ pub(crate) fn ensure_player_for_join(
                 player.state.id
             );
             player.framed_snapshots = framed_snapshots;
+            player.career_capable |= career_capable;
             player.protocol_compatible = true;
             player.join_error = None;
             player.session_id = Some(session_id);
@@ -144,6 +150,7 @@ pub(crate) fn ensure_player_for_join(
                 disconnected.player.state.id
             );
             disconnected.player.framed_snapshots = framed_snapshots;
+            disconnected.player.career_capable |= career_capable;
             disconnected.player.protocol_compatible = true;
             disconnected.player.join_error = None;
             disconnected.player.session_id = Some(session_id);
@@ -243,7 +250,11 @@ pub(crate) fn handle_join_request_with_sprite(
 }
 
 /// Gameplay reset shared by fresh admission and every subsequent round.
-fn reset_player_round(player: &mut ConnectedPlayer, map_layout: &MapLayoutState, now: Instant) {
+pub(crate) fn reset_player_round(
+    player: &mut ConnectedPlayer,
+    map_layout: &MapLayoutState,
+    now: Instant,
+) {
     let spawn = spawn_position_for_team(map_layout, player.state.team);
     player.state.x = spawn.x;
     player.state.y = PLAYER_GROUND_Y;
@@ -534,6 +545,7 @@ impl ServerRuntime {
             .map(|(addr, _)| *addr)
             .collect::<Vec<_>>();
         for addr in expired {
+            self.disconnect_career_player(addr, now);
             let player = self.players.remove(&addr).unwrap();
             let disconnected_at = player.last_seen + PLAYER_TIMEOUT;
             if player.joined {
@@ -571,12 +583,15 @@ impl ServerRuntime {
                     self.match_id,
                     self.elapsed_match_ms(now)
                 );
+                self.finish_career_round(shared::career::MatchOutcome::Abandoned, None, now);
                 self.restart_round(now);
             }
         }
     }
 
     pub(crate) fn restart_round(&mut self, now: Instant) {
+        self.finish_career_round(shared::career::MatchOutcome::Abandoned, None, now);
+        self.reset_career_round();
         reset_match_with_map(
             &mut self.players,
             &mut self.structures,
@@ -619,6 +634,10 @@ impl ServerRuntime {
 
     pub(crate) fn track_round_start(&mut self, now: Instant) {
         if matches!(self.game_state, GameState::Running) && self.match_started_at.is_none() {
+            if !self.begin_career_round(now) {
+                self.game_state = GameState::Starting { countdown_ms: 0 };
+                return;
+            }
             self.match_started_at = Some(now);
             self.last_wave_spawn_at = now - (MINION_WAVE_INTERVAL - FIRST_MINION_WAVE_DELAY);
             println!(
@@ -679,6 +698,7 @@ impl ServerRuntime {
             }
         }
         if let GameState::Victory { winner } = self.game_state {
+            self.finish_career_round(shared::career::MatchOutcome::Completed, Some(winner), now);
             if self.victory_at.is_none() {
                 self.victory_at = Some(now);
                 println!(

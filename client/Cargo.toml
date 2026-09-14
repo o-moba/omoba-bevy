@@ -5,6 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+ed25519-dalek = "2.2.0"
+getrandom = "0.3.4"
 # Keep the Bevy name visible to its derive-macro crate resolver on every target.
 bevy = { version = "0.18.0", default-features = false, features = ["jpeg"] }
 crossbeam-channel.workspace = true
