@@ -1,6 +1,24 @@
 # Feature Inventory
 
-Canonical version: `0.19.0-rc.6`
+Canonical version: `0.19.0-rc.7`
+
+## Native bot practice and match communication
+
+An explicit practice server admits a solo player immediately and fills remaining
+seats with labelled server-controlled heroes. Late humans replace bots safely;
+bots use the actual navigation/combat rules. Practice retains a local scoreboard
+and gives no permanent career credit. `make practice` launches client and server;
+`make practice-server` hosts this mode without a local client.
+
+Joined participants can use team/match chat and four picture reactions. The
+server validates sender identity, scope, audience and rate limits. PC/mobile UI
+provides text entry, mute controls and a reaction wheel via long press on the
+local hero, T or a visible button. A separate opt-in social packet stream preserves
+world snapshot capacity and compatibility with older clients.
+
+Reaction IDs/access policy and image presentation are separate versioned catalogs.
+The free starter pack works now; generic NFT packs remain locked until a trusted
+ownership provider is integrated. See [setup, authoring and scope](bot-practice-and-social.md).
 
 ## Current Playable Surface
 

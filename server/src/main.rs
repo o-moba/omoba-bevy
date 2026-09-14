@@ -2,6 +2,7 @@
 
 mod balance;
 mod basic_attack;
+mod bots;
 mod career_backend;
 mod career_runtime;
 #[cfg(test)]
@@ -19,11 +20,14 @@ mod minion_path_tests;
 mod navigation_tests;
 mod neutrals;
 mod passport_admission;
+#[cfg(test)]
+mod practice_tests;
 mod progression;
 #[cfg(test)]
 mod release_tests;
 mod session;
 mod shop;
+mod social;
 mod targeting_qa;
 #[cfg(test)]
 mod terminal_result_tests;
@@ -73,6 +77,9 @@ const NETWORK_DIAGNOSTIC_INTERVAL: Duration = Duration::from_secs(1);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ClientPacket {
+    Social {
+        request: shared::social::SocialRequest,
+    },
     Career {
         request: shared::career::CareerRequest,
     },
@@ -176,6 +183,8 @@ fn default_skill_ranks() -> [u8; 4] {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PlayerState {
+    #[serde(default)]
+    is_bot: bool,
     id: u64,
     x: f32,
     y: f32,
@@ -488,12 +497,20 @@ struct ProjectileState {
 // Keep both envelopes inline to avoid an extra allocation per gameplay snapshot.
 #[allow(clippy::large_enum_variant)]
 enum ServerPacket {
+    Social {
+        server_epoch: u64,
+        match_id: u64,
+        sequence: u64,
+        social: shared::social::SocialView,
+    },
     Career {
         server_epoch: u64,
         sequence: u64,
         career: shared::career::CareerView,
     },
     Snapshot {
+        #[serde(default)]
+        match_mode: String,
         #[serde(default)]
         geometry_id: String,
         #[serde(default)]
@@ -611,6 +628,7 @@ enum GameState {
 enum MatchMode {
     Release,
     Dev,
+    Practice,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -631,9 +649,10 @@ fn parse_match_mode(raw: Option<&str>) -> MatchMode {
     {
         None | Some("") | Some("release") | Some("normal") => MatchMode::Release,
         Some("dev") | Some("debug") => MatchMode::Dev,
+        Some("practice") => MatchMode::Practice,
         Some(other) => {
             eprintln!(
-                "Unknown OMOBA_MATCH_MODE '{other}' - falling back to release (expected 'release' or 'dev')"
+                "Unknown OMOBA_MATCH_MODE '{other}' - falling back to release (expected 'release', 'dev' or 'practice')"
             );
             MatchMode::Release
         }
@@ -654,6 +673,13 @@ fn parse_team_size(raw: Option<&str>) -> u32 {
 }
 
 impl MatchConfig {
+    fn mode_id(&self) -> &'static str {
+        match self.mode {
+            MatchMode::Release => "release",
+            MatchMode::Dev => "dev",
+            MatchMode::Practice => "practice",
+        }
+    }
     fn from_env() -> Self {
         Self {
             mode: parse_match_mode(std::env::var("OMOBA_MATCH_MODE").ok().as_deref()),
@@ -745,9 +771,12 @@ fn advance_formation_on_join(
     now: Instant,
 ) {
     match config.mode {
-        MatchMode::Dev => {
+        MatchMode::Dev | MatchMode::Practice => {
             if matches!(game_state, GameState::Lobby) {
-                println!("First player joined - match starting (dev mode)");
+                println!(
+                    "First player joined - match starting ({} mode)",
+                    config.mode_id()
+                );
                 start_match_running(game_state, neutrals, now);
             }
         }
@@ -1032,6 +1061,8 @@ impl RateLimitedDiagnostic {
 
 #[derive(Resource)]
 struct ServerRuntime {
+    social: social::SocialRuntime,
+    bots: bots::BotControllers,
     career: career_runtime::CareerRuntime,
     combat_log: CombatLog,
     passport_admissions: passport_admission::PassportAdmissions,
@@ -1091,6 +1122,8 @@ impl ServerRuntime {
             .as_nanos() as u64
             | 1;
         Self {
+            bots: bots::BotControllers::default(),
+            social: social::SocialRuntime::default(),
             career: career_runtime::CareerRuntime::new(server_epoch),
             combat_log: CombatLog::default(),
             passport_admissions: passport_admission::PassportAdmissions::default(),
@@ -1179,8 +1212,19 @@ impl ServerRuntime {
     }
 
     fn handle_packet(&mut self, addr: SocketAddr, packet: ClientPacket, now: Instant) {
+        // Internal bot actor addresses never accept network commands or identity claims.
+        if bots::is_bot_address(addr) {
+            return;
+        }
         if let ClientPacket::Career { request } = packet {
             self.handle_career_request(addr, request, now);
+            for (sender, request) in self.career.backend.take_social() {
+                self.handle_social_request(sender, request, true, now);
+            }
+            return;
+        }
+        if let ClientPacket::Social { request } = packet {
+            self.handle_social_request(addr, request, false, now);
             return;
         }
         self.career.backend.touch(addr);
@@ -1261,6 +1305,9 @@ impl ServerRuntime {
             if !self.authorize_career_join(addr, &packet, now) {
                 return;
             }
+            if !self.prepare_practice_join(addr, &packet, now) {
+                return;
+            }
             if self.career_queue_enabled() {
                 self.join_career_queue(addr, packet, now);
                 return;
@@ -1289,7 +1336,9 @@ impl ServerRuntime {
             ..
         } = self;
         match packet {
-            ClientPacket::Career { .. } => unreachable!("handled before gameplay admission"),
+            ClientPacket::Career { .. } | ClientPacket::Social { .. } => {
+                unreachable!("handled before gameplay admission")
+            }
             ClientPacket::Hello { protocol_version } => {
                 ensure_player_connected(players, map_layout, addr, next_player_id, now);
                 let player = players.get_mut(&addr).unwrap();
@@ -1394,12 +1443,15 @@ impl ServerRuntime {
                 // A reclaim is already joined: retain all authoritative round state.
                 if let Some(player) = players.get_mut(&addr).filter(|player| player.joined) {
                     player.join_error = None;
+                    self.register_career_participant(addr);
+                    self.fill_practice_bots(now);
                     return;
                 }
                 // Team resolution: dev mode honors the client's
                 // choice; release mode balances teams server-side
                 // (rejoining players keep their original team).
                 let assigned_team = match match_config.mode {
+                    MatchMode::Practice => bots::assign_human_team(players, match_config.team_size),
                     MatchMode::Dev => (joined_count(players)
                         + (disconnected_sessions.len() as u32)
                         < match_config.roster_size())
@@ -1427,6 +1479,9 @@ impl ServerRuntime {
                         Some(shared::protocol::JoinRejection::MatchFull);
                     return;
                 };
+                if match_config.mode == MatchMode::Practice {
+                    bots::remove_replaced_bot(players, &mut self.bots, assigned_team);
+                }
                 if let Some(player) = players.get_mut(&addr) {
                     player.join_error = None;
                     handle_join_request_with_sprite(
@@ -1528,6 +1583,7 @@ impl ServerRuntime {
                 }
             }
         }
+        self.fill_practice_bots(now);
         self.track_round_start(now);
         self.register_career_participant(addr);
     }
@@ -1547,6 +1603,7 @@ impl ServerRuntime {
 
     fn simulate_after_mana(&mut self, now: Instant, dt: f32) {
         self.maintain_roster(now);
+        self.fill_practice_bots(now);
         // Formation's final interval belongs to the countdown, not earned income.
         let gold_dt = if matches!(self.game_state, GameState::Running) {
             dt
@@ -1570,6 +1627,7 @@ impl ServerRuntime {
             now,
         );
         self.track_round_start(now);
+        self.simulate_bots(now, dt);
         let career_flow = self.career_flow_active();
         let Self {
             socket,
@@ -1721,8 +1779,9 @@ impl ServerRuntime {
                 None
             };
 
-            for (addr, player) in &*players {
+            for (addr, player) in players.iter().filter(|(_, player)| !player.state.is_bot) {
                 let packet = ServerPacket::Snapshot {
+                    match_mode: self.match_config.mode_id().into(),
                     geometry_id: map_config.geometry_id.clone(),
                     map_profile: map_config.map_profile.clone(),
                     meta: shared::protocol::SnapshotMeta::new(
@@ -1798,6 +1857,7 @@ impl ServerRuntime {
         self.record_match_metrics(now);
         self.checkpoint_career_round(now);
         self.send_career_views(now);
+        self.send_social_views(now);
     }
 }
 
@@ -1979,6 +2039,10 @@ fn main() -> io::Result<()> {
         MatchMode::Dev => {
             println!("Match mode: dev - first join starts the match immediately (NOT for release)")
         }
+        MatchMode::Practice => println!(
+            "Match mode: practice - solo start, {}v{} with server bots; local results, no career credit",
+            match_config.team_size, match_config.team_size
+        ),
     }
 
     App::new()
@@ -3393,6 +3457,7 @@ mod tests {
 
     fn empty_snapshot() -> ServerPacket {
         ServerPacket::Snapshot {
+            match_mode: "dev".into(),
             geometry_id: shared::map::GEOMETRY_ID.to_owned(),
             map_profile: "verdant_default".to_owned(),
             meta: Default::default(),
@@ -3436,6 +3501,7 @@ mod tests {
         player.state.avatar = Some("x".repeat(IPV4_UDP_MAX_PAYLOAD_BYTES));
 
         let packet = ServerPacket::Snapshot {
+            match_mode: "dev".into(),
             geometry_id: shared::map::GEOMETRY_ID.to_owned(),
             map_profile: "verdant_default".to_owned(),
             meta: Default::default(),

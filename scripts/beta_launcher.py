@@ -37,10 +37,12 @@ def arguments(argv=None):
     join = actions.add_parser("join", help="join an existing host")
     join.add_argument("server", type=address, help="host's IPv4 address or hostname, e.g. 192.168.1.20:4000")
     join.add_argument("--profile", type=profile, default="player", help="use different names for simultaneous local players")
-    for name, help_text in (("practice", "one local human plus nine bots"),
+    for name, help_text in (("practice", "solo practice with native server bots and late human joins"),
+                            ("practice-server", "host native bot practice without a local client"),
+                            ("local-release", "legacy local release 5v5 with nine harness players"),
                             ("host", "host a release match for a known number of humans")):
         action = actions.add_parser(name, help=help_text)
-        action.add_argument("--bind", type=address, default="127.0.0.1:4000" if name == "practice" else "0.0.0.0:4000")
+        action.add_argument("--bind", type=address, default="127.0.0.1:4000" if name in ("practice", "local-release") else "0.0.0.0:4000")
         if name == "host":
             action.add_argument("--humans", type=int, choices=range(1, 11), required=True,
                                 help="expected human players; fills remaining seats to ten with bots")
@@ -64,7 +66,12 @@ def run(args, package, *, executables=None, assets=None):
     package = package.resolve()
     children, logs = [], []
     suffix = ".exe" if os.name == "nt" else ""
-    required = ("client",) if args.action == "join" else ("server", "bots", "client")
+    native_practice = args.action in ("practice", "practice-server")
+    required = {
+        "join": ("client",), "practice": ("server", "client"),
+        "practice-server": ("server",), "local-release": ("server", "bots", "client"),
+        "host": ("server", "bots"),
+    }[args.action]
     paths = ({name: package / (name + suffix) for name in required}
              if executables is None else {name: Path(path).resolve() for name, path in executables.items()})
     for binary in required:
@@ -77,11 +84,14 @@ def run(args, package, *, executables=None, assets=None):
     print(f"Session logs: {run_dir}", flush=True)
     env = dict(os.environ, OMOBA_ASSET_DIR=str(Path(assets).resolve() if assets is not None else package / "assets"),
                OMOBA_PLAYER_VISUAL_MODE="models3d", OMOBA_DEBUG_UI="0",
-               OMOBA_MATCH_MODE="release", OMOBA_TEAM_SIZE="5")
+               OMOBA_MATCH_MODE="practice" if native_practice else "release", OMOBA_TEAM_SIZE="5")
     # QA/developer switches must never silently change a tester's session.
     for key in ("OMOBA_AVATAR_MANIFEST", "OMOBA_VISUAL_QA_DIR", "OMOBA_BETA_UI_QA_DIR",
                 "OMOBA_AUTOJOIN", "OMOBA_MEASURE_MODELS"):
         env.pop(key, None)
+    for key in list(env):
+        if key.startswith("OMOBA_") and (key.endswith("_QA") or key.endswith("_QA_DIR") or key.endswith("_QA_OUTPUT")):
+            env.pop(key)
 
     def launch(name, extra=()):
         log = (run_dir / f"{name}.log").open("w")
@@ -108,16 +118,19 @@ def run(args, package, *, executables=None, assets=None):
         env["SERVER_ADDR"] = args.bind
         env["GAME_SERVER_ADDR"] = local_address
         env["OMOBA_CLIENT_CONFIG_DIR"] = str(run_dir / "player")
-        humans = 1 if args.action == "practice" else args.humans
-        print(f"Release 5v5: waiting for {humans} human(s); starting {10 - humans} bot(s).", flush=True)
+        humans = args.humans if args.action == "host" else 1
+        if native_practice:
+            print("Practice 5v5: first human starts; server bots fill open seats. Late humans may join. Local results, no ranked credit.", flush=True)
+        else:
+            print(f"Release 5v5: waiting for {humans} human(s); starting {10 - humans} harness player(s).", flush=True)
         server = launch("server")
         deadline = time.monotonic() + 15
         while "is listening" not in (run_dir / "server.log").read_text(errors="replace"):
             if server.poll() is not None or time.monotonic() > deadline:
                 raise RuntimeError(f"server did not start; see {run_dir / 'server.log'}")
             time.sleep(0.1)
-        bots = launch("bots", ("--count", str(10 - humans), "--server", local_address)) if humans < 10 else None
-        client = launch("client") if args.action == "practice" else None
+        bots = launch("bots", ("--count", str(10 - humans), "--server", local_address)) if not native_practice and humans < 10 else None
+        client = launch("client") if args.action in ("practice", "local-release") else None
         if not client:
             print(f"Host ready on {args.bind}. Testers: ./join-server.sh HOST_IP:{port}", flush=True)
             print("Leave this terminal open. Ctrl+C stops this host and its bots.", flush=True)

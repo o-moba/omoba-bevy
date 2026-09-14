@@ -15,6 +15,7 @@ client/assets/*
 !client/assets/world2d/
 !client/assets/verdant/
 !client/assets/ui/
+!client/assets/reactions/
 .claude/*
 !.claude/skills/
 .claude/skills/*
@@ -35,6 +36,7 @@ CLAUDE.md
 # docs/tasks: ignore by default; whitelist canonical markdown so deliverables stay versioned.
 docs/*
 !docs/features.md
+!docs/bot-practice-and-social.md
 !docs/playtest-script.md
 !docs/bug-report-template.md
 !docs/mvp-scope-and-limitations.md

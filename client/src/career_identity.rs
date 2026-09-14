@@ -10,9 +10,7 @@ use std::{
 use bevy::prelude::*;
 use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
-use shared::career::{
-    AuthChallenge, CareerAction, CareerRequest, authorized_signing_bytes, normalize_nickname,
-};
+use shared::career::{AuthChallenge, CareerRequest, authorized_signing_bytes, normalize_nickname};
 
 use crate::{
     career::{CareerClient, CareerUiSet, NicknameChanged},
@@ -219,6 +217,20 @@ impl CareerIdentity {
             })
     }
 
+    pub(crate) fn authenticated_for_scope(
+        &self,
+        server_addr: &str,
+        server_epoch: u64,
+        session_id: &str,
+    ) -> bool {
+        self.auth_nonce.is_some()
+            && self.scope.as_ref().is_some_and(|scope| {
+                scope.server_addr == server_addr
+                    && scope.server_epoch == server_epoch
+                    && scope.session_id == session_id
+            })
+    }
+
     pub(crate) fn prepare_request(
         &mut self,
         request: &CareerRequest,
@@ -276,47 +288,9 @@ impl CareerIdentity {
             .auth_nonce
             .as_ref()
             .ok_or("Your profile is still connecting. Try again shortly.")?;
-        let action = match request {
-            CareerRequest::History { request_id, before } => CareerAction::History {
-                request_id: *request_id,
-                before: *before,
-            },
-            CareerRequest::Detail {
-                request_id,
-                result_id,
-            } => CareerAction::Detail {
-                request_id: *request_id,
-                result_id: result_id.clone(),
-            },
-            CareerRequest::CancelQueue => CareerAction::CancelQueue,
-            CareerRequest::Friends { request_id } => CareerAction::Friends {
-                request_id: *request_id,
-            },
-            CareerRequest::Friend {
-                request_id,
-                profile_id,
-                action,
-            } => CareerAction::Friend {
-                request_id: *request_id,
-                profile_id: profile_id.clone(),
-                action: *action,
-            },
-            CareerRequest::Profile {
-                request_id,
-                profile_id,
-            } => CareerAction::Profile {
-                request_id: *request_id,
-                profile_id: profile_id.clone(),
-            },
-            CareerRequest::Rename {
-                request_id,
-                nickname,
-            } => CareerAction::Rename {
-                request_id: *request_id,
-                nickname: nickname.clone(),
-            },
-            _ => return Err("Unexpected profile request.".into()),
-        };
+        let action = request
+            .account_action()
+            .ok_or("Unexpected profile request.")?;
         self.sequence = self
             .sequence
             .checked_add(1)
@@ -609,15 +583,31 @@ mod tests {
     fn signed_actions_have_independent_monotonic_sequence_and_verify() {
         use ed25519_dalek::{Signature, Verifier};
         let mut identity = identity();
+        assert!(!identity.authenticated_for_scope("localhost:4000", 42, "session"));
         identity.auth_nonce = Some("a".repeat(64));
+        assert!(identity.authenticated_for_scope("localhost:4000", 42, "session"));
+        assert!(!identity.authenticated_for_scope("other:4000", 42, "session"));
+        assert!(!identity.authenticated_for_scope("localhost:4000", 43, "session"));
+        assert!(!identity.authenticated_for_scope("localhost:4000", 42, "other-session"));
         for sequence in 1..=2 {
+            let request = if sequence == 1 {
+                CareerRequest::Friends { request_id: 1 }
+            } else {
+                CareerRequest::Social {
+                    request: shared::social::SocialRequest {
+                        request_id: 2,
+                        server_epoch: 42,
+                        match_id: 1,
+                        session_id: "session".into(),
+                        command: shared::social::SocialCommand::Chat {
+                            channel: shared::social::SocialChannel::Team,
+                            text: "Hello".into(),
+                        },
+                    },
+                }
+            };
             let packet = identity
-                .prepare_request(
-                    &CareerRequest::Friends { request_id: 1 },
-                    "localhost:4000",
-                    42,
-                    "session",
-                )
+                .prepare_request(&request, "localhost:4000", 42, "session")
                 .unwrap();
             let CareerRequest::Authorized {
                 session_nonce,

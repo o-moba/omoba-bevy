@@ -1,0 +1,34 @@
+test_busy_host_port_fails_before_starting_children (test_beta_launcher.LauncherTests) ... Session logs: /private/var/folders/mv/hdwk4pdx15q9_rnhdnd8mfkc0000gn/T/omoba-beta-launch-test-w8mml4u2/sessions/20260914-200458-8b40b9a9
+ok
+test_host_signal_stops_owned_server_and_eight_bots (test_beta_launcher.LauncherTests) ... ok
+test_invalid_parameters_fail (test_beta_launcher.LauncherTests) ... ok
+test_join_resolves_and_uses_named_persistent_profile (test_beta_launcher.LauncherTests) ... Session logs: /private/var/folders/mv/hdwk4pdx15q9_rnhdnd8mfkc0000gn/T/omoba-beta-launch-test-2voobxg1/sessions/20260914-200458-1a43c5e5
+Joining 127.0.0.1:4000; profile tester-2. Choose a hero, then Join.
+ok
+test_legacy_local_release_still_launches_nine_harness_players (test_beta_launcher.LauncherTests) ... Session logs: /private/var/folders/mv/hdwk4pdx15q9_rnhdnd8mfkc0000gn/T/omoba-beta-launch-test-nl25o3jn/sessions/20260914-200459-c60df4b7
+Release 5v5: waiting for 1 human(s); starting 9 harness player(s).
+ok
+test_native_practice_server_needs_no_client_or_harness_and_cleans_up_on_signal (test_beta_launcher.LauncherTests) ... ok
+test_practice_isolates_qa_environment_and_only_stops_owned_children (test_beta_launcher.LauncherTests) ... Session logs: /private/var/folders/mv/hdwk4pdx15q9_rnhdnd8mfkc0000gn/T/omoba-beta-launch-test-zz3nh_lj/sessions/20260914-200501-d264cc85
+Practice 5v5: first human starts; server bots fill open seats. Late humans may join. Local results, no ranked credit.
+ok
+test_practice_uses_server_bots_without_harness_and_cleans_up_children (test_beta_launcher.LauncherTests) ... Session logs: /private/var/folders/mv/hdwk4pdx15q9_rnhdnd8mfkc0000gn/T/omoba-beta-launch-test-kimj1a02/sessions/20260914-200502-7535f07e
+Practice 5v5: first human starts; server bots fill open seats. Late humans may join. Local results, no ranked credit.
+Session logs: /private/var/folders/mv/hdwk4pdx15q9_rnhdnd8mfkc0000gn/T/omoba-beta-launch-test-kimj1a02/sessions/20260914-200503-feb01a5e
+Practice 5v5: first human starts; server bots fill open seats. Late humans may join. Local results, no ranked credit.
+ok
+test_source_binaries_and_assets_work_outside_session_directory (test_beta_launcher.LauncherTests) ... Session logs: /private/var/folders/mv/hdwk4pdx15q9_rnhdnd8mfkc0000gn/T/omoba-beta-launch-test-bjqo2o2w/sessions/20260914-200504-1009f128
+Release 5v5: waiting for 1 human(s); starting 9 harness player(s).
+ok
+test_source_play_defaults_to_legacy_and_explicit_practice_selects_native_bots (test_beta_launcher.LauncherTests) ... Building current sources with Cargo.lock (dev profile)...
+Choose a hero, then Join. Close the game or press Ctrl+C to stop the session.
+Building current sources with Cargo.lock (dev profile)...
+Choose a hero, then Join. Close the game or press Ctrl+C to stop the session.
+ok
+test_unspecified_join_is_rejected (test_beta_launcher.LauncherTests) ... Session logs: /private/var/folders/mv/hdwk4pdx15q9_rnhdnd8mfkc0000gn/T/omoba-beta-launch-test-obmp1lmy/sessions/20260914-200505-238f9f06
+ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 7.658s
+
+OK

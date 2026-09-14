@@ -500,8 +500,15 @@ fn close_pause_menu_when_disconnected(
 
 pub(crate) fn toggle_pause_menu(
     keyboard_input: Res<ButtonInput<KeyCode>>,
+    social: Option<Res<crate::social::SocialClient>>,
     mut menu_state: ResMut<PauseMenuState>,
 ) {
+    if social
+        .as_ref()
+        .is_some_and(|social| social.blocks_gameplay())
+    {
+        return;
+    }
     if keyboard_input.just_pressed(KeyCode::Escape) {
         if menu_state.open {
             menu_state.open = false;

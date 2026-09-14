@@ -1,0 +1,628 @@
+use super::*;
+
+fn runtime(size: u32) -> ServerRuntime {
+    let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    socket.set_nonblocking(true).unwrap();
+    let mut rt = ServerRuntime::new(
+        socket,
+        MatchConfig {
+            mode: MatchMode::Practice,
+            team_size: size,
+        },
+    );
+    // Enabled but never acknowledges allocation: practice must still run.
+    rt.career.backend = career_backend::CareerBackend::test_backend(rt.server_epoch);
+    rt
+}
+
+fn addr(index: u16) -> SocketAddr {
+    SocketAddr::from(([127, 0, 0, 1], 57000 + index))
+}
+fn join(session: &str) -> ClientPacket {
+    ClientPacket::Join {
+        team: Team::Green,
+        character: CharacterChoice::Cube,
+        hero_class: HeroClass::Mage,
+        avatar: None,
+        sprite_character: None,
+        session_id: Some(session.into()),
+        passport_ticket: None,
+    }
+}
+
+#[test]
+fn practice_solo_starts_with_labelled_heroes_without_database_ack_or_ranked_credit() {
+    assert_eq!(parse_match_mode(Some("practice")), MatchMode::Practice);
+    let mut rt = runtime(2);
+    let now = Instant::now();
+    rt.handle_packet(addr(1), join("solo"), now);
+    assert_eq!(rt.game_state, GameState::Running);
+    assert_eq!(joined_count(&rt.players), 4);
+    assert_eq!(joined_team_counts(&rt.players), (2, 2));
+    let snapshot = build_players_snapshot(&rt.players);
+    assert_eq!(snapshot.iter().filter(|p| p.is_bot).count(), 3);
+    let allocation = rt.career_allocation_for_test().unwrap();
+    assert_eq!(allocation.participants.len(), 4);
+    assert_eq!(
+        allocation.participants.iter().filter(|p| p.is_bot).count(),
+        3
+    );
+    assert!(!allocation.rated);
+    assert_eq!(allocation.ruleset, "practice-bots-v1");
+    assert!(!rt.career.backend.started(&allocation.result_id));
+    rt.game_state = GameState::Victory {
+        winner: Team::Green,
+    };
+    rt.record_match_metrics(now + Duration::from_secs(1));
+    let result = rt.career_view(addr(1), now).last_result.unwrap();
+    assert!(!result.saved && !result.rated);
+    assert!(
+        result
+            .participants
+            .iter()
+            .all(|p| p.rating.is_none() && p.progression_xp_gained == 0)
+    );
+    rt.handle_packet(
+        addr(1),
+        ClientPacket::RequestRematch,
+        now + Duration::from_secs(2),
+    );
+    assert_eq!(rt.game_state, GameState::Running);
+    assert_eq!(rt.match_id, 2);
+}
+
+#[test]
+fn bot_models_are_distinct_bundled_free_avatars_with_unchanged_sprite_assignments() {
+    let mut rt = runtime(5);
+    let now = Instant::now();
+    rt.handle_packet(addr(1), join("visible-bots"), now);
+    let mut slugs = HashSet::new();
+    for player in rt.players.values().filter(|p| p.state.is_bot) {
+        let slug = player
+            .state
+            .avatar
+            .as_deref()
+            .expect("practice bots have a real roster model");
+        assert_eq!(shared::normalize_avatar_slug(Some(slug)), Some(slug));
+        let avatar = shared::avatar_definition(slug).unwrap();
+        assert!(avatar.passport.is_none() && !slug.starts_with("ekza-"));
+        assert_eq!(avatar.license, "CC0");
+        assert_eq!(
+            player.state.sprite_character.as_deref(),
+            Some(shared::normalize_sprite_character_id(None))
+        );
+        slugs.insert(slug.to_owned());
+    }
+    assert_eq!(
+        slugs.len(),
+        8,
+        "the nine bots use two appearances per class"
+    );
+    for slug in slugs {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../client/assets/avatars")
+            .join(format!("{slug}.glb"));
+        assert!(
+            path.is_file(),
+            "bot model is not bundled: {}",
+            path.display()
+        );
+        let packet = ClientPacket::Join {
+            team: Team::Green,
+            character: CharacterChoice::Cube,
+            hero_class: HeroClass::Mage,
+            avatar: Some(slug),
+            sprite_character: None,
+            session_id: Some("free-bot-check".into()),
+            passport_ticket: None,
+        };
+        assert!(matches!(
+            rt.passport_admissions.begin(addr(90), &packet),
+            passport_admission::Admission::Free
+        ));
+    }
+}
+
+#[test]
+fn late_human_replaces_bot_at_safe_spawn_without_inheriting_stats_or_identity() {
+    let mut rt = runtime(1);
+    let now = Instant::now();
+    rt.handle_packet(addr(1), join("first"), now);
+    let bot_addr = *rt.players.iter().find(|(_, p)| p.state.is_bot).unwrap().0;
+    let bot_id = rt.players[&bot_addr].state.id;
+    rt.players.get_mut(&bot_addr).unwrap().state.hp = 17.0;
+    let event = CombatEvent {
+        source: CombatEntity {
+            kind: CombatEntityKind::Player,
+            id: bot_id,
+        },
+        target: CombatEntity {
+            kind: CombatEntityKind::Player,
+            id: rt.players[&addr(1)].state.id,
+        },
+        amount: 9.0,
+        ..Default::default()
+    };
+    rt.combat_log.extend(now, [event]);
+    rt.handle_packet(addr(2), join("second"), now + Duration::from_millis(20));
+    let human = &rt.players[&addr(2)].state;
+    let spawn = spawn_position_for_team(&rt.map_layout, Team::Blue);
+    assert!(!human.is_bot && human.id != bot_id);
+    assert_eq!(human.team, Team::Blue);
+    assert_eq!(
+        (human.x, human.z, human.hp, human.level),
+        (spawn.x, spawn.z, MAX_HP, STARTING_LEVEL)
+    );
+    assert_eq!(joined_count(&rt.players), 2);
+    let roster = rt.combat_log.ledger.snapshot();
+    assert_eq!(
+        roster
+            .iter()
+            .find(|p| p.player_id == bot_id)
+            .unwrap()
+            .stats
+            .damage_to_heroes,
+        9.0
+    );
+    assert_eq!(
+        roster
+            .iter()
+            .find(|p| p.player_id == human.id)
+            .unwrap()
+            .stats
+            .damage_to_heroes,
+        0.0
+    );
+    rt.handle_packet(addr(3), join("third"), now + Duration::from_millis(30));
+    assert_eq!(
+        rt.players[&addr(3)].join_error,
+        Some(shared::protocol::JoinRejection::MatchFull)
+    );
+    assert!(!rt.players[&addr(3)].joined);
+}
+
+#[test]
+fn disconnect_replacement_and_reconnect_keep_human_state_without_oversubscribing() {
+    let mut rt = runtime(1);
+    let now = Instant::now();
+    rt.handle_packet(addr(1), join("anchor"), now);
+    rt.handle_packet(addr(2), join("reconnect"), now);
+    let original_id = rt.players[&addr(2)].state.id;
+    rt.players.get_mut(&addr(2)).unwrap().state.hp = 63.0;
+    let later = now + PLAYER_TIMEOUT + Duration::from_millis(1);
+    rt.players.get_mut(&addr(1)).unwrap().last_seen = later;
+    rt.maintain_roster(later);
+    rt.fill_practice_bots(later);
+    assert_eq!(rt.players.values().filter(|p| p.state.is_bot).count(), 1);
+    rt.handle_packet(addr(3), join("reconnect"), later + Duration::from_millis(1));
+    assert_eq!(
+        (rt.players[&addr(3)].state.id, rt.players[&addr(3)].state.hp),
+        (original_id, 63.0)
+    );
+    assert_eq!(joined_count(&rt.players), 2);
+    assert!(rt.players.values().all(|p| !p.state.is_bot));
+    let expired = later + PLAYER_TIMEOUT + Duration::from_secs(1);
+    rt.maintain_roster(expired);
+    rt.maintain_roster(expired + EMPTY_ROSTER_GRACE);
+    assert_eq!(rt.game_state, GameState::Lobby);
+    assert!(rt.players.values().all(|p| !p.state.is_bot));
+}
+
+#[test]
+fn practice_turnover_rolls_round_before_lifetime_roster_overflow() {
+    let mut rt = runtime(1);
+    let mut now = Instant::now();
+    rt.handle_packet(addr(1), join("anchor"), now);
+    let anchor_id = rt.players[&addr(1)].state.id;
+    for index in 2..42 {
+        rt.handle_packet(addr(index), join(&format!("turnover-{index}")), now);
+        assert!(
+            rt.players[&addr(index)].joined,
+            "late tester was blocked at turnover {index}"
+        );
+        assert!(rt.combat_log.ledger.snapshot().len() <= shared::career::MAX_PARTICIPANTS);
+        now += PLAYER_TIMEOUT + Duration::from_millis(1);
+        rt.players.get_mut(&addr(1)).unwrap().last_seen = now;
+        rt.maintain_roster(now);
+        rt.fill_practice_bots(now);
+        assert_eq!(joined_count(&rt.players), 2);
+        assert_eq!(rt.players[&addr(1)].state.id, anchor_id);
+    }
+    assert!(rt.match_id > 1);
+    assert_eq!(rt.game_state, GameState::Running);
+    assert!(rt.career_view(addr(1), now).last_result.is_some());
+}
+
+#[test]
+fn maximum_practice_roster_rollover_reserves_identity_for_the_incoming_human() {
+    let mut rt = runtime(16);
+    let now = Instant::now();
+    rt.handle_packet(addr(1), join("large-anchor"), now);
+    assert_eq!(rt.combat_log.ledger.snapshot().len(), 32);
+    rt.handle_packet(addr(2), join("large-late"), now + Duration::from_millis(1));
+    assert!(rt.players[&addr(2)].joined);
+    assert_eq!(rt.match_id, 2);
+    let roster = rt.combat_log.ledger.snapshot();
+    assert_eq!(roster.len(), 32);
+    assert_eq!(roster.iter().filter(|p| !p.is_bot).count(), 2);
+    assert!(
+        roster
+            .iter()
+            .any(|p| p.player_id == rt.players[&addr(2)].state.id)
+    );
+}
+
+#[test]
+fn practice_protects_signed_identity_without_allocating_and_marks_late_guest_auth() {
+    let mut rt = runtime(1);
+    let now = Instant::now();
+    let profile = shared::career::ProfileSummary::new("1".repeat(64), "Original identity".into());
+    rt.career
+        .backend
+        .test_authenticated(addr(1), profile.clone(), "signed-practice");
+    rt.handle_packet(addr(1), join("signed-practice"), now);
+    assert!(rt.career.backend.test_is_playing(addr(1)));
+    let allocation = rt.career_allocation_for_test().unwrap();
+    assert!(!rt.career.backend.started(&allocation.result_id));
+    rt.handle_packet(
+        addr(1),
+        ClientPacket::Career {
+            request: shared::career::CareerRequest::Challenge {
+                public_key: "2".repeat(64),
+                nickname: "Replacement".into(),
+                session_id: "signed-practice".into(),
+            },
+        },
+        now,
+    );
+    assert_eq!(rt.career.backend.profile(addr(1)), Some(profile.clone()));
+    assert_eq!(rt.players[&addr(1)].career_profile, Some(profile));
+    rt.handle_packet(addr(2), join("late-guest-auth"), now);
+    assert!(
+        !rt.career.backend.test_is_playing(addr(2)),
+        "no account client yet"
+    );
+    rt.handle_packet(
+        addr(2),
+        ClientPacket::Career {
+            request: shared::career::CareerRequest::Challenge {
+                public_key: "3".repeat(64),
+                nickname: "Guest signing in".into(),
+                session_id: "late-guest-auth".into(),
+            },
+        },
+        now,
+    );
+    assert!(
+        rt.career.backend.view(addr(2)).challenge.is_some(),
+        "first authentication remains available"
+    );
+    assert!(
+        rt.career.backend.test_is_playing(addr(2)),
+        "new account client inherits the actor's admission guard before async login"
+    );
+    assert_eq!(rt.game_state, GameState::Running);
+}
+
+#[test]
+fn bots_attack_cast_take_real_damage_and_respawn_using_normal_timers() {
+    let mut rt = runtime(1);
+    let mut now = Instant::now();
+    rt.handle_packet(addr(1), join("target"), now);
+    let bot_addr = *rt.players.iter().find(|(_, p)| p.state.is_bot).unwrap().0;
+    rt.structures.clear();
+    rt.minions.clear();
+    let bot_id = rt.players[&bot_addr].state.id;
+    for (address, x) in [(addr(1), -8.0), (bot_addr, -4.0)] {
+        let p = rt.players.get_mut(&address).unwrap();
+        p.state.x = x;
+        p.state.z = -8.0;
+        p.state.hero_class = HeroClass::Mage;
+    }
+    now += Duration::from_millis(100);
+    rt.simulate_bots(now, 0.1);
+    assert_eq!(
+        rt.players[&addr(1)].state.hp,
+        MAX_HP,
+        "damage waits for actual projectile travel"
+    );
+    assert!(rt.players[&bot_addr].state.mana < MAX_MANA);
+    assert_eq!(rt.projectiles.len(), 2, "ordinary basic plus Q");
+    assert!(
+        rt.projectiles
+            .values()
+            .all(|p| p.state.owner_id == bot_id && p.state.source_kind == CombatEntityKind::Player)
+    );
+    let shots = rt.next_projectile_id;
+    rt.simulate_bots(now + Duration::from_millis(10), 0.01);
+    assert_eq!(
+        rt.next_projectile_id, shots,
+        "normal cooldown prevents a second strike"
+    );
+    let receipts = simulate_projectiles(
+        &mut rt.players,
+        &mut rt.minions,
+        &mut rt.structures,
+        &mut rt.neutrals,
+        &mut rt.team_buffs,
+        &mut rt.projectiles,
+        &mut rt.game_state,
+        0.5,
+        now + Duration::from_millis(500),
+    );
+    rt.combat_log.extend(now, receipts);
+    assert!(rt.players[&addr(1)].state.hp < MAX_HP);
+    assert!(
+        rt.combat_log
+            .ledger
+            .snapshot()
+            .iter()
+            .find(|p| p.player_id == bot_id)
+            .unwrap()
+            .stats
+            .damage_to_heroes
+            > 0.0
+    );
+    apply_player_damage(&mut rt.players, bot_id, 999.0, now);
+    assert_eq!(rt.players[&bot_addr].state.hp, 0.0);
+    rt.simulate_bots(now + Duration::from_secs(1), 0.1);
+    assert_eq!(rt.players[&bot_addr].state.hp, 0.0);
+    handle_respawns(
+        &mut rt.players,
+        &rt.structures,
+        &rt.map_layout,
+        &rt.game_state,
+        now + RESPAWN_DELAY,
+    );
+    let spawn = spawn_position_for_team(&rt.map_layout, Team::Blue);
+    assert_eq!(
+        (
+            rt.players[&bot_addr].state.x,
+            rt.players[&bot_addr].state.z,
+            rt.players[&bot_addr].state.hp
+        ),
+        (spawn.x, spawn.z, MAX_HP)
+    );
+}
+
+#[test]
+fn bot_controller_routes_around_real_forest_and_rejects_remote_control() {
+    let mut rt = runtime(1);
+    let mut now = Instant::now();
+    rt.handle_packet(addr(1), join("forest-target"), now);
+    let bot_addr = *rt.players.iter().find(|(_, p)| p.state.is_bot).unwrap().0;
+    let nav = shared::navigation::world_navigation();
+    let (from, to) = nav
+        .obstacles()
+        .iter()
+        .filter(|o| o.kind == "tree_trunk")
+        .find_map(|o| {
+            let center = o
+                .vertices
+                .iter()
+                .fold([0.0, 0.0], |a, p| [a[0] + p[0], a[1] + p[1]])
+                .map(|p| p / o.vertices.len() as f32);
+            let from = [center[0] - 4.0, center[1]];
+            let to = [center[0] + 4.0, center[1]];
+            (nav.point_clear(from)
+                && nav.point_clear(to)
+                && !nav.segment_clear(from, to)
+                && nav.plan_route(from, to, &[]).is_some())
+            .then_some((from, to))
+        })
+        .unwrap();
+    rt.structures.clear();
+    for (address, point) in [(bot_addr, from), (addr(1), to)] {
+        let p = rt.players.get_mut(&address).unwrap();
+        p.state.x = point[0];
+        p.state.z = point[1];
+    }
+    rt.handle_packet(bot_addr, ClientPacket::SetGodMode { enabled: true }, now);
+    assert!(!rt.players[&bot_addr].god_mode);
+    rt.handle_packet(
+        bot_addr,
+        ClientPacket::Transform {
+            x: to[0],
+            y: PLAYER_GROUND_Y,
+            z: to[1],
+            yaw: 0.0,
+        },
+        now,
+    );
+    assert_eq!(
+        [rt.players[&bot_addr].state.x, rt.players[&bot_addr].state.z],
+        from
+    );
+    let mut travelled = 0.0;
+    for _ in 0..150 {
+        let before = [rt.players[&bot_addr].state.x, rt.players[&bot_addr].state.z];
+        now += Duration::from_millis(100);
+        rt.simulate_bots(now, 0.1);
+        let after = [rt.players[&bot_addr].state.x, rt.players[&bot_addr].state.z];
+        assert!(
+            nav.segment_clear(before, after),
+            "bot crossed forest collision"
+        );
+        let distance = (after[0] - before[0]).hypot(after[1] - before[1]);
+        assert!(distance <= PLAYER_SPEED * 0.1 + 0.001);
+        travelled += distance;
+        if (after[0] - to[0]).hypot(after[1] - to[1])
+            <= shared::basic_attack_for_class(rt.players[&bot_addr].state.hero_class).range
+                + PLAYER_HIT_RADIUS
+        {
+            break;
+        }
+    }
+    let bot = &rt.players[&bot_addr].state;
+    assert!(travelled > 1.0);
+    assert!(
+        (bot.x - to[0]).hypot(bot.z - to[1])
+            <= shared::basic_attack_for_class(bot.hero_class).range + PLAYER_HIT_RADIUS + 0.1
+    );
+}
+
+#[test]
+fn bot_pushes_a_real_lane_and_damages_towers_without_crossing_live_structure_discs() {
+    let mut rt = runtime(1);
+    let mut now = Instant::now();
+    rt.handle_packet(addr(1), join("lane-observer"), now);
+    let bot_addr = *rt.players.iter().find(|(_, p)| p.state.is_bot).unwrap().0;
+    let nav = shared::navigation::world_navigation();
+    let mut damaged_tower = false;
+    let mut moved = 0.0;
+    for _ in 0..900 {
+        let before = rt.players[&bot_addr].state.clone();
+        let discs: Vec<_> = rt
+            .structures
+            .values()
+            .filter(|s| s.state.hp > 0.0)
+            .map(|s| shared::navigation::Disc {
+                center: [s.state.x, s.state.z],
+                radius: structure_radius(s.state.kind),
+            })
+            .collect();
+        now += Duration::from_millis(100);
+        rt.players.get_mut(&addr(1)).unwrap().last_seen = now;
+        rt.simulate_after_mana(now, 0.1);
+        let after = &rt.players[&bot_addr].state;
+        // Respawn is the ordinary explicit teleport, not a movement segment.
+        if before.hp > 0.0 && after.hp > 0.0 {
+            assert!(
+                nav.segment_clear_with_discs([before.x, before.z], [after.x, after.z], &discs),
+                "bot crossed a live tower or forest"
+            );
+            moved += (after.x - before.x).hypot(after.z - before.z);
+        }
+        let stats = rt.combat_log.ledger.snapshot();
+        if stats
+            .iter()
+            .any(|p| p.is_bot && p.stats.damage_to_structures > 0.0)
+        {
+            damaged_tower = true;
+            break;
+        }
+    }
+    assert!(moved > 10.0, "bot should leave its base and push the lane");
+    assert!(
+        damaged_tower,
+        "normal bot attacks must actually reach a lane tower"
+    );
+}
+
+#[test]
+fn release_and_development_never_create_bots() {
+    for config in [MatchConfig::release(1), MatchConfig::dev()] {
+        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        socket.set_nonblocking(true).unwrap();
+        let mut rt = ServerRuntime::new(socket, config);
+        let now = Instant::now();
+        rt.handle_packet(addr(1), join("human-only"), now);
+        rt.fill_practice_bots(now);
+        assert!(rt.players.values().all(|p| !p.state.is_bot));
+    }
+}
+
+fn send_udp(client: &UdpSocket, rt: &mut ServerRuntime, packet: ClientPacket) {
+    client
+        .send_to(
+            &serde_json::to_vec(&packet).unwrap(),
+            rt.socket.local_addr().unwrap(),
+        )
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut buffer = [0_u8; 4096];
+    loop {
+        match rt.socket.peek_from(&mut buffer) {
+            Ok((_, sender)) => {
+                assert_eq!(sender, client.local_addr().unwrap());
+                rt.receive_packets();
+                return;
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                assert!(Instant::now() < deadline, "UDP delivery timed out");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            Err(error) => panic!("UDP receive readiness failed: {error}"),
+        }
+    }
+}
+
+fn read_snapshot(client: &UdpSocket, rt: &mut ServerRuntime) -> ServerPacket {
+    client
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let mut assembler = shared::transport::SnapshotAssembler::default();
+    let now = Instant::now();
+    rt.last_snapshot_at = now - SNAPSHOT_INTERVAL;
+    rt.simulate_after_mana(now, 0.0);
+    let mut buffer = [0_u8; 65_536];
+    loop {
+        let (size, _) = client.recv_from(&mut buffer).unwrap();
+        assert!(size <= shared::transport::MAX_DATAGRAM_BYTES);
+        if let Some(bytes) = assembler.push(&buffer[..size], Instant::now()).unwrap() {
+            let packet: ServerPacket = serde_json::from_slice(&bytes).unwrap();
+            if matches!(packet, ServerPacket::Snapshot { .. }) {
+                return packet;
+            }
+        }
+    }
+}
+
+#[test]
+fn live_udp_practice_solo_and_running_late_join_publish_real_bot_replacement() {
+    let mut rt = runtime(1);
+    let first = UdpSocket::bind("127.0.0.1:0").unwrap();
+    send_udp(
+        &first,
+        &mut rt,
+        ClientPacket::Hello {
+            protocol_version: shared::protocol::PROTOCOL_VERSION,
+        },
+    );
+    send_udp(&first, &mut rt, join("udp-practice-first"));
+    let ServerPacket::Snapshot {
+        match_mode,
+        meta,
+        game_state,
+        players,
+        your_id,
+        ..
+    } = read_snapshot(&first, &mut rt)
+    else {
+        unreachable!()
+    };
+    assert_eq!(match_mode, "practice");
+    assert_eq!(game_state, GameState::Running);
+    assert_eq!(players.len(), 2);
+    assert_eq!(players.iter().filter(|p| p.is_bot).count(), 1);
+    assert!(!players.iter().find(|p| p.id == your_id).unwrap().is_bot);
+    let old_bot = players.iter().find(|p| p.is_bot).unwrap().id;
+    let second = UdpSocket::bind("127.0.0.1:0").unwrap();
+    send_udp(
+        &second,
+        &mut rt,
+        ClientPacket::Hello {
+            protocol_version: shared::protocol::PROTOCOL_VERSION,
+        },
+    );
+    send_udp(&second, &mut rt, join("udp-practice-second"));
+    let ServerPacket::Snapshot {
+        meta: late_meta,
+        game_state,
+        players,
+        your_id: second_id,
+        ..
+    } = read_snapshot(&second, &mut rt)
+    else {
+        unreachable!()
+    };
+    assert_eq!(meta.match_id, late_meta.match_id);
+    assert_eq!(game_state, GameState::Running);
+    assert_eq!(players.len(), 2);
+    assert!(players.iter().all(|p| !p.is_bot && p.id != old_bot));
+    assert_ne!(your_id, second_id);
+    assert!(players.iter().any(|p| p.id == your_id));
+    println!(
+        "LIVE_UDP_PRACTICE solo_running=true bots=1 late_join_same_round=true bot_identity_replaced=true humans=2"
+    );
+}

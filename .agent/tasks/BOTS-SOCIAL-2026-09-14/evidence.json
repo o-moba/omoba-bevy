@@ -1,0 +1,188 @@
+{
+  "task_id": "BOTS-SOCIAL-2026-09-14",
+  "base_commit": "88722154f702fe725fbde803f8ebef424e327279",
+  "version": "0.19.0-rc.7",
+  "date": "2026-09-14",
+  "status": "PASS",
+  "criteria": {
+    "AC1": {
+      "status": "PASS",
+      "evidence": [
+        "server/src/practice_tests.rs",
+        "raw/workspace-tests-final.log",
+        "raw/final-changed-packages.log"
+      ]
+    },
+    "AC2": {
+      "status": "PASS",
+      "evidence": [
+        "server/src/bots.rs",
+        "server/src/practice_tests.rs",
+        "raw/final-changed-packages.log",
+        "raw/launcher-tests-final.log"
+      ]
+    },
+    "AC3": {
+      "status": "PASS",
+      "evidence": [
+        "server/src/social/tests.rs",
+        "server/src/career_backend.rs",
+        "raw/workspace-tests-final.log",
+        "raw/postgres-tests-final.log"
+      ]
+    },
+    "AC4": {
+      "status": "PASS",
+      "evidence": [
+        "client/src/social.rs",
+        "client/src/social_qa.rs",
+        "raw/client-tests-final-317.log",
+        "raw/native-qa-run.log"
+      ]
+    },
+    "AC5": {
+      "status": "PASS",
+      "evidence": [
+        "shared/src/social.rs",
+        "client/src/reaction_visuals.rs",
+        "client/assets/reactions/PROVENANCE.md",
+        "raw/final-changed-packages.log"
+      ]
+    },
+    "AC6": {
+      "status": "PASS",
+      "evidence": [
+        "raw/clippy-final.log",
+        "raw/fmt-final.log",
+        "raw/diff-check-final.log",
+        "raw/native-qa-run.log",
+        "sha256.json"
+      ]
+    }
+  },
+  "checks": [
+    {
+      "log": "raw/workspace-tests-final.log",
+      "status": "PASS",
+      "passed": 599,
+      "failed": 0,
+      "ignored": 14
+    },
+    {
+      "log": "raw/final-changed-packages.log",
+      "status": "PASS",
+      "passed": 546,
+      "failed": 0,
+      "ignored": 14
+    },
+    {
+      "log": "raw/client-tests-final-317.log",
+      "status": "PASS",
+      "passed": 317,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "log": "raw/postgres-tests-final.log",
+      "status": "PASS",
+      "passed": 14,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "log": "raw/launcher-tests-final.log",
+      "status": "PASS",
+      "passed": 11
+    },
+    {
+      "log": "raw/clippy-final.log",
+      "status": "PASS"
+    },
+    {
+      "log": "raw/fmt-final.log",
+      "status": "PASS"
+    },
+    {
+      "log": "raw/diff-check-final.log",
+      "status": "PASS",
+      "command": "git diff --cached --check -- . ':(exclude).agent/tasks/BOTS-SOCIAL-2026-09-14/raw/**'"
+    },
+    {
+      "log": "raw/native-build-final.log",
+      "status": "PASS"
+    }
+  ],
+  "native_captures": [
+    {
+      "mode": "desktop-3d",
+      "status": "PASS",
+      "receipt": "raw/desktop-3d/qa-summary.json",
+      "files": [
+        "raw/desktop-3d/01-chat.png",
+        "raw/desktop-3d/02-reaction-wheel.png",
+        "raw/desktop-3d/03-confirmed-reaction.png"
+      ],
+      "resolution": [
+        1280,
+        720
+      ],
+      "visually_reviewed": true,
+      "real_udp_server": true,
+      "scripted_input": true,
+      "fixture": false,
+      "physical_phone_verified": false,
+      "manual_input_verified": false
+    },
+    {
+      "mode": "phone-3d",
+      "status": "PASS",
+      "receipt": "raw/phone-3d/qa-summary.json",
+      "files": [
+        "raw/phone-3d/01-chat.png",
+        "raw/phone-3d/02-reaction-wheel.png",
+        "raw/phone-3d/03-confirmed-reaction.png"
+      ],
+      "resolution": [
+        844,
+        390
+      ],
+      "visually_reviewed": true,
+      "real_udp_server": true,
+      "scripted_input": true,
+      "fixture": false,
+      "physical_phone_verified": false,
+      "manual_input_verified": false
+    },
+    {
+      "mode": "phone-2d",
+      "status": "PASS",
+      "receipt": "raw/phone-2d/qa-summary.json",
+      "files": [
+        "raw/phone-2d/01-chat.png",
+        "raw/phone-2d/02-reaction-wheel.png",
+        "raw/phone-2d/03-confirmed-reaction.png"
+      ],
+      "resolution": [
+        844,
+        390
+      ],
+      "visually_reviewed": true,
+      "real_udp_server": true,
+      "scripted_input": true,
+      "fixture": false,
+      "physical_phone_verified": false,
+      "manual_input_verified": false
+    }
+  ],
+  "source_state": "Uncommitted changes based on base_commit; exact reviewed content recorded in sha256.json and the enclosing Git commit.",
+  "verification_scope": "Full workspace regression followed by changed-package and focused client reruns. Final BOT label Z layer verified by current native build, strict Clippy and nine captures.",
+  "limitations": [
+    "One Practice arena per server process; capacity bounded.",
+    "Practice results are local only; no durable history, XP or MMR, including with PostgreSQL.",
+    "Runtime reaction entitlements enable only the free pack. No live generic NFT ownership adapter or marketplace.",
+    "Phone-sized native previews and scripted input; no physical Android/iOS or manual gesture acceptance.",
+    "No production deployment or global-load test. UDP transport is unencrypted."
+  ],
+  "cleanup": "Task PostgreSQL stopped; native QA runner owns and stops its clients/servers; runtime database and account config excluded from Git.",
+  "inventory": "sha256.json"
+}

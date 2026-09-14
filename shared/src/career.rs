@@ -52,9 +52,16 @@ pub struct RatingChange {
     pub delta: i32,
 }
 
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ParticipantResult {
     pub player_id: u64,
+    // Preserve rc6 JSON receipts exactly when this additive human default is absent.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub is_bot: bool,
     pub profile_id: Option<String>,
     pub nickname: String,
     pub team: Team,
@@ -222,6 +229,9 @@ pub struct FriendsView {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum CareerAction {
+    Social {
+        request: crate::social::SocialRequest,
+    },
     History {
         request_id: u64,
         before: Option<u64>,
@@ -269,6 +279,9 @@ pub fn authorized_signing_bytes(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum CareerRequest {
+    Social {
+        request: crate::social::SocialRequest,
+    },
     Challenge {
         public_key: String,
         nickname: String,
@@ -318,6 +331,9 @@ pub enum CareerRequest {
 impl CareerRequest {
     pub fn account_action(&self) -> Option<CareerAction> {
         Some(match self {
+            Self::Social { request } => CareerAction::Social {
+                request: request.clone(),
+            },
             Self::History { request_id, before } => CareerAction::History {
                 request_id: *request_id,
                 before: *before,
@@ -386,6 +402,70 @@ pub struct CareerView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn social_account_action_signs_the_complete_match_scoped_request() {
+        use crate::social::{SocialCommand, SocialRequest};
+        let social = SocialRequest {
+            request_id: 10,
+            server_epoch: 20,
+            match_id: 30,
+            session_id: "session".into(),
+            command: SocialCommand::Reaction {
+                reaction_id: "heart".into(),
+            },
+        };
+        let request = CareerRequest::Social {
+            request: social.clone(),
+        };
+        let decoded: CareerRequest =
+            serde_json::from_slice(&serde_json::to_vec(&request).unwrap()).unwrap();
+        let action = decoded.account_action().unwrap();
+        assert_eq!(
+            action,
+            CareerAction::Social {
+                request: social.clone()
+            }
+        );
+        let original = authorized_signing_bytes(20, "nonce", 1, &action);
+        let mut changed = social;
+        changed.match_id += 1;
+        assert_ne!(
+            original,
+            authorized_signing_bytes(20, "nonce", 1, &CareerAction::Social { request: changed })
+        );
+    }
+
+    #[test]
+    fn older_participant_receipts_default_to_human() {
+        let original = serde_json::json!({
+            "player_id": 1, "profile_id": null, "nickname": "Guest", "team": "green",
+            "hero_class": "mage", "character": "ipfs", "avatar": null,
+            "sprite_character": null, "stats": serde_json::to_value(MatchStats::default()).unwrap(), "disconnected": false,
+            "rating": null, "progression_xp_gained": 0
+        });
+        let participant: ParticipantResult = serde_json::from_value(original.clone()).unwrap();
+        assert!(!participant.is_bot);
+        assert_eq!(serde_json::to_value(&participant).unwrap(), original);
+
+        let old_result = serde_json::json!({
+            "result_id": "rc6-receipt", "server_epoch": 1, "match_id": 2,
+            "started_at_ms": 1000, "ended_at_ms": 2000, "duration_ms": 1000,
+            "map_profile": "verdant_default", "ruleset": "verdant-default-v1",
+            "outcome": "completed", "winner": "green", "rated": false,
+            "unrated_reason": "dev", "participants": [original], "saved": false
+        });
+        let result: MatchResult = serde_json::from_value(old_result.clone()).unwrap();
+        assert_eq!(serde_json::to_value(result).unwrap(), old_result);
+
+        let mut bot = participant;
+        bot.is_bot = true;
+        assert_eq!(serde_json::to_value(&bot).unwrap()["is_bot"], true);
+        assert!(
+            serde_json::from_slice::<ParticipantResult>(&serde_json::to_vec(&bot).unwrap())
+                .unwrap()
+                .is_bot
+        );
+    }
     #[test]
     fn query_ids_round_trip_and_legacy_fields_default() {
         let legacy: CareerRequest =

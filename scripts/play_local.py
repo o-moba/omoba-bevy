@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build current locked sources and play a local 3D match with nine bots."""
+"""Build locked sources for native bot practice or the legacy release bot session."""
 import argparse
 from pathlib import Path
 import signal
@@ -16,8 +16,10 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bind", type=beta_launcher.address, default="127.0.0.1:4000",
                         help="local server address (default: 127.0.0.1:4000)")
-    parser.set_defaults(action="practice")
+    parser.add_argument("--mode", choices=("release", "practice"), default="release",
+                        help="release uses nine external harness players; practice uses server bots")
     args = parser.parse_args(argv)
+    args.action = "practice" if args.mode == "practice" else "local-release"
 
     def interrupted(_number, _frame):
         raise KeyboardInterrupt

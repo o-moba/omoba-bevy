@@ -164,8 +164,13 @@ fn toggle_help_overlay(
     game: Res<GameStateSnapshot>,
     mut visible: ResMut<HelpOverlayVisible>,
     career: Option<Res<crate::career::CareerClient>>,
+    social: Option<Res<crate::social::SocialClient>>,
 ) {
-    if career.as_ref().is_some_and(|career| career.modal_open()) {
+    if social
+        .as_ref()
+        .is_some_and(|social| social.blocks_gameplay())
+        || career.as_ref().is_some_and(|career| career.modal_open())
+    {
         return;
     }
     if visible.0

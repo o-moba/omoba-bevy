@@ -1,0 +1,412 @@
+{
+  "schema_version": 1,
+  "algorithm": "sha256",
+  "scope": "Changed source/assets/docs and selected task evidence. This inventory file excludes itself.",
+  "files": [
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/evidence.json",
+      "sha256": "933627566ee27605fb9b7c230d3f3cd68fcabad862438ce6fd4a4aa4ceb722b1",
+      "bytes": 5220
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/evidence.md",
+      "sha256": "3cf26a28dcc3036022aa15ac3c232a07bd766c61a3ad6e0b765a47895a4fb5f9",
+      "bytes": 7446
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/problems.md",
+      "sha256": "78ad9407aba90e242601e51ca0fd242f777a3955356830e7dfde03802aa47fc1",
+      "bytes": 5033
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/client-tests-final-317.log",
+      "sha256": "df8559fdb05585246948f282d9130d69be3070aeb155a51a7ff24bf830cd4233",
+      "bytes": 28959
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/clippy-final.log",
+      "sha256": "bf85f20227adabf588e51e9eea32fa6eb332797c15b37c5191ba7155e6deaea8",
+      "bytes": 158
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/desktop-3d/01-chat.png",
+      "sha256": "71cdeae0e28cbd624c99852095f2d5de0c91b99eb342245601fe3288e8f3fc72",
+      "bytes": 386801
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/desktop-3d/02-reaction-wheel.png",
+      "sha256": "382ec6dad8c3ec42e0cb66c5c7a3ba4074c8441c4095b0aa7ed1a1fac2ca5aa3",
+      "bytes": 882898
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/desktop-3d/03-confirmed-reaction.png",
+      "sha256": "48758868a867aef30c344cf4923bdd52e8b183f01b5cb049c7e39e430fb63376",
+      "bytes": 880860
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/desktop-3d/client.log",
+      "sha256": "1ca75943bfd651f4ca52650652aaff1a9824d8d5d5315da59fd0df774ac350c8",
+      "bytes": 251
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/desktop-3d/qa-summary.json",
+      "sha256": "f06c123543dc884f2903b87b886ac972fbad82e7e2b754097d03fc4f97d28c59",
+      "bytes": 14552
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/desktop-3d/server.log",
+      "sha256": "e8bc00e1118ac389b17277f0c87a60a7a45a7a4d4879f76bdf8a1e385ff7c8ef",
+      "bytes": 3244
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/diff-check-final.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/final-changed-packages.log",
+      "sha256": "e397454a162457774a240e7d5c39f613cff35cdb3be3f77ee6c226dc74c041f8",
+      "bytes": 52977
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/fmt-final.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/launcher-tests-final.log",
+      "sha256": "90c319d1019f6fad3126e68d00eaf7ecdf5224d5ebac74e2973d92ee7bf21afb",
+      "bytes": 3123
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/native-build-final.log",
+      "sha256": "757843b6812bc4291c9b6390ca5d688953fb25f0e7b7f1cd8ca6831eb4e4c205",
+      "bytes": 149
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/native-qa-run.log",
+      "sha256": "b81ae60182b2ee7ea679a7378403b54f3c42661bae8f57a6cc2f120dd8eb0582",
+      "bytes": 256
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/phone-2d/01-chat.png",
+      "sha256": "d963f27c76b8393f5c05857a3ef99553b587f488dbe3f834c3eb6a128333d16d",
+      "bytes": 212465
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/phone-2d/02-reaction-wheel.png",
+      "sha256": "22e64b45b679c34e7432b212c9d7e146222d9a42f608d11a5ead051d666a69db",
+      "bytes": 586768
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/phone-2d/03-confirmed-reaction.png",
+      "sha256": "5f3b459264aeb1ff53b18bbb0de4012ec10f7596391ef00feb31084239920968",
+      "bytes": 578474
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/phone-2d/client.log",
+      "sha256": "1b5ec9b261993e5027d8d49f6f1ebf31c0755e79042b2fec30dce8b4ae72f22f",
+      "bytes": 251
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/phone-2d/qa-summary.json",
+      "sha256": "069e33c4c775fcfaffd622adc85ece3d11bb38f18ef9c0414494421d805b9c5f",
+      "bytes": 15485
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/phone-2d/server.log",
+      "sha256": "1e13b6ec0e313a6030747601ee5fa587980167deba0fac7e4f1a25ccc36cb9e5",
+      "bytes": 3244
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/phone-3d/01-chat.png",
+      "sha256": "bedc0ddd966f934987c788b446954ba15ddffb6e7418897bde2fcd6c9da1cfdf",
+      "bytes": 89122
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/phone-3d/02-reaction-wheel.png",
+      "sha256": "10c3fa6552e248a1950496b86376f36099aa040670626923594ad0a2a704821b",
+      "bytes": 340222
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/phone-3d/03-confirmed-reaction.png",
+      "sha256": "e172a4a83d0a69193feccc98357f1d2cb85b42c03c8173c06dfbdd6210ab4e12",
+      "bytes": 342747
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/phone-3d/client.log",
+      "sha256": "6dd4c11c3a15aa958b28866bef056bbf3f3408a9d46f8ff7edfea67f76ec9b51",
+      "bytes": 251
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/phone-3d/qa-summary.json",
+      "sha256": "3dfcb0d2820c6e645e0608668cd76341ef7278fd659a2b370c7b9df75bd96c75",
+      "bytes": 15472
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/phone-3d/server.log",
+      "sha256": "5c762dfaf33f50b7c19f16eeff6f5cf2aab4b5d03e03c8db05fc15e1106013f7",
+      "bytes": 3244
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/postgres-tests-final.log",
+      "sha256": "06604c1fe97e4b6518041824174b317d64b88437e4dcface27e2314438393679",
+      "bytes": 1955
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/raw/workspace-tests-final.log",
+      "sha256": "4da95b91481b45584ef94d8c39235410e574e8e019db2ceb13afcba49ec03d1e",
+      "bytes": 62074
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/run_native_qa.py",
+      "sha256": "4ced1b4bb933a3998a98a880e33de6111842aa77421345bbb31d03ec9a093d19",
+      "bytes": 3939
+    },
+    {
+      "path": ".agent/tasks/BOTS-SOCIAL-2026-09-14/spec.md",
+      "sha256": "eea05dd21dade175bb8a0701bf654b75fa36df509664ecc809a0b4b02f134364",
+      "bytes": 3132
+    },
+    {
+      "path": ".gitignore",
+      "sha256": "b5866960134cf7884aa37645701e2f783dcc331851fe4ad210e610e326283367",
+      "bytes": 2335
+    },
+    {
+      "path": "ATTRIBUTION.md",
+      "sha256": "105324c0914fc084ddde9181be28dbd4199debb99d42fbe431fa5d666ab74d44",
+      "bytes": 5353
+    },
+    {
+      "path": "CHANGELOG.md",
+      "sha256": "557dae03fd6f48a9861e423a9a454a0f43eb63373e1db877979643193b4f8442",
+      "bytes": 59262
+    },
+    {
+      "path": "Cargo.lock",
+      "sha256": "7bd05251a702c7a65a2648d27daeaecc235b5ad33e0818ca85d357098bf5b14a",
+      "bytes": 181859
+    },
+    {
+      "path": "Cargo.toml",
+      "sha256": "aaef5d988206f4c1f4e1ed29c128b564dfd232686f43db4425f6dc23ed105f6d",
+      "bytes": 840
+    },
+    {
+      "path": "Makefile",
+      "sha256": "09e191989654b29ec3b05e09d9d81b60f802557993a5b824206d164dcd6c11d8",
+      "bytes": 4708
+    },
+    {
+      "path": "README.md",
+      "sha256": "bb194a66a613f69989e33e2d6d6d7e1d67feb5bcbd1a36782c0037ee0621951a",
+      "bytes": 8868
+    },
+    {
+      "path": "client/assets/reactions/LICENSE.md",
+      "sha256": "03a2718e46ffd4118d9a1a44f896a80eebcc4d649467edf68e02adef4691cd5d",
+      "bytes": 583
+    },
+    {
+      "path": "client/assets/reactions/PROVENANCE.md",
+      "sha256": "c5864f004c392620b23c140187b6e57ef0700f7799776934a31c0248ebcb073a",
+      "bytes": 1551
+    },
+    {
+      "path": "client/assets/reactions/base-atlas.png",
+      "sha256": "19d270254ffa25af837818e9f4bf6a6de3731ec4468b7fe818770085094acf17",
+      "bytes": 1136741
+    },
+    {
+      "path": "client/assets/reactions/manifest.json",
+      "sha256": "c07d14352a39d3019ae85b132a08a04f0a0f9fdae8cdf2b05c35b0b939471df3",
+      "bytes": 641
+    },
+    {
+      "path": "client/src/career.rs",
+      "sha256": "cd754a696379b9671ba8bab88510e60b8f3c26b7eb16cdef09cb4e4b8544c187",
+      "bytes": 96923
+    },
+    {
+      "path": "client/src/career_identity.rs",
+      "sha256": "089f5a8c56eac9560768bbd018167ec875a8a6ec2894cecf5056b1a19f739c5a",
+      "bytes": 24925
+    },
+    {
+      "path": "client/src/career_visual_qa.rs",
+      "sha256": "60ef76c090d95ff378a7f3fd5b47f76edf741f69d037e9102457014279cb1cd3",
+      "bytes": 17009
+    },
+    {
+      "path": "client/src/help_overlay.rs",
+      "sha256": "e021ee2b5f4b5bcc5e7a678aca7babe4fb30b1d092e1b5fde2b1b90f660f3e76",
+      "bytes": 11694
+    },
+    {
+      "path": "client/src/input_context.rs",
+      "sha256": "478919727f9f6f9c2552da4d3042768fb2d67151231624cb9d44437127f4fdf2",
+      "bytes": 9416
+    },
+    {
+      "path": "client/src/lib.rs",
+      "sha256": "c5253335aad80b5ba5ab21e38ca9fd18cabb6832b1d788aa91c79c3e2b515924",
+      "bytes": 4006
+    },
+    {
+      "path": "client/src/mobile_controls.rs",
+      "sha256": "0cd26bf741e12217d7391f8e28d3474d3d54cf73ac50d433f7ebd7b04fd0fefd",
+      "bytes": 54955
+    },
+    {
+      "path": "client/src/net.rs",
+      "sha256": "6e0e41e7c2be6704130e3b6fc847863bb38ec95f6637e53db8ea64541db563b4",
+      "bytes": 163381
+    },
+    {
+      "path": "client/src/pause_menu.rs",
+      "sha256": "b84df75013104063eff1566c0e48453d8ba7978c901220dd940779f3d88b9a20",
+      "bytes": 46947
+    },
+    {
+      "path": "client/src/reaction_visuals.rs",
+      "sha256": "de0562b360b0c0418e976874d9578ca66b1774eb65c510cb7c0a3af8478df7fd",
+      "bytes": 7436
+    },
+    {
+      "path": "client/src/shop.rs",
+      "sha256": "590653e9f6b830965032c2de909abdd3dcea65c9744fbba8ca4eb23d314540ab",
+      "bytes": 42455
+    },
+    {
+      "path": "client/src/social.rs",
+      "sha256": "11fe319aa7fa065cd286e8cc1be1fa25ae0d8873e43f7963ac8e4ea35de0422d",
+      "bytes": 61640
+    },
+    {
+      "path": "client/src/social_qa.rs",
+      "sha256": "4d80a7b384c27f994ac36dd9f0affbfb16a42f6dcb43b8351a47bd97a9d1fabf",
+      "bytes": 24366
+    },
+    {
+      "path": "docs/bot-practice-and-social.md",
+      "sha256": "59949bd2e6de790a64d96d460965b15e1dc752f18e9cc622dd14e9415bd0d6d6",
+      "bytes": 11082
+    },
+    {
+      "path": "docs/features.md",
+      "sha256": "3483efd2ab89366a83694e00d0f03aad35b667cda1b17bfff0a02e16e01a70f3",
+      "bytes": 33009
+    },
+    {
+      "path": "docs/match-progression.md",
+      "sha256": "6e5e552ec7a4687a56bc8a07b4f84f72ffa968fe6cd04b0151cc2aad00c2f5b1",
+      "bytes": 9148
+    },
+    {
+      "path": "docs/progress/2026-09-14-bots-and-social.md",
+      "sha256": "2c9272edf9e12ff8a8412e4ec8d83a2ec6e46693d414de2f0e923cff3f02d36d",
+      "bytes": 3386
+    },
+    {
+      "path": "scripts/beta_launcher.py",
+      "sha256": "c37b71a490ba4c86f4065de337d9455ddde489c4aae3f49994c53004455660bc",
+      "bytes": 8043
+    },
+    {
+      "path": "scripts/play_local.py",
+      "sha256": "59ad89afa17d3ac4647c5d92e5f5a38430f1942646c3e39c7944d4386d6d5e08",
+      "bytes": 1650
+    },
+    {
+      "path": "scripts/test_beta_launcher.py",
+      "sha256": "1c840a95b0d72a321eb0d816a4113470e31e440e59f2f87c768956c5f5e6d85e",
+      "bytes": 9349
+    },
+    {
+      "path": "server/src/bots.rs",
+      "sha256": "e0ff3af8ce56ae87866c151c203ddbb445edaae2aac99398d0bd8401e1387c21",
+      "bytes": 20209
+    },
+    {
+      "path": "server/src/career_backend.rs",
+      "sha256": "0b8f38869b9eb4539b280f943e91960cfc3ba7b4fbc0eca8500e0b981a8b519e",
+      "bytes": 53814
+    },
+    {
+      "path": "server/src/career_backend_resilience_tests.rs",
+      "sha256": "5d0f12f527164909c6d7c73816380a699e394403f8f22351bb01f31852447b92",
+      "bytes": 10788
+    },
+    {
+      "path": "server/src/career_runtime.rs",
+      "sha256": "ff0e2a58514ab61afb1c8492dd30bfd00551b3efdfcca7514bf9b01d34f17da7",
+      "bytes": 36534
+    },
+    {
+      "path": "server/src/career_store.rs",
+      "sha256": "a2bb77d11b4c39b12abd28f8771cf03c6796337929504d6aa569ae8a59f399d5",
+      "bytes": 44805
+    },
+    {
+      "path": "server/src/career_store_tests.rs",
+      "sha256": "ea1634e99010b855c8cda3cf83858ee6d49bb78991395e5e1e4800c248711a6b",
+      "bytes": 31009
+    },
+    {
+      "path": "server/src/combat_feedback/tests.rs",
+      "sha256": "84d7e7d7dd57f89b4ef0d7d473d71479ddf524b4b1104acf1e278705637f4fe0",
+      "bytes": 18412
+    },
+    {
+      "path": "server/src/main.rs",
+      "sha256": "bd152071a63d14ed37a23f0998844f9b9ab3952d9c2bc014bda25814c8b8c0be",
+      "bytes": 211276
+    },
+    {
+      "path": "server/src/match_stats.rs",
+      "sha256": "70c554473b2955855f2317c3bfb66d7ab32f81974ad72027b0529c29e3092c82",
+      "bytes": 25223
+    },
+    {
+      "path": "server/src/practice_tests.rs",
+      "sha256": "8665b36dcaee76c6f2cb8842cd68a27280a91948975e819ad67533f0de47ab5d",
+      "bytes": 22128
+    },
+    {
+      "path": "server/src/session.rs",
+      "sha256": "b6323ebb3498d5997ba44cbb91e4e0e98fa681ba21c00c7a11ea8655d9989e92",
+      "bytes": 25186
+    },
+    {
+      "path": "server/src/social/tests.rs",
+      "sha256": "adb693349f376e011dd0a1f59f96a12aac7765443b376b345acc7c83a6c255e1",
+      "bytes": 13247
+    },
+    {
+      "path": "server/src/social.rs",
+      "sha256": "dc6ee83b380083600a0aca3ee7c3bb1684c2730d4d176aee165ee21a49b11fee",
+      "bytes": 11861
+    },
+    {
+      "path": "shared/assets/reactions.json",
+      "sha256": "a3ce8a8a7a05af8119495a6b343017faa52572df80600d5d0de02e09a3552294",
+      "bytes": 522
+    },
+    {
+      "path": "shared/src/career.rs",
+      "sha256": "84d2ab9b017240aef9b074a09a86d95f4600b18c700c1891cdad4f5efb709dfe",
+      "bytes": 15699
+    },
+    {
+      "path": "shared/src/lib.rs",
+      "sha256": "28f66b4140d9d8c2a8b357f6351b850bbdabe818a3cebcffebcc765065ceac07",
+      "bytes": 36012
+    },
+    {
+      "path": "shared/src/social.rs",
+      "sha256": "3297efa6aeee9c6db0b39002733ff48a093210ead20a6e0e45e0f90ed41cb7f5",
+      "bytes": 22334
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "packs": [
+    {"id": "base", "label": "Base reactions", "access": {"kind": "free"}},
+    {"id": "ekza_future", "label": "Future Ekza NFT packs (unavailable)", "access": {"kind": "nft", "provider": "ekza_passport"}}
+  ],
+  "reactions": [
+    {"id": "thumbs_up", "label": "Thumbs up", "pack_id": "base"},
+    {"id": "thumbs_down", "label": "Thumbs down", "pack_id": "base"},
+    {"id": "heart", "label": "Heart", "pack_id": "base"},
+    {"id": "laugh", "label": "Laugh", "pack_id": "base"}
+  ]
+}

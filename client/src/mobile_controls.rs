@@ -144,6 +144,13 @@ impl Default for MobileControls {
 }
 
 impl MobileControls {
+    pub(crate) fn owns_control_point(&self, point: Vec2) -> bool {
+        self.hit_control(point).is_some()
+    }
+    pub(crate) fn has_active_gesture(&self) -> bool {
+        !self.captures.is_empty()
+    }
+
     pub fn scale(&self) -> f32 {
         (self.viewport.y / 390.0).clamp(0.85, 1.25)
     }

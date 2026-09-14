@@ -19,8 +19,9 @@ from the Friends panel; nicknames are Unicode and need not be unique. Lists are
 bounded to 64 relationships per account. Presence expires after 30 seconds when
 refreshes stop. Lists refresh on opening or Refresh; no push chat is implied.
 
-Friendship and presence are the social scope of this release. Party invitations,
-coordinated group matchmaking, chat and voice are future work. Friends do not
+Since `0.19.0-rc.7`, [match/team chat, reactions and bot practice](bot-practice-and-social.md)
+are also available. Practice receipts stay local and give no permanent career credit.
+Party invitations, coordinated group matchmaking and voice are future work. Friends do not
 bypass roster capacity, account reservations or matchmaking rules.
 
 ## Running a career-enabled beta

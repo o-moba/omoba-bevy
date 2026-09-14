@@ -1,0 +1,6 @@
+Running desktop-3d on 127.0.0.1:40517
+PASS desktop-3d: 3 real server-confirmed captures
+Running phone-3d on 127.0.0.1:40518
+PASS phone-3d: 3 real server-confirmed captures
+Running phone-2d on 127.0.0.1:40519
+PASS phone-2d: 3 real server-confirmed captures

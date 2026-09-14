@@ -13,6 +13,7 @@ pub mod map;
 pub mod navigation;
 pub mod protocol;
 pub mod shop;
+pub mod social;
 pub mod transport;
 
 /// Resolve packaged assets before the development checkout. Launchers can

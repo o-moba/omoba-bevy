@@ -1,4 +1,4 @@
-.PHONY: server server-dev game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay
+.PHONY: server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay
 
 # ---------------------------------------------------------------------------
 # Match modes (TASK-22)
@@ -10,7 +10,10 @@
 #                       match immediately and the client-chosen team is
 #                       honored. Never ship this mode.
 #
-# Env vars: OMOBA_MATCH_MODE=release|dev, OMOBA_TEAM_SIZE=<players per team,
+#   practice          - solo start; server bots fill vacant seats and late
+#                       humans replace them. Local results, no ranked credit.
+#
+# Env vars: OMOBA_MATCH_MODE=release|dev|practice, OMOBA_TEAM_SIZE=<players per team,
 # default 5>, SERVER_ADDR (server bind), GAME_SERVER_ADDR (client target),
 # OMOBA_AUTOJOIN=<class>:<avatar|->:<team> (client joins without UI).
 # ---------------------------------------------------------------------------
@@ -25,6 +28,15 @@ server:
 # Run the game server in DEV match mode (first join starts the match immediately).
 server-dev:
 	OMOBA_MATCH_MODE=dev cargo run -p server
+
+# Native bot practice: build current sources, supervise this server and client.
+# No external harness bots; closing the client stops only this session's server.
+practice:
+	python3 scripts/play_local.py --mode practice --bind "$(LOCAL_SERVER_ADDR)"
+
+# Server-only practice, suitable for late joining testers. Ctrl+C stops this host.
+practice-server:
+	SERVER_ADDR="$(LOCAL_SERVER_ADDR)" OMOBA_MATCH_MODE=practice cargo run -p server --locked
 
 # Run a single game client (env: GAME_SERVER_ADDR, default 127.0.0.1:4000)
 game:

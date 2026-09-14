@@ -40,8 +40,11 @@ mod player;
 mod presentation2d;
 mod presentation3d;
 mod projectile_visuals;
+mod reaction_visuals;
 mod session_config;
 mod shop;
+mod social;
+mod social_qa;
 mod sprite;
 mod targeting;
 mod targeting_qa;
@@ -138,6 +141,11 @@ pub fn main() {
         combat_visuals::CombatVisualsPlugin,
         projectile_visuals::ProjectileVisualsPlugin,
         combat_feedback::CombatFeedbackPlugin,
+    ))
+    .add_plugins((
+        social::SocialPlugin,
+        reaction_visuals::ReactionVisualsPlugin,
+        social_qa::SocialQaPlugin,
     ))
     .add_plugins(career::CareerPlugin)
     .add_plugins(career_identity::CareerIdentityPlugin)

@@ -398,6 +398,10 @@ fn ground_networked_entities(
 pub enum NetworkCommand {
     /// Profile/history requests are valid before arena admission as well.
     Career(shared::career::CareerRequest),
+    Social {
+        request_id: u64,
+        command: shared::social::SocialCommand,
+    },
     BasicAttack {
         target: TargetId,
     },
@@ -437,6 +441,9 @@ pub enum NetworkCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ClientPacket {
+    Social {
+        request: shared::social::SocialRequest,
+    },
     Career {
         request: shared::career::CareerRequest,
     },
@@ -512,6 +519,8 @@ pub struct TargetId {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PlayerState {
     id: u64,
+    #[serde(default)]
+    is_bot: bool,
     x: f32,
     y: f32,
     z: f32,
@@ -742,6 +751,12 @@ struct NeutralState {
 // Keep the protocol's explicit flat fields; a lint alone does not warrant a wire DTO refactor.
 #[allow(clippy::large_enum_variant)]
 enum ServerPacket {
+    Social {
+        server_epoch: u64,
+        match_id: u64,
+        sequence: u64,
+        social: shared::social::SocialView,
+    },
     Career {
         server_epoch: u64,
         sequence: u64,
@@ -754,6 +769,8 @@ enum ServerPacket {
         geometry_id: String,
         #[serde(default)]
         map_profile: String,
+        #[serde(default)]
+        match_mode: String,
         #[serde(default)]
         join_error: Option<JoinRejection>,
         your_id: u64,
@@ -801,6 +818,7 @@ pub enum GameState {
 
 #[derive(Resource, Default, Clone)]
 pub struct GameStateSnapshot {
+    pub match_mode: String,
     pub geometry_id: String,
     pub map_profile: String,
     pub meta: SnapshotMeta,
@@ -840,6 +858,7 @@ struct PendingServerSnapshotFrame {
 }
 
 struct PendingSnapshotData {
+    match_mode: String,
     geometry_id: String,
     map_profile: String,
     meta: SnapshotMeta,
@@ -866,6 +885,9 @@ pub struct RemotePlayer;
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkPlayerId(pub u64);
+
+#[derive(Component, Clone, Copy, Debug)]
+pub(crate) struct NetworkBot(pub bool);
 
 /// Latest server strike deadline and replay acknowledgment. Reconcile local
 /// feedback from snapshots; skill cooldown mirrors remain independent.
@@ -1436,6 +1458,17 @@ fn mirror_debug_flags_to_network_state(
     }
 }
 
+fn social_requires_signature(
+    mode: &str,
+    storage_enabled: bool,
+    profile_or_nonce: bool,
+    authenticated_identity: bool,
+) -> bool {
+    profile_or_nonce
+        || authenticated_identity
+        || (storage_enabled && !matches!(mode, "practice" | "dev"))
+}
+
 fn send_network_commands(
     mut command_events: MessageReader<NetworkCommand>,
     channels: Option<Res<NetworkChannels>>,
@@ -1446,6 +1479,7 @@ fn send_network_commands(
     mut basic_sequence: Local<u64>,
     mut career_identity: Option<ResMut<crate::career_identity::CareerIdentity>>,
     mut career_client: Option<ResMut<crate::career::CareerClient>>,
+    mut social_client: Option<ResMut<crate::social::SocialClient>>,
 ) {
     let Some(channels) = channels else {
         return;
@@ -1453,6 +1487,72 @@ fn send_network_commands(
 
     for command in command_events.read() {
         match command {
+            NetworkCommand::Social {
+                request_id,
+                command,
+            } => {
+                let error = if !client_session.join_confirmed() {
+                    Some("Join a match before sending a message.".to_owned())
+                } else if let Some(snapshot) = snapshot.as_ref() {
+                    let request = shared::social::SocialRequest {
+                        request_id: *request_id,
+                        server_epoch: snapshot.meta.server_epoch,
+                        match_id: snapshot.meta.match_id,
+                        session_id: client_session_id.0.clone(),
+                        command: command.clone(),
+                    };
+                    let identity_established = career_identity.as_ref().is_some_and(|identity| {
+                        identity.authenticated_for_scope(
+                            &client_session.server_addr_display,
+                            snapshot.meta.server_epoch,
+                            &client_session_id.0,
+                        )
+                    });
+                    let (storage_enabled, profile_or_nonce) =
+                        career_client.as_ref().map_or((false, false), |career| {
+                            (
+                                career.view.storage_enabled,
+                                career.view.profile.is_some() || career.view.auth_nonce.is_some(),
+                            )
+                        });
+                    let packet = if social_requires_signature(
+                        &snapshot.match_mode,
+                        storage_enabled,
+                        profile_or_nonce,
+                        identity_established,
+                    ) {
+                        career_identity
+                            .as_mut()
+                            .ok_or_else(|| "Your profile is not connected.".to_owned())
+                            .and_then(|identity| {
+                                identity.prepare_request(
+                                    &shared::career::CareerRequest::Social { request },
+                                    &client_session.server_addr_display,
+                                    snapshot.meta.server_epoch,
+                                    &client_session_id.0,
+                                )
+                            })
+                            .map(|request| ClientPacket::Career { request })
+                    } else {
+                        Ok(ClientPacket::Social { request })
+                    };
+                    match packet {
+                        Ok(packet) => channels
+                            .outgoing
+                            .send(packet)
+                            .err()
+                            .map(|_| "Connection lost.".to_owned()),
+                        Err(error) => Some(error),
+                    }
+                } else {
+                    Some("The match is not ready.".to_owned())
+                };
+                if let Some(error) = error
+                    && let Some(social) = social_client.as_mut()
+                {
+                    social.request_failed(*request_id, error);
+                }
+            }
             NetworkCommand::Career(request) => {
                 let Some(identity) = career_identity.as_mut() else {
                     continue;
@@ -1665,6 +1765,7 @@ fn ingest_server_snapshot_packets(
     mut incoming_dead: ResMut<NetIncomingDisconnected>,
     team_selection: Res<TeamSelection>,
     mut career_client: Option<ResMut<crate::career::CareerClient>>,
+    mut social_client: Option<ResMut<crate::social::SocialClient>>,
 ) {
     pending.frame = None;
     let Some(channels) = channels.as_ref() else {
@@ -1686,6 +1787,16 @@ fn ingest_server_snapshot_packets(
                 break;
             }
             Ok(packet) => match packet {
+                ServerPacket::Social {
+                    server_epoch,
+                    match_id,
+                    sequence,
+                    social,
+                } => {
+                    if let Some(client) = social_client.as_mut() {
+                        client.apply_view(server_epoch, match_id, sequence, social);
+                    }
+                }
                 ServerPacket::Career {
                     server_epoch,
                     sequence,
@@ -1715,6 +1826,7 @@ fn ingest_server_snapshot_packets(
                 ServerPacket::Snapshot {
                     geometry_id,
                     map_profile,
+                    match_mode,
                     meta,
                     join_error,
                     your_id,
@@ -1742,6 +1854,9 @@ fn ingest_server_snapshot_packets(
                     if !client_session.snapshot_order.accept(meta) {
                         continue;
                     }
+                    if let Some(social) = social_client.as_mut() {
+                        social.bind(meta.server_epoch, meta.match_id);
+                    }
                     if client_session.career_server_epoch != meta.server_epoch {
                         client_session.career_server_epoch = meta.server_epoch;
                         client_session.career_packet_sequence = 0;
@@ -1760,6 +1875,7 @@ fn ingest_server_snapshot_packets(
                         client_session.join_exhausted = false;
                     }
                     latest_snapshot = Some(PendingSnapshotData {
+                        match_mode,
                         geometry_id,
                         map_profile,
                         meta,
@@ -1824,6 +1940,7 @@ fn apply_server_snapshot(
         return;
     };
     let PendingSnapshotData {
+        match_mode,
         geometry_id,
         map_profile,
         meta,
@@ -1848,6 +1965,7 @@ fn apply_server_snapshot(
     client_session.last_qualifying_snapshot_wall = Some(snapshot_wall_time);
 
     network_state.local_id = Some(your_id);
+    game_state_snapshot.match_mode = match_mode;
     game_state_snapshot.geometry_id = geometry_id;
     game_state_snapshot.map_profile = map_profile;
     game_state_snapshot.meta = meta;
@@ -2090,6 +2208,7 @@ fn apply_server_snapshot(
             }
             commands.entity(entity).insert((
                 NetworkPlayerId(player.id),
+                NetworkBot(player.is_bot),
                 player.team,
                 NetworkCharacterChoice(player.character),
                 NetworkAvatar(player.avatar.clone()),
@@ -2141,6 +2260,7 @@ fn apply_server_snapshot(
             Name::new(format!("RemotePlayer-{}", player.id)),
         ));
         entity_commands.insert((
+            NetworkBot(player.is_bot),
             player_state_to_equipment(player),
             PlayerBasicAttackCooldown::from(player),
         ));
@@ -2812,6 +2932,7 @@ fn update_session_lifecycle(
     visual_mode: Res<PlayerVisualMode>,
     sprite_assets: Res<SpriteVisualAssets>,
     mut career: Option<ResMut<crate::career::CareerClient>>,
+    mut social: Option<ResMut<crate::social::SocialClient>>,
 ) {
     let TeardownQueries {
         overlay_query,
@@ -2832,6 +2953,11 @@ fn update_session_lifecycle(
                 let Some(address) = crate::persistence::validate_game_server_addr(raw) else {
                     continue;
                 };
+                if address != client_session.server_addr_display
+                    && let Some(social) = social.as_mut()
+                {
+                    social.clear();
+                }
                 if address != client_session.server_addr_display
                     && let Some(career) = career.as_mut()
                 {
@@ -4328,5 +4454,47 @@ mod udp_connection_tests {
         let error = connect_resolved_udp_server(candidates).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
         assert_eq!(attempted.get(), MAX_RESOLVED_SERVER_ADDRESSES);
+    }
+    #[test]
+    fn social_packet_roundtrip_preserves_match_binding_and_remains_distinct_from_snapshot() {
+        use super::{ClientPacket, ServerPacket, decode_server_packet};
+        let packet = ServerPacket::Social {
+            server_epoch: 12,
+            match_id: 3,
+            sequence: 7,
+            social: shared::social::SocialView::default(),
+        };
+        let bytes = serde_json::to_vec(&packet).unwrap();
+        assert!(matches!(
+            decode_server_packet(&bytes).unwrap(),
+            ServerPacket::Social {
+                server_epoch: 12,
+                match_id: 3,
+                sequence: 7,
+                ..
+            }
+        ));
+        let request = shared::social::SocialRequest {
+            request_id: 1,
+            server_epoch: 12,
+            match_id: 3,
+            session_id: "session".into(),
+            command: shared::social::SocialCommand::Subscribe,
+        };
+        let json = serde_json::to_value(ClientPacket::Social { request }).unwrap();
+        assert_eq!(json["type"], "social");
+        assert_eq!(json["request"]["command"]["kind"], "subscribe");
+    }
+    #[test]
+    fn social_guest_routing_preserves_practice_during_profile_outage_and_fails_closed_for_accounts()
+    {
+        use super::social_requires_signature as signed;
+        assert!(!signed("practice", true, false, false));
+        assert!(!signed("dev", true, false, false));
+        assert!(signed("practice", true, true, false));
+        assert!(signed("practice", false, false, true));
+        assert!(signed("release", true, false, false));
+        assert!(!signed("release", false, false, false));
+        assert!(signed("", true, false, false));
     }
 }

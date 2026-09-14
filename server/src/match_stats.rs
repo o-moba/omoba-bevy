@@ -246,6 +246,7 @@ mod tests {
 
     fn participant(id: u64, team: Team) -> ParticipantResult {
         ParticipantResult {
+            is_bot: false,
             player_id: id,
             profile_id: Some(format!("{id:064x}")),
             nickname: format!("Hero {id}"),

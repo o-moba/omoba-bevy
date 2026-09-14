@@ -18,7 +18,11 @@ package includes `practice.sh`, `host.sh --humans N` and
 [match readiness record](docs/progress/2026-09-07-beta-readiness.md) for measured
 checks and remaining coverage. The commands below are development workflows.
 
-Version `0.19.0-rc.6` adds saved post-match statistics, player profiles, match
+Version `0.19.0-rc.7` adds native bot practice, match/team chat and picture reactions.
+Use `make practice` for solo testing with server bots or `make practice-server` to
+host that mode. See [controls, customization and beta limits](docs/bot-practice-and-social.md).
+
+Version `0.19.0-rc.6` introduced saved post-match statistics, player profiles, match
 history and friend requests with online/in-game presence. Career-enabled servers
 use PostgreSQL; see the [career setup and beta limits](docs/match-progression.md)
 and [verification record](docs/progress/2026-09-14-career-and-friends.md).

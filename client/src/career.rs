@@ -514,7 +514,14 @@ fn actions(
     mut requests: MessageWriter<NetworkCommand>,
     mut changed: MessageWriter<NicknameChanged>,
     mut server_entry: Option<ResMut<crate::mobile_ui::ServerEntry>>,
+    social: Option<Res<crate::social::SocialClient>>,
 ) {
+    if social
+        .as_ref()
+        .is_some_and(|social| social.blocks_gameplay())
+    {
+        return;
+    }
     career.expire_request(Instant::now());
     for (interaction, action) in &buttons {
         if *interaction != Interaction::Pressed {
@@ -626,7 +633,7 @@ fn append_friend_code(current: &mut String, text: &str) -> Result<(), &'static s
 }
 /// Invoked only by an explicit native paste shortcut. Phone keyboard paste is
 /// received as an IME commit; no clipboard polling or extra backend dependency.
-fn clipboard_text() -> Result<String, &'static str> {
+pub(crate) fn clipboard_text() -> Result<String, &'static str> {
     #[cfg(target_os = "macos")]
     let output = std::process::Command::new("/usr/bin/pbpaste").output();
     #[cfg(target_os = "windows")]
@@ -1040,7 +1047,17 @@ fn desktop_team(
                         ..column_node()
                     })
                     .with_children(|p| {
-                        label(p, &player.nickname, 16.0, ui::IVORY, "CareerPlayerNickname");
+                        label(
+                            p,
+                            if player.is_bot {
+                                format!("{} · BOT", player.nickname)
+                            } else {
+                                player.nickname.clone()
+                            },
+                            16.0,
+                            ui::IVORY,
+                            "CareerPlayerNickname",
+                        );
                         label(p, hero_name(player), 12.0, ui::MUTED, "CareerPlayerHero");
                     });
                 });
@@ -1145,7 +1162,17 @@ fn mobile_team(
                         ..column_node()
                     })
                     .with_children(|p| {
-                        label(p, &player.nickname, 16.0, ui::IVORY, "CareerPlayerNickname");
+                        label(
+                            p,
+                            if player.is_bot {
+                                format!("{} · BOT", player.nickname)
+                            } else {
+                                player.nickname.clone()
+                            },
+                            16.0,
+                            ui::IVORY,
+                            "CareerPlayerNickname",
+                        );
                         label(p, hero_name(player), 12.0, ui::MUTED, "CareerPlayerHero");
                     });
                     button(
@@ -1230,7 +1257,7 @@ fn result_body(
             },
             if result.saved {
                 "Result saved"
-            } else if career.view.storage_enabled {
+            } else if result.ruleset != "practice-bots-v1" && career.view.storage_enabled {
                 "Saving result…"
             } else {
                 "Local practice result · not saved"
@@ -2074,6 +2101,7 @@ mod tests {
             rated: false,
             unrated_reason: Some("Practice match".into()),
             participants: vec![ParticipantResult {
+                is_bot: false,
                 player_id: 7,
                 profile_id: Some("a".repeat(64)),
                 nickname: "Дмитрий".into(),

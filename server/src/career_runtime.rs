@@ -70,13 +70,20 @@ fn gameplay_team(team: shared::map::Team) -> Team {
 }
 fn participant(player: &ConnectedPlayer) -> ParticipantResult {
     ParticipantResult {
+        is_bot: player.state.is_bot,
         player_id: player.state.id,
         profile_id: player
             .career_profile
             .as_ref()
             .map(|profile| profile.profile_id.clone()),
         nickname: player.career_profile.as_ref().map_or_else(
-            || format!("Guest {}", player.state.id),
+            || {
+                if player.state.is_bot {
+                    format!("Bot {}", player.state.id)
+                } else {
+                    format!("Guest {}", player.state.id)
+                }
+            },
             |profile| profile.nickname.clone(),
         ),
         team: career_team(player.state.team),
@@ -210,7 +217,13 @@ impl ServerRuntime {
         let player = self.players.get_mut(&addr).unwrap();
         player.career_capable = true;
         player.last_seen = now;
+        let admitted_human = player.joined && !player.state.is_bot;
+        // Protect an existing profile before a Challenge can clear its auth.
+        // Repeat after handle creates a first guest-auth client: this flag is
+        // also an identity guard and requires no persistent match allocation.
+        self.career.backend.set_playing(addr, admitted_human);
         self.career.backend.handle(addr, request);
+        self.career.backend.set_playing(addr, admitted_human);
         // Only verified signed cancellation completions change queue state.
         self.poll_career(now);
         self.career.last_sent = None;
@@ -315,7 +328,8 @@ impl ServerRuntime {
                 return false;
             }
         }
-        if !self.career_queue_enabled()
+        if self.match_config.mode != MatchMode::Practice
+            && !self.career_queue_enabled()
             && !self.combat_log.ledger.is_frozen()
             && self.combat_log.ledger.is_started()
             && self.combat_log.ledger.snapshot().len() >= shared::career::MAX_PARTICIPANTS
@@ -495,6 +509,12 @@ impl ServerRuntime {
     }
 
     fn rating_eligibility(&self, roster: &[ParticipantResult]) -> Result<(), &'static str> {
+        if self.match_config.mode == MatchMode::Practice {
+            return Err("Bot practice: local result only; no permanent career credit.");
+        }
+        if roster.iter().any(|participant| participant.is_bot) {
+            return Err("Bot participants are not eligible for ranked play.");
+        }
         if !self.career_queue_enabled() {
             return Err("Development or legacy guest match.");
         }
@@ -530,7 +550,8 @@ impl ServerRuntime {
     /// Called at the final formation boundary. Career-backed rounds remain at
     /// Starting(0) until durable allocation ACK; no combat or income runs early.
     pub(crate) fn begin_career_round(&mut self, now: Instant) -> bool {
-        if self.career.pending.len() >= MAX_PENDING_RESULTS {
+        let practice = self.match_config.mode == MatchMode::Practice;
+        if !practice && self.career.pending.len() >= MAX_PENDING_RESULTS {
             return false;
         }
         if self.career.round.is_none() {
@@ -553,7 +574,9 @@ impl ServerRuntime {
                 ended_at_ms: 0,
                 duration_ms: 0,
                 map_profile: self.map_config.map_profile.clone(),
-                ruleset: if approved_default_map(&self.map_config) {
+                ruleset: if practice {
+                    "practice-bots-v1"
+                } else if approved_default_map(&self.map_config) {
                     RATED_RULESET
                 } else {
                     "custom-unrated-v1"
@@ -575,7 +598,7 @@ impl ServerRuntime {
             });
         }
         let round = self.career.round.as_mut().unwrap();
-        if self.career.backend.enabled() {
+        if !practice && self.career.backend.enabled() {
             if !round.start_enqueued {
                 round.start_enqueued = self.career.backend.start(round.result.clone());
             }
@@ -600,7 +623,7 @@ impl ServerRuntime {
             round.checkpoint_at = now;
             self.career.queue.commit_selection();
             for (addr, player) in &self.players {
-                if player.joined {
+                if player.joined && !player.state.is_bot {
                     self.career.backend.set_playing(*addr, true);
                 }
             }
@@ -621,7 +644,9 @@ impl ServerRuntime {
         self.combat_log
             .ledger
             .update_player(player.state.id, player.state.level, false);
-        self.career.backend.set_playing(addr, true);
+        if !player.state.is_bot {
+            self.career.backend.set_playing(addr, true);
+        }
     }
     fn update_career_totals(&mut self) {
         for player in self.players.values().filter(|p| p.joined) {
@@ -673,7 +698,9 @@ impl ServerRuntime {
         if outcome != MatchOutcome::Completed {
             round.result.rated = false;
             round.result.winner = None;
-            round.result.unrated_reason = Some("The match did not finish normally.".into());
+            if self.match_config.mode != MatchMode::Practice {
+                round.result.unrated_reason = Some("The match did not finish normally.".into());
+            }
         }
         for participant in &round.result.participants {
             self.career
@@ -691,6 +718,10 @@ impl ServerRuntime {
     }
 
     pub(crate) fn checkpoint_career_round(&mut self, now: Instant) {
+        if self.match_config.mode == MatchMode::Practice {
+            self.update_career_totals();
+            return;
+        }
         if !matches!(self.game_state, GameState::Running) {
             return;
         }
@@ -718,7 +749,7 @@ impl ServerRuntime {
         let career_flow = self.career_flow_active();
         self.career.round = None;
         self.career.queue.release_selection();
-        if career_flow {
+        if career_flow && self.match_config.mode != MatchMode::Practice {
             for (addr, player) in &mut self.players {
                 player.joined = false;
                 self.career.backend.set_playing(*addr, false);
@@ -847,7 +878,10 @@ impl ServerRuntime {
             self.record_match_metrics(now);
         }
         if let Some(result) = self.career.last_results.get(&id) {
-            if self.career.backend.enabled() && !result.saved {
+            if self.match_config.mode != MatchMode::Practice
+                && self.career.backend.enabled()
+                && !result.saved
+            {
                 self.career_error(
                     addr,
                     "Saving the result. Play again after storage acknowledges it.",

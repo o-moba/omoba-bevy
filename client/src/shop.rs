@@ -395,12 +395,16 @@ fn toggle_shop(
     moving: Query<Entity, (With<Player>, With<MovementTarget>)>,
     mut commands: Commands,
     career: Option<Res<crate::career::CareerClient>>,
+    social: Option<Res<crate::social::SocialClient>>,
 ) {
     let allowed = session.join_confirmed() && !matches!(game.state, GameState::Victory { .. });
     let visible_help = matches!(game.state, GameState::Running) && help.0;
     if !allowed
         || visible_help
         || pause.open
+        || social
+            .as_ref()
+            .is_some_and(|social| social.blocks_gameplay())
         || career.as_ref().is_some_and(|career| career.modal_open())
     {
         shop.open = false;

@@ -8,6 +8,7 @@ use crate::pause_menu::PauseMenuState;
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum InputContextSet {
+    Social,
     Modal,
     Resolve,
     Actions,
@@ -48,6 +49,7 @@ impl Plugin for InputContextPlugin {
             .configure_sets(
                 Update,
                 (
+                    InputContextSet::Social,
                     InputContextSet::Modal,
                     InputContextSet::Resolve,
                     InputContextSet::Actions,
@@ -74,6 +76,7 @@ fn resolve_input_context(
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     server_entry: Option<Res<crate::mobile_ui::ServerEntry>>,
     career: Option<Res<crate::career::CareerClient>>,
+    social: Option<Res<crate::social::SocialClient>>,
 ) {
     context.running = game
         .as_ref()
@@ -84,6 +87,9 @@ fn resolve_input_context(
     context.modal_open = mobile
         .as_ref()
         .is_some_and(|mobile| mobile.enabled && (!mobile.landscape || !mobile.focused))
+        || social
+            .as_ref()
+            .is_some_and(|social| social.blocks_gameplay())
         || career.as_ref().is_some_and(|career| career.modal_open())
         || server_entry.as_ref().is_some_and(|entry| entry.open)
         || shop.as_ref().is_some_and(|shop| shop.open)

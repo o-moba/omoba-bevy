@@ -137,6 +137,7 @@ pub struct CareerBackend {
     starts: HashMap<String, Result<(), String>>,
     settled: Vec<MatchResult>,
     cancelled: Vec<SocketAddr>,
+    social: Vec<(SocketAddr, shared::social::SocialRequest)>,
     last_presence: Instant,
     matches: HashMap<String, String>,
     pending_ids: HashSet<String>,
@@ -172,6 +173,7 @@ impl CareerBackend {
             starts: HashMap::new(),
             settled: Vec::new(),
             cancelled: Vec::new(),
+            social: Vec::new(),
             last_presence: Instant::now(),
             matches: HashMap::new(),
             pending_ids: HashSet::new(),
@@ -201,6 +203,7 @@ impl CareerBackend {
             settled: Vec::new(),
             cancelled: Vec::new(),
             last_presence: Instant::now(),
+            social: Vec::new(),
             matches: HashMap::new(),
             pending_ids: HashSet::new(),
             rejected: HashMap::new(),
@@ -279,8 +282,17 @@ impl CareerBackend {
             c.playing = playing;
         }
     }
+    #[cfg(test)]
+    pub fn test_is_playing(&self, addr: SocketAddr) -> bool {
+        self.clients.get(&addr).is_some_and(|client| client.playing)
+    }
     pub fn take_cancelled(&mut self) -> Vec<SocketAddr> {
         std::mem::take(&mut self.cancelled)
+    }
+
+    /// Ephemeral authenticated messages stay on the game thread, outside SQL.
+    pub fn take_social(&mut self) -> Vec<(SocketAddr, shared::social::SocialRequest)> {
+        std::mem::take(&mut self.social)
     }
     pub fn take_settled(&mut self) -> Vec<MatchResult> {
         std::mem::take(&mut self.settled)
@@ -451,6 +463,17 @@ impl CareerBackend {
                 c.view.error = None;
                 if matches!(action, CareerAction::CancelQueue) {
                     self.cancelled.push(addr);
+                    return;
+                }
+                if let CareerAction::Social { request } = action {
+                    if request.server_epoch != self.epoch || request.session_id != auth.session_id {
+                        c.view.error =
+                            Some("Social request belongs to a different session.".into());
+                    } else if self.social.len() >= MAX_JOBS {
+                        c.view.error = Some("Chat is busy. Retry shortly.".into());
+                    } else {
+                        self.social.push((addr, request));
+                    }
                     return;
                 }
                 let Some(profile) = c.view.profile.as_ref() else {
@@ -661,6 +684,7 @@ fn action_id(action: &CareerAction) -> Option<u64> {
         | CareerAction::Profile { request_id, .. }
         | CareerAction::Rename { request_id, .. } => Some(*request_id),
         CareerAction::CancelQueue => None,
+        CareerAction::Social { request } => Some(request.request_id),
     }
 }
 
@@ -698,6 +722,9 @@ async fn account_action(
             view.profile = Some(store.rename(id, &nickname).await?)
         }
         CareerAction::CancelQueue => {}
+        CareerAction::Social { .. } => {
+            return Err("Social requests are handled by the game server.".into());
+        }
     }
     Ok(view)
 }
@@ -1112,6 +1139,85 @@ mod tests {
     }
 
     #[test]
+    fn social_signatures_bind_message_and_session_without_sending_sql_jobs() {
+        let addr = "127.0.0.1:30003".parse().unwrap();
+        let mut backend = CareerBackend::test_backend(9);
+        backend.test_authenticated(
+            addr,
+            ProfileSummary::new("a".repeat(64), "Player".into()),
+            "session",
+        );
+        let key = SigningKey::from_bytes(&[7; 32]);
+        let nonce = "b".repeat(64);
+        let request = shared::social::SocialRequest {
+            request_id: 1,
+            server_epoch: 9,
+            match_id: 1,
+            session_id: "session".into(),
+            command: shared::social::SocialCommand::Chat {
+                channel: shared::social::SocialChannel::Team,
+                text: "Hello".into(),
+            },
+        };
+        let action = CareerAction::Social {
+            request: request.clone(),
+        };
+        let sign = |action: CareerAction, sequence| {
+            let signature = hex(&key
+                .sign(&authorized_signing_bytes(9, &nonce, sequence, &action))
+                .to_bytes());
+            CareerRequest::Authorized {
+                session_nonce: nonce.clone(),
+                sequence,
+                action,
+                signature,
+            }
+        };
+        backend.handle(
+            addr,
+            CareerRequest::Social {
+                request: request.clone(),
+            },
+        );
+        assert!(backend.take_social().is_empty());
+        backend.clients.get_mut(&addr).unwrap().last_request = None;
+        let valid = sign(action.clone(), 1);
+        let mut forged = valid.clone();
+        if let CareerRequest::Authorized {
+            action: CareerAction::Social { request },
+            ..
+        } = &mut forged
+        {
+            request.command = shared::social::SocialCommand::Reaction {
+                reaction_id: "heart".into(),
+            };
+        }
+        backend.handle(addr, forged);
+        assert!(backend.take_social().is_empty());
+        backend.clients.get_mut(&addr).unwrap().last_request = None;
+        backend.handle(addr, valid.clone());
+        assert_eq!(backend.take_social(), vec![(addr, request.clone())]);
+        backend.clients.get_mut(&addr).unwrap().last_request = None;
+        backend.handle(addr, valid);
+        assert!(backend.take_social().is_empty());
+        let mut wrong = request;
+        wrong.session_id = "someone-else".into();
+        backend.clients.get_mut(&addr).unwrap().last_request = None;
+        backend.handle(addr, sign(CareerAction::Social { request: wrong }, 2));
+        assert!(backend.take_social().is_empty());
+        assert!(
+            backend
+                ._test_jobs
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .try_recv()
+                .is_err()
+        );
+    }
+
+    #[test]
     fn late_duplicate_login_ack_cannot_reset_sequence() {
         let addr = "127.0.0.1:30002".parse().unwrap();
         let mut backend = CareerBackend::test_backend(9);
@@ -1173,6 +1279,7 @@ mod tests {
                 unrated_reason: Some("test".into()),
                 saved: false,
                 participants: vec![ParticipantResult {
+                    is_bot: false,
                     player_id: 1,
                     profile_id: Some(profile.profile_id.clone()),
                     nickname: profile.nickname,

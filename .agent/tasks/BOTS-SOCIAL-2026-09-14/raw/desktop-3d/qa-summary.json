@@ -1,0 +1,660 @@
+{
+  "captures": [
+    {
+      "chat_events": [
+        {
+          "age_ms": 82,
+          "id": 1,
+          "kind": {
+            "channel": "team",
+            "kind": "chat",
+            "text": "QA: Привет 小明 — ready for practice!"
+          },
+          "nickname": "Guest 1",
+          "player_id": 1,
+          "team": "green"
+        }
+      ],
+      "confirmed_chat": true,
+      "desktop_hud_overlap_checked": true,
+      "desktop_hud_overlaps": [],
+      "diagnostic": {
+        "canceled_gestures": 0,
+        "chat_sent": true,
+        "connected": true,
+        "connection_state": "Connected",
+        "elapsed_secs": 4.213774375,
+        "focus_event_confirmed": true,
+        "focus_history": [
+          {
+            "elapsed_secs": 0.189337542,
+            "focused": false,
+            "kind": "native_focus_event",
+            "step": 0
+          },
+          {
+            "attempt": 1,
+            "elapsed_secs": 0.195156917,
+            "kind": "native_focus_request",
+            "step": 0
+          },
+          {
+            "elapsed_secs": 2.282487334,
+            "focused": true,
+            "kind": "native_focus_event",
+            "step": 0
+          }
+        ],
+        "focus_request_count": 1,
+        "focus_requested": true,
+        "game_state": "Running",
+        "gesture_released": false,
+        "gesture_started": false,
+        "join_sent": true,
+        "joined": true,
+        "local_alive": true,
+        "local_query_count": 1,
+        "match_id": 1,
+        "match_mode": "practice",
+        "native_focused": true,
+        "server_epoch": 1789392345992486001,
+        "social": {
+          "allowed_reactions": [
+            "thumbs_up",
+            "thumbs_down",
+            "heart",
+            "laugh"
+          ],
+          "chat_open": true,
+          "events": 1,
+          "namespace": [
+            1789392345992486001,
+            1
+          ],
+          "pending": null,
+          "reactions": 0,
+          "server_sequence": 15,
+          "status": "Delivered",
+          "subscribed": true,
+          "subscription_request_id": null,
+          "wheel_open": false
+        },
+        "step": 0,
+        "window_focused": true
+      },
+      "epoch": 1789392345992486001,
+      "file": "01-chat.png",
+      "match_id": 1,
+      "match_mode": "practice",
+      "nodes": [
+        {
+          "fits": true,
+          "min": [
+            290.0,
+            80.0
+          ],
+          "name": "SocialChatPanel",
+          "size": [
+            700.0,
+            560.0
+          ],
+          "visible": true
+        },
+        {
+          "fits": true,
+          "min": [
+            300.0,
+            161.0
+          ],
+          "name": "SocialChatLog",
+          "size": [
+            680.0,
+            393.0
+          ],
+          "visible": true
+        },
+        {
+          "fits": true,
+          "min": [
+            706.0,
+            554.0
+          ],
+          "name": "EquipmentHud",
+          "size": [
+            260.0,
+            150.0
+          ],
+          "visible": true
+        },
+        {
+          "fits": true,
+          "min": [
+            16.0,
+            554.0
+          ],
+          "name": "MatchHudColumn",
+          "size": [
+            230.0,
+            150.0
+          ],
+          "visible": true
+        },
+        {
+          "fits": true,
+          "min": [
+            16.0,
+            16.0
+          ],
+          "name": "MinimapRoot",
+          "size": [
+            252.0,
+            252.0
+          ],
+          "visible": true
+        },
+        {
+          "fits": true,
+          "min": [
+            264.0,
+            596.0
+          ],
+          "name": "SkillBarRoot",
+          "size": [
+            424.0,
+            100.0
+          ],
+          "visible": true
+        },
+        {
+          "fits": true,
+          "min": [
+            284.0,
+            14.0
+          ],
+          "name": "MatchObjectiveRoot",
+          "size": [
+            980.0,
+            82.0
+          ],
+          "visible": true
+        },
+        {
+          "fits": true,
+          "min": [
+            300.0,
+            586.0
+          ],
+          "name": "SocialSend",
+          "size": [
+            54.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "fits": true,
+          "min": [
+            565.0,
+            90.0
+          ],
+          "name": "SocialClose",
+          "size": [
+            58.0,
+            44.0
+          ],
+          "visible": true
+        }
+      ],
+      "pixels": [
+        1280,
+        720
+      ],
+      "reaction_event": null,
+      "ui_profile": "Desktop",
+      "visible_reaction": false
+    },
+    {
+      "chat_events": [
+        {
+          "age_ms": 82,
+          "id": 1,
+          "kind": {
+            "channel": "team",
+            "kind": "chat",
+            "text": "QA: Привет 小明 — ready for practice!"
+          },
+          "nickname": "Guest 1",
+          "player_id": 1,
+          "team": "green"
+        }
+      ],
+      "confirmed_chat": true,
+      "desktop_hud_overlap_checked": true,
+      "desktop_hud_overlaps": [],
+      "diagnostic": {
+        "canceled_gestures": 0,
+        "chat_sent": true,
+        "connected": true,
+        "connection_state": "Connected",
+        "elapsed_secs": 5.107665292,
+        "focus_event_confirmed": true,
+        "focus_history": [
+          {
+            "elapsed_secs": 0.189337542,
+            "focused": false,
+            "kind": "native_focus_event",
+            "step": 0
+          },
+          {
+            "attempt": 1,
+            "elapsed_secs": 0.195156917,
+            "kind": "native_focus_request",
+            "step": 0
+          },
+          {
+            "elapsed_secs": 2.282487334,
+            "focused": true,
+            "kind": "native_focus_event",
+            "step": 0
+          }
+        ],
+        "focus_request_count": 1,
+        "focus_requested": true,
+        "game_state": "Running",
+        "gesture_released": false,
+        "gesture_started": true,
+        "join_sent": true,
+        "joined": true,
+        "local_alive": true,
+        "local_query_count": 1,
+        "match_id": 1,
+        "match_mode": "practice",
+        "native_focused": true,
+        "server_epoch": 1789392345992486001,
+        "social": {
+          "allowed_reactions": [
+            "thumbs_up",
+            "thumbs_down",
+            "heart",
+            "laugh"
+          ],
+          "chat_open": false,
+          "events": 1,
+          "namespace": [
+            1789392345992486001,
+            1
+          ],
+          "pending": null,
+          "reactions": 0,
+          "server_sequence": 18,
+          "status": "Delivered",
+          "subscribed": true,
+          "subscription_request_id": null,
+          "wheel_open": true
+        },
+        "step": 1,
+        "window_focused": true
+      },
+      "epoch": 1789392345992486001,
+      "file": "02-reaction-wheel.png",
+      "match_id": 1,
+      "match_mode": "practice",
+      "nodes": [
+        {
+          "fits": true,
+          "min": [
+            706.0,
+            554.0
+          ],
+          "name": "EquipmentHud",
+          "size": [
+            260.0,
+            150.0
+          ],
+          "visible": true
+        },
+        {
+          "fits": true,
+          "min": [
+            16.0,
+            554.0
+          ],
+          "name": "MatchHudColumn",
+          "size": [
+            230.0,
+            150.0
+          ],
+          "visible": true
+        },
+        {
+          "fits": true,
+          "min": [
+            16.0,
+            16.0
+          ],
+          "name": "MinimapRoot",
+          "size": [
+            252.0,
+            252.0
+          ],
+          "visible": true
+        },
+        {
+          "fits": true,
+          "min": [
+            264.0,
+            596.0
+          ],
+          "name": "SkillBarRoot",
+          "size": [
+            424.0,
+            100.0
+          ],
+          "visible": true
+        },
+        {
+          "fits": true,
+          "min": [
+            284.0,
+            14.0
+          ],
+          "name": "MatchObjectiveRoot",
+          "size": [
+            980.0,
+            82.0
+          ],
+          "visible": true
+        },
+        {
+          "fits": true,
+          "min": [
+            0.0,
+            0.0
+          ],
+          "name": "SocialWheelRoot",
+          "size": [
+            1280.0,
+            720.0
+          ],
+          "visible": true
+        },
+        {
+          "fits": true,
+          "min": [
+            604.0,
+            207.0
+          ],
+          "name": "SocialWheelChoice0",
+          "size": [
+            72.0,
+            73.0
+          ],
+          "visible": true
+        },
+        {
+          "fits": true,
+          "min": [
+            696.0,
+            300.0
+          ],
+          "name": "SocialWheelChoice1",
+          "size": [
+            73.0,
+            72.0
+          ],
+          "visible": true
+        },
+        {
+          "fits": true,
+          "min": [
+            604.0,
+            392.0
+          ],
+          "name": "SocialWheelChoice2",
+          "size": [
+            72.0,
+            73.0
+          ],
+          "visible": true
+        },
+        {
+          "fits": true,
+          "min": [
+            511.0,
+            300.0
+          ],
+          "name": "SocialWheelChoice3",
+          "size": [
+            73.0,
+            72.0
+          ],
+          "visible": true
+        }
+      ],
+      "pixels": [
+        1280,
+        720
+      ],
+      "reaction_event": null,
+      "ui_profile": "Desktop",
+      "visible_reaction": false
+    },
+    {
+      "chat_events": [
+        {
+          "age_ms": 82,
+          "id": 1,
+          "kind": {
+            "channel": "team",
+            "kind": "chat",
+            "text": "QA: Привет 小明 — ready for practice!"
+          },
+          "nickname": "Guest 1",
+          "player_id": 1,
+          "team": "green"
+        }
+      ],
+      "confirmed_chat": true,
+      "desktop_hud_overlap_checked": true,
+      "desktop_hud_overlaps": [],
+      "diagnostic": {
+        "canceled_gestures": 0,
+        "chat_sent": true,
+        "connected": true,
+        "connection_state": "Connected",
+        "elapsed_secs": 5.710010917,
+        "focus_event_confirmed": true,
+        "focus_history": [
+          {
+            "elapsed_secs": 0.189337542,
+            "focused": false,
+            "kind": "native_focus_event",
+            "step": 0
+          },
+          {
+            "attempt": 1,
+            "elapsed_secs": 0.195156917,
+            "kind": "native_focus_request",
+            "step": 0
+          },
+          {
+            "elapsed_secs": 2.282487334,
+            "focused": true,
+            "kind": "native_focus_event",
+            "step": 0
+          }
+        ],
+        "focus_request_count": 1,
+        "focus_requested": true,
+        "game_state": "Running",
+        "gesture_released": true,
+        "gesture_started": true,
+        "join_sent": true,
+        "joined": true,
+        "local_alive": true,
+        "local_query_count": 1,
+        "match_id": 1,
+        "match_mode": "practice",
+        "native_focused": true,
+        "server_epoch": 1789392345992486001,
+        "social": {
+          "allowed_reactions": [
+            "thumbs_up",
+            "thumbs_down",
+            "heart",
+            "laugh"
+          ],
+          "chat_open": false,
+          "events": 1,
+          "namespace": [
+            1789392345992486001,
+            1
+          ],
+          "pending": null,
+          "reactions": 1,
+          "server_sequence": 21,
+          "status": "Delivered",
+          "subscribed": true,
+          "subscription_request_id": null,
+          "wheel_open": false
+        },
+        "step": 2,
+        "window_focused": true
+      },
+      "epoch": 1789392345992486001,
+      "file": "03-confirmed-reaction.png",
+      "match_id": 1,
+      "match_mode": "practice",
+      "nodes": [
+        {
+          "fits": true,
+          "min": [
+            706.0,
+            554.0
+          ],
+          "name": "EquipmentHud",
+          "size": [
+            260.0,
+            150.0
+          ],
+          "visible": true
+        },
+        {
+          "fits": true,
+          "min": [
+            16.0,
+            554.0
+          ],
+          "name": "MatchHudColumn",
+          "size": [
+            230.0,
+            150.0
+          ],
+          "visible": true
+        },
+        {
+          "fits": true,
+          "min": [
+            16.0,
+            16.0
+          ],
+          "name": "MinimapRoot",
+          "size": [
+            252.0,
+            252.0
+          ],
+          "visible": true
+        },
+        {
+          "fits": true,
+          "min": [
+            264.0,
+            596.0
+          ],
+          "name": "SkillBarRoot",
+          "size": [
+            424.0,
+            100.0
+          ],
+          "visible": true
+        },
+        {
+          "fits": true,
+          "min": [
+            284.0,
+            14.0
+          ],
+          "name": "MatchObjectiveRoot",
+          "size": [
+            980.0,
+            82.0
+          ],
+          "visible": true
+        },
+        {
+          "fits": true,
+          "min": [
+            16.0,
+            276.0
+          ],
+          "name": "SocialEntry",
+          "size": [
+            142.0,
+            44.0
+          ],
+          "visible": true
+        },
+        {
+          "fits": true,
+          "min": [
+            16.0,
+            328.0
+          ],
+          "name": "SocialStatus",
+          "size": [
+            54.0,
+            15.0
+          ],
+          "visible": true
+        },
+        {
+          "fits": true,
+          "min": [
+            612.0,
+            259.0
+          ],
+          "name": "SocialReactionBubble",
+          "size": [
+            56.0,
+            56.0
+          ],
+          "visible": true
+        }
+      ],
+      "pixels": [
+        1280,
+        720
+      ],
+      "reaction_event": {
+        "age_ms": 47,
+        "id": 2,
+        "kind": {
+          "kind": "reaction",
+          "reaction_id": "thumbs_up"
+        },
+        "nickname": "Guest 1",
+        "player_id": 1,
+        "team": "green"
+      },
+      "ui_profile": "Desktop",
+      "visible_reaction": true
+    }
+  ],
+  "fixture": false,
+  "manual_input_verified": false,
+  "physical_phone_verified": false,
+  "scenario": "native_social",
+  "scripted_join_and_input": true,
+  "status": "passed",
+  "version": "0.19.0-rc.7"
+}

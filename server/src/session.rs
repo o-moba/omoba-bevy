@@ -34,6 +34,7 @@ pub(crate) fn ensure_player_connected(
             career_profile: None,
             career_capable: false,
             state: PlayerState {
+                is_bot: false,
                 id: player_id,
                 x: spawn.x,
                 y: PLAYER_GROUND_Y,
@@ -541,7 +542,10 @@ impl ServerRuntime {
         let expired = self
             .players
             .iter()
-            .filter(|(_, player)| now.saturating_duration_since(player.last_seen) > PLAYER_TIMEOUT)
+            .filter(|(_, player)| {
+                !player.state.is_bot
+                    && now.saturating_duration_since(player.last_seen) > PLAYER_TIMEOUT
+            })
             .map(|(addr, _)| *addr)
             .collect::<Vec<_>>();
         for addr in expired {
@@ -570,7 +574,7 @@ impl ServerRuntime {
         self.disconnected_sessions.retain(|_, session| {
             now.saturating_duration_since(session.disconnected_at) <= SESSION_RECLAIM_WINDOW
         });
-        if joined_count(&self.players) > 0 {
+        if self.players.values().any(|p| p.joined && !p.state.is_bot) {
             self.empty_since = None;
         } else if !matches!(self.game_state, GameState::Lobby)
             || !self.disconnected_sessions.is_empty()
@@ -591,6 +595,10 @@ impl ServerRuntime {
 
     pub(crate) fn restart_round(&mut self, now: Instant) {
         self.finish_career_round(shared::career::MatchOutcome::Abandoned, None, now);
+        if self.match_config.mode == MatchMode::Practice {
+            self.players.retain(|_, player| !player.state.is_bot);
+            self.bots.clear();
+        }
         self.reset_career_round();
         reset_match_with_map(
             &mut self.players,
@@ -623,6 +631,7 @@ impl ServerRuntime {
                 now,
             );
         }
+        self.fill_practice_bots(now);
         self.track_round_start(now);
         println!(
             "MATCH_METRIC event=round_reset epoch={} match={} connected={}",

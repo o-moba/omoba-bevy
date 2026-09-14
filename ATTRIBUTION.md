@@ -86,6 +86,13 @@ Retained imported models include Quaternius Universal Animation Library clips,
 credited as CC0 in `assets-src/animations/README.md`, which records source links,
 clip names and retargeting. The native package includes that attribution record.
 
+## Starter reaction artwork — 0.19.0-rc.7
+
+The original AI-assisted starter reaction atlas introduced in rc.7 is recorded
+separately in `client/assets/reactions/PROVENANCE.md`, with a CC0 dedication of the
+project's rights in `client/assets/reactions/LICENSE.md`. It contains no imported
+game characters and does not relicense any third-party cosmetic pack.
+
 ## CJK interface font — 0.19.0-rc.6
 
 `client/assets/ui/NotoSansCJKsc-Regular.otf` is the unmodified Noto Sans CJK SC

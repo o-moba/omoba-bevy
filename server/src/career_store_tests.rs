@@ -78,6 +78,7 @@ impl Fixture {
 }
 fn participant(profile: &ProfileSummary, player_id: u64, team: Team) -> ParticipantResult {
     ParticipantResult {
+        is_bot: false,
         player_id,
         profile_id: Some(profile.profile_id.clone()),
         nickname: profile.nickname.clone(),
@@ -558,6 +559,21 @@ async fn career_store_live_ownership_fencing_active_seats_and_interrupted_recove
     f.close().await;
 }
 
+#[test]
+fn career_store_rated_policy_rejects_profile_bearing_bots_at_start_and_finish() {
+    let a = ProfileSummary::new("a".repeat(64), "Player-A".into());
+    let b = ProfileSummary::new("b".repeat(64), "Player-B".into());
+    let mut rated = result(&a, &b, 1);
+    assert!(validate_rated(&starting(&rated)).is_ok());
+    rated.participants[1].is_bot = true;
+    assert!(rated.participants[1].profile_id.is_some());
+    assert!(validate_rated(&starting(&rated)).is_err());
+    assert!(normalize_terminal(rated.clone()).is_err());
+    rated.rated = false;
+    rated.unrated_reason = Some("practice".into());
+    assert!(normalize_terminal(rated).is_ok());
+}
+
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
 async fn career_store_roster_policy_unrated_append_and_invalid_result_rejection() {
@@ -565,7 +581,20 @@ async fn career_store_roster_policy_unrated_append_and_invalid_result_rejection(
     let a = f.profile(1).await;
     let b = f.profile(2).await;
     let rated = result(&a, &b, 1);
+    let mut bot = rated.clone();
+    bot.participants[1].is_bot = true;
+    assert!(f.store.start(starting(&bot)).await.is_err());
+    assert!(f.store.ensure_allocation(starting(&bot)).await.is_err());
+    let allocations: i64 = sqlx::query_scalar("SELECT count(*) FROM career_matches")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        allocations, 0,
+        "bot rejection cannot leave a durable rated allocation"
+    );
     f.store.start(starting(&rated)).await.unwrap();
+    assert!(f.store.settle(bot).await.is_err());
     let mut changed = rated.clone();
     changed.participants[0].team = Team::Blue;
     assert!(f.store.settle(changed).await.is_err());
@@ -582,6 +611,12 @@ async fn career_store_roster_policy_unrated_append_and_invalid_result_rejection(
     let mut initial = starting(&unrated);
     initial.participants.truncate(1);
     f.store.start(initial).await.unwrap();
+    let mut changed_role = starting(&unrated);
+    changed_role.participants[0].is_bot = true;
+    assert!(
+        f.store.checkpoint(changed_role).await.is_err(),
+        "an unrated checkpoint cannot change a frozen human into a bot"
+    );
     f.store.checkpoint(starting(&unrated)).await.unwrap();
     let before = f.store.profile(&a.profile_id).await.unwrap();
     let saved = f.store.settle(unrated).await.unwrap();

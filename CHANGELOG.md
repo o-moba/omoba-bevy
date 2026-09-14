@@ -14,6 +14,32 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 - Add `make play` / `make play-bots` to build locked current sources and launch
   supervised local 3D practice with nine bots, with owned-process cleanup.
 
+## [0.19.0-rc.7] - 2026-09-14
+
+### Added
+- Explicit native bot practice: immediate solo start, labelled bot heroes, late
+  human replacement, safe reconnect and bounded round rollover. Bots follow map
+  navigation and use authoritative attacks, skills, cooldowns and damage.
+- `make practice` and `make practice-server`; packaged practice uses native
+  server bots. Existing `make play` retains its legacy local-release workflow.
+- Opt-in match/team chat and short-lived picture reactions through a separately
+  framed social stream. Server-owned identity, audience filtering, deduplication,
+  signed profile requests and shared rate limits protect the message boundary.
+- Desktop/mobile chat, local mute controls and a reaction wheel opened by holding
+  the local hero, a visible button or T. The UI cancels gameplay orders and blocks
+  closing-frame click-through. Four original starter reaction pictures are bundled.
+- Versioned reaction catalog and local presentation manifest, with a fail-closed
+  entitlement boundary for future approved cosmetic/NFT packs.
+
+### Compatibility and scope
+- Human result JSON remains compatible with rc.6 immutable receipts. Rated storage
+  rejects bots; an existing participant cannot change its human/bot identity.
+- Practice results are explicitly local and unranked, including with PostgreSQL
+  configured. No permanent career XP/MMR/history credit is claimed for bot practice.
+- Runtime reaction access currently includes the free starter pack only. Generic
+  NFT ownership verification, minting/marketplace, party queue and voice remain
+  future work. Physical-device and global-load validation remain separate checks.
+
 ## [0.19.0-rc.6] - 2026-09-14
 
 ### Added

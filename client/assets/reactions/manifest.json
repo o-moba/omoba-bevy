@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "wheel": [
+    "thumbs_up",
+    "thumbs_down",
+    "heart",
+    "laugh"
+  ],
+  "images": {
+    "thumbs_up": {
+      "path": "reactions/base-atlas.png",
+      "grid": [
+        2,
+        2
+      ],
+      "index": 0
+    },
+    "thumbs_down": {
+      "path": "reactions/base-atlas.png",
+      "grid": [
+        2,
+        2
+      ],
+      "index": 1
+    },
+    "heart": {
+      "path": "reactions/base-atlas.png",
+      "grid": [
+        2,
+        2
+      ],
+      "index": 2
+    },
+    "laugh": {
+      "path": "reactions/base-atlas.png",
+      "grid": [
+        2,
+        2
+      ],
+      "index": 3
+    }
+  }
+}

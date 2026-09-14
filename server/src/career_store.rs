@@ -955,6 +955,13 @@ fn normalize_terminal(result: MatchResult) -> StoreResult<MatchResult> {
     Ok(result)
 }
 fn validate_rated(result: &MatchResult) -> StoreResult<()> {
+    if result
+        .participants
+        .iter()
+        .any(|participant| participant.is_bot)
+    {
+        return Err("Rated matches cannot contain bot participants.".into());
+    }
     let green = result
         .participants
         .iter()
@@ -974,6 +981,7 @@ fn validate_rated(result: &MatchResult) -> StoreResult<()> {
 }
 fn same_person(a: &ParticipantResult, b: &ParticipantResult) -> bool {
     a.player_id == b.player_id
+        && a.is_bot == b.is_bot
         && a.profile_id == b.profile_id
         && a.nickname == b.nickname
         && a.team == b.team
