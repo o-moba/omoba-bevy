@@ -1,7 +1,7 @@
 # Game audio acceptance evidence
 
 Task: GAME-AUDIO-2026-09-14. Base: `747b991`. Release: `0.19.0-rc.8`.
-Verification: **PASS**. Git publication: **pending** at this checkpoint.
+Verification and publication: **PASS**. All six acceptance criteria pass.
 
 | Criterion | Result | Current evidence |
 | --- | --- | --- |
@@ -10,7 +10,7 @@ Verification: **PASS**. Git publication: **pending** at this checkpoint.
 | AC3: Persistent desktop/mobile controls | PASS | Seven preference/UI tests; normal handlers change music 25% → 20%, mute/resume and save preferences. All nine audio buttons fit in all six rendered captures. |
 | AC4: Customizable catalog | PASS | All stable cues and finite gains validated under local audio paths. No protocol, ranked, NFT ownership, server or production dependency changes. |
 | AC5: Fresh verification | PASS | Workspace regression plus final client tests, native build, strict Clippy, formatting, source whitespace, Python parsing, asset measurements and native visual review. |
-| AC6: Release docs and publication | PENDING | Version/changelog/features, authoring guide and proof are ready; record commit/push only after they succeed. |
+| AC6: Release docs and publication | PASS | Feature `8a2716a` published to GitHub main; both local mains and canonical origin/main agree after fetch. Four unrelated files preserved byte-for-byte. `raw/git-publication.json` records the result. |
 
 ## Exact checks and their scope
 
@@ -40,3 +40,13 @@ Each directory includes real client/server logs and `qa-summary.json`: all 17 as
 `sha256.json` binds the curated source/assets/docs/proof to their bytes. The reproducible stdlib/FFmpeg palette authoring script is in `scripts/build_audio_palette.py`; asset audit and preview helpers are retained here. Audit source-archive checks require the separately downloaded original archives, which remain ignored. License pages and exact hashes are in the packaged provenance records.
 
 Physical Android/iOS audio routes, Bluetooth latency, browser autoplay, subjective listening and public deployment/load have not been verified. The 134.4-second music preserves source frames and author-designated loop boundaries; numeric seam measurements do not establish perceptual seamlessness. No database migration or new production dependency is part of this task.
+
+## Publication
+
+Feature `8a2716a91880bd09d8ba9547cb4296a98fcf27a6` was pushed successfully to GitHub main. Both
+local main checkouts and the fetched remote main match. Four pre-existing untracked
+cinematic files have identical before/after SHA-256 values. The independent
+read-only reviewer verified all 78 inventory entries and 79 checkpoint files,
+found no staged runtime/download/cache/credential artifacts and confirmed AC1–AC5.
+This final publication receipt and acceptance status are a documentation-only
+follow-up; tested game source and assets remain unchanged.

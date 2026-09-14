@@ -2,7 +2,7 @@
   "task_id": "GAME-AUDIO-2026-09-14",
   "base_commit": "747b991acf283cf18b636d0c7c71f4245eb1e376",
   "version": "0.19.0-rc.8",
-  "status": "VERIFICATION_PASS_PUBLICATION_PENDING",
+  "status": "PASS",
   "acceptance": {
     "AC1": {
       "status": "PASS",
@@ -59,14 +59,15 @@
       "result": "Workspace 628 passed/0 failed/14 PostgreSQL tests ignored across 21 targets; after final client-only refinements, current client 341 passed/0 failed. Current native build, strict workspace Clippy, formatting, Python parsing and scoped whitespace checks pass. All 17 assets decode without clipping/nonfinite samples or decoder errors."
     },
     "AC6": {
-      "status": "PENDING_PUBLICATION",
+      "status": "PASS",
       "evidence": [
         "../../../Cargo.toml",
         "../../../CHANGELOG.md",
         "../../../docs/features.md",
-        "../../../docs/progress/2026-09-14-game-audio.md"
+        "../../../docs/progress/2026-09-14-game-audio.md",
+        "raw/git-publication.json"
       ],
-      "result": "Release 0.19.0-rc.8, authoring guide and curated proof ready. Commit/push and preserved unrelated files will be recorded after actual publication."
+      "result": "Release 0.19.0-rc.8 and proof committed in 8a2716a91880bd09d8ba9547cb4296a98fcf27a6, pushed to GitHub main and fast-forwarded in both local mains. Subsequent fetch confirms matching refs. Four unrelated canonical files preserved byte-for-byte. This publication receipt is a documentation-only follow-up."
     }
   },
   "verification_sequence": [

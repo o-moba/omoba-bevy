@@ -1,7 +1,8 @@
 # Game audio — 2026-09-14
 
 Base: `747b991`. Release version: `0.19.0-rc.8`.
-Current-source verification passes; publication is recorded in the task evidence.
+Current-source verification and publication pass. Feature `8a2716a` is on
+GitHub main; both local main checkouts are synchronized. See the task evidence.
 
 The existing bot/social work was already committed and pushed to main. This
 isolated follow-up adds a small CC0 audio palette, local event-based playback and
