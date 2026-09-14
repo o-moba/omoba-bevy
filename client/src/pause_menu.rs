@@ -1,10 +1,12 @@
 use bevy::{
     app::AppExit,
+    input::mouse::{MouseScrollUnit, MouseWheel},
     input::touch::{TouchInput, TouchPhase},
     prelude::*,
     window::{CursorGrabMode, CursorOptions, PrimaryWindow},
 };
 
+use crate::audio_settings::AudioSettings;
 use crate::model_scale::{
     DEFAULT_MODEL_TARGET_HEIGHT, MAX_MODEL_TARGET_HEIGHT, MIN_MODEL_TARGET_HEIGHT,
     ModelScaleSettings,
@@ -40,6 +42,7 @@ pub struct PauseMenuPlugin;
 impl Plugin for PauseMenuPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PauseMenuState>()
+            .init_resource::<AudioSettings>()
             .add_systems(Startup, setup_pause_menu_ui)
             .add_systems(
                 Update,
@@ -63,14 +66,23 @@ impl Plugin for PauseMenuPlugin {
                     sync_pause_menu_sections,
                     handle_model_scale_buttons,
                     handle_lighting_buttons,
+                    handle_audio_buttons,
+                    update_audio_labels.after(handle_audio_buttons),
                     update_model_scale_label,
                     update_lighting_labels,
                     handle_resume_button,
+                    reset_pause_scroll_on_navigation
+                        .after(handle_settings_navigation_buttons)
+                        .after(handle_resume_button),
                     handle_reset_graphics_defaults_button,
                     handle_exit_button,
                     sync_settings_server_addr_label,
                 )
                     .after(collect_pause_button_taps),
+            )
+            .add_systems(
+                PostUpdate,
+                scroll_desktop_settings.before(bevy::ui::UiSystems::Layout),
             );
     }
 }
@@ -153,6 +165,49 @@ struct YawValueLabel;
 #[derive(Component)]
 struct SettingsServerAddrLabel;
 
+#[derive(Component)]
+struct PauseMenuPanel;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AudioBus {
+    Master,
+    Music,
+    Effects,
+    Ui,
+}
+
+impl AudioBus {
+    fn value(self, settings: AudioSettings) -> f32 {
+        match self {
+            Self::Master => settings.master,
+            Self::Music => settings.music,
+            Self::Effects => settings.effects,
+            Self::Ui => settings.ui,
+        }
+    }
+    fn adjust(self, settings: &mut AudioSettings, delta: f32) {
+        *settings = settings.sanitized();
+        let value = match self {
+            Self::Master => &mut settings.master,
+            Self::Music => &mut settings.music,
+            Self::Effects => &mut settings.effects,
+            Self::Ui => &mut settings.ui,
+        };
+        *value = ((*value * 100.0).round() + delta * 100.0).clamp(0.0, 100.0) / 100.0;
+    }
+}
+
+#[derive(Component, Clone, Copy)]
+enum AudioButton {
+    Adjust(AudioBus, f32),
+    Mute,
+}
+#[derive(Component, Clone, Copy)]
+enum AudioLabel {
+    Bus(AudioBus),
+    Mute,
+}
+
 fn setup_pause_menu_ui(mut commands: Commands) {
     commands
         .spawn((
@@ -179,6 +234,9 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                     Node {
                         width: Val::Px(PANEL_WIDTH),
                         height: Val::Px(PANEL_HEIGHT),
+                        max_width: Val::Percent(95.0),
+                        max_height: Val::Percent(95.0),
+                        overflow: Overflow::scroll_y(),
                         flex_direction: FlexDirection::Column,
                         justify_content: JustifyContent::FlexStart,
                         align_items: AlignItems::Stretch,
@@ -187,6 +245,8 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                         ..default()
                     },
                     BackgroundColor(crate::ui_theme::PANEL),
+                    ScrollPosition::default(),
+                    PauseMenuPanel,
                     Name::new("PauseMenuPanel"),
                 ))
                 .with_children(|panel| {
@@ -198,6 +258,10 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                         },
                         TextColor(Color::WHITE),
                         Name::new("PauseMenuTitle"),
+                        Node {
+                            flex_shrink: 0.0,
+                            ..default()
+                        },
                     ));
 
                     panel
@@ -208,6 +272,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                 display: Display::Flex,
                                 align_items: AlignItems::Center,
                                 justify_content: JustifyContent::FlexStart,
+                                flex_shrink: 0.0,
                                 ..default()
                             },
                             MainMenuSection,
@@ -243,10 +308,11 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                         .spawn((
                             Node {
                                 flex_direction: FlexDirection::Column,
-                                row_gap: Val::Px(12.0),
+                                row_gap: Val::Px(8.0),
                                 display: Display::None,
                                 align_items: AlignItems::Center,
                                 justify_content: JustifyContent::FlexStart,
+                                flex_shrink: 0.0,
                                 ..default()
                             },
                             Visibility::Hidden,
@@ -263,6 +329,58 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                 TextColor(Color::WHITE),
                                 Name::new("PauseMenuSettingsTitle"),
                             ));
+
+                            settings.spawn((
+                                Text::new("Sound"),
+                                crate::ui_theme::text(18.0),
+                                TextColor(crate::ui_theme::GOLD),
+                                Name::new("PauseMenuAudioTitle"),
+                            ));
+                            for (bus, label, name) in [
+                                (AudioBus::Master, "Master", "PauseMenuAudioMasterControls"),
+                                (AudioBus::Music, "Music", "PauseMenuAudioMusicControls"),
+                                (
+                                    AudioBus::Effects,
+                                    "Effects",
+                                    "PauseMenuAudioEffectsControls",
+                                ),
+                                (AudioBus::Ui, "Interface", "PauseMenuAudioUiControls"),
+                            ] {
+                                spawn_adjust_row(
+                                    settings,
+                                    label,
+                                    format!("{:.0}%", bus.value(AudioSettings::default()) * 100.0),
+                                    AudioButton::Adjust(bus, -0.05),
+                                    AudioLabel::Bus(bus),
+                                    AudioButton::Adjust(bus, 0.05),
+                                    name,
+                                );
+                            }
+                            settings
+                                .spawn((
+                                    Button,
+                                    PauseButtonGesture::default(),
+                                    AudioButton::Mute,
+                                    Node {
+                                        width: Val::Px(BUTTON_WIDTH),
+                                        min_height: Val::Px(BUTTON_HEIGHT),
+                                        flex_shrink: 0.0,
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
+                                        ..default()
+                                    },
+                                    BackgroundColor(BUTTON_COLOR),
+                                    Name::new("PauseMenuAudioMuteButton"),
+                                ))
+                                .with_children(|button| {
+                                    button.spawn((
+                                        Text::new("Mute sound"),
+                                        crate::ui_theme::text(20.0),
+                                        TextColor(Color::WHITE),
+                                        AudioLabel::Mute,
+                                        Name::new("PauseMenuAudioMuteLabel"),
+                                    ));
+                                });
 
                             settings.spawn((
                                 Text::new(""),
@@ -371,6 +489,7 @@ fn spawn_menu_button<M: Component>(
             Node {
                 width: Val::Px(BUTTON_WIDTH),
                 height: Val::Px(BUTTON_HEIGHT),
+                flex_shrink: 0.0,
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 ..default()
@@ -404,6 +523,7 @@ fn spawn_adjust_row<Dec: Component, ValueMarker: Component, Inc: Component>(
         .spawn((
             Node {
                 flex_direction: FlexDirection::Row,
+                flex_shrink: 0.0,
                 column_gap: Val::Px(10.0),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
@@ -964,6 +1084,106 @@ fn handle_lighting_buttons(
     }
 }
 
+fn handle_audio_buttons(
+    menu: Res<PauseMenuState>,
+    career: Option<Res<crate::career::CareerClient>>,
+    social: Option<Res<crate::social::SocialClient>>,
+    mut settings: ResMut<AudioSettings>,
+    mut buttons: Query<
+        (
+            &Interaction,
+            &PauseButtonGesture,
+            &AudioButton,
+            &mut BackgroundColor,
+        ),
+        (
+            Or<(Changed<Interaction>, Changed<PauseButtonGesture>)>,
+            With<Button>,
+        ),
+    >,
+) {
+    if !menu.open
+        || !menu.in_settings
+        || career.as_ref().is_some_and(|career| career.modal_open())
+        || social
+            .as_ref()
+            .is_some_and(|social| social.blocks_gameplay())
+    {
+        return;
+    }
+    for (interaction, gesture, action, mut color) in &mut buttons {
+        match gesture.effective(*interaction) {
+            Interaction::Pressed => {
+                match *action {
+                    AudioButton::Adjust(bus, delta) => bus.adjust(&mut settings, delta),
+                    AudioButton::Mute => settings.muted = !settings.muted,
+                }
+                *color = BUTTON_HOVER_COLOR.into();
+            }
+            Interaction::Hovered => *color = BUTTON_HOVER_COLOR.into(),
+            Interaction::None => *color = BUTTON_COLOR.into(),
+        }
+    }
+}
+
+fn update_audio_labels(settings: Res<AudioSettings>, mut labels: Query<(&AudioLabel, &mut Text)>) {
+    if !settings.is_changed() {
+        return;
+    }
+    let settings = settings.sanitized();
+    for (label, mut text) in &mut labels {
+        text.0 = match *label {
+            AudioLabel::Bus(bus) => format!("{:.0}%", bus.value(settings) * 100.0),
+            AudioLabel::Mute => if settings.muted {
+                "Unmute sound"
+            } else {
+                "Mute sound"
+            }
+            .into(),
+        };
+    }
+}
+
+fn scroll_desktop_settings(
+    menu: Res<PauseMenuState>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    mut wheel: MessageReader<MouseWheel>,
+    mut panels: Query<(&ComputedNode, &mut ScrollPosition), With<PauseMenuPanel>>,
+) {
+    let delta: f32 = wheel
+        .read()
+        .map(|event| {
+            event.y
+                * if event.unit == MouseScrollUnit::Line {
+                    32.0
+                } else {
+                    1.0
+                }
+        })
+        .sum();
+    if !menu.open || !menu.in_settings || mobile.as_ref().is_some_and(|mobile| mobile.enabled) {
+        return;
+    }
+    for (node, mut scroll) in &mut panels {
+        let max = ((node.content_size().y - node.size().y) * node.inverse_scale_factor()).max(0.0);
+        scroll.y = (scroll.y - delta).clamp(0.0, max);
+    }
+}
+
+fn reset_pause_scroll_on_navigation(
+    menu: Res<PauseMenuState>,
+    mut previous: Local<Option<(bool, bool)>>,
+    mut panels: Query<&mut ScrollPosition, With<PauseMenuPanel>>,
+) {
+    let current = (menu.open, menu.in_settings);
+    if *previous != Some(current) {
+        for mut scroll in &mut panels {
+            scroll.y = 0.0;
+        }
+        *previous = Some(current);
+    }
+}
+
 fn update_model_scale_label(
     scale_settings: Res<ModelScaleSettings>,
     mut label_query: Query<&mut Text, With<ScaleValueLabel>>,
@@ -1016,11 +1236,7 @@ fn sync_settings_server_addr_label(
             s
         }
     };
-    let next = format!(
-        "Game server: {addr}\n\
-         Saved with preferences when you change graphics or character. \
-         Next launch: set GAME_SERVER_ADDR or edit client_preferences.json (see persistence docs)."
-    );
+    let next = format!("Server: {addr}\nSettings are saved automatically.");
     if let Ok(mut text) = label_q.single_mut() {
         if text.0 != next {
             text.0 = next;
@@ -1035,6 +1251,7 @@ fn handle_reset_graphics_defaults_button(
     resolved_addr: Res<ResolvedServerAddressForPrefs>,
     client_session_id: Res<ClientSessionId>,
     team: Res<TeamSelection>,
+    audio: Res<AudioSettings>,
     mut button_query: Query<
         (&Interaction, &PauseButtonGesture, &mut BackgroundColor),
         (
@@ -1063,6 +1280,7 @@ fn handle_reset_graphics_defaults_button(
                     team.character,
                     addr,
                     client_session_id.0.as_str(),
+                    audio.as_ref(),
                 );
                 *color = BUTTON_HOVER_COLOR.into();
             }
@@ -1139,6 +1357,199 @@ fn handle_resume_button(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn audio_menu_shows_saved_levels_and_only_changes_selected_bus_while_open() {
+        let initial = AudioSettings {
+            music: 0.2,
+            muted: true,
+            ..default()
+        };
+        let mut app = App::new();
+        app.insert_resource(initial)
+            .insert_resource(PauseMenuState {
+                open: false,
+                in_settings: true,
+            })
+            .add_systems(Startup, setup_pause_menu_ui)
+            .add_systems(Update, (handle_audio_buttons, update_audio_labels).chain());
+        app.update();
+        let music = app.world_mut().query::<(Entity, &AudioButton)>().iter(app.world())
+            .find(|(_, button)| matches!(button, AudioButton::Adjust(AudioBus::Music, delta) if *delta < 0.0)).unwrap().0;
+        app.world_mut()
+            .entity_mut(music)
+            .insert(Interaction::Pressed);
+        app.update();
+        assert_eq!(*app.world().resource::<AudioSettings>(), initial);
+        app.world_mut().entity_mut(music).insert(Interaction::None);
+        app.world_mut().resource_mut::<PauseMenuState>().open = true;
+        app.update();
+        app.world_mut()
+            .entity_mut(music)
+            .insert(Interaction::Pressed);
+        app.update();
+        let expected = AudioSettings {
+            music: 0.15,
+            ..initial
+        };
+        assert_eq!(*app.world().resource::<AudioSettings>(), expected);
+        app.update();
+        assert_eq!(*app.world().resource::<AudioSettings>(), expected);
+        let labels: Vec<_> = app
+            .world_mut()
+            .query::<(&AudioLabel, &Text)>()
+            .iter(app.world())
+            .map(|(label, text)| (*label, text.0.clone()))
+            .collect();
+        assert!(
+            labels.iter().any(
+                |(label, text)| matches!(label, AudioLabel::Bus(AudioBus::Music)) && text == "15%"
+            )
+        );
+        assert!(
+            labels
+                .iter()
+                .any(|(label, text)| matches!(label, AudioLabel::Mute) && text == "Unmute sound")
+        );
+        let mute = app
+            .world_mut()
+            .query::<(Entity, &AudioButton)>()
+            .iter(app.world())
+            .find(|(_, action)| matches!(action, AudioButton::Mute))
+            .unwrap()
+            .0;
+        app.world_mut()
+            .entity_mut(mute)
+            .insert(Interaction::Pressed);
+        app.update();
+        assert_eq!(
+            *app.world().resource::<AudioSettings>(),
+            AudioSettings {
+                muted: false,
+                ..expected
+            }
+        );
+        let mut bounded = AudioSettings::default();
+        for _ in 0..25 {
+            AudioBus::Master.adjust(&mut bounded, 0.05);
+            AudioBus::Music.adjust(&mut bounded, -0.05);
+        }
+        assert_eq!(bounded.master, 1.0);
+        assert_eq!(bounded.music, 0.0);
+    }
+
+    #[test]
+    fn mobile_audio_changes_on_short_release_but_never_on_scroll_or_closed_menu() {
+        let mut app = App::new();
+        let mut mobile = crate::mobile_controls::MobileControls::default();
+        mobile.enabled = true;
+        mobile.focused = true;
+        mobile.landscape = true;
+        app.insert_resource(mobile)
+            .init_resource::<AudioSettings>()
+            .insert_resource(PauseMenuState {
+                open: true,
+                in_settings: true,
+            })
+            .init_resource::<Touches>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .add_message::<TouchInput>()
+            .add_systems(
+                Update,
+                (collect_pause_button_taps, handle_audio_buttons).chain(),
+            );
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
+        app.world_mut().spawn((
+            Button,
+            Node::default(),
+            AudioButton::Adjust(AudioBus::Music, 0.05),
+            PauseButtonGesture::default(),
+            Interaction::Pressed,
+            BackgroundColor(BUTTON_COLOR),
+            ComputedNode {
+                size: Vec2::new(44.0, 44.0),
+                inverse_scale_factor: 1.0,
+                ..default()
+            },
+            UiGlobalTransform::from_translation(Vec2::new(300.0, 150.0)),
+            InheritedVisibility::VISIBLE,
+        ));
+        let event = |id, phase, position| TouchInput {
+            id,
+            phase,
+            position,
+            window,
+            force: None,
+        };
+        let center = Vec2::new(300.0, 150.0);
+        app.world_mut()
+            .write_message(event(1, TouchPhase::Started, center));
+        app.update();
+        assert_eq!(app.world().resource::<AudioSettings>().music, 0.25);
+        app.world_mut()
+            .write_message(event(1, TouchPhase::Moved, center + Vec2::Y * 30.0));
+        app.world_mut()
+            .write_message(event(1, TouchPhase::Ended, center));
+        app.update();
+        assert_eq!(app.world().resource::<AudioSettings>().music, 0.25);
+        app.world_mut()
+            .write_message(event(2, TouchPhase::Started, center));
+        app.world_mut()
+            .write_message(event(2, TouchPhase::Ended, center + Vec2::X * 3.0));
+        app.update();
+        assert_eq!(app.world().resource::<AudioSettings>().music, 0.3);
+        app.update();
+        assert_eq!(app.world().resource::<AudioSettings>().music, 0.3);
+        app.world_mut()
+            .write_message(event(3, TouchPhase::Started, center));
+        app.update();
+        app.world_mut().resource_mut::<PauseMenuState>().open = false;
+        app.world_mut()
+            .write_message(event(3, TouchPhase::Ended, center));
+        app.update();
+        assert_eq!(app.world().resource::<AudioSettings>().music, 0.3);
+    }
+
+    #[test]
+    fn desktop_settings_scroll_is_clamped_and_back_navigation_resets_it() {
+        let mut app = App::new();
+        app.insert_resource(PauseMenuState {
+            open: true,
+            in_settings: true,
+        })
+        .add_message::<MouseWheel>()
+        .add_systems(
+            Update,
+            (reset_pause_scroll_on_navigation, scroll_desktop_settings).chain(),
+        );
+        let panel = app
+            .world_mut()
+            .spawn((
+                PauseMenuPanel,
+                ScrollPosition::default(),
+                ComputedNode {
+                    size: Vec2::new(400.0, 200.0),
+                    content_size: Vec2::new(400.0, 800.0),
+                    inverse_scale_factor: 1.0,
+                    ..default()
+                },
+            ))
+            .id();
+        app.world_mut().write_message(MouseWheel {
+            unit: MouseScrollUnit::Line,
+            x: 0.0,
+            y: -50.0,
+            window: Entity::PLACEHOLDER,
+        });
+        app.update();
+        assert_eq!(app.world().get::<ScrollPosition>(panel).unwrap().y, 600.0);
+        app.world_mut().resource_mut::<PauseMenuState>().in_settings = false;
+        app.update();
+        assert_eq!(app.world().get::<ScrollPosition>(panel).unwrap().y, 0.0);
+    }
 
     #[test]
     fn pause_tap_cancels_a_scroll_even_after_returning_to_the_button() {

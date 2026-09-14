@@ -1,0 +1,86 @@
+{
+  "task_id": "GAME-AUDIO-2026-09-14",
+  "base_commit": "747b991acf283cf18b636d0c7c71f4245eb1e376",
+  "version": "0.19.0-rc.8",
+  "status": "VERIFICATION_PASS_PUBLICATION_PENDING",
+  "acceptance": {
+    "AC1": {
+      "status": "PASS",
+      "evidence": [
+        "raw/asset-audit.json",
+        "raw/package-audio-inventory.json",
+        "raw/audio-preview.mp3"
+      ],
+      "result": "17 bundled CC0 Vorbis assets, 1,859,827 bytes; 23 source/member/output SHA-256 checks; exact source notices; 14 original cues and two adapted Kenney cues; no production dependency changes."
+    },
+    "AC2": {
+      "status": "PASS",
+      "evidence": [
+        "raw/client-tests-final.log",
+        "raw/native-qa-run.log",
+        "raw/desktop-3d/qa-summary.json",
+        "raw/phone-3d/qa-summary.json",
+        "raw/phone-2d/qa-summary.json"
+      ],
+      "result": "17 policy/headless audio tests cover authoritative style routing, history baselines, dedupe, bounded admission, distance, missing assets/device, focus/mute and one music loop. Three real native Practice connections report decoded music/effect sinks and advancing music position."
+    },
+    "AC3": {
+      "status": "PASS",
+      "evidence": [
+        "raw/client-tests-final.log",
+        "raw/native-qa-run.log",
+        "raw/phone-3d/01-audio-settings.png",
+        "raw/phone-2d/02-muted-settings.png"
+      ],
+      "result": "Seven preference/UI tests plus native normal button/touch handlers: music 25 to 20 percent, mute and resume, saved preferences. All nine audio controls fit panel/window in all six final captures, visually inspected."
+    },
+    "AC4": {
+      "status": "PASS",
+      "evidence": [
+        "../../../client/assets/audio/manifest.json",
+        "../../../client/src/game_audio/policy.rs",
+        "../../../docs/game-audio.md"
+      ],
+      "result": "Versioned stable cue catalog with complete cue IDs, finite gains and safe local paths; unchanged gameplay authority, networking, ranked/NFT contracts."
+    },
+    "AC5": {
+      "status": "PASS",
+      "evidence": [
+        "raw/workspace-tests-2.log",
+        "raw/client-tests-final.log",
+        "raw/native-build-final.log",
+        "raw/clippy-final.log",
+        "raw/fmt-final.log",
+        "raw/source-diff-check.log",
+        "raw/python-source-check.log",
+        "raw/asset-audit.json",
+        "raw/native-qa-run.log"
+      ],
+      "result": "Workspace 628 passed/0 failed/14 PostgreSQL tests ignored across 21 targets; after final client-only refinements, current client 341 passed/0 failed. Current native build, strict workspace Clippy, formatting, Python parsing and scoped whitespace checks pass. All 17 assets decode without clipping/nonfinite samples or decoder errors."
+    },
+    "AC6": {
+      "status": "PENDING_PUBLICATION",
+      "evidence": [
+        "../../../Cargo.toml",
+        "../../../CHANGELOG.md",
+        "../../../docs/features.md",
+        "../../../docs/progress/2026-09-14-game-audio.md"
+      ],
+      "result": "Release 0.19.0-rc.8, authoring guide and curated proof ready. Commit/push and preserved unrelated files will be recorded after actual publication."
+    }
+  },
+  "verification_sequence": [
+    "Workspace regression: 628 passed, 14 PostgreSQL integration tests ignored.",
+    "Client-only final changes: session-lifecycle ordering, one new music runtime test, compact UI spacing/hint, QA control-fit assertion and equivalent Clippy assertion cleanup.",
+    "Fresh final client suite: 341 passed; fresh native build and three native scenarios; strict workspace all-target Clippy and formatting."
+  ],
+  "limitations": [
+    "No PostgreSQL service or database integration rerun in this audio task; database code/schema did not change.",
+    "Phone-sized native previews are not physical Android/iOS acceptance. No browser autoplay, Bluetooth, production-load or full distributable-build claim.",
+    "Real sinks and advancing position establish decoded playback, not subjective listening quality.",
+    "The 32-second MP3 is an authored music/effects palette demo, not a gameplay recording.",
+    "Music source is author-designated seamless; measurements do not establish perceptual seamlessness.",
+    "Source archives, temporary PCM, runtime configs and caches remain ignored. Third-party notices and raw logs retain their original whitespace."
+  ],
+  "artifact_inventory": "sha256.json"
+}

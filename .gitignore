@@ -16,6 +16,7 @@ client/assets/*
 !client/assets/verdant/
 !client/assets/ui/
 !client/assets/reactions/
+!client/assets/audio/
 .claude/*
 !.claude/skills/
 .claude/skills/*
@@ -37,6 +38,7 @@ CLAUDE.md
 docs/*
 !docs/features.md
 !docs/bot-practice-and-social.md
+!docs/game-audio.md
 !docs/playtest-script.md
 !docs/bug-report-template.md
 !docs/mvp-scope-and-limitations.md

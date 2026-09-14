@@ -1,0 +1,6 @@
+Running desktop-3d on 127.0.0.1:40527
+PASS desktop-3d: 2 captures, real audio sinks and saved settings
+Running phone-3d on 127.0.0.1:40528
+PASS phone-3d: 2 captures, real audio sinks and saved settings
+Running phone-2d on 127.0.0.1:40529
+PASS phone-2d: 2 captures, real audio sinks and saved settings

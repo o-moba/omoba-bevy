@@ -14,6 +14,26 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 - Add `make play` / `make play-bots` to build locked current sources and launch
   supervised local 3D practice with nine bots, with owned-process cleanup.
 
+## [0.19.0-rc.8] - 2026-09-14
+
+### Added
+- Bundled CC0 instrumental music loop, distinct combat-style impacts, local
+  hero/match notifications and interface sounds; exact attribution and asset
+  provenance accompany the compact Ogg Vorbis pack.
+- Local audio presentation driven by accepted server combat and match state,
+  with round/reconnect baselines, distance attenuation, bounded voices and rate
+  limits. Missing sounds are dropped without delaying gameplay or replaying later.
+- Smooth music gain changes, focus/mute handling and separate persistent master,
+  music, effects and interface settings on desktop and mobile. Preferences migrate
+  without changing older graphics or player selections.
+- Versioned cue manifest using safe packaged paths, an original sound-synthesis
+  builder and native audio/settings diagnostics.
+
+### Scope
+- Audio uses the existing Bevy/Vorbis stack; no new production dependency or
+  network protocol is introduced. Native phone-sized previews do not establish
+  physical Android/iOS output or browser autoplay acceptance.
+
 ## [0.19.0-rc.7] - 2026-09-14
 
 ### Added

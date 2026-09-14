@@ -102,3 +102,14 @@ distributed under the SIL Open Font License 1.1. The complete license is in
 SHA-256 are recorded in `client/assets/ui/NotoSansCJK-SOURCE.md`. Preserve both
 notices when packaging the font. This covers CJK player names alongside the
 existing Inter font for Latin and Cyrillic interface text.
+
+## Music and sound — 0.19.0-rc.8
+
+The CC0 audio pack in `client/assets/audio/` includes **Exploration Theme** by
+Cleyton Kauffman (https://opengameart.org/content/exploration-theme), two adapted
+foley clips from **Kenney RPG Audio** (https://kenney.nl/assets/rpg-audio), and
+fourteen original synthesized cues. Courtesy music credit: Cleyton Kauffman —
+https://soundcloud.com/cleytonkauffman . Asset licenses, unmodified source notices,
+download/member/output hashes and adaptations are recorded in that directory.
+The original synthesis builder and game code remain MPL-2.0; the project's rights
+in the generated clips are dedicated under CC0-1.0 as described in its LICENSE.md.

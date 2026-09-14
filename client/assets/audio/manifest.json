@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "music": {
+    "path": "audio/music/arena.ogg",
+    "gain": 0.8
+  },
+  "cues": {
+    "melee": {
+      "path": "audio/sfx/melee.ogg",
+      "gain": 0.6
+    },
+    "arrow": {
+      "path": "audio/sfx/arrow.ogg",
+      "gain": 0.65
+    },
+    "arcane": {
+      "path": "audio/sfx/arcane.ogg",
+      "gain": 0.7
+    },
+    "holy": {
+      "path": "audio/sfx/holy.ogg",
+      "gain": 0.55
+    },
+    "caster": {
+      "path": "audio/sfx/caster.ogg",
+      "gain": 0.3
+    },
+    "tower": {
+      "path": "audio/sfx/tower.ogg",
+      "gain": 0.7
+    },
+    "hit": {
+      "path": "audio/sfx/hit.ogg",
+      "gain": 0.6
+    },
+    "kill": {
+      "path": "audio/sfx/kill.ogg",
+      "gain": 0.65
+    },
+    "death": {
+      "path": "audio/sfx/death.ogg",
+      "gain": 0.75
+    },
+    "respawn": {
+      "path": "audio/sfx/respawn.ogg",
+      "gain": 0.65
+    },
+    "level_up": {
+      "path": "audio/sfx/level_up.ogg",
+      "gain": 0.65
+    },
+    "match_start": {
+      "path": "audio/sfx/match_start.ogg",
+      "gain": 0.55
+    },
+    "victory": {
+      "path": "audio/sfx/victory.ogg",
+      "gain": 0.7
+    },
+    "defeat": {
+      "path": "audio/sfx/defeat.ogg",
+      "gain": 0.6
+    },
+    "ui_click": {
+      "path": "audio/sfx/ui_click.ogg",
+      "gain": 0.35
+    },
+    "ui_confirm": {
+      "path": "audio/sfx/ui_confirm.ogg",
+      "gain": 0.45
+    }
+  }
+}

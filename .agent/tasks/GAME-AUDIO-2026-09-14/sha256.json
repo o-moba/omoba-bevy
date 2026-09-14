@@ -1,0 +1,397 @@
+{
+  "task_id": "GAME-AUDIO-2026-09-14",
+  "algorithm": "sha256",
+  "scope": "All task commit files except this self-referential inventory; updated for publication evidence follow-up.",
+  "files": [
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/audit_audio_assets.py",
+      "bytes": 9321,
+      "sha256": "5cb5fc93b57daca1baa187188be9e6c86366475349375f0c3db212ec5d107275"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/build_preview.py",
+      "bytes": 1876,
+      "sha256": "c24dbd5bd62de833d4d4f740c01cceb5215c2ab9fd23e477c2bb7bcd0afc6135"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/evidence.json",
+      "bytes": 4389,
+      "sha256": "b146e1248d73150fe5e87215e4685617901d8b5376f0b019a7531734b897f7ef"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/evidence.md",
+      "bytes": 5693,
+      "sha256": "f164829419ffa3e5d6d663d6db2f6c1374f68adc5e8b7b048bc1a7370a16d4f2"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/problems.md",
+      "bytes": 1567,
+      "sha256": "d11657844efd06963260036039992ba76405c5f0272dd086b63199f22f44a033"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/asset-audit.json",
+      "bytes": 15314,
+      "sha256": "0982d3d3fe4d7db22c024859523a448a88ea385ed897c4838f4c8881e7b7fc61"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/audio-preview.mp3",
+      "bytes": 769297,
+      "sha256": "1fe9e5ab761a1ae4216eb8ff17496bf1314199be4dc09fdd32c1c722493a4cd5"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/client-tests-final.log",
+      "bytes": 31424,
+      "sha256": "9d133b2e0ea9322a2bfa7e6ae78c14f5dcf3ce8f50e12d73e1ad84c5b8632e65"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/clippy-final.log",
+      "bytes": 152,
+      "sha256": "54768ce8dfe6564c9c77e262ad661b0bfa7a8f9aad2fcbae9059c4e1ce01dc6f"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/desktop-3d/01-audio-settings.png",
+      "bytes": 589315,
+      "sha256": "ffbcd613a05c1f07b5752486ecbb67ed36f842c654f4d68e7dc89ca88eded3ce"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/desktop-3d/02-muted-settings.png",
+      "bytes": 590702,
+      "sha256": "cdca22dc9269eda0e08b036ebcaf83d6249c0f485bf76436ba06ee501a74df55"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/desktop-3d/client.log",
+      "bytes": 245,
+      "sha256": "1b9af1450ca472708b3c993b9a2bc2986b698d14163c8431a61f4bd268d5e67e"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/desktop-3d/qa-summary.json",
+      "bytes": 11066,
+      "sha256": "09da8f0684d6604580e6fd6f2947dd82ec729a1bdf89bef4e56d79a62fd668f3"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/desktop-3d/server.log",
+      "bytes": 3244,
+      "sha256": "ec2bc34edf69acd605285c08fc173d7b77bd8c4bcb34b15f6f9616d767aad737"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/fmt-final.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/native-build-final.log",
+      "bytes": 143,
+      "sha256": "a336283dc3afadae2365810e2cbef5eac2430d8de507c376958c98732b0ceb5c"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/native-qa-run.log",
+      "bytes": 301,
+      "sha256": "8bef5b449e24a484b68c03dea4004ebbea9f51ad80347a6548358f7547bd2462"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/package-audio-inventory.json",
+      "bytes": 3776,
+      "sha256": "2e456fd36ef7e3c6285e2c2a0d4e35ba2fbcb2f7d1bf71e474770b679a845f66"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/palette-build.log",
+      "bytes": 81,
+      "sha256": "1af8a98cf418b9fb29762c192c79e15584c72d23a8df7397aae8f352ed653f57"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/phone-2d/01-audio-settings.png",
+      "bytes": 360762,
+      "sha256": "1717986029683248dac2d4e22f506ac1773bdd195880a7417757c6e522ee6368"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/phone-2d/02-muted-settings.png",
+      "bytes": 361145,
+      "sha256": "b02f914fce05eb4a3189e03069d77996d9d21d960e62510a0e778535e308bfd1"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/phone-2d/client.log",
+      "bytes": 245,
+      "sha256": "8d81505108dc3211be6b9b65f731a6a4bc4d10466fbc6015d02f7c131eb4c586"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/phone-2d/qa-summary.json",
+      "bytes": 11049,
+      "sha256": "96448fdb842b69d7e1b785b825769abcb4ad69258294703f523600ed6acba3f2"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/phone-2d/server.log",
+      "bytes": 3244,
+      "sha256": "ae6fc5e24bc4a1a00aae20fd9af273b92647277ae6fba831bf1c03fdfe1a6363"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/phone-3d/01-audio-settings.png",
+      "bytes": 184726,
+      "sha256": "1ce820150dff7d592906d2480f830ec2280b1ea625066e276b5da3b833577d35"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/phone-3d/02-muted-settings.png",
+      "bytes": 184951,
+      "sha256": "a08d2ae0f8894169e3737eca67fdbfc593ba7f4f1baebbfabf5f5c94c8680759"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/phone-3d/client.log",
+      "bytes": 245,
+      "sha256": "f3e172fa2f14c6d3fdfa3b42e12c92289e57e41711f32e423edcd36b7a82c747"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/phone-3d/qa-summary.json",
+      "bytes": 11049,
+      "sha256": "3a0f4e0eb681ea60ce4517b70ab90a74c0ef213a4d890226246a84aea883b7a9"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/phone-3d/server.log",
+      "bytes": 3244,
+      "sha256": "c3058e22ac611aa0b2f05214c4393cae9015079484934b622dc3d8dde88396b2"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/preview-build.log",
+      "bytes": 50,
+      "sha256": "2b581a04b6b1e089a5cc34f301e382f45e2b845f40c431a07655a47f0113cb39"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/preview-timeline.json",
+      "bytes": 1232,
+      "sha256": "8fe9cac445dcf806f650de006b0dee2f7a9254b94fd8999ac0c92e9dd18ccb11"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/python-source-check.log",
+      "bytes": 238,
+      "sha256": "050cb713959f9bf8ec4ee79d5ff524b3b0d23cf8b1e4c2bbcd0efd5e7c06def2"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/source-diff-check.log",
+      "bytes": 87,
+      "sha256": "ee67035ed15b55c23c7ba5524b7e75de754d3f72ef4b62bb58a8f58581cfb349"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/raw/workspace-tests-2.log",
+      "bytes": 64473,
+      "sha256": "b71572e2d0b9b33c8fa42dc0624246c9e929b448b677996a37012f491932b9cd"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/run_native_qa.py",
+      "bytes": 4519,
+      "sha256": "ee08176b0089342ecffc45b7fc0f8c185e7d7673b5e5f56e0d0fedd501b79324"
+    },
+    {
+      "path": ".agent/tasks/GAME-AUDIO-2026-09-14/spec.md",
+      "bytes": 2494,
+      "sha256": "6a87b1e55855b8969928ab26da034d1714d10ef84a4422b55f7b377e8c529f88"
+    },
+    {
+      "path": ".gitignore",
+      "bytes": 2377,
+      "sha256": "fb109246e07454642f2de200fd1def96386bf32fe910ef2c2b7631c6f44d267d"
+    },
+    {
+      "path": "ATTRIBUTION.md",
+      "bytes": 6038,
+      "sha256": "34a2a6526197c37f9297303a89158503408f0d782955b38520dce4ab1504d61d"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "bytes": 60327,
+      "sha256": "f4b78995df2b45dd2ce399e0b3e435ff3b2c5a6b24c035a2185057e772ce917d"
+    },
+    {
+      "path": "Cargo.lock",
+      "bytes": 181859,
+      "sha256": "feec04c157a3cb1877bd3e4b4fdb2d9e7feb5aff6c9b30bd7558dcc52dbac180"
+    },
+    {
+      "path": "Cargo.toml",
+      "bytes": 840,
+      "sha256": "9cf1dce9be85cc71acad1ba07fe7b9f2f62ba9d56d46db2634f6a895ae608d2b"
+    },
+    {
+      "path": "README.md",
+      "bytes": 9071,
+      "sha256": "058ac712883076127a60ad5445b440ced3ba8566c0ea498bbe6db9f5c0a82b97"
+    },
+    {
+      "path": "client/assets/audio/LICENSE.md",
+      "bytes": 1442,
+      "sha256": "f9b7af92d51230355534f262cd1440bd2334cdf137f44b70f41c70a8e3e34b03"
+    },
+    {
+      "path": "client/assets/audio/licenses/exploration-theme.txt",
+      "bytes": 475,
+      "sha256": "5516a1d57b79938480b6fdd021504c1cfe8b3be05938e210b844fef6f7a5d129"
+    },
+    {
+      "path": "client/assets/audio/licenses/kenney-rpg-audio.txt",
+      "bytes": 478,
+      "sha256": "5735dfd72cb64cbbceda4ebc00c380c41ca680edb82ff153aa7c9ab97614c539"
+    },
+    {
+      "path": "client/assets/audio/manifest.json",
+      "bytes": 1387,
+      "sha256": "7378fdf19126cbcee4946d17e1422fd7e6900de1a3f95d45916f8f2869db4a0a"
+    },
+    {
+      "path": "client/assets/audio/music-provenance.json",
+      "bytes": 908,
+      "sha256": "1749390fe26050a74f7a71df793e6e35c9b8069309a79af69e116b54eb80ca02"
+    },
+    {
+      "path": "client/assets/audio/music/arena.ogg",
+      "bytes": 1729695,
+      "sha256": "305dc905e0a38d658296108b6d63626bf09d7173fb16ad81d83afdcf7f367db6"
+    },
+    {
+      "path": "client/assets/audio/sfx-provenance.json",
+      "bytes": 5081,
+      "sha256": "6f910e1d89bc7714c51b052015d6bd9ed7d220e407b702a9e3a33129290cacab"
+    },
+    {
+      "path": "client/assets/audio/sfx/arcane.ogg",
+      "bytes": 10409,
+      "sha256": "911b57348e0f1588db3189455a68e3977a18211ead8a6bbc14b01ecdbca7f028"
+    },
+    {
+      "path": "client/assets/audio/sfx/arrow.ogg",
+      "bytes": 5893,
+      "sha256": "067faccf81dcf1f6bbaecaa15354f40a854f89a82022ee76d8c9acf6db7b3a47"
+    },
+    {
+      "path": "client/assets/audio/sfx/caster.ogg",
+      "bytes": 5376,
+      "sha256": "e248d217443ca29ad876431ef6898948dcdbb8d09a2978f4b32fa340a50953df"
+    },
+    {
+      "path": "client/assets/audio/sfx/death.ogg",
+      "bytes": 7636,
+      "sha256": "6e5be7f80834743cab8bdfa09a27730451132454481801c46f9622788c5fd24a"
+    },
+    {
+      "path": "client/assets/audio/sfx/defeat.ogg",
+      "bytes": 10380,
+      "sha256": "b4b2b935ecee1eb9a6e6916a908e76fe012d7ba019ba72f2c74b7c1d3affce1c"
+    },
+    {
+      "path": "client/assets/audio/sfx/hit.ogg",
+      "bytes": 5893,
+      "sha256": "33dac618d1f0f7c5053bab327125d349155c878ac366f9c3f262531134e1e1bb"
+    },
+    {
+      "path": "client/assets/audio/sfx/holy.ogg",
+      "bytes": 8912,
+      "sha256": "ae506ca8a14232f8b430f88e9f894552ece42f3c18d9eb3cc309ca6a84c58630"
+    },
+    {
+      "path": "client/assets/audio/sfx/kill.ogg",
+      "bytes": 7390,
+      "sha256": "8adb8002734c0855985c8173c90ccea2c48a843cd6c5df2eeb1bfa0ededbf286"
+    },
+    {
+      "path": "client/assets/audio/sfx/level_up.ogg",
+      "bytes": 9062,
+      "sha256": "cbf865ebedd956835c62bdf1f79b817b6ecbf273885ff0db5c8d45040ddac41a"
+    },
+    {
+      "path": "client/assets/audio/sfx/match_start.ogg",
+      "bytes": 9041,
+      "sha256": "e428a1478664ae4e3fd3cd1557e672a9242f74c63593c45e1661bece75ce90c3"
+    },
+    {
+      "path": "client/assets/audio/sfx/melee.ogg",
+      "bytes": 9169,
+      "sha256": "3ead4fe1ff585ecc7144f1535bc9ffe1d543430561e4738eb132f6fc8a777ad6"
+    },
+    {
+      "path": "client/assets/audio/sfx/respawn.ogg",
+      "bytes": 8645,
+      "sha256": "7d677a36122aa2998f7e0bb472908ae7698e95cfc7707f64c6feedeb90e9b12f"
+    },
+    {
+      "path": "client/assets/audio/sfx/tower.ogg",
+      "bytes": 7054,
+      "sha256": "89cf1b4a03489642b6427aa5cac86839e48d96106dd76a6c81dbee26563b800b"
+    },
+    {
+      "path": "client/assets/audio/sfx/ui_click.ogg",
+      "bytes": 4012,
+      "sha256": "05923b88f6d19e68d1a209d8a4cbc47cc3f81aaffbcb1cb2402faa51632e13e6"
+    },
+    {
+      "path": "client/assets/audio/sfx/ui_confirm.ogg",
+      "bytes": 6180,
+      "sha256": "603cc314d9bc7e337deb58319b38449477658b3907dc69130ace5d518d39be75"
+    },
+    {
+      "path": "client/assets/audio/sfx/victory.ogg",
+      "bytes": 15080,
+      "sha256": "2ae103cc00344419e21e3f34d7e4082c28c62bddbbdd32d7de97f6c07312af42"
+    },
+    {
+      "path": "client/src/audio_qa.rs",
+      "bytes": 16031,
+      "sha256": "de0924d8d6c5c0a459b1a57ef7e531fda164874550e7545e0913da320422d130"
+    },
+    {
+      "path": "client/src/audio_settings.rs",
+      "bytes": 2828,
+      "sha256": "846bce6eeac089f8cced1350673408ffcc3557e899b2066ce54ac620d7e1e36b"
+    },
+    {
+      "path": "client/src/game_audio.rs",
+      "bytes": 13307,
+      "sha256": "29859b0a7a111ce652d7e7455f909365fe8793c8b82ab5adba6e00d464d7d175"
+    },
+    {
+      "path": "client/src/game_audio/policy.rs",
+      "bytes": 11571,
+      "sha256": "5af603de0923ba0ba9f47449d5fb76d11545a8e69a65e36167eb800352a4da38"
+    },
+    {
+      "path": "client/src/game_audio/policy/tests.rs",
+      "bytes": 11979,
+      "sha256": "b175a27fae5bb935a04bd655f8d0cbc6cf79e7f8c866193bdc8fff9852ed7300"
+    },
+    {
+      "path": "client/src/game_audio/runtime_tests.rs",
+      "bytes": 5996,
+      "sha256": "77554ca24c74cee6df38c1efb261b173d73893c41991637a5202fa4c50dd1fd7"
+    },
+    {
+      "path": "client/src/lib.rs",
+      "bytes": 4144,
+      "sha256": "d70cdcf8f302d2330d162c47cae28c4185704f9eb4898eada92dec62972da629"
+    },
+    {
+      "path": "client/src/pause_menu.rs",
+      "bytes": 62134,
+      "sha256": "73c99436a91b8ca22b435979db4062457e455886fe88eb98f35cd6be0a298bff"
+    },
+    {
+      "path": "client/src/persistence.rs",
+      "bytes": 23729,
+      "sha256": "fc9caa50f9d7f2d26c45578f59083f36189cae2d0c98a0204df3ab79836b872f"
+    },
+    {
+      "path": "docs/features.md",
+      "bytes": 33601,
+      "sha256": "e56505894f4b86c42a2f990d930c4dc2b48a70c6b77d2a3996fbfd000b1e6098"
+    },
+    {
+      "path": "docs/game-audio.md",
+      "bytes": 6276,
+      "sha256": "586735356dbc305185c6886412aaeaec18b8166d82ff997af20c4840a1ba672d"
+    },
+    {
+      "path": "docs/progress/2026-09-14-game-audio.md",
+      "bytes": 2191,
+      "sha256": "32a098d1ad061a465818bcfa33ca7f246e9acb36b3d6e60f411ad24b3c7dc03b"
+    },
+    {
+      "path": "scripts/build_audio_palette.py",
+      "bytes": 7907,
+      "sha256": "a23452d8fa53afb29e4ca748d7dfe8c59061efa0fe9e04094ee4842fd6d32f6f"
+    }
+  ]
+}

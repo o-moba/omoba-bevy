@@ -12,6 +12,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::audio_settings::AudioSettings;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -27,7 +28,7 @@ use crate::world::{
     MIN_LIGHT_YAW_DEG,
 };
 
-const SCHEMA_VERSION: u32 = 4;
+const SCHEMA_VERSION: u32 = 5;
 const LEGACY_DEFAULT_MODEL_TARGET_HEIGHT: f32 = 1.15;
 const SCHEMA_3_DEFAULT_MODEL_TARGET_HEIGHT: f32 = 1.45;
 const PREFS_FILENAME: &str = "client_preferences.json";
@@ -56,6 +57,7 @@ pub struct ClientPersistencePlugin;
 impl Plugin for ClientPersistencePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FileGameServerAddr>()
+            .init_resource::<AudioSettings>()
             .init_resource::<ResolvedServerAddressForPrefs>()
             .init_resource::<ClientSessionId>()
             .init_resource::<ClientPreferencesInitialSavePending>()
@@ -94,6 +96,8 @@ struct ClientPreferencesFile {
     light_pitch_deg: Option<f32>,
     #[serde(default)]
     light_yaw_deg: Option<f32>,
+    #[serde(default)]
+    audio: AudioSettings,
 }
 
 fn default_schema_version() -> u32 {
@@ -213,7 +217,7 @@ fn write_preferences_file(path: &Path, prefs: &ClientPreferencesFile) -> io::Res
 }
 
 /// Startup: load JSON if present and apply to resources; always sets [`FileGameServerAddr`].
-pub fn load_persistent_client_settings(
+pub(crate) fn load_persistent_client_settings(
     mut file_addr: ResMut<FileGameServerAddr>,
     mut lighting: ResMut<LightingSettings>,
     mut model: ResMut<ModelScaleSettings>,
@@ -221,6 +225,7 @@ pub fn load_persistent_client_settings(
     mut client_session_id: ResMut<ClientSessionId>,
     mut initial_save_pending: ResMut<ClientPreferencesInitialSavePending>,
     mut gate: ResMut<ClientPrefsSaveGate>,
+    mut audio: ResMut<AudioSettings>,
 ) {
     gate.suppress_saves = 3;
     file_addr.0 = None;
@@ -254,6 +259,7 @@ pub fn load_persistent_client_settings(
     // Startup's save gate outlives Bevy's resource change tick. Explicitly
     // queue the migrated schema so the one-time default migration is persisted.
     initial_save_pending.0 = disk.schema_version < SCHEMA_VERSION;
+    *audio = disk.audio.sanitized();
 
     if let Some(addr_raw) = disk.game_server_addr.as_deref() {
         if let Some(addr) = validate_game_server_addr(addr_raw) {
@@ -313,6 +319,7 @@ fn build_file_from_state(
     character: CharacterChoice,
     game_server_addr: &str,
     client_session_id: &str,
+    audio: &AudioSettings,
 ) -> ClientPreferencesFile {
     ClientPreferencesFile {
         schema_version: SCHEMA_VERSION,
@@ -324,16 +331,18 @@ fn build_file_from_state(
         ambient_brightness: Some(lighting.ambient_brightness),
         light_pitch_deg: Some(lighting.light_pitch_deg),
         light_yaw_deg: Some(lighting.light_yaw_deg),
+        audio: audio.sanitized(),
     }
 }
 
 /// Writes current resources to disk (graphics + character + active server display string).
-pub fn save_client_preferences_to_disk(
+pub(crate) fn save_client_preferences_to_disk(
     lighting: &LightingSettings,
     model: &ModelScaleSettings,
     character: CharacterChoice,
     game_server_addr: &str,
     client_session_id: &str,
+    audio: &AudioSettings,
 ) -> io::Result<()> {
     let Some(path) = preferences_path() else {
         return Err(io::Error::new(
@@ -347,7 +356,7 @@ pub fn save_client_preferences_to_disk(
     });
     let session_id =
         validate_client_session_id(client_session_id).unwrap_or_else(generate_client_session_id);
-    let prefs = build_file_from_state(lighting, model, character, &addr, &session_id);
+    let prefs = build_file_from_state(lighting, model, character, &addr, &session_id, audio);
     write_preferences_file(&path, &prefs)
 }
 
@@ -359,6 +368,7 @@ fn save_client_preferences_on_change(
     team: Res<crate::team::TeamSelection>,
     resolved_addr: Res<ResolvedServerAddressForPrefs>,
     client_session_id: Res<ClientSessionId>,
+    audio: Res<AudioSettings>,
 ) {
     if gate.suppress_saves > 0 {
         gate.suppress_saves -= 1;
@@ -369,7 +379,8 @@ fn save_client_preferences_on_change(
         || model.is_changed()
         || team.is_changed()
         || resolved_addr.is_changed()
-        || client_session_id.is_changed();
+        || client_session_id.is_changed()
+        || audio.is_changed();
     if !changed && !initial_save_pending.0 {
         return;
     }
@@ -385,6 +396,7 @@ fn save_client_preferences_on_change(
             addr
         },
         client_session_id.0.as_str(),
+        audio.as_ref(),
     ) {
         warn!("Failed to save client preferences: {e}");
     }
@@ -392,13 +404,14 @@ fn save_client_preferences_on_change(
 }
 
 /// Resets graphics settings to defaults, persists, and re-opens save gate briefly.
-pub fn reset_graphics_to_defaults(
+pub(crate) fn reset_graphics_to_defaults(
     lighting: &mut LightingSettings,
     model: &mut ModelScaleSettings,
     gate: &mut ClientPrefsSaveGate,
     character: CharacterChoice,
     game_server_addr: &str,
     client_session_id: &str,
+    audio: &AudioSettings,
 ) {
     *lighting = LightingSettings::default();
     *model = ModelScaleSettings::default();
@@ -409,6 +422,7 @@ pub fn reset_graphics_to_defaults(
         character,
         game_server_addr,
         client_session_id,
+        audio,
     ) {
         warn!("Failed to save preferences after reset: {e}");
     }
@@ -417,6 +431,77 @@ pub fn reset_graphics_to_defaults(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn schema_four_gets_audio_defaults_without_repeating_readability_migration() {
+        let old: ClientPreferencesFile = serde_json::from_str(r#"{"schema_version":4,"model_target_height":1.45,"client_session_id":"old-install","game_server_addr":"game.local:4000","illuminance":23000}"#).unwrap();
+        assert_eq!(old.audio, AudioSettings::default());
+        assert_eq!(
+            migrate_model_target_height(old.model_target_height.unwrap(), old.schema_version),
+            1.45
+        );
+        assert_eq!(old.client_session_id.as_deref(), Some("old-install"));
+        assert_eq!(old.illuminance, Some(23000.0));
+        assert_eq!(old.game_server_addr.as_deref(), Some("game.local:4000"));
+    }
+
+    #[test]
+    fn saved_audio_round_trip_keeps_independent_buses_mute_and_existing_preferences() {
+        let audio = AudioSettings {
+            master: 0.55,
+            music: 0.1,
+            effects: 0.95,
+            ui: 0.4,
+            muted: true,
+        };
+        let file = build_file_from_state(
+            &LightingSettings::default(),
+            &ModelScaleSettings { target_height: 2.4 },
+            CharacterChoice::Paco,
+            "game.local:5000",
+            "audio-test-install",
+            &audio,
+        );
+        let bytes = serde_json::to_vec(&file).unwrap();
+        let restored: ClientPreferencesFile = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(restored.schema_version, 5);
+        assert_eq!(restored.audio, audio);
+        assert_eq!(restored.model_target_height, Some(2.4));
+        assert_eq!(restored.character, Some(CharacterChoice::Paco));
+        assert_eq!(
+            restored.game_server_addr.as_deref(),
+            Some("game.local:5000")
+        );
+        assert_eq!(
+            restored.client_session_id.as_deref(),
+            Some("audio-test-install")
+        );
+        // The graphics reset writer receives the current audio mix unchanged.
+        let reset = build_file_from_state(
+            &LightingSettings::default(),
+            &ModelScaleSettings::default(),
+            CharacterChoice::Paco,
+            "game.local:5000",
+            "audio-test-install",
+            &restored.audio,
+        );
+        assert_eq!(reset.audio, audio);
+        let invalid = build_file_from_state(
+            &LightingSettings::default(),
+            &ModelScaleSettings::default(),
+            CharacterChoice::Paco,
+            "game.local:5000",
+            "audio-test-install",
+            &AudioSettings {
+                master: f32::NAN,
+                effects: -5.0,
+                ..audio
+            },
+        );
+        let value = serde_json::to_value(invalid).unwrap();
+        assert!(value["audio"]["master"].is_number());
+        assert_eq!(value["audio"]["effects"], 0.0);
+    }
 
     #[test]
     fn validate_accepts_socket_addr() {
@@ -566,6 +651,7 @@ mod tests {
                 CharacterChoice::Paco,
                 DEFAULT_GAME_SERVER_ADDR,
                 "scale-migration-test",
+                &AudioSettings::default(),
             );
             let round_trip: ClientPreferencesFile =
                 serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();

@@ -1,5 +1,7 @@
 use bevy::{asset::AssetPlugin, prelude::*};
 
+mod audio_qa;
+mod audio_settings;
 mod beta_ui_qa;
 mod bosses;
 mod camera;
@@ -13,6 +15,7 @@ mod combat_visuals;
 mod creatures3d;
 mod debug_console;
 mod decor;
+mod game_audio;
 mod game_state;
 mod god_mode;
 mod help_overlay;
@@ -148,6 +151,8 @@ pub fn main() {
         social_qa::SocialQaPlugin,
     ))
     .add_plugins(career::CareerPlugin)
+    .add_plugins(game_audio::GameAudioPlugin)
+    .add_plugins(audio_qa::AudioQaPlugin)
     .add_plugins(career_identity::CareerIdentityPlugin)
     .add_plugins(career_visual_qa::CareerVisualQaPlugin)
     .add_plugins(map_visuals::MapVisualsPlugin)

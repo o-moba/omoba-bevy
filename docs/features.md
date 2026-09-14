@@ -1,6 +1,16 @@
 # Feature Inventory
 
-Canonical version: `0.19.0-rc.7`
+Canonical version: `0.19.0-rc.8`
+
+## Music and sound
+
+A bundled CC0 soundtrack and sixteen effect cues cover combat styles, local
+player/match events and interface actions. The client deduplicates accepted combat
+receipts, attenuates nearby effects and limits simultaneous voices. Music follows
+match/menu state and mute/focus changes; missing audio does not block gameplay.
+Master, music, effects and UI volume are separately saved in client preferences.
+The scrolling settings menu supports mouse and touch. Stable cue IDs map to local
+Ogg assets in a versioned manifest. See [audio controls and authoring](game-audio.md).
 
 ## Native bot practice and match communication
 

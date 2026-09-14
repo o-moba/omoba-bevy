@@ -22,6 +22,10 @@ Version `0.19.0-rc.7` adds native bot practice, match/team chat and picture reac
 Use `make practice` for solo testing with server bots or `make practice-server` to
 host that mode. See [controls, customization and beta limits](docs/bot-practice-and-social.md).
 
+Music and combat/interface sounds are bundled. Open **Menu → Settings** to adjust
+master, music, effects and interface volume or mute. See [audio controls, sources
+and authoring](docs/game-audio.md).
+
 Version `0.19.0-rc.6` introduced saved post-match statistics, player profiles, match
 history and friend requests with online/in-game presence. Career-enabled servers
 use PostgreSQL; see the [career setup and beta limits](docs/match-progression.md)

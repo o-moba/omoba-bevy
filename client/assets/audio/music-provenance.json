@@ -1,0 +1,16 @@
+{
+  "title": "Exploration Theme",
+  "author": "Cleyton Kauffman",
+  "license": "CC0-1.0",
+  "source_page": "https://opengameart.org/content/exploration-theme",
+  "source_archive": "https://opengameart.org/sites/default/files/exploration_theme.zip",
+  "author_profile": "https://soundcloud.com/cleytonkauffman",
+  "retrieved": "2026-09-14",
+  "archive_sha256": "81601fb33319491973803edeebb5ab5d2d05d943c0accb48ea79e84a9680fa43",
+  "source_member": "Exploration Theme/Exploration Theme.wav",
+  "source_sha256": "f88993692b978d9bf3d376b1ae45111c1d5f0ea27b4e550e987f580e1384a150",
+  "path": "audio/music/arena.ogg",
+  "sha256": "305dc905e0a38d658296108b6d63626bf09d7173fb16ad81d83afdcf7f367db6",
+  "adaptations": "Lossless source re-encoded to Ogg Vorbis q4; stereo and exact source duration retained. No composition edits.",
+  "looping": "Author explicitly marks seamless. Original loop boundaries retained."
+}

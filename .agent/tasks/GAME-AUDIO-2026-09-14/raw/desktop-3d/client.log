@@ -1,0 +1,4 @@
+Omoba asset root: /Users/wotori/git/ekza/omoba-bevy-audio/client/assets
+Connecting to server at 127.0.0.1:40527
+UDP socket connected to 127.0.0.1:40527; waiting for first snapshot
+First snapshot received from 127.0.0.1:40527; connection is live
