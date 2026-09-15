@@ -1,0 +1,23 @@
+[package]
+name = "omoba-account-api"
+version.workspace = true
+edition.workspace = true
+license = "AGPL-3.0-only"
+
+[dependencies]
+axum = "=0.8.9"
+ring = "=0.17.14"
+sqlx = { version = "0.8.6", default-features = false, features = ["postgres", "runtime-tokio-rustls", "json"] }
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "time", "sync", "macros", "net", "signal"] }
+serde.workspace = true
+serde_json.workspace = true
+ed25519-dalek = "2.2.0"
+getrandom = "0.3.4"
+shared = { path = "../shared" }
+server = { path = "../server" }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+
+[lints]
+workspace = true

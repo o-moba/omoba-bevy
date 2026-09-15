@@ -193,6 +193,37 @@ pub(crate) struct CareerIdentity {
 }
 
 impl CareerIdentity {
+    pub(crate) fn public_key(&self) -> Result<String, String> {
+        self.key
+            .as_ref()
+            .map(|key| hex(key.verifying_key().as_bytes()))
+            .ok_or_else(|| "The saved game identity is not ready.".into())
+    }
+
+    /// Only a validated portal challenge can be signed; the device key stays private.
+    pub(crate) fn sign_web_pair(
+        &self,
+        challenge: shared::web_account::WebPairChallenge,
+        decision: shared::web_account::WebPairDecision,
+        trusted_origin: &str,
+        now_secs: u64,
+    ) -> Result<shared::web_account::SignedWebPair, String> {
+        let public_key = self.public_key()?;
+        challenge
+            .validate(trusted_origin, &public_key, now_secs)
+            .map_err(str::to_owned)?;
+        let key = self
+            .key
+            .as_ref()
+            .ok_or("The saved game identity is not ready.")?;
+        let signature = hex(&key.sign(&challenge.signing_bytes(decision)).to_bytes());
+        Ok(shared::web_account::SignedWebPair {
+            challenge,
+            decision,
+            signature,
+        })
+    }
+
     fn invalidate(&mut self) {
         self.scope = None;
         self.signed_challenge = None;

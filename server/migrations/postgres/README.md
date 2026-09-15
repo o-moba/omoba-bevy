@@ -1,10 +1,14 @@
 # PostgreSQL career adapter
 
-`career_store.rs` uses this PostgreSQL migration with SQLx dynamic queries. It
-does not use the older SQLite prototype. `connect` applies version 1 transactionally
-under a migration advisory lock, accepts an existing version 1, and rejects
-unknown versions. The database role needs schema creation/migration permissions
-for this beta adapter. Use a dedicated database/schema; no extension is needed.
+`career_store.rs` uses these PostgreSQL migrations with SQLx dynamic queries. It
+does not use the older SQLite prototype. `connect` applies versions 1 and 2 transactionally
+under a migration advisory lock, upgrades existing version 1, and rejects
+unknown versions. Since 0.20.0-rc.1, use `migrate-career` (or Account API `migrate`)
+explicitly as the migration owner. The game worker uses `connect_runtime` and
+requires no DDL permissions; startup rejects missing/unknown versions. See
+[portal roles and grants](../../../account-api/README.md). Use a dedicated
+database/schema; no extension is needed. Version 2 requires PostgreSQL built with
+ICU and the `"und-x-icu"` collation for Unicode case-insensitive player handles.
 SQLx connection pools are bounded to four connections and configure statement
 and lock timeouts plus `synchronous_commit = on`. Infrastructure backups,
 replication, credentials, TLS policy and disaster recovery remain deployment work.
@@ -24,8 +28,9 @@ acceptances and removals are idempotent for the same relationship state. The
 worker must reject replays of old signed action sequences so an old removal
 cannot act on a later recreated friendship. Self requests are forbidden, profiles
 must exist, and each account has at most 64 friends plus pending requests.
-Mutation transactions lock both profiles in sorted ID order. There is no nickname
-search: invite by exact ID. Full profile lookup permits self, accepted friends,
+Mutation transactions lock both profiles in sorted ID order. Authenticated exact `nickname#1234` lookup returns only the immutable ID and
+current name, allowing invitations even when partial discovery is disabled.
+Friend operations use that resolved ID. See [player handles](../../../docs/player-handles.md). Full profile lookup permits self, accepted friends,
 and incoming/outgoing friend-request contacts, matching the profile data already
 included in those lists. Removing, rejecting or canceling the relationship revokes
 that access. Match detail still requires actual participant membership.

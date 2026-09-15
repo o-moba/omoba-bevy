@@ -29,15 +29,19 @@ bypass roster capacity, account reservations or matchmaking rules.
 Use PostgreSQL 18 as the tested reference engine. Create a dedicated database and
 supply `OMOBA_DATABASE_URL` to the trusted game server process. Do not put the
 connection string in Git, client builds, screenshots or public distribution.
-The adapter applies its versioned PostgreSQL migration transactionally and rejects
+Since 0.20.0-rc.1, apply the versioned migration explicitly with the migration-owner
+role before starting runtime services. Runtime connections perform no DDL and reject
 unexpected schema versions. See [migration and transaction details](../server/migrations/postgres/README.md).
 
 ```sh
-# Set OMOBA_DATABASE_URL using the local/server secret mechanism.
+# Initialize once as the migration owner (or use the Account API migrate command).
+OMOBA_DATABASE_URL="$MIGRATION_DATABASE_URL" cargo run -p server --bin migrate-career --locked
+# Then use the restricted game-runtime role.
+export OMOBA_DATABASE_URL="$GAME_RUNTIME_DATABASE_URL"
 # Give each arena a persistent, separate outbox directory.
 export OMOBA_CAREER_OUTBOX=/var/lib/omoba/arena-1/career-outbox
 export OMOBA_MATCH_MODE=release
-cargo run -p server --locked
+cargo run -p server --bin server --locked
 ```
 
 `OMOBA_CAREER_OUTBOX` defaults to `.omoba/career-outbox` in the working directory.

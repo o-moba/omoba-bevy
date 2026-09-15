@@ -62,6 +62,11 @@ impl fmt::Display for StoreError {
                     .as_database_error()
                     .and_then(|e| e.code())
                     .map(|c| c.into_owned());
+                if e.as_database_error().and_then(|e| e.constraint())
+                    == Some("career_player_handle")
+                {
+                    return f.write_str("This nickname#tag is already taken. Choose another tag.");
+                }
                 match code.as_deref() {
                     Some("23505") => f.write_str(
                         "A conflicting career identity or active assignment already exists.",
@@ -102,7 +107,33 @@ where
 
 impl CareerStore {
     pub async fn connect(database_url: &str) -> Result<Self, String> {
-        let pool = PgPoolOptions::new()
+        let pool = Self::open_pool(database_url).await?;
+        Self::from_pool(pool).await.map_err(|e| e.to_string())
+    }
+
+    /// Runtime connections validate the schema and never require DDL privileges.
+    pub async fn connect_runtime(database_url: &str) -> Result<Self, String> {
+        Self::runtime_from_pool(Self::open_pool(database_url).await?).await
+    }
+
+    pub async fn runtime_from_pool(pool: PgPool) -> Result<Self, String> {
+        let versions: Vec<i32> =
+            sqlx::query_scalar("SELECT version FROM career_schema_version ORDER BY version")
+                .fetch_all(&pool)
+                .await
+                .map_err(|e| StoreError::from(e).to_string())?;
+        if versions != [1, 2] {
+            return Err("Unsupported career database schema version.".into());
+        }
+        let owner: String = sqlx::query_scalar("SELECT gen_random_uuid()::text")
+            .fetch_one(&pool)
+            .await
+            .map_err(|e| StoreError::from(e).to_string())?;
+        Ok(Self { pool, owner })
+    }
+
+    async fn open_pool(database_url: &str) -> Result<PgPool, String> {
+        PgPoolOptions::new()
             .max_connections(4)
             .acquire_timeout(Duration::from_secs(5))
             .after_connect(|connection, _| {
@@ -121,8 +152,7 @@ impl CareerStore {
             })
             .connect(database_url)
             .await
-            .map_err(|e| StoreError::from(e).to_string())?;
-        Self::from_pool(pool).await.map_err(|e| e.to_string())
+            .map_err(|e| StoreError::from(e).to_string())
     }
 
     async fn from_pool(pool: PgPool) -> StoreResult<Self> {
@@ -144,8 +174,18 @@ impl CareerStore {
             sqlx::query("INSERT INTO career_schema_version VALUES (1)")
                 .execute(&mut *tx)
                 .await?;
-        } else if versions != [1] {
+        } else if versions != [1] && versions != [1, 2] {
             return Err("Unsupported career database schema version.".into());
+        }
+        if versions != [1, 2] {
+            sqlx::query("SET LOCAL statement_timeout='120s'")
+                .execute(&mut *tx)
+                .await?;
+            sqlx::raw_sql(include_str!(
+                "../migrations/postgres/002_player_handles.sql"
+            ))
+            .execute(&mut *tx)
+            .await?;
         }
         tx.commit().await?;
         let owner: String = sqlx::query_scalar("SELECT gen_random_uuid()::text")
@@ -207,6 +247,21 @@ impl CareerStore {
         let profile = profile_row(&row)?;
         tx.commit().await?;
         Ok(profile)
+    }
+
+    /// Exact handle lookup reveals only the name and stable friend-operation ID.
+    pub async fn lookup_player(
+        &self,
+        handle: &str,
+    ) -> Result<shared::career::PlayerReference, String> {
+        let handle = shared::career::normalize_player_handle(handle).map_err(str::to_owned)?;
+        let row = sqlx::query("SELECT profile_id,nickname FROM career_profiles WHERE lower(nickname COLLATE \"und-x-icu\")=lower($1 COLLATE \"und-x-icu\")")
+            .bind(handle).fetch_optional(&self.pool).await.map_err(|e| StoreError::from(e).to_string())?
+            .ok_or("Player not found. Check nickname#1234.")?;
+        Ok(shared::career::PlayerReference {
+            profile_id: row.get("profile_id"),
+            nickname: row.get("nickname"),
+        })
     }
 
     pub async fn profile(&self, id: &str) -> Result<ProfileSummary, String> {
@@ -637,21 +692,32 @@ impl CareerStore {
         }).await
     }
     pub async fn friends(&self, actor: &str) -> Result<FriendsView, String> {
+        self.friends_with_versions(actor)
+            .await
+            .map(|(view, _)| view)
+    }
+    pub async fn friends_with_versions(
+        &self,
+        actor: &str,
+    ) -> Result<(FriendsView, BTreeMap<String, String>), String> {
         retry(|| async {
             check_id(actor)?;
-            let rows = sqlx::query("SELECT p.*,f.requested_by,f.accepted,CASE WHEN s.expires_at>clock_timestamp() THEN CASE WHEN EXISTS(SELECT 1 FROM career_active_profiles a JOIN career_matches m USING(result_id) WHERE a.profile_id=p.profile_id AND m.status!='settled' AND m.lease_until>clock_timestamp()) THEN 'playing' ELSE 'online' END ELSE 'offline' END AS presence FROM career_friendships f JOIN career_profiles p ON p.profile_id=CASE WHEN f.low_id=$1 THEN f.high_id ELSE f.low_id END LEFT JOIN career_presence s ON s.profile_id=p.profile_id WHERE f.low_id=$1 OR f.high_id=$1 ORDER BY p.profile_id LIMIT 257")
+            let rows = sqlx::query("SELECT p.*,f.requested_by,f.accepted,extract(epoch FROM f.created_at)::text AS created_epoch,CASE WHEN s.expires_at>clock_timestamp() THEN CASE WHEN EXISTS(SELECT 1 FROM career_active_profiles a JOIN career_matches m USING(result_id) WHERE a.profile_id=p.profile_id AND m.status!='settled' AND m.lease_until>clock_timestamp()) THEN 'playing' ELSE 'online' END ELSE 'offline' END AS presence FROM career_friendships f JOIN career_profiles p ON p.profile_id=CASE WHEN f.low_id=$1 THEN f.high_id ELSE f.low_id END LEFT JOIN career_presence s ON s.profile_id=p.profile_id WHERE f.low_id=$1 OR f.high_id=$1 ORDER BY p.profile_id LIMIT 257")
                 .bind(actor).fetch_all(&self.pool).await?;
             let mut view = FriendsView::default();
+            let mut versions = BTreeMap::new();
             for row in rows {
                 let presence = match row.try_get::<String,_>("presence")?.as_str() {
                     "online" => FriendPresence::Online, "playing" => FriendPresence::Playing, _ => FriendPresence::Offline,
                 };
                 let friend = FriendProfile { profile: profile_row(&row)?, presence };
+                versions.insert(friend.profile.profile_id.clone(), friendship_etag(
+                    &row.try_get::<String,_>("created_epoch")?, &row.try_get::<String,_>("requested_by")?, row.try_get::<bool,_>("accepted")?));
                 if row.try_get::<bool,_>("accepted")? { view.friends.push(friend); }
                 else if row.try_get::<String,_>("requested_by")? == actor { view.outgoing.push(friend); }
                 else { view.incoming.push(friend); }
             }
-            Ok(view)
+            Ok((view,versions))
         }).await
     }
     pub async fn friend_action(
@@ -679,6 +745,32 @@ impl CareerStore {
         target: &str,
         action: FriendAction,
     ) -> StoreResult<()> {
+        let mut tx = self.pool.begin().await?;
+        Self::friend_action_in_tx(&mut tx, actor, target, action, None).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// The HTTP adapter holds its idempotency receipt in this same transaction.
+    pub async fn apply_friend_action(
+        tx: &mut Transaction<'_, Postgres>,
+        actor: &str,
+        target: &str,
+        action: FriendAction,
+        expected_etag: Option<&str>,
+    ) -> Result<(), String> {
+        Self::friend_action_in_tx(tx, actor, target, action, expected_etag)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    async fn friend_action_in_tx(
+        tx: &mut Transaction<'_, Postgres>,
+        actor: &str,
+        target: &str,
+        action: FriendAction,
+        expected_etag: Option<&str>,
+    ) -> StoreResult<()> {
         check_id(actor)?;
         check_id(target)?;
         if actor == target {
@@ -689,15 +781,14 @@ impl CareerStore {
         } else {
             (target, actor)
         };
-        let mut tx = self.pool.begin().await?;
         // Includes absent friendship rows; two reverse requests cannot race.
         let ids: Vec<String> = sqlx::query_scalar("SELECT profile_id FROM career_profiles WHERE profile_id=$1 OR profile_id=$2 ORDER BY profile_id FOR UPDATE")
-            .bind(low).bind(high).fetch_all(&mut *tx).await?;
+            .bind(low).bind(high).fetch_all(&mut **tx).await?;
         if ids.len() != 2 {
             return Err("Profile not found. Use the exact profile ID.".into());
         }
-        let existing = sqlx::query("SELECT requested_by,accepted FROM career_friendships WHERE low_id=$1 AND high_id=$2 FOR UPDATE")
-            .bind(low).bind(high).fetch_optional(&mut *tx).await?;
+        let existing = sqlx::query("SELECT requested_by,accepted,extract(epoch FROM created_at)::text AS created_epoch FROM career_friendships WHERE low_id=$1 AND high_id=$2 FOR UPDATE")
+            .bind(low).bind(high).fetch_optional(&mut **tx).await?;
         let state = existing
             .as_ref()
             .map(|r| {
@@ -707,6 +798,21 @@ impl CareerStore {
                 ))
             })
             .transpose()?;
+        if let Some(expected) = expected_etag {
+            let actual = existing
+                .as_ref()
+                .map(|row| -> StoreResult<String> {
+                    Ok(friendship_etag(
+                        &row.try_get::<String, _>("created_epoch")?,
+                        &row.try_get::<String, _>("requested_by")?,
+                        row.try_get::<bool, _>("accepted")?,
+                    ))
+                })
+                .transpose()?;
+            if actual.as_deref() != Some(expected) {
+                return Err("Friend relationship changed; refresh before this action.".into());
+            }
+        }
         match action {
             FriendAction::Request => {
                 match state {
@@ -720,13 +826,13 @@ impl CareerStore {
                     None => {
                         for id in [low, high] {
                             let count: i64 = sqlx::query_scalar("SELECT count(*) FROM career_friendships WHERE low_id=$1 OR high_id=$1")
-                            .bind(id).fetch_one(&mut *tx).await?;
+                            .bind(id).fetch_one(&mut **tx).await?;
                             if count >= MAX_SOCIAL {
                                 return Err("Friend and pending-request limit reached.".into());
                             }
                         }
                         sqlx::query("INSERT INTO career_friendships(low_id,high_id,requested_by) VALUES($1,$2,$3)")
-                        .bind(low).bind(high).bind(actor).execute(&mut *tx).await?;
+                        .bind(low).bind(high).bind(actor).execute(&mut **tx).await?;
                     }
                 }
             }
@@ -734,7 +840,7 @@ impl CareerStore {
                 Some((_, true)) => {}
                 Some((by, false)) if by == target => {
                     sqlx::query("UPDATE career_friendships SET accepted=TRUE WHERE low_id=$1 AND high_id=$2")
-                    .bind(low).bind(high).execute(&mut *tx).await?;
+                    .bind(low).bind(high).execute(&mut **tx).await?;
                 }
                 _ => return Err("No incoming friend request to accept.".into()),
             },
@@ -754,14 +860,17 @@ impl CareerStore {
                     sqlx::query("DELETE FROM career_friendships WHERE low_id=$1 AND high_id=$2")
                         .bind(low)
                         .bind(high)
-                        .execute(&mut *tx)
+                        .execute(&mut **tx)
                         .await?;
                 }
             }
         }
-        tx.commit().await?;
         Ok(())
     }
+}
+
+pub fn friendship_etag(created_epoch: &str, requested_by: &str, accepted: bool) -> String {
+    format!("v1:{created_epoch}:{requested_by}:{}", u8::from(accepted))
 }
 
 fn check_id(id: &str) -> StoreResult<()> {

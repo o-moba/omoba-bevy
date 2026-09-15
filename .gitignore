@@ -39,6 +39,7 @@ docs/*
 !docs/features.md
 !docs/bot-practice-and-social.md
 !docs/game-audio.md
+!docs/player-handles.md
 !docs/playtest-script.md
 !docs/bug-report-template.md
 !docs/mvp-scope-and-limitations.md

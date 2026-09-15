@@ -14,6 +14,37 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 - Add `make play` / `make play-bots` to build locked current sources and launch
   supervised local 3D practice with nine bots, with owned-process cleanup.
 
+## [0.20.0-rc.2] - 2026-09-15
+
+### Fixed
+- Keep native friend/profile input widgets alive while typing, preserving scroll,
+  focus and IME state on desktop and mobile layouts.
+
+### Added
+- Editable public `nickname#1234` addresses in the game and player portal, random
+  initial names and tags, exact signed friend lookup and collision feedback.
+- Atomic career v2 migration preserving internal account IDs, friendships, ratings
+  and historical match receipts; Unicode case-insensitive uniqueness requires ICU.
+
+## [0.20.0-rc.1] - 2026-09-15
+
+### Added
+- Rust Account API and separate portal schema for game-confirmed browser sessions,
+  private match reports/history, statistics projection, friends and preferences.
+- Native desktop/mobile profile action to confirm a website code with the existing
+  game identity; HTTPS worker is bounded and approval remains explicit.
+- Atomic browser operation receipts and friendship version preconditions, preserving
+  recreated relationships when an old removal request is retried.
+- OpenAPI contract, PostgreSQL role grants, local deployment/restore guidance and
+  real database, browser and load-test support for the standalone Next.js portal.
+
+### Changed
+- Enable Bevy std for standalone server builds, using OS sleep instead of the
+  no-std spin fallback that consumed a full core between ticks.
+- Game database migrations run explicitly with `migrate-career` or Account API
+  `migrate`; game and API runtime startup only verify the existing schema version.
+- Authoritative career/matchmaking persistence is shared through the server library.
+
 ## [0.19.0-rc.8] - 2026-09-14
 
 ### Added

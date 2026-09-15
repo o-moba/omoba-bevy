@@ -15,6 +15,7 @@ pub mod protocol;
 pub mod shop;
 pub mod social;
 pub mod transport;
+pub mod web_account;
 
 /// Resolve packaged assets before the development checkout. Launchers can
 /// pin this path without requiring a source-tree working directory.

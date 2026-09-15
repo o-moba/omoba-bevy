@@ -7,13 +7,13 @@ mod career_backend;
 mod career_runtime;
 #[cfg(test)]
 mod career_runtime_tests;
-mod career_store;
+use server::career_store;
 mod combat_feedback;
 mod gameplay;
 #[cfg(test)]
 mod map_config_tests;
 mod match_stats;
-mod matchmaking;
+use server::matchmaking;
 #[cfg(test)]
 mod minion_path_tests;
 #[cfg(test)]

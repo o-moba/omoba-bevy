@@ -619,6 +619,43 @@ fn postgres_live_udp_signed_profiles_queue_real_cast_and_durable_history() {
             .iter()
             .any(|entry| entry.result_id == saved.result_id)
     );
+    let target = rt
+        .career
+        .backend
+        .profile(sockets[1 - attacker_index].local_addr().unwrap())
+        .unwrap();
+    let nonce = rt.career.backend.view(attacker_addr).auth_nonce.unwrap();
+    let action = CareerAction::LookupPlayer {
+        request_id: 78,
+        handle: target.nickname.to_uppercase(),
+    };
+    // Separate signed account actions must respect the worker's 100 ms throttle.
+    std::thread::sleep(Duration::from_millis(110));
+    let bytes = shared::career::authorized_signing_bytes(rt.server_epoch, &nonce, 2, &action);
+    let signature = keys[attacker_index]
+        .sign(&bytes)
+        .to_bytes()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    send(
+        &sockets[attacker_index],
+        &mut rt,
+        ClientPacket::Career {
+            request: CareerRequest::Authorized {
+                session_nonce: nonce,
+                sequence: 2,
+                action,
+                signature,
+            },
+        },
+    );
+    pump_worker(&mut rt, &sockets, |rt| {
+        rt.career.backend.view(attacker_addr).response_id == Some(78)
+    });
+    let found = rt.career.backend.view(attacker_addr).found_player.unwrap();
+    assert_eq!(found.profile_id, target.profile_id);
+    assert_eq!(found.nickname, target.nickname);
     for socket in &sockets {
         let address = socket.local_addr().unwrap();
         let profile = rt.career.backend.profile(address).unwrap();

@@ -4,12 +4,20 @@ use serde::{Deserialize, Serialize};
 
 pub const HISTORY_PAGE_SIZE: usize = 10;
 pub const MAX_NICKNAME_CHARS: usize = 20;
+pub const MAX_PLAYER_HANDLE_CHARS: usize = MAX_NICKNAME_CHARS + 5;
 pub const MAX_PARTICIPANTS: usize = 32;
 pub const INITIAL_RATING: i32 = 1000;
 pub const NEWCOMER_MATCHES: u32 = 20;
 
 pub fn normalize_nickname(raw: &str) -> Result<String, &'static str> {
-    let name = raw.trim();
+    let raw = raw.trim();
+    let (name, tag) = match raw.split_once('#') {
+        Some((name, tag)) if tag.len() == 4 && tag.bytes().all(|b| b.is_ascii_digit()) => {
+            (name, Some(tag))
+        }
+        Some(_) => return Err("Use nickname#1234 with exactly four digits."),
+        None => (raw, None),
+    };
     if name.is_empty() || name.chars().count() > MAX_NICKNAME_CHARS || name.len() > 80 {
         return Err("Use a name with 1–20 characters.");
     }
@@ -19,7 +27,24 @@ pub fn normalize_nickname(raw: &str) -> Result<String, &'static str> {
     {
         return Err("Use letters, numbers, spaces, dots, hyphens or underscores.");
     }
-    Ok(name.to_owned())
+    Ok(match tag {
+        Some(tag) => format!("{name}#{tag}"),
+        None => name.to_owned(),
+    })
+}
+
+pub fn normalize_player_handle(raw: &str) -> Result<String, &'static str> {
+    let value = normalize_nickname(raw)?;
+    if !value.contains('#') {
+        return Err("Use nickname#1234 with exactly four digits.");
+    }
+    Ok(value)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlayerReference {
+    pub profile_id: String,
+    pub nickname: String,
 }
 
 pub fn valid_profile_id(id: &str) -> bool {
@@ -253,6 +278,10 @@ pub enum CareerAction {
         request_id: u64,
         profile_id: String,
     },
+    LookupPlayer {
+        request_id: u64,
+        handle: String,
+    },
     Rename {
         request_id: u64,
         nickname: String,
@@ -314,6 +343,10 @@ pub enum CareerRequest {
         request_id: u64,
         profile_id: String,
     },
+    LookupPlayer {
+        request_id: u64,
+        handle: String,
+    },
     Rename {
         request_id: u64,
         nickname: String,
@@ -364,6 +397,10 @@ impl CareerRequest {
                 request_id: *request_id,
                 profile_id: profile_id.clone(),
             },
+            Self::LookupPlayer { request_id, handle } => CareerAction::LookupPlayer {
+                request_id: *request_id,
+                handle: handle.clone(),
+            },
             Self::Rename {
                 request_id,
                 nickname,
@@ -388,6 +425,7 @@ pub struct CareerView {
     pub auth_nonce: Option<String>,
     pub friends: Option<FriendsView>,
     pub visited_profile: Option<ProfileSummary>,
+    pub found_player: Option<PlayerReference>,
     pub profile: Option<ProfileSummary>,
     pub history: Vec<MatchSummary>,
     pub history_loaded: bool,
@@ -402,6 +440,35 @@ pub struct CareerView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn handles_require_exactly_four_digits_and_allow_unicode_names() {
+        for value in ["MossFox#0000", "小明#0123", "Лиса#9999"] {
+            assert_eq!(normalize_player_handle(value).unwrap(), value);
+        }
+        for value in [
+            "MossFox",
+            "A#123",
+            "A#12345",
+            "A#１２３４",
+            "A#12a4",
+            "A##1234",
+            "#1234",
+        ] {
+            assert!(normalize_player_handle(value).is_err(), "{value}");
+        }
+        assert!(normalize_player_handle(&format!("{}#1234", "界".repeat(20))).is_ok());
+        assert!(normalize_player_handle(&format!("{}#1234", "界".repeat(21))).is_err());
+        let action = CareerRequest::LookupPlayer {
+            request_id: 42,
+            handle: "MossFox#0042".into(),
+        }
+        .account_action()
+        .unwrap();
+        assert!(matches!(
+            action,
+            CareerAction::LookupPlayer { request_id: 42, .. }
+        ));
+    }
     #[test]
     fn social_account_action_signs_the_complete_match_scoped_request() {
         use crate::social::{SocialCommand, SocialRequest};

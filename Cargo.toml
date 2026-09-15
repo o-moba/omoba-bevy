@@ -1,9 +1,9 @@
 [workspace]
-members = ["arena-sync", "client", "harness", "passport", "server", "shared", "skills"]
+members = ["account-api", "arena-sync", "client", "harness", "passport", "server", "shared", "skills"]
 resolver = "2"
 
 [workspace.package]
-version = "0.19.0-rc.8"
+version = "0.20.0-rc.2"
 edition = "2024"
 license = "MPL-2.0"
 

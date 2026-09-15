@@ -1,6 +1,19 @@
 # Feature Inventory
 
-Canonical version: `0.19.0-rc.8`
+Canonical version: `0.20.0-rc.1`
+
+## Player portal integration
+
+A separate Next.js player portal uses the Rust Account API and the same PostgreSQL
+career data. The native Profile screen confirms a browser pairing with the existing
+device-held key; the browser never receives that key. The API supplies private
+history, participant-only match reports, derived class/rating statistics, friends,
+nickname/privacy/language/timezone preferences and revocable browser sessions.
+Game runtime and portal have distinct database privileges. Portal migrations retain
+career schema v1; migrate commands are now separate from runtime startup.
+Public downloads are a curated optional catalog. Physical mobile browser acceptance,
+public installation packages, passkeys and cosmetic loadout editing are not claimed
+by this change. See [operations](../account-api/README.md).
 
 ## Music and sound
 

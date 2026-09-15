@@ -16,9 +16,11 @@ use bevy::{
 };
 use shared::career::{
     CareerRequest, CareerView, FriendAction, FriendPresence, FriendProfile, MatchOutcome,
-    MatchResult, ParticipantResult, ProfileSummary, QueueView, normalize_nickname,
+    MatchResult, ParticipantResult, ProfileSummary, QueueView,
 };
 use std::time::{Duration, Instant};
+#[path = "career_web.rs"]
+mod web;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum CareerModal {
@@ -29,6 +31,7 @@ pub(crate) enum CareerModal {
     Result,
     Friends,
     FriendProfile,
+    WebLink,
 }
 
 #[derive(Clone, PartialEq)]
@@ -39,11 +42,13 @@ enum PendingKind {
     Friends,
     Friend(String, FriendAction),
     Profile(String),
+    Lookup(String),
 }
 
 #[derive(Resource, Clone, PartialEq)]
 pub(crate) struct CareerClient {
     pub view: CareerView,
+    web: web::WebState,
     pub public_profile_id: Option<String>,
     pub nickname: String,
     pub local_player_id: Option<u64>,
@@ -71,6 +76,7 @@ impl Default for CareerClient {
     fn default() -> Self {
         Self {
             view: CareerView::default(),
+            web: web::WebState::default(),
             public_profile_id: None,
             nickname: "Player".into(),
             local_player_id: None,
@@ -173,6 +179,10 @@ impl CareerClient {
                 profile_id: id.clone(),
                 action: *action,
             },
+            PendingKind::Lookup(handle) => CareerRequest::LookupPlayer {
+                request_id: *request_id,
+                handle: handle.clone(),
+            },
             PendingKind::Profile(id) => CareerRequest::Profile {
                 request_id: *request_id,
                 profile_id: id.clone(),
@@ -249,6 +259,13 @@ impl CareerClient {
         ) && next.friends.is_some()
             && !next.loading
             && next.error.is_none();
+        let lookup_response = matches!(query_kind, Some(PendingKind::Lookup(_)))
+            && next.found_player.is_some()
+            && !next.loading
+            && next.error.is_none();
+        if !lookup_response {
+            next.found_player.clone_from(&self.view.found_player);
+        }
         let profile_response = matches!(query_kind, Some(PendingKind::Profile(id)) if next.visited_profile.as_ref().is_some_and(|profile| &profile.profile_id == id))
             && !next.loading
             && next.error.is_none();
@@ -280,6 +297,7 @@ impl CareerClient {
             || friends_response
             || profile_response
             || nickname_response
+            || lookup_response
         {
             self.request_error = None;
         }
@@ -292,6 +310,7 @@ impl CareerClient {
                     PendingKind::Nickname(_) => matched && nickname_response,
                     PendingKind::Friends | PendingKind::Friend(_, _) => matched && friends_response,
                     PendingKind::Profile(_) => matched && profile_response,
+                    PendingKind::Lookup(_) => matched && lookup_response,
                 };
             if complete || (matched && next.error.is_some()) {
                 self.request_error.clone_from(&next.error);
@@ -341,6 +360,7 @@ impl CareerClient {
         self.friend_code_focused = false;
     }
     fn close(&mut self) {
+        self.web.dismiss();
         self.modal = CareerModal::Closed;
         self.nickname_focused = false;
         self.friend_code_focused = false;
@@ -360,11 +380,13 @@ pub(crate) struct CareerPlugin;
 impl Plugin for CareerPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CareerClient>()
+            .init_resource::<web::Worker>()
+            .init_resource::<crate::career_identity::CareerIdentity>()
             .insert_resource(CareerUiProfile(crate::platform::ui_profile()))
             .add_message::<NicknameChanged>()
             .add_systems(
                 Update,
-                (actions, dismiss_with_escape, nickname_input)
+                (web::poll, actions, dismiss_with_escape, nickname_input)
                     .chain()
                     .after(crate::mobile_ui::address_keyboard)
                     .after(crate::net::ClientNetPipeline::ApplySnapshot)
@@ -385,6 +407,11 @@ struct CareerRoot;
 struct CareerScroll;
 #[derive(Component, Clone)]
 enum Action {
+    WebOpen,
+    WebEdit,
+    WebLookup,
+    WebApprove,
+    WebDeny,
     Profile,
     History,
     Close,
@@ -409,9 +436,29 @@ enum Action {
 fn profile_id(raw: &str) -> Result<String, &'static str> {
     let value = raw.trim();
     if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err("Use the complete 64-character friend code.");
+        return Err("Invalid player reference. Find the player again.");
     }
     Ok(value.to_ascii_lowercase())
+}
+
+fn lookup_player(career: &mut CareerClient, requests: &mut MessageWriter<NetworkCommand>) {
+    let handle = match shared::career::normalize_player_handle(&career.friend_code) {
+        Ok(handle) => handle,
+        Err(e) => {
+            career.form_error = Some(e.into());
+            return;
+        }
+    };
+    career.form_error = None;
+    career.friend_code_focused = false;
+    career.friend_code.clone_from(&handle);
+    career.preedit.clear();
+    career.view.found_player = None;
+    let request_id = career.begin_request(PendingKind::Lookup(handle.clone()));
+    requests.write(NetworkCommand::Career(CareerRequest::LookupPlayer {
+        request_id,
+        handle,
+    }));
 }
 
 fn request_friends(career: &mut CareerClient, requests: &mut MessageWriter<NetworkCommand>) {
@@ -439,7 +486,7 @@ fn friend_action(
         }
     };
     if career.public_profile_id.as_deref() == Some(&id) {
-        career.form_error = Some("That is your own friend code.".into());
+        career.form_error = Some("That is your own player tag.".into());
         return;
     }
     career.form_error = None;
@@ -495,7 +542,7 @@ fn request_history(
     }));
 }
 fn save_name(career: &mut CareerClient, changed: &mut MessageWriter<NicknameChanged>) {
-    match normalize_nickname(&career.draft) {
+    match shared::career::normalize_player_handle(&career.draft) {
         Ok(name) => {
             career.nickname = name.clone();
             career.draft = name.clone();
@@ -515,6 +562,8 @@ fn actions(
     mut changed: MessageWriter<NicknameChanged>,
     mut server_entry: Option<ResMut<crate::mobile_ui::ServerEntry>>,
     social: Option<Res<crate::social::SocialClient>>,
+    identity: Res<crate::career_identity::CareerIdentity>,
+    mut web_worker: ResMut<web::Worker>,
 ) {
     if social
         .as_ref()
@@ -527,7 +576,13 @@ fn actions(
         if *interaction != Interaction::Pressed {
             continue;
         }
+        web::act(action, &mut career, &identity, &mut web_worker);
         match action {
+            Action::WebOpen
+            | Action::WebEdit
+            | Action::WebLookup
+            | Action::WebApprove
+            | Action::WebDeny => {}
             Action::Profile => career.open_profile(),
             Action::Friends => request_friends(&mut career, &mut requests),
             Action::EditFriendCode => {
@@ -536,13 +591,21 @@ fn actions(
                 career.form_error = None;
             }
             Action::AddFriend => {
-                let id = career.friend_code.clone();
-                friend_action(&mut career, &id, FriendAction::Request, &mut requests);
+                let found = career.view.found_player.clone().filter(|p| {
+                    p.nickname.to_lowercase() == career.friend_code.trim().to_lowercase()
+                });
+                if let Some(found) = found {
+                    friend_action(
+                        &mut career,
+                        &found.profile_id,
+                        FriendAction::Request,
+                        &mut requests,
+                    );
+                } else {
+                    lookup_player(&mut career, &mut requests);
+                }
             }
-            Action::LookupFriend => {
-                let id = career.friend_code.clone();
-                visit_profile(&mut career, &id, &mut requests);
-            }
+            Action::LookupFriend => lookup_player(&mut career, &mut requests),
             Action::Friend(id, action) => friend_action(&mut career, id, *action, &mut requests),
             Action::VisitProfile(id) => visit_profile(&mut career, id, &mut requests),
             Action::History | Action::Refresh => {
@@ -614,8 +677,8 @@ fn actions(
 }
 fn append_name(current: &mut String, text: &str) -> Result<(), &'static str> {
     let next = format!("{current}{text}");
-    if next.chars().count() > shared::career::MAX_NICKNAME_CHARS || next.len() > 80 {
-        return Err("Use up to 20 characters.");
+    if next.chars().count() > shared::career::MAX_PLAYER_HANDLE_CHARS || next.len() > 85 {
+        return Err("Use up to 20 name characters, # and four digits.");
     }
     if next.chars().any(char::is_control) {
         return Err("Names cannot contain control characters.");
@@ -624,12 +687,15 @@ fn append_name(current: &mut String, text: &str) -> Result<(), &'static str> {
     Ok(())
 }
 fn append_friend_code(current: &mut String, text: &str) -> Result<(), &'static str> {
-    let text = text.trim();
-    if current.len() + text.len() > 64 || !text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err("Friend codes contain 64 letters and numbers, using 0–9 and a–f.");
-    }
-    current.push_str(&text.to_ascii_lowercase());
-    Ok(())
+    append_name(current, text)
+}
+fn field_text(value: &str, preedit: &str, focused: bool, placeholder: &str) -> String {
+    format!(
+        "{}{}{}",
+        if value.is_empty() { placeholder } else { value },
+        preedit,
+        if focused { " |" } else { "" }
+    )
 }
 /// Invoked only by an explicit native paste shortcut. Phone keyboard paste is
 /// received as an IME commit; no clipboard polling or extra backend dependency.
@@ -675,13 +741,18 @@ fn nickname_input(
     mut requests: MessageWriter<NetworkCommand>,
 ) {
     let friend_input = career.modal == CareerModal::Friends && career.friend_code_focused;
-    let active = career.nickname_editor_open() || friend_input;
+    let web_input = career.modal == CareerModal::WebLink && career.web.focused;
+    let active = career.nickname_editor_open() || friend_input || web_input;
     if let Ok(mut window) = windows.single_mut() {
         if active {
-            window.ime_enabled = true;
+            if !window.ime_enabled {
+                window.ime_enabled = true;
+            }
             career.ime_owned = true;
         } else if career.ime_owned {
-            window.ime_enabled = false;
+            if window.ime_enabled {
+                window.ime_enabled = false;
+            }
             career.ime_owned = false;
         }
     }
@@ -693,7 +764,9 @@ fn nickname_input(
         match event {
             Ime::Preedit { value, .. } => career.preedit = value.clone(),
             Ime::Commit { value, .. } => {
-                let result = if friend_input {
+                let result = if web_input {
+                    web::append(&mut career.web.code, value)
+                } else if friend_input {
                     append_friend_code(&mut career.friend_code, value)
                 } else {
                     append_name(&mut career.draft, value)
@@ -720,8 +793,10 @@ fn nickname_input(
                     ]) =>
             {
                 let result = clipboard_text().and_then(|text| {
-                    if friend_input {
-                        append_friend_code(&mut career.friend_code, &text)
+                    if web_input {
+                        web::append(&mut career.web.code, &text)
+                    } else if friend_input {
+                        append_friend_code(&mut career.friend_code, text.trim())
                     } else {
                         append_name(&mut career.draft, text.trim())
                     }
@@ -729,7 +804,9 @@ fn nickname_input(
                 career.form_error = result.err().map(str::to_owned);
             }
             Key::Backspace => {
-                if friend_input {
+                if web_input {
+                    career.web.code.pop();
+                } else if friend_input {
                     career.friend_code.pop();
                 } else {
                     career.draft.pop();
@@ -742,9 +819,10 @@ fn nickname_input(
                 career.preedit.clear();
             }
             Key::Enter => {
-                if friend_input {
-                    let id = career.friend_code.clone();
-                    friend_action(&mut career, &id, FriendAction::Request, &mut requests);
+                if web_input {
+                    career.web.focused = false;
+                } else if friend_input {
+                    lookup_player(&mut career, &mut requests);
                 } else {
                     save_name(&mut career, &mut changed);
                 }
@@ -762,7 +840,9 @@ fn nickname_input(
                     Key::Character(text) => Some(text.as_str()),
                     _ => None,
                 }) {
-                    let result = if friend_input {
+                    let result = if web_input {
+                        web::append(&mut career.web.code, text)
+                    } else if friend_input {
                         append_friend_code(&mut career.friend_code, text)
                     } else {
                         append_name(&mut career.draft, text)
@@ -789,11 +869,26 @@ fn label(
     ));
 }
 fn button(parent: &mut ChildSpawnerCommands, value: &str, action: Action, name: &str) {
+    let input = matches!(
+        action,
+        Action::EditName | Action::EditFriendCode | Action::WebEdit
+    );
     parent
         .spawn((
             Button,
             Node {
-                min_height: Val::Px(44.0),
+                min_height: Val::Px(if input { 52.0 } else { 44.0 }),
+                height: if input { Val::Px(52.0) } else { Val::Auto },
+                width: if input {
+                    Val::Percent(100.0)
+                } else {
+                    Val::Auto
+                },
+                overflow: if input {
+                    Overflow::clip()
+                } else {
+                    Overflow::default()
+                },
                 min_width: Val::Px(44.0),
                 padding: UiRect::axes(Val::Px(8.0), Val::Px(6.0)),
                 align_items: AlignItems::Center,
@@ -1292,9 +1387,15 @@ fn result_body(
     }
 }
 fn profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
+    button(
+        parent,
+        "Connect player website",
+        Action::WebOpen,
+        "CareerWebsite",
+    );
     label(parent, "Your profile", 26.0, ui::GOLD, "CareerProfileTitle");
     if let Some(profile) = &career.view.profile {
-        friend_code_label(parent, &profile.profile_id);
+        friend_code_label(parent, &profile.nickname);
         label(
             parent,
             format!(
@@ -1335,7 +1436,7 @@ fn profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
     }
     label(
         parent,
-        "Nickname · 1–20 characters",
+        "Player tag · name (1–20 characters) # 4 digits",
         15.0,
         ui::IVORY,
         "CareerNicknamePrompt",
@@ -1351,10 +1452,19 @@ fn profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
         Action::EditName,
         "CareerNicknameField",
     );
-    if let Some(error) = &career.form_error {
-        label(parent, error, 14.0, ui::GOLD, "CareerNicknameError");
-    }
-    button(parent, "Save name", Action::SaveName, "CareerSaveNickname");
+    label(
+        parent,
+        career.form_error.as_deref().unwrap_or(""),
+        14.0,
+        ui::GOLD,
+        "CareerNicknameError",
+    );
+    button(
+        parent,
+        "Save player tag",
+        Action::SaveName,
+        "CareerSaveNickname",
+    );
     label(
         parent,
         "Rating measures match results. Career XP records your progress.",
@@ -1363,23 +1473,15 @@ fn profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
         "CareerRatingExplanation",
     );
 }
-fn friend_code_label(parent: &mut ChildSpawnerCommands, id: &str) {
-    // Explicit line breaks keep all 64 characters readable on narrow phones.
-    // No Copy button is shown without a platform clipboard implementation.
-    let lines = id
-        .as_bytes()
-        .chunks(16)
-        .map(|part| String::from_utf8_lossy(part))
-        .collect::<Vec<_>>()
-        .join("\n");
+fn friend_code_label(parent: &mut ChildSpawnerCommands, handle: &str) {
     label(
         parent,
-        "Friend code · share this code or a screenshot",
+        "Player tag · share this with friends",
         13.0,
         ui::MUTED,
         "CareerFriendCodePrompt",
     );
-    label(parent, lines, 15.0, ui::JADE, "CareerFriendCode");
+    label(parent, handle, 20.0, ui::JADE, "CareerFriendCode");
 }
 
 fn profile_summary(parent: &mut ChildSpawnerCommands, profile: &ProfileSummary) {
@@ -1415,7 +1517,7 @@ fn profile_summary(parent: &mut ChildSpawnerCommands, profile: &ProfileSummary) 
             "CareerVisitedNewcomer",
         );
     }
-    friend_code_label(parent, &profile.profile_id);
+    friend_code_label(parent, &profile.nickname);
 }
 
 fn friend_row(
@@ -1489,49 +1591,55 @@ fn friends_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
         "CareerFriendsScope",
     );
     if let Some(profile) = &career.view.profile {
-        friend_code_label(parent, &profile.profile_id);
+        friend_code_label(parent, &profile.nickname);
     }
     label(
         parent,
-        "Add a friend using their full friend code",
+        "Find a friend by nickname#1234",
         15.0,
         ui::IVORY,
         "CareerFriendInputPrompt",
     );
-    let draft = if career.friend_code.is_empty() {
-        "Enter friend code".into()
-    } else {
-        career
-            .friend_code
-            .as_bytes()
-            .chunks(16)
-            .map(|part| String::from_utf8_lossy(part))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
+    let draft = &career.friend_code;
     button(
         parent,
-        &format!(
-            "{draft}{}{}",
-            career.preedit,
-            if career.friend_code_focused { " |" } else { "" }
+        &field_text(
+            draft,
+            &career.preedit,
+            career.friend_code_focused,
+            "Nickname#1234",
         ),
         Action::EditFriendCode,
         "CareerFriendCodeField",
     );
-    if let Some(error) = &career.form_error {
-        label(parent, error, 14.0, ui::GOLD, "CareerFriendCodeError");
+    label(
+        parent,
+        career.form_error.as_deref().unwrap_or(""),
+        14.0,
+        ui::GOLD,
+        "CareerFriendCodeError",
+    );
+    if let Some(found) = &career.view.found_player {
+        label(
+            parent,
+            format!("Found: {}", found.nickname),
+            17.0,
+            ui::JADE,
+            "CareerFoundPlayer",
+        );
+        if career.public_profile_id.as_ref() != Some(&found.profile_id) {
+            button(
+                parent,
+                "Send friend request",
+                Action::AddFriend,
+                "CareerSendFriendRequest",
+            );
+        }
     }
     parent.spawn(row_node()).with_children(|buttons| {
         button(
             buttons,
-            "Send request",
-            Action::AddFriend,
-            "CareerSendFriendRequest",
-        );
-        button(
-            buttons,
-            "View profile",
+            "Find player",
             Action::LookupFriend,
             "CareerLookupProfile",
         );
@@ -1838,7 +1946,35 @@ fn render(
     roots: Query<Entity, With<CareerRoot>>,
     scrolls: Query<&ScrollPosition, With<CareerScroll>>,
     mut previous: Local<Option<RenderKey>>,
+    mut texts: Query<(&Name, &mut Text)>,
 ) {
+    // Keep focused widgets alive. Updating glyphs must never replace the modal,
+    // reset pointer capture/scroll, or dismiss the phone's IME.
+    for (name, mut text) in &mut texts {
+        let value = match name.as_str() {
+            "CareerFriendCodeFieldLabel" => Some(field_text(
+                &career.friend_code,
+                &career.preedit,
+                career.friend_code_focused,
+                "Nickname#1234",
+            )),
+            "CareerNicknameFieldLabel" => Some(field_text(
+                &career.draft,
+                &career.preedit,
+                career.nickname_focused,
+                "Nickname#1234",
+            )),
+            "CareerNicknameError" | "CareerFriendCodeError" => {
+                Some(career.form_error.clone().unwrap_or_default())
+            }
+            _ => None,
+        };
+        if let Some(value) = value {
+            if text.0 != value {
+                text.0 = value;
+            }
+        }
+    }
     let viewport = windows.single().map_or(Vec2::new(1280.0, 720.0), |w| {
         Vec2::new(w.width(), w.height())
     });
@@ -1863,8 +1999,28 @@ fn render(
         .as_deref()
         .copied()
         .unwrap_or(PlayerVisualMode::Models3d);
+    let editing = career.nickname_editor_open()
+        || (career.modal == CareerModal::Friends && career.friend_code_focused);
+    if editing
+        && previous.as_ref().is_some_and(|p| {
+            p.career.modal == career.modal
+                && p.viewport == viewport
+                && p.insets == insets
+                && p.profile == profile.0
+        })
+    {
+        return;
+    }
+    let mut render_state = career.clone();
+    render_state.draft.clear();
+    render_state.friend_code.clear();
+    render_state.preedit.clear();
+    render_state.form_error = None;
+    render_state.nickname_focused = false;
+    render_state.friend_code_focused = false;
+    render_state.ime_owned = false;
     let key = RenderKey {
-        career: career.clone(),
+        career: render_state,
         profile: profile.0,
         viewport,
         insets,
@@ -2030,6 +2186,7 @@ fn render(
                             }
                             match career.modal {
                                 CareerModal::Profile => profile_body(body, &career),
+                                CareerModal::WebLink => web::body(body, &career),
                                 CareerModal::Friends => friends_body(body, &career),
                                 CareerModal::FriendProfile => visited_profile_body(body, &career),
                                 CareerModal::History => history_body(
@@ -2157,7 +2314,10 @@ mod tests {
     fn unicode_editor_is_bounded_and_does_not_split_utf8() {
         let mut value = "Дми".to_string();
         append_name(&mut value, "трий").unwrap();
-        assert_eq!(normalize_nickname(&value).unwrap(), "Дмитрий");
+        assert_eq!(
+            shared::career::normalize_nickname(&value).unwrap(),
+            "Дмитрий"
+        );
         value.pop();
         assert_eq!(value, "Дмитри");
         let before = value.clone();
@@ -2535,23 +2695,86 @@ mod tests {
         );
     }
     #[test]
-    fn friend_codes_are_complete_hex_and_input_never_partially_accepts_bad_paste() {
-        let code = "AB12".repeat(16);
-        assert_eq!(profile_id(&code).unwrap(), code.to_ascii_lowercase());
-        for wrong in [
-            "short".into(),
-            "g".repeat(64),
-            "я".repeat(32),
-            format!("{} {}", "a".repeat(32), "b".repeat(32)),
-        ] {
-            assert!(profile_id(&wrong).is_err());
-        }
+    fn player_handle_input_is_unicode_bounded_and_atomic() {
         let mut field = String::new();
-        append_friend_code(&mut field, &format!(" {code}\n")).unwrap();
-        assert_eq!(field, code.to_ascii_lowercase());
+        append_friend_code(&mut field, "Лесная Лиса#0042").unwrap();
+        assert_eq!(field, "Лесная Лиса#0042");
+        assert!(shared::career::normalize_player_handle(&field).is_ok());
         let before = field.clone();
-        assert!(append_friend_code(&mut field, "f").is_err());
+        assert!(append_friend_code(&mut field, "\ninvalid").is_err());
         assert_eq!(field, before);
+        assert!(append_friend_code(&mut field, &"a".repeat(30)).is_err());
+        assert_eq!(field, before);
+    }
+    #[test]
+    fn focused_friend_field_keeps_its_entity_and_scroll_on_every_keystroke() {
+        for profile in [UiProfile::Desktop, UiProfile::Mobile] {
+            let mut app = render_app(profile, CareerModal::Friends);
+            app.update();
+            let root = app
+                .world_mut()
+                .query_filtered::<Entity, With<CareerRoot>>()
+                .single(app.world())
+                .unwrap();
+            let field = app
+                .world_mut()
+                .query::<(Entity, &Name)>()
+                .iter(app.world())
+                .find(|(_, n)| n.as_str() == "CareerFriendCodeField")
+                .unwrap()
+                .0;
+            let scroll = app
+                .world_mut()
+                .query_filtered::<Entity, With<CareerScroll>>()
+                .single(app.world())
+                .unwrap();
+            app.world_mut()
+                .entity_mut(scroll)
+                .insert(ScrollPosition(Vec2::new(0.0, 37.0)));
+            app.world_mut()
+                .resource_mut::<CareerClient>()
+                .friend_code_focused = true;
+            for ch in "MossFox#0427".chars() {
+                {
+                    let mut c = app.world_mut().resource_mut::<CareerClient>();
+                    c.friend_code.push(ch);
+                    c.ime_owned = true;
+                }
+                app.update();
+                assert!(app.world().get_entity(root).is_ok());
+                assert!(app.world().get_entity(field).is_ok());
+                assert_eq!(app.world().get::<ScrollPosition>(scroll).unwrap().y, 37.0);
+                let draft = app.world().resource::<CareerClient>().friend_code.clone();
+                assert!(texts(&mut app).contains(&format!("{draft} |")));
+            }
+            assert_eq!(
+                app.world().get::<Node>(field).unwrap().height,
+                Val::Px(52.0)
+            );
+        }
+    }
+    #[test]
+    fn handle_lookup_ignores_stale_reply_and_preserves_stable_account_id() {
+        let mut c = CareerClient::default();
+        let old = c.begin_request(PendingKind::Lookup("Old#0001".into()));
+        let current = c.begin_request(PendingKind::Lookup("New#0002".into()));
+        let found = shared::career::PlayerReference {
+            profile_id: "a".repeat(64),
+            nickname: "New#0002".into(),
+        };
+        c.apply_view(CareerView {
+            response_id: Some(old),
+            found_player: Some(found.clone()),
+            ..default()
+        });
+        assert!(c.view.found_player.is_none());
+        c.apply_view(CareerView {
+            response_id: Some(current),
+            found_player: Some(found.clone()),
+            ..default()
+        });
+        assert_eq!(c.view.found_player, Some(found));
+        assert!(c.pending.is_none());
     }
     #[test]
     fn friends_and_profile_payloads_are_correlated_and_survive_live_snapshots() {
@@ -2632,7 +2855,7 @@ mod tests {
                 "Decline",
                 "Remove",
                 "Cancel request",
-                "Send request",
+                "Find player",
             ] {
                 assert!(text.contains(expected), "{expected}");
             }

@@ -143,7 +143,10 @@ async fn career_store_identity_reopen_and_explicit_rename() {
     let other = f.another_owner().await;
     assert_eq!(other.authenticate(&key, "Ignored").await.unwrap(), a);
     let renamed = other.rename(&a.profile_id, "  Дмитрий-7  ").await.unwrap();
-    assert_eq!(renamed.nickname, "Дмитрий-7");
+    assert_eq!(
+        renamed.nickname,
+        format!("Дмитрий-7#{}", a.nickname.rsplit_once('#').unwrap().1)
+    );
     assert_eq!(
         f.store.authenticate(&key, "Ignored").await.unwrap(),
         renamed
@@ -164,11 +167,12 @@ async fn career_store_identity_reopen_and_explicit_rename() {
             .unwrap(),
         renamed
     );
-    let version: i32 = sqlx::query_scalar("SELECT version FROM career_schema_version")
-        .fetch_one(&f.store.pool)
-        .await
-        .unwrap();
-    assert_eq!(version, 1);
+    let versions: Vec<i32> =
+        sqlx::query_scalar("SELECT version FROM career_schema_version ORDER BY version")
+            .fetch_all(&f.store.pool)
+            .await
+            .unwrap();
+    assert_eq!(versions, [1, 2]);
     f.close().await;
 }
 

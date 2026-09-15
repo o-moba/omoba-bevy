@@ -2,16 +2,16 @@ Open Moba licensing
 ===================
 
 Original project source code, build scripts and configuration are licensed under
-Mozilla Public License 2.0 (MPL-2.0), except original server/ code, which is
+Mozilla Public License 2.0 (MPL-2.0), except original server/ and account-api/ code, which is
 licensed under GNU Affero General Public License version 3 only (AGPL-3.0-only).
 These are separate scopes, not a choice of licenses for the server.
 
-MPL notice for the source outside server/:
+MPL notice for the source outside server/ and account-api/:
 This Source Code Form is subject to the terms of the Mozilla Public License,
 v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain
 one at https://mozilla.org/MPL/2.0/.
 
-AGPL notice for the source in server/:
+AGPL notice for the source in server/ and account-api/:
 This program is free software: you can redistribute it and/or modify it under
 the terms of the GNU Affero General Public License as published by the Free
 Software Foundation, version 3 of the License.

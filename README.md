@@ -31,6 +31,11 @@ history and friend requests with online/in-game presence. Career-enabled servers
 use PostgreSQL; see the [career setup and beta limits](docs/match-progression.md)
 and [verification record](docs/progress/2026-09-14-career-and-friends.md).
 
+The 0.20.0-rc.1 player portal adds game-confirmed browser sign-in, match reports,
+statistics and shared friends through the [Account API](account-api/README.md).
+Runtime services now require an explicit owner-run migration before startup.
+See the [portal verification and remaining release checks](docs/progress/2026-09-15-player-portal.md).
+
 ## Prerequisites
 
 - [Rust toolchain](https://rustup.rs/) (`rustc`, `cargo`).
@@ -170,3 +175,6 @@ replies use a separate assembly namespace and sequence. Bounded payloads preserv
 complete results and participant lists. Oversized combined career views are sent
 as separate complete views; a single view beyond the supported limit reports an
 error. This avoids relying on large datagrams or truncating JSON.
+
+Player addresses and friend lookup use editable `nickname#1234` handles; see
+[handle rules, migration and rollout](docs/player-handles.md).

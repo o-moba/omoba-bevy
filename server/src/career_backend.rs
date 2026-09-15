@@ -574,6 +574,9 @@ impl CareerBackend {
                             if view.friends.is_some() {
                                 c.view.friends = view.friends;
                             }
+                            if view.found_player.is_some() {
+                                c.view.found_player = view.found_player;
+                            }
                             if view.visited_profile.is_some() {
                                 c.view.visited_profile = view.visited_profile;
                             }
@@ -682,6 +685,7 @@ fn action_id(action: &CareerAction) -> Option<u64> {
         | CareerAction::Friends { request_id }
         | CareerAction::Friend { request_id, .. }
         | CareerAction::Profile { request_id, .. }
+        | CareerAction::LookupPlayer { request_id, .. }
         | CareerAction::Rename { request_id, .. } => Some(*request_id),
         CareerAction::CancelQueue => None,
         CareerAction::Social { request } => Some(request.request_id),
@@ -717,6 +721,9 @@ async fn account_action(
             } else {
                 view.visited_profile = Some(store.public_profile(id, &profile_id).await?);
             }
+        }
+        CareerAction::LookupPlayer { handle, .. } => {
+            view.found_player = Some(store.lookup_player(&handle).await?);
         }
         CareerAction::Rename { nickname, .. } => {
             view.profile = Some(store.rename(id, &nickname).await?)
@@ -829,7 +836,7 @@ fn worker(url: String, outbox: PathBuf, jobs: Receiver<Job>, replies: SyncSender
     while connected || !pending.is_empty() {
         if store.is_none() && last_retry.elapsed() >= Duration::from_secs(2) {
             last_retry = Instant::now();
-            store = rt.block_on(CareerStore::connect(&url)).ok();
+            store = rt.block_on(CareerStore::connect_runtime(&url)).ok();
             if let Some(s) = &store {
                 let s = s.clone();
                 _heartbeat_task = Some(rt.spawn(async move {
