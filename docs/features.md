@@ -459,3 +459,8 @@ and [source delivery](../SOURCE.md). Legal notices are included by all three
 packagers; this does not certify store approval or completed source publication.
 
 The [project mission](../MISSION.md) records the official long-term direction; it adds no restrictions to the standard licenses or to independently operated forks.
+
+- **Stable target presentation (2026-09-15):** a terrain-anchored ring and a thinner
+  screen frame track current target/camera transforms after movement and grounding.
+  Animation bounds, model turning and decorative pulse/spin no longer move the
+  selection marker. Applies to both interface profiles and 3D/2D rendering.

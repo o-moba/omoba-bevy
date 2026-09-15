@@ -617,7 +617,8 @@ pub(crate) fn draw_locked_target(
     basic: Res<BasicAttackState>,
     validity: TargetValidity,
     local: Query<&Team, With<Player>>,
-    camera: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
+    camera: Query<(Entity, &Camera), With<MainCamera>>,
+    poses: bevy::transform::helper::TransformHelper,
     mode: Res<PlayerVisualMode>,
     settings: Option<Res<crate::model_scale::ModelScaleSettings>>,
     mut indicator: Query<&mut Node, With<LockedTargetIndicator>>,
@@ -630,11 +631,18 @@ pub(crate) fn draw_locked_target(
     let Some((entity, id)) = target.selected_entity.zip(target.selected_target) else {
         return;
     };
-    let (Ok(team), Ok((camera, transform)), Some(position)) =
-        (local.single(), camera.single(), validity.position(entity))
-    else {
+    let (Ok(team), Ok((camera_entity, camera)), Ok(target_pose)) = (
+        local.single(),
+        camera.single(),
+        poses.compute_global_transform(entity),
+    ) else {
         return;
     };
+    let Ok(camera_pose) = poses.compute_global_transform(camera_entity) else {
+        return;
+    };
+    let transform = &camera_pose;
+    let position = target_pose.translation();
     if !validity.valid(entity, id, *team) {
         return;
     }
@@ -665,7 +673,7 @@ pub(crate) fn draw_locked_target(
         top: Val::Px(foot.y - height.clamp(24.0, 100.0) - 10.0),
         width: Val::Px(width),
         height: Val::Px(height.clamp(24.0, 100.0) + 18.0),
-        border: UiRect::all(Val::Px(3.0)),
+        border: UiRect::all(Val::Px(2.0)),
         border_radius: BorderRadius::all(Val::Px(7.0)),
         ..default()
     };

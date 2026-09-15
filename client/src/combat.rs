@@ -138,12 +138,8 @@ const NEUTRAL_PICK_RADIUS_PX: f32 = 52.0;
 const TOWER_PICK_RADIUS_PX: f32 = 56.0;
 const BASE_TOWER_PICK_RADIUS_PX: f32 = 68.0;
 const TARGET_MARKER_SIZE: f32 = 2.0;
-const TARGET_MARKER_THICKNESS: f32 = 0.08;
-const TARGET_MARKER_Y: f32 = 0.24;
-const TARGET_MARKER_EDGE: f32 = 0.18;
-const TARGET_MARKER_PULSE_AMPLITUDE: f32 = 0.09;
-const TARGET_MARKER_BOB_AMPLITUDE: f32 = 0.06;
-const TARGET_MARKER_SPIN_SPEED: f32 = 2.6;
+const TARGET_MARKER_Y: f32 = 0.08;
+const TARGET_MARKER_INNER_RADIUS: f32 = 0.90;
 const PLAYER_MARKER_RADIUS: f32 = 1.25;
 const MINION_MARKER_RADIUS: f32 = 1.05;
 const NEUTRAL_MARKER_RADIUS: f32 = 1.1;
@@ -210,14 +206,13 @@ impl Plugin for CombatPlugin {
                     skill_upgrade_input_system,
                     update_skill_bar_system,
                     adapt_mobile_combat_feedback,
-                    update_target_marker_system,
                     crate::targeting::draw_targeting_ui,
-                    crate::targeting::draw_locked_target,
                 )
                     .chain()
                     .after(WorldMovementInputSet)
                     .in_set(InputContextSet::Actions),
             );
+        configure_target_presentation(app);
         app.add_systems(
             PostUpdate,
             (
@@ -228,6 +223,24 @@ impl Plugin for CombatPlugin {
                 .chain(),
         );
     }
+}
+
+/// UI layout precedes Bevy's global-transform propagation. Compute current world
+/// poses from the hierarchy here, after all movement and terrain grounding, so
+/// both the world ring and screen frame use this frame's target/camera positions.
+fn configure_target_presentation(app: &mut App) {
+    app.add_systems(
+        PostUpdate,
+        (
+            update_target_marker_system,
+            crate::targeting::draw_locked_target,
+        )
+            .after(crate::net::NetworkGroundingSet)
+            .after(bevy::camera::CameraUpdateSystems)
+            .before(bevy::ui::UiSystems::Prepare)
+            .before(bevy::ui::UiSystems::Layout)
+            .before(bevy::transform::TransformSystems::Propagate),
+    );
 }
 
 #[derive(Component, Clone, Copy, Debug)]
@@ -475,11 +488,12 @@ fn setup_combat_visual_assets(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut flat_materials: ResMut<Assets<ColorMaterial>>,
     mode: Res<PlayerVisualMode>,
 ) {
     let is_2d = *mode == PlayerVisualMode::Sprite2d;
     let bar_mesh = meshes.add(Mesh::from(Rectangle::new(BAR_WIDTH, BAR_HEIGHT)));
-    let marker_segment_mesh = meshes.add(Mesh::from(Cuboid::new(1.0, 1.0, 1.0)));
+    let marker_mesh = meshes.add(Annulus::new(TARGET_MARKER_INNER_RADIUS, 1.0));
 
     let hp_bg_material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.15, 0.02, 0.02),
@@ -516,7 +530,7 @@ fn setup_combat_visual_assets(
         ..default()
     });
     let target_material = materials.add(StandardMaterial {
-        base_color: Color::srgba(1.0, 0.84, 0.24, 0.45),
+        base_color: Color::srgba(1.0, 0.84, 0.24, 0.85),
         alpha_mode: AlphaMode::Blend,
         unlit: true,
         ..default()
@@ -529,61 +543,19 @@ fn setup_combat_visual_assets(
         Name::new("TargetMarker"),
     ));
     if is_2d {
-        marker_commands.insert(Sprite::from_color(
-            Color::srgba(1.0, 0.84, 0.24, 0.45),
-            Vec2::splat(TARGET_MARKER_SIZE),
+        marker_commands.insert((
+            Mesh2d(marker_mesh),
+            MeshMaterial2d(flat_materials.add(Color::srgba(1.0, 0.84, 0.24, 0.85))),
+        ));
+    } else {
+        marker_commands.insert((
+            Mesh3d(marker_mesh),
+            MeshMaterial3d(target_material),
+            bevy::light::NotShadowCaster,
+            bevy::light::NotShadowReceiver,
         ));
     }
-    let marker_entity = marker_commands
-        .with_children(|parent| {
-            if is_2d {
-                return;
-            }
-            // Four thin segments form a ring-like selection outline.
-            let horizontal_scale = Vec3::new(1.0, TARGET_MARKER_THICKNESS, TARGET_MARKER_EDGE);
-            let vertical_scale = Vec3::new(TARGET_MARKER_EDGE, TARGET_MARKER_THICKNESS, 1.0);
-            parent.spawn((
-                Mesh3d(marker_segment_mesh.clone()),
-                MeshMaterial3d(target_material.clone()),
-                Transform {
-                    translation: Vec3::new(0.0, 0.0, 0.5),
-                    scale: horizontal_scale,
-                    ..default()
-                },
-                Name::new("TargetMarker-North"),
-            ));
-            parent.spawn((
-                Mesh3d(marker_segment_mesh.clone()),
-                MeshMaterial3d(target_material.clone()),
-                Transform {
-                    translation: Vec3::new(0.0, 0.0, -0.5),
-                    scale: horizontal_scale,
-                    ..default()
-                },
-                Name::new("TargetMarker-South"),
-            ));
-            parent.spawn((
-                Mesh3d(marker_segment_mesh.clone()),
-                MeshMaterial3d(target_material.clone()),
-                Transform {
-                    translation: Vec3::new(0.5, 0.0, 0.0),
-                    scale: vertical_scale,
-                    ..default()
-                },
-                Name::new("TargetMarker-East"),
-            ));
-            parent.spawn((
-                Mesh3d(marker_segment_mesh),
-                MeshMaterial3d(target_material),
-                Transform {
-                    translation: Vec3::new(-0.5, 0.0, 0.0),
-                    scale: vertical_scale,
-                    ..default()
-                },
-                Name::new("TargetMarker-West"),
-            ));
-        })
-        .id();
+    let marker_entity = marker_commands.id();
 
     commands.insert_resource(CombatVisualAssets {
         is_2d,
@@ -1888,118 +1860,76 @@ fn compute_bar_world_y_for_entity(
 }
 
 fn update_target_marker_system(
-    time: Res<Time>,
     target_state: Res<TargetState>,
-    children_query: Query<&Children>,
-    aabb_query: Query<&Aabb>,
-    global_query: Query<&GlobalTransform, Without<TargetMarker>>,
+    mut poses: ParamSet<(
+        bevy::transform::helper::TransformHelper,
+        crate::targeting::TargetValidity,
+        Query<(&mut Transform, &mut Visibility), With<TargetMarker>>,
+    )>,
+    local: Query<&Team, With<Player>>,
     structure_kinds: Query<&StructureKind, With<NetworkStructure>>,
     minions: Query<(), With<NetworkMinion>>,
     neutrals: Query<(), With<NetworkNeutral>>,
     players: Query<(), Or<(With<Player>, With<RemotePlayer>)>>,
-    mut marker_query: Query<(&mut Transform, &mut Visibility), With<TargetMarker>>,
+    map: Res<crate::maps::MapLayout>,
     mode: Res<PlayerVisualMode>,
 ) {
     let Some(marker_entity) = target_state.marker_entity else {
         return;
     };
-    let Ok((mut marker_transform, mut marker_visibility)) = marker_query.get_mut(marker_entity)
-    else {
+    let selected = target_state
+        .selected_entity
+        .zip(target_state.selected_target)
+        .filter(|(entity, id)| {
+            local
+                .single()
+                .is_ok_and(|team| poses.p1().valid(*entity, *id, *team))
+        });
+    let anchor = selected.and_then(|(entity, _)| {
+        poses
+            .p0()
+            .compute_global_transform(entity)
+            .ok()
+            .map(|pose| (entity, pose.translation()))
+    });
+    let mut markers = poses.p2();
+    let Ok((mut transform, mut visibility)) = markers.get_mut(marker_entity) else {
         return;
     };
-
-    let Some(target_entity) = target_state.selected_entity else {
-        *marker_visibility = Visibility::Hidden;
+    let Some((entity, position)) = anchor.filter(|(_, p)| p.is_finite()) else {
+        *visibility = Visibility::Hidden;
         return;
     };
-    let Ok(target_transform) = global_query.get(target_entity) else {
-        *marker_visibility = Visibility::Hidden;
-        return;
-    };
-
-    *marker_visibility = Visibility::Visible;
-    let target_translation = target_transform.translation();
-    let marker_radius = if let Ok(kind) = structure_kinds.get(target_entity) {
+    let radius = if let Ok(kind) = structure_kinds.get(entity) {
         match kind {
             StructureKind::Tower => TOWER_MARKER_RADIUS,
             StructureKind::BaseTower => BASE_TOWER_MARKER_RADIUS,
         }
-    } else if minions.get(target_entity).is_ok() {
+    } else if minions.contains(entity) {
         MINION_MARKER_RADIUS
-    } else if neutrals.get(target_entity).is_ok() {
+    } else if neutrals.contains(entity) {
         NEUTRAL_MARKER_RADIUS
-    } else if players.get(target_entity).is_ok() {
+    } else if players.contains(entity) {
         PLAYER_MARKER_RADIUS
     } else {
         TARGET_MARKER_SIZE * 0.5
     };
-    let pulse = 1.0 + TARGET_MARKER_PULSE_AMPLITUDE * (time.elapsed_secs() * 7.5).sin();
-    if *mode == PlayerVisualMode::Sprite2d {
-        let xy = crate::world2d::simulation_xz_to_render_xy(target_translation);
-        marker_transform.translation = Vec3::new(xy.x, xy.y, crate::world2d::layer::MARKER);
-        marker_transform.rotation =
-            Quat::from_rotation_z(time.elapsed_secs() * TARGET_MARKER_SPIN_SPEED);
-        marker_transform.scale = Vec3::splat(marker_radius * pulse / (TARGET_MARKER_SIZE * 0.5));
-        return;
-    }
-    let bob = TARGET_MARKER_BOB_AMPLITUDE * (time.elapsed_secs() * 5.0).sin();
-    let marker_center_y = compute_marker_world_y_for_entity(
-        target_entity,
-        target_translation.y + TARGET_MARKER_Y,
-        &children_query,
-        &aabb_query,
-        &global_query,
-    );
-    marker_transform.translation = Vec3::new(
-        target_translation.x,
-        marker_center_y + bob,
-        target_translation.z,
-    );
-    marker_transform.rotation =
-        Quat::from_rotation_y(time.elapsed_secs() * TARGET_MARKER_SPIN_SPEED);
-    marker_transform.scale = Vec3::new(marker_radius * pulse, 1.0, marker_radius * pulse);
-}
-
-fn compute_marker_world_y_for_entity(
-    entity: Entity,
-    fallback_world_y: f32,
-    children_query: &Query<&Children>,
-    aabb_query: &Query<&Aabb>,
-    global_query: &Query<&GlobalTransform, Without<TargetMarker>>,
-) -> f32 {
-    let mut min_y = f32::INFINITY;
-    let mut max_y = f32::NEG_INFINITY;
-    let mut has_bounds = false;
-
-    let mut sample_entity = |sample: Entity| {
-        let (Ok(aabb), Ok(global)) = (aabb_query.get(sample), global_query.get(sample)) else {
-            return;
-        };
-        let center: Vec3 = aabb.center.into();
-        let half: Vec3 = aabb.half_extents.into();
-        for sx in [-1.0_f32, 1.0] {
-            for sy in [-1.0_f32, 1.0] {
-                for sz in [-1.0_f32, 1.0] {
-                    let local_corner = center + Vec3::new(half.x * sx, half.y * sy, half.z * sz);
-                    let world_corner = global.transform_point(local_corner);
-                    min_y = min_y.min(world_corner.y);
-                    max_y = max_y.max(world_corner.y);
-                    has_bounds = true;
-                }
-            }
-        }
+    // Anchor to terrain, never to animated/skinned bounds or a model's pivot.
+    // A fixed ring cannot wobble when the hero turns, attacks, or changes skin.
+    *transform = if *mode == PlayerVisualMode::Sprite2d {
+        let xy = crate::world2d::simulation_xz_to_render_xy(position);
+        Transform::from_translation(xy.extend(crate::world2d::layer::MARKER))
+            .with_scale(Vec3::splat(radius))
+    } else {
+        Transform::from_xyz(
+            position.x,
+            map.terrain_height_3d(position.x, position.z) + TARGET_MARKER_Y,
+            position.z,
+        )
+        .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))
+        .with_scale(Vec3::splat(radius))
     };
-
-    sample_entity(entity);
-    for child in children_query.iter_descendants(entity) {
-        sample_entity(child);
-    }
-
-    if !has_bounds {
-        return fallback_world_y;
-    }
-
-    (min_y + max_y) * 0.5
+    *visibility = Visibility::Visible;
 }
 
 fn find_nearest_enemy_target(
@@ -3403,3 +3333,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "target_presentation_tests.rs"]
+mod target_presentation_tests;

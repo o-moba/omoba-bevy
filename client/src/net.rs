@@ -348,10 +348,15 @@ impl Plugin for NetworkingPlugin {
             )
             .add_systems(
                 PostUpdate,
-                ground_networked_entities.before(bevy::transform::TransformSystems::Propagate),
+                ground_networked_entities
+                    .in_set(NetworkGroundingSet)
+                    .before(bevy::transform::TransformSystems::Propagate),
             );
     }
 }
+
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct NetworkGroundingSet;
 
 /// Client-side terrain lift for server-driven entities. The server simulates
 /// a flat ground plane; after interpolation writes the (flat) server Y, this

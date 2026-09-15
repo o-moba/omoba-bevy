@@ -585,6 +585,21 @@ fn observe_targeting(
             });
             if mobile.enabled {
                 if !preview.active || preview.target != expected {
+                    event!(
+                        qa,
+                        "drag_failure_readback",
+                        tick,
+                        serde_json::json!({
+                            "active":preview.active,"actual_target":preview.target,"expected_target":expected,
+                            "origin":preview.origin.to_array(),"cursor":preview.cursor.to_array(),
+                            "candidate_screen":preview.candidate_screen.map(|p|p.to_array()),
+                            "drag_end":qa.drag_end.to_array(),"attack_center":mobile.layout().attack_center.to_array(),
+                        "attack_aim":mobile.attack_aim().map(|a|serde_json::json!({"direction":a.direction.to_array(),"extent":a.extent})),
+                        "has_gesture":mobile.has_active_gesture(),"gesture":mobile.attack_gesture(),
+                        "skill_aiming":mobile.skill_aiming(),"cancelled":mobile.attack_cancelled(),
+                            "viewport":mobile.viewport.to_array(),"scale":mobile.scale()
+                        })
+                    );
                     fail(
                         &mut qa,
                         &mut exit,

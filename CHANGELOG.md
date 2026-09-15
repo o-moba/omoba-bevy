@@ -14,6 +14,15 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 - Add `make play` / `make play-bots` to build locked current sources and launch
   supervised local 3D practice with nine bots, with owned-process cleanup.
 
+## [0.20.0-rc.3] - 2026-09-15
+
+### Fixed
+- Update target selection visuals after interpolation and grounding using current
+  target/camera poses before UI layout, eliminating mixed-frame screen projection.
+- Replace the rotating, bobbing bounding-box marker with a stable terrain-anchored
+  ring in 3D and 2D; animation bounds and model rotation no longer move it.
+- Hide both indicators immediately for invalid, dead or despawned targets.
+
 ## [0.20.0-rc.2] - 2026-09-15
 
 ### Fixed
