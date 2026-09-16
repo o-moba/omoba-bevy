@@ -402,6 +402,11 @@ struct SkillBarSlot {
 }
 
 #[derive(Component)]
+struct DesktopSkillIcon {
+    slot: usize,
+}
+
+#[derive(Component)]
 struct SkillUpgradeButton {
     slot: usize,
 }
@@ -573,7 +578,8 @@ fn setup_combat_visual_assets(
     });
 }
 
-fn setup_combat_ui(mut commands: Commands) {
+fn setup_combat_ui(mut commands: Commands, asset_server: Option<Res<AssetServer>>) {
+    let skill_atlas = asset_server.map(|assets| assets.load(crate::skill_icons::ATLAS_PATH));
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
@@ -666,11 +672,37 @@ fn setup_combat_ui(mut commands: Commands) {
                         Name::new(format!("SkillSlot-{label}")),
                     ))
                     .with_children(|slot| {
+                        // The atlas is presentation only; shortcuts and status remain
+                        // live text above it, including while the art is loading.
+                        slot.spawn((
+                            ImageNode {
+                                image: skill_atlas.clone().unwrap_or_default(),
+                                ..default()
+                            },
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Px(0.0),
+                                top: Val::Px(0.0),
+                                width: Val::Percent(100.0),
+                                height: Val::Percent(100.0),
+                                border_radius: BorderRadius::all(Val::Px(7.0)),
+                                display: Display::None,
+                                ..default()
+                            },
+                            bevy::ui::FocusPolicy::Pass,
+                            DesktopSkillIcon { slot: i },
+                            Name::new(format!("SkillIcon-{label}")),
+                        ));
                         slot.spawn((
                             Text::new(label),
                             TextLayout::new_with_justify(Justify::Center),
                             TextFont {
                                 font_size: 24.0,
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgba(0.01, 0.02, 0.03, 0.78)),
+                            Node {
+                                padding: UiRect::horizontal(Val::Px(4.0)),
                                 ..default()
                             },
                             TextColor::WHITE,
@@ -683,6 +715,11 @@ fn setup_combat_ui(mut commands: Commands) {
                             },
                             TextColor(Color::srgba(0.88, 0.90, 0.94, 1.0)),
                             TextLayout::new_with_justify(Justify::Center),
+                            BackgroundColor(Color::srgba(0.01, 0.02, 0.03, 0.88)),
+                            Node {
+                                width: Val::Percent(100.0),
+                                ..default()
+                            },
                             SkillNameLabel { slot: i },
                         ));
                         slot.spawn((
@@ -693,6 +730,11 @@ fn setup_combat_ui(mut commands: Commands) {
                             },
                             TextColor(Color::srgba(0.82, 0.84, 0.90, 1.0)),
                             TextLayout::new_with_justify(Justify::Center),
+                            BackgroundColor(Color::srgba(0.01, 0.02, 0.03, 0.88)),
+                            Node {
+                                width: Val::Percent(100.0),
+                                ..default()
+                            },
                             SkillRankLabel { slot: i },
                         ));
                     });
@@ -722,6 +764,8 @@ fn update_skill_bar_system(
     team_selection: Res<TeamSelection>,
     mut rank_labels: Query<(&SkillRankLabel, &mut Text), Without<SkillNameLabel>>,
     mut name_labels: Query<(&SkillNameLabel, &mut Text), Without<SkillRankLabel>>,
+    images: Option<Res<Assets<Image>>>,
+    mut icons: Query<(&DesktopSkillIcon, &mut ImageNode, &mut Node), Without<SkillUpgradeButton>>,
     mut upgrade_buttons: Query<
         (
             &SkillUpgradeButton,
@@ -735,6 +779,33 @@ fn update_skill_bar_system(
     let local = progression.iter().next();
     let prog = local.map(|(prog, ..)| *prog).unwrap_or_default();
     let class = local_hero_class(local.map(|(_, class, ..)| class), &team_selection);
+
+    for (icon, mut image, mut node) in &mut icons {
+        let Some(slot) = SkillSlot::from_index(icon.slot as u8) else {
+            node.display = Display::None;
+            continue;
+        };
+        let definition = ability_for_class_slot(class, slot);
+        image.rect = images
+            .as_ref()
+            .and_then(|images| images.get(&image.image))
+            .and_then(|atlas| crate::skill_icons::icon_rect(definition.id, atlas.size().as_vec2()));
+        node.display = if image.rect.is_some() {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        let rank = prog.ranks[icon.slot].max(1);
+        let available = unlocked_slots_for_level(prog.level.max(1))[icon.slot]
+            && cooldowns.remaining_secs[icon.slot] <= 0.0
+            && local
+                .is_none_or(|(_, _, stats, _)| stats.mana >= scaled_mana_cost(definition, rank));
+        image.color = if available {
+            Color::WHITE
+        } else {
+            Color::srgb(0.3, 0.3, 0.3)
+        };
+    }
 
     for (label, mut text) in &mut name_labels {
         let Some(slot) = SkillSlot::from_index(label.slot as u8) else {
@@ -3076,6 +3147,99 @@ mod tests {
                 .drain()
                 .count(),
             0
+        );
+    }
+
+    #[test]
+    fn desktop_skill_art_tracks_class_loading_and_unavailable_state() {
+        let mut app = App::new();
+        app.init_resource::<TeamSelection>()
+            .init_resource::<LocalCastCooldown>()
+            .init_resource::<TargetState>()
+            .init_resource::<PendingCast>()
+            .init_resource::<Assets<Image>>()
+            .add_systems(Update, update_skill_bar_system);
+        let player = app
+            .world_mut()
+            .spawn((
+                Player,
+                Transform::default(),
+                CombatStats::default(),
+                PlayerProgression::default(),
+                NetworkHeroClass(HeroClass::Mage),
+            ))
+            .id();
+        let icon = app
+            .world_mut()
+            .spawn((
+                DesktopSkillIcon { slot: 0 },
+                ImageNode::default(),
+                Node::default(),
+            ))
+            .id();
+        let locked = app
+            .world_mut()
+            .spawn((
+                DesktopSkillIcon { slot: 3 },
+                ImageNode::default(),
+                Node::default(),
+            ))
+            .id();
+        app.update();
+        assert_eq!(
+            app.world().get::<Node>(icon).unwrap().display,
+            Display::None
+        );
+        let atlas = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(Image::default());
+        for entity in [icon, locked] {
+            app.world_mut().get_mut::<ImageNode>(entity).unwrap().image = atlas.clone();
+        }
+        app.update();
+        let mage_rect = app.world().get::<ImageNode>(icon).unwrap().rect.unwrap();
+        assert_eq!(
+            app.world().get::<Node>(icon).unwrap().display,
+            Display::Flex
+        );
+        assert_eq!(
+            app.world().get::<ImageNode>(icon).unwrap().color,
+            Color::WHITE
+        );
+        assert_ne!(
+            app.world().get::<ImageNode>(locked).unwrap().color,
+            Color::WHITE
+        );
+        app.world_mut()
+            .get_mut::<NetworkHeroClass>(player)
+            .unwrap()
+            .0 = HeroClass::Ranger;
+        app.update();
+        assert_ne!(
+            app.world().get::<ImageNode>(icon).unwrap().rect,
+            Some(mage_rect)
+        );
+        app.world_mut()
+            .resource_mut::<LocalCastCooldown>()
+            .remaining_secs[0] = 2.0;
+        app.update();
+        assert_ne!(
+            app.world().get::<ImageNode>(icon).unwrap().color,
+            Color::WHITE
+        );
+        app.world_mut()
+            .resource_mut::<LocalCastCooldown>()
+            .remaining_secs[0] = 0.0;
+        app.world_mut().get_mut::<CombatStats>(player).unwrap().mana = 0.0;
+        app.update();
+        assert_ne!(
+            app.world().get::<ImageNode>(icon).unwrap().color,
+            Color::WHITE
+        );
+        assert_eq!(
+            app.world().get::<Node>(icon).unwrap().display,
+            Display::Flex
         );
     }
 

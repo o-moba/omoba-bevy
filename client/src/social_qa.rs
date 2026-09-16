@@ -25,10 +25,11 @@ use std::{
     path::PathBuf,
     time::{Duration, Instant},
 };
-const FILES: [&str; 3] = [
+const FILES: [&str; 4] = [
     "01-chat.png",
     "02-reaction-wheel.png",
     "03-confirmed-reaction.png",
+    "04-skill-description.png",
 ];
 const TOUCH_ID: u64 = 908143;
 pub(crate) struct SocialQaPlugin;
@@ -55,6 +56,11 @@ impl Plugin for SocialQaPlugin {
                 chat_sent: false,
                 gesture_started: false,
                 gesture_released: false,
+                skill_help: std::env::var("OMOBA_SOCIAL_QA_SKILL_HELP").as_deref() == Ok("1"),
+                skill_started: None,
+                skill_released: false,
+                skill_release_frames: 0,
+                skill_cast_commands: 0,
                 focus_requested: false,
                 focus_request_count: 0,
                 last_focus_request: None,
@@ -74,10 +80,12 @@ impl Plugin for SocialQaPlugin {
             .add_systems(
                 PostUpdate,
                 capture
+                    .after(monitor_skill_casts)
                     .after(bevy::ui::UiSystems::PostLayout)
                     .after(bevy::transform::TransformSystems::Propagate)
                     .after(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate),
-            );
+            )
+            .add_systems(PostUpdate, monitor_skill_casts);
     }
 }
 #[derive(Resource)]
@@ -93,6 +101,11 @@ struct Qa {
     chat_sent: bool,
     gesture_started: bool,
     gesture_released: bool,
+    skill_help: bool,
+    skill_started: Option<Instant>,
+    skill_released: bool,
+    skill_release_frames: u32,
+    skill_cast_commands: usize,
     focus_requested: bool,
     focus_request_count: u8,
     last_focus_request: Option<Instant>,
@@ -251,6 +264,61 @@ fn drive(
         }
         qa.gesture_released = true;
     }
+    if qa.skill_help && world.mobile.enabled {
+        let point = world.mobile.layout().ability_centers[0];
+        if qa.step == 3 && qa.skill_started.is_none() {
+            touches.write(TouchInput {
+                phase: TouchPhase::Started,
+                position: point,
+                window: window_id,
+                force: None,
+                id: TOUCH_ID + 1,
+            });
+            qa.skill_started = Some(Instant::now());
+        } else if qa.step == 4 && !qa.skill_released {
+            touches.write(TouchInput {
+                phase: TouchPhase::Ended,
+                position: point,
+                window: window_id,
+                force: None,
+                id: TOUCH_ID + 1,
+            });
+            qa.skill_released = true;
+        }
+    }
+}
+fn monitor_skill_casts(mut qa: ResMut<Qa>, mut commands: MessageReader<NetworkCommand>) {
+    let casts = commands
+        .read()
+        .filter(|command| matches!(command, NetworkCommand::Cast { .. }))
+        .count();
+    if qa.skill_started.is_some() && !qa.done {
+        qa.skill_cast_commands += casts;
+        if qa.skill_released {
+            qa.skill_release_frames += 1;
+        }
+    }
+}
+fn finish(qa: &mut Qa, exit: &mut MessageWriter<AppExit>) {
+    let result = serde_json::json!({
+        "status":"passed", "version":env!("CARGO_PKG_VERSION"), "scenario":"native_social",
+        "fixture":false, "scripted_join_and_input":true, "manual_input_verified":false,
+        "physical_phone_verified":false, "captures":qa.records,
+        "skill_help_requested":qa.skill_help,
+        "skill_hold_release_without_cast":qa.skill_help && qa.skill_released && qa.skill_release_frames >= 3 && qa.skill_cast_commands == 0,
+        "skill_cast_commands":qa.skill_cast_commands,
+    });
+    if std::fs::write(
+        qa.directory.join("qa-summary.json"),
+        serde_json::to_vec_pretty(&result).unwrap(),
+    )
+    .is_err()
+    {
+        fail(qa, "cannot write summary", exit);
+        return;
+    }
+    qa.done = true;
+    exit.write(AppExit::Success);
 }
 fn fail(qa: &mut Qa, reason: &str, exit: &mut MessageWriter<AppExit>) {
     let _ = std::fs::create_dir_all(&qa.directory);
@@ -276,6 +344,7 @@ fn capture(
         Option<&InheritedVisibility>,
     )>,
     bubbles: Query<&SocialBubble>,
+    pending: Res<crate::combat::PendingCast>,
     mut exit: MessageWriter<AppExit>,
 ) {
     if qa.done {
@@ -297,6 +366,8 @@ fn capture(
         "local_alive": world.local.single().ok().map(|(_, stats, _)| stats.is_alive()),
         "join_sent": qa.join_sent, "chat_sent": qa.chat_sent,
         "gesture_started": qa.gesture_started, "gesture_released": qa.gesture_released,
+        "skill_help": qa.skill_help, "skill_started": qa.skill_started.is_some(),
+        "skill_released": qa.skill_released, "skill_cast_commands": qa.skill_cast_commands,
         "social": social.qa_diagnostics(),
     });
     if qa
@@ -332,19 +403,8 @@ fn capture(
             if qa.step == 1 {
                 social.qa_close();
             }
-            if qa.step == FILES.len() {
-                let result = serde_json::json!({"status":"passed","version":env!("CARGO_PKG_VERSION"),"scenario":"native_social","fixture":false,"scripted_join_and_input":true,"manual_input_verified":false,"physical_phone_verified":false,"captures":qa.records});
-                if std::fs::write(
-                    qa.directory.join("qa-summary.json"),
-                    serde_json::to_vec_pretty(&result).unwrap(),
-                )
-                .is_err()
-                {
-                    fail(&mut qa, "cannot write summary", &mut exit);
-                    return;
-                }
-                qa.done = true;
-                exit.write(AppExit::Success);
+            if qa.step == 3 && !qa.skill_help {
+                finish(&mut qa, &mut exit);
             }
         }
         return;
@@ -356,6 +416,33 @@ fn capture(
         qa.settled = 0;
         return;
     }
+    if qa.skill_help && !world.mobile.enabled {
+        fail(
+            &mut qa,
+            "skill help capture requires the mobile UI profile",
+            &mut exit,
+        );
+        return;
+    }
+    let description_visible = nodes.iter().any(|(name, node, _, visible)| {
+        name.as_str() == "MobileSkillDescription"
+            && visible.is_none_or(|v| v.get())
+            && node.size().min_element() > 0.0
+    });
+    if qa.step == 4 {
+        if qa.skill_released && qa.skill_release_frames >= 3 {
+            if qa.skill_cast_commands > 0 || pending.is_pending() || description_visible {
+                fail(
+                    &mut qa,
+                    "skill inspection release cast, queued a cast, or left its tooltip visible",
+                    &mut exit,
+                );
+            } else {
+                finish(&mut qa, &mut exit);
+            }
+        }
+        return;
+    }
     let viewport = Vec2::new(window.width(), window.height());
     let confirmed_chat=social.events.iter().any(|event|matches!(&event.kind,shared::social::SocialEventKind::Chat{text,..}if text=="QA: Привет 小明 — ready for practice!"));
     let reaction=social.reactions.iter().find(|(event,_)|matches!(&event.kind,shared::social::SocialEventKind::Reaction{reaction_id}if reaction_id=="thumbs_up"));
@@ -365,6 +452,12 @@ fn capture(
         0 => confirmed_chat && social.chat_open,
         1 => social.wheel_center().is_some(),
         2 => visible_reaction,
+        3 => {
+            description_visible
+                && qa
+                    .skill_started
+                    .is_some_and(|started| started.elapsed() >= Duration::from_millis(500))
+        }
         _ => false,
     };
     if !ready {
@@ -375,7 +468,7 @@ fn capture(
     if qa.settled < if qa.step == 2 { 2 } else { 24 } {
         return;
     }
-    let measured:Vec<_>=nodes.iter().filter(|(name,_,_,_)|matches!(name.as_str(),"SocialChatPanel"|"SocialChatLog"|"SocialSend"|"SocialClose"|"SocialWheelRoot"|"SocialWheelChoice0"|"SocialWheelChoice1"|"SocialWheelChoice2"|"SocialWheelChoice3"|"SocialReactionBubble"|"SocialEntry"|"SocialStatus"|"MinimapRoot"|"MatchHudColumn"|"SkillBarRoot"|"EquipmentHud"|"MatchObjectiveRoot")).map(|(name,node,transform,visible)|{
+    let measured:Vec<_>=nodes.iter().filter(|(name,_,_,_)|matches!(name.as_str(),"MobileSkillDescription"|"MobileAbility-0"|"MobileAbility-1"|"MobileAbility-2"|"MobileAbility-3"|"SocialChatPanel"|"SocialChatLog"|"SocialSend"|"SocialClose"|"SocialWheelRoot"|"SocialWheelChoice0"|"SocialWheelChoice1"|"SocialWheelChoice2"|"SocialWheelChoice3"|"SocialReactionBubble"|"SocialEntry"|"SocialStatus"|"MinimapRoot"|"MatchHudColumn"|"SkillBarRoot"|"EquipmentHud"|"MatchObjectiveRoot")).map(|(name,node,transform,visible)|{
         let size=node.size()*node.inverse_scale_factor();let min=transform.translation*node.inverse_scale_factor()-size*0.5;
         serde_json::json!({"name":name.as_str(),"min":min.to_array(),"size":size.to_array(),"visible":visible.is_none_or(|v|v.get()),"fits":min.x>=-1.0&&min.y>=-1.0&&(min+size).x<=viewport.x+1.0&&(min+size).y<=viewport.y+1.0&&size.x>0.0&&size.y>0.0})
     }).collect();
@@ -387,7 +480,14 @@ fn capture(
             "SocialWheelChoice2",
             "SocialWheelChoice3",
         ],
-        _ => vec!["SocialReactionBubble", "SocialEntry", "SocialStatus"],
+        2 => vec!["SocialReactionBubble", "SocialEntry", "SocialStatus"],
+        _ => vec![
+            "MobileSkillDescription",
+            "MobileAbility-0",
+            "MobileAbility-1",
+            "MobileAbility-2",
+            "MobileAbility-3",
+        ],
     };
     if !required.iter().all(|name| {
         measured

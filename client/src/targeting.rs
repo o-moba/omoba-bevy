@@ -317,7 +317,7 @@ pub(crate) fn resolve_basic_attack(
     }
 }
 
-fn screen_position(
+fn projected_position(
     camera: &Camera,
     transform: &GlobalTransform,
     mode: PlayerVisualMode,
@@ -329,32 +329,45 @@ fn screen_position(
         p
     };
     let screen = camera.world_to_viewport(transform, render).ok()?;
-    let size = camera.logical_viewport_size()?;
-    (screen.is_finite() && screen.cmpge(Vec2::ZERO).all() && screen.cmple(size).all())
-        .then_some(screen)
+    screen.is_finite().then_some(screen)
 }
+
+fn screen_position(
+    camera: &Camera,
+    transform: &GlobalTransform,
+    mode: PlayerVisualMode,
+    p: Vec3,
+) -> Option<Vec2> {
+    let screen = projected_position(camera, transform, mode, p)?;
+    let size = camera.logical_viewport_size()?;
+    (screen.cmpge(Vec2::ZERO).all() && screen.cmple(size).all()).then_some(screen)
+}
+
+/// Short visual handle only. Selection uses an unbounded forward ray, never
+/// this endpoint or the amount of thumb travel.
 pub(crate) fn aim_cursor(origin: Vec2, viewport: Vec2, aim: MobileAttackAim) -> Vec2 {
-    let reach = (viewport.y * 0.70).min(viewport.x * 0.45);
+    let reach = 96.0 * (viewport.y / 390.0).clamp(0.85, 1.25);
     origin + aim.direction.normalize_or_zero() * aim.extent.clamp(0.0, 1.0) * reach
 }
-/// The reticle chooses proximity in two dimensions, so thumb distance can select
-/// the second enemy along the same bearing instead of always snapping to the first.
-pub(crate) fn reticle_score(
-    origin: Vec2,
-    cursor: Vec2,
-    point: Vec2,
-    pick_radius: f32,
-) -> Option<f32> {
-    let vector = cursor - origin;
-    if vector.length_squared() < 4.0 || !vector.is_finite() || !point.is_finite() {
+
+pub(crate) fn direction_score(origin: Vec2, direction: Vec2, point: Vec2) -> Option<f32> {
+    if !origin.is_finite()
+        || !direction.is_finite()
+        || !point.is_finite()
+        || direction.length_squared() < 0.0001
+    {
         return None;
     }
+    let direction = direction.normalize();
     let delta = point - origin;
-    if delta.dot(vector) <= 0.0 {
+    let along = delta.dot(direction);
+    if along <= 0.0 {
         return None;
     }
-    let distance = cursor.distance(point);
-    (distance <= pick_radius).then_some(distance)
+    // Distance to the infinite ray is the primary score. A small distance
+    // preference makes collinear targets deterministic without needing a long drag.
+    let across = delta.perp_dot(direction).abs();
+    Some(across + along * 0.001)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -370,22 +383,25 @@ fn pick_mobile(
     mode: PlayerVisualMode,
 ) -> Option<(Entity, TargetId, Vec2)> {
     let origin = screen_position(camera, camera_transform, mode, origin_position)?;
-    let viewport = camera.logical_viewport_size()?;
-    let cursor = aim.map(|a| aim_cursor(origin, viewport, a));
     let mut best: Option<(Entity, TargetId, Vec2, f32)> = None;
     let mut consider = |entity: Entity, id: TargetId, position: Vec3| {
         if !validity.valid(entity, id, team) {
             return;
         }
         let distance = position.xz().distance(origin_position.xz());
-        if distance > range + validity.radius(entity, id) - 0.08 {
+        if aim.is_none() && distance > range + validity.radius(entity, id) - 0.08 {
             return;
         }
-        let Some(screen) = screen_position(camera, camera_transform, mode, position) else {
+        let projected = if aim.is_some() {
+            projected_position(camera, camera_transform, mode, position)
+        } else {
+            screen_position(camera, camera_transform, mode, position)
+        };
+        let Some(screen) = projected else {
             return;
         };
-        let score = if let Some(cursor) = cursor {
-            let Some(score) = reticle_score(origin, cursor, screen, 36.0) else {
+        let score = if let Some(aim) = aim {
+            let Some(score) = direction_score(origin, aim.direction, screen) else {
                 return;
             };
             score
@@ -481,7 +497,6 @@ pub(crate) fn mobile_basic_attack(
     };
     let class = class.map_or(selection.hero_class, |c| c.0);
     let range = shared::basic_attack_for_class(class).range;
-    let select_range = range.max(24.0);
     if let Some(aim) = mobile.attack_aim() {
         basic.cancel();
         if let (Some(origin), Some(viewport)) = (
@@ -491,7 +506,7 @@ pub(crate) fn mobile_basic_attack(
             let pick = pick_mobile(
                 position.translation,
                 *team,
-                select_range,
+                range,
                 Some(aim),
                 &candidates,
                 &validity,
@@ -548,7 +563,7 @@ pub(crate) fn mobile_basic_attack(
     let aim = intent.and_then(|i| i.aim);
     let pick = if let Some(aim) = aim {
         // Commit the exact preview shown for this press. Revalidate its final
-        // reticle/visibility, but never replace a dead/moved candidate with B.
+        // direction/visibility, but never replace a dead/moved candidate with B.
         let gesture = intent.map(|i| i.gesture);
         previous_preview
             .candidate
@@ -560,20 +575,20 @@ pub(crate) fn mobile_basic_attack(
                 {
                     return false;
                 }
-                let Some(p) = validity.position(*entity) else {
-                    return false;
-                };
-                let (Some(origin), Some(point), Some(viewport)) = (
-                    screen_position(camera, camera_transform, *mode, position.translation),
-                    screen_position(camera, camera_transform, *mode, p),
-                    camera.logical_viewport_size(),
-                ) else {
-                    return false;
-                };
-                position.translation.xz().distance(p.xz())
-                    <= select_range + validity.radius(*entity, *id) - 0.08
-                    && reticle_score(origin, aim_cursor(origin, viewport, aim), point, 36.0)
-                        .is_some()
+                pick_mobile(
+                    position.translation,
+                    *team,
+                    range,
+                    Some(aim),
+                    &candidates,
+                    &validity,
+                    camera,
+                    camera_transform,
+                    *mode,
+                )
+                .is_some_and(|(picked_entity, picked_id, _)| {
+                    picked_entity == *entity && picked_id == *id
+                })
             })
     } else if let Some((e, id)) = target.selected_entity.zip(target.selected_target) {
         validity.valid(e, id, *team).then_some((e, id))
@@ -599,7 +614,7 @@ pub(crate) fn mobile_basic_attack(
         basic.cancel();
         if intent.is_some() {
             feedback.push_line(if aim.is_some() {
-                "No target under the reticle."
+                "No enemy in that direction."
             } else {
                 "No enemy in range."
             });
@@ -1113,7 +1128,7 @@ mod tests {
     fn drag_release_never_substitutes_a_new_enemy_for_the_preview() {
         use crate::mobile_controls::MobileAttackIntent;
         use bevy::camera::{ComputedCameraValues, RenderTargetInfo};
-        for reject in 0..3 {
+        for reject in 0..4 {
             let (mut app, _, enemy) = attack_app(shared::HeroClass::Mage, vec![], true);
             app.world_mut()
                 .entity_mut(enemy)
@@ -1160,7 +1175,7 @@ mod tests {
             }
             app.world_mut().spawn((
                 crate::net::RemotePlayer,
-                Transform::from_xyz(0.1, 0.0, 0.0),
+                Transform::from_xyz(0.1, if reject == 3 { -0.2 } else { 0.0 }, 0.0),
                 Team::Blue,
                 CombatStats::default(),
                 NetworkPlayerId(3),
@@ -1171,7 +1186,11 @@ mod tests {
                 .push(MobileAttackIntent {
                     gesture: if reject == 2 { 8 } else { 7 },
                     aim: Some(MobileAttackAim {
-                        direction: Vec2::X,
+                        direction: if reject == 3 {
+                            Vec2::new(42.2, 39.0).normalize()
+                        } else {
+                            Vec2::X
+                        },
                         extent: 42.2 / 273.0,
                     }),
                 });
@@ -1330,48 +1349,38 @@ mod tests {
         }
     }
     #[test]
-    fn reticle_growth_selects_distance_and_rejects_behind_or_empty_direction() {
+    fn mobile_ray_reaches_beyond_the_bounded_handle_and_prefers_alignment() {
         let origin = Vec2::new(400.0, 200.0);
         let viewport = Vec2::new(844.0, 390.0);
-        let near = aim_cursor(
-            origin,
-            viewport,
-            MobileAttackAim {
-                direction: Vec2::X,
-                extent: 0.25,
-            },
+        let aim = MobileAttackAim {
+            direction: Vec2::X,
+            extent: 0.1,
+        };
+        let end = aim_cursor(origin, viewport, aim);
+        assert!(end.distance(origin) < 12.0);
+        let near_off_axis = origin + Vec2::new(25.0, 20.0);
+        let far_aligned = origin + Vec2::new(2000.0, 1.0);
+        assert!(
+            direction_score(origin, aim.direction, far_aligned).unwrap()
+                < direction_score(origin, aim.direction, near_off_axis).unwrap()
         );
-        let far = aim_cursor(
-            origin,
-            viewport,
-            MobileAttackAim {
-                direction: Vec2::X,
-                extent: 0.75,
-            },
-        );
-        assert!(far.distance(origin) > near.distance(origin) * 2.9);
-        assert!(reticle_score(origin, near, near, 36.0).is_some());
-        assert!(reticle_score(origin, near, far, 36.0).is_none());
-        assert!(reticle_score(origin, far, far, 36.0).is_some());
-        assert!(reticle_score(origin, far, origin - Vec2::X * 20.0, 36.0).is_none());
-        assert!(reticle_score(origin, origin, near, 36.0).is_none());
+        assert!(direction_score(origin, aim.direction, origin - Vec2::X).is_none());
+        assert!(direction_score(origin, Vec2::ZERO, far_aligned).is_none());
+        assert!(direction_score(origin, Vec2::splat(f32::NAN), far_aligned).is_none());
         assert_eq!(
             aim_cursor(
                 origin,
                 viewport,
                 MobileAttackAim {
-                    direction: Vec2::X,
-                    extent: 20.0
+                    extent: 200.0,
+                    ..aim
                 }
             ),
-            aim_cursor(
-                origin,
-                viewport,
-                MobileAttackAim {
-                    direction: Vec2::X,
-                    extent: 1.0
-                }
-            )
+            aim_cursor(origin, viewport, MobileAttackAim { extent: 1.0, ..aim })
+        );
+        assert!(
+            aim_cursor(origin, viewport, MobileAttackAim { extent: 1.0, ..aim }).distance(origin)
+                <= 96.1
         );
     }
 }

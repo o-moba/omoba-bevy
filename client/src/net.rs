@@ -8,7 +8,7 @@ use bevy::scene::SceneRoot;
 use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     io,
     net::{SocketAddr, ToSocketAddrs, UdpSocket},
     thread,
@@ -1074,14 +1074,76 @@ struct NetEntityInterpolation {
     duration: f32,
 }
 
-#[derive(Component, Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug)]
+struct RemotePose {
+    received: Instant,
+    translation: Vec3,
+    rotation: Quat,
+}
+
+/// Render two network ticks behind receipt time. Interpolating authoritative
+/// samples avoids the old 50ms ease/stop/restart cycle whenever Wi-Fi delivers
+/// the next snapshot a little late. Never extrapolate through another actor.
+#[derive(Component, Clone, Debug)]
 struct RemotePlayerInterpolation {
-    from_translation: Vec3,
-    to_translation: Vec3,
-    from_rotation: Quat,
-    to_rotation: Quat,
-    elapsed: f32,
-    duration: f32,
+    poses: VecDeque<RemotePose>,
+}
+
+impl RemotePlayerInterpolation {
+    const DELAY: Duration = Duration::from_millis(100);
+
+    fn new(translation: Vec3, rotation: Quat, received: Instant) -> Self {
+        Self {
+            poses: VecDeque::from([RemotePose {
+                received,
+                translation,
+                rotation,
+            }]),
+        }
+    }
+
+    fn push(&mut self, translation: Vec3, rotation: Quat, received: Instant) {
+        if let Some(last) = self.poses.back() {
+            if received <= last.received {
+                return;
+            }
+            // Respawns/reconnects are explicit teleports, not a journey across
+            // the map. Drop old history after a long network interruption too.
+            if translation.distance_squared(last.translation) > 12.0_f32.powi(2)
+                || received.duration_since(last.received) > Duration::from_millis(500)
+            {
+                self.poses.clear();
+            }
+        }
+        self.poses.push_back(RemotePose {
+            received,
+            translation,
+            rotation,
+        });
+        while self.poses.len() > 8 {
+            self.poses.pop_front();
+        }
+    }
+
+    fn sample(&mut self, now: Instant) -> RemotePose {
+        let at = now.checked_sub(Self::DELAY).unwrap_or(now);
+        while self.poses.len() > 2 && self.poses[1].received <= at {
+            self.poses.pop_front();
+        }
+        let first = self.poses[0];
+        let Some(second) = self.poses.get(1).copied() else {
+            return first;
+        };
+        let span = second.received.duration_since(first.received).as_secs_f32();
+        let fraction = (at.saturating_duration_since(first.received).as_secs_f32()
+            / span.max(0.001))
+        .clamp(0.0, 1.0);
+        RemotePose {
+            received: at,
+            translation: first.translation.lerp(second.translation, fraction),
+            rotation: first.rotation.slerp(second.rotation, fraction),
+        }
+    }
 }
 
 fn network_projectile(state: &ProjectileState) -> NetworkProjectile {
@@ -1924,7 +1986,7 @@ fn apply_server_snapshot(
         Query<&mut Transform>,
         Query<&mut Transform, With<MainCamera>>,
     )>,
-    remote_query: Query<&RemotePlayer>,
+    mut remote_query: Query<&mut RemotePlayerInterpolation, With<RemotePlayer>>,
     projectile_query: Query<&NetworkProjectile>,
     structure_query: Query<&NetworkStructure>,
     minion_query: Query<&NetworkMinion>,
@@ -2200,16 +2262,12 @@ fn apply_server_snapshot(
         seen_remote_ids.insert(player.id);
 
         if let Some(entity) = network_state.remote_players.get(&player.id).copied() {
-            if let Ok(transform) = transform_sets.p0().get_mut(entity) {
-                let interpolation = RemotePlayerInterpolation {
-                    from_translation: transform.translation,
-                    to_translation: Vec3::new(player.x, player.y, player.z),
-                    from_rotation: transform.rotation,
-                    to_rotation: Quat::from_rotation_y(player.yaw),
-                    elapsed: 0.0,
-                    duration: UPDATE_INTERVAL_SECONDS.max(0.001),
-                };
-                commands.entity(entity).insert(interpolation);
+            if let Ok(mut interpolation) = remote_query.get_mut(entity) {
+                interpolation.push(
+                    Vec3::new(player.x, player.y, player.z),
+                    Quat::from_rotation_y(player.yaw),
+                    snapshot_wall_time,
+                );
             }
             commands.entity(entity).insert((
                 NetworkPlayerId(player.id),
@@ -2254,14 +2312,7 @@ fn apply_server_snapshot(
             NetworkHeroClass(player.hero_class),
             player_state_to_combat_stats(player),
             player_state_to_progression(player),
-            RemotePlayerInterpolation {
-                from_translation: spawn_translation,
-                to_translation: spawn_translation,
-                from_rotation: spawn_rotation,
-                to_rotation: spawn_rotation,
-                elapsed: UPDATE_INTERVAL_SECONDS,
-                duration: UPDATE_INTERVAL_SECONDS.max(0.001),
-            },
+            RemotePlayerInterpolation::new(spawn_translation, spawn_rotation, snapshot_wall_time),
             Name::new(format!("RemotePlayer-{}", player.id)),
         ));
         entity_commands.insert((
@@ -2596,19 +2647,13 @@ fn interpolate_snapshot_entities(
 }
 
 fn interpolate_remote_players(
-    time: Res<Time>,
     mut player_query: Query<(&mut Transform, &mut RemotePlayerInterpolation), With<RemotePlayer>>,
 ) {
+    let now = Instant::now();
     for (mut transform, mut interpolation) in &mut player_query {
-        let duration = interpolation.duration.max(0.001);
-        interpolation.elapsed = (interpolation.elapsed + time.delta_secs()).min(duration);
-        let t = (interpolation.elapsed / duration).clamp(0.0, 1.0);
-        transform.translation = interpolation
-            .from_translation
-            .lerp(interpolation.to_translation, t);
-        transform.rotation = interpolation
-            .from_rotation
-            .slerp(interpolation.to_rotation, t);
+        let pose = interpolation.sample(now);
+        transform.translation = pose.translation;
+        transform.rotation = pose.rotation;
     }
 }
 
@@ -3250,6 +3295,71 @@ fn default_max_mana() -> f32 {
 
 fn default_minion_brain_state() -> MinionBrainState {
     MinionBrainState::Marching
+}
+
+#[cfg(test)]
+mod remote_interpolation_tests {
+    use super::*;
+
+    #[test]
+    fn delayed_wifi_snapshots_stay_in_motion_without_overshooting() {
+        let start = Instant::now();
+        let mut track = RemotePlayerInterpolation::new(Vec3::ZERO, Quat::IDENTITY, start);
+        // Ordinary jitter around the 50ms server cadence. Position is the
+        // authoritative constant-speed track; this also tests queue pruning.
+        let arrivals = [50_u64, 118, 158, 213, 267, 309];
+        let mut next = 0;
+        let mut last = 0.0;
+        for millis in (10_u64..=400).step_by(10) {
+            while next < arrivals.len() && arrivals[next] <= millis {
+                let at = arrivals[next];
+                track.push(
+                    Vec3::X * (at as f32 / 1000.0),
+                    Quat::IDENTITY,
+                    start + Duration::from_millis(at),
+                );
+                next += 1;
+            }
+            let pose = track.sample(start + Duration::from_millis(millis));
+            if (110..=390).contains(&millis) {
+                assert!(
+                    (pose.translation.x - last - 0.01).abs() < 0.000_01,
+                    "movement stalled at {millis}ms: {last} -> {}",
+                    pose.translation.x
+                );
+            }
+            assert!(pose.translation.x <= arrivals[next.saturating_sub(1)] as f32 / 1000.0);
+            last = pose.translation.x;
+        }
+        let held = track.sample(start + Duration::from_secs(2));
+        assert_eq!(
+            held.translation,
+            Vec3::X * 0.309,
+            "never extrapolate on packet loss"
+        );
+    }
+
+    #[test]
+    fn remote_respawn_drops_old_path_and_out_of_order_samples() {
+        let start = Instant::now();
+        let mut track = RemotePlayerInterpolation::new(Vec3::ZERO, Quat::IDENTITY, start);
+        track.push(Vec3::X, Quat::IDENTITY, start + Duration::from_millis(50));
+        track.push(
+            Vec3::X * 99.0,
+            Quat::IDENTITY,
+            start + Duration::from_millis(40),
+        );
+        assert_eq!(track.poses.len(), 2);
+        track.push(
+            Vec3::X * 40.0,
+            Quat::from_rotation_y(2.0),
+            start + Duration::from_millis(100),
+        );
+        let pose = track.sample(start + Duration::from_millis(100));
+        assert_eq!(pose.translation, Vec3::X * 40.0);
+        assert_eq!(pose.rotation, Quat::from_rotation_y(2.0));
+        assert_eq!(track.poses.len(), 1);
+    }
 }
 
 #[cfg(test)]

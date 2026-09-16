@@ -73,7 +73,9 @@ client/assets/avatars/passport-manifest.json
 /mobile/ios/build/
 
 # Local cinematic scenes, rendered frames and encoded video materials.
-/art/verdant-confluence/cinematic/
+/art/verdant-confluence/cinematic/*
+!/art/verdant-confluence/cinematic/shots.json
+!docs/verdant-cinematic.md
 .DS_Store
 
 # Contributor-facing combat cosmetics schema and examples.

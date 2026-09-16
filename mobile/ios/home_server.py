@@ -37,7 +37,12 @@ def main(argv=None):
         if key.startswith('OMOBA_') or key == 'GAME_SERVER_ADDR': os.environ.pop(key)
     options = beta_launcher.arguments(['practice-server','--bind',f'0.0.0.0:{args.port}'])
     try:
-        return beta_launcher.run(options,args.kit)
+        assets = args.kit / 'assets'
+        if not assets.is_dir():
+            assets = args.kit / 'OmobaBeta.app' / 'assets'
+        if not assets.is_dir():
+            raise RuntimeError('The practice kit has no assets directory or packaged iPhone app assets.')
+        return beta_launcher.run(options,args.kit,assets=assets)
     except KeyboardInterrupt:
         print('Practice server stopped.')
         return 0

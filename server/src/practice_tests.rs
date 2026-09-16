@@ -510,6 +510,48 @@ fn bot_pushes_a_real_lane_and_damages_towers_without_crossing_live_structure_dis
 }
 
 #[test]
+fn practice_bots_unstack_spawn_without_moving_human_or_exceeding_speed() {
+    let mut rt = runtime(5);
+    let mut now = Instant::now();
+    rt.handle_packet(addr(1), join("crowd-observer"), now);
+    let human_before = rt.players[&addr(1)].state.clone();
+    let nav = shared::navigation::world_navigation();
+    for _ in 0..120 {
+        let previous: HashMap<_, _> = rt
+            .players
+            .iter()
+            .map(|(addr, p)| (*addr, [p.state.x, p.state.z]))
+            .collect();
+        now += Duration::from_millis(50);
+        rt.simulate_bots(now, 0.05);
+        for (address, player) in &rt.players {
+            let from = previous[address];
+            let to = [player.state.x, player.state.z];
+            assert!((to[0] - from[0]).hypot(to[1] - from[1]) <= PLAYER_SPEED * 0.05 + 0.001);
+            assert!(nav.segment_clear(from, to));
+        }
+    }
+    let alive: Vec<_> = rt
+        .players
+        .values()
+        .filter(|p| p.joined && p.state.hp > 0.0)
+        .collect();
+    for (i, a) in alive.iter().enumerate() {
+        for b in &alive[i + 1..] {
+            assert!(
+                (a.state.x - b.state.x).hypot(a.state.z - b.state.z)
+                    >= shared::PLAYER_TARGET_RADIUS * 2.0 - 0.05,
+                "heroes {} and {} remain overlapped",
+                a.state.id,
+                b.state.id
+            );
+        }
+    }
+    let human = &rt.players[&addr(1)].state;
+    assert_eq!((human.x, human.z), (human_before.x, human_before.z));
+}
+
+#[test]
 fn release_and_development_never_create_bots() {
     for config in [MatchConfig::release(1), MatchConfig::dev()] {
         let socket = UdpSocket::bind("127.0.0.1:0").unwrap();

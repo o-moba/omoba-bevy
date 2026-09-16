@@ -46,6 +46,7 @@ mod projectile_visuals;
 mod reaction_visuals;
 mod session_config;
 mod shop;
+mod skill_icons;
 mod social;
 mod social_qa;
 mod sprite;

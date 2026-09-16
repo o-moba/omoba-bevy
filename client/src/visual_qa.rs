@@ -2,7 +2,7 @@
 //! directory is supplied. Images are real Bevy window readbacks, not UI input
 //! automation, Blender renders, or a substitute for interactive playtesting.
 
-use bevy::ecs::system::SystemParam;
+use bevy::ecs::system::{NonSendMarker, SystemParam};
 use bevy::{
     app::AppExit,
     asset::RecursiveDependencyLoadState,
@@ -12,6 +12,7 @@ use bevy::{
     render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk},
     scene::{SceneInstance, SceneSpawner},
     window::PrimaryWindow,
+    winit::{WINIT_WINDOWS, WinitSettings},
 };
 use std::{
     collections::HashMap,
@@ -72,7 +73,11 @@ impl Plugin for VisualQaPlugin {
             return; // Dedicated production-input scenario registered by the client.
         }
         let max_seconds = bounded_timeout(std::env::var("OMOBA_VISUAL_QA_TIMEOUT").ok().as_deref());
-        app.insert_resource(QaState::new(directory, max_seconds))
+        // Only an explicitly requested, short-lived capture gets a continuous
+        // render loop. Native focus remains observed state owned by the OS.
+        app.insert_resource(WinitSettings::continuous())
+            .insert_resource(QaState::new(directory, max_seconds))
+            .add_systems(PreUpdate, focus_qa_window)
             .add_systems(
                 Update,
                 prepare_qa.after(crate::input_context::InputContextSet::Actions),
@@ -223,7 +228,10 @@ struct QaState {
     started: Instant,
     timeout: Duration,
     joined: bool,
-    focus_requested: bool,
+    focus_request_count: u8,
+    last_focus_request: Option<Instant>,
+    native_focused: Option<bool>,
+    diagnostic: serde_json::Value,
     fixtures_spawned: bool,
     view: usize,
     stable_frames: u32,
@@ -248,7 +256,10 @@ impl QaState {
             started: Instant::now(),
             timeout: Duration::from_secs(max_seconds),
             joined: false,
-            focus_requested: false,
+            focus_request_count: 0,
+            last_focus_request: None,
+            native_focused: None,
+            diagnostic: serde_json::Value::Null,
             fixtures_spawned: false,
             view: 0,
             stable_frames: 0,
@@ -266,6 +277,37 @@ struct QaActor;
 #[derive(Component)]
 struct QaShot(usize);
 
+fn focus_retry_due(native: Option<bool>, count: u8, elapsed: Option<Duration>) -> bool {
+    native == Some(false)
+        && count < 3
+        && elapsed.is_none_or(|elapsed| elapsed >= Duration::from_secs(2))
+}
+
+fn focus_qa_window(
+    mut qa: ResMut<QaState>,
+    windows: Query<Entity, With<PrimaryWindow>>,
+    _main_thread: NonSendMarker,
+) {
+    let Ok(entity) = windows.single() else {
+        return;
+    };
+    qa.native_focused = WINIT_WINDOWS
+        .with_borrow(|windows| windows.get_window(entity).map(|window| window.has_focus()));
+    if focus_retry_due(
+        qa.native_focused,
+        qa.focus_request_count,
+        qa.last_focus_request.map(|at| at.elapsed()),
+    ) {
+        WINIT_WINDOWS.with_borrow(|windows| {
+            if let Some(window) = windows.get_window(entity) {
+                window.focus_window();
+            }
+        });
+        qa.focus_request_count += 1;
+        qa.last_focus_request = Some(Instant::now());
+    }
+}
+
 fn prepare_qa(
     mut commands: Commands,
     mut qa: ResMut<QaState>,
@@ -277,17 +319,7 @@ fn prepare_qa(
     mut pause: ResMut<PauseMenuState>,
     players: Query<(Entity, &Transform, &CombatStats, Option<&MovementTarget>), With<Player>>,
     join_ui: Query<Entity, With<TeamSelectRoot>>,
-    mut windows: Query<&mut Window, With<PrimaryWindow>>,
 ) {
-    if qa.jungle
-        && !qa.focus_requested
-        && let Ok(mut window) = windows.single_mut()
-    {
-        // This short-lived QA window requests real OS focus once. Production
-        // focus events and input policy still decide whether controls appear.
-        window.focused = true;
-        qa.focus_requested = true;
-    }
     help.0 = false;
     pause.open = false;
     if !qa.joined && session.is_connected() {
@@ -371,7 +403,7 @@ fn prepare_qa(
     }
 }
 
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, serde::Serialize)]
 struct Readiness {
     admitted: bool,
     running: bool,
@@ -505,6 +537,9 @@ fn capture_qa(
             serde_json::json!({
                 "reason":"wrong render mode or readiness/readback timeout", "captures":qa.captures,
                 "elapsed_seconds":qa.started.elapsed().as_secs_f64(),
+                "diagnostic":qa.diagnostic, "native_focused":qa.native_focused,
+                "focus_request_count":qa.focus_request_count,
+                "window_focused":world.windows.single().ok().map(|(_, window)| window.focused),
             })
             .to_string(),
         );
@@ -698,9 +733,24 @@ fn capture_qa(
         qa.stable_frames,
         ready_for_capture(ready) && (!qa.jungle || (jungle_mobs == 6 && mobile_ready)),
     );
+    qa.diagnostic = serde_json::json!({
+        "elapsed_seconds":qa.started.elapsed().as_secs_f64(), "view":qa.view,
+        "readiness":ready, "stable_frames":qa.stable_frames,
+        "gameplay_allowed":context.gameplay_allowed(), "window_focused":window_focused,
+        "native_focused":qa.native_focused, "focus_request_count":qa.focus_request_count,
+        "primary_controls_fit":primary_controls_fit, "jungle_mobs":jungle_mobs,
+        "local_position":world.local.single().ok().map(|(pose, _)| pose.translation.to_array()),
+        "player_positions":world.actors.iter().map(|pose| pose.translation.to_array()).collect::<Vec<_>>(),
+        "connection_state":format!("{:?}",session.state), "game_state":format!("{:?}",game.state),
+    });
     let diagnostic = qa.started.elapsed().as_secs() as u32 / 5;
     if diagnostic > qa.last_diagnostic {
         qa.last_diagnostic = diagnostic;
+        let _ = std::fs::create_dir_all(&qa.directory);
+        let _ = std::fs::write(
+            qa.directory.join("qa-diagnostics.json"),
+            serde_json::to_vec_pretty(&qa.diagnostic).unwrap(),
+        );
         info!(
             "VERDANT_QA readiness={ready:?} stable_frames={} view={} gameplay_allowed={} window_focused={} primary_controls_fit={}",
             qa.stable_frames,
@@ -772,6 +822,28 @@ fn record_readback(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_focus_retries_are_bounded_and_never_infer_focus_from_missing_window() {
+        assert!(focus_retry_due(Some(false), 0, None));
+        assert!(!focus_retry_due(
+            Some(false),
+            1,
+            Some(Duration::from_secs(1))
+        ));
+        assert!(focus_retry_due(
+            Some(false),
+            2,
+            Some(Duration::from_secs(2))
+        ));
+        assert!(!focus_retry_due(
+            Some(false),
+            3,
+            Some(Duration::from_secs(10))
+        ));
+        assert!(!focus_retry_due(Some(true), 0, None));
+        assert!(!focus_retry_due(None, 0, None));
+    }
 
     #[test]
     fn capture_queries_keep_neutral_transforms_disjoint_from_camera_mutation() {

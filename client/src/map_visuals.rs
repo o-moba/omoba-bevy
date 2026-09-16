@@ -1,4 +1,6 @@
 //! Local map cosmetics bound to authored instance roots, never simulation state.
+mod river;
+
 use std::collections::{HashMap, HashSet};
 
 use bevy::{
@@ -439,6 +441,7 @@ struct PendingConfig(Option<Handle<LoadedMapVisuals>>);
 pub struct MapVisualsPlugin;
 impl Plugin for MapVisualsPlugin {
     fn build(&self, app: &mut App) {
+        river::register(app);
         app.init_resource::<MapVisualRegistry>()
             .init_resource::<MapVisualCache>()
             .init_resource::<PendingConfig>()

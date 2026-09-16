@@ -11,6 +11,9 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
   license terms and remove an accidental editing suffix from the mission.
 
 ### Developer workflow
+- Prepare Xcode archives from existing signed physical iPhone apps for later
+  TestFlight distribution; include an original beta icon, required-reason API
+  manifest, explicit build numbers and an Apple account/signing handoff guide.
 - Add an enrolled-iPhone install/launch helper and a home practice-server launcher;
   prepared kits keep signed app/IPA and the native Mac server outside compiler caches.
 - Consolidate physical iPhone build/signing tools and tests in the main repository;
@@ -18,6 +21,32 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
   from disposable Cargo caches. Refresh the reviewed prop asset inventory.
 - Add `make play` / `make play-bots` to build locked current sources and launch
   supervised local 3D practice with nine bots, with owned-process cleanup.
+
+## [0.20.0-rc.4] - 2026-09-16
+
+### Fixed
+- Reduce practice-bot stop/turn jitter with stable targets, immediate route
+  continuation and bounded collision-aware hero separation. Smooth remote
+  players with a short snapshot buffer, including reconnect/teleport resets.
+- Anchor BOT names above normalized models using current rendered hero/camera
+  poses, independent of animation bounds and model yaw.
+- Replace overlapping Verdant river planes with a continuous joined surface
+  below roads; close bank seams and clip water cleanly at map corners.
+- Keep the phone chat input, Send and Close in the top safe-area row; preserve
+  drafts when hiding the keyboard and accept the native iOS Return key.
+
+### Added
+- Original class-specific artwork for all sixteen abilities on mobile and desktop,
+  with readable availability/cooldown overlays and asset provenance.
+- Mobile stationary skill inspection on a 450 ms hold. Inspection never casts
+  on release; taps and deliberate directional drags retain their combat behavior.
+
+### Changed
+- Mobile basic targeting follows a forward aim ray independently of thumb reach.
+  The visible handle stays short; actual attack range and server validation remain
+  unchanged. Release commits only the same eligible target shown in the preview.
+- iPhone builds retain debug symbols; TestFlight archives require a matching dSYM
+  and validate its UUID against the packaged game executable before archiving.
 
 ## [0.20.0-rc.3] - 2026-09-15
 

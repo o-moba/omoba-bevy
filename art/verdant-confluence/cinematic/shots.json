@@ -1,0 +1,188 @@
+{
+  "title": "Verdant Confluence",
+  "fps": 24,
+  "width": 1920,
+  "height": 1080,
+  "transition_seconds": 0.5,
+  "shots": [
+    {
+      "id": "01-atlas",
+      "label": "The living observatory",
+      "duration_seconds": 6,
+      "start": [
+        240,
+        -310,
+        290
+      ],
+      "end": [
+        285,
+        -270,
+        280
+      ],
+      "target": [
+        0,
+        0,
+        -1
+      ],
+      "type": "ORTHO",
+      "scale_start": 390,
+      "scale_end": 384
+    },
+    {
+      "id": "02-sanctuary",
+      "label": "Emerald sanctuary",
+      "duration_seconds": 5,
+      "start": [
+        -91.55,
+        147.55,
+        44
+      ],
+      "end": [
+        -109.55,
+        140.55,
+        40
+      ],
+      "target": [
+        -79.55,
+        79.55,
+        6.5
+      ],
+      "type": "PERSP",
+      "lens": 50
+    },
+    {
+      "id": "03-river",
+      "label": "Where the rivers meet",
+      "duration_seconds": 6,
+      "start": [
+        43,
+        -57,
+        42
+      ],
+      "end": [
+        52,
+        -48,
+        39
+      ],
+      "target": [
+        0,
+        0,
+        1
+      ],
+      "type": "PERSP",
+      "lens": 40
+    },
+    {
+      "id": "04-ruins",
+      "label": "The forest remembers",
+      "duration_seconds": 5,
+      "start": [
+        82,
+        35,
+        46
+      ],
+      "end": [
+        69,
+        27,
+        43
+      ],
+      "target": [
+        47.7618,
+        73.8137,
+        2.5
+      ],
+      "type": "PERSP",
+      "lens": 42
+    },
+    {
+      "id": "05-vista",
+      "label": "Verdant Confluence",
+      "duration_seconds": 6,
+      "start": [
+        180,
+        -340,
+        305
+      ],
+      "end": [
+        145,
+        -350,
+        320
+      ],
+      "target": [
+        0,
+        0,
+        -1
+      ],
+      "type": "ORTHO",
+      "scale_start": 395,
+      "scale_end": 410
+    },
+    {
+      "id": "06-ridge",
+      "label": "Ridge sweep",
+      "duration_seconds": 6,
+      "start": [
+        95,
+        -250,
+        95
+      ],
+      "end": [
+        42,
+        -210,
+        82
+      ],
+      "target": [
+        72,
+        -240,
+        16
+      ],
+      "type": "PERSP",
+      "lens": 46
+    },
+    {
+      "id": "07-canopy",
+      "label": "Canopy passage",
+      "duration_seconds": 5,
+      "start": [
+        160,
+        -80,
+        52
+      ],
+      "end": [
+        190,
+        -40,
+        46
+      ],
+      "target": [
+        170,
+        -20,
+        7
+      ],
+      "type": "PERSP",
+      "lens": 34
+    },
+    {
+      "id": "08-northfall",
+      "label": "Northern fallback",
+      "duration_seconds": 6,
+      "start": [
+        140,
+        240,
+        150
+      ],
+      "end": [
+        95,
+        200,
+        132
+      ],
+      "target": [
+        130,
+        150,
+        12
+      ],
+      "type": "ORTHO",
+      "scale_start": 380,
+      "scale_end": 360
+    }
+  ]
+}

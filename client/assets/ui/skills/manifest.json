@@ -1,0 +1,12 @@
+{
+  "path": "ui/skills/skills-atlas.png",
+  "sha256": "db6f801836c3cbf66942aff3df9428de0cf5016094b025943ec92e4faa0ce06b",
+  "width": 1254,
+  "height": 1254,
+  "columns": 4,
+  "rows": 4,
+  "generator": "OpenAI imagegen",
+  "date": "2026-09-16",
+  "license": "CC-BY-4.0",
+  "source_image": "exec-5d663a4c-5d9c-4d62-840b-b4d2d630cc2c.png"
+}

@@ -158,6 +158,7 @@ pub(crate) struct SocialClient {
     draft: String,
     preedit: String,
     ime_owned: bool,
+    keyboard_requested: bool,
     channel: SocialChannel,
     namespace: Option<(u64, u64)>,
     server_sequence: u64,
@@ -185,6 +186,7 @@ impl Default for SocialClient {
             draft: String::new(),
             preedit: String::new(),
             ime_owned: false,
+            keyboard_requested: true,
             channel: SocialChannel::Team,
             namespace: None,
             server_sequence: 0,
@@ -333,6 +335,13 @@ impl SocialClient {
         }
         self.send(SocialCommand::Reaction { reaction_id: id }, out);
     }
+    fn open_chat(&mut self) {
+        self.chat_open = true;
+        self.keyboard_requested = true;
+        self.wheel.cancel();
+        self.opened_frame = true;
+        self.blocked_frame = true;
+    }
     fn close(&mut self) {
         self.chat_open = false;
         self.wheel.cancel();
@@ -404,9 +413,20 @@ impl Plugin for SocialPlugin {
                     .before(InputContextSet::Resolve),
             )
             .add_systems(Update, render.after(InputContextSet::Actions))
-            .add_systems(Update, render_bubbles.after(InputContextSet::Actions))
             .add_systems(PostUpdate, scroll_chat.before(bevy::ui::UiSystems::Layout));
+        configure_social_bubbles(app);
     }
+}
+fn configure_social_bubbles(app: &mut App) {
+    app.add_systems(
+        PostUpdate,
+        render_bubbles
+            .after(crate::net::NetworkGroundingSet)
+            .after(bevy::camera::CameraUpdateSystems)
+            .before(bevy::ui::UiSystems::Prepare)
+            .before(bevy::ui::UiSystems::Layout)
+            .before(bevy::transform::TransformSystems::Propagate),
+    );
 }
 #[derive(Component, Clone)]
 enum SocialAction {
@@ -414,6 +434,8 @@ enum SocialAction {
     Wheel,
     Close,
     Send,
+    Keyboard,
+    FocusComposer,
     Channel,
     MuteAll,
     Mute(u64),
@@ -569,9 +591,7 @@ fn input(
         && !social.chat_open
         && social.wheel.center.is_none()
     {
-        social.chat_open = true;
-        social.opened_frame = true;
-        social.blocked_frame = true;
+        social.open_chat();
     } else if keys.just_pressed(KeyCode::KeyT) && !social.chat_open && hero.is_some() {
         social.wheel.cancel();
         social
@@ -585,10 +605,7 @@ fn input(
         }
         match action {
             SocialAction::Chat => {
-                social.chat_open = true;
-                social.wheel.cancel();
-                social.opened_frame = true;
-                social.blocked_frame = true;
+                social.open_chat();
             }
             SocialAction::Wheel => {
                 if hero.is_some() {
@@ -605,6 +622,10 @@ fn input(
                 }
             }
             SocialAction::Send => social.send_chat(&mut out),
+            SocialAction::Keyboard => {
+                social.keyboard_requested = !social.keyboard_requested;
+            }
+            SocialAction::FocusComposer => social.keyboard_requested = true,
             SocialAction::Channel => {
                 social.channel = if social.channel == SocialChannel::Team {
                     SocialChannel::Match
@@ -725,6 +746,9 @@ fn append_chat(draft: &mut String, text: &str) -> Result<(), &'static str> {
     *draft = next;
     Ok(())
 }
+fn is_chat_submit_text(value: &str) -> bool {
+    matches!(value, "\n" | "\r" | "\r\n")
+}
 fn chat_keyboard(
     mut social: ResMut<SocialClient>,
     mut keys: MessageReader<KeyboardInput>,
@@ -732,9 +756,11 @@ fn chat_keyboard(
     mut window: Query<&mut Window, With<PrimaryWindow>>,
     mut out: MessageWriter<NetworkCommand>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    mobile: Option<Res<MobileControls>>,
 ) {
+    let phone = mobile.as_ref().is_some_and(|mobile| mobile.enabled);
     if let Ok(mut window) = window.single_mut() {
-        if social.chat_open {
+        if social.chat_open && (!phone || social.keyboard_requested) {
             window.ime_enabled = true;
             social.ime_owned = true;
         } else if social.ime_owned {
@@ -750,7 +776,9 @@ fn chat_keyboard(
         match event {
             Ime::Preedit { value, .. } => social.preedit = value.clone(),
             Ime::Commit { value, .. } => {
-                if let Err(error) = append_chat(&mut social.draft, value) {
+                if is_chat_submit_text(value) {
+                    social.send_chat(&mut out);
+                } else if let Err(error) = append_chat(&mut social.draft, value) {
                     social.status = error.into();
                 }
                 social.preedit.clear();
@@ -769,6 +797,8 @@ fn chat_keyboard(
             continue;
         }
         match &event.logical_key {
+            // UIKit's UIKeyInput emits Return as Character("\n"), not Key::Enter.
+            Key::Character(value) if is_chat_submit_text(value) => social.send_chat(&mut out),
             Key::Character(value)
                 if value.eq_ignore_ascii_case("v")
                     && keyboard.any_pressed([
@@ -884,6 +914,263 @@ fn wheel_render_key(ids: &[String; 4], images: &[Option<ImageNode>; 4]) -> Strin
     format!("{ids:?}{resolved:?}")
 }
 
+/// Native UIKit IME overlays the viewport and winit does not expose its frame.
+/// Keep all essential composer controls in the first safe-area row, independent
+/// of the keyboard's size. Hiding it expands history without closing chat.
+#[derive(Clone, Copy, Debug)]
+struct PhoneChatLayout {
+    left: f32,
+    top: f32,
+    width: f32,
+    height: f32,
+}
+impl PhoneChatLayout {
+    fn new(viewport: Vec2, safe: crate::mobile_controls::MobileSafeInsets, keyboard: bool) -> Self {
+        let width = (viewport.x - safe.left - safe.right - 12.0).max(0.0);
+        let available = (viewport.y - safe.top - safe.bottom - 12.0).max(0.0);
+        Self {
+            left: safe.left + 6.0,
+            top: safe.top + 6.0,
+            width,
+            height: if keyboard {
+                // This is a conservative history budget, not an inferred OS inset.
+                (viewport.y * 0.4).max(112.0).min(available)
+            } else {
+                available
+            },
+        }
+    }
+}
+fn composer_preview(draft: &str, preedit: &str, width: f32) -> String {
+    let capacity = ((width / 16.0) as usize).max(1);
+    let value = format!("{draft}{preedit}");
+    if value.is_empty() {
+        return "Message your team…".into();
+    }
+    let skip = value.chars().count().saturating_sub(capacity);
+    format!(
+        "{}{} |",
+        if skip > 0 { "…" } else { "" },
+        value.chars().skip(skip).collect::<String>()
+    )
+}
+fn render_phone_chat(
+    commands: &mut Commands,
+    social: &SocialClient,
+    mobile: &MobileControls,
+    viewport: Vec2,
+    old_scroll: ScrollPosition,
+) {
+    let layout = PhoneChatLayout::new(viewport, mobile.safe, social.keyboard_requested);
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.02, 0.02, 0.96)),
+            ZIndex(150),
+            SocialRoot,
+            Name::new("SocialChatRoot"),
+        ))
+        .with_children(|p| {
+            p.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(layout.left),
+                    top: Val::Px(layout.top),
+                    width: Val::Px(layout.width),
+                    height: Val::Px(layout.height),
+                    padding: UiRect::all(Val::Px(6.0)),
+                    overflow: Overflow::clip(),
+                    ..column()
+                },
+                BackgroundColor(ui::PANEL),
+                Name::new("SocialChatPanel"),
+            ))
+            .with_children(|p| {
+                // Send and Close never move below history or a wrapping draft.
+                p.spawn(Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(48.0),
+                    flex_shrink: 0.0,
+                    flex_wrap: FlexWrap::NoWrap,
+                    ..row()
+                })
+                .with_children(|p| {
+                    p.spawn((
+                        Button,
+                        Node {
+                            height: Val::Px(48.0),
+                            min_width: Val::Px(0.0),
+                            flex_grow: 1.0,
+                            flex_basis: Val::Px(0.0),
+                            padding: UiRect::horizontal(Val::Px(10.0)),
+                            align_items: AlignItems::Center,
+                            overflow: Overflow::clip(),
+                            ..default()
+                        },
+                        BackgroundColor(ui::TILE),
+                        SocialAction::FocusComposer,
+                        Name::new("SocialPhoneComposer"),
+                    ))
+                    .with_children(|p| {
+                        p.spawn((
+                            Text::new(composer_preview(
+                                &social.draft,
+                                &social.preedit,
+                                layout.width - 180.0,
+                            )),
+                            TextLayout::new_with_no_wrap(),
+                            ui::text(16.0),
+                            TextColor(ui::IVORY),
+                            Name::new("SocialChatInput"),
+                        ));
+                    });
+                    button(p, "Send", SocialAction::Send, "SocialSend");
+                    button(p, "Close", SocialAction::Close, "SocialClose");
+                });
+                p.spawn(Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(44.0),
+                    flex_shrink: 0.0,
+                    flex_wrap: FlexWrap::NoWrap,
+                    overflow: Overflow::clip(),
+                    ..row()
+                })
+                .with_children(|p| {
+                    button(
+                        p,
+                        if social.channel == SocialChannel::Team {
+                            "Team"
+                        } else {
+                            "Match"
+                        },
+                        SocialAction::Channel,
+                        "SocialChannel",
+                    );
+                    button(
+                        p,
+                        if social.keyboard_requested {
+                            "Hide keys"
+                        } else {
+                            "Keyboard"
+                        },
+                        SocialAction::Keyboard,
+                        "SocialKeyboard",
+                    );
+                    button(
+                        p,
+                        if social.mute_all {
+                            "Unmute"
+                        } else {
+                            "Mute all"
+                        },
+                        SocialAction::MuteAll,
+                        "SocialMuteAll",
+                    );
+                    p.spawn((
+                        Text::new(format!(
+                            "{}/160 {}",
+                            social.draft.chars().count(),
+                            social.status
+                        )),
+                        TextLayout::new_with_no_wrap(),
+                        ui::text(12.0),
+                        TextColor(ui::MUTED),
+                        Node {
+                            min_width: Val::Px(0.0),
+                            overflow: Overflow::clip(),
+                            ..default()
+                        },
+                        Name::new("SocialSendStatus"),
+                    ));
+                });
+                render_chat_log(p, social, old_scroll);
+            });
+        });
+}
+
+fn render_chat_log(
+    p: &mut ChildSpawnerCommands,
+    social: &SocialClient,
+    old_scroll: ScrollPosition,
+) {
+    p.spawn((
+        Node {
+            flex_grow: 1.0,
+            flex_basis: Val::Px(0.0),
+            min_height: Val::Px(0.0),
+            overflow: Overflow::scroll_y(),
+            ..column()
+        },
+        old_scroll,
+        Name::new("SocialChatLog"),
+    ))
+    .with_children(|p| {
+        if social.events.is_empty() {
+            text(
+                p,
+                "No messages yet. Say hello to your team.",
+                14.0,
+                ui::MUTED,
+                "SocialEmpty",
+            );
+        }
+        for event in social
+            .events
+            .iter()
+            .filter(|e| social.visible_sender(e.player_id))
+        {
+            if let SocialEventKind::Chat {
+                channel,
+                text: message,
+            } = &event.kind
+            {
+                p.spawn(row()).with_children(|p| {
+                    text(
+                        p,
+                        format!(
+                            "{} · {}: {}",
+                            if *channel == SocialChannel::Team {
+                                "Team"
+                            } else {
+                                "Match"
+                            },
+                            event.nickname,
+                            message
+                        ),
+                        14.0,
+                        ui::IVORY,
+                        "SocialChatMessage",
+                    );
+                    button(
+                        p,
+                        "Mute",
+                        SocialAction::Mute(event.player_id),
+                        "SocialMuteSender",
+                    );
+                });
+            }
+        }
+        if !social.muted.is_empty() {
+            text(p, "Muted players", 12.0, ui::MUTED, "SocialMuted");
+            for id in &social.muted {
+                button(
+                    p,
+                    &format!("Unmute player {id}"),
+                    SocialAction::Mute(*id),
+                    "SocialUnmuteSender",
+                );
+            }
+        }
+    });
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render(
     mut commands: Commands,
@@ -922,8 +1209,12 @@ fn render(
             .and_then(|assets| assets.image(&social.wheel_ids[index], &images))
     });
     let key = format!(
-        "{key}{}",
-        wheel_render_key(&social.wheel_ids, &wheel_images)
+        "{key}{}{:?}{}{}{:?}",
+        wheel_render_key(&social.wheel_ids, &wheel_images),
+        world.mobile.safe,
+        world.mobile.enabled,
+        social.keyboard_requested,
+        social.channel,
     );
     let old_scroll = scrolls
         .iter()
@@ -1012,17 +1303,11 @@ fn render(
         }
         return;
     }
-    if social.chat_open {
-        let width = if phone {
-            viewport.x - world.mobile.safe.left - world.mobile.safe.right - 12.0
-        } else {
-            (viewport.x - 48.0).min(700.0)
-        };
-        let height = if phone {
-            viewport.y - world.mobile.safe.top - world.mobile.safe.bottom - 12.0
-        } else {
-            (viewport.y - 48.0).min(560.0)
-        };
+    if social.chat_open && phone {
+        render_phone_chat(&mut commands, &social, &world.mobile, viewport, old_scroll);
+    } else if social.chat_open {
+        let width = (viewport.x - 48.0).min(700.0);
+        let height = (viewport.y - 48.0).min(560.0);
         commands
             .spawn((
                 Node {
@@ -1087,75 +1372,7 @@ fn render(
                         ui::MUTED,
                         "SocialMode",
                     );
-                    p.spawn((
-                        Node {
-                            flex_grow: 1.0,
-                            flex_basis: Val::Px(0.0),
-                            min_height: Val::Px(0.0),
-                            overflow: Overflow::scroll_y(),
-                            ..column()
-                        },
-                        old_scroll,
-                        Name::new("SocialChatLog"),
-                    ))
-                    .with_children(|p| {
-                        if social.events.is_empty() {
-                            text(
-                                p,
-                                "No messages yet. Say hello to your team.",
-                                14.0,
-                                ui::MUTED,
-                                "SocialEmpty",
-                            );
-                        }
-                        for event in social
-                            .events
-                            .iter()
-                            .filter(|e| social.visible_sender(e.player_id))
-                        {
-                            if let SocialEventKind::Chat {
-                                channel,
-                                text: message,
-                            } = &event.kind
-                            {
-                                p.spawn(row()).with_children(|p| {
-                                    text(
-                                        p,
-                                        format!(
-                                            "{} · {}: {}",
-                                            if *channel == SocialChannel::Team {
-                                                "Team"
-                                            } else {
-                                                "Match"
-                                            },
-                                            event.nickname,
-                                            message
-                                        ),
-                                        14.0,
-                                        ui::IVORY,
-                                        "SocialChatMessage",
-                                    );
-                                    button(
-                                        p,
-                                        "Mute",
-                                        SocialAction::Mute(event.player_id),
-                                        "SocialMuteSender",
-                                    );
-                                });
-                            }
-                        }
-                        if !social.muted.is_empty() {
-                            text(p, "Muted players", 12.0, ui::MUTED, "SocialMuted");
-                            for id in &social.muted {
-                                button(
-                                    p,
-                                    &format!("Unmute player {id}"),
-                                    SocialAction::Mute(*id),
-                                    "SocialUnmuteSender",
-                                );
-                            }
-                        }
-                    });
+                    render_chat_log(p, &social, old_scroll);
                     text(
                         p,
                         format!("{}{} |", social.draft, social.preedit),
@@ -1250,37 +1467,48 @@ fn render(
 fn render_bubbles(
     mut commands: Commands,
     social: Res<SocialClient>,
-    world: SocialWorld,
+    mode: Res<PlayerVisualMode>,
+    camera: Query<(Entity, &Camera), With<MainCamera>>,
+    transforms: bevy::transform::helper::TransformHelper,
     assets: Option<Res<ReactionVisuals>>,
     images: Res<Assets<Image>>,
     players: Query<(
+        Entity,
         &NetworkPlayerId,
-        &Transform,
         Option<&NetworkBot>,
         &CombatStats,
+        Option<&crate::model_scale::NormalizeModelScale>,
+        Option<&crate::net::NetworkSpriteCharacter>,
     )>,
     bubbles: Query<(Entity, &SocialBubble)>,
 ) {
     let current: Vec<_> = bubbles.iter().map(|(entity, key)| (entity, *key)).collect();
     let mut desired = Vec::new();
-    let Ok((camera, camera_transform)) = world.camera.single() else {
+    let Ok((camera_entity, camera)) = camera.single() else {
+        reconcile_bubbles(&mut commands, &current, desired);
+        return;
+    };
+    // These are sampled before UI layout, while propagated globals may still
+    // contain last frame's camera or hero poses. Match the target UI pipeline.
+    let Ok(camera_transform) = transforms.compute_global_transform(camera_entity) else {
         reconcile_bubbles(&mut commands, &current, desired);
         return;
     };
     let viewport = camera.logical_viewport_size().unwrap_or(Vec2::ZERO);
-    for (id, position, bot, stats) in &players {
+    for (entity, id, bot, stats, normalization, sprite) in &players {
         if !stats.is_alive() {
             continue;
         }
-        let Some(point) = hero_screen(
-            camera,
-            camera_transform,
-            *world.mode,
-            position.translation,
-            2.6,
-        ) else {
+        let Ok(pose) = transforms.compute_global_transform(entity) else {
             continue;
         };
+        let anchor = social_head_anchor(pose.translation(), *mode, normalization, sprite);
+        let Ok(point) = camera.world_to_viewport(&camera_transform, anchor) else {
+            continue;
+        };
+        if !point.is_finite() {
+            continue;
+        }
         if point.x < 32.0
             || point.y < 36.0
             || point.x > viewport.x - 32.0
@@ -1292,8 +1520,10 @@ fn render_bubbles(
             desired.push(BubbleDraw {
                 node: Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(point.x - 12.0),
-                    top: Val::Px(point.y + 24.0),
+                    left: Val::Px(point.x - 24.0),
+                    top: Val::Px(point.y - 16.0),
+                    width: Val::Px(48.0),
+                    height: Val::Px(16.0),
                     ..default()
                 },
                 image: None,
@@ -1335,6 +1565,27 @@ fn render_bubbles(
     reconcile_bubbles(&mut commands, &current, desired);
 }
 
+fn social_head_anchor(
+    position: Vec3,
+    mode: PlayerVisualMode,
+    normalization: Option<&crate::model_scale::NormalizeModelScale>,
+    sprite: Option<&crate::net::NetworkSpriteCharacter>,
+) -> Vec3 {
+    if mode == PlayerVisualMode::Sprite2d {
+        let height = shared::sprite_character_render_definition(
+            sprite.and_then(|sprite| sprite.0.as_deref()),
+        )
+        .map(|definition| (1.0 - definition.pivot[1]) * definition.world_height)
+        .unwrap_or(2.6);
+        let xy = crate::world2d::simulation_xz_to_render_xy(position);
+        (xy + Vec2::Y * (height + 0.2)).extend(crate::world2d::layer::OVERHEAD)
+    } else {
+        // head_local_y already includes normalization. Do not rotate the offset
+        // with animated limbs or multiply it by the model's root scale again.
+        position + Vec3::Y * (normalization.and_then(|n| n.head_local_y).unwrap_or(2.6) + 0.2)
+    }
+}
+
 struct BubbleDraw {
     key: SocialBubble,
     node: Node,
@@ -1366,6 +1617,7 @@ fn reconcile_bubbles(
             commands
                 .spawn((
                     Text::new("BOT"),
+                    TextLayout::new_with_justify(Justify::Center),
                     ui::text(11.0),
                     TextColor(ui::GOLD),
                     FocusPolicy::Pass,
@@ -1425,6 +1677,193 @@ fn scroll_chat(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn phone_composer_stays_in_top_safe_row_and_history_expands_when_keyboard_hides() {
+        let safe = crate::mobile_controls::MobileSafeInsets {
+            left: 44.0,
+            right: 44.0,
+            top: 8.0,
+            bottom: 21.0,
+        };
+        for viewport in [
+            Vec2::new(568.0, 320.0),
+            Vec2::new(844.0, 390.0),
+            Vec2::new(932.0, 430.0),
+        ] {
+            let typing = PhoneChatLayout::new(viewport, safe, true);
+            let reading = PhoneChatLayout::new(viewport, safe, false);
+            assert!(typing.left >= safe.left);
+            assert!(typing.left + typing.width <= viewport.x - safe.right);
+            // Input, Send and Close are in the first 48px row + 6px padding.
+            // Even an overlay covering the lower 75% leaves this row accessible.
+            assert!(typing.top + 6.0 + 48.0 <= viewport.y * 0.25);
+            assert!(typing.top + typing.height <= viewport.y - safe.bottom);
+            assert!(reading.height > typing.height);
+            assert_eq!(typing.top, reading.top);
+            assert_eq!(typing.width, reading.width);
+        }
+        let preview = composer_preview("Привет 小明, this is a long draft", "中文", 128.0);
+        assert!(preview.starts_with('…'));
+        assert!(preview.ends_with("中文 |"));
+    }
+    #[test]
+    fn phone_keyboard_can_hide_without_losing_draft_or_releasing_gameplay() {
+        let mut app = App::new();
+        let mut mobile = MobileControls::default();
+        mobile.enabled = true;
+        app.insert_resource(mobile)
+            .insert_resource(SocialClient {
+                chat_open: true,
+                draft: "Keep me".into(),
+                ..default()
+            })
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_message::<KeyboardInput>()
+            .add_message::<Ime>()
+            .add_message::<NetworkCommand>()
+            .add_systems(Update, chat_keyboard);
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
+        app.update();
+        assert!(app.world().get::<Window>(window).unwrap().ime_enabled);
+        app.world_mut()
+            .resource_mut::<SocialClient>()
+            .keyboard_requested = false;
+        app.update();
+        assert!(!app.world().get::<Window>(window).unwrap().ime_enabled);
+        assert!(app.world().resource::<SocialClient>().blocks_gameplay());
+        assert_eq!(app.world().resource::<SocialClient>().draft, "Keep me");
+        app.world_mut()
+            .resource_mut::<SocialClient>()
+            .keyboard_requested = true;
+        app.update();
+        assert!(app.world().get::<Window>(window).unwrap().ime_enabled);
+        app.world_mut().resource_mut::<SocialClient>().close();
+        app.update();
+        assert!(!app.world().get::<Window>(window).unwrap().ime_enabled);
+        assert!(app.world().resource::<SocialClient>().blocks_gameplay());
+        app.world_mut().resource_mut::<SocialClient>().open_chat();
+        assert!(app.world().resource::<SocialClient>().keyboard_requested);
+        assert_eq!(app.world().resource::<SocialClient>().draft, "Keep me");
+    }
+    #[test]
+    fn ios_character_return_submits_once_and_does_not_insert_control_text() {
+        use bevy::input::ButtonState;
+        for ime_commit in [false, true] {
+            let mut app = App::new();
+            app.insert_resource(SocialClient {
+                chat_open: true,
+                draft: "Hello team".into(),
+                ..default()
+            })
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_message::<KeyboardInput>()
+            .add_message::<Ime>()
+            .add_message::<NetworkCommand>()
+            .add_systems(Update, chat_keyboard);
+            let window = app
+                .world_mut()
+                .spawn((Window::default(), PrimaryWindow))
+                .id();
+            if ime_commit {
+                app.world_mut().write_message(Ime::Commit {
+                    window,
+                    value: "\n".into(),
+                });
+            }
+            for state in [ButtonState::Pressed, ButtonState::Released] {
+                app.world_mut().write_message(KeyboardInput {
+                    window,
+                    key_code: KeyCode::Enter,
+                    logical_key: Key::Character("\n".into()),
+                    text: Some("\n".into()),
+                    state,
+                    repeat: false,
+                });
+            }
+            app.update();
+            let social = app.world().resource::<SocialClient>();
+            assert_eq!(social.request_sequence, 1);
+            assert_eq!(social.draft, "Hello team");
+            assert!(
+                matches!(&social.pending.as_ref().unwrap().command, SocialCommand::Chat { text, .. } if text == "Hello team")
+            );
+            assert_eq!(app.world().resource::<Messages<NetworkCommand>>().len(), 1);
+        }
+    }
+    #[test]
+    fn bot_labels_track_current_camera_and_grounded_head_without_yaw_jitter() {
+        use bevy::camera::{ComputedCameraValues, RenderTargetInfo};
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::transform::TransformPlugin))
+            .init_resource::<SocialClient>()
+            .init_resource::<Assets<Image>>()
+            .insert_resource(PlayerVisualMode::Models3d);
+        configure_social_bubbles(&mut app);
+        let mut normalization = crate::model_scale::NormalizeModelScale::for_player_model();
+        normalization.head_local_y = Some(1.8);
+        let bot = app
+            .world_mut()
+            .spawn((
+                NetworkPlayerId(7),
+                NetworkBot(true),
+                CombatStats::default(),
+                normalization,
+                Transform::from_xyz(0.1, 0.0, 0.0).with_scale(Vec3::splat(3.0)),
+            ))
+            .id();
+        let camera = app
+            .world_mut()
+            .spawn((
+                MainCamera,
+                Transform::IDENTITY,
+                Camera {
+                    computed: ComputedCameraValues {
+                        clip_from_view: Mat4::from_scale(Vec3::new(1.0, 0.1, 0.01)),
+                        target_info: Some(RenderTargetInfo {
+                            physical_size: UVec2::new(800, 400),
+                            scale_factor: 1.0,
+                        }),
+                        ..default()
+                    },
+                    ..default()
+                },
+            ))
+            .id();
+        app.update();
+        let label = app
+            .world_mut()
+            .query_filtered::<Entity, With<SocialBubble>>()
+            .single(app.world())
+            .unwrap();
+        app.add_systems(
+            PostUpdate,
+            (move |mut poses: Query<&mut Transform>| {
+                poses.get_mut(bot).unwrap().translation.x = 0.4;
+                poses.get_mut(camera).unwrap().translation.x = 0.15;
+            })
+            .in_set(crate::net::NetworkGroundingSet),
+        );
+        app.add_systems(
+            PostUpdate,
+            (move |nodes: Query<&Node>| {
+                let node = nodes.get(label).unwrap();
+                // Both root poses changed after Update. Old globals would miss x=500.
+                assert_eq!(node.left, Val::Px(500.0 - 24.0));
+                // Head offset is already normalized, independent of root scale=3.
+                assert_eq!(node.top, Val::Px(144.0));
+            })
+            .in_set(bevy::ui::UiSystems::Layout),
+        );
+        for frame in 0..12 {
+            app.world_mut().get_mut::<Transform>(bot).unwrap().rotation =
+                Quat::from_rotation_y(frame as f32);
+            app.update();
+            assert!(app.world().get::<SocialBubble>(label).is_some());
+        }
+    }
     #[test]
     fn bubble_nodes_survive_motion_and_only_expire_or_replace_with_authoritative_event() {
         let mut world = World::new();

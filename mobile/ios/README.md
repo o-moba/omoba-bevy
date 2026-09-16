@@ -1,5 +1,9 @@
 # Install a development build on your iPhone
 
+For installation without connecting the iPhone to a Mac, use the separate
+[TestFlight archive and account workflow](TESTFLIGHT.md). A development IPA
+cannot simply be uploaded to TestFlight.
+
 `build_device.py` packages the native `aarch64-apple-ios` executable. It can sign
 with an **existing** valid Apple Development identity and a matching, unexpired
 iOS development profile. It never creates certificates, contacts provisioning
@@ -37,9 +41,12 @@ python3 mobile/ios/build_device.py --check
 ```
 
 For a source build, use a fresh output directory and optionally reuse a Cargo
-cache. The default `dev` profile keeps the workspace optimizations and disables
-debug data/incremental compilation to reduce build storage. `--build-profile
-release` is also available. At least 6 GiB free is required by fresh-build
+cache. The default `dev` profile keeps the workspace optimizations. Both `dev`
+and `release` retain `debug=1`, `strip=none`, and `split-debuginfo=packed`; only
+incremental compilation is disabled. The resulting `client.dSYM` is validated
+against the executable's arm64 UUID and retained as `OmobaBeta.app.dSYM` beside
+the packaged app. Keep these symbols for TestFlight and crash reports even when
+deleting the Cargo cache. At least 6 GiB free is required by fresh-build
 preflight; actual peak usage varies.
 
 ```sh
@@ -58,8 +65,18 @@ To reuse a compiled executable, `--binary` skips Cargo entirely:
 ```sh
 python3 mobile/ios/build_device.py \
   --binary /absolute/path/to/aarch64-apple-ios/debug/client \
+  --dsym /absolute/path/to/aarch64-apple-ios/debug/client.dSYM \
   --output builds/iphone-unsigned-1
 ```
+
+Without `--dsym`, an existing `client.dSYM` beside `--binary` is detected
+automatically. Cargo's root-level symlink to `deps/client-<hash>.dSYM` is resolved
+before validation; the retained output is an independent directory copy. Nested
+symlinks inside a symbol bundle are still rejected. A legacy executable without symbols can still be packaged for
+local development, but the TestFlight archive preparer rejects it. Its debug
+information cannot be recovered from the stripped binary: rebuild the exact
+source with the symbol-retaining settings. Invalid, empty or mismatched symbol
+bundles fail before packaging rather than producing an upload warning later.
 
 Unsigned output is useful for reviewing its contents, but is not installable.
 Only tracked `client/assets` files are copied, including model/sprite registries,

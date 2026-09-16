@@ -59,7 +59,7 @@ pub(crate) struct MobileCastIntent {
 pub(crate) struct MobileAttackAim {
     /// Logical screen axes, normalized. Positive Y points down.
     pub direction: Vec2,
-    /// Fraction of the legal target-selector reach, never additional attack range.
+    /// Fraction of the bounded visual handle; selection continues along its ray.
     pub extent: f32,
 }
 
@@ -72,6 +72,8 @@ pub(crate) struct MobileAttackIntent {
 const ATTACK_HOLD_SECONDS: f32 = 0.18;
 const ATTACK_DRAG_DEAD_ZONE: f32 = 12.0;
 const ATTACK_DRAG_REACH: f32 = 96.0;
+const SKILL_DESCRIPTION_SECONDS: f32 = 0.45;
+const SKILL_DRAG_DEAD_ZONE: f32 = 20.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Control {
@@ -90,6 +92,7 @@ struct Capture {
     held_seconds: f32,
     hold_exposed: bool,
     dragged: bool,
+    inspecting: bool,
     gesture: u64,
 }
 
@@ -261,7 +264,7 @@ impl MobileControls {
                     id,
                     Capture {
                         control,
-                        origin: if control == Control::Attack {
+                        origin: if matches!(control, Control::Attack | Control::Ability(_)) {
                             position
                         } else {
                             origin
@@ -271,16 +274,18 @@ impl MobileControls {
                         held_seconds: 0.0,
                         hold_exposed: false,
                         dragged: false,
+                        inspecting: false,
                         gesture,
                     },
                 );
             }
             TouchPhase::Moved => {
                 let layout = self.layout();
-                let dead_zone = ATTACK_DRAG_DEAD_ZONE * self.scale();
+                let scale = self.scale();
                 if let Some(capture) = self.captures.get_mut(&id) {
                     capture.position = position;
-                    capture.dragged |= position.distance(capture.origin) > dead_zone;
+                    capture.dragged |= position.distance(capture.origin)
+                        > control_drag_dead_zone(capture.control) * scale;
                     capture.canceled =
                         position.distance(layout.cancel_center) <= layout.cancel_radius;
                 }
@@ -290,8 +295,8 @@ impl MobileControls {
                     self.skill_released_this_frame |=
                         matches!(capture.control, Control::Ability(_));
                     capture.position = position;
-                    capture.dragged |=
-                        position.distance(capture.origin) > ATTACK_DRAG_DEAD_ZONE * self.scale();
+                    capture.dragged |= position.distance(capture.origin)
+                        > control_drag_dead_zone(capture.control) * self.scale();
                     capture.canceled = position.distance(self.layout().cancel_center)
                         <= self.layout().cancel_radius;
                     self.attack_canceled_this_frame |= capture.control == Control::Attack
@@ -325,10 +330,15 @@ impl MobileControls {
                                     });
                                 }
                             }
-                            Control::Ability(slot) => self.casts.push(MobileCastIntent {
-                                slot,
-                                aim: aim_vector(capture.position - capture.origin, self.scale()),
-                            }),
+                            Control::Ability(slot) if !capture.inspecting => {
+                                self.casts.push(MobileCastIntent {
+                                    slot,
+                                    aim: aim_vector(
+                                        capture.position - capture.origin,
+                                        self.scale(),
+                                    ),
+                                })
+                            }
                             Control::Upgrade(slot)
                                 if position.distance(capture.origin)
                                     <= self.layout().upgrade_radius * 1.3 =>
@@ -387,7 +397,20 @@ impl MobileControls {
         }
         for capture in self.captures.values_mut() {
             capture.held_seconds += seconds;
+            capture.inspecting |= matches!(capture.control, Control::Ability(_))
+                && !capture.dragged
+                && !capture.canceled
+                && capture.held_seconds >= SKILL_DESCRIPTION_SECONDS;
         }
+    }
+
+    fn inspected_skill(&self) -> Option<usize> {
+        self.captures
+            .values()
+            .find_map(|capture| match capture.control {
+                Control::Ability(slot) if capture.inspecting && !capture.canceled => Some(slot),
+                _ => None,
+            })
     }
 
     fn acknowledge_hold(&mut self) {
@@ -450,8 +473,15 @@ fn joystick_vector(delta: Vec2, radius: f32) -> Vec2 {
     }
     delta.normalize_or_zero() * ((distance - dead_zone) / (radius - dead_zone)).clamp(0.0, 1.0)
 }
+fn control_drag_dead_zone(control: Control) -> f32 {
+    if matches!(control, Control::Ability(_)) {
+        SKILL_DRAG_DEAD_ZONE
+    } else {
+        ATTACK_DRAG_DEAD_ZONE
+    }
+}
 fn aim_vector(delta: Vec2, scale: f32) -> Option<Vec2> {
-    (delta.length() > 20.0 * scale).then(|| delta.normalize_or_zero())
+    (delta.length() > SKILL_DRAG_DEAD_ZONE * scale).then(|| delta.normalize_or_zero())
 }
 
 fn attack_aim_vector(delta: Vec2, scale: f32) -> Option<MobileAttackAim> {
@@ -613,10 +643,14 @@ enum MobileVisual {
     Ability(usize),
     Upgrade(usize),
     AimHint,
+    SkillDescription,
     Rotate,
 }
 
-fn setup_mobile_controls(mut commands: Commands) {
+#[derive(Component)]
+struct SkillIcon(usize);
+
+fn setup_mobile_controls(mut commands: Commands, assets: Option<Res<AssetServer>>) {
     for visual in [
         MobileVisual::Joystick,
         MobileVisual::Thumb,
@@ -633,9 +667,16 @@ fn setup_mobile_controls(mut commands: Commands) {
         MobileVisual::Upgrade(2),
         MobileVisual::Upgrade(3),
         MobileVisual::AimHint,
+        MobileVisual::SkillDescription,
         MobileVisual::Rotate,
     ] {
         let is_rotate = matches!(visual, MobileVisual::Rotate);
+        let is_description = matches!(visual, MobileVisual::SkillDescription);
+        let icon_slot = if let MobileVisual::Ability(slot) = visual {
+            Some(slot)
+        } else {
+            None
+        };
         commands
             .spawn((
                 Node {
@@ -646,12 +687,19 @@ fn setup_mobile_controls(mut commands: Commands) {
                     border: UiRect::all(Val::Px(2.0)),
                     border_radius: BorderRadius::all(Val::Percent(50.0)),
                     padding: UiRect::all(Val::Px(4.0)),
+                    overflow: Overflow::clip(),
                     ..default()
                 },
                 BackgroundColor(crate::ui_theme::PANEL),
                 UiTransform::default(),
                 BorderColor::all(crate::ui_theme::EDGE),
-                ZIndex(if is_rotate { 250 } else { 30 }),
+                ZIndex(if is_rotate {
+                    250
+                } else if is_description {
+                    180
+                } else {
+                    30
+                }),
                 if is_rotate {
                     FocusPolicy::Block
                 } else {
@@ -667,11 +715,28 @@ fn setup_mobile_controls(mut commands: Commands) {
                     MobileVisual::Ability(slot) => format!("MobileAbility-{slot}"),
                     MobileVisual::Upgrade(slot) => format!("MobileUpgrade-{slot}"),
                     MobileVisual::AimHint => "MobileAimHint".to_owned(),
+                    MobileVisual::SkillDescription => "MobileSkillDescription".to_owned(),
                     MobileVisual::Rotate => "MobileRotatePrompt".to_owned(),
                 }),
                 visual,
             ))
             .with_children(|parent| {
+                if let (Some(slot), Some(assets)) = (icon_slot, assets.as_ref()) {
+                    parent.spawn((
+                        SkillIcon(slot),
+                        ImageNode::new(assets.load(crate::skill_icons::ATLAS_PATH)),
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(0.0),
+                            top: Val::Px(0.0),
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
+                            border_radius: BorderRadius::all(Val::Percent(50.0)),
+                            ..default()
+                        },
+                        FocusPolicy::Pass,
+                    ));
+                }
                 parent.spawn((
                     Text::new(""),
                     TextFont {
@@ -680,6 +745,20 @@ fn setup_mobile_controls(mut commands: Commands) {
                     },
                     TextColor(crate::ui_theme::IVORY),
                     TextLayout::new_with_justify(Justify::Center),
+                    Node {
+                        align_self: if icon_slot.is_some() {
+                            AlignSelf::End
+                        } else {
+                            AlignSelf::Center
+                        },
+                        ..default()
+                    },
+                    BackgroundColor(if icon_slot.is_some() {
+                        Color::srgba(0.01, 0.025, 0.04, 0.84)
+                    } else {
+                        Color::NONE
+                    }),
+                    ZIndex(1),
                 ));
             });
     }
@@ -700,6 +779,8 @@ fn draw_mobile_controls(
     selection: Res<TeamSelection>,
     cooldown: Res<LocalCastCooldown>,
     basic_attack: Option<Res<crate::targeting::BasicAttackState>>,
+    images: Option<Res<Assets<Image>>>,
+    mut icons: Query<(&SkillIcon, &mut ImageNode)>,
     mut visuals: Query<(
         &MobileVisual,
         &mut Node,
@@ -743,6 +824,22 @@ fn draw_mobile_controls(
         .filter(|capture| capture.dragged)
         .map(|capture| (capture.position - capture.origin).clamp_length_max(ATTACK_DRAG_REACH * s));
     let canceled_color = Color::srgb(0.90, 0.28, 0.24);
+    for (SkillIcon(slot), mut icon) in &mut icons {
+        let def = ability_for_class_slot(class, SkillSlot::from_index(*slot as u8).unwrap());
+        if let Some(image) = images.as_ref().and_then(|images| images.get(&icon.image)) {
+            icon.rect = crate::skill_icons::icon_rect(def.id, image.size().as_vec2());
+        }
+        let ready = unlocked_slots_for_level(prog.level.max(1))[*slot]
+            && cooldown.remaining_secs[*slot] <= 0.0
+            && local.is_some_and(|(stats, _, _)| {
+                stats.mana >= scaled_mana_cost(def, prog.ranks[*slot].max(1))
+            });
+        icon.color = if ready {
+            Color::WHITE
+        } else {
+            Color::srgb(0.38, 0.42, 0.48)
+        };
+    }
     for (visual, mut node, mut color, mut border, mut ui_transform, children) in &mut visuals {
         let (center, radius, label, show, fill, edge) = match *visual {
             MobileVisual::Joystick => (
@@ -818,7 +915,7 @@ fn draw_mobile_controls(
                 layout.cancel_center,
                 layout.cancel_radius,
                 "×".into(),
-                visible && aiming.is_some(),
+                visible && aiming.is_some() && mobile.inspected_skill().is_none(),
                 if aiming.is_some_and(|capture| capture.canceled) {
                     canceled_color
                 } else {
@@ -836,7 +933,6 @@ fn draw_mobile_controls(
                     .captures
                     .values()
                     .any(|c| c.control == Control::Ability(slot) && !c.canceled);
-                let tag = ["Q", "W", "E", "R"][slot];
                 let status = if !unlocked {
                     format!("Lv {}", shared::SLOT_UNLOCK_LEVELS[slot])
                 } else if cooldown.remaining_secs[slot] > 0.0 {
@@ -849,7 +945,7 @@ fn draw_mobile_controls(
                 (
                     layout.ability_centers[slot],
                     layout.ability_radii[slot],
-                    format!("{tag}\n{status}"),
+                    status,
                     visible,
                     if active {
                         crate::ui_theme::HOVER
@@ -878,7 +974,7 @@ fn draw_mobile_controls(
                         {
                             "CANCEL\nRelease to discard"
                         } else if c.control == Control::Attack {
-                            "Drag to select · release to attack\nMove to × to cancel"
+                            "Point toward an enemy · release to lock\nMove to × to cancel"
                         } else {
                             "Drag to aim · release to cast\nMove to × to cancel"
                         }
@@ -895,9 +991,29 @@ fn draw_mobile_controls(
                     ),
                     1.0,
                     message.into(),
-                    visible && aiming.is_some(),
+                    visible && aiming.is_some() && mobile.inspected_skill().is_none(),
                     crate::ui_theme::PANEL,
                     crate::ui_theme::EDGE,
+                )
+            }
+            MobileVisual::SkillDescription => {
+                let slot = mobile.inspected_skill();
+                let label = slot.map(|slot| {
+                    let def = ability_for_class_slot(class, SkillSlot::from_index(slot as u8).unwrap());
+                    let rank = prog.ranks[slot].max(1);
+                    let availability = if unlocked_slots_for_level(prog.level.max(1))[slot] {
+                        format!("Rank {rank}")
+                    } else { format!("Unlocks at level {}", shared::SLOT_UNLOCK_LEVELS[slot]) };
+                    format!("{}  ·  {}\n{}\n\n{:.0} mana  ·  {:.1}s cooldown\nRelease to close · tap or drag to cast", def.name, availability, def.description,
+                        scaled_mana_cost(def, rank), shared::scaled_cooldown(def, rank).as_secs_f32())
+                }).unwrap_or_default();
+                (
+                    Vec2::new(mobile.viewport.x * 0.5, mobile.safe.top + 100.0 * s),
+                    1.0,
+                    label,
+                    visible && slot.is_some(),
+                    Color::srgb(0.025, 0.055, 0.065),
+                    crate::ui_theme::GOLD,
                 )
             }
             MobileVisual::Rotate => (
@@ -910,12 +1026,20 @@ fn draw_mobile_controls(
             ),
         };
         node.display = if show { Display::Flex } else { Display::None };
-        let rectangular = matches!(visual, MobileVisual::AimHint | MobileVisual::Rotate);
+        let rectangular = matches!(
+            visual,
+            MobileVisual::AimHint | MobileVisual::Rotate | MobileVisual::SkillDescription
+        );
         let is_vector = matches!(visual, MobileVisual::AttackVector);
         let size = if is_vector {
             Vec2::new(drag.unwrap_or_default().length(), 3.0 * s)
         } else if matches!(visual, MobileVisual::Rotate) {
             mobile.viewport
+        } else if matches!(visual, MobileVisual::SkillDescription) {
+            Vec2::new(
+                (330.0 * s).min(mobile.viewport.x - mobile.safe.left - mobile.safe.right),
+                172.0 * s,
+            )
         } else if rectangular {
             let available = layout.upgrade_centers[1].x
                 - layout.upgrade_radius
@@ -952,7 +1076,12 @@ fn draw_mobile_controls(
                     24.0 * s
                 } else if matches!(visual, MobileVisual::Cancel) {
                     28.0 * s
-                } else if matches!(visual, MobileVisual::AimHint) {
+                } else if matches!(
+                    visual,
+                    MobileVisual::AimHint
+                        | MobileVisual::SkillDescription
+                        | MobileVisual::Ability(_)
+                ) {
                     12.0 * s
                 } else {
                     14.0 * s
@@ -970,6 +1099,47 @@ mod tests {
             enabled: true,
             ..default()
         }
+    }
+    #[test]
+    fn stationary_skill_hold_describes_without_casting_and_movement_keeps_working() {
+        let mut m = controls();
+        let layout = m.layout();
+        let skill = layout.ability_centers[1] + Vec2::X * 16.0;
+        m.event(1, TouchPhase::Started, skill);
+        m.event(2, TouchPhase::Started, layout.joystick_center);
+        m.event(
+            2,
+            TouchPhase::Moved,
+            layout.joystick_center + Vec2::X * 40.0,
+        );
+        m.event(1, TouchPhase::Moved, skill + Vec2::X * 15.0);
+        m.advance_hold_time(SKILL_DESCRIPTION_SECONDS);
+        assert_eq!(m.inspected_skill(), Some(1));
+        assert!(m.movement.x > 0.0);
+        // After opening help, later finger movement must never cast accidentally.
+        m.event(1, TouchPhase::Moved, skill + Vec2::NEG_X * 70.0);
+        m.event(1, TouchPhase::Ended, skill + Vec2::NEG_X * 70.0);
+        assert!(m.casts.is_empty());
+        assert_eq!(m.inspected_skill(), None);
+        assert!(m.movement.x > 0.0);
+    }
+
+    #[test]
+    fn deliberate_skill_drag_still_aims_after_a_long_hold() {
+        let mut m = controls();
+        let skill = m.layout().ability_centers[0];
+        m.event(1, TouchPhase::Started, skill);
+        m.event(1, TouchPhase::Moved, skill + Vec2::NEG_X * 50.0);
+        m.advance_hold_time(1.0);
+        assert_eq!(m.inspected_skill(), None);
+        m.event(1, TouchPhase::Ended, skill + Vec2::NEG_X * 50.0);
+        assert_eq!(
+            m.casts,
+            [MobileCastIntent {
+                slot: 0,
+                aim: Some(Vec2::NEG_X)
+            }]
+        );
     }
     #[test]
     fn basic_taps_and_holds_are_independent_from_all_four_skills() {

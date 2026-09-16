@@ -24,6 +24,29 @@ def macho(platform=2, cpu=0x0100000C, kind=2, minimum=0x000F0000):
     return struct.pack("<8I", 0xFEEDFACF, cpu, 0, kind, 1, len(command), 0, 0) + command
 
 
+UUID = "079D4CF5-594E-3DD6-A192-D183AB5EB30B"
+
+
+def dsym_fixture(root: Path) -> Path:
+    """Small structurally valid section table; Apple UUID tools are mocked."""
+    bundle = root / "client.dSYM"
+    directory = bundle / "Contents/Resources/DWARF"
+    directory.mkdir(parents=True)
+    size = 72 + 2 * 80
+    command = struct.pack("<II16sQQQQIIII", 0x19, size, b"__DWARF", 0, 2, 32 + size, 2, 1, 1, 2, 0)
+    for i, name in enumerate((b"__debug_info", b"__debug_line")):
+        command += struct.pack("<16s16sQQIIIIIIII", name, b"__DWARF", i, 1, 32 + size + i, 0, 0, 0, 0, 0, 0, 0)
+    header = struct.pack("<8I", 0xFEEDFACF, 0x0100000C, 0, 10, 1, len(command), 0, 0)
+    (directory / "client").write_bytes(header + command + b"DL")
+    (bundle / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundlePackageType": "dSYM"}))
+    return bundle
+
+
+def uuid_output(command):
+    assert command[:3] == ["xcrun", "dwarfdump", "--uuid"], command
+    return f"UUID: {UUID} (arm64) {command[-1]}\n".encode()
+
+
 class DeviceTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -68,6 +91,55 @@ class DeviceTests(unittest.TestCase):
             self.binary.write_bytes(data)
             with self.assertRaises(ValueError):
                 device.inspect_macho(self.binary)
+
+    def test_ios_profiles_retain_packed_debug_symbols(self):
+        with patch.dict(device.os.environ, {"CARGO_PROFILE_DEV_DEBUG": "0", "CARGO_PROFILE_RELEASE_STRIP": "symbols"}):
+            env = device.ios_build_environment(self.root, "/sdk", "192.0.2.1:4000")
+        for profile in ("DEV", "RELEASE"):
+            self.assertEqual(env[f"CARGO_PROFILE_{profile}_DEBUG"], "1")
+            self.assertEqual(env[f"CARGO_PROFILE_{profile}_STRIP"], "none")
+            self.assertEqual(env[f"CARGO_PROFILE_{profile}_SPLIT_DEBUGINFO"], "packed")
+        self.assertEqual(env["CARGO_INCREMENTAL"], "0")
+        self.assertEqual(env["OMOBA_DEFAULT_GAME_SERVER_ADDR"], "192.0.2.1:4000")
+
+    def test_matching_dsym_uuid_and_real_sections_required(self):
+        dsym = dsym_fixture(self.root)
+        report = device.validate_dsym(self.binary, dsym, runner=uuid_output)
+        self.assertTrue(report["uuid_match_verified"])
+        self.assertEqual(report["uuids"], {"arm64": UUID})
+        (dsym / report["dwarf_file"]).write_bytes(macho(kind=10))
+        with self.assertRaisesRegex(ValueError, "debug info/line tables"):
+            device.validate_dsym(self.binary, dsym, runner=uuid_output)
+
+    def test_missing_and_mismatched_dsym_rejected(self):
+        with self.assertRaisesRegex(ValueError, "missing"):
+            device.validate_dsym(self.binary, self.root / "missing.dSYM")
+        dsym = dsym_fixture(self.root)
+        def mismatch(command):
+            return uuid_output(command).replace(UUID.encode(), b"FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF") if command[-1] == str(self.binary) else uuid_output(command)
+        with self.assertRaisesRegex(ValueError, "UUID mismatch"):
+            device.validate_dsym(self.binary, dsym, runner=mismatch)
+        for bad in (b"", b"UUID: invalid (arm64)", uuid_output(["xcrun", "dwarfdump", "--uuid", "x"]) * 2,
+                    uuid_output(["xcrun", "dwarfdump", "--uuid", "x"]).replace(b"arm64", b"x86_64")):
+            with self.assertRaisesRegex(ValueError, "exactly one arm64"):
+                device.dwarf_uuids(self.binary, runner=lambda _: bad)
+
+    def test_dsym_symlink_rejected_without_reading_destination(self):
+        dsym = dsym_fixture(self.root)
+        (dsym / "escape").symlink_to(self.root)
+        with self.assertRaisesRegex(ValueError, "symlinks"):
+            device.validate_dsym(self.binary, dsym, runner=uuid_output)
+
+    def test_cargo_dsym_root_alias_is_allowed_but_nested_alias_is_not(self):
+        dsym = dsym_fixture(self.root)
+        target = self.root / "deps/client-0123456789.dSYM"
+        target.parent.mkdir()
+        dsym.rename(target)
+        dsym.symlink_to(Path("deps") / target.name, target_is_directory=True)
+        self.assertTrue(device.validate_dsym(self.binary, dsym, runner=uuid_output)["uuid_match_verified"])
+        (target / "nested").symlink_to(self.root)
+        with self.assertRaisesRegex(ValueError, "symlinks"):
+            device.validate_dsym(self.binary, dsym, runner=uuid_output)
 
     def test_wildcard_profile_and_distinct_team_prefix(self):
         actual = self.validate(device_udid="test-device")
@@ -169,6 +241,37 @@ class DeviceTests(unittest.TestCase):
         with patch.object(device, "ROOT", self.root), patch.object(device, "collect_legal_notices", return_value={"LICENSES/private.txt": b"untracked"}):
             with self.assertRaisesRegex(ValueError, "tracked source"):
                 device.main(["--binary", str(self.binary), "--check"])
+
+    def test_existing_binary_package_retains_verified_symbols(self):
+        self.repository()
+        dsym = dsym_fixture(self.root)
+        target = self.root / "deps/client-0123456789.dSYM"
+        target.parent.mkdir()
+        dsym.rename(target)
+        alias = Path(str(self.binary) + ".dSYM")
+        alias.symlink_to(Path("deps") / target.name, target_is_directory=True)
+        real_output = device.output
+        def tool(command, **kwargs):
+            return uuid_output(command) if command[:3] == ["xcrun", "dwarfdump", "--uuid"] else real_output(command, **kwargs)
+        for explicit in (False, True):
+            with self.subTest(explicit=explicit):
+                out = self.root / f"symbols-out-{explicit}"
+                with patch.object(device, "ROOT", self.root), patch.object(device, "collect_legal_notices", return_value={"LICENSE": b"synthetic notice"}), \
+                        patch.object(device, "output", side_effect=tool), patch.object(device, "check_tools"), redirect_stdout(io.StringIO()):
+                    args = ["--binary", str(self.binary), "--output", str(out)]
+                    if explicit:
+                        args.extend(["--dsym", str(alias)])
+                    self.assertEqual(device.main(args + ["--check"]), 0)
+                    self.assertFalse(out.exists())
+                    self.assertEqual(device.main(args), 0)
+                report = json.loads((out / "device-build.json").read_text())
+                symbols = report["debug_symbols"]
+                self.assertTrue(symbols["uuid_match_verified"])
+                self.assertEqual(symbols["uuids"], {"arm64": UUID})
+                retained = out / symbols["bundle"] / symbols["dwarf_file"]
+                self.assertFalse((out / symbols["bundle"]).is_symlink())
+                self.assertEqual(retained.read_bytes(), (target / symbols["dwarf_file"]).read_bytes())
+                self.assertEqual(device.sha256(retained), symbols["dwarf_sha256"])
 
 
 if __name__ == "__main__":

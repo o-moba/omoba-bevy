@@ -96,6 +96,89 @@ def inspect_macho(path: Path) -> dict:
             "sdk": version_string(sdk), "sha256": sha256(path), "bytes": path.stat().st_size}
 
 
+def dwarf_uuids(path: Path, *, runner=None) -> dict[str, str]:
+    text = (runner or output)(["xcrun", "dwarfdump", "--uuid", str(path)]).decode()
+    records = re.findall(r"(?m)^UUID: ([0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}) \(([^)]+)\)", text)
+    if len(records) != 1 or records[0][1] != "arm64":
+        raise ValueError("Expected exactly one arm64 UUID from dwarfdump; symbols cannot be matched.")
+    return {arch: uuid.upper() for uuid, arch in records}
+
+
+def require_dwarf_sections(path: Path) -> None:
+    """Reject a UUID-only/empty dSYM: it cannot symbolicate Rust crash logs."""
+    with path.open("rb") as source:
+        header = source.read(32)
+        if len(header) != 32:
+            raise ValueError("dSYM DWARF file is truncated.")
+        magic, cpu, _subtype, kind, count, size, _flags, _reserved = struct.unpack("<8I", header)
+        if magic != 0xFEEDFACF or cpu != 0x0100000C or kind != 10:
+            raise ValueError("Expected a thin arm64 MH_DSYM symbol file.")
+        if not count or size > 16 * 1024 * 1024 or count > size // 8:
+            raise ValueError("Invalid dSYM load-command table.")
+        commands = source.read(size)
+    if len(commands) != size:
+        raise ValueError("Truncated dSYM load commands.")
+    cursor, sections = 0, set()
+    for _ in range(count):
+        if cursor + 8 > size:
+            raise ValueError("Truncated dSYM load command.")
+        command, length = struct.unpack_from("<2I", commands, cursor)
+        if length < 8 or cursor + length > size:
+            raise ValueError("Invalid dSYM load-command size.")
+        if command == 0x19:  # LC_SEGMENT_64
+            if length < 72:
+                raise ValueError("Truncated dSYM segment.")
+            section_count = struct.unpack_from("<I", commands, cursor + 64)[0]
+            if 72 + section_count * 80 > length:
+                raise ValueError("Truncated dSYM section table.")
+            for i in range(section_count):
+                section = cursor + 72 + i * 80
+                name = commands[section:section + 16].rstrip(b"\0")
+                segment = commands[section + 16:section + 32].rstrip(b"\0")
+                section_size, offset = struct.unpack_from("<QI", commands, section + 40)
+                if segment == b"__DWARF" and section_size and offset >= 32 + size and offset + section_size <= path.stat().st_size:
+                    sections.add(name)
+        cursor += length
+    if cursor != size or not {b"__debug_info", b"__debug_line"}.issubset(sections):
+        raise ValueError("dSYM has no usable debug info/line tables. Rebuild with debug=1, strip=none, split-debuginfo=packed.")
+
+
+def validate_dsym(binary: Path, dsym: Path, *, runner=None) -> dict:
+    # Cargo exposes client.dSYM as a relative alias of deps/client-<hash>.dSYM.
+    # Follow that entry once, then require every item inside the actual bundle
+    # to be a regular path so a nested alias cannot escape the symbol package.
+    dsym = dsym.resolve()
+    if not dsym.is_dir() or dsym.suffix != ".dSYM":
+        raise ValueError("Matching dSYM bundle is missing; rebuild the iPhone executable with retained debug symbols.")
+    if any(path.is_symlink() for path in dsym.rglob("*")):
+        raise ValueError("dSYM symlinks are not supported.")
+    dwarf_dir = dsym / "Contents/Resources/DWARF"
+    files = list(dwarf_dir.iterdir()) if dwarf_dir.is_dir() else []
+    if len(files) != 1 or not files[0].is_file():
+        raise ValueError("Expected exactly one DWARF file inside the dSYM bundle.")
+    require_dwarf_sections(files[0])
+    executable_uuids = dwarf_uuids(binary, runner=runner)
+    symbol_uuids = dwarf_uuids(files[0], runner=runner)
+    if executable_uuids != symbol_uuids:
+        raise ValueError(f"dSYM UUID mismatch: executable {executable_uuids['arm64']}, symbols {symbol_uuids['arm64']}. Use symbols from this exact build.")
+    return {"uuid_match_verified": True, "uuids": symbol_uuids,
+            "dwarf_file": files[0].relative_to(dsym).as_posix(),
+            "dwarf_sha256": sha256(files[0]), "dwarf_bytes": files[0].stat().st_size}
+
+
+def ios_build_environment(cache: Path, sdk: str, server: str | None = None) -> dict[str, str]:
+    env = os.environ.copy()
+    env.update({"CARGO_TARGET_DIR": str(cache), "SDKROOT": sdk,
+                "IPHONEOS_DEPLOYMENT_TARGET": DEPLOYMENT_TARGET, "CARGO_INCREMENTAL": "0"})
+    for profile in ("DEV", "RELEASE"):
+        env.update({f"CARGO_PROFILE_{profile}_DEBUG": "1",
+                    f"CARGO_PROFILE_{profile}_STRIP": "none",
+                    f"CARGO_PROFILE_{profile}_SPLIT_DEBUGINFO": "packed"})
+    if server:
+        env["OMOBA_DEFAULT_GAME_SERVER_ADDR"] = server
+    return env
+
+
 def resolve_identity(requested: str, listing: str) -> str:
     identities = re.findall(r'\b([0-9A-Fa-f]{40})\s+"([^"\n]+)"', listing)
     matching = {fingerprint.upper() for fingerprint, name in identities
@@ -190,11 +273,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="read-only preflight; never build, sign or write")
     parser.add_argument("--binary", type=Path, help="existing physical arm64 iOS executable; skips Cargo")
+    parser.add_argument("--dsym", type=Path, help="matching dSYM for --binary; otherwise looks beside the executable")
     parser.add_argument("--output", type=Path, default=ROOT / "builds/iphone")
     parser.add_argument("--target-dir", type=Path, default=ROOT / "target/iphone-cargo",
                         help="reusable Cargo cache; kept separate from installable builds")
     parser.add_argument("--build-profile", choices=("dev", "release"), default="dev",
-                        help="dev retains workspace optimizations with debug/incremental disabled")
+                        help="dev retains workspace optimizations; both profiles retain packed dSYM symbols")
     parser.add_argument("--server", help="editable initial host:port, compiled only when building")
     parser.add_argument("--bundle-id", default=BUNDLE_ID)
     parser.add_argument("--profile", type=Path, help="existing .mobileprovision; never copied into source")
@@ -205,12 +289,20 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--profile and --identity must be supplied together; --device-udid also requires them")
     if args.binary and args.server:
         parser.error("--server cannot change an existing --binary; enter the server in the installed app")
+    if args.dsym and not args.binary:
+        parser.error("--dsym accompanies --binary; a source build generates its own symbols")
     out = args.output.expanduser().resolve()
     bundle = out / "OmobaBeta.app"
-    if not args.check and (bundle.exists() or (out / "device-build.json").exists()):
+    if not args.check and (bundle.exists() or (out / "device-build.json").exists() or (out / "OmobaBeta.app.dSYM").exists()):
         raise ValueError("Output app or report already exists; choose a fresh --output to preserve previous evidence.")
     binary = args.binary.expanduser().resolve() if args.binary else None
+    dsym = args.dsym.expanduser().resolve() if args.dsym else None
+    if binary and dsym is None and Path(str(binary) + ".dSYM").exists():
+        dsym = Path(str(binary) + ".dSYM").resolve()
+    if dsym and (out == dsym.resolve() or dsym.resolve() in out.parents):
+        raise ValueError("Output cannot be inside the input dSYM bundle.")
     check_tools(["git"] + ([] if binary else ["cargo", "rustc", "xcrun"]) +
+                (["xcrun"] if dsym and binary else []) +
                 (["security", "codesign"] if args.profile else []))
     assets = tracked_assets(ROOT)
     notices = collect_legal_notices(ROOT)
@@ -218,6 +310,7 @@ def main(argv: list[str] | None = None) -> int:
     if any(path != "SOURCE-REVISION.json" and path not in tracked for path in notices):
         raise ValueError("Package legal notices must be tracked source files.")
     binary_info = inspect_macho(binary) if binary else None
+    symbols = validate_dsym(binary, dsym) if binary and dsym else None
     sdk = None
     if binary is None:
         sdk = output(["xcrun", "--sdk", "iphoneos", "--show-sdk-path"]).decode().strip()
@@ -238,23 +331,21 @@ def main(argv: list[str] | None = None) -> int:
         entitlements = validate_profile(decoded, args.bundle_id, identity, args.device_udid)
     report = {"target": TARGET, "preflight_passed": True, "existing_binary": binary_info,
               "tracked_asset_count": len(assets), "signing_credentials_checked": bool(entitlements),
-              "device_profile_membership_checked": bool(args.device_udid), "installed": False, "launched": False}
+              "device_profile_membership_checked": bool(args.device_udid), "debug_symbols": symbols,
+              "installed": False, "launched": False}
     if args.check:
         print(json.dumps(report, indent=2))
         return 0
     out.mkdir(parents=True, exist_ok=True)
     if binary is None:
         cache = args.target_dir.expanduser().resolve()
-        env = os.environ.copy()
-        env.update({"CARGO_TARGET_DIR": str(cache), "SDKROOT": sdk,
-                    "IPHONEOS_DEPLOYMENT_TARGET": DEPLOYMENT_TARGET,
-                    "CARGO_PROFILE_DEV_DEBUG": "0", "CARGO_PROFILE_RELEASE_DEBUG": "0", "CARGO_INCREMENTAL": "0"})
-        if args.server:
-            env["OMOBA_DEFAULT_GAME_SERVER_ADDR"] = args.server
+        env = ios_build_environment(cache, sdk, args.server)
         subprocess.run(["cargo", "build", "--locked", "-p", "client", "--bin", "client", "--target", TARGET,
                         "--profile", args.build_profile], cwd=ROOT, env=env, check=True)
         binary = cache / TARGET / ("debug" if args.build_profile == "dev" else "release") / "client"
         binary_info = inspect_macho(binary)
+        dsym = Path(str(binary) + ".dSYM").resolve()
+        symbols = validate_dsym(binary, dsym)
     bundle.mkdir()
     shutil.copy2(binary, bundle / "client")
     (bundle / "client").chmod(0o755)
@@ -277,12 +368,18 @@ def main(argv: list[str] | None = None) -> int:
         actual = plistlib.loads(output(["codesign", "--display", "--entitlements", ":-", str(bundle)]))
         if actual != entitlements:
             raise ValueError("Signed app entitlements do not match the validated development profile.")
+    if symbols:
+        retained_dsym = out / "OmobaBeta.app.dSYM"
+        shutil.copytree(dsym, retained_dsym)
+        symbols = validate_dsym(bundle / "client", retained_dsym)
+        symbols["bundle"] = retained_dsym.name
     files = []
     for path in sorted(bundle.rglob("*")):
         if path.is_file():
             files.append({"path": path.relative_to(bundle).as_posix(), "bytes": path.stat().st_size, "sha256": sha256(path)})
     report.update({"bundle": bundle.name, "bundle_id": args.bundle_id, "binary_before_signing": binary_info,
                    "signed_and_verified": bool(entitlements), "files": files,
+                   "debug_symbols": symbols,
                    "source_revision": output(["git", "rev-parse", "HEAD"], cwd=ROOT).decode().strip(),
                    "source_dirty": bool(output(["git", "status", "--porcelain"], cwd=ROOT).strip()),
                    "binary_source_match_verified": False,

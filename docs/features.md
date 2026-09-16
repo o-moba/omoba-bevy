@@ -1,6 +1,6 @@
 # Feature Inventory
 
-Canonical version: `0.20.0-rc.3`
+Canonical version: `0.20.0-rc.4`
 
 ## Builds from the primary checkout
 
@@ -15,6 +15,31 @@ The iPhone installer checks profile expiration, physical-device enrollment and
 Developer Mode before updating and launching. Home playtest kits bundle the Mac
 practice server, display its current LAN addresses and require no compilation or
 database to run. Actual device gameplay remains a separate acceptance step.
+
+`mobile/ios/prepare_testflight.py` prepares a development-signed Xcode archive from
+an existing device build without changing the original. It adds the app icon,
+API-reason manifest and build metadata. App Store distribution signing, Apple
+validation/upload and TestFlight availability are separate, unverified account
+steps; see the [TestFlight guide](../mobile/ios/TESTFLIGHT.md).
+
+## Phone playtest polish
+
+The phone attack gesture selects along a forward ray with a bounded visual handle;
+it can lock distant visible enemies without increasing damage range. Release
+revalidates the exact preview rather than substituting another enemy. Desktop
+mouse targeting remains separate.
+
+All four classes have four illustrated skills. A stationary phone hold opens
+ability name, description, rank/unlock level, mana cost and cooldown; releasing
+inspection never fires a skill. A quick tap casts, and a deliberate drag aims.
+Desktop slots reuse the same presentation-only art while retaining shortcuts and
+status labels. See `client/assets/ui/skills/PROVENANCE.md` for replaceable art.
+
+Phone chat keeps input, Send and Close above the keyboard and supports iOS Return.
+Bots retain combat targets, continue routes without waiting for their next planning
+tick and avoid other living heroes; buffered remote poses and stable head anchors
+reduce motion/nameplate jitter. Verdant river bands join without stacked coplanar
+surfaces at the lane crossings. Physical-device acceptance remains a playtest step.
 
 ## Player portal integration
 
