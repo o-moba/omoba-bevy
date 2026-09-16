@@ -12,7 +12,7 @@ async fn run() -> Result<(), String> {
     let url = std::env::var("OMOBA_DATABASE_URL").map_err(|_| "Set OMOBA_DATABASE_URL")?;
     if std::env::args().nth(1).as_deref() == Some("migrate") {
         migrate(&url).await?;
-        println!("Career v2 and portal v1 ready.");
+        println!("Career v3 and portal v3 ready.");
         return Ok(());
     }
     let origin =
@@ -54,6 +54,18 @@ async fn run() -> Result<(), String> {
     )
     .await
     .map_err(|e| e.1)?;
+    let billing_worker = app.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            if let Err(error) = omoba_account_api::supporter::reconcile_apple(&billing_worker).await
+            {
+                eprintln!("supporter reconciliation: {}", error.1);
+            }
+        }
+    });
     let worker = app.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));

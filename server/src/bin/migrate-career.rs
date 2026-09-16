@@ -7,7 +7,7 @@ fn main() {
         .build()
         .expect("runtime");
     match runtime.block_on(server::career_store::CareerStore::connect(&url)) {
-        Ok(_) => println!("Career schema version 1 ready."),
+        Ok(_) => println!("Career schema version 3 ready."),
         Err(error) => {
             eprintln!("Career migration failed: {error}");
             std::process::exit(1);

@@ -109,12 +109,13 @@ pub async fn decide(app: &App, body: &[u8], decision: WebPairDecision) -> Result
     {
         return Err(forbidden());
     }
-    let profile: String =
-        sqlx::query_scalar("SELECT profile_id FROM career_keys WHERE public_key=$1")
-            .bind(&c.public_key)
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or_else(forbidden)?;
+    let profile: String = sqlx::query_scalar(
+        "SELECT profile_id FROM career_keys WHERE public_key=$1 AND revoked_at IS NULL",
+    )
+    .bind(&c.public_key)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(forbidden)?;
     let state = if decision == WebPairDecision::Approve {
         "approved"
     } else {
@@ -130,7 +131,7 @@ pub async fn decide(app: &App, body: &[u8], decision: WebPairDecision) -> Result
         return Err(conflict());
     }
     sqlx::query(
-        "UPDATE portal.web_pairings SET state=$2,profile_id=$3,approved_key=$4 WHERE pair_id=$1",
+        "UPDATE portal.web_pairings SET state=$2,profile_id=$3,approved_key=$4,authorization_version=2 WHERE pair_id=$1",
     )
     .bind(&c.pair_id)
     .bind(state)
@@ -187,7 +188,7 @@ pub async fn complete(app: &App, body: &[u8]) -> Result<Value> {
     let state = row_text(&row, "state")?;
     let current = now();
     if state == "consumed" {
-        let active:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM portal.web_sessions WHERE session_id=$1 AND NOT revoked AND expires_at>$2 AND last_seen>$2-86400)").bind(row.try_get::<Option<String>,_>("session_id")?).bind(current).fetch_one(&mut *tx).await?;
+        let active:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM portal.web_sessions WHERE session_id=$1 AND authorization_version=2 AND NOT revoked AND expires_at>$2 AND last_seen>$2-86400)").bind(row.try_get::<Option<String>,_>("session_id")?).bind(current).fetch_one(&mut *tx).await?;
         if row
             .try_get::<Option<i64>, _>("delivery_until")?
             .is_some_and(|t| t > current)
@@ -202,7 +203,10 @@ pub async fn complete(app: &App, body: &[u8]) -> Result<Value> {
         }
         return Err(conflict());
     }
-    if state != "approved" || row.try_get::<i64, _>("expires_at")? <= current {
+    if state != "approved"
+        || row.try_get::<i16, _>("authorization_version")? != 2
+        || row.try_get::<i64, _>("expires_at")? <= current
+    {
         return Err(conflict());
     }
     let profile: String = row
@@ -213,6 +217,11 @@ pub async fn complete(app: &App, body: &[u8]) -> Result<Value> {
         .bind(&profile)
         .fetch_one(&mut *tx)
         .await?;
+    let key_active:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM career_keys WHERE public_key=$1 AND profile_id=$2 AND revoked_at IS NULL)")
+        .bind(row.try_get::<Option<String>,_>("approved_key")?).bind(&profile).fetch_one(&mut *tx).await?;
+    if !key_active {
+        return Err(forbidden());
+    }
     let active:i64=sqlx::query_scalar("SELECT count(*) FROM portal.web_sessions WHERE profile_id=$1 AND NOT revoked AND expires_at>$2 AND last_seen>$2-86400")
         .bind(&profile).bind(current).fetch_one(&mut *tx).await?;
     if active >= 20 {
@@ -222,7 +231,7 @@ pub async fn complete(app: &App, body: &[u8]) -> Result<Value> {
     let token = crypto::random::<32>();
     let delivery = crypto::seal(&app.config.secret, &context, &token)
         .map_err(|_| Error(StatusCode::SERVICE_UNAVAILABLE, "crypto_unavailable"))?;
-    sqlx::query("INSERT INTO portal.web_sessions(session_id,profile_id,token_hash,created_at,last_seen,expires_at) VALUES($1,$2,$3,$4,$4,$5)").bind(&sid).bind(&profile).bind(crypto::mac(&app.config.secret,"session-token",&token)).bind(current).bind(current+7*86400).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO portal.web_sessions(session_id,profile_id,token_hash,created_at,last_seen,expires_at,authorization_version) VALUES($1,$2,$3,$4,$4,$5,2)").bind(&sid).bind(&profile).bind(crypto::mac(&app.config.secret,"session-token",&token)).bind(current).bind(current+7*86400).execute(&mut *tx).await?;
     sqlx::query("UPDATE portal.web_pairings SET state='consumed',session_id=$2,delivery=$3,delivery_until=$4 WHERE pair_id=$1").bind(id).bind(sid).bind(delivery).bind(current+60).execute(&mut *tx).await?;
     sqlx::query("INSERT INTO portal.audit_events(profile_id,event) VALUES($1,'session_created')")
         .bind(profile)
@@ -240,7 +249,7 @@ pub async fn session(app: &App, headers: &HeaderMap) -> Result<Session> {
     if crypto::decode::<32>(token).is_none() {
         return Err(credential_error());
     }
-    let row=sqlx::query("UPDATE portal.web_sessions SET last_seen=$2 WHERE token_hash=$1 AND NOT revoked AND expires_at>$2 AND last_seen>$2-86400 RETURNING session_id,profile_id,created_at")
+    let row=sqlx::query("UPDATE portal.web_sessions SET last_seen=$2 WHERE token_hash=$1 AND authorization_version=2 AND NOT revoked AND expires_at>$2 AND last_seen>$2-86400 RETURNING session_id,profile_id,created_at")
         .bind(crypto::mac(&app.config.secret,"session-token",token)).bind(now()).fetch_optional(&app.pool).await?.ok_or_else(credential_error)?;
     Ok(Session {
         session_id: row_text(&row, "session_id")?,

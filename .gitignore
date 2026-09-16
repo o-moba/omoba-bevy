@@ -92,3 +92,7 @@ client/assets/avatars/passport-manifest.json
 .omoba/
 career_identity.json
 career_nickname.json
+
+# Supporter integration documentation and local verifier dependencies.
+!docs/supporter.md
+/billing/apple-verifier/node_modules/

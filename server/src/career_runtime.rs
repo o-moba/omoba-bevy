@@ -795,6 +795,38 @@ impl ServerRuntime {
             .errors
             .retain(|addr, _| self.players.contains_key(addr));
         self.career.backend.poll();
+        let mut invalidated = Vec::new();
+        for (addr, player) in &mut self.players {
+            player.state.supporter_aura = if player.state.is_bot {
+                None
+            } else {
+                self.career.backend.supporter_aura(*addr)
+            };
+            if player.career_profile.is_some()
+                && self.career.backend.authenticated_session(*addr).is_none()
+            {
+                let queued = !matches!(
+                    self.career.queue.view(
+                        player.state.id,
+                        self.match_config.team_size as usize,
+                        now
+                    ),
+                    QueueView::Idle
+                );
+                if player.joined || queued {
+                    invalidated.push((*addr, player.state.id, player.state.level));
+                }
+                player.joined = false;
+                player.state.supporter_aura = None;
+            }
+        }
+        for (addr, player_id, level) in invalidated {
+            self.combat_log.ledger.update_player(player_id, level, true);
+            self.career.backend.set_playing(addr, false);
+            // A selected endpoint is no longer authorized to hold a countdown
+            // seat. Reuse normal cancellation so the remaining roster can queue.
+            self.cancel_career_entry(player_id, now);
+        }
         self.handle_rejected_career_start(now);
         for addr in self.career.backend.take_cancelled() {
             if let Some(player) = self.players.get(&addr) {

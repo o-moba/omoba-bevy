@@ -30,7 +30,7 @@ struct IdentityFile {
     public_key: String,
 }
 
-fn hex(bytes: &[u8]) -> String {
+pub(super) fn hex(bytes: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
     let mut out = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
@@ -88,7 +88,7 @@ fn private_create(path: &Path) -> io::Result<fs::File> {
 
 /// Publish a complete key with an exclusive hard link. Concurrent clients use
 /// the winning file; neither an existing nor a corrupt identity is overwritten.
-fn load_or_create_key(directory: &Path) -> Result<SigningKey, String> {
+pub(super) fn load_or_create_key(directory: &Path) -> Result<SigningKey, String> {
     let path = directory.join(KEY_FILE);
     match fs::symlink_metadata(&path) {
         Ok(_) => return read_key(&path),
@@ -198,6 +198,101 @@ impl CareerIdentity {
             .as_ref()
             .map(|key| hex(key.verifying_key().as_bytes()))
             .ok_or_else(|| "The saved game identity is not ready.".into())
+    }
+
+    /// This entry point signs only typed Supporter operations, never arbitrary bytes.
+    #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+    pub(crate) fn sign_supporter_request(
+        &self,
+        action: shared::supporter::NativeSupporterAction,
+        trusted_origin: &str,
+        now_secs: u64,
+    ) -> Result<shared::supporter::SignedNativeSupporterRequest, String> {
+        let key = self
+            .key
+            .as_ref()
+            .ok_or("The saved game identity is not ready.")?;
+        let mut nonce = [0; 32];
+        getrandom::fill(&mut nonce).map_err(|_| "Secure randomness is unavailable.")?;
+        let request = shared::supporter::NativeSupporterRequest {
+            origin: trusted_origin.into(),
+            public_key: self.public_key()?,
+            nonce: hex(&nonce),
+            expires_at: now_secs.saturating_add(60),
+            action,
+        };
+        request
+            .validate(trusted_origin, &request.public_key, now_secs)
+            .map_err(str::to_owned)?;
+        let signature = hex(&key.sign(&request.signing_bytes()).to_bytes());
+        Ok(shared::supporter::SignedNativeSupporterRequest { request, signature })
+    }
+
+    pub(crate) fn enrollment_directory(&self) -> Result<PathBuf, String> {
+        self.directory
+            .as_ref()
+            .map(|d| d.join("device-enrollment"))
+            .ok_or_else(|| "Private profile storage is unavailable.".into())
+    }
+
+    /// Activate on the next launch only. Preserve the current key before replacing
+    /// the file; the running game keeps its original identity and match ownership.
+    pub(crate) fn stage_enrolled_identity(&self, public_key: &str) -> Result<(), String> {
+        let directory = self
+            .directory
+            .as_ref()
+            .ok_or("Private profile storage is unavailable.")?;
+        let candidate = read_key(&directory.join("device-enrollment").join(KEY_FILE))?;
+        if hex(candidate.verifying_key().as_bytes()) != public_key {
+            return Err("The enrollment key changed. Start the device request again.".into());
+        }
+        let existing = read_key(&directory.join(KEY_FILE))?;
+        let old_public = hex(existing.verifying_key().as_bytes());
+        let backup = directory.join("saved-devices");
+        fs::create_dir_all(&backup).map_err(|_| "Cannot preserve the previous device key.")?;
+        let backup_path = backup.join(format!("{old_public}.json"));
+        match fs::hard_link(directory.join(KEY_FILE), &backup_path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                if read_key(&backup_path)?.verifying_key() != existing.verifying_key() {
+                    return Err(
+                        "Previous identity backup does not match; no key was replaced.".into(),
+                    );
+                }
+            }
+            Err(_) => {
+                return Err("Cannot preserve the previous device key; no key was replaced.".into());
+            }
+        }
+        #[cfg(unix)]
+        fs::File::open(&backup)
+            .and_then(|f| f.sync_all())
+            .map_err(|_| "Cannot confirm the previous account backup; no key was replaced.")?;
+        let mut suffix = [0; 16];
+        getrandom::fill(&mut suffix).map_err(|_| "Secure randomness is unavailable.")?;
+        let temporary = directory.join(format!(".career-switch-{}.tmp", hex(&suffix)));
+        let result = (|| {
+            let mut file =
+                private_create(&temporary).map_err(|_| "Cannot stage the account switch.")?;
+            let bytes = serde_json::to_vec(&IdentityFile {
+                version: 1,
+                seed: hex(&candidate.to_bytes()),
+                public_key: public_key.into(),
+            })
+            .map_err(|_| "Cannot encode account switch.")?;
+            file.write_all(&bytes)
+                .and_then(|_| file.sync_all())
+                .map_err(|_| "Cannot save account switch.")?;
+            fs::rename(&temporary, directory.join(KEY_FILE))
+                .map_err(|_| "Cannot activate account switch.")?;
+            #[cfg(unix)]
+            fs::File::open(directory)
+                .and_then(|f| f.sync_all())
+                .map_err(|_| "Cannot confirm account switch storage.")?;
+            Ok(())
+        })();
+        let _ = fs::remove_file(temporary);
+        result
     }
 
     /// Only a validated portal challenge can be signed; the device key stays private.
@@ -520,6 +615,46 @@ mod tests {
         getrandom::fill(&mut suffix).unwrap();
         std::env::temp_dir().join(format!("omoba-identity-test-{}", hex(&suffix)))
     }
+    #[test]
+    fn enrolled_key_activates_after_restart_and_preserves_old_account() {
+        let directory = temporary_directory();
+        let current = load_or_create_key(&directory).unwrap();
+        let next = load_or_create_key(&directory.join("device-enrollment")).unwrap();
+        let old_public = hex(current.verifying_key().as_bytes());
+        let next_public = hex(next.verifying_key().as_bytes());
+        let identity = CareerIdentity {
+            key: Some(current.clone()),
+            directory: Some(directory.clone()),
+            ..default()
+        };
+        assert!(identity.stage_enrolled_identity(&"f".repeat(64)).is_err());
+        assert_eq!(
+            load_or_create_key(&directory).unwrap().verifying_key(),
+            current.verifying_key()
+        );
+        identity.stage_enrolled_identity(&next_public).unwrap();
+        assert_eq!(
+            identity.public_key().unwrap(),
+            old_public,
+            "live session must retain original identity"
+        );
+        assert_eq!(
+            load_or_create_key(&directory).unwrap().verifying_key(),
+            next.verifying_key()
+        );
+        assert_eq!(
+            read_key(
+                &directory
+                    .join("saved-devices")
+                    .join(format!("{old_public}.json"))
+            )
+            .unwrap()
+            .verifying_key(),
+            current.verifying_key()
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
     #[test]
     fn key_survives_reopen_and_corruption_is_not_overwritten() {
         let directory = temporary_directory();

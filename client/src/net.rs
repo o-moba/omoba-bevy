@@ -523,6 +523,9 @@ pub struct TargetId {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PlayerState {
+    /// Cosmetic only, authorized from persisted profile grants by the game server.
+    #[serde(default)]
+    supporter_aura: Option<shared::supporter::AuraStyle>,
     id: u64,
     #[serde(default)]
     is_bot: bool,
@@ -2081,6 +2084,7 @@ fn apply_server_snapshot(
                 NetworkAvatar(local_player_state.avatar.clone()),
                 NetworkSpriteCharacter(local_player_state.sprite_character.clone()),
                 NetworkHeroClass(local_player_state.hero_class),
+                crate::supporter::NetworkSupporterAura(local_player_state.supporter_aura),
                 player_state_to_progression(local_player_state),
                 player_state_to_equipment(local_player_state),
                 PlayerBasicAttackCooldown::from(local_player_state),
@@ -2160,6 +2164,7 @@ fn apply_server_snapshot(
                         NetworkSpriteCharacter(local_player_state.sprite_character.clone()),
                         PlayerCosmeticAction::from(local_player_state),
                         NetworkHeroClass(local_player_state.hero_class),
+                        crate::supporter::NetworkSupporterAura(local_player_state.supporter_aura),
                     ),
                     player_state_to_combat_stats(local_player_state),
                     player_state_to_progression(local_player_state),
@@ -2190,6 +2195,7 @@ fn apply_server_snapshot(
                     NetworkSpriteCharacter(local_player_state.sprite_character.clone()),
                     PlayerCosmeticAction::from(local_player_state),
                     NetworkHeroClass(local_player_state.hero_class),
+                    crate::supporter::NetworkSupporterAura(local_player_state.supporter_aura),
                 ),
                 player_state_to_combat_stats(local_player_state),
                 player_state_to_progression(local_player_state),
@@ -2224,6 +2230,7 @@ fn apply_server_snapshot(
                         NetworkSpriteCharacter(local_player_state.sprite_character.clone()),
                         PlayerCosmeticAction::from(local_player_state),
                         NetworkHeroClass(local_player_state.hero_class),
+                        crate::supporter::NetworkSupporterAura(local_player_state.supporter_aura),
                     ),
                     player_state_to_combat_stats(local_player_state),
                     player_state_to_progression(local_player_state),
@@ -2277,6 +2284,7 @@ fn apply_server_snapshot(
                 NetworkAvatar(player.avatar.clone()),
                 NetworkSpriteCharacter(player.sprite_character.clone()),
                 NetworkHeroClass(player.hero_class),
+                crate::supporter::NetworkSupporterAura(player.supporter_aura),
                 player_state_to_combat_stats(player),
                 player_state_to_progression(player),
                 player_state_to_equipment(player),
@@ -2317,6 +2325,7 @@ fn apply_server_snapshot(
         ));
         entity_commands.insert((
             NetworkBot(player.is_bot),
+            crate::supporter::NetworkSupporterAura(player.supporter_aura),
             player_state_to_equipment(player),
             PlayerBasicAttackCooldown::from(player),
         ));

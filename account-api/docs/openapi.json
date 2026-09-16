@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Omoba Account API",
-    "version": "0.20.0-rc.2",
+    "version": "0.20.0-rc.5",
     "description": "Browser clients use the Next.js BFF, not these bearer endpoints directly. No match/reward write endpoints. All private replies are no-store. Native proofs are domain-separated Ed25519; signing tuple is defined in shared/src/web_account.rs."
   },
   "paths": {
@@ -1713,7 +1713,7 @@
                   "nickname": {
                     "type": "string",
                     "maxLength": 25,
-                    "description": "Editable nickname#1234. Legacy bare names (1\u201320 codepoints) preserve the existing tag."
+                    "description": "Editable nickname#1234. Legacy bare names (1–20 codepoints) preserve the existing tag."
                   }
                 },
                 "required": [
@@ -2604,6 +2604,956 @@
           }
         }
       }
+    },
+    "/v1/me/supporter": {
+      "get": {
+        "summary": "Read authenticated Supporter status and configured checkout capabilities",
+        "operationId": "get_me_supporter",
+        "responses": {
+          "200": {
+            "description": "Success after committed transaction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupporterDashboard"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid payment or request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Active Supporter required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Account or order not owned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Replay, duplicate subscription or payment not yet finalized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Provider unconfigured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/supporter/aura": {
+      "patch": {
+        "summary": "Equip a cosmetic only while entitled, or hide it",
+        "operationId": "patch_me_supporter_aura",
+        "responses": {
+          "200": {
+            "description": "Success after committed transaction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupporterDashboard"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid payment or request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Active Supporter required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Account or order not owned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Replay, duplicate subscription or payment not yet finalized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Provider unconfigured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "aura": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "solar",
+                      "lunar",
+                      "verdant",
+                      null
+                    ]
+                  }
+                },
+                "required": [
+                  "aura"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/supporter/solana/checkout": {
+      "post": {
+        "summary": "Create or reuse a fifteen-minute account-bound USDC quote",
+        "operationId": "post_me_supporter_solana_checkout",
+        "responses": {
+          "200": {
+            "description": "Success after committed transaction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupporterCheckout"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid payment or request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Active Supporter required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Account or order not owned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Replay, duplicate subscription or payment not yet finalized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Provider unconfigured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {},
+                "required": []
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/supporter/solana/confirm": {
+      "post": {
+        "summary": "Fetch finalized payment from configured chain; never trust client transaction data",
+        "operationId": "post_me_supporter_solana_confirm",
+        "responses": {
+          "200": {
+            "description": "Success after committed transaction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "status": {
+                      "const": "confirmed"
+                    },
+                    "supporter": {
+                      "$ref": "#/components/schemas/SupporterStatus"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "supporter"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid payment or request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Active Supporter required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Account or order not owned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Replay, duplicate subscription or payment not yet finalized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Provider unconfigured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "order_id": {
+                    "type": "string"
+                  },
+                  "signature": {
+                    "type": "string",
+                    "description": "Optional; omitted or empty triggers server-side finalized discovery by the invoice reference (up to 5 candidates)."
+                  }
+                },
+                "required": [
+                  "order_id"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/supporter/apple/prepare": {
+      "post": {
+        "summary": "Bind immutable account to StoreKit appAccountToken",
+        "operationId": "post_me_supporter_apple_prepare",
+        "responses": {
+          "200": {
+            "description": "Success after committed transaction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupporterApplePrepare"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid payment or request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Active Supporter required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Account or order not owned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Replay, duplicate subscription or payment not yet finalized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Provider unconfigured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {},
+                "required": []
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/supporter/apple/verify": {
+      "post": {
+        "summary": "Verify signed StoreKit transaction through private Apple verifier",
+        "operationId": "post_me_supporter_apple_verify",
+        "responses": {
+          "200": {
+            "description": "Success after committed transaction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "status": {
+                      "const": "verified"
+                    },
+                    "supporter": {
+                      "$ref": "#/components/schemas/SupporterStatus"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "supporter"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid payment or request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Active Supporter required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Account or order not owned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Replay, duplicate subscription or payment not yet finalized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Provider unconfigured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "signed_payload": {
+                    "type": "string",
+                    "maxLength": 32768
+                  }
+                },
+                "required": [
+                  "signed_payload"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/supporter/native": {
+      "post": {
+        "summary": "Authenticated native Supporter operation; Ed25519 signing tuple in shared/src/supporter.rs, one-use nonce, 60-second maximum lifetime",
+        "operationId": "post_supporter_native",
+        "responses": {
+          "200": {
+            "description": "Success after committed transaction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid payment or request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Active Supporter required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Account or order not owned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Replay, duplicate subscription or payment not yet finalized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Provider unconfigured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupporterNativeProof"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/supporter/apple/notifications": {
+      "post": {
+        "summary": "Receive signed Apple notification; verify before applying provider periods",
+        "operationId": "post_supporter_apple_notifications",
+        "responses": {
+          "200": {
+            "description": "Success after committed transaction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "status": {
+                      "const": "accepted"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid payment or request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Active Supporter required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Account or order not owned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Replay, duplicate subscription or payment not yet finalized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Provider unconfigured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "signedPayload": {
+                    "type": "string",
+                    "maxLength": 32768
+                  }
+                },
+                "required": [
+                  "signedPayload"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/supporter/solana/orders": {
+      "get": {
+        "summary": "Recover recent account invoices, including expired quotes paid within their window",
+        "operationId": "get_me_supporter_solana_orders",
+        "responses": {
+          "200": {
+            "description": "Up to 15 account-owned invoices from the last 7 days",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "orders"
+                  ],
+                  "properties": {
+                    "orders": {
+                      "type": "array",
+                      "maxItems": 15,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "order_id": {
+                            "type": "string"
+                          },
+                          "payment_url": {
+                            "type": "string",
+                            "pattern": "^solana:"
+                          },
+                          "amount": {
+                            "type": "string"
+                          },
+                          "asset": {
+                            "const": "USDC"
+                          },
+                          "network": {
+                            "enum": [
+                              "mainnet-beta",
+                              "devnet"
+                            ]
+                          },
+                          "expires_at": {
+                            "type": "integer",
+                            "format": "int64"
+                          },
+                          "duration_days": {
+                            "const": 30
+                          },
+                          "status": {
+                            "enum": [
+                              "pending",
+                              "confirmed"
+                            ]
+                          },
+                          "confirmed_signature": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "order_id",
+                          "payment_url",
+                          "amount",
+                          "asset",
+                          "network",
+                          "expires_at",
+                          "duration_days",
+                          "status",
+                          "confirmed_signature"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2639,7 +3589,7 @@
           "nickname": {
             "type": "string",
             "maxLength": 25,
-            "description": "Current public nickname#1234 handle, 1\u201320 Unicode codepoints plus four digits.",
+            "description": "Current public nickname#1234 handle, 1–20 Unicode codepoints plus four digits.",
             "pattern": "^[^#]{1,20}#[0-9]{4}$"
           },
           "rating": {
@@ -2688,7 +3638,7 @@
           },
           "nickname": {
             "type": "string",
-            "description": "Current public nickname#1234 handle, 1\u201320 Unicode codepoints plus four digits.",
+            "description": "Current public nickname#1234 handle, 1–20 Unicode codepoints plus four digits.",
             "maxLength": 25,
             "pattern": "^[^#]{1,20}#[0-9]{4}$"
           },
@@ -3765,7 +4715,7 @@
           "nickname": {
             "type": "string",
             "maxLength": 25,
-            "description": "Current public nickname#1234 handle, 1\u201320 Unicode codepoints plus four digits.",
+            "description": "Current public nickname#1234 handle, 1–20 Unicode codepoints plus four digits.",
             "pattern": "^[^#]{1,20}#[0-9]{4}$"
           }
         },
@@ -3774,6 +4724,308 @@
           "nickname"
         ],
         "additionalProperties": false
+      },
+      "SupporterGrant": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "apple",
+              "solana"
+            ]
+          },
+          "valid_from": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "valid_until": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "revoked": {
+            "type": "boolean"
+          },
+          "renewal_enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "True/false only when verified provider renewal information exists; null means unknown. Cancellation preserves paid access until expiry unless refunded."
+          }
+        },
+        "required": [
+          "provider",
+          "valid_from",
+          "valid_until",
+          "revoked",
+          "renewal_enabled"
+        ]
+      },
+      "SupporterStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "equipped_aura": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "solar",
+              "lunar",
+              "verdant",
+              null
+            ]
+          },
+          "active_until": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "grants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SupporterGrant"
+            }
+          }
+        },
+        "required": [
+          "active",
+          "equipped_aura",
+          "active_until",
+          "grants"
+        ]
+      },
+      "SupporterDashboard": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "supporter": {
+            "$ref": "#/components/schemas/SupporterStatus"
+          },
+          "apple": {
+            "type": "object",
+            "description": "available boolean; when configured product_id and environment."
+          },
+          "solana": {
+            "type": "object",
+            "description": "available boolean, duration_days=30; configured amount decimal string, asset=USDC, network."
+          },
+          "catalog": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "enum": [
+                    "solar",
+                    "lunar",
+                    "verdant"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name"
+              ]
+            }
+          }
+        },
+        "required": [
+          "supporter",
+          "apple",
+          "solana",
+          "catalog"
+        ]
+      },
+      "SupporterCheckout": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "order_id": {
+            "type": "string"
+          },
+          "payment_url": {
+            "type": "string",
+            "pattern": "^solana:"
+          },
+          "amount": {
+            "type": "string"
+          },
+          "asset": {
+            "const": "USDC"
+          },
+          "network": {
+            "enum": [
+              "mainnet-beta",
+              "devnet"
+            ]
+          },
+          "expires_at": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "duration_days": {
+            "const": 30
+          }
+        },
+        "required": [
+          "order_id",
+          "payment_url",
+          "amount",
+          "asset",
+          "network",
+          "expires_at",
+          "duration_days"
+        ]
+      },
+      "SupporterApplePrepare": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "app_account_token": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "product_id": {
+            "type": "string"
+          },
+          "environment": {
+            "enum": [
+              "Sandbox",
+              "Production"
+            ]
+          }
+        },
+        "required": [
+          "app_account_token",
+          "product_id",
+          "environment"
+        ]
+      },
+      "SupporterNativeProof": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "origin": {
+                "type": "string"
+              },
+              "public_key": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "nonce": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "expires_at": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "action": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "const": "status"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "const": "apple_prepare"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "const": "equip"
+                      },
+                      "aura": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "enum": [
+                          "solar",
+                          "lunar",
+                          "verdant",
+                          null
+                        ]
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "aura"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "const": "apple_verify"
+                      },
+                      "signed_payload": {
+                        "type": "string",
+                        "maxLength": 32768
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "signed_payload"
+                    ]
+                  }
+                ]
+              }
+            },
+            "required": [
+              "origin",
+              "public_key",
+              "nonce",
+              "expires_at",
+              "action"
+            ]
+          },
+          "signature": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{128}$"
+          }
+        },
+        "required": [
+          "request",
+          "signature"
+        ]
       }
     }
   }

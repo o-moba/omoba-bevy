@@ -183,6 +183,9 @@ fn default_skill_ranks() -> [u8; 4] {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PlayerState {
+    /// Cosmetic only, authorized from persisted profile grants by the game server.
+    #[serde(default)]
+    supporter_aura: Option<shared::supporter::AuraStyle>,
     #[serde(default)]
     is_bot: bool,
     id: u64,
@@ -1301,6 +1304,15 @@ impl ServerRuntime {
 
     fn handle_packet_authorized(&mut self, addr: SocketAddr, packet: ClientPacket, now: Instant) {
         self.maintain_roster(now);
+        if self
+            .players
+            .get(&addr)
+            .is_some_and(|p| p.career_profile.is_some())
+            && self.career.backend.authenticated_session(addr).is_none()
+            && !matches!(packet, ClientPacket::Hello { .. })
+        {
+            return;
+        }
         if matches!(packet, ClientPacket::Join { .. }) {
             if !self.authorize_career_join(addr, &packet, now) {
                 return;

@@ -188,7 +188,7 @@ pub(super) fn body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
         label(
             parent,
             format!(
-                "Website: {}\nAccount: {}\nRead career history, manage friends, nickname and privacy settings.\nExpires: {} (Unix seconds).",
+                "Website: {}\nAccount: {}\nRead career history; manage friends, nickname and privacy.\nAuthorize and revoke devices, create recovery codes, manage Supporter. This grants account control.\nExpires: {} (Unix seconds).",
                 c.origin,
                 career
                     .view

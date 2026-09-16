@@ -1,6 +1,47 @@
 # Feature Inventory
 
-Canonical version: `0.20.0-rc.4`
+Canonical version: `0.20.0-rc.5`
+
+## Shared accounts and Supporter cosmetics
+
+A native installation can enroll a separate device key into an existing account
+through explicit portal approval, without exporting its private seed or merging
+progress. Activation preserves the prior key and takes effect after restart.
+The portal lists/revokes devices and issues eight one-time recovery codes. Codes
+are stored only as keyed hashes; old codes are replaced when a new set is issued.
+Revoked keys remain tombstoned and cannot silently become a different account.
+
+Supporter provides three cosmetic aura styles (Solar, Lunar, Verdant) and a free
+isolated preview. The game server reads account grants from PostgreSQL, enforces
+expiry and revocation, and replicates the permitted style. Auras follow actor
+visibility/death and never change combat, XP, rating, or matchmaking. The portal
+shows billing source, paid period, renewal state and aura preferences.
+
+Live aura VFX use three intersecting inclined orbits with bright cores, camera-facing glow sprites,
+eight tapered trail segments per orbit, four rising glints and a subtle ground ring.
+Each hero has a fixed 35 rendered elements; meshes/materials are shared and no dynamic
+lights or per-frame particle spawning are needed. Sprite mode projects the same paths
+with front/back layering. Native preview uses the same effect implementation.
+This source update is newer than TestFlight 0.20.0 (4).
+
+Apple and Solana are separate provider adapters granting the same account right.
+Payment functionality is unavailable until the operator explicitly configures a
+verified provider. Solana is a quoted 30-day USDC prepayment, with finalized-chain
+verification and a recoverable account order list. StoreKit supports native
+purchase/restore and retains unfinished transactions until server confirmation.
+The Apple adapter requires an authenticated verifier and App Store setup; local
+fixtures are not proof of a real sandbox purchase or App Review approval.
+
+Core career and portal schemas are both version 3. Run owner migrations and the
+updated runtime grants before deploying matching game/API releases. See
+[Supporter operations](supporter.md) for rollout boundaries and test procedures.
+
+## Project and developer entry points
+
+The README introduces the open-avatar mission, verified Ekza Space/SDK projects,
+creator contribution paths and this game's pinned Passport integration. It
+separates the playable source beta from distribution, mobile and provider gates.
+`make` / `make help` list commands and overrides without starting processes.
 
 ## Builds from the primary checkout
 
@@ -48,11 +89,11 @@ career data. The native Profile screen confirms a browser pairing with the exist
 device-held key; the browser never receives that key. The API supplies private
 history, participant-only match reports, derived class/rating statistics, friends,
 nickname/privacy/language/timezone preferences and revocable browser sessions.
-Game runtime and portal have distinct database privileges. Portal migrations retain
-career schema v1; migrate commands are now separate from runtime startup.
-Public downloads are a curated optional catalog. Physical mobile browser acceptance,
-public installation packages, passkeys and cosmetic loadout editing are not claimed
-by this change. See [operations](../account-api/README.md).
+Game runtime and portal have distinct database privileges. Owner-run migrations are separate from runtime startup; current career and
+portal schema versions are recorded in the Supporter section above. Public
+downloads are a curated optional catalog. Passkeys, public installation packages
+and arbitrary avatar loadout editing remain outside this portal implementation;
+Supporter aura selection is described separately above. See [operations](../account-api/README.md).
 
 ## Music and sound
 

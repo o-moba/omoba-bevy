@@ -43,7 +43,7 @@ impl WebAccountApi {
             std::env::var("OMOBA_ALLOW_INSECURE_LOCAL").as_deref() == Ok("1"),
         )
     }
-    fn request<T: serde::de::DeserializeOwned>(
+    pub(crate) fn request<T: serde::de::DeserializeOwned>(
         &self,
         path: &str,
         body: serde_json::Value,
@@ -60,15 +60,23 @@ impl WebAccountApi {
             .map_err(|_| "Website service is unavailable. Try again.")?;
         let status = response.status();
         let mut bytes = Vec::new();
+        // The Supporter response includes a bounded provider-period history.
+        // Pairing/device replies are smaller; all endpoints remain hard-bounded.
         response
-            .take(8193)
+            .take(65537)
             .read_to_end(&mut bytes)
             .map_err(|_| "Website response was interrupted.")?;
-        if bytes.len() > 8192 {
+        if bytes.len() > 65536 {
             return Err("Website response is too large.".into());
         }
         if !status.is_success() {
-            return Err(match status.as_u16(){404=>"Code expired, cancelled, or game profile not registered. Join an online game, then request a new code.",409=>"This code was already used. Request a new code on the website.",429=>"Too many requests. Wait a minute before retrying.",_=>"Website confirmation failed. Try again."}.into());
+            return Err(match status.as_u16() {
+                404 => "Request expired, cancelled, or account not available. Start a new request.",
+                409 => "This request was already used or changed. Refresh before trying again.",
+                429 => "Too many requests. Wait a minute before retrying.",
+                _ => "Website confirmation failed. Try again.",
+            }
+            .into());
         }
         serde_json::from_slice(&bytes).map_err(|_| "Invalid website response.".into())
     }

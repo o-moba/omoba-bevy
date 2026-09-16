@@ -18,6 +18,7 @@ use std::{
 
 const MAX_CLIENTS: usize = 512;
 const MAX_JOBS: usize = 256;
+const COSMETIC_CACHE_TTL: Duration = Duration::from_secs(30);
 const CHALLENGE_TTL: Duration = Duration::from_secs(30);
 
 fn hex(bytes: &[u8]) -> String {
@@ -61,6 +62,8 @@ struct Client {
     touched: Instant,
     playing: bool,
     profile_ready: bool,
+    supporter_checked: Option<Instant>,
+    key_checked: Option<Instant>,
 }
 impl Default for Client {
     fn default() -> Self {
@@ -73,11 +76,19 @@ impl Default for Client {
             touched: Instant::now(),
             playing: false,
             profile_ready: false,
+            supporter_checked: None,
+            key_checked: None,
         }
     }
 }
 
 enum Job {
+    RefreshAccess {
+        addr: SocketAddr,
+        nonce: String,
+        public_key: String,
+        profile_id: String,
+    },
     Login {
         addr: SocketAddr,
         challenge: AuthChallenge,
@@ -86,12 +97,19 @@ enum Job {
         addr: SocketAddr,
         nonce: String,
         profile_id: String,
+        public_key: String,
         action: CareerAction,
     },
     Record(Box<PendingRecord>),
     Presence(Vec<(String, Option<String>)>),
 }
 enum Reply {
+    RefreshAccess {
+        addr: SocketAddr,
+        nonce: String,
+        key_active: Option<bool>,
+        supporter: Option<shared::supporter::SupporterStatus>,
+    },
     Login {
         addr: SocketAddr,
         challenge: AuthChallenge,
@@ -236,6 +254,7 @@ impl CareerBackend {
                 },
                 auth: Some(challenge),
                 profile_ready: true,
+                key_checked: Some(Instant::now()),
                 ..Default::default()
             },
         );
@@ -256,17 +275,47 @@ impl CareerBackend {
     }
     pub fn profile(&self, addr: SocketAddr) -> Option<ProfileSummary> {
         let client = self.clients.get(&addr)?;
-        client
-            .profile_ready
-            .then(|| client.view.profile.clone())
-            .flatten()
+        (client.profile_ready
+            && client.auth.is_some()
+            && client
+                .key_checked
+                .is_some_and(|at| at.elapsed() < COSMETIC_CACHE_TTL))
+        .then(|| client.view.profile.clone())
+        .flatten()
+    }
+    /// Cosmetic authorization expires locally even if the DB worker stops responding.
+    pub fn supporter_aura(&self, addr: SocketAddr) -> Option<shared::supporter::AuraStyle> {
+        let client = self.clients.get(&addr)?;
+        client.auth.as_ref()?;
+        if client.key_checked?.elapsed() >= COSMETIC_CACHE_TTL {
+            return None;
+        }
+        if client.supporter_checked?.elapsed() >= COSMETIC_CACHE_TTL {
+            return None;
+        }
+        let status = client.view.supporter.as_ref()?;
+        authorized_supporter_aura(status, unix_seconds())
     }
     pub fn authenticated_session(&self, addr: SocketAddr) -> Option<String> {
-        Some(self.clients.get(&addr)?.auth.as_ref()?.session_id.clone())
+        let client = self.clients.get(&addr)?;
+        if client.key_checked?.elapsed() >= COSMETIC_CACHE_TTL {
+            return None;
+        }
+        Some(client.auth.as_ref()?.session_id.clone())
     }
     pub fn view(&self, addr: SocketAddr) -> CareerView {
         let mut view = self.clients.get(&addr).map(|c|c.view.clone()).unwrap_or_else(|| CareerView {error:(!self.enabled()).then(||"Career storage is not configured on this server. Guest matches are unranked.".into()),..Default::default()});
         view.storage_enabled = self.enabled();
+        if let Some(status) = &mut view.supporter {
+            if status
+                .active_until
+                .is_none_or(|until| until <= unix_seconds())
+            {
+                status.active = false;
+                status.equipped_aura = None;
+                status.active_until = None;
+            }
+        }
         view
     }
     pub fn forget(&mut self, addr: SocketAddr) {
@@ -448,7 +497,9 @@ impl CareerBackend {
                     c.view.error = Some("Sign in before using your profile.".into());
                     return;
                 };
-                if session_nonce != auth.nonce
+                if c.key_checked
+                    .is_none_or(|at| at.elapsed() >= COSMETIC_CACHE_TTL)
+                    || session_nonce != auth.nonce
                     || sequence <= c.sequence
                     || !verify(
                         &auth.public_key,
@@ -488,6 +539,7 @@ impl CareerBackend {
                         addr,
                         nonce: session_nonce,
                         profile_id: profile.profile_id.clone(),
+                        public_key: auth.public_key.clone(),
                         action,
                     })
                     .is_err()
@@ -508,6 +560,32 @@ impl CareerBackend {
                 break;
             };
             match reply {
+                Reply::RefreshAccess {
+                    addr,
+                    nonce,
+                    key_active,
+                    supporter,
+                } => {
+                    let Some(c) = self.clients.get_mut(&addr) else {
+                        continue;
+                    };
+                    if c.auth.as_ref().is_none_or(|auth| auth.nonce != nonce) {
+                        continue;
+                    }
+                    if key_active == Some(false) {
+                        c.auth = None;
+                        c.profile_ready = false;
+                        c.view.auth_nonce = None;
+                        c.view.supporter = Some(Default::default());
+                        c.view.error = Some("This device was revoked. Authorize this device again from your account.".into());
+                    } else {
+                        if key_active == Some(true) {
+                            c.key_checked = Some(Instant::now());
+                        }
+                        c.view.supporter = supporter;
+                    }
+                    c.supporter_checked = Some(Instant::now());
+                }
                 Reply::Login {
                     addr,
                     challenge,
@@ -528,6 +606,8 @@ impl CareerBackend {
                     match result {
                         Ok(mut view) => {
                             view.auth_nonce = Some(challenge.nonce.clone());
+                            c.supporter_checked = Some(Instant::now());
+                            c.key_checked = Some(Instant::now());
                             c.view = view;
                             c.auth = Some(challenge);
                             c.profile_ready = true;
@@ -558,6 +638,10 @@ impl CareerBackend {
                     c.view.visited_profile = None;
                     match result {
                         Ok(view) => {
+                            if let Some(supporter) = view.supporter {
+                                c.view.supporter = Some(supporter);
+                                c.supporter_checked = Some(Instant::now());
+                            }
                             if view.profile.is_some() {
                                 c.view.profile = view.profile;
                                 c.profile_ready = true;
@@ -596,6 +680,7 @@ impl CareerBackend {
                                     addr: *addr,
                                     nonce: auth.nonce.clone(),
                                     profile_id: profile.profile_id.clone(),
+                                    public_key: auth.public_key.clone(),
                                     action: CareerAction::Profile {
                                         request_id: 0,
                                         profile_id: profile.profile_id.clone(),
@@ -638,6 +723,20 @@ impl CareerBackend {
                 }
             }
         }
+        for c in self.clients.values_mut() {
+            if c.auth.is_some()
+                && c.key_checked
+                    .is_none_or(|at| at.elapsed() >= COSMETIC_CACHE_TTL)
+            {
+                c.auth = None;
+                c.challenge = None;
+                c.profile_ready = false;
+                c.view.auth_nonce = None;
+                c.view.challenge = None;
+                c.view.supporter = None;
+                c.view.error = Some("Account authorization could not be refreshed. Reconnect when the account service is available.".into());
+            }
+        }
         self.clients
             .retain(|_, c| c.touched.elapsed() < Duration::from_secs(120));
         if self.last_presence.elapsed() >= Duration::from_secs(10) {
@@ -659,12 +758,21 @@ impl CareerBackend {
             if let Some(tx) = &self.tx {
                 let _ = tx.try_send(Job::Presence(presence));
                 for (addr, c) in &self.clients {
+                    if let (Some(profile), Some(auth)) = (&c.view.profile, &c.auth) {
+                        let _ = tx.try_send(Job::RefreshAccess {
+                            addr: *addr,
+                            nonce: auth.nonce.clone(),
+                            public_key: auth.public_key.clone(),
+                            profile_id: profile.profile_id.clone(),
+                        });
+                    }
                     if !c.profile_ready {
                         if let (Some(profile), Some(auth)) = (&c.view.profile, &c.auth) {
                             let _ = tx.try_send(Job::Action {
                                 addr: *addr,
                                 nonce: auth.nonce.clone(),
                                 profile_id: profile.profile_id.clone(),
+                                public_key: auth.public_key.clone(),
                                 action: CareerAction::Profile {
                                     request_id: 0,
                                     profile_id: profile.profile_id.clone(),
@@ -678,9 +786,25 @@ impl CareerBackend {
     }
 }
 
+fn unix_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs().min(i64::MAX as u64) as i64)
+}
+fn authorized_supporter_aura(
+    status: &shared::supporter::SupporterStatus,
+    now: i64,
+) -> Option<shared::supporter::AuraStyle> {
+    (status.active && status.active_until.is_some_and(|until| until > now))
+        .then_some(status.equipped_aura)
+        .flatten()
+}
+
 fn action_id(action: &CareerAction) -> Option<u64> {
     match action {
-        CareerAction::History { request_id, .. }
+        CareerAction::SupporterStatus { request_id }
+        | CareerAction::EquipSupporterAura { request_id, .. }
+        | CareerAction::History { request_id, .. }
         | CareerAction::Detail { request_id, .. }
         | CareerAction::Friends { request_id }
         | CareerAction::Friend { request_id, .. }
@@ -699,6 +823,12 @@ async fn account_action(
 ) -> Result<CareerView, String> {
     let mut view = CareerView::default();
     match action {
+        CareerAction::SupporterStatus { .. } => {
+            view.supporter = Some(store.supporter_status(id).await?)
+        }
+        CareerAction::EquipSupporterAura { aura, .. } => {
+            view.supporter = Some(store.equip_supporter_aura(id, aura).await?)
+        }
         CareerAction::History { before, .. } => {
             let (history, next) = store.history(id, before).await?;
             view.history = history;
@@ -887,6 +1017,7 @@ fn worker(url: String, outbox: PathBuf, jobs: Receiver<Job>, replies: SyncSender
                             None => None,
                         };
                         Ok(CareerView {
+                            supporter: store.supporter_status(&profile.profile_id).await.ok(),
                             profile: Some(profile),
                             last_result,
                             ..Default::default()
@@ -904,11 +1035,17 @@ fn worker(url: String, outbox: PathBuf, jobs: Receiver<Job>, replies: SyncSender
                 addr,
                 nonce,
                 profile_id,
+                public_key,
                 action,
             }) => {
                 let request_id = action_id(&action);
                 let result = match &store {
-                    Some(s) => rt.block_on(account_action(s, &profile_id, action)),
+                    Some(s) => rt.block_on(async {
+                        if !s.key_is_active(&public_key, &profile_id).await? {
+                            return Err("This device has been revoked.".into());
+                        }
+                        account_action(s, &profile_id, action).await
+                    }),
                     None => Err("Profile storage is unavailable. Retry shortly.".into()),
                 };
                 let _ = replies.try_send(Reply::Action {
@@ -916,6 +1053,31 @@ fn worker(url: String, outbox: PathBuf, jobs: Receiver<Job>, replies: SyncSender
                     nonce,
                     result,
                     request_id,
+                });
+            }
+            Ok(Job::RefreshAccess {
+                addr,
+                nonce,
+                public_key,
+                profile_id,
+            }) => {
+                let (key_active, supporter) = match &store {
+                    Some(s) => rt.block_on(async {
+                        let active = s.key_is_active(&public_key, &profile_id).await.ok();
+                        let supporter = if active == Some(true) {
+                            s.supporter_status(&profile_id).await.ok()
+                        } else {
+                            None
+                        };
+                        (active, supporter)
+                    }),
+                    None => (None, None),
+                };
+                let _ = replies.try_send(Reply::RefreshAccess {
+                    addr,
+                    nonce,
+                    key_active,
+                    supporter,
                 });
             }
             Ok(Job::Presence(presence)) => {
@@ -1077,6 +1239,141 @@ fn worker(url: String, outbox: PathBuf, jobs: Receiver<Job>, replies: SyncSender
 mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
+    #[test]
+    fn supporter_is_denied_for_free_expired_disabled_stale_and_unauthenticated_profiles() {
+        use shared::supporter::{AuraStyle, SupporterStatus};
+        let mut status = SupporterStatus {
+            active: true,
+            active_until: Some(101),
+            equipped_aura: Some(AuraStyle::Solar),
+            grants: vec![],
+        };
+        assert_eq!(
+            authorized_supporter_aura(&status, 100),
+            Some(AuraStyle::Solar)
+        );
+        assert_eq!(authorized_supporter_aura(&status, 101), None);
+        status.active = false;
+        assert_eq!(authorized_supporter_aura(&status, 100), None);
+        status.active = true;
+        status.equipped_aura = None;
+        assert_eq!(authorized_supporter_aura(&status, 100), None);
+        let addr = "127.0.0.1:30020".parse().unwrap();
+        let mut backend = CareerBackend::test_backend(9);
+        backend.test_authenticated(
+            addr,
+            ProfileSummary::new("a".repeat(64), "Tester".into()),
+            "session",
+        );
+        let c = backend.clients.get_mut(&addr).unwrap();
+        c.view.supporter = Some(SupporterStatus {
+            active: true,
+            active_until: Some(unix_seconds() + 60),
+            equipped_aura: Some(AuraStyle::Verdant),
+            grants: vec![],
+        });
+        c.supporter_checked = Some(Instant::now());
+        assert_eq!(backend.supporter_aura(addr), Some(AuraStyle::Verdant));
+        backend.clients.get_mut(&addr).unwrap().supporter_checked =
+            Some(Instant::now() - COSMETIC_CACHE_TTL);
+        assert_eq!(backend.supporter_aura(addr), None);
+        let c = backend.clients.get_mut(&addr).unwrap();
+        c.supporter_checked = Some(Instant::now());
+        c.auth = None;
+        assert_eq!(backend.supporter_aura(addr), None);
+    }
+
+    #[test]
+    fn revoked_key_refresh_clears_cached_authority_and_cannot_resurrect_via_profile_ready() {
+        let addr = "127.0.0.1:30021".parse().unwrap();
+        let mut backend = CareerBackend::test_backend(9);
+        backend.test_authenticated(
+            addr,
+            ProfileSummary::new("a".repeat(64), "Tester".into()),
+            "session",
+        );
+        let (sender, receiver) = mpsc::sync_channel(2);
+        backend.rx = Mutex::new(receiver);
+        sender
+            .send(Reply::RefreshAccess {
+                addr,
+                nonce: "b".repeat(64),
+                key_active: Some(false),
+                supporter: None,
+            })
+            .unwrap();
+        backend.poll();
+        assert!(backend.authenticated_session(addr).is_none());
+        assert!(backend.profile(addr).is_none());
+        assert!(backend.supporter_aura(addr).is_none());
+        backend.clients.get_mut(&addr).unwrap().profile_ready = true;
+        assert!(backend.profile(addr).is_none());
+    }
+
+    #[test]
+    fn missing_key_refresh_never_extends_authority_during_a_database_outage() {
+        let addr = "127.0.0.1:30022".parse().unwrap();
+        let mut backend = CareerBackend::test_backend(9);
+        backend.test_authenticated(
+            addr,
+            ProfileSummary::new("a".repeat(64), "Tester".into()),
+            "session",
+        );
+        let expired = Instant::now() - COSMETIC_CACHE_TTL;
+        backend.clients.get_mut(&addr).unwrap().key_checked = Some(expired);
+        let (sender, receiver) = mpsc::sync_channel(2);
+        backend.rx = Mutex::new(receiver);
+        sender
+            .send(Reply::RefreshAccess {
+                addr,
+                nonce: "b".repeat(64),
+                key_active: None,
+                supporter: None,
+            })
+            .unwrap();
+        backend.poll();
+        assert_eq!(backend.clients[&addr].key_checked, Some(expired));
+        assert!(backend.clients[&addr].auth.is_none());
+        assert!(backend.authenticated_session(addr).is_none());
+        assert!(backend.profile(addr).is_none());
+    }
+
+    #[test]
+    fn unsigned_cosmetic_equip_never_reaches_persisted_preferences() {
+        let addr = "127.0.0.1:30023".parse().unwrap();
+        let mut backend = CareerBackend::test_backend(9);
+        backend.test_authenticated(
+            addr,
+            ProfileSummary::new("a".repeat(64), "Tester".into()),
+            "session",
+        );
+        backend.handle(
+            addr,
+            CareerRequest::EquipSupporterAura {
+                request_id: 1,
+                aura: Some(shared::supporter::AuraStyle::Solar),
+            },
+        );
+        assert!(
+            backend
+                ._test_jobs
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .try_recv()
+                .is_err()
+        );
+        assert_eq!(backend.supporter_aura(addr), None);
+        assert!(
+            backend
+                .view(addr)
+                .error
+                .unwrap()
+                .contains("valid signature")
+        );
+    }
+
     #[test]
     fn signatures_bind_domain_nonce_epoch_sequence_and_action() {
         let key = SigningKey::from_bytes(&[7; 32]);

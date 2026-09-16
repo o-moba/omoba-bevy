@@ -61,6 +61,35 @@ fn start(rt: &mut ServerRuntime, now: Instant) {
 }
 
 #[test]
+fn invalidated_account_releases_waiting_and_reserved_seats_without_stalling_the_roster() {
+    for selected in [false, true] {
+        let mut rt = runtime(MatchConfig::release(1), true);
+        let now = Instant::now();
+        let revoked = addr(59431);
+        authenticated_join(&mut rt, revoked, 431, 1000, false, now);
+        if selected {
+            authenticated_join(&mut rt, addr(59432), 432, 1000, false, now);
+            assert!(rt.career.queue.selection().is_some());
+            assert_eq!(joined_count(&rt.players), 2);
+        }
+        // Worker revocation/expiry clears cached authority. This runtime test
+        // exercises the exact post-invalidation cleanup, independent of SQL.
+        rt.career.backend.forget(revoked);
+        rt.poll_career(now);
+        assert!(!rt.players[&revoked].joined);
+        assert!(rt.career.queue.selection().is_none());
+        assert_eq!(rt.career.queue.len(), usize::from(selected));
+        assert_eq!(joined_count(&rt.players), 0);
+        if selected {
+            authenticated_join(&mut rt, addr(59433), 433, 1000, false, now);
+            assert!(rt.career.queue.selection().is_some());
+            assert_eq!(joined_count(&rt.players), 2);
+            assert!(!rt.players[&revoked].joined);
+        }
+    }
+}
+
+#[test]
 fn release_queue_uses_saved_skill_and_experience_and_waits_for_durable_allocation() {
     let mut rt = runtime(MatchConfig::release(1), true);
     let now = Instant::now();

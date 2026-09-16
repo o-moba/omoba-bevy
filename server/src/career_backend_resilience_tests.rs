@@ -228,8 +228,9 @@ fn postgres_worker_renews_lease_with_full_reply_buffer_and_retries_critical_acks
 #[ignore = "requires isolated OMOBA_TEST_DATABASE_URL; real worker rejection tombstone"]
 fn postgres_worker_rejected_start_discards_already_queued_terminal_without_resurrection() {
     let (url, runtime, store, pool) = database();
+    let public_key = random_id::<32>();
     let profile = runtime
-        .block_on(store.authenticate(&random_id::<32>(), "Tombstone tester"))
+        .block_on(store.authenticate(&public_key, "Tombstone tester"))
         .unwrap();
     let holding = allocation(&profile);
     runtime.block_on(store.start(holding.clone())).unwrap();
@@ -242,6 +243,7 @@ fn postgres_worker_rejected_start_discards_already_queued_terminal_without_resur
     fixture.send(Job::Action {
         addr: "127.0.0.1:39101".parse().unwrap(),
         nonce: "fixture-barrier".into(),
+        public_key,
         profile_id: profile.profile_id.clone(),
         action: CareerAction::Friends { request_id: 991 },
     });

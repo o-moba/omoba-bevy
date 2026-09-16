@@ -172,7 +172,7 @@ async fn career_store_identity_reopen_and_explicit_rename() {
             .fetch_all(&f.store.pool)
             .await
             .unwrap();
-    assert_eq!(versions, [1, 2]);
+    assert_eq!(versions, [1, 2, 3]);
     f.close().await;
 }
 

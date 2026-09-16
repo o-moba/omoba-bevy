@@ -106,6 +106,63 @@ where
 }
 
 impl CareerStore {
+    /// Read only provider-verified grants. Missing billing migrations fail closed.
+    pub async fn supporter_status(
+        &self,
+        profile_id: &str,
+    ) -> Result<shared::supporter::SupporterStatus, String> {
+        use shared::supporter::{AuraStyle, SupporterGrantSummary, SupporterStatus};
+        let rows = sqlx::query("SELECT provider, valid_from, valid_until, revoked_at, renewal_enabled, EXTRACT(EPOCH FROM now())::bigint AS now FROM portal.supporter_grants WHERE profile_id=$1 ORDER BY (revoked_at IS NULL AND valid_from<=EXTRACT(EPOCH FROM now())::bigint AND valid_until>EXTRACT(EPOCH FROM now())::bigint) DESC, valid_until DESC LIMIT 64")
+            .bind(profile_id).fetch_all(&self.pool).await.map_err(|_| "Supporter storage is unavailable.".to_string())?;
+        let mut status = SupporterStatus::default();
+        for row in rows {
+            let from: i64 = row.get("valid_from");
+            let until: i64 = row.get("valid_until");
+            let now: i64 = row.get("now");
+            let revoked = row.get::<Option<i64>, _>("revoked_at").is_some();
+            if !revoked && from <= now && until > now {
+                status.active = true;
+                status.active_until = Some(status.active_until.unwrap_or(0).max(until));
+            }
+            status.grants.push(SupporterGrantSummary {
+                provider: row.get("provider"),
+                valid_from: from,
+                valid_until: until,
+                revoked,
+                renewal_enabled: row.get("renewal_enabled"),
+            });
+        }
+        if status.active {
+            let selected: Option<Option<String>> = sqlx::query_scalar(
+                "SELECT aura FROM portal.supporter_preferences WHERE profile_id=$1",
+            )
+            .bind(profile_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|_| "Supporter storage is unavailable.".to_string())?;
+            status.equipped_aura = selected
+                .unwrap_or(Some("solar".into()))
+                .as_deref()
+                .and_then(AuraStyle::from_id);
+        }
+        Ok(status)
+    }
+
+    /// Caller has already verified a signed, active profile key. SQL checks the
+    /// grant in the same statement that changes the cosmetic preference.
+    pub async fn equip_supporter_aura(
+        &self,
+        profile_id: &str,
+        aura: Option<shared::supporter::AuraStyle>,
+    ) -> Result<shared::supporter::SupporterStatus, String> {
+        let updated = sqlx::query("INSERT INTO portal.supporter_preferences(profile_id,aura) SELECT $1,$2 WHERE $2::text IS NULL OR EXISTS (SELECT 1 FROM portal.supporter_grants WHERE profile_id=$1 AND revoked_at IS NULL AND valid_from<=EXTRACT(EPOCH FROM now())::bigint AND valid_until>EXTRACT(EPOCH FROM now())::bigint) ON CONFLICT(profile_id) DO UPDATE SET aura=EXCLUDED.aura")
+            .bind(profile_id).bind(aura.map(|a| a.id())).execute(&self.pool).await.map_err(|_| "Supporter storage is unavailable.".to_string())?;
+        if updated.rows_affected() == 0 {
+            return Err("An active Supporter membership is required to equip an aura.".into());
+        }
+        self.supporter_status(profile_id).await
+    }
+
     pub async fn connect(database_url: &str) -> Result<Self, String> {
         let pool = Self::open_pool(database_url).await?;
         Self::from_pool(pool).await.map_err(|e| e.to_string())
@@ -122,7 +179,7 @@ impl CareerStore {
                 .fetch_all(&pool)
                 .await
                 .map_err(|e| StoreError::from(e).to_string())?;
-        if versions != [1, 2] {
+        if versions != [1, 2, 3] {
             return Err("Unsupported career database schema version.".into());
         }
         let owner: String = sqlx::query_scalar("SELECT gen_random_uuid()::text")
@@ -174,10 +231,10 @@ impl CareerStore {
             sqlx::query("INSERT INTO career_schema_version VALUES (1)")
                 .execute(&mut *tx)
                 .await?;
-        } else if versions != [1] && versions != [1, 2] {
+        } else if versions != [1] && versions != [1, 2] && versions != [1, 2, 3] {
             return Err("Unsupported career database schema version.".into());
         }
-        if versions != [1, 2] {
+        if !versions.contains(&2) {
             sqlx::query("SET LOCAL statement_timeout='120s'")
                 .execute(&mut *tx)
                 .await?;
@@ -186,6 +243,11 @@ impl CareerStore {
             ))
             .execute(&mut *tx)
             .await?;
+        }
+        if !versions.contains(&3) {
+            sqlx::raw_sql(include_str!("../migrations/postgres/003_device_keys.sql"))
+                .execute(&mut *tx)
+                .await?;
         }
         tx.commit().await?;
         let owner: String = sqlx::query_scalar("SELECT gen_random_uuid()::text")
@@ -226,8 +288,11 @@ impl CareerStore {
             .bind(public_key)
             .execute(&mut *tx)
             .await?;
-        if let Some(row) = sqlx::query("SELECT p.* FROM career_profiles p JOIN career_keys k USING(profile_id) WHERE k.public_key=$1")
+        if let Some(row) = sqlx::query("SELECT p.*, k.revoked_at IS NOT NULL AS revoked FROM career_profiles p JOIN career_keys k USING(profile_id) WHERE k.public_key=$1")
             .bind(public_key).fetch_optional(&mut *tx).await? {
+            if row.try_get::<bool,_>("revoked")? {
+                return Err("This device key was revoked. Link a new device or use a recovery code.".into());
+            }
             let profile = profile_row(&row)?; tx.commit().await?; return Ok(profile);
         }
         let id: String = sqlx::query_scalar("SELECT replace(gen_random_uuid()::text,'-','') || replace(gen_random_uuid()::text,'-','')")
@@ -247,6 +312,13 @@ impl CareerStore {
         let profile = profile_row(&row)?;
         tx.commit().await?;
         Ok(profile)
+    }
+
+    /// Session caches must revalidate this tombstone; DB errors fail closed.
+    pub async fn key_is_active(&self, public_key: &str, profile_id: &str) -> Result<bool, String> {
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM career_keys WHERE public_key=$1 AND profile_id=$2 AND revoked_at IS NULL)")
+            .bind(public_key).bind(profile_id).fetch_one(&self.pool).await
+            .map_err(|e| StoreError::from(e).to_string())
     }
 
     /// Exact handle lookup reveals only the name and stable friend-operation ID.
@@ -1131,3 +1203,7 @@ fn same_terminal_allocation(old: &MatchResult, new: &MatchResult) -> StoreResult
 #[cfg(test)]
 #[path = "career_store_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "supporter_store_tests.rs"]
+mod supporter_tests;

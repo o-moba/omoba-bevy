@@ -19,6 +19,8 @@ use shared::career::{
     MatchResult, ParticipantResult, ProfileSummary, QueueView,
 };
 use std::time::{Duration, Instant};
+#[path = "career_devices.rs"]
+mod devices;
 #[path = "career_web.rs"]
 mod web;
 
@@ -32,6 +34,7 @@ pub(crate) enum CareerModal {
     Friends,
     FriendProfile,
     WebLink,
+    Devices,
 }
 
 #[derive(Clone, PartialEq)]
@@ -49,6 +52,7 @@ enum PendingKind {
 pub(crate) struct CareerClient {
     pub view: CareerView,
     web: web::WebState,
+    devices: devices::DeviceState,
     pub public_profile_id: Option<String>,
     pub nickname: String,
     pub local_player_id: Option<u64>,
@@ -77,6 +81,7 @@ impl Default for CareerClient {
         Self {
             view: CareerView::default(),
             web: web::WebState::default(),
+            devices: devices::DeviceState::default(),
             public_profile_id: None,
             nickname: "Player".into(),
             local_player_id: None,
@@ -219,8 +224,14 @@ impl CareerClient {
     pub fn clear_account(&mut self) {
         // A late response from the old namespace must never share a new ID.
         let request_sequence = self.request_sequence;
+        // Native enrollment belongs to the account service, not a match server.
+        // Reconnecting while its HTTP worker runs must not discard its new key proof.
+        let mut devices = std::mem::take(&mut self.devices);
+        devices.focused = false;
+        devices.recovery_code.clear();
         *self = Self::default();
         self.request_sequence = request_sequence;
+        self.devices = devices;
     }
     /// A default/live snapshot does not erase the last immutable result receipt.
     pub fn apply_view(&mut self, mut next: CareerView) {
@@ -320,6 +331,9 @@ impl CareerClient {
                 next.error = None;
             }
         }
+        if next.supporter.is_none() {
+            next.supporter.clone_from(&self.view.supporter);
+        }
         if next.last_result.is_none() {
             next.last_result.clone_from(&self.view.last_result);
         }
@@ -361,6 +375,8 @@ impl CareerClient {
     }
     fn close(&mut self) {
         self.web.dismiss();
+        self.devices.focused = false;
+        self.devices.recovery_code.clear();
         self.modal = CareerModal::Closed;
         self.nickname_focused = false;
         self.friend_code_focused = false;
@@ -381,12 +397,19 @@ impl Plugin for CareerPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CareerClient>()
             .init_resource::<web::Worker>()
+            .init_resource::<devices::Worker>()
             .init_resource::<crate::career_identity::CareerIdentity>()
             .insert_resource(CareerUiProfile(crate::platform::ui_profile()))
             .add_message::<NicknameChanged>()
             .add_systems(
                 Update,
-                (web::poll, actions, dismiss_with_escape, nickname_input)
+                (
+                    web::poll,
+                    devices::poll,
+                    actions,
+                    dismiss_with_escape,
+                    nickname_input,
+                )
                     .chain()
                     .after(crate::mobile_ui::address_keyboard)
                     .after(crate::net::ClientNetPipeline::ApplySnapshot)
@@ -407,6 +430,13 @@ struct CareerRoot;
 struct CareerScroll;
 #[derive(Component, Clone)]
 enum Action {
+    Supporter,
+    DevicesOpen,
+    DevicesStart,
+    DevicesPoll,
+    DevicesRecoveryEdit,
+    DevicesRecover,
+    DevicesConfirm,
     WebOpen,
     WebEdit,
     WebLookup,
@@ -564,6 +594,8 @@ fn actions(
     social: Option<Res<crate::social::SocialClient>>,
     identity: Res<crate::career_identity::CareerIdentity>,
     mut web_worker: ResMut<web::Worker>,
+    mut device_worker: ResMut<devices::Worker>,
+    mut supporter: Option<ResMut<crate::supporter::SupporterUiState>>,
 ) {
     if social
         .as_ref()
@@ -577,7 +609,23 @@ fn actions(
             continue;
         }
         web::act(action, &mut career, &identity, &mut web_worker);
+        devices::act(action, &mut career, &identity, &mut device_worker);
         match action {
+            Action::Supporter => {
+                career.close();
+                if let Some(state) = supporter.as_deref_mut() {
+                    state.open = true;
+                }
+                requests.write(NetworkCommand::Career(CareerRequest::SupporterStatus {
+                    request_id: 0,
+                }));
+            }
+            Action::DevicesOpen
+            | Action::DevicesStart
+            | Action::DevicesPoll
+            | Action::DevicesRecoveryEdit
+            | Action::DevicesRecover
+            | Action::DevicesConfirm => {}
             Action::WebOpen
             | Action::WebEdit
             | Action::WebLookup
@@ -742,7 +790,8 @@ fn nickname_input(
 ) {
     let friend_input = career.modal == CareerModal::Friends && career.friend_code_focused;
     let web_input = career.modal == CareerModal::WebLink && career.web.focused;
-    let active = career.nickname_editor_open() || friend_input || web_input;
+    let device_input = career.modal == CareerModal::Devices && career.devices.focused;
+    let active = career.nickname_editor_open() || friend_input || web_input || device_input;
     if let Ok(mut window) = windows.single_mut() {
         if active {
             if !window.ime_enabled {
@@ -764,7 +813,9 @@ fn nickname_input(
         match event {
             Ime::Preedit { value, .. } => career.preedit = value.clone(),
             Ime::Commit { value, .. } => {
-                let result = if web_input {
+                let result = if device_input {
+                    devices::append(&mut career.devices.recovery_code, value)
+                } else if web_input {
                     web::append(&mut career.web.code, value)
                 } else if friend_input {
                     append_friend_code(&mut career.friend_code, value)
@@ -793,7 +844,9 @@ fn nickname_input(
                     ]) =>
             {
                 let result = clipboard_text().and_then(|text| {
-                    if web_input {
+                    if device_input {
+                        devices::append(&mut career.devices.recovery_code, &text)
+                    } else if web_input {
                         web::append(&mut career.web.code, &text)
                     } else if friend_input {
                         append_friend_code(&mut career.friend_code, text.trim())
@@ -804,7 +857,9 @@ fn nickname_input(
                 career.form_error = result.err().map(str::to_owned);
             }
             Key::Backspace => {
-                if web_input {
+                if device_input {
+                    career.devices.recovery_code.pop();
+                } else if web_input {
                     career.web.code.pop();
                 } else if friend_input {
                     career.friend_code.pop();
@@ -819,7 +874,9 @@ fn nickname_input(
                 career.preedit.clear();
             }
             Key::Enter => {
-                if web_input {
+                if device_input {
+                    career.devices.focused = false;
+                } else if web_input {
                     career.web.focused = false;
                 } else if friend_input {
                     lookup_player(&mut career, &mut requests);
@@ -840,7 +897,9 @@ fn nickname_input(
                     Key::Character(text) => Some(text.as_str()),
                     _ => None,
                 }) {
-                    let result = if web_input {
+                    let result = if device_input {
+                        devices::append(&mut career.devices.recovery_code, text)
+                    } else if web_input {
                         web::append(&mut career.web.code, text)
                     } else if friend_input {
                         append_friend_code(&mut career.friend_code, text)
@@ -871,7 +930,7 @@ fn label(
 fn button(parent: &mut ChildSpawnerCommands, value: &str, action: Action, name: &str) {
     let input = matches!(
         action,
-        Action::EditName | Action::EditFriendCode | Action::WebEdit
+        Action::EditName | Action::EditFriendCode | Action::WebEdit | Action::DevicesRecoveryEdit
     );
     parent
         .spawn((
@@ -1387,6 +1446,18 @@ fn result_body(
     }
 }
 fn profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
+    button(
+        parent,
+        "Support Open Moba",
+        Action::Supporter,
+        "CareerSupporter",
+    );
+    button(
+        parent,
+        "Link or recover an account",
+        Action::DevicesOpen,
+        "CareerDevices",
+    );
     button(
         parent,
         "Connect player website",
@@ -1964,6 +2035,8 @@ fn render(
                 career.nickname_focused,
                 "Nickname#1234",
             )),
+            "DeviceRecoveryFieldLabel" => Some(devices::recovery_field(&career.devices)),
+            "DeviceInputError" => Some(career.form_error.clone().unwrap_or_default()),
             "CareerNicknameError" | "CareerFriendCodeError" => {
                 Some(career.form_error.clone().unwrap_or_default())
             }
@@ -2000,7 +2073,8 @@ fn render(
         .copied()
         .unwrap_or(PlayerVisualMode::Models3d);
     let editing = career.nickname_editor_open()
-        || (career.modal == CareerModal::Friends && career.friend_code_focused);
+        || (career.modal == CareerModal::Friends && career.friend_code_focused)
+        || (career.modal == CareerModal::Devices && career.devices.focused);
     if editing
         && previous.as_ref().is_some_and(|p| {
             p.career.modal == career.modal
@@ -2014,6 +2088,8 @@ fn render(
     let mut render_state = career.clone();
     render_state.draft.clear();
     render_state.friend_code.clear();
+    render_state.devices.recovery_code.clear();
+    render_state.devices.focused = false;
     render_state.preedit.clear();
     render_state.form_error = None;
     render_state.nickname_focused = false;
@@ -2187,6 +2263,7 @@ fn render(
                             match career.modal {
                                 CareerModal::Profile => profile_body(body, &career),
                                 CareerModal::WebLink => web::body(body, &career),
+                                CareerModal::Devices => devices::body(body, &career),
                                 CareerModal::Friends => friends_body(body, &career),
                                 CareerModal::FriendProfile => visited_profile_body(body, &career),
                                 CareerModal::History => history_body(
@@ -2931,6 +3008,52 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn recovery_input_stays_mounted_and_never_renders_the_secret() {
+        let mut app = render_app(UiProfile::Mobile, CareerModal::Devices);
+        {
+            let mut career = app.world_mut().resource_mut::<CareerClient>();
+            career.devices.status = Some(shared::device_account::DeviceEnrollmentStatus {
+                state: "pending".into(),
+                code: Some("ABCDEFGH".into()),
+                profile_id: None,
+                nickname: None,
+            });
+            career.devices.focused = true;
+        }
+        app.update();
+        let field = |app: &mut App| {
+            app.world_mut()
+                .query::<(Entity, &Name)>()
+                .iter(app.world())
+                .find(|(_, n)| n.as_str() == "DeviceRecoveryField")
+                .map(|(e, _)| e)
+                .unwrap()
+        };
+        let original = field(&mut app);
+        let secret = "a1234567".repeat(8);
+        for character in secret.chars() {
+            app.world_mut()
+                .resource_mut::<CareerClient>()
+                .devices
+                .recovery_code
+                .push(character);
+            app.update();
+            assert_eq!(field(&mut app), original);
+        }
+        let displayed = texts(&mut app).join(" ");
+        assert!(displayed.contains("64 / 64 characters"));
+        assert!(!displayed.contains(&secret));
+        app.world_mut().resource_mut::<CareerClient>().close();
+        assert!(
+            app.world()
+                .resource::<CareerClient>()
+                .devices
+                .recovery_code
+                .is_empty()
+        );
+    }
+
     #[test]
     fn queue_updates_preserve_scroll_but_screen_and_history_page_navigation_reset_it() {
         let mut app = render_app(UiProfile::Mobile, CareerModal::Friends);

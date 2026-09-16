@@ -1,187 +1,235 @@
 # Open Moba
 
-An open-source MOBA and reusable engine where people can bring their avatars
-into a shared competitive game. Native 3D beta: Bevy client and authoritative
-Rust UDP server. See our [mission](MISSION.md) and [contribution guide](CONTRIBUTING.md).
+**A shared world for avatars. Built in the open, together.**
 
-**Licenses:** server **AGPL-3.0-only**; client and reusable source **MPL-2.0**.
-Original documentation and identified Verdant art use **CC-BY-4.0**; existing
-CC0/OFL and other asset/dependency terms remain unchanged. Commercial forks are
-welcome under the applicable terms. Read the [license map](LICENSING.md),
-[brand policy](TRADEMARKS.md) and [source distribution guide](SOURCE.md).
+Open Moba is an open-source multiplayer MOBA built with Rust and Bevy. It is a
+place to play, compete with friends and give creator-made characters a life
+inside a game. It is also a practical integration of the **Ekza SDK**: we want
+other game developers to build on the same ideas and connect their own worlds.
 
-For the September 8 controlled beta, use the
-[tester/host guide](docs/progress/2026-09-07-beta-test-guide.md): the native
-package includes `practice.sh`, `host.sh --humans N` and
-`join-server.sh HOST:PORT`. See the
-[current forest navigation iteration](docs/progress/2026-09-08-forest-navigation.md) and
-[match readiness record](docs/progress/2026-09-07-beta-readiness.md) for measured
-checks and remaining coverage. The commands below are development workflows.
+An avatar drawn by an artist, modeled by another person and brought to life by
+an animator should have a future beyond one application. We are working toward
+that future through a real game, reusable tools and open collaboration. Bring
+a character, a map, a sound, an idea or a pull request. Help shape what comes next.
 
-Version `0.19.0-rc.7` adds native bot practice, match/team chat and picture reactions.
-Use `make practice` for solo testing with server bots or `make practice-server` to
-host that mode. See [controls, customization and beta limits](docs/bot-practice-and-social.md).
+[Open Moba website](https://omoba.io/) ·
+[Ekza ecosystem](https://ekza.io/) ·
+[Ekza Space](https://space.ekza.io/) ·
+[Ekza Bevy SDK](https://github.com/ekza-space/ekza-bevy-sdk) ·
+[Our mission](MISSION.md) · [Contribute](CONTRIBUTING.md)
 
-Music and combat/interface sounds are bundled. Open **Menu → Settings** to adjust
-master, music, effects and interface volume or mute. See [audio controls, sources
-and authoring](docs/game-audio.md).
+## Choose your way in
 
-Version `0.19.0-rc.6` introduced saved post-match statistics, player profiles, match
-history and friend requests with online/in-game presence. Career-enabled servers
-use PostgreSQL; see the [career setup and beta limits](docs/match-progression.md)
-and [verification record](docs/progress/2026-09-14-career-and-friends.md).
-
-The 0.20.0-rc.1 player portal adds game-confirmed browser sign-in, match reports,
-statistics and shared friends through the [Account API](account-api/README.md).
-Runtime services now require an explicit owner-run migration before startup.
-See the [portal verification and remaining release checks](docs/progress/2026-09-15-player-portal.md).
-
-## Prerequisites
-
-- [Rust toolchain](https://rustup.rs/) (`rustc`, `cargo`).
-- Git and a clone of this repository.
-- Python 3.9+ and Make for the local practice launcher.
-- PostgreSQL for persistent profiles, results and friends (not required for local practice).
-
-## Build and play locally
-
-Desktop, Android, iOS Simulator and physical iPhone build scripts all live in
-this repository. No sibling worktree is required. For physical iPhone, install
-Xcode and the Rust `aarch64-apple-ios` target, then run `make iphone-check` and
-`make iphone`. See [iPhone setup, signing and installation](mobile/ios/README.md).
-Installable iPhone packages go in `builds/`; disposable Cargo files go in `target/`.
-Keep `builds/` when clearing build caches.
-
-From the **repository root** (the folder containing this `README.md` and `Makefile`):
-
-```sh
-make play
-```
-
-This builds the current source with the locked dependencies, starts a local
-release-mode server and nine bots, and opens the 3D game. Choose your hero and
-press **Join** to start a 5v5 match. No separate build, package, environment
-variable or sibling checkout is required. The first build can take several
-minutes; later runs reuse Cargo's cache. `make play-bots` is the same command.
-
-Close the game window or press **Ctrl+C** in its terminal to stop this session's
-client, bots and server. Logs are printed at startup and saved under
-`target/local-play/sessions/`. If port 4000 is already occupied, close the
-previous session or use `make play LOCAL_SERVER_ADDR=127.0.0.1:4010`.
-
-The launcher uses Cargo's reported executable paths, including a configured
-`CARGO_TARGET_DIR`, and loads this checkout's `client/assets`. It forces local
-3D practice settings so saved server addresses and developer/QA environment
-variables cannot silently redirect the run.
-
-For other development workflows, see **[RUNBOOK.md](RUNBOOK.md)**. A local
-two-client dev session (instant match start, dev mode) remains available:
-
-```sh
-make start
-```
-
-Production-like server on its own (matches start only after a full 5v5 queue;
-instant start is dev-only via `make server-dev` / `make start`):
-
-```sh
-make server
-```
-
-For the older multi-terminal/dev commands, stop background processes afterward:
-
-```sh
-make stop
-```
-
-## Command cheat sheet
-
-| Command | What it does |
+| I want to… | Start here |
 | --- | --- |
-| `make start` | **Dev quick-start**: dev-mode server + 2 clients, instant match start |
-| `make play` / `make play-bots` | Build current sources, then run local 3D 5v5 with 9 bots; close the window or Ctrl+C to stop the session |
-| `make server` | Server in **release** matchmaking mode (queue to full 5v5 before start) |
-| `make server-dev` | Server in **dev** mode (first join starts the match; dev only) |
-| `make game` | One client (defaults explicitly to `127.0.0.1:4000`; set `GAME_SERVER_ADDR` for another server) |
-| `make game2d` | Same explicit local server default, forced into the genuine orthographic 2D game mode |
-| `make start-release` | Release server + 1 client (waits in queue until filled) |
-| `make bots` | Fill bots for a running server (`BOTS=<n>`, `BOTS_SERVER=<addr>`) |
-| `make stop` | Kill server, clients, and bots |
-| `make restart` | `stop` + dev quick-start |
-| `make verify-gameplay` | Headless gameplay + matchmaking tests over real UDP |
-| `make verify-task-12` | Live UDP QA matrix |
+| Play a match with bots | [Run locally](#play-locally) with `make practice` |
+| Test on an iPhone | [Device build](mobile/ios/README.md) and [TestFlight workflow](mobile/ios/TESTFLIGHT.md) |
+| Make characters, worlds or effects | [Create with us](#create-with-us) |
+| Bring avatars into another game | [Integrate Ekza](#bring-ekza-into-your-game) |
+| Host matches or connect a phone and PC | [Hosting and connection](#host-a-practice-match) and [runbook](RUNBOOK.md) |
 
-Key env vars: `OMOBA_MATCH_MODE` (`release` default / `dev`), `OMOBA_TEAM_SIZE`
-(players per team, default 5 — `1` gives a quick 1v1 with release semantics),
-`SERVER_ADDR`, `GAME_SERVER_ADDR`, `OMOBA_PLAYER_VISUAL_MODE`
-(`models3d` default / `sprite2d` genuine orthographic XY renderer), and
-`OMOBA_AUTOJOIN` (`<class>:<avatar|->:<team>[:<sprite-id>]`). Validate the
-offline character/presentation contract with
-`python3 scripts/validate_sprite_assets.py --self-test` and the tiled-world
-contract with `python3 scripts/validate_world2d_assets.py --self-test`.
-`python3 scripts/validate_2d_readability.py --json` additionally checks the
-occupied (non-transparent) pixels at default zoom and maximum zoom-out.
+## What you can play today
 
-Do not rely on tribal knowledge for ports or addresses: use the tables in `RUNBOOK.md` (`SERVER_ADDR`, `GAME_SERVER_ADDR`).
+This is a **native beta under active development**. The source version is
+[`0.20.0-rc.5`](Cargo.toml); see [features](docs/features.md) and
+[changes](CHANGELOG.md) for the detailed implementation history. A source version
+is not a promise of a published installer or a live public server.
 
-## Tester-facing documentation
+- **Team combat:** four classes, basic attacks and class abilities, lane minions,
+  towers, jungle camps that respawn, items and match results.
+- **Bot practice:** native server bots fill empty seats; people can join and take
+  over those seats. Practice is separate from ranked progression.
+- **Desktop and phone controls:** mouse/keyboard on desktop; movement joystick,
+  right-thumb attacks, directional targeting and skill inspection on phones.
+  The compiled platform selects the interface; both use the same game protocol.
+- **A persistent career:** PostgreSQL-backed profiles, `nickname#1234` handles,
+  match statistics, history and friends on configured career servers. A companion
+  player portal reads the same data through the
+  [Account API](account-api/README.md).
+- **A world to customize:** character presentation, projectiles, effects, reusable
+  map props, tower placement, balance data, music and sound.
+- **Cosmetic Supporter work:** shared device accounts, recovery codes and three
+  server-authorized auras. Payment providers are disabled until configured;
+  Apple verification integration and real payment validation remain unfinished.
+  See [current Supporter status](docs/supporter.md).
 
-The [2026-09-07 beta guide](docs/progress/2026-09-07-beta-test-guide.md) is the
-current tester entry point. Earlier audits and MVP documents below retain
-historical context; the [dated beta readiness record](docs/progress/2026-09-07-beta-readiness.md)
-states the current delivery boundary.
+The built-in roster and local practice need **no wallet, purchased avatar or
+PostgreSQL database**. Mobile build tools live in this repository; device tests,
+store distribution and a reliable public service remain separate release work.
 
-| Document | Purpose |
-| --- | --- |
-| [RUNBOOK.md](RUNBOOK.md) | Server/client startup, env vars, troubleshooting with recovery steps |
-| [docs/playtest-script.md](docs/playtest-script.md) | Timeboxed 10–20 minute MVP playtest checklist |
-| [docs/bug-report-template.md](docs/bug-report-template.md) | Expected internal bug report format |
-| [docs/mvp-scope-and-limitations.md](docs/mvp-scope-and-limitations.md) | MVP scope, limitations, MVP vs deferrable gaps |
-| [tasks/MVP-CHECKLIST.md](tasks/MVP-CHECKLIST.md) | MVP-blocking vs later improvements |
+## Play locally
 
-## Controls and gameplay (MVP summary)
-
-| Input | Action |
-| --- | --- |
-| **Arrow keys** (2D) | Pan the orthographic camera while follow is unlocked |
-| **Mouse wheel** | Zoom the active camera; 2D zoom is clamped to the map |
-| **P / Shop** | Browse items; buy while alive at your own base; Escape closes the shop |
-| **Y** | Toggle hero follow/free camera; a minimap focus returns directly to the hero |
-| **Space** | Restore hero follow and clear a minimap focus override |
-| **Alt + right mouse** (3D only) | Hold to orbit the camera |
-| Team / character UI | Click team and character before play; server snapshot is authoritative |
-| **Right-click ground / minimap** | Set a route around solid forest and structures, shown on the minimap; another order replaces it |
-| **Left-click hostile** | Select the exact target without moving or casting |
-| **Left-click/drag minimap** | Pan the camera without issuing movement |
-| **Right-click hostile** | Approach through normal navigation and repeat basic attacks |
-| **Tab** | Select nearest enemy target |
-| **S / Backspace** | Stop movement and attacks, and clear target selection |
-| **Q / W / E / R** | Cast that class ability at the selected target |
-| Phone **ATTACK** | Tap for a basic attack; stationary hold repeats without mana cost |
-| Phone **drag ATTACK** | Extend reticle, preview a foe, release to lock and attack once; drag to X to cancel |
-| On-screen **Q/W/E/R** | Separate abilities around ATTACK; tap uses locked target, drag aims a skill |
-| **Esc** | Close Help/Shop first, otherwise open the pause menu |
-
-Gameplay: lane map, minions, structures, combat, respawn, match phases (lobby → running → victory / rematch), and progression HUD as described in [docs/features.md](docs/features.md).
-
-## Optional automated session check
-
-After a successful build, you can run the UDP session harness (separate port from the default Makefile flow):
+Install [Rust](https://rustup.rs/), Git, Python 3.9+ and Make. The commands below
+use a POSIX shell. Your OS also needs the native build and graphics libraries
+required by Bevy; see [Bevy's Linux dependencies](https://github.com/bevyengine/bevy/blob/v0.18.0/docs/linux_dependencies.md)
+when building on Linux.
 
 ```sh
-python3 scripts/verify_task_02_multiplayer_session_flow.py
+git clone https://github.com/o-moba/omoba-bevy.git
+cd omoba-bevy
+make help
+make practice
 ```
 
-See the script header for prerequisites; it spawns its own server on `127.0.0.1:4010`.
+`make practice` builds the locked current sources, starts a local 3D server with
+native bots and opens the client. Choose your hero and join. The first build can
+take several minutes; subsequent runs reuse Cargo's cache. Close the client or
+press **Ctrl+C** to stop only the processes owned by this launcher.
 
-## UDP snapshot size
+Logs are saved in this checkout's `target/local-play/sessions/`. If port 4000
+is occupied, use `make practice LOCAL_SERVER_ADDR=127.0.0.1:4010`.
+`CARGO_TARGET_DIR` can relocate compiled binaries; it does not relocate these
+session logs. No adjacent project checkout is needed.
 
-World snapshots and career replies use shared framing with datagrams capped at
-1,200 bytes. Receivers reassemble complete JSON objects before parsing; career
-replies use a separate assembly namespace and sequence. Bounded payloads preserve
-complete results and participant lists. Oversized combined career views are sent
-as separate complete views; a single view beyond the supported limit reports an
-error. This avoids relying on large datagrams or truncating JSON.
+To exercise full-roster matchmaking instead, `make play` (alias `make play-bots`)
+launches a release-match-mode server and nine external harness bots. This is a
+different workflow from native bot practice. Match mode and Cargo optimization
+profile are separate settings.
 
-Player addresses and friend lookup use editable `nickname#1234` handles; see
-[handle rules, migration and rollout](docs/player-handles.md).
+## Host a practice match
+
+On the computer hosting the game:
+
+```sh
+make practice-server LOCAL_SERVER_ADDR=0.0.0.0:4000
+```
+
+On another computer, replace the example address with the host's actual LAN IP:
+
+```sh
+make game GAME_SERVER_ADDR=192.168.1.10:4000
+```
+
+On the phone, enter that same reachable `host:4000` in the game's connection
+screen. `127.0.0.1` on a phone means the phone itself. Both devices must be able
+to reach the host's UDP port. This command runs a foreground practice server;
+24/7 public hosting additionally needs supervised operations and network setup.
+
+Persistent profiles and match history require a configured career server and
+PostgreSQL. See [career setup](docs/match-progression.md),
+[Account API operations](account-api/README.md) and [RUNBOOK.md](RUNBOOK.md).
+
+## Commands at a glance
+
+Run **`make` or `make help`** to see commands without starting a game or build.
+
+| Command | Purpose |
+| --- | --- |
+| `make practice` | Local client + native bot server; easiest first match |
+| `make practice-server` | Native bot host; set `LOCAL_SERVER_ADDR` for LAN access |
+| `make play` / `make play-bots` | Full 5v5 matchmaking demo with external harness bots |
+| `make game` / `make game2d` | One client, in 3D / orthographic 2D; set `GAME_SERVER_ADDR` |
+| `make server` | Full-roster matchmaking by default; solo players wait for a filled queue |
+| `make server-dev` | Explicit development mode; first join starts the match |
+| `make start` / `make start-release` | Legacy server + client workflows; details in the runbook |
+| `make bots BOTS=4 BOTS_SERVER=127.0.0.1:4000` | Add external harness players to an existing server |
+| `make iphone-check` | Check Xcode and physical iPhone build prerequisites |
+| `make iphone` | Build an **unsigned** device package; signing is a separate step |
+| `make verify-gameplay` / `make verify-task-12` | Headless gameplay/matchmaking checks and live UDP QA |
+| `make stop` / `make restart` | Broad legacy local-process cleanup / restart; not session-scoped |
+
+For iPhone, install Xcode and the Rust `aarch64-apple-ios` target first. Follow
+[signing and installation](mobile/ios/README.md) or the
+[TestFlight archive guide](mobile/ios/TESTFLIGHT.md). `make iphone` does not upload
+to Apple. Retain `builds/` when clearing disposable `target/` caches. Android and
+iOS Simulator workflows are in the [mobile guide](mobile/README.md), with their
+measured limits.
+
+## Bring Ekza into your game
+
+**Open Moba is a working reference, and an invitation to build another game.**
+Ekza's broader goal is an ecosystem where creators collaborate on avatars and
+assets, and participating games can recognize compatible representations of
+them. Each game keeps its own art direction, performance budget and rules.
+
+| Project | What to explore |
+| --- | --- |
+| [Ekza Bevy SDK](https://github.com/ekza-space/ekza-bevy-sdk) | Rust character identity, model metadata, GLB validation and Bevy model loading |
+| [The SDK revision used by Open Moba](https://github.com/ekza-space/ekza-bevy-sdk/tree/8254ed5e94d4709c11c83bef604ebe4481467847) | The exact integration, including Passport data contracts; SDK `main` may differ |
+| [Ekza Stellar TypeScript SDK](https://github.com/ekza-space/ekza-stellar-sdk) | Asset manifests, avatar loading and application bridge source |
+| [Ekza Stellar creator protocol](https://github.com/ekza-space/solana-stellar) | Collaborative assets, lineage, releases and contributor-share infrastructure |
+| [Ekza Space](https://space.ekza.io/) | Explore another application in the ecosystem |
+
+For a Bevy integration, start with the SDK's README and model-checking examples.
+Then follow Open Moba's [pinned dependency](client/Cargo.toml),
+[native Passport adapter and importer](passport/src), and
+[staged avatar integration guide](docs/progress/2026-09-11-avatar-passport-roundtrip.md).
+The guide includes reproducible commands and the division of responsibility
+between client, trusted Passport service and authoritative game server.
+
+The current purchased-avatar path is **opt-in, staged Solana Devnet desktop
+integration**. A trusted service verifies ownership, and the game approves the
+exact model and animation profile before use. It does not make every model
+playable in every game, hot-load unknown avatars during a match or establish
+mobile Passport readiness. A compatible file format alone does not establish
+permission to redistribute the artwork.
+
+**SDK reuse status:** the Bevy SDK revision pinned above has no declared license
+grant yet, as recorded in the [licensing audit](docs/progress/2026-09-12-open-source-licensing.md).
+That needs to be resolved for third-party adoption; Open Moba's licenses do not
+license a separate SDK. The TypeScript link points to source, not a verified npm
+package installation workflow.
+
+## Create with us
+
+You can help build this world without writing Rust. We welcome artists,
+designers, modelers, riggers, animators, musicians, translators, players and
+programmers. Start small, show what you made and credit the people who helped.
+
+| Create or improve… | Guide |
+| --- | --- |
+| Characters, weapon/projectile skins and combat effects | [Combat cosmetics](docs/combat-cosmetics.md) |
+| Props, forests, rivers, towers and map composition | [Map customization](docs/map-customization.md) |
+| Combat pacing, camps, distances and balance | [Balance tuning](docs/balance-tuning.md) |
+| Music, interface sounds and combat cues | [Audio authoring and sources](docs/game-audio.md) |
+| Playability, accessibility and phone usability | [Playtest checklist](docs/playtest-script.md) and [bug report](docs/bug-report-template.md) |
+| Shared tools, integrations or documentation | [Contribution guide](CONTRIBUTING.md) and [issues](https://github.com/o-moba/omoba-bevy/issues) |
+
+We want collaboration to leave people with more possibilities: useful tools,
+shared knowledge, fair credit and worlds they can help shape. Contributors
+retain their copyright; permissions and asset provenance remain explicit.
+Read [our mission](MISSION.md) and the [contribution terms](CONTRIBUTING.md).
+
+## Controls
+
+| Desktop | Action |
+| --- | --- |
+| Right-click ground / minimap | Move using map navigation |
+| Left-click hostile | Select a target without moving or casting |
+| Right-click hostile | Approach and repeat basic attacks |
+| Q / W / E / R | Use class abilities |
+| Tab / S or Backspace | Select nearest enemy / stop and clear target |
+| P / Shop | Buy equipment while alive at your base |
+| Y / Space | Toggle camera follow / return to your hero |
+| Mouse wheel / Alt + right mouse | Zoom / orbit in 3D |
+| Esc | Close a panel or open the pause menu |
+
+On phones, use the left movement joystick and right-thumb **ATTACK** button with
+abilities around it. Drag ATTACK to choose a target along a direction; the short
+handle does not extend attack range. Hold an ability still to inspect it, tap to
+cast, or drag deliberately to aim. See [platform controls](mobile/README.md) and
+[practice, chat and reactions](docs/bot-practice-and-social.md).
+
+## Technical and project references
+
+The Bevy client and authoritative Rust server communicate over UDP; the website
+uses a separate HTTP Account API. Snapshots and career replies use bounded,
+1,200-byte datagram framing with complete-message reassembly. Player account
+identifiers remain separate from display handles and avatar ownership proofs.
+
+- [Feature inventory](docs/features.md), [changelog](CHANGELOG.md) and [runbook](RUNBOOK.md).
+- [Account API](account-api/README.md), [career storage](docs/match-progression.md) and [player handles](docs/player-handles.md).
+- [Supporter implementation and rollout limits](docs/supporter.md).
+- [Historical beta package guide](docs/progress/2026-09-07-beta-test-guide.md) and [its dated readiness record](docs/progress/2026-09-07-beta-readiness.md).
+
+## Licenses
+
+Server source: **AGPL-3.0-only**. Client and reusable original source:
+**MPL-2.0**. Original documentation and identified Verdant art:
+**CC-BY-4.0**. Existing CC0/OFL and other dependency/asset terms remain unchanged.
+Commercial forks are welcome under the applicable terms.
+
+Read the [license map](LICENSING.md), [brand policy](TRADEMARKS.md),
+[attribution](ATTRIBUTION.md) and [source distribution guide](SOURCE.md). The
+mission expresses the official project's direction; it adds no restrictions to
+those licenses. Avatars, SDKs and third-party assets retain their own terms.

@@ -448,11 +448,11 @@ async fn portal_postgres_contract_and_security() {
         .is_err()
     );
     assert_eq!(
-        sqlx::query_scalar::<_, i32>("SELECT version FROM career_schema_version")
-            .fetch_one(&app.pool)
+        sqlx::query_scalar::<_, i32>("SELECT version FROM career_schema_version ORDER BY version")
+            .fetch_all(&app.pool)
             .await
             .unwrap(),
-        1
+        vec![1, 2, 3]
     );
     println!(
         "PASS: real PostgreSQL migration, browser-bound pairing, concurrent completion, profile identity, strict writes, contact ACL, public opt-in, search, stale friendship protection, game/web synchronization, settlement, late projection, stats, u64, private match ACL and logout."
@@ -678,7 +678,7 @@ async fn bounded_sessions_and_cross_replica_statistics_lock() {
         .await
         .unwrap();
     for _ in 0..19 {
-        sqlx::query("INSERT INTO portal.web_sessions(session_id,profile_id,token_hash,created_at,last_seen,expires_at) VALUES($1,$2,$3,$4,$4,$5)")
+        sqlx::query("INSERT INTO portal.web_sessions(session_id,profile_id,token_hash,created_at,last_seen,expires_at,authorization_version) VALUES($1,$2,$3,$4,$4,$5,2)")
             .bind(crypto::random::<32>()).bind(&old.profile_id).bind(crypto::random::<32>())
             .bind(now()-10).bind(now()+3600).execute(&app.pool).await.unwrap();
     }

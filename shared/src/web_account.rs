@@ -2,11 +2,14 @@
 use serde::{Deserialize, Serialize};
 
 pub const PAIR_LIFETIME_SECS: u64 = 300;
-pub const WEB_SCOPES: [&str; 4] = [
+pub const WEB_SCOPES: [&str; 7] = [
     "career:read",
     "friends:write",
     "nickname:write",
     "settings:write",
+    "devices:write",
+    "recovery:write",
+    "supporter:write",
 ];
 
 pub fn lowercase_hex(value: &str, bytes: usize) -> bool {
@@ -115,6 +118,9 @@ mod tests {
         assert!(c.validate(&c.origin, &"e".repeat(64), 1000).is_err());
         assert!(c.validate(&c.origin, &c.public_key, 1200).is_err());
         assert!(c.validate(&c.origin, &c.public_key, 899).is_err());
+        let mut legacy = c.clone();
+        legacy.scopes.truncate(4);
+        assert!(legacy.validate(&c.origin, &c.public_key, 1000).is_err());
         let mut extra = c.clone();
         extra.scopes.push("keys:write".into());
         assert!(extra.validate(&c.origin, &c.public_key, 1000).is_err());
@@ -123,7 +129,7 @@ mod tests {
     fn golden_signing_tuple_and_decision_separation() {
         let c = challenge();
         let expected = format!(
-            r#"["omoba.web.pair.v1","https://players.example","{}","{}","{}","{}","approve",["career:read","friends:write","nickname:write","settings:write"],"1200"]"#,
+            r#"["omoba.web.pair.v1","https://players.example","{}","{}","{}","{}","approve",["career:read","friends:write","nickname:write","settings:write","devices:write","recovery:write","supporter:write"],"1200"]"#,
             "a".repeat(64),
             "b".repeat(64),
             "c".repeat(64),

@@ -1,6 +1,10 @@
 # Open Moba: a world where your avatar can play
 
-Our mission is to build an open, competitive multiplayer game in which ordinary people can bring their digital selves into a shared world. A person's avatar should be able to take part in a substantial game, with friends, teamwork, mastery and a reason to return.
+Our mission is to help build an open world of avatars: a future in which people can bring their digital selves into games, and creators can give those worlds shape together. An artist's character, a modeler's creature or an animator's movement should have a life beyond a single application.
+
+Open Moba gives that ambition a playable home. We are building an open, competitive multiplayer game with friends, teamwork, mastery and a reason to return. We also develop it as a practical integration of the [Ekza SDK](https://github.com/ekza-space/ekza-bevy-sdk), alongside [Ekza Space](https://ekza.io/), so other game developers can learn from the implementation and help improve the shared tools.
+
+The invitation is wider than code: draw a character, build a prop, animate an attack, design a map, compose a sound, test a match or connect another game. We want people to create with one another, keep credit for their work and make something useful beyond the boundaries of this project.
 
 We are working toward an enduring alternative alongside established MOBAs: polished combat, readable maps, fair competition and a welcoming place for player and creator identities. This is a commitment to years of development. The current beta and its measured limits are recorded in `docs/features.md` and the dated progress notes; this mission is a direction, not a claim that all of these capabilities are already delivered.
 
@@ -13,6 +17,8 @@ We are working toward an enduring alternative alongside established MOBAs: polis
 - **A game people can enter.** Prioritize mobile play alongside desktop play, with controls appropriate to each device and a shared authoritative game. Keep a usable free roster and a path into play for people without a purchased avatar or a crypto wallet.
 
 - **Competition decided by play.** Aim for cosmetic identity without bought combat advantages. Imported avatars must meet the same readability, performance and gameplay constraints as the built-in roster.
+
+- **Tools that connect games.** Build reusable avatar identities, validation and integration paths through Ekza. Each game chooses compatible representations and fair gameplay rules; portability requires explicit technical support and creator permission. Share what we learn so the next developer can build on it.
 
 - **A community that can participate.** Welcome playtesting, art, accessibility work, translation, tools, code and constructive disagreement. Make meaningful project decisions understandable and preserve credit for contributors.
 

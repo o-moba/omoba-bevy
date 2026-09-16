@@ -34,6 +34,7 @@ pub(crate) fn ensure_player_connected(
             career_profile: None,
             career_capable: false,
             state: PlayerState {
+                supporter_aura: None,
                 is_bot: false,
                 id: player_id,
                 x: spawn.x,

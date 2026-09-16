@@ -1,10 +1,10 @@
 # Omoba Account API
 
-Rust 0.20.0-rc.1 HTTP adapter for the existing game career store. Axum 0.8.9,
+Rust 0.20.0-rc.5 HTTP adapter for the existing game career store. Axum 0.8.9,
 SQLx PostgreSQL, ring 0.17.14. No HTTP endpoint can settle matches or change rewards.
 The adapter reuses the game friendship transaction and nickname validation rules.
 [OpenAPI 3.1](docs/openapi.json) describes the wire contract. Game core schema is
-version 2 (human-readable player handles); portal schema has its own version 1 and never runs Prisma/Drizzle push.
+version 3 (revocable device keys); portal schema has its own version 3 and never runs Prisma/Drizzle push.
 
 ## Database and migration
 
@@ -18,7 +18,7 @@ psql "$MIGRATION_DATABASE_URL" -v portal_role=omoba_portal -v game_role=omoba_ga
 ```
 
 The migration command initializes the game’s existing v1 migration when needed,
-then applies portal v1 under an advisory lock. Repeated execution is safe. Existing
+then applies portal v1–v3 under an advisory lock. Repeated execution is safe. Existing
 unknown versions fail closed. Runtime startup verifies versions and performs no DDL.
 For game-only initialization, `cargo run -p server --bin migrate-career --locked` uses
 `OMOBA_DATABASE_URL`. This replaces implicit DDL at game-worker startup.
@@ -28,7 +28,7 @@ would defeat least privilege; use unprivileged runtime roles without memberships
 No role has ownership or CREATE on public/portal. On databases predating PostgreSQL
 15, remove public CREATE permission as part of administration. The portal can update
 only the nickname column in career_profiles, read core career tables, mutate friend
-relations, and maintain portal tables. It cannot create game accounts or alter XP,
+relations, and maintain portal tables. It can enroll a proved new device key into an explicitly approved existing profile, and revoke keys. It cannot create game profiles or alter XP,
 rating, match outcomes, allocation identities or core migration versions.
 
 ## Runtime
@@ -48,8 +48,11 @@ Changing it intentionally invalidates outstanding pairings and browser tokens.
 Do not log it or expose it in `NEXT_PUBLIC_` variables.
 
 Default `OMOBA_ACCOUNT_BIND=127.0.0.1:40550`; non-loopback binds fail. TLS is terminated
-by your existing trusted ingress. Native clients need ingress routes only for POST
-`/v1/auth/pairings/lookup`, `/approve`, `/deny`. Next’s BFF uses the internal API.
+by your existing trusted ingress. Native clients need ingress routes for POST
+`/v1/auth/pairings/lookup`, `/approve`, `/deny`,
+`/v1/auth/devices/create`, `/status`, `/recover`, `/complete`, and
+`/v1/supporter/native`. Apple notifications use only the separately configured
+`/v1/supporter/apple/notifications` route. Next’s BFF uses the internal API.
 Do not broadly expose all API routes as an alternative browser backend.
 `OMOBA_ALLOW_INSECURE_LOCAL=1` permits the exact localhost/127.0.0.1 portal on port
 3010 for isolated development; never enable it for a remote HTTP site.
@@ -108,7 +111,7 @@ row counts and immutable receipt checksums, then start the services against it.
 Never restore over the running production database as a test.
 
 Rollback of the application does not require destructive SQL. Stop the portal and
-use a game binary compatible with career v2. Pre-v2 binaries fail schema checks;
+use a game binary compatible with career v3. Pre-v3 binaries fail schema checks;
 there is no automatic downgrade of player handles. Keep portal schema and
 immutable game data; rotate/revoke portal sessions deliberately if retiring access.
 Do not delete tables or lower migration versions. Public cutover, secrets, ingress,
@@ -122,3 +125,10 @@ migrations before starting matching client/server/API releases. Exact authentica
 `GET /v1/players?query=Name%231234` returns only ID and name, including private
 accounts; prefix discovery still requires opt-in. Friend mutations bind the resolved
 immutable ID. See [handle rules and migration](../docs/player-handles.md).
+
+## Shared devices and Supporter
+
+See [Supporter operations](../docs/supporter.md) for enrollment/recovery, billing
+provider configuration, test boundaries and schema/runtime grants. Web sessions
+now explicitly authorize device/recovery management; native confirmations display
+these capabilities. Old limited sessions are invalidated by the account upgrade.

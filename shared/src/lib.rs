@@ -8,12 +8,14 @@ use std::time::Duration;
 
 pub mod career;
 pub mod combat;
+pub mod device_account;
 pub mod jungle;
 pub mod map;
 pub mod navigation;
 pub mod protocol;
 pub mod shop;
 pub mod social;
+pub mod supporter;
 pub mod transport;
 pub mod web_account;
 

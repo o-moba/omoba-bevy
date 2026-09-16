@@ -2,7 +2,9 @@
 pub mod accounts;
 pub mod auth;
 pub mod crypto;
+pub mod devices;
 pub mod read;
+pub mod supporter;
 
 use axum::{
     Json, Router,
@@ -24,6 +26,8 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+pub const DEVICES_MIGRATION: &str = include_str!("../migrations/002_devices.sql");
+pub const SUPPORTER_MIGRATION: &str = include_str!("../migrations/003_supporter.sql");
 pub const PORTAL_MIGRATION: &str = include_str!("../migrations/001_portal.sql");
 #[derive(Clone)]
 pub struct Config {
@@ -34,6 +38,7 @@ pub struct Config {
 }
 #[derive(Clone)]
 pub struct App {
+    pub billing: Arc<supporter::BillingConfig>,
     pub pool: PgPool,
     pub career: CareerStore,
     pub config: Arc<Config>,
@@ -129,13 +134,19 @@ impl App {
             sqlx::query_scalar("SELECT version FROM portal.schema_version ORDER BY version")
                 .fetch_all(&pool)
                 .await?;
-        if versions != [1] {
+        if versions != [1, 2, 3] {
             return Err(Error(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "unsupported_portal_schema",
             ));
         }
         Ok(Self {
+            billing: Arc::new(supporter::BillingConfig::from_env().map_err(|_| {
+                Error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "invalid_billing_configuration",
+                )
+            })?),
             pool,
             career,
             config: Arc::new(config),
@@ -159,6 +170,8 @@ impl App {
         Ok(())
     }
     pub async fn cleanup(&self) -> Result<()> {
+        sqlx::query("DELETE FROM portal.device_enrollments WHERE enrollment_id IN (SELECT e.enrollment_id FROM portal.device_enrollments e WHERE e.expires_at<$1 AND NOT EXISTS(SELECT 1 FROM portal.recovery_codes r WHERE r.enrollment_id=e.enrollment_id) LIMIT 256)").bind(now()-86400).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM portal.supporter_nonces WHERE (public_key,nonce) IN (SELECT public_key,nonce FROM portal.supporter_nonces WHERE expires_at<$1 LIMIT 1000)").bind(now()-60).execute(&self.pool).await?;
         // Bounded expiry cleanup; active credentials and immutable game results remain untouched.
         sqlx::query("DELETE FROM portal.rate_limits WHERE (identity_hash,bucket) IN (SELECT identity_hash,bucket FROM portal.rate_limits WHERE bucket<$1 LIMIT 1000)").bind(now()/60-2).execute(&self.pool).await?;
         sqlx::query("DELETE FROM portal.web_pairings WHERE pair_id IN (SELECT pair_id FROM portal.web_pairings WHERE expires_at<$1 LIMIT 256)").bind(now()-60).execute(&self.pool).await?;
@@ -192,12 +205,27 @@ pub async fn migrate(url: &str) -> std::result::Result<(), String> {
             .await
             .map_err(|_| "Cannot apply portal migration")?;
     }
+    for (version, migration) in [(2, DEVICES_MIGRATION), (3, SUPPORTER_MIGRATION)] {
+        let applied: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM portal.schema_version WHERE version=$1)",
+        )
+        .bind(version)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|_| "Cannot inspect portal migration")?;
+        if !applied {
+            sqlx::raw_sql(migration)
+                .execute(&mut *tx)
+                .await
+                .map_err(|_| "Cannot apply portal migration")?;
+        }
+    }
     let versions: Vec<i32> =
         sqlx::query_scalar("SELECT version FROM portal.schema_version ORDER BY version")
             .fetch_all(&mut *tx)
             .await
             .map_err(|_| "Cannot read portal version")?;
-    if versions != [1] {
+    if versions != [1, 2, 3] {
         return Err("Unsupported portal schema version".into());
     }
     tx.commit().await.map_err(|_| "Cannot commit migration")?;
@@ -211,7 +239,7 @@ pub fn router(app: App) -> Router {
         )
         .route("/health/ready", get(ready))
         .route("/v1/{*path}", any(handle))
-        .layer(DefaultBodyLimit::max(8192))
+        .layer(DefaultBodyLimit::max(65536))
         .layer(middleware::from_fn_with_state(app.clone(), observe))
         .with_state(app)
 }
@@ -286,6 +314,33 @@ async fn dispatch(
     } else {
         addr.ip().to_string()
     }; // Only an explicitly configured, overwriting loopback ingress is trusted.
+    if method == Method::POST && path.starts_with("auth/devices/") {
+        app.rate(
+            &ip,
+            "device-enrollment",
+            if path == "auth/devices/status" {
+                120
+            } else {
+                10
+            },
+        )
+        .await?;
+        return match path {
+            "auth/devices/create" => devices::create(app, body).await,
+            "auth/devices/status" => devices::status(app, body).await,
+            "auth/devices/complete" => devices::complete(app, body).await,
+            "auth/devices/recover" => devices::recover(app, body).await,
+            _ => Err(forbidden()),
+        };
+    }
+    if method == Method::POST && path == "supporter/native" {
+        app.rate(&ip, "native-supporter-ip", 60).await?;
+        return supporter::native(app, body).await;
+    }
+    if method == Method::POST && path == "supporter/apple/notifications" {
+        app.rate(&ip, "apple-notification-ip", 120).await?;
+        return supporter::apple_notification(app, body).await;
+    }
     if method == Method::POST && path.starts_with("auth/pairings") {
         app.rate(
             &ip,
@@ -339,6 +394,30 @@ async fn dispatch(
     )
     .await?;
     match (method.as_str(), path) {
+        ("GET", "me/devices") => devices::list(app, &session).await,
+        ("POST", "me/devices/lookup") => devices::lookup(app, &session, body).await,
+        ("POST", "me/devices/approve") => devices::approve(app, &session, body).await,
+        ("POST", "me/recovery-codes") => devices::recovery_codes(app, &session, body).await,
+        ("DELETE", p) if p.starts_with("me/devices/") => {
+            devices::revoke(app, &session, &p[11..]).await
+        }
+        ("GET", "me/supporter") => supporter::dashboard(app, &session.profile_id).await,
+        ("PATCH", "me/supporter/aura") => supporter::equip(app, &session.profile_id, body).await,
+        ("GET", "me/supporter/solana/orders") => {
+            supporter::solana::orders(app, &session.profile_id).await
+        }
+        ("POST", "me/supporter/solana/checkout") => {
+            supporter::solana::checkout(app, &session.profile_id, body).await
+        }
+        ("POST", "me/supporter/solana/confirm") => {
+            supporter::solana::confirm(app, &session.profile_id, body).await
+        }
+        ("POST", "me/supporter/apple/prepare") => {
+            supporter::apple_prepare(app, &session.profile_id).await
+        }
+        ("POST", "me/supporter/apple/verify") => {
+            supporter::apple_verify(app, &session.profile_id, body).await
+        }
         ("GET", "me") => accounts::me(app, &session).await,
         ("GET", "me/matches") => read::history(app, &session, query).await,
         ("GET", "me/statistics") => {

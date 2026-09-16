@@ -6,11 +6,24 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Visual effects
+- Upgrade live Supporter auras with three inclined electron-like orbits, bright
+  cores, soft camera-facing glow sprites, tapered light trails and rising glints. Keep a fixed
+  35-element budget per hero, shared materials, and hidden/dead actor suppression
+  in both 3D and sprite rendering. No combat or entitlement changes.
+
 ### Documentation
+- Reframe the README and mission around a collaborative open world of avatars;
+  add verified Ekza Space/SDK links, a developer integration path and concrete
+  entry points for artists, modelers, animators, players and contributors.
+- Refresh native practice, phone/PC connection and iPhone/TestFlight instructions;
+  distinguish source-beta features from public distribution and provider readiness.
 - Normalize mission and licensing-guide Markdown paragraphs/list spacing; preserve
   license terms and remove an accidental editing suffix from the mission.
 
 ### Developer workflow
+- Make bare `make` show `make help`; derive the command list from target comments
+  without starting game processes or checking the iPhone toolchain.
 - Prepare Xcode archives from existing signed physical iPhone apps for later
   TestFlight distribution; include an original beta icon, required-reason API
   manifest, explicit build numbers and an Apple account/signing handoff guide.
@@ -21,6 +34,27 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
   from disposable Cargo caches. Refresh the reviewed prop asset inventory.
 - Add `make play` / `make play-bots` to build locked current sources and launch
   supervised local 3D practice with nine bots, with owned-process cleanup.
+
+## [0.20.0-rc.5] - 2026-09-16
+
+### Added
+- Shared native-account enrollment with explicit portal approval, one-time recovery
+  codes, device revocation and preserved local identity backups.
+- Server-authorized Solar, Lunar and Verdant Supporter auras, isolated native
+  preview, account status and cosmetic selection without gameplay advantages.
+- PostgreSQL provider events and expiring payment periods with replay, ownership,
+  cancellation, refund and reconciliation handling.
+- Account-bound Solana Pay quotes, finalized USDC transfer validation and recent
+  orders that remain recoverable after a browser reload.
+- Native StoreKit purchase/restore bridge compiled by the regular iOS Cargo build;
+  unfinished purchases await committed server verification.
+
+### Changed
+- Career and portal migrations advance to version 3. Runtime roles gain narrowly
+  scoped device/cosmetic permissions; revoked game keys cannot be reused.
+- Payment providers remain unavailable without explicit verified configuration.
+  Live Apple/Solana purchases, App Store products and deployment are operator
+  rollout steps, separate from local synthetic payment verification.
 
 ## [0.20.0-rc.4] - 2026-09-16
 

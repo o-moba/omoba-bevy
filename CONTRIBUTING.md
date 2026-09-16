@@ -2,6 +2,23 @@
 
 Help us build the [mission](MISSION.md) through code, playtesting, documentation, art, accessibility or useful tools. Start with the current [features and limitations](docs/features.md) and existing issues; discuss large changes before doing substantial implementation work.
 
+## Find your part of the world
+
+| If you enjoy… | A concrete place to start |
+| --- | --- |
+| Drawing, modeling or animating | Build a character, prop, projectile or effect with documented source files and credits. Read [combat cosmetics](docs/combat-cosmetics.md) and [map customization](docs/map-customization.md). |
+| Designing games and maps | Try [bot practice](docs/bot-practice-and-social.md), then propose a specific change to routes, camps, towers or [balance](docs/balance-tuning.md) with before/after observations. |
+| Making music and sound | Add a cue or improve a mix using the [audio authoring guide](docs/game-audio.md). |
+| Playing and testing | Play one match and submit a reproducible [bug report](docs/bug-report-template.md), especially for phone controls, readability and accessibility. |
+| Translating or explaining | Improve an instruction, an error message or a player's first few minutes; include the language and device you tested. |
+| Building games and tools | Explore the [Ekza Bevy SDK](https://github.com/ekza-space/ekza-bevy-sdk), the [Stellar TypeScript SDK](https://github.com/ekza-space/ekza-stellar-sdk), and this game's [Passport reference integration](docs/progress/2026-09-11-avatar-passport-roundtrip.md). Report missing contracts or contribute a focused example. Check each SDK's own licensing status. |
+
+Start with a small [issue](https://github.com/o-moba/omoba-bevy/issues) or pull
+request: what you want to create, who it helps and how someone can try it. A
+sketch, source model, test recording or clear reproduction can be as useful as
+code. You do not need a wallet or purchased avatar to contribute or play the
+built-in roster. Bring a collaborator and credit everyone involved.
+
 ## Rights and licenses
 
 By intentionally submitting a contribution for inclusion, you offer the rights you hold in it under the license applying to those files in [LICENSING.md](LICENSING.md): AGPL-3.0-only for original server source, MPL-2.0 for other original source, and CC-BY-4.0 for original standalone documentation and the identified Verdant visual assets. Existing asset-specific terms, including CC0, continue to apply. State the license and provenance of any newly introduced material clearly in your submission.

@@ -50,6 +50,8 @@ mod skill_icons;
 mod social;
 mod social_qa;
 mod sprite;
+mod supporter;
+mod supporter_storekit;
 mod targeting;
 mod targeting_qa;
 mod team;
@@ -152,6 +154,8 @@ pub fn main() {
         social_qa::SocialQaPlugin,
     ))
     .add_plugins(career::CareerPlugin)
+    .add_plugins(supporter::SupporterPlugin)
+    .add_plugins(supporter_storekit::SupporterStoreKitPlugin)
     .add_plugins(game_audio::GameAudioPlugin)
     .add_plugins(audio_qa::AudioQaPlugin)
     .add_plugins(career_identity::CareerIdentityPlugin)

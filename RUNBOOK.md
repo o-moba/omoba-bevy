@@ -1,7 +1,7 @@
 # Local Development Runbook
 
-Single-machine multiplayer development for omoba-bevy. For the packaged native
-beta, start with the [current tester/host guide](docs/progress/2026-09-07-beta-test-guide.md).
+Single-machine multiplayer development for omoba-bevy. For the September 7 packaged native
+beta, use the [historical tester/host guide](docs/progress/2026-09-07-beta-test-guide.md).
 Its practice/host launchers stop only their owned processes and need no checkout.
 
 Entry point: see [README.md](README.md) for first-time setup and a controls summary. This file focuses on processes, logs, and recovery.
@@ -11,19 +11,33 @@ Entry point: see [README.md](README.md) for first-time setup and a controls summ
 - Rust toolchain (`rustup`) installed.
 - Repository cloned; Python 3.9+ and Make installed. `make play` builds the source automatically.
 
+## First commands
+
+`make` and `make help` print available targets without starting a process.
+Use `make practice` for a first local match with native server bots. Closing
+that client or pressing Ctrl+C stops only its owned server. For phone/PC LAN
+play, run `make practice-server LOCAL_SERVER_ADDR=0.0.0.0:4000` and enter the
+host's actual LAN address on each client. A phone's localhost is the phone.
+
+`make play` retains the separate full-roster matchmaking harness workflow below.
+The older `make start` / `make stop` flow uses broad process matching; it is not
+the cleanup mechanism for a supervised practice session.
+
 ## Match Modes (TASK-22)
 
-The server has two explicit match-start modes, selected with
+The server has three explicit match-start modes, selected with
 `OMOBA_MATCH_MODE`:
 
 | Mode | Behavior | When to use |
 |---|---|---|
 | `release` (**default**) | Production-like matchmaking: players who join land in a queue, the match forms to a full 5v5 roster (`2 × OMOBA_TEAM_SIZE`), teams are **assigned by the server** (balanced, client choice is a preference only), a 3-second countdown runs, and only then the match starts. A solo player waits at "Searching for match..." forever — by design. | Anything player-facing / release-like. |
 | `dev` | Instant start: the first join flips the match to Running immediately and the client-chosen team is honored. This is the historical development behavior. | Local development and debugging ONLY. **Never ship dev mode.** |
+| `practice` | Native bots fill the roster and late humans replace them; results stay local and do not earn ranked progression. | Solo testing and shared phone/desktop playtests. |
 
 The bare server (`make server`, `cargo run -p server`) runs **release** mode —
-you cannot accidentally start an under-filled match in a production-like
-setup. Every quick dev flow goes through an explicit dev target.
+unless `OMOBA_MATCH_MODE` is explicitly set in the environment. `release` is a
+matchmaking policy, not Cargo's `--release` compilation profile. Native practice
+and instant-start development each have their own explicit targets.
 
 Client-side search states you should see in release mode after picking a
 class/avatar/team: `Searching for match...` → `Waiting for players — X/10` →
@@ -104,19 +118,18 @@ the local run; `GAME_SERVER_ADDR=<host:port>` overrides that default.
 2D camera controls: mouse wheel zooms within map-safe limits; **Y** toggles
 hero-follow/free-pan; arrow keys pan while unlocked; **Space** restores follow
 and clears a minimap focus override. Pressing **Y** while a minimap focus is
-active also returns directly to the hero. Minimap clicks focus the camera
-without leaking a world movement command. Ground movement remains available
-while camera follow is unlocked; right-click and Alt are reserved for their
-legacy 3D camera behavior and do not capture or toggle the 2D camera.
+active also returns directly to the hero. Left-click the minimap to look around; right-click the ground or minimap to
+move. Ground movement remains available while camera follow is unlocked.
+Alt + right mouse only orbits the 3D camera.
 
-Desktop/mobile combat input uses one pointer intent per press. Click or tap
-empty ground to move. Click or tap a living hostile actor to select it and
-request Q; the gold marker confirms selection, and the hero approaches the
-moving target when it is outside the shared ability range before emitting one
-server-authoritative cast. Tab still selects the nearest hostile, middle-click
-selects without attacking, and Q/W/E/R or the four 64-pixel on-screen buttons
-cast the chosen slot. Ground, minimap, and HUD presses are isolated so a touch
-cannot both cast and redirect movement.
+Desktop left-click selects an exact hostile target; right-click approaches and
+repeats basic attacks. Q/W/E/R cast separate abilities. Tab selects the nearest
+hostile; S/Backspace stops movement/attacks and clears selection. On phones, the
+right-thumb ATTACK button handles basic attacks and directional target selection;
+the surrounding skill buttons support tap, deliberate drag and stationary hold
+for descriptions. Desktop and mobile use separate platform-selected interfaces.
+See the [current controls](README.md#controls) rather than the historical
+click-to-cast-Q behavior in old progress notes.
 
 Validate the offline assets before a playtest:
 
@@ -136,6 +149,9 @@ make verify-gameplay   # includes the release-mode formation harness test
 
 | Goal | Command |
 |---|---|
+| Discover commands without starting a process | `make help` |
+| Native bot practice | `make practice` |
+| Host native bot practice | `make practice-server LOCAL_SERVER_ADDR=0.0.0.0:4000` |
 | Start server (release matchmaking) | `make server` |
 | Start server (dev instant-start) | `make server-dev` |
 | Start one client | `make game` |
@@ -154,7 +170,7 @@ make verify-gameplay   # includes the release-mode formation harness test
 |---|---|---|
 | `SERVER_ADDR` | `0.0.0.0:4000` | Address the server binds to |
 | `GAME_SERVER_ADDR` | `127.0.0.1:4000` | Server address clients connect to |
-| `OMOBA_MATCH_MODE` | `release` | `release` = queue to full 5v5 before start; `dev` = instant start on first join (dev only) |
+| `OMOBA_MATCH_MODE` | `release` | `release` = queue to full 5v5 before start; `dev` = instant start on first join (dev only); `practice` = native bots and late human replacement |
 | `OMOBA_TEAM_SIZE` | `5` | Players per team in release mode (clamped 1–16); `1` gives a 1v1 with release semantics for quick checks |
 | `OMOBA_AUTOJOIN` | unset | Client joins without UI: `<class>:<avatar-slug|->:<team>` |
 
@@ -204,8 +220,8 @@ server is not running or is on a different address/port.
 | Client never receives first snapshot | Port mismatch between server bind and client target | Parse port from `SERVER_ADDR` (e.g. `0.0.0.0:5000` → clients use `127.0.0.1:5000` in `GAME_SERVER_ADDR`) |
 | Second machine on LAN cannot connect | Client still points at localhost | On the client machine set `GAME_SERVER_ADDR=<server-LAN-IP>:4000`; on the server keep `SERVER_ADDR=0.0.0.0:4000` so it accepts non-local interfaces |
 | `Connection refused` (tools) or immediate disconnect | Nothing listening on declared port | Start server first; verify with server log line; check VPN or corporate proxy is not blocking UDP loopback |
-| Repeated JSON EOF at column `8192` | Client/server binaries are from different revisions, or an old client still uses the former 8 KiB receive buffer | Rebuild both with `cargo build --workspace`, restart the server and client, and confirm both use the same checkout. Current clients receive up to a complete legal 65,507-byte IPv4 UDP payload. |
-| Server logs `Failed to send complete ... snapshot` / `Message too long` | The populated one-datagram JSON snapshot exceeds the host kernel's UDP send ceiling (measured as 9,216 bytes on the current macOS host) | Reduce the playtest roster/entity load. Do not raise buffers blindly: payload reduction or versioned fragmentation/compression is a separate protocol change. |
+| Repeated JSON EOF at column `8192` | Client/server binaries are from different revisions, or an old client still uses the former 8 KiB receive buffer | Rebuild both with `cargo build --locked --workspace` and use matching versions. Current snapshots and career replies are framed into datagrams of at most 1,200 bytes; JSON is parsed only after complete-message reassembly. |
+| Legacy `Message too long` errors or incomplete snapshots | Old single-datagram binary, mismatched framing versions or dropped frame parts | Confirm the actual executable paths and rebuild both sides from the same revision. Current framing is implemented in `shared/src/transport.rs`; inspect UDP loss and assembly limits if a matched build still fails. |
 | Towers or minions seem absent in 2D | Old assets/binary, extreme camera state, or the match has not reached `running` | Rebuild, use `make game2d`, press **Space** to restore hero follow, and verify the server snapshot has 8 structures and 18 minions with `cargo test -p harness --test udp_datagrams -- --nocapture`. Green actors use square badges; Blue actors use diamonds; lane towers also show TOP/MID/BOT. |
 | `Failed to bind client UDP socket` | OS port exhaustion (rare) | Close other clients; reboot if needed; retry `make game` |
 | Client exits immediately | Build error or asset load failure | Run `cargo build --workspace` from repo root and fix compile errors; check client stderr for asset path errors (the client uses `client/assets/` under the crate, including an auto-created downloads subfolder) |

@@ -77,6 +77,7 @@ fn resolve_input_context(
     server_entry: Option<Res<crate::mobile_ui::ServerEntry>>,
     career: Option<Res<crate::career::CareerClient>>,
     social: Option<Res<crate::social::SocialClient>>,
+    supporter: Option<Res<crate::supporter::SupporterUiState>>,
 ) {
     context.running = game
         .as_ref()
@@ -90,6 +91,7 @@ fn resolve_input_context(
         || social
             .as_ref()
             .is_some_and(|social| social.blocks_gameplay())
+        || supporter.as_ref().is_some_and(|state| state.open)
         || career.as_ref().is_some_and(|career| career.modal_open())
         || server_entry.as_ref().is_some_and(|entry| entry.open)
         || shop.as_ref().is_some_and(|shop| shop.open)

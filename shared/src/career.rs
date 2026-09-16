@@ -254,6 +254,14 @@ pub struct FriendsView {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum CareerAction {
+    SupporterStatus {
+        request_id: u64,
+    },
+    EquipSupporterAura {
+        request_id: u64,
+        aura: Option<crate::supporter::AuraStyle>,
+    },
+
     Social {
         request: crate::social::SocialRequest,
     },
@@ -308,6 +316,14 @@ pub fn authorized_signing_bytes(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum CareerRequest {
+    SupporterStatus {
+        request_id: u64,
+    },
+    EquipSupporterAura {
+        request_id: u64,
+        aura: Option<crate::supporter::AuraStyle>,
+    },
+
     Social {
         request: crate::social::SocialRequest,
     },
@@ -364,6 +380,13 @@ pub enum CareerRequest {
 impl CareerRequest {
     pub fn account_action(&self) -> Option<CareerAction> {
         Some(match self {
+            Self::SupporterStatus { request_id } => CareerAction::SupporterStatus {
+                request_id: *request_id,
+            },
+            Self::EquipSupporterAura { request_id, aura } => CareerAction::EquipSupporterAura {
+                request_id: *request_id,
+                aura: *aura,
+            },
             Self::Social { request } => CareerAction::Social {
                 request: request.clone(),
             },
@@ -417,6 +440,7 @@ impl CareerRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct CareerView {
+    pub supporter: Option<crate::supporter::SupporterStatus>,
     /// Configuration capability, independent of temporary database availability.
     pub storage_enabled: bool,
     /// Echo the History/Detail request ID for its payload or error.

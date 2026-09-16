@@ -1,6 +1,8 @@
 //! Native transport and staged importer for the shared Ekza passport contract.
 //! Secrets stay in memory. Game packets contain only one-use scoped tickets.
 
+pub mod device_account;
+pub mod supporter_account;
 pub mod web_account;
 
 use ekza_bevy_sdk::passport::{
