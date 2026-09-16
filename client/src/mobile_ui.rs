@@ -654,11 +654,15 @@ fn adapt_phone_layout(
         let Some(family) = phone_family(entity, &hierarchy) else {
             continue;
         };
-        let original = base.map_or(font.font_size, |base| base.0);
+        // Relative font sizes are resolved by Bevy; only scale our pixel-sized HUD.
+        let bevy::text::FontSize::Px(current_size) = font.font_size else {
+            continue;
+        };
+        let original = base.map_or(current_size, |base| base.0);
         if base.is_none() {
             commands.entity(entity).insert(PhoneFontSize(original));
         }
-        font.font_size = match family {
+        font.font_size = (match family {
             "hero" | "objective" | "equipment" => original.clamp(11.0, 13.0),
             "entry" => original.clamp(11.0, 16.0),
             "shop-card" if width < 650.0 => {
@@ -674,7 +678,8 @@ fn adapt_phone_layout(
             "help" => 15.0,
             "pause" => original.clamp(14.0, 22.0),
             _ => original,
-        };
+        })
+        .into();
     }
     for (name, mut text) in &mut copy {
         match name.as_str() {

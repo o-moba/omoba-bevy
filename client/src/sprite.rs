@@ -308,7 +308,7 @@ fn attach_sprite_visuals(
             parent.spawn((
                 Text2d::new(definition.display_name.clone()),
                 TextFont {
-                    font_size: NAMEPLATE_FONT_SIZE,
+                    font_size: (NAMEPLATE_FONT_SIZE).into(),
                     ..default()
                 },
                 TextColor(Color::WHITE),

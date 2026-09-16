@@ -3,7 +3,7 @@ members = ["account-api", "arena-sync", "client", "harness", "passport", "server
 resolver = "2"
 
 [workspace.package]
-version = "0.20.0-rc.5"
+version = "0.20.0-rc.6"
 edition = "2024"
 license = "MPL-2.0"
 
@@ -17,7 +17,7 @@ too_many_arguments = "allow"
 type_complexity = "allow"
 
 [workspace.dependencies]
-bevy = "0.18.0"
+bevy = "0.19.1"
 crossbeam-channel = "0.5.15"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"

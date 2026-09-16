@@ -119,7 +119,7 @@ fn spawn_toggle_button<B: Component, L: Component>(
             button.spawn((
                 Text::new(text),
                 TextFont {
-                    font_size: 16.0,
+                    font_size: (16.0).into(),
                     ..default()
                 },
                 TextColor(Color::WHITE),

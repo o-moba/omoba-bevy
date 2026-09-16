@@ -25,9 +25,9 @@ use bevy::{
     mesh::VertexAttributeValues,
     prelude::*,
     render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk},
-    scene::{SceneInstance, SceneSpawner},
     ui::FocusPolicy,
     window::PrimaryWindow,
+    world_serialization::{WorldInstance, WorldInstanceSpawner},
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -138,7 +138,7 @@ fn label(mut commands: Commands) {
         },
         Text::new("QA: live map objects · scripted cosmetic swaps"),
         TextFont {
-            font_size: 10.0,
+            font_size: (10.0).into(),
             ..default()
         },
         TextColor(Color::WHITE),
@@ -273,7 +273,7 @@ struct Scene<'w, 's> {
             Option<&'static Sprite>,
         ),
     >,
-    scenes: Query<'w, 's, (&'static SceneRoot, Option<&'static SceneInstance>)>,
+    scenes: Query<'w, 's, (&'static WorldAssetRoot, Option<&'static WorldInstance>)>,
     nodes: Query<
         'w,
         's,
@@ -451,7 +451,7 @@ fn observe(
     mobile: Res<MobileControls>,
     mode: Res<PlayerVisualMode>,
     assets: Res<AssetServer>,
-    spawner: Res<SceneSpawner>,
+    spawner: Res<WorldInstanceSpawner>,
     meshes: Res<Assets<Mesh>>,
     cache: Res<MapVisualCache>,
     images: Res<Assets<Image>>,

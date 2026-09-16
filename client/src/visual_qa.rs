@@ -10,9 +10,9 @@ use bevy::{
     light::{CascadeShadowConfig, CascadeShadowConfigBuilder},
     prelude::*,
     render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk},
-    scene::{SceneInstance, SceneSpawner},
     window::PrimaryWindow,
     winit::{WINIT_WINDOWS, WinitSettings},
+    world_serialization::{WorldInstance, WorldInstanceSpawner},
 };
 use std::{
     collections::HashMap,
@@ -470,7 +470,7 @@ struct CaptureWorld<'w, 's> {
         (&'static GlobalTransform, &'static InheritedVisibility),
         (With<crate::game_vfx::ButterflyWing>, Without<MainCamera>),
     >,
-    scenes: Query<'w, 's, (&'static SceneRoot, Option<&'static SceneInstance>)>,
+    scenes: Query<'w, 's, (&'static WorldAssetRoot, Option<&'static WorldInstance>)>,
     environment: Query<'w, 's, (), With<VerdantEnvironment>>,
     foliage: Query<'w, 's, (), With<VerdantFoliage>>,
     structures: Query<'w, 's, (), With<NetworkStructure>>,
@@ -543,7 +543,7 @@ fn capture_qa(
     context: Res<crate::input_context::GameplayInputContext>,
     mobile: Res<crate::mobile_controls::MobileControls>,
     asset_server: Res<AssetServer>,
-    spawner: Res<SceneSpawner>,
+    spawner: Res<WorldInstanceSpawner>,
     mut scenes: ParamSet<(CaptureWorld, crate::minimap::MinimapQaScene)>,
     mut exit: MessageWriter<AppExit>,
 ) {

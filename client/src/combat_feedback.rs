@@ -233,7 +233,7 @@ fn collect_hits(
             },
             Text::new(text),
             TextFont {
-                font_size: if outgoing || incoming { 23.0 } else { 16.0 },
+                font_size: (if outgoing || incoming { 23.0 } else { 16.0 }).into(),
                 ..default()
             },
             TextColor(color),

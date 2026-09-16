@@ -261,7 +261,7 @@ pub fn spawn_team_select_ui(
             parent.spawn((
                 Text::new(crate::passport::status()),
                 TextFont {
-                    font_size: 13.0,
+                    font_size: (13.0).into(),
                     ..default()
                 },
                 TextColor::WHITE,
@@ -271,7 +271,7 @@ pub fn spawn_team_select_ui(
             parent.spawn((
                 Text::new("Scroll heroes: mouse wheel / Page Up / Page Down"),
                 TextFont {
-                    font_size: 15.0,
+                    font_size: (15.0).into(),
                     ..default()
                 },
                 TextColor::WHITE,
@@ -387,7 +387,7 @@ pub fn spawn_team_select_ui(
             parent.spawn((
                 Text::new("Pick a class and an avatar, then a team to join the match."),
                 TextFont {
-                    font_size: 15.0,
+                    font_size: (15.0).into(),
                     ..default()
                 },
                 TextColor(Color::srgba(0.78, 0.80, 0.86, 1.0)),
@@ -499,7 +499,7 @@ fn spawn_sprite_button(
         button.spawn((
             Text::new(label),
             TextFont {
-                font_size: 9.5,
+                font_size: (9.5).into(),
                 ..default()
             },
             TextColor(Color::srgba(0.86, 0.88, 0.92, 1.0)),
@@ -511,7 +511,7 @@ fn spawn_section_title(parent: &mut ChildSpawnerCommands, title: &str, name: &st
     parent.spawn((
         Text::new(title),
         TextFont {
-            font_size: 20.0,
+            font_size: (20.0).into(),
             ..default()
         },
         TextColor(Color::WHITE),
@@ -544,7 +544,7 @@ fn spawn_class_button(row: &mut ChildSpawnerCommands, class: HeroClass, selected
         button.spawn((
             Text::new(class.display_name()),
             TextFont {
-                font_size: 17.0,
+                font_size: (17.0).into(),
                 ..default()
             },
             TextColor(Color::WHITE),
@@ -552,7 +552,7 @@ fn spawn_class_button(row: &mut ChildSpawnerCommands, class: HeroClass, selected
         button.spawn((
             Text::new(class.tagline()),
             TextFont {
-                font_size: 10.5,
+                font_size: (10.5).into(),
                 ..default()
             },
             TextColor(Color::srgba(0.82, 0.84, 0.90, 1.0)),
@@ -603,7 +603,7 @@ fn spawn_avatar_button(
         button.spawn((
             Text::new(display_name),
             TextFont {
-                font_size: 10.5,
+                font_size: (10.5).into(),
                 ..default()
             },
             TextColor(Color::srgba(0.86, 0.88, 0.92, 1.0)),
@@ -647,7 +647,7 @@ fn spawn_team_button(row: &mut ChildSpawnerCommands, team: Team, name: &str) {
         button.spawn((
             Text::new(format!("Join {}", team.as_str())),
             TextFont {
-                font_size: 26.0,
+                font_size: (26.0).into(),
                 ..default()
             },
             TextColor(Color::WHITE),

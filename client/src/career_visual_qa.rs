@@ -101,7 +101,7 @@ fn watermark(mut commands: Commands) {
         },
         Text::new("QA FIXTURE · no account or match data"),
         TextFont {
-            font_size: 8.0,
+            font_size: (8.0).into(),
             ..default()
         },
         TextColor(Color::WHITE),

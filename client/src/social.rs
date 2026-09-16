@@ -1025,7 +1025,7 @@ fn render_phone_chat(
                                 &social.preedit,
                                 layout.width - 180.0,
                             )),
-                            TextLayout::new_with_no_wrap(),
+                            TextLayout::no_wrap(),
                             ui::text(16.0),
                             TextColor(ui::IVORY),
                             Name::new("SocialChatInput"),
@@ -1079,7 +1079,7 @@ fn render_phone_chat(
                             social.draft.chars().count(),
                             social.status
                         )),
-                        TextLayout::new_with_no_wrap(),
+                        TextLayout::no_wrap(),
                         ui::text(12.0),
                         TextColor(ui::MUTED),
                         Node {
@@ -1617,7 +1617,7 @@ fn reconcile_bubbles(
             commands
                 .spawn((
                     Text::new("BOT"),
-                    TextLayout::new_with_justify(Justify::Center),
+                    TextLayout::justify(Justify::Center),
                     ui::text(11.0),
                     TextColor(ui::GOLD),
                     FocusPolicy::Pass,

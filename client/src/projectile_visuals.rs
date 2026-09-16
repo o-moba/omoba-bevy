@@ -39,7 +39,7 @@ struct ProjectileAssets {
     white: Handle<StandardMaterial>,
     green: Handle<StandardMaterial>,
     blue: Handle<StandardMaterial>,
-    profiles: HashMap<(u64, String), (Handle<StandardMaterial>, Option<Handle<Scene>>)>,
+    profiles: HashMap<(u64, String), (Handle<StandardMaterial>, Option<Handle<WorldAsset>>)>,
 }
 
 fn material(color: Color) -> StandardMaterial {
@@ -84,7 +84,7 @@ struct ProjectileVisual {
     trail: VecDeque<TrailPoint>,
     facing: Entity,
     fallback: Entity,
-    model: Option<(Entity, Handle<Scene>)>,
+    model: Option<(Entity, Handle<WorldAsset>)>,
 }
 
 fn spawn_part(
@@ -339,7 +339,7 @@ fn attach_visuals(
             let [x, y, z] = model.rotation_degrees.map(f32::to_radians);
             let entity = commands
                 .spawn((
-                    SceneRoot(scene.clone()),
+                    WorldAssetRoot(scene.clone()),
                     Visibility::Hidden,
                     Transform::from_scale(Vec3::splat(model.scale))
                         .with_rotation(Quat::from_euler(EulerRot::XYZ, x, y, z)),
@@ -397,7 +397,7 @@ fn advance_trail(visual: &mut ProjectileVisual, position: Vec3, delta: f32) {
 fn update_visuals(
     time: Res<Time>,
     server: Option<Res<AssetServer>>,
-    scenes: Option<Res<Assets<Scene>>>,
+    scenes: Option<Res<Assets<WorldAsset>>>,
     mut roots: Query<(&Transform, &NetworkProjectile, &mut ProjectileVisual)>,
     mut transforms: Query<&mut Transform, Without<NetworkProjectile>>,
     mut visibility: Query<&mut Visibility>,

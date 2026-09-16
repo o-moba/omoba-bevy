@@ -12,9 +12,9 @@ use bevy::{
     input::touch::{TouchInput, TouchPhase},
     prelude::*,
     render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk},
-    scene::{SceneInstance, SceneSpawner},
     ui::FocusPolicy,
     window::PrimaryWindow,
+    world_serialization::{WorldInstance, WorldInstanceSpawner},
 };
 
 use crate::{
@@ -88,7 +88,7 @@ fn label(mut commands: Commands) {
         },
         Text::new("QA: scripted input · server placement fixture"),
         TextFont {
-            font_size: 10.0,
+            font_size: (10.0).into(),
             ..default()
         },
         TextColor(Color::WHITE),
@@ -326,7 +326,7 @@ struct Scene<'w, 's> {
     >,
     cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<MainCamera>>,
     environment: Query<'w, 's, Entity, With<VerdantEnvironment>>,
-    scenes: Query<'w, 's, (&'static SceneRoot, Option<&'static SceneInstance>)>,
+    scenes: Query<'w, 's, (&'static WorldAssetRoot, Option<&'static WorldInstance>)>,
     windows: Query<'w, 's, Entity, With<PrimaryWindow>>,
     window_state: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     mouse: Res<'w, ButtonInput<MouseButton>>,
@@ -426,7 +426,7 @@ fn observe_targeting(
     preview: Res<TargetAimPreview>,
     cooldown: Res<LocalCastCooldown>,
     assets: Res<AssetServer>,
-    spawner: Res<SceneSpawner>,
+    spawner: Res<WorldInstanceSpawner>,
     mut exit: MessageWriter<AppExit>,
 ) {
     if qa.stage == 255 {

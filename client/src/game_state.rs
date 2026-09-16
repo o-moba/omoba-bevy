@@ -73,7 +73,7 @@ fn setup_game_state_ui(mut commands: Commands) {
                     card.spawn((
                         Text::new(""),
                         TextFont {
-                            font_size: 28.0,
+                            font_size: (28.0).into(),
                             ..default()
                         },
                         TextColor(Color::WHITE),

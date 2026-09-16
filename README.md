@@ -31,7 +31,7 @@ a character, a map, a sound, an idea or a pull request. Help shape what comes ne
 ## What you can play today
 
 This is a **native beta under active development**. The source version is
-[`0.20.0-rc.5`](Cargo.toml); see [features](docs/features.md) and
+[`0.20.0-rc.6`](Cargo.toml); see [features](docs/features.md) and
 [changes](CHANGELOG.md) for the detailed implementation history. A source version
 is not a promise of a published installer or a live public server.
 
@@ -59,9 +59,10 @@ store distribution and a reliable public service remain separate release work.
 
 ## Play locally
 
-Install [Rust](https://rustup.rs/), Git, Python 3.9+ and Make. The commands below
+Install [Rust through rustup](https://rustup.rs/), Git, Python 3.9+ and Make.
+`rust-toolchain.toml` selects Rust 1.95.0 for Bevy 0.19.1. The commands below
 use a POSIX shell. Your OS also needs the native build and graphics libraries
-required by Bevy; see [Bevy's Linux dependencies](https://github.com/bevyengine/bevy/blob/v0.18.0/docs/linux_dependencies.md)
+required by Bevy; see [Bevy's Linux dependencies](https://github.com/bevyengine/bevy/blob/v0.19.1/docs/linux_dependencies.md)
 when building on Linux.
 
 ```sh
@@ -145,7 +146,7 @@ them. Each game keeps its own art direction, performance budget and rules.
 | Project | What to explore |
 | --- | --- |
 | [Ekza Bevy SDK](https://github.com/ekza-space/ekza-bevy-sdk) | Rust character identity, model metadata, GLB validation and Bevy model loading |
-| [The SDK revision used by Open Moba](https://github.com/ekza-space/ekza-bevy-sdk/tree/28fbfde54780ba6af469a1653ef9334df2f5f446) | The exact integration, including Passport data contracts; SDK `main` may differ |
+| [The SDK revision used by Open Moba](https://github.com/ekza-space/ekza-bevy-sdk/tree/28205aedc8666d93b7ada8c94814d92577f65eaf) | The exact integration, including Passport data contracts; SDK `main` may differ |
 | [Ekza Stellar TypeScript SDK](https://github.com/ekza-space/ekza-stellar-sdk) | Asset manifests, avatar loading and application bridge source |
 | [Ekza Stellar creator protocol](https://github.com/ekza-space/solana-stellar) | Collaborative assets, lineage, releases and contributor-share infrastructure |
 | [Ekza Space](https://space.ekza.io/) | Explore another application in the ecosystem |

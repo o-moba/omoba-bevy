@@ -4,7 +4,7 @@ use shared::transport::{SnapshotAssembler, TransportError};
 
 use bevy::ecs::query::Or;
 use bevy::prelude::*;
-use bevy::scene::SceneRoot;
+use bevy::world_serialization::WorldAssetRoot;
 use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -2175,7 +2175,7 @@ fn apply_server_snapshot(
                 .id()
         } else if let Some(scene_handle) = local_scene {
             let mut entity_commands = commands.spawn((
-                SceneRoot(scene_handle),
+                WorldAssetRoot(scene_handle),
                 Transform {
                     translation: spawn,
                     rotation: Quat::IDENTITY,
@@ -2340,7 +2340,7 @@ fn apply_server_snapshot(
             entity_commands.with_children(|parent| {
                 if let Some(scene_handle) = scene_handle {
                     parent.spawn((
-                        SceneRoot(scene_handle),
+                        WorldAssetRoot(scene_handle),
                         Transform::default(),
                         Visibility::default(),
                     ));
@@ -2701,7 +2701,7 @@ fn setup_connection_status_ui(mut commands: Commands) {
             parent.spawn((
                 Text::new(""),
                 TextFont {
-                    font_size: 16.0,
+                    font_size: (16.0).into(),
                     ..default()
                 },
                 TextColor(Color::WHITE),
@@ -2727,7 +2727,7 @@ fn setup_connection_status_ui(mut commands: Commands) {
                     button.spawn((
                         Text::new("Retry"),
                         TextFont {
-                            font_size: 16.0,
+                            font_size: (16.0).into(),
                             ..default()
                         },
                         TextColor(Color::WHITE),

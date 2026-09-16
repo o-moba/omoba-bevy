@@ -253,7 +253,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                     panel.spawn((
                         Text::new("Menu"),
                         TextFont {
-                            font_size: 32.0,
+                            font_size: (32.0).into(),
                             ..default()
                         },
                         TextColor(Color::WHITE),
@@ -282,7 +282,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                             main.spawn((
                                 Text::new("The online match continues"),
                                 TextFont {
-                                    font_size: 20.0,
+                                    font_size: (20.0).into(),
                                     ..default()
                                 },
                                 TextColor(Color::WHITE),
@@ -323,7 +323,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                             settings.spawn((
                                 Text::new("Settings"),
                                 TextFont {
-                                    font_size: 22.0,
+                                    font_size: (22.0).into(),
                                     ..default()
                                 },
                                 TextColor(Color::WHITE),
@@ -385,7 +385,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                             settings.spawn((
                                 Text::new(""),
                                 TextFont {
-                                    font_size: 14.0,
+                                    font_size: (14.0).into(),
                                     ..default()
                                 },
                                 TextColor(Color::srgb(0.75, 0.78, 0.85)),
@@ -396,7 +396,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                             settings.spawn((
                                 Text::new("Lighting"),
                                 TextFont {
-                                    font_size: 18.0,
+                                    font_size: (18.0).into(),
                                     ..default()
                                 },
                                 TextColor(Color::srgb(0.88, 0.88, 0.88)),
@@ -446,7 +446,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                             settings.spawn((
                                 Text::new("Model"),
                                 TextFont {
-                                    font_size: 18.0,
+                                    font_size: (18.0).into(),
                                     ..default()
                                 },
                                 TextColor(Color::srgb(0.88, 0.88, 0.88)),
@@ -502,7 +502,7 @@ fn spawn_menu_button<M: Component>(
             button.spawn((
                 Text::new(text),
                 TextFont {
-                    font_size: 24.0,
+                    font_size: (24.0).into(),
                     ..default()
                 },
                 TextColor(Color::WHITE),
@@ -535,7 +535,7 @@ fn spawn_adjust_row<Dec: Component, ValueMarker: Component, Inc: Component>(
             row.spawn((
                 Text::new(label),
                 TextFont {
-                    font_size: 18.0,
+                    font_size: (18.0).into(),
                     ..default()
                 },
                 TextColor(Color::WHITE),
@@ -559,7 +559,7 @@ fn spawn_adjust_row<Dec: Component, ValueMarker: Component, Inc: Component>(
                 button.spawn((
                     Text::new("-"),
                     TextFont {
-                        font_size: 22.0,
+                        font_size: (22.0).into(),
                         ..default()
                     },
                     TextColor(Color::WHITE),
@@ -569,7 +569,7 @@ fn spawn_adjust_row<Dec: Component, ValueMarker: Component, Inc: Component>(
             row.spawn((
                 Text::new(value),
                 TextFont {
-                    font_size: 18.0,
+                    font_size: (18.0).into(),
                     ..default()
                 },
                 TextColor(Color::WHITE),
@@ -595,7 +595,7 @@ fn spawn_adjust_row<Dec: Component, ValueMarker: Component, Inc: Component>(
                 button.spawn((
                     Text::new("+"),
                     TextFont {
-                        font_size: 22.0,
+                        font_size: (22.0).into(),
                         ..default()
                     },
                     TextColor(Color::WHITE),
@@ -1539,6 +1539,7 @@ mod tests {
             ))
             .id();
         app.world_mut().write_message(MouseWheel {
+            phase: bevy::input::touch::TouchPhase::Moved,
             unit: MouseScrollUnit::Line,
             x: 0.0,
             y: -50.0,

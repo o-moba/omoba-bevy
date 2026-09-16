@@ -6,6 +6,15 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.20.0-rc.6] - 2026-09-17
+
+### Engine compatibility
+- Upgrade to Bevy 0.19.1 and pin Rust 1.95.0 plus a compatible Ekza SDK 0.4
+  revision. Adapt legacy GLB scene loading, typed fonts, mobile text scaling,
+  shadow-map settings, asset mutation and test input/system APIs.
+- Preserve current rendering quality, controls and gameplay protocol. New BSN,
+  editable-text widgets and expensive visual effects are not enabled by this migration.
+
 ### Build reproducibility
 - Repin the SDK to its content-identical rewritten Passport revision after Git
   attribution cleanup, preserving the locked dependency graph and platform features.

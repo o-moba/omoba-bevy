@@ -740,11 +740,11 @@ fn setup_mobile_controls(mut commands: Commands, assets: Option<Res<AssetServer>
                 parent.spawn((
                     Text::new(""),
                     TextFont {
-                        font_size: 15.0,
+                        font_size: (15.0).into(),
                         ..default()
                     },
                     TextColor(crate::ui_theme::IVORY),
-                    TextLayout::new_with_justify(Justify::Center),
+                    TextLayout::justify(Justify::Center),
                     Node {
                         align_self: if icon_slot.is_some() {
                             AlignSelf::End
@@ -1072,7 +1072,7 @@ fn draw_mobile_controls(
         for child in children.iter() {
             if let Ok((mut text, mut font)) = texts.get_mut(child) {
                 text.0.clone_from(&label);
-                font.font_size = if matches!(visual, MobileVisual::Rotate) {
+                font.font_size = (if matches!(visual, MobileVisual::Rotate) {
                     24.0 * s
                 } else if matches!(visual, MobileVisual::Cancel) {
                     28.0 * s
@@ -1085,7 +1085,8 @@ fn draw_mobile_controls(
                     12.0 * s
                 } else {
                     14.0 * s
-                };
+                })
+                .into();
             }
         }
     }

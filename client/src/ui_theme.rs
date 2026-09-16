@@ -50,17 +50,18 @@ fn apply_theme_font(
     for (mut font, root, span) in &mut text {
         let cjk = root.is_some_and(|text| needs_cjk_font(&text.0))
             || span.is_some_and(|text| needs_cjk_font(&text.0));
-        font.font = if cjk {
+        font.font = (if cjk {
             theme.cjk_font.clone()
         } else {
             theme.font.clone()
-        };
+        })
+        .into();
     }
 }
 
 pub(crate) fn text(size: f32) -> TextFont {
     TextFont {
-        font_size: size,
+        font_size: (size).into(),
         ..default()
     }
 }
@@ -78,7 +79,7 @@ pub(crate) fn panel_node() -> Node {
 mod tests {
     use super::*;
     fn packaged_font(name: &str) -> Font {
-        Font::try_from_bytes(
+        Font::from_bytes(
             std::fs::read(
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                     .join("assets/ui")
@@ -86,7 +87,6 @@ mod tests {
             )
             .unwrap(),
         )
-        .unwrap()
     }
     #[test]
     fn latin_cyrillic_keep_inter_and_cjk_names_use_the_packaged_fallback() {
@@ -110,18 +110,30 @@ mod tests {
             .spawn((Text::new("QA Дмитрий"), TextFont::default()))
             .id();
         app.update();
-        assert_eq!(app.world().get::<TextFont>(entity).unwrap().font, font);
+        assert_eq!(
+            app.world().get::<TextFont>(entity).unwrap().font,
+            font.clone().into()
+        );
         app.world_mut().get_mut::<Text>(entity).unwrap().0 = "QA 小明".into();
         app.update();
-        assert_eq!(app.world().get::<TextFont>(entity).unwrap().font, cjk_font);
+        assert_eq!(
+            app.world().get::<TextFont>(entity).unwrap().font,
+            cjk_font.clone().into()
+        );
         app.world_mut().get_mut::<Text>(entity).unwrap().0 = "QA Дмитрий".into();
         app.update();
-        assert_eq!(app.world().get::<TextFont>(entity).unwrap().font, font);
+        assert_eq!(
+            app.world().get::<TextFont>(entity).unwrap().font,
+            font.clone().into()
+        );
         let span = app
             .world_mut()
             .spawn((TextSpan::new("한글"), TextFont::default()))
             .id();
         app.update();
-        assert_eq!(app.world().get::<TextFont>(span).unwrap().font, cjk_font);
+        assert_eq!(
+            app.world().get::<TextFont>(span).unwrap().font,
+            cjk_font.clone().into()
+        );
     }
 }

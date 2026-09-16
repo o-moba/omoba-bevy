@@ -23,9 +23,9 @@ use bevy::{
     ecs::system::{NonSendMarker, SystemParam},
     prelude::*,
     render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk},
-    scene::{SceneInstance, SceneSpawner},
     ui::FocusPolicy,
     window::PrimaryWindow,
+    world_serialization::{WorldInstance, WorldInstanceSpawner},
 };
 use shared::{
     HeroClass,
@@ -125,7 +125,7 @@ fn label(mut commands: Commands) {
         },
         Text::new("QA: scripted commands · live server combat"),
         TextFont {
-            font_size: 10.0,
+            font_size: (10.0).into(),
             ..default()
         },
         TextColor(Color::WHITE),
@@ -278,7 +278,7 @@ struct Scene<'w, 's> {
         ),
     >,
     cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<MainCamera>>,
-    scenes: Query<'w, 's, (&'static SceneRoot, Option<&'static SceneInstance>)>,
+    scenes: Query<'w, 's, (&'static WorldAssetRoot, Option<&'static WorldInstance>)>,
     sprites: Query<'w, 's, &'static Sprite>,
     windows: Query<'w, 's, Entity, With<PrimaryWindow>>,
 }
@@ -336,7 +336,7 @@ fn observe(
     mobile: Res<MobileControls>,
     mode: Res<PlayerVisualMode>,
     assets: Res<AssetServer>,
-    spawner: Res<SceneSpawner>,
+    spawner: Res<WorldInstanceSpawner>,
     mut outgoing: MessageWriter<NetworkCommand>,
     mut exit: MessageWriter<AppExit>,
 ) {

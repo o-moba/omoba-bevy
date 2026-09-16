@@ -578,7 +578,7 @@ pub fn run_model_measurement_analyzer() {
             ..default()
         })
         .add_plugins(bevy::mesh::MeshPlugin)
-        .add_plugins(bevy::scene::ScenePlugin)
+        .add_plugins(bevy::world_serialization::WorldSerializationPlugin)
         .init_asset::<Image>()
         .init_asset::<StandardMaterial>()
         .init_asset::<bevy::animation::AnimationClip>()

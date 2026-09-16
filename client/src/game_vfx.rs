@@ -463,7 +463,7 @@ fn animate_particles(
             let mesh = assets.mesh(p.shape);
             // Ring/slash meshes need a solid tint; particles use the radial texture.
             let texture = matches!(p.shape, Shape::Glow).then(|| assets.glow_texture.clone());
-            if let Some(m) = materials.get_mut(&slot.material) {
+            if let Some(mut m) = materials.get_mut(&slot.material) {
                 m.base_color = p.color;
                 m.base_color_texture = texture.clone();
                 m.alpha_mode = if matches!(p.shape, Shape::Glow) {
@@ -472,7 +472,7 @@ fn animate_particles(
                     AlphaMode::Blend
                 };
             }
-            if let Some(m) = flats.get_mut(&slot.flat) {
+            if let Some(mut m) = flats.get_mut(&slot.flat) {
                 m.color = p.color;
                 m.texture = texture;
             }
@@ -501,10 +501,10 @@ fn animate_particles(
         *visibility = Visibility::Visible;
         *inherited = InheritedVisibility::VISIBLE;
         let opacity = (1. - p.age / p.lifetime).max(0.);
-        if let Some(m) = materials.get_mut(&slot.material) {
+        if let Some(mut m) = materials.get_mut(&slot.material) {
             m.base_color = p.color.with_alpha(opacity);
         }
-        if let Some(m) = flats.get_mut(&slot.flat) {
+        if let Some(mut m) = flats.get_mut(&slot.flat) {
             m.color = p.color.with_alpha(opacity);
         }
     }

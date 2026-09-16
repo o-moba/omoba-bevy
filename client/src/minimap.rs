@@ -1255,7 +1255,10 @@ mod tests {
             .id();
         let mut diagnostics =
             bevy::ecs::system::SystemState::<MinimapQaScene>::new(app.world_mut());
-        let summary = diagnostics.get(app.world()).diagnostics();
+        let summary = diagnostics
+            .get(app.world())
+            .expect("minimap test resources exist")
+            .diagnostics();
         assert_eq!(
             summary["container_rect"],
             serde_json::json!([184.0, 284.0, 416.0, 516.0])
@@ -1271,7 +1274,10 @@ mod tests {
         );
         app.world_mut().get_mut::<Node>(edge).unwrap().display = Display::None;
         app.world_mut().get_mut::<Node>(icon).unwrap().display = Display::None;
-        let summary = diagnostics.get(app.world()).diagnostics();
+        let summary = diagnostics
+            .get(app.world())
+            .expect("minimap test resources exist")
+            .diagnostics();
         assert_eq!(summary["hero_markers"]["local"], 0);
         assert_eq!(summary["camera_edges"], serde_json::json!([]));
     }

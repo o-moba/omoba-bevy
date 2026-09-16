@@ -173,7 +173,7 @@ Installer selection and failure handling can be checked independently with:
 python3 -B -m unittest discover -s mobile/ios -p 'test_install_device.py' -v
 ```
 
-- [Bevy 0.18 iOS example](https://github.com/bevyengine/bevy/tree/v0.18.0/examples/mobile)
+- [Bevy 0.19 iOS example](https://github.com/bevyengine/bevy/tree/v0.19.1/examples/mobile)
 - [Rust iOS targets and SDK requirements](https://doc.rust-lang.org/rustc/platform-support/apple-ios.html)
 - [Apple: Run an app on a device](https://help.apple.com/xcode/mac/current/en.lproj/dev5a825a1ca.html)
 - [Apple: Enable Developer Mode](https://developer.apple.com/documentation/xcode/enabling-developer-mode-on-a-device)

@@ -122,7 +122,7 @@ fn setup_help_overlay(mut commands: Commands) {
                     panel.spawn((
                         Text::new(body),
                         TextFont {
-                            font_size: 16.0,
+                            font_size: (16.0).into(),
                             ..default()
                         },
                         TextColor(Color::WHITE),
@@ -149,7 +149,7 @@ fn setup_help_overlay(mut commands: Commands) {
                                 Text::new("Got it - play  [Escape / F1]"),
                                 Name::new("HelpDismissLabel"),
                                 TextFont {
-                                    font_size: 18.0,
+                                    font_size: (18.0).into(),
                                     ..default()
                                 },
                                 TextColor::WHITE,

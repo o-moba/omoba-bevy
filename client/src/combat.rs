@@ -591,7 +591,7 @@ fn setup_combat_ui(mut commands: Commands, asset_server: Option<Res<AssetServer>
         },
         Text::new(""),
         TextFont {
-            font_size: 18.0,
+            font_size: (18.0).into(),
             ..default()
         },
         TextColor(Color::srgb(1.0, 0.88, 0.5)),
@@ -645,7 +645,7 @@ fn setup_combat_ui(mut commands: Commands, asset_server: Option<Res<AssetServer>
                         arrow.spawn((
                             Text::new("+  UPGRADE"),
                             TextFont {
-                                font_size: 11.0,
+                                font_size: (11.0).into(),
                                 ..default()
                             },
                             TextColor::WHITE,
@@ -695,9 +695,9 @@ fn setup_combat_ui(mut commands: Commands, asset_server: Option<Res<AssetServer>
                         ));
                         slot.spawn((
                             Text::new(label),
-                            TextLayout::new_with_justify(Justify::Center),
+                            TextLayout::justify(Justify::Center),
                             TextFont {
-                                font_size: 24.0,
+                                font_size: (24.0).into(),
                                 ..default()
                             },
                             BackgroundColor(Color::srgba(0.01, 0.02, 0.03, 0.78)),
@@ -710,11 +710,11 @@ fn setup_combat_ui(mut commands: Commands, asset_server: Option<Res<AssetServer>
                         slot.spawn((
                             Text::new(""),
                             TextFont {
-                                font_size: 13.0,
+                                font_size: (13.0).into(),
                                 ..default()
                             },
                             TextColor(Color::srgba(0.88, 0.90, 0.94, 1.0)),
-                            TextLayout::new_with_justify(Justify::Center),
+                            TextLayout::justify(Justify::Center),
                             BackgroundColor(Color::srgba(0.01, 0.02, 0.03, 0.88)),
                             Node {
                                 width: Val::Percent(100.0),
@@ -725,11 +725,11 @@ fn setup_combat_ui(mut commands: Commands, asset_server: Option<Res<AssetServer>
                         slot.spawn((
                             Text::new("Lv 1"),
                             TextFont {
-                                font_size: 12.0,
+                                font_size: (12.0).into(),
                                 ..default()
                             },
                             TextColor(Color::srgba(0.82, 0.84, 0.90, 1.0)),
-                            TextLayout::new_with_justify(Justify::Center),
+                            TextLayout::justify(Justify::Center),
                             BackgroundColor(Color::srgba(0.01, 0.02, 0.03, 0.88)),
                             Node {
                                 width: Val::Percent(100.0),
@@ -1651,7 +1651,7 @@ fn adapt_mobile_combat_feedback(
         node.left = Val::Px((mobile.viewport.x - width) * 0.5);
         node.bottom = Val::Px(mobile.safe.bottom + 84.0 * mobile.scale());
         node.max_width = Val::Px(width);
-        font.font_size = 13.0 * mobile.scale();
+        font.font_size = (13.0 * mobile.scale()).into();
     }
 }
 
@@ -2393,7 +2393,9 @@ mod tests {
             TargetCandidates,
             crate::targeting::TargetValidity,
         )>::new(app.world_mut());
-        let (candidates, validity) = params.get(app.world());
+        let (candidates, validity) = params
+            .get(app.world())
+            .expect("targeting test resources exist");
         let expected = Some((
             visible,
             TargetId {

@@ -41,16 +41,16 @@ struct AttachedStructure(Entity);
 
 #[derive(Resource, Clone)]
 struct VerdantAssets {
-    environment: Handle<Scene>,
-    foliage: Handle<Scene>,
-    watchtower_green: Handle<Scene>,
-    watchtower_blue: Handle<Scene>,
-    sanctuary_green: Handle<Scene>,
-    sanctuary_blue: Handle<Scene>,
+    environment: Handle<WorldAsset>,
+    foliage: Handle<WorldAsset>,
+    watchtower_green: Handle<WorldAsset>,
+    watchtower_blue: Handle<WorldAsset>,
+    sanctuary_green: Handle<WorldAsset>,
+    sanctuary_blue: Handle<WorldAsset>,
 }
 
 impl VerdantAssets {
-    fn structure(&self, kind: StructureKind, team: Team) -> Handle<Scene> {
+    fn structure(&self, kind: StructureKind, team: Team) -> Handle<WorldAsset> {
         match (kind, team) {
             (StructureKind::Tower, Team::Green) => self.watchtower_green.clone(),
             (StructureKind::Tower, Team::Blue) => self.watchtower_blue.clone(),
@@ -113,14 +113,14 @@ fn spawn_environment(
     // Source export is already Y-up, one meter per unit. Do not reorient it.
     commands.spawn((
         VerdantEnvironment,
-        SceneRoot(assets.environment.clone()),
+        WorldAssetRoot(assets.environment.clone()),
         Transform::IDENTITY,
         Name::new("Verdant / environment"),
     ));
     commands.spawn((
         VerdantFoliage,
         DecorRoot,
-        SceneRoot(assets.foliage.clone()),
+        WorldAssetRoot(assets.foliage.clone()),
         Transform::IDENTITY,
         Name::new("Verdant / foliage (F4)"),
     ));
@@ -168,7 +168,7 @@ fn reconcile_structures(
     >,
     mut visuals: Query<
         (
-            &SceneRoot,
+            &WorldAssetRoot,
             &mut Transform,
             &mut Visibility,
             &VerdantStructureVisual,
@@ -223,7 +223,7 @@ fn reconcile_structures(
         }
         let child = commands
             .spawn((
-                SceneRoot(scene),
+                WorldAssetRoot(scene),
                 transform,
                 visibility,
                 VerdantStructureVisual { owner },
@@ -249,8 +249,8 @@ mod tests {
     fn fixture(mode: PlayerVisualMode) -> App {
         let mut app = App::new();
         app.insert_resource(mode).init_resource::<MapLayout>();
-        let mut scenes = Assets::<Scene>::default();
-        let mut scene = || scenes.add(Scene::new(World::new()));
+        let mut scenes = Assets::<WorldAsset>::default();
+        let mut scene = || scenes.add(WorldAsset::new(World::new()));
         app.insert_resource(VerdantAssets {
             environment: scene(),
             foliage: scene(),
@@ -298,7 +298,7 @@ mod tests {
         assert!(!app.world().contains_resource::<VerdantAssets>());
         assert_eq!(
             app.world_mut()
-                .query::<&SceneRoot>()
+                .query::<&WorldAssetRoot>()
                 .iter(app.world())
                 .count(),
             0
@@ -339,7 +339,7 @@ mod tests {
                 .count(),
             8
         );
-        assert_eq!(app.world().resource::<Assets<Scene>>().len(), 6);
+        assert_eq!(app.world().resource::<Assets<WorldAsset>>().len(), 6);
         let assets = app.world().resource::<VerdantAssets>();
         for owner in &owners {
             let entity = app.world().entity(*owner);
@@ -352,7 +352,7 @@ mod tests {
             );
             assert_eq!(visual.get::<ChildOf>().unwrap().parent(), *owner);
             assert_eq!(
-                visual.get::<SceneRoot>().unwrap().0,
+                visual.get::<WorldAssetRoot>().unwrap().0,
                 assets.structure(
                     *entity.get::<StructureKind>().unwrap(),
                     *entity.get::<Team>().unwrap()
@@ -368,7 +368,7 @@ mod tests {
         let owner = structure(&mut app, StructureKind::Tower, Team::Green);
         app.update();
         let child = app.world().get::<AttachedStructure>(owner).unwrap().0;
-        let scene = app.world().get::<SceneRoot>(child).unwrap().0.clone();
+        let scene = app.world().get::<WorldAssetRoot>(child).unwrap().0.clone();
         app.world_mut().get_mut::<CombatStats>(owner).unwrap().hp = 37.0;
         app.update();
         assert_eq!(app.world().get::<CombatStats>(owner).unwrap().hp, 37.0);
@@ -400,7 +400,7 @@ mod tests {
         app.update();
         let restored_child = app.world().get::<AttachedStructure>(restored).unwrap().0;
         assert_eq!(
-            app.world().get::<SceneRoot>(restored_child).unwrap().0,
+            app.world().get::<WorldAssetRoot>(restored_child).unwrap().0,
             scene
         );
         assert_eq!(

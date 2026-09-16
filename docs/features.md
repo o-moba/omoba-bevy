@@ -1,6 +1,15 @@
 # Feature Inventory
 
-Canonical version: `0.20.0-rc.5`
+Canonical version: `0.20.0-rc.6`
+
+## Engine compatibility
+
+The source targets Bevy 0.19.1 with Rust 1.95.0 and an exact Ekza SDK 0.4
+revision. Existing GLB scenes use the world-serialization API; HUD typography
+keeps pixel-based mobile scaling with typed font sizes and font sources.
+The upgrade retains current graphics settings, controls and network protocol.
+Upstream renderer improvements are not a measured phone FPS claim. Physical
+iPhone performance and keyboard/touch validation remain release requirements.
 
 ## Forest ambience and combat particles
 
