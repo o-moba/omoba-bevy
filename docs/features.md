@@ -11,6 +11,11 @@ credentials can sign it; installation and real-device gameplay require separate
 verification. Retain `builds/` when clearing `target/` caches. See
 [iPhone instructions](../mobile/ios/README.md).
 
+The iPhone installer checks profile expiration, physical-device enrollment and
+Developer Mode before updating and launching. Home playtest kits bundle the Mac
+practice server, display its current LAN addresses and require no compilation or
+database to run. Actual device gameplay remains a separate acceptance step.
+
 ## Player portal integration
 
 A separate Next.js player portal uses the Rust Account API and the same PostgreSQL

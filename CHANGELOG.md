@@ -11,6 +11,8 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
   license terms and remove an accidental editing suffix from the mission.
 
 ### Developer workflow
+- Add an enrolled-iPhone install/launch helper and a home practice-server launcher;
+  prepared kits keep signed app/IPA and the native Mac server outside compiler caches.
 - Consolidate physical iPhone build/signing tools and tests in the main repository;
   add `make iphone-check` / `make iphone` and separate retained `builds/` packages
   from disposable Cargo caches. Refresh the reviewed prop asset inventory.

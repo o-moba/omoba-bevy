@@ -97,6 +97,26 @@ this local development artifact as a public download.
 
 ## Install and launch separately
 
+The repository also includes an installer that selects an available, enrolled
+physical iPhone and checks the existing profile expiration and Developer Mode:
+
+```sh
+python3 mobile/ios/install_device.py --app builds/iphone/OmobaBeta.app --check
+python3 mobile/ios/install_device.py --app builds/iphone/OmobaBeta.app
+```
+
+The first command checks readiness; the second installs and launches. With several
+eligible phones, specify the desired identifier using `--device`. It never
+uninstalls the existing app. Connect/unlock/trust the iPhone before running it.
+
+Prepared home-playtest kits under `builds/` include `1-Start-server.command` and
+`2-Install-on-iPhone.command`. The first runs a bundled Mac practice server and
+prints its current LAN address; the second runs the installer. These kits need
+neither a Cargo build nor PostgreSQL at play time. Connect both devices to the
+same Wi-Fi, allow local-network access on the phone, then enter the printed
+`IP:4000` through the game's **SERVER** button and select **CONNECT**. Practice
+uses server bots and produces local results without permanent career/rating credit.
+
 Connect/unlock/trust the phone, enable Developer Mode when required, and use the
 device identifier reported by Xcode/devicectl. This identifier can differ from
 the provisioning UDID. On current Xcode, the explicit actions are:
@@ -129,6 +149,12 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s mobile/ios -p 'test_bu
 
 Tests use synthetic Mach-O/profile fixtures and an isolated temporary Git tree.
 They do not use real signing credentials or prove physical gameplay.
+
+Installer selection and failure handling can be checked independently with:
+
+```sh
+python3 -B -m unittest discover -s mobile/ios -p 'test_install_device.py' -v
+```
 
 - [Bevy 0.18 iOS example](https://github.com/bevyengine/bevy/tree/v0.18.0/examples/mobile)
 - [Rust iOS targets and SDK requirements](https://doc.rust-lang.org/rustc/platform-support/apple-ios.html)
