@@ -145,7 +145,7 @@ them. Each game keeps its own art direction, performance budget and rules.
 | Project | What to explore |
 | --- | --- |
 | [Ekza Bevy SDK](https://github.com/ekza-space/ekza-bevy-sdk) | Rust character identity, model metadata, GLB validation and Bevy model loading |
-| [The SDK revision used by Open Moba](https://github.com/ekza-space/ekza-bevy-sdk/tree/8254ed5e94d4709c11c83bef604ebe4481467847) | The exact integration, including Passport data contracts; SDK `main` may differ |
+| [The SDK revision used by Open Moba](https://github.com/ekza-space/ekza-bevy-sdk/tree/28fbfde54780ba6af469a1653ef9334df2f5f446) | The exact integration, including Passport data contracts; SDK `main` may differ |
 | [Ekza Stellar TypeScript SDK](https://github.com/ekza-space/ekza-stellar-sdk) | Asset manifests, avatar loading and application bridge source |
 | [Ekza Stellar creator protocol](https://github.com/ekza-space/solana-stellar) | Collaborative assets, lineage, releases and contributor-share infrastructure |
 | [Ekza Space](https://space.ekza.io/) | Explore another application in the ecosystem |

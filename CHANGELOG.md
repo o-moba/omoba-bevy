@@ -6,6 +6,10 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Build reproducibility
+- Repin the SDK to its content-identical rewritten Passport revision after Git
+  attribution cleanup, preserving the locked dependency graph and platform features.
+
 ### Visual effects
 - Add animated forest butterflies and pooled confirmed-hit particles: melee slash
   arcs and sparks, expanding magic rings and motes, and ranged impact flashes.

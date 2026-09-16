@@ -560,3 +560,16 @@ The [project mission](../MISSION.md) records the official long-term direction; i
   screen frame track current target/camera transforms after movement and grounding.
   Animation bounds, model turning and decorative pulse/spin no longer move the
   selection marker. Applies to both interface profiles and 3D/2D rendering.
+
+## Current SDK integration boundary
+
+Open Moba pins a specific SDK Passport revision in all four consumers (client,
+server, shared and Passport wrapper), rather than following SDK main. The SDK
+provides character identifiers and validated Passport delivery/admission types.
+The game wrapper performs HTTP delivery, size/hash and humanoid animation checks;
+Bevy loads installed GLBs. Ordinary packaged roster avatars are loaded directly
+through `AvatarAssetCache` in `client/src/world.rs`. The legacy SDK model catalog
+is intentionally empty at startup, so `load_builtin_model_catalog` and its remote
+downloader are not the active roster import path. Android uses the SDK without
+its optional desktop Bevy/HTTP feature set. These boundaries should guide further
+SDK extraction instead of claiming all avatar loading already lives in the SDK.
