@@ -11,6 +11,9 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
   license terms and remove an accidental editing suffix from the mission.
 
 ### Developer workflow
+- Consolidate physical iPhone build/signing tools and tests in the main repository;
+  add `make iphone-check` / `make iphone` and separate retained `builds/` packages
+  from disposable Cargo caches. Refresh the reviewed prop asset inventory.
 - Add `make play` / `make play-bots` to build locked current sources and launch
   supervised local 3D practice with nine bots, with owned-process cleanup.
 

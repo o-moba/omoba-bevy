@@ -1,8 +1,10 @@
 # Omoba mobile beta build and platform boundaries
 
-Android is the first phone package. Android, iOS and desktop retain the same native
-UDP protocol and gameplay rules. These files prepare native application launch;
-they do not publish a server, a download, or a store release.
+Android, iOS and desktop retain the same native UDP protocol and gameplay rules.
+These files prepare native application launch; they do not publish a server, a
+download, or a store release. For the physical iPhone development package added
+on September 14, see [iPhone build and installation](ios/README.md). The dated
+September 11 preflight below remains a historical record.
 
 ## Desktop and mobile interface selection
 
@@ -124,9 +126,10 @@ landscape orientations and the local-network permission explanation. Assets are
 copied inside the bundle. The script prints `simctl install` and launch commands
 but does not launch or modify simulator devices automatically.
 
-A physical iPhone build, Apple developer provisioning, device signing, and TestFlight
-require a separate verified step with the user's credentials and explicit release
-authorization. This simulator scaffold does not imply those steps are complete.
+The separate [physical iPhone builder](ios/README.md) supports an actual device
+binary and existing development credentials. Device installation is verified
+separately. Apple account provisioning and TestFlight publication are not performed
+by either script; this Simulator scaffold does not imply those steps are complete.
 
 ## Required beta device evidence
 

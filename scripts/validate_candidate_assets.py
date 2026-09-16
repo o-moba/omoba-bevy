@@ -148,11 +148,36 @@ def validate(asset_root, policy_path=POLICY):
                 continue
             if sha(path) != entry["sha256"]:
                 errors.append(f"unreviewed environment model hash: {relative}")
-        expected_models = set(actors) | environment_models
+        prop_manifest_path = safe_path(root, policy["prop_manifest"])
+        if sha(prop_manifest_path) != policy["prop_manifest_sha256"]:
+            errors.append("unreviewed prop provenance manifest hash")
+        prop_manifest = json.loads(prop_manifest_path.read_text())
+        props = policy["approved_prop_models"]
+        prop_references = set()
+        for entry in prop_manifest["models"]:
+            relative = f"map-props/{entry['file']}"
+            safe_path(root, relative)
+            if relative in prop_references:
+                errors.append(f"duplicate prop reference: {relative}")
+            prop_references.add(relative)
+            approved = props.get(relative)
+            if not approved or any(entry[key] != approved[key] for key in ("source", "sha256")):
+                errors.append(f"prop provenance mismatch: {relative}")
+        if prop_references != set(props):
+            errors.append("prop references differ from reviewed model inventory")
+        for relative, approved in props.items():
+            path = safe_path(root, relative)
+            if not path.is_file():
+                errors.append(f"missing approved prop: {relative}")
+                continue
+            if sha(path) != approved["sha256"]:
+                errors.append(f"unreviewed prop model hash: {relative}")
+        expected_models = set(actors) | environment_models | set(props)
         for relative in sorted(actual_models - expected_models):
             errors.append(f"unknown model: {relative}")
         checks = ["denied filenames and hashes across every packaged file", "reviewed model inventory and SHA-256",
-                  "manifest references, previews and provenance", "embedded actor permissions", "reviewed original environment manifest"]
+                  "manifest references, previews and provenance", "embedded actor permissions", "reviewed original environment manifest",
+                  "reviewed original prop inventory, provenance and SHA-256"]
     # JSON with unexpected object/array shapes must still return a closed gate.
     except (OSError, ValueError, KeyError, TypeError, AttributeError, struct.error) as error:
         errors.append(f"invalid or incomplete asset inventory: {error}")

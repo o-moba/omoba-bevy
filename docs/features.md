@@ -1,6 +1,15 @@
 # Feature Inventory
 
-Canonical version: `0.20.0-rc.1`
+Canonical version: `0.20.0-rc.3`
+
+## Builds from the primary checkout
+
+All native launch and mobile packaging scripts are in the main repository.
+`make practice` / `make play` use current desktop sources; `make iphone-check`
+and `make iphone` prepare a physical arm64 iPhone app. Existing development
+credentials can sign it; installation and real-device gameplay require separate
+verification. Retain `builds/` when clearing `target/` caches. See
+[iPhone instructions](../mobile/ios/README.md).
 
 ## Player portal integration
 

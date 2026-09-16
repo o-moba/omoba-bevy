@@ -1,4 +1,6 @@
 /target
+# Installable local packages are retained separately from disposable build caches.
+/builds/
 __pycache__/
 *.pyc
 assets/

@@ -142,6 +142,35 @@
     }
   },
   "environment_manifest": "verdant/manifest.json",
-  "environment_manifest_sha256": "25a3717741813d028d9fd7b96ed75e31e1454eb4413bb5d876074af48f201e22",
-  "environment_provenance": "Original project-authored geometry; see art/verdant-confluence/PROVENANCE.md"
+  "environment_manifest_sha256": "ce596c28a93e8708fd381b55956604720272392a833b5e89d6eec924385acb3d",
+  "environment_provenance": "Original project-authored geometry; see art/verdant-confluence/PROVENANCE.md",
+  "prop_manifest": "map-props/provenance.json",
+  "prop_manifest_sha256": "f7992da07e1439f282b11e702471cca478585ac60b7795e32feaa06560b66f22",
+  "approved_prop_models": {
+    "map-props/lantern.glb": {
+      "sha256": "5e7c47fe5dfef8e79b7f5d5e1a60646584c3cac1e6f64000db2ffed028144d32",
+      "source": "art/verdant-confluence/library/lantern.glb",
+      "license": "CC-BY-4.0"
+    },
+    "map-props/flowering_shrub.glb": {
+      "sha256": "63e52b981dd4b69d1d2d88dba2ee44bb4d47da821e47f054567e6f2343fd2a41",
+      "source": "art/verdant-confluence/library/flowering_shrub.glb",
+      "license": "CC-BY-4.0"
+    },
+    "map-props/fern_cluster.glb": {
+      "sha256": "4f542a1f7dd4d1b644d2839d4e8b70e4f2d254a26a0717671290619d0d2b3555",
+      "source": "art/verdant-confluence/library/fern_cluster.glb",
+      "license": "CC-BY-4.0"
+    },
+    "map-props/tree_jade_canopy.glb": {
+      "sha256": "d120297754b3deb80e8a55639451e6139c07bc8a9e745912095dd481454018a3",
+      "source": "art/verdant-confluence/library/tree_jade_canopy.glb",
+      "license": "CC-BY-4.0"
+    },
+    "map-props/tree_sage_elder.glb": {
+      "sha256": "a00aeb112a0780d2532e8167422945c1fcfb0db6760f1ec0a05166d7d24791d8",
+      "source": "art/verdant-confluence/library/tree_sage_elder.glb",
+      "license": "CC-BY-4.0"
+    }
+  }
 }

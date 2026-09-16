@@ -1,4 +1,4 @@
-.PHONY: server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay
+.PHONY: server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone
 
 # ---------------------------------------------------------------------------
 # Match modes (TASK-22)
@@ -20,6 +20,15 @@
 
 GAME_SERVER_ADDR ?= 127.0.0.1:4000
 LOCAL_SERVER_ADDR ?= 127.0.0.1:4000
+IPHONE_OUTPUT ?= builds/iphone
+
+# Physical iOS package; install the Rust iOS target and select Xcode first.
+# Optional signing with existing credentials is documented in mobile/ios/README.md.
+iphone-check:
+	python3 mobile/ios/build_device.py --check
+
+iphone:
+	python3 mobile/ios/build_device.py --output "$(IPHONE_OUTPUT)"
 
 # Run the game server in RELEASE match mode (matches form to 5v5 before starting).
 server:

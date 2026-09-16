@@ -45,6 +45,13 @@ See the [portal verification and remaining release checks](docs/progress/2026-09
 
 ## Build and play locally
 
+Desktop, Android, iOS Simulator and physical iPhone build scripts all live in
+this repository. No sibling worktree is required. For physical iPhone, install
+Xcode and the Rust `aarch64-apple-ios` target, then run `make iphone-check` and
+`make iphone`. See [iPhone setup, signing and installation](mobile/ios/README.md).
+Installable iPhone packages go in `builds/`; disposable Cargo files go in `target/`.
+Keep `builds/` when clearing build caches.
+
 From the **repository root** (the folder containing this `README.md` and `Makefile`):
 
 ```sh

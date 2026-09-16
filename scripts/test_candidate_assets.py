@@ -32,6 +32,7 @@ class CandidateAssetGateTests(unittest.TestCase):
         cls.assets = cls.directory / "assets"
         shutil.copytree(ROOT / "client/assets", cls.assets)
         cls.reviewed_policy = json.loads(POLICY.read_text())
+        cls.legal_notices = package_native.collect_legal_notices(ROOT)
         cls.denied_bytes = {}
         archive = os.environ.get("OMOBA_DENIED_ASSET_ROOT")
         for relative, record in cls.reviewed_policy["denied_files"].items():
@@ -194,6 +195,38 @@ class CandidateAssetGateTests(unittest.TestCase):
         self.remove("verdant/foliage.glb")
         self.expect_failure("missing environment model: verdant/foliage.glb")
 
+    def test_each_required_prop_fails_if_missing(self):
+        for relative in self.reviewed_policy["approved_prop_models"]:
+            with self.subTest(prop=relative):
+                self.remove(relative)
+                self.expect_failure(f"missing approved prop: {relative}")
+                (self.assets / relative).write_bytes(self.saved[relative])
+
+    def test_prop_geometry_swap_cannot_reuse_an_approved_filename(self):
+        self.write("map-props/lantern.glb", (self.assets / "map-props/flowering_shrub.glb").read_bytes())
+        self.expect_failure("unreviewed prop model hash: map-props/lantern.glb")
+
+    def test_new_prop_is_rejected_even_if_its_bytes_are_reviewed(self):
+        self.write("map-props/unlisted.glb", (self.assets / "map-props/lantern.glb").read_bytes())
+        self.expect_failure("unknown model: map-props/unlisted.glb")
+
+    def test_prop_manifest_cannot_approve_altered_geometry_or_provenance(self):
+        relative = "map-props/lantern.glb"
+        altered = (self.assets / relative).read_bytes() + b"mutation"
+        self.write(relative, altered)
+        manifest = json.loads((self.assets / "map-props/provenance.json").read_text())
+        entry = next(item for item in manifest["models"] if item["file"] == "lantern.glb")
+        entry["sha256"] = hashlib.sha256(altered).hexdigest()
+        entry["source"] = "unreviewed/model.glb"
+        self.write_json("map-props/provenance.json", manifest)
+        result = self.expect_failure("unreviewed prop provenance manifest hash")
+        self.assertIn(f"prop provenance mismatch: {relative}", result["errors"])
+        self.assertIn(f"unreviewed prop model hash: {relative}", result["errors"])
+
+    def test_missing_prop_provenance_fails_closed(self):
+        self.remove("map-props/provenance.json")
+        self.expect_failure("invalid or incomplete asset inventory")
+
     def test_environment_manifest_cannot_silently_approve_an_extra_scene(self):
         manifest = json.loads((self.assets / "verdant/manifest.json").read_text())
         manifest["files"].append(copy.deepcopy(manifest["files"][0]))
@@ -239,6 +272,7 @@ class CandidateAssetGateTests(unittest.TestCase):
         repository = self.packaging_source("source-rejection")
         output = repository / "candidate"
         with mock.patch.object(package_native, "ROOT", repository), \
+                mock.patch.object(package_native, "collect_legal_notices", return_value=self.legal_notices), \
                 mock.patch("sys.argv", ["package_native.py", "--output", str(output)]), \
                 mock.patch.object(package_native, "build_executables") as cargo, \
                 mock.patch("sys.stderr"):
@@ -268,6 +302,7 @@ class CandidateAssetGateTests(unittest.TestCase):
             return result
 
         with mock.patch.object(package_native, "ROOT", repository), \
+                mock.patch.object(package_native, "collect_legal_notices", return_value=self.legal_notices), \
                 mock.patch("sys.argv", ["package_native.py", "--output", str(output)]), \
                 mock.patch.dict(os.environ, {"CARGO_TARGET_DIR": str(target)}), \
                 mock.patch.object(package_native, "source_identity", return_value={}), \
