@@ -16,6 +16,7 @@ mod creatures3d;
 mod debug_console;
 mod decor;
 mod game_audio;
+mod game_vfx;
 mod game_state;
 mod god_mode;
 mod help_overlay;
@@ -157,6 +158,7 @@ pub fn main() {
     .add_plugins(supporter::SupporterPlugin)
     .add_plugins(supporter_storekit::SupporterStoreKitPlugin)
     .add_plugins(game_audio::GameAudioPlugin)
+    .add_plugins(game_vfx::GameVfxPlugin)
     .add_plugins(audio_qa::AudioQaPlugin)
     .add_plugins(career_identity::CareerIdentityPlugin)
     .add_plugins(career_visual_qa::CareerVisualQaPlugin)

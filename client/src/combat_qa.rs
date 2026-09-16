@@ -20,7 +20,7 @@ use crate::{
 use bevy::{
     app::AppExit,
     asset::RecursiveDependencyLoadState,
-    ecs::system::SystemParam,
+    ecs::system::{NonSendMarker, SystemParam},
     prelude::*,
     render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk},
     scene::{SceneInstance, SceneSpawner},
@@ -81,12 +81,20 @@ impl Plugin for CombatQaPlugin {
             requests: Vec::new(),
         })
         .add_systems(Startup, label)
-        .add_systems(PreUpdate, prepare.after(bevy::ui::UiSystems::Focus))
+        .add_systems(
+            PreUpdate,
+            (
+                focus_capture_window,
+                prepare.after(bevy::ui::UiSystems::Focus),
+            ),
+        )
         .add_systems(
             PostUpdate,
             observe
                 .after(bevy::transform::TransformSystems::Propagate)
-                .after(bevy::ui::UiSystems::Layout),
+                .after(bevy::ui::UiSystems::Layout)
+                .after(crate::game_vfx::VfxPresentation)
+                .after(bevy::camera::visibility::VisibilitySystems::CheckVisibility),
         );
     }
 }
@@ -126,6 +134,34 @@ fn label(mut commands: Commands) {
         ZIndex(200),
     ));
 }
+// Ask the actual OS window for focus; never spoof Window.focused or input gates.
+// This is bounded and only installed for an explicitly requested native QA run.
+fn focus_capture_window(
+    windows: Query<Entity, With<PrimaryWindow>>,
+    mut retry: Local<(u8, Option<Instant>)>,
+    _main_thread: NonSendMarker,
+) {
+    if retry.0 >= 3
+        || retry
+            .1
+            .is_some_and(|at| at.elapsed() < Duration::from_secs(2))
+    {
+        return;
+    }
+    let Ok(entity) = windows.single() else {
+        return;
+    };
+    bevy::winit::WINIT_WINDOWS.with_borrow(|windows| {
+        if let Some(window) = windows.get_window(entity)
+            && !window.has_focus()
+        {
+            window.focus_window();
+            retry.0 += 1;
+            retry.1 = Some(Instant::now());
+        }
+    });
+}
+
 fn prepare(
     qa: Res<CombatQa>,
     session: Res<ClientSession>,
@@ -164,6 +200,16 @@ fn prepare(
 
 #[derive(SystemParam)]
 struct Scene<'w, 's> {
+    window_focus: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
+    context: Res<'w, crate::input_context::GameplayInputContext>,
+    particles: Query<
+        'w,
+        's,
+        (
+            &'static crate::game_vfx::ParticleSlot,
+            &'static ViewVisibility,
+        ),
+    >,
     local: Query<
         'w,
         's,
@@ -354,9 +400,20 @@ fn observe(
         .map(|(number, text, node, transform, _)| serde_json::json!({"event_id":number.event_id,"text":text.0,"size":node.size().to_array(),"center":transform.translation.to_array(),"visible":true})).collect();
     let nodes: Vec<_> = scene.nodes.iter().filter(|(name,_,_)| matches!(name.as_str(),"MobileJoystick"|"MobileAttack"|"MobileAbility-0"|"MobileAbility-1"|"MobileAbility-2"|"MobileAbility-3"|"ShopOpenButton"))
         .map(|(name,node,visible)| serde_json::json!({"name":name.as_str(),"size":node.size().to_array(),"visible":visible.get()})).collect();
-    let frame = serde_json::json!({"snapshot_tick":snapshot.meta.snapshot_tick,"server_epoch":snapshot.meta.server_epoch,"match_id":snapshot.meta.match_id,
+    let particles: Vec<_> = scene
+        .particles
+        .iter()
+        .filter(|(_, v)| v.get())
+        .filter_map(|(slot, _)| slot.sample())
+        .filter(|(id, _)| events.iter().any(|e| e.id == *id))
+        .map(|(id, age)| serde_json::json!({"event_id":id,"age":age}))
+        .collect();
+    let visible_burst = particles
+        .iter()
+        .any(|p| p["age"].as_f64().is_some_and(|age| age >= 0.06));
+    let frame = serde_json::json!({"window_focused":scene.window_focus.single().ok().map(|w| w.focused), "gameplay_allowed":scene.context.gameplay_allowed(), "help_open":help.0,"snapshot_tick":snapshot.meta.snapshot_tick,"server_epoch":snapshot.meta.server_epoch,"match_id":snapshot.meta.match_id,
         "mobile_controls":mobile.enabled,"visual_mode":format!("{:?}", *mode),"player_position":position.translation.to_array(),
-        "projectiles":projectiles,"combat_events":events,"damage_numbers":numbers,"minions":minions,"nodes":nodes});
+        "particles":particles,"projectiles":projectiles,"combat_events":events,"damage_numbers":numbers,"minions":minions,"nodes":nodes});
     match qa.stage {
         0 => {
             let models_ready = *mode == PlayerVisualMode::Sprite2d
@@ -425,7 +482,7 @@ fn observe(
             capture(&mut commands, &mut qa, 1, frame);
             qa.stage = 3;
         }
-        3 if !numbers.is_empty() => {
+        3 if !numbers.is_empty() && visible_burst => {
             capture(&mut commands, &mut qa, 2, frame);
             qa.stage = 4;
         }

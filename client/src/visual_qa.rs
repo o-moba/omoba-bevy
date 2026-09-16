@@ -180,7 +180,13 @@ fn views() -> [View; 5] {
 }
 
 fn jungle_views() -> [View; 4] {
-    let anchors = MapLayout::default().camp_centers();
+    let forest = std::env::var("OMOBA_VISUAL_QA_SCENARIO").as_deref() == Ok("forest-vfx");
+    let anchors = if forest {
+        let forest = MapLayout::default().decorative_jungle_block_centers();
+        std::array::from_fn(|i| forest[i % forest.len()] + Vec2::X * 3.)
+    } else {
+        MapLayout::default().camp_centers()
+    };
     let dimension = |key, fallback, min, max| {
         std::env::var(key)
             .ok()
@@ -212,12 +218,25 @@ fn jungle_views() -> [View; 4] {
             zoom: 1.0,
         }
     };
-    [
-        overview,
-        closeup(0, "02-jungle-skirmisher.png"),
-        closeup(2, "03-jungle-bruiser.png"),
-        closeup(4, "04-jungle-spitter.png"),
-    ]
+    if forest {
+        let first = closeup(0, "01-forest-wings.png");
+        [
+            first,
+            View {
+                file: "02-forest-motion.png",
+                ..first
+            },
+            closeup(1, "03-forest-clearing.png"),
+            closeup(2, "04-forest-path.png"),
+        ]
+    } else {
+        [
+            overview,
+            closeup(0, "02-jungle-skirmisher.png"),
+            closeup(2, "03-jungle-bruiser.png"),
+            closeup(4, "04-jungle-spitter.png"),
+        ]
+    }
 }
 
 #[derive(Resource)]
@@ -244,7 +263,8 @@ struct QaState {
 
 impl QaState {
     fn new(directory: PathBuf, max_seconds: u64) -> Self {
-        let jungle = std::env::var("OMOBA_VISUAL_QA_SCENARIO").is_ok_and(|v| v == "jungle");
+        let jungle = std::env::var("OMOBA_VISUAL_QA_SCENARIO")
+            .is_ok_and(|v| v == "jungle" || v == "forest-vfx");
         Self {
             directory,
             jungle,
@@ -444,6 +464,12 @@ fn advance_stability(stable: u32, ready: bool) -> u32 {
 
 #[derive(SystemParam)]
 struct CaptureWorld<'w, 's> {
+    wings: Query<
+        'w,
+        's,
+        (&'static GlobalTransform, &'static InheritedVisibility),
+        (With<crate::game_vfx::ButterflyWing>, Without<MainCamera>),
+    >,
     scenes: Query<'w, 's, (&'static SceneRoot, Option<&'static SceneInstance>)>,
     environment: Query<'w, 's, (), With<VerdantEnvironment>>,
     foliage: Query<'w, 's, (), With<VerdantFoliage>>,
@@ -785,6 +811,8 @@ fn capture_qa(
         "asset_root":shared::client_asset_root(),"version":env!("CARGO_PKG_VERSION"),
         "source_camera":if qa.jungle {"shared jungle camp anchors and bounded QA closeup offsets"} else if view.perspective {"production follow offset with declared QA orbit/zoom"} else {"art/verdant-confluence/scripts/build_scene.py"},"stable_frames":qa.stable_frames,
         "orbit_yaw_radians":view.orbit_yaw,"zoom":view.zoom,"minimap":minimap_summary,
+        "butterfly_wings":world.wings.iter().filter(|(_, v)| v.get()).map(|(p, _)| p.translation().to_array()).collect::<Vec<_>>(),
+        "forest_vfx_camera":std::env::var("OMOBA_VISUAL_QA_SCENARIO").as_deref() == Ok("forest-vfx"),
         "jungle_mobs":world.neutrals.iter().filter(|(_, kind, _, _, _)| !kind.0.is_boss()).map(|(id, kind, stats, scale, transform)|
             serde_json::json!({"id":id.0,"kind":format!("{:?}",kind.0),"hp":stats.hp,
                 "position":transform.translation.to_array(),"foot_local_y":scale.foot_local_y(),"head_local_y":scale.head_local_y})).collect::<Vec<_>>(),

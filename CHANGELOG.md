@@ -7,6 +7,9 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 ## [Unreleased]
 
 ### Visual effects
+- Add animated forest butterflies and pooled confirmed-hit particles: melee slash
+  arcs and sparks, expanding magic rings and motes, and ranged impact flashes.
+  Reuse skin impact colors and fixed budgets in both 3D and sprite rendering.
 - Upgrade live Supporter auras with three inclined electron-like orbits, bright
   cores, soft camera-facing glow sprites, tapered light trails and rising glints. Keep a fixed
   35-element budget per hero, shared materials, and hidden/dead actor suppression

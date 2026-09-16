@@ -29,6 +29,8 @@ NAVIGATION_IMAGES = ("01-minimap-route.png", "02-minimap-arrival.png", "03-world
 FRAME_HEADER = struct.Struct("<4sHQQHHI")
 
 
+FOREST_IMAGES = ("01-forest-wings.png", "02-forest-motion.png", "03-forest-clearing.png", "04-forest-path.png")
+
 JUNGLE_IMAGES = ("01-jungle-overview.png", "02-jungle-skirmisher.png", "03-jungle-bruiser.png", "04-jungle-spitter.png")
 
 
@@ -342,13 +344,13 @@ def main():
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--touch-controls", action="store_true", help="Preview phone UI at the requested viewport; requires a desktop development build")
-    parser.add_argument("--scenario", choices=("verdant", "beta-ui", "navigation", "jungle"), default="verdant")
+    parser.add_argument("--scenario", choices=("verdant", "beta-ui", "navigation", "jungle", "forest-vfx"), default="verdant")
     parser.add_argument("--bots", type=int, choices=range(5), default=2)
     args = parser.parse_args()
     if not (320 <= args.width <= 3840 and 320 <= args.height <= 2160):
         parser.error("viewport must be 320..3840 wide and 320..2160 high")
     expected_images = (tuple(name.replace("720p", f"{args.height}p") for name in BETA_IMAGES) if args.scenario == "beta-ui"
-                       else NAVIGATION_IMAGES if args.scenario == "navigation" else JUNGLE_IMAGES if args.scenario == "jungle" else EXPECTED_IMAGES)
+                       else FOREST_IMAGES if args.scenario == "forest-vfx" else NAVIGATION_IMAGES if args.scenario == "navigation" else JUNGLE_IMAGES if args.scenario == "jungle" else EXPECTED_IMAGES)
     package = args.package.resolve() if args.package else None
     suffix = ".exe" if os.name == "nt" else ""
     client = args.client_bin or (package / ("client" + suffix) if package else None)
@@ -462,6 +464,17 @@ def main():
         result["navigation"] = verify_navigation(json.loads(summary_path.read_text()) if summary_path.is_file() else {},
                                                   observer.samples if observer else [])
         result["capture_pass"] = result["capture_pass"] and result["navigation"]["pass"]
+    if args.scenario == "forest-vfx":
+        summary_path = output / "qa-summary.json"
+        summary = json.loads(summary_path.read_text()) if summary_path.is_file() else {}
+        captures = summary.get("captures", [])
+        visible = [c.get("butterfly_wings", []) for c in captures]
+        result["forest_vfx"] = dict(visible_wings=[len(w) for w in visible],
+            motion_observed=len(visible) >= 2 and visible[0] != visible[1],
+            physical_device_verified=False)
+        result["capture_pass"] = result["capture_pass"] and bool(len(captures) == 4
+            and all(0 < len(w) <= 40 for w in visible)
+            and result["forest_vfx"]["motion_observed"])
     if args.scenario == "jungle":
         summary_path = output / "qa-summary.json"
         result["jungle"] = verify_jungle(json.loads(summary_path.read_text()) if summary_path.is_file() else {},

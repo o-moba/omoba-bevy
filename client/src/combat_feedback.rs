@@ -101,6 +101,8 @@ fn collect_hits(
     snapshot: Res<GameStateSnapshot>,
     registry: Res<CombatVisualRegistry>,
     mut feedback: ResMut<CombatFeedback>,
+    mut bursts: MessageWriter<crate::game_vfx::ImpactBurst>,
+    mut resets: MessageWriter<crate::game_vfx::ClearCombatVfx>,
     numbers: Query<Entity, With<DamageNumber>>,
     heroes: Query<(
         &NetworkPlayerId,
@@ -109,6 +111,7 @@ fn collect_hits(
         Option<&NetworkSpriteCharacter>,
     )>,
     local: Query<&NetworkPlayerId, With<Player>>,
+    positions: Query<(&NetworkPlayerId, &Transform)>,
     cameras: Query<(&Camera, &Transform), With<MainCamera>>,
     mode: Res<PlayerVisualMode>,
 ) {
@@ -123,6 +126,7 @@ fn collect_hits(
     let mut number_count = numbers.iter().count();
     if changed {
         feedback.impacts.clear();
+        resets.write(crate::game_vfx::ClearCombatVfx);
         for entity in &numbers {
             commands.entity(entity).despawn();
         }
@@ -159,6 +163,31 @@ fn collect_hits(
             owner.and_then(|(_, _, avatar, _)| avatar.and_then(|v| v.0.as_deref())),
             owner.and_then(|(_, _, _, sprite)| sprite.and_then(|v| v.0.as_deref())),
         );
+        let source_position = positions
+            .iter()
+            .find(|(id, _)| {
+                event.source.kind == CombatEntityKind::Player && id.0 == event.source.id
+            })
+            .map(|(_, pose)| {
+                if *mode == PlayerVisualMode::Sprite2d {
+                    pose.translation.truncate()
+                } else {
+                    Vec2::new(pose.translation.x, pose.translation.z)
+                }
+            });
+        let direction = source_position
+            .map(|source| Vec2::new(position.x, position.z) - source)
+            .unwrap_or(Vec2::X)
+            .normalize_or(Vec2::X);
+        bursts.write(crate::game_vfx::ImpactBurst {
+            position,
+            direction,
+            color: profile.impact.color(),
+            scale: profile.impact.scale,
+            lifetime: profile.impact.lifetime,
+            kind: crate::game_vfx::BurstKind::for_style(event.style),
+            seed: event.id,
+        });
         if feedback.impacts.len() == MAX_HITS {
             feedback.impacts.remove(0);
         }

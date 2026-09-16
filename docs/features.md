@@ -2,6 +2,22 @@
 
 Canonical version: `0.20.0-rc.5`
 
+## Forest ambience and combat particles
+
+The game renders twenty animated butterflies around forest anchors. Their wings
+share geometry and materials; offscreen butterflies are hidden. Combat uses a
+fixed pool of 128 reusable particle slots: melee arcs and sparks, magic rings and
+motes, and ranged hit flashes. Saturation drops excess cosmetics without changing
+damage. Match changes clear active effects; both 3D and sprite modes are supported.
+
+Only accepted, deduplicated server hit events trigger these bursts. The existing
+`combat_visuals.json` class/avatar/sprite overrides control impact color, scale
+and lifetime. `client/src/game_vfx.rs` maps projectile styles to burst geometry;
+new geometry or trajectories can be added there without modifying combat rules.
+This is a lightweight Bevy mesh/material particle foundation, without an extra
+GPU particle plugin or dynamic lights. Phone performance still needs device QA.
+These source changes are newer than TestFlight 0.20.0 (4).
+
 ## Shared accounts and Supporter cosmetics
 
 A native installation can enroll a separate device key into an existing account
