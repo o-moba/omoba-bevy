@@ -222,7 +222,10 @@ pub(crate) fn resolve_basic_attack(
     positions: Query<(&Transform, Option<&StructureKind>), Without<Player>>,
     validity: TargetValidity,
     selection: Res<TeamSelection>,
-    mobile: Option<Res<MobileControls>>,
+    input_modes: (
+        Option<Res<MobileControls>>,
+        Option<Res<crate::gamepad_controls::GamepadControls>>,
+    ),
     pending: Res<PendingCast>,
     mut basic: ResMut<BasicAttackState>,
     mut outgoing: MessageWriter<NetworkCommand>,
@@ -274,7 +277,8 @@ pub(crate) fn resolve_basic_attack(
         .translation
         .xz()
         .distance(position.translation.xz());
-    let phone = mobile.as_ref().is_some_and(|m| m.enabled);
+    let phone = input_modes.0.as_ref().is_some_and(|m| m.enabled)
+        || input_modes.1.as_ref().is_some_and(|pad| pad.active);
     if distance > range {
         if phone {
             feedback.push_line("Target out of attack range — move closer.");
@@ -622,6 +626,174 @@ pub(crate) fn mobile_basic_attack(
     }
 }
 
+/// Controller targeting shares hostile/visibility validation and the one basic
+/// attack resolver. A locked target is never silently replaced with another unit.
+pub(crate) fn gamepad_basic_attack(
+    mut gamepad: Option<ResMut<crate::gamepad_controls::GamepadControls>>,
+    context: Res<GameplayInputContext>,
+    local: Query<
+        (
+            &Transform,
+            &Team,
+            &CombatStats,
+            Option<&NetworkHeroClass>,
+            Option<&crate::net::PlayerProgression>,
+        ),
+        With<Player>,
+    >,
+    camera: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
+    mode: Res<PlayerVisualMode>,
+    selection: Res<TeamSelection>,
+    candidates: TargetCandidates,
+    validity: TargetValidity,
+    mut target: ResMut<TargetState>,
+    mut preview: ResMut<TargetAimPreview>,
+    mut basic: ResMut<BasicAttackState>,
+    pending: Res<PendingCast>,
+) {
+    let Some(pad) = gamepad.as_deref_mut().filter(|pad| pad.active) else {
+        return;
+    };
+    let (Ok((position, team, stats, class, progression)), Ok((camera, camera_transform))) =
+        (local.single(), camera.single())
+    else {
+        basic.cancel();
+        pad.candidate = None;
+        return;
+    };
+    if !context.gameplay_allowed() || !stats.is_alive() {
+        basic.cancel();
+        return;
+    }
+    let class = class.map_or(selection.hero_class, |c| c.0);
+    let attack_range = shared::basic_attack_for_class(class).range;
+    let slot = pad.aiming_slot.or(pad.cast.map(|intent| intent.slot));
+    let skill_range = slot.and_then(|slot| {
+        shared::SkillSlot::from_index(slot as u8).map(|s| {
+            shared::scaled_cast_range(
+                shared::ability_for_class_slot(class, s),
+                progression.map_or(1, |p| p.ranks[slot].max(1)),
+            )
+        })
+    });
+    if pad.locked
+        && target
+            .selected_entity
+            .zip(target.selected_target)
+            .is_none_or(|(e, id)| !validity.valid(e, id, *team))
+    {
+        pad.cancel_gesture();
+        basic.cancel();
+        target.selected_entity = None;
+        target.selected_target = None;
+        return;
+    }
+    let aim = pad.aim.map(|direction| MobileAttackAim {
+        direction,
+        extent: 1.0,
+    });
+    let mut pick = if pad.locked {
+        target.selected_entity.zip(target.selected_target)
+    } else if let Some(range) = skill_range {
+        crate::combat::mobile_assisted_target(
+            position.translation,
+            *team,
+            range,
+            pad.aim,
+            &candidates,
+            &validity,
+            camera,
+            camera_transform,
+            *mode,
+            pad.candidate.map(|p| p.0),
+        )
+    } else {
+        pick_mobile(
+            position.translation,
+            *team,
+            attack_range,
+            aim,
+            &candidates,
+            &validity,
+            camera,
+            camera_transform,
+            *mode,
+        )
+        .map(|(e, id, _)| (e, id))
+    };
+    if !pad.locked && skill_range.is_none() {
+        if let (Some(direction), Some((old, old_id)), Some(origin)) = (
+            pad.aim,
+            pad.candidate,
+            projected_position(camera, camera_transform, *mode, position.translation),
+        ) {
+            if validity.valid(old, old_id, *team) {
+                let score = |e| {
+                    validity
+                        .position(e)
+                        .and_then(|p| projected_position(camera, camera_transform, *mode, p))
+                        .and_then(|p| direction_score(origin, direction, p))
+                };
+                if retain_aim_candidate(score(old), pick.and_then(|p| score(p.0))) {
+                    pick = Some((old, old_id));
+                }
+            }
+        }
+    }
+    pad.candidate = pick;
+    if pad.lock_pressed {
+        pad.locked = !pad.locked && pick.is_some();
+        target.selected_entity = if pad.locked { pick.map(|p| p.0) } else { None };
+        target.selected_target = if pad.locked { pick.map(|p| p.1) } else { None };
+    }
+    if let (Some(aim), Some(origin), Some(viewport)) = (
+        aim,
+        screen_position(camera, camera_transform, *mode, position.translation),
+        camera.logical_viewport_size(),
+    ) {
+        *preview = TargetAimPreview {
+            active: true,
+            origin,
+            cursor: aim_cursor(origin, viewport, aim),
+            candidate: pick.map(|p| p.0),
+            target: pick.map(|p| p.1),
+            candidate_screen: pick
+                .and_then(|p| validity.position(p.0))
+                .and_then(|p| projected_position(camera, camera_transform, *mode, p)),
+            in_attack_range: pick.is_some_and(|(e, id)| {
+                validity.position(e).is_some_and(|p| {
+                    position.translation.xz().distance(p.xz())
+                        <= skill_range.unwrap_or(attack_range + validity.radius(e, id) - 0.08)
+                })
+            }),
+            ..default()
+        };
+    }
+    if !pad.attack_held || slot.is_some() || pending.is_pending() {
+        basic.cancel();
+        return;
+    }
+    // The resolver's cooldown is the sole attack cadence. Never enqueue stale
+    // orders during a cooldown, and never chase a target from analog controls.
+    if basic.remaining_secs > 0.0 {
+        return;
+    }
+    if let Some((entity, id)) = pick {
+        if !pad.locked {
+            target.selected_entity = Some(entity);
+            target.selected_target = Some(id);
+        }
+        basic.start(entity, id, false);
+    } else {
+        basic.cancel();
+    }
+}
+
+fn retain_aim_candidate(previous: Option<f32>, best: Option<f32>) -> bool {
+    // Pixel hysteresis absorbs snapshot jitter without trapping a deliberate turn.
+    previous.is_some_and(|previous| best.is_some_and(|best| previous <= best + 12.0))
+}
+
 #[derive(Component)]
 pub(crate) struct LockedTargetIndicator;
 #[derive(Component)]
@@ -780,6 +952,7 @@ pub(crate) fn setup_targeting_ui(mut commands: Commands) {
 }
 pub(crate) fn draw_targeting_ui(
     preview: Res<TargetAimPreview>,
+    gamepad: Option<Res<crate::gamepad_controls::GamepadControls>>,
     mut nodes: Query<(
         &AimVisual,
         &mut Node,
@@ -811,7 +984,17 @@ pub(crate) fn draw_targeting_ui(
                     ..default()
                 };
                 if let Some(mut text) = label {
-                    text.0 = if ready {
+                    text.0 = if let Some(pad) = gamepad.as_ref().filter(|p| p.active) {
+                        if pad.aiming_slot.is_some() {
+                            "RELEASE TO CAST"
+                        } else if pad.locked {
+                            "TARGET LOCKED"
+                        } else if pad.playstation {
+                            "R2 ATTACK · R3 LOCK"
+                        } else {
+                            "RT ATTACK · RS LOCK"
+                        }
+                    } else if ready {
                         "RELEASE TO ATTACK"
                     } else if preview.candidate.is_some() {
                         "LOCK · MOVE CLOSER"
@@ -861,8 +1044,47 @@ pub(crate) fn draw_targeting_ui(
 }
 
 #[cfg(test)]
+#[path = "gamepad_combat_tests.rs"]
+mod gamepad_combat_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn controller_uses_shared_attack_cooldown_and_never_chases() {
+        let (mut app, player, enemy) = attack_app(shared::HeroClass::Mage, vec![], false);
+        let mut pad = crate::gamepad_controls::GamepadControls::default();
+        pad.active = true;
+        app.insert_resource(pad);
+        app.world_mut()
+            .get_mut::<Transform>(enemy)
+            .unwrap()
+            .translation = Vec3::X * 50.0;
+        order(&mut app, enemy);
+        app.update();
+        assert!(commands(&mut app).is_empty());
+        assert!(app.world().get::<MovementTarget>(player).is_none());
+        app.world_mut()
+            .get_mut::<Transform>(enemy)
+            .unwrap()
+            .translation = Vec3::X;
+        order(&mut app, enemy);
+        app.update();
+        assert_eq!(commands(&mut app).len(), 1);
+        order(&mut app, enemy);
+        app.update();
+        assert!(commands(&mut app).is_empty());
+        assert!(app.world().resource::<BasicAttackState>().remaining_secs > 0.0);
+    }
+
+    #[test]
+    fn controller_aim_hysteresis_keeps_small_jitter_but_releases_new_direction() {
+        assert!(retain_aim_candidate(Some(20.0), Some(14.0)));
+        assert!(!retain_aim_candidate(Some(80.0), Some(14.0)));
+        assert!(!retain_aim_candidate(None, Some(14.0)));
+        assert!(!retain_aim_candidate(Some(14.0), None));
+    }
+
     fn attack_app(
         class: shared::HeroClass,
         inventory: Vec<shared::shop::ItemId>,

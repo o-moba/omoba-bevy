@@ -1,6 +1,19 @@
 # Feature Inventory
 
-Canonical version: `0.20.0-rc.6`
+Canonical version: `0.20.0-rc.7`
+
+## Controller input
+
+Desktop gamepads and iOS Apple Game Controller devices can control the same hero
+and use the same server as mouse and touch players. No new server protocol or
+controller-only gameplay advantage is introduced. The last deliberately used
+input device owns gameplay; connection alone never overrides pointer input.
+
+See [controller controls and testing](controller.md) for the complete mapping,
+neutral-rearm behavior and hardware test checklist. iOS uses a main-thread native
+snapshot bridge because the current gilrs backend does not support iOS. The
+bridge is included by Cargo in both device and simulator builds. Physical
+Bluetooth controller compatibility and feel are not yet verified on a phone.
 
 ## Engine compatibility
 

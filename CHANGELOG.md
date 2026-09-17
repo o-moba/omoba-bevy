@@ -6,6 +6,22 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.20.0-rc.7] - 2026-09-17
+
+### Controller beta
+- Add desktop gamepad input and an iOS Apple Game Controller bridge, using existing
+  build tools and no additional production crates. Support PlayStation button
+  labels and generic fallback labels; one controller controls the local hero.
+- Move with the left stick, aim with the right, hold R2 for basic attacks, and
+  hold/release L1/R1/L2 for skills. L2+R2 casts the ultimate; R3 toggles target
+  lock. Circle cancels; Triangle plus a skill upgrades it. D-pad right opens the
+  shop and left opens reactions; Options opens the menu.
+- Reuse authoritative attack/cast/cooldown validation and analog collision paths.
+  Controller actions never auto-chase. Dead zones, target hysteresis, chord
+  arbitration and neutral rearming protect focus/modal/disconnect transitions.
+- Add controller UI navigation, safe focus feedback and adaptive HUD labels.
+  Real-controller/iPhone playtesting is still required before release.
+
 ## [0.20.0-rc.6] - 2026-09-17
 
 ### Engine compatibility

@@ -74,6 +74,13 @@ class DeviceTests(unittest.TestCase):
         self.assertEqual(result["sdk"], "26.2.0")
         self.assertEqual(result["sha256"], hashlib.sha256(macho()).hexdigest())
 
+    def test_packaged_app_declares_optional_extended_gamepad_support(self):
+        info = device.app_info(device.ROOT, device.inspect_macho(self.binary), device.BUNDLE_ID)
+        self.assertTrue(info["GCSupportsControllerUserInteraction"])
+        self.assertEqual(info["GCSupportedGameControllers"], [{"ProfileName": "ExtendedGamepad"}])
+        self.assertFalse(info.get("GCRequiresControllerUserInteraction", False))
+        self.assertNotIn("game-controller", info["UIRequiredDeviceCapabilities"])
+
     def test_same_arm64_simulator_is_rejected(self):
         self.binary.write_bytes(macho(platform=7))
         with self.assertRaisesRegex(ValueError, "physical iOS"):

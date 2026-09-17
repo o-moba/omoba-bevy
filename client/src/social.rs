@@ -491,6 +491,7 @@ pub(crate) fn hero_screen(
         .filter(|p| p.is_finite())
 }
 fn input(
+    gamepad: Option<Res<crate::gamepad_controls::GamepadControls>>,
     mut social: ResMut<SocialClient>,
     world: SocialWorld,
     time: Res<Time>,
@@ -584,7 +585,10 @@ fn input(
     if hero.is_none() {
         social.wheel.cancel();
     }
-    if keys.just_pressed(KeyCode::Escape) && social.blocks_gameplay() {
+    if (keys.just_pressed(KeyCode::Escape)
+        || gamepad.as_ref().is_some_and(|p| p.active && p.nav.cancel))
+        && social.blocks_gameplay()
+    {
         social.close();
         keys.clear_just_pressed(KeyCode::Escape);
     } else if keys.just_pressed(KeyCode::Enter)
@@ -592,7 +596,13 @@ fn input(
         && social.wheel.center.is_none()
     {
         social.open_chat();
-    } else if keys.just_pressed(KeyCode::KeyT) && !social.chat_open && hero.is_some() {
+    } else if (keys.just_pressed(KeyCode::KeyT)
+        || gamepad
+            .as_ref()
+            .is_some_and(|p| p.active && p.reaction_pressed && social.wheel.center.is_none()))
+        && !social.chat_open
+        && hero.is_some()
+    {
         social.wheel.cancel();
         social
             .wheel
@@ -1173,6 +1183,7 @@ fn render_chat_log(
 
 #[allow(clippy::too_many_arguments)]
 fn render(
+    gamepad: Option<Res<crate::gamepad_controls::GamepadControls>>,
     mut commands: Commands,
     social: Res<SocialClient>,
     world: SocialWorld,
@@ -1203,6 +1214,8 @@ fn render(
         social.allowed,
         world.other_modal()
     );
+    let controller_active = gamepad.as_ref().is_some_and(|pad| pad.active);
+    let key = format!("{key}{controller_active}");
     let wheel_images: [Option<ImageNode>; 4] = std::array::from_fn(|index| {
         assets
             .as_ref()
@@ -1235,6 +1248,9 @@ fn render(
     let viewport = Vec2::new(window.width(), window.height());
     let scale = world.mobile.scale();
     if !social.chat_open && social.wheel.center.is_none() {
+        if controller_active {
+            return;
+        }
         commands
             .spawn((
                 Node {

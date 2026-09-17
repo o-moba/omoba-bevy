@@ -199,12 +199,16 @@ impl Plugin for CombatPlugin {
                     crate::targeting::clear_invalid_selection,
                     cast_spell_system,
                     skill_button_system,
-                    mobile_cast_system,
-                    crate::targeting::mobile_basic_attack,
+                    (
+                        crate::targeting::mobile_basic_attack,
+                        crate::targeting::gamepad_basic_attack,
+                        mobile_cast_system,
+                    )
+                        .chain(),
                     crate::targeting::resolve_basic_attack,
                     resolve_pending_cast_system,
                     skill_upgrade_input_system,
-                    update_skill_bar_system,
+                    (update_skill_bar_system, adapt_controller_hotbar).chain(),
                     adapt_mobile_combat_feedback,
                     crate::targeting::draw_targeting_ui,
                 )
@@ -395,6 +399,9 @@ struct CombatBars {
 
 #[derive(Component)]
 struct TargetMarker;
+
+#[derive(Component)]
+struct SkillKeyLabel(usize);
 
 #[derive(Component)]
 struct SkillBarSlot {
@@ -695,6 +702,7 @@ fn setup_combat_ui(mut commands: Commands, asset_server: Option<Res<AssetServer>
                         ));
                         slot.spawn((
                             Text::new(label),
+                            SkillKeyLabel(i),
                             TextLayout::justify(Justify::Center),
                             TextFont {
                                 font_size: (24.0).into(),
@@ -741,6 +749,160 @@ fn setup_combat_ui(mut commands: Commands, asset_server: Option<Res<AssetServer>
                 });
             }
         });
+}
+
+#[allow(clippy::type_complexity)]
+fn adapt_controller_hotbar(
+    gamepad: Option<Res<crate::gamepad_controls::GamepadControls>>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    progression: Query<&PlayerProgression, With<Player>>,
+    cooldowns: Res<LocalCastCooldown>,
+    mut labels: Query<
+        (
+            Option<&SkillKeyLabel>,
+            Option<&SkillRankLabel>,
+            Option<&SkillNameLabel>,
+            &mut Text,
+            &mut TextFont,
+            &mut TextLayout,
+            &mut Node,
+        ),
+        Or<(
+            With<SkillKeyLabel>,
+            With<SkillRankLabel>,
+            With<SkillNameLabel>,
+        )>,
+    >,
+    mut roots: Query<
+        (
+            &Name,
+            &mut Node,
+            Option<&SkillBarSlot>,
+            Option<&mut BorderColor>,
+        ),
+        (
+            Without<SkillKeyLabel>,
+            Without<SkillRankLabel>,
+            Without<SkillNameLabel>,
+        ),
+    >,
+) {
+    let pad = gamepad.as_ref().filter(|pad| pad.active);
+    let controller = pad.is_some();
+    let phone = mobile.as_ref().filter(|mobile| mobile.enabled);
+    let size = if controller {
+        phone.map_or(82.0, |mobile| 66.0 * mobile.scale())
+    } else {
+        SKILL_SLOT_SIZE
+    };
+    let keys = pad.map_or(crate::input_bindings::SKILL_SLOT_KEY_LABELS, |pad| {
+        pad.skill_labels()
+    });
+    let prog = progression.single().copied().unwrap_or_default();
+    for (key, rank, name, mut text, mut font, mut layout, mut node) in &mut labels {
+        if name.is_some() {
+            // Keep the full icon readable. Restore the detailed desktop caption
+            // as soon as keyboard or mouse takes ownership again.
+            node.display = if controller {
+                Display::None
+            } else {
+                Display::Flex
+            };
+            continue;
+        }
+        node.position_type = if controller {
+            PositionType::Absolute
+        } else {
+            PositionType::Relative
+        };
+        node.left = if controller { Val::Px(3.0) } else { Val::Auto };
+        node.top = Val::Auto;
+        node.bottom = Val::Auto;
+        node.right = Val::Auto;
+        node.max_width = if controller {
+            Val::Px(size - 6.0)
+        } else {
+            Val::Auto
+        };
+        *layout = if controller {
+            TextLayout::no_wrap().with_justify(Justify::Center)
+        } else {
+            TextLayout::justify(Justify::Center)
+        };
+        if let Some(key) = key {
+            text.0 = keys[key.0].into();
+            font.font_size = if controller { 14.0 } else { 24.0 }.into();
+            node.top = if controller { Val::Px(3.0) } else { Val::Auto };
+        }
+        if let Some(rank) = rank {
+            font.font_size = if controller { 10.0 } else { 12.0 }.into();
+            node.bottom = if controller { Val::Px(3.0) } else { Val::Auto };
+            node.right = if controller { Val::Px(3.0) } else { Val::Auto };
+            node.width = if controller {
+                Val::Auto
+            } else {
+                Val::Percent(100.0)
+            };
+            if let Some(pad) = pad {
+                text.0 = controller_skill_status(rank.slot, prog, &cooldowns, pad.aiming_slot);
+            }
+        }
+    }
+    for (name, mut node, slot, border) in &mut roots {
+        let name = name.as_str();
+        if name == "SkillBarRoot" {
+            node.left = if let Some(phone) = phone.filter(|_| controller) {
+                Val::Px((phone.viewport.x - size * 4.0 - SKILL_SLOT_GAP * 3.0) * 0.5)
+            } else {
+                Val::Px(264.0)
+            };
+            node.bottom = if controller {
+                Val::Px(phone.map_or(85.0, |mobile| mobile.safe.bottom + 55.0))
+            } else {
+                Val::Px(24.0)
+            };
+        } else if name.starts_with("SkillSlot-") {
+            node.width = Val::Px(size);
+            node.height = Val::Px(size);
+            node.overflow = if controller {
+                Overflow::clip()
+            } else {
+                Overflow::default()
+            };
+            if let Some(mut border) = border {
+                *border = BorderColor::all(
+                    if slot.is_some_and(|slot| {
+                        pad.is_some_and(|pad| pad.aiming_slot == Some(slot.slot))
+                    }) {
+                        crate::ui_theme::GOLD
+                    } else {
+                        crate::ui_theme::EDGE
+                    },
+                );
+            }
+        } else if name.starts_with("SkillColumn-") {
+            node.width = if controller { Val::Px(size) } else { Val::Auto };
+        } else if name.starts_with("SkillUpgrade-") {
+            node.width = Val::Px(size);
+        }
+    }
+}
+
+fn controller_skill_status(
+    slot: usize,
+    progression: PlayerProgression,
+    cooldowns: &LocalCastCooldown,
+    aiming: Option<usize>,
+) -> String {
+    if !unlocked_slots_for_level(progression.level.max(1))[slot] {
+        format!("LOCK {}", shared::SLOT_UNLOCK_LEVELS[slot])
+    } else if cooldowns.remaining_secs[slot] > 0.0 {
+        format!("{:.1}s", cooldowns.remaining_secs[slot])
+    } else if aiming == Some(slot) {
+        "AIMING".to_owned()
+    } else {
+        format!("RANK {}", progression.ranks[slot].max(1))
+    }
 }
 
 /// Reflect the selected class kit + server ranks on the hotbar and light the
@@ -1267,10 +1429,14 @@ fn resolve_pending_cast_system(
     context: Res<GameplayInputContext>,
     protection: Query<&crate::net::NetworkStructureProtected>,
     equipment: Query<&crate::net::PlayerEquipment, With<Player>>,
-    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    input_modes: (
+        Option<Res<crate::mobile_controls::MobileControls>>,
+        Option<Res<crate::gamepad_controls::GamepadControls>>,
+    ),
     validity: crate::targeting::TargetValidity,
 ) {
-    let touch_mode = mobile.as_ref().is_some_and(|mobile| mobile.enabled);
+    let touch_mode = input_modes.0.as_ref().is_some_and(|mobile| mobile.enabled)
+        || input_modes.1.as_ref().is_some_and(|pad| pad.active);
     if !context.gameplay_allowed() {
         pending_cast.cancel();
         return;
@@ -1410,6 +1576,7 @@ fn resolve_pending_cast_system(
 #[allow(clippy::type_complexity)]
 fn mobile_cast_system(
     mut mobile: Option<ResMut<crate::mobile_controls::MobileControls>>,
+    mut gamepad: Option<ResMut<crate::gamepad_controls::GamepadControls>>,
     context: Res<GameplayInputContext>,
     selection: Res<TeamSelection>,
     local: Query<
@@ -1431,24 +1598,43 @@ fn mobile_cast_system(
     mut feedback: ResMut<ActionFeedback>,
     mut commands: MessageWriter<NetworkCommand>,
 ) {
-    let Some(mobile) = mobile.as_deref_mut().filter(|mobile| mobile.enabled) else {
+    let controller_pick = gamepad.as_ref().filter(|pad| pad.active).map(|pad| {
+        if pad.locked {
+            target.selected_entity.zip(target.selected_target)
+        } else {
+            pad.candidate
+        }
+    });
+    let pad = gamepad.as_deref_mut().filter(|pad| pad.active);
+    let (intent, upgrades) = if let Some(pad) = pad {
+        (
+            pad.cast.take().map(|mut intent| {
+                if pad.locked {
+                    intent.aim = None;
+                }
+                intent
+            }),
+            pad.upgrade.take().into_iter().collect::<Vec<_>>(),
+        )
+    } else if let Some(mobile) = mobile.as_deref_mut().filter(|m| m.enabled) {
+        (
+            mobile.casts.drain(..).next_back(),
+            mobile.upgrades.drain(..).collect(),
+        )
+    } else {
         return;
     };
     if !context.gameplay_allowed() {
-        mobile.casts.clear();
-        mobile.upgrades.clear();
         return;
     }
     let Ok((transform, team, stats, prog, class)) = local.single() else {
         return;
     };
     if !stats.is_alive() {
-        mobile.casts.clear();
-        mobile.upgrades.clear();
         return;
     }
     let prog = prog.copied().unwrap_or_default();
-    for slot in mobile.upgrades.drain(..) {
+    for slot in upgrades {
         if slot < 4
             && prog.skill_points > 0
             && prog.ranks[slot] < MAX_ABILITY_RANK
@@ -1458,7 +1644,6 @@ fn mobile_cast_system(
         }
     }
     let class = class.map(|class| class.0).unwrap_or(selection.hero_class);
-    let intent = mobile.casts.drain(..).next_back();
     let Some(intent) = intent else {
         return;
     };
@@ -1471,7 +1656,11 @@ fn mobile_cast_system(
             return;
         };
         let range = scaled_cast_range(definition, prog.ranks[intent.slot].max(1));
-        let pick = if intent.aim.is_none() && target.selected_entity.is_some() {
+        let pick = if let Some(pick) = controller_pick {
+            // The controller adapter has just resolved the displayed candidate.
+            // Automatic basic-attack selections are not explicit skill locks.
+            pick.filter(|(entity, id)| validity.valid(*entity, *id, *team))
+        } else if intent.aim.is_none() && target.selected_entity.is_some() {
             // An explicit lock wins even when currently out of range. The skill
             // resolver reports that range error instead of hitting another foe.
             target.selected_entity.zip(target.selected_target)
@@ -1511,7 +1700,7 @@ fn mobile_cast_system(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn mobile_assisted_target(
+pub(crate) fn mobile_assisted_target(
     position: Vec3,
     team: Team,
     range: f32,

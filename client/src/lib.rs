@@ -18,6 +18,10 @@ mod decor;
 mod game_audio;
 mod game_state;
 mod game_vfx;
+mod gamepad_controls;
+#[cfg(target_os = "ios")]
+mod gamepad_ios;
+mod gamepad_ui;
 mod god_mode;
 mod help_overlay;
 mod input_bindings;
@@ -124,6 +128,8 @@ pub fn main() {
     ))
     .add_plugins((
         input_context::InputContextPlugin,
+        gamepad_controls::GamepadControlsPlugin,
+        gamepad_ui::GamepadUiPlugin,
         ui_theme::UiThemePlugin,
         shop::ShopPlugin,
         HelpOverlayPlugin,

@@ -271,6 +271,7 @@ fn update_hero_details(
 /// Keep entry and result cards clear; these controls only describe a live,
 /// admitted hero. Visibility and layout agree so hidden panels reserve no space.
 fn sync_gameplay_hud_visibility(
+    gamepad: Option<Res<crate::gamepad_controls::GamepadControls>>,
     game: Res<GameStateSnapshot>,
     session: Res<crate::net::ClientSession>,
     help: Option<Res<crate::help_overlay::HelpOverlayVisible>>,
@@ -297,7 +298,8 @@ fn sync_gameplay_hud_visibility(
             if name.as_str() != "ActionFeedback" {
                 node.display = if show
                     && !(name.as_str() == "SkillBarRoot"
-                        && mobile.as_ref().is_some_and(|mobile| mobile.enabled))
+                        && mobile.as_ref().is_some_and(|mobile| mobile.enabled)
+                        && !gamepad.as_ref().is_some_and(|pad| pad.active))
                 {
                     Display::Flex
                 } else {
@@ -358,6 +360,7 @@ fn spawn_stat_bar<F: Component>(
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn update_match_hud(
     game_state: Option<Res<GameStateSnapshot>>,
+    gamepad: Option<Res<crate::gamepad_controls::GamepadControls>>,
     team_selection: Res<TeamSelection>,
     player: Query<(&CombatStats, &PlayerProgression, Option<&NetworkHeroClass>), With<Player>>,
     local_team: Query<&Team, With<Player>>,
@@ -478,6 +481,12 @@ fn update_match_hud(
     let objective_line = enemy_base_objective_line(&local_team, &enemy_bases);
     let target = if !stats.is_alive() {
         "Defeated - respawning soon"
+    } else if let Some(pad) = gamepad.as_ref().filter(|pad| pad.active) {
+        if pad.playstation {
+            "R2 attack · Right stick aim · R3 lock"
+        } else {
+            "RT attack · Right stick aim · RS click lock"
+        }
     } else if target_state.selected_target.is_some() {
         "Target locked — basic attack or Q/W/E/R"
     } else {

@@ -561,8 +561,14 @@ fn read_mobile_controls(
     local: Query<(&CombatStats, Option<&PlayerProgression>), With<Player>>,
     mut mobile: ResMut<MobileControls>,
     snapshot: Option<Res<crate::net::GameStateSnapshot>>,
+    gamepad: Option<Res<crate::gamepad_controls::GamepadControls>>,
 ) {
     mobile.begin_input_frame();
+    if gamepad.as_ref().is_some_and(|pad| pad.active) {
+        mobile.clear();
+        events.clear();
+        return;
+    }
     if let Some(snapshot) = snapshot {
         let identity = (snapshot.meta.server_epoch, snapshot.meta.match_id);
         if identity.0 != 0 && identity.1 != 0 {
@@ -779,6 +785,7 @@ fn draw_mobile_controls(
     selection: Res<TeamSelection>,
     cooldown: Res<LocalCastCooldown>,
     basic_attack: Option<Res<crate::targeting::BasicAttackState>>,
+    gamepad: Option<Res<crate::gamepad_controls::GamepadControls>>,
     images: Option<Res<Assets<Image>>>,
     mut icons: Query<(&SkillIcon, &mut ImageNode)>,
     mut visuals: Query<(
@@ -800,6 +807,7 @@ fn draw_mobile_controls(
         .map(|c| c.0)
         .unwrap_or(selection.hero_class);
     let visible = mobile.enabled
+        && !gamepad.as_ref().is_some_and(|pad| pad.active)
         && mobile.landscape
         && context.gameplay_allowed()
         && local.is_some_and(|(stats, _, _)| stats.is_alive());

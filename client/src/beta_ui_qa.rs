@@ -328,9 +328,13 @@ fn capture(
     spawner: Res<WorldInstanceSpawner>,
     scene: UiScene,
     minimap: crate::minimap::MinimapQaScene,
-    progression_fixture: Option<Res<SkillUpgradeFixtureState>>,
+    fixtures: (
+        Option<Res<SkillUpgradeFixtureState>>,
+        Option<Res<crate::gamepad_controls::GamepadControls>>,
+    ),
     mut exit: MessageWriter<AppExit>,
 ) {
+    let (progression_fixture, gamepad) = fixtures;
     if qa.stage >= FILES.len() {
         return;
     }
@@ -361,6 +365,7 @@ fn capture(
                     "real_purchase_verified":true,
                     "full_match_proof":false, "result_snapshot":"synthetic presentation fixture only",
                     "synthetic_progression":qa.skill_upgrades,
+                    "synthetic_controller":std::env::var("OMOBA_GAMEPAD_QA").as_deref() == Ok("1"),
                     "progression_fixture":"opt-in local level 6, four skill points and rank 1 abilities during stages 2/5 only; server unchanged"});
                 let saved = std::fs::write(
                     qa.directory.join("qa-summary.json"),
@@ -433,7 +438,7 @@ fn capture(
         return;
     }
     let primary_nodes: Vec<_> = scene.nodes.iter().filter(|(name, _, _, _)| matches!(name.as_str(),
-        "TeamGreenButton" | "TeamBlueButton" | "AvatarGrid" | "HelpDismissButton" | "HelpOverlayRoot" | "GameStateLabel" | "ConnectionStatusPanel" | "MinimapRoot" | "MatchObjectivePanel" | "MatchHudColumn" | "SkillBarRoot" | "SkillSlot-Q" | "SkillSlot-R" | "EquipmentHud" | "ShopOpenButton" | "ShopPanel" | "ShopCloseButton" | "ShopBuy-EB" | "ShopBuy-GC" | "ShopSummary" | "ShopFeedback" | "MobileJoystick" | "MobileAttack" | "MobileAbility-0" | "MobileAbility-1" | "MobileAbility-2" | "MobileAbility-3" | "MobileUpgrade-0" | "MobileUpgrade-1" | "MobileUpgrade-2" | "MobileUpgrade-3" | "PhoneMenuBar" | "QaSkillUpgradeFixtureLabel")
+        "TeamGreenButton" | "TeamBlueButton" | "AvatarGrid" | "HelpDismissButton" | "HelpOverlayRoot" | "GameStateLabel" | "ConnectionStatusPanel" | "MinimapRoot" | "MatchObjectivePanel" | "MatchHudColumn" | "SkillBarRoot" | "SkillSlot-Q" | "SkillSlot-R" | "ControllerLegend" | "EquipmentHud" | "ShopOpenButton" | "ShopPanel" | "ShopCloseButton" | "ShopBuy-EB" | "ShopBuy-GC" | "ShopSummary" | "ShopFeedback" | "MobileJoystick" | "MobileAttack" | "MobileAbility-0" | "MobileAbility-1" | "MobileAbility-2" | "MobileAbility-3" | "MobileUpgrade-0" | "MobileUpgrade-1" | "MobileUpgrade-2" | "MobileUpgrade-3" | "PhoneMenuBar" | "QaSkillUpgradeFixtureLabel")
             || name.as_str().starts_with("ShopBuy-") || name.as_str().starts_with("ShopDescription-") || name.as_str().starts_with("ShopDetails-"))
         .map(|(name, node, transform, visible)| {
             let center = transform.translation;
@@ -501,9 +506,17 @@ fn capture(
         exit.write(AppExit::error());
         return;
     }
+    let pad_active = gamepad.as_ref().is_some_and(|p| p.active);
     let required: &[&str] = match stage {
         0 => &["TeamGreenButton", "TeamBlueButton", "AvatarGrid"],
         1 => &["HelpDismissButton", "HelpOverlayRoot"],
+        2 | 5 if pad_active => &[
+            "MinimapRoot",
+            "SkillBarRoot",
+            "SkillSlot-Q",
+            "SkillSlot-R",
+            "ControllerLegend",
+        ],
         2 | 5 if mobile.as_ref().is_some_and(|mobile| mobile.enabled) => &[
             "MinimapRoot",
             "MatchObjectivePanel",
@@ -541,18 +554,20 @@ fn capture(
     let synthetic_progression = progression_fixture
         .as_ref()
         .is_some_and(|fixture| fixture.applied);
-    let upgrade_required: &[&str] =
-        if synthetic_progression && mobile.as_ref().is_some_and(|mobile| mobile.enabled) {
-            &[
-                "MobileUpgrade-0",
-                "MobileUpgrade-1",
-                "MobileUpgrade-2",
-                "MobileUpgrade-3",
-                "QaSkillUpgradeFixtureLabel",
-            ]
-        } else {
-            &[]
-        };
+    let upgrade_required: &[&str] = if synthetic_progression
+        && !pad_active
+        && mobile.as_ref().is_some_and(|mobile| mobile.enabled)
+    {
+        &[
+            "MobileUpgrade-0",
+            "MobileUpgrade-1",
+            "MobileUpgrade-2",
+            "MobileUpgrade-3",
+            "QaSkillUpgradeFixtureLabel",
+        ]
+    } else {
+        &[]
+    };
     let controls_fit = required.iter().chain(upgrade_required).all(|name| {
         primary_nodes.iter().any(|node| {
             node["name"] == *name

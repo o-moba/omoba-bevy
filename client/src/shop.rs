@@ -45,6 +45,8 @@ struct ShopRoot;
 #[derive(Component)]
 struct ShopToggle;
 #[derive(Component)]
+struct ShopOpenLabel;
+#[derive(Component)]
 struct ShopClose;
 #[derive(Component)]
 struct ShopBuy(ItemId);
@@ -200,6 +202,7 @@ fn setup_shop(mut commands: Commands) {
                 .with_children(|button| {
                     button.spawn((
                         Text::new("P   OPEN SHOP"),
+                        ShopOpenLabel,
                         Name::new("ShopOpenLabel"),
                         ui::text(14.0),
                         TextColor(ui::GOLD),
@@ -255,10 +258,20 @@ fn setup_shop(mut commands: Commands) {
 fn adapt_desktop_equipment_width(
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    gamepad: Option<Res<crate::gamepad_controls::GamepadControls>>,
+    mut labels: Query<&mut Text, With<ShopOpenLabel>>,
     mut nodes: Query<(&EquipmentLayoutPart, &mut Node)>,
 ) {
     if mobile.is_some_and(|mobile| mobile.enabled) {
         return;
+    }
+    for mut label in &mut labels {
+        label.0 = if gamepad.as_ref().is_some_and(|pad| pad.active) {
+            "D-PAD RIGHT   SHOP"
+        } else {
+            "P   OPEN SHOP"
+        }
+        .to_owned();
     }
     let Ok(window) = windows.single() else { return };
     let width = (window.width() - 706.0 - 16.0).clamp(0.0, 260.0);
@@ -384,6 +397,7 @@ fn update_inventory_icons(
 }
 
 fn toggle_shop(
+    gamepad: Option<Res<crate::gamepad_controls::GamepadControls>>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
     game: Res<GameStateSnapshot>,
     session: Res<ClientSession>,
@@ -410,10 +424,17 @@ fn toggle_shop(
         shop.open = false;
         return;
     }
-    if shop.open && keys.just_pressed(KeyCode::Escape) {
+    if shop.open
+        && (keys.just_pressed(KeyCode::Escape)
+            || gamepad.as_ref().is_some_and(|p| p.active && p.nav.cancel))
+    {
         shop.open = false;
         keys.clear_just_pressed(KeyCode::Escape);
-    } else if keys.just_pressed(KeyCode::KeyP) || buttons.iter().any(|i| *i == Interaction::Pressed)
+    } else if keys.just_pressed(KeyCode::KeyP)
+        || gamepad
+            .as_ref()
+            .is_some_and(|p| p.active && p.shop_pressed && !shop.open)
+        || buttons.iter().any(|i| *i == Interaction::Pressed)
     {
         shop.open = !shop.open;
     } else if close.iter().any(|i| *i == Interaction::Pressed) {

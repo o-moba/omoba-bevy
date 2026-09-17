@@ -784,6 +784,7 @@ impl PauseTapState {
 #[allow(clippy::type_complexity)]
 fn collect_pause_button_taps(
     mut state: Local<PauseTapState>,
+    gamepad: Option<Res<crate::gamepad_controls::GamepadControls>>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     menu: Res<PauseMenuState>,
     server: Option<Res<crate::mobile_ui::ServerEntry>>,
@@ -802,7 +803,8 @@ fn collect_pause_button_taps(
         Option<&bevy::ui::CalculatedClip>,
     )>,
 ) {
-    let touch_mode = mobile.as_ref().is_some_and(|m| m.enabled);
+    let touch_mode = mobile.as_ref().is_some_and(|m| m.enabled)
+        && !gamepad.as_ref().is_some_and(|pad| pad.active);
     for (_, mut gesture, _, _, _, _) in &mut buttons {
         gesture.set_if_neq(PauseButtonGesture {
             touch_mode,

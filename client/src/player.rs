@@ -779,6 +779,7 @@ fn move_player_mobile(
     mut commands: Commands,
     time: Res<Time>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    gamepad: Option<Res<crate::gamepad_controls::GamepadControls>>,
     context: Res<crate::input_context::GameplayInputContext>,
     mode: Res<PlayerVisualMode>,
     camera: Query<&GlobalTransform, With<MainCamera>>,
@@ -800,7 +801,13 @@ fn move_player_mobile(
     mut pending: ResMut<PendingCast>,
     mut basic: ResMut<BasicAttackState>,
 ) {
-    let Some(mobile) = mobile.filter(|mobile| mobile.enabled) else {
+    let pad = gamepad.as_ref().filter(|pad| pad.active);
+    let touch = mobile.as_ref().filter(|mobile| mobile.enabled);
+    let movement = if let Some(pad) = pad {
+        pad.movement
+    } else if let Some(touch) = touch {
+        touch.movement
+    } else {
         return;
     };
     let other_players = transforms
@@ -814,11 +821,12 @@ fn move_player_mobile(
         .filter(|(_, _, stats)| stats.is_none_or(|s| s.is_alive()))
         .map(|(t, kind, _)| (t.translation, *kind))
         .collect::<Vec<_>>();
-    let allowed = context.gameplay_allowed() && mobile.focused && mobile.landscape;
+    let allowed =
+        context.gameplay_allowed() && touch.is_none_or(|mobile| mobile.focused && mobile.landscape);
     let direction = camera
         .single()
         .ok()
-        .map(|camera| mobile_screen_direction(mobile.movement, camera, *mode))
+        .map(|camera| mobile_screen_direction(movement, camera, *mode))
         .unwrap_or(Vec3::ZERO);
     for (entity, mut transform, stats, equipment) in &mut transforms.p0() {
         commands
@@ -1384,6 +1392,10 @@ fn resolve_player_structure_overlap(
     player_transform.translation.x = resolved.x;
     player_transform.translation.z = resolved.z;
 }
+
+#[cfg(test)]
+#[path = "gamepad_movement_tests.rs"]
+mod gamepad_movement_tests;
 
 #[cfg(test)]
 mod tests {

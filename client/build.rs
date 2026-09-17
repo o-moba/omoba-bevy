@@ -1,4 +1,4 @@
-//! Compile the platform-owned StoreKit bridge for every iOS build path.
+//! Compile the platform-owned Swift bridges for every iOS build path.
 use std::{env, path::PathBuf, process::Command};
 
 fn output(args: &[&str]) -> String {
@@ -20,6 +20,7 @@ fn output(args: &[&str]) -> String {
 
 fn main() {
     println!("cargo:rerun-if-changed=../mobile/ios/SupporterStoreKit.swift");
+    println!("cargo:rerun-if-changed=../mobile/ios/OmobaGameController.swift");
     println!("cargo:rerun-if-env-changed=IPHONEOS_DEPLOYMENT_TARGET");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("ios") {
         return;
@@ -63,13 +64,14 @@ fn main() {
         ])
         .arg(out.join("swift-module-cache"))
         .arg("../mobile/ios/SupporterStoreKit.swift")
+        .arg("../mobile/ios/OmobaGameController.swift")
         .arg("-o")
         .arg(&library)
         .output()
         .expect("Swift compiler required");
     assert!(
         result.status.success(),
-        "StoreKit bridge failed: {}",
+        "iOS Swift bridges failed: {}",
         String::from_utf8_lossy(&result.stderr)
     );
     let toolchain = swiftc
@@ -84,6 +86,8 @@ fn main() {
     println!("cargo:rustc-link-search=native={sdk}/usr/lib/swift");
     println!("cargo:rustc-link-lib=static=OmobaStoreKit");
     println!("cargo:rustc-link-lib=framework=StoreKit");
+    println!("cargo:rustc-link-lib=framework=GameController");
+    println!("cargo:rustc-link-lib=framework=UIKit");
     println!("cargo:rustc-link-lib=framework=Foundation");
     println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
 }

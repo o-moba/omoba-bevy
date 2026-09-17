@@ -39,6 +39,7 @@ CLAUDE.md
 # docs/tasks: ignore by default; whitelist canonical markdown so deliverables stay versioned.
 docs/*
 !docs/features.md
+!docs/controller.md
 !docs/bot-practice-and-social.md
 !docs/game-audio.md
 !docs/player-handles.md
