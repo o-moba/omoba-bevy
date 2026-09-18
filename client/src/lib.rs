@@ -97,6 +97,17 @@ pub fn main() {
     eprintln!("Omoba asset root: {}", asset_root.display());
     let mut app = App::new();
     platform::configure_app(&mut app);
+    // Purchased Ekza avatars live outside the (possibly read-only) bundle.
+    // Asset sources must exist before AssetPlugin is added.
+    if let Some(store_root) = passport::initialize_store() {
+        app.register_asset_source(
+            omoba_passport::store::ASSET_SOURCE,
+            bevy::asset::io::AssetSourceBuilder::platform_default(
+                &store_root.to_string_lossy(),
+                None,
+            ),
+        );
+    }
     app.add_plugins(
         DefaultPlugins
             .set(AssetPlugin {

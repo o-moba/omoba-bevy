@@ -2,287 +2,108 @@
 //! Secrets stay in memory. Game packets contain only one-use scoped tickets.
 
 pub mod device_account;
+pub mod store;
 pub mod supporter_account;
 pub mod web_account;
 
 use ekza_bevy_sdk::passport::{
-    ConsumedTicket, OMOBA_PROJECT, ProjectSupport, ProtectedAvatar, PurchasedAvatar,
-    PurchasedLibrary, validate_avatar_id, validate_omoba_support,
+    ConsumedTicket, OMOBA_PROJECT, ProjectSupport, ProtectedAvatar, PurchasedLibrary,
+    SupportSelector,
+    client::PassportClient,
+    validate_omoba_support,
 };
-use reqwest::{Url, blocking::Client, redirect::Policy};
-use serde::{Deserialize, de::DeserializeOwned};
+pub use ekza_bevy_sdk::passport::{
+    client::{AvatarTicket, DevicePairing, NativeSession, PairingPoll, valid_session_id},
+    protected_slug,
+};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use std::{fs, io::Read, path::Path, time::Duration};
 
+/// Operator override of the trusted storefront passport API.
 pub const PASSPORT_URL_ENV: &str = "OMOBA_PASSPORT_URL";
-const MAX_JSON_BYTES: u64 = 2 * 1024 * 1024;
+/// Omoba only accepts devnet libraries until a mainnet storefront exists.
+const LIBRARY_NETWORK: &str = "solana-devnet";
 
+/// The exact approval Omoba's desktop runtime can load.
+pub fn selector() -> SupportSelector {
+    SupportSelector::omoba_desktop()
+}
+
+/// Omoba's view of the Ekza passport: the SDK transport bound to the `omoba`
+/// project, plus the humanoid profile check on every downloaded rendition.
 #[derive(Clone)]
-pub struct PassportApi {
-    base: Url,
-    client: Client,
-}
-
-// No Debug implementation: accessToken/deviceCode must never leak through logs.
-#[derive(Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DevicePairing {
-    pub device_code: String,
-    pub user_code: String,
-    pub verification_url: String,
-    pub expires_at: String,
-    pub interval: u64,
-}
-
-#[derive(Clone, Deserialize)]
-#[serde(tag = "status", rename_all = "lowercase")]
-pub enum PairingPoll {
-    Pending,
-    Approved {
-        #[serde(rename = "accessToken")]
-        access_token: String,
-        #[serde(rename = "expiresAt")]
-        expires_at: String,
-        wallet: String,
-    },
-}
-
-#[derive(Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AvatarTicket {
-    pub ticket: String,
-    pub expires_at: String,
-    pub avatar: PurchasedAvatar,
-    pub support: ProjectSupport,
-}
-
-#[derive(Clone)]
-pub struct NativeSession {
-    pub api: PassportApi,
-    token: String,
-    pub library: PurchasedLibrary,
-}
-
-fn safe_url(raw: &str) -> Result<Url, String> {
-    let url = Url::parse(raw).map_err(|_| "Invalid passport URL".to_string())?;
-    let local = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
-    if !(url.scheme() == "https" || (url.scheme() == "http" && local))
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-    {
-        return Err("Use HTTPS, or explicit localhost development, without URL credentials".into());
-    }
-    Ok(url)
-}
+pub struct PassportApi(PassportClient);
 
 impl PassportApi {
     pub fn new(base: &str) -> Result<Self, String> {
-        let base = safe_url(base)?;
-        if !base.path().trim_end_matches('/').ends_with("/api/passport") {
-            return Err("Passport URL must end in /api/passport".into());
-        }
-        let client = Client::builder()
-            .redirect(Policy::none())
-            .connect_timeout(Duration::from_secs(3))
-            .timeout(Duration::from_secs(15))
-            .build()
-            .map_err(|_| "Unable to initialize passport HTTPS transport".to_string())?;
-        Ok(Self { base, client })
+        PassportClient::new(base, OMOBA_PROJECT).map(Self)
     }
 
+    /// `OMOBA_PASSPORT_URL`, then the SDK-wide `EKZA_PASSPORT_URL`, then the
+    /// public Ekza storefront. The origin is always operator- or build-defined,
+    /// never taken from a game packet.
     pub fn from_env() -> Result<Self, String> {
-        let base = std::env::var(PASSPORT_URL_ENV).map_err(|_| {
-            format!("Set {PASSPORT_URL_ENV} to the trusted storefront passport API")
-        })?;
+        let base = std::env::var(PASSPORT_URL_ENV)
+            .or_else(|_| std::env::var(ekza_bevy_sdk::passport::client::PASSPORT_URL_ENV))
+            .unwrap_or_else(|_| ekza_bevy_sdk::registry::DEFAULT_PASSPORT_URL.to_owned());
         Self::new(&base)
     }
 
-    fn request<T: DeserializeOwned>(
-        &self,
-        path: &str,
-        token: Option<&str>,
-        body: Option<Value>,
-    ) -> Result<T, String> {
-        let endpoint = format!("{}/{}", self.base.as_str().trim_end_matches('/'), path);
-        let mut request = if let Some(body) = body {
-            self.client.post(endpoint).json(&body)
-        } else {
-            self.client.get(endpoint)
-        };
-        if let Some(token) = token {
-            request = request.bearer_auth(token);
-        }
-        let response = request
-            .send()
-            .map_err(|_| "Passport service could not be reached. Retry.".to_string())?;
-        let status = response.status();
-        let mut bytes = Vec::new();
-        response
-            .take(MAX_JSON_BYTES + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|_| "Passport response was interrupted".to_string())?;
-        if bytes.len() as u64 > MAX_JSON_BYTES {
-            return Err("Passport response is too large".into());
-        }
-        if !status.is_success() {
-            // Remote error text may contain sensitive information. Surface status
-            // with safe action-oriented copy rather than printing arbitrary JSON.
-            return Err(match status.as_u16() {
-                401 | 403 => {
-                    "Wallet approval expired or this avatar is not owned/supported. Pair again."
-                        .into()
-                }
-                404 | 410 => "Pairing, avatar, or ticket expired or is no longer available.".into(),
-                409 => "Pairing or ticket was already used. Start a fresh approval.".into(),
-                429 => "Too many passport requests. Wait and retry.".into(),
-                _ => format!("Passport request failed (HTTP {}). Retry.", status.as_u16()),
-            });
-        }
-        serde_json::from_slice(&bytes).map_err(|_| "Invalid passport response".into())
+    pub fn client(&self) -> &PassportClient {
+        &self.0
     }
 
     pub fn pair(&self) -> Result<DevicePairing, String> {
-        let pairing: DevicePairing =
-            self.request("device", None, Some(json!({"projectId": OMOBA_PROJECT})))?;
-        let verification = Url::parse(&pairing.verification_url)
-            .map_err(|_| "Invalid wallet verification link".to_string())?;
-        if verification.origin() != self.base.origin()
-            || verification.username() != ""
-            || verification.password().is_some()
-            || pairing.user_code.is_empty()
-            || pairing.device_code.len() < 16
-            || pairing.verification_url.contains(&pairing.device_code)
-        {
-            return Err("Invalid wallet verification link or pairing code".into());
-        }
-        Ok(pairing)
+        self.0.pair()
     }
 
     pub fn poll(&self, device_code: &str) -> Result<PairingPoll, String> {
-        self.request(
-            "device/poll",
-            None,
-            Some(json!({"deviceCode": device_code})),
-        )
+        self.0.poll(device_code)
     }
 
     pub fn session(&self, token: String, expected_wallet: &str) -> Result<NativeSession, String> {
-        let library: PurchasedLibrary = self.request("library", Some(&token), None)?;
-        if library.schema != "ekza.passport.library.v1"
-            || library.network != "solana-devnet"
-            || library.wallet != expected_wallet
-        {
-            return Err("Passport library belongs to a different wallet or network".into());
-        }
-        for avatar in &library.items {
-            validate_avatar_id(&avatar.avatar_id)?;
-            if !ekza_bevy_sdk::passport::valid_base58_key(&avatar.mint) {
-                return Err("Invalid owned NFT mint".into());
-            }
-        }
-        Ok(NativeSession {
-            api: self.clone(),
-            token,
-            library,
-        })
+        let session = self.0.session(token, expected_wallet)?;
+        check_network(&session.library)?;
+        Ok(session)
     }
 
     pub fn consume(&self, ticket: &str, session_id: &str) -> Result<ConsumedTicket, String> {
-        if ticket.len() < 16 || ticket.len() > 4096 || !valid_session_id(session_id) {
-            return Err("Missing or malformed avatar admission proof".into());
-        }
-        self.request(
-            "ticket/consume",
-            None,
-            Some(json!({
-                "ticket": ticket, "projectId": OMOBA_PROJECT, "sessionId": session_id,
-            })),
-        )
+        self.0.consume(ticket, session_id)
     }
 
     pub fn download(&self, protected: &ProtectedAvatar) -> Result<Vec<u8>, String> {
-        protected.validate()?;
-        let url = safe_url(&protected.support.rendition.url)?;
-        // This request deliberately carries no bearer token, cookies or redirects.
-        let response = self
-            .client
-            .get(url)
-            .send()
-            .map_err(|_| "Avatar rendition download failed".to_string())?;
-        if !response.status().is_success() {
-            return Err("Avatar rendition is unavailable".into());
-        }
-        let limit = protected.support.rendition.size_bytes;
-        if response.content_length().is_some_and(|size| size > limit) {
-            return Err("Avatar exceeds its approved size".into());
-        }
-        let mut bytes = Vec::new();
-        response
-            .take(limit + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|_| "Avatar download was interrupted".to_string())?;
-        verify_bytes(protected, &bytes)?;
-        Ok(bytes)
+        download(&self.0, protected)
     }
 }
 
-pub fn valid_session_id(session_id: &str) -> bool {
-    !session_id.is_empty()
-        && session_id.len() <= 64
-        && session_id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+fn check_network(library: &PurchasedLibrary) -> Result<(), String> {
+    if library.network != LIBRARY_NETWORK {
+        return Err("Passport library belongs to a different wallet or network".into());
+    }
+    Ok(())
 }
 
-impl NativeSession {
-    pub fn owns(&self, protected: &ProtectedAvatar) -> Option<&PurchasedAvatar> {
-        self.library.items.iter().find(|avatar| {
-            avatar.avatar_id == protected.avatar_id
-                && avatar
-                    .support
-                    .iter()
-                    .any(|support| support == &protected.support)
-        })
-    }
+/// Bounded, tokenless download checked against the approval and Omoba's profile.
+pub fn download(client: &PassportClient, protected: &ProtectedAvatar) -> Result<Vec<u8>, String> {
+    protected.validate()?;
+    let bytes = client.download(protected, &selector())?;
+    validate_humanoid_profile(&bytes)?;
+    Ok(bytes)
+}
 
-    pub fn ticket(
-        &self,
-        protected: &ProtectedAvatar,
-        session_id: &str,
-    ) -> Result<AvatarTicket, String> {
-        protected.validate()?;
-        let avatar = self
-            .owns(protected)
-            .ok_or("This wallet does not own this supported avatar")?;
-        if !valid_session_id(session_id) {
-            return Err("Invalid game session".into());
-        }
-        let response: AvatarTicket = self.api.request(
-            "ticket",
-            Some(&self.token),
-            Some(json!({
-                "projectId": OMOBA_PROJECT, "avatarId": avatar.avatar_id,
-                "mint": avatar.mint, "sessionId": session_id,
-            })),
-        )?;
-        if response.avatar.avatar_id != protected.avatar_id
-            || response.avatar.mint != avatar.mint
-            || response.support != protected.support
-            || response.ticket.len() < 16
-            || response.ticket.len() > 4096
-        {
-            return Err("Passport ticket does not match the selected avatar".into());
-        }
-        Ok(response)
-    }
+/// One-use ticket for an owned avatar, bound to this game session.
+pub fn ticket(
+    session: &NativeSession,
+    protected: &ProtectedAvatar,
+    session_id: &str,
+) -> Result<AvatarTicket, String> {
+    protected.validate()?;
+    session.ticket(protected, &selector(), session_id)
 }
 
 pub fn verify_bytes(protected: &ProtectedAvatar, bytes: &[u8]) -> Result<(), String> {
     protected
-        .validate_bytes(bytes, &format!("{:x}", Sha256::digest(bytes)))
+        .validate_bytes(bytes, &ekza_bevy_sdk::sha256_hex(bytes))
         .map_err(str::to_owned)?;
     validate_humanoid_profile(bytes)
 }
@@ -367,16 +188,6 @@ pub fn verify_local(protected: &ProtectedAvatar, path: &Path) -> Result<(), Stri
     verify_bytes(protected, &bytes)
 }
 
-pub fn protected_slug(protected: &ProtectedAvatar) -> String {
-    // Include canonical identity and full revision hash; two templates using the
-    // same geometry must not collapse into one ownership entry.
-    let key = format!(
-        "{}\n{}",
-        protected.avatar_id, protected.support.rendition.sha256
-    );
-    format!("ekza-{:x}", Sha256::digest(key.as_bytes()))
-}
-
 fn is_desktop_omoba_selector(support: &ProjectSupport) -> bool {
     support.project_id == OMOBA_PROJECT
         && support.platform == "desktop"
@@ -420,7 +231,7 @@ pub fn import_owned(
             if !seen.insert(slug.clone()) {
                 continue;
             }
-            let bytes = session.api.download(&protected)?;
+            let bytes = download(&session.api, &protected)?;
             let destination = asset_root.join("avatars").join(format!("{slug}.glb"));
             fs::create_dir_all(destination.parent().unwrap())
                 .map_err(|_| "Cannot create avatar asset directory")?;

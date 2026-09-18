@@ -6,6 +6,28 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Ekza avatars through the SDK
+- Purchased Ekza avatars now reach a running game through `ekza-bevy-sdk` 0.4.0.
+  The client reads the public registry catalogue in the background, lists the
+  store avatars the paired wallet owns, installs a model on first use into the
+  private settings directory (`ekza://` asset source) and only after the SDK
+  size/SHA-256/GLB checks and Omoba's humanoid-clip check pass.
+- The avatar picker has two groups: "Default avatars" (the 15 shipped CC0
+  skins, free for everyone, unchanged) and "Your Ekza avatars" (not in the box:
+  bought on Ekza and delivered through the SDK), with an explanatory hint when
+  the group is empty.
+- Another player's store avatar is downloaded and verified on demand; the
+  legacy model stands in until it is installed, instead of rendering nothing.
+- The server admits an `ekza-<sha256>` slug from the consumed passport ticket
+  alone: the slug is the hash of the granted identity and rendition, so no
+  pre-synced manifest or asset copy is required. Forged, mismatched, replayed
+  and ticketless joins stay denied.
+- `omoba-passport` no longer carries its own passport HTTP transport; it wraps
+  the SDK client and keeps the Omoba-specific checks and the staged importer.
+  The passport origin defaults to the public Ekza storefront
+  (`OMOBA_PASSPORT_URL` / `EKZA_PASSPORT_URL` override it); the registry origin
+  is overridable with `OMOBA_REGISTRY_URL`.
+
 ### Build reproducibility
 - Repin the SDK to its content-identical rewritten Passport revision after Git
   attribution cleanup, preserving the locked dependency graph and platform features.

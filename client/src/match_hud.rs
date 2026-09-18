@@ -248,12 +248,12 @@ fn update_hero_details(
             commands.entity(entity).despawn_related::<Children>();
             // A shipped portrait is preferred; the neutral hero silhouette is a
             // deliberate fallback for the one roster entry without a thumbnail.
-            if let Some(file) =
-                shared::avatar_definition(slug).and_then(|avatar| avatar.thumbnail.as_deref())
+            if let Some(path) =
+                shared::avatar_definition(slug).and_then(crate::passport::thumbnail_asset_path)
             {
                 commands
                     .entity(entity)
-                    .insert(ImageNode::new(assets.load(format!("avatars/{file}"))));
+                    .insert(ImageNode::new(assets.load(path)));
             } else {
                 commands.entity(entity).remove::<ImageNode>();
                 commands.entity(entity).with_children(|portrait| {

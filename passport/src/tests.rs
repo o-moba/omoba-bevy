@@ -1,5 +1,6 @@
 use super::*;
-use ekza_bevy_sdk::passport::Rendition;
+use ekza_bevy_sdk::passport::{PurchasedAvatar, Rendition};
+use sha2::{Digest, Sha256};
 use std::{
     io::{Read, Write},
     net::TcpListener,
@@ -179,17 +180,18 @@ fn download_is_bounded_checked_and_never_sends_session_token() {
 fn library_owner_and_exact_support_selectability_are_independent_of_shared_roster() {
     let bytes = model();
     let protected = asset("https://example.test/a.glb", &bytes);
-    let mut session = NativeSession {
-        api: PassportApi::new("https://example.test/api/passport").unwrap(),
-        token: "private".into(),
-        library: PurchasedLibrary {
+    let mut session = NativeSession::from_parts(
+        PassportApi::new("https://example.test/api/passport").unwrap().client().clone(),
+        "private".into(),
+        PurchasedLibrary {
             schema: "ekza.passport.library.v1".into(),
             network: "solana-devnet".into(),
             wallet: "2".repeat(32),
             expires_at: "2099-01-01T00:00:00Z".into(),
             items: vec![],
         },
-    };
+    )
+    .unwrap();
     assert!(session.owns(&protected).is_none());
     session.library.items.push(PurchasedAvatar {
         avatar_id: protected.avatar_id.clone(),
@@ -221,10 +223,10 @@ fn imported_bytes_and_sidecar_retain_identity_and_preserve_original_roster() {
     let mut mobile = protected.support.clone();
     mobile.platform = "mobile".into();
     mobile.profile = "mobile-lod-v1".into();
-    let session = NativeSession {
-        api: PassportApi::new(&format!("{origin}/api/passport")).unwrap(),
-        token: "private".into(),
-        library: PurchasedLibrary {
+    let session = NativeSession::from_parts(
+        PassportApi::new(&format!("{origin}/api/passport")).unwrap().client().clone(),
+        "private".into(),
+        PurchasedLibrary {
             schema: "ekza.passport.library.v1".into(),
             network: "solana-devnet".into(),
             wallet: "2".repeat(32),
@@ -239,7 +241,8 @@ fn imported_bytes_and_sidecar_retain_identity_and_preserve_original_roster() {
                 support: vec![mobile, protected.support.clone()],
             }],
         },
-    };
+    )
+    .unwrap();
     let manifest = root.join("passport-manifest.json");
     assert_eq!(import_owned(&session, &root, &manifest).unwrap(), 1);
     worker.join().unwrap();

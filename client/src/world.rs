@@ -80,13 +80,23 @@ impl AvatarAssetCache {
         asset_server: &AssetServer,
         slug: &str,
     ) -> (Handle<Scene>, Handle<Gltf>) {
+        self.ensure_loaded_from(asset_server, slug, format!("avatars/{slug}.glb"))
+    }
+
+    /// `path` is the model's asset path; store avatars live under `ekza://`.
+    fn ensure_loaded_from(
+        &mut self,
+        asset_server: &AssetServer,
+        slug: &str,
+        path: String,
+    ) -> (Handle<Scene>, Handle<Gltf>) {
         self.handles
             .entry(slug.to_owned())
             .or_insert_with(|| {
                 info!("Loading roster avatar model '{slug}'");
                 (
-                    asset_server.load(format!("avatars/{slug}.glb#Scene0")),
-                    asset_server.load(format!("avatars/{slug}.glb")),
+                    asset_server.load(format!("{path}#Scene0")),
+                    asset_server.load(path),
                 )
             })
             .clone()
@@ -116,9 +126,31 @@ impl PlayerModelResolver<'_> {
         character: CharacterChoice,
         avatar: Option<&str>,
     ) -> (Option<Handle<Scene>>, Option<Handle<Gltf>>) {
+        use omoba_passport::store::{self, ModelState};
+        if let Some(slug) = avatar
+            && shared::avatar_definition(slug).is_none()
+            && ekza_bevy_sdk::passport::is_protected_slug(slug)
+        {
+            // Someone wears a store avatar published after our last catalogue
+            // read. Refresh in the background; `take_changed` re-resolves.
+            store::request_refresh();
+        }
         if let Some(slug) = avatar
             && shared::avatar_definition(slug).is_some()
         {
+            if store::knows(slug) {
+                // Verified install on first use, off the main thread. Until it
+                // lands (or if it cannot), the legacy model stands in.
+                if store::model_state(slug) != ModelState::Ready {
+                    return self.catalog.handles_for(character);
+                }
+                let (scene, gltf) = self.avatars.ensure_loaded_from(
+                    &self.asset_server,
+                    slug,
+                    store::model_asset_path(slug),
+                );
+                return (Some(scene), Some(gltf));
+            }
             if let Some(protected) =
                 shared::avatar_definition(slug).and_then(|entry| entry.passport.as_ref())
             {

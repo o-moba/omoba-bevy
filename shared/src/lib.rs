@@ -642,14 +642,61 @@ pub fn avatar_roster() -> &'static [AvatarDefinition] {
     })
 }
 
-/// Looks up a shipped avatar by slug.
+/// Ekza store avatars learned at runtime (catalogue refresh on the client, a
+/// consumed ticket on the server). Entries are leaked once so lookups keep the
+/// `'static` lifetime the roster API always had; the set is bounded.
+static STORE_AVATARS: std::sync::RwLock<Vec<&'static AvatarDefinition>> =
+    std::sync::RwLock::new(Vec::new());
+const MAX_STORE_AVATARS: usize = 4096;
+
+/// Register a purchasable Ekza avatar. Only a definition whose slug is the
+/// SDK-derived name of its own passport boundary is accepted, so a registered
+/// entry can never shadow a shipped slug or masquerade as a free cosmetic.
+/// Returns the canonical entry (the first registration wins).
+pub fn register_store_avatar(definition: AvatarDefinition) -> Option<&'static AvatarDefinition> {
+    let protected = definition.passport.as_ref()?;
+    if protected.validate().is_err()
+        || ekza_bevy_sdk::passport::protected_slug(protected) != definition.slug
+        || avatar_roster().iter().any(|avatar| avatar.slug == definition.slug)
+    {
+        return None;
+    }
+    let mut store = STORE_AVATARS.write().unwrap();
+    if let Some(existing) = store.iter().find(|avatar| avatar.slug == definition.slug) {
+        return Some(existing);
+    }
+    if store.len() >= MAX_STORE_AVATARS {
+        return None;
+    }
+    let entry: &'static AvatarDefinition = Box::leak(Box::new(definition));
+    store.push(entry);
+    Some(entry)
+}
+
+/// Store avatars registered so far, in registration order.
+pub fn store_avatars() -> Vec<&'static AvatarDefinition> {
+    STORE_AVATARS.read().unwrap().clone()
+}
+
+/// Looks up a shipped or registered store avatar by slug.
 pub fn avatar_definition(slug: &str) -> Option<&'static AvatarDefinition> {
-    avatar_roster().iter().find(|avatar| avatar.slug == slug)
+    avatar_roster()
+        .iter()
+        .find(|avatar| avatar.slug == slug)
+        .or_else(|| {
+            STORE_AVATARS
+                .read()
+                .unwrap()
+                .iter()
+                .copied()
+                .find(|avatar| avatar.slug == slug)
+        })
 }
 
 /// Normalizes a client-supplied avatar slug: only slugs present in the shipped
-/// roster survive; anything else (unknown, malformed, path-like) becomes `None`
-/// so the receiving side falls back to the default model.
+/// roster or the registered store survive; anything else (unknown, malformed,
+/// path-like) becomes `None` so the receiving side falls back to the default
+/// model.
 pub fn normalize_avatar_slug(raw: Option<&str>) -> Option<&'static str> {
     let slug = raw?.trim();
     avatar_definition(slug).map(|avatar| avatar.slug.as_str())
@@ -982,6 +1029,67 @@ mod tests {
         assert_eq!(normalize_avatar_slug(Some("not-a-real-avatar")), None);
         assert_eq!(normalize_avatar_slug(Some("")), None);
         assert_eq!(normalize_avatar_slug(None), None);
+    }
+
+    #[test]
+    fn store_avatars_register_only_under_their_derived_passport_slug() {
+        use ekza_bevy_sdk::passport::{ProjectSupport, ProtectedAvatar, Rendition, protected_slug};
+        let protected = ProtectedAvatar {
+            avatar_id: format!("solana:devnet:avatar-data:{}", "7".repeat(32)),
+            support: ProjectSupport {
+                project_id: "omoba".into(),
+                platform: "desktop".into(),
+                profile: "humanoid-glb-v1".into(),
+                status: "approved".into(),
+                rendition: Rendition {
+                    id: "r1".into(),
+                    url: "https://example.test/store.glb".into(),
+                    sha256: "9".repeat(64),
+                    size_bytes: 4096,
+                    format: "glb".into(),
+                },
+            },
+        };
+        let definition = |slug: String, passport| AvatarDefinition {
+            slug,
+            display_name: "Store".into(),
+            collection: "Ekza store".into(),
+            license: "See creator terms".into(),
+            source_url: "https://example.test/store.glb".into(),
+            author: None,
+            thumbnail: None,
+            passport,
+        };
+        let slug = protected_slug(&protected);
+        assert_eq!(normalize_avatar_slug(Some(&slug)), None);
+
+        // Free entries, shipped slugs and mismatched names are all refused.
+        assert!(register_store_avatar(definition(slug.clone(), None)).is_none());
+        let shipped = avatar_roster()[0].slug.clone();
+        assert!(register_store_avatar(definition(shipped.clone(), Some(protected.clone()))).is_none());
+        assert!(avatar_definition(&shipped).unwrap().passport.is_none());
+        assert!(
+            register_store_avatar(definition("ekza-forged".into(), Some(protected.clone())))
+                .is_none()
+        );
+        let mut other_project = protected.clone();
+        other_project.support.project_id = "ekza-space".into();
+        assert!(
+            register_store_avatar(definition(
+                protected_slug(&other_project),
+                Some(other_project)
+            ))
+            .is_none()
+        );
+
+        let registered =
+            register_store_avatar(definition(slug.clone(), Some(protected.clone()))).unwrap();
+        assert_eq!(registered.passport.as_ref(), Some(&protected));
+        assert_eq!(normalize_avatar_slug(Some(&format!(" {slug} "))), Some(slug.as_str()));
+        // Idempotent: the first registration stays canonical.
+        let again = register_store_avatar(definition(slug.clone(), Some(protected))).unwrap();
+        assert!(std::ptr::eq(registered, again));
+        assert_eq!(store_avatars().iter().filter(|a| a.slug == slug).count(), 1);
     }
 
     #[test]

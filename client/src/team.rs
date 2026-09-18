@@ -86,9 +86,8 @@ impl Default for TeamSelection {
             hero_class: HeroClass::default(),
             // Preselect the first shipped avatar so a plain "click a team"
             // flow already exercises the roster path.
-            avatar: avatar_roster()
-                .iter()
-                .find(|avatar| crate::passport::can_select(avatar))
+            avatar: crate::passport::selectable_avatars()
+                .first()
                 .map(|avatar| avatar.slug.clone()),
             sprite_character: shared::DEFAULT_SPRITE_CHARACTER_ID.to_owned(),
         }
@@ -197,16 +196,13 @@ fn setup_team_select_ui(
     mut thumbnails: ResMut<AvatarThumbnails>,
     mut commands: Commands,
 ) {
-    for avatar in avatar_roster() {
-        if let Some(thumbnail) = avatar
-            .thumbnail
-            .as_deref()
+    for avatar in avatar_roster().iter().chain(shared::store_avatars()) {
+        if let Some(thumbnail) = crate::passport::thumbnail_asset_path(avatar)
             .filter(|_| *visual_mode == PlayerVisualMode::Models3d)
         {
-            thumbnails.0.insert(
-                avatar.slug.clone(),
-                asset_server.load(format!("avatars/{thumbnail}")),
-            );
+            thumbnails
+                .0
+                .insert(avatar.slug.clone(), asset_server.load(thumbnail));
         }
     }
     spawn_team_select_ui(&mut commands, &selection, *visual_mode, &sprite_assets);
@@ -310,11 +306,26 @@ pub fn spawn_team_select_ui(
                     Name::new("AvatarGrid"),
                 ))
                 .with_children(|grid| {
-                    for avatar in avatar_roster()
-                        .iter()
-                        .filter(|_| visual_mode == PlayerVisualMode::Models3d)
-                        .filter(|avatar| crate::passport::can_select(avatar))
-                    {
+                    if visual_mode != PlayerVisualMode::Models3d {
+                        return;
+                    }
+                    // In the box: the shipped roster, free for everyone.
+                    spawn_avatar_group_label(grid, "Default avatars", "DefaultAvatarsLabel");
+                    for avatar in crate::passport::default_avatars() {
+                        spawn_avatar_button(
+                            grid,
+                            &avatar.slug,
+                            &avatar.display_name,
+                            selection.avatar.as_deref() == Some(avatar.slug.as_str()),
+                        );
+                    }
+                    // Not in the box: bought on Ekza, delivered through the SDK.
+                    spawn_avatar_group_label(grid, "Your Ekza avatars", "PurchasedAvatarsLabel");
+                    let purchased = crate::passport::purchased_avatars();
+                    if purchased.is_empty() {
+                        spawn_avatar_group_hint(grid, crate::passport::purchased_hint());
+                    }
+                    for avatar in purchased {
                         spawn_avatar_button(
                             grid,
                             &avatar.slug,
@@ -517,6 +528,50 @@ fn spawn_section_title(parent: &mut ChildSpawnerCommands, title: &str, name: &st
         TextColor(Color::WHITE),
         Name::new(name.to_owned()),
     ));
+}
+
+/// Full-width row inside the wrapping avatar grid, so each group starts on its
+/// own line while the grid keeps a single scroll area.
+fn spawn_avatar_group_label(grid: &mut ChildSpawnerCommands, title: &str, name: &str) {
+    grid.spawn((
+        Node {
+            width: Val::Percent(100.0),
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+        Name::new(name.to_owned()),
+    ))
+    .with_children(|row| {
+        row.spawn((
+            Text::new(title),
+            TextFont {
+                font_size: 15.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.78, 0.86, 1.0)),
+        ));
+    });
+}
+
+fn spawn_avatar_group_hint(grid: &mut ChildSpawnerCommands, hint: &str) {
+    grid.spawn((
+        Node {
+            width: Val::Percent(100.0),
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+        Name::new("PurchasedAvatarsHint"),
+    ))
+    .with_children(|row| {
+        row.spawn((
+            Text::new(hint),
+            TextFont {
+                font_size: 12.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.7, 0.7, 0.7)),
+        ));
+    });
 }
 
 fn spawn_class_button(row: &mut ChildSpawnerCommands, class: HeroClass, selected: bool) {
@@ -1003,6 +1058,20 @@ mod tests {
         assert_eq!(inactive.single(app.world()).unwrap().display, Display::None);
         let mut choices = app.world_mut().query::<&AvatarSelectButton>();
         assert_eq!(choices.iter(app.world()).count(), avatar_roster().len());
+        // Shipped defaults and SDK-delivered purchases are separate groups;
+        // without a paired wallet the purchased group explains itself.
+        let mut names = app.world_mut().query::<&Name>();
+        let names: Vec<String> = names
+            .iter(app.world())
+            .map(|name| name.as_str().to_owned())
+            .collect();
+        for expected in [
+            "DefaultAvatarsLabel",
+            "PurchasedAvatarsLabel",
+            "PurchasedAvatarsHint",
+        ] {
+            assert!(names.iter().any(|name| name == expected), "{expected}");
+        }
         let mut sprite_choices = app.world_mut().query::<&SpriteSelectButton>();
         assert_eq!(sprite_choices.iter(app.world()).count(), 0);
         let mut teams = app.world_mut().query::<&TeamSelectButton>();

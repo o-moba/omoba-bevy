@@ -54,14 +54,21 @@ impl PassportAdmissions {
         // Gameplay normalizes surrounding whitespace before assigning a model.
         // The gate must inspect the same slug to prevent a padded paid bypass.
         let slug = slug.trim();
-        let protected = shared::avatar_definition(slug).and_then(|entry| entry.passport.as_ref());
-        let Some(protected) = protected else {
-            return if slug.starts_with("ekza-") {
+        let definition = shared::avatar_definition(slug);
+        // A shipped or already registered entry pins the exact rendition. A
+        // store slug the server has never seen is still admissible: the
+        // passport's consumed ticket names the rendition, and the slug is a
+        // hash of exactly that, so no pre-synced manifest is needed.
+        let expected = definition.and_then(|entry| entry.passport.clone());
+        if expected.is_none()
+            && (definition.is_some() || !ekza_bevy_sdk::passport::is_protected_slug(slug))
+        {
+            return if slug.starts_with("ekza-") && definition.is_none() {
                 Admission::Denied
             } else {
                 Admission::Free
             };
-        };
+        }
         if self.pending.contains(&addr) {
             return Admission::Pending;
         }
@@ -76,20 +83,25 @@ impl PassportAdmissions {
             || !omoba_passport::valid_session_id(&session)
             || ticket.len() < 16
             || ticket.len() > 4096
-            || protected.validate().is_err()
-            || omoba_passport::protected_slug(protected) != slug
+            || expected.as_ref().is_some_and(|protected| {
+                protected.validate().is_err() || omoba_passport::protected_slug(protected) != slug
+            })
         {
             return Admission::Denied;
         }
         self.pending.insert(addr);
-        let protected = protected.clone();
+        let slug = slug.to_owned();
         let packet = packet.clone();
         let sender = self.sender.clone();
         std::thread::spawn(move || {
-            let allowed = verify_admission(&protected, &session, &ticket, |ticket, session| {
-                api.consume(ticket, session)
-            })
-            .is_ok();
+            let allowed = verify_admission(
+                &slug,
+                expected.as_ref(),
+                &session,
+                &ticket,
+                |ticket, session| api.consume(ticket, session),
+            )
+            .is_ok_and(|granted| register(&slug, granted));
             let _ = sender.send(CompletedAdmission {
                 addr,
                 packet,
@@ -108,20 +120,54 @@ impl PassportAdmissions {
     }
 }
 
+/// Make the granted avatar visible to slug normalization and to the clients
+/// that will render it. Roster entries are already known.
+fn register(slug: &str, granted: ProtectedAvatar) -> bool {
+    if shared::avatar_definition(slug).is_some() {
+        return true;
+    }
+    shared::register_store_avatar(shared::AvatarDefinition {
+        slug: slug.to_owned(),
+        display_name: "Ekza avatar".into(),
+        collection: "Ekza store".into(),
+        license: "See creator terms".into(),
+        source_url: granted.support.rendition.url.clone(),
+        author: None,
+        thumbnail: None,
+        passport: Some(granted),
+    })
+    .is_some()
+}
+
+/// Consume the ticket at the configured origin and return the exact rendition
+/// it grants. The slug the client asked for must be the hash of that grant,
+/// and must equal the pinned roster entry when one exists.
 fn verify_admission(
-    expected: &ProtectedAvatar,
+    slug: &str,
+    expected: Option<&ProtectedAvatar>,
     session: &str,
     ticket: &str,
     consume: impl FnOnce(&str, &str) -> Result<ekza_bevy_sdk::passport::ConsumedTicket, String>,
-) -> Result<(), String> {
-    expected.validate()?;
+) -> Result<ProtectedAvatar, String> {
+    if let Some(expected) = expected {
+        expected.validate()?;
+    }
     if !omoba_passport::valid_session_id(session) || ticket.len() < 16 {
         return Err("Invalid admission proof".into());
     }
     let response = consume(ticket, session)?;
-    expected
-        .validate_consumed_ticket(&response)
-        .map_err(str::to_owned)
+    let granted = ProtectedAvatar {
+        avatar_id: response.avatar_id.clone(),
+        support: response.support.clone(),
+    };
+    // Validates the Omoba approval, identity, wallet and mint shapes.
+    granted.validate_consumed_ticket(&response)?;
+    if expected.is_some_and(|expected| expected != &granted)
+        || omoba_passport::protected_slug(&granted) != slug
+    {
+        return Err("Ticket does not grant this exact approved avatar rendition".into());
+    }
+    Ok(granted)
 }
 
 #[cfg(test)]
@@ -159,9 +205,11 @@ mod tests {
     #[test]
     fn owner_is_admitted_only_for_exact_rendition() {
         let (expected, response) = fixture();
+        let slug = omoba_passport::protected_slug(&expected);
         assert!(
             verify_admission(
-                &expected,
+                &slug,
+                Some(&expected),
                 "session-1",
                 "scoped-proof-123456",
                 |ticket, session| {
@@ -172,19 +220,54 @@ mod tests {
             )
             .is_ok()
         );
-        let mut wrong = response;
+        let mut wrong = response.clone();
         wrong.support.rendition.sha256 = "b".repeat(64);
         assert!(
-            verify_admission(&expected, "session-1", "scoped-proof-123456", |_, _| Ok(
-                wrong
-            ))
+            verify_admission(
+                &slug,
+                Some(&expected),
+                "session-1",
+                "scoped-proof-123456",
+                |_, _| Ok(wrong)
+            )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn unknown_store_slug_is_admitted_only_by_a_ticket_for_that_exact_rendition() {
+        let (expected, response) = fixture();
+        let slug = omoba_passport::protected_slug(&expected);
+        // No roster entry: the consumed ticket alone names the rendition.
+        let granted = verify_admission(&slug, None, "session-1", "scoped-proof-123456", |_, _| {
+            Ok(response.clone())
+        })
+        .unwrap();
+        assert_eq!(granted, expected);
+        assert!(register(&slug, granted));
+        assert_eq!(shared::normalize_avatar_slug(Some(&slug)), Some(slug.as_str()));
+
+        // A valid ticket for some other owned avatar cannot unlock this slug.
+        let mut other = response.clone();
+        other.avatar_id = format!("solana:devnet:avatar-data:{}", "4".repeat(32));
+        other.support.rendition.sha256 = "c".repeat(64);
+        assert!(
+            verify_admission(&slug, None, "session-1", "scoped-proof-123456", |_, _| Ok(other))
+                .is_err()
+        );
+        // Nor can a ticket approved for another project or profile.
+        let mut foreign = response;
+        foreign.support.project_id = "ekza-space".into();
+        assert!(
+            verify_admission(&slug, None, "session-1", "scoped-proof-123456", |_, _| Ok(foreign))
+                .is_err()
         );
     }
 
     #[test]
     fn nonowner_expired_replay_and_wrong_session_fail_closed() {
         let (expected, _) = fixture();
+        let slug = omoba_passport::protected_slug(&expected);
         for error in [
             "non-owner",
             "expired",
@@ -194,14 +277,18 @@ mod tests {
             "offline",
         ] {
             assert!(
-                verify_admission(&expected, "session-1", "scoped-proof-123456", |_, _| Err(
-                    error.into()
-                ))
+                verify_admission(
+                    &slug,
+                    Some(&expected),
+                    "session-1",
+                    "scoped-proof-123456",
+                    |_, _| Err(error.into())
+                )
                 .is_err()
             );
         }
         assert!(
-            verify_admission(&expected, "session-1", "", |_, _| panic!(
+            verify_admission(&slug, None, "session-1", "", |_, _| panic!(
                 "missing proof must not contact API"
             ))
             .is_err()
@@ -217,6 +304,13 @@ mod tests {
         }))
         .unwrap();
         assert!(matches!(gate.begin(addr, &paid), Admission::Denied));
+        // A well-formed store slug without a ticket never reaches the passport.
+        let ticketless: ClientPacket = serde_json::from_value(serde_json::json!({
+            "type":"join", "team":"green", "avatar":format!("ekza-{}", "a".repeat(64)),
+            "session_id":"session-1"
+        }))
+        .unwrap();
+        assert!(matches!(gate.begin(addr, &ticketless), Admission::Denied));
         let free: ClientPacket = serde_json::from_value(serde_json::json!({
             "type":"join", "team":"green", "avatar":shared::avatar_roster()[0].slug
         }))

@@ -11,7 +11,7 @@ tokio = { version = "1.49.0", features = ["rt", "time", "sync", "macros"] }
 ed25519-dalek = "2.2.0"
 getrandom = "0.3.4"
 bevy = { version = "0.18.0", default-features = false, features = ["std"] }
-ekza-bevy-sdk = { git = "https://github.com/ekza-space/ekza-bevy-sdk", rev = "28fbfde54780ba6af469a1653ef9334df2f5f446", default-features = false }
+ekza-bevy-sdk = { git = "https://github.com/ekza-space/ekza-bevy-sdk", rev = "902d52cc3b55a3cbe8c691761d9d77d4b66e7219", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
 shared = { path = "../shared" }

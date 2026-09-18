@@ -318,6 +318,10 @@ impl Plugin for NetworkingPlugin {
             .add_systems(Update, mirror_debug_flags_to_network_state)
             .add_systems(
                 Update,
+                respawn_players_with_new_store_models.before(ClientNetPipeline::ApplySnapshot),
+            )
+            .add_systems(
+                Update,
                 ingest_server_snapshot_packets.in_set(ClientNetPipeline::IngestSnapshot),
             )
             .add_systems(
@@ -843,6 +847,29 @@ struct NetworkChannels {
     outgoing: Sender<ClientPacket>,
     incoming: Receiver<ServerPacket>,
     signals: Receiver<NetThreadSignal>,
+}
+
+/// A remote player's Ekza store avatar is resolved when the player spawns. If
+/// the catalogue entry or the verified model only arrives later, drop the
+/// stand-in entity; the next snapshot spawns it again with the real model.
+fn respawn_players_with_new_store_models(
+    mut commands: Commands,
+    mut network_state: ResMut<NetworkState>,
+    remote_query: Query<(Entity, &NetworkPlayerId, &NetworkAvatar), With<RemotePlayer>>,
+) {
+    let changed = omoba_passport::store::take_changed();
+    if changed.is_empty() {
+        return;
+    }
+    for (entity, id, avatar) in &remote_query {
+        if avatar.0.as_ref().is_some_and(|slug| changed.contains(slug)) {
+            network_state.remote_players.remove(&id.0);
+            commands
+                .entity(entity)
+                .despawn_related::<Children>()
+                .despawn();
+        }
+    }
 }
 
 #[derive(Resource, Default)]
