@@ -7,6 +7,8 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 ## [Unreleased]
 
 ### Ekza avatar loop, demo ready
+- The demo runner uses the registry from its own `ekza-registry` repository
+  (falls back to `ekza-mirror/backend`).
 - "Connect Ekza wallet" button in the avatar picker: pairing runs through the
   SDK `PairingFlow` without blocking the game, the approval page opens in the
   browser, the code and link stay on screen, and the picker rebuilds with the

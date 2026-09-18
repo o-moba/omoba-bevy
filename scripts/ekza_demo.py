@@ -17,7 +17,8 @@ Flow to show:
      the avatar appears under "Your Ekza avatars" -> pick it -> join
   5. second `client`: sees the first player wearing it (downloaded on demand)
 
-Needs sibling checkouts `../ekza-mirror` (backend/.venv) and
+Needs sibling checkouts `../ekza-registry` (`cd backend && uv sync`; the older
+`../ekza-mirror/backend` is used when the registry repository is absent) and
 `../solana-avatars` (app built with `npm run build`). Standard library only.
 """
 
@@ -51,6 +52,14 @@ def game_env() -> dict:
     }
 
 
+def registry_backend() -> Path:
+    """The registry moved out of ekza-mirror into its own repository."""
+    for candidate in ("ekza-registry/backend", "ekza-mirror/backend"):
+        if (UMBRELLA / candidate / ".venv/bin/python").is_file():
+            return UMBRELLA / candidate
+    return UMBRELLA / "ekza-registry/backend"
+
+
 def port_free(port: int) -> bool:
     with socket.socket() as probe:
         return probe.connect_ex(("127.0.0.1", port)) != 0
@@ -71,13 +80,14 @@ def publish(args) -> int:
 
 def serve(_args) -> int:
     catalog = STATE / "registry/catalog.json"
-    python = UMBRELLA / "ekza-mirror/backend/.venv/bin/python"
+    backend = registry_backend()
+    python = backend / ".venv/bin/python"
     store = UMBRELLA / "solana-avatars/app"
     problems = []
     if not catalog.is_file():
         problems.append("no catalogue yet: run `publish --index N --reviewed-by NAME` first")
     if not python.is_file():
-        problems.append(f"registry environment missing: {python} (cd ekza-mirror/backend && uv sync)")
+        problems.append(f"registry environment missing: {python} (cd {backend} && uv sync)")
     if not (store / "build/server").is_dir():
         problems.append(f"storefront is not built: cd {store} && npm run build")
     for port in (REGISTRY_PORT, STORE_PORT):
@@ -98,7 +108,7 @@ def serve(_args) -> int:
 
     launch(
         [str(python), "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(REGISTRY_PORT)],
-        UMBRELLA / "ekza-mirror/backend",
+        backend,
         {
             "EKZA_CATALOG_PATH": str(catalog),
             "EKZA_ASSET_DIR": str(STATE / "registry/assets"),
