@@ -14,6 +14,7 @@ use ekza_bevy_sdk::passport::{
 };
 pub use ekza_bevy_sdk::passport::{
     client::{AvatarTicket, DevicePairing, NativeSession, PairingPoll, valid_session_id},
+    pairing::{PairingFlow, PairingState, open_in_browser},
     protected_slug,
 };
 use serde_json::{Value, json};
@@ -74,6 +75,13 @@ impl PassportApi {
     pub fn download(&self, protected: &ProtectedAvatar) -> Result<Vec<u8>, String> {
         download(&self.0, protected)
     }
+}
+
+/// Accept a session paired through [`PairingFlow`]: same network rule as
+/// [`PassportApi::session`].
+pub fn accept_session(session: NativeSession) -> Result<NativeSession, String> {
+    check_network(&session.library)?;
+    Ok(session)
 }
 
 fn check_network(library: &PurchasedLibrary) -> Result<(), String> {

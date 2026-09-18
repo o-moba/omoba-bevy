@@ -6,6 +6,20 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Ekza avatar loop, demo ready
+- "Connect Ekza wallet" button in the avatar picker: pairing runs through the
+  SDK `PairingFlow` without blocking the game, the approval page opens in the
+  browser, the code and link stay on screen, and the picker rebuilds with the
+  purchased avatars once the wallet is approved. The `OMOBA_PASSPORT_CONNECT=1`
+  terminal flow still works.
+- `scripts/ekza_publish.py`: operator tool that turns an on-chain avatar
+  template into a registry catalogue entry: reads the minter program, verifies
+  the source VRM, bakes the five Omoba clips into a `desktop/humanoid-glb-v1`
+  rendition, writes content-addressed assets and an explicit approval record.
+  It never signs, spends or deploys.
+- `scripts/ekza_demo.py`: local demo of the whole loop on devnet
+  (`publish`, `serve` = registry + storefront/passport + game server, `client`).
+
 ### Ekza avatars through the SDK
 - Purchased Ekza avatars now reach a running game through `ekza-bevy-sdk` 0.4.0.
   The client reads the public registry catalogue in the background, lists the

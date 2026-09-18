@@ -112,6 +112,7 @@ impl Plugin for TeamSelectPlugin {
             )
             .add_systems(Update, (team_select_ui_system, scroll_avatar_roster))
             .add_systems(Update, attach_avatar_thumbnails)
+            .add_systems(Update, wallet_connect_ui_system.before(team_select_ui_system))
             .add_systems(
                 Update,
                 adapt_mobile_selection_contrast.after(team_select_ui_system),
@@ -147,6 +148,15 @@ struct AvatarThumbnailSlot {
 
 #[derive(Component)]
 struct ModelAvatarGrid;
+
+#[derive(Component)]
+struct WalletStatusText;
+
+#[derive(Component)]
+struct WalletConnectButton;
+
+const WALLET_BUTTON_COLOR: Color = Color::srgb(0.22, 0.30, 0.55);
+const WALLET_BUTTON_HOVER_COLOR: Color = Color::srgb(0.30, 0.40, 0.70);
 
 #[derive(Component)]
 struct SpriteAvatarGrid;
@@ -196,16 +206,79 @@ fn setup_team_select_ui(
     mut thumbnails: ResMut<AvatarThumbnails>,
     mut commands: Commands,
 ) {
+    load_avatar_thumbnails(&asset_server, *visual_mode, &mut thumbnails);
+    spawn_team_select_ui(&mut commands, &selection, *visual_mode, &sprite_assets);
+}
+
+fn load_avatar_thumbnails(
+    asset_server: &AssetServer,
+    visual_mode: PlayerVisualMode,
+    thumbnails: &mut AvatarThumbnails,
+) {
+    if visual_mode != PlayerVisualMode::Models3d {
+        return;
+    }
     for avatar in avatar_roster().iter().chain(shared::store_avatars()) {
-        if let Some(thumbnail) = crate::passport::thumbnail_asset_path(avatar)
-            .filter(|_| *visual_mode == PlayerVisualMode::Models3d)
-        {
+        if thumbnails.0.contains_key(&avatar.slug) {
+            continue;
+        }
+        if let Some(thumbnail) = crate::passport::thumbnail_asset_path(avatar) {
             thumbnails
                 .0
                 .insert(avatar.slug.clone(), asset_server.load(thumbnail));
         }
     }
-    spawn_team_select_ui(&mut commands, &selection, *visual_mode, &sprite_assets);
+}
+
+/// Wallet pairing from the menu: start it, mirror its progress into the status
+/// line, and rebuild the picker when purchased avatars become selectable
+/// (wallet approved, or the store catalogue arrived after the menu was built).
+#[allow(clippy::too_many_arguments)]
+fn wallet_connect_ui_system(
+    mut commands: Commands,
+    selection: Res<TeamSelection>,
+    visual_mode: Res<PlayerVisualMode>,
+    sprite_assets: Res<SpriteVisualAssets>,
+    asset_server: Res<AssetServer>,
+    mut thumbnails: ResMut<AvatarThumbnails>,
+    mut buttons: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<WalletConnectButton>),
+    >,
+    mut status: Query<&mut Text, With<WalletStatusText>>,
+    overlay_query: Query<Entity, With<TeamSelectRoot>>,
+    mut listed_purchases: Local<Option<usize>>,
+) {
+    if selection.team.is_some() || overlay_query.is_empty() {
+        return;
+    }
+    for (interaction, mut color) in &mut buttons {
+        match *interaction {
+            Interaction::Pressed => crate::passport::connect(),
+            Interaction::Hovered => *color = BackgroundColor(WALLET_BUTTON_HOVER_COLOR),
+            Interaction::None => *color = BackgroundColor(WALLET_BUTTON_COLOR),
+        }
+    }
+    let just_connected = crate::passport::poll_wallet();
+    let line = crate::passport::wallet_status_line();
+    for mut text in &mut status {
+        if text.0 != line {
+            text.0.clone_from(&line);
+        }
+    }
+    let purchases = crate::passport::purchased_avatars().len();
+    let stale = listed_purchases.is_some_and(|listed| listed != purchases);
+    *listed_purchases = Some(purchases);
+    if just_connected || stale {
+        for overlay in &overlay_query {
+            commands
+                .entity(overlay)
+                .despawn_related::<Children>()
+                .despawn();
+        }
+        load_avatar_thumbnails(&asset_server, *visual_mode, &mut thumbnails);
+        spawn_team_select_ui(&mut commands, &selection, *visual_mode, &sprite_assets);
+    }
 }
 
 pub fn spawn_team_select_ui(
@@ -255,14 +328,40 @@ pub fn spawn_team_select_ui(
 
             spawn_section_title(parent, "Choose Avatar", "AvatarSelectTitle");
             parent.spawn((
-                Text::new(crate::passport::status()),
+                Text::new(crate::passport::wallet_status_line()),
                 TextFont {
                     font_size: 13.0,
                     ..default()
                 },
                 TextColor::WHITE,
+                WalletStatusText,
                 Name::new("PassportStatus"),
             ));
+            if !crate::passport::is_connected() {
+                parent
+                    .spawn((
+                        Button,
+                        Node {
+                            padding: UiRect::axes(Val::Px(14.0), Val::Px(6.0)),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        BackgroundColor(WALLET_BUTTON_COLOR),
+                        WalletConnectButton,
+                        Name::new("WalletConnectButton"),
+                    ))
+                    .with_children(|button| {
+                        button.spawn((
+                            Text::new("Connect Ekza wallet"),
+                            TextFont {
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor::WHITE,
+                        ));
+                    });
+            }
 
             parent.spawn((
                 Text::new("Scroll heroes: mouse wheel / Page Up / Page Down"),
@@ -1069,9 +1168,16 @@ mod tests {
             "DefaultAvatarsLabel",
             "PurchasedAvatarsLabel",
             "PurchasedAvatarsHint",
+            // Pairing starts from the menu, not from a launch flag.
+            "WalletConnectButton",
         ] {
             assert!(names.iter().any(|name| name == expected), "{expected}");
         }
+        assert_eq!(
+            crate::passport::wallet_view(),
+            crate::passport::WalletView::Disconnected
+        );
+        assert!(!crate::passport::poll_wallet());
         let mut sprite_choices = app.world_mut().query::<&SpriteSelectButton>();
         assert_eq!(sprite_choices.iter(app.world()).count(), 0);
         let mut teams = app.world_mut().query::<&TeamSelectButton>();

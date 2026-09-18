@@ -1,6 +1,8 @@
 //! First native wallet integration: explicit terminal pairing before startup.
 //! Tokens remain process-local; only scoped tickets enter the UDP protocol.
-use omoba_passport::{NativeSession, PassportApi, pair_interactively, store, verify_local};
+use omoba_passport::{
+    NativeSession, PairingFlow, PairingState, PassportApi, pair_interactively, store, verify_local,
+};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, OnceLock},
@@ -9,6 +11,116 @@ use std::{
 static SESSION: OnceLock<NativeSession> = OnceLock::new();
 type TicketResult = Arc<Mutex<Option<Result<String, String>>>>;
 static TICKETS: OnceLock<Mutex<HashMap<(String, String), TicketResult>>> = OnceLock::new();
+
+/// In-game wallet pairing, if one was started from the menu.
+static PAIRING: Mutex<Option<PairingFlow>> = Mutex::new(None);
+static BROWSER_OPENED: Mutex<Option<String>> = Mutex::new(None);
+
+/// What the menu shows about the wallet connection.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WalletView {
+    Disconnected,
+    Starting,
+    AwaitingApproval { user_code: String, verification_url: String },
+    Connected,
+    Failed(String),
+}
+
+pub fn is_connected() -> bool {
+    SESSION.get().is_some()
+}
+
+/// Start pairing from the menu. A running attempt is left alone.
+pub fn connect() {
+    if is_connected() {
+        return;
+    }
+    let mut pairing = PAIRING.lock().unwrap();
+    if pairing.as_ref().is_some_and(PairingFlow::in_progress) {
+        return;
+    }
+    *BROWSER_OPENED.lock().unwrap() = None;
+    *pairing = match PassportApi::from_env() {
+        Ok(api) => Some(PairingFlow::start(api.client().clone())),
+        Err(error) => {
+            eprintln!("Wallet connection unavailable: {error}");
+            None
+        }
+    };
+}
+
+/// Advance pairing once per frame. Returns true on the frame the wallet
+/// becomes connected, so the menu can list the purchased avatars.
+pub fn poll_wallet() -> bool {
+    let mut pairing = PAIRING.lock().unwrap();
+    let Some(flow) = pairing.as_ref() else {
+        return false;
+    };
+    match flow.state() {
+        PairingState::AwaitingApproval {
+            verification_url, ..
+        } => {
+            // Open the approval page once; the link stays on screen either way.
+            let mut opened = BROWSER_OPENED.lock().unwrap();
+            if opened.as_deref() != Some(verification_url.as_str()) {
+                if let Err(error) = omoba_passport::open_in_browser(&verification_url) {
+                    eprintln!("{error}: {verification_url}");
+                }
+                *opened = Some(verification_url);
+            }
+            false
+        }
+        PairingState::Connected => {
+            let connected = flow
+                .take_session()
+                .ok_or_else(|| "Wallet session was already collected".to_owned())
+                .and_then(omoba_passport::accept_session)
+                .is_ok_and(|session| SESSION.set(session).is_ok());
+            *pairing = None;
+            if connected {
+                // A purchase made minutes ago may be newer than our catalogue.
+                store::request_refresh();
+            }
+            connected
+        }
+        _ => false,
+    }
+}
+
+pub fn wallet_view() -> WalletView {
+    if is_connected() {
+        return WalletView::Connected;
+    }
+    match PAIRING.lock().unwrap().as_ref().map(PairingFlow::state) {
+        None | Some(PairingState::Cancelled | PairingState::Connected) => WalletView::Disconnected,
+        Some(PairingState::Starting) => WalletView::Starting,
+        Some(PairingState::AwaitingApproval {
+            user_code,
+            verification_url,
+            ..
+        }) => WalletView::AwaitingApproval {
+            user_code,
+            verification_url,
+        },
+        Some(PairingState::Failed(error)) => WalletView::Failed(error),
+    }
+}
+
+/// One line for the menu, under "Choose Avatar".
+pub fn wallet_status_line() -> String {
+    match wallet_view() {
+        WalletView::Disconnected => "Default avatars are free for everyone".into(),
+        WalletView::Starting => "Contacting Ekza…".into(),
+        WalletView::AwaitingApproval {
+            user_code,
+            verification_url,
+        } => format!("Approve in your browser · code {user_code} · {verification_url}"),
+        WalletView::Connected => {
+            "Wallet connected · your Ekza avatars are listed below the defaults".into()
+        }
+        WalletView::Failed(error) => error,
+    }
+}
 
 pub enum TicketPoll {
     Free,
@@ -82,7 +194,7 @@ pub fn purchased_hint() -> &'static str {
     if SESSION.get().is_some() {
         "No Ekza avatars approved for Omoba in this wallet yet · buy one on avatar.ekza.io"
     } else {
-        "Launch with OMOBA_PASSPORT_CONNECT=1 to wear avatars you own on Ekza"
+        "Connect your Ekza wallet to wear avatars you own"
     }
 }
 
@@ -102,14 +214,6 @@ pub fn can_select(avatar: &shared::AvatarDefinition) -> bool {
             .get()
             .is_some_and(|session| session.owns(protected).is_some())
     })
-}
-
-pub fn status() -> &'static str {
-    if SESSION.get().is_some() {
-        "Wallet connected · your Ekza avatars are listed below the defaults"
-    } else {
-        "Default avatars are free for everyone"
-    }
 }
 
 pub fn ticket_for_slug(slug: Option<&str>, session_id: &str) -> TicketPoll {

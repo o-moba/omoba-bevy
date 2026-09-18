@@ -2387,8 +2387,8 @@ dependencies = [
 
 [[package]]
 name = "ekza-bevy-sdk"
-version = "0.4.0"
-source = "git+https://github.com/ekza-space/ekza-bevy-sdk?rev=902d52cc3b55a3cbe8c691761d9d77d4b66e7219#902d52cc3b55a3cbe8c691761d9d77d4b66e7219"
+version = "0.4.1"
+source = "git+https://github.com/ekza-space/ekza-bevy-sdk?rev=19663c351aca490d98f05dc1d951935fed397da6#19663c351aca490d98f05dc1d951935fed397da6"
 dependencies = [
  "bevy",
  "reqwest",

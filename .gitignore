@@ -43,6 +43,7 @@ docs/*
 !docs/game-audio.md
 !docs/player-handles.md
 !docs/playtest-script.md
+!docs/ekza-avatar-demo.md
 !docs/bug-report-template.md
 !docs/mvp-scope-and-limitations.md
 !docs/progress/
@@ -96,3 +97,6 @@ career_nickname.json
 # Supporter integration documentation and local verifier dependencies.
 !docs/supporter.md
 /billing/apple-verifier/node_modules/
+
+# Local Ekza avatar demo state (scripts/ekza_demo.py)
+.ekza-demo/
