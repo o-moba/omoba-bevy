@@ -6,6 +6,11 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Developer workflow
+- `scripts/ekza_demo.py serve` also starts Avatar Studio from `../ekza-registry/web`
+  when it is built, points the storefront's old `/studio` links at it, and enables
+  the registry's Studio API when Supabase settings are present in the environment.
+
 ### Repository hygiene
 - Make this checkout the single place every platform is built from. The separate
   local copies used for the iPhone, mobile beta and passport work were retired;

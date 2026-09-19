@@ -5,7 +5,7 @@ Devnet chain, local services. Nothing here deploys, signs or spends:
 publishing reads the chain, buying happens in your own browser wallet.
 
     python3 scripts/ekza_demo.py publish --index 18 --reviewed-by "Dima"
-    python3 scripts/ekza_demo.py serve        # registry + storefront/passport + game server
+    python3 scripts/ekza_demo.py serve        # registry + storefront/passport + Studio + game server
     python3 scripts/ekza_demo.py client       # one game window (run twice for two players)
 
 Flow to show:
@@ -20,6 +20,12 @@ Flow to show:
 Needs sibling checkouts `../ekza-registry` (`cd backend && uv sync`; the older
 `../ekza-mirror/backend` is used when the registry repository is absent) and
 `../solana-avatars` (app built with `npm run build`). Standard library only.
+
+Avatar Studio (`../ekza-registry/web`) is started too when it has been built
+(`npm run build` there). Its account features need the registry to reach
+Supabase: export `EKZA_SUPABASE_URL`, `EKZA_SUPABASE_SECRET_KEY` and
+`EKZA_SUPABASE_PUBLISHABLE_KEY` first (see `tools/studio_supabase.py` in the
+registry); without them Studio opens but reports itself unavailable.
 """
 
 from __future__ import annotations
@@ -38,9 +44,11 @@ UMBRELLA = REPO.parent
 STATE = Path(os.environ.get("OMOBA_EKZA_DEMO_DIR", REPO / ".ekza-demo"))
 REGISTRY_PORT = int(os.environ.get("EKZA_DEMO_REGISTRY_PORT", "8029"))
 STORE_PORT = int(os.environ.get("EKZA_DEMO_STORE_PORT", "5191"))
+STUDIO_PORT = int(os.environ.get("EKZA_DEMO_STUDIO_PORT", "7103"))
 GAME_ADDR = os.environ.get("EKZA_DEMO_GAME_ADDR", "127.0.0.1:4028")
 REGISTRY = f"http://127.0.0.1:{REGISTRY_PORT}"
 STORE = f"http://127.0.0.1:{STORE_PORT}"
+STUDIO = f"http://127.0.0.1:{STUDIO_PORT}"
 RPC = os.environ.get("OMOBA_SOLANA_RPC_URL", "https://api.devnet.solana.com")
 
 
@@ -83,6 +91,9 @@ def serve(_args) -> int:
     backend = registry_backend()
     python = backend / ".venv/bin/python"
     store = UMBRELLA / "solana-avatars/app"
+    studio = backend.parent / "web"
+    with_studio = (studio / "build/server").is_dir()
+    studio_backed = with_studio and bool(os.environ.get("EKZA_SUPABASE_URL"))
     problems = []
     if not catalog.is_file():
         problems.append("no catalogue yet: run `publish --index N --reviewed-by NAME` first")
@@ -90,7 +101,7 @@ def serve(_args) -> int:
         problems.append(f"registry environment missing: {python} (cd {backend} && uv sync)")
     if not (store / "build/server").is_dir():
         problems.append(f"storefront is not built: cd {store} && npm run build")
-    for port in (REGISTRY_PORT, STORE_PORT):
+    for port in (REGISTRY_PORT, STORE_PORT) + ((STUDIO_PORT,) if with_studio else ()):
         if not port_free(port):
             problems.append(f"port {port} is in use; stop the earlier demo first")
     if problems:
@@ -115,6 +126,7 @@ def serve(_args) -> int:
             "EKZA_PUBLISHED_DIR": str(STATE / "registry/published"),
             "EKZA_QUARANTINE_DIR": str(STATE / "registry/quarantine"),
             "EKZA_PUBLIC_BASE_URL": REGISTRY,
+            **({"EKZA_STUDIO_ENABLED": "1", "EKZA_STUDIO_DIR": str(STATE / "registry/studio")} if studio_backed else {}),
         },
     )
     launch(
@@ -125,8 +137,19 @@ def serve(_args) -> int:
             "EKZA_PASSPORT_ORIGIN": STORE, "EKZA_PASSPORT_ALLOW_LOCALHOST": "1",
             "EKZA_PASSPORT_RPC_URL": RPC,
             "EKZA_PASSPORT_REGISTRY_URL": f"{REGISTRY}/v1/avatars",
+            **({"EKZA_STUDIO_URL": STUDIO} if with_studio else {}),
         },
     )
+    if with_studio:
+        launch(
+            ["npm", "start"],
+            studio,
+            {
+                "PORT": str(STUDIO_PORT), "HOST": "127.0.0.1",
+                "EKZA_STUDIO_API_URL": f"{REGISTRY}/v1/studio",
+                "EKZA_STUDIO_PUBLIC_API_URL": f"{REGISTRY}/v1/studio",
+            },
+        )
     launch(
         ["cargo", "run", "-p", "server"],
         REPO,
@@ -135,6 +158,14 @@ def serve(_args) -> int:
     print(
         f"\nRegistry  {REGISTRY}/v1/avatars\n"
         f"Storefront {STORE}  (publish: /deployer, buy: /minter)\n"
+        + (
+            f"Studio     {STUDIO}/studio"
+            + ("" if studio_backed else "  (no Supabase settings in the environment: account features unavailable)")
+            + "\n"
+            if with_studio
+            else "Studio     not built: cd ../ekza-registry/web && npm install && npm run build\n"
+        )
+        +
         f"Game server udp://{GAME_ADDR}\n"
         "Now run: python3 scripts/ekza_demo.py client   (Ctrl+C here stops everything)\n"
     )
