@@ -10,6 +10,7 @@ second player sees it. Devnet chain, local services; nothing is deployed.
 | --- | --- |
 | Registry environment | `cd ../ekza-registry/backend && uv sync` |
 | Storefront build | `cd ../solana-avatars/app && npm install && npm run build` |
+| Studio build (optional) | `cd ../ekza-registry/web && npm install && npm run build`; started on `:7103` when present |
 | A devnet wallet in the browser (Phantom/Solflare on **devnet**) with a little test SOL | `solana airdrop 1 <address> --url devnet` |
 | `PINATA_JWT` in `../solana-avatars/app/.env` | only for step 1 (uploading a new VRM) |
 
@@ -42,7 +43,8 @@ python3 scripts/ekza_publish.py list
    python3 scripts/ekza_demo.py serve
    ```
 
-   Registry `:8029`, storefront + passport `:5191`, game server `udp :4028`.
+   Registry `:8029`, storefront + passport `:5191`, Avatar Studio `:7103` (when
+   built), game server `udp :4028`.
 
 4. **Player buys**: `http://127.0.0.1:5191/minter`, pick the avatar, mint with
    the devnet wallet.
