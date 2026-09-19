@@ -2387,8 +2387,8 @@ dependencies = [
 
 [[package]]
 name = "ekza-bevy-sdk"
-version = "0.5.0"
-source = "git+https://github.com/ekza-space/ekza-bevy-sdk?rev=b66a6da69cba5f1674824e55ff245d97487b7492#b66a6da69cba5f1674824e55ff245d97487b7492"
+version = "0.6.0"
+source = "git+https://github.com/ekza-space/ekza-bevy-sdk?rev=31b03356cab220ef3d8cc7abc668c0675b64da87#31b03356cab220ef3d8cc7abc668c0675b64da87"
 dependencies = [
  "bevy",
  "reqwest",
@@ -6584,7 +6584,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

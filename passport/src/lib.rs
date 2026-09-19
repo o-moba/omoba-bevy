@@ -1,6 +1,7 @@
 //! Native transport and staged importer for the shared Ekza passport contract.
 //! Secrets stay in memory. Game packets contain only one-use scoped tickets.
 
+pub mod account;
 pub mod community;
 pub mod device_account;
 pub mod store;

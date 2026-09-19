@@ -6,6 +6,17 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Ekza account: your own library in the picker, no wallet
+- "Connect Ekza account" in the avatar picker: the game shows a short code and opens
+  Ekza Studio, the player signs in (email, later Google) and confirms, and the picker
+  gains a "My Ekza library" group with the free avatars that account saved or created
+  and that are approved for Omoba. The library is re-read every 15 seconds while
+  connected, so an avatar saved in the browser appears without restarting the game.
+- The connection grants nothing. The server still admits a free avatar from its own
+  registry read, so a connected account and a guest can wear exactly the same avatars;
+  the account only decides what the picker lists first.
+- Update `ekza-bevy-sdk` to 0.6.0 (`account` module). Wallet pairing is unchanged.
+
 ### Ekza community avatars: free, no wallet
 - Avatars a creator published through Ekza Studio, prepared for Omoba and approved by
   an Omoba project owner now reach the game with no wallet and no ticket. The picker

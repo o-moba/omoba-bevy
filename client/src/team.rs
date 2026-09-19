@@ -158,6 +158,12 @@ struct WalletStatusText;
 #[derive(Component)]
 struct WalletConnectButton;
 
+#[derive(Component)]
+struct AccountStatusText;
+
+#[derive(Component)]
+struct AccountConnectButton;
+
 const WALLET_BUTTON_COLOR: Color = Color::srgb(0.22, 0.30, 0.55);
 const WALLET_BUTTON_HOVER_COLOR: Color = Color::srgb(0.30, 0.40, 0.70);
 
@@ -248,9 +254,19 @@ fn wallet_connect_ui_system(
         (&Interaction, &mut BackgroundColor),
         (Changed<Interaction>, With<WalletConnectButton>),
     >,
-    mut status: Query<&mut Text, With<WalletStatusText>>,
+    mut status: Query<&mut Text, (With<WalletStatusText>, Without<AccountStatusText>)>,
+    mut account_buttons: Query<
+        (&Interaction, &mut BackgroundColor),
+        (
+            Changed<Interaction>,
+            With<AccountConnectButton>,
+            Without<WalletConnectButton>,
+        ),
+    >,
+    mut account_status: Query<&mut Text, (With<AccountStatusText>, Without<WalletStatusText>)>,
     overlay_query: Query<Entity, With<TeamSelectRoot>>,
     mut listed_purchases: Local<Option<usize>>,
+    mut listed_library: Local<Option<(usize, usize)>>,
 ) {
     if selection.team.is_some() || overlay_query.is_empty() {
         return;
@@ -269,10 +285,32 @@ fn wallet_connect_ui_system(
             text.0.clone_from(&line);
         }
     }
+    for (interaction, mut color) in &mut account_buttons {
+        match *interaction {
+            Interaction::Pressed => crate::passport::connect_account(),
+            Interaction::Hovered => *color = BackgroundColor(WALLET_BUTTON_HOVER_COLOR),
+            Interaction::None => *color = BackgroundColor(WALLET_BUTTON_COLOR),
+        }
+    }
+    let account_just_connected = crate::passport::poll_account();
+    let account_line = crate::passport::account_status_line();
+    for mut text in &mut account_status {
+        if text.0 != account_line {
+            text.0.clone_from(&account_line);
+        }
+    }
     let purchases = crate::passport::purchased_avatars().len();
-    let stale = listed_purchases.is_some_and(|listed| listed != purchases);
+    // The library and the community list change when the store refreshes or the
+    // player saves an avatar in the browser.
+    let library = (
+        crate::passport::library_avatars().len(),
+        crate::passport::community_avatars().len(),
+    );
+    let stale = listed_purchases.is_some_and(|listed| listed != purchases)
+        || listed_library.is_some_and(|listed| listed != library);
     *listed_purchases = Some(purchases);
-    if just_connected || stale {
+    *listed_library = Some(library);
+    if just_connected || account_just_connected || stale {
         for overlay in &overlay_query {
             commands
                 .entity(overlay)
@@ -367,6 +405,42 @@ pub fn spawn_team_select_ui(
             }
 
             parent.spawn((
+                Text::new(crate::passport::account_status_line()),
+                TextFont {
+                    font_size: 13.0,
+                    ..default()
+                },
+                TextColor::WHITE,
+                AccountStatusText,
+                Name::new("EkzaAccountStatus"),
+            ));
+            if !crate::passport::account_connected() {
+                parent
+                    .spawn((
+                        Button,
+                        Node {
+                            padding: UiRect::axes(Val::Px(14.0), Val::Px(6.0)),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        BackgroundColor(WALLET_BUTTON_COLOR),
+                        AccountConnectButton,
+                        Name::new("AccountConnectButton"),
+                    ))
+                    .with_children(|button| {
+                        button.spawn((
+                            Text::new("Connect Ekza account"),
+                            TextFont {
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor::WHITE,
+                        ));
+                    });
+            }
+
+            parent.spawn((
                 Text::new("Scroll heroes: mouse wheel / Page Up / Page Down"),
                 TextFont {
                     font_size: 15.0,
@@ -414,6 +488,19 @@ pub fn spawn_team_select_ui(
                     // In the box: the shipped roster, free for everyone.
                     spawn_avatar_group_label(grid, "Default avatars", "DefaultAvatarsLabel");
                     for avatar in crate::passport::default_avatars() {
+                        spawn_avatar_button(
+                            grid,
+                            &avatar.slug,
+                            &avatar.display_name,
+                            selection.avatar.as_deref() == Some(avatar.slug.as_str()),
+                        );
+                    }
+                    // The connected account's own library: saved or created on Ekza.
+                    let library = crate::passport::library_avatars();
+                    if !library.is_empty() {
+                        spawn_avatar_group_label(grid, "My Ekza library", "LibraryAvatarsLabel");
+                    }
+                    for avatar in library {
                         spawn_avatar_button(
                             grid,
                             &avatar.slug,
@@ -1107,6 +1194,16 @@ fn autojoin_from_env(
 mod tests {
     use super::*;
     use shared::SPRITE_CHARACTER_IDS;
+
+    /// Bevy checks query conflicts when a system is initialized, not when it compiles.
+    /// The picker system holds two `&mut Text` and two `&mut BackgroundColor` queries
+    /// (wallet and account); they must stay disjoint or the game panics on start.
+    #[test]
+    fn picker_system_queries_are_disjoint() {
+        let mut world = World::new();
+        let mut system = IntoSystem::into_system(wallet_connect_ui_system);
+        system.initialize(&mut world);
+    }
 
     #[test]
     fn ten_sprite_buttons_use_a_bounded_two_row_grid() {

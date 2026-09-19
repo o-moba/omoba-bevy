@@ -13,6 +13,12 @@ type TicketResult = Arc<Mutex<Option<Result<String, String>>>>;
 static TICKETS: OnceLock<Mutex<HashMap<(String, String), TicketResult>>> = OnceLock::new();
 
 /// In-game wallet pairing, if one was started from the menu.
+static ACCOUNT: Mutex<Option<omoba_passport::account::AccountSession>> = Mutex::new(None);
+static ACCOUNT_FLOW: Mutex<Option<omoba_passport::account::AccountFlow>> = Mutex::new(None);
+static ACCOUNT_BROWSER_OPENED: Mutex<Option<String>> = Mutex::new(None);
+static ACCOUNT_REFRESH: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+const ACCOUNT_REFRESH_EVERY: std::time::Duration = std::time::Duration::from_secs(15);
+
 static PAIRING: Mutex<Option<PairingFlow>> = Mutex::new(None);
 static BROWSER_OPENED: Mutex<Option<String>> = Mutex::new(None);
 
@@ -125,6 +131,122 @@ pub fn wallet_status_line() -> String {
     }
 }
 
+pub fn account_connected() -> bool {
+    ACCOUNT.lock().unwrap().is_some()
+}
+
+/// Start connecting an Ekza account (email or Google in the browser, no wallet).
+pub fn connect_account() {
+    if account_connected() {
+        return;
+    }
+    let mut flow = ACCOUNT_FLOW.lock().unwrap();
+    if flow.as_ref().is_some_and(|flow| flow.in_progress()) {
+        return;
+    }
+    *ACCOUNT_BROWSER_OPENED.lock().unwrap() = None;
+    *flow = match omoba_passport::account::start() {
+        Ok(flow) => Some(flow),
+        Err(error) => {
+            eprintln!("Ekza account connection unavailable: {error}");
+            None
+        }
+    };
+}
+
+/// Drive the account connection; true once when the account has just connected.
+/// While connected, re-reads the library in the background so an avatar saved in the
+/// browser shows up without restarting the game.
+pub fn poll_account() -> bool {
+    let mut flow = ACCOUNT_FLOW.lock().unwrap();
+    match flow.as_ref().map(|flow| flow.state()) {
+        Some(PairingState::AwaitingApproval {
+            verification_url, ..
+        }) => {
+            let mut opened = ACCOUNT_BROWSER_OPENED.lock().unwrap();
+            if opened.as_deref() != Some(verification_url.as_str()) {
+                if let Err(error) = omoba_passport::open_in_browser(&verification_url) {
+                    eprintln!("{error}: {verification_url}");
+                }
+                *opened = Some(verification_url);
+            }
+            false
+        }
+        Some(PairingState::Connected) => {
+            let session = flow.as_ref().and_then(|flow| flow.take_session());
+            *flow = None;
+            let connected = session.is_some();
+            if connected {
+                *ACCOUNT.lock().unwrap() = session;
+                *ACCOUNT_REFRESH.lock().unwrap() = Some(std::time::Instant::now());
+                store::request_refresh();
+            }
+            connected
+        }
+        _ => {
+            drop(flow);
+            refresh_account_in_background();
+            false
+        }
+    }
+}
+
+fn refresh_account_in_background() {
+    let mut last = ACCOUNT_REFRESH.lock().unwrap();
+    if !last.is_some_and(|at| at.elapsed() >= ACCOUNT_REFRESH_EVERY) {
+        return;
+    }
+    let Some(mut session) = ACCOUNT.lock().unwrap().clone() else {
+        return;
+    };
+    *last = Some(std::time::Instant::now());
+    std::thread::spawn(move || match session.refresh() {
+        Ok(()) => {
+            *ACCOUNT.lock().unwrap() = Some(session);
+            store::request_refresh();
+        }
+        // Disconnected in Studio, or Ekza is unreachable: keep what is shown.
+        Err(error) => eprintln!("Ekza library was not refreshed: {error}"),
+    });
+}
+
+pub fn account_status_line() -> String {
+    if let Some(session) = ACCOUNT.lock().unwrap().as_ref() {
+        return format!(
+            "Ekza account {} · save avatars on Ekza to see them here",
+            session.username
+        );
+    }
+    match ACCOUNT_FLOW
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|flow| flow.state())
+    {
+        Some(PairingState::Starting) => "Contacting Ekza…".into(),
+        Some(PairingState::AwaitingApproval {
+            user_code,
+            verification_url,
+            ..
+        }) => format!("Confirm in your browser · code {user_code} · {verification_url}"),
+        Some(PairingState::Failed(error)) => error,
+        _ => "Connect your Ekza account to see your own library · no wallet needed".into(),
+    }
+}
+
+/// Free avatars from the connected account's library (saved or created), approved
+/// for Omoba. A subset of [`community_avatars`]; empty when no account is connected.
+pub fn library_avatars() -> Vec<&'static shared::AvatarDefinition> {
+    let account = ACCOUNT.lock().unwrap();
+    let Some(session) = account.as_ref() else {
+        return Vec::new();
+    };
+    shared::store_avatars()
+        .into_iter()
+        .filter(|avatar| avatar.free && session.has(&avatar.slug))
+        .collect()
+}
+
 pub enum TicketPoll {
     Free,
     Pending,
@@ -195,9 +317,13 @@ pub fn purchased_avatars() -> Vec<&'static shared::AvatarDefinition> {
 /// Free avatars creators prepared for Omoba and an Omoba owner approved. Anyone
 /// may wear them; the server admits them from its own read of the registry.
 pub fn community_avatars() -> Vec<&'static shared::AvatarDefinition> {
+    let mine: Vec<_> = library_avatars()
+        .iter()
+        .map(|avatar| avatar.slug.clone())
+        .collect();
     shared::store_avatars()
         .into_iter()
-        .filter(|avatar| avatar.free)
+        .filter(|avatar| avatar.free && !mine.contains(&avatar.slug))
         .collect()
 }
 

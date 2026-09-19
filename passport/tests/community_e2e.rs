@@ -14,7 +14,10 @@ use omoba_passport::{community, store};
 fn free_studio_avatar_is_listed_for_the_server_and_installs_on_the_client() {
     // What the game server does before admitting a ticketless join.
     let free = community::fetch_free(&community::registry_url()).expect("registry read");
-    assert!(!free.is_empty(), "registry lists no free avatar approved for Omoba");
+    assert!(
+        !free.is_empty(),
+        "registry lists no free avatar approved for Omoba"
+    );
     assert!(free.iter().all(|item| item.free));
 
     // What a game client does: the same avatars arrive through the SDK store.
@@ -22,7 +25,11 @@ fn free_studio_avatar_is_listed_for_the_server_and_installs_on_the_client() {
     let _ = std::fs::remove_dir_all(&root);
     store::initialize(root.clone(), true);
     for item in &free {
-        assert!(item.protected.avatar_id.starts_with("ekza:avatar:"), "{}", item.protected.avatar_id);
+        assert!(
+            item.protected.avatar_id.starts_with("ekza:avatar:"),
+            "{}",
+            item.protected.avatar_id
+        );
         assert_eq!(omoba_passport::protected_slug(&item.protected), item.slug);
         let entry = shared::avatar_definition(&item.slug).expect("registered by the store");
         assert!(entry.free, "the client must know it needs no wallet");
