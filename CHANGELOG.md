@@ -6,6 +6,20 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Ekza community avatars: free, no wallet
+- Avatars a creator published through Ekza Studio, prepared for Omoba and approved by
+  an Omoba project owner now reach the game with no wallet and no ticket. The picker
+  shows them as "Ekza community avatars"; the model installs on first use through the
+  same verified SDK store as a purchased avatar.
+- The server decides from its own read of the registry's unified catalogue
+  (`/v2/avatars`, `access: "free"`), off the game tick. A client can never declare an
+  avatar free: an owned template, an unknown slug or a forged entry is still refused.
+  A known avatar is re-checked after five minutes, so a withdrawn approval stops
+  working; an unknown slug may trigger a new read at most every ten seconds; a registry
+  outage keeps what was already approved.
+- Update `ekza-bevy-sdk` to 0.5.0: unified catalogue, `ekza:avatar:<uuid>` identities,
+  `StoreAvatar::free`. Purchased avatars and their tickets are unchanged.
+
 ### Ekza avatars: the game owns its rendition builder
 - Add `scripts/ekza_build_rendition.py`, the builder behind the Ekza rendition profile
   `desktop / humanoid-glb-v1`: a VRM goes in, a GLB with the five retargeted clips

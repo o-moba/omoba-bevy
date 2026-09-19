@@ -1,6 +1,7 @@
 //! Native transport and staged importer for the shared Ekza passport contract.
 //! Secrets stay in memory. Game packets contain only one-use scoped tickets.
 
+pub mod community;
 pub mod device_account;
 pub mod store;
 pub mod supporter_account;
@@ -8,9 +9,7 @@ pub mod web_account;
 
 use ekza_bevy_sdk::passport::{
     ConsumedTicket, OMOBA_PROJECT, ProjectSupport, ProtectedAvatar, PurchasedLibrary,
-    SupportSelector,
-    client::PassportClient,
-    validate_omoba_support,
+    SupportSelector, client::PassportClient, validate_omoba_support,
 };
 pub use ekza_bevy_sdk::passport::{
     client::{AvatarTicket, DevicePairing, NativeSession, PairingPoll, valid_session_id},

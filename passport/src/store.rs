@@ -163,6 +163,7 @@ fn adopt(runtime: &Runtime, items: Vec<StoreAvatar>) {
             author: item.author.clone(),
             thumbnail,
             passport: Some(item.protected.clone()),
+            free: item.free,
         });
         // A slug the server registered first (same derivation) is equally fine.
         if registered.is_some_and(|entry| entry.passport.as_ref() == Some(&item.protected)) {
@@ -220,7 +221,10 @@ pub fn model_state(slug: &str) -> ModelState {
     std::thread::spawn(move || {
         let outcome = install_blocking_inner(runtime, &item);
         if let Err(error) = &outcome {
-            eprintln!("Ekza avatar '{}' could not be installed: {error}", item.name);
+            eprintln!(
+                "Ekza avatar '{}' could not be installed: {error}",
+                item.name
+            );
         }
     });
     ModelState::Pending

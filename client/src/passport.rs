@@ -21,7 +21,10 @@ static BROWSER_OPENED: Mutex<Option<String>> = Mutex::new(None);
 pub enum WalletView {
     Disconnected,
     Starting,
-    AwaitingApproval { user_code: String, verification_url: String },
+    AwaitingApproval {
+        user_code: String,
+        verification_url: String,
+    },
     Connected,
     Failed(String),
 }
@@ -185,7 +188,16 @@ pub fn default_avatars() -> Vec<&'static shared::AvatarDefinition> {
 pub fn purchased_avatars() -> Vec<&'static shared::AvatarDefinition> {
     shared::store_avatars()
         .into_iter()
-        .filter(|avatar| can_select(avatar))
+        .filter(|avatar| !avatar.free && can_select(avatar))
+        .collect()
+}
+
+/// Free avatars creators prepared for Omoba and an Omoba owner approved. Anyone
+/// may wear them; the server admits them from its own read of the registry.
+pub fn community_avatars() -> Vec<&'static shared::AvatarDefinition> {
+    shared::store_avatars()
+        .into_iter()
+        .filter(|avatar| avatar.free)
         .collect()
 }
 
@@ -209,11 +221,12 @@ pub fn thumbnail_asset_path(avatar: &shared::AvatarDefinition) -> Option<String>
 }
 
 pub fn can_select(avatar: &shared::AvatarDefinition) -> bool {
-    avatar.passport.as_ref().is_none_or(|protected| {
-        SESSION
-            .get()
-            .is_some_and(|session| session.owns(protected).is_some())
-    })
+    avatar.free
+        || avatar.passport.as_ref().is_none_or(|protected| {
+            SESSION
+                .get()
+                .is_some_and(|session| session.owns(protected).is_some())
+        })
 }
 
 pub fn ticket_for_slug(slug: Option<&str>, session_id: &str) -> TicketPoll {
@@ -223,6 +236,11 @@ pub fn ticket_for_slug(slug: Option<&str>, session_id: &str) -> TicketPoll {
     let Some(protected) = &avatar.passport else {
         return TicketPoll::Free;
     };
+    if avatar.free {
+        // No ownership to prove. The model installs on first use like any store
+        // avatar another player wears.
+        return TicketPoll::Free;
+    }
     let Some(session) = SESSION.get() else {
         return TicketPoll::Denied("Connect your wallet before choosing a purchased avatar".into());
     };

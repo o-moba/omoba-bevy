@@ -585,6 +585,11 @@ pub struct AvatarDefinition {
     /// Explicit paid-cosmetic boundary. Never inferred from URL or format.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub passport: Option<ekza_bevy_sdk::passport::ProtectedAvatar>,
+    /// The Ekza registry marked this store avatar free: the boundary above still
+    /// pins the exact rendition, but no ticket is needed to wear it. This is a
+    /// presentation hint. The game server decides from its own registry read.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub free: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -657,7 +662,9 @@ pub fn register_store_avatar(definition: AvatarDefinition) -> Option<&'static Av
     let protected = definition.passport.as_ref()?;
     if protected.validate().is_err()
         || ekza_bevy_sdk::passport::protected_slug(protected) != definition.slug
-        || avatar_roster().iter().any(|avatar| avatar.slug == definition.slug)
+        || avatar_roster()
+            .iter()
+            .any(|avatar| avatar.slug == definition.slug)
     {
         return None;
     }
@@ -1059,6 +1066,7 @@ mod tests {
             author: None,
             thumbnail: None,
             passport,
+            free: false,
         };
         let slug = protected_slug(&protected);
         assert_eq!(normalize_avatar_slug(Some(&slug)), None);
@@ -1066,7 +1074,9 @@ mod tests {
         // Free entries, shipped slugs and mismatched names are all refused.
         assert!(register_store_avatar(definition(slug.clone(), None)).is_none());
         let shipped = avatar_roster()[0].slug.clone();
-        assert!(register_store_avatar(definition(shipped.clone(), Some(protected.clone()))).is_none());
+        assert!(
+            register_store_avatar(definition(shipped.clone(), Some(protected.clone()))).is_none()
+        );
         assert!(avatar_definition(&shipped).unwrap().passport.is_none());
         assert!(
             register_store_avatar(definition("ekza-forged".into(), Some(protected.clone())))
@@ -1085,7 +1095,10 @@ mod tests {
         let registered =
             register_store_avatar(definition(slug.clone(), Some(protected.clone()))).unwrap();
         assert_eq!(registered.passport.as_ref(), Some(&protected));
-        assert_eq!(normalize_avatar_slug(Some(&format!(" {slug} "))), Some(slug.as_str()));
+        assert_eq!(
+            normalize_avatar_slug(Some(&format!(" {slug} "))),
+            Some(slug.as_str())
+        );
         // Idempotent: the first registration stays canonical.
         let again = register_store_avatar(definition(slug.clone(), Some(protected))).unwrap();
         assert!(std::ptr::eq(registered, again));

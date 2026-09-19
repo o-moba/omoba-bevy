@@ -112,7 +112,10 @@ impl Plugin for TeamSelectPlugin {
             )
             .add_systems(Update, (team_select_ui_system, scroll_avatar_roster))
             .add_systems(Update, attach_avatar_thumbnails)
-            .add_systems(Update, wallet_connect_ui_system.before(team_select_ui_system))
+            .add_systems(
+                Update,
+                wallet_connect_ui_system.before(team_select_ui_system),
+            )
             .add_systems(
                 Update,
                 adapt_mobile_selection_contrast.after(team_select_ui_system),
@@ -411,6 +414,23 @@ pub fn spawn_team_select_ui(
                     // In the box: the shipped roster, free for everyone.
                     spawn_avatar_group_label(grid, "Default avatars", "DefaultAvatarsLabel");
                     for avatar in crate::passport::default_avatars() {
+                        spawn_avatar_button(
+                            grid,
+                            &avatar.slug,
+                            &avatar.display_name,
+                            selection.avatar.as_deref() == Some(avatar.slug.as_str()),
+                        );
+                    }
+                    // Free, made by creators in Ekza Studio and approved for Omoba.
+                    let community = crate::passport::community_avatars();
+                    if !community.is_empty() {
+                        spawn_avatar_group_label(
+                            grid,
+                            "Ekza community avatars",
+                            "CommunityAvatarsLabel",
+                        );
+                    }
+                    for avatar in community {
                         spawn_avatar_button(
                             grid,
                             &avatar.slug,
