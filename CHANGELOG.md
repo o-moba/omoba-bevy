@@ -6,6 +6,14 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Ekza avatars: the game owns its rendition builder
+- Add `scripts/ekza_build_rendition.py`, the builder behind the Ekza rendition profile
+  `desktop / humanoid-glb-v1`: a VRM goes in, a GLB with the five retargeted clips
+  comes out, named by its SHA-256. The Ekza registry runs it as an external command,
+  so Omoba's requirements and the code that satisfies them stay in this repository.
+  One JSON document on stdout; exit 0 on success, 2 with typed issues when the avatar
+  cannot become a rendition. No network, standard library only, idempotent.
+
 ### Developer workflow
 - `scripts/ekza_demo.py serve` also starts Avatar Studio from `../ekza-registry/web`
   when it is built, points the storefront's old `/studio` links at it, and enables
