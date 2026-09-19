@@ -100,3 +100,34 @@ career_nickname.json
 
 # Local Ekza avatar demo state (scripts/ekza_demo.py)
 .ekza-demo/
+
+# Platform build tooling lives in this one repository (mobile/ios, mobile/android,
+# scripts/package_native.py). Outputs go to /target and /builds, ignored above.
+# The entries below keep signing material, IDE state and platform caches out
+# even when a tool writes them outside those two directories.
+*.mobileprovision
+*.p12
+*.p8
+*.cer
+*.keystore
+*.jks
+local.properties
+.env
+.env.*
+!.env.example
+xcuserdata/
+*.xcuserstate
+DerivedData/
+*.xcarchive
+*.ipa
+*.dSYM/
+.gradle/
+*.apk
+*.aab
+*.dmg
+*.msi
+.venv/
+node_modules/
+.idea/
+.vscode/
+*.log

@@ -1,5 +1,0 @@
-PASS: Python AST parsing of four source files
-scripts/build_audio_palette.py
-.agent/tasks/GAME-AUDIO-2026-09-14/audit_audio_assets.py
-.agent/tasks/GAME-AUDIO-2026-09-14/build_preview.py
-.agent/tasks/GAME-AUDIO-2026-09-14/run_native_qa.py

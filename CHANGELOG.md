@@ -6,6 +6,15 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Repository hygiene
+- Make this checkout the single place every platform is built from. The separate
+  local copies used for the iPhone, mobile beta and passport work were retired;
+  their task evidence and the first physical iPhone build log were moved here.
+- Stop versioning `.agent/` task evidence (248 log and report files that predated
+  the ignore rule). The files stay on disk; only the index entries are removed.
+- Extend `.gitignore` with signing material, Xcode/Gradle/IDE state and packaged
+  artifacts so platform tooling cannot leak them outside `/target` and `/builds`.
+
 ### Ekza avatar loop, demo ready
 - The demo runner uses the registry from its own `ekza-registry` repository
   (falls back to `ekza-mirror/backend`).
