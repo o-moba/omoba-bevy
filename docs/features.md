@@ -147,12 +147,13 @@ machine in `client/src/frontend/`
 -> PostMatch`); every menu screen is modal for `client/src/input_context.rs`, so the
 world cannot receive input behind them.
 
-- **Home:** the player's card (nickname, level, rating, W/L from `ProfileSummary`),
-  live connection status, PLAY, and entry points to the collection, match history,
-  friends and the account modal.
-- **Hero select:** the class/avatar/side picker, reached from PLAY. Locking in is what
-  sends `ClientPacket::Join`, which is also the matchmaking queue entry, so the map is
-  only built after the hero is chosen.
+- **Home:** the player's card (nickname, level, rating, W/L from `ProfileSummary`), the
+  card's hero rendered live in 3D, the last match result, live connection status, PLAY,
+  and entry points to the collection, match history, friends and the account modal.
+- **Hero select:** the class/avatar/side picker, reached from PLAY, with a live panel
+  showing the chosen avatar in 3D, the class line and that class's Q/W/E/R kit. Locking
+  in is what sends `ClientPacket::Join`, which is also the matchmaking queue entry, so
+  the map is only built after the hero is chosen.
 - **Searching:** the server's `QueueView`, or the match formation counters when the
   ranked queue is off, with a cancel that returns home and clears the queue entry.
 - **Loading:** shown from "match found" until the local hero exists in a running match.
@@ -168,7 +169,10 @@ world cannot receive input behind them.
 
 Automation is unaffected: `OMOBA_AUTOJOIN` and the `*_QA_DIR` screenshot harnesses
 bypass the shell and boot straight into the world. `OMOBA_FRONTEND_QA_OUTPUT` captures
-the shell screen by screen and fails if a screen leaves a 1280x720 viewport.
+the shell screen by screen (at `OMOBA_QA_WIDTH` x `OMOBA_QA_HEIGHT`, default 1280x720)
+and fails if a screen leaves the viewport; adding `OMOBA_FRONTEND_QA_FLOW=1` presses the
+real buttons against a live server instead and records the screen sequence that
+follows.
 
 ## Current Playable Surface
 

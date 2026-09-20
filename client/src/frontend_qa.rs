@@ -25,7 +25,7 @@ use crate::frontend::{AppScreen, ScreenDriverPaused, preview::AvatarPreview};
 const SETTLE_FRAMES: u32 = 32;
 const COLLECTION_SETTLE_FRAMES: u32 = 240;
 
-const VIEWS: [(&str, AppScreen, &str); 6] = [
+const VIEWS: [(&str, AppScreen, &str); 7] = [
     ("01-home.png", AppScreen::Home, "HomeScreen"),
     ("02-profile-card.png", AppScreen::Card, "CardScreen"),
     (
@@ -40,6 +40,7 @@ const VIEWS: [(&str, AppScreen, &str); 6] = [
     ),
     ("05-searching.png", AppScreen::Searching, "SearchingScreen"),
     ("06-loading.png", AppScreen::Loading, "LoadingScreen"),
+    ("07-post-match.png", AppScreen::PostMatch, "PostMatchScreen"),
 ];
 
 pub(crate) struct FrontendQaPlugin;
@@ -209,6 +210,7 @@ fn observe(
         Option<&InheritedVisibility>,
     )>,
     buttons: Query<&Name, With<Button>>,
+    preview_cameras: Query<&Camera, With<crate::frontend::preview::PreviewCamera>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     if qa.finished {
@@ -284,7 +286,11 @@ fn observe(
         if name.as_str() == root_name {
             root_fit = visible && fits(min, size, viewport);
         }
-        if name.as_str() == root_name || name.as_str().starts_with("Avatar") {
+        if name.as_str() == root_name
+            || name.as_str().starts_with("Avatar")
+            || name.as_str().starts_with("HomeShowcase")
+            || name.as_str().starts_with("HeroSelectPreview")
+        {
             nodes_json.push(serde_json::json!({
                 "name": name.as_str(),
                 "min": min.to_array(),
@@ -303,6 +309,7 @@ fn observe(
         "buttons": interactive,
         "preview_avatar": preview.slug,
         "preview_status": format!("{:?}", preview.status),
+        "preview_camera_active": preview_cameras.iter().any(|camera| camera.is_active),
         "preview_clips": preview.clips.iter().map(|clip| clip.name.clone()).collect::<Vec<_>>(),
         "nodes": nodes_json,
     });

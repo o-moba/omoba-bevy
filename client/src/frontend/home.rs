@@ -71,7 +71,34 @@ fn signature(career: &CareerClient, session: &ClientSession, card: &ProfileCard)
     }
 }
 
-fn connection_line(session: &ClientSession) -> (String, Color) {
+/// One line about the player's own last match, for the home screen.
+pub fn last_match_line(result: &shared::career::MatchResult, profile_id: Option<&str>) -> String {
+    let mine = profile_id.and_then(|id| {
+        result
+            .participants
+            .iter()
+            .find(|entry| entry.profile_id.as_deref() == Some(id))
+    });
+    let outcome = match (result.winner, mine.map(|entry| entry.team)) {
+        (Some(winner), Some(team)) if winner == team => "Victory",
+        (Some(_), Some(_)) => "Defeat",
+        _ => "Match complete",
+    };
+    let minutes = result.duration_ms / 60_000;
+    match mine {
+        Some(entry) => format!(
+            "{outcome} · {}/{}/{} · {} · {minutes} min",
+            entry.stats.kills,
+            entry.stats.deaths,
+            entry.stats.assists,
+            entry.hero_class.display_name(),
+        ),
+        None => format!("{outcome} · {minutes} min"),
+    }
+}
+
+/// Shared status line: the home header and the picker header both use it.
+pub(crate) fn connection_line(session: &ClientSession) -> (String, Color) {
     match session.state {
         ClientConnectionState::Connected => (
             format!("Online · {}", session.server_addr_display),
@@ -94,12 +121,23 @@ fn spawn_home(
     session: Res<ClientSession>,
     card: Res<ProfileCard>,
     thumbnails: Res<AvatarThumbnails>,
+    mut preview: ResMut<super::preview::AvatarPreview>,
 ) {
     if automation_bypass() {
         return;
     }
+    // The home screen shows the card's hero in 3D.
+    if let Some(slug) = card.showcase_avatar.as_deref() {
+        preview.show_portrait(slug);
+    }
+    let preview_image = preview.image.clone();
     let (status, status_color) = connection_line(&session);
     let profile = career.view.profile.clone();
+    let last_match = career
+        .view
+        .last_result
+        .as_ref()
+        .map(|result| last_match_line(result, career.public_profile_id.as_deref()));
     commands
         .spawn((
             widgets::screen_root(AppScreen::Home, "HomeScreen"),
@@ -120,7 +158,11 @@ fn spawn_home(
                     })
                     .with_children(|title| {
                         title.spawn(widgets::heading("OMOBA", 38.0));
-                        title.spawn(widgets::label("Verdant Arena · 5v5", 14.0, widgets::MUTED));
+                        title.spawn(widgets::label(
+                            &format!("Verdant Arena · 5v5 · {}", env!("CARGO_PKG_VERSION")),
+                            14.0,
+                            widgets::MUTED,
+                        ));
                     });
                 header.spawn((
                     widgets::label(&status, 15.0, status_color),
@@ -171,12 +213,54 @@ fn spawn_home(
                                 "HomeAccount",
                             );
                         });
+                    if let Some(last) = last_match.as_deref() {
+                        column
+                            .spawn((widgets::panel_row(), Name::new("HomeLastMatch")))
+                            .with_children(|panel| {
+                                panel.spawn(widgets::label("Last match", 12.0, widgets::MUTED));
+                                panel.spawn(widgets::label(last, 14.0, widgets::IVORY));
+                            });
+                    }
+                });
+
+                // Live showcase of the card's hero, between the identity and
+                // the actions.
+                body.spawn((
+                    Node {
+                        flex_grow: 1.0,
+                        // Zero basis: the showcase takes what is left after the
+                        // card and the action rail, never pushing them out.
+                        flex_basis: Val::Px(0.0),
+                        min_width: Val::Px(0.0),
+                        flex_direction: FlexDirection::Column,
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
+                    Name::new("HomeShowcase"),
+                ))
+                .with_children(|column| {
+                    column.spawn((
+                        ImageNode::new(preview_image),
+                        Node {
+                            // Sized from the window height so the showcase
+                            // scales with the window and never overflows it.
+                            width: Val::Vh(40.0),
+                            max_width: Val::Px(360.0),
+                            min_width: Val::Px(0.0),
+                            aspect_ratio: Some(0.742),
+                            border_radius: BorderRadius::all(Val::Px(14.0)),
+                            ..default()
+                        },
+                        Name::new("HomeShowcaseImage"),
+                    ));
                 });
 
                 body.spawn((
                     Node {
+                        width: Val::Px(300.0),
                         flex_direction: FlexDirection::Column,
-                        flex_grow: 1.0,
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
                         row_gap: Val::Px(18.0),
@@ -199,7 +283,10 @@ fn spawn_home(
                     ));
                     column
                         .spawn(Node {
-                            column_gap: Val::Px(10.0),
+                            flex_direction: FlexDirection::Column,
+                            align_items: AlignItems::Stretch,
+                            width: Val::Percent(100.0),
+                            row_gap: Val::Px(8.0),
                             ..default()
                         })
                         .with_children(|row| {
@@ -265,6 +352,7 @@ fn refresh_home(
     session: Res<ClientSession>,
     card: Res<ProfileCard>,
     thumbnails: Res<AvatarThumbnails>,
+    preview: ResMut<super::preview::AvatarPreview>,
     roots: Query<Entity, With<HomeRoot>>,
     mut last: Local<Option<HomeSignature>>,
 ) {
@@ -280,7 +368,7 @@ fn refresh_home(
         .entity(root)
         .despawn_related::<Children>()
         .despawn();
-    spawn_home(commands, career, session, card, thumbnails);
+    spawn_home(commands, career, session, card, thumbnails, preview);
 }
 
 #[cfg(test)]

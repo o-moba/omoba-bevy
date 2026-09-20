@@ -152,6 +152,22 @@ pub fn screen_root(screen: AppScreen, name: &str) -> impl Bundle {
     )
 }
 
+/// A short labelled strip inside a column (used for "last match" on home).
+pub fn panel_row() -> impl Bundle {
+    (
+        Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(2.0),
+            padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(10.0)),
+            ..default()
+        },
+        BackgroundColor(PANEL),
+        BorderColor::all(PANEL_EDGE),
+    )
+}
+
 pub fn heading(text: &str, size: f32) -> impl Bundle {
     (
         Text::new(text.to_owned()),

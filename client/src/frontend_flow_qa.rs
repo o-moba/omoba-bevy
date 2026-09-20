@@ -100,6 +100,7 @@ impl FlowQa {
         let passed = status == "passed";
         let value = serde_json::json!({
             "status": status,
+            "step": format!("{:?}", self.step),
             "reason": reason,
             "scenario": "frontend-flow",
             "version": env!("CARGO_PKG_VERSION"),
@@ -124,14 +125,12 @@ impl FlowQa {
 }
 
 /// Presses the button with this name, if it is on screen.
-fn press(buttons: &mut Query<(&Name, &mut Interaction)>, wanted: &str) -> bool {
+fn press(buttons: &mut Query<(&Name, &mut Interaction)>, wanted: &str) {
     for (name, mut interaction) in buttons.iter_mut() {
         if name.as_str() == wanted {
             *interaction = Interaction::Pressed;
-            return true;
         }
     }
-    false
 }
 
 fn drive_flow(
@@ -174,17 +173,24 @@ fn drive_flow(
                 );
                 return;
             }
-            if press(&mut buttons, "HomePlay") {
+            // Keep pressing until the screen actually changes: the UI focus
+            // pass clears a synthetic press that no system read that frame.
+            press(&mut buttons, "HomePlay");
+            if current == AppScreen::HeroSelect {
                 qa.step = FlowStep::HeroSelect;
                 qa.frames = 0;
             }
         }
         FlowStep::HeroSelect => {
-            if current != AppScreen::HeroSelect {
+            // The lock-in is what commits the join; once it lands, the session
+            // owns the flow and this step is done.
+            if session.join_flow_committed {
+                qa.step = FlowStep::AwaitMatch;
+                qa.frames = 0;
                 return;
             }
-            if session.join_flow_committed {
-                qa.join_committed_on_home = true;
+            if current != AppScreen::HeroSelect {
+                return;
             }
             if !players.is_empty() {
                 qa.world_before_lock_in = true;
@@ -192,13 +198,11 @@ fn drive_flow(
             if qa.frames < SELECT_FRAMES {
                 return;
             }
-            if press(&mut buttons, "TeamGreenButton") {
-                qa.step = FlowStep::AwaitMatch;
-                qa.frames = 0;
-            }
+            press(&mut buttons, "TeamGreenButton");
         }
         FlowStep::AwaitMatch => {
             if current == AppScreen::InMatch {
+                info!("[omoba:qa] flow reached the match; capturing");
                 qa.step = FlowStep::Capture;
                 qa.frames = 0;
             }
@@ -212,6 +216,9 @@ fn drive_flow(
                     qa.finish("failed", Some("cannot create capture directory"), &mut exit);
                     return;
                 }
+                // A leftover file from an earlier run must not pass for this
+                // run's evidence.
+                let _ = std::fs::remove_file(qa.directory.join("07-in-match.png"));
                 commands
                     .spawn(Screenshot::primary_window())
                     .observe(save_to_disk(qa.directory.join("07-in-match.png")));

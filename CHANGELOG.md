@@ -32,6 +32,12 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
   the real buttons against a live server and records the screen sequence it produced.
   Headless evidence runs (`OMOBA_AUTOJOIN`) and the screenshot harnesses bypass the
   shell and still reach a match directly.
+- Beta polish pass on the shell: the home screen shows the card's hero in 3D next to a
+  right-hand action rail and the build version; hero select gains a live panel with the
+  chosen avatar in 3D, the class line and that class's Q/W/E/R kit, and its wallet and
+  account controls collapse into one strip under the grids; the connection panel and the
+  in-match career bar keep out of the menus, which print their own status line. Layouts
+  are checked at 1280x720 and 1024x640 and hold at both.
 - Fix eight pre-existing clippy findings so `cargo clippy --workspace --all-targets -D
   warnings` passes again under clippy 1.93 (`account-api`, `server/passport_admission`,
   `client/career_devices`, `client/map_visuals/river`). Behaviour is unchanged.

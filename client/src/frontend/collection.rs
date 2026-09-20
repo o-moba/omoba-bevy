@@ -116,6 +116,8 @@ fn spawn_collection(
         .or_else(|| entries.first().map(|(avatar, _)| avatar.slug.clone()));
     if let Some(slug) = initial.as_deref() {
         preview.show(slug);
+        // The collection is where a player inspects a model: turn it.
+        preview.auto_spin = true;
     }
     let image = preview.image.clone();
     commands
@@ -202,8 +204,11 @@ fn spawn_collection(
                         Button,
                         ImageNode::new(image),
                         Node {
-                            width: Val::Px(272.0),
-                            height: Val::Px(366.0),
+                            // Height-driven so the clip buttons and the
+                            // avatar details stay on screen on a short window.
+                            height: Val::Vh(48.0),
+                            max_height: Val::Px(420.0),
+                            aspect_ratio: Some(0.742),
                             border: UiRect::all(Val::Px(1.0)),
                             border_radius: BorderRadius::all(Val::Px(12.0)),
                             ..default()

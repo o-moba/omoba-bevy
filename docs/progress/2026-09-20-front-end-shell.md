@@ -44,6 +44,22 @@ avatar or a match history before queueing, and no separation between "in the men
 - **`client/src/frontend_qa.rs`**: `OMOBA_FRONTEND_QA_OUTPUT` captures the shell screen
   by screen and fails the run if a screen leaves a 1280x720 viewport.
 
+## Beta polish pass
+
+- Home: the card's hero is rendered live in 3D (`AvatarPreview` on render layer 28) next
+  to a right-hand action rail; the header carries the build version and the connection
+  status, and a last-match line appears under the card once a result exists.
+- Hero select: a live panel shows the chosen avatar in 3D with the class line and that
+  class's Q/W/E/R kit; the wallet and account controls collapsed into a single strip
+  under the grids; the header carries the connection status.
+- The floating connection panel and the in-match career bar now stay out of every menu
+  screen, which print their own status instead.
+- `AvatarPreview` is a `FromWorld` resource so it exists during the startup state
+  transition, when the first screen is entered.
+- Layout holds at 1024x640 as well as 1280x720: the class row wraps, the picker drops to
+  one avatar row on a short window, the hero panel and the collection preview are sized
+  from the window, and the harness fails a run if a screen root leaves the viewport.
+
 ## Checks
 
 - `cargo fmt --all -- --check`, `cargo check -p client --locked --all-targets`: clean.
@@ -60,6 +76,8 @@ avatar or a match history before queueing, and no separation between "in the men
 - Screen capture (`OMOBA_FRONTEND_QA_OUTPUT`): six screens, `qa-summary.json`
   `"status": "passed"`, the collection capture reporting `preview_status: "Ready"` and
   five animation clips for `agnes`.
+- Second screen capture at `OMOBA_QA_WIDTH=1024 OMOBA_QA_HEIGHT=640`: seven screens,
+  `"status": "passed"`.
 - Live flow capture (`OMOBA_FRONTEND_QA_FLOW=1` against
   `OMOBA_MATCH_MODE=practice cargo run -p server`): `qa-flow.json` `"status": "passed"`
   with `screen_trace: ["Home","HeroSelect","Searching","Loading","InMatch"]`,

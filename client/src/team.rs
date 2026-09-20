@@ -119,7 +119,12 @@ impl Plugin for TeamSelectPlugin {
             .add_systems(OnEnter(AppScreen::HeroSelect), setup_team_select_ui)
             .add_systems(
                 Update,
-                (team_select_ui_system, scroll_avatar_roster)
+                (
+                    team_select_ui_system,
+                    scroll_avatar_roster,
+                    sync_hero_panel,
+                    sync_hero_select_status,
+                )
                     .run_if(in_state(AppScreen::HeroSelect)),
             )
             .add_systems(Update, attach_avatar_thumbnails)
@@ -145,6 +150,10 @@ pub struct TeamSelectRoot;
 /// Leaves the picker without committing a join.
 #[derive(Component)]
 pub struct HeroSelectBackButton;
+
+/// Connection status inside the picker header.
+#[derive(Component)]
+struct HeroSelectStatus;
 
 #[derive(Component)]
 struct TeamSelectButton {
@@ -232,13 +241,33 @@ fn setup_team_select_ui(
     sprite_assets: Res<SpriteVisualAssets>,
     asset_server: Res<AssetServer>,
     mut thumbnails: ResMut<AvatarThumbnails>,
+    mut preview: ResMut<crate::frontend::preview::AvatarPreview>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mut commands: Commands,
 ) {
     // Entering the picker always means "not committed yet", even when the
     // player backed out of a queue with a team already chosen.
     selection.team = None;
     load_avatar_thumbnails(&asset_server, *visual_mode, &mut thumbnails);
-    spawn_team_select_ui(&mut commands, &selection, *visual_mode, &sprite_assets);
+    if let Some(slug) = selection.avatar.as_deref() {
+        preview.show_portrait(slug);
+    }
+    let image = preview.image.clone();
+    spawn_team_select_ui(
+        &mut commands,
+        &selection,
+        *visual_mode,
+        &sprite_assets,
+        image,
+        is_compact(&windows),
+    );
+}
+
+/// A short window gets the compact picker layout.
+fn is_compact(windows: &Query<&Window, With<bevy::window::PrimaryWindow>>) -> bool {
+    windows
+        .single()
+        .is_ok_and(|window| window.resolution.height() < COMPACT_HEIGHT)
 }
 
 /// Avatar thumbnails are used outside the picker (profile card, collection),
@@ -296,6 +325,8 @@ fn wallet_connect_ui_system(
         ),
     >,
     mut account_status: Query<&mut Text, (With<AccountStatusText>, Without<WalletStatusText>)>,
+    preview: Res<crate::frontend::preview::AvatarPreview>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     overlay_query: Query<Entity, With<TeamSelectRoot>>,
     mut listed_purchases: Local<Option<usize>>,
     mut listed_library: Local<Option<(usize, usize)>>,
@@ -350,15 +381,27 @@ fn wallet_connect_ui_system(
                 .despawn();
         }
         load_avatar_thumbnails(&asset_server, *visual_mode, &mut thumbnails);
-        spawn_team_select_ui(&mut commands, &selection, *visual_mode, &sprite_assets);
+        spawn_team_select_ui(
+            &mut commands,
+            &selection,
+            *visual_mode,
+            &sprite_assets,
+            preview.image.clone(),
+            is_compact(&windows),
+        );
     }
 }
+
+/// Window height under which the picker switches to its compact layout.
+const COMPACT_HEIGHT: f32 = 700.0;
 
 pub fn spawn_team_select_ui(
     commands: &mut Commands,
     selection: &TeamSelection,
     visual_mode: PlayerVisualMode,
     sprite_assets: &SpriteVisualAssets,
+    preview_image: Handle<Image>,
+    compact: bool,
 ) {
     let sprite_grid = sprite_grid_layout(shared::sprite_character_roster().len());
     let root = commands
@@ -372,9 +415,16 @@ pub fn spawn_team_select_ui(
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(10.0),
-                // The global connection panel sits in the top-right corner.
-                padding: UiRect::axes(Val::Px(18.0), Val::Px(18.0)).with_top(Val::Px(18.0)),
+                row_gap: Val::Px(if compact { 5.0 } else { 10.0 }),
+                // Room on the right for the live hero panel (3D mode only).
+                // Proportional, so a small window keeps both columns readable.
+                padding: UiRect::axes(Val::Px(18.0), Val::Px(18.0)).with_right(
+                    if visual_mode == PlayerVisualMode::Models3d {
+                        Val::Percent(HERO_PANEL_PERCENT + 2.0)
+                    } else {
+                        Val::Px(18.0)
+                    },
+                ),
                 ..default()
             },
             BackgroundColor(TEAM_OVERLAY_COLOR),
@@ -430,6 +480,21 @@ pub fn spawn_team_select_ui(
                         TextColor::WHITE,
                         Name::new("HeroSelectTitle"),
                     ));
+                    header.spawn((
+                        Text::new(String::new()),
+                        TextFont {
+                            font_size: 13.0,
+                            ..default()
+                        },
+                        TextColor(crate::frontend::widgets::MUTED),
+                        Node {
+                            margin: UiRect::left(Val::Auto),
+                            max_width: Val::Percent(45.0),
+                            ..default()
+                        },
+                        HeroSelectStatus,
+                        Name::new("HeroSelectStatus"),
+                    ));
                 });
             spawn_section_title(parent, "Choose Class", "ClassSelectTitle");
 
@@ -437,7 +502,11 @@ pub fn spawn_team_select_ui(
                 .spawn((
                     Node {
                         flex_direction: FlexDirection::Row,
+                        flex_wrap: FlexWrap::Wrap,
+                        justify_content: JustifyContent::Center,
+                        max_width: Val::Percent(100.0),
                         column_gap: Val::Px(CLASS_BUTTON_GAP),
+                        row_gap: Val::Px(CLASS_BUTTON_GAP),
                         ..default()
                     },
                     Name::new("ClassButtonsRow"),
@@ -450,84 +519,12 @@ pub fn spawn_team_select_ui(
 
             spawn_section_title(parent, "Choose Avatar", "AvatarSelectTitle");
             parent.spawn((
-                Text::new(crate::passport::wallet_status_line()),
-                TextFont {
-                    font_size: 13.0,
-                    ..default()
-                },
-                TextColor::WHITE,
-                WalletStatusText,
-                Name::new("PassportStatus"),
-            ));
-            if !crate::passport::is_connected() {
-                parent
-                    .spawn((
-                        Button,
-                        Node {
-                            padding: UiRect::axes(Val::Px(14.0), Val::Px(6.0)),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                        BackgroundColor(WALLET_BUTTON_COLOR),
-                        WalletConnectButton,
-                        Name::new("WalletConnectButton"),
-                    ))
-                    .with_children(|button| {
-                        button.spawn((
-                            Text::new("Connect Ekza wallet"),
-                            TextFont {
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor::WHITE,
-                        ));
-                    });
-            }
-
-            parent.spawn((
-                Text::new(crate::passport::account_status_line()),
-                TextFont {
-                    font_size: 13.0,
-                    ..default()
-                },
-                TextColor::WHITE,
-                AccountStatusText,
-                Name::new("EkzaAccountStatus"),
-            ));
-            if !crate::passport::account_connected() {
-                parent
-                    .spawn((
-                        Button,
-                        Node {
-                            padding: UiRect::axes(Val::Px(14.0), Val::Px(6.0)),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                        BackgroundColor(WALLET_BUTTON_COLOR),
-                        AccountConnectButton,
-                        Name::new("AccountConnectButton"),
-                    ))
-                    .with_children(|button| {
-                        button.spawn((
-                            Text::new("Connect Ekza account"),
-                            TextFont {
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor::WHITE,
-                        ));
-                    });
-            }
-
-            parent.spawn((
                 Text::new("Scroll heroes: mouse wheel / Page Up / Page Down"),
                 TextFont {
-                    font_size: 15.0,
+                    font_size: 12.5,
                     ..default()
                 },
-                TextColor::WHITE,
+                TextColor(crate::frontend::widgets::MUTED),
                 Name::new("RendererStatus"),
             ));
 
@@ -543,7 +540,14 @@ pub fn spawn_team_select_ui(
                         max_width: Val::Px(
                             AVATAR_GRID_COLUMNS as f32 * (AVATAR_BUTTON_WIDTH + AVATAR_GRID_GAP),
                         ),
-                        max_height: Val::Vh(32.0),
+                        // Whole rows only: a half-cut row reads as a broken
+                        // layout rather than as something to scroll. A short
+                        // window gets one row so the lock-in stays visible.
+                        max_height: Val::Px(
+                            if compact { 1.0 } else { 2.0 }
+                                * (AVATAR_BUTTON_HEIGHT + AVATAR_GRID_GAP)
+                                + AVATAR_GRID_GAP,
+                        ),
                         overflow: Overflow::scroll_y(),
                         flex_shrink: 0.0,
                         flex_direction: FlexDirection::Row,
@@ -666,6 +670,8 @@ pub fn spawn_team_select_ui(
                     }
                 });
 
+            spawn_ekza_row(parent);
+
             spawn_section_title(parent, "Lock in your side", "TeamSelectTitle");
 
             parent
@@ -691,6 +697,9 @@ pub fn spawn_team_select_ui(
                 TextColor(Color::srgba(0.78, 0.80, 0.86, 1.0)),
                 Name::new("TeamSelectHint"),
             ));
+            if visual_mode == PlayerVisualMode::Models3d {
+                spawn_hero_panel(parent, selection, preview_image.clone());
+            }
         })
         .id();
     if visual_mode == PlayerVisualMode::Sprite2d {
@@ -700,6 +709,259 @@ pub fn spawn_team_select_ui(
             TextureAtlas { layout, index: 0 },
         ));
     }
+}
+
+/// Share of the window the live hero panel takes on the right of the picker.
+const HERO_PANEL_PERCENT: f32 = 27.0;
+/// Upper bound for that panel on a wide window.
+const HERO_PANEL_MAX_WIDTH: f32 = 320.0;
+
+/// Marks the live hero panel's avatar name.
+#[derive(Component)]
+struct HeroPanelAvatarName;
+
+/// Marks the live hero panel's class name.
+#[derive(Component)]
+struct HeroPanelClassName;
+
+/// One ability row in the live hero panel, by slot index.
+#[derive(Component)]
+struct HeroPanelAbility(usize);
+
+/// Shows what the player is about to lock in: the avatar in 3D, the class and
+/// the kit that class brings. Everything here is read-only; selection stays
+/// with the grids on the left.
+fn spawn_hero_panel(
+    parent: &mut ChildSpawnerCommands,
+    selection: &TeamSelection,
+    preview_image: Handle<Image>,
+) {
+    let class = selection.hero_class;
+    let avatar_name = selection
+        .avatar
+        .as_deref()
+        .and_then(shared::avatar_definition)
+        .map_or("Default avatar", |avatar| avatar.display_name.as_str());
+    parent
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(12.0),
+                top: Val::Px(12.0),
+                bottom: Val::Px(12.0),
+                width: Val::Percent(HERO_PANEL_PERCENT),
+                max_width: Val::Px(HERO_PANEL_MAX_WIDTH),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                row_gap: Val::Px(10.0),
+                padding: UiRect::all(Val::Px(14.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(12.0)),
+                ..default()
+            },
+            BackgroundColor(crate::frontend::widgets::PANEL),
+            BorderColor::all(crate::frontend::widgets::PANEL_EDGE),
+            Name::new("HeroSelectPanel"),
+        ))
+        .with_children(|panel| {
+            panel.spawn((
+                ImageNode::new(preview_image),
+                Node {
+                    width: Val::Percent(92.0),
+                    // The preview texture is portrait; keep its shape at any size.
+                    aspect_ratio: Some(0.742),
+                    border_radius: BorderRadius::all(Val::Px(10.0)),
+                    ..default()
+                },
+                Name::new("HeroSelectPreview"),
+            ));
+            panel.spawn((
+                Text::new(avatar_name.to_owned()),
+                TextFont {
+                    font_size: 19.0,
+                    ..default()
+                },
+                TextColor(crate::frontend::widgets::IVORY),
+                HeroPanelAvatarName,
+                Name::new("HeroSelectAvatarName"),
+            ));
+            panel.spawn((
+                Text::new(format!("{} · {}", class.display_name(), class.tagline())),
+                TextFont {
+                    font_size: 12.5,
+                    ..default()
+                },
+                TextColor(crate::frontend::widgets::MUTED),
+                HeroPanelClassName,
+                Name::new("HeroSelectClassName"),
+            ));
+            for (index, ability) in class.abilities().iter().enumerate() {
+                panel.spawn((
+                    Text::new(format!("{}  {}", ability_key(index), ability.name)),
+                    TextFont {
+                        font_size: 13.0,
+                        ..default()
+                    },
+                    TextColor(crate::frontend::widgets::GOLD),
+                    HeroPanelAbility(index),
+                    Name::new(format!("HeroSelectAbility-{index}")),
+                ));
+            }
+        });
+}
+
+/// Hotkey label for an ability slot, matching the in-match hotbar.
+fn ability_key(index: usize) -> &'static str {
+    ["Q", "W", "E", "R"].get(index).copied().unwrap_or("?")
+}
+
+/// Keeps the live hero panel in step with the grids, and points the shared 3D
+/// preview at the avatar the player currently has selected.
+fn sync_hero_select_status(
+    session: Res<crate::net::ClientSession>,
+    mut status: Query<&mut Text, With<HeroSelectStatus>>,
+) {
+    let (line, _) = crate::frontend::home::connection_line(&session);
+    for mut text in &mut status {
+        if text.0 != line {
+            text.0.clone_from(&line);
+        }
+    }
+}
+
+fn sync_hero_panel(
+    selection: Res<TeamSelection>,
+    mut preview: ResMut<crate::frontend::preview::AvatarPreview>,
+    mut names: Query<&mut Text, (With<HeroPanelAvatarName>, Without<HeroPanelClassName>)>,
+    mut classes: Query<&mut Text, (With<HeroPanelClassName>, Without<HeroPanelAvatarName>)>,
+    mut abilities: Query<
+        (&HeroPanelAbility, &mut Text),
+        (Without<HeroPanelAvatarName>, Without<HeroPanelClassName>),
+    >,
+) {
+    if !selection.is_changed() {
+        return;
+    }
+    if let Some(slug) = selection.avatar.as_deref() {
+        preview.show_portrait(slug);
+    }
+    let avatar_name = selection
+        .avatar
+        .as_deref()
+        .and_then(shared::avatar_definition)
+        .map_or("Default avatar", |avatar| avatar.display_name.as_str());
+    for mut text in &mut names {
+        if text.0 != avatar_name {
+            text.0 = avatar_name.to_owned();
+        }
+    }
+    let class = selection.hero_class;
+    let class_line = format!("{} · {}", class.display_name(), class.tagline());
+    for mut text in &mut classes {
+        if text.0 != class_line {
+            text.0.clone_from(&class_line);
+        }
+    }
+    let kit = class.abilities();
+    for (slot, mut text) in &mut abilities {
+        let Some(ability) = kit.get(slot.0) else {
+            continue;
+        };
+        let line = format!("{}  {}", ability_key(slot.0), ability.name);
+        if text.0 != line {
+            text.0 = line;
+        }
+    }
+}
+
+/// Wallet and account connection in one strip under the grids. Both are
+/// optional: the shipped roster plays without either.
+fn spawn_ekza_row(parent: &mut ChildSpawnerCommands) {
+    parent
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Row,
+                flex_wrap: FlexWrap::Wrap,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                max_width: Val::Percent(100.0),
+                column_gap: Val::Px(12.0),
+                row_gap: Val::Px(6.0),
+                padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(10.0)),
+                ..default()
+            },
+            BackgroundColor(crate::frontend::widgets::PANEL),
+            BorderColor::all(crate::frontend::widgets::PANEL_EDGE),
+            Name::new("EkzaConnectRow"),
+        ))
+        .with_children(|row| {
+            row.spawn((
+                Text::new(crate::passport::wallet_status_line()),
+                TextFont {
+                    font_size: 12.5,
+                    ..default()
+                },
+                TextColor(crate::frontend::widgets::MUTED),
+                WalletStatusText,
+                Name::new("PassportStatus"),
+            ));
+            if !crate::passport::is_connected() {
+                spawn_connect_button(row, "Connect wallet", ConnectTarget::Wallet);
+            }
+            row.spawn((
+                Text::new(crate::passport::account_status_line()),
+                TextFont {
+                    font_size: 12.5,
+                    ..default()
+                },
+                TextColor(crate::frontend::widgets::MUTED),
+                AccountStatusText,
+                Name::new("EkzaAccountStatus"),
+            ));
+            if !crate::passport::account_connected() {
+                spawn_connect_button(row, "Connect account", ConnectTarget::Account);
+            }
+        });
+}
+
+/// Which Ekza connection a strip button starts.
+enum ConnectTarget {
+    Wallet,
+    Account,
+}
+
+fn spawn_connect_button(row: &mut ChildSpawnerCommands, label: &str, target: ConnectTarget) {
+    let mut button = row.spawn((
+        Button,
+        Node {
+            padding: UiRect::axes(Val::Px(14.0), Val::Px(6.0)),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border_radius: BorderRadius::all(Val::Px(8.0)),
+            ..default()
+        },
+        BackgroundColor(WALLET_BUTTON_COLOR),
+    ));
+    match target {
+        ConnectTarget::Wallet => {
+            button.insert((WalletConnectButton, Name::new("WalletConnectButton")));
+        }
+        ConnectTarget::Account => {
+            button.insert((AccountConnectButton, Name::new("AccountConnectButton")));
+        }
+    }
+    button.with_children(|button| {
+        button.spawn((
+            Text::new(label.to_owned()),
+            TextFont {
+                font_size: 13.0,
+                ..default()
+            },
+            TextColor::WHITE,
+        ));
+    });
 }
 
 fn scroll_avatar_roster(
@@ -1353,6 +1615,8 @@ mod tests {
                     &TeamSelection::default(),
                     PlayerVisualMode::Models3d,
                     &SpriteVisualAssets::default(),
+                    Handle::default(),
+                    false,
                 )
             })
             .add_systems(Update, scroll_avatar_roster);
@@ -1362,7 +1626,11 @@ mod tests {
             .query_filtered::<(Entity, &Node), With<ModelAvatarGrid>>();
         let (grid, node) = model.single(app.world()).unwrap();
         assert_eq!(node.display, Display::Flex);
-        assert_eq!(node.max_height, Val::Vh(32.0));
+        // Two whole avatar rows on a normal window; a short window gets one.
+        assert_eq!(
+            node.max_height,
+            Val::Px(2.0 * (AVATAR_BUTTON_HEIGHT + AVATAR_GRID_GAP) + AVATAR_GRID_GAP)
+        );
         assert_eq!(node.overflow.y, OverflowAxis::Scroll);
         let mut inactive = app
             .world_mut()

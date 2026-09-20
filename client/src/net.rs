@@ -2814,16 +2814,9 @@ fn sync_connection_status_ui(
         (With<ConnectionRetryButton>, Without<ConnectionStatusRoot>),
     >,
 ) {
-    // Home prints its own connection line, and the card/collection screens are
-    // pure menus: the floating panel only belongs to the flow into a match.
-    let owned_by_screen = screen.as_ref().is_some_and(|screen| {
-        matches!(
-            screen.get(),
-            crate::frontend::AppScreen::Home
-                | crate::frontend::AppScreen::Card
-                | crate::frontend::AppScreen::Collection
-        )
-    });
+    // Front-end screens print their own status line (home header, picker
+    // header, search screen), so the floating panel belongs to the match only.
+    let owned_by_screen = screen.as_ref().is_some_and(|screen| screen.get().is_menu());
     let healthy_admission = owned_by_screen
         || (client_session.join_confirmed()
             && client_session.join_error.is_none()
@@ -2843,11 +2836,16 @@ fn sync_connection_status_ui(
             Display::Flex
         };
         if front_end_menu {
+            // Bottom-left: the hero panel owns the right edge of the picker.
             node.top = Val::Auto;
             node.bottom = Val::Px(12.0);
+            node.left = Val::Px(16.0);
+            node.right = Val::Auto;
         } else {
             node.top = Val::Px(12.0);
             node.bottom = Val::Auto;
+            node.left = Val::Auto;
+            node.right = Val::Px(16.0);
         }
     }
     let Ok(mut text) = label_q.single_mut() else {

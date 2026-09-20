@@ -67,6 +67,15 @@ pub struct AvatarPreview {
 }
 
 impl AvatarPreview {
+    /// Shows `slug` standing still and facing the camera. Screens that want the
+    /// turntable (the collection) switch `auto_spin` back on.
+    pub fn show_portrait(&mut self, slug: &str) {
+        self.show(slug);
+        self.auto_spin = false;
+        // Roster models are authored facing -Z; the preview camera sits on +Z.
+        self.yaw = std::f32::consts::PI;
+    }
+
     pub fn show(&mut self, slug: &str) {
         if self.slug.as_deref() == Some(slug) {
             return;
@@ -101,52 +110,65 @@ impl AvatarPreview {
     }
 }
 
+/// The resource exists from the first frame: screens are entered during the
+/// startup state transition, before `Startup` systems have run.
+impl FromWorld for AvatarPreview {
+    fn from_world(world: &mut World) -> Self {
+        let image = world
+            .resource_mut::<Assets<Image>>()
+            .add(Image::new_target_texture(
+                PREVIEW_WIDTH,
+                PREVIEW_HEIGHT,
+                TextureFormat::Rgba8Unorm,
+                Some(TextureFormat::Rgba8UnormSrgb),
+            ));
+        Self {
+            image,
+            slug: None,
+            yaw: 0.0,
+            auto_spin: true,
+            clips: Vec::new(),
+            selected: 0,
+            status: PreviewStatus::Empty,
+            spawned_slug: None,
+            pivot: None,
+            model: None,
+            player: None,
+            gltf: None,
+            graph: None,
+            bound: false,
+            tag_frames: 0,
+        }
+    }
+}
+
 pub struct AvatarPreviewPlugin;
 
 impl Plugin for AvatarPreviewPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_preview).add_systems(
-            Update,
-            (
-                sync_preview_model,
-                tag_preview_layers,
-                bind_preview_animations,
-                apply_clip_selection,
-                spin_preview,
-                toggle_preview_camera,
-            )
-                .chain(),
-        );
+        app.init_resource::<AvatarPreview>()
+            .add_systems(Startup, setup_preview)
+            .add_systems(
+                Update,
+                (
+                    sync_preview_model,
+                    tag_preview_layers,
+                    bind_preview_animations,
+                    apply_clip_selection,
+                    spin_preview,
+                    toggle_preview_camera,
+                )
+                    .chain(),
+            );
     }
 }
 
+/// The preview's own camera; the QA harness reports whether it is rendering.
 #[derive(Component)]
-struct PreviewCamera;
+pub struct PreviewCamera;
 
-fn setup_preview(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
-    let image = images.add(Image::new_target_texture(
-        PREVIEW_WIDTH,
-        PREVIEW_HEIGHT,
-        TextureFormat::Rgba8Unorm,
-        Some(TextureFormat::Rgba8UnormSrgb),
-    ));
-    commands.insert_resource(AvatarPreview {
-        image: image.clone(),
-        slug: None,
-        yaw: 0.0,
-        auto_spin: true,
-        clips: Vec::new(),
-        selected: 0,
-        status: PreviewStatus::Empty,
-        spawned_slug: None,
-        pivot: None,
-        model: None,
-        player: None,
-        gltf: None,
-        graph: None,
-        bound: false,
-        tag_frames: 0,
-    });
+fn setup_preview(mut commands: Commands, preview: Res<AvatarPreview>) {
+    let image = preview.image.clone();
     commands.spawn((
         Camera3d::default(),
         Camera {
@@ -420,7 +442,12 @@ fn toggle_preview_camera(
     preview: Res<AvatarPreview>,
     mut cameras: Query<&mut Camera, With<PreviewCamera>>,
 ) {
-    let wanted = preview.slug.is_some() && matches!(*screen.get(), AppScreen::Collection);
+    // Home, the collection and the picker all show the live model.
+    let wanted = preview.slug.is_some()
+        && matches!(
+            *screen.get(),
+            AppScreen::Home | AppScreen::Collection | AppScreen::HeroSelect
+        );
     for mut camera in &mut cameras {
         if camera.is_active != wanted {
             camera.is_active = wanted;
