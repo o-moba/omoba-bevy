@@ -78,6 +78,7 @@ fn resolve_input_context(
     career: Option<Res<crate::career::CareerClient>>,
     social: Option<Res<crate::social::SocialClient>>,
     supporter: Option<Res<crate::supporter::SupporterUiState>>,
+    screen: Option<Res<State<crate::frontend::AppScreen>>>,
 ) {
     context.running = game
         .as_ref()
@@ -85,9 +86,13 @@ fn resolve_input_context(
         && session
             .as_ref()
             .is_none_or(|session| session.join_confirmed());
-    context.modal_open = mobile
-        .as_ref()
-        .is_some_and(|mobile| mobile.enabled && (!mobile.landscape || !mobile.focused))
+    // Every front-end screen is modal: the world keeps simulating behind it,
+    // but nothing the player does on a menu may reach gameplay.
+    let front_end_open = screen.as_ref().is_some_and(|screen| screen.get().is_menu());
+    context.modal_open = front_end_open
+        || mobile
+            .as_ref()
+            .is_some_and(|mobile| mobile.enabled && (!mobile.landscape || !mobile.focused))
         || social
             .as_ref()
             .is_some_and(|social| social.blocks_gameplay())

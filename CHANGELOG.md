@@ -6,6 +6,31 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Front end: home screen, avatar collection and a hero pick before the match
+- The client now opens on a home screen instead of dropping the player into the live
+  map with a picker floating over it. Screens are an explicit state machine
+  (`Home -> HeroSelect -> Searching -> Loading -> InMatch -> PostMatch`), and every
+  menu screen blocks gameplay input through the existing input context.
+- PLAY opens hero select. The join packet - which is also the matchmaking queue entry -
+  is only sent when the player locks in a class, an avatar and a side, so the map now
+  appears after the hero is chosen instead of before.
+- Matchmaking has its own screen: the server's queue view, the formation counters, the
+  chosen hero and a cancel that returns to the home screen. A match found leads to a
+  loading screen and only then into the world.
+- Avatar collection with a live 3D preview: every shipped, owned and community avatar
+  can be inspected on its own render layer, turned by dragging, and played through any
+  animation clip the model actually declares. The preview never touches the match
+  world. An avatar can be put on the profile card or selected for the next match.
+- Profile card: nickname, level, rating and W/L from the career profile, plus a chosen
+  main class, showcase avatar, accent colour and a title unlocked by wins. The card is
+  stored locally in `profile_card.json` next to the client preferences.
+- Match history and friends open from the home screen through the existing career
+  modals; the result screen after a match offers "Play again" and "Back to menu", the
+  latter leaving the session cleanly instead of holding the seat for a reconnect.
+- `OMOBA_FRONTEND_QA_OUTPUT` captures the shell screen by screen and fails the run if
+  a screen leaves a 1280x720 viewport. Headless evidence runs (`OMOBA_AUTOJOIN`) and
+  the screenshot harnesses bypass the shell and still reach a match directly.
+
 ### Ekza account: your own library in the picker, no wallet
 - "Connect Ekza account" in the avatar picker: the game shows a short code and opens
   Ekza Studio, the player signs in (email, later Google) and confirms, and the picker

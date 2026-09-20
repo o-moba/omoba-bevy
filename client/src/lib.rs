@@ -15,9 +15,11 @@ mod combat_visuals;
 mod creatures3d;
 mod debug_console;
 mod decor;
+mod frontend;
+mod frontend_qa;
 mod game_audio;
-mod game_vfx;
 mod game_state;
+mod game_vfx;
 mod god_mode;
 mod help_overlay;
 mod input_bindings;
@@ -67,6 +69,7 @@ use camera::CameraPlugin;
 use combat::CombatPlugin;
 use debug_console::DebugConsolePlugin;
 use decor::DecorPlugin;
+use frontend::FrontendPlugin;
 use game_state::GameStateUiPlugin;
 use god_mode::GodModePlugin;
 use help_overlay::HelpOverlayPlugin;
@@ -133,6 +136,7 @@ pub fn main() {
         TeamSelectPlugin,
         GameStateUiPlugin,
     ))
+    .add_plugins((FrontendPlugin, frontend_qa::FrontendQaPlugin))
     .add_plugins((
         input_context::InputContextPlugin,
         ui_theme::UiThemePlugin,

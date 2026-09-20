@@ -373,6 +373,11 @@ impl CareerClient {
         self.nickname_focused = true;
         self.friend_code_focused = false;
     }
+    /// Opens the profile modal from outside the career UI (front-end shell).
+    pub(crate) fn open_profile_modal(&mut self) {
+        self.open_profile();
+    }
+
     fn close(&mut self) {
         self.web.dismiss();
         self.devices.focused = false;
@@ -500,6 +505,24 @@ fn request_friends(career: &mut CareerClient, requests: &mut MessageWriter<Netwo
     requests.write(NetworkCommand::Career(CareerRequest::Friends {
         request_id,
     }));
+}
+
+/// Opens the match-history modal from outside the career UI (front-end shell),
+/// reusing the same request path the in-career button uses.
+pub(crate) fn open_history_modal(
+    career: &mut CareerClient,
+    requests: &mut MessageWriter<NetworkCommand>,
+) {
+    career.history_back.clear();
+    request_history(career, None, requests);
+}
+
+/// Opens the friends modal from outside the career UI (front-end shell).
+pub(crate) fn open_friends_modal(
+    career: &mut CareerClient,
+    requests: &mut MessageWriter<NetworkCommand>,
+) {
+    request_friends(career, requests);
 }
 
 fn friend_action(
@@ -2014,6 +2037,7 @@ fn render(
     mode: Option<Res<PlayerVisualMode>>,
     assets: Option<Res<AssetServer>>,
     sprites: Option<Res<SpriteVisualAssets>>,
+    screen: Option<Res<State<crate::frontend::AppScreen>>>,
     roots: Query<Entity, With<CareerRoot>>,
     scrolls: Query<&ScrollPosition, With<CareerScroll>>,
     mut previous: Local<Option<RenderKey>>,
@@ -2062,12 +2086,16 @@ fn render(
         && session
             .as_ref()
             .is_some_and(|session| session.join_flow_committed && !session.join_confirmed());
-    let show_entry = selection_recovery
-        || queue_text(&career.view.queue).is_some()
-        || !game
-            .as_ref()
-            .is_some_and(|g| matches!(g.state, GameState::Running))
-        || pause.as_ref().is_some_and(|p| p.open);
+    // The front end has its own navigation; the in-match career bar would
+    // otherwise float over the menus.
+    let front_end_menu = screen.as_ref().is_some_and(|screen| screen.get().is_menu());
+    let show_entry = !front_end_menu
+        && (selection_recovery
+            || queue_text(&career.view.queue).is_some()
+            || !game
+                .as_ref()
+                .is_some_and(|g| matches!(g.state, GameState::Running))
+            || pause.as_ref().is_some_and(|p| p.open));
     let mode = mode
         .as_deref()
         .copied()

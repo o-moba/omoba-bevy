@@ -28,9 +28,9 @@ use crate::session_config::{
     DEFAULT_GAME_SERVER_ADDR, T_RETRY, T_STALE_SNAPSHOT, T_WAIT_MAX,
     TRANSPORT_CONSECUTIVE_RECV_ERRORS, TRANSPORT_CONSECUTIVE_SEND_ERRORS, is_stale,
 };
-use crate::sprite::{PlayerVisualMode, SpriteVisualAssets};
+use crate::sprite::PlayerVisualMode;
 use crate::team::TeamSelection;
-use crate::team::{CharacterChoice, Team, TeamSelectRoot, spawn_team_select_ui};
+use crate::team::{CharacterChoice, Team, TeamSelectRoot};
 use crate::world::{PlayerAssets, PlayerModelResolver};
 use shared::{HeroClass, PlayerActionKind};
 
@@ -79,6 +79,10 @@ pub enum SessionUiCommand {
     Retry,
     /// Validated address chosen in the pre-join UI. Never transfers an active match.
     ConnectTo(String),
+    /// Leave the current match and return to the front end. The session is
+    /// dropped and a fresh transport is opened, so the server reclaims the
+    /// seat instead of holding it for a reconnect.
+    LeaveMatch,
 }
 
 /// Set by [`ingest_server_snapshot_packets`] when the UDP thread dropped the snapshot sender
@@ -162,11 +166,15 @@ impl Default for ClientSession {
 /// diagnosable from the client log.
 #[derive(Debug, Clone, Copy)]
 enum TeardownReason {
-    StaleSnapshot { elapsed_secs: f32 },
+    StaleSnapshot {
+        elapsed_secs: f32,
+    },
     TransportFailure,
     ServerWaitTimeout,
     IncomingChannelClosed,
     ProtocolMismatch,
+    /// The player chose to leave the match from the result screen.
+    UserRequestedLeave,
 }
 
 impl std::fmt::Display for TeardownReason {
@@ -179,6 +187,7 @@ impl std::fmt::Display for TeardownReason {
             Self::ServerWaitTimeout => write!(f, "server did not answer within the wait budget"),
             Self::IncomingChannelClosed => write!(f, "incoming packet channel closed"),
             Self::ProtocolMismatch => write!(f, "client and server protocol versions differ"),
+            Self::UserRequestedLeave => write!(f, "player left the match"),
         }
     }
 }
@@ -212,8 +221,24 @@ impl ClientSession {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn reject_for_test(&mut self, rejection: JoinRejection) {
+        self.join_error = Some(rejection);
+    }
+
     pub fn join_confirmed(&self) -> bool {
         self.is_connected() && self.admitted
+    }
+
+    /// The rejection the server returned for the last join attempt.
+    pub fn join_rejection(&self) -> Option<JoinRejection> {
+        self.join_error
+    }
+
+    /// A committed join that can no longer make progress on its own: the
+    /// server rejected it, or the retry budget is spent.
+    pub fn join_blocked(&self) -> bool {
+        self.join_error.is_some() || self.join_exhausted
     }
 
     pub(crate) fn is_choosing_loadout(&self) -> bool {
@@ -2721,7 +2746,9 @@ fn setup_connection_status_ui(mut commands: Commands) {
             BackgroundColor(CONNECTION_PANEL_BG),
             ConnectionStatusRoot,
             Visibility::Visible,
-            ZIndex(20),
+            // Above the front-end screens: connectivity and join rejections
+            // have to be readable from the menus as well as in a match.
+            ZIndex(crate::frontend::widgets::SCREEN_Z + 5),
             Name::new("ConnectionStatusPanel"),
         ))
         .with_children(|parent| {
@@ -2776,6 +2803,7 @@ fn handle_connection_retry_button(
 
 fn sync_connection_status_ui(
     client_session: Res<ClientSession>,
+    screen: Option<Res<State<crate::frontend::AppScreen>>>,
     mut label_q: Query<&mut Text, With<ConnectionStatusLabel>>,
     mut root: Query<
         (&mut Visibility, &mut Node),
@@ -2786,9 +2814,23 @@ fn sync_connection_status_ui(
         (With<ConnectionRetryButton>, Without<ConnectionStatusRoot>),
     >,
 ) {
-    let healthy_admission = client_session.join_confirmed()
-        && client_session.join_error.is_none()
-        && !client_session.join_exhausted;
+    // Home prints its own connection line, and the card/collection screens are
+    // pure menus: the floating panel only belongs to the flow into a match.
+    let owned_by_screen = screen.as_ref().is_some_and(|screen| {
+        matches!(
+            screen.get(),
+            crate::frontend::AppScreen::Home
+                | crate::frontend::AppScreen::Card
+                | crate::frontend::AppScreen::Collection
+        )
+    });
+    let healthy_admission = owned_by_screen
+        || (client_session.join_confirmed()
+            && client_session.join_error.is_none()
+            && !client_session.join_exhausted);
+    // On a front-end screen the panel moves to the bottom-right corner so it
+    // never covers the screen's own content.
+    let front_end_menu = screen.as_ref().is_some_and(|screen| screen.get().is_menu());
     if let Ok((mut visibility, mut node)) = root.single_mut() {
         *visibility = if healthy_admission {
             Visibility::Hidden
@@ -2800,6 +2842,13 @@ fn sync_connection_status_ui(
         } else {
             Display::Flex
         };
+        if front_end_menu {
+            node.top = Val::Auto;
+            node.bottom = Val::Px(12.0);
+        } else {
+            node.top = Val::Px(12.0);
+            node.bottom = Val::Auto;
+        }
     }
     let Ok(mut text) = label_q.single_mut() else {
         return;
@@ -2950,8 +2999,6 @@ fn perform_network_teardown(
     minion_query: &Query<Entity, With<NetworkMinion>>,
     neutral_query: &Query<Entity, With<NetworkNeutral>>,
     player_query: &Query<Entity, With<Player>>,
-    visual_mode: PlayerVisualMode,
-    sprite_assets: &SpriteVisualAssets,
 ) {
     despawn_tracked_net_entities(
         commands,
@@ -2970,8 +3017,12 @@ fn perform_network_teardown(
     warn!("Network teardown: {reason}");
     if teardown_shows_select(client_session.last_join.is_some()) {
         team_selection.team = None;
+        // The picker is a front-end screen; asking for it keeps screen
+        // ownership in one place instead of spawning UI from the transport.
         if overlay_query.iter().next().is_none() {
-            spawn_team_select_ui(commands, team_selection, visual_mode, sprite_assets);
+            commands.insert_resource(crate::frontend::PendingScreen(Some(
+                crate::frontend::AppScreen::HeroSelect,
+            )));
         }
     } else if !client_session.reconnect.active {
         // Joined session: keep the team selection and reconnect quietly
@@ -3015,8 +3066,6 @@ fn update_session_lifecycle(
     mut cam_state: ResMut<CameraState>,
     queries: TeardownQueries,
     mut session_ui: MessageReader<SessionUiCommand>,
-    visual_mode: Res<PlayerVisualMode>,
-    sprite_assets: Res<SpriteVisualAssets>,
     mut career: Option<ResMut<crate::career::CareerClient>>,
     mut social: Option<ResMut<crate::social::SocialClient>>,
 ) {
@@ -3055,6 +3104,36 @@ fn update_session_lifecycle(
                 spawn_network_transport(&mut commands, &mut client_session, address);
                 incoming_dead.0 = false;
                 retried_this_frame = true;
+            }
+            SessionUiCommand::LeaveMatch => {
+                // Forget the committed join first: teardown must not treat this
+                // as a dropped connection worth auto-reconnecting into.
+                client_session.last_join = None;
+                perform_network_teardown(
+                    TeardownReason::UserRequestedLeave,
+                    &mut commands,
+                    &mut client_session,
+                    &mut network_state,
+                    &mut game_state_snapshot,
+                    &mut team_selection,
+                    &mut cam_state,
+                    overlay_query,
+                    remote_query,
+                    projectile_query,
+                    structure_query,
+                    minion_query,
+                    neutral_query,
+                    player_query,
+                );
+                commands.remove_resource::<NetworkChannels>();
+                let addr = validated_server_addr_or_default(&client_session.server_addr_display);
+                spawn_network_transport(&mut commands, &mut client_session, addr);
+                incoming_dead.0 = false;
+                retried_this_frame = true;
+                // Teardown asks for the picker; leaving a match goes home.
+                commands.insert_resource(crate::frontend::PendingScreen(Some(
+                    crate::frontend::AppScreen::Home,
+                )));
             }
             SessionUiCommand::Retry => {
                 if client_session.state == ClientConnectionState::Disconnected
@@ -3119,8 +3198,6 @@ fn update_session_lifecycle(
                 minion_query,
                 neutral_query,
                 player_query,
-                *visual_mode,
-                &sprite_assets,
             );
         }
     }
@@ -3144,8 +3221,6 @@ fn update_session_lifecycle(
                         minion_query,
                         neutral_query,
                         player_query,
-                        *visual_mode,
-                        &sprite_assets,
                     );
                 }
                 // Retrying the same incompatible release cannot recover a
@@ -3170,8 +3245,6 @@ fn update_session_lifecycle(
                         minion_query,
                         neutral_query,
                         player_query,
-                        *visual_mode,
-                        &sprite_assets,
                     );
                 }
             }
@@ -3198,8 +3271,6 @@ fn update_session_lifecycle(
                     minion_query,
                     neutral_query,
                     player_query,
-                    *visual_mode,
-                    &sprite_assets,
                 );
             }
         }
@@ -3230,8 +3301,6 @@ fn update_session_lifecycle(
                 minion_query,
                 neutral_query,
                 player_query,
-                *visual_mode,
-                &sprite_assets,
             );
         }
     }
@@ -4321,6 +4390,7 @@ mod tests {
 #[cfg(test)]
 mod connection_ui_tests {
     use super::*;
+    use crate::sprite::SpriteVisualAssets;
 
     #[test]
     fn old_framed_server_reports_protocol_mismatch_and_stops_automatic_reconnect() {

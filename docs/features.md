@@ -139,6 +139,37 @@ Reaction IDs/access policy and image presentation are separate versioned catalog
 The free starter pack works now; generic NFT packs remain locked until a trusted
 ownership provider is integrated. See [setup, authoring and scope](bot-practice-and-social.md).
 
+## Front-end shell and pre-match hero select
+
+The client opens on a front end instead of the live map. Screens are a Bevy state
+machine in `client/src/frontend/`
+(`Home -> Card -> Collection`, `Home -> HeroSelect -> Searching -> Loading -> InMatch
+-> PostMatch`); every menu screen is modal for `client/src/input_context.rs`, so the
+world cannot receive input behind them.
+
+- **Home:** the player's card (nickname, level, rating, W/L from `ProfileSummary`),
+  live connection status, PLAY, and entry points to the collection, match history,
+  friends and the account modal.
+- **Hero select:** the class/avatar/side picker, reached from PLAY. Locking in is what
+  sends `ClientPacket::Join`, which is also the matchmaking queue entry, so the map is
+  only built after the hero is chosen.
+- **Searching:** the server's `QueueView`, or the match formation counters when the
+  ranked queue is off, with a cancel that returns home and clears the queue entry.
+- **Loading:** shown from "match found" until the local hero exists in a running match.
+- **Collection:** every shipped, owned and community avatar with a live 3D preview on
+  its own render layer (`client/src/frontend/preview.rs`). The model can be turned by
+  dragging and played through any animation clip its glTF declares; avatars that are
+  not unlocked for matches are marked view-only. An avatar can be put on the profile
+  card or selected for the next match.
+- **Profile card:** locally stored choice of main class, showcase avatar, accent colour
+  and a win-gated title (`profile_card.json` beside the client preferences).
+- **Result screen:** outcome, personal K/D/A and rating delta, "Play again" and "Back to
+  menu"; leaving drops the session so the server reclaims the seat.
+
+Automation is unaffected: `OMOBA_AUTOJOIN` and the `*_QA_DIR` screenshot harnesses
+bypass the shell and boot straight into the world. `OMOBA_FRONTEND_QA_OUTPUT` captures
+the shell screen by screen and fails if a screen leaves a 1280x720 viewport.
+
 ## Current Playable Surface
 
 - **Persistent career and friends:** PostgreSQL stores immutable match results,

@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use shared::{HeroClass, avatar_roster};
 use std::collections::HashMap;
 
+use crate::frontend::AppScreen;
 use crate::net::{ClientConnectionState, ClientSession, NetworkCommand, SessionUiCommand};
 use crate::sprite::{PlayerVisualMode, SpriteVisualAssets};
 pub use ekza_bevy_sdk::EkzaCharacter as CharacterChoice;
@@ -30,7 +31,8 @@ const AVATAR_GRID_GAP: f32 = 8.0;
 const AVATAR_GRID_COLUMNS: usize = 8;
 const SPRITE_GRID_MAX_COLUMNS: usize = 5;
 const SPRITE_GRID_WIDTH_PERCENT: f32 = 92.0;
-const TEAM_OVERLAY_COLOR: Color = Color::srgba(0.035, 0.075, 0.09, 0.88);
+// Opaque: the match world must not be visible while a hero is being picked.
+const TEAM_OVERLAY_COLOR: Color = Color::srgb(0.020, 0.052, 0.058);
 const SELECT_BUTTON_COLOR: Color = Color::srgba(0.07, 0.14, 0.17, 0.96);
 const SELECT_BUTTON_HOVER_COLOR: Color = Color::srgba(0.10, 0.23, 0.27, 0.98);
 const SELECT_BUTTON_SELECTED_COLOR: Color = Color::srgba(0.96, 0.69, 0.20, 0.98);
@@ -104,21 +106,34 @@ impl Plugin for TeamSelectPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TeamSelection>()
             .init_resource::<AvatarThumbnails>()
+            // Thumbnails are loaded up front so the collection and the profile
+            // card can draw avatars without opening the picker first.
             .add_systems(
                 Startup,
-                setup_team_select_ui
+                preload_avatar_thumbnails
                     .after(crate::persistence::load_persistent_client_settings)
                     .after(crate::sprite::load_sprite_visual_assets),
             )
-            .add_systems(Update, (team_select_ui_system, scroll_avatar_roster))
+            // The picker is a screen now: it exists only while the player is
+            // choosing a hero, never behind or on top of a live match.
+            .add_systems(OnEnter(AppScreen::HeroSelect), setup_team_select_ui)
+            .add_systems(
+                Update,
+                (team_select_ui_system, scroll_avatar_roster)
+                    .run_if(in_state(AppScreen::HeroSelect)),
+            )
             .add_systems(Update, attach_avatar_thumbnails)
             .add_systems(
                 Update,
-                wallet_connect_ui_system.before(team_select_ui_system),
+                wallet_connect_ui_system
+                    .before(team_select_ui_system)
+                    .run_if(in_state(AppScreen::HeroSelect)),
             )
             .add_systems(
                 Update,
-                adapt_mobile_selection_contrast.after(team_select_ui_system),
+                adapt_mobile_selection_contrast
+                    .after(team_select_ui_system)
+                    .run_if(in_state(AppScreen::HeroSelect)),
             )
             .add_systems(Update, autojoin_from_env);
     }
@@ -126,6 +141,10 @@ impl Plugin for TeamSelectPlugin {
 
 #[derive(Component)]
 pub struct TeamSelectRoot;
+
+/// Leaves the picker without committing a join.
+#[derive(Component)]
+pub struct HeroSelectBackButton;
 
 #[derive(Component)]
 struct TeamSelectButton {
@@ -208,15 +227,28 @@ fn update_sprite_selection(selection: &mut TeamSelection, requested: &str) -> bo
 }
 
 fn setup_team_select_ui(
-    selection: Res<TeamSelection>,
+    mut selection: ResMut<TeamSelection>,
     visual_mode: Res<PlayerVisualMode>,
     sprite_assets: Res<SpriteVisualAssets>,
     asset_server: Res<AssetServer>,
     mut thumbnails: ResMut<AvatarThumbnails>,
     mut commands: Commands,
 ) {
+    // Entering the picker always means "not committed yet", even when the
+    // player backed out of a queue with a team already chosen.
+    selection.team = None;
     load_avatar_thumbnails(&asset_server, *visual_mode, &mut thumbnails);
     spawn_team_select_ui(&mut commands, &selection, *visual_mode, &sprite_assets);
+}
+
+/// Avatar thumbnails are used outside the picker (profile card, collection),
+/// so they are requested once at startup.
+fn preload_avatar_thumbnails(
+    visual_mode: Res<PlayerVisualMode>,
+    asset_server: Res<AssetServer>,
+    mut thumbnails: ResMut<AvatarThumbnails>,
+) {
+    load_avatar_thumbnails(&asset_server, *visual_mode, &mut thumbnails);
 }
 
 fn load_avatar_thumbnails(
@@ -341,15 +373,64 @@ pub fn spawn_team_select_ui(
                 align_items: AlignItems::Center,
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(10.0),
-                padding: UiRect::all(Val::Px(18.0)),
+                // The global connection panel sits in the top-right corner.
+                padding: UiRect::axes(Val::Px(18.0), Val::Px(18.0)).with_top(Val::Px(18.0)),
                 ..default()
             },
             BackgroundColor(TEAM_OVERLAY_COLOR),
-            ZIndex(15),
+            ZIndex(crate::frontend::widgets::SCREEN_Z),
+            // Leaving hero select always takes the picker with it, whether the
+            // player locked in, went back, or the session pulled the screen.
+            bevy::state::state_scoped::DespawnOnExit(AppScreen::HeroSelect),
             TeamSelectRoot,
             Name::new("TeamSelectOverlay"),
         ))
         .with_children(|parent| {
+            parent
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        justify_content: JustifyContent::FlexStart,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(16.0),
+                        ..default()
+                    },
+                    Name::new("HeroSelectHeader"),
+                ))
+                .with_children(|header| {
+                    header
+                        .spawn((
+                            Button,
+                            Node {
+                                padding: UiRect::axes(Val::Px(16.0), Val::Px(7.0)),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            BackgroundColor(SELECT_BUTTON_COLOR),
+                            HeroSelectBackButton,
+                            Name::new("HeroSelectBack"),
+                        ))
+                        .with_children(|button| {
+                            button.spawn((
+                                Text::new("Back"),
+                                TextFont {
+                                    font_size: 15.0,
+                                    ..default()
+                                },
+                                TextColor::WHITE,
+                            ));
+                        });
+                    header.spawn((
+                        Text::new("Choose your hero"),
+                        TextFont {
+                            font_size: 26.0,
+                            ..default()
+                        },
+                        TextColor::WHITE,
+                        Name::new("HeroSelectTitle"),
+                    ));
+                });
             spawn_section_title(parent, "Choose Class", "ClassSelectTitle");
 
             parent
@@ -585,7 +666,7 @@ pub fn spawn_team_select_ui(
                     }
                 });
 
-            spawn_section_title(parent, "Choose Team", "TeamSelectTitle");
+            spawn_section_title(parent, "Lock in your side", "TeamSelectTitle");
 
             parent
                 .spawn((
@@ -602,7 +683,7 @@ pub fn spawn_team_select_ui(
                 });
 
             parent.spawn((
-                Text::new("Pick a class and an avatar, then a team to join the match."),
+                Text::new("Pick a class and an avatar, then a side: locking in starts the search."),
                 TextFont {
                     font_size: 15.0,
                     ..default()
@@ -894,7 +975,7 @@ fn spawn_team_button(row: &mut ChildSpawnerCommands, team: Team, name: &str) {
     row.spawn((
         Button,
         Node {
-            width: Val::Px(180.0),
+            width: Val::Px(230.0),
             height: Val::Px(TEAM_BUTTON_SIZE),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
@@ -906,9 +987,9 @@ fn spawn_team_button(row: &mut ChildSpawnerCommands, team: Team, name: &str) {
     ))
     .with_children(|button| {
         button.spawn((
-            Text::new(format!("Join {}", team.as_str())),
+            Text::new(format!("Lock in · {} side", team.as_str())),
             TextFont {
-                font_size: 26.0,
+                font_size: 22.0,
                 ..default()
             },
             TextColor(Color::WHITE),
@@ -992,10 +1073,21 @@ fn team_select_ui_system(
     avatar_buttons: Query<(Entity, &AvatarSelectButton), With<Button>>,
     sprite_buttons: Query<(Entity, &SpriteSelectButton), With<Button>>,
     overlay_query: Query<Entity, With<TeamSelectRoot>>,
+    back_buttons: Query<&Interaction, (Changed<Interaction>, With<HeroSelectBackButton>)>,
+    mut screen: Option<ResMut<NextState<AppScreen>>>,
     mut command_writer: MessageWriter<NetworkCommand>,
     mut session_ui_writer: MessageWriter<SessionUiCommand>,
 ) {
     if selection.team.is_some() {
+        return;
+    }
+
+    if back_buttons
+        .iter()
+        .any(|interaction| *interaction == Interaction::Pressed)
+        && let Some(screen) = screen.as_deref_mut()
+    {
+        screen.set(AppScreen::Home);
         return;
     }
 
@@ -1120,6 +1212,10 @@ fn team_select_ui_system(
                         .entity(overlay)
                         .despawn_related::<Children>()
                         .despawn();
+                }
+                // The hero is locked: matchmaking owns the screen from here.
+                if let Some(screen) = screen.as_deref_mut() {
+                    screen.set(AppScreen::Searching);
                 }
             }
             Interaction::Hovered => {
