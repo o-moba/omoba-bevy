@@ -757,6 +757,44 @@ impl ServerRuntime {
         }
     }
 
+    /// A deliberate leave, as opposed to a timeout: the seat and any queue
+    /// entry are released at once and nothing is kept for a session reclaim,
+    /// so the same client can join again straight away with a new hero. The
+    /// endpoint and its career authentication stay as they are.
+    pub(crate) fn leave_match(&mut self, addr: SocketAddr, now: Instant) {
+        let Some(player) = self.players.get_mut(&addr) else {
+            return;
+        };
+        player.last_seen = now;
+        let id = player.state.id;
+        let level = player.state.level;
+        let was_joined = player.joined;
+        let session_id = player.session_id.take();
+        if was_joined {
+            self.combat_log.ledger.update_player(id, level, true);
+        }
+        self.cancel_career_entry(id, now);
+        self.career.blocked_starts.remove(&id);
+        self.career.backend.set_playing(addr, false);
+        if let Some(player) = self.players.get_mut(&addr) {
+            player.joined = false;
+            player.career_profile = None;
+            player.join_error = None;
+        }
+        if let Some(session_id) = session_id {
+            self.disconnected_sessions.remove(&session_id);
+        }
+        if was_joined {
+            println!(
+                "MATCH_METRIC event=leave epoch={} match={} player={} elapsed_ms={}",
+                self.server_epoch,
+                self.match_id,
+                id,
+                self.elapsed_match_ms(now)
+            );
+        }
+    }
+
     pub(crate) fn disconnect_career_player(&mut self, addr: SocketAddr, now: Instant) {
         if let Some(player) = self.players.get(&addr) {
             let id = player.state.id;

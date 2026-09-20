@@ -120,7 +120,10 @@ impl Plugin for TeamSelectPlugin {
             .add_systems(
                 Update,
                 (
-                    team_select_ui_system,
+                    // Before the network send: the join written by a lock-in is
+                    // committed in the same frame, so the search screen never
+                    // opens on an uncommitted join.
+                    team_select_ui_system.before(crate::net::ClientNetPipeline::SendCommands),
                     scroll_avatar_roster,
                     sync_hero_panel,
                     sync_hero_select_status,
@@ -819,12 +822,24 @@ fn ability_key(index: usize) -> &'static str {
 /// preview at the avatar the player currently has selected.
 fn sync_hero_select_status(
     session: Res<crate::net::ClientSession>,
-    mut status: Query<&mut Text, With<HeroSelectStatus>>,
+    notice: Option<Res<crate::frontend::JoinNotice>>,
+    mut status: Query<(&mut Text, &mut TextColor), With<HeroSelectStatus>>,
 ) {
-    let (line, _) = crate::frontend::home::connection_line(&session);
-    for mut text in &mut status {
+    // A failed lock-in outranks the plain connection line: it is the reason
+    // the player is looking at the picker again.
+    let (line, color) = match notice.as_ref().and_then(|notice| notice.0.clone()) {
+        Some(reason) => (reason, crate::frontend::widgets::GOLD),
+        None => {
+            let (line, _) = crate::frontend::home::connection_line(&session);
+            (line, crate::frontend::widgets::MUTED)
+        }
+    };
+    for (mut text, mut text_color) in &mut status {
         if text.0 != line {
             text.0.clone_from(&line);
+        }
+        if text_color.0 != color {
+            text_color.0 = color;
         }
     }
 }
@@ -1337,6 +1352,7 @@ fn team_select_ui_system(
     overlay_query: Query<Entity, With<TeamSelectRoot>>,
     back_buttons: Query<&Interaction, (Changed<Interaction>, With<HeroSelectBackButton>)>,
     mut screen: Option<ResMut<NextState<AppScreen>>>,
+    mut notice: Option<ResMut<crate::frontend::JoinNotice>>,
     mut command_writer: MessageWriter<NetworkCommand>,
     mut session_ui_writer: MessageWriter<SessionUiCommand>,
 ) {
@@ -1455,6 +1471,10 @@ fn team_select_ui_system(
                     continue;
                 }
                 selection.team = Some(button.team);
+                // A new attempt: the previous failure is no longer the story.
+                if let Some(notice) = notice.as_deref_mut() {
+                    notice.0 = None;
+                }
                 info!(
                     "[omoba:cli] event=join_request team={:?} class={} avatar={:?} character={:?}",
                     button.team,

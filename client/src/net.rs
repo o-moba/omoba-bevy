@@ -30,7 +30,7 @@ use crate::session_config::{
 };
 use crate::sprite::PlayerVisualMode;
 use crate::team::TeamSelection;
-use crate::team::{CharacterChoice, Team, TeamSelectRoot};
+use crate::team::{CharacterChoice, Team};
 use crate::world::{PlayerAssets, PlayerModelResolver};
 use shared::{HeroClass, PlayerActionKind};
 
@@ -79,9 +79,8 @@ pub enum SessionUiCommand {
     Retry,
     /// Validated address chosen in the pre-join UI. Never transfers an active match.
     ConnectTo(String),
-    /// Leave the current match and return to the front end. The session is
-    /// dropped and a fresh transport is opened, so the server reclaims the
-    /// seat instead of holding it for a reconnect.
+    /// Leave the current match or queue and return to the front end. The
+    /// server is told to release the seat; the connection stays up.
     LeaveMatch,
 }
 
@@ -101,6 +100,19 @@ pub struct CommittedJoin {
     pub hero_class: HeroClass,
     pub avatar: Option<String>,
     pub sprite_character: Option<String>,
+}
+
+#[cfg(test)]
+impl CommittedJoin {
+    pub(crate) fn for_test() -> Self {
+        Self {
+            team: Team::Green,
+            character: CharacterChoice::default(),
+            hero_class: HeroClass::default(),
+            avatar: None,
+            sprite_character: None,
+        }
+    }
 }
 
 /// Auto-reconnect bookkeeping for a torn-down session with a committed join.
@@ -166,15 +178,11 @@ impl Default for ClientSession {
 /// diagnosable from the client log.
 #[derive(Debug, Clone, Copy)]
 enum TeardownReason {
-    StaleSnapshot {
-        elapsed_secs: f32,
-    },
+    StaleSnapshot { elapsed_secs: f32 },
     TransportFailure,
     ServerWaitTimeout,
     IncomingChannelClosed,
     ProtocolMismatch,
-    /// The player chose to leave the match from the result screen.
-    UserRequestedLeave,
 }
 
 impl std::fmt::Display for TeardownReason {
@@ -187,7 +195,6 @@ impl std::fmt::Display for TeardownReason {
             Self::ServerWaitTimeout => write!(f, "server did not answer within the wait budget"),
             Self::IncomingChannelClosed => write!(f, "incoming packet channel closed"),
             Self::ProtocolMismatch => write!(f, "client and server protocol versions differ"),
-            Self::UserRequestedLeave => write!(f, "player left the match"),
         }
     }
 }
@@ -217,6 +224,36 @@ impl ClientSession {
             state: ClientConnectionState::Connected,
             admitted: true,
             join_flow_committed: true,
+            last_join: Some(CommittedJoin::for_test()),
+            ..default()
+        }
+    }
+
+    /// A joined session right after a transport teardown: the join is still
+    /// the player's intent, the connection is gone, the hero is despawned.
+    #[cfg(test)]
+    pub(crate) fn reconnecting_for_test() -> Self {
+        Self {
+            state: ClientConnectionState::Disconnected,
+            admitted: false,
+            join_flow_committed: false,
+            last_join: Some(CommittedJoin::for_test()),
+            reconnect: ReconnectState {
+                active: true,
+                attempts: 0,
+                last_attempt: None,
+            },
+            ..default()
+        }
+    }
+
+    /// Locked in, waiting for the server: what the picker leaves behind.
+    #[cfg(test)]
+    pub(crate) fn queued_for_test() -> Self {
+        Self {
+            state: ClientConnectionState::Connected,
+            join_flow_committed: true,
+            last_join: Some(CommittedJoin::for_test()),
             ..default()
         }
     }
@@ -228,6 +265,22 @@ impl ClientSession {
 
     pub fn join_confirmed(&self) -> bool {
         self.is_connected() && self.admitted
+    }
+
+    /// A join the client still stands behind: locked in, and neither left nor
+    /// abandoned. It survives a transport teardown, which is what tells a
+    /// reconnect apart from "the player is back in the menus".
+    pub fn has_committed_join(&self) -> bool {
+        self.last_join.is_some()
+    }
+
+    /// Gives up the current join locally: no more retries, the lock-in works
+    /// again, and a stale snapshot cannot count as an admission.
+    pub fn abandon_join(&mut self) {
+        self.last_join = None;
+        self.join_flow_committed = false;
+        self.reconnect = ReconnectState::default();
+        self.clear_join_attempt();
     }
 
     /// The rejection the server returned for the last join attempt.
@@ -475,6 +528,9 @@ pub enum NetworkCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ClientPacket {
+    /// Deliberate leave: the server releases the seat or the queue entry now
+    /// instead of holding it for a reconnect.
+    Leave,
     Social {
         request: shared::social::SocialRequest,
     },
@@ -2746,9 +2802,7 @@ fn setup_connection_status_ui(mut commands: Commands) {
             BackgroundColor(CONNECTION_PANEL_BG),
             ConnectionStatusRoot,
             Visibility::Visible,
-            // Above the front-end screens: connectivity and join rejections
-            // have to be readable from the menus as well as in a match.
-            ZIndex(crate::frontend::widgets::SCREEN_Z + 5),
+            ZIndex(20),
             Name::new("ConnectionStatusPanel"),
         ))
         .with_children(|parent| {
@@ -2821,9 +2875,6 @@ fn sync_connection_status_ui(
         || (client_session.join_confirmed()
             && client_session.join_error.is_none()
             && !client_session.join_exhausted);
-    // On a front-end screen the panel moves to the bottom-right corner so it
-    // never covers the screen's own content.
-    let front_end_menu = screen.as_ref().is_some_and(|screen| screen.get().is_menu());
     if let Ok((mut visibility, mut node)) = root.single_mut() {
         *visibility = if healthy_admission {
             Visibility::Hidden
@@ -2835,18 +2886,6 @@ fn sync_connection_status_ui(
         } else {
             Display::Flex
         };
-        if front_end_menu {
-            // Bottom-left: the hero panel owns the right edge of the picker.
-            node.top = Val::Auto;
-            node.bottom = Val::Px(12.0);
-            node.left = Val::Px(16.0);
-            node.right = Val::Auto;
-        } else {
-            node.top = Val::Px(12.0);
-            node.bottom = Val::Auto;
-            node.left = Val::Auto;
-            node.right = Val::Px(16.0);
-        }
     }
     let Ok(mut text) = label_q.single_mut() else {
         return;
@@ -2990,7 +3029,6 @@ fn perform_network_teardown(
     game_state_snapshot: &mut GameStateSnapshot,
     team_selection: &mut TeamSelection,
     cam_state: &mut CameraState,
-    overlay_query: &Query<Entity, With<TeamSelectRoot>>,
     remote_query: &Query<Entity, With<RemotePlayer>>,
     projectile_query: &Query<Entity, With<NetworkProjectile>>,
     structure_query: &Query<Entity, With<NetworkStructure>>,
@@ -3014,14 +3052,9 @@ fn perform_network_teardown(
 
     warn!("Network teardown: {reason}");
     if teardown_shows_select(client_session.last_join.is_some()) {
+        // Nothing was committed: the player is somewhere in the front end and
+        // stays there. Screens belong to the shell, not to the transport.
         team_selection.team = None;
-        // The picker is a front-end screen; asking for it keeps screen
-        // ownership in one place instead of spawning UI from the transport.
-        if overlay_query.iter().next().is_none() {
-            commands.insert_resource(crate::frontend::PendingScreen(Some(
-                crate::frontend::AppScreen::HeroSelect,
-            )));
-        }
     } else if !client_session.reconnect.active {
         // Joined session: keep the team selection and reconnect quietly
         // instead of dumping the player back onto the select screen.
@@ -3044,7 +3077,6 @@ fn perform_network_teardown(
 /// functions at 16 parameters).
 #[derive(bevy::ecs::system::SystemParam)]
 struct TeardownQueries<'w, 's> {
-    overlay_query: Query<'w, 's, Entity, With<TeamSelectRoot>>,
     remote_query: Query<'w, 's, Entity, With<RemotePlayer>>,
     projectile_query: Query<'w, 's, Entity, With<NetworkProjectile>>,
     structure_query: Query<'w, 's, Entity, With<NetworkStructure>>,
@@ -3068,7 +3100,6 @@ fn update_session_lifecycle(
     mut social: Option<ResMut<crate::social::SocialClient>>,
 ) {
     let TeardownQueries {
-        overlay_query,
         remote_query,
         projectile_query,
         structure_query,
@@ -3104,31 +3135,17 @@ fn update_session_lifecycle(
                 retried_this_frame = true;
             }
             SessionUiCommand::LeaveMatch => {
-                // Forget the committed join first: teardown must not treat this
-                // as a dropped connection worth auto-reconnecting into.
-                client_session.last_join = None;
-                perform_network_teardown(
-                    TeardownReason::UserRequestedLeave,
-                    &mut commands,
-                    &mut client_session,
-                    &mut network_state,
-                    &mut game_state_snapshot,
-                    &mut team_selection,
-                    &mut cam_state,
-                    overlay_query,
-                    remote_query,
-                    projectile_query,
-                    structure_query,
-                    minion_query,
-                    neutral_query,
-                    player_query,
-                );
-                commands.remove_resource::<NetworkChannels>();
-                let addr = validated_server_addr_or_default(&client_session.server_addr_display);
-                spawn_network_transport(&mut commands, &mut client_session, addr);
-                incoming_dead.0 = false;
-                retried_this_frame = true;
-                // Teardown asks for the picker; leaving a match goes home.
+                // The server releases the seat (or the queue entry) on `Leave`;
+                // the connection itself stays up for the menus and the career.
+                if let Some(channels) = channels.as_ref() {
+                    let _ = channels.outgoing.send(ClientPacket::Leave);
+                }
+                client_session.abandon_join();
+                // Snapshots already in flight may still list this player; with
+                // no team selected they cannot respawn the local hero.
+                team_selection.team = None;
+                despawn_local_players(&mut commands, player_query);
+                cam_state.locked = false;
                 commands.insert_resource(crate::frontend::PendingScreen(Some(
                     crate::frontend::AppScreen::Home,
                 )));
@@ -3189,7 +3206,6 @@ fn update_session_lifecycle(
                 &mut game_state_snapshot,
                 &mut team_selection,
                 &mut cam_state,
-                overlay_query,
                 remote_query,
                 projectile_query,
                 structure_query,
@@ -3212,7 +3228,6 @@ fn update_session_lifecycle(
                         &mut game_state_snapshot,
                         &mut team_selection,
                         &mut cam_state,
-                        overlay_query,
                         remote_query,
                         projectile_query,
                         structure_query,
@@ -3236,7 +3251,6 @@ fn update_session_lifecycle(
                         &mut game_state_snapshot,
                         &mut team_selection,
                         &mut cam_state,
-                        overlay_query,
                         remote_query,
                         projectile_query,
                         structure_query,
@@ -3262,7 +3276,6 @@ fn update_session_lifecycle(
                     &mut game_state_snapshot,
                     &mut team_selection,
                     &mut cam_state,
-                    overlay_query,
                     remote_query,
                     projectile_query,
                     structure_query,
@@ -3292,7 +3305,6 @@ fn update_session_lifecycle(
                 &mut game_state_snapshot,
                 &mut team_selection,
                 &mut cam_state,
-                overlay_query,
                 remote_query,
                 projectile_query,
                 structure_query,

@@ -660,7 +660,7 @@ impl ServerRuntime {
         }
     }
 
-    fn elapsed_match_ms(&self, now: Instant) -> u128 {
+    pub(crate) fn elapsed_match_ms(&self, now: Instant) -> u128 {
         self.match_started_at
             .map_or(0, |start| now.saturating_duration_since(start).as_millis())
     }

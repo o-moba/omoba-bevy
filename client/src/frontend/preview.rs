@@ -18,9 +18,13 @@ use crate::world::PlayerModelResolver;
 pub const PREVIEW_LAYER: usize = 28;
 const PREVIEW_WIDTH: u32 = 460;
 const PREVIEW_HEIGHT: u32 = 620;
-/// Frames spent tagging a freshly spawned glTF scene onto the preview layer.
-/// Scene children appear over several frames after `SceneRoot` is inserted.
-const TAG_FRAMES: u8 = 240;
+/// Frames the layer tagging keeps running *after* the scene reported ready, to
+/// catch entities inserted by post-load systems. Before that it runs for as
+/// long as the scene takes, however slow the load is.
+const TAG_FRAMES_AFTER_READY: u8 = 30;
+/// Where the preview rig lives. Far below the arena, so that even an entity
+/// that somehow missed its render layer can never stand on the match map.
+const PREVIEW_ORIGIN: Vec3 = Vec3::new(0.0, -2000.0, 0.0);
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct PreviewClip {
@@ -63,6 +67,8 @@ pub struct AvatarPreview {
     gltf: Option<Handle<Gltf>>,
     graph: Option<Handle<AnimationGraph>>,
     bound: bool,
+    /// Set by the `SceneInstanceReady` observer of the current model.
+    scene_ready: bool,
     tag_frames: u8,
 }
 
@@ -137,6 +143,7 @@ impl FromWorld for AvatarPreview {
             gltf: None,
             graph: None,
             bound: false,
+            scene_ready: false,
             tag_frames: 0,
         }
     }
@@ -151,6 +158,7 @@ impl Plugin for AvatarPreviewPlugin {
             .add_systems(
                 Update,
                 (
+                    release_preview_off_screen,
                     sync_preview_model,
                     tag_preview_layers,
                     bind_preview_animations,
@@ -178,7 +186,8 @@ fn setup_preview(mut commands: Commands, preview: Res<AvatarPreview>) {
             ..default()
         },
         RenderTarget::Image(image.into()),
-        Transform::from_xyz(0.0, 1.05, 3.4).looking_at(Vec3::new(0.0, 0.92, 0.0), Vec3::Y),
+        Transform::from_translation(PREVIEW_ORIGIN + Vec3::new(0.0, 1.05, 3.4))
+            .looking_at(PREVIEW_ORIGIN + Vec3::new(0.0, 0.92, 0.0), Vec3::Y),
         RenderLayers::layer(PREVIEW_LAYER),
         PreviewCamera,
         Name::new("AvatarPreviewCamera"),
@@ -231,6 +240,8 @@ fn sync_preview_model(
     preview.clips.clear();
     preview.selected = 0;
     preview.bound = false;
+    preview.scene_ready = false;
+    preview.tag_frames = 0;
     preview.spawned_slug = preview.slug.clone();
     let Some(slug) = preview.slug.clone() else {
         preview.status = PreviewStatus::Empty;
@@ -256,7 +267,7 @@ fn sync_preview_model(
         .clone();
     let pivot = commands
         .spawn((
-            Transform::default(),
+            Transform::from_translation(PREVIEW_ORIGIN),
             Visibility::Visible,
             RenderLayers::layer(PREVIEW_LAYER),
             Name::new("AvatarPreviewPivot"),
@@ -287,12 +298,21 @@ fn sync_preview_model(
             Name::new("AvatarPreviewPedestal"),
         ))
         .id();
+    // The scene reports when every one of its entities exists. Until then the
+    // tagging pass keeps running, however long the load takes.
+    commands.entity(model).observe(
+        |ready: On<bevy::scene::SceneInstanceReady>, mut preview: ResMut<AvatarPreview>| {
+            if preview.model == Some(ready.entity) {
+                preview.scene_ready = true;
+                preview.tag_frames = TAG_FRAMES_AFTER_READY;
+            }
+        },
+    );
     commands.entity(pivot).add_children(&[model, base]);
     preview.pivot = Some(pivot);
     preview.model = Some(model);
     preview.gltf = gltf;
     preview.status = PreviewStatus::Loading;
-    preview.tag_frames = TAG_FRAMES;
 }
 
 /// glTF scene children spawn over several frames and do not inherit render
@@ -303,13 +323,15 @@ fn tag_preview_layers(
     children: Query<&Children>,
     tagged: Query<&RenderLayers>,
 ) {
-    if preview.tag_frames == 0 {
-        return;
-    }
-    preview.tag_frames -= 1;
     let Some(model) = preview.model else {
         return;
     };
+    if preview.scene_ready {
+        if preview.tag_frames == 0 {
+            return;
+        }
+        preview.tag_frames -= 1;
+    }
     let mut stack = vec![model];
     while let Some(entity) = stack.pop() {
         if tagged.get(entity).is_err() {
@@ -355,6 +377,11 @@ fn bind_preview_animations(
         }
     }
     let Some(target) = target else {
+        // No `AnimationPlayer` in a finished scene: the model has no clips.
+        if preview.scene_ready {
+            preview.status = PreviewStatus::NoAnimations;
+            preview.bound = true;
+        }
         return;
     };
     let mut names: Vec<(String, Handle<AnimationClip>)> = gltf
@@ -452,6 +479,21 @@ fn toggle_preview_camera(
         if camera.is_active != wanted {
             camera.is_active = wanted;
         }
+    }
+}
+
+/// The model only exists while a screen shows it. A match never carries a
+/// preview avatar along, and the card editor does not pay for one either.
+fn release_preview_off_screen(screen: Res<State<AppScreen>>, mut preview: ResMut<AvatarPreview>) {
+    if !screen.is_changed() {
+        return;
+    }
+    let shown = matches!(
+        *screen.get(),
+        AppScreen::Home | AppScreen::Collection | AppScreen::HeroSelect
+    );
+    if !shown && preview.slug.is_some() {
+        preview.slug = None;
     }
 }
 

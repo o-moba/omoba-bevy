@@ -75,7 +75,9 @@ impl Plugin for FrontendPlugin {
         app.init_state::<AppScreen>()
             .init_resource::<PendingScreen>()
             .init_resource::<ScreenDriverPaused>()
+            .init_resource::<JoinNotice>()
             .add_systems(Startup, bypass_shell_for_automation)
+            .add_systems(Update, retry_connection_from_menus)
             .add_systems(
                 Update,
                 (apply_pending_screen, drive_screen_from_session)
@@ -98,15 +100,28 @@ impl Plugin for FrontendPlugin {
 }
 
 /// Headless evidence runs and the screenshot harnesses expect the old
-/// "boot straight into the world" behaviour. They set one of the QA
-/// directories or `OMOBA_AUTOJOIN`, so the shell steps aside for them.
+/// "boot straight into the world" behaviour, so the shell steps aside for
+/// them. Decided once: the environment does not change under a running client.
 pub fn automation_bypass() -> bool {
-    if std::env::var_os("OMOBA_AUTOJOIN").is_some() {
-        return true;
-    }
-    std::env::vars_os().any(|(key, value)| {
-        let key = key.to_string_lossy();
-        key.starts_with("OMOBA_") && key.ends_with("_QA_DIR") && !value.is_empty()
+    static BYPASS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *BYPASS.get_or_init(|| {
+        bypass_for(
+            std::env::vars_os()
+                .filter(|(_, value)| !value.is_empty())
+                .map(|(key, _)| key.to_string_lossy().into_owned()),
+        )
+    })
+}
+
+/// The shell's own harness is the one QA run that must *not* bypass it.
+const OWN_HARNESS: &str = "OMOBA_FRONTEND_QA_OUTPUT";
+
+fn bypass_for(keys: impl Iterator<Item = String>) -> bool {
+    keys.into_iter().any(|key| {
+        key == "OMOBA_AUTOJOIN"
+            || (key.starts_with("OMOBA_")
+                && key != OWN_HARNESS
+                && (key.ends_with("_QA_DIR") || key.ends_with("_QA_OUTPUT")))
     })
 }
 
@@ -125,40 +140,80 @@ fn apply_pending_screen(
     }
 }
 
+/// Why the last lock-in did not become a match. The picker shows it until the
+/// player locks in again.
+#[derive(Resource, Default)]
+pub struct JoinNotice(pub Option<String>);
+
+/// Frames a screen may sit in `Searching` without a committed join before the
+/// shell treats the lock-in as lost. The picker is ordered before the network
+/// send, so this is only a guard against a future ordering change.
+const UNCOMMITTED_GRACE_FRAMES: u8 = 3;
+
+/// Seconds between connection retries while the player is in the menus with
+/// nothing committed. A joined session has its own reconnect cadence.
+const MENU_RETRY_SECS: f32 = 5.0;
+
 /// Advances the shell from what the session and the server actually report.
 /// Screens never guess: `Searching` leaves only once the server admits the
 /// join, `Loading` leaves only once the local hero exists in a running match.
+///
+/// "Still mine" is [`ClientSession::has_committed_join`], not
+/// `join_flow_committed`: a transport teardown clears the latter while the
+/// session reconnects, and a reconnect must not look like leaving the match.
 fn drive_screen_from_session(
     screen: Res<State<AppScreen>>,
     mut next: ResMut<NextState<AppScreen>>,
-    session: Res<ClientSession>,
+    mut session: ResMut<ClientSession>,
     game: Res<GameStateSnapshot>,
     paused: Res<ScreenDriverPaused>,
+    mut notice: ResMut<JoinNotice>,
     local_player: Query<(), With<Player>>,
+    mut uncommitted_frames: Local<u8>,
 ) {
     if paused.0 || automation_bypass() {
         return;
     }
     let current = *screen.get();
     let admitted = session.join_confirmed();
+    let committed = session.has_committed_join();
     let in_world = !local_player.is_empty();
+    if current != AppScreen::Searching {
+        *uncommitted_frames = 0;
+    }
     match current {
         AppScreen::Searching => {
-            if session.join_blocked() || !session.join_flow_committed {
-                // Rejected or cancelled: back to the picker with the reason on
-                // screen (the connection status line renders it).
+            if session.join_blocked() {
+                // Keep the reason, drop the dead join: the picker must be usable
+                // again and the player must know why they are back on it.
+                notice.0 = Some(session.join_rejection().map_or_else(
+                    || {
+                        "The server did not answer the join. Check the connection and lock in again."
+                            .to_owned()
+                    },
+                    |rejection| rejection.message().to_owned(),
+                ));
+                session.abandon_join();
                 next.set(AppScreen::HeroSelect);
-            } else if admitted
-                && matches!(
-                    game.state,
-                    GameState::Starting { .. } | GameState::Running | GameState::Victory { .. }
-                )
-            {
-                next.set(AppScreen::Loading);
+            } else if !committed {
+                *uncommitted_frames = uncommitted_frames.saturating_add(1);
+                if *uncommitted_frames > UNCOMMITTED_GRACE_FRAMES {
+                    next.set(AppScreen::HeroSelect);
+                }
+            } else {
+                *uncommitted_frames = 0;
+                if admitted
+                    && matches!(
+                        game.state,
+                        GameState::Starting { .. } | GameState::Running | GameState::Victory { .. }
+                    )
+                {
+                    next.set(AppScreen::Loading);
+                }
             }
         }
         AppScreen::Loading => {
-            if !session.join_flow_committed && !admitted {
+            if !committed && !admitted {
                 next.set(AppScreen::Home);
             } else if in_world && matches!(game.state, GameState::Running) {
                 next.set(AppScreen::InMatch);
@@ -167,7 +222,7 @@ fn drive_screen_from_session(
         AppScreen::InMatch => {
             if matches!(game.state, GameState::Victory { .. }) {
                 next.set(AppScreen::PostMatch);
-            } else if !session.join_flow_committed && !admitted && !in_world {
+            } else if !committed && !admitted && !in_world {
                 next.set(AppScreen::Home);
             }
         }
@@ -176,14 +231,40 @@ fn drive_screen_from_session(
                 next.set(AppScreen::InMatch);
             }
         }
-        // Home, Card, Collection and HeroSelect: a player who ends up in a
-        // live match anyway (a queue entry the server honoured after a cancel,
-        // a reconnect that landed mid-round) must not be left in the menus.
+        // Home, Card, Collection and HeroSelect: a player whose committed join
+        // lands in a live match anyway (a reconnect that completed mid-round)
+        // must not be left in the menus. Without a committed join nothing here
+        // may pull them in: that is what "back to menu" and "cancel" mean.
         _ => {
-            if admitted && in_world && matches!(game.state, GameState::Running) {
+            if committed && admitted && in_world && matches!(game.state, GameState::Running) {
                 next.set(AppScreen::InMatch);
             }
         }
+    }
+}
+
+/// Before anything is committed nobody reconnects for the player, so the
+/// menus do: the career profile and the PLAY path come back on their own when
+/// the server does.
+fn retry_connection_from_menus(
+    time: Res<Time>,
+    screen: Res<State<AppScreen>>,
+    session: Res<ClientSession>,
+    mut retry: MessageWriter<crate::net::SessionUiCommand>,
+    mut since_last: Local<f32>,
+) {
+    if automation_bypass() {
+        return;
+    }
+    let offline = session.state == crate::net::ClientConnectionState::Disconnected;
+    if !screen.get().is_menu() || !offline || session.has_committed_join() {
+        *since_last = 0.0;
+        return;
+    }
+    *since_last += time.delta_secs();
+    if *since_last >= MENU_RETRY_SECS {
+        *since_last = 0.0;
+        retry.write(crate::net::SessionUiCommand::Retry);
     }
 }
 
@@ -205,6 +286,28 @@ mod tests {
         }
         assert!(!AppScreen::InMatch.is_menu());
         assert!(!AppScreen::PostMatch.is_menu());
+    }
+
+    #[test]
+    fn every_world_harness_bypasses_the_shell_and_the_shell_harness_does_not() {
+        let keys = |names: &[&str]| {
+            names
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect::<Vec<_>>()
+        };
+        for harness in [
+            "OMOBA_AUTOJOIN",
+            "OMOBA_VISUAL_QA_DIR",
+            "OMOBA_CAREER_QA_OUTPUT",
+            "OMOBA_AUDIO_QA_OUTPUT",
+        ] {
+            assert!(bypass_for(keys(&[harness]).into_iter()), "{harness}");
+        }
+        assert!(!bypass_for(
+            keys(&["OMOBA_FRONTEND_QA_OUTPUT", "HOME"]).into_iter()
+        ));
+        assert!(!bypass_for(keys(&["OMOBA_QA_WIDTH"]).into_iter()));
     }
 
     #[test]
@@ -233,6 +336,7 @@ mod tests {
             .init_state::<AppScreen>()
             .init_resource::<PendingScreen>()
             .init_resource::<ScreenDriverPaused>()
+            .init_resource::<JoinNotice>()
             .init_resource::<ClientSession>()
             .init_resource::<GameStateSnapshot>()
             .add_systems(
@@ -246,17 +350,29 @@ mod tests {
         *app.world().resource::<State<AppScreen>>().get()
     }
 
+    /// Puts the app on `wanted` with `session`, the way the shell gets there.
+    fn enter(app: &mut App, wanted: AppScreen, session: ClientSession) {
+        *app.world_mut().resource_mut::<ClientSession>() = session;
+        app.world_mut().resource_mut::<PendingScreen>().0 = Some(wanted);
+        app.update();
+        app.update();
+    }
+
+    fn settle(app: &mut App) {
+        for _ in 0..(UNCOMMITTED_GRACE_FRAMES as usize + 3) {
+            app.update();
+        }
+    }
+
     #[test]
     fn the_shell_only_leaves_the_search_when_the_server_admitted_the_join() {
         let mut app = driver_app();
-        // Locking in commits the join and asks for the search screen in the
-        // same frame, which is what the picker does.
-        app.world_mut()
-            .resource_mut::<ClientSession>()
-            .join_flow_committed = true;
-        app.world_mut().resource_mut::<PendingScreen>().0 = Some(AppScreen::Searching);
-        app.update();
-        app.update();
+        enter(
+            &mut app,
+            AppScreen::Searching,
+            ClientSession::queued_for_test(),
+        );
+        settle(&mut app);
         // Queued, but no admission and no match start yet: the screen holds.
         assert_eq!(screen(&app), AppScreen::Searching);
 
@@ -265,52 +381,132 @@ mod tests {
         app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Starting {
             countdown_ms: 3_000,
         };
-        app.update();
-        app.update();
+        settle(&mut app);
         assert_eq!(screen(&app), AppScreen::Loading);
 
         // The world is only entered once the local hero actually exists.
         app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Running;
-        app.update();
-        app.update();
+        settle(&mut app);
         assert_eq!(screen(&app), AppScreen::Loading);
         app.world_mut().spawn(Player);
-        app.update();
-        app.update();
+        settle(&mut app);
         assert_eq!(screen(&app), AppScreen::InMatch);
 
         // The result screen follows the server's verdict.
         app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Victory {
             winner: crate::team::Team::Green,
         };
-        app.update();
-        app.update();
+        settle(&mut app);
         assert_eq!(screen(&app), AppScreen::PostMatch);
     }
 
     #[test]
-    fn a_rejected_join_returns_to_hero_select() {
+    fn a_rejected_join_returns_to_a_working_picker_with_the_reason() {
         let mut app = driver_app();
-        app.world_mut().resource_mut::<PendingScreen>().0 = Some(AppScreen::Searching);
-        app.update();
-        app.update();
-        let mut session = ClientSession::admitted_for_test();
+        let mut session = ClientSession::queued_for_test();
         session.reject_for_test(shared::protocol::JoinRejection::MatchFull);
-        *app.world_mut().resource_mut::<ClientSession>() = session;
-        app.update();
-        app.update();
+        enter(&mut app, AppScreen::Searching, session);
+        settle(&mut app);
         assert_eq!(screen(&app), AppScreen::HeroSelect);
+        // The reason survives for the picker...
+        assert_eq!(
+            app.world().resource::<JoinNotice>().0.as_deref(),
+            Some(shared::protocol::JoinRejection::MatchFull.message())
+        );
+        // ...and the dead join does not: the lock-in must work again.
+        let session = app.world().resource::<ClientSession>();
+        assert!(!session.join_flow_committed);
+        assert!(!session.has_committed_join());
+        assert!(!session.join_blocked());
+    }
+
+    #[test]
+    fn a_lost_lock_in_falls_back_to_the_picker_after_the_grace_frames() {
+        let mut app = driver_app();
+        enter(&mut app, AppScreen::Searching, ClientSession::default());
+        settle(&mut app);
+        assert_eq!(screen(&app), AppScreen::HeroSelect);
+        assert!(app.world().resource::<JoinNotice>().0.is_none());
+    }
+
+    #[test]
+    fn a_reconnect_in_the_middle_of_a_match_keeps_the_match_on_screen() {
+        let mut app = driver_app();
+        app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Running;
+        app.world_mut().spawn(Player);
+        enter(
+            &mut app,
+            AppScreen::InMatch,
+            ClientSession::admitted_for_test(),
+        );
+        assert_eq!(screen(&app), AppScreen::InMatch);
+
+        // Transport teardown: hero despawned, snapshot reset, reconnect armed.
+        let players: Vec<Entity> = app
+            .world_mut()
+            .query_filtered::<Entity, With<Player>>()
+            .iter(app.world())
+            .collect();
+        for player in players {
+            app.world_mut().despawn(player);
+        }
+        *app.world_mut().resource_mut::<GameStateSnapshot>() = GameStateSnapshot::default();
+        *app.world_mut().resource_mut::<ClientSession>() = ClientSession::reconnecting_for_test();
+        settle(&mut app);
+        assert_eq!(
+            screen(&app),
+            AppScreen::InMatch,
+            "a reconnect must not look like leaving the match"
+        );
+
+        // The same holds while still loading into the match.
+        enter(
+            &mut app,
+            AppScreen::Loading,
+            ClientSession::reconnecting_for_test(),
+        );
+        settle(&mut app);
+        assert_eq!(screen(&app), AppScreen::Loading);
+    }
+
+    #[test]
+    fn leaving_the_match_goes_home_and_stale_snapshots_cannot_pull_back() {
+        let mut app = driver_app();
+        app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Running;
+        enter(
+            &mut app,
+            AppScreen::InMatch,
+            ClientSession::admitted_for_test(),
+        );
+
+        // "Back to menu": the join is abandoned, the hero is gone.
+        let mut session = ClientSession::admitted_for_test();
+        session.abandon_join();
+        *app.world_mut().resource_mut::<ClientSession>() = session;
+        settle(&mut app);
+        assert_eq!(screen(&app), AppScreen::Home);
+
+        // A snapshot still in flight re-lists the player and even a hero: with
+        // nothing committed, the menus keep the player.
+        let mut stale = ClientSession::admitted_for_test();
+        stale.last_join = None;
+        *app.world_mut().resource_mut::<ClientSession>() = stale;
+        app.world_mut().spawn(Player);
+        settle(&mut app);
+        assert_eq!(screen(&app), AppScreen::Home);
     }
 
     #[test]
     fn a_paused_driver_never_moves_the_screen() {
         let mut app = driver_app();
         app.world_mut().resource_mut::<ScreenDriverPaused>().0 = true;
-        app.world_mut().resource_mut::<PendingScreen>().0 = Some(AppScreen::Searching);
-        *app.world_mut().resource_mut::<ClientSession>() = ClientSession::admitted_for_test();
         app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Running;
-        app.update();
-        app.update();
+        enter(
+            &mut app,
+            AppScreen::Searching,
+            ClientSession::admitted_for_test(),
+        );
+        settle(&mut app);
         assert_eq!(screen(&app), AppScreen::Searching);
     }
 }

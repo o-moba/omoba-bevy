@@ -60,6 +60,48 @@ avatar or a match history before queueing, and no separation between "in the men
   one avatar row on a short window, the hero panel and the collection preview are sized
   from the window, and the harness fails a run if a screen root leaves the viewport.
 
+## Review pass (2026-09-21)
+
+A code review of the branch found that the tests and captures only covered the happy
+path - a live server and an accepted join - while every defect sat on a failure path.
+Fixed, each with a test on that path:
+
+- **Leaving did not leave.** `SessionUiCommand::LeaveMatch` only swapped the local UDP
+  transport and kept the session id, so the server answered the next join with
+  `SessionActive` or reclaimed the old seat with the old hero. There is now a `Leave`
+  client packet (`server/src/career_runtime.rs::leave_match`): the seat and any queue
+  entry go at once, nothing is kept for a reclaim, the endpoint and its career
+  authentication stay. The search screen's Cancel uses the same path, because a signed
+  `CancelQueue` did nothing on a practice or dev server. Server test:
+  `a_deliberate_leave_frees_the_seat_and_lets_the_same_session_pick_again`.
+- **A rejected join stranded the player** on a picker whose lock-in was dead and whose
+  only recovery UI had been hidden. The driver now abandons the dead join
+  (`ClientSession::abandon_join`) and hands the reason to the picker header through
+  `JoinNotice`. Test: `a_rejected_join_returns_to_a_working_picker_with_the_reason`.
+- **A reconnect looked like leaving.** The driver keyed "still mine" off
+  `join_flow_committed`, which a teardown clears. It now uses
+  `ClientSession::has_committed_join`, which survives a teardown. Tests:
+  `a_reconnect_in_the_middle_of_a_match_keeps_the_match_on_screen`,
+  `leaving_the_match_goes_home_and_stale_snapshots_cannot_pull_back`.
+- **The transport owned a screen.** A pre-join teardown requested hero select from
+  anywhere. It no longer requests anything; the menus retry the connection every five
+  seconds on their own (`retry_connection_from_menus`).
+- **Lock-in race.** `team_select_ui_system` is ordered before
+  `ClientNetPipeline::SendCommands`, with a three-frame grace in the driver as a guard.
+- **Preview leaking into the world.** Layer tagging runs until `SceneInstanceReady`
+  instead of for 240 frames, the rig lives at y = -2000, and the model is released when
+  no screen shows it. `NoAnimations` is reachable and refreshes the clip row.
+- **Card, collection, small items.** Store/community showcase avatars survive loading
+  (shape check instead of a catalogue lookup at startup); the collection grid scrolls;
+  the accent swatch repaints; `automation_bypass` is decided once and covers
+  `*_QA_OUTPUT`; the home footer stopped advertising F1.
+
+The live-flow harness now also leaves the match and comes back with another class on the
+other side. Against a practice server it records
+`Home, HeroSelect, Searching, Loading, InMatch, Home, HeroSelect, Searching, Loading,
+InMatch` with `rejoined_after_leave: true`, and the server logs `event=leave` with no
+`Rejecting session id reuse` and no `Reclaiming`.
+
 ## Checks
 
 - `cargo fmt --all -- --check`, `cargo check -p client --locked --all-targets`: clean.
@@ -93,8 +135,9 @@ avatar or a match history before queueing, and no separation between "in the men
   on a phone or in the mobile UI profile.
 - The live run was practice mode (solo start, server bots). The ranked path (`Release`
   mode with a career backend) is covered by unit tests only.
-- `SessionUiCommand::LeaveMatch` (the result screen's "Back to menu") drops the session
-  and opens a fresh transport; no test covers the server-side seat reclaim after it.
+- A client built from this branch against an older server: `Leave` is ignored there, so
+  leaving falls back to the five-second timeout and the old reclaim behaviour. Ship
+  client and server together.
 - The server still has no draft phase: hero select runs *before* the queue entry because
   `ClientPacket::Join` carries the loadout. A Wild-Rift-style pick after "match found"
   needs a protocol and server change (`Forming -> Drafting -> Starting`).

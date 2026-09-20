@@ -165,7 +165,12 @@ world cannot receive input behind them.
 - **Profile card:** locally stored choice of main class, showcase avatar, accent colour
   and a win-gated title (`profile_card.json` beside the client preferences).
 - **Result screen:** outcome, personal K/D/A and rating delta, "Play again" and "Back to
-  menu"; leaving drops the session so the server reclaims the seat.
+  menu". Leaving sends the `Leave` packet: the server releases the seat at once and the
+  same client can lock in another hero straight away. The search screen's Cancel uses
+  the same path on every server mode.
+- **Failure paths:** a rejected join returns to a working picker that shows the reason; a
+  reconnect in the middle of a match keeps the match on screen; with nothing committed
+  the menus retry the connection on their own and never change screen under the player.
 
 Automation is unaffected: `OMOBA_AUTOJOIN` and the `*_QA_DIR` screenshot harnesses
 bypass the shell and boot straight into the world. `OMOBA_FRONTEND_QA_OUTPUT` captures

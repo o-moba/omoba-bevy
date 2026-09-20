@@ -77,6 +77,10 @@ const NETWORK_DIAGNOSTIC_INTERVAL: Duration = Duration::from_secs(1);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ClientPacket {
+    /// The player chose to leave the match or the queue. The seat is released
+    /// immediately instead of being held for a reconnect; the endpoint itself
+    /// stays connected for career, friends and the menus.
+    Leave,
     Social {
         request: shared::social::SocialRequest,
     },
@@ -1325,6 +1329,10 @@ impl ServerRuntime {
                 return;
             }
         }
+        if matches!(packet, ClientPacket::Leave) {
+            self.leave_match(addr, now);
+            return;
+        }
         if matches!(packet, ClientPacket::RequestRematch) && self.career_flow_active() {
             self.career_play_again(addr, now);
             return;
@@ -1351,6 +1359,7 @@ impl ServerRuntime {
             ClientPacket::Career { .. } | ClientPacket::Social { .. } => {
                 unreachable!("handled before gameplay admission")
             }
+            ClientPacket::Leave => unreachable!("handled before the gameplay match"),
             ClientPacket::Hello { protocol_version } => {
                 ensure_player_connected(players, map_layout, addr, next_player_id, now);
                 let player = players.get_mut(&addr).unwrap();

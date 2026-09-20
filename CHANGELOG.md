@@ -38,6 +38,35 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
   account controls collapse into one strip under the grids; the connection panel and the
   in-match career bar keep out of the menus, which print their own status line. Layouts
   are checked at 1280x720 and 1024x640 and hold at both.
+- Front-end failure paths, found in review and fixed:
+  - New `Leave` client packet. The server releases the seat or the queue entry at once
+    and keeps nothing for a session reclaim, while the endpoint stays connected. "Back to
+    menu" and the search screen's Cancel both use it, so leaving works the same on a
+    practice, dev or ranked server, and the same client can lock in a different hero
+    straight away. Previously leaving only swapped the local transport: the next join was
+    refused as `SessionActive` or handed back the old seat with the old hero.
+  - A rejected or exhausted join now returns to a working picker that says why. The dead
+    join is dropped, so the lock-in works again, and the reason is shown in the picker
+    header until the next attempt.
+  - A transport teardown in the middle of a match no longer throws the player onto the
+    home screen: the shell tells a reconnect from a leave by the committed join, not by a
+    flag the teardown clears.
+  - A teardown with nothing committed no longer pulls the player out of the home, card or
+    collection screen into hero select. Instead the menus retry the connection themselves
+    every five seconds.
+  - The lock-in is ordered before the network send, so the search screen never opens on a
+    join that is not committed yet.
+  - The 3D preview tags its model onto the preview layer until the scene reports ready,
+    however slow the load, lives far below the arena, and is released when no screen
+    shows it, so a preview avatar can never stand in a match. A model without animation
+    clips now says so instead of loading forever.
+  - A showcase avatar from the store or the community list survives a restart: the card
+    no longer drops a slug the catalogue simply has not delivered yet.
+  - The collection grid scrolls (wheel, Page Up/Down); avatars below the fold were
+    unreachable.
+  - Smaller: the accent swatch follows the choice, every `*_QA_OUTPUT` world harness
+    bypasses the shell (decided once, not per frame), and the home footer no longer
+    advertises an F1 overlay that only exists in a match.
 - Fix eight pre-existing clippy findings so `cargo clippy --workspace --all-targets -D
   warnings` passes again under clippy 1.93 (`account-api`, `server/passport_admission`,
   `client/career_devices`, `client/map_visuals/river`). Behaviour is unchanged.

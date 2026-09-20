@@ -54,6 +54,7 @@ impl Plugin for FrontendFlowQaPlugin {
             join_committed_on_home: false,
             world_before_lock_in: false,
             captured: false,
+            rejoined_after_leave: false,
             finished: false,
         })
         .insert_resource(bevy::winit::WinitSettings::continuous())
@@ -67,6 +68,15 @@ enum FlowStep {
     HeroSelect,
     AwaitMatch,
     Capture,
+    /// "Back to menu" from inside the match.
+    Leave,
+    /// Home again, with the seat released; then PLAY a second time.
+    HomeAgain,
+    /// Pick another class and the other side.
+    SecondSelect,
+    /// The second lock-in must reach a match too: no `SessionActive`, no
+    /// reclaimed old seat, no dead picker.
+    AwaitSecondMatch,
     Done,
 }
 
@@ -83,6 +93,8 @@ struct FlowQa {
     /// Set if a local hero existed before the lock-in.
     world_before_lock_in: bool,
     captured: bool,
+    /// The session left the match and reached a second one with a new pick.
+    rejoined_after_leave: bool,
     finished: bool,
 }
 
@@ -108,6 +120,7 @@ impl FlowQa {
             "screen_trace": self.trace,
             "join_committed_from_the_menus": self.join_committed_on_home,
             "local_hero_before_lock_in": self.world_before_lock_in,
+            "rejoined_after_leave": self.rejoined_after_leave,
             "in_match_capture": passed.then(|| "07-in-match.png".to_owned()),
             "manual_input_verified": false,
         });
@@ -140,6 +153,7 @@ fn drive_flow(
     session: Res<ClientSession>,
     players: Query<(), With<Player>>,
     mut buttons: Query<(&Name, &mut Interaction)>,
+    mut session_ui: MessageWriter<crate::net::SessionUiCommand>,
     windows: Query<Entity, With<PrimaryWindow>>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -231,6 +245,61 @@ fn drive_flow(
                 .metadata()
                 .is_ok_and(|file| file.len() > 32)
             {
+                qa.step = FlowStep::Leave;
+                qa.frames = 0;
+            }
+        }
+        FlowStep::Leave => {
+            // The same command the result screen's "Back to menu" sends.
+            session_ui.write(crate::net::SessionUiCommand::LeaveMatch);
+            qa.step = FlowStep::HomeAgain;
+            qa.frames = 0;
+        }
+        FlowStep::HomeAgain => {
+            if current != AppScreen::Home && current != AppScreen::HeroSelect {
+                return;
+            }
+            // Give stale snapshots time to try (and fail) to pull us back in.
+            if qa.frames < HOME_FRAMES {
+                return;
+            }
+            if current == AppScreen::Home && (session.has_committed_join() || !players.is_empty()) {
+                qa.finish(
+                    "failed",
+                    Some("the match still held the player after leaving"),
+                    &mut exit,
+                );
+                return;
+            }
+            press(&mut buttons, "HomePlay");
+            if current == AppScreen::HeroSelect {
+                qa.step = FlowStep::SecondSelect;
+                qa.frames = 0;
+            }
+        }
+        FlowStep::SecondSelect => {
+            if session.join_flow_committed {
+                qa.step = FlowStep::AwaitSecondMatch;
+                qa.frames = 0;
+                return;
+            }
+            if current != AppScreen::HeroSelect {
+                return;
+            }
+            // Another class first, then the other side.
+            if qa.frames < SELECT_FRAMES {
+                press(&mut buttons, "ClassButton-cleric");
+                return;
+            }
+            press(&mut buttons, "TeamBlueButton");
+        }
+        FlowStep::AwaitSecondMatch => {
+            if let Some(rejection) = session.join_rejection() {
+                qa.finish("failed", Some(rejection.message()), &mut exit);
+                return;
+            }
+            if current == AppScreen::InMatch && !players.is_empty() {
+                qa.rejoined_after_leave = true;
                 qa.step = FlowStep::Done;
             }
         }
@@ -258,6 +327,7 @@ mod tests {
             join_committed_on_home: false,
             world_before_lock_in: false,
             captured: false,
+            rejoined_after_leave: false,
             finished: false,
         };
         qa.record(AppScreen::Home);

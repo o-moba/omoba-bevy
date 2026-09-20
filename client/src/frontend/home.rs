@@ -316,7 +316,7 @@ fn spawn_home(
             });
 
             root.spawn(widgets::label(
-                "Escape opens settings · F1 shows the controls",
+                "Escape opens settings",
                 12.0,
                 widgets::MUTED,
             ));

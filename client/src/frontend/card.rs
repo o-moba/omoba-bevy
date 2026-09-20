@@ -73,14 +73,27 @@ impl ProfileCard {
     }
 
     /// Keeps a card read from disk inside the ranges the UI can render.
+    ///
+    /// The showcase avatar is only checked for shape, not for existence: owned
+    /// and community avatars arrive with the store catalogue, which is still
+    /// empty when the card loads. Dropping an unknown slug here would erase
+    /// the player's choice on every launch. An avatar that never turns up
+    /// simply renders without a portrait.
     pub fn sanitized(mut self) -> Self {
         self.accent = self.accent.min(widgets::ACCENTS.len() - 1);
         self.title = self.title.min(TITLES.len() - 1);
-        self.showcase_avatar = self
-            .showcase_avatar
-            .filter(|slug| shared::avatar_definition(slug).is_some());
+        self.showcase_avatar = self.showcase_avatar.filter(|slug| plausible_slug(slug));
         self
     }
+}
+
+/// A slug the asset pipeline could have produced: short, lowercase, no path.
+fn plausible_slug(slug: &str) -> bool {
+    !slug.is_empty()
+        && slug.len() <= 64
+        && slug
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
 fn card_path() -> Option<PathBuf> {
@@ -456,9 +469,22 @@ fn refresh_card_screen(
     thumbnails: Res<AvatarThumbnails>,
     slot: Query<Entity, With<CardPreviewSlot>>,
     mut tiles: Query<(&CardAction, &mut MenuButton)>,
+    mut swatches: Query<(&CardAction, &mut Node, &mut BorderColor), Without<MenuButton>>,
 ) {
     if !card.is_changed() {
         return;
+    }
+    for (action, mut node, mut border) in &mut swatches {
+        let CardAction::Accent(index) = action else {
+            continue;
+        };
+        let chosen = *index == card.accent;
+        node.border = UiRect::all(Val::Px(if chosen { 3.0 } else { 1.0 }));
+        *border = BorderColor::all(if chosen {
+            widgets::IVORY
+        } else {
+            widgets::PANEL_EDGE
+        });
     }
     let wins = career
         .view
@@ -537,12 +563,26 @@ mod tests {
         let card = ProfileCard {
             accent: 99,
             title: 99,
-            showcase_avatar: Some("not-a-real-avatar".into()),
+            showcase_avatar: Some("../../etc/passwd".into()),
             ..Default::default()
         }
         .sanitized();
         assert_eq!(card.accent, widgets::ACCENTS.len() - 1);
         assert_eq!(card.title, TITLES.len() - 1);
         assert!(card.showcase_avatar.is_none());
+    }
+
+    #[test]
+    fn a_store_avatar_the_catalogue_has_not_delivered_yet_survives_loading() {
+        // Not in the shipped roster, and the store catalogue is empty in a test:
+        // exactly the situation at startup for an owned or community avatar.
+        let slug = "community-star-walker";
+        assert!(shared::avatar_definition(slug).is_none());
+        let card = ProfileCard {
+            showcase_avatar: Some(slug.into()),
+            ..Default::default()
+        }
+        .sanitized();
+        assert_eq!(card.showcase_avatar.as_deref(), Some(slug));
     }
 }

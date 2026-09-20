@@ -182,6 +182,52 @@ fn late_human_replaces_bot_at_safe_spawn_without_inheriting_stats_or_identity() 
 }
 
 #[test]
+fn a_deliberate_leave_frees_the_seat_and_lets_the_same_session_pick_again() {
+    let mut rt = runtime(2);
+    let now = Instant::now();
+    rt.handle_packet(addr(1), join("returning"), now);
+    assert!(rt.players[&addr(1)].joined);
+    let first_class = rt.players[&addr(1)].state.hero_class;
+
+    rt.handle_packet(
+        addr(1),
+        ClientPacket::Leave,
+        now + Duration::from_millis(10),
+    );
+    let left = &rt.players[&addr(1)];
+    // The endpoint survives (menus, career), the seat does not.
+    assert!(!left.joined);
+    assert!(left.session_id.is_none());
+    assert!(rt.disconnected_sessions.is_empty());
+
+    // Same session id, straight away, with another hero: no `SessionActive`,
+    // and the new pick is what the server admits.
+    let again = ClientPacket::Join {
+        team: Team::Blue,
+        character: CharacterChoice::Cube,
+        hero_class: HeroClass::Cleric,
+        avatar: None,
+        sprite_character: None,
+        session_id: Some("returning".into()),
+        passport_ticket: None,
+    };
+    rt.handle_packet(addr(1), again, now + Duration::from_millis(20));
+    let back = &rt.players[&addr(1)];
+    assert!(back.joined);
+    assert!(back.join_error.is_none());
+    assert_ne!(back.state.hero_class, first_class);
+    assert_eq!(back.state.hero_class, HeroClass::Cleric);
+
+    // A leave from an endpoint that never joined is harmless.
+    rt.handle_packet(
+        addr(9),
+        ClientPacket::Leave,
+        now + Duration::from_millis(30),
+    );
+    assert!(!rt.players.contains_key(&addr(9)) || !rt.players[&addr(9)].joined);
+}
+
+#[test]
 fn disconnect_replacement_and_reconnect_keep_human_state_without_oversubscribing() {
     let mut rt = runtime(1);
     let now = Instant::now();

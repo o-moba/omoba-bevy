@@ -1,12 +1,12 @@
 //! Matchmaking screen: what the server says about the queue, and a way out.
 
 use bevy::prelude::*;
-use shared::career::{CareerRequest, QueueView};
+use shared::career::QueueView;
 
 use super::AppScreen;
 use super::widgets::{self, ButtonKind};
 use crate::career::CareerClient;
-use crate::net::{ClientSession, GameState, GameStateSnapshot, NetworkCommand};
+use crate::net::{ClientSession, GameState, GameStateSnapshot, SessionUiCommand};
 use crate::team::TeamSelection;
 
 pub struct SearchingScreenPlugin;
@@ -100,16 +100,18 @@ fn spawn_searching(mut commands: Commands, selection: Res<TeamSelection>) {
 }
 
 fn searching_actions(
-    mut next: ResMut<NextState<AppScreen>>,
-    mut requests: MessageWriter<NetworkCommand>,
+    mut session_ui: MessageWriter<SessionUiCommand>,
     buttons: Query<&Interaction, (Changed<Interaction>, With<SearchingCancel>)>,
 ) {
     for interaction in &buttons {
         if *interaction != Interaction::Pressed {
             continue;
         }
-        requests.write(NetworkCommand::Career(CareerRequest::CancelQueue));
-        next.set(AppScreen::Home);
+        // One path for every server mode: the server drops the queue entry or
+        // the seat, the client drops the join, and the shell goes home. A
+        // signed career `CancelQueue` alone did nothing on a practice or dev
+        // server and left the join retrying behind the menus.
+        session_ui.write(SessionUiCommand::LeaveMatch);
     }
 }
 

@@ -1,7 +1,7 @@
 //! Avatar collection: every avatar the player can look at, with a live 3D
 //! preview, animation switching and the showcase/loadout choices.
 
-use bevy::input::mouse::MouseMotion;
+use bevy::input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 use shared::AvatarDefinition;
 
@@ -42,6 +42,7 @@ impl Plugin for CollectionScreenPlugin {
                 Update,
                 (
                     collection_actions,
+                    scroll_collection,
                     drag_to_rotate,
                     refresh_collection_details,
                 )
@@ -63,6 +64,10 @@ enum CollectionAction {
 
 #[derive(Component)]
 struct PreviewSurface;
+
+/// The scrolling avatar grid.
+#[derive(Component)]
+struct CollectionGrid;
 
 #[derive(Component)]
 struct ClipRow;
@@ -141,7 +146,7 @@ fn spawn_collection(
                     .with_children(|title| {
                         title.spawn(widgets::heading("Avatars", 30.0));
                         title.spawn(widgets::label(
-                            "Drag the model to turn it · switch animations below",
+                            "Scroll the roster · drag the model to turn it · switch animations below",
                             13.0,
                             widgets::MUTED,
                         ));
@@ -174,6 +179,7 @@ fn spawn_collection(
                         overflow: Overflow::scroll_y(),
                         ..default()
                     },
+                    CollectionGrid,
                     Name::new("CollectionGrid"),
                 ))
                 .with_children(|grid| {
@@ -355,6 +361,46 @@ fn collection_actions(
     }
 }
 
+/// Bevy lays a scroll container out but does not move it: without this the
+/// avatars below the fold could be seen clipped and never reached.
+fn scroll_collection(
+    mut wheel: MessageReader<MouseWheel>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut grids: Query<(&ComputedNode, &mut ScrollPosition), With<CollectionGrid>>,
+) {
+    let mut delta = wheel
+        .read()
+        .map(|event| {
+            -event.y
+                * if event.unit == MouseScrollUnit::Line {
+                    48.0
+                } else {
+                    1.0
+                }
+        })
+        .sum::<f32>();
+    if keys.just_pressed(KeyCode::PageDown) {
+        delta += 300.0;
+    }
+    if keys.just_pressed(KeyCode::PageUp) {
+        delta -= 300.0;
+    }
+    if delta == 0.0 {
+        return;
+    }
+    for (computed, mut position) in &mut grids {
+        position.y = scrolled(position.y, delta, computed);
+    }
+}
+
+/// New scroll offset, kept inside what the container can actually show.
+fn scrolled(current: f32, delta: f32, computed: &ComputedNode) -> f32 {
+    let maximum = ((computed.content_size().y - computed.size().y)
+        * computed.inverse_scale_factor())
+    .max(0.0);
+    (current + delta).clamp(0.0, maximum)
+}
+
 /// Dragging across the preview turns the model; releasing keeps the angle.
 fn drag_to_rotate(
     mut preview: ResMut<AvatarPreview>,
@@ -380,7 +426,17 @@ fn refresh_collection_details(
     selection: Res<TeamSelection>,
     clip_row: Query<Entity, With<ClipRow>>,
     detail: Query<Entity, With<DetailPanel>>,
-    mut last: Local<Option<(Option<String>, usize, usize, bool, bool, bool)>>,
+    mut last: Local<
+        Option<(
+            Option<String>,
+            PreviewStatus,
+            usize,
+            usize,
+            bool,
+            bool,
+            bool,
+        )>,
+    >,
 ) {
     let playable = preview
         .slug
@@ -389,6 +445,7 @@ fn refresh_collection_details(
         .is_some_and(crate::passport::can_select);
     let current = (
         preview.slug.clone(),
+        preview.status,
         preview.clips.len(),
         preview.selected,
         preview.auto_spin,
