@@ -14,15 +14,13 @@ fn proof(app: &App, body: &[u8], action: DeviceAction) -> Result<SignedDeviceEnr
         || (action != DeviceAction::Complete && p.target_profile.is_some())
         || (action != DeviceAction::Recover && p.recovery_code.is_some())
         || (action == DeviceAction::Complete
-            && !p
-                .target_profile
+            && p.target_profile
                 .as_deref()
-                .is_some_and(|v| crypto::decode::<32>(v).is_some()))
+                .is_none_or(|v| crypto::decode::<32>(v).is_none()))
         || (action == DeviceAction::Recover
-            && !p
-                .recovery_code
+            && p.recovery_code
                 .as_deref()
-                .is_some_and(|v| crypto::decode::<32>(v).is_some()))
+                .is_none_or(|v| crypto::decode::<32>(v).is_none()))
     {
         return Err(invalid());
     }

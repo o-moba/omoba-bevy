@@ -256,9 +256,10 @@ pub(super) fn body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
         label(
             parent,
             format!(
-                "Trusted portal: {}\nNew device fingerprint: {}",
+                "Trusted portal: {}\nNew device fingerprint: {}…{}",
                 e.origin,
-                format!("{}…{}", &e.public_key[..8], &e.public_key[56..])
+                &e.public_key[..8],
+                &e.public_key[56..]
             ),
             14.,
             ui::MUTED,

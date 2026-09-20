@@ -91,11 +91,29 @@ fn card_path() -> Option<PathBuf> {
     )
 }
 
+/// Reads a card from disk. A missing, unreadable or malformed file is not an
+/// error: the player simply gets the default card.
+pub fn read_card(path: &std::path::Path) -> Option<ProfileCard> {
+    let bytes = std::fs::read(path).ok()?;
+    serde_json::from_slice::<ProfileCard>(&bytes)
+        .ok()
+        .map(ProfileCard::sanitized)
+}
+
+/// Writes a card, creating the preferences directory if it is missing.
+pub fn write_card(path: &std::path::Path, card: &ProfileCard) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let bytes = serde_json::to_vec_pretty(card)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    std::fs::write(path, bytes)
+}
+
 fn load_card(mut commands: Commands) {
     let card = card_path()
-        .and_then(|path| std::fs::read(path).ok())
-        .and_then(|bytes| serde_json::from_slice::<ProfileCard>(&bytes).ok())
-        .map(ProfileCard::sanitized)
+        .as_deref()
+        .and_then(read_card)
         .unwrap_or_default();
     commands.insert_resource(card);
 }
@@ -113,19 +131,8 @@ fn save_card(card: Res<ProfileCard>, mut ready: Local<bool>) {
     let Some(path) = card_path() else {
         return;
     };
-    match serde_json::to_vec_pretty(card.as_ref()) {
-        Ok(bytes) => {
-            if let Some(parent) = path.parent()
-                && let Err(error) = std::fs::create_dir_all(parent)
-            {
-                warn!("Failed to create the profile card directory: {error}");
-                return;
-            }
-            if let Err(error) = std::fs::write(&path, bytes) {
-                warn!("Failed to save the profile card: {error}");
-            }
-        }
-        Err(error) => warn!("Failed to encode the profile card: {error}"),
+    if let Err(error) = write_card(&path, card.as_ref()) {
+        warn!("Failed to save the profile card: {error}");
     }
 }
 
@@ -497,6 +504,32 @@ mod tests {
         };
         assert_eq!(card.title_text(10), TITLES[0].0);
         assert_eq!(card.title_text(30), TITLES[3].0);
+    }
+
+    #[test]
+    fn a_saved_card_comes_back_after_a_restart() {
+        let directory = std::env::temp_dir().join(format!(
+            "omoba-card-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|since| since.as_nanos())
+                .unwrap_or_default()
+        ));
+        let path = directory.join(CARD_FILE);
+        assert!(read_card(&path).is_none(), "nothing is stored yet");
+        let saved = ProfileCard {
+            main_class: HeroClass::Cleric,
+            showcase_avatar: None,
+            accent: 3,
+            title: 1,
+        };
+        write_card(&path, &saved).expect("the card is written");
+        assert_eq!(read_card(&path), Some(saved));
+        // A corrupt file must not take the front end down with it.
+        std::fs::write(&path, b"{ not json").expect("the file is replaced");
+        assert!(read_card(&path).is_none());
+        let _ = std::fs::remove_dir_all(&directory);
     }
 
     #[test]

@@ -100,11 +100,10 @@ async fn device_enrollment_proves_new_key_preserves_profile_and_rejects_reassign
     let new = random_key();
     let (e, started) = start(&app, &new).await;
     assert!(
-        app.career
+        !app.career
             .key_is_active(&public(&new), &profile.profile_id)
             .await
             .unwrap()
-            == false
     );
     approve(&app, &s, &e, started["code"].as_str().unwrap()).await;
     // The enrollment proof cannot be replayed as another operation or target.

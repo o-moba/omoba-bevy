@@ -28,8 +28,13 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
   modals; the result screen after a match offers "Play again" and "Back to menu", the
   latter leaving the session cleanly instead of holding the seat for a reconnect.
 - `OMOBA_FRONTEND_QA_OUTPUT` captures the shell screen by screen and fails the run if
-  a screen leaves a 1280x720 viewport. Headless evidence runs (`OMOBA_AUTOJOIN`) and
-  the screenshot harnesses bypass the shell and still reach a match directly.
+  a screen leaves a 1280x720 viewport; adding `OMOBA_FRONTEND_QA_FLOW=1` instead presses
+  the real buttons against a live server and records the screen sequence it produced.
+  Headless evidence runs (`OMOBA_AUTOJOIN`) and the screenshot harnesses bypass the
+  shell and still reach a match directly.
+- Fix eight pre-existing clippy findings so `cargo clippy --workspace --all-targets -D
+  warnings` passes again under clippy 1.93 (`account-api`, `server/passport_admission`,
+  `client/career_devices`, `client/map_visuals/river`). Behaviour is unchanged.
 
 ### Ekza account: your own library in the picker, no wallet
 - "Connect Ekza account" in the avatar picker: the game shows a short code and opens

@@ -16,6 +16,7 @@ mod creatures3d;
 mod debug_console;
 mod decor;
 mod frontend;
+mod frontend_flow_qa;
 mod frontend_qa;
 mod game_audio;
 mod game_state;

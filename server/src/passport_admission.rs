@@ -25,7 +25,8 @@ struct FreeCatalogue {
 }
 
 enum FreeLookup {
-    Known(StoreAvatar),
+    /// Boxed: a catalogue entry dwarfs the other variants.
+    Known(Box<StoreAvatar>),
     Unknown,
     NeedsRead,
 }
@@ -36,7 +37,9 @@ impl FreeCatalogue {
             at.is_some_and(|at| now.saturating_duration_since(at) < limit)
         };
         match self.items.get(slug) {
-            Some(item) if recent(self.fetched, FREE_TTL) => FreeLookup::Known(item.clone()),
+            Some(item) if recent(self.fetched, FREE_TTL) => {
+                FreeLookup::Known(Box::new(item.clone()))
+            }
             _ if recent(self.attempted, FREE_RETRY) => FreeLookup::Unknown,
             _ => FreeLookup::NeedsRead,
         }

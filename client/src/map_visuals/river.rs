@@ -335,9 +335,9 @@ mod tests {
         // Baked road tops are Y=0, meadow=-0.02, bank=-0.04. The old
         // shallows were exactly coplanar with roads. All new water uses the
         // same lower datum; it remains within the 5 cm walk-surface budget.
-        assert!(WATER_Y < MEADOW_Y && WATER_Y >= -0.05);
-        assert!(0.0 - WATER_Y >= 0.03);
-        assert!(0.016 - HIGHLIGHT_LOWERING < 0.0);
+        const _: () = assert!(WATER_Y < MEADOW_Y && WATER_Y >= -0.05);
+        const _: () = assert!(0.0 - WATER_Y >= 0.03);
+        const _: () = assert!(0.016 - HIGHLIGHT_LOWERING < 0.0);
         let mut bank = Mesh::new(
             PrimitiveTopology::TriangleList,
             RenderAssetUsages::default(),

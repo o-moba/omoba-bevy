@@ -52,6 +52,11 @@ impl Plugin for FrontendQaPlugin {
         else {
             return;
         };
+        if std::env::var("OMOBA_FRONTEND_QA_FLOW").is_ok_and(|value| value == "1") {
+            // Live-flow capture owns the screens instead of this harness.
+            app.add_plugins(crate::frontend_flow_qa::FrontendFlowQaPlugin);
+            return;
+        }
         let dimension = |name: &str, fallback| {
             std::env::var(name)
                 .ok()

@@ -47,26 +47,38 @@ avatar or a match history before queueing, and no separation between "in the men
 ## Checks
 
 - `cargo fmt --all -- --check`, `cargo check -p client --locked --all-targets`: clean.
-- `cargo test -p client`: 399 passed. Slices covering the rest of the workspace
-  (`shared`, `omoba-passport`, `skills`, `arena-sync`, `server`, `harness`,
-  `omoba-account-api`): 311 passed, 0 failed. A single `cargo test --workspace`
-  invocation did not fit on the machine's disk.
-- `cargo clippy --workspace --all-targets --locked -- -D warnings`: seven errors, all
-  pre-existing on a clean tree (`account-api/src/devices.rs`,
-  `server/src/passport_admission.rs`, `client/src/career_devices.rs`,
-  `client/src/map_visuals/river.rs`) under clippy 1.93.
-- Screenshot capture: six screens, `qa-summary.json` `"status": "passed"`, the collection
-  capture reporting `preview_status: "Ready"` and five animation clips for `agnes`.
-  Artifacts in `.agent/tasks/FRONTEND-SHELL-2026-09-20/artifacts/`.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`: clean. The gate was
+  red before this task on eight findings unrelated to it (clippy 1.93 is newer than the
+  last green run); they are fixed here: `!is_some_and` → `is_none_or` in
+  `account-api/src/devices.rs`, a boxed large enum variant in
+  `server/src/passport_admission.rs`, a flattened nested `format!` in
+  `client/src/career_devices.rs`, constant assertions made `const` in
+  `client/src/map_visuals/river.rs`, and `== false` → `!` in
+  `account-api/tests/devices_postgres.rs`.
+- `cargo test --workspace --locked -- --test-threads=1`: 713 passed, 0 failed,
+  34 ignored (the pre-existing PostgreSQL/Apple cases).
+- Screen capture (`OMOBA_FRONTEND_QA_OUTPUT`): six screens, `qa-summary.json`
+  `"status": "passed"`, the collection capture reporting `preview_status: "Ready"` and
+  five animation clips for `agnes`.
+- Live flow capture (`OMOBA_FRONTEND_QA_FLOW=1` against
+  `OMOBA_MATCH_MODE=practice cargo run -p server`): `qa-flow.json` `"status": "passed"`
+  with `screen_trace: ["Home","HeroSelect","Searching","Loading","InMatch"]`,
+  `join_committed_from_the_menus: false` and `local_hero_before_lock_in: false`. The
+  harness presses the real buttons by setting `Interaction::Pressed`; the session drives
+  every transition after the lock-in. `07-in-match.png` is the resulting first playable
+  frame.
+- Artifacts: `.agent/tasks/FRONTEND-SHELL-2026-09-20/`.
 
 ## Remaining risks
 
-- No live match was played through the new flow: `InMatch`/`PostMatch` are covered by a
-  state-machine test, not by a real 5v5, and nobody clicked the buttons by hand.
-- `SessionUiCommand::LeaveMatch` drops the session and opens a fresh transport. It is
-  exercised by no test yet; a server-side seat reclaim after leaving is unverified.
+- No human ever clicked these buttons: both harnesses are synthetic, and nothing was run
+  on a phone or in the mobile UI profile.
+- The live run was practice mode (solo start, server bots). The ranked path (`Release`
+  mode with a career backend) is covered by unit tests only.
+- `SessionUiCommand::LeaveMatch` (the result screen's "Back to menu") drops the session
+  and opens a fresh transport; no test covers the server-side seat reclaim after it.
 - The server still has no draft phase: hero select runs *before* the queue entry because
   `ClientPacket::Join` carries the loadout. A Wild-Rift-style pick after "match found"
   needs a protocol and server change (`Forming -> Drafting -> Starting`).
-- The shell assumes the career view arrives over the same UDP session, so on a dead
-  server the home screen shows an empty card with "Career profile not loaded yet".
+- The shell reads the career view from the same UDP session, so against a dead server the
+  home screen shows an empty card with "Career profile not loaded yet".
