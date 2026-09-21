@@ -275,8 +275,13 @@ pub(crate) fn resolve_basic_attack(
         .xz()
         .distance(position.translation.xz());
     let phone = mobile.as_ref().is_some_and(|m| m.enabled);
+    // While the thumb is on the stick the player steers; the attack does not
+    // fight the stick for the hero. Otherwise a phone chases like a desktop.
+    let steering = mobile
+        .as_ref()
+        .is_some_and(|m| m.enabled && m.movement.length_squared() > 0.0001);
     if distance > range {
-        if phone {
+        if phone && steering {
             feedback.push_line("Target out of attack range — move closer.");
             basic.cancel();
         } else {
@@ -371,6 +376,29 @@ pub(crate) fn direction_score(origin: Vec2, direction: Vec2, point: Vec2) -> Opt
 }
 
 #[allow(clippy::too_many_arguments)]
+/// How far the phone's attack button looks for a target when nothing is locked.
+/// Wider than the attack itself: a melee hero must find the enemy standing two
+/// steps away and walk up to it, which is what the button means on a phone.
+pub(crate) fn mobile_acquire_radius(attack_range: f32) -> f32 {
+    (attack_range + 6.0).max(12.0)
+}
+
+/// Who the attack button picks first when several targets are in reach:
+/// enemy heroes, then minions and jungle camps, then structures.
+fn acquire_tier(kind: TargetKind) -> u8 {
+    match kind {
+        TargetKind::Player => 0,
+        TargetKind::Minion | TargetKind::Neutral => 1,
+        TargetKind::Structure => 2,
+    }
+}
+
+/// Score for automatic acquisition: tier first (a hero anywhere in reach beats
+/// a minion next to you), distance within a tier.
+fn acquire_score(kind: TargetKind, distance: f32) -> f32 {
+    f32::from(acquire_tier(kind)) * 10_000.0 + distance
+}
+
 fn pick_mobile(
     origin_position: Vec3,
     team: Team,
@@ -389,7 +417,9 @@ fn pick_mobile(
             return;
         }
         let distance = position.xz().distance(origin_position.xz());
-        if aim.is_none() && distance > range + validity.radius(entity, id) - 0.08 {
+        if aim.is_none()
+            && distance > mobile_acquire_radius(range) + validity.radius(entity, id) - 0.08
+        {
             return;
         }
         let projected = if aim.is_some() {
@@ -407,13 +437,9 @@ fn pick_mobile(
             score
         } else {
             // A deliberate existing lock is resolved by the caller. Automatic
-            // acquisition prefers nearby champions, then farm/objective targets.
-            distance
-                + if id.kind == TargetKind::Player {
-                    0.0
-                } else {
-                    range
-                }
+            // acquisition takes an enemy hero whenever one is in reach, then
+            // farm, then objectives; the nearest within the same tier.
+            acquire_score(id.kind, distance)
         };
         if best.is_none_or(|(_, prev, _, old)| score < old || (score == old && id.id < prev.id)) {
             best = Some((entity, id, screen, score));
@@ -1240,9 +1266,17 @@ mod tests {
         assert!(app.world().get::<MovementTarget>(player).is_none());
     }
     #[test]
-    fn chase_is_desktop_only_and_invalid_targets_never_emit() {
-        for phone in [false, true] {
+    fn both_platforms_chase_unless_the_stick_steers_and_invalid_targets_never_emit() {
+        // (phone, stick in use, expected chase)
+        for (phone, steering, chases) in [
+            (false, false, true),
+            (true, false, true),
+            (true, true, false),
+        ] {
             let (mut app, player, enemy) = attack_app(shared::HeroClass::Warrior, vec![], phone);
+            if steering {
+                app.world_mut().resource_mut::<MobileControls>().movement = Vec2::X;
+            }
             app.world_mut()
                 .get_mut::<Transform>(enemy)
                 .unwrap()
@@ -1250,8 +1284,13 @@ mod tests {
             order(&mut app, enemy);
             app.update();
             assert!(commands(&mut app).is_empty());
-            assert_eq!(app.world().get::<MovementTarget>(player).is_some(), !phone);
-            if !phone {
+            assert_eq!(
+                app.world().get::<MovementTarget>(player).is_some(),
+                chases,
+                "phone={phone} steering={steering}"
+            );
+            if chases {
+                // Once in reach, the chase ends in a real attack.
                 app.world_mut()
                     .get_mut::<Transform>(enemy)
                     .unwrap()
@@ -1289,6 +1328,31 @@ mod tests {
             assert!(commands(&mut app).is_empty());
             assert!(app.world().resource::<BasicAttackState>().order.is_none());
         }
+    }
+    #[test]
+    fn the_attack_button_reaches_past_its_own_range_but_not_across_the_map() {
+        // Melee reach is 4; the button looks further so a Warrior finds the
+        // enemy standing a few steps away.
+        let warrior = shared::basic_attack_for_class(shared::HeroClass::Warrior).range;
+        assert!(mobile_acquire_radius(warrior) >= 12.0);
+        assert!(mobile_acquire_radius(warrior) > warrior * 2.0);
+        // Ranged heroes keep a margin over their own reach, bounded.
+        let ranger = shared::basic_attack_for_class(shared::HeroClass::Ranger).range;
+        assert!(mobile_acquire_radius(ranger) > ranger);
+        assert!(mobile_acquire_radius(ranger) < ranger * 2.0);
+    }
+
+    #[test]
+    fn an_enemy_hero_in_reach_always_beats_a_closer_minion() {
+        let hero_far = acquire_score(TargetKind::Player, 11.0);
+        let minion_close = acquire_score(TargetKind::Minion, 0.5);
+        let camp_close = acquire_score(TargetKind::Neutral, 0.5);
+        let tower_close = acquire_score(TargetKind::Structure, 0.5);
+        assert!(hero_far < minion_close);
+        assert!(hero_far < camp_close);
+        // Farm before objectives; the nearest within a tier.
+        assert!(acquire_score(TargetKind::Minion, 11.0) < tower_close);
+        assert!(acquire_score(TargetKind::Minion, 2.0) < acquire_score(TargetKind::Minion, 3.0));
     }
     #[test]
     fn attack_order_replaces_an_old_ground_route_even_when_already_in_range() {

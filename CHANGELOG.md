@@ -6,6 +6,17 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Phone attack button finds and chases a target
+- With nothing locked, the attack button now looks beyond its own reach (at least 12
+  units, attack range + 6 for ranged heroes) instead of only inside the attack range, so
+  a Warrior finds the enemy standing a few steps away.
+- It always takes an enemy hero when one is in reach, then the nearest minion or jungle
+  camp, then a structure. Previously heroes only had a distance bonus, so a minion at
+  your feet could win over a hero nearby.
+- On a phone the hero now walks up to an out-of-range target and attacks when it
+  arrives, as on desktop. It used to stop with "Target out of attack range". Moving the
+  stick still takes over at once and drops the walk.
+
 ### New app icon
 - The iOS app icon is the new Omoba logo. The source art ships with pre-rounded corners
   on black; the icon is a full-bleed 1024x1024 square with the panel's own edge colours

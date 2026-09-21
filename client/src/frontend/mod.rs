@@ -356,7 +356,7 @@ mod tests {
     fn menus_shrink_on_a_phone_and_never_grow_on_a_big_screen() {
         // iPhone 16 Pro in landscape is 874x402 logical pixels.
         let phone = menu_scale(402.0);
-        assert!(phone < 0.7 && phone >= MIN_MENU_SCALE, "{phone}");
+        assert!((MIN_MENU_SCALE..0.7).contains(&phone), "{phone}");
         assert_eq!(menu_scale(640.0), 1.0);
         // iPad Air 11" landscape and desktop windows keep the designed size.
         assert_eq!(menu_scale(820.0), 1.0);

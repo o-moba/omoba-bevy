@@ -821,17 +821,23 @@ fn move_player_mobile(
         .map(|camera| mobile_screen_direction(mobile.movement, camera, *mode))
         .unwrap_or(Vec3::ZERO);
     for (entity, mut transform, stats, equipment) in &mut transforms.p0() {
-        commands
-            .entity(entity)
-            .remove::<(MovementTarget, MovementRoute, Jumping)>();
+        commands.entity(entity).remove::<Jumping>();
         if !allowed || !stats.is_alive() {
+            commands
+                .entity(entity)
+                .remove::<(MovementTarget, MovementRoute)>();
             pending.cancel();
             basic.cancel_for_movement();
             continue;
         }
         if direction.length_squared() < 0.0001 {
+            // Idle stick: a basic attack may be walking the hero to its target.
             continue;
         }
+        // The stick takes over: drop any walk-to-target the attack started.
+        commands
+            .entity(entity)
+            .remove::<(MovementTarget, MovementRoute)>();
         let current = transform.translation;
         let speed = PLAYER_SPEED
             * if boost.0 { DEBUG_SPEED_MULTIPLIER } else { 1.0 }
