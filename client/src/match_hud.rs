@@ -25,6 +25,8 @@ pub(crate) struct MatchHudVisuals;
 impl Plugin for MatchHudPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup_match_hud)
+            .add_systems(Update, adapt_desktop_dock)
+            .add_systems(Update, sync_buff_row_visibility.after(MatchHudVisuals))
             .add_systems(
                 Update,
                 (update_match_hud, update_hero_details)
@@ -79,12 +81,13 @@ fn setup_match_hud(mut commands: Commands) {
             Button,
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(16.0),
+                left: Val::Px(212.0),
                 bottom: Val::Px(16.0),
-                width: Val::Px(230.0),
-                height: Val::Px(150.0),
+                width: Val::Px(168.0),
+                height: Val::Px(136.0),
+                padding: UiRect::all(Val::Px(10.0)),
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(6.0),
+                row_gap: Val::Px(5.0),
                 ..ui::panel_node()
             },
             BackgroundColor(ui::PANEL),
@@ -102,8 +105,8 @@ fn setup_match_hud(mut commands: Commands) {
                 .with_children(|row| {
                     row.spawn((
                         Node {
-                            width: Val::Px(44.0),
-                            height: Val::Px(44.0),
+                            width: Val::Px(32.0),
+                            height: Val::Px(32.0),
                             flex_shrink: 0.0,
                             border_radius: BorderRadius::all(Val::Px(22.0)),
                             overflow: Overflow::clip(),
@@ -117,9 +120,10 @@ fn setup_match_hud(mut commands: Commands) {
                     ));
                     row.spawn((
                         Text::new("YOUR HERO"),
-                        ui::text(15.0),
+                        ui::text(12.0),
                         TextColor(ui::IVORY),
                         MatchHudProgressionText,
+                        Name::new("HudProgressionText"),
                     ));
                 });
             panel
@@ -139,22 +143,19 @@ fn setup_match_hud(mut commands: Commands) {
                 });
             panel.spawn((
                 Text::new("XP 0 / 0"),
-                ui::text(12.0),
+                ui::text(11.0),
                 TextColor(ui::MUTED),
                 HudXpText,
+                Name::new("HudXpText"),
             ));
         });
     commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                // Reserve the desktop map and a gap even when the window narrows.
-                // The phone layout supplies its own anchors and panel width.
-                left: Val::Px(
-                    crate::minimap::DESKTOP_MINIMAP_INSET + crate::minimap::MINIMAP_SIZE + 16.0,
-                ),
-                right: Val::Px(16.0),
-                top: Val::Px(14.0),
+                left: Val::Px(468.0),
+                bottom: Val::Px(166.0),
+                width: Val::Px(344.0),
                 justify_content: JustifyContent::Center,
                 ..default()
             },
@@ -166,12 +167,13 @@ fn setup_match_hud(mut commands: Commands) {
             root.spawn((
                 Button,
                 Node {
-                    max_width: Val::Px(630.0),
+                    width: Val::Percent(100.0),
+                    max_width: Val::Px(344.0),
                     min_width: Val::Px(0.0),
                     flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    row_gap: Val::Px(4.0),
-                    padding: UiRect::axes(Val::Px(18.0), Val::Px(10.0)),
+                    align_items: AlignItems::FlexStart,
+                    row_gap: Val::Px(3.0),
+                    padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
                     ..ui::panel_node()
                 },
                 BackgroundColor(ui::PANEL),
@@ -181,19 +183,46 @@ fn setup_match_hud(mut commands: Commands) {
             .with_children(|panel| {
                 panel.spawn((
                     Text::new(""),
-                    ui::text(15.0),
+                    ui::text(12.0),
                     TextColor(ui::IVORY),
                     MatchHudStatusText,
                     Name::new("MatchStatusText"),
                 ));
                 panel.spawn((
                     Text::new(""),
-                    ui::text(13.0),
+                    ui::text(11.0),
                     TextColor(ui::GOLD),
                     MatchHudBuffText,
+                    Name::new("MatchBuffText"),
                 ));
             });
         });
+}
+
+/// Shared anchor keeps status and ability rows aligned at every desktop width.
+pub(crate) fn desktop_skills_left(width: f32) -> f32 {
+    ((width - 344.0) * 0.5).max(392.0)
+}
+
+fn adapt_desktop_dock(
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    mut nodes: Query<(&Name, &mut Node)>,
+) {
+    if mobile.is_some_and(|mobile| mobile.enabled) {
+        return;
+    }
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    for (name, mut node) in &mut nodes {
+        if matches!(
+            name.as_str(),
+            "MatchObjectiveRoot" | "SkillBarRoot" | "ActionFeedback"
+        ) {
+            node.left = Val::Px(desktop_skills_left(window.width()));
+        }
+    }
 }
 
 #[derive(Component)]
@@ -234,7 +263,7 @@ fn update_hero_details(
             "MAX LEVEL".into()
         } else {
             format!(
-                "XP {} / {}   |   {} points",
+                "XP {} / {} · {} +",
                 progression.xp, progression.next_level_xp, progression.skill_points
             )
         };
@@ -310,6 +339,17 @@ fn sync_gameplay_hud_visibility(
                 Visibility::Hidden
             };
         }
+    }
+}
+
+/// Empty text still has a line box in Bevy; remove that row until a real buff is active.
+fn sync_buff_row_visibility(mut rows: Query<(&Text, &mut Node), With<MatchHudBuffText>>) {
+    for (text, mut node) in &mut rows {
+        node.display = if text.0.is_empty() {
+            Display::None
+        } else {
+            Display::Flex
+        };
     }
 }
 
@@ -479,9 +519,9 @@ fn update_match_hud(
     let target = if !stats.is_alive() {
         "Defeated - respawning soon"
     } else if target_state.selected_target.is_some() {
-        "Target locked — basic attack or Q/W/E/R"
+        "Target locked · Attack / Q W E R"
     } else {
-        "Select a foe  /  P shop  /  F1 help"
+        "Select a foe · P shop · F1 help"
     };
     status_text.0 = format!("{}\n{target}", objective_line.replace("Goal: ", ""));
 }
@@ -592,7 +632,7 @@ fn enemy_base_objective_line(
     >,
 ) -> String {
     let Ok(team) = local_team.single() else {
-        return "Goal: destroy the enemy base tower.".to_string();
+        return "Goal: Destroy the enemy base.".to_string();
     };
     let mut hp_sum = 0.0f32;
     let mut max_sum = 0.0f32;
@@ -607,15 +647,15 @@ fn enemy_base_objective_line(
         }
     }
     if protected {
-        "Goal: clear all towers in one lane to expose the enemy base.".to_string()
+        "Goal: Clear one lane to unlock the base.".to_string()
     } else if any && max_sum > 0.0 {
         format!(
-            "Goal: destroy enemy base - {:.0} / {:.0} HP remaining",
+            "Goal: Enemy base · {:.0} / {:.0} HP",
             hp_sum.min(max_sum),
             max_sum
         )
     } else {
-        "Goal: destroy the enemy base tower.".to_string()
+        "Goal: Destroy the enemy base.".to_string()
     }
 }
 

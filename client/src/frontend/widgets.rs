@@ -10,19 +10,19 @@ use super::AppScreen;
 
 /// Opaque menu backdrop. The gameplay world keeps rendering underneath, so the
 /// backdrop must not be translucent.
-pub const BACKDROP: Color = Color::srgb(0.020, 0.052, 0.058);
-pub const PANEL: Color = Color::srgb(0.035, 0.085, 0.092);
-pub const PANEL_EDGE: Color = Color::srgb(0.13, 0.27, 0.27);
-pub const TILE: Color = Color::srgb(0.055, 0.135, 0.142);
-pub const TILE_HOVER: Color = Color::srgb(0.095, 0.225, 0.225);
-pub const TILE_SELECTED: Color = Color::srgb(0.16, 0.38, 0.35);
-pub const PRIMARY: Color = Color::srgb(0.18, 0.62, 0.42);
-pub const PRIMARY_HOVER: Color = Color::srgb(0.24, 0.76, 0.52);
-pub const DANGER: Color = Color::srgb(0.46, 0.16, 0.16);
-pub const DANGER_HOVER: Color = Color::srgb(0.60, 0.22, 0.22);
-pub const IVORY: Color = Color::srgb(0.91, 0.94, 0.86);
-pub const MUTED: Color = Color::srgb(0.55, 0.70, 0.66);
-pub const GOLD: Color = Color::srgb(0.94, 0.77, 0.43);
+pub const BACKDROP: Color = Color::srgb(0.018, 0.039, 0.045);
+pub const PANEL: Color = Color::srgb(0.025, 0.060, 0.065);
+pub const PANEL_EDGE: Color = crate::ui_theme::EDGE;
+pub const TILE: Color = crate::ui_theme::TILE;
+pub const TILE_HOVER: Color = crate::ui_theme::HOVER;
+pub const TILE_SELECTED: Color = Color::srgb(0.095, 0.27, 0.23);
+pub const PRIMARY: Color = Color::srgb(0.12, 0.46, 0.34);
+pub const PRIMARY_HOVER: Color = Color::srgb(0.18, 0.60, 0.43);
+pub const DANGER: Color = Color::srgb(0.32, 0.12, 0.13);
+pub const DANGER_HOVER: Color = Color::srgb(0.47, 0.18, 0.18);
+pub const IVORY: Color = crate::ui_theme::IVORY;
+pub const MUTED: Color = crate::ui_theme::MUTED;
+pub const GOLD: Color = crate::ui_theme::GOLD;
 
 /// Accent colours a player can put on their profile card.
 pub const ACCENTS: [(&str, Color); 6] = [
@@ -105,7 +105,11 @@ pub struct FrontendWidgetsPlugin;
 
 impl Plugin for FrontendWidgetsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (paint_buttons, repaint_changed_buttons));
+        app.add_systems(Update, (paint_buttons, repaint_changed_buttons))
+            .add_systems(
+                PostUpdate,
+                adapt_phone_menu_readability.before(bevy::ui::UiSystems::Layout),
+            );
     }
 }
 
@@ -130,6 +134,56 @@ fn repaint_changed_buttons(
     }
 }
 
+/// Frontend metrics are retained separately so global menu fitting never
+/// turns phone controls into sub-44px touch targets or tiny labels.
+#[derive(Component)]
+struct MenuTypography {
+    size: f32,
+    heading: bool,
+}
+#[derive(Component)]
+struct MenuControl {
+    height: f32,
+}
+
+fn adapt_phone_menu_readability(
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    scale: Res<UiScale>,
+    mut labels: Query<(&MenuTypography, &mut TextFont)>,
+    mut buttons: Query<(&MenuControl, &mut Node)>,
+) {
+    let phone = mobile.as_ref().is_some_and(|mobile| mobile.enabled);
+    let scale = scale.0.max(0.1);
+    for (metric, mut font) in &mut labels {
+        let size = if phone {
+            metric
+                .size
+                .max(if metric.heading { 20.0 } else { 12.0 } / scale)
+        } else {
+            metric.size
+        };
+        if font.font_size != size {
+            font.font_size = size;
+        }
+    }
+    for (metric, mut node) in &mut buttons {
+        let height = if phone {
+            metric.height.max(44.0 / scale)
+        } else {
+            metric.height
+        };
+        if node.height != Val::Px(height) {
+            node.height = Val::Px(height);
+        }
+        if node.min_height != Val::Px(height) {
+            node.min_height = Val::Px(height);
+        }
+        if node.flex_shrink != 0.0 {
+            node.flex_shrink = 0.0;
+        }
+    }
+}
+
 /// Full-screen opaque root for a menu screen. Despawned automatically when the
 /// screen is left.
 pub fn screen_root(screen: AppScreen, name: &str) -> impl Bundle {
@@ -141,7 +195,7 @@ pub fn screen_root(screen: AppScreen, name: &str) -> impl Bundle {
             top: Val::Px(0.0),
             bottom: Val::Px(0.0),
             flex_direction: FlexDirection::Column,
-            padding: UiRect::all(Val::Px(24.0)),
+            padding: UiRect::all(Val::Px(28.0)),
             row_gap: Val::Px(16.0),
             ..default()
         },
@@ -160,7 +214,7 @@ pub fn panel_row() -> impl Bundle {
             row_gap: Val::Px(2.0),
             padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
             border: UiRect::all(Val::Px(1.0)),
-            border_radius: BorderRadius::all(Val::Px(10.0)),
+            border_radius: BorderRadius::all(Val::Px(8.0)),
             ..default()
         },
         BackgroundColor(PANEL),
@@ -176,6 +230,10 @@ pub fn heading(text: &str, size: f32) -> impl Bundle {
             ..default()
         },
         TextColor(IVORY),
+        MenuTypography {
+            size,
+            heading: true,
+        },
     )
 }
 
@@ -187,6 +245,10 @@ pub fn label(text: &str, size: f32, color: Color) -> impl Bundle {
             ..default()
         },
         TextColor(color),
+        MenuTypography {
+            size,
+            heading: false,
+        },
     )
 }
 
@@ -219,9 +281,11 @@ fn spawn_button<M: Component>(
     marker: M,
     name: &str,
 ) -> Entity {
+    let compact_clip = crate::platform::ui_profile() == crate::platform::UiProfile::Mobile
+        && (name.starts_with("AvatarClip-") || name == "AvatarAutoSpin");
     let (width, height, font) = match menu.kind {
-        ButtonKind::Primary => (Val::Px(260.0), Val::Px(62.0), 24.0),
-        _ => (Val::Auto, Val::Px(42.0), 16.0),
+        ButtonKind::Primary => (Val::Px(240.0), Val::Px(60.0), 22.0),
+        _ => (Val::Auto, Val::Px(44.0), 15.0),
     };
     parent
         .spawn((
@@ -229,14 +293,30 @@ fn spawn_button<M: Component>(
             Node {
                 width,
                 height,
-                min_width: Val::Px(120.0),
-                padding: UiRect::axes(Val::Px(18.0), Val::Px(8.0)),
+                min_width: Val::Px(if compact_clip { 86.0 } else { 120.0 }),
+                padding: UiRect::axes(
+                    Val::Px(if compact_clip { 10.0 } else { 18.0 }),
+                    Val::Px(8.0),
+                ),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                border_radius: BorderRadius::all(Val::Px(10.0)),
+                border_radius: BorderRadius::all(Val::Px(8.0)),
+                border: UiRect::all(Val::Px(1.0)),
                 ..default()
             },
+            BorderColor::all(if menu.kind == ButtonKind::Primary {
+                GOLD
+            } else {
+                PANEL_EDGE
+            }),
             BackgroundColor(menu.idle_color()),
+            MenuControl {
+                height: if menu.kind == ButtonKind::Primary {
+                    60.0
+                } else {
+                    44.0
+                },
+            },
             menu,
             marker,
             Name::new(name.to_owned()),

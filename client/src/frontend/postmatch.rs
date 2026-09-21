@@ -105,13 +105,14 @@ fn spawn_post_match(
         .with_children(|root| {
             root.spawn((
                 Node {
-                    width: Val::Px(520.0),
+                    width: Val::Px(600.0),
+                    max_width: Val::Percent(92.0),
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
-                    padding: UiRect::all(Val::Px(26.0)),
+                    padding: UiRect::all(Val::Px(32.0)),
                     row_gap: Val::Px(12.0),
                     border: UiRect::all(Val::Px(1.0)),
-                    border_radius: BorderRadius::all(Val::Px(14.0)),
+                    border_radius: BorderRadius::all(Val::Px(12.0)),
                     ..default()
                 },
                 BackgroundColor(widgets::PANEL),
@@ -119,7 +120,8 @@ fn spawn_post_match(
                 Name::new("PostMatchPanel"),
             ))
             .with_children(|panel| {
-                panel.spawn(widgets::heading(headline, 34.0));
+                panel.spawn(widgets::label("THE VERDANT ARENA", 12.0, widgets::GOLD));
+                panel.spawn(widgets::heading(headline, 42.0));
                 if let Some(summary) = summary.as_deref() {
                     panel.spawn(widgets::label(summary, 15.0, widgets::IVORY));
                 }
@@ -128,14 +130,15 @@ fn spawn_post_match(
                 }
                 panel
                     .spawn(Node {
-                        column_gap: Val::Px(10.0),
+                        column_gap: Val::Px(12.0),
+                        align_items: AlignItems::Center,
                         ..default()
                     })
                     .with_children(|row| {
                         widgets::button(
                             row,
                             "Play again",
-                            ButtonKind::Secondary,
+                            ButtonKind::Primary,
                             PostMatchAction::PlayAgain,
                             "PostMatchPlayAgain",
                         );

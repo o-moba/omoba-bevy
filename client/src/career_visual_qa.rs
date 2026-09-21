@@ -26,13 +26,15 @@ use crate::{
 };
 
 const SETTLE_FRAMES: u32 = 32;
-const VIEWS: [(&str, CareerModal, f32); 6] = [
+const VIEWS: [(&str, CareerModal, f32); 8] = [
     ("01-profile.png", CareerModal::Profile, 0.0),
     ("02-friends-code.png", CareerModal::Friends, 0.0),
     ("03-friends-list.png", CareerModal::Friends, 350.0),
     ("04-history.png", CareerModal::History, 0.0),
     ("05-result.png", CareerModal::Result, 0.0),
     ("06-friend-profile.png", CareerModal::FriendProfile, 0.0),
+    ("07-website-account.png", CareerModal::WebLink, 0.0),
+    ("08-devices.png", CareerModal::Devices, 0.0),
 ];
 
 pub(crate) struct CareerVisualQaPlugin;

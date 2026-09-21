@@ -181,7 +181,10 @@ fn library_owner_and_exact_support_selectability_are_independent_of_shared_roste
     let bytes = model();
     let protected = asset("https://example.test/a.glb", &bytes);
     let mut session = NativeSession::from_parts(
-        PassportApi::new("https://example.test/api/passport").unwrap().client().clone(),
+        PassportApi::new("https://example.test/api/passport")
+            .unwrap()
+            .client()
+            .clone(),
         "private".into(),
         PurchasedLibrary {
             schema: "ekza.passport.library.v1".into(),
@@ -224,7 +227,10 @@ fn imported_bytes_and_sidecar_retain_identity_and_preserve_original_roster() {
     mobile.platform = "mobile".into();
     mobile.profile = "mobile-lod-v1".into();
     let session = NativeSession::from_parts(
-        PassportApi::new(&format!("{origin}/api/passport")).unwrap().client().clone(),
+        PassportApi::new(&format!("{origin}/api/passport"))
+            .unwrap()
+            .client()
+            .clone(),
         "private".into(),
         PurchasedLibrary {
             schema: "ekza.passport.library.v1".into(),

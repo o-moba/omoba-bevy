@@ -879,12 +879,18 @@ fn button(parent: &mut ChildSpawnerCommands, title: &str, action: SocialAction, 
             Node {
                 min_height: Val::Px(44.0),
                 min_width: Val::Px(44.0),
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(6.0)),
+                padding: UiRect::axes(Val::Px(12.0), Val::Px(7.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(6.0)),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 ..default()
             },
             BackgroundColor(ui::TILE),
+            BorderColor::all(ui::EDGE),
+            crate::frontend::widgets::MenuButton::new(
+                crate::frontend::widgets::ButtonKind::Secondary,
+            ),
             action,
             Name::new(name.to_owned()),
         ))
@@ -1234,26 +1240,35 @@ fn render(
     let phone = world.mobile.enabled;
     let viewport = Vec2::new(window.width(), window.height());
     let scale = world.mobile.scale();
+    let safe_height = viewport.y - world.mobile.safe.top - world.mobile.safe.bottom;
+    let phone_entry_left = world.mobile.safe.left + (safe_height * 0.37).clamp(112.0, 142.0) + 12.0;
+    let phone_entry_width = (viewport.x * 0.35 - phone_entry_left - 8.0).clamp(104.0, 132.0);
     if !social.chat_open && social.wheel.center.is_none() {
         commands
             .spawn((
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px(if phone {
-                        viewport.x * 0.5 - 100.0
+                        phone_entry_left
                     } else {
                         crate::minimap::DESKTOP_MINIMAP_INSET
                     }),
-                    top: if phone {
-                        Val::Auto
+                    top: Val::Px(if phone {
+                        world.mobile.safe.top + 116.0
                     } else {
-                        Val::Px(desktop_social_top())
-                    },
-                    bottom: if phone {
-                        Val::Px(world.mobile.safe.bottom + 4.0)
+                        desktop_social_top()
+                    }),
+                    width: if phone {
+                        Val::Px(phone_entry_width)
                     } else {
                         Val::Auto
                     },
+                    flex_direction: if phone {
+                        FlexDirection::Column
+                    } else {
+                        FlexDirection::Row
+                    },
+                    align_items: AlignItems::Stretch,
                     ..row()
                 },
                 ZIndex(85),
@@ -1270,28 +1285,26 @@ fn render(
             commands.spawn((
                 Node {
                     position_type: PositionType::Absolute,
-                    left: if phone {
-                        Val::Percent(35.0)
+                    left: Val::Px(if phone {
+                        phone_entry_left
                     } else {
-                        Val::Px(crate::minimap::DESKTOP_MINIMAP_INSET)
-                    },
-                    top: if phone {
-                        Val::Auto
+                        crate::minimap::DESKTOP_MINIMAP_INSET
+                    }),
+                    top: Val::Px(if phone {
+                        world.mobile.safe.top + 214.0
                     } else {
-                        Val::Px(desktop_social_top() + 52.0)
-                    },
-                    bottom: if phone {
-                        Val::Px(world.mobile.safe.bottom + 52.0)
+                        desktop_social_top() + 52.0
+                    }),
+                    max_width: Val::Px(if phone {
+                        phone_entry_width
                     } else {
-                        Val::Auto
-                    },
-                    max_width: if phone {
-                        Val::Auto
-                    } else {
-                        Val::Px(crate::minimap::MINIMAP_SIZE)
-                    },
+                        crate::minimap::DESKTOP_MINIMAP_SIZE
+                    }),
+                    padding: UiRect::all(Val::Px(4.0)),
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
                     ..default()
                 },
+                BackgroundColor(ui::PANEL),
                 Text::new(&social.status),
                 ui::text(12.0),
                 TextColor(ui::IVORY),
@@ -1642,7 +1655,7 @@ fn reconcile_bubbles(
 }
 
 fn desktop_social_top() -> f32 {
-    crate::minimap::DESKTOP_MINIMAP_INSET + crate::minimap::MINIMAP_SIZE + 8.0
+    crate::minimap::DESKTOP_MINIMAP_INSET
 }
 
 fn scroll_chat(

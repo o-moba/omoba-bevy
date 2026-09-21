@@ -180,15 +180,15 @@ pub fn spawn_card(
     parent
         .spawn((
             Node {
-                width: Val::Px(360.0),
+                width: Val::Px(320.0),
                 flex_direction: FlexDirection::Column,
                 padding: UiRect::all(Val::Px(18.0)),
                 row_gap: Val::Px(12.0),
-                border: UiRect::all(Val::Px(2.0)),
-                border_radius: BorderRadius::all(Val::Px(16.0)),
+                border: UiRect::left(Val::Px(3.0)),
+                border_radius: BorderRadius::all(Val::Px(8.0)),
                 ..default()
             },
-            BackgroundColor(widgets::PANEL),
+            BackgroundColor(widgets::TILE),
             BorderColor::all(accent),
             Name::new("ProfileCard"),
         ))
@@ -208,7 +208,7 @@ pub fn spawn_card(
                         Node {
                             width: Val::Px(84.0),
                             height: Val::Px(84.0),
-                            border: UiRect::all(Val::Px(2.0)),
+                            border: UiRect::left(Val::Px(3.0)),
                             border_radius: BorderRadius::all(Val::Px(42.0)),
                             ..default()
                         },
@@ -275,6 +275,7 @@ fn spawn_card_screen(
     career: Res<crate::career::CareerClient>,
     thumbnails: Res<AvatarThumbnails>,
 ) {
+    let phone = crate::platform::ui_profile() == crate::platform::UiProfile::Mobile;
     let wins = career
         .view
         .profile
@@ -290,13 +291,27 @@ fn spawn_card_screen(
             })
             .with_children(|header| {
                 header.spawn(widgets::heading("Profile card", 30.0));
-                widgets::button(
-                    header,
-                    "Back",
-                    ButtonKind::Secondary,
-                    CardAction::Back,
-                    "CardBack",
-                );
+                header
+                    .spawn(Node {
+                        column_gap: Val::Px(8.0),
+                        ..default()
+                    })
+                    .with_children(|actions| {
+                        widgets::button(
+                            actions,
+                            "Avatars",
+                            ButtonKind::Secondary,
+                            CardAction::Showcase,
+                            "CardOpenCollection",
+                        );
+                        widgets::button(
+                            actions,
+                            "Back",
+                            ButtonKind::Secondary,
+                            CardAction::Back,
+                            "CardBack",
+                        );
+                    });
             });
             root.spawn(Node {
                 column_gap: Val::Px(24.0),
@@ -324,7 +339,7 @@ fn spawn_card_screen(
                 body.spawn((
                     Node {
                         flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(18.0),
+                        row_gap: Val::Px(if phone { 8.0 } else { 18.0 }),
                         flex_grow: 1.0,
                         ..default()
                     },
@@ -361,14 +376,14 @@ fn spawn_card_screen(
                                 row.spawn((
                                     Button,
                                     Node {
-                                        width: Val::Px(46.0),
-                                        height: Val::Px(46.0),
+                                        width: Val::Px(if phone { 74.0 } else { 46.0 }),
+                                        height: Val::Px(if phone { 74.0 } else { 46.0 }),
                                         border: UiRect::all(Val::Px(if index == card.accent {
                                             3.0
                                         } else {
                                             1.0
                                         })),
-                                        border_radius: BorderRadius::all(Val::Px(23.0)),
+                                        border_radius: BorderRadius::all(Val::Percent(50.0)),
                                         ..default()
                                     },
                                     BackgroundColor(*color),
@@ -412,20 +427,6 @@ fn spawn_card_screen(
                         13.0,
                         widgets::MUTED,
                     ));
-                    editors
-                        .spawn(Node {
-                            column_gap: Val::Px(8.0),
-                            ..default()
-                        })
-                        .with_children(|row| {
-                            widgets::button(
-                                row,
-                                "Open collection",
-                                ButtonKind::Secondary,
-                                CardAction::Showcase,
-                                "CardOpenCollection",
-                            );
-                        });
                 });
             });
         });

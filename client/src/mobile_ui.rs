@@ -332,6 +332,7 @@ fn sync_phone_ui(
     mobile: Res<MobileControls>,
     session: Res<ClientSession>,
     screen: Option<Res<State<crate::frontend::AppScreen>>>,
+    shop: Option<Res<crate::shop::ShopState>>,
     mut entry: ResMut<ServerEntry>,
     mut bar: Query<
         &mut Node,
@@ -352,7 +353,9 @@ fn sync_phone_ui(
     mut buttons: Query<(&PhoneAction, &mut Node), (Without<PhoneBar>, Without<ServerEntryRoot>)>,
     mut address: Query<&mut Text, (With<ServerAddressLabel>, Without<ServerErrorLabel>)>,
     mut errors: Query<&mut Text, (With<ServerErrorLabel>, Without<ServerAddressLabel>)>,
+    ui_scale: Option<Res<UiScale>>,
 ) {
+    let scale = ui_scale.as_ref().map_or(1.0, |scale| scale.0.max(0.1));
     if mobile.enabled && !entry.initialized && !session.server_addr_display.is_empty() {
         entry.initialized = true;
         if session.server_addr_display == "127.0.0.1:4000" {
@@ -367,15 +370,36 @@ fn sync_phone_ui(
         !screen.get().is_menu() || matches!(screen.get(), AppScreen::Home | AppScreen::HeroSelect)
     });
     for mut node in &mut bar {
-        node.display = if mobile.enabled && mobile.landscape && bar_wanted {
+        node.display = if mobile.enabled
+            && mobile.landscape
+            && bar_wanted
+            && !shop.as_ref().is_some_and(|shop| shop.open)
+        {
             Display::Flex
         } else {
             Display::None
         };
-        node.right = Val::Px(mobile.safe.right);
-        node.top = Val::Px(mobile.safe.top);
+        // Shell pages use a global scale; these utility controls retain their
+        // real safe-area anchors and 44px touch targets through that transition.
+        node.right = Val::Px(mobile.safe.right / scale);
+        node.top = Val::Px(mobile.safe.top / scale);
+        node.column_gap = Val::Px(6.0 / scale);
     }
     for (action, mut node) in &mut buttons {
+        let width = match action {
+            PhoneAction::Help => Some(48.0),
+            PhoneAction::Menu => Some(64.0),
+            PhoneAction::Server => Some(88.0),
+            _ => None,
+        };
+        if let Some(width) = width {
+            node.width = Val::Px(width / scale);
+            node.min_width = Val::Px(48.0 / scale);
+            node.height = Val::Px(44.0 / scale);
+            node.min_height = Val::Px(44.0 / scale);
+            node.padding = UiRect::horizontal(Val::Px(10.0 / scale));
+            node.border_radius = BorderRadius::all(Val::Px(8.0 / scale));
+        }
         if matches!(action, PhoneAction::Server) {
             node.display = if !session.join_flow_committed && session.last_join.is_none() {
                 Display::Flex
@@ -422,6 +446,7 @@ fn phone_family(
                 "MatchHudColumn" => "hero",
                 "MatchObjectiveRoot" => "objective",
                 "EquipmentHud" => "equipment",
+                "PhoneMenuBar" => "phone-menu",
                 _ => "",
             };
             if !family.is_empty() {
@@ -454,20 +479,39 @@ fn adapt_phone_layout(
     mut fonts: Query<(Entity, &mut TextFont, Option<&PhoneFontSize>)>,
     mut copy: Query<(&Name, &mut Text)>,
     hierarchy: Query<(Option<&ChildOf>, Option<&Name>)>,
+    pause: Option<Res<crate::pause_menu::PauseMenuState>>,
+    ui_scale: Option<Res<UiScale>>,
 ) {
     if !mobile.enabled || !mobile.landscape {
         return;
     }
+    let scale = ui_scale.as_ref().map_or(1.0, |scale| scale.0.max(0.1));
     let left = mobile.safe.left;
     let top = mobile.safe.top;
     let bottom = mobile.safe.bottom;
     let width = mobile.viewport.x - left - mobile.safe.right;
     let height = mobile.viewport.y - top - bottom;
     let minimap_size = (height * 0.37).clamp(112.0, 142.0);
-    // Keep status beside the menu, above the right thumb's combat fan. The
-    // objective uses only the space between the minimap and this status card.
-    let hero_left = mobile.viewport.x - mobile.safe.right - 300.0;
-    let objective_left = left + minimap_size + 12.0;
+    // The small identity card stays in the left corner; reserve the entire
+    // north approach for the world. The lower status strip fits between actual
+    // touch hit areas, including the outer upgrade buttons.
+    let hero_left = left + minimap_size + 12.0;
+    let hero_width = (mobile.viewport.x * 0.35 - hero_left - 8.0).clamp(104.0, 132.0);
+    let controls = mobile.layout();
+    let objective_left = controls.joystick_center.x + controls.joystick_radius + 20.0;
+    let combat_left = controls
+        .upgrade_centers
+        .iter()
+        .map(|center| center.x - controls.upgrade_radius)
+        .chain(
+            controls
+                .ability_centers
+                .iter()
+                .zip(controls.ability_radii)
+                .map(|(center, radius)| center.x - radius),
+        )
+        .fold(f32::INFINITY, f32::min);
+    let objective_width = (combat_left - objective_left - 12.0).clamp(120.0, 344.0);
     let class_width = (width * 0.26).clamp(150.0, 210.0);
     let grid_left = left + class_width + 20.0;
     let grid_width = width - class_width - 20.0;
@@ -491,25 +535,22 @@ fn adapt_phone_layout(
                 }
             }
             "MatchHudColumn" => {
-                absolute(&mut node, hero_left, top, 172.0, Some(108.0));
+                absolute(&mut node, hero_left, top, hero_width, Some(108.0));
                 node.padding = UiRect::all(Val::Px(7.0));
                 node.row_gap = Val::Px(3.0);
             }
             "HudHeroPortrait" => {
-                node.width = Val::Px(30.0);
-                node.height = Val::Px(30.0);
+                node.width = Val::Px(24.0);
+                node.height = Val::Px(24.0);
             }
             "MatchHudBar-HP" | "MatchHudBar-MP" => node.height = Val::Px(15.0),
             "MatchObjectiveRoot" => {
-                absolute(
-                    &mut node,
-                    objective_left,
-                    top,
-                    (hero_left - objective_left - 12.0).max(1.0),
-                    None,
-                );
+                absolute(&mut node, objective_left, 0.0, objective_width, None);
+                node.top = Val::Auto;
+                node.bottom = Val::Px(bottom);
             }
             "MatchObjectivePanel" => {
+                node.width = Val::Percent(100.0);
                 node.max_width = Val::Percent(100.0);
                 node.padding = UiRect::all(Val::Px(6.0));
                 node.row_gap = Val::Px(2.0);
@@ -634,7 +675,11 @@ fn adapt_phone_layout(
             }
             "PauseMenuPanel" => {
                 node.width = Val::Px(width.min(650.0));
-                node.height = Val::Px(height);
+                node.height = Val::Px(if pause.as_ref().is_some_and(|pause| pause.in_settings) {
+                    height
+                } else {
+                    height.min(270.0)
+                });
                 node.padding = UiRect::all(Val::Px(10.0));
                 node.row_gap = Val::Px(6.0);
                 node.overflow = Overflow::scroll_y();
@@ -691,7 +736,9 @@ fn adapt_phone_layout(
             commands.entity(entity).insert(PhoneFontSize(original));
         }
         font.font_size = match family {
-            "hero" | "objective" | "equipment" => original.clamp(11.0, 13.0),
+            "phone-menu" => original / scale,
+            "hero" => 11.0,
+            "objective" | "equipment" => original.clamp(11.0, 13.0),
             "entry" => original.clamp(11.0, 16.0),
             "shop-card" if width < 650.0 => {
                 if original >= 18.0 {
@@ -719,8 +766,8 @@ fn adapt_phone_layout(
             "HelpDismissLabel" => text.0 = "Got it — play".into(),
             "MatchStatusText" => text.0 = text.0
                 .replace("clear all towers in one lane to expose the enemy base.", "Clear a lane's towers to unlock the base.")
-                .replace("Select a foe  /  P shop  /  F1 help", "Tap ATTACK · Drag to lock")
-                .replace("Target locked — basic attack or Q/W/E/R", "Target locked · ATTACK or Q/W/E/R"),
+                .replace("Select a foe · P shop · F1 help", "Tap ATTACK · Drag to lock")
+                .replace("Target locked · Attack / Q W E R", "Target locked · ATTACK / skills"),
             "ShopFooter" => text.0 = "Buy at your base. Items survive respawn and reset next round.".into(),
             name if name.starts_with("ShopDescription-") => text.0 = text.0.replace("maximum HP", "max HP"),
             "HelpBody" => text.0 = "YOUR FIRST MATCH\n\nMOVE: Drag the left stick. Release to stop.\nATTACK: Tap the large right button; hold to repeat. No mana needed.\nTARGET: Drag ATTACK to extend the reticle. Release on a highlighted foe to lock. Drag to X to cancel.\nSKILLS: Q/W/E/R surround ATTACK. Tap to use the locked target, or drag to aim.\nGROW: Abilities unlock as you level. Tap + to spend skill points.\nWIN: Follow your minions, clear all towers in one lane, then destroy the enemy base.\nRECOVER: Return to your base to shop. If defeated, wait to respawn.\nLOOK: Tap the minimap to scout. Move the stick to follow your hero again.\n\nThe match continues while menus are open. Stay connected for the next round.".into(),
@@ -820,6 +867,75 @@ mod tests {
                 .count(),
             0
         );
+    }
+
+    #[test]
+    fn phone_utilities_keep_touch_targets_type_and_safe_insets_when_shell_scale_changes() {
+        let mut app = App::new();
+        let mut mobile = MobileControls::default();
+        mobile.enabled = true;
+        app.insert_resource(mobile)
+            .init_resource::<ClientSession>()
+            .init_resource::<ServerEntry>()
+            .init_resource::<crate::shop::ShopState>()
+            .init_resource::<UiScale>()
+            .add_systems(Startup, setup_phone_ui)
+            .add_systems(Update, sync_phone_ui)
+            .add_systems(PostUpdate, adapt_phone_layout);
+        for (scale, shop_open) in [
+            (1.0, false),
+            (0.61, false),
+            (0.61, true),
+            (0.61, false),
+            (0.8, false),
+            (1.0, false),
+        ] {
+            app.world_mut().resource_mut::<UiScale>().0 = scale;
+            app.world_mut()
+                .resource_mut::<crate::shop::ShopState>()
+                .open = shop_open;
+            app.update();
+            let mut buttons = app.world_mut().query::<(&PhoneAction, &Node)>();
+            for (action, node) in buttons.iter(app.world()) {
+                if matches!(
+                    action,
+                    PhoneAction::Help | PhoneAction::Menu | PhoneAction::Server
+                ) {
+                    let Val::Px(height) = node.height else {
+                        panic!("explicit target height")
+                    };
+                    let Val::Px(width) = node.width else {
+                        panic!("explicit target width")
+                    };
+                    assert!((height * scale - 44.0).abs() < 0.001);
+                    assert!(width * scale >= 47.999);
+                }
+            }
+            let mut bars = app.world_mut().query_filtered::<&Node, With<PhoneBar>>();
+            let node = bars.single(app.world()).unwrap();
+            assert_eq!(
+                node.display,
+                if shop_open {
+                    Display::None
+                } else {
+                    Display::Flex
+                }
+            );
+            let Val::Px(top) = node.top else {
+                panic!("safe top")
+            };
+            let Val::Px(right) = node.right else {
+                panic!("safe right")
+            };
+            assert!((top * scale - 12.0).abs() < 0.001);
+            assert!((right * scale - 32.0).abs() < 0.001);
+            let mut fonts = app.world_mut().query::<(&Text, &TextFont)>();
+            for (text, font) in fonts.iter(app.world()) {
+                if matches!(text.0.as_str(), "?" | "MENU" | "SERVER") {
+                    assert!((font.font_size * scale - 14.0).abs() < 0.001);
+                }
+            }
+        }
     }
 
     #[test]

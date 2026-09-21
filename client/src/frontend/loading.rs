@@ -40,16 +40,33 @@ fn spawn_loading(mut commands: Commands, selection: Res<TeamSelection>, time: Re
         .with_children(|root| {
             root.spawn((
                 Node {
-                    flex_grow: 1.0,
+                    width: Val::Px(620.0),
+                    max_width: Val::Percent(92.0),
+                    margin: UiRect::all(Val::Auto),
+                    padding: UiRect::all(Val::Px(40.0)),
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(12.0)),
                     flex_direction: FlexDirection::Column,
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
                     row_gap: Val::Px(14.0),
                     ..default()
                 },
+                BackgroundColor(widgets::PANEL),
+                BorderColor::all(widgets::PANEL_EDGE),
                 Name::new("LoadingBody"),
             ))
             .with_children(|body| {
+                body.spawn(widgets::label("MATCH FOUND", 12.0, widgets::GOLD));
+                body.spawn((
+                    Node {
+                        width: Val::Px(48.0),
+                        height: Val::Px(3.0),
+                        margin: UiRect::bottom(Val::Px(12.0)),
+                        ..default()
+                    },
+                    BackgroundColor(widgets::GOLD),
+                ));
                 body.spawn(widgets::heading("Entering the Verdant", 34.0));
                 body.spawn(widgets::label(
                     &format!("{} · {avatar}", hero.display_name()),

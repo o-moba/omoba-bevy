@@ -1,13 +1,13 @@
 //! Shared Verdant overlay palette and packaged, licensed typography.
 use bevy::prelude::*;
 
-pub(crate) const PANEL: Color = Color::srgba(0.025, 0.075, 0.078, 0.97);
-pub(crate) const TILE: Color = Color::srgb(0.055, 0.14, 0.145);
-pub(crate) const HOVER: Color = Color::srgb(0.10, 0.24, 0.23);
-pub(crate) const EDGE: Color = Color::srgb(0.23, 0.40, 0.36);
-pub(crate) const GOLD: Color = Color::srgb(0.94, 0.77, 0.43);
-pub(crate) const IVORY: Color = Color::srgb(0.91, 0.94, 0.86);
-pub(crate) const MUTED: Color = Color::srgb(0.55, 0.70, 0.66);
+pub(crate) const PANEL: Color = Color::srgba(0.025, 0.060, 0.065, 0.96);
+pub(crate) const TILE: Color = Color::srgb(0.050, 0.115, 0.125);
+pub(crate) const HOVER: Color = Color::srgb(0.085, 0.205, 0.200);
+pub(crate) const EDGE: Color = Color::srgb(0.19, 0.32, 0.30);
+pub(crate) const GOLD: Color = Color::srgb(0.86, 0.74, 0.49);
+pub(crate) const IVORY: Color = Color::srgb(0.92, 0.94, 0.89);
+pub(crate) const MUTED: Color = Color::srgb(0.61, 0.72, 0.70);
 pub(crate) const JADE: Color = Color::srgb(0.24, 0.79, 0.58);
 
 #[derive(Resource)]
@@ -69,7 +69,7 @@ pub(crate) fn panel_node() -> Node {
     Node {
         padding: UiRect::all(Val::Px(12.0)),
         border: UiRect::all(Val::Px(1.0)),
-        border_radius: BorderRadius::all(Val::Px(10.0)),
+        border_radius: BorderRadius::all(Val::Px(8.0)),
         ..default()
     }
 }

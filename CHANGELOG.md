@@ -6,6 +6,29 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.21.0-rc.2] - 2026-09-21
+
+### Art-directed interface and clear combat sightlines
+- A compact desktop tactical dock groups the minimap, hero resources, abilities, and
+  equipment along the lower edge. Match and target information sits beside that dock;
+  the upper-middle battlefield stays visible when opponents approach from the north.
+- Landscape phone HUD groups status beside the minimap and keeps the middle approach
+  clear while retaining the movement stick, attack fan, upgrades, chat, and shop.
+- Verdant menus share a restrained palette, consistent borders, typography, spacing,
+  and clear primary actions. Home gives the selected hero a composed showcase and
+  groups player identity and matchmaking in a single framed layout.
+- Phone shell controls retain full touch targets and readable type instead of shrinking
+  with the desktop composition. Modals use their actual phone layout scale.
+- Help is shorter and easier to scan. Game-menu controls and settings rows align;
+  career navigation highlights the current tab and shares menu hover feedback.
+  Settings remain usable while the menu is offline, and phone utility controls
+  yield to the shop so its Close action remains exposed. Explicit Help requests
+  also work before joining; closing the guide restores the fitted phone home.
+- Native screenshot checks now measure the protected north sightline, HUD text fit,
+  and panel overlap, and include essential frontend actions, game-menu, server form, and scrolled
+  settings captures. Longer class-specific ability labels have their own reserved space.
+
+
 ### Phone attack button finds and chases a target
 - With nothing locked, the attack button now looks beyond its own reach (at least 12
   units, attack range + 6 for ranged heroes) instead of only inside the attack range, so

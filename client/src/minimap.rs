@@ -18,6 +18,8 @@ use crate::ui_theme;
 
 pub(crate) const MINIMAP_SIZE: f32 = 252.0;
 pub(crate) const DESKTOP_MINIMAP_INSET: f32 = 16.0;
+/// Render the shared map coordinate space as a compact tactical dock.
+pub(crate) const DESKTOP_MINIMAP_SIZE: f32 = 184.0;
 pub(crate) const MINIMAP_INNER_SIZE: f32 = 232.0;
 const HERO_SIGHT: f32 = 32.0;
 const MINION_SIGHT: f32 = 22.0;
@@ -197,8 +199,10 @@ fn setup_minimap_ui(
             Button,
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(DESKTOP_MINIMAP_INSET),
-                top: Val::Px(DESKTOP_MINIMAP_INSET),
+                left: Val::Px(DESKTOP_MINIMAP_INSET + (DESKTOP_MINIMAP_SIZE - MINIMAP_SIZE) * 0.5),
+                bottom: Val::Px(
+                    DESKTOP_MINIMAP_INSET + (DESKTOP_MINIMAP_SIZE - MINIMAP_SIZE) * 0.5,
+                ),
                 width: Val::Px(MINIMAP_SIZE),
                 height: Val::Px(MINIMAP_SIZE),
                 padding: UiRect::all(Val::Px(9.0)),
@@ -210,6 +214,7 @@ fn setup_minimap_ui(
             BorderColor::all(ui_theme::EDGE),
             ZIndex(8),
             MinimapRoot,
+            UiTransform::from_scale(Vec2::splat(DESKTOP_MINIMAP_SIZE / MINIMAP_SIZE)),
             Name::new("MinimapRoot"),
         ))
         .with_children(|parent| {
@@ -855,7 +860,7 @@ mod tests {
     use crate::input_context::GameplayInputContext;
 
     #[test]
-    fn desktop_map_keeps_click_shield_on_its_upper_left_frame() {
+    fn desktop_map_keeps_click_shield_on_its_scaled_bottom_left_frame() {
         let mut app = App::new();
         app.init_resource::<MapLayout>()
             .init_resource::<MinimapUiState>()
@@ -863,13 +868,18 @@ mod tests {
         app.update();
         let mut roots = app
             .world_mut()
-            .query_filtered::<(&Node, Option<&Button>), With<MinimapRoot>>();
-        let (root, shield) = roots.single(app.world()).unwrap();
+            .query_filtered::<(&Node, &UiTransform, Option<&Button>), With<MinimapRoot>>();
+        let (root, transform, shield) = roots.single(app.world()).unwrap();
         assert!(shield.is_some());
-        assert_eq!(root.left, Val::Px(16.0));
-        assert_eq!(root.top, Val::Px(16.0));
+        let anchor = DESKTOP_MINIMAP_INSET + (DESKTOP_MINIMAP_SIZE - MINIMAP_SIZE) * 0.5;
+        assert_eq!(root.left, Val::Px(anchor));
+        assert_eq!(root.top, Val::Auto);
         assert_eq!(root.right, Val::Auto);
-        assert_eq!(root.bottom, Val::Auto);
+        assert_eq!(root.bottom, Val::Px(anchor));
+        assert_eq!(
+            transform.scale,
+            Vec2::splat(DESKTOP_MINIMAP_SIZE / MINIMAP_SIZE)
+        );
         assert_eq!(root.width, Val::Px(252.0));
         assert_eq!(root.height, Val::Px(252.0));
     }
@@ -1277,10 +1287,10 @@ mod tests {
     }
 
     #[test]
-    fn map_projection_and_clicks_round_trip_at_upper_left_and_phone_scales() {
+    fn map_projection_and_clicks_round_trip_at_docked_desktop_and_phone_scales() {
         let layout = MapLayout::default();
         for (inset, scale) in [
-            (Vec2::splat(26.0), 1.0),
+            (Vec2::new(23.3, 527.3), DESKTOP_MINIMAP_SIZE / MINIMAP_SIZE),
             (Vec2::new(37.0, 17.0), 132.0 / 252.0),
         ] {
             let rect = Rect::from_corners(inset, inset + Vec2::splat(MINIMAP_INNER_SIZE * scale));

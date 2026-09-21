@@ -32,10 +32,10 @@ const AVATAR_GRID_COLUMNS: usize = 8;
 const SPRITE_GRID_MAX_COLUMNS: usize = 5;
 const SPRITE_GRID_WIDTH_PERCENT: f32 = 92.0;
 // Opaque: the match world must not be visible while a hero is being picked.
-const TEAM_OVERLAY_COLOR: Color = Color::srgb(0.020, 0.052, 0.058);
-const SELECT_BUTTON_COLOR: Color = Color::srgba(0.07, 0.14, 0.17, 0.96);
-const SELECT_BUTTON_HOVER_COLOR: Color = Color::srgba(0.10, 0.23, 0.27, 0.98);
-const SELECT_BUTTON_SELECTED_COLOR: Color = Color::srgba(0.96, 0.69, 0.20, 0.98);
+const TEAM_OVERLAY_COLOR: Color = crate::frontend::widgets::BACKDROP;
+const SELECT_BUTTON_COLOR: Color = crate::frontend::widgets::TILE;
+const SELECT_BUTTON_HOVER_COLOR: Color = crate::frontend::widgets::TILE_HOVER;
+const SELECT_BUTTON_SELECTED_COLOR: Color = crate::frontend::widgets::TILE_SELECTED;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -54,8 +54,8 @@ impl Team {
 
     pub fn ui_color(self) -> Color {
         match self {
-            Team::Green => Color::srgba(0.14, 0.55, 0.22, 0.95),
-            Team::Blue => Color::srgba(0.18, 0.35, 0.75, 0.95),
+            Team::Green => Color::srgba(0.12, 0.40, 0.28, 0.98),
+            Team::Blue => Color::srgba(0.16, 0.28, 0.48, 0.98),
         }
     }
 
@@ -499,7 +499,7 @@ pub fn spawn_team_select_ui(
                         Name::new("HeroSelectStatus"),
                     ));
                 });
-            spawn_section_title(parent, "Choose Class", "ClassSelectTitle");
+            spawn_section_title(parent, "01  CHOOSE YOUR CLASS", "ClassSelectTitle");
 
             parent
                 .spawn((
@@ -520,7 +520,7 @@ pub fn spawn_team_select_ui(
                     }
                 });
 
-            spawn_section_title(parent, "Choose Avatar", "AvatarSelectTitle");
+            spawn_section_title(parent, "02  CHOOSE YOUR AVATAR", "AvatarSelectTitle");
             parent.spawn((
                 Text::new("Scroll heroes: mouse wheel / Page Up / Page Down"),
                 TextFont {
@@ -675,7 +675,7 @@ pub fn spawn_team_select_ui(
 
             spawn_ekza_row(parent);
 
-            spawn_section_title(parent, "Lock in your side", "TeamSelectTitle");
+            spawn_section_title(parent, "03  JOIN YOUR TEAM", "TeamSelectTitle");
 
             parent
                 .spawn((
@@ -1031,6 +1031,7 @@ fn spawn_sprite_button(
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
             row_gap: Val::Px(3.0),
+            border_radius: BorderRadius::all(Val::Px(6.0)),
             ..default()
         },
         BackgroundColor(if selected {
@@ -1148,7 +1149,8 @@ fn spawn_class_button(row: &mut ChildSpawnerCommands, class: HeroClass, selected
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
             row_gap: Val::Px(3.0),
-            padding: UiRect::axes(Val::Px(6.0), Val::Px(4.0)),
+            padding: UiRect::axes(Val::Px(10.0), Val::Px(6.0)),
+            border_radius: BorderRadius::all(Val::Px(8.0)),
             ..default()
         },
         BackgroundColor(if selected {
@@ -1195,6 +1197,7 @@ fn spawn_avatar_button(
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
             row_gap: Val::Px(3.0),
+            border_radius: BorderRadius::all(Val::Px(6.0)),
             ..default()
         },
         BackgroundColor(if selected {
@@ -1208,17 +1211,39 @@ fn spawn_avatar_button(
         Name::new(format!("AvatarButton-{slug}")),
     ))
     .with_children(|button| {
-        button.spawn((
-            Node {
-                width: Val::Px(AVATAR_THUMBNAIL_SIZE),
-                height: Val::Px(AVATAR_THUMBNAIL_SIZE),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.10, 0.10, 0.12, 0.9)),
-            AvatarThumbnailSlot {
-                slug: slug.to_owned(),
-            },
-        ));
+        button
+            .spawn((
+                Node {
+                    width: Val::Px(AVATAR_THUMBNAIL_SIZE),
+                    height: Val::Px(AVATAR_THUMBNAIL_SIZE),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    border_radius: BorderRadius::all(Val::Px(6.0)),
+                    ..default()
+                },
+                BackgroundColor(crate::ui_theme::PANEL),
+                AvatarThumbnailSlot {
+                    slug: slug.to_owned(),
+                },
+            ))
+            .with_children(|portrait| {
+                if shared::avatar_definition(slug)
+                    .and_then(crate::passport::thumbnail_asset_path)
+                    .is_none()
+                {
+                    let initials: String = slug
+                        .split('-')
+                        .filter_map(|part| part.chars().next())
+                        .take(2)
+                        .flat_map(char::to_uppercase)
+                        .collect();
+                    portrait.spawn((
+                        Text::new(initials),
+                        crate::ui_theme::text(22.0),
+                        TextColor(crate::ui_theme::GOLD),
+                    ));
+                }
+            });
         button.spawn((
             Text::new(display_name),
             TextFont {
@@ -1254,11 +1279,14 @@ fn spawn_team_button(row: &mut ChildSpawnerCommands, team: Team, name: &str) {
         Node {
             width: Val::Px(230.0),
             height: Val::Px(TEAM_BUTTON_SIZE),
+            border_radius: BorderRadius::all(Val::Px(8.0)),
+            border: UiRect::all(Val::Px(1.0)),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
             ..default()
         },
         BackgroundColor(team.ui_color()),
+        BorderColor::all(crate::ui_theme::EDGE),
         TeamSelectButton { team },
         Name::new(name.to_owned()),
     ))

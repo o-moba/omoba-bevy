@@ -266,6 +266,10 @@ fn scale_menus_to_the_window(
     screen: Res<State<AppScreen>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    pause: Option<Res<crate::pause_menu::PauseMenuState>>,
+    career: Option<Res<crate::career::CareerClient>>,
+    server: Option<Res<crate::mobile_ui::ServerEntry>>,
+    help: Option<Res<crate::help_overlay::HelpOverlayVisible>>,
     mut ui_scale: ResMut<UiScale>,
 ) {
     let Ok(window) = windows.single() else {
@@ -273,8 +277,13 @@ fn scale_menus_to_the_window(
     };
     // The phone picker is laid out in real screen pixels by `mobile_ui`,
     // like the match HUD: scaling it would misplace every part.
-    let phone_picker = *screen.get() == AppScreen::HeroSelect
-        && mobile.as_ref().is_some_and(|mobile| mobile.enabled);
+    let phone = mobile.as_ref().is_some_and(|mobile| mobile.enabled);
+    let phone_picker = phone
+        && (*screen.get() == AppScreen::HeroSelect
+            || pause.as_ref().is_some_and(|state| state.open)
+            || career.as_ref().is_some_and(|state| state.modal_open())
+            || server.as_ref().is_some_and(|state| state.open)
+            || help.as_ref().is_some_and(|state| state.0));
     let wanted = if screen.get().is_menu() && !phone_picker {
         menu_scale(window.resolution.height())
     } else {
@@ -363,6 +372,68 @@ mod tests {
         assert_eq!(menu_scale(1440.0), 1.0);
         assert_eq!(menu_scale(100.0), MIN_MENU_SCALE);
         assert_eq!(menu_scale(0.0), 1.0);
+    }
+
+    #[test]
+    fn phone_modals_restore_real_pixel_touch_targets_and_menu_scale_after_close() {
+        let mut app = App::new();
+        app.add_plugins(bevy::state::app::StatesPlugin)
+            .init_state::<AppScreen>()
+            .init_resource::<UiScale>()
+            .init_resource::<crate::pause_menu::PauseMenuState>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ClientSession>()
+            .init_resource::<GameStateSnapshot>()
+            .add_plugins(crate::help_overlay::HelpOverlayPlugin)
+            .init_resource::<crate::mobile_controls::MobileControls>()
+            .add_systems(
+                Update,
+                scale_menus_to_the_window.after(crate::help_overlay::HelpOverlaySet::Input),
+            );
+        app.world_mut()
+            .resource_mut::<crate::mobile_controls::MobileControls>()
+            .enabled = true;
+        app.world_mut().spawn((
+            Window {
+                resolution: (844, 390).into(),
+                ..default()
+            },
+            bevy::window::PrimaryWindow,
+        ));
+        app.update();
+        let shell_scale = app.world().resource::<UiScale>().0;
+        assert!(shell_scale < 0.7);
+        app.world_mut()
+            .resource_mut::<crate::pause_menu::PauseMenuState>()
+            .open = true;
+        app.update();
+        assert_eq!(app.world().resource::<UiScale>().0, 1.0);
+        app.world_mut()
+            .resource_mut::<crate::pause_menu::PauseMenuState>()
+            .open = false;
+        app.world_mut()
+            .resource_mut::<crate::help_overlay::HelpOverlayVisible>()
+            .0 = true;
+        app.update();
+        assert_eq!(app.world().resource::<UiScale>().0, 1.0);
+        let mut roots = app.world_mut().query::<(&Name, &Node, &Visibility)>();
+        let (_, node, visibility) = roots
+            .iter(app.world())
+            .find(|(name, _, _)| name.as_str() == "HelpOverlayRoot")
+            .unwrap();
+        assert_eq!(node.display, Display::Flex);
+        assert_eq!(*visibility, Visibility::Visible);
+        app.world_mut()
+            .resource_mut::<crate::help_overlay::HelpOverlayVisible>()
+            .0 = false;
+        app.update();
+        assert_eq!(app.world().resource::<UiScale>().0, shell_scale);
+        let (_, node, visibility) = roots
+            .iter(app.world())
+            .find(|(name, _, _)| name.as_str() == "HelpOverlayRoot")
+            .unwrap();
+        assert_eq!(node.display, Display::None);
+        assert_eq!(*visibility, Visibility::Hidden);
     }
 
     #[test]

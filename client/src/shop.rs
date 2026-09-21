@@ -113,12 +113,13 @@ fn setup_shop(mut commands: Commands) {
             Button,
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(706.0),
+                right: Val::Px(16.0),
                 bottom: Val::Px(16.0),
-                width: Val::Px(260.0),
-                height: Val::Px(150.0),
+                width: Val::Px(224.0),
+                height: Val::Px(136.0),
+                padding: UiRect::all(Val::Px(10.0)),
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(6.0),
+                row_gap: Val::Px(5.0),
                 ..ui::panel_node()
             },
             BackgroundColor(ui::PANEL),
@@ -130,7 +131,7 @@ fn setup_shop(mut commands: Commands) {
         .with_children(|panel| {
             panel.spawn((
                 Text::new("80 gold   /   Equipment"),
-                ui::text(15.0),
+                ui::text(13.0),
                 TextColor(ui::GOLD),
                 EquipmentGold,
                 Name::new("EquipmentGold"),
@@ -150,8 +151,8 @@ fn setup_shop(mut commands: Commands) {
                         slots
                             .spawn((
                                 Node {
-                                    width: Val::Px(73.0),
-                                    height: Val::Px(29.0),
+                                    width: Val::Px(64.0),
+                                    height: Val::Px(27.0),
                                     justify_content: JustifyContent::Center,
                                     align_items: AlignItems::Center,
                                     column_gap: Val::Px(3.0),
@@ -176,7 +177,7 @@ fn setup_shop(mut commands: Commands) {
                                 ));
                                 slot.spawn((
                                     Text::new("-"),
-                                    ui::text(12.0),
+                                    ui::text(11.0),
                                     TextColor(ui::MUTED),
                                     InventoryLabel(index),
                                 ));
@@ -214,7 +215,7 @@ fn setup_shop(mut commands: Commands) {
         .with_children(|overlay| {
             overlay.spawn((Node { width: Val::Px(864.0), max_width: Val::Percent(94.0), flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(12.0), padding: UiRect::all(Val::Px(22.0)), ..ui::panel_node() },
-                BackgroundColor(ui::PANEL), BorderColor::all(ui::GOLD), Name::new("ShopPanel")))
+                BackgroundColor(ui::PANEL.with_alpha(1.0)), BorderColor::all(ui::EDGE), Name::new("ShopPanel")))
                 .with_children(|panel| {
                     panel.spawn((Node { align_items: AlignItems::Center, justify_content: JustifyContent::SpaceBetween, ..default() },))
                         .with_children(|row| {
@@ -261,10 +262,10 @@ fn adapt_desktop_equipment_width(
         return;
     }
     let Ok(window) = windows.single() else { return };
-    let width = (window.width() - 706.0 - 16.0).clamp(0.0, 260.0);
+    let width = (window.width() - 32.0).clamp(0.0, 224.0);
     // Keep all six slots in two rows as the panel approaches the right edge.
-    // The panel has 12px padding + 1px border, and two 5px column gaps.
-    let slot_width = ((width - 26.0 - 10.0) / 3.0).clamp(0.0, 73.0);
+    // The panel has 10px padding + 1px border, and two 5px column gaps.
+    let slot_width = ((width - 22.0 - 10.0) / 3.0).clamp(0.0, 64.0);
     for (part, mut node) in &mut nodes {
         node.width = Val::Px(match part {
             EquipmentLayoutPart::Panel => width,
@@ -794,12 +795,12 @@ mod tests {
                 }
             }
             assert_eq!(slot_widths.len(), 6);
-            assert!(706.0 + panel_width + 16.0 <= width as f32 / scale + 0.01);
-            assert!(slot_widths[0] * 3.0 + 10.0 <= panel_width - 26.0 + 0.01);
-            assert!(slot_widths[0] >= 67.0);
+            assert!(panel_width + 32.0 <= width as f32 / scale + 0.01);
+            assert!(slot_widths[0] * 3.0 + 10.0 <= panel_width - 22.0 + 0.01);
+            assert!(slot_widths[0] >= 64.0);
             if scale == 1.0 && width >= 1280 {
-                assert_eq!(panel_width, 260.0);
-                assert_eq!(slot_widths[0], 73.0);
+                assert_eq!(panel_width, 224.0);
+                assert_eq!(slot_widths[0], 64.0);
             }
         }
         // Mobile's separate layout must retain its own width after this system runs.

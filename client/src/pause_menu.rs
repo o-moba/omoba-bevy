@@ -25,11 +25,11 @@ use crate::world::{
 };
 
 const OVERLAY_ALPHA: f32 = 0.7;
-const PANEL_WIDTH: f32 = 420.0;
+const PANEL_WIDTH: f32 = 480.0;
 const PANEL_HEIGHT: f32 = 560.0;
-const BUTTON_WIDTH: f32 = 180.0;
+const BUTTON_WIDTH: f32 = 320.0;
 const BUTTON_HEIGHT: f32 = 46.0;
-const ADJUST_BUTTON_SIZE: f32 = 40.0;
+const ADJUST_BUTTON_SIZE: f32 = 44.0;
 const SCALE_STEP: f32 = 0.04;
 const ILLUMINANCE_STEP: f32 = 2_000.0;
 const AMBIENT_STEP: f32 = 50.0;
@@ -38,6 +38,12 @@ const BUTTON_COLOR: Color = crate::ui_theme::TILE;
 const BUTTON_HOVER_COLOR: Color = crate::ui_theme::HOVER;
 
 pub struct PauseMenuPlugin;
+
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum PauseMenuSet {
+    Close,
+    Visuals,
+}
 
 impl Plugin for PauseMenuPlugin {
     fn build(&self, app: &mut App) {
@@ -48,6 +54,7 @@ impl Plugin for PauseMenuPlugin {
                 Update,
                 (toggle_pause_menu, close_pause_menu_when_disconnected)
                     .chain()
+                    .in_set(PauseMenuSet::Close)
                     .after(crate::help_overlay::HelpOverlaySet::Input)
                     .after(crate::shop::ShopModalSet)
                     .in_set(crate::input_context::InputContextSet::Modal),
@@ -78,11 +85,13 @@ impl Plugin for PauseMenuPlugin {
                     handle_exit_button,
                     sync_settings_server_addr_label,
                 )
-                    .after(collect_pause_button_taps),
+                    .after(collect_pause_button_taps)
+                    .in_set(PauseMenuSet::Visuals),
             )
             .add_systems(
                 PostUpdate,
-                scroll_desktop_settings.before(bevy::ui::UiSystems::Layout),
+                (scroll_desktop_settings, size_desktop_pause_panel)
+                    .before(bevy::ui::UiSystems::Layout),
             );
     }
 }
@@ -90,7 +99,7 @@ impl Plugin for PauseMenuPlugin {
 #[derive(Resource, Default)]
 pub(crate) struct PauseMenuState {
     pub(crate) open: bool,
-    in_settings: bool,
+    pub(crate) in_settings: bool,
 }
 
 #[derive(Component)]
@@ -208,6 +217,26 @@ enum AudioLabel {
     Mute,
 }
 
+fn size_desktop_pause_panel(
+    menu: Res<PauseMenuState>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    mut panels: Query<&mut Node, With<PauseMenuPanel>>,
+) {
+    if mobile.as_ref().is_some_and(|mobile| mobile.enabled) {
+        return;
+    }
+    let height = if menu.in_settings {
+        Val::Px(PANEL_HEIGHT)
+    } else {
+        Val::Auto
+    };
+    for mut panel in &mut panels {
+        if panel.height != height {
+            panel.height = height;
+        }
+    }
+}
+
 fn setup_pause_menu_ui(mut commands: Commands) {
     commands
         .spawn((
@@ -241,22 +270,25 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                         justify_content: JustifyContent::FlexStart,
                         align_items: AlignItems::Stretch,
                         row_gap: Val::Px(16.0),
-                        padding: UiRect::all(Val::Px(20.0)),
+                        padding: UiRect::all(Val::Px(24.0)),
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(12.0)),
                         ..default()
                     },
-                    BackgroundColor(crate::ui_theme::PANEL),
+                    BackgroundColor(crate::ui_theme::PANEL.with_alpha(1.0)),
+                    BorderColor::all(crate::ui_theme::EDGE),
                     ScrollPosition::default(),
                     PauseMenuPanel,
                     Name::new("PauseMenuPanel"),
                 ))
                 .with_children(|panel| {
                     panel.spawn((
-                        Text::new("Menu"),
+                        Text::new("Game menu"),
                         TextFont {
                             font_size: 32.0,
                             ..default()
                         },
-                        TextColor(Color::WHITE),
+                        TextColor(crate::ui_theme::IVORY),
                         Name::new("PauseMenuTitle"),
                         Node {
                             flex_shrink: 0.0,
@@ -268,7 +300,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                         .spawn((
                             Node {
                                 flex_direction: FlexDirection::Column,
-                                row_gap: Val::Px(14.0),
+                                row_gap: Val::Px(12.0),
                                 display: Display::Flex,
                                 align_items: AlignItems::Center,
                                 justify_content: JustifyContent::FlexStart,
@@ -280,26 +312,26 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                         ))
                         .with_children(|main| {
                             main.spawn((
-                                Text::new("The online match continues"),
+                                Text::new("Your match continues while this menu is open."),
                                 TextFont {
-                                    font_size: 20.0,
+                                    font_size: 14.0,
                                     ..default()
                                 },
-                                TextColor(Color::WHITE),
+                                TextColor(crate::ui_theme::MUTED),
                                 Name::new("PauseMenuMainTitle"),
                             ));
 
                             spawn_menu_button(
                                 main,
-                                "Settings",
-                                SettingsOpenButton,
-                                "SettingsButton",
+                                "Return to game",
+                                ResumeButton,
+                                "PauseMenuResumeButton",
                             );
                             spawn_menu_button(
                                 main,
-                                "Resume match",
-                                ResumeButton,
-                                "PauseMenuResumeButton",
+                                "Settings",
+                                SettingsOpenButton,
+                                "SettingsButton",
                             );
                             spawn_menu_button(main, "Exit game", ExitButton, "PauseMenuExitButton");
                         });
@@ -326,7 +358,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                     font_size: 22.0,
                                     ..default()
                                 },
-                                TextColor(Color::WHITE),
+                                TextColor(crate::ui_theme::IVORY),
                                 Name::new("PauseMenuSettingsTitle"),
                             ));
 
@@ -369,6 +401,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                         align_items: AlignItems::Center,
                                         ..default()
                                     },
+                                    BorderColor::all(crate::ui_theme::EDGE),
                                     BackgroundColor(BUTTON_COLOR),
                                     Name::new("PauseMenuAudioMuteButton"),
                                 ))
@@ -376,7 +409,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                     button.spawn((
                                         Text::new("Mute sound"),
                                         crate::ui_theme::text(20.0),
-                                        TextColor(Color::WHITE),
+                                        TextColor(crate::ui_theme::IVORY),
                                         AudioLabel::Mute,
                                         Name::new("PauseMenuAudioMuteLabel"),
                                     ));
@@ -388,7 +421,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                     font_size: 14.0,
                                     ..default()
                                 },
-                                TextColor(Color::srgb(0.75, 0.78, 0.85)),
+                                TextColor(crate::ui_theme::MUTED),
                                 SettingsServerAddrLabel,
                                 Name::new("PauseMenuServerAddrHint"),
                             ));
@@ -399,7 +432,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                     font_size: 18.0,
                                     ..default()
                                 },
-                                TextColor(Color::srgb(0.88, 0.88, 0.88)),
+                                TextColor(crate::ui_theme::GOLD),
                                 Name::new("PauseMenuLightingTitle"),
                             ));
 
@@ -449,7 +482,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                     font_size: 18.0,
                                     ..default()
                                 },
-                                TextColor(Color::srgb(0.88, 0.88, 0.88)),
+                                TextColor(crate::ui_theme::GOLD),
                                 Name::new("PauseMenuModelTitle"),
                             ));
 
@@ -465,7 +498,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
 
                             spawn_menu_button(
                                 settings,
-                                "Reset graphics to defaults",
+                                "Reset graphics",
                                 ResetGraphicsDefaultsButton,
                                 "PauseMenuResetGraphicsButton",
                             );
@@ -489,12 +522,20 @@ fn spawn_menu_button<M: Component>(
             Node {
                 width: Val::Px(BUTTON_WIDTH),
                 height: Val::Px(BUTTON_HEIGHT),
+                max_width: Val::Percent(100.0),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(6.0)),
                 flex_shrink: 0.0,
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 ..default()
             },
-            BackgroundColor(BUTTON_COLOR),
+            BorderColor::all(crate::ui_theme::EDGE),
+            BackgroundColor(if name == "PauseMenuResumeButton" {
+                crate::frontend::widgets::PRIMARY
+            } else {
+                BUTTON_COLOR
+            }),
             marker,
             Name::new(name.to_owned()),
         ))
@@ -502,10 +543,10 @@ fn spawn_menu_button<M: Component>(
             button.spawn((
                 Text::new(text),
                 TextFont {
-                    font_size: 24.0,
+                    font_size: 17.0,
                     ..default()
                 },
-                TextColor(Color::WHITE),
+                TextColor(crate::ui_theme::IVORY),
             ));
         });
 }
@@ -534,11 +575,16 @@ fn spawn_adjust_row<Dec: Component, ValueMarker: Component, Inc: Component>(
         .with_children(|row| {
             row.spawn((
                 Text::new(label),
+                Node {
+                    width: Val::Px(110.0),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
                 TextFont {
                     font_size: 18.0,
                     ..default()
                 },
-                TextColor(Color::WHITE),
+                TextColor(crate::ui_theme::IVORY),
             ));
 
             row.spawn((
@@ -547,10 +593,14 @@ fn spawn_adjust_row<Dec: Component, ValueMarker: Component, Inc: Component>(
                 Node {
                     width: Val::Px(ADJUST_BUTTON_SIZE),
                     height: Val::Px(ADJUST_BUTTON_SIZE),
+                    flex_shrink: 0.0,
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(6.0)),
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
                     ..default()
                 },
+                BorderColor::all(crate::ui_theme::EDGE),
                 BackgroundColor(BUTTON_COLOR),
                 decrease_marker,
                 Name::new(format!("{row_name}-Down")),
@@ -562,17 +612,23 @@ fn spawn_adjust_row<Dec: Component, ValueMarker: Component, Inc: Component>(
                         font_size: 22.0,
                         ..default()
                     },
-                    TextColor(Color::WHITE),
+                    TextColor(crate::ui_theme::IVORY),
                 ));
             });
 
             row.spawn((
                 Text::new(value),
+                Node {
+                    width: Val::Px(62.0),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+                TextLayout::new_with_justify(Justify::Center),
                 TextFont {
                     font_size: 18.0,
                     ..default()
                 },
-                TextColor(Color::WHITE),
+                TextColor(crate::ui_theme::IVORY),
                 value_marker,
                 Name::new(format!("{row_name}-Value")),
             ));
@@ -583,10 +639,14 @@ fn spawn_adjust_row<Dec: Component, ValueMarker: Component, Inc: Component>(
                 Node {
                     width: Val::Px(ADJUST_BUTTON_SIZE),
                     height: Val::Px(ADJUST_BUTTON_SIZE),
+                    flex_shrink: 0.0,
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(6.0)),
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
                     ..default()
                 },
+                BorderColor::all(crate::ui_theme::EDGE),
                 BackgroundColor(BUTTON_COLOR),
                 increase_marker,
                 Name::new(format!("{row_name}-Up")),
@@ -598,7 +658,7 @@ fn spawn_adjust_row<Dec: Component, ValueMarker: Component, Inc: Component>(
                         font_size: 22.0,
                         ..default()
                     },
-                    TextColor(Color::WHITE),
+                    TextColor(crate::ui_theme::IVORY),
                 ));
             });
         });
@@ -608,8 +668,13 @@ fn spawn_adjust_row<Dec: Component, ValueMarker: Component, Inc: Component>(
 fn close_pause_menu_when_disconnected(
     client_session: Res<ClientSession>,
     mut menu_state: ResMut<PauseMenuState>,
+    screen: Option<Res<State<crate::frontend::AppScreen>>>,
 ) {
-    if client_session.state != ClientConnectionState::Disconnected {
+    // Shell settings must remain usable before a server connects. A lost
+    // gameplay connection still closes the in-match menu as before.
+    if client_session.state != ClientConnectionState::Disconnected
+        || screen.as_ref().is_some_and(|screen| screen.get().is_menu())
+    {
         return;
     }
     if menu_state.open {
@@ -1348,8 +1413,8 @@ fn handle_resume_button(
                 menu_state.open = false;
                 menu_state.in_settings = false;
             }
-            Interaction::Hovered => *color = BUTTON_HOVER_COLOR.into(),
-            Interaction::None => *color = BUTTON_COLOR.into(),
+            Interaction::Hovered => *color = crate::frontend::widgets::PRIMARY_HOVER.into(),
+            Interaction::None => *color = crate::frontend::widgets::PRIMARY.into(),
         }
     }
 }
@@ -1357,6 +1422,31 @@ fn handle_resume_button(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn offline_shell_settings_stay_open_but_disconnected_match_menu_closes() {
+        use crate::frontend::AppScreen;
+        for (screen, remains_open) in [
+            (AppScreen::Home, true),
+            (AppScreen::HeroSelect, true),
+            (AppScreen::InMatch, false),
+        ] {
+            let mut app = App::new();
+            let mut session = ClientSession::default();
+            session.state = ClientConnectionState::Disconnected;
+            app.insert_resource(session)
+                .insert_resource(State::new(screen))
+                .insert_resource(PauseMenuState {
+                    open: true,
+                    in_settings: true,
+                })
+                .add_systems(Update, close_pause_menu_when_disconnected);
+            app.update();
+            let menu = app.world().resource::<PauseMenuState>();
+            assert_eq!(menu.open, remains_open, "{screen:?}");
+            assert_eq!(menu.in_settings, remains_open, "{screen:?}");
+        }
+    }
 
     #[test]
     fn audio_menu_shows_saved_levels_and_only_changes_selected_bus_while_open() {

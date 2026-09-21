@@ -81,6 +81,7 @@ struct HelpDismissButton;
 
 fn setup_help_overlay(mut commands: Commands) {
     let body = help_overlay_body();
+    let phone = crate::platform::ui_profile() == crate::platform::UiProfile::Mobile;
 
     commands
         .spawn((
@@ -96,7 +97,7 @@ fn setup_help_overlay(mut commands: Commands) {
                 ..default()
             },
             Visibility::Hidden,
-            ZIndex(40),
+            ZIndex(crate::frontend::widgets::SCREEN_Z + 50),
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.45)),
             HelpOverlayRoot,
             Name::new("HelpOverlayRoot"),
@@ -108,24 +109,36 @@ fn setup_help_overlay(mut commands: Commands) {
                         width: Val::Percent(88.0),
                         max_width: Val::Px(760.0),
                         flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(18.0),
-                        padding: UiRect::all(Val::Px(22.0)),
+                        row_gap: Val::Px(16.0),
+                        padding: UiRect::all(Val::Px(24.0)),
                         border: UiRect::all(Val::Px(1.0)),
                         border_radius: BorderRadius::all(Val::Px(12.0)),
                         ..default()
                     },
-                    BackgroundColor(crate::ui_theme::PANEL),
-                    BorderColor::all(crate::ui_theme::GOLD),
+                    BackgroundColor(crate::ui_theme::PANEL.with_alpha(1.0)),
+                    BorderColor::all(crate::ui_theme::EDGE),
                     Name::new("HelpPanel"),
                 ))
                 .with_children(|panel| {
+                    if !phone {
+                        panel.spawn((
+                            Text::new("FIELD GUIDE  /  VERDANT ARENA"),
+                            crate::ui_theme::text(11.0),
+                            TextColor(crate::ui_theme::GOLD),
+                        ));
+                        panel.spawn((
+                            Text::new("Make your first move."),
+                            crate::ui_theme::text(28.0),
+                            TextColor(crate::ui_theme::IVORY),
+                        ));
+                    }
                     panel.spawn((
                         Text::new(body),
                         TextFont {
-                            font_size: 16.0,
+                            font_size: 15.0,
                             ..default()
                         },
-                        TextColor(Color::WHITE),
+                        TextColor(crate::ui_theme::IVORY),
                         HelpOverlayPanel,
                         Name::new("HelpBody"),
                     ));
@@ -140,13 +153,16 @@ fn setup_help_overlay(mut commands: Commands) {
                                 justify_content: JustifyContent::Center,
                                 ..default()
                             },
-                            BackgroundColor(Color::srgb(0.15, 0.42, 0.29)),
+                            BackgroundColor(crate::frontend::widgets::PRIMARY),
+                            crate::frontend::widgets::MenuButton::new(
+                                crate::frontend::widgets::ButtonKind::Primary,
+                            ),
                             HelpDismissButton,
                             Name::new("HelpDismissButton"),
                         ))
                         .with_children(|button| {
                             button.spawn((
-                                Text::new("Got it - play  [Escape / F1]"),
+                                Text::new("Enter the arena   /   Escape or F1"),
                                 Name::new("HelpDismissLabel"),
                                 TextFont {
                                     font_size: 18.0,
@@ -165,6 +181,7 @@ fn toggle_help_overlay(
     mut visible: ResMut<HelpOverlayVisible>,
     career: Option<Res<crate::career::CareerClient>>,
     social: Option<Res<crate::social::SocialClient>>,
+    screen: Option<Res<State<crate::frontend::AppScreen>>>,
 ) {
     if social
         .as_ref()
@@ -174,7 +191,8 @@ fn toggle_help_overlay(
         return;
     }
     if visible.0
-        && matches!(game.state, GameState::Running)
+        && (matches!(game.state, GameState::Running)
+            || screen.as_ref().is_some_and(|screen| screen.get().is_menu()))
         && keyboard.just_pressed(KeyCode::Escape)
     {
         visible.0 = false;
@@ -201,6 +219,7 @@ fn sync_help_overlay_visibility(
     visible: Res<HelpOverlayVisible>,
     snapshot: Res<GameStateSnapshot>,
     session: Option<Res<ClientSession>>,
+    screen: Option<Res<State<crate::frontend::AppScreen>>>,
     mut root: Query<(&mut Visibility, &mut Node), With<HelpOverlayRoot>>,
 ) {
     let in_running_match = matches!(snapshot.state, GameState::Running)
@@ -210,14 +229,17 @@ fn sync_help_overlay_visibility(
     if !visible.is_changed()
         && !snapshot.is_changed()
         && session.as_ref().is_none_or(|session| !session.is_changed())
+        && screen.as_ref().is_none_or(|screen| !screen.is_changed())
     {
         return;
     }
     let Ok((mut v, mut node)) = root.single_mut() else {
         return;
     };
-    // Keep lobby/victory overlays readable (game state UI sits below this z-order).
-    let show_panel = visible.0 && in_running_match;
+    // Explicit Help requests are usable before admission too. Automatic
+    // first-match onboarding remains gated separately by local admission.
+    let shell = screen.as_ref().is_some_and(|screen| screen.get().is_menu());
+    let show_panel = visible.0 && (in_running_match || shell);
     node.display = if show_panel {
         Display::Flex
     } else {
@@ -235,24 +257,65 @@ fn help_overlay_body() -> String {
     let skills = skill_keys_display();
     let upgrade = upgrade_key_display();
     format!(
-        "Quick guide (press {help_key} or Escape to close)\n\n\
-MOVE: Right-click ground or minimap to move around forest; your route appears on the minimap. Left click selects without moving.\n\
-ATTACK: Right-click a hostile to approach and repeat basic attacks; left-click only selects. Basic attacks cost no mana.\n\
-CAST: Use {skills} or the on-screen buttons. W/E/R unlock by level.\n\
-SKILL POINTS: Use {upgrade} or the arrows above the hotbar to rank up abilities.\n\
-TARGET: Tab selects the nearest hostile; Backspace clears. S stops attacks and movement.\n\
-TEAMS: You have a double ring; allies have squares; enemies have triangles.\n\n\
-OBJECTIVE: Follow a lane with your minions. Destroy all towers in one lane to unlock the enemy base, then destroy the base to win.\n\
-RECOVER: Let minions take tower fire. If defeated, wait for your respawn.\n\
-SHOP: Press P or click Open shop. Buy recommended items at your base with earned gold.\n\n\
-CAMERA: Y toggles hero follow; Space returns to your hero. Wheel zooms. Hold Alt + right mouse to orbit in 3D. Left-click the minimap to look around.\n\
-MENU: Escape opens settings. The online match continues; a rematch starts automatically after victory."
+        "MOVE: Right-click ground to travel. Your route appears on the minimap.\n\
+ATTACK: Right-click a hostile to approach and attack. Basic attacks use no mana.\n\
+TARGET: Left-click selects. Tab finds a foe; Backspace clears. S stops your hero.\n\n\
+CAST: Use {skills} or the on-screen buttons. W/E/R unlock as you level.\n\
+GROW: Spend skill points with {upgrade} or the arrows above the hotbar.\n\
+SHOP: Press P at your base. Spend earned gold on items that suit your class.\n\n\
+OBJECTIVE: Follow your minions. Clear every tower in one lane, then destroy the enemy base.\n\
+SURVIVE: Let minions take tower fire. If defeated, wait for your respawn.\n\
+READ THE FIELD: Your hero has a double ring; allies have squares; enemies have triangles.\n\n\
+CAMERA: Y toggles hero follow; Space returns to your hero. Wheel zooms.\n\
+Left-click the minimap to scout. Alt + right mouse orbits the 3D view.\n\
+Need this guide again? In a match, press {help_key}. Escape opens the game menu."
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shell_help_opens_and_dismisses_before_admission_without_auto_onboarding() {
+        for state in [GameState::Lobby, GameState::Running] {
+            let mut app = App::new();
+            app.init_resource::<ButtonInput<KeyCode>>()
+                .init_resource::<ClientSession>()
+                .insert_resource(State::new(crate::frontend::AppScreen::Home))
+                .insert_resource(GameStateSnapshot { state, ..default() })
+                .add_plugins(HelpOverlayPlugin);
+            app.update();
+            assert!(!app.world().resource::<HelpOverlayVisible>().0);
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(HELP_TOGGLE_KEY);
+            app.update();
+            let mut roots = app
+                .world_mut()
+                .query_filtered::<(&Node, &Visibility), With<HelpOverlayRoot>>();
+            let (node, visibility) = roots.single(app.world()).unwrap();
+            assert_eq!(node.display, Display::Flex);
+            assert_eq!(*visibility, Visibility::Visible);
+            assert!(app.world().resource::<HelpAutoShowState>().pending);
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .reset_all();
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(KeyCode::Escape);
+            app.update();
+            assert!(!app.world().resource::<HelpOverlayVisible>().0);
+            let (node, visibility) = roots.single(app.world()).unwrap();
+            assert_eq!(node.display, Display::None);
+            assert_eq!(*visibility, Visibility::Hidden);
+            assert!(
+                !app.world()
+                    .resource::<ButtonInput<KeyCode>>()
+                    .just_pressed(KeyCode::Escape)
+            );
+        }
+    }
 
     #[test]
     fn help_overlay_copy_covers_core_first_match_actions() {

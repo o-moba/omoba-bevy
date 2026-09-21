@@ -955,9 +955,21 @@ fn button(parent: &mut ChildSpawnerCommands, value: &str, action: Action, name: 
         action,
         Action::EditName | Action::EditFriendCode | Action::WebEdit | Action::DevicesRecoveryEdit
     );
+    let emphasis = matches!(
+        &action,
+        Action::SaveName | Action::AddFriend | Action::LookupFriend | Action::PlayAgain
+    );
+    let menu = crate::frontend::widgets::MenuButton::new(if emphasis {
+        crate::frontend::widgets::ButtonKind::Primary
+    } else if matches!(&action, Action::WebDeny) {
+        crate::frontend::widgets::ButtonKind::Danger
+    } else {
+        crate::frontend::widgets::ButtonKind::Secondary
+    });
     parent
         .spawn((
             Button,
+            menu,
             Node {
                 min_height: Val::Px(if input { 52.0 } else { 44.0 }),
                 height: if input { Val::Px(52.0) } else { Val::Auto },
@@ -972,7 +984,7 @@ fn button(parent: &mut ChildSpawnerCommands, value: &str, action: Action, name: 
                     Overflow::default()
                 },
                 min_width: Val::Px(44.0),
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(6.0)),
+                padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 border: UiRect::all(Val::Px(1.0)),
@@ -980,7 +992,7 @@ fn button(parent: &mut ChildSpawnerCommands, value: &str, action: Action, name: 
                 flex_shrink: 0.0,
                 ..default()
             },
-            BackgroundColor(ui::TILE),
+            BackgroundColor(menu.idle_color()),
             BorderColor::all(ui::EDGE),
             action,
             Name::new(name.to_owned()),
@@ -1469,24 +1481,6 @@ fn result_body(
     }
 }
 fn profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
-    button(
-        parent,
-        "Support Open Moba",
-        Action::Supporter,
-        "CareerSupporter",
-    );
-    button(
-        parent,
-        "Link or recover an account",
-        Action::DevicesOpen,
-        "CareerDevices",
-    );
-    button(
-        parent,
-        "Connect player website",
-        Action::WebOpen,
-        "CareerWebsite",
-    );
     label(parent, "Your profile", 26.0, ui::GOLD, "CareerProfileTitle");
     if let Some(profile) = &career.view.profile {
         friend_code_label(parent, &profile.nickname);
@@ -1566,7 +1560,26 @@ fn profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
         ui::MUTED,
         "CareerRatingExplanation",
     );
+    parent
+        .spawn(Node {
+            margin: UiRect::top(Val::Px(12.0)),
+            column_gap: Val::Px(8.0),
+            row_gap: Val::Px(8.0),
+            flex_wrap: FlexWrap::Wrap,
+            ..default()
+        })
+        .with_children(|row| {
+            button(
+                row,
+                "Link or recover account",
+                Action::DevicesOpen,
+                "CareerDevices",
+            );
+            button(row, "Player website", Action::WebOpen, "CareerWebsite");
+            button(row, "Support OMOBA", Action::Supporter, "CareerSupporter");
+        });
 }
+
 fn friend_code_label(parent: &mut ChildSpawnerCommands, handle: &str) {
     label(
         parent,
@@ -2189,10 +2202,34 @@ fn render(
         return;
     }
     let phone = profile.0 == UiProfile::Mobile;
+    let compact = matches!(
+        career.modal,
+        CareerModal::Profile
+            | CareerModal::WebLink
+            | CareerModal::Devices
+            | CareerModal::FriendProfile
+    );
     let width = (viewport.x - insets[0] - insets[2] - if phone { 12.0 } else { 48.0 })
         .max(180.0)
-        .min(if phone { f32::MAX } else { 1120.0 });
-    let height = (viewport.y - insets[1] - insets[3] - if phone { 12.0 } else { 40.0 }).max(160.0);
+        .min(if phone {
+            f32::MAX
+        } else if compact {
+            760.0
+        } else {
+            1120.0
+        });
+    let height = (viewport.y - insets[1] - insets[3] - if phone { 12.0 } else { 40.0 })
+        .max(160.0)
+        .min(if phone {
+            f32::MAX
+        } else {
+            match career.modal {
+                CareerModal::WebLink => 420.0,
+                CareerModal::Devices | CareerModal::FriendProfile => 560.0,
+                CareerModal::Profile => 640.0,
+                _ => f32::MAX,
+            }
+        });
     commands
         .spawn((
             Node {
@@ -2226,19 +2263,61 @@ fn render(
                     Node {
                         width: Val::Px(width),
                         height: Val::Px(height),
-                        padding: UiRect::all(Val::Px(if phone { 8.0 } else { 16.0 })),
+                        padding: UiRect::all(Val::Px(if phone { 10.0 } else { 24.0 })),
+                        border_radius: BorderRadius::all(Val::Px(12.0)),
                         border: UiRect::all(Val::Px(1.0)),
                         ..column_node()
                     },
-                    BackgroundColor(ui::PANEL),
+                    BackgroundColor(ui::PANEL.with_alpha(1.0)),
                     BorderColor::all(ui::EDGE),
                     Name::new("CareerPanel"),
                 ))
                 .with_children(|panel| {
                     panel.spawn(row_node()).with_children(|p| {
-                        button(p, "Profile", Action::Profile, "CareerProfileTab");
-                        button(p, "History", Action::History, "CareerHistoryTab");
-                        button(p, "Friends", Action::Friends, "CareerFriendsTab");
+                        for (title, action, name, selected) in [
+                            (
+                                "Profile",
+                                Action::Profile,
+                                "CareerProfileTab",
+                                career.modal == CareerModal::Profile,
+                            ),
+                            (
+                                "History",
+                                Action::History,
+                                "CareerHistoryTab",
+                                career.modal == CareerModal::History,
+                            ),
+                            (
+                                "Friends",
+                                Action::Friends,
+                                "CareerFriendsTab",
+                                matches!(
+                                    career.modal,
+                                    CareerModal::Friends | CareerModal::FriendProfile
+                                ),
+                            ),
+                        ] {
+                            let menu = crate::frontend::widgets::MenuButton::tile(selected);
+                            p.spawn((
+                                Button,
+                                menu,
+                                action,
+                                Name::new(name),
+                                Node {
+                                    min_height: Val::Px(44.0),
+                                    padding: UiRect::axes(Val::Px(16.0), Val::Px(8.0)),
+                                    align_items: AlignItems::Center,
+                                    border: UiRect::bottom(Val::Px(2.0)),
+                                    border_radius: BorderRadius::top(Val::Px(6.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(menu.idle_color()),
+                                BorderColor::all(if selected { ui::GOLD } else { ui::EDGE }),
+                            ))
+                            .with_children(|p| {
+                                label(p, title, 15.0, ui::IVORY, &format!("{name}Label"))
+                            });
+                        }
                         if career.view.last_result.is_some() {
                             button(
                                 p,

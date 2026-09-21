@@ -100,18 +100,13 @@ pub fn last_match_line(result: &shared::career::MatchResult, profile_id: Option<
 /// Shared status line: the home header and the picker header both use it.
 pub(crate) fn connection_line(session: &ClientSession) -> (String, Color) {
     match session.state {
-        ClientConnectionState::Connected => (
-            format!("Online · {}", session.server_addr_display),
-            widgets::PRIMARY,
-        ),
-        ClientConnectionState::Connecting | ClientConnectionState::WaitingForServer => (
-            format!("Connecting to {}…", session.server_addr_display),
-            widgets::GOLD,
-        ),
-        ClientConnectionState::Disconnected => (
-            format!("Offline · retrying {}", session.server_addr_display),
-            widgets::DANGER_HOVER,
-        ),
+        ClientConnectionState::Connected => ("Online · ready to play".to_owned(), widgets::PRIMARY),
+        ClientConnectionState::Connecting | ClientConnectionState::WaitingForServer => {
+            ("Connecting…".to_owned(), widgets::GOLD)
+        }
+        ClientConnectionState::Disconnected => {
+            ("Offline · reconnecting…".to_owned(), widgets::DANGER_HOVER)
+        }
     }
 }
 
@@ -158,39 +153,47 @@ fn spawn_home(
                         ..default()
                     })
                     .with_children(|title| {
-                        title.spawn(widgets::heading("OMOBA", 38.0));
-                        title.spawn(widgets::label(
-                            &format!("Verdant Arena · 5v5 · {}", env!("CARGO_PKG_VERSION")),
-                            14.0,
-                            widgets::MUTED,
-                        ));
+                        title.spawn(widgets::heading("OMOBA", 36.0));
+                        title.spawn(widgets::label("THE VERDANT ARENA", 14.0, widgets::MUTED));
                     });
                 header.spawn((
                     widgets::label(&status, 15.0, status_color),
                     Node {
                         // The phone bar (?, MENU, SERVER) owns the corner.
-                        margin: UiRect::right(Val::Px(if phone { 330.0 } else { 0.0 })),
+                        margin: UiRect::right(Val::Px(if phone { 400.0 } else { 0.0 })),
                         ..default()
                     },
                     Name::new("HomeConnectionStatus"),
                 ));
             });
 
-            root.spawn(Node {
-                flex_grow: 1.0,
-                column_gap: Val::Px(28.0),
-                ..default()
-            })
+            root.spawn((
+                Node {
+                    flex_grow: 1.0,
+                    column_gap: Val::Px(20.0),
+                    min_height: Val::Px(0.0),
+                    padding: UiRect::all(Val::Px(if phone { 12.0 } else { 20.0 })),
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(12.0)),
+                    ..default()
+                },
+                BackgroundColor(widgets::PANEL),
+                BorderColor::all(widgets::PANEL_EDGE),
+            ))
             .with_children(|body| {
                 body.spawn((
                     Node {
                         flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(14.0),
+                        row_gap: Val::Px(12.0),
+                        width: Val::Px(320.0),
+                        flex_shrink: 0.0,
+                        justify_content: JustifyContent::Center,
                         ..default()
                     },
                     Name::new("HomeIdentity"),
                 ))
                 .with_children(|column| {
+                    column.spawn(widgets::label("PLAYER PROFILE", 12.0, widgets::GOLD));
                     spawn_card(
                         column,
                         &card,
@@ -247,13 +250,14 @@ fn spawn_home(
                     Name::new("HomeShowcase"),
                 ))
                 .with_children(|column| {
+                    column.spawn(widgets::label("YOUR CHAMPION", 12.0, widgets::GOLD));
                     column.spawn((
                         ImageNode::new(preview_image),
                         Node {
                             // Sized from the window height so the showcase
                             // scales with the window and never overflows it.
-                            width: Val::Vh(40.0),
-                            max_width: Val::Px(360.0),
+                            width: Val::Vh(46.0),
+                            max_width: Val::Percent(100.0),
                             min_width: Val::Px(0.0),
                             aspect_ratio: Some(0.742),
                             border_radius: BorderRadius::all(Val::Px(14.0)),
@@ -261,20 +265,44 @@ fn spawn_home(
                         },
                         Name::new("HomeShowcaseImage"),
                     ));
+                    let avatar_name = card
+                        .showcase_avatar
+                        .as_deref()
+                        .and_then(shared::avatar_definition)
+                        .map_or("Your hero", |avatar| avatar.display_name.as_str());
+                    column.spawn(widgets::heading(avatar_name, 22.0));
+                    column.spawn(widgets::label(
+                        card.main_class.display_name(),
+                        13.0,
+                        widgets::MUTED,
+                    ));
                 });
 
                 body.spawn((
                     Node {
-                        width: Val::Px(300.0),
+                        width: Val::Px(260.0),
+                        flex_shrink: 0.0,
+                        padding: UiRect::vertical(Val::Px(if phone { 0.0 } else { 24.0 })),
                         flex_direction: FlexDirection::Column,
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
-                        row_gap: Val::Px(18.0),
+                        row_gap: Val::Px(if phone { 10.0 } else { 16.0 }),
                         ..default()
                     },
                     Name::new("HomePlayColumn"),
                 ))
                 .with_children(|column| {
+                    if !phone {
+                        column.spawn(widgets::label("ENTER THE ARENA", 12.0, widgets::GOLD));
+                    }
+                    column.spawn(widgets::heading("Your next battle", 24.0));
+                    if !phone {
+                        column.spawn(widgets::label(
+                            "5 versus 5 · Team strategy",
+                            13.0,
+                            widgets::MUTED,
+                        ));
+                    }
                     widgets::button(
                         column,
                         "PLAY",
@@ -282,11 +310,13 @@ fn spawn_home(
                         HomeAction::Play,
                         "HomePlay",
                     );
-                    column.spawn(widgets::label(
-                        "Pick your hero, then the search starts.",
-                        14.0,
-                        widgets::MUTED,
-                    ));
+                    if !phone {
+                        column.spawn(widgets::label(
+                            "Choose a hero. Make your mark.",
+                            14.0,
+                            widgets::MUTED,
+                        ));
+                    }
                     column
                         .spawn(Node {
                             flex_direction: FlexDirection::Column,
@@ -325,7 +355,7 @@ fn spawn_home(
                 if phone {
                     "MENU opens settings · SERVER sets the address"
                 } else {
-                    "Escape opens settings"
+                    "Escape · Settings                         OMOBA · Verdant Arena"
                 },
                 12.0,
                 widgets::MUTED,

@@ -25,7 +25,7 @@ use crate::frontend::{AppScreen, ScreenDriverPaused, preview::AvatarPreview};
 const SETTLE_FRAMES: u32 = 32;
 const COLLECTION_SETTLE_FRAMES: u32 = 240;
 
-const VIEWS: [(&str, AppScreen, &str); 7] = [
+const VIEWS: [(&str, AppScreen, &str); 13] = [
     ("01-home.png", AppScreen::Home, "HomeScreen"),
     ("02-profile-card.png", AppScreen::Card, "CardScreen"),
     (
@@ -41,6 +41,16 @@ const VIEWS: [(&str, AppScreen, &str); 7] = [
     ("05-searching.png", AppScreen::Searching, "SearchingScreen"),
     ("06-loading.png", AppScreen::Loading, "LoadingScreen"),
     ("07-post-match.png", AppScreen::PostMatch, "PostMatchScreen"),
+    ("08-menu.png", AppScreen::Home, "PauseMenuPanel"),
+    ("09-settings-sound.png", AppScreen::Home, "PauseMenuPanel"),
+    (
+        "10-settings-graphics.png",
+        AppScreen::Home,
+        "PauseMenuPanel",
+    ),
+    ("11-server.png", AppScreen::Home, "ServerEntryPanel"),
+    ("12-home-help.png", AppScreen::Home, "HelpOverlayRoot"),
+    ("13-home-help-closed.png", AppScreen::Home, "HomeScreen"),
 ];
 
 pub(crate) struct FrontendQaPlugin;
@@ -85,7 +95,16 @@ impl Plugin for FrontendQaPlugin {
         // screen away (the search screen has no real queue entry behind it).
         .insert_resource(ScreenDriverPaused(true))
         .add_systems(Startup, watermark)
-        .add_systems(Update, drive)
+        .add_systems(
+            PreUpdate,
+            prepare_help_buttons.after(bevy::ui::UiSystems::Focus),
+        )
+        .add_systems(
+            Update,
+            drive
+                .after(crate::pause_menu::PauseMenuSet::Close)
+                .before(crate::pause_menu::PauseMenuSet::Visuals),
+        )
         .add_systems(
             PostUpdate,
             observe
@@ -122,6 +141,26 @@ impl FrontendQa {
 #[derive(Component)]
 struct Shot(usize);
 
+fn prepare_help_buttons(
+    qa: Res<FrontendQa>,
+    help: Res<crate::help_overlay::HelpOverlayVisible>,
+    mut buttons: Query<(&Name, &mut Interaction), With<Button>>,
+) {
+    if qa.finished || qa.applied_stage != Some(qa.stage) {
+        return;
+    }
+    let wanted = match qa.stage {
+        11 if !help.0 => "PhoneHelpButton",
+        12 if help.0 => "HelpDismissButton",
+        _ => return,
+    };
+    for (name, mut interaction) in &mut buttons {
+        if name.as_str() == wanted {
+            *interaction = Interaction::Pressed;
+        }
+    }
+}
+
 fn watermark(mut commands: Commands) {
     commands.spawn((
         Node {
@@ -148,6 +187,9 @@ fn drive(
     screen: Res<State<AppScreen>>,
     mut next: ResMut<NextState<AppScreen>>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
+    mut pause: ResMut<crate::pause_menu::PauseMenuState>,
+    server: Option<ResMut<crate::mobile_ui::ServerEntry>>,
+    mut scrolls: Query<(&Name, &ComputedNode, &mut ScrollPosition)>,
 ) {
     if qa.finished || qa.stage >= VIEWS.len() {
         return;
@@ -160,6 +202,22 @@ fn drive(
         window
             .resolution
             .set_physical_resolution(qa.pixels.x, qa.pixels.y);
+    }
+    // Only this explicitly enabled screenshot harness drives the modal fixture.
+    // The production modal visibility, scrolling and input gates still render it.
+    pause.open = (7..=9).contains(&qa.stage);
+    pause.in_settings = (8..=9).contains(&qa.stage);
+    if let Some(mut server) = server {
+        server.open = qa.stage == 10;
+    }
+    for (name, node, mut scroll) in &mut scrolls {
+        if name.as_str() == "PauseMenuPanel" {
+            scroll.y = if qa.stage == 9 {
+                ((node.content_size().y - node.size().y) * node.inverse_scale_factor()).max(0.0)
+            } else {
+                0.0
+            };
+        }
     }
     let wanted = VIEWS[qa.stage].1;
     if qa.applied_stage != Some(qa.stage) {
@@ -202,12 +260,15 @@ fn observe(
     mut qa: ResMut<FrontendQa>,
     screen: Res<State<AppScreen>>,
     preview: Res<AvatarPreview>,
+    ui_scale: Res<UiScale>,
+    mobile: Res<crate::mobile_controls::MobileControls>,
     windows: Query<(Entity, &Window), With<PrimaryWindow>>,
     nodes: Query<(
         &Name,
         &ComputedNode,
         &UiGlobalTransform,
         Option<&InheritedVisibility>,
+        Option<&ZIndex>,
     )>,
     buttons: Query<&Name, With<Button>>,
     preview_cameras: Query<&Camera, With<crate::frontend::preview::PreviewCamera>>,
@@ -233,7 +294,9 @@ fn observe(
         qa.stage += 1;
         qa.in_flight = false;
         qa.applied_stage = None;
-        if qa.stage == VIEWS.len() {
+        // The hosted-server form is a phone-only surface. Desktop settings
+        // retain their existing server-address hint rather than this keypad.
+        if qa.stage == VIEWS.len() || (qa.stage == 10 && !mobile.enabled) {
             let summary = serde_json::json!({
                 "status": "passed",
                 "scenario": "frontend-shell",
@@ -279,7 +342,7 @@ fn observe(
     let root_name = VIEWS[qa.stage].2;
     let mut root_fit = false;
     let mut nodes_json = Vec::new();
-    for (name, node, transform, inherited) in &nodes {
+    for (name, node, transform, inherited, z_index) in &nodes {
         let size = node.size() * transform.to_scale_angle_translation().0.abs();
         let min = transform.translation - size * 0.5;
         let visible = inherited.is_none_or(|visibility| visibility.get());
@@ -288,25 +351,126 @@ fn observe(
         }
         if name.as_str() == root_name
             || name.as_str().starts_with("Avatar")
-            || name.as_str().starts_with("HomeShowcase")
-            || name.as_str().starts_with("HeroSelectPreview")
+            || name.as_str().starts_with("Home")
+            || name.as_str().starts_with("Card")
+            || name.as_str().starts_with("Collection")
+            || name.as_str().starts_with("Searching")
+            || name.as_str().starts_with("PostMatch")
+            || name.as_str().starts_with("Server")
+            || name.as_str().starts_with("Help")
+            || name.as_str() == "PhoneMenuBar"
+            || name.as_str().starts_with("HeroSelect")
+            || matches!(name.as_str(), "TeamGreenButton" | "TeamBlueButton")
+            || name.as_str().starts_with("PauseMenu")
+            || matches!(name.as_str(), "SettingsButton" | "BackButton")
         {
             nodes_json.push(serde_json::json!({
                 "name": name.as_str(),
                 "min": min.to_array(),
                 "size": size.to_array(),
                 "visible": visible,
+                "z_index": z_index.map_or(0, |z| z.0),
             }));
         }
     }
+    let required: &[&str] = match qa.stage {
+        0 => &[
+            "HomePlay",
+            "HomeCustomizeCard",
+            "HomeAccount",
+            "HomeCollection",
+            "HomeHistory",
+            "HomeFriends",
+        ],
+        1 => &["CardBack", "CardOpenCollection"],
+        2 => &[
+            "CollectionBack",
+            "AvatarAutoSpin",
+            "AvatarShowcase",
+            "AvatarEquip",
+        ],
+        3 => &["HeroSelectBack", "TeamGreenButton", "TeamBlueButton"],
+        4 => &["SearchingCancel"],
+        6 => &["PostMatchPlayAgain", "PostMatchBackToMenu"],
+        7 => &[
+            "PauseMenuResumeButton",
+            "SettingsButton",
+            "PauseMenuExitButton",
+        ],
+        8 => &[
+            "PauseMenuAudioMasterControls",
+            "PauseMenuAudioMusicControls",
+        ],
+        9 => &[
+            "PauseMenuScaleControls",
+            "PauseMenuResetGraphicsButton",
+            "BackButton",
+        ],
+        10 => &[
+            "ServerConnectButton",
+            "ServerCloseButton",
+            "ServerKeyboardButton",
+        ],
+        11 => &["HelpDismissButton"],
+        12 => &[
+            "HomePlay",
+            "HomeCustomizeCard",
+            "HomeAccount",
+            "HomeCollection",
+            "HomeHistory",
+            "HomeFriends",
+        ],
+        _ => &[],
+    };
+    let controls_fit = required.iter().all(|required| {
+        nodes_json.iter().any(|record| {
+            record["name"] == *required
+                && record["visible"] == true
+                && fits(
+                    Vec2::new(
+                        record["min"][0].as_f64().unwrap() as f32,
+                        record["min"][1].as_f64().unwrap() as f32,
+                    ),
+                    Vec2::new(
+                        record["size"][0].as_f64().unwrap() as f32,
+                        record["size"][1].as_f64().unwrap() as f32,
+                    ),
+                    viewport,
+                )
+        })
+    });
     let interactive: Vec<&str> = buttons.iter().map(Name::as_str).collect();
+    let help_transition_scale_correct = match qa.stage {
+        11 => (ui_scale.0 - 1.0).abs() < 0.001,
+        12 => (ui_scale.0 - crate::frontend::menu_scale(window.height())).abs() < 0.001,
+        _ => true,
+    };
+    let help_above_shell = qa.stage != 11
+        || nodes_json
+            .iter()
+            .find(|node| node["name"] == "HelpOverlayRoot")
+            .and_then(|node| node["z_index"].as_i64())
+            .is_some_and(|help_z| {
+                nodes_json
+                    .iter()
+                    .filter(|node| node["name"] == "HomeScreen" || node["name"] == "PhoneMenuBar")
+                    .all(|node| node["z_index"].as_i64().is_some_and(|z| help_z > z))
+            });
     let record = serde_json::json!({
         "file": VIEWS[qa.stage].0,
         "screen": format!("{:?}", VIEWS[qa.stage].1),
         "root": root_name,
         "root_fits_viewport": root_fit,
+        "required_controls": required,
+        "required_controls_fit": controls_fit,
+        "help_transition_scale_correct": help_transition_scale_correct,
+        "help_above_shell": help_above_shell,
+        "production_help_button_transition": qa.stage >= 11,
+        "ui_profile": if mobile.enabled { "Mobile" } else { "Desktop" },
+        "ui_scale": ui_scale.0,
         "pixels": viewport.to_array(),
         "buttons": interactive,
+        "modal_fixture": qa.stage >= 7,
         "preview_avatar": preview.slug,
         "preview_status": format!("{:?}", preview.status),
         "preview_camera_active": preview_cameras.iter().any(|camera| camera.is_active),
@@ -314,10 +478,10 @@ fn observe(
         "nodes": nodes_json,
     });
     qa.captures.push(record);
-    if !root_fit {
+    if !root_fit || !controls_fit || !help_transition_scale_correct || !help_above_shell {
         fail(
             &mut qa,
-            "front-end screen root is missing or leaves the viewport",
+            "screen root or essential controls are missing or leave the viewport",
             &mut exit,
         );
         return;

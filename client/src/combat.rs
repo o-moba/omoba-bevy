@@ -145,7 +145,7 @@ const MINION_MARKER_RADIUS: f32 = 1.05;
 const NEUTRAL_MARKER_RADIUS: f32 = 1.1;
 const TOWER_MARKER_RADIUS: f32 = 2.0;
 const BASE_TOWER_MARKER_RADIUS: f32 = 3.75;
-const SKILL_SLOT_SIZE: f32 = 100.0;
+const SKILL_SLOT_SIZE: f32 = 80.0;
 const SKILL_SLOT_GAP: f32 = 8.0;
 const SKILL_BUTTON_COLOR: Color = crate::ui_theme::PANEL;
 const SKILL_BUTTON_HOVER_COLOR: Color = crate::ui_theme::HOVER;
@@ -583,15 +583,15 @@ fn setup_combat_ui(mut commands: Commands, asset_server: Option<Res<AssetServer>
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
-            bottom: Val::Px(178.0),
-            left: Val::Px(264.0),
-            max_width: Val::Px(490.0),
+            bottom: Val::Px(258.0),
+            left: Val::Px(468.0),
+            max_width: Val::Px(344.0),
             padding: UiRect::all(Val::Px(8.0)),
             ..default()
         },
         Text::new(""),
         TextFont {
-            font_size: 18.0,
+            font_size: 14.0,
             ..default()
         },
         TextColor(Color::srgb(1.0, 0.88, 0.5)),
@@ -604,8 +604,8 @@ fn setup_combat_ui(mut commands: Commands, asset_server: Option<Res<AssetServer>
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(264.0),
-                bottom: Val::Px(24.0),
+                left: Val::Px(468.0),
+                bottom: Val::Px(16.0),
                 flex_direction: FlexDirection::Row,
                 column_gap: Val::Px(SKILL_SLOT_GAP),
                 align_items: AlignItems::FlexEnd,
@@ -656,12 +656,12 @@ fn setup_combat_ui(mut commands: Commands, asset_server: Option<Res<AssetServer>
                         Button,
                         Node {
                             width: Val::Px(SKILL_SLOT_SIZE),
-                            height: Val::Px(SKILL_SLOT_SIZE),
+                            height: Val::Px(112.0),
                             border: UiRect::all(Val::Px(1.0)),
                             border_radius: BorderRadius::all(Val::Px(8.0)),
                             padding: UiRect::all(Val::Px(4.0)),
                             flex_direction: FlexDirection::Column,
-                            justify_content: JustifyContent::Center,
+                            justify_content: JustifyContent::FlexEnd,
                             align_items: AlignItems::Center,
                             row_gap: Val::Px(1.0),
                             ..default()
@@ -673,7 +673,7 @@ fn setup_combat_ui(mut commands: Commands, asset_server: Option<Res<AssetServer>
                     ))
                     .with_children(|slot| {
                         // The atlas is presentation only; shortcuts and status remain
-                        // live text above it, including while the art is loading.
+                        // live text below it, including while the art is loading.
                         slot.spawn((
                             ImageNode {
                                 image: skill_atlas.clone().unwrap_or_default(),
@@ -681,10 +681,10 @@ fn setup_combat_ui(mut commands: Commands, asset_server: Option<Res<AssetServer>
                             },
                             Node {
                                 position_type: PositionType::Absolute,
-                                left: Val::Px(0.0),
-                                top: Val::Px(0.0),
-                                width: Val::Percent(100.0),
-                                height: Val::Percent(100.0),
+                                left: Val::Px((SKILL_SLOT_SIZE - 48.0) * 0.5 - 1.0),
+                                top: Val::Px(1.0),
+                                width: Val::Px(48.0),
+                                height: Val::Px(48.0),
                                 border_radius: BorderRadius::all(Val::Px(7.0)),
                                 display: Display::None,
                                 ..default()
@@ -697,12 +697,16 @@ fn setup_combat_ui(mut commands: Commands, asset_server: Option<Res<AssetServer>
                             Text::new(label),
                             TextLayout::new_with_justify(Justify::Center),
                             TextFont {
-                                font_size: 24.0,
+                                font_size: 14.0,
                                 ..default()
                             },
                             BackgroundColor(Color::srgba(0.01, 0.02, 0.03, 0.78)),
                             Node {
-                                padding: UiRect::horizontal(Val::Px(4.0)),
+                                position_type: PositionType::Absolute,
+                                top: Val::Px(5.0),
+                                left: Val::Px(5.0),
+                                padding: UiRect::horizontal(Val::Px(3.0)),
+                                border_radius: BorderRadius::all(Val::Px(3.0)),
                                 ..default()
                             },
                             TextColor::WHITE,
@@ -710,32 +714,32 @@ fn setup_combat_ui(mut commands: Commands, asset_server: Option<Res<AssetServer>
                         slot.spawn((
                             Text::new(""),
                             TextFont {
-                                font_size: 13.0,
+                                font_size: 11.0,
                                 ..default()
                             },
                             TextColor(Color::srgba(0.88, 0.90, 0.94, 1.0)),
                             TextLayout::new_with_justify(Justify::Center),
-                            BackgroundColor(Color::srgba(0.01, 0.02, 0.03, 0.88)),
                             Node {
                                 width: Val::Percent(100.0),
                                 ..default()
                             },
                             SkillNameLabel { slot: i },
+                            Name::new(format!("SkillName-{label}")),
                         ));
                         slot.spawn((
                             Text::new("Lv 1"),
                             TextFont {
-                                font_size: 12.0,
+                                font_size: 11.0,
                                 ..default()
                             },
                             TextColor(Color::srgba(0.82, 0.84, 0.90, 1.0)),
                             TextLayout::new_with_justify(Justify::Center),
-                            BackgroundColor(Color::srgba(0.01, 0.02, 0.03, 0.88)),
                             Node {
                                 width: Val::Percent(100.0),
                                 ..default()
                             },
                             SkillRankLabel { slot: i },
+                            Name::new(format!("SkillRank-{label}")),
                         ));
                     });
                 });
@@ -825,7 +829,7 @@ fn update_skill_bar_system(
         let status = if !unlocked_slots_for_level(prog.level.max(1))[label.slot] {
             format!("Locked Lv {}", shared::SLOT_UNLOCK_LEVELS[label.slot])
         } else if cooldowns.remaining_secs[label.slot] > 0.0 {
-            format!("{:.1}s cooldown", cooldowns.remaining_secs[label.slot])
+            format!("{:.1}s", cooldowns.remaining_secs[label.slot])
         } else if local.is_some_and(|(_, _, stats, _)| stats.mana < cost) {
             "Need mana".to_string()
         } else if pending
@@ -856,7 +860,7 @@ fn update_skill_bar_system(
         } else {
             "Ready".to_string()
         };
-        let next = format!("Rank {rank} | {cost:.0} MP\n{status}");
+        let next = format!("R{rank} · {cost:.0} MP\n{status}");
         if text.0 != next {
             text.0 = next;
         }
@@ -3288,9 +3292,10 @@ mod tests {
             .iter(app.world())
             .map(|(slot, text)| (slot.slot, text.0.clone()))
             .collect();
-        assert!(text.iter().any(|(slot, text)| *slot == 0
-            && text.contains("Rank 2")
-            && text.contains("1.5s cooldown")));
+        assert!(
+            text.iter()
+                .any(|(slot, text)| *slot == 0 && text.contains("R2") && text.contains("1.5s"))
+        );
         assert!(
             text.iter()
                 .any(|(slot, text)| *slot == 1 && text.contains("Need mana"))

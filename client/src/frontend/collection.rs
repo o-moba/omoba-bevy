@@ -111,6 +111,7 @@ fn spawn_collection(
     selection: Res<TeamSelection>,
     thumbnails: Res<AvatarThumbnails>,
 ) {
+    let phone = crate::platform::ui_profile() == crate::platform::UiProfile::Mobile;
     let entries = collection_entries();
     // Open on something: the current loadout avatar, else the showcase, else
     // the first entry.
@@ -146,7 +147,7 @@ fn spawn_collection(
                     .with_children(|title| {
                         title.spawn(widgets::heading("Avatars", 30.0));
                         title.spawn(widgets::label(
-                            "Scroll the roster · drag the model to turn it · switch animations below",
+                            "Your heroes, your identity · Drag a model to inspect it",
                             13.0,
                             widgets::MUTED,
                         ));
@@ -170,7 +171,10 @@ fn spawn_collection(
                 // Grid of avatars.
                 body.spawn((
                     Node {
-                        width: Val::Percent(58.0),
+                        width: Val::Percent(50.0),
+                        padding: UiRect::all(Val::Px(12.0)),
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(12.0)),
                         flex_direction: FlexDirection::Row,
                         flex_wrap: FlexWrap::Wrap,
                         align_content: AlignContent::FlexStart,
@@ -179,6 +183,8 @@ fn spawn_collection(
                         overflow: Overflow::scroll_y(),
                         ..default()
                     },
+                    BackgroundColor(widgets::PANEL),
+                    BorderColor::all(widgets::PANEL_EDGE),
                     CollectionGrid,
                     Name::new("CollectionGrid"),
                 ))
@@ -201,8 +207,14 @@ fn spawn_collection(
                         flex_direction: FlexDirection::Column,
                         align_items: AlignItems::Center,
                         row_gap: Val::Px(8.0),
+                        padding: UiRect::all(Val::Px(12.0)),
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(12.0)),
+                        min_width: Val::Px(0.0),
                         ..default()
                     },
+                    BackgroundColor(widgets::PANEL),
+                    BorderColor::all(widgets::PANEL_EDGE),
                     Name::new("CollectionPreview"),
                 ))
                 .with_children(|column| {
@@ -212,7 +224,7 @@ fn spawn_collection(
                         Node {
                             // Height-driven so the clip buttons and the
                             // avatar details stay on screen on a short window.
-                            height: Val::Vh(48.0),
+                            height: Val::Vh(if phone { 28.0 } else { 43.0 }),
                             max_height: Val::Px(420.0),
                             aspect_ratio: Some(0.742),
                             border: UiRect::all(Val::Px(1.0)),
@@ -262,8 +274,20 @@ fn spawn_avatar_tile(
     grid.spawn((
         Button,
         Node {
-            width: Val::Px(112.0),
-            height: Val::Px(146.0),
+            width: Val::Px(
+                if crate::platform::ui_profile() == crate::platform::UiProfile::Mobile {
+                    136.0
+                } else {
+                    112.0
+                },
+            ),
+            height: Val::Px(
+                if crate::platform::ui_profile() == crate::platform::UiProfile::Mobile {
+                    180.0
+                } else {
+                    146.0
+                },
+            ),
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
             justify_content: JustifyContent::FlexStart,
@@ -289,6 +313,26 @@ fn spawn_avatar_tile(
         ));
         if let Some(image) = thumbnails.0.get(&avatar.slug) {
             thumb.insert(ImageNode::new(image.clone()));
+        } else {
+            thumb
+                .insert(Node {
+                    width: Val::Px(84.0),
+                    height: Val::Px(84.0),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    border_radius: BorderRadius::all(Val::Px(8.0)),
+                    ..default()
+                })
+                .with_children(|portrait| {
+                    let initials: String = avatar
+                        .slug
+                        .split('-')
+                        .filter_map(|part| part.chars().next())
+                        .take(2)
+                        .flat_map(char::to_uppercase)
+                        .collect();
+                    portrait.spawn(widgets::heading(&initials, 24.0));
+                });
         }
         tile.spawn(widgets::label(&avatar.display_name, 12.0, widgets::IVORY));
         tile.spawn(widgets::label(

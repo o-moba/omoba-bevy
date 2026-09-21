@@ -614,3 +614,41 @@ is intentionally empty at startup, so `load_builtin_model_catalog` and its remot
 downloader are not the active roster import path. Android uses the SDK without
 its optional desktop Bevy/HTTP feature set. These boundaries should guide further
 SDK extraction instead of claiming all avatar loading already lives in the SDK.
+
+
+## Interface composition and combat visibility (0.21.0-rc.2)
+
+The Verdant interface uses shared dark surfaces, champagne accents, jade primary
+buttons, and packaged Inter/CJK fonts across menus and gameplay overlays. Home
+organizes identity, the selected hero, and matchmaking into one composition.
+Collection, card customization, hero selection, queue, loading, and results retain
+their existing navigation and server-driven behavior.
+
+In desktop matches the compact minimap, hero resources, four abilities, and
+inventory form a tactical dock at the bottom. Objective, target, and boss-buff
+information remains in a compact status panel above the abilities. The central
+30% of the viewport's upper 30% stays free of persistent opaque HUD panels.
+Landscape phone layouts retain the thumb controls, move hero/social status beside
+the minimap, and place match status in the gap between the lower controls. This is
+an interface change; world visibility and fog mechanics are unchanged.
+
+Phone shell buttons and utility controls compensate for menu scale so their touch
+areas remain usable. Essential shell text has a readable minimum size; modals use
+real phone pixels rather than inheriting the shell shrink factor.
+
+Help and settings use the same hierarchy and surfaces as the shell. Settings
+adjusters have aligned label/value columns and retain scrolling. Account, history,
+and friends use selected navigation tabs and consistent hover feedback. Purchases,
+reconnect actions, upgrades, input gating, and profile persistence remain available.
+Shell settings remain open before a connection is established; the phone utility
+bar hides while the shop is open so the shop Close action stays reachable.
+Help can be opened from the shell before joining and dismissed with its button
+or Escape; phone menu scale is restored after closing. Automatic first-match
+onboarding still waits for local admission.
+
+`OMOBA_FRONTEND_QA_OUTPUT` also captures the game menu and settings at two scroll
+positions, plus the server-address form. It requires essential navigation and action
+controls to fit the viewport. These menu states are explicitly labeled fixtures. The beta UI harness
+measures the north sightline, HUD text containment, control bounds, and unrelated
+panel overlap in actual Bevy screenshots. Phone previews use the development
+`OMOBA_TOUCH_CONTROLS=1` path and do not replace physical-device validation.

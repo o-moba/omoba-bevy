@@ -55,6 +55,11 @@ impl Plugin for BetaUiQaPlugin {
             directory,
             started: Instant::now(),
             timeout: Duration::from_secs(seconds),
+            next_readiness_report: Duration::ZERO,
+            hero_class: std::env::var("OMOBA_BETA_UI_CLASS").ok().map(|name| {
+                shared::HeroClass::from_id(&name)
+                    .expect("OMOBA_BETA_UI_CLASS must be warrior, mage, ranger or cleric")
+            }),
             stage: 0,
             frames: 0,
             in_flight: false,
@@ -72,6 +77,7 @@ impl Plugin for BetaUiQaPlugin {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(720),
         })
+        .insert_resource(bevy::winit::WinitSettings::continuous())
         .add_systems(
             PreUpdate,
             prepare_controls.after(bevy::ui::UiSystems::Focus),
@@ -102,6 +108,8 @@ struct BetaUiQa {
     directory: PathBuf,
     started: Instant,
     timeout: Duration,
+    next_readiness_report: Duration,
+    hero_class: Option<shared::HeroClass>,
     stage: usize,
     frames: u32,
     in_flight: bool,
@@ -125,7 +133,25 @@ fn prepare_controls(
     equipment: Query<&crate::net::PlayerEquipment, With<crate::player::Player>>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mut focus_requested: Local<bool>,
+    screen: Res<State<crate::frontend::AppScreen>>,
+    mut next: ResMut<NextState<crate::frontend::AppScreen>>,
+    selection: Res<crate::team::TeamSelection>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
 ) {
+    // World harnesses bypass the session-driven frontend. The picker is now
+    // created only on HeroSelect, so this legacy HUD sequence owns those two
+    // presentation states while admission still uses the real lock-in button.
+    use crate::frontend::AppScreen;
+    let wanted = if qa.stage == 0 {
+        Some(AppScreen::HeroSelect)
+    } else if session.join_confirmed() {
+        Some(AppScreen::InMatch)
+    } else {
+        None
+    };
+    if let Some(wanted) = wanted.filter(|wanted| *wanted != *screen.get()) {
+        next.set(wanted);
+    }
     if let Ok(mut window) = windows.single_mut() {
         // The capture command owns this short-lived window. Request real OS
         // focus once; do not bypass the production focus-loss input gate.
@@ -140,23 +166,31 @@ fn prepare_controls(
                 .set_physical_resolution(qa.width, qa.height);
         }
     }
-    if qa.stage == 5 && shop.open {
+    let phone = mobile.as_ref().is_some_and(|mobile| mobile.enabled);
+    if qa.stage == 5 && shop.open && !phone {
         keys.press(KeyCode::Escape);
     } else {
         keys.release(KeyCode::Escape);
     }
     for (name, mut interaction) in &mut buttons {
-        let press = (qa.stage == 1
-            && session.is_connected()
-            && !session.join_confirmed()
-            && name.as_str()
-                == if std::env::var("OMOBA_QA_TEAM").as_deref() == Ok("blue") {
-                    "TeamBlueButton"
-                } else {
-                    "TeamGreenButton"
-                })
+        let class_press = qa.stage == 0
+            && qa.hero_class.is_some_and(|class| {
+                selection.hero_class != class
+                    && name.as_str() == format!("ClassButton-{}", class.id())
+            });
+        let press = class_press
+            || (qa.stage == 1
+                && session.is_connected()
+                && !session.join_confirmed()
+                && name.as_str()
+                    == if std::env::var("OMOBA_QA_TEAM").as_deref() == Ok("blue") {
+                        "TeamBlueButton"
+                    } else {
+                        "TeamGreenButton"
+                    })
             || (qa.stage == 2 && help.0 && name.as_str() == "HelpDismissButton")
             || (qa.stage == 3 && !shop.open && name.as_str() == "ShopOpenButton")
+            || (qa.stage == 5 && shop.open && phone && name.as_str() == "ShopCloseButton")
             || (qa.stage == 4
                 && shop.open
                 && !shop.purchase_pending()
@@ -297,6 +331,9 @@ fn prepare_skill_upgrade_fixture(
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct UiScene<'w, 's> {
+    screen: Res<'w, State<crate::frontend::AppScreen>>,
+    selection: Res<'w, crate::team::TeamSelection>,
+    hero_classes: Query<'w, 's, &'static crate::net::NetworkHeroClass, With<crate::player::Player>>,
     windows: Query<'w, 's, Entity, With<PrimaryWindow>>,
     environment: Query<'w, 's, Entity, With<VerdantEnvironment>>,
     scenes: Query<'w, 's, (&'static SceneRoot, Option<&'static SceneInstance>)>,
@@ -390,9 +427,25 @@ fn capture(
                     RecursiveDependencyLoadState::Loaded
                 )
         });
+    let class_ready = qa.hero_class.is_none_or(|class| {
+        if qa.stage == 0 {
+            scene.selection.hero_class == class
+        } else {
+            scene
+                .hero_classes
+                .single()
+                .is_ok_and(|actual| actual.0 == class)
+        }
+    });
     let ready = scenes_ready
+        && class_ready
         && match qa.stage {
-            0 => session.is_connected() && !session.join_confirmed() && !scene.join.is_empty(),
+            0 => {
+                session.is_connected()
+                    && !session.join_confirmed()
+                    && !scene.join.is_empty()
+                    && *scene.screen.get() == crate::frontend::AppScreen::HeroSelect
+            }
             1 => {
                 session.join_confirmed()
                     && matches!(game.state, GameState::Running)
@@ -423,6 +476,28 @@ fn capture(
             6 => session.join_confirmed() && matches!(game.state, GameState::Victory { .. }),
             _ => false,
         };
+    if !ready && qa.started.elapsed() >= qa.next_readiness_report {
+        qa.next_readiness_report = qa.started.elapsed() + Duration::from_secs(5);
+        let diagnostic = serde_json::json!({
+            "stage": qa.stage,
+            "screen": format!("{:?}", scene.screen.get()),
+            "connected": session.is_connected(), "admitted": session.join_confirmed(),
+            "picker_roots": scene.join.iter().count(), "scenes_ready": scenes_ready, "class_ready":class_ready,
+            "requested_class":qa.hero_class.map(|class|class.id()),
+            "environment_roots": scene.environment.iter().count(),
+            "scenes": scene.scenes.iter().map(|(root, instance)| serde_json::json!({
+                "instance_ready": instance.is_some_and(|instance| spawner.instance_is_ready(**instance)),
+                "dependencies": format!("{:?}", assets.recursive_dependency_load_state(root.0.id())),
+            })).collect::<Vec<_>>(),
+            "help_open": help.0, "shop_open": shop.open, "gameplay_allowed": context.gameplay_allowed(),
+            "elapsed_seconds": qa.started.elapsed().as_secs_f64(),
+        });
+        let _ = std::fs::create_dir_all(&qa.directory);
+        let _ = std::fs::write(
+            qa.directory.join("qa-readiness.json"),
+            serde_json::to_vec_pretty(&diagnostic).unwrap(),
+        );
+    }
     qa.frames = if ready { qa.frames + 1 } else { 0 };
     if qa.frames < SETTLE_FRAMES {
         return;
@@ -433,8 +508,8 @@ fn capture(
         return;
     }
     let primary_nodes: Vec<_> = scene.nodes.iter().filter(|(name, _, _, _)| matches!(name.as_str(),
-        "TeamGreenButton" | "TeamBlueButton" | "AvatarGrid" | "HelpDismissButton" | "HelpOverlayRoot" | "GameStateLabel" | "ConnectionStatusPanel" | "MinimapRoot" | "MatchObjectivePanel" | "MatchHudColumn" | "SkillBarRoot" | "SkillSlot-Q" | "SkillSlot-R" | "EquipmentHud" | "ShopOpenButton" | "ShopPanel" | "ShopCloseButton" | "ShopBuy-EB" | "ShopBuy-GC" | "ShopSummary" | "ShopFeedback" | "MobileJoystick" | "MobileAttack" | "MobileAbility-0" | "MobileAbility-1" | "MobileAbility-2" | "MobileAbility-3" | "MobileUpgrade-0" | "MobileUpgrade-1" | "MobileUpgrade-2" | "MobileUpgrade-3" | "PhoneMenuBar" | "QaSkillUpgradeFixtureLabel")
-            || name.as_str().starts_with("ShopBuy-") || name.as_str().starts_with("ShopDescription-") || name.as_str().starts_with("ShopDetails-"))
+        "TeamGreenButton" | "TeamBlueButton" | "AvatarGrid" | "HelpDismissButton" | "HelpOverlayRoot" | "GameStateLabel" | "ConnectionStatusPanel" | "MinimapRoot" | "MatchObjectivePanel" | "MatchHudColumn" | "SkillBarRoot" | "SkillSlot-Q" | "SkillSlot-R" | "EquipmentHud" | "ShopOpenButton" | "ShopPanel" | "ShopCloseButton" | "ShopBuy-EB" | "ShopBuy-GC" | "ShopSummary" | "ShopFeedback" | "MobileJoystick" | "MobileAttack" | "MobileAbility-0" | "MobileAbility-1" | "MobileAbility-2" | "MobileAbility-3" | "MobileUpgrade-0" | "MobileUpgrade-1" | "MobileUpgrade-2" | "MobileUpgrade-3" | "PhoneMenuBar" | "QaSkillUpgradeFixtureLabel" | "SocialEntry" | "SocialStatus" | "CareerEntryActions" | "HudProgressionText" | "HudXpText" | "MatchStatusText" | "MatchBuffText" | "EquipmentGold")
+            || name.as_str().starts_with("ShopBuy-") || name.as_str().starts_with("ShopDescription-") || name.as_str().starts_with("ShopDetails-") || name.as_str().starts_with("SkillName-") || name.as_str().starts_with("SkillRank-") || name.as_str().starts_with("SkillSlot-") || name.as_str().starts_with("SkillIcon-"))
         .map(|(name, node, transform, visible)| {
             let center = transform.translation;
             let size = node.size() * transform.to_scale_angle_translation().0.abs();
@@ -447,25 +522,128 @@ fn capture(
                     && center.x+size.x/2.0 <= qa.width as f32 + 1.0 && center.y+size.y/2.0 <= qa.height as f32 + 1.0})
         }).collect();
     let stage = qa.stage;
-    let desktop_minimap_upper_left = (matches!(stage, 2 | 5)
+    let shop_close_clear = !matches!(stage, 3 | 4)
+        || primary_nodes
+            .iter()
+            .find(|node| node["name"] == "ShopCloseButton" && node["visible"] == true)
+            .and_then(measured_rect)
+            .is_some_and(|close| {
+                primary_nodes
+                    .iter()
+                    .find(|node| node["name"] == "PhoneMenuBar" && node["visible"] == true)
+                    .and_then(measured_rect)
+                    .is_none_or(|bar| {
+                        let overlap = close.intersect(bar);
+                        overlap.width() <= 0.5 || overlap.height() <= 0.5
+                    })
+            });
+    if !shop_close_clear {
+        error!("BETA_UI_QA failed: shop Close is missing or obscured by phone utility controls");
+        exit.write(AppExit::error());
+        return;
+    }
+    let desktop_minimap_bottom_left = (matches!(stage, 2 | 5)
         && !mobile.as_ref().is_some_and(|mobile| mobile.enabled))
     .then(|| {
         primary_nodes.iter().any(|node| {
+            let expected = crate::minimap::DESKTOP_MINIMAP_SIZE as f64;
+            let inset = crate::minimap::DESKTOP_MINIMAP_INSET as f64;
+            let number = |field: &str, axis: usize| node[field][axis].as_f64().unwrap_or(f64::NAN);
+            let logical_height = qa.height as f64 * number("logical_size", 1) / number("size", 1);
             node["name"] == "MinimapRoot"
                 && node["visible"] == true
-                && (0..2).all(|axis| {
-                    node["logical_min"][axis].as_f64().is_some_and(|value| {
-                        (value - crate::minimap::DESKTOP_MINIMAP_INSET as f64).abs() <= 1.0
-                    }) && node["logical_size"][axis].as_f64().is_some_and(|value| {
-                        (value - crate::minimap::MINIMAP_SIZE as f64).abs() <= 1.0
-                    })
-                })
+                && (number("logical_min", 0) - inset).abs() <= 1.0
+                && (number("logical_min", 1) + expected + inset - logical_height).abs() <= 1.0
+                && (0..2).all(|axis| (number("logical_size", axis) - expected).abs() <= 1.0)
         })
     });
-    if desktop_minimap_upper_left == Some(false) {
-        error!(
-            "BETA_UI_QA failed: desktop minimap must be 252px at logical inset16: {primary_nodes:?}"
-        );
+    if desktop_minimap_bottom_left == Some(false) {
+        error!("BETA_UI_QA failed: compact desktop map must anchor bottom-left: {primary_nodes:?}");
+        exit.write(AppExit::error());
+        return;
+    }
+    let north_sightline_clear = !matches!(stage, 2 | 5)
+        || primary_nodes
+            .iter()
+            .filter(|node| {
+                node["visible"] == true && node["name"].as_str().is_some_and(persistent_hud_panel)
+            })
+            .all(|node| {
+                measured_rect(node).is_none_or(|rect| {
+                    clears_north_sightline(rect, Vec2::new(qa.width as f32, qa.height as f32))
+                })
+            });
+    if !north_sightline_clear {
+        error!("BETA_UI_QA failed: persistent HUD blocks the north approach: {primary_nodes:?}");
+        exit.write(AppExit::error());
+        return;
+    }
+    let hud_text_fits = !matches!(stage, 2 | 5)
+        || primary_nodes.iter().all(|text| {
+            let Some(name) = text["name"].as_str() else {
+                return true;
+            };
+            let parent = match name {
+                "HudProgressionText" | "HudXpText" => Some("MatchHudColumn".to_owned()),
+                "MatchStatusText" | "MatchBuffText" => Some("MatchObjectivePanel".to_owned()),
+                "EquipmentGold" => Some("EquipmentHud".to_owned()),
+                _ => name
+                    .strip_prefix("SkillName-")
+                    .or_else(|| name.strip_prefix("SkillRank-"))
+                    .map(|slot| format!("SkillSlot-{slot}")),
+            };
+            if text["visible"] != true {
+                return true;
+            }
+            let Some(parent) = parent else {
+                return true;
+            };
+            let Some(rect) = measured_rect(text) else {
+                return true;
+            };
+            primary_nodes
+                .iter()
+                .find(|node| node["name"] == parent)
+                .and_then(measured_rect)
+                .is_some_and(|parent| {
+                    parent.inflate(1.0).contains(rect.min) && parent.inflate(1.0).contains(rect.max)
+                })
+        });
+    if !hud_text_fits {
+        error!("BETA_UI_QA failed: meaningful HUD text leaves its panel: {primary_nodes:?}");
+        exit.write(AppExit::error());
+        return;
+    }
+    // Key badges intentionally sit on artwork; full ability names and live
+    // rank/status text must remain in the distinct lower card area, including
+    // the longer Ranger and Cleric names.
+    let skill_art_clear = !matches!(stage, 2 | 5)
+        || mobile.as_ref().is_some_and(|mobile| mobile.enabled)
+        || primary_nodes.iter().all(|text| {
+            let Some(slot) = text["name"].as_str().and_then(|name| {
+                name.strip_prefix("SkillName-")
+                    .or_else(|| name.strip_prefix("SkillRank-"))
+            }) else {
+                return true;
+            };
+            if text["visible"] != true {
+                return true;
+            }
+            let Some(text_rect) = measured_rect(text) else {
+                return true;
+            };
+            primary_nodes
+                .iter()
+                .find(|node| node["name"] == format!("SkillIcon-{slot}"))
+                .filter(|node| node["visible"] == true)
+                .and_then(measured_rect)
+                .is_none_or(|icon| {
+                    let overlap = icon.intersect(text_rect);
+                    overlap.width() <= 0.5 || overlap.height() <= 0.5
+                })
+        });
+    if !skill_art_clear {
+        error!("BETA_UI_QA failed: skill labels overlap their artwork: {primary_nodes:?}");
         exit.write(AppExit::error());
         return;
     }
@@ -579,6 +757,9 @@ fn capture(
         "MobileUpgrade-2",
         "MobileUpgrade-3",
         "PhoneMenuBar",
+        "SocialEntry",
+        "SocialStatus",
+        "CareerEntryActions",
     ];
     let dock: Vec<_> = primary_nodes
         .iter()
@@ -631,10 +812,12 @@ fn capture(
         return;
     }
     let record = serde_json::json!({"file":capture_file(&qa, stage), "stage":stage, "pixels":[qa.width,qa.height],
-        "mobile_controls":mobile.as_ref().is_some_and(|mobile| mobile.enabled), "admitted":session.join_confirmed(), "server_epoch":game.meta.server_epoch, "snapshot_tick":game.meta.snapshot_tick,
+        "mobile_controls":mobile.as_ref().is_some_and(|mobile| mobile.enabled), "admitted":session.join_confirmed(),
+        "requested_class":qa.hero_class.map(|class|class.id()), "selected_class":scene.selection.hero_class.id(),
+        "authoritative_class":scene.hero_classes.single().ok().map(|class|class.0.id()), "skill_art_clear":skill_art_clear, "shop_close_clear":shop_close_clear, "server_epoch":game.meta.server_epoch, "snapshot_tick":game.meta.snapshot_tick,
         "synthetic_result":stage == 6, "synthetic_progression":synthetic_progression,
         "progression_fixture":synthetic_progression.then(||serde_json::json!({"level":6,"skill_points":4,"ranks":[1,1,1,1],"server_unchanged":true})),
-        "minimap":minimap.diagnostics(), "desktop_minimap_upper_left":desktop_minimap_upper_left, "shop_modal":shop.open, "gameplay_allowed":context.gameplay_allowed(), "pause_open":pause.open,
+        "minimap":minimap.diagnostics(), "desktop_minimap_bottom_left":desktop_minimap_bottom_left, "north_sightline_clear":north_sightline_clear, "hud_text_fits":hud_text_fits, "shop_modal":shop.open, "gameplay_allowed":context.gameplay_allowed(), "pause_open":pause.open,
         "equipment":equipment.single().ok().map(|e|serde_json::json!({"gold":e.gold,"inventory":e.inventory,"bonuses":e.item_bonuses,"receipt":e.last_purchase})), "primary_controls_fit":controls_fit, "shop_text_fits":shop_text_fits, "primary_nodes":primary_nodes});
     info!("BETA_UI_QA capture_request={record}");
     qa.captures.push(record);
@@ -661,5 +844,77 @@ fn record_readback(
             captured.image.width(),
             captured.image.height()
         );
+    }
+}
+
+/// Check screen-space panels only; world labels and transient feedback remain independent.
+fn persistent_hud_panel(name: &str) -> bool {
+    matches!(
+        name,
+        "MinimapRoot"
+            | "MatchObjectivePanel"
+            | "MatchHudColumn"
+            | "SkillBarRoot"
+            | "EquipmentHud"
+            | "PhoneMenuBar"
+            | "SocialEntry"
+            | "SocialStatus"
+            | "CareerEntryActions"
+            | "ConnectionStatusPanel"
+    )
+}
+
+fn measured_rect(node: &serde_json::Value) -> Option<Rect> {
+    let center = Vec2::new(
+        node["center"][0].as_f64()? as f32,
+        node["center"][1].as_f64()? as f32,
+    );
+    let size = Vec2::new(
+        node["size"][0].as_f64()? as f32,
+        node["size"][1].as_f64()? as f32,
+    );
+    (center.is_finite() && size.is_finite() && size.min_element() > 0.0)
+        .then(|| Rect::from_center_size(center, size))
+}
+
+fn clears_north_sightline(panel: Rect, viewport: Vec2) -> bool {
+    let north = Rect::from_corners(
+        Vec2::new(viewport.x * 0.35, 0.0),
+        Vec2::new(viewport.x * 0.65, viewport.y * 0.30),
+    );
+    let overlap = panel.intersect(north);
+    overlap.width() <= 0.5 || overlap.height() <= 0.5
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    #[test]
+    fn north_guard_rejects_the_old_banner_and_accepts_corner_and_lower_docks_at_each_scale() {
+        for viewport in [
+            Vec2::new(844.0, 390.0),
+            Vec2::new(1280.0, 720.0),
+            Vec2::new(1920.0, 1080.0),
+        ] {
+            for scale in [1.0, 2.0] {
+                let viewport = viewport * scale;
+                let rect = |min: Vec2, size: Vec2| {
+                    Rect::from_corners(min * viewport, (min + size) * viewport)
+                };
+                assert!(!clears_north_sightline(
+                    rect(Vec2::new(0.25, 0.02), Vec2::new(0.50, 0.12)),
+                    viewport
+                ));
+                assert!(clears_north_sightline(
+                    rect(Vec2::new(0.02, 0.02), Vec2::new(0.32, 0.25)),
+                    viewport
+                ));
+                assert!(clears_north_sightline(
+                    rect(Vec2::new(0.30, 0.75), Vec2::new(0.40, 0.20)),
+                    viewport
+                ));
+            }
+        }
     }
 }

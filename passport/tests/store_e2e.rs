@@ -16,11 +16,17 @@ fn approved_template_is_listed_installed_and_passes_omoba_verification() {
     store::initialize(root.clone(), true);
 
     let avatars = shared::store_avatars();
-    assert!(!avatars.is_empty(), "registry lists no Omoba-approved template");
+    assert!(
+        !avatars.is_empty(),
+        "registry lists no Omoba-approved template"
+    );
     for avatar in avatars {
         let protected = avatar.passport.as_ref().expect("store entries are paid");
         assert_eq!(omoba_passport::protected_slug(protected), avatar.slug);
-        assert_eq!(shared::normalize_avatar_slug(Some(&avatar.slug)), Some(avatar.slug.as_str()));
+        assert_eq!(
+            shared::normalize_avatar_slug(Some(&avatar.slug)),
+            Some(avatar.slug.as_str())
+        );
         assert!(store::knows(&avatar.slug));
 
         store::install_blocking(&avatar.slug).expect("verified install");
