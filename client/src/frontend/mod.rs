@@ -78,6 +78,7 @@ impl Plugin for FrontendPlugin {
             .init_resource::<JoinNotice>()
             .add_systems(Startup, bypass_shell_for_automation)
             .add_systems(Update, retry_connection_from_menus)
+            .add_systems(Update, scale_menus_to_the_window)
             .add_systems(
                 Update,
                 (apply_pending_screen, drive_screen_from_session)
@@ -243,6 +244,47 @@ fn drive_screen_from_session(
     }
 }
 
+/// Height the front-end screens are laid out for. Everything was checked at
+/// 1280x720 and 1024x640; a phone in landscape is ~400 logical pixels tall.
+const MENU_DESIGN_HEIGHT: f32 = 640.0;
+/// Below this the text would stop being readable on a phone.
+const MIN_MENU_SCALE: f32 = 0.55;
+
+/// Scale for the front-end screens on a window this tall. Never above 1: a
+/// big window gets more room, not bigger buttons.
+pub fn menu_scale(logical_height: f32) -> f32 {
+    if logical_height <= 0.0 {
+        return 1.0;
+    }
+    (logical_height / MENU_DESIGN_HEIGHT).clamp(MIN_MENU_SCALE, 1.0)
+}
+
+/// Shrinks the whole UI while a menu is on screen and restores it for the
+/// match, whose HUD and touch controls are laid out for the real size. On a
+/// phone the menus are otherwise taller than the screen.
+fn scale_menus_to_the_window(
+    screen: Res<State<AppScreen>>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    mut ui_scale: ResMut<UiScale>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    // The phone picker is laid out in real screen pixels by `mobile_ui`,
+    // like the match HUD: scaling it would misplace every part.
+    let phone_picker = *screen.get() == AppScreen::HeroSelect
+        && mobile.as_ref().is_some_and(|mobile| mobile.enabled);
+    let wanted = if screen.get().is_menu() && !phone_picker {
+        menu_scale(window.resolution.height())
+    } else {
+        1.0
+    };
+    if (ui_scale.0 - wanted).abs() > f32::EPSILON {
+        ui_scale.0 = wanted;
+    }
+}
+
 /// Before anything is committed nobody reconnects for the player, so the
 /// menus do: the career profile and the PLAY path come back on their own when
 /// the server does.
@@ -308,6 +350,19 @@ mod tests {
             keys(&["OMOBA_FRONTEND_QA_OUTPUT", "HOME"]).into_iter()
         ));
         assert!(!bypass_for(keys(&["OMOBA_QA_WIDTH"]).into_iter()));
+    }
+
+    #[test]
+    fn menus_shrink_on_a_phone_and_never_grow_on_a_big_screen() {
+        // iPhone 16 Pro in landscape is 874x402 logical pixels.
+        let phone = menu_scale(402.0);
+        assert!(phone < 0.7 && phone >= MIN_MENU_SCALE, "{phone}");
+        assert_eq!(menu_scale(640.0), 1.0);
+        // iPad Air 11" landscape and desktop windows keep the designed size.
+        assert_eq!(menu_scale(820.0), 1.0);
+        assert_eq!(menu_scale(1440.0), 1.0);
+        assert_eq!(menu_scale(100.0), MIN_MENU_SCALE);
+        assert_eq!(menu_scale(0.0), 1.0);
     }
 
     #[test]

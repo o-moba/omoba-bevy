@@ -104,7 +104,9 @@ fn setup_phone_ui(mut commands: Commands) {
                 column_gap: Val::Px(6.0),
                 ..default()
             },
-            ZIndex(30),
+            // Above the front-end screens: on a phone this bar is the only way
+            // to settings and to the server address (there is no Escape key).
+            ZIndex(crate::frontend::widgets::SCREEN_Z + 10),
             PhoneBar,
             Name::new("PhoneMenuBar"),
         ))
@@ -329,6 +331,7 @@ pub(crate) fn address_keyboard(
 fn sync_phone_ui(
     mobile: Res<MobileControls>,
     session: Res<ClientSession>,
+    screen: Option<Res<State<crate::frontend::AppScreen>>>,
     mut entry: ResMut<ServerEntry>,
     mut bar: Query<
         &mut Node,
@@ -356,8 +359,15 @@ fn sync_phone_ui(
             entry.open = true;
         }
     }
+    // The bar is how a phone reaches settings and the server address: it
+    // belongs on the home screen, the picker and the match. The other menus
+    // have their own Back and would collide with it in the corner.
+    let bar_wanted = screen.as_ref().is_none_or(|screen| {
+        use crate::frontend::AppScreen;
+        !screen.get().is_menu() || matches!(screen.get(), AppScreen::Home | AppScreen::HeroSelect)
+    });
     for mut node in &mut bar {
-        node.display = if mobile.enabled && mobile.landscape {
+        node.display = if mobile.enabled && mobile.landscape && bar_wanted {
             Display::Flex
         } else {
             Display::None
@@ -567,13 +577,35 @@ fn adapt_phone_layout(
                 node.width = Val::Px((grid_width - 10.0) * 0.5);
                 node.height = Val::Px(44.0);
             }
+            // The hint starts beside the Back button, not under it.
             "TeamSelectHint" => absolute(
                 &mut node,
-                left,
+                grid_left,
                 mobile.viewport.y - bottom - 17.0,
-                width,
+                grid_width,
                 None,
             ),
+            // Back sits under the class column; the top-right corner belongs
+            // to the phone bar (?, MENU, SERVER).
+            "HeroSelectHeader" => {
+                absolute(
+                    &mut node,
+                    left,
+                    mobile.viewport.y - bottom - 48.0,
+                    class_width,
+                    Some(44.0),
+                );
+                node.column_gap = Val::Px(0.0);
+            }
+            "HeroSelectBack" => {
+                node.width = Val::Percent(100.0);
+                node.height = Val::Px(44.0);
+            }
+            // Desktop-only picker parts: no room beside the phone grid, and the
+            // wallet pairing flow is not supported on a phone yet.
+            "HeroSelectTitle" | "HeroSelectStatus" | "HeroSelectPanel" | "EkzaConnectRow" => {
+                node.display = Display::None;
+            }
             "ServerEntryPanel" => {
                 node.width = Val::Px(width.min(860.0));
                 node.max_width = Val::Px(width);

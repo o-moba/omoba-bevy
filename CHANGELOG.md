@@ -67,6 +67,14 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
   - Smaller: the accent swatch follows the choice, every `*_QA_OUTPUT` world harness
     bypasses the shell (decided once, not per frame), and the home footer no longer
     advertises an F1 overlay that only exists in a match.
+- Phone and tablet: the menus scale to the window height (an iPhone in landscape is about
+  400 logical pixels tall; the screens are laid out for 640) and return to full size for
+  the match, whose HUD and touch controls are laid out for the real screen. The phone
+  picker keeps its own tuned layout; its Back button sits under the class column, and the
+  desktop-only parts (3D side panel, wallet strip) stay hidden there. The phone bar
+  (?, MENU, SERVER) now shows on the home screen and the picker instead of hiding under
+  them, so a phone can reach settings and the server address from the menus. Checked
+  with the touch UI at 874x402.
 - Fix eight pre-existing clippy findings so `cargo clippy --workspace --all-targets -D
   warnings` passes again under clippy 1.93 (`account-api`, `server/passport_admission`,
   `client/career_devices`, `client/map_visuals/river`). Behaviour is unchanged.

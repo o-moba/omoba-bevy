@@ -131,6 +131,7 @@ fn spawn_home(
         preview.show_portrait(slug);
     }
     let preview_image = preview.image.clone();
+    let phone = crate::platform::ui_profile() == crate::platform::UiProfile::Mobile;
     let (status, status_color) = connection_line(&session);
     let profile = career.view.profile.clone();
     let last_match = career
@@ -166,6 +167,11 @@ fn spawn_home(
                     });
                 header.spawn((
                     widgets::label(&status, 15.0, status_color),
+                    Node {
+                        // The phone bar (?, MENU, SERVER) owns the corner.
+                        margin: UiRect::right(Val::Px(if phone { 330.0 } else { 0.0 })),
+                        ..default()
+                    },
                     Name::new("HomeConnectionStatus"),
                 ));
             });
@@ -316,7 +322,11 @@ fn spawn_home(
             });
 
             root.spawn(widgets::label(
-                "Escape opens settings",
+                if phone {
+                    "MENU opens settings · SERVER sets the address"
+                } else {
+                    "Escape opens settings"
+                },
                 12.0,
                 widgets::MUTED,
             ));

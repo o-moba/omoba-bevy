@@ -143,3 +143,21 @@ InMatch` with `rejoined_after_leave: true`, and the server logs `event=leave` wi
   needs a protocol and server change (`Forming -> Drafting -> Starting`).
 - The shell reads the career view from the same UDP session, so against a dead server the
   home screen shows an empty card with "Career profile not loaded yet".
+
+## Phone pass for the iOS alpha build (2026-09-21)
+
+The shell had only been checked at 1280x720 and 1024x640. An iPhone 16 Pro in landscape
+is 874x402 logical pixels, and the client applies no UI scale on mobile, so every menu
+was taller than the screen. The phone bar (?, MENU, SERVER) sat at z 30 under the shell,
+which left a phone with no way to settings or to the server address from the menus.
+
+- `frontend::scale_menus_to_the_window` sets `UiScale` to `height / 640` (clamped to
+  0.55..1) while a menu screen is up, and back to 1 for the match.
+- The phone picker keeps its absolute layout from `mobile_ui::adapt_phone_layout` at
+  scale 1. Back moves under the class column, the hint starts beside it, and the
+  desktop-only 3D side panel and wallet strip are hidden.
+- The phone bar sits above the shell on the home screen and the picker; the other menus
+  have their own Back in that corner.
+- Evidence: `OMOBA_TOUCH_CONTROLS=1 OMOBA_QA_WIDTH=874 OMOBA_QA_HEIGHT=402` capture,
+  seven screens, `passed` (`.agent/tasks/FRONTEND-SHELL-2026-09-20/artifacts-iphone/`).
+  This is the touch UI on a desktop window, not a phone.
