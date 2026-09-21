@@ -6,6 +6,11 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### New app icon
+- The iOS app icon is the new Omoba logo. The source art ships with pre-rounded corners
+  on black; the icon is a full-bleed 1024x1024 square with the panel's own edge colours
+  extended into the corners, so the iOS mask never shows black edges.
+
 ## [0.21.0-rc.1] - 2026-09-21
 
 ### Front end: home screen, avatar collection and a hero pick before the match
