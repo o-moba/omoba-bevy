@@ -1,6 +1,6 @@
 # Feature Inventory
 
-Canonical version: `0.20.0-rc.5`
+Canonical version: `0.21.0-rc.1`
 
 ## Forest ambience and combat particles
 

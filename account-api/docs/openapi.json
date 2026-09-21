@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Omoba Account API",
-    "version": "0.20.0-rc.5",
+    "version": "0.21.0-rc.1",
     "description": "Browser clients use the Next.js BFF, not these bearer endpoints directly. No match/reward write endpoints. All private replies are no-store. Native proofs are domain-separated Ed25519; signing tuple is defined in shared/src/web_account.rs."
   },
   "paths": {

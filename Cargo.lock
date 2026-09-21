@@ -184,7 +184,7 @@ dependencies = [
 
 [[package]]
 name = "arena-sync"
-version = "0.20.0-rc.5"
+version = "0.21.0-rc.1"
 dependencies = [
  "base64",
  "reqwest",
@@ -1867,7 +1867,7 @@ dependencies = [
 
 [[package]]
 name = "client"
-version = "0.20.0-rc.5"
+version = "0.21.0-rc.1"
 dependencies = [
  "bevy",
  "crossbeam-channel",
@@ -2987,7 +2987,7 @@ dependencies = [
 
 [[package]]
 name = "harness"
-version = "0.20.0-rc.5"
+version = "0.21.0-rc.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -4245,7 +4245,7 @@ dependencies = [
 
 [[package]]
 name = "omoba-account-api"
-version = "0.20.0-rc.5"
+version = "0.21.0-rc.1"
 dependencies = [
  "axum",
  "ed25519-dalek",
@@ -4263,7 +4263,7 @@ dependencies = [
 
 [[package]]
 name = "omoba-passport"
-version = "0.20.0-rc.5"
+version = "0.21.0-rc.1"
 dependencies = [
  "ekza-bevy-sdk",
  "reqwest",
@@ -5120,7 +5120,7 @@ dependencies = [
 
 [[package]]
 name = "server"
-version = "0.20.0-rc.5"
+version = "0.21.0-rc.1"
 dependencies = [
  "bevy",
  "ed25519-dalek",
@@ -5167,7 +5167,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "0.20.0-rc.5"
+version = "0.21.0-rc.1"
 dependencies = [
  "ekza-bevy-sdk",
  "serde",
@@ -5208,7 +5208,7 @@ checksum = "d66dc143e6b11c1eddc06d5c423cfc97062865baf299914ab64caa38182078fe"
 
 [[package]]
 name = "skills"
-version = "0.20.0-rc.5"
+version = "0.21.0-rc.1"
 
 [[package]]
 name = "skrifa"

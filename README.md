@@ -31,7 +31,7 @@ a character, a map, a sound, an idea or a pull request. Help shape what comes ne
 ## What you can play today
 
 This is a **native beta under active development**. The source version is
-[`0.20.0-rc.5`](Cargo.toml); see [features](docs/features.md) and
+[`0.21.0-rc.1`](Cargo.toml); see [features](docs/features.md) and
 [changes](CHANGELOG.md) for the detailed implementation history. A source version
 is not a promise of a published installer or a live public server.
 

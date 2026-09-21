@@ -1,6 +1,6 @@
 # Omoba Account API
 
-Rust 0.20.0-rc.5 HTTP adapter for the existing game career store. Axum 0.8.9,
+Rust 0.21.0-rc.1 HTTP adapter for the existing game career store. Axum 0.8.9,
 SQLx PostgreSQL, ring 0.17.14. No HTTP endpoint can settle matches or change rewards.
 The adapter reuses the game friendship transaction and nickname validation rules.
 [OpenAPI 3.1](docs/openapi.json) describes the wire contract. Game core schema is

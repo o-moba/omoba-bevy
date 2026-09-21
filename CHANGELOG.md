@@ -6,6 +6,8 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.21.0-rc.1] - 2026-09-21
+
 ### Front end: home screen, avatar collection and a hero pick before the match
 - The client now opens on a home screen instead of dropping the player into the live
   map with a picker floating over it. Screens are an explicit state machine
