@@ -78,6 +78,7 @@ fn resolve_input_context(
     career: Option<Res<crate::career::CareerClient>>,
     social: Option<Res<crate::social::SocialClient>>,
     supporter: Option<Res<crate::supporter::SupporterUiState>>,
+    scoreboard: Option<Res<crate::edge_hud::ScoreboardState>>,
     screen: Option<Res<State<crate::frontend::AppScreen>>>,
 ) {
     context.running = game
@@ -90,6 +91,7 @@ fn resolve_input_context(
     // but nothing the player does on a menu may reach gameplay.
     let front_end_open = screen.as_ref().is_some_and(|screen| screen.get().is_menu());
     context.modal_open = front_end_open
+        || scoreboard.is_some_and(|s| s.open)
         || mobile
             .as_ref()
             .is_some_and(|mobile| mobile.enabled && (!mobile.landscape || !mobile.focused))

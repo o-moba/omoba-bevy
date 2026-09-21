@@ -131,6 +131,8 @@ fn late_human_replaces_bot_at_safe_spawn_without_inheriting_stats_or_identity() 
     let bot_addr = *rt.players.iter().find(|(_, p)| p.state.is_bot).unwrap().0;
     let bot_id = rt.players[&bot_addr].state.id;
     rt.players.get_mut(&bot_addr).unwrap().state.hp = 17.0;
+    rt.players.get_mut(&bot_addr).unwrap().state.level = 7;
+    award_gold(rt.players.get_mut(&bot_addr).unwrap(), 123);
     let event = CombatEvent {
         source: CombatEntity {
             kind: CombatEntityKind::Player,
@@ -154,6 +156,17 @@ fn late_human_replaces_bot_at_safe_spawn_without_inheriting_stats_or_identity() 
         (spawn.x, spawn.z, MAX_HP, STARTING_LEVEL)
     );
     assert_eq!(joined_count(&rt.players), 2);
+    let scoreboard = rt.combat_log.ledger.live_scoreboard().unwrap();
+    let retired = scoreboard
+        .players
+        .iter()
+        .find(|p| p.player_id == bot_id)
+        .unwrap();
+    assert_eq!(
+        (retired.connected, retired.level, retired.earned_gold),
+        (false, 7, 123)
+    );
+    assert_eq!(scoreboard.players.iter().filter(|p| p.connected).count(), 2);
     let roster = rt.combat_log.ledger.snapshot();
     assert_eq!(
         roster
@@ -188,6 +201,34 @@ fn a_deliberate_leave_frees_the_seat_and_lets_the_same_session_pick_again() {
     rt.handle_packet(addr(1), join("returning"), now);
     assert!(rt.players[&addr(1)].joined);
     let first_class = rt.players[&addr(1)].state.hero_class;
+    let first_id = rt.players[&addr(1)].state.id;
+    let first_team = rt.players[&addr(1)].state.team;
+    let match_id = rt.match_id;
+    let enemy_id = rt
+        .players
+        .values()
+        .find(|p| p.joined && p.state.team != first_team)
+        .unwrap()
+        .state
+        .id;
+    let player = rt.players.get_mut(&addr(1)).unwrap();
+    player.state.level = 4;
+    award_gold(player, 100);
+    let kill = CombatEvent {
+        source: CombatEntity {
+            kind: CombatEntityKind::Player,
+            id: first_id,
+        },
+        target: CombatEntity {
+            kind: CombatEntityKind::Player,
+            id: enemy_id,
+        },
+        amount: 10.0,
+        killed: true,
+        ..Default::default()
+    };
+    rt.combat_log.extend(now, [kill.clone()]);
+    rt.checkpoint_career_round(now);
 
     rt.handle_packet(
         addr(1),
@@ -217,6 +258,55 @@ fn a_deliberate_leave_frees_the_seat_and_lets_the_same_session_pick_again() {
     assert!(back.join_error.is_none());
     assert_ne!(back.state.hero_class, first_class);
     assert_eq!(back.state.hero_class, HeroClass::Cleric);
+    assert_eq!(rt.match_id, match_id, "guest admission stays in this round");
+    let new_id = back.state.id;
+    let new_team = back.state.team;
+    assert_ne!(new_id, first_id);
+    assert_eq!(
+        (back.state.level, back.state.earned_gold),
+        (STARTING_LEVEL, 0)
+    );
+
+    // A projectile fired before leaving keeps its original attribution. New
+    // income must advance immediately, not stall behind the old accumulator.
+    rt.combat_log.extend(now, [kill]);
+    award_gold(rt.players.get_mut(&addr(1)).unwrap(), 1);
+    rt.checkpoint_career_round(now);
+    let scoreboard = rt.combat_log.ledger.live_scoreboard().unwrap();
+    let old = scoreboard
+        .players
+        .iter()
+        .find(|p| p.player_id == first_id)
+        .unwrap();
+    assert_eq!(old.hero_class, first_class);
+    assert_eq!(
+        old.team,
+        match first_team {
+            Team::Green => shared::map::Team::Green,
+            Team::Blue => shared::map::Team::Blue,
+        }
+    );
+    assert_eq!(
+        (old.connected, old.kills, old.level, old.earned_gold),
+        (false, 2, 4, 100)
+    );
+    let new = scoreboard
+        .players
+        .iter()
+        .find(|p| p.player_id == new_id)
+        .unwrap();
+    assert_eq!(new.hero_class, HeroClass::Cleric);
+    assert_eq!(
+        new.team,
+        match new_team {
+            Team::Green => shared::map::Team::Green,
+            Team::Blue => shared::map::Team::Blue,
+        }
+    );
+    assert_eq!(
+        (new.connected, new.kills, new.level, new.earned_gold),
+        (true, 0, STARTING_LEVEL, 1)
+    );
 
     // A leave from an endpoint that never joined is harmless.
     rt.handle_packet(
@@ -228,25 +318,115 @@ fn a_deliberate_leave_frees_the_seat_and_lets_the_same_session_pick_again() {
 }
 
 #[test]
+fn signed_deliberate_leave_cannot_create_a_second_profile_seat_in_the_same_round() {
+    let mut rt = runtime(2);
+    let now = Instant::now();
+    let profile = shared::career::ProfileSummary::new("4".repeat(64), "Round identity".into());
+    rt.career
+        .backend
+        .test_authenticated(addr(1), profile.clone(), "signed-return");
+    rt.handle_packet(addr(1), join("signed-return"), now);
+    let old_id = rt.players[&addr(1)].state.id;
+    let match_id = rt.match_id;
+    assert!(rt.players[&addr(1)].joined);
+
+    rt.handle_packet(
+        addr(1),
+        ClientPacket::Leave,
+        now + Duration::from_millis(10),
+    );
+    assert_ne!(rt.players[&addr(1)].state.id, old_id);
+    rt.handle_packet(
+        addr(1),
+        join("signed-return"),
+        now + Duration::from_millis(20),
+    );
+    assert!(!rt.players[&addr(1)].joined);
+    assert_eq!(rt.match_id, match_id);
+    assert!(
+        rt.career_view(addr(1), now)
+            .error
+            .unwrap()
+            .contains("already participated in the current round")
+    );
+    let roster = rt.combat_log.ledger.snapshot();
+    let identities: Vec<_> = roster
+        .iter()
+        .filter(|p| p.profile_id.as_ref() == Some(&profile.profile_id))
+        .collect();
+    assert_eq!(identities.len(), 1);
+    assert_eq!(identities[0].player_id, old_id);
+    assert!(identities[0].disconnected);
+}
+
+#[test]
 fn disconnect_replacement_and_reconnect_keep_human_state_without_oversubscribing() {
     let mut rt = runtime(1);
     let now = Instant::now();
     rt.handle_packet(addr(1), join("anchor"), now);
     rt.handle_packet(addr(2), join("reconnect"), now);
     let original_id = rt.players[&addr(2)].state.id;
-    rt.players.get_mut(&addr(2)).unwrap().state.hp = 63.0;
+    let original = rt.players.get_mut(&addr(2)).unwrap();
+    original.state.hp = 63.0;
+    original.state.level = 6;
+    award_gold(original, 101);
+    original
+        .state
+        .inventory
+        .push(shared::shop::ItemId::VitalityGem);
+    original.state.utility.dash_remaining_secs = 11.0;
+    original.state.utility.haste_remaining_secs = 16.0;
+    original.state.utility.last_request_id = 7;
+    original.state.utility.dash_sequence = 3;
+    original.dash_ready_at = Some(now + Duration::from_secs(20));
+    original.haste_ready_at = Some(now + Duration::from_secs(25));
+    let utility = original.state.utility;
+    let dash_ready_at = original.dash_ready_at;
+    let haste_ready_at = original.haste_ready_at;
     let later = now + PLAYER_TIMEOUT + Duration::from_millis(1);
     rt.players.get_mut(&addr(1)).unwrap().last_seen = later;
     rt.maintain_roster(later);
     rt.fill_practice_bots(later);
     assert_eq!(rt.players.values().filter(|p| p.state.is_bot).count(), 1);
+    let replacement = rt.players.values_mut().find(|p| p.state.is_bot).unwrap();
+    let replacement_id = replacement.state.id;
+    replacement.state.level = 4;
+    award_gold(replacement, 57);
     rt.handle_packet(addr(3), join("reconnect"), later + Duration::from_millis(1));
+    let scoreboard = rt.combat_log.ledger.live_scoreboard().unwrap();
+    let retired = scoreboard
+        .players
+        .iter()
+        .find(|p| p.player_id == replacement_id)
+        .unwrap();
+    assert_eq!(
+        (retired.connected, retired.level, retired.earned_gold),
+        (false, 4, 57)
+    );
+    assert_eq!(scoreboard.players.iter().filter(|p| p.connected).count(), 2);
     assert_eq!(
         (rt.players[&addr(3)].state.id, rt.players[&addr(3)].state.hp),
         (original_id, 63.0)
     );
     assert_eq!(joined_count(&rt.players), 2);
     assert!(rt.players.values().all(|p| !p.state.is_bot));
+    let restored = &rt.players[&addr(3)];
+    assert_eq!((restored.state.level, restored.state.earned_gold), (6, 101));
+    assert_eq!(
+        restored.state.inventory,
+        [shared::shop::ItemId::VitalityGem]
+    );
+    assert_eq!(restored.state.utility, utility);
+    assert_eq!(
+        (restored.dash_ready_at, restored.haste_ready_at),
+        (dash_ready_at, haste_ready_at)
+    );
+    let row = scoreboard
+        .players
+        .iter()
+        .find(|p| p.player_id == original_id)
+        .unwrap();
+    assert_eq!((row.connected, row.level, row.earned_gold), (true, 6, 101));
     let expired = later + PLAYER_TIMEOUT + Duration::from_secs(1);
     rt.maintain_roster(expired);
     rt.maintain_roster(expired + EMPTY_ROSTER_GRACE);
@@ -468,6 +648,7 @@ fn bot_controller_routes_around_real_forest_and_rejects_remote_control() {
     rt.handle_packet(
         bot_addr,
         ClientPacket::Transform {
+            dash_sequence: 0,
             x: to[0],
             y: PLAYER_GROUND_Y,
             z: to[1],

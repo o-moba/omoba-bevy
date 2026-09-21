@@ -456,6 +456,7 @@ struct SocialWorld<'w, 's> {
     career: Option<Res<'w, crate::career::CareerClient>>,
     pause: Option<Res<'w, crate::pause_menu::PauseMenuState>>,
     shop: Option<Res<'w, crate::shop::ShopState>>,
+    scoreboard: Option<Res<'w, crate::edge_hud::ScoreboardState>>,
     help: Option<Res<'w, crate::help_overlay::HelpOverlayVisible>>,
     server: Option<Res<'w, crate::mobile_ui::ServerEntry>>,
     visuals: Option<Res<'w, ReactionVisuals>>,
@@ -469,6 +470,7 @@ impl SocialWorld<'_, '_> {
         self.career.as_ref().is_some_and(|v| v.modal_open())
             || self.pause.as_ref().is_some_and(|v| v.open)
             || self.shop.as_ref().is_some_and(|v| v.open)
+            || self.scoreboard.as_ref().is_some_and(|v| v.open)
             || self.help.as_ref().is_some_and(|v| v.0)
             || self.server.as_ref().is_some_and(|v| v.open)
     }
@@ -873,13 +875,19 @@ fn text(
     ));
 }
 fn button(parent: &mut ChildSpawnerCommands, title: &str, action: SocialAction, name: &str) {
+    let compact = matches!(name, "SocialOpenChat" | "SocialOpenWheel");
     parent
         .spawn((
             Button,
             Node {
                 min_height: Val::Px(44.0),
                 min_width: Val::Px(44.0),
-                padding: UiRect::axes(Val::Px(12.0), Val::Px(7.0)),
+                width: if compact { Val::Px(44.0) } else { Val::Auto },
+                padding: if compact {
+                    UiRect::ZERO
+                } else {
+                    UiRect::axes(Val::Px(12.0), Val::Px(7.0))
+                },
                 border: UiRect::all(Val::Px(1.0)),
                 border_radius: BorderRadius::all(Val::Px(6.0)),
                 justify_content: JustifyContent::Center,
@@ -894,7 +902,54 @@ fn button(parent: &mut ChildSpawnerCommands, title: &str, action: SocialAction, 
             action,
             Name::new(name.to_owned()),
         ))
-        .with_children(|p| text(p, title, 14.0, ui::IVORY, "SocialButtonText"));
+        .with_children(|p| {
+            if !compact {
+                text(p, title, 14.0, ui::IVORY, "SocialButtonText");
+                return;
+            }
+            p.spawn((
+                Node {
+                    width: Val::Px(24.0),
+                    height: Val::Px(if name == "SocialOpenChat" { 18.0 } else { 24.0 }),
+                    border: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(if name == "SocialOpenChat" {
+                        Val::Px(4.0)
+                    } else {
+                        Val::Percent(50.0)
+                    }),
+                    column_gap: Val::Px(3.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BorderColor::all(ui::GOLD),
+            ))
+            .with_children(|face| {
+                for _ in 0..if name == "SocialOpenChat" { 3 } else { 2 } {
+                    face.spawn((
+                        Node {
+                            width: Val::Px(3.0),
+                            height: Val::Px(3.0),
+                            border_radius: BorderRadius::all(Val::Percent(50.0)),
+                            ..default()
+                        },
+                        BackgroundColor(ui::GOLD),
+                    ));
+                }
+                if name == "SocialOpenWheel" {
+                    face.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            bottom: Val::Px(4.0),
+                            width: Val::Px(9.0),
+                            height: Val::Px(2.0),
+                            ..default()
+                        },
+                        BackgroundColor(ui::GOLD),
+                    ));
+                }
+            });
+        });
 }
 fn row() -> Node {
     Node {
@@ -1240,35 +1295,23 @@ fn render(
     let phone = world.mobile.enabled;
     let viewport = Vec2::new(window.width(), window.height());
     let scale = world.mobile.scale();
-    let safe_height = viewport.y - world.mobile.safe.top - world.mobile.safe.bottom;
-    let phone_entry_left = world.mobile.safe.left + (safe_height * 0.37).clamp(112.0, 142.0) + 12.0;
-    let phone_entry_width = (viewport.x * 0.35 - phone_entry_left - 8.0).clamp(104.0, 132.0);
+    let edge_right = if phone { world.mobile.safe.right } else { 16.0 };
+    let edge_top = if phone {
+        world.mobile.safe.top
+    } else {
+        desktop_social_top()
+    };
     if !social.chat_open && social.wheel.center.is_none() {
         commands
             .spawn((
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(if phone {
-                        phone_entry_left
-                    } else {
-                        crate::minimap::DESKTOP_MINIMAP_INSET
-                    }),
-                    top: Val::Px(if phone {
-                        world.mobile.safe.top + 116.0
-                    } else {
-                        desktop_social_top()
-                    }),
-                    width: if phone {
-                        Val::Px(phone_entry_width)
-                    } else {
-                        Val::Auto
-                    },
-                    flex_direction: if phone {
-                        FlexDirection::Column
-                    } else {
-                        FlexDirection::Row
-                    },
-                    align_items: AlignItems::Stretch,
+                    right: Val::Px(edge_right + 50.0),
+                    top: Val::Px(edge_top),
+                    width: Val::Px(94.0),
+                    flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::NoWrap,
+                    align_items: AlignItems::Center,
                     ..row()
                 },
                 ZIndex(85),
@@ -1285,21 +1328,9 @@ fn render(
             commands.spawn((
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(if phone {
-                        phone_entry_left
-                    } else {
-                        crate::minimap::DESKTOP_MINIMAP_INSET
-                    }),
-                    top: Val::Px(if phone {
-                        world.mobile.safe.top + 214.0
-                    } else {
-                        desktop_social_top() + 52.0
-                    }),
-                    max_width: Val::Px(if phone {
-                        phone_entry_width
-                    } else {
-                        crate::minimap::DESKTOP_MINIMAP_SIZE
-                    }),
+                    right: Val::Px(edge_right + 50.0),
+                    top: Val::Px(edge_top + 50.0),
+                    max_width: Val::Px(180.0),
                     padding: UiRect::all(Val::Px(4.0)),
                     border_radius: BorderRadius::all(Val::Px(4.0)),
                     ..default()

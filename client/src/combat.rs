@@ -37,6 +37,16 @@ pub struct LocalCastCooldown {
     total_secs: [f32; 4],
 }
 
+impl LocalCastCooldown {
+    pub(crate) fn remaining_fraction(&self, slot: usize) -> f32 {
+        if self.total_secs[slot] > 0.0 {
+            (self.remaining_secs[slot] / self.total_secs[slot]).clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+}
+
 /// One visible action message, replaced in place and expired after three seconds.
 #[derive(Resource, Default)]
 pub(crate) struct ActionFeedback {
@@ -117,6 +127,7 @@ fn reset_round_input_state(
                 NetworkCommand::BasicAttack { .. }
                     | NetworkCommand::Cast { .. }
                     | NetworkCommand::UpgradeSkill { .. }
+                    | NetworkCommand::Utility { .. }
                     | NetworkCommand::BuyItem { .. }
             )
         })
@@ -200,6 +211,7 @@ impl Plugin for CombatPlugin {
                     cast_spell_system,
                     skill_button_system,
                     mobile_cast_system,
+                    mobile_utility_system,
                     crate::targeting::mobile_basic_attack,
                     crate::targeting::resolve_basic_attack,
                     resolve_pending_cast_system,
@@ -1409,6 +1421,55 @@ fn resolve_pending_cast_system(
     pending_cast.cancel();
 }
 
+/// Utility commands use the same network request IDs and match identity as
+/// other combat actions. Cooldowns come only from authoritative snapshots.
+fn mobile_utility_system(
+    mut mobile: Option<ResMut<crate::mobile_controls::MobileControls>>,
+    context: Res<GameplayInputContext>,
+    local: Query<(&Transform, &CombatStats, &crate::net::PlayerUtility), With<Player>>,
+    camera: Query<&GlobalTransform, With<MainCamera>>,
+    mode: Res<PlayerVisualMode>,
+    mut commands: MessageWriter<NetworkCommand>,
+) {
+    let Some(mobile) = mobile.as_deref_mut().filter(|mobile| mobile.enabled) else {
+        return;
+    };
+    let intents = std::mem::take(&mut mobile.utilities);
+    if !context.gameplay_allowed() || !mobile.focused || !mobile.landscape {
+        return;
+    }
+    let Ok((transform, stats, utility)) = local.single() else {
+        return;
+    };
+    if !stats.is_alive() {
+        return;
+    }
+    for (action, aim) in intents {
+        use shared::utility::UtilityAction;
+        let remaining = match action {
+            UtilityAction::Dash => utility.state.dash_remaining_secs,
+            UtilityAction::Haste => utility.state.haste_remaining_secs,
+        };
+        if remaining > 0.0 {
+            continue;
+        }
+        let direction = if action == UtilityAction::Dash {
+            let screen = aim
+                .or_else(|| (mobile.movement.length_squared() > 0.001).then_some(mobile.movement));
+            if let (Some(screen), Ok(camera)) = (screen, camera.single()) {
+                crate::player::mobile_screen_direction(screen, camera, *mode)
+                    .xz()
+                    .normalize_or_zero()
+            } else {
+                transform.forward().xz().normalize_or_zero()
+            }
+        } else {
+            Vec2::ZERO
+        };
+        commands.write(NetworkCommand::Utility { action, direction });
+    }
+}
+
 /// Mobile abilities share the existing PendingCast/try_cast_slot path. The
 /// assistance step changes only target choice, never range, mana or cooldowns.
 #[allow(clippy::type_complexity)]
@@ -2346,6 +2407,70 @@ fn screen_pick_distance(pointer: Vec2, actor_center: Vec2, radius_px: f32) -> Op
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn utility_intents_obey_snapshot_cooldowns_and_clear_on_modal_death_or_focus_loss() {
+        use shared::utility::{UtilityAction, UtilityState};
+        for gate in 0..5 {
+            let mut app = App::new();
+            let mut mobile = crate::mobile_controls::MobileControls::default();
+            mobile.enabled = true;
+            mobile.utilities = vec![(UtilityAction::Dash, None), (UtilityAction::Haste, None)];
+            if gate == 4 {
+                mobile.focused = false;
+            }
+            app.insert_resource(mobile)
+                .insert_resource(GameplayInputContext {
+                    modal_open: gate == 1,
+                    ..default()
+                })
+                .insert_resource(PlayerVisualMode::Models3d)
+                .add_message::<NetworkCommand>()
+                .add_systems(Update, mobile_utility_system);
+            app.world_mut().spawn((
+                Player,
+                Transform::default(),
+                CombatStats {
+                    hp: if gate == 2 { 0.0 } else { 100.0 },
+                    ..default()
+                },
+                crate::net::PlayerUtility {
+                    state: UtilityState {
+                        dash_remaining_secs: if gate == 3 { 5.0 } else { 0.0 },
+                        haste_remaining_secs: if gate == 3 { 8.0 } else { 0.0 },
+                        ..default()
+                    },
+                },
+            ));
+            app.update();
+            let sent: Vec<_> = app
+                .world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .collect();
+            assert!(
+                app.world()
+                    .resource::<crate::mobile_controls::MobileControls>()
+                    .utilities
+                    .is_empty()
+            );
+            if gate == 0 {
+                assert!(
+                    matches!(sent.as_slice(), [NetworkCommand::Utility { action: UtilityAction::Dash, direction }, NetworkCommand::Utility { action: UtilityAction::Haste, .. }] if *direction == Vec2::NEG_Y)
+                );
+            } else {
+                assert!(sent.is_empty());
+            }
+            app.update();
+            assert_eq!(
+                app.world_mut()
+                    .resource_mut::<Messages<NetworkCommand>>()
+                    .drain()
+                    .count(),
+                0
+            );
+        }
+    }
 
     #[test]
     fn hidden_and_protected_nearest_candidates_do_not_mask_visible_targets() {

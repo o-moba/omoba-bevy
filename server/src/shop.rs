@@ -84,6 +84,11 @@ pub(crate) fn handle_purchase(
     });
 }
 
+pub(crate) fn award_gold(player: &mut ConnectedPlayer, amount: u32) {
+    player.state.gold = player.state.gold.saturating_add(amount);
+    player.state.earned_gold = player.state.earned_gold.saturating_add(amount);
+}
+
 pub(crate) fn accrue_passive_gold(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,
     phase: &GameState,
@@ -96,7 +101,7 @@ pub(crate) fn accrue_passive_gold(
         player.gold_income_remainder += dt * GOLD_PER_SECOND;
         let earned = player.gold_income_remainder.floor() as u32;
         player.gold_income_remainder -= earned as f32;
-        player.state.gold = player.state.gold.saturating_add(earned);
+        award_gold(player, earned);
     }
 }
 
@@ -508,5 +513,39 @@ mod tests {
         assert_eq!(rt.disconnected_sessions["shopper"].player.state.gold, 0);
         accrue_passive_gold(&mut rt.players, &GameState::Running, 3.0);
         assert_eq!(rt.disconnected_sessions["shopper"].player.state.gold, 0);
+    }
+    #[test]
+    fn earned_gold_is_income_not_wallet_and_survives_purchase_respawn_and_reconnect() {
+        let (mut rt, addr, now) = fixture();
+        assert_eq!(rt.players[&addr].state.earned_gold, 0);
+        accrue_passive_gold(&mut rt.players, &GameState::Running, 10.0);
+        award_gold(rt.players.get_mut(&addr).unwrap(), 200);
+        let earned = rt.players[&addr].state.earned_gold;
+        assert_eq!(earned, 210);
+        buy(&mut rt, addr, ItemId::TrailBoots, 1, now);
+        assert_eq!(rt.players[&addr].state.earned_gold, earned);
+        assert_ne!(rt.players[&addr].state.gold, STARTING_GOLD + earned);
+        rt.players.get_mut(&addr).unwrap().state.hp = 0.0;
+        rt.players.get_mut(&addr).unwrap().respawn_at = Some(now);
+        handle_respawns(
+            &mut rt.players,
+            &rt.structures,
+            &rt.map_layout,
+            &GameState::Running,
+            now,
+        );
+        assert_eq!(rt.players[&addr].state.earned_gold, earned);
+        let reconnect_at = now + PLAYER_TIMEOUT + Duration::from_millis(1);
+        rt.maintain_roster(reconnect_at);
+        let other = "127.0.0.1:57999".parse().unwrap();
+        rt.handle_packet(other, join(Team::Green, "shopper"), reconnect_at);
+        assert_eq!(rt.players[&other].state.earned_gold, earned);
+        reset_player_round(
+            rt.players.get_mut(&other).unwrap(),
+            &rt.map_layout,
+            reconnect_at,
+        );
+        assert_eq!(rt.players[&other].state.earned_gold, 0);
+        assert_eq!(rt.players[&other].state.gold, STARTING_GOLD);
     }
 }

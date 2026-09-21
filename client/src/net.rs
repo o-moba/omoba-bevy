@@ -335,6 +335,7 @@ pub(crate) enum ClientNetPipeline {
     SendCommands,
     IngestSnapshot,
     ApplySnapshot,
+    AgeUtilityTimers,
     InterpolateNetEntities,
     InterpolateRemotePlayers,
     SessionRetryInput,
@@ -354,7 +355,8 @@ pub(crate) fn configure_network_pipeline(app: &mut App) {
             ClientNetPipeline::SendLocalState.after(crate::input_context::InputContextSet::Actions),
             ClientNetPipeline::SendCommands.after(ClientNetPipeline::SendLocalState),
             ClientNetPipeline::ApplySnapshot.after(ClientNetPipeline::IngestSnapshot),
-            ClientNetPipeline::InterpolateNetEntities.after(ClientNetPipeline::ApplySnapshot),
+            ClientNetPipeline::AgeUtilityTimers.after(ClientNetPipeline::ApplySnapshot),
+            ClientNetPipeline::InterpolateNetEntities.after(ClientNetPipeline::AgeUtilityTimers),
             ClientNetPipeline::InterpolateRemotePlayers
                 .after(ClientNetPipeline::InterpolateNetEntities),
             ClientNetPipeline::SessionRetryInput.after(ClientNetPipeline::SendCommands),
@@ -405,6 +407,10 @@ impl Plugin for NetworkingPlugin {
             .add_systems(
                 Update,
                 apply_server_snapshot.in_set(ClientNetPipeline::ApplySnapshot),
+            )
+            .add_systems(
+                Update,
+                age_utility_timers.in_set(ClientNetPipeline::AgeUtilityTimers),
             )
             .add_systems(
                 Update,
@@ -489,6 +495,10 @@ pub enum NetworkCommand {
         request_id: u64,
         command: shared::social::SocialCommand,
     },
+    Utility {
+        action: shared::utility::UtilityAction,
+        direction: Vec2,
+    },
     BasicAttack {
         target: TargetId,
     },
@@ -541,6 +551,8 @@ enum ClientPacket {
         protocol_version: u16,
     },
     Transform {
+        #[serde(default)]
+        dash_sequence: u64,
         x: f32,
         y: f32,
         z: f32,
@@ -550,6 +562,13 @@ enum ClientPacket {
         target: TargetId,
         #[serde(default)]
         slot: u8,
+    },
+    Utility {
+        action: shared::utility::UtilityAction,
+        direction: [f32; 2],
+        server_epoch: u64,
+        match_id: u64,
+        request_id: u64,
     },
     BasicAttack {
         target: TargetId,
@@ -630,6 +649,8 @@ struct PlayerState {
     max_mana: f32,
     #[serde(default)]
     gold: u32,
+    #[serde(default)]
+    utility: shared::utility::UtilityState,
     #[serde(default)]
     inventory: Vec<shared::shop::ItemId>,
     #[serde(default)]
@@ -869,6 +890,8 @@ enum ServerPacket {
         your_id: u64,
         players: Vec<PlayerState>,
         #[serde(default)]
+        scoreboard: Option<shared::live_score::LiveScoreboard>,
+        #[serde(default)]
         projectiles: Vec<ProjectileState>,
         #[serde(default)]
         structures: Vec<StructureState>,
@@ -921,6 +944,8 @@ pub struct GameStateSnapshot {
     pub team_buffs: Vec<TeamBuffState>,
     /// Recent confirmed hits; presentation deduplicates by epoch, match and event id.
     pub combat_events: Vec<CombatEvent>,
+    /// Current-round authoritative ledger. None means unavailable/legacy server.
+    pub scoreboard: Option<shared::live_score::LiveScoreboard>,
 }
 
 #[derive(Resource)]
@@ -965,6 +990,7 @@ struct NetworkState {
     /// Mirror of `DebugSpeedBoost`, so snapshot reconcile can widen the snap
     /// threshold while boosting without exceeding the 16-param system limit.
     speed_boost_active: bool,
+    local_dash_ack: Option<(u64, u64, u64, u64)>,
 }
 
 /// Latest drained snapshot for this frame (filled by [`ingest_server_snapshot_packets`]).
@@ -981,6 +1007,7 @@ struct PendingSnapshotData {
     wall_time: Instant,
     your_id: u64,
     players: Vec<PlayerState>,
+    scoreboard: Option<shared::live_score::LiveScoreboard>,
     projectiles: Vec<ProjectileState>,
     structures: Vec<StructureState>,
     minions: Vec<MinionState>,
@@ -1004,6 +1031,48 @@ pub struct NetworkPlayerId(pub u64);
 
 #[derive(Component, Clone, Copy, Debug)]
 pub(crate) struct NetworkBot(pub bool);
+
+/// Server-authoritative utility timers and the accepted dash acknowledgment.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+pub struct PlayerUtility {
+    pub state: shared::utility::UtilityState,
+}
+
+impl From<&PlayerState> for PlayerUtility {
+    fn from(player: &PlayerState) -> Self {
+        Self {
+            state: player.utility,
+        }
+    }
+}
+
+/// Keep authoritative remaining durations moving between snapshots, including
+/// packet loss or a paused virtual clock. Each new snapshot replaces this estimate.
+fn age_utility_timers(time: Res<Time<Real>>, mut players: Query<&mut PlayerUtility>) {
+    let elapsed = time.delta_secs();
+    for mut utility in &mut players {
+        let state = &mut utility.state;
+        state.dash_remaining_secs = (state.dash_remaining_secs - elapsed).max(0.0);
+        state.haste_remaining_secs = (state.haste_remaining_secs - elapsed).max(0.0);
+        state.haste_active_secs = (state.haste_active_secs - elapsed).max(0.0);
+    }
+}
+
+fn accept_dash_ack(
+    previous: &mut Option<(u64, u64, u64, u64)>,
+    meta: SnapshotMeta,
+    player: &PlayerState,
+) -> bool {
+    let next = (
+        meta.server_epoch,
+        meta.match_id,
+        player.id,
+        player.utility.dash_sequence,
+    );
+    let changed = player.utility.dash_sequence > 0 && *previous != Some(next);
+    *previous = Some(next);
+    changed
+}
 
 /// Latest server strike deadline and replay acknowledgment. Reconcile local
 /// feedback from snapshots; skill cooldown mirrors remain independent.
@@ -1598,7 +1667,7 @@ fn send_local_state(
     mut timer: ResMut<LocalStateSendTimer>,
     channels: Option<Res<NetworkChannels>>,
     client_session: Res<ClientSession>,
-    player_query: Query<&Transform, With<Player>>,
+    player_query: Query<(&Transform, Option<&PlayerUtility>), With<Player>>,
 ) {
     let Some(channels) = channels else {
         return;
@@ -1613,12 +1682,13 @@ fn send_local_state(
         return;
     }
 
-    let Ok(player_transform) = player_query.single() else {
+    let Ok((player_transform, utility)) = player_query.single() else {
         return;
     };
 
     let (yaw, _pitch, _roll) = player_transform.rotation.to_euler(EulerRot::YXZ);
     let packet = ClientPacket::Transform {
+        dash_sequence: utility.map_or(0, |u| u.state.dash_sequence),
         x: player_transform.translation.x,
         y: player_transform.translation.y,
         z: player_transform.translation.z,
@@ -1654,6 +1724,8 @@ fn send_network_commands(
     client_session_id: Res<ClientSessionId>,
     snapshot: Option<Res<GameStateSnapshot>>,
     basic_cooldown: Query<&PlayerBasicAttackCooldown, With<Player>>,
+    utility: Query<&PlayerUtility, With<Player>>,
+    mut utility_sequence: Local<u64>,
     mut basic_sequence: Local<u64>,
     mut career_identity: Option<ResMut<crate::career_identity::CareerIdentity>>,
     mut career_client: Option<ResMut<crate::career::CareerClient>>,
@@ -1758,6 +1830,31 @@ fn send_network_commands(
                         }
                     }
                 }
+            }
+            NetworkCommand::Utility { action, direction } => {
+                if !client_session.join_confirmed() {
+                    continue;
+                }
+                let Some(meta) = snapshot
+                    .as_ref()
+                    .filter(|s| matches!(s.state, GameState::Running))
+                    .map(|s| s.meta)
+                    .filter(|m| m.server_epoch != 0 && m.match_id != 0)
+                else {
+                    continue;
+                };
+                let acknowledged = utility.single().map_or(0, |u| u.state.last_request_id);
+                let Some(request_id) = (*utility_sequence).max(acknowledged).checked_add(1) else {
+                    continue;
+                };
+                *utility_sequence = request_id;
+                let _ = channels.outgoing.send(ClientPacket::Utility {
+                    action: *action,
+                    direction: direction.to_array(),
+                    server_epoch: meta.server_epoch,
+                    match_id: meta.match_id,
+                    request_id,
+                });
             }
             NetworkCommand::BasicAttack { target } => {
                 if !client_session.join_confirmed() {
@@ -2009,6 +2106,7 @@ fn ingest_server_snapshot_packets(
                     join_error,
                     your_id,
                     players,
+                    scoreboard,
                     projectiles,
                     structures,
                     minions,
@@ -2060,6 +2158,7 @@ fn ingest_server_snapshot_packets(
                         wall_time: Instant::now(),
                         your_id,
                         players,
+                        scoreboard,
                         projectiles,
                         structures,
                         minions,
@@ -2125,6 +2224,7 @@ fn apply_server_snapshot(
         wall_time: snapshot_wall_time,
         your_id,
         players,
+        scoreboard,
         projectiles,
         structures,
         minions,
@@ -2151,6 +2251,7 @@ fn apply_server_snapshot(
     game_state_snapshot.rematch_in_secs = rematch_in_secs;
     game_state_snapshot.team_buffs = team_buffs;
     game_state_snapshot.combat_events = combat_events;
+    game_state_snapshot.scoreboard = scoreboard;
 
     let local_player_state = players.iter().find(|player| player.id == your_id);
     let local_players = local_player_query
@@ -2195,7 +2296,10 @@ fn apply_server_snapshot(
                 crate::supporter::NetworkSupporterAura(local_player_state.supporter_aura),
                 player_state_to_progression(local_player_state),
                 player_state_to_equipment(local_player_state),
-                PlayerBasicAttackCooldown::from(local_player_state),
+                (
+                    PlayerBasicAttackCooldown::from(local_player_state),
+                    PlayerUtility::from(local_player_state),
+                ),
             ));
             let next_action = PlayerCosmeticAction::from(local_player_state);
             if action_query.get(local_entity).ok().flatten().copied() != Some(next_action) {
@@ -2208,6 +2312,13 @@ fn apply_server_snapshot(
                 local_player_state.y,
                 local_player_state.z,
             );
+            let dash_accepted =
+                accept_dash_ack(&mut network_state.local_dash_ack, meta, local_player_state);
+            if dash_accepted {
+                commands
+                    .entity(local_entity)
+                    .remove::<(crate::player::MovementTarget, crate::player::MovementRoute)>();
+            }
             if let Ok(mut local_transform) = transform_sets.p0().get_mut(local_entity) {
                 // Snap on meaningful server corrections (first team spawn, respawn, etc.).
                 // While speed-boosting, the local player legitimately leads the last
@@ -2218,10 +2329,11 @@ fn apply_server_snapshot(
                 } else {
                     LOCAL_SNAP_DISTANCE
                 };
-                if local_transform
-                    .translation
-                    .distance_squared(server_translation)
-                    > snap_distance * snap_distance
+                if dash_accepted
+                    || local_transform
+                        .translation
+                        .distance_squared(server_translation)
+                        > snap_distance * snap_distance
                 {
                     local_transform.translation = server_translation;
                     local_transform.rotation = Quat::from_rotation_y(local_player_state.yaw);
@@ -2277,7 +2389,10 @@ fn apply_server_snapshot(
                     player_state_to_combat_stats(local_player_state),
                     player_state_to_progression(local_player_state),
                     player_state_to_equipment(local_player_state),
-                    PlayerBasicAttackCooldown::from(local_player_state),
+                    (
+                        PlayerBasicAttackCooldown::from(local_player_state),
+                        PlayerUtility::from(local_player_state),
+                    ),
                     Name::new("Player"),
                 ))
                 .id()
@@ -2308,7 +2423,10 @@ fn apply_server_snapshot(
                 player_state_to_combat_stats(local_player_state),
                 player_state_to_progression(local_player_state),
                 player_state_to_equipment(local_player_state),
-                PlayerBasicAttackCooldown::from(local_player_state),
+                (
+                    PlayerBasicAttackCooldown::from(local_player_state),
+                    PlayerUtility::from(local_player_state),
+                ),
                 Name::new("Player"),
             ));
             if let Some(gltf) = local_gltf {
@@ -2343,13 +2461,17 @@ fn apply_server_snapshot(
                     player_state_to_combat_stats(local_player_state),
                     player_state_to_progression(local_player_state),
                     player_state_to_equipment(local_player_state),
-                    PlayerBasicAttackCooldown::from(local_player_state),
+                    (
+                        PlayerBasicAttackCooldown::from(local_player_state),
+                        PlayerUtility::from(local_player_state),
+                    ),
                     Name::new("Player"),
                 ))
                 .id()
         };
 
         network_state.local_team = Some(local_player_state.team);
+        accept_dash_ack(&mut network_state.local_dash_ack, meta, local_player_state);
         if let Ok(mut camera_transform) = transform_sets.p1().single_mut() {
             cam_state.locked = true;
             if **visual_mode == PlayerVisualMode::Sprite2d {
@@ -2396,7 +2518,10 @@ fn apply_server_snapshot(
                 player_state_to_combat_stats(player),
                 player_state_to_progression(player),
                 player_state_to_equipment(player),
-                PlayerBasicAttackCooldown::from(player),
+                (
+                    PlayerBasicAttackCooldown::from(player),
+                    PlayerUtility::from(player),
+                ),
             ));
             let next_action = PlayerCosmeticAction::from(player);
             if action_query.get(entity).ok().flatten().copied() != Some(next_action) {
@@ -2435,7 +2560,10 @@ fn apply_server_snapshot(
             NetworkBot(player.is_bot),
             crate::supporter::NetworkSupporterAura(player.supporter_aura),
             player_state_to_equipment(player),
-            PlayerBasicAttackCooldown::from(player),
+            (
+                PlayerBasicAttackCooldown::from(player),
+                PlayerUtility::from(player),
+            ),
         ));
         if **visual_mode == PlayerVisualMode::Models3d {
             entity_commands.insert(NormalizeModelScale::for_player_model());
@@ -3549,6 +3677,134 @@ mod basic_attack_network_tests {
         assert!(
             received.try_recv().is_err(),
             "pre-admission strike cannot leave the client"
+        );
+    }
+
+    #[test]
+    fn utility_sender_binds_match_and_continues_above_reconnect_acknowledgment() {
+        let (outgoing, received) = crossbeam_channel::unbounded();
+        let (_, incoming) = crossbeam_channel::unbounded();
+        let (_, signals) = crossbeam_channel::unbounded();
+        let mut app = App::new();
+        app.add_message::<NetworkCommand>()
+            .insert_resource(NetworkChannels {
+                outgoing,
+                incoming,
+                signals,
+            })
+            .insert_resource(ClientSession::admitted_for_test())
+            .init_resource::<ClientSessionId>()
+            .insert_resource(GameStateSnapshot {
+                meta: SnapshotMeta::new(17, 3, 9),
+                state: GameState::Running,
+                ..default()
+            })
+            .add_systems(Update, send_network_commands);
+        app.world_mut().spawn((
+            Player,
+            PlayerUtility {
+                state: shared::utility::UtilityState {
+                    last_request_id: 8,
+                    ..default()
+                },
+            },
+        ));
+        app.world_mut().write_message(NetworkCommand::Utility {
+            action: shared::utility::UtilityAction::Dash,
+            direction: Vec2::X,
+        });
+        app.update();
+        let encoded = serde_json::to_value(received.try_recv().unwrap()).unwrap();
+        assert_eq!(
+            encoded,
+            json!({"type":"utility","action":"dash","direction":[1.0,0.0],"server_epoch":17,"match_id":3,"request_id":9})
+        );
+        app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Lobby;
+        app.world_mut().write_message(NetworkCommand::Utility {
+            action: shared::utility::UtilityAction::Haste,
+            direction: Vec2::ZERO,
+        });
+        app.update();
+        assert!(received.try_recv().is_err());
+        app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Running;
+        app.world_mut().resource_mut::<ClientSession>().admitted = false;
+        app.world_mut().write_message(NetworkCommand::Utility {
+            action: shared::utility::UtilityAction::Haste,
+            direction: Vec2::ZERO,
+        });
+        app.update();
+        assert!(received.try_recv().is_err());
+    }
+
+    #[test]
+    fn utility_timers_expire_without_followup_snapshots_and_keep_acknowledgments() {
+        let mut app = App::new();
+        app.init_resource::<Time<Real>>()
+            .add_systems(Update, age_utility_timers);
+        let player = app
+            .world_mut()
+            .spawn(PlayerUtility {
+                state: shared::utility::UtilityState {
+                    dash_remaining_secs: shared::utility::DASH_COOLDOWN_SECS,
+                    haste_remaining_secs: shared::utility::HASTE_COOLDOWN_SECS,
+                    haste_active_secs: shared::utility::HASTE_DURATION_SECS,
+                    last_request_id: 8,
+                    dash_sequence: 3,
+                },
+            })
+            .id();
+        for frame in 1..=52 {
+            app.world_mut()
+                .resource_mut::<Time<Real>>()
+                .advance_by(Duration::from_millis(500));
+            app.update();
+            let state = app.world().get::<PlayerUtility>(player).unwrap().state;
+            if frame == 5 {
+                assert_eq!(state.movement_multiplier(), 1.4);
+            }
+            if frame >= 6 {
+                assert_eq!(state.movement_multiplier(), 1.0);
+            }
+            assert_eq!((state.last_request_id, state.dash_sequence), (8, 3));
+        }
+        let state = app.world().get::<PlayerUtility>(player).unwrap().state;
+        assert_eq!(
+            (
+                state.dash_remaining_secs,
+                state.haste_remaining_secs,
+                state.haste_active_secs
+            ),
+            (0.0, 0.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn utility_snapshot_defaults_and_dash_ack_force_even_short_reconciliation_once() {
+        let mut player: PlayerState =
+            serde_json::from_value(json!({"id":1,"x":0.0,"y":0.5,"z":0.0,"yaw":0.0})).unwrap();
+        assert_eq!(PlayerUtility::from(&player), PlayerUtility::default());
+        let meta = SnapshotMeta::new(4, 8, 1);
+        let mut previous = None;
+        assert!(!accept_dash_ack(&mut previous, meta, &player));
+        player.x = 0.25; // well below the normal 4-unit reconciliation threshold
+        player.utility.dash_sequence = 1;
+        assert!(accept_dash_ack(&mut previous, meta, &player));
+        assert!(!accept_dash_ack(&mut previous, meta, &player));
+        assert!(accept_dash_ack(
+            &mut previous,
+            SnapshotMeta::new(4, 9, 1),
+            &player
+        ));
+        player.utility.dash_sequence = 0;
+        assert!(!accept_dash_ack(
+            &mut previous,
+            SnapshotMeta::new(4, 10, 1),
+            &player
+        ));
+        player.utility.haste_active_secs = shared::utility::HASTE_DURATION_SECS;
+        assert_eq!(
+            PlayerUtility::from(&player).state.movement_multiplier(),
+            1.4
         );
     }
 

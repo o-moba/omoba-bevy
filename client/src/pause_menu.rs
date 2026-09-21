@@ -333,6 +333,12 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                 SettingsOpenButton,
                                 "SettingsButton",
                             );
+                            spawn_menu_button(
+                                main,
+                                "Controls guide",
+                                crate::edge_hud::MatchHelpButton,
+                                "PauseMenuHelpButton",
+                            );
                             spawn_menu_button(main, "Exit game", ExitButton, "PauseMenuExitButton");
                         });
 

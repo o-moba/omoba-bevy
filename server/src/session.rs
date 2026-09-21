@@ -47,6 +47,8 @@ pub(crate) fn ensure_player_connected(
                 mana: MAX_MANA,
                 max_mana: MAX_MANA,
                 gold: STARTING_GOLD,
+                earned_gold: 0,
+                utility: Default::default(),
                 inventory: Vec::new(),
                 item_bonuses: ItemBonuses::NONE,
                 shop_available: false,
@@ -76,6 +78,9 @@ pub(crate) fn ensure_player_connected(
             last_movement_at: now,
             last_cast_at: [None; 4],
             last_basic_attack_at: None,
+            dash_ready_at: None,
+            haste_ready_at: None,
+            haste_expires_at: None,
             respawn_at: None,
             god_mode: false,
             speed_mult: 1.0,
@@ -267,6 +272,11 @@ pub(crate) fn reset_player_round(
     player.state.mana = MAX_MANA;
     player.state.max_mana = MAX_MANA;
     player.state.gold = STARTING_GOLD;
+    player.state.earned_gold = 0;
+    player.state.utility = Default::default();
+    player.dash_ready_at = None;
+    player.haste_ready_at = None;
+    player.haste_expires_at = None;
     player.state.inventory.clear();
     player.state.item_bonuses = ItemBonuses::NONE;
     player.state.shop_available = false;
@@ -348,7 +358,7 @@ pub(crate) fn handle_transform_request_with_structures(
         .duration_since(player.last_movement_at)
         .as_secs_f32()
         .clamp(0.0, MOVEMENT_MAX_DELTA_SECONDS);
-    let speed_mult = player.speed_mult.max(1.0);
+    let speed_mult = player.speed_mult.max(1.0) * utility_movement_multiplier(player, now);
     let max_distance =
         PLAYER_SPEED * speed_mult * player.state.item_bonuses.move_speed_multiplier * elapsed
             + MOVEMENT_POSITION_TOLERANCE;
@@ -380,7 +390,7 @@ pub(crate) fn handle_transform_request_with_structures(
 
 /// Sweep every live gameplay footprint. Starting overlaps may recover only
 /// outward, which also keeps reset/legacy-position recovery from freezing.
-fn clip_live_structures(
+pub(crate) fn clip_live_structures(
     from: [f32; 2],
     to: [f32; 2],
     structures: &HashMap<u64, Structure>,
@@ -445,6 +455,8 @@ pub(crate) fn handle_respawns(
         player.state.hp = player.state.max_hp;
         player.state.mana = player.state.max_mana;
         player.respawn_at = None;
+        player.haste_expires_at = None;
+        player.state.utility.haste_active_secs = 0.0;
         player.last_movement_at = now;
         player.last_cast_at = [None; 4];
         player.last_basic_attack_at = None;

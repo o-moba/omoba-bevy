@@ -31,6 +31,7 @@ mod social;
 mod targeting_qa;
 #[cfg(test)]
 mod terminal_result_tests;
+mod utility;
 mod world;
 
 use balance::*;
@@ -58,6 +59,7 @@ use std::{
     net::{SocketAddr, UdpSocket},
     time::{Duration, Instant},
 };
+use utility::*;
 use world::*;
 
 const DEFAULT_BIND_ADDR: &str = "0.0.0.0:4000";
@@ -91,6 +93,8 @@ enum ClientPacket {
         protocol_version: u16,
     },
     Transform {
+        #[serde(default)]
+        dash_sequence: u64,
         x: f32,
         y: f32,
         z: f32,
@@ -102,6 +106,13 @@ enum ClientPacket {
         /// from the caster's class kit. Defaults to Q for legacy packets.
         #[serde(default)]
         slot: u8,
+    },
+    Utility {
+        action: shared::utility::UtilityAction,
+        direction: [f32; 2],
+        server_epoch: u64,
+        match_id: u64,
+        request_id: u64,
     },
     BasicAttack {
         target: TargetId,
@@ -203,6 +214,10 @@ struct PlayerState {
     mana: f32,
     max_mana: f32,
     gold: u32,
+    #[serde(default)]
+    earned_gold: u32,
+    #[serde(default)]
+    utility: shared::utility::UtilityState,
     #[serde(default)]
     inventory: Vec<ItemId>,
     #[serde(default)]
@@ -528,6 +543,8 @@ enum ServerPacket {
         join_error: Option<shared::protocol::JoinRejection>,
         your_id: u64,
         players: Vec<PlayerState>,
+        #[serde(default)]
+        scoreboard: Option<shared::live_score::LiveScoreboard>,
         projectiles: Vec<ProjectileState>,
         #[serde(default)]
         combat_events: Vec<CombatEvent>,
@@ -916,6 +933,9 @@ struct ConnectedPlayer {
     last_cast_at: [Option<Instant>; 4],
     /// Independent of Q/W/E/R and never charged against mana.
     last_basic_attack_at: Option<Instant>,
+    dash_ready_at: Option<Instant>,
+    haste_ready_at: Option<Instant>,
+    haste_expires_at: Option<Instant>,
     respawn_at: Option<Instant>,
     /// Debug invulnerability toggle (TASK04). Not networked; the requesting
     /// client owns the toggle and the server skips damage while it is set.
@@ -1369,7 +1389,13 @@ impl ServerRuntime {
                 player.join_error = (!player.protocol_compatible)
                     .then_some(shared::protocol::JoinRejection::ProtocolMismatch);
             }
-            ClientPacket::Transform { x, y, z, yaw } => {
+            ClientPacket::Transform {
+                x,
+                y,
+                z,
+                yaw,
+                dash_sequence,
+            } => {
                 ensure_player_connected(players, map_layout, addr, next_player_id, now);
                 if let Some(player) = players.get_mut(&addr) {
                     player.last_seen = now;
@@ -1377,6 +1403,7 @@ impl ServerRuntime {
                 if matches!(game_state, GameState::Running)
                     && let Some(player) = players.get_mut(&addr)
                     && player.state.hp > 0.0
+                    && dash_sequence == player.state.utility.dash_sequence
                 {
                     handle_transform_request_with_structures(
                         player, map_layout, structures, x, y, z, yaw, now,
@@ -1402,6 +1429,23 @@ impl ServerRuntime {
                     game_state,
                     now,
                 );
+            }
+            ClientPacket::Utility {
+                action,
+                direction,
+                server_epoch: requested_epoch,
+                match_id: requested_match,
+                request_id,
+            } => {
+                if requested_epoch != *server_epoch || requested_match != *match_id {
+                    return;
+                }
+                if let Some(player) = players.get_mut(&addr) {
+                    handle_utility_request(
+                        player, map_layout, structures, game_state, action, direction, request_id,
+                        now,
+                    );
+                }
             }
             ClientPacket::BasicAttack {
                 target,
@@ -1501,7 +1545,12 @@ impl ServerRuntime {
                     return;
                 };
                 if match_config.mode == MatchMode::Practice {
-                    bots::remove_replaced_bot(players, &mut self.bots, assigned_team);
+                    bots::remove_replaced_bot(
+                        players,
+                        &mut self.bots,
+                        &mut self.combat_log.ledger,
+                        assigned_team,
+                    );
                 }
                 if let Some(player) = players.get_mut(&addr) {
                     player.join_error = None;
@@ -1730,6 +1779,7 @@ impl ServerRuntime {
         restore_god_mode_players(players);
         handle_respawns(players, structures, map_layout, game_state, now);
         refresh_basic_attack_cooldowns(players, now);
+        refresh_utilities(players, now);
 
         let live_player_ids = players
             .values()
@@ -1752,6 +1802,15 @@ impl ServerRuntime {
 
         if now.duration_since(*last_snapshot_at) >= SNAPSHOT_INTERVAL {
             *snapshot_tick = snapshot_tick.saturating_add(1);
+            for player in players.values().filter(|p| p.joined) {
+                combat_log
+                    .ledger
+                    .update_player(player.state.id, player.state.level, false);
+                combat_log
+                    .ledger
+                    .update_earned_gold(player.state.id, player.state.earned_gold);
+            }
+            let scoreboard = combat_log.ledger.live_scoreboard();
             let mut players_snapshot = build_players_snapshot(players);
             for state in &mut players_snapshot {
                 state.shop_available = shop_is_available(state, map_layout, game_state);
@@ -1813,6 +1872,7 @@ impl ServerRuntime {
                     join_error: player.join_error,
                     your_id: player.state.id,
                     players: players_snapshot.clone(),
+                    scoreboard: scoreboard.clone(),
                     projectiles: projectiles_snapshot.clone(),
                     combat_events: combat_log.snapshot(now),
                     structures: structures_snapshot.clone(),
@@ -2709,7 +2769,7 @@ fn award_neutral_kill_to_player(
     let rewards = neutral_template(camp_type);
     for player in players.values_mut() {
         if player.state.id == killer_id {
-            player.state.gold = player.state.gold.saturating_add(rewards.kill_gold);
+            award_gold(player, rewards.kill_gold);
             grant_player_xp(&mut player.state, rewards.kill_xp);
             if !camp_type.is_boss() && player.state.hp > 0.0 {
                 player.state.hp = (player.state.hp
@@ -2978,7 +3038,7 @@ fn award_minion_kill_rewards(
         if (index as u32) < bonus_xp_receivers {
             xp += 1;
         }
-        player.state.gold = player.state.gold.saturating_add(gold);
+        award_gold(player, gold);
         grant_player_xp(&mut player.state, xp);
     }
 }
@@ -3485,6 +3545,7 @@ mod tests {
             join_error: None,
             your_id: 1,
             players: Vec::new(),
+            scoreboard: None,
             projectiles: Vec::new(),
             combat_events: Vec::new(),
             structures: Vec::new(),
@@ -3529,6 +3590,7 @@ mod tests {
             join_error: None,
             your_id: player.state.id,
             players: build_players_snapshot(&players),
+            scoreboard: None,
             projectiles: Vec::new(),
             combat_events: Vec::new(),
             structures: Vec::new(),

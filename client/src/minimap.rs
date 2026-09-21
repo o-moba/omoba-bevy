@@ -18,8 +18,8 @@ use crate::ui_theme;
 
 pub(crate) const MINIMAP_SIZE: f32 = 252.0;
 pub(crate) const DESKTOP_MINIMAP_INSET: f32 = 16.0;
-/// Render the shared map coordinate space as a compact tactical dock.
-pub(crate) const DESKTOP_MINIMAP_SIZE: f32 = 184.0;
+/// Render the shared map coordinate space as a compact upper-left module.
+pub(crate) const DESKTOP_MINIMAP_SIZE: f32 = 144.0;
 pub(crate) const MINIMAP_INNER_SIZE: f32 = 232.0;
 const HERO_SIGHT: f32 = 32.0;
 const MINION_SIGHT: f32 = 22.0;
@@ -33,6 +33,10 @@ impl Plugin for MinimapPlugin {
             .init_resource::<MinimapUiState>()
             .init_resource::<MinimapNavigationState>()
             .add_systems(Startup, setup_minimap_ui)
+            .add_systems(
+                PostUpdate,
+                adapt_minimap_edge.before(bevy::ui::UiSystems::Layout),
+            )
             .add_systems(
                 Update,
                 handle_minimap_navigation_system
@@ -188,6 +192,26 @@ impl MinimapQaScene<'_, '_> {
     }
 }
 
+fn adapt_minimap_edge(
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    mut roots: Query<(&mut Node, &mut UiTransform), With<MinimapRoot>>,
+) {
+    let (left, top, size) = mobile.as_ref().filter(|m| m.enabled).map_or(
+        (
+            DESKTOP_MINIMAP_INSET,
+            DESKTOP_MINIMAP_INSET,
+            DESKTOP_MINIMAP_SIZE,
+        ),
+        |m| (m.safe.left, m.safe.top, 116.0 * m.scale()),
+    );
+    for (mut node, mut transform) in &mut roots {
+        node.left = Val::Px(left + (size - MINIMAP_SIZE) * 0.5);
+        node.top = Val::Px(top + (size - MINIMAP_SIZE) * 0.5);
+        node.bottom = Val::Auto;
+        transform.scale = Vec2::splat(size / MINIMAP_SIZE);
+    }
+}
+
 fn setup_minimap_ui(
     mut commands: Commands,
     mut state: ResMut<MinimapUiState>,
@@ -200,9 +224,7 @@ fn setup_minimap_ui(
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(DESKTOP_MINIMAP_INSET + (DESKTOP_MINIMAP_SIZE - MINIMAP_SIZE) * 0.5),
-                bottom: Val::Px(
-                    DESKTOP_MINIMAP_INSET + (DESKTOP_MINIMAP_SIZE - MINIMAP_SIZE) * 0.5,
-                ),
+                top: Val::Px(DESKTOP_MINIMAP_INSET + (DESKTOP_MINIMAP_SIZE - MINIMAP_SIZE) * 0.5),
                 width: Val::Px(MINIMAP_SIZE),
                 height: Val::Px(MINIMAP_SIZE),
                 padding: UiRect::all(Val::Px(9.0)),
@@ -860,11 +882,15 @@ mod tests {
     use crate::input_context::GameplayInputContext;
 
     #[test]
-    fn desktop_map_keeps_click_shield_on_its_scaled_bottom_left_frame() {
+    fn desktop_map_keeps_click_shield_on_its_scaled_upper_left_frame() {
         let mut app = App::new();
         app.init_resource::<MapLayout>()
             .init_resource::<MinimapUiState>()
-            .add_systems(Startup, setup_minimap_ui);
+            .add_systems(Startup, setup_minimap_ui)
+            .add_systems(
+                PostUpdate,
+                adapt_minimap_edge.before(bevy::ui::UiSystems::Layout),
+            );
         app.update();
         let mut roots = app
             .world_mut()
@@ -873,9 +899,9 @@ mod tests {
         assert!(shield.is_some());
         let anchor = DESKTOP_MINIMAP_INSET + (DESKTOP_MINIMAP_SIZE - MINIMAP_SIZE) * 0.5;
         assert_eq!(root.left, Val::Px(anchor));
-        assert_eq!(root.top, Val::Auto);
+        assert_eq!(root.top, Val::Px(anchor));
         assert_eq!(root.right, Val::Auto);
-        assert_eq!(root.bottom, Val::Px(anchor));
+        assert_eq!(root.bottom, Val::Auto);
         assert_eq!(
             transform.scale,
             Vec2::splat(DESKTOP_MINIMAP_SIZE / MINIMAP_SIZE)

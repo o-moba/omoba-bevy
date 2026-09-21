@@ -341,6 +341,7 @@ fn observe(
     }
     let root_name = VIEWS[qa.stage].2;
     let mut root_fit = false;
+    let mut root_bounds = None;
     let mut nodes_json = Vec::new();
     for (name, node, transform, inherited, z_index) in &nodes {
         let size = node.size() * transform.to_scale_angle_translation().0.abs();
@@ -348,6 +349,7 @@ fn observe(
         let visible = inherited.is_none_or(|visibility| visibility.get());
         if name.as_str() == root_name {
             root_fit = visible && fits(min, size, viewport);
+            root_bounds = Some((min, size));
         }
         if name.as_str() == root_name
             || name.as_str().starts_with("Avatar")
@@ -395,6 +397,7 @@ fn observe(
         7 => &[
             "PauseMenuResumeButton",
             "SettingsButton",
+            "PauseMenuHelpButton",
             "PauseMenuExitButton",
         ],
         8 => &[
@@ -439,6 +442,26 @@ fn observe(
                 )
         })
     });
+    // A control can fit the viewport yet be clipped by its parent panel.
+    let menu_controls_fit_panel = qa.stage != 7
+        || root_bounds.is_some_and(|(panel_min, panel_size)| {
+            required.iter().all(|required| {
+                nodes_json.iter().any(|record| {
+                    let min = Vec2::new(
+                        record["min"][0].as_f64().unwrap() as f32,
+                        record["min"][1].as_f64().unwrap() as f32,
+                    );
+                    let size = Vec2::new(
+                        record["size"][0].as_f64().unwrap() as f32,
+                        record["size"][1].as_f64().unwrap() as f32,
+                    );
+                    record["name"] == *required
+                        && record["visible"] == true
+                        && fits(min - panel_min, size, panel_size)
+                        && (!mobile.enabled || size.cmpge(Vec2::splat(44.0)).all())
+                })
+            })
+        });
     let interactive: Vec<&str> = buttons.iter().map(Name::as_str).collect();
     let help_transition_scale_correct = match qa.stage {
         11 => (ui_scale.0 - 1.0).abs() < 0.001,
@@ -463,6 +486,7 @@ fn observe(
         "root_fits_viewport": root_fit,
         "required_controls": required,
         "required_controls_fit": controls_fit,
+        "menu_controls_fit_panel": menu_controls_fit_panel,
         "help_transition_scale_correct": help_transition_scale_correct,
         "help_above_shell": help_above_shell,
         "production_help_button_transition": qa.stage >= 11,
@@ -478,10 +502,15 @@ fn observe(
         "nodes": nodes_json,
     });
     qa.captures.push(record);
-    if !root_fit || !controls_fit || !help_transition_scale_correct || !help_above_shell {
+    if !root_fit
+        || !controls_fit
+        || !menu_controls_fit_panel
+        || !help_transition_scale_correct
+        || !help_above_shell
+    {
         fail(
             &mut qa,
-            "screen root or essential controls are missing or leave the viewport",
+            "screen root or essential controls are missing or leave their viewport/panel",
             &mut exit,
         );
         return;

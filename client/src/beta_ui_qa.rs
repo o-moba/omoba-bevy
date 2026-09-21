@@ -23,6 +23,9 @@ use crate::{
     verdant3d::VerdantEnvironment,
 };
 
+#[path = "edge_hud_qa.rs"]
+mod edge;
+
 const FILES: [&str; 7] = [
     "01-entry-720p.png",
     "02-help-720p.png",
@@ -34,7 +37,12 @@ const FILES: [&str; 7] = [
 ];
 const SETTLE_FRAMES: u32 = 45;
 fn capture_file(qa: &BetaUiQa, index: usize) -> String {
-    FILES[index].replace("720p", &format!("{}p", qa.height))
+    let file = if index < FILES.len() {
+        FILES[index]
+    } else {
+        edge::FILES[index - FILES.len()]
+    };
+    file.replace("720p", &format!("{}p", qa.height))
 }
 
 pub(crate) struct BetaUiQaPlugin;
@@ -60,6 +68,7 @@ impl Plugin for BetaUiQaPlugin {
                 shared::HeroClass::from_id(&name)
                     .expect("OMOBA_BETA_UI_CLASS must be warrior, mage, ranger or cleric")
             }),
+            edge: std::env::var("OMOBA_BETA_UI_EDGE").is_ok_and(|value| value == "1"),
             stage: 0,
             frames: 0,
             in_flight: false,
@@ -90,6 +99,9 @@ impl Plugin for BetaUiQaPlugin {
                 .before(crate::input_context::InputContextSet::Modal),
         )
         .add_systems(PostUpdate, capture.after(bevy::ui::UiSystems::Layout));
+        if app.world().resource::<BetaUiQa>().edge {
+            edge::configure(app);
+        }
         if app.world().resource::<BetaUiQa>().skill_upgrades {
             app.init_resource::<SkillUpgradeFixtureState>().add_systems(
                 Update,
@@ -110,6 +122,7 @@ struct BetaUiQa {
     timeout: Duration,
     next_readiness_report: Duration,
     hero_class: Option<shared::HeroClass>,
+    edge: bool,
     stage: usize,
     frames: u32,
     in_flight: bool,
@@ -120,6 +133,21 @@ struct BetaUiQa {
     width: u32,
     height: u32,
 }
+impl BetaUiQa {
+    fn total(&self, phone: bool) -> usize {
+        FILES.len()
+            + if self.edge {
+                if phone {
+                    edge::FILES.len()
+                } else {
+                    edge::FILES.len() - 1
+                }
+            } else {
+                0
+            }
+    }
+}
+
 #[derive(Component)]
 struct BetaUiShot(usize);
 
@@ -189,9 +217,10 @@ fn prepare_controls(
                         "TeamGreenButton"
                     })
             || (qa.stage == 2 && help.0 && name.as_str() == "HelpDismissButton")
-            || (qa.stage == 3 && !shop.open && name.as_str() == "ShopOpenButton")
+            || (qa.stage == 3 && !shop.open && name.as_str() == "GoldShopButton")
             || (qa.stage == 5 && shop.open && phone && name.as_str() == "ShopCloseButton")
             || (qa.stage == 4
+                && !qa.edge
                 && shop.open
                 && !shop.purchase_pending()
                 && name.as_str() == "ShopBuy-EB"
@@ -206,11 +235,22 @@ fn prepare_controls(
     }
 }
 
+#[derive(Component)]
+struct ResultFixtureLabel;
+
 fn prepare_result_fixture(
     mut commands: Commands,
     mut qa: ResMut<BetaUiQa>,
     mut game: ResMut<GameStateSnapshot>,
+    mut labels: Query<&mut Node, With<ResultFixtureLabel>>,
 ) {
+    for mut node in &mut labels {
+        node.display = if qa.stage == 6 {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
     if qa.stage != 6 {
         return;
     }
@@ -230,6 +270,7 @@ fn prepare_result_fixture(
                 padding: UiRect::all(Val::Px(8.0)),
                 ..default()
             },
+            ResultFixtureLabel,
             Text::new("QA FIXTURE: result layout only"),
             TextFont {
                 font_size: 16.0,
@@ -335,6 +376,10 @@ struct UiScene<'w, 's> {
     selection: Res<'w, crate::team::TeamSelection>,
     hero_classes: Query<'w, 's, &'static crate::net::NetworkHeroClass, With<crate::player::Player>>,
     windows: Query<'w, 's, Entity, With<PrimaryWindow>>,
+    edge: Option<Res<'w, edge::EdgeQa>>,
+    scoreboard: Option<Res<'w, crate::edge_hud::ScoreboardState>>,
+    texts: Query<'w, 's, (&'static Name, &'static Text)>,
+    utility: Query<'w, 's, &'static crate::net::PlayerUtility, With<crate::player::Player>>,
     environment: Query<'w, 's, Entity, With<VerdantEnvironment>>,
     scenes: Query<'w, 's, (&'static SceneRoot, Option<&'static SceneInstance>)>,
     join: Query<'w, 's, Entity, With<TeamSelectRoot>>,
@@ -368,7 +413,8 @@ fn capture(
     progression_fixture: Option<Res<SkillUpgradeFixtureState>>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    if qa.stage >= FILES.len() {
+    let phone = mobile.as_ref().is_some_and(|mobile| mobile.enabled);
+    if qa.stage >= qa.total(phone) {
         return;
     }
     if qa.started.elapsed() >= qa.timeout {
@@ -390,11 +436,12 @@ fn capture(
             qa.stage += 1;
             qa.frames = 0;
             qa.in_flight = false;
-            if qa.stage == FILES.len() {
+            if qa.stage == qa.total(phone) {
                 let summary = serde_json::json!({"version":env!("CARGO_PKG_VERSION"), "scenario":"beta-ui", "pixels":[qa.width,qa.height],
                     "method":"Bevy Screenshot::primary_window + save_to_disk", "captures":qa.captures,
                     "elapsed_seconds":qa.started.elapsed().as_secs_f64(), "manual_interaction_verified":false,
-                    "button_handler_interactions":"scripted Interaction::Pressed on production Join, Help, Shop and purchase buttons; Escape uses production keyboard modal closure",
+                    "button_handler_interactions":"scripted production Join/Help/Gold/Shop/purchase/Close buttons; edge mode also drives scoreboard and mobile touch utility controls",
+                    "edge_scenario":qa.edge, "edge_fixture_limits":"target actors and populated scoreboard are client presentation fixtures; utility acknowledgments and purchase receipts are real server snapshots",
                     "real_purchase_verified":true,
                     "full_match_proof":false, "result_snapshot":"synthetic presentation fixture only",
                     "synthetic_progression":qa.skill_upgrades,
@@ -462,18 +509,35 @@ fn capture(
             4 => {
                 shop.open
                     && !context.gameplay_allowed()
-                    && equipment.single().is_ok_and(|equipment| {
-                        equipment
-                            .inventory
-                            .contains(&shared::shop::ItemId::EmberBlade)
-                            && equipment
-                                .last_purchase
-                                .as_ref()
-                                .is_some_and(|receipt| receipt.error.is_none())
-                    })
+                    && if qa.edge {
+                        scene.edge.as_deref().is_some_and(|edge| {
+                            edge::purchase_verified(edge, equipment.single().ok())
+                        })
+                    } else {
+                        equipment.single().is_ok_and(|equipment| {
+                            equipment
+                                .inventory
+                                .contains(&shared::shop::ItemId::EmberBlade)
+                                && equipment
+                                    .last_purchase
+                                    .as_ref()
+                                    .is_some_and(|receipt| receipt.error.is_none())
+                        })
+                    }
             }
             5 => !shop.open && !pause.open && context.gameplay_allowed(),
             6 => session.join_confirmed() && matches!(game.state, GameState::Victory { .. }),
+            7..=13 => {
+                qa.edge
+                    && edge::ready(
+                        stage_for_edge(&qa),
+                        &game,
+                        &context,
+                        scene.scoreboard.as_deref(),
+                        scene.edge.as_deref(),
+                        scene.utility.single().ok(),
+                    )
+            }
             _ => false,
         };
     if !ready && qa.started.elapsed() >= qa.next_readiness_report {
@@ -507,7 +571,7 @@ fn capture(
         exit.write(AppExit::error());
         return;
     }
-    let primary_nodes: Vec<_> = scene.nodes.iter().filter(|(name, _, _, _)| matches!(name.as_str(),
+    let primary_nodes: Vec<_> = scene.nodes.iter().filter(|(name, _, _, _)| edge::tracked(name.as_str()) || matches!(name.as_str(),
         "TeamGreenButton" | "TeamBlueButton" | "AvatarGrid" | "HelpDismissButton" | "HelpOverlayRoot" | "GameStateLabel" | "ConnectionStatusPanel" | "MinimapRoot" | "MatchObjectivePanel" | "MatchHudColumn" | "SkillBarRoot" | "SkillSlot-Q" | "SkillSlot-R" | "EquipmentHud" | "ShopOpenButton" | "ShopPanel" | "ShopCloseButton" | "ShopBuy-EB" | "ShopBuy-GC" | "ShopSummary" | "ShopFeedback" | "MobileJoystick" | "MobileAttack" | "MobileAbility-0" | "MobileAbility-1" | "MobileAbility-2" | "MobileAbility-3" | "MobileUpgrade-0" | "MobileUpgrade-1" | "MobileUpgrade-2" | "MobileUpgrade-3" | "PhoneMenuBar" | "QaSkillUpgradeFixtureLabel" | "SocialEntry" | "SocialStatus" | "CareerEntryActions" | "HudProgressionText" | "HudXpText" | "MatchStatusText" | "MatchBuffText" | "EquipmentGold")
             || name.as_str().starts_with("ShopBuy-") || name.as_str().starts_with("ShopDescription-") || name.as_str().starts_with("ShopDetails-") || name.as_str().starts_with("SkillName-") || name.as_str().starts_with("SkillRank-") || name.as_str().starts_with("SkillSlot-") || name.as_str().starts_with("SkillIcon-"))
         .map(|(name, node, transform, visible)| {
@@ -542,43 +606,50 @@ fn capture(
         exit.write(AppExit::error());
         return;
     }
-    let desktop_minimap_bottom_left = (matches!(stage, 2 | 5)
-        && !mobile.as_ref().is_some_and(|mobile| mobile.enabled))
-    .then(|| {
-        primary_nodes.iter().any(|node| {
-            let expected = crate::minimap::DESKTOP_MINIMAP_SIZE as f64;
-            let inset = crate::minimap::DESKTOP_MINIMAP_INSET as f64;
-            let number = |field: &str, axis: usize| node[field][axis].as_f64().unwrap_or(f64::NAN);
-            let logical_height = qa.height as f64 * number("logical_size", 1) / number("size", 1);
-            node["name"] == "MinimapRoot"
-                && node["visible"] == true
-                && (number("logical_min", 0) - inset).abs() <= 1.0
-                && (number("logical_min", 1) + expected + inset - logical_height).abs() <= 1.0
-                && (0..2).all(|axis| (number("logical_size", axis) - expected).abs() <= 1.0)
-        })
-    });
-    if desktop_minimap_bottom_left == Some(false) {
-        error!("BETA_UI_QA failed: compact desktop map must anchor bottom-left: {primary_nodes:?}");
-        exit.write(AppExit::error());
-        return;
-    }
-    let north_sightline_clear = !matches!(stage, 2 | 5)
+    let resting = edge::resting(stage);
+    let minimap_top_left = !resting
+        || primary_nodes.iter().any(|node| {
+            if node["name"] != "MinimapRoot" || node["visible"] != true {
+                return false;
+            }
+            let Some(rect) = measured_logical_rect(node) else {
+                return false;
+            };
+            let expected = if phone { 116.0 } else { 144.0 };
+            let inset = if phone {
+                mobile.as_ref().unwrap().safe.left
+            } else {
+                16.0
+            };
+            let top = if phone {
+                mobile.as_ref().unwrap().safe.top
+            } else {
+                16.0
+            };
+            (rect.width() - expected).abs() <= 1.0
+                && (rect.height() - expected).abs() <= 1.0
+                && (rect.min.x - inset).abs() <= 1.0
+                && (rect.min.y - top).abs() <= 1.0
+        });
+    let playfield_clear = !resting
         || primary_nodes
             .iter()
             .filter(|node| {
                 node["visible"] == true && node["name"].as_str().is_some_and(persistent_hud_panel)
             })
             .all(|node| {
-                measured_rect(node).is_none_or(|rect| {
-                    clears_north_sightline(rect, Vec2::new(qa.width as f32, qa.height as f32))
+                measured_logical_rect(node).is_none_or(|rect| {
+                    clears_playfield(rect, Vec2::new(qa.width as f32, qa.height as f32), phone)
                 })
             });
-    if !north_sightline_clear {
-        error!("BETA_UI_QA failed: persistent HUD blocks the north approach: {primary_nodes:?}");
+    if !minimap_top_left || !playfield_clear {
+        error!(
+            "BETA_UI_QA failed: edge placement/top-left map or open playfield: map={minimap_top_left} playfield={playfield_clear} {primary_nodes:?}"
+        );
         exit.write(AppExit::error());
         return;
     }
-    let hud_text_fits = !matches!(stage, 2 | 5)
+    let hud_text_fits = !resting
         || primary_nodes.iter().all(|text| {
             let Some(name) = text["name"].as_str() else {
                 return true;
@@ -587,6 +658,9 @@ fn capture(
                 "HudProgressionText" | "HudXpText" => Some("MatchHudColumn".to_owned()),
                 "MatchStatusText" | "MatchBuffText" => Some("MatchObjectivePanel".to_owned()),
                 "EquipmentGold" => Some("EquipmentHud".to_owned()),
+                "TargetHealthName" | "TargetHealthValue" => Some("TargetHealthRoot".to_owned()),
+                "QuickBuyPrice-0" => Some("QuickBuy-0".to_owned()),
+                "QuickBuyPrice-1" => Some("QuickBuy-1".to_owned()),
                 _ => name
                     .strip_prefix("SkillName-")
                     .or_else(|| name.strip_prefix("SkillRank-"))
@@ -617,7 +691,7 @@ fn capture(
     // Key badges intentionally sit on artwork; full ability names and live
     // rank/status text must remain in the distinct lower card area, including
     // the longer Ranger and Cleric names.
-    let skill_art_clear = !matches!(stage, 2 | 5)
+    let skill_art_clear = !resting
         || mobile.as_ref().is_some_and(|mobile| mobile.enabled)
         || primary_nodes.iter().all(|text| {
             let Some(slot) = text["name"].as_str().and_then(|name| {
@@ -682,30 +756,6 @@ fn capture(
     let required: &[&str] = match stage {
         0 => &["TeamGreenButton", "TeamBlueButton", "AvatarGrid"],
         1 => &["HelpDismissButton", "HelpOverlayRoot"],
-        2 | 5 if mobile.as_ref().is_some_and(|mobile| mobile.enabled) => &[
-            "MinimapRoot",
-            "MatchObjectivePanel",
-            "MatchHudColumn",
-            "EquipmentHud",
-            "ShopOpenButton",
-            "MobileJoystick",
-            "MobileAttack",
-            "MobileAbility-0",
-            "MobileAbility-1",
-            "MobileAbility-2",
-            "MobileAbility-3",
-            "PhoneMenuBar",
-        ],
-        2 | 5 => &[
-            "MinimapRoot",
-            "MatchObjectivePanel",
-            "MatchHudColumn",
-            "SkillBarRoot",
-            "SkillSlot-Q",
-            "SkillSlot-R",
-            "EquipmentHud",
-            "ShopOpenButton",
-        ],
         3 | 4 => &[
             "ShopPanel",
             "ShopCloseButton",
@@ -714,6 +764,45 @@ fn capture(
             "ShopSummary",
         ],
         6 => &["GameStateLabel"],
+        11 => &[
+            "ScoreboardPanel",
+            "ScoreboardCloseButton",
+            "ScoreboardGreenRows",
+            "ScoreboardBlueRows",
+        ],
+        _ if resting && phone => &[
+            "MinimapRoot",
+            "MatchHudColumn",
+            "QuickBuyHud",
+            "GoldShopButton",
+            "QuickBuy-0",
+            "QuickBuy-1",
+            "MatchScoreButton",
+            "MatchMenuButton",
+            "MobileJoystick",
+            "MobileAttack",
+            "MobileAbility-0",
+            "MobileAbility-1",
+            "MobileAbility-2",
+            "MobileAbility-3",
+            "MobileMinionAttack",
+            "MobileTowerAttack",
+            "MobileDash",
+            "MobileHaste",
+        ],
+        _ if resting => &[
+            "MinimapRoot",
+            "MatchHudColumn",
+            "QuickBuyHud",
+            "GoldShopButton",
+            "QuickBuy-0",
+            "QuickBuy-1",
+            "MatchScoreButton",
+            "MatchMenuButton",
+            "SkillBarRoot",
+            "SkillSlot-Q",
+            "SkillSlot-R",
+        ],
         _ => &[],
     };
     let synthetic_progression = progression_fixture
@@ -722,10 +811,11 @@ fn capture(
     let upgrade_required: &[&str] =
         if synthetic_progression && mobile.as_ref().is_some_and(|mobile| mobile.enabled) {
             &[
-                "MobileUpgrade-0",
-                "MobileUpgrade-1",
-                "MobileUpgrade-2",
-                "MobileUpgrade-3",
+                "MobileRankMode",
+                "MobileRankRing-0",
+                "MobileRankRing-1",
+                "MobileRankRing-2",
+                "MobileRankRing-3",
                 "QaSkillUpgradeFixtureLabel",
             ]
         } else {
@@ -746,16 +836,21 @@ fn capture(
         "MatchHudColumn",
         "SkillBarRoot",
         "EquipmentHud",
+        "QuickBuyHud",
+        "MatchScoreStrip",
+        "MatchMenuButton",
+        "TargetHealthRoot",
         "MobileJoystick",
         "MobileAttack",
         "MobileAbility-0",
         "MobileAbility-1",
         "MobileAbility-2",
         "MobileAbility-3",
-        "MobileUpgrade-0",
-        "MobileUpgrade-1",
-        "MobileUpgrade-2",
-        "MobileUpgrade-3",
+        "MobileMinionAttack",
+        "MobileTowerAttack",
+        "MobileDash",
+        "MobileHaste",
+        "MobileRankMode",
         "PhoneMenuBar",
         "SocialEntry",
         "SocialStatus",
@@ -770,7 +865,7 @@ fn capture(
                 && node["size"][1].as_f64().is_some_and(|size| size > 0.0)
         })
         .collect();
-    let dock_clear = !matches!(stage, 2 | 5)
+    let dock_clear = !resting
         || dock.iter().enumerate().all(|(i, a)| {
             dock.iter().skip(i + 1).all(|b| {
                 let delta_x =
@@ -779,14 +874,8 @@ fn capture(
                     (a["center"][1].as_f64().unwrap() - b["center"][1].as_f64().unwrap()).abs();
                 // Raw mobile touch controls are circles. Their bounding-square
                 // corners may overlap without overlapping visible/hit regions.
-                let circle = |node: &serde_json::Value| {
-                    node["name"].as_str().is_some_and(|name| {
-                        name == "MobileJoystick"
-                            || name == "MobileAttack"
-                            || name.starts_with("MobileAbility-")
-                            || name.starts_with("MobileUpgrade-")
-                    })
-                };
+                let circle =
+                    |node: &serde_json::Value| node["name"].as_str().is_some_and(edge::circle);
                 if circle(a) && circle(b) {
                     return delta_x.hypot(delta_y)
                         >= (a["size"][0].as_f64().unwrap() + b["size"][0].as_f64().unwrap()) / 2.0;
@@ -817,8 +906,23 @@ fn capture(
         "authoritative_class":scene.hero_classes.single().ok().map(|class|class.0.id()), "skill_art_clear":skill_art_clear, "shop_close_clear":shop_close_clear, "server_epoch":game.meta.server_epoch, "snapshot_tick":game.meta.snapshot_tick,
         "synthetic_result":stage == 6, "synthetic_progression":synthetic_progression,
         "progression_fixture":synthetic_progression.then(||serde_json::json!({"level":6,"skill_points":4,"ranks":[1,1,1,1],"server_unchanged":true})),
-        "minimap":minimap.diagnostics(), "desktop_minimap_bottom_left":desktop_minimap_bottom_left, "north_sightline_clear":north_sightline_clear, "hud_text_fits":hud_text_fits, "shop_modal":shop.open, "gameplay_allowed":context.gameplay_allowed(), "pause_open":pause.open,
+        "minimap":minimap.diagnostics(), "minimap_top_left":minimap_top_left, "playfield_clear":playfield_clear, "hud_text_fits":hud_text_fits, "shop_modal":shop.open, "gameplay_allowed":context.gameplay_allowed(), "pause_open":pause.open,
+        "edge":edge::record(stage, scene.edge.as_deref(), &game, scene.utility.single().ok(), &scene.texts),
         "equipment":equipment.single().ok().map(|e|serde_json::json!({"gold":e.gold,"inventory":e.inventory,"bonuses":e.item_bonuses,"receipt":e.last_purchase})), "primary_controls_fit":controls_fit, "shop_text_fits":shop_text_fits, "primary_nodes":primary_nodes});
+    if qa.edge
+        && !edge::validate(
+            stage,
+            &primary_nodes,
+            &scene.texts,
+            scene.edge.as_deref(),
+            &context,
+            scene.utility.single().ok(),
+        )
+    {
+        error!("BETA_UI_QA failed: edge target/score/utility state assertions: {record}");
+        exit.write(AppExit::error());
+        return;
+    }
     info!("BETA_UI_QA capture_request={record}");
     qa.captures.push(record);
     qa.in_flight = true;
@@ -861,6 +965,10 @@ fn persistent_hud_panel(name: &str) -> bool {
             | "SocialStatus"
             | "CareerEntryActions"
             | "ConnectionStatusPanel"
+            | "QuickBuyHud"
+            | "MatchScoreStrip"
+            | "MatchMenuButton"
+            | "TargetHealthRoot"
     )
 }
 
@@ -877,44 +985,96 @@ fn measured_rect(node: &serde_json::Value) -> Option<Rect> {
         .then(|| Rect::from_center_size(center, size))
 }
 
-fn clears_north_sightline(panel: Rect, viewport: Vec2) -> bool {
-    let north = Rect::from_corners(
-        Vec2::new(viewport.x * 0.35, 0.0),
-        Vec2::new(viewport.x * 0.65, viewport.y * 0.30),
+fn measured_logical_rect(node: &serde_json::Value) -> Option<Rect> {
+    let min = Vec2::new(
+        node["logical_min"][0].as_f64()? as f32,
+        node["logical_min"][1].as_f64()? as f32,
     );
-    let overlap = panel.intersect(north);
-    overlap.width() <= 0.5 || overlap.height() <= 0.5
+    let size = Vec2::new(
+        node["logical_size"][0].as_f64()? as f32,
+        node["logical_size"][1].as_f64()? as f32,
+    );
+    (min.is_finite() && size.is_finite() && size.min_element() > 0.0)
+        .then(|| Rect::from_corners(min, min + size))
+}
+
+fn stage_for_edge(qa: &BetaUiQa) -> usize {
+    qa.stage
+}
+
+fn clears_playfield(panel: Rect, viewport: Vec2, phone: bool) -> bool {
+    // Target health intentionally occupies upper-center; protect the actual hero
+    // neighborhood and mobile lower-center opening from resting opaque panels.
+    let regions = if phone {
+        [
+            Rect::from_corners(
+                Vec2::new(0.30, 0.30) * viewport,
+                Vec2::new(0.65, 0.60) * viewport,
+            ),
+            Rect::from_corners(
+                Vec2::new(188.0 / 844.0, 239.0 / 390.0) * viewport,
+                Vec2::new(548.0 / 844.0, 367.0 / 390.0) * viewport,
+            ),
+        ]
+    } else {
+        [Rect::from_corners(
+            Vec2::new(0.30, 0.20) * viewport,
+            Vec2::new(0.70, 0.65) * viewport,
+        ); 2]
+    };
+    regions.into_iter().all(|region| {
+        let overlap = panel.intersect(region);
+        overlap.width() <= 0.5 || overlap.height() <= 0.5
+    })
 }
 
 #[cfg(test)]
 mod layout_tests {
     use super::*;
-
     #[test]
-    fn north_guard_rejects_the_old_banner_and_accepts_corner_and_lower_docks_at_each_scale() {
+    fn edge_guard_accepts_target_strip_but_rejects_old_phone_bottom_banner() {
+        let viewport = Vec2::new(844.0, 390.0);
+        assert!(clears_playfield(
+            Rect::from_corners(Vec2::new(330.0, 10.0), Vec2::new(514.0, 40.0)),
+            viewport,
+            true
+        ));
+        assert!(!clears_playfield(
+            Rect::from_corners(Vec2::new(186.0, 327.0), Vec2::new(530.0, 370.0)),
+            viewport,
+            true
+        ));
+        assert!(!clears_playfield(
+            Rect::from_center_size(viewport * 0.5, Vec2::splat(40.0)),
+            viewport,
+            true
+        ));
+        assert!(clears_playfield(
+            Rect::from_corners(Vec2::new(12.0, 182.0), Vec2::new(152.0, 214.0)),
+            viewport,
+            true
+        ));
+    }
+    #[test]
+    fn desktop_cards_and_target_strip_preserve_the_playfield_across_sizes() {
         for viewport in [
-            Vec2::new(844.0, 390.0),
+            Vec2::new(1024.0, 640.0),
             Vec2::new(1280.0, 720.0),
             Vec2::new(1920.0, 1080.0),
         ] {
-            for scale in [1.0, 2.0] {
-                let viewport = viewport * scale;
-                let rect = |min: Vec2, size: Vec2| {
-                    Rect::from_corners(min * viewport, (min + size) * viewport)
-                };
-                assert!(!clears_north_sightline(
-                    rect(Vec2::new(0.25, 0.02), Vec2::new(0.50, 0.12)),
-                    viewport
-                ));
-                assert!(clears_north_sightline(
-                    rect(Vec2::new(0.02, 0.02), Vec2::new(0.32, 0.25)),
-                    viewport
-                ));
-                assert!(clears_north_sightline(
-                    rect(Vec2::new(0.30, 0.75), Vec2::new(0.40, 0.20)),
-                    viewport
-                ));
-            }
+            assert!(clears_playfield(
+                Rect::from_center_size(Vec2::new(viewport.x * 0.5, 32.0), Vec2::new(224.0, 32.0)),
+                viewport,
+                false
+            ));
+            assert!(clears_playfield(
+                Rect::from_center_size(
+                    Vec2::new(viewport.x * 0.5, viewport.y - 68.0),
+                    Vec2::new(360.0, 112.0)
+                ),
+                viewport,
+                false
+            ));
         }
     }
 }

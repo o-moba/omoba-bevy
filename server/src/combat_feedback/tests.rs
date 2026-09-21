@@ -516,6 +516,7 @@ fn cosmetic_history_yields_space_to_gameplay_and_keeps_newest_receipts() {
         join_error: None,
         your_id: player.id,
         players: vec![player],
+        scoreboard: None,
         projectiles: vec![],
         combat_events: vec![],
         structures: vec![],

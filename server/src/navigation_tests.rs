@@ -50,6 +50,7 @@ fn transform_packets_cannot_tunnel_through_trees_but_a_legal_route_arrives() {
         runtime.handle_packet(
             address,
             ClientPacket::Transform {
+                dash_sequence: 0,
                 x: end[0],
                 y: PLAYER_GROUND_Y,
                 z: end[1],
@@ -85,6 +86,7 @@ fn transform_packets_cannot_tunnel_through_trees_but_a_legal_route_arrives() {
             runtime.handle_packet(
                 address,
                 ClientPacket::Transform {
+                    dash_sequence: 0,
                     x: from[0] + dx * scale,
                     y: PLAYER_GROUND_Y,
                     z: from[1] + dz * scale,

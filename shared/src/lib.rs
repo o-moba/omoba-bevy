@@ -10,6 +10,7 @@ pub mod career;
 pub mod combat;
 pub mod device_account;
 pub mod jungle;
+pub mod live_score;
 pub mod map;
 pub mod navigation;
 pub mod protocol;
@@ -17,6 +18,7 @@ pub mod shop;
 pub mod social;
 pub mod supporter;
 pub mod transport;
+pub mod utility;
 pub mod web_account;
 
 /// Resolve packaged assets before the development checkout. Launchers can

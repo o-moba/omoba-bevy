@@ -323,7 +323,11 @@ impl ServerRuntime {
             if conflicting || conflicting_frozen {
                 self.career_error(
                     addr,
-                    "This profile already owns a queue entry or a reserved match seat.",
+                    if conflicting {
+                        "This profile already owns a queue entry or a reserved match seat."
+                    } else {
+                        "This profile already participated in the current round. Wait for a new round before selecting another hero."
+                    },
                 );
                 return false;
             }
@@ -649,6 +653,16 @@ impl ServerRuntime {
         }
     }
     fn update_career_totals(&mut self) {
+        for player in self
+            .players
+            .values()
+            .filter(|p| p.joined)
+            .chain(self.disconnected_sessions.values().map(|s| &s.player))
+        {
+            self.combat_log
+                .ledger
+                .update_earned_gold(player.state.id, player.state.earned_gold);
+        }
         for player in self.players.values().filter(|p| p.joined) {
             self.combat_log
                 .ledger
@@ -759,8 +773,9 @@ impl ServerRuntime {
 
     /// A deliberate leave, as opposed to a timeout: the seat and any queue
     /// entry are released at once and nothing is kept for a session reclaim,
-    /// so the same client can join again straight away with a new hero. The
-    /// endpoint and its career authentication stay as they are.
+    /// so a guest can join again straight away with a new hero. Signed profiles
+    /// still have at most one participant per round. The endpoint and its career
+    /// authentication stay as they are.
     pub(crate) fn leave_match(&mut self, addr: SocketAddr, now: Instant) {
         let Some(player) = self.players.get_mut(&addr) else {
             return;
@@ -771,6 +786,11 @@ impl ServerRuntime {
         let was_joined = player.joined;
         let session_id = player.session_id.take();
         if was_joined {
+            self.combat_log
+                .ledger
+                .update_earned_gold(id, player.state.earned_gold);
+            player.haste_expires_at = None;
+            player.state.utility.haste_active_secs = 0.0;
             self.combat_log.ledger.update_player(id, level, true);
         }
         self.cancel_career_entry(id, now);
@@ -780,6 +800,23 @@ impl ServerRuntime {
             player.joined = false;
             player.career_profile = None;
             player.join_error = None;
+            if was_joined
+                && self.combat_log.ledger.is_started()
+                && !self.combat_log.ledger.is_frozen()
+            {
+                // A deliberate fresh admission can change hero and team and
+                // resets gameplay progression. Never recycle its old round
+                // identity: delayed damage still belongs to that retired row.
+                // Timeout/session reclaim does not take this path.
+                player.state.id = self.next_player_id;
+                self.next_player_id += 1;
+                if let Some(result) = self.career.last_results.remove(&id) {
+                    self.career.last_results.insert(player.state.id, result);
+                }
+                if let Some(result_id) = self.career.dismissed.remove(&id) {
+                    self.career.dismissed.insert(player.state.id, result_id);
+                }
+            }
         }
         if let Some(session_id) = session_id {
             self.disconnected_sessions.remove(&session_id);
@@ -796,6 +833,13 @@ impl ServerRuntime {
     }
 
     pub(crate) fn disconnect_career_player(&mut self, addr: SocketAddr, now: Instant) {
+        if let Some(player) = self.players.get_mut(&addr) {
+            self.combat_log
+                .ledger
+                .update_earned_gold(player.state.id, player.state.earned_gold);
+            player.haste_expires_at = None;
+            player.state.utility.haste_active_secs = 0.0;
+        }
         if let Some(player) = self.players.get(&addr) {
             let id = player.state.id;
             self.combat_log

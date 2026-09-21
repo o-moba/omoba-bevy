@@ -109,10 +109,18 @@ pub enum ClientPacket {
         protocol_version: u16,
     },
     Transform {
+        dash_sequence: u64,
         x: f32,
         y: f32,
         z: f32,
         yaw: f32,
+    },
+    Utility {
+        action: shared::utility::UtilityAction,
+        direction: [f32; 2],
+        server_epoch: u64,
+        match_id: u64,
+        request_id: u64,
     },
     Cast {
         target: TargetId,
@@ -168,6 +176,8 @@ pub struct PlayerState {
     pub max_mana: f32,
     #[serde(default)]
     pub gold: u32,
+    #[serde(default)]
+    pub utility: shared::utility::UtilityState,
     #[serde(default)]
     pub inventory: Vec<shared::shop::ItemId>,
     #[serde(default)]
@@ -379,6 +389,8 @@ pub enum ServerPacket {
         projectiles: Vec<ProjectileState>,
         #[serde(default)]
         players: Vec<PlayerState>,
+        #[serde(default)]
+        scoreboard: Option<shared::live_score::LiveScoreboard>,
         /// Alive (non-respawn-gated) jungle neutrals, including raid bosses.
         #[serde(default)]
         neutrals: Vec<NeutralState>,
@@ -398,6 +410,11 @@ pub enum ServerPacket {
 }
 
 impl ServerPacket {
+    pub fn scoreboard(&self) -> Option<&shared::live_score::LiveScoreboard> {
+        match self {
+            Self::Snapshot { scoreboard, .. } => scoreboard.as_ref(),
+        }
+    }
     pub fn geometry_id(&self) -> &str {
         match self {
             Self::Snapshot { geometry_id, .. } => geometry_id,

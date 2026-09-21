@@ -283,6 +283,7 @@ fn packet_transform_respects_configured_live_discs_and_death_removes_blocker() {
         rt.handle_packet(
             address,
             ClientPacket::Transform {
+                dash_sequence: 0,
                 x: end[0],
                 y: 0.0,
                 z: end[1],
@@ -302,6 +303,7 @@ fn packet_transform_respects_configured_live_discs_and_death_removes_blocker() {
     rt.handle_packet(
         address,
         ClientPacket::Transform {
+            dash_sequence: 0,
             x: end[0],
             y: 0.0,
             z: end[1],

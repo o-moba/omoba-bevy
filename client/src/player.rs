@@ -789,6 +789,7 @@ fn move_player_mobile(
                 &mut Transform,
                 &CombatStats,
                 Option<&crate::net::PlayerEquipment>,
+                Option<&crate::net::PlayerUtility>,
             ),
             With<Player>,
         >,
@@ -820,7 +821,7 @@ fn move_player_mobile(
         .ok()
         .map(|camera| mobile_screen_direction(mobile.movement, camera, *mode))
         .unwrap_or(Vec3::ZERO);
-    for (entity, mut transform, stats, equipment) in &mut transforms.p0() {
+    for (entity, mut transform, stats, equipment, utility) in &mut transforms.p0() {
         commands.entity(entity).remove::<Jumping>();
         if !allowed || !stats.is_alive() {
             commands
@@ -841,7 +842,8 @@ fn move_player_mobile(
         let current = transform.translation;
         let speed = PLAYER_SPEED
             * if boost.0 { DEBUG_SPEED_MULTIPLIER } else { 1.0 }
-            * equipment.map_or(1.0, |e| e.item_bonuses.move_speed_multiplier);
+            * equipment.map_or(1.0, |e| e.item_bonuses.move_speed_multiplier)
+            * utility.map_or(1.0, |u| u.state.movement_multiplier());
         // Bound a resumed/hitched frame; the server movement envelope remains authoritative.
         let desired = current + direction * speed * time.delta_secs().min(0.1);
         let mut desired = resolve_player_collisions(desired, &other_players, &structures);
@@ -859,7 +861,11 @@ fn move_player_mobile(
     }
 }
 
-fn mobile_screen_direction(screen: Vec2, camera: &GlobalTransform, mode: PlayerVisualMode) -> Vec3 {
+pub(crate) fn mobile_screen_direction(
+    screen: Vec2,
+    camera: &GlobalTransform,
+    mode: PlayerVisualMode,
+) -> Vec3 {
     if mode == PlayerVisualMode::Sprite2d {
         return render_xy_to_simulation_xz(Vec2::new(screen.x, -screen.y), 0.0).normalize_or_zero()
             * screen.length().min(1.0);
@@ -1009,6 +1015,7 @@ fn move_player(
                 &mut MovementRoute,
                 &CombatStats,
                 Option<&crate::net::PlayerEquipment>,
+                Option<&crate::net::PlayerUtility>,
             ),
             (With<Player>, With<MovementTarget>),
         >,
@@ -1037,7 +1044,7 @@ fn move_player(
         .collect::<Vec<_>>();
 
     let mut player_query = transform_sets.p0();
-    for (entity, mut transform, mut route, stats, equipment) in player_query.iter_mut() {
+    for (entity, mut transform, mut route, stats, equipment, utility) in player_query.iter_mut() {
         if !stats.is_alive() {
             commands
                 .entity(entity)
@@ -1063,7 +1070,8 @@ fn move_player(
         let speed = speed
             * equipment.map_or(1.0, |equipment| {
                 equipment.item_bonuses.move_speed_multiplier
-            });
+            })
+            * utility.map_or(1.0, |u| u.state.movement_multiplier());
         let move_delta = speed * time.delta_secs();
 
         if distance < move_delta || distance < 0.01 {

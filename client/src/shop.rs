@@ -57,6 +57,17 @@ struct ShopFeedback;
 #[derive(Component)]
 struct EquipmentGold;
 #[derive(Component)]
+struct QuickBuySlot(usize);
+#[derive(Component)]
+struct QuickBuyPrice(usize);
+#[derive(Component)]
+struct QuickBuyIcon {
+    slot: usize,
+    shown: Option<ItemId>,
+}
+#[derive(Component)]
+struct QuickGold;
+#[derive(Component)]
 enum EquipmentLayoutPart {
     Panel,
     Slot,
@@ -72,7 +83,7 @@ struct InventoryIcon {
 impl Plugin for ShopPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ShopState>()
-            .add_systems(Startup, setup_shop)
+            .add_systems(Startup, (setup_shop, setup_quick_buy))
             .add_systems(Update, adapt_desktop_equipment_width)
             .add_systems(
                 Update,
@@ -89,6 +100,7 @@ impl Plugin for ShopPlugin {
                     purchase_buttons,
                     update_shop,
                     update_inventory_icons,
+                    update_quick_buy,
                 )
                     .chain()
                     .in_set(InputContextSet::Actions),
@@ -104,6 +116,184 @@ pub(crate) fn item_code(id: ItemId) -> &'static str {
         ItemId::VitalityGem => "VG",
         ItemId::FocusCharm => "FC",
         ItemId::GuardianCrest => "GC",
+    }
+}
+
+pub(crate) fn quick_offers(class: shared::HeroClass, inventory: &[ItemId]) -> [Option<ItemId>; 2] {
+    let mut offers = shop::recommended_items(class)
+        .iter()
+        .copied()
+        .filter(|id| !inventory.contains(id));
+    [offers.next(), offers.next()]
+}
+fn compact_gold(gold: u32) -> String {
+    if gold < 10_000 {
+        gold.to_string()
+    } else if gold < 1_000_000 {
+        format!("{:.0}k", gold as f32 / 1000.0)
+    } else {
+        format!("{:.1}m", gold as f32 / 1_000_000.0)
+    }
+}
+fn setup_quick_buy(mut commands: Commands) {
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(16.0),
+                top: Val::Px(168.0),
+                column_gap: Val::Px(6.0),
+                ..default()
+            },
+            ZIndex(12),
+            Name::new("QuickBuyHud"),
+        ))
+        .with_children(|row| {
+            row.spawn((
+                Button,
+                Node {
+                    width: Val::Px(44.0),
+                    height: Val::Px(44.0),
+                    flex_shrink: 0.0,
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(5.0)),
+                    ..default()
+                },
+                BackgroundColor(ui::PANEL),
+                BorderColor::all(ui::GOLD),
+                ShopToggle,
+                Name::new("GoldShopButton"),
+            ))
+            .with_children(|button| {
+                button.spawn((
+                    Node {
+                        width: Val::Px(17.0),
+                        height: Val::Px(9.0),
+                        border: UiRect::all(Val::Px(2.0)),
+                        border_radius: BorderRadius::all(Val::Percent(50.0)),
+                        ..default()
+                    },
+                    BorderColor::all(ui::GOLD),
+                    BackgroundColor(ui::TILE),
+                ));
+                button.spawn((
+                    Text::new("80"),
+                    ui::text(12.0),
+                    TextColor(ui::GOLD),
+                    QuickGold,
+                    Name::new("QuickGoldText"),
+                ));
+            });
+            for slot in 0..2 {
+                row.spawn((
+                    Button,
+                    Node {
+                        width: Val::Px(44.0),
+                        height: Val::Px(44.0),
+                        flex_shrink: 0.0,
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(5.0)),
+                        ..default()
+                    },
+                    BackgroundColor(ui::PANEL),
+                    BorderColor::all(ui::EDGE),
+                    QuickBuySlot(slot),
+                    Name::new(format!("QuickBuy-{slot}")),
+                ))
+                .with_children(|button| {
+                    button.spawn((
+                        Node {
+                            width: Val::Px(25.0),
+                            height: Val::Px(25.0),
+                            ..default()
+                        },
+                        QuickBuyIcon { slot, shown: None },
+                    ));
+                    button.spawn((
+                        Text::new("—"),
+                        ui::text(12.0),
+                        TextColor(ui::MUTED),
+                        QuickBuyPrice(slot),
+                        Name::new(format!("QuickBuyPrice-{slot}")),
+                    ));
+                });
+            }
+        });
+}
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+fn update_quick_buy(
+    mut commands: Commands,
+    state: Res<ShopState>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    player: Query<(&PlayerEquipment, &CombatStats, &NetworkHeroClass), With<Player>>,
+    mut roots: Query<(&Name, &mut Node)>,
+    mut gold: Query<&mut Text, (With<QuickGold>, Without<QuickBuyPrice>)>,
+    mut prices: Query<(&QuickBuyPrice, &mut Text, &mut TextColor), Without<QuickGold>>,
+    mut icons: Query<(Entity, &mut QuickBuyIcon)>,
+    mut buttons: Query<(&QuickBuySlot, &mut BorderColor, &mut BackgroundColor)>,
+) {
+    for (name, mut node) in &mut roots {
+        if name.as_str() == "QuickBuyHud" {
+            let (left, top, gap) = mobile
+                .as_ref()
+                .filter(|m| m.enabled)
+                .map_or((16.0, 168.0, 6.0), |m| {
+                    (m.safe.left, m.safe.top + 122.0 * m.scale(), 4.0)
+                });
+            node.left = Val::Px(left);
+            node.top = Val::Px(top);
+            node.column_gap = Val::Px(gap);
+        }
+    }
+    let Ok((equipment, stats, class)) = player.single() else {
+        return;
+    };
+    let offers = quick_offers(class.0, &equipment.inventory);
+    for mut text in &mut gold {
+        text.0 = compact_gold(equipment.gold);
+    }
+    for (slot, mut text, mut color) in &mut prices {
+        text.0 = offers[slot.0].map_or_else(
+            || "—".into(),
+            |id| {
+                if state.pending.as_ref().is_some_and(|p| p.item == id) {
+                    "...".into()
+                } else {
+                    shop::item(id).cost.to_string()
+                }
+            },
+        );
+        *color = TextColor(
+            if offers[slot.0].is_some_and(|id| unavailable_reason(equipment, stats, id).is_none()) {
+                ui::GOLD
+            } else {
+                ui::MUTED
+            },
+        );
+    }
+    for (entity, mut icon) in &mut icons {
+        let next = offers[icon.slot];
+        if icon.shown != next {
+            icon.shown = next;
+            commands.entity(entity).despawn_related::<Children>();
+            if let Some(id) = next {
+                commands
+                    .entity(entity)
+                    .with_children(|p| spawn_item_icon(p, id, 25.0));
+            }
+        }
+    }
+    for (slot, mut border, mut background) in &mut buttons {
+        let available =
+            offers[slot.0].is_some_and(|id| unavailable_reason(equipment, stats, id).is_none());
+        *border = BorderColor::all(if available { ui::GOLD } else { ui::EDGE });
+        *background = BackgroundColor(if available { ui::TILE } else { ui::PANEL });
     }
 }
 
@@ -245,6 +435,17 @@ fn setup_shop(mut commands: Commands) {
                                         Name::new(format!("ShopDetails-{}", item_code(definition.id)))));
                                 });
                         }});
+                    panel.spawn((Node { column_gap: Val::Px(6.0), flex_wrap: FlexWrap::Wrap, ..default() }, Name::new("ShopInventory")))
+                        .with_children(|row| {
+                            for index in 0..shop::INVENTORY_CAPACITY {
+                                row.spawn((Node { width: Val::Px(74.0), height: Val::Px(28.0), align_items: AlignItems::Center,
+                                    column_gap: Val::Px(3.0), ..default() }, BackgroundColor(ui::TILE)))
+                                    .with_children(|slot| {
+                                        slot.spawn((Node { width: Val::Px(22.0), height: Val::Px(22.0), ..default() }, InventoryIcon { index, shown: None }));
+                                        slot.spawn((Text::new("-"), ui::text(12.0), TextColor(ui::MUTED), InventoryLabel(index)));
+                                    });
+                            }
+                        });
                     panel.spawn((Text::new(""), ui::text(15.0), TextColor(ui::JADE), ShopFeedback,
                         Node { min_height: Val::Px(21.0), ..default() }, Name::new("ShopFeedback")));
                     panel.spawn((Text::new("Unique permanent items. Buy at your base; keep them through respawn.\nEarn 1 gold / second during the match, plus combat rewards. Equipment resets each new round."),
@@ -397,12 +598,14 @@ fn toggle_shop(
     mut commands: Commands,
     career: Option<Res<crate::career::CareerClient>>,
     social: Option<Res<crate::social::SocialClient>>,
+    scoreboard: Option<Res<crate::edge_hud::ScoreboardState>>,
 ) {
     let allowed = session.join_confirmed() && !matches!(game.state, GameState::Victory { .. });
     let visible_help = matches!(game.state, GameState::Running) && help.0;
     if !allowed
         || visible_help
         || pause.open
+        || scoreboard.is_some_and(|s| s.open)
         || social
             .as_ref()
             .is_some_and(|social| social.blocks_gameplay())
@@ -473,21 +676,36 @@ fn unavailable_reason(
 fn purchase_buttons(
     mut state: ResMut<ShopState>,
     game: Res<GameStateSnapshot>,
-    player: Query<(&PlayerEquipment, &CombatStats), With<Player>>,
-    buttons: Query<(&Interaction, &ShopBuy), Changed<Interaction>>,
+    player: Query<(&PlayerEquipment, &CombatStats, Option<&NetworkHeroClass>), With<Player>>,
+    buttons: Query<(&Interaction, Option<&ShopBuy>, Option<&QuickBuySlot>), Changed<Interaction>>,
+    context: Option<Res<crate::input_context::GameplayInputContext>>,
+    mut feedback: Option<ResMut<ActionFeedback>>,
     mut outgoing: MessageWriter<NetworkCommand>,
 ) {
-    if !state.open || state.pending.is_some() {
+    if state.pending.is_some() {
         return;
     }
-    let Ok((equipment, stats)) = player.single() else {
+    let Ok((equipment, stats, class)) = player.single() else {
         return;
     };
-    for (interaction, button) in &buttons {
+    for (interaction, button, quick) in &buttons {
         if *interaction != Interaction::Pressed {
             continue;
         }
-        if let Some(reason) = unavailable_reason(equipment, stats, button.0) {
+        let item = if let Some(button) = button.filter(|_| state.open) {
+            Some(button.0)
+        } else if let Some(quick) =
+            quick.filter(|_| !state.open && context.as_ref().is_some_and(|c| c.gameplay_allowed()))
+        {
+            class.and_then(|class| quick_offers(class.0, &equipment.inventory)[quick.0])
+        } else {
+            None
+        };
+        let Some(item) = item else { continue };
+        if let Some(reason) = unavailable_reason(equipment, stats, item) {
+            if let Some(feedback) = feedback.as_mut() {
+                feedback.push_line(reason.clone());
+            }
             state.feedback = reason;
             return;
         }
@@ -501,14 +719,14 @@ fn purchase_buttons(
             )
             .saturating_add(1);
         let pending = PendingPurchase {
-            item: button.0,
+            item,
             request: state.next_request,
             round: game.meta.match_id,
             epoch: game.meta.server_epoch,
             retry: 0.0,
         };
         send_purchase(&pending, &mut outgoing);
-        state.feedback = format!("Purchasing {}...", shop::item(button.0).name);
+        state.feedback = format!("Purchasing {}...", shop::item(item).name);
         state.pending = Some(pending);
         return;
     }
@@ -764,7 +982,7 @@ mod tests {
     #[test]
     fn equipment_resizes_in_logical_pixels_and_keeps_three_slots_per_row() {
         let mut app = App::new();
-        app.add_systems(Startup, setup_shop)
+        app.add_systems(Startup, (setup_shop, setup_quick_buy))
             .add_systems(Update, adapt_desktop_equipment_width);
         let window = app
             .world_mut()
@@ -825,7 +1043,7 @@ mod tests {
     #[test]
     fn production_shop_bootstraps_distinct_close_label_and_footer() {
         let mut app = App::new();
-        app.add_systems(Startup, setup_shop);
+        app.add_systems(Startup, (setup_shop, setup_quick_buy));
         app.update();
         let mut labels = app.world_mut().query::<(&Name, &Text)>();
         let close: Vec<_> = labels
@@ -1153,5 +1371,115 @@ mod tests {
         assert!(app.world().resource::<ShopState>().pending.is_none());
         assert_eq!(app.world().resource::<ShopState>().next_request, 0);
         assert_eq!(app.world().resource::<ShopState>().epoch, 2);
+    }
+    #[test]
+    fn quick_buy_uses_authoritative_receipt_before_advancing_and_respects_modals() {
+        use bevy::ecs::message::MessageCursor;
+        let mut app = interaction_app();
+        let hero = app
+            .world_mut()
+            .spawn((
+                Player,
+                NetworkHeroClass(shared::HeroClass::Warrior),
+                CombatStats {
+                    hp: 100.0,
+                    max_hp: 100.0,
+                    mana: 100.0,
+                    max_mana: 100.0,
+                },
+                PlayerEquipment {
+                    gold: 80,
+                    shop_available: true,
+                    ..default()
+                },
+            ))
+            .id();
+        app.update();
+        let button = app
+            .world_mut()
+            .spawn((QuickBuySlot(0), Interaction::Pressed))
+            .id();
+        let mut cursor = MessageCursor::<NetworkCommand>::default();
+        app.update();
+        let sent: Vec<_> = cursor
+            .read(app.world().resource::<Messages<NetworkCommand>>())
+            .cloned()
+            .collect();
+        assert!(
+            matches!(&sent[..],[NetworkCommand::BuyItem {item_id,..}] if item_id=="vitality_gem")
+        );
+        let before = app.world().get::<PlayerEquipment>(hero).unwrap();
+        assert_eq!(before.gold, 80);
+        assert_eq!(
+            quick_offers(shared::HeroClass::Warrior, &before.inventory)[0],
+            Some(ItemId::VitalityGem)
+        );
+        assert!(!app.world().resource::<ShopState>().open);
+        app.world_mut()
+            .get_mut::<Interaction>(button)
+            .unwrap()
+            .clone_from(&Interaction::None);
+        let request = app
+            .world()
+            .resource::<ShopState>()
+            .pending
+            .as_ref()
+            .unwrap()
+            .request;
+        app.world_mut().entity_mut(hero).insert(PlayerEquipment {
+            gold: 0,
+            inventory: vec![ItemId::VitalityGem],
+            shop_available: true,
+            last_purchase: Some(shop::PurchaseReceipt {
+                request_id: request,
+                match_id: 1,
+                item_id: Some(ItemId::VitalityGem),
+                error: None,
+            }),
+            ..default()
+        });
+        app.update();
+        assert!(!app.world().resource::<ShopState>().purchase_pending());
+        let after = app.world().get::<PlayerEquipment>(hero).unwrap();
+        assert!(
+            quick_offers(shared::HeroClass::Warrior, &after.inventory)
+                .iter()
+                .all(|item| *item != Some(ItemId::VitalityGem))
+        );
+        app.world_mut()
+            .get_mut::<PlayerEquipment>(hero)
+            .unwrap()
+            .gold = 999;
+        app.insert_resource(crate::edge_hud::ScoreboardState::default());
+        app.world_mut()
+            .resource_mut::<crate::edge_hud::ScoreboardState>()
+            .open = true;
+        app.world_mut()
+            .get_mut::<Interaction>(button)
+            .unwrap()
+            .clone_from(&Interaction::Pressed);
+        app.update();
+        assert_eq!(
+            cursor
+                .read(app.world().resource::<Messages<NetworkCommand>>())
+                .count(),
+            0
+        );
+        assert!(!app.world().resource::<ShopState>().purchase_pending());
+    }
+
+    #[test]
+    fn quick_offers_have_two_stable_slots_and_do_not_offer_owned_items() {
+        let mut owned = Vec::new();
+        for _ in 0..shop::INVENTORY_CAPACITY {
+            let offers = quick_offers(shared::HeroClass::Mage, &owned);
+            let next = offers[0].unwrap();
+            assert!(!owned.contains(&next));
+            assert!(offers[1].is_none_or(|id| id != next && !owned.contains(&id)));
+            owned.push(next);
+        }
+        assert_eq!(quick_offers(shared::HeroClass::Mage, &owned), [None, None]);
+        assert_eq!(compact_gold(80), "80");
+        assert_eq!(compact_gold(10_000), "10k");
     }
 }

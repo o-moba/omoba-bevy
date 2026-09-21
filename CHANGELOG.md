@@ -6,6 +6,16 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.21.0-rc.3] - 2026-09-22
+
+### Compact mobile MOBA controls and live match information
+- Both profiles place the minimap at upper left with money and two recommended quick purchases underneath. Money opens the shop; purchases retain server confirmation and base/inventory rules. Equipment is inspectable in the shop.
+- Mobile keeps movement at lower left and groups attack, minion/structure targeting, four skill circles and utilities at lower right. Skill rank rings and a single full-size upgrade mode replace detached upgrade buttons. The center and lower center stay open; desktop keeps its center-bottom skill cards.
+- A compact top strip displays team kills and personal K/D/A beside chat, reactions and menu icons. The score opens both teams' live scoreboard with identity, K/D/A, level and earned gold. Income excludes the starting wallet grant and never decreases when shopping.
+- Selected targets have a compact top-center health bar with exact HP, supporting heroes, minions, structures and neutrals. Local health/mana/level remain in the left edge module; detailed objective guidance is available in the scoreboard and controls guide.
+- Mobile dash travels up to 5 units with a 20-second cooldown; haste grants 40% movement speed for 3 seconds with a 25-second cooldown. Both are server-authoritative, bound to the current round, and validated against cooldown/life state. Dash respects obstacles and explicitly reconciles even when blocked short of its full distance.
+- Native QA covers the revised resting layout, category controls, rank mode, target health, live purchase receipts and scoreboard states. Phone captures are development previews; physical-device verification remains a release gate.
+
 ## [0.21.0-rc.2] - 2026-09-21
 
 ### Art-directed interface and clear combat sightlines

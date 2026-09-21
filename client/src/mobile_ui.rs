@@ -363,11 +363,12 @@ fn sync_phone_ui(
         }
     }
     // The bar is how a phone reaches settings and the server address: it
-    // belongs on the home screen, the picker and the match. The other menus
+    // belongs on the home screen and the picker. The match has its compact
+    // score/menu strip. The other menus
     // have their own Back and would collide with it in the corner.
-    let bar_wanted = screen.as_ref().is_none_or(|screen| {
+    let bar_wanted = screen.as_ref().is_some_and(|screen| {
         use crate::frontend::AppScreen;
-        !screen.get().is_menu() || matches!(screen.get(), AppScreen::Home | AppScreen::HeroSelect)
+        matches!(screen.get(), AppScreen::Home | AppScreen::HeroSelect)
     });
     for mut node in &mut bar {
         node.display = if mobile.enabled
@@ -440,12 +441,10 @@ fn phone_family(
             let family = match name.as_str() {
                 "TeamSelectOverlay" => "entry",
                 "ShopPanel" => "shop",
+                "ShopSummary" => "shop-summary",
                 "PauseMenuPanel" => "pause",
                 "GameStateCard" => "result",
                 "HelpPanel" => "help",
-                "MatchHudColumn" => "hero",
-                "MatchObjectiveRoot" => "objective",
-                "EquipmentHud" => "equipment",
                 "PhoneMenuBar" => "phone-menu",
                 _ => "",
             };
@@ -491,87 +490,11 @@ fn adapt_phone_layout(
     let bottom = mobile.safe.bottom;
     let width = mobile.viewport.x - left - mobile.safe.right;
     let height = mobile.viewport.y - top - bottom;
-    let minimap_size = (height * 0.37).clamp(112.0, 142.0);
-    // The small identity card stays in the left corner; reserve the entire
-    // north approach for the world. The lower status strip fits between actual
-    // touch hit areas, including the outer upgrade buttons.
-    let hero_left = left + minimap_size + 12.0;
-    let hero_width = (mobile.viewport.x * 0.35 - hero_left - 8.0).clamp(104.0, 132.0);
-    let controls = mobile.layout();
-    let objective_left = controls.joystick_center.x + controls.joystick_radius + 20.0;
-    let combat_left = controls
-        .upgrade_centers
-        .iter()
-        .map(|center| center.x - controls.upgrade_radius)
-        .chain(
-            controls
-                .ability_centers
-                .iter()
-                .zip(controls.ability_radii)
-                .map(|(center, radius)| center.x - radius),
-        )
-        .fold(f32::INFINITY, f32::min);
-    let objective_width = (combat_left - objective_left - 12.0).clamp(120.0, 344.0);
     let class_width = (width * 0.26).clamp(150.0, 210.0);
     let grid_left = left + class_width + 20.0;
     let grid_width = width - class_width - 20.0;
-    for (entity, name, mut node, transform) in &mut nodes {
+    for (entity, name, mut node, _transform) in &mut nodes {
         match name.as_str() {
-            "MinimapRoot" => {
-                let size = minimap_size;
-                absolute(
-                    &mut node,
-                    left + (size - 252.0) * 0.5,
-                    top + (size - 252.0) * 0.5,
-                    252.0,
-                    Some(252.0),
-                );
-                if let Some(mut transform) = transform {
-                    transform.scale = Vec2::splat(size / 252.0);
-                } else {
-                    commands
-                        .entity(entity)
-                        .insert(UiTransform::from_scale(Vec2::splat(size / 252.0)));
-                }
-            }
-            "MatchHudColumn" => {
-                absolute(&mut node, hero_left, top, hero_width, Some(108.0));
-                node.padding = UiRect::all(Val::Px(7.0));
-                node.row_gap = Val::Px(3.0);
-            }
-            "HudHeroPortrait" => {
-                node.width = Val::Px(24.0);
-                node.height = Val::Px(24.0);
-            }
-            "MatchHudBar-HP" | "MatchHudBar-MP" => node.height = Val::Px(15.0),
-            "MatchObjectiveRoot" => {
-                absolute(&mut node, objective_left, 0.0, objective_width, None);
-                node.top = Val::Auto;
-                node.bottom = Val::Px(bottom);
-            }
-            "MatchObjectivePanel" => {
-                node.width = Val::Percent(100.0);
-                node.max_width = Val::Percent(100.0);
-                node.padding = UiRect::all(Val::Px(6.0));
-                node.row_gap = Val::Px(2.0);
-            }
-            "EquipmentHud" => {
-                absolute(
-                    &mut node,
-                    left,
-                    top + minimap_size + 8.0,
-                    minimap_size,
-                    Some(71.0),
-                );
-                node.padding = UiRect::all(Val::Px(4.0));
-                node.row_gap = Val::Px(3.0);
-            }
-            "InventorySlots" => node.display = Display::None,
-            "ShopOpenButton" => {
-                node.height = Val::Px(44.0);
-                node.min_height = Val::Px(44.0);
-                node.padding = UiRect::all(Val::Px(4.0));
-            }
             "TeamSelectOverlay" => {
                 node.padding = UiRect::ZERO;
             }
@@ -654,32 +577,63 @@ fn adapt_phone_layout(
                 node.row_gap = Val::Px(6.0);
             }
             "HelpPanel" => {
+                node.max_height = Val::Px(height);
                 node.width = Val::Px(width.min(740.0));
                 node.max_width = Val::Px(width);
                 node.padding = UiRect::all(Val::Px(14.0));
                 node.row_gap = Val::Px(10.0);
             }
+            "HelpBody" => {
+                // New combat actions remain discoverable without pushing the
+                // fixed 44px dismiss action below a landscape phone viewport.
+                node.max_height = Val::Px((height - 82.0).max(120.0));
+                node.min_height = Val::Px(0.0);
+                node.flex_shrink = 1.0;
+                node.overflow = Overflow::scroll_y();
+                commands
+                    .entity(entity)
+                    .insert_if_new(ScrollPosition::default());
+            }
             "ShopPanel" => {
+                // Center inside the asymmetric safe area while the backdrop
+                // continues to cover the entire viewport.
+                node.top = Val::Px((top - bottom) * 0.5);
                 node.width = Val::Px(width);
                 node.max_width = Val::Px(width);
-                node.padding = UiRect::all(Val::Px(10.0));
-                node.row_gap = Val::Px(6.0);
+                node.max_height = Val::Px(height);
+                node.padding = UiRect::all(Val::Px(8.0));
+                node.row_gap = Val::Px(3.0);
             }
             "ShopCards" => {
+                // Keep every item card at 103px and the header/close outside
+                // the scroll area. At 844×390 both rows fit; narrower phones
+                // retain scrolling room when the summary wraps to two lines.
+                node.max_height =
+                    Val::Px((height - if width < 700.0 { 162.0 } else { 144.0 }).max(103.0));
+                node.min_height = Val::Px(0.0);
+                node.flex_shrink = 1.0;
                 node.column_gap = Val::Px(6.0);
-                node.row_gap = Val::Px(6.0);
+                node.row_gap = Val::Px(4.0);
+                node.overflow = Overflow::scroll_y();
+                commands
+                    .entity(entity)
+                    .insert_if_new(ScrollPosition::default());
             }
+            "ShopFooter" => node.display = Display::None,
             "ShopCloseButton" => {
                 node.min_height = Val::Px(44.0);
                 node.padding = UiRect::axes(Val::Px(10.0), Val::Px(5.0));
             }
             "PauseMenuPanel" => {
                 node.width = Val::Px(width.min(650.0));
-                node.height = Val::Px(if pause.as_ref().is_some_and(|pause| pause.in_settings) {
-                    height
+                // The main menu grows with its four full-size actions. A
+                // fixed 270px panel clipped Exit after Controls guide was added.
+                node.height = if pause.as_ref().is_some_and(|pause| pause.in_settings) {
+                    Val::Px(height)
                 } else {
-                    height.min(270.0)
-                });
+                    Val::Auto
+                };
+                node.max_height = Val::Px(height);
                 node.padding = UiRect::all(Val::Px(10.0));
                 node.row_gap = Val::Px(6.0);
                 node.overflow = Overflow::scroll_y();
@@ -737,8 +691,6 @@ fn adapt_phone_layout(
         }
         font.font_size = match family {
             "phone-menu" => original / scale,
-            "hero" => 11.0,
-            "objective" | "equipment" => original.clamp(11.0, 13.0),
             "entry" => original.clamp(11.0, 16.0),
             "shop-card" if width < 650.0 => {
                 if original >= 18.0 {
@@ -749,6 +701,7 @@ fn adapt_phone_layout(
             }
             "shop-card" => original.clamp(12.0, 18.0),
             "shop" => original.clamp(12.0, 18.0),
+            "shop-summary" => 14.0,
             "result" => 20.0,
             "help" => 15.0,
             "pause" => original.clamp(14.0, 22.0),
@@ -759,8 +712,7 @@ fn adapt_phone_layout(
         match name.as_str() {
             "RendererStatus" => text.0 = "Swipe to choose your hero".into(),
             "TeamSelectHint" => text.0 = "Choose your class and hero, then join a team. Teams balance automatically.".into(),
-            "EquipmentGold" => text.0 = text.0.replace("   /   Equipment", ""),
-            "ShopOpenLabel" => text.0 = "SHOP".into(),
+
             "ShopCloseLabel" => text.0 = "CLOSE".into(),
             "ShopSummary" => text.0 = text.0.replace("click an item", "tap an item"),
             "HelpDismissLabel" => text.0 = "Got it — play".into(),
@@ -770,7 +722,7 @@ fn adapt_phone_layout(
                 .replace("Target locked · Attack / Q W E R", "Target locked · ATTACK / skills"),
             "ShopFooter" => text.0 = "Buy at your base. Items survive respawn and reset next round.".into(),
             name if name.starts_with("ShopDescription-") => text.0 = text.0.replace("maximum HP", "max HP"),
-            "HelpBody" => text.0 = "YOUR FIRST MATCH\n\nMOVE: Drag the left stick. Release to stop.\nATTACK: Tap the large right button; hold to repeat. No mana needed.\nTARGET: Drag ATTACK to extend the reticle. Release on a highlighted foe to lock. Drag to X to cancel.\nSKILLS: Q/W/E/R surround ATTACK. Tap to use the locked target, or drag to aim.\nGROW: Abilities unlock as you level. Tap + to spend skill points.\nWIN: Follow your minions, clear all towers in one lane, then destroy the enemy base.\nRECOVER: Return to your base to shop. If defeated, wait to respawn.\nLOOK: Tap the minimap to scout. Move the stick to follow your hero again.\n\nThe match continues while menus are open. Stay connected for the next round.".into(),
+            "HelpBody" => text.0 = "YOUR FIRST MATCH\n\nMOVE: Drag the left stick. Release to stop.\nATTACK: Tap the large right button; hold to repeat. No mana needed.\nTARGET: Drag ATTACK to extend the reticle. Release on a highlighted foe to lock. Drag to X to cancel.\nFARM: The small minion and tower buttons target only that category.\nUTILITY: Dash moves in your stick direction; drag it to aim. Haste boosts movement briefly.\nSKILLS: Q/W/E/R surround ATTACK. Tap to use the locked target, or drag to aim.\nGROW: Abilities unlock as you level. Tap RANK, then a glowing skill to spend a point.\nWIN: Follow your minions, clear all towers in one lane, then destroy the enemy base.\nRECOVER: Return to your base to shop. If defeated, wait to respawn.\nLOOK: Tap the minimap to scout. Move the stick to follow your hero again.\n\nThe match continues while menus are open. Stay connected for the next round.".into(),
             "GameStateLabel" => text.0 = text.0.replace("Escape: settings or exit game.", "MENU: settings or exit game."),
             _ => {}
         }
@@ -879,6 +831,7 @@ mod tests {
             .init_resource::<ServerEntry>()
             .init_resource::<crate::shop::ShopState>()
             .init_resource::<UiScale>()
+            .insert_resource(State::new(crate::frontend::AppScreen::Home))
             .add_systems(Startup, setup_phone_ui)
             .add_systems(Update, sync_phone_ui)
             .add_systems(PostUpdate, adapt_phone_layout);
@@ -935,6 +888,39 @@ mod tests {
                     assert!((font.font_size * scale - 14.0).abs() < 0.001);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn phone_menu_bar_belongs_only_to_home_and_hero_picker() {
+        let mut app = App::new();
+        let mut mobile = MobileControls::default();
+        mobile.enabled = true;
+        app.insert_resource(mobile)
+            .init_resource::<ClientSession>()
+            .init_resource::<ServerEntry>()
+            .add_systems(Startup, setup_phone_ui)
+            .add_systems(Update, sync_phone_ui);
+        for screen in [
+            crate::frontend::AppScreen::Home,
+            crate::frontend::AppScreen::HeroSelect,
+            crate::frontend::AppScreen::InMatch,
+            crate::frontend::AppScreen::Card,
+        ] {
+            app.insert_resource(State::new(screen));
+            app.update();
+            let mut bars = app.world_mut().query_filtered::<&Node, With<PhoneBar>>();
+            assert_eq!(
+                bars.single(app.world()).unwrap().display,
+                if matches!(
+                    screen,
+                    crate::frontend::AppScreen::Home | crate::frontend::AppScreen::HeroSelect
+                ) {
+                    Display::Flex
+                } else {
+                    Display::None
+                }
+            );
         }
     }
 

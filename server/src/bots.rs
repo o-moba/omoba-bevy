@@ -226,6 +226,7 @@ pub(crate) fn assign_human_team(
 pub(crate) fn remove_replaced_bot(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,
     bots: &mut BotControllers,
+    ledger: &mut match_stats::RoundLedger,
     team: Team,
 ) {
     let addr = players
@@ -234,7 +235,10 @@ pub(crate) fn remove_replaced_bot(
         .min_by_key(|(_, p)| p.state.id)
         .map(|(addr, _)| *addr);
     if let Some(addr) = addr {
-        players.remove(&addr);
+        if let Some(player) = players.remove(&addr) {
+            ledger.update_earned_gold(player.state.id, player.state.earned_gold);
+            ledger.update_player(player.state.id, player.state.level, true);
+        }
         bots.controllers.remove(&addr);
     }
 }
@@ -315,7 +319,12 @@ impl ServerRuntime {
                 > self.match_config.team_size as usize
             {
                 let before = self.players.len();
-                remove_replaced_bot(&mut self.players, &mut self.bots, team);
+                remove_replaced_bot(
+                    &mut self.players,
+                    &mut self.bots,
+                    &mut self.combat_log.ledger,
+                    team,
+                );
                 if self.players.len() == before {
                     break;
                 }

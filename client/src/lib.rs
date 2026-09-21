@@ -15,6 +15,7 @@ mod combat_visuals;
 mod creatures3d;
 mod debug_console;
 mod decor;
+mod edge_hud;
 mod frontend;
 mod frontend_flow_qa;
 mod frontend_qa;
@@ -137,6 +138,7 @@ pub fn main() {
         TeamSelectPlugin,
         GameStateUiPlugin,
     ))
+    .add_plugins(edge_hud::EdgeHudPlugin)
     .add_plugins((FrontendPlugin, frontend_qa::FrontendQaPlugin))
     .add_plugins((
         input_context::InputContextPlugin,

@@ -36,6 +36,7 @@ pub struct Bot {
     assembler: shared::transport::SnapshotAssembler,
     order: shared::protocol::SnapshotOrder,
     framed: bool,
+    dash_sequence: u64,
 }
 
 impl Bot {
@@ -60,6 +61,7 @@ impl Bot {
             assembler: Default::default(),
             order: Default::default(),
             framed: false,
+            dash_sequence: 0,
         }
     }
 
@@ -82,6 +84,11 @@ impl Bot {
         {
             return None;
         }
+        self.dash_sequence = packet
+            .players()
+            .iter()
+            .find(|p| p.id == packet.your_id())
+            .map_or(0, |p| p.utility.dash_sequence);
         Some(packet)
     }
 
@@ -139,7 +146,13 @@ impl Bot {
 
     /// Sends a movement/orientation update.
     pub fn send_transform(&self, x: f32, y: f32, z: f32, yaw: f32) {
-        self.send(&ClientPacket::Transform { x, y, z, yaw });
+        self.send(&ClientPacket::Transform {
+            x,
+            y,
+            z,
+            yaw,
+            dash_sequence: self.dash_sequence,
+        });
     }
 
     /// Casts the Q ability at a target.

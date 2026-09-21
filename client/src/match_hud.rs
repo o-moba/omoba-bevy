@@ -81,13 +81,13 @@ fn setup_match_hud(mut commands: Commands) {
             Button,
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(212.0),
-                bottom: Val::Px(16.0),
-                width: Val::Px(168.0),
-                height: Val::Px(136.0),
-                padding: UiRect::all(Val::Px(10.0)),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(5.0),
+                left: Val::Px(16.0),
+                top: Val::Px(218.0),
+                width: Val::Px(144.0),
+                height: Val::Px(38.0),
+                padding: UiRect::all(Val::Px(3.0)),
+                column_gap: Val::Px(5.0),
+                align_items: AlignItems::Center,
                 ..ui::panel_node()
             },
             BackgroundColor(ui::PANEL),
@@ -96,41 +96,24 @@ fn setup_match_hud(mut commands: Commands) {
             Name::new("MatchHudColumn"),
         ))
         .with_children(|panel| {
-            panel
-                .spawn((Node {
-                    column_gap: Val::Px(10.0),
-                    align_items: AlignItems::Center,
+            panel.spawn((
+                Text::new("Lv\n1"),
+                ui::text(12.0),
+                TextColor(ui::GOLD),
+                MatchHudProgressionText,
+                Name::new("HudProgressionText"),
+                Node {
+                    width: Val::Px(24.0),
+                    flex_shrink: 0.0,
                     ..default()
-                },))
-                .with_children(|row| {
-                    row.spawn((
-                        Node {
-                            width: Val::Px(32.0),
-                            height: Val::Px(32.0),
-                            flex_shrink: 0.0,
-                            border_radius: BorderRadius::all(Val::Px(22.0)),
-                            overflow: Overflow::clip(),
-                            border: UiRect::all(Val::Px(2.0)),
-                            ..default()
-                        },
-                        BorderColor::all(ui::GOLD),
-                        BackgroundColor(ui::TILE),
-                        HudPortrait,
-                        Name::new("HudHeroPortrait"),
-                    ));
-                    row.spawn((
-                        Text::new("YOUR HERO"),
-                        ui::text(12.0),
-                        TextColor(ui::IVORY),
-                        MatchHudProgressionText,
-                        Name::new("HudProgressionText"),
-                    ));
-                });
+                },
+            ));
             panel
                 .spawn((
                     Node {
+                        flex_grow: 1.0,
                         flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(5.0),
+                        row_gap: Val::Px(2.0),
                         ..default()
                     },
                     Visibility::Hidden,
@@ -142,10 +125,14 @@ fn setup_match_hud(mut commands: Commands) {
                     spawn_stat_bar(bars, "MP", MANA_BAR_COLOR, ManaBarFill);
                 });
             panel.spawn((
-                Text::new("XP 0 / 0"),
-                ui::text(11.0),
+                Text::new(""),
+                ui::text(12.0),
                 TextColor(ui::MUTED),
                 HudXpText,
+                Node {
+                    display: Display::None,
+                    ..default()
+                },
                 Name::new("HudXpText"),
             ));
         });
@@ -201,7 +188,7 @@ fn setup_match_hud(mut commands: Commands) {
 
 /// Shared anchor keeps status and ability rows aligned at every desktop width.
 pub(crate) fn desktop_skills_left(width: f32) -> f32 {
-    ((width - 344.0) * 0.5).max(392.0)
+    ((width - 344.0) * 0.5).max(16.0)
 }
 
 fn adapt_desktop_dock(
@@ -209,17 +196,31 @@ fn adapt_desktop_dock(
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     mut nodes: Query<(&Name, &mut Node)>,
 ) {
-    if mobile.is_some_and(|mobile| mobile.enabled) {
-        return;
-    }
+    let phone = mobile.as_ref().filter(|m| m.enabled);
     let Ok(window) = windows.single() else {
         return;
     };
     for (name, mut node) in &mut nodes {
-        if matches!(
-            name.as_str(),
-            "MatchObjectiveRoot" | "SkillBarRoot" | "ActionFeedback"
-        ) {
+        if name.as_str() == "MatchHudColumn" {
+            let (left, top, width) = phone.map_or((16.0, 218.0, 144.0), |m| {
+                (
+                    m.safe.left,
+                    m.safe.top + 172.0 * m.scale(),
+                    140.0 * m.scale(),
+                )
+            });
+            node.left = Val::Px(left);
+            node.top = Val::Px(top);
+            node.bottom = Val::Auto;
+            node.width = Val::Px(width);
+            node.height = Val::Px(38.0);
+        }
+        if phone.is_none()
+            && matches!(
+                name.as_str(),
+                "MatchObjectiveRoot" | "SkillBarRoot" | "ActionFeedback"
+            )
+        {
             node.left = Val::Px(desktop_skills_left(window.width()));
         }
     }
@@ -321,10 +322,13 @@ fn sync_gameplay_hud_visibility(
                 | "ActionFeedback"
                 | "EquipmentHud"
                 | "MatchObjectiveRoot"
+                | "QuickBuyHud"
         ) {
             // Transient feedback owns its own empty/expired layout state.
             if name.as_str() != "ActionFeedback" {
                 node.display = if show
+                    && name.as_str() != "MatchObjectiveRoot"
+                    && name.as_str() != "EquipmentHud"
                     && !(name.as_str() == "SkillBarRoot"
                         && mobile.as_ref().is_some_and(|mobile| mobile.enabled))
                 {
@@ -362,7 +366,7 @@ fn spawn_stat_bar<F: Component>(
     col.spawn((
         Node {
             width: Val::Percent(100.0),
-            height: Val::Px(19.0),
+            height: Val::Px(14.0),
             align_items: AlignItems::Center,
             justify_content: JustifyContent::Center,
             border_radius: BorderRadius::all(Val::Px(3.0)),
@@ -499,11 +503,7 @@ fn update_match_hud(
         }
     }
 
-    prog_text.0 = format!(
-        "{}\nLEVEL {}",
-        hero_class.display_name(),
-        progression.level.max(1)
-    );
+    prog_text.0 = format!("Lv\n{}", progression.level.max(1));
 
     if !running {
         status_text.0 = format!(
@@ -560,7 +560,7 @@ fn update_stat_bars(
 /// One line per active buff of the LOCAL player's team, with the remaining
 /// time in whole seconds. Effect numbers mirror `server/src/balance.rs`
 /// (`BOTTOM_BOSS_BUFF_*` / `TOP_BOSS_BUFF_*`); an empty string hides the row.
-fn team_buff_hud_text(buffs: &[TeamBuffState], local_team: Team) -> String {
+pub(crate) fn team_buff_hud_text(buffs: &[TeamBuffState], local_team: Team) -> String {
     buffs
         .iter()
         .filter(|buff| buff.team == local_team)

@@ -18,6 +18,7 @@ struct PlayerId(u64);
 
 struct FrozenParticipant {
     result: ParticipantResult,
+    earned_gold: u32,
 }
 
 #[derive(Default)]
@@ -93,6 +94,7 @@ impl RoundLedger {
             id,
             FrozenParticipant {
                 result: participant,
+                earned_gold: 0,
             },
         );
         Ok(true)
@@ -116,6 +118,38 @@ impl RoundLedger {
                 participant.result.stats.final_level.max(final_level);
             participant.result.disconnected = disconnected;
         }
+    }
+
+    pub(crate) fn update_earned_gold(&mut self, player_id: u64, earned_gold: u32) {
+        if !self.frozen
+            && let Some(participant) = self.participants.get_mut(&PlayerId(player_id))
+        {
+            participant.earned_gold = participant.earned_gold.max(earned_gold);
+        }
+    }
+
+    pub(crate) fn live_scoreboard(&self) -> Option<shared::live_score::LiveScoreboard> {
+        self.started.then(|| shared::live_score::LiveScoreboard {
+            players: self
+                .participants
+                .values()
+                .map(|participant| {
+                    let p = &participant.result;
+                    shared::live_score::LiveScorePlayer {
+                        player_id: p.player_id,
+                        nickname: p.nickname.clone(),
+                        team: p.team,
+                        hero_class: p.hero_class,
+                        kills: p.stats.kills,
+                        deaths: p.stats.deaths,
+                        assists: p.stats.assists,
+                        earned_gold: participant.earned_gold,
+                        level: p.stats.final_level,
+                        connected: !p.disconnected,
+                    }
+                })
+                .collect(),
+        })
     }
 
     pub(crate) fn snapshot(&self) -> Vec<ParticipantResult> {
@@ -777,5 +811,55 @@ mod tests {
         assert_eq!(stats(&ledger, 1).kills, 0);
         assert_eq!(stats(&ledger, 1).final_level, 4);
         assert_eq!(ledger.snapshot()[0].progression_xp_gained, 0);
+    }
+    #[test]
+    fn live_score_uses_deduplicated_ledger_and_preserves_income_until_new_round() {
+        let now = Instant::now();
+        assert!(RoundLedger::default().live_scoreboard().is_none());
+        let mut ledger = ledger();
+        ledger.update_earned_gold(1, 250);
+        ledger.update_earned_gold(1, 20);
+        ledger.update_player(1, 8, true);
+        let receipt = hit(
+            1,
+            CombatEntityKind::Player,
+            1,
+            CombatEntityKind::Player,
+            3,
+            100.0,
+            true,
+        );
+        ledger.record(now, &receipt);
+        ledger.record(now, &receipt);
+        let rows = ledger.live_scoreboard().unwrap().players;
+        assert_eq!(
+            (
+                rows[0].kills,
+                rows[0].earned_gold,
+                rows[0].level,
+                rows[0].connected
+            ),
+            (1, 250, 8, false)
+        );
+        assert_eq!(rows[2].deaths, 1);
+        ledger.update_player(1, 8, false);
+        assert!(!ledger.register(participant(1, Team::Green)).unwrap());
+        assert_eq!(
+            ledger.live_scoreboard().unwrap().players[0].earned_gold,
+            250
+        );
+        ledger.freeze();
+        ledger.update_earned_gold(1, 999);
+        assert_eq!(
+            ledger.live_scoreboard().unwrap().players[0].earned_gold,
+            250
+        );
+        ledger = RoundLedger::default();
+        ledger.begin(roster()).unwrap();
+        let p = &ledger.live_scoreboard().unwrap().players[0];
+        assert_eq!(
+            (p.kills, p.deaths, p.assists, p.earned_gold, p.level),
+            (0, 0, 0, 0, 1)
+        );
     }
 }

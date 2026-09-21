@@ -1,6 +1,36 @@
 # Feature Inventory
 
-Canonical version: `0.21.0-rc.1`
+Canonical version: `0.21.0-rc.3`
+
+## Compact match HUD and utility actions
+
+The minimap occupies the upper-left corner on both profiles, with current gold and
+two unowned recommended quick purchases below it. Tapping gold opens the full shop,
+which also shows equipment. Quick purchases use the existing base, price, life,
+inventory, request/retry and server-receipt rules.
+
+Phone movement stays at lower left; the lower-right fan holds main attack, explicit
+minion/structure targeting, four skill circles with segmented rank indicators, and
+dash/haste utilities. One upgrade-mode control turns eligible skill circles into
+full-size upgrade targets. Desktop retains the four centered bottom skill cards.
+Compact vitals, score, K/D/A and icon controls leave the middle and lower-middle
+battlefield visible. A selected target gets exact current/max HP at upper center.
+
+The score opens a two-team table backed by the authoritative round ledger, with
+nickname, K/D/A, level and earned gold. Earned gold excludes the initial wallet
+and remains independent of spending; life/reconnect retain it and a new round
+resets it. A missing legacy score field is shown as unavailable, never fabricated.
+
+Dash travels at most5 units, respects static/live obstacles and map bounds, and
+has a20-second cooldown. Haste gives1.4× speed for3 seconds with a25-second cooldown.
+Requests have current-match identity and replay protection; server snapshots drive
+cooldown/active state. Explicit dash acknowledgments handle movements smaller than
+the normal network correction threshold and prevent delayed old movement packets
+from undoing them. The development speed toggle remains separate.
+
+Actual-client render coverage and focused behavior checks are retained in the
+MOBA edge-HUD task evidence. Phone runs are desktop development previews and do
+not certify physical-device input, performance or platform release readiness.
 
 ## Forest ambience and combat particles
 

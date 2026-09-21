@@ -2,12 +2,14 @@
 //! another control; only a fresh Started event can capture an input.
 use std::collections::HashMap;
 
+use crate::net::TargetKind;
 use bevy::{
     input::touch::{TouchInput, TouchPhase},
     prelude::*,
     ui::FocusPolicy,
     window::{AppLifecycle, PrimaryWindow, WindowFocused},
 };
+use shared::utility::UtilityAction;
 use shared::{SkillSlot, ability_for_class_slot, scaled_mana_cost, unlocked_slots_for_level};
 
 use crate::{
@@ -45,7 +47,10 @@ pub(crate) struct MobileLayout {
     pub cancel_radius: f32,
     pub ability_centers: [Vec2; 4],
     pub ability_radii: [f32; 4],
-    pub upgrade_centers: [Vec2; 4],
+    pub category_centers: [Vec2; 2],
+    pub utility_centers: [Vec2; 2],
+    pub auxiliary_radius: f32,
+    pub upgrade_center: Vec2,
     pub upgrade_radius: f32,
 }
 
@@ -81,6 +86,9 @@ enum Control {
     Attack,
     Ability(usize),
     Upgrade(usize),
+    UpgradeMode,
+    CategoryAttack(TargetKind),
+    Utility(UtilityAction),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -109,6 +117,9 @@ pub(crate) struct MobileControls {
     pub casts: Vec<MobileCastIntent>,
     pub attacks: Vec<MobileAttackIntent>,
     pub upgrades: Vec<usize>,
+    pub category_attacks: Vec<TargetKind>,
+    pub utilities: Vec<(UtilityAction, Option<Vec2>)>,
+    upgrade_mode: bool,
     captures: HashMap<u64, Capture>,
     upgrade_enabled: [bool; 4],
     layout_changed: bool,
@@ -135,6 +146,9 @@ impl Default for MobileControls {
             casts: Vec::new(),
             attacks: Vec::new(),
             upgrades: Vec::new(),
+            category_attacks: Vec::new(),
+            utilities: Vec::new(),
+            upgrade_mode: false,
             captures: HashMap::new(),
             upgrade_enabled: [false; 4],
             layout_changed: false,
@@ -159,33 +173,30 @@ impl MobileControls {
     }
 
     pub fn layout(&self) -> MobileLayout {
-        let s = self.scale();
-        let edge = self.viewport.x - self.safe.right;
+        // The phone reference is one coherent edge group. Scaling never makes
+        // the smallest controls smaller than a 44 logical-pixel touch target.
+        let s = self.scale().max(1.0);
+        let right = self.viewport.x - self.safe.right;
         let bottom = self.viewport.y - self.safe.bottom;
-        let attack = Vec2::new(edge - 48.0 * s, bottom - 48.0 * s);
-        // Four separate skills arc around the larger basic attack. Upgrade
-        // targets remain outside the fan and clear of the HP card above it.
-        let centers = [
-            attack + Vec2::new(-90.0, 15.0) * s,
-            attack + Vec2::new(-140.0, -39.0) * s,
-            attack + Vec2::new(-96.0, -107.0) * s,
-            attack + Vec2::new(-25.0, -122.0) * s,
-        ];
+        let point = |x: f32, y: f32| Vec2::new(right - x * s, bottom - y * s);
         MobileLayout {
-            joystick_center: Vec2::new(self.safe.left + 76.0 * s, bottom - 72.0 * s),
-            joystick_radius: 58.0 * s,
-            attack_center: attack,
-            attack_radius: 44.0 * s,
-            cancel_center: Vec2::new(edge - 38.0 * s, self.safe.top + 85.0 * s),
-            cancel_radius: 24.0 * s,
-            ability_centers: centers,
-            ability_radii: [28.0 * s, 28.0 * s, 28.0 * s, 31.0 * s],
-            upgrade_centers: [
-                attack + Vec2::new(-147.0, 23.0) * s,
-                attack + Vec2::new(-197.0, -40.0) * s,
-                attack + Vec2::new(-154.0, -111.0) * s,
-                attack + Vec2::new(-71.0, -175.0) * s,
+            joystick_center: Vec2::new(self.safe.left + 72.0 * s, bottom - 65.0 * s),
+            joystick_radius: 52.0 * s,
+            attack_center: point(50.0, 82.0),
+            attack_radius: 38.0 * s,
+            cancel_center: point(28.0, 266.0),
+            cancel_radius: 22.0 * s,
+            ability_centers: [
+                point(118.0, 34.0),
+                point(159.0, 99.0),
+                point(127.0, 164.0),
+                point(65.0, 203.0),
             ],
+            ability_radii: [25.0 * s; 4],
+            category_centers: [point(28.0, 22.0), point(22.0, 144.0)],
+            utility_centers: [point(238.0, 31.0), point(188.0, 31.0)],
+            auxiliary_radius: 22.0 * s,
+            upgrade_center: point(188.0, 157.0),
             upgrade_radius: 22.0 * s,
         }
     }
@@ -196,19 +207,36 @@ impl MobileControls {
             .values()
             .any(|capture| matches!(capture.control, Control::Attack | Control::Ability(_)));
         self.captures.clear();
+        self.upgrade_mode = false;
         self.movement = Vec2::ZERO;
         self.casts.clear();
         self.attacks.clear();
         self.upgrades.clear();
+        self.category_attacks.clear();
+        self.utilities.clear();
     }
 
     fn hit_control(&self, point: Vec2) -> Option<(Control, Vec2)> {
         let l = self.layout();
-        for slot in 0..4 {
-            if self.upgrade_enabled[slot]
-                && point.distance(l.upgrade_centers[slot]) <= l.upgrade_radius
-            {
-                return Some((Control::Upgrade(slot), l.upgrade_centers[slot]));
+        if self.upgrade_enabled.iter().any(|enabled| *enabled)
+            && point.distance(l.upgrade_center) <= l.upgrade_radius
+        {
+            return Some((Control::UpgradeMode, l.upgrade_center));
+        }
+        for (index, kind) in [TargetKind::Minion, TargetKind::Structure]
+            .into_iter()
+            .enumerate()
+        {
+            if point.distance(l.category_centers[index]) <= l.auxiliary_radius {
+                return Some((Control::CategoryAttack(kind), l.category_centers[index]));
+            }
+        }
+        for (index, action) in [UtilityAction::Dash, UtilityAction::Haste]
+            .into_iter()
+            .enumerate()
+        {
+            if point.distance(l.utility_centers[index]) <= l.auxiliary_radius {
+                return Some((Control::Utility(action), l.utility_centers[index]));
             }
         }
         if point.distance(l.attack_center) <= l.attack_radius {
@@ -216,7 +244,14 @@ impl MobileControls {
         }
         for slot in 0..4 {
             if point.distance(l.ability_centers[slot]) <= l.ability_radii[slot] {
-                return Some((Control::Ability(slot), l.ability_centers[slot]));
+                return Some((
+                    if self.upgrade_mode {
+                        Control::Upgrade(slot)
+                    } else {
+                        Control::Ability(slot)
+                    },
+                    l.ability_centers[slot],
+                ));
             }
         }
         // Fixed anchor avoids moving the joystick under minimap/menu touches.
@@ -246,10 +281,19 @@ impl MobileControls {
                     c.control == control
                         || matches!(
                             (control, c.control),
-                            (Control::Ability(_), Control::Ability(_))
+                            (
+                                Control::Ability(_) | Control::Upgrade(_),
+                                Control::Ability(_) | Control::Upgrade(_)
+                            )
                         )
                 }) {
                     return;
+                }
+                if matches!(
+                    control,
+                    Control::Attack | Control::CategoryAttack(_) | Control::Utility(_)
+                ) {
+                    self.upgrade_mode = false;
                 }
                 let gesture = if control == Control::Attack {
                     let Some(next) = self.next_attack_gesture.checked_add(1) else {
@@ -264,7 +308,7 @@ impl MobileControls {
                     id,
                     Capture {
                         control,
-                        origin: if matches!(control, Control::Attack | Control::Ability(_)) {
+                        origin: if control != Control::Joystick {
                             position
                         } else {
                             origin
@@ -340,10 +384,24 @@ impl MobileControls {
                                 })
                             }
                             Control::Upgrade(slot)
-                                if position.distance(capture.origin)
-                                    <= self.layout().upgrade_radius * 1.3 =>
+                                if self.upgrade_enabled[slot]
+                                    && position.distance(self.layout().ability_centers[slot])
+                                        <= self.layout().ability_radii[slot] =>
                             {
-                                self.upgrades.push(slot)
+                                self.upgrades.push(slot);
+                                self.upgrade_mode = false;
+                            }
+                            Control::UpgradeMode if !capture.dragged => {
+                                self.upgrade_mode = !self.upgrade_mode;
+                            }
+                            Control::CategoryAttack(kind) if !capture.dragged => {
+                                self.category_attacks.push(kind);
+                            }
+                            Control::Utility(action) => {
+                                self.utilities.push((
+                                    action,
+                                    aim_vector(capture.position - capture.origin, self.scale()),
+                                ));
                             }
                             _ => {}
                         }
@@ -387,6 +445,8 @@ impl MobileControls {
         self.casts.clear();
         self.attacks.clear();
         self.upgrades.clear();
+        self.category_attacks.clear();
+        self.utilities.clear();
         self.attack_canceled_this_frame = false;
         self.skill_released_this_frame = false;
     }
@@ -595,6 +655,7 @@ fn read_mobile_controls(
                 && prog.ranks[slot] < shared::MAX_ABILITY_RANK
                 && unlocked_slots_for_level(prog.level.max(1))[slot]
         });
+        mobile.upgrade_mode &= mobile.upgrade_enabled.iter().any(|enabled| *enabled);
     }
     let Ok((window_entity, window)) = window.single() else {
         mobile.clear();
@@ -641,7 +702,10 @@ enum MobileVisual {
     AttackThumb,
     Cancel,
     Ability(usize),
-    Upgrade(usize),
+    UpgradeMode,
+    CategoryAttack(usize),
+    Utility(usize),
+    RankRing(usize),
     AimHint,
     SkillDescription,
     Rotate,
@@ -650,7 +714,134 @@ enum MobileVisual {
 #[derive(Component)]
 struct SkillIcon(usize);
 
-fn setup_mobile_controls(mut commands: Commands, assets: Option<Res<AssetServer>>) {
+#[derive(Resource)]
+struct SkillRingTextures {
+    ranks: Vec<Handle<Image>>,
+    cooldowns: Vec<Handle<Image>>,
+    glyphs: Vec<Handle<Image>>,
+}
+
+#[derive(Component)]
+enum SkillOverlay {
+    Rank(usize),
+    Cooldown(usize),
+}
+
+// Each actual rank occupies one arc, separated by a visible gap. The transparent
+// center preserves the skill artwork; cooldown sectors are a separate layer.
+fn skill_overlay_pixels(rank: u8, capacity: u8, cooldown: Option<f32>) -> Vec<u8> {
+    const SIZE: usize = 112;
+    let mut pixels = vec![0; SIZE * SIZE * 4];
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let delta = Vec2::new(x as f32 + 0.5, y as f32 + 0.5) - Vec2::splat(SIZE as f32 * 0.5);
+            let radius = delta.length() / (SIZE as f32 * 0.5);
+            let turn = (delta.y.atan2(delta.x) + std::f32::consts::FRAC_PI_2)
+                .rem_euclid(std::f32::consts::TAU)
+                / std::f32::consts::TAU;
+            let rgba = if let Some(fraction) = cooldown {
+                if radius <= 0.98 && turn <= fraction {
+                    [1, 9, 14, 185]
+                } else {
+                    [0; 4]
+                }
+            } else {
+                let segment = turn * f32::from(capacity.max(1));
+                if (0.87..=0.98).contains(&radius) && (0.045..0.955).contains(&segment.fract()) {
+                    if (segment.floor() as u8) < rank {
+                        [123, 228, 192, 255]
+                    } else {
+                        [63, 85, 83, 240]
+                    }
+                } else {
+                    [0; 4]
+                }
+            };
+            pixels[(y * SIZE + x) * 4..(y * SIZE + x) * 4 + 4].copy_from_slice(&rgba);
+        }
+    }
+    pixels
+}
+
+fn combat_glyph_pixels(kind: usize) -> Vec<u8> {
+    // Small original geometric symbols: minion helmet, tower, dash arrow,
+    // haste chevrons, and crossed swords. They do not depend on platform Unicode coverage.
+    let mut pixels = vec![0; 112 * 112 * 4];
+    for y in 0..112 {
+        for x in 0..112 {
+            let p = Vec2::new(x as f32 / 112.0, y as f32 / 112.0);
+            let line = |a: Vec2, b: Vec2| {
+                let t = ((p - a).dot(b - a) / (b - a).length_squared()).clamp(0.0, 1.0);
+                p.distance(a + (b - a) * t) < 0.055
+            };
+            let solid = match kind {
+                0 => {
+                    let d = p - Vec2::new(0.5, 0.48);
+                    (d.length() < 0.34
+                        && p.y < 0.72
+                        && !(p.y > 0.39 && p.y < 0.51 && p.x > 0.26 && p.x < 0.74))
+                        || (p.x > 0.46 && p.x < 0.54 && p.y > 0.14 && p.y < 0.83)
+                }
+                1 => {
+                    (p.x > 0.25 && p.x < 0.75 && p.y > 0.22 && p.y < 0.83)
+                        && !(p.y < 0.38
+                            && ((p.x > 0.35 && p.x < 0.43) || (p.x > 0.57 && p.x < 0.65)))
+                        && !(p.y > 0.59 && p.x > 0.43 && p.x < 0.57)
+                }
+                2 => {
+                    line(Vec2::new(0.12, 0.50), Vec2::new(0.85, 0.50))
+                        || line(Vec2::new(0.56, 0.22), Vec2::new(0.85, 0.50))
+                        || line(Vec2::new(0.56, 0.78), Vec2::new(0.85, 0.50))
+                }
+                3 => [0.27, 0.56].into_iter().any(|offset| {
+                    line(Vec2::new(offset, 0.22), Vec2::new(offset + 0.23, 0.5))
+                        || line(Vec2::new(offset + 0.23, 0.5), Vec2::new(offset, 0.78))
+                }),
+                _ => {
+                    line(Vec2::new(0.25, 0.82), Vec2::new(0.78, 0.18))
+                        || line(Vec2::new(0.75, 0.82), Vec2::new(0.22, 0.18))
+                        || line(Vec2::new(0.17, 0.64), Vec2::new(0.42, 0.84))
+                        || line(Vec2::new(0.58, 0.84), Vec2::new(0.83, 0.64))
+                }
+            };
+            if solid {
+                pixels[(y * 112 + x) * 4..(y * 112 + x) * 4 + 4]
+                    .copy_from_slice(&[214, 196, 143, 255]);
+            }
+        }
+    }
+    pixels
+}
+
+fn setup_mobile_controls(
+    mut commands: Commands,
+    assets: Option<Res<AssetServer>>,
+    mut images: Option<ResMut<Assets<Image>>>,
+) {
+    let textures = images.as_mut().map(|images| {
+        let mut add = |pixels| {
+            images.add(Image::new(
+                bevy::render::render_resource::Extent3d {
+                    width: 112,
+                    height: 112,
+                    depth_or_array_layers: 1,
+                },
+                bevy::render::render_resource::TextureDimension::D2,
+                pixels,
+                bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+                bevy::asset::RenderAssetUsages::default(),
+            ))
+        };
+        SkillRingTextures {
+            glyphs: (0..5).map(|kind| add(combat_glyph_pixels(kind))).collect(),
+            ranks: (0..=shared::MAX_ABILITY_RANK)
+                .map(|rank| add(skill_overlay_pixels(rank, shared::MAX_ABILITY_RANK, None)))
+                .collect(),
+            cooldowns: (0..=32)
+                .map(|step| add(skill_overlay_pixels(0, 0, Some(step as f32 / 32.0))))
+                .collect(),
+        }
+    });
     for visual in [
         MobileVisual::Joystick,
         MobileVisual::Thumb,
@@ -662,20 +853,37 @@ fn setup_mobile_controls(mut commands: Commands, assets: Option<Res<AssetServer>
         MobileVisual::Ability(1),
         MobileVisual::Ability(2),
         MobileVisual::Ability(3),
-        MobileVisual::Upgrade(0),
-        MobileVisual::Upgrade(1),
-        MobileVisual::Upgrade(2),
-        MobileVisual::Upgrade(3),
+        MobileVisual::UpgradeMode,
+        MobileVisual::CategoryAttack(0),
+        MobileVisual::CategoryAttack(1),
+        MobileVisual::Utility(0),
+        MobileVisual::Utility(1),
+        MobileVisual::RankRing(0),
+        MobileVisual::RankRing(1),
+        MobileVisual::RankRing(2),
+        MobileVisual::RankRing(3),
         MobileVisual::AimHint,
         MobileVisual::SkillDescription,
         MobileVisual::Rotate,
     ] {
+        let rank_slot = if let MobileVisual::RankRing(slot) = visual {
+            Some(slot)
+        } else {
+            None
+        };
         let is_rotate = matches!(visual, MobileVisual::Rotate);
         let is_description = matches!(visual, MobileVisual::SkillDescription);
         let icon_slot = if let MobileVisual::Ability(slot) = visual {
             Some(slot)
         } else {
             None
+        };
+        let attack_icon = matches!(visual, MobileVisual::Attack);
+        let glyph = match visual {
+            MobileVisual::CategoryAttack(index) => Some(index),
+            MobileVisual::Utility(index) => Some(index + 2),
+            MobileVisual::Attack => Some(4),
+            _ => None,
         };
         commands
             .spawn((
@@ -713,7 +921,14 @@ fn setup_mobile_controls(mut commands: Commands, assets: Option<Res<AssetServer>
                     MobileVisual::AttackThumb => "MobileAttackThumb".to_owned(),
                     MobileVisual::Cancel => "MobileAttackCancel".to_owned(),
                     MobileVisual::Ability(slot) => format!("MobileAbility-{slot}"),
-                    MobileVisual::Upgrade(slot) => format!("MobileUpgrade-{slot}"),
+                    MobileVisual::UpgradeMode => "MobileRankMode".to_owned(),
+                    MobileVisual::CategoryAttack(index) => {
+                        ["MobileMinionAttack", "MobileTowerAttack"][*index].to_owned()
+                    }
+                    MobileVisual::Utility(index) => {
+                        ["MobileDash", "MobileHaste"][*index].to_owned()
+                    }
+                    MobileVisual::RankRing(slot) => format!("MobileRankRing-{slot}"),
                     MobileVisual::AimHint => "MobileAimHint".to_owned(),
                     MobileVisual::SkillDescription => "MobileSkillDescription".to_owned(),
                     MobileVisual::Rotate => "MobileRotatePrompt".to_owned(),
@@ -721,6 +936,32 @@ fn setup_mobile_controls(mut commands: Commands, assets: Option<Res<AssetServer>
                 visual,
             ))
             .with_children(|parent| {
+                if let (Some(glyph), Some(textures)) = (glyph, textures.as_ref()) {
+                    parent.spawn((
+                        ImageNode::new(textures.glyphs[glyph].clone()),
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Percent(if attack_icon { 17.0 } else { 22.0 }),
+                            top: Val::Percent(if attack_icon { 10.0 } else { 1.0 }),
+                            width: Val::Percent(if attack_icon { 66.0 } else { 56.0 }),
+                            height: Val::Percent(if attack_icon { 66.0 } else { 56.0 }),
+                            ..default()
+                        },
+                        FocusPolicy::Pass,
+                    ));
+                }
+                if let (Some(slot), Some(textures)) = (rank_slot, textures.as_ref()) {
+                    parent.spawn((
+                        SkillOverlay::Rank(slot),
+                        ImageNode::new(textures.ranks[0].clone()),
+                        Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
+                            ..default()
+                        },
+                        FocusPolicy::Pass,
+                    ));
+                }
                 if let (Some(slot), Some(assets)) = (icon_slot, assets.as_ref()) {
                     parent.spawn((
                         SkillIcon(slot),
@@ -737,6 +978,21 @@ fn setup_mobile_controls(mut commands: Commands, assets: Option<Res<AssetServer>
                         FocusPolicy::Pass,
                     ));
                 }
+                if let (Some(slot), Some(textures)) = (icon_slot, textures.as_ref()) {
+                    parent.spawn((
+                        SkillOverlay::Cooldown(slot),
+                        ImageNode::new(textures.cooldowns[0].clone()),
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(0.0),
+                            top: Val::Px(0.0),
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
+                            ..default()
+                        },
+                        FocusPolicy::Pass,
+                    ));
+                }
                 parent.spawn((
                     Text::new(""),
                     TextFont {
@@ -746,14 +1002,14 @@ fn setup_mobile_controls(mut commands: Commands, assets: Option<Res<AssetServer>
                     TextColor(crate::ui_theme::IVORY),
                     TextLayout::new_with_justify(Justify::Center),
                     Node {
-                        align_self: if icon_slot.is_some() {
+                        align_self: if icon_slot.is_some() || attack_icon || glyph.is_some() {
                             AlignSelf::End
                         } else {
                             AlignSelf::Center
                         },
                         ..default()
                     },
-                    BackgroundColor(if icon_slot.is_some() {
+                    BackgroundColor(if icon_slot.is_some() || attack_icon {
                         Color::srgba(0.01, 0.025, 0.04, 0.84)
                     } else {
                         Color::NONE
@@ -761,6 +1017,9 @@ fn setup_mobile_controls(mut commands: Commands, assets: Option<Res<AssetServer>
                     ZIndex(1),
                 ));
             });
+    }
+    if let Some(textures) = textures {
+        commands.insert_resource(textures);
     }
 }
 
@@ -780,7 +1039,10 @@ fn draw_mobile_controls(
     cooldown: Res<LocalCastCooldown>,
     basic_attack: Option<Res<crate::targeting::BasicAttackState>>,
     images: Option<Res<Assets<Image>>>,
-    mut icons: Query<(&SkillIcon, &mut ImageNode)>,
+    mut icons: Query<(&SkillIcon, &mut ImageNode), Without<SkillOverlay>>,
+    textures: Option<Res<SkillRingTextures>>,
+    mut overlays: Query<(&SkillOverlay, &mut ImageNode), Without<SkillIcon>>,
+    utilities: Query<&crate::net::PlayerUtility, With<Player>>,
     mut visuals: Query<(
         &MobileVisual,
         &mut Node,
@@ -806,7 +1068,7 @@ fn draw_mobile_controls(
     let aiming = mobile
         .captures
         .values()
-        .find(|c| matches!(c.control, Control::Ability(_)))
+        .find(|c| matches!(c.control, Control::Ability(_) | Control::Utility(_)))
         .or_else(|| {
             mobile
                 .captures
@@ -840,6 +1102,23 @@ fn draw_mobile_controls(
             Color::srgb(0.38, 0.42, 0.48)
         };
     }
+    if let Some(textures) = textures {
+        for (overlay, mut image) in &mut overlays {
+            image.image = match *overlay {
+                SkillOverlay::Rank(slot) => textures.ranks
+                    [usize::from(prog.ranks[slot].min(shared::MAX_ABILITY_RANK))]
+                .clone(),
+                SkillOverlay::Cooldown(slot) => {
+                    let fraction = cooldown.remaining_fraction(slot);
+                    textures.cooldowns[(fraction.clamp(0.0, 1.0) * 32.0).ceil() as usize].clone()
+                }
+            };
+        }
+    }
+    let utility = utilities
+        .single()
+        .map(|utility| utility.state)
+        .unwrap_or_default();
     for (visual, mut node, mut color, mut border, mut ui_transform, children) in &mut visuals {
         let (center, radius, label, show, fill, edge) = match *visual {
             MobileVisual::Joystick => (
@@ -852,7 +1131,7 @@ fn draw_mobile_controls(
             ),
             MobileVisual::Thumb => (
                 layout.joystick_center + mobile.movement * layout.joystick_radius * 0.7,
-                24.0 * s,
+                22.0 * s,
                 String::new(),
                 visible,
                 Color::srgba(0.43, 0.7, 0.62, 0.72),
@@ -862,14 +1141,9 @@ fn draw_mobile_controls(
                 layout.attack_center,
                 layout.attack_radius,
                 if attack_cooling {
-                    format!(
-                        "ATTACK\n{attack_remaining:.1}{}",
-                        if attack_held { "\nHOLD" } else { "" }
-                    )
-                } else if attack_held {
-                    "ATTACK\nHOLD".into()
+                    format!("{attack_remaining:.1}")
                 } else {
-                    "ATTACK\nREADY".into()
+                    "ATK".into()
                 },
                 visible,
                 if attack_cooling {
@@ -933,14 +1207,16 @@ fn draw_mobile_controls(
                     .captures
                     .values()
                     .any(|c| c.control == Control::Ability(slot) && !c.canceled);
-                let status = if !unlocked {
+                let status = if mobile.upgrade_mode && mobile.upgrade_enabled[slot] {
+                    format!("{} +", ["Q", "W", "E", "R"][slot])
+                } else if !unlocked {
                     format!("Lv {}", shared::SLOT_UNLOCK_LEVELS[slot])
                 } else if cooldown.remaining_secs[slot] > 0.0 {
                     format!("{:.1}", cooldown.remaining_secs[slot])
                 } else if !mana {
                     "MANA".into()
                 } else {
-                    format!("{}", prog.ranks[slot].max(1))
+                    ["Q", "W", "E", "R"][slot].into()
                 };
                 (
                     layout.ability_centers[slot],
@@ -952,21 +1228,76 @@ fn draw_mobile_controls(
                     } else {
                         crate::ui_theme::PANEL
                     },
-                    if !unlocked || !mana || cooldown.remaining_secs[slot] > 0.0 {
+                    if mobile.upgrade_enabled[slot] {
+                        crate::ui_theme::GOLD
+                    } else if !unlocked || !mana || cooldown.remaining_secs[slot] > 0.0 {
                         crate::ui_theme::EDGE
                     } else {
                         crate::ui_theme::JADE
                     },
                 )
             }
-            MobileVisual::Upgrade(slot) => (
-                layout.upgrade_centers[slot],
+            MobileVisual::RankRing(slot) => (
+                layout.ability_centers[slot],
+                layout.ability_radii[slot] + 3.0 * s,
+                String::new(),
+                visible,
+                Color::NONE,
+                Color::NONE,
+            ),
+            MobileVisual::UpgradeMode => (
+                layout.upgrade_center,
                 layout.upgrade_radius,
-                ["Q+", "W+", "E+", "R+"][slot].into(),
-                visible && mobile.upgrade_enabled[slot],
-                crate::ui_theme::HOVER,
+                if mobile.upgrade_mode {
+                    "BACK".into()
+                } else {
+                    format!("+{}\nRANK", prog.skill_points)
+                },
+                visible && mobile.upgrade_enabled.iter().any(|enabled| *enabled),
+                if mobile.upgrade_mode {
+                    crate::ui_theme::HOVER
+                } else {
+                    crate::ui_theme::PANEL
+                },
                 crate::ui_theme::GOLD,
             ),
+            MobileVisual::CategoryAttack(index) => (
+                layout.category_centers[index],
+                layout.auxiliary_radius,
+                ["MIN", "TWR"][index].into(),
+                visible,
+                crate::ui_theme::PANEL,
+                crate::ui_theme::GOLD,
+            ),
+            MobileVisual::Utility(index) => {
+                let remaining = [utility.dash_remaining_secs, utility.haste_remaining_secs][index];
+                let active = index == 1 && utility.haste_active_secs > 0.0;
+                let label = if active {
+                    format!("{:.1}\nFAST", utility.haste_active_secs)
+                } else if remaining > 0.0 {
+                    format!("{remaining:.0}")
+                } else {
+                    ["DASH", "HASTE"][index].into()
+                };
+                (
+                    layout.utility_centers[index],
+                    layout.auxiliary_radius,
+                    label,
+                    visible,
+                    if active {
+                        crate::ui_theme::HOVER
+                    } else {
+                        crate::ui_theme::PANEL
+                    },
+                    if active {
+                        crate::ui_theme::JADE
+                    } else if remaining > 0.0 {
+                        crate::ui_theme::EDGE
+                    } else {
+                        crate::ui_theme::GOLD
+                    },
+                )
+            }
             MobileVisual::AimHint => {
                 let message = aiming
                     .map(|c| {
@@ -976,7 +1307,7 @@ fn draw_mobile_controls(
                         } else if c.control == Control::Attack {
                             "Point toward an enemy · release to lock\nMove to × to cancel"
                         } else {
-                            "Drag to aim · release to cast\nMove to × to cancel"
+                            "Drag to aim · release to use\nMove to × to cancel"
                         }
                     })
                     .unwrap_or("");
@@ -984,7 +1315,7 @@ fn draw_mobile_controls(
                     Vec2::new(
                         (layout.joystick_center.x
                             + layout.joystick_radius
-                            + layout.upgrade_centers[1].x
+                            + layout.utility_centers[0].x
                             - layout.upgrade_radius)
                             * 0.5,
                         mobile.viewport.y - mobile.safe.bottom - 36.0 * s,
@@ -1026,6 +1357,7 @@ fn draw_mobile_controls(
             ),
         };
         node.display = if show { Display::Flex } else { Display::None };
+        let is_ring = matches!(visual, MobileVisual::RankRing(_));
         let rectangular = matches!(
             visual,
             MobileVisual::AimHint | MobileVisual::Rotate | MobileVisual::SkillDescription
@@ -1041,7 +1373,7 @@ fn draw_mobile_controls(
                 172.0 * s,
             )
         } else if rectangular {
-            let available = layout.upgrade_centers[1].x
+            let available = layout.utility_centers[0].x
                 - layout.upgrade_radius
                 - layout.joystick_center.x
                 - layout.joystick_radius
@@ -1054,8 +1386,8 @@ fn draw_mobile_controls(
         node.top = Val::Px(center.y - size.y * 0.5);
         node.width = Val::Px(size.x);
         node.height = Val::Px(size.y);
-        node.padding = UiRect::all(Val::Px(if is_vector { 0.0 } else { 4.0 }));
-        node.border = UiRect::all(Val::Px(if is_vector { 0.0 } else { 2.0 }));
+        node.padding = UiRect::all(Val::Px(if is_vector || is_ring { 0.0 } else { 3.0 }));
+        node.border = UiRect::all(Val::Px(if is_vector || is_ring { 0.0 } else { 1.0 }));
         ui_transform.rotation = if is_vector {
             let delta = drag.unwrap_or_default();
             Rot2::radians(delta.y.atan2(delta.x))
@@ -1081,6 +1413,9 @@ fn draw_mobile_controls(
                     MobileVisual::AimHint
                         | MobileVisual::SkillDescription
                         | MobileVisual::Ability(_)
+                        | MobileVisual::Utility(_)
+                        | MobileVisual::CategoryAttack(_)
+                        | MobileVisual::UpgradeMode
                 ) {
                     12.0 * s
                 } else {
@@ -1545,87 +1880,162 @@ mod tests {
     }
 
     #[test]
-    fn phone_controls_and_upgrade_targets_fit_safe_area_without_overlap() {
+    fn phone_controls_and_rank_mode_fit_safe_area_without_overlap() {
         for viewport in [
             Vec2::new(844.0, 390.0),
             Vec2::new(932.0, 430.0),
             Vec2::new(667.0, 375.0),
             Vec2::new(1280.0, 720.0),
         ] {
-            let mut m = MobileControls {
+            let m = MobileControls {
                 viewport,
                 ..controls()
             };
-            let scale = m.scale();
-            m.safe = MobileSafeInsets {
-                left: 32.0 * scale,
-                right: 32.0 * scale,
-                top: 12.0 * scale,
-                bottom: 20.0 * scale,
-            };
             let l = m.layout();
-            let attack = l.attack_center;
-            // Reach bounds protect the compact fan while the spacing lower
-            // bound prevents achieving compactness with ambiguous touch areas.
-            for (slot, center) in l.ability_centers.iter().enumerate() {
-                assert!(center.distance(attack) <= 150.0 * scale);
-                assert!(attack.y - (center.y - l.ability_radii[slot]) <= 154.0 * scale);
-                assert!(l.ability_radii[slot] * 2.0 >= 48.0);
-                assert!(center.distance(attack) - l.ability_radii[slot] - l.attack_radius >= 6.0);
-            }
-            for (i, center) in l.ability_centers.iter().enumerate() {
-                for j in i + 1..4 {
-                    let gap = center.distance(l.ability_centers[j])
-                        - l.ability_radii[i]
-                        - l.ability_radii[j];
-                    assert!(
-                        gap >= 6.0,
-                        "ability hit areas too close on {viewport:?}: {i}/{j}, {gap}"
-                    );
-                }
-            }
-            for center in l.upgrade_centers {
-                assert!(center.distance(attack) <= 202.0 * scale);
-                assert!(attack.y - (center.y - l.upgrade_radius) <= 198.0 * scale);
-            }
-            // Reserve the right HP/progression card above the combat fan.
-            let edge = viewport.x - m.safe.right;
-            let hero = Rect::from_corners(
-                Vec2::new(edge - 300.0, m.safe.top),
-                Vec2::new(edge - 128.0, m.safe.top + 108.0),
-            );
             let circles: Vec<_> = l
                 .ability_centers
                 .iter()
                 .copied()
                 .zip(l.ability_radii)
                 .chain(
-                    l.upgrade_centers
+                    l.category_centers
                         .iter()
+                        .chain(l.utility_centers.iter())
                         .copied()
-                        .map(|p| (p, l.upgrade_radius)),
+                        .map(|p| (p, l.auxiliary_radius)),
                 )
                 .chain([
                     (l.joystick_center, l.joystick_radius),
                     (l.attack_center, l.attack_radius),
+                    (l.upgrade_center, l.upgrade_radius),
                     (l.cancel_center, l.cancel_radius),
                 ])
                 .collect();
-            for (i, (p, r)) in circles.iter().enumerate() {
-                let nearest = p.clamp(hero.min, hero.max);
+            for (i, (center, radius)) in circles.iter().enumerate() {
+                assert!(*radius * 2.0 >= 44.0);
                 assert!(
-                    p.distance(nearest) >= *r,
-                    "control overlaps right hero HUD on {viewport:?}"
+                    center.x - radius >= m.safe.left
+                        && center.x + radius <= viewport.x - m.safe.right + 0.01
                 );
-                assert!(p.x - r >= m.safe.left - 1.0 && p.x + r <= viewport.x - m.safe.right + 1.0);
-                assert!(p.y - r >= m.safe.top && p.y + r <= viewport.y - m.safe.bottom);
-                for (q, t) in &circles[i + 1..] {
+                assert!(
+                    center.y - radius >= m.safe.top
+                        && center.y + radius <= viewport.y - m.safe.bottom + 0.01
+                );
+                for (other, other_radius) in &circles[i + 1..] {
                     assert!(
-                        p.distance(*q) >= r + t,
-                        "overlap at {viewport:?}: {p:?}, {q:?}"
+                        center.distance(*other) + 0.01 >= radius + other_radius + 3.5,
+                        "overlap at {viewport:?}: {center:?}, {other:?}"
                     );
                 }
             }
         }
+        let l = controls().layout();
+        assert_eq!(l.joystick_center, Vec2::new(104.0, 305.0));
+        assert_eq!(l.attack_center, Vec2::new(762.0, 288.0));
+        assert_eq!(
+            l.ability_centers,
+            [
+                Vec2::new(694.0, 336.0),
+                Vec2::new(653.0, 271.0),
+                Vec2::new(685.0, 206.0),
+                Vec2::new(747.0, 167.0)
+            ]
+        );
+    }
+
+    #[test]
+    fn rank_mode_uses_the_skill_hit_circle_and_never_casts_or_upgrades_locked_slots() {
+        let mut m = controls();
+        m.upgrade_enabled = [true, true, false, false];
+        let l = m.layout();
+        m.event(1, TouchPhase::Started, l.upgrade_center);
+        m.event(1, TouchPhase::Ended, l.upgrade_center);
+        assert!(m.upgrade_mode);
+        m.event(2, TouchPhase::Started, l.ability_centers[2]);
+        m.event(2, TouchPhase::Ended, l.ability_centers[2]);
+        assert!(m.upgrades.is_empty() && m.casts.is_empty());
+        m.event(2, TouchPhase::Started, l.ability_centers[1]);
+        m.event(2, TouchPhase::Ended, l.ability_centers[1]);
+        assert_eq!(m.upgrades, [1]);
+        assert!(m.casts.is_empty() && !m.upgrade_mode);
+        m.upgrade_mode = true;
+        m.clear();
+        assert!(!m.upgrade_mode);
+    }
+
+    #[test]
+    fn auxiliary_touch_ownership_keeps_category_and_utility_intents_separate() {
+        let mut m = controls();
+        let l = m.layout();
+        m.event(1, TouchPhase::Started, l.joystick_center);
+        m.event(1, TouchPhase::Moved, l.joystick_center + Vec2::X * 60.0);
+        for (index, kind) in [TargetKind::Minion, TargetKind::Structure]
+            .into_iter()
+            .enumerate()
+        {
+            m.event(2, TouchPhase::Started, l.category_centers[index]);
+            m.event(2, TouchPhase::Ended, l.category_centers[index]);
+            assert_eq!(m.category_attacks[index], kind);
+        }
+        m.event(3, TouchPhase::Started, l.utility_centers[0]);
+        m.event(
+            3,
+            TouchPhase::Ended,
+            l.utility_centers[0] + Vec2::NEG_X * 60.0,
+        );
+        assert_eq!(m.utilities, [(UtilityAction::Dash, Some(Vec2::NEG_X))]);
+        m.event(4, TouchPhase::Started, l.utility_centers[1]);
+        m.event(4, TouchPhase::Canceled, l.utility_centers[1]);
+        assert_eq!(m.utilities.len(), 1);
+        assert_eq!(m.movement, Vec2::X);
+        assert!(m.attacks.is_empty() && m.casts.is_empty());
+        m.clear();
+        assert!(m.utilities.is_empty() && m.category_attacks.is_empty());
+    }
+
+    #[test]
+    fn auxiliary_controls_accept_stationary_taps_at_the_edge_of_the_full_hit_circle() {
+        let mut m = controls();
+        m.upgrade_enabled[0] = true;
+        let l = m.layout();
+        for center in [
+            l.upgrade_center,
+            l.category_centers[0],
+            l.utility_centers[0],
+        ] {
+            let edge = center + Vec2::X * 21.0;
+            m.event(1, TouchPhase::Started, edge);
+            m.event(1, TouchPhase::Ended, edge);
+        }
+        assert_eq!(m.category_attacks, [TargetKind::Minion]);
+        assert_eq!(m.utilities, [(UtilityAction::Dash, None)]);
+        m.event(1, TouchPhase::Started, l.upgrade_center + Vec2::X * 21.0);
+        m.event(1, TouchPhase::Ended, l.upgrade_center + Vec2::X * 21.0);
+        assert!(m.upgrade_mode);
+    }
+
+    #[test]
+    fn rank_ring_has_distinct_capacity_segments_and_learned_rank_pixels() {
+        let count = |rank| {
+            let pixels = skill_overlay_pixels(rank, 3, None);
+            assert_eq!(
+                &pixels[(56 * 112 + 56) * 4..(56 * 112 + 56) * 4 + 4],
+                &[0, 0, 0, 0]
+            );
+            pixels
+                .chunks_exact(4)
+                .filter(|pixel| pixel[0] == 123)
+                .count()
+        };
+        assert_eq!(count(0), 0);
+        assert!(count(1) > 500);
+        assert!((count(2) as i32 - 2 * count(1) as i32).abs() < 10);
+        assert!((count(3) as i32 - 3 * count(1) as i32).abs() < 10);
+        let dark = skill_overlay_pixels(0, 3, None);
+        assert!(dark.chunks_exact(4).any(|pixel| pixel == [63, 85, 83, 240]));
+        assert_ne!(
+            skill_overlay_pixels(0, 0, Some(0.25)),
+            skill_overlay_pixels(0, 0, Some(0.75))
+        );
     }
 }

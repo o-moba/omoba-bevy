@@ -404,6 +404,7 @@ fn pick_mobile(
     team: Team,
     range: f32,
     aim: Option<MobileAttackAim>,
+    category: Option<TargetKind>,
     candidates: &TargetCandidates,
     validity: &TargetValidity,
     camera: &Camera,
@@ -413,7 +414,7 @@ fn pick_mobile(
     let origin = screen_position(camera, camera_transform, mode, origin_position)?;
     let mut best: Option<(Entity, TargetId, Vec2, f32)> = None;
     let mut consider = |entity: Entity, id: TargetId, position: Vec3| {
-        if !validity.valid(entity, id, team) {
+        if category.is_some_and(|kind| id.kind != kind) || !validity.valid(entity, id, team) {
             return;
         }
         let distance = position.xz().distance(origin_position.xz());
@@ -508,6 +509,7 @@ pub(crate) fn mobile_basic_attack(
     let Some(mobile) = mobile.as_deref_mut().filter(|m| m.enabled) else {
         return;
     };
+    let category = mobile.category_attacks.drain(..).next_back();
     let Ok((position, team, stats, class)) = local.single() else {
         mobile.attacks.clear();
         return;
@@ -534,6 +536,7 @@ pub(crate) fn mobile_basic_attack(
                 *team,
                 range,
                 Some(aim),
+                None,
                 &candidates,
                 &validity,
                 camera,
@@ -580,14 +583,30 @@ pub(crate) fn mobile_basic_attack(
     }
     let intent = mobile.attacks.drain(..).next_back();
     let held = mobile.held_basic_attack();
-    if intent.is_none() && !held {
+    if intent.is_none() && !held && category.is_none() {
         return;
     }
-    if basic.remaining_secs > 0.0 && intent.is_none() {
+    if basic.remaining_secs > 0.0 && intent.is_none() && category.is_none() {
         return;
     }
     let aim = intent.and_then(|i| i.aim);
-    let pick = if let Some(aim) = aim {
+    let pick = if let Some(kind) = category {
+        // Category buttons deliberately replace any previous hero lock. An
+        // empty category never falls back to another kind of unit.
+        pick_mobile(
+            position.translation,
+            *team,
+            range,
+            None,
+            Some(kind),
+            &candidates,
+            &validity,
+            camera,
+            camera_transform,
+            *mode,
+        )
+        .map(|(entity, id, _)| (entity, id))
+    } else if let Some(aim) = aim {
         // Commit the exact preview shown for this press. Revalidate its final
         // direction/visibility, but never replace a dead/moved candidate with B.
         let gesture = intent.map(|i| i.gesture);
@@ -606,6 +625,7 @@ pub(crate) fn mobile_basic_attack(
                     *team,
                     range,
                     Some(aim),
+                    None,
                     &candidates,
                     &validity,
                     camera,
@@ -624,6 +644,7 @@ pub(crate) fn mobile_basic_attack(
             *team,
             range,
             None,
+            None,
             &candidates,
             &validity,
             camera,
@@ -638,7 +659,15 @@ pub(crate) fn mobile_basic_attack(
         basic.start(entity, id, false);
     } else {
         basic.cancel();
-        if intent.is_some() {
+        if category.is_some() {
+            target.selected_entity = None;
+            target.selected_target = None;
+            feedback.push_line(if category == Some(TargetKind::Minion) {
+                "No hostile minion in range."
+            } else {
+                "No vulnerable enemy structure in range."
+            });
+        } else if intent.is_some() {
             feedback.push_line(if aim.is_some() {
                 "No enemy in that direction."
             } else {
@@ -964,6 +993,108 @@ mod tests {
                 duration_secs: duration,
                 remaining_secs: remaining,
             });
+    }
+
+    #[test]
+    fn category_attack_replaces_hero_lock_and_never_falls_back_when_category_is_invalid() {
+        use bevy::camera::{ComputedCameraValues, RenderTargetInfo};
+        for kind in [TargetKind::Minion, TargetKind::Structure] {
+            for invalid in 0..6 {
+                let (mut app, _, hero) = attack_app(shared::HeroClass::Mage, vec![], true);
+                app.world_mut()
+                    .entity_mut(hero)
+                    .insert(crate::net::RemotePlayer);
+                app.world_mut()
+                    .get_mut::<Transform>(hero)
+                    .unwrap()
+                    .translation = Vec3::X * 0.05;
+                app.insert_resource(PlayerVisualMode::Models3d)
+                    .add_systems(Update, mobile_basic_attack.before(resolve_basic_attack));
+                app.world_mut().spawn((
+                    MainCamera,
+                    GlobalTransform::IDENTITY,
+                    Camera {
+                        computed: ComputedCameraValues {
+                            clip_from_view: Mat4::IDENTITY,
+                            target_info: Some(RenderTargetInfo {
+                                physical_size: UVec2::new(844, 390),
+                                scale_factor: 1.0,
+                            }),
+                            ..default()
+                        },
+                        ..default()
+                    },
+                ));
+                let unit = app
+                    .world_mut()
+                    .spawn((
+                        Transform::from_xyz(0.1, 0.0, 0.0),
+                        Team::Blue,
+                        CombatStats::default(),
+                    ))
+                    .id();
+                if kind == TargetKind::Minion {
+                    app.world_mut()
+                        .entity_mut(unit)
+                        .insert((crate::net::NetworkMinion, NetworkMinionId(9)));
+                } else {
+                    app.world_mut().entity_mut(unit).insert((
+                        crate::net::NetworkStructure,
+                        NetworkStructureId(9),
+                        StructureKind::BaseTower,
+                    ));
+                }
+                match invalid {
+                    1 => app.world_mut().get_mut::<CombatStats>(unit).unwrap().hp = 0.0,
+                    2 => *app.world_mut().get_mut::<Team>(unit).unwrap() = Team::Green,
+                    3 => {
+                        app.world_mut()
+                            .entity_mut(unit)
+                            .insert(InheritedVisibility::HIDDEN);
+                    }
+                    4 => {
+                        app.world_mut()
+                            .entity_mut(unit)
+                            .insert(NetworkStructureProtected(true));
+                    }
+                    5 => {
+                        app.world_mut().despawn(unit);
+                    }
+                    _ => {}
+                }
+                {
+                    let mut target = app.world_mut().resource_mut::<TargetState>();
+                    target.selected_entity = Some(hero);
+                    target.selected_target = Some(TargetId {
+                        kind: TargetKind::Player,
+                        id: 2,
+                    });
+                }
+                app.world_mut()
+                    .resource_mut::<MobileControls>()
+                    .category_attacks
+                    .push(kind);
+                app.update();
+                let sent = commands(&mut app);
+                if invalid == 0 {
+                    assert!(
+                        matches!(sent.as_slice(), [NetworkCommand::BasicAttack { target }] if target.kind == kind && target.id == 9)
+                    );
+                } else {
+                    assert!(
+                        sent.is_empty(),
+                        "invalid category {kind:?}/{invalid} sent {sent:?}"
+                    );
+                    assert!(
+                        app.world()
+                            .resource::<TargetState>()
+                            .selected_target
+                            .is_none()
+                    );
+                    assert!(app.world().resource::<BasicAttackState>().order.is_none());
+                }
+            }
+        }
     }
 
     #[test]
