@@ -1,6 +1,6 @@
 # Feature Inventory
 
-## Public multiplayer MVP (0.22.0-rc.1)
+## Public multiplayer MVP (0.22.0-rc.2)
 
 The public lobby offers Quick match (30-second bot fallback), Wait for players (ten humans only), and Play with bots. Independent worker processes own immutable ten-player rosters, automatic teams, shared draft/countdown/loading and a durable start barrier. New humans cannot replace bots after a match starts; existing participants can reconnect. PostgreSQL saves history and progression for approved allocated bot games, with competitive rating reserved for eligible bot-free PvP. Signed gameplay packets, bounded admission and isolated durable outboxes protect the public match boundary. See [launch, recovery and capacity instructions](public-mvp.md).
 
@@ -730,3 +730,12 @@ out removes the local credential and invalidates pending background work;
 Studio Account revokes access server-side. Public approved community models
 remain free after logout. Catalogue identity, metadata, live entitlement changes
 and scrolling stay intact when an account is restored or signed out.
+
+## Xcode iOS archive workflow
+
+Open `mobile/ios/Omoba.xcodeproj`, select the shared Omoba scheme and a physical
+iOS destination, then use Product → Archive. A build phase compiles the current
+locked Rust source and stages tracked assets plus matching symbols. Xcode owns
+signing and Organizer distribution. Local signing/team overrides remain ignored.
+See [TestFlight instructions](../mobile/ios/TESTFLIGHT.md); local unsigned archive
+validation does not assert Apple upload acceptance.

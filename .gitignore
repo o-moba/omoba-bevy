@@ -135,3 +135,6 @@ node_modules/
 # Engine-owned shared humanoid motion (not baked into avatar models).
 !client/assets/animations/
 !client/assets/animations/**
+
+# Personal Xcode signing and local build overrides.
+/mobile/ios/Omoba.local.xcconfig

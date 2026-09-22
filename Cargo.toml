@@ -3,7 +3,7 @@ members = ["account-api", "arena-sync", "client", "harness", "passport", "server
 resolver = "2"
 
 [workspace.package]
-version = "0.22.0-rc.1"
+version = "0.22.0-rc.2"
 edition = "2024"
 license = "MPL-2.0"
 

@@ -1,0 +1,28 @@
+// !$*UTF8*$!
+{
+ archiveVersion = 1;
+ classes = {};
+ objectVersion = 56;
+ objects = {
+  A00000000000000000000001 = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = YES; LastUpgradeCheck = 2600; TargetAttributes = {A00000000000000000000002 = {CreatedOnToolsVersion = 26.0; ProvisioningStyle = Automatic;};};}; buildConfigurationList = A00000000000000000000010; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base); mainGroup = A00000000000000000000003; productRefGroup = A00000000000000000000004; projectDirPath = ""; projectRoot = ""; targets = (A00000000000000000000002);};
+  A00000000000000000000002 = {isa = PBXNativeTarget; buildConfigurationList = A00000000000000000000011; buildPhases = (A00000000000000000000020, A00000000000000000000021); buildRules = (); dependencies = (); name = Omoba; productName = OmobaBeta; productReference = A00000000000000000000005; productType = "com.apple.product-type.application";};
+  A00000000000000000000003 = {isa = PBXGroup; children = (A00000000000000000000006, A00000000000000000000007, A00000000000000000000008, A00000000000000000000009, A00000000000000000000004); sourceTree = "<group>";};
+  A00000000000000000000004 = {isa = PBXGroup; children = (A00000000000000000000005); name = Products; sourceTree = "<group>";};
+  A00000000000000000000005 = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OmobaBeta.app; sourceTree = BUILT_PRODUCTS_DIR;};
+  A00000000000000000000006 = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>";};
+  A00000000000000000000007 = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>";};
+  A00000000000000000000008 = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = xcode_build.py; sourceTree = "<group>";};
+  A00000000000000000000009 = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Omoba.xcconfig; sourceTree = "<group>";};
+  A00000000000000000000022 = {isa = PBXBuildFile; fileRef = A00000000000000000000006;};
+  A00000000000000000000023 = {isa = PBXBuildFile; fileRef = A00000000000000000000007;};
+  A00000000000000000000020 = {isa = PBXShellScriptBuildPhase; alwaysOutOfDate = 1; buildActionMask = 2147483647; files = (); inputPaths = (); name = "Build Rust, assets and symbols"; outputPaths = ("$(TARGET_BUILD_DIR)/$(EXECUTABLE_PATH)", "$(DERIVED_FILE_DIR)/Omoba-Info.plist", "$(DWARF_DSYM_FOLDER_PATH)/$(DWARF_DSYM_FILE_NAME)"); runOnlyForDeploymentPostprocessing = 0; shellPath = /bin/sh; shellScript = "set -eu\nexport PATH=\"$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"\nexec python3 \"$SRCROOT/xcode_build.py\"\n";};
+  A00000000000000000000021 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000022, A00000000000000000000023); runOnlyForDeploymentPostprocessing = 0;};
+  A00000000000000000000010 = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000030, A00000000000000000000031); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+  A00000000000000000000011 = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000032, A00000000000000000000033); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+  A00000000000000000000030 = {isa = XCBuildConfiguration; buildSettings = {}; name = Debug;};
+  A00000000000000000000031 = {isa = XCBuildConfiguration; buildSettings = {}; name = Release;};
+  A00000000000000000000032 = {isa = XCBuildConfiguration; baseConfigurationReference = A00000000000000000000009; buildSettings = {}; name = Debug;};
+  A00000000000000000000033 = {isa = XCBuildConfiguration; baseConfigurationReference = A00000000000000000000009; buildSettings = {}; name = Release;};
+ };
+ rootObject = A00000000000000000000001;
+}

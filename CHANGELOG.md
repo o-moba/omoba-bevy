@@ -6,6 +6,11 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.22.0-rc.2] - 2026-09-22
+
+- Add a versioned Xcode iOS application project and shared Archive scheme for the existing Rust game, including bundled assets, icons, privacy manifest and matching debug symbols.
+- Keep signing and TestFlight distribution in Xcode; provide ignored local team/build/server settings without storing personal credentials.
+
 ## [0.22.0-rc.1] - 2026-09-22
 
 ### Public multiplayer MVP

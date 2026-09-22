@@ -5,7 +5,75 @@ wireless Xcode pairing, a registered device UDID, or Developer Mode on the teste
 phone. The distributor needs an active Apple Developer Program membership and
 access to App Store Connect. The tester installs Apple's TestFlight app.
 
-## Prepare locally
+## Open the permanent Xcode project (recommended)
+
+From the repository root:
+
+```sh
+open mobile/ios/Omoba.xcodeproj
+```
+
+The project and shared **Omoba** scheme are versioned. The previous September
+workflow opened a prepared `.xcarchive` in Organizer; historical archives under
+`builds/testflight-*` are not source projects and do not rebuild the latest game.
+
+1. Select the **Omoba** scheme and **Any iOS Device (arm64)** (or a physical iPhone).
+   This project targets physical iOS only. The Simulator keeps its separate builder.
+2. Select the **Omoba** target → **Signing & Capabilities** and your existing
+   Apple Developer team. Keep bundle ID `space.ekza.omoba.beta` for the existing app.
+   Xcode manages the signing step; do not commit a personal team ID or profiles.
+3. Choose a new **Build** number before uploading. The checked-in default is `12`;
+   previous local archives used `10` and `11`, but check App Store Connect for the
+   next unused number. The marketing version is read from `[workspace.package]`
+   in `Cargo.toml` (the prerelease suffix is removed for Apple's numeric field).
+4. Select **Product → Archive**. The build phase runs locked Cargo against this
+   checkout, copies tracked assets/legal notices, and retains validated Rust dSYM
+   symbols. Xcode compiles the icon, processes Info.plist, signs and archives.
+5. In **Window → Organizer → Archives**, select the new Omoba archive, then
+   **Distribute App → App Store Connect**. Complete validation, signing/export and
+   upload using the existing account. Then assign the processed build to testers
+   in App Store Connect → TestFlight. Review Apple's privacy/compliance questions
+   for the actual deployed game; the project does not supply guessed answers.
+
+Use the ignored `mobile/ios/Omoba.local.xcconfig` for local settings, for example:
+
+```xcconfig
+DEVELOPMENT_TEAM = YOUR_EXISTING_TEAM_ID
+CURRENT_PROJECT_VERSION = 12
+// Optional reachable game server; omit to choose through SERVER in the game.
+OMOBA_GAME_SERVER = 192.168.1.10:4000
+```
+
+Selecting a team in Xcode can write it into `project.pbxproj`; move that personal
+setting into the ignored local configuration before committing source. Do not
+check in provisioning files, certificates, account credentials or archive output.
+The helper searches Rust in `~/.cargo/bin`, including when Xcode is opened from
+Finder. Rust's `aarch64-apple-ios` target and the selected Xcode iPhoneOS SDK are
+required; `python3 mobile/ios/build_device.py --check` verifies the prerequisites.
+
+Both Xcode configurations initially use the existing optimized Cargo `dev` profile
+(workspace code opt-level 1, dependencies 3) and retained debug symbols. Set
+`OMOBA_CARGO_PROFILE = release` locally for Rust release optimization; the first
+build uses a separate cache and can take longer. Cargo cache defaults to
+`target/iphone-cargo`; `OMOBA_CARGO_TARGET_DIR` can override it. Xcode Clean does
+not remove retained packages in `builds/` or that reusable Cargo cache.
+
+The local verification command intentionally does **not** sign or upload:
+
+```sh
+xcodebuild -project mobile/ios/Omoba.xcodeproj -scheme Omoba \
+  -destination 'generic/platform=iOS' \
+  -archivePath builds/Omoba-check.xcarchive CODE_SIGNING_ALLOWED=NO archive
+```
+
+An unsigned verification archive proves packaging and symbol retention only.
+Use the normal signed Archive action after selecting your team to distribute.
+TestFlight distributes the client; a reachable game server is still required.
+
+## Existing script-based preparation
+
+The original workflow remains available when a signed `.app` already exists.
+
 
 First create a signed physical-device app using [build_device.py](README.md).
 The archive preparer reuses that executable and its bundled assets, and validates
