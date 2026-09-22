@@ -110,6 +110,8 @@ struct MainMenuSection;
 
 #[derive(Component)]
 struct SettingsSection;
+#[derive(Component)]
+struct SettingsFooter;
 
 #[derive(Component)]
 struct SettingsOpenButton;
@@ -265,7 +267,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                         height: Val::Px(PANEL_HEIGHT),
                         max_width: Val::Percent(95.0),
                         max_height: Val::Percent(95.0),
-                        overflow: Overflow::scroll_y(),
+                        overflow: Overflow::clip(),
                         flex_direction: FlexDirection::Column,
                         justify_content: JustifyContent::FlexStart,
                         align_items: AlignItems::Stretch,
@@ -277,7 +279,6 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                     },
                     BackgroundColor(crate::ui_theme::PANEL.with_alpha(1.0)),
                     BorderColor::all(crate::ui_theme::EDGE),
-                    ScrollPosition::default(),
                     PauseMenuPanel,
                     Name::new("PauseMenuPanel"),
                 ))
@@ -350,10 +351,16 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                 display: Display::None,
                                 align_items: AlignItems::Center,
                                 justify_content: JustifyContent::FlexStart,
-                                flex_shrink: 0.0,
+                                flex_shrink: 1.0,
+                                flex_grow: 1.0,
+                                flex_basis: Val::Px(0.0),
+                                min_height: Val::Px(0.0),
+                                overflow: Overflow::scroll_y(),
                                 ..default()
                             },
                             Visibility::Hidden,
+                            ScrollPosition::default(),
+                            crate::mobile_ui::TouchScrollPanel,
                             SettingsSection,
                             Name::new("PauseMenuSettingsSection"),
                         ))
@@ -508,8 +515,22 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                 ResetGraphicsDefaultsButton,
                                 "PauseMenuResetGraphicsButton",
                             );
-
-                            spawn_menu_button(settings, "Back", SettingsBackButton, "BackButton");
+                        });
+                    panel
+                        .spawn((
+                            Node {
+                                display: Display::None,
+                                flex_shrink: 0.0,
+                                min_height: Val::Px(46.0),
+                                justify_content: JustifyContent::Center,
+                                ..default()
+                            },
+                            Visibility::Hidden,
+                            SettingsFooter,
+                            Name::new("PauseMenuSettingsFooter"),
+                        ))
+                        .with_children(|footer| {
+                            spawn_menu_button(footer, "Back", SettingsBackButton, "BackButton")
                         });
                 });
         });
@@ -741,7 +762,7 @@ fn sync_pause_menu_sections(
     menu_state: Res<PauseMenuState>,
     mut section_queries: ParamSet<(
         Query<(&mut Visibility, &mut Node), With<MainMenuSection>>,
-        Query<(&mut Visibility, &mut Node), With<SettingsSection>>,
+        Query<(&mut Visibility, &mut Node), Or<(With<SettingsSection>, With<SettingsFooter>)>>,
     )>,
 ) {
     if !menu_state.is_changed() {
@@ -761,7 +782,7 @@ fn sync_pause_menu_sections(
         };
     }
 
-    if let Ok((mut settings_visibility, mut settings_node)) = section_queries.p1().single_mut() {
+    for (mut settings_visibility, mut settings_node) in &mut section_queries.p1() {
         *settings_visibility = if menu_state.in_settings {
             Visibility::Visible
         } else {
@@ -799,7 +820,7 @@ impl PauseButtonGesture {
 }
 
 #[derive(Default)]
-struct PauseTapState {
+pub(crate) struct PauseTapState {
     held: Option<PauseTap>,
     menu: Option<(bool, bool, Vec2)>,
 }
@@ -812,7 +833,7 @@ struct PauseTap {
 }
 
 impl PauseTapState {
-    fn event(
+    pub(crate) fn event(
         &mut self,
         id: u64,
         phase: TouchPhase,
@@ -919,7 +940,7 @@ fn collect_pause_button_taps(
             let (Some(node), Some(transform)) = (node, transform) else {
                 return None;
             };
-            let factor = node.inverse_scale_factor();
+            let factor = 1.0 / window.single().map_or(1.0, |(_, w)| w.scale_factor());
             let size = node.size() * transform.to_scale_angle_translation().0.abs() * factor;
             if size.min_element() <= 0.0 {
                 return None;
@@ -1219,7 +1240,7 @@ fn scroll_desktop_settings(
     menu: Res<PauseMenuState>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     mut wheel: MessageReader<MouseWheel>,
-    mut panels: Query<(&ComputedNode, &mut ScrollPosition), With<PauseMenuPanel>>,
+    mut panels: Query<(&ComputedNode, &mut ScrollPosition), With<SettingsSection>>,
 ) {
     let delta: f32 = wheel
         .read()
@@ -1244,7 +1265,7 @@ fn scroll_desktop_settings(
 fn reset_pause_scroll_on_navigation(
     menu: Res<PauseMenuState>,
     mut previous: Local<Option<(bool, bool)>>,
-    mut panels: Query<&mut ScrollPosition, With<PauseMenuPanel>>,
+    mut panels: Query<&mut ScrollPosition, With<SettingsSection>>,
 ) {
     let current = (menu.open, menu.in_settings);
     if *previous != Some(current) {
@@ -1610,6 +1631,29 @@ mod tests {
     }
 
     #[test]
+    fn settings_back_button_is_outside_the_scrolling_body() {
+        let mut app = App::new();
+        app.add_systems(Startup, setup_pause_menu_ui);
+        app.update();
+        let back = app
+            .world_mut()
+            .query_filtered::<Entity, With<SettingsBackButton>>()
+            .single(app.world())
+            .unwrap();
+        let body = app
+            .world_mut()
+            .query_filtered::<Entity, With<SettingsSection>>()
+            .single(app.world())
+            .unwrap();
+        assert!(app.world().get::<ScrollPosition>(body).is_some());
+        let footer = app.world().get::<ChildOf>(back).unwrap().parent();
+        assert!(app.world().get::<SettingsFooter>(footer).is_some());
+        assert_ne!(footer, body);
+        assert_eq!(app.world().get::<Node>(footer).unwrap().flex_shrink, 0.0);
+        assert_eq!(app.world().get::<Node>(back).unwrap().height, Val::Px(46.0));
+    }
+
+    #[test]
     fn desktop_settings_scroll_is_clamped_and_back_navigation_resets_it() {
         let mut app = App::new();
         app.insert_resource(PauseMenuState {
@@ -1624,7 +1668,7 @@ mod tests {
         let panel = app
             .world_mut()
             .spawn((
-                PauseMenuPanel,
+                SettingsSection,
                 ScrollPosition::default(),
                 ComputedNode {
                     size: Vec2::new(400.0, 200.0),

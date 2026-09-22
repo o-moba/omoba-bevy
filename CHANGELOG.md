@@ -8,6 +8,12 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 - Refresh the staged Rust executable timestamp so incremental Xcode device builds re-sign the current executable.
 
+## [0.22.0-rc.4] - 2026-09-23
+
+- Add server-authoritative own-base healing at 12% maximum HP per second inside the shop zone.
+- Repair mobile settings/results drag scrolling, preserve nonshrinking result cards, and keep settings Back outside the scroll body.
+- Make mobile career actions activate on short release, cancel them on a drag, and verify live scoreboard delivery through UDP and client ingest.
+
 ## [0.22.0-rc.3] - 2026-09-23
 
 - Align practice bot routes with authoritative base footprints so every lane advances after spawn and respawn.

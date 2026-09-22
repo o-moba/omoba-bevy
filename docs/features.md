@@ -753,3 +753,19 @@ buildings, so ordinary 20 Hz position samples do not cut through a structure.
 On iOS, winit may emit `RedrawRequested` informational messages and `AboutToWait`
 event-order warnings. These concern the native window loop, not UDP sync errors.
 Warnings remain visible; the movement fix does not change the native event loop.
+
+## Base recovery and mobile result panels
+
+During a running match, living joined heroes and bots recover 12% of maximum HP
+per second inside their own base's shop zone. The server caps recovery at maximum
+HP; opponents' bases, dead players and completed matches do not grant healing.
+
+Settings scroll within a bounded body with a fixed Back action. Results use
+nonshrinking cards inside their scroll area and fixed header/footer navigation.
+Mobile drags use logical window coordinates, respect display/UI scaling and
+clipping, and retain pointer ownership until release/cancel. Career buttons
+activate on short release; scrolling cannot trigger a button underneath the finger.
+
+Live K/D/A and team kills are read from the authoritative snapshot scoreboard.
+Older running server binaries that omit that field show unavailable statistics;
+restart the server from current source as well as rebuilding the client.

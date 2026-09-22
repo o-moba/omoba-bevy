@@ -4212,6 +4212,29 @@ mod tests {
     }
 
     #[test]
+    fn wire_scoreboard_updates_reach_the_hud_resource_and_local_identity() {
+        let (mut app, incoming) = snapshot_app();
+        for tick in 1..=2 {
+            let mut value = serde_json::to_value(admission_snapshot(1, tick, true, None)).unwrap();
+            value["scoreboard"] = json!({"players":[{"player_id":1,"nickname":"Player","team":"green","hero_class":"mage",
+                "kills":tick-1,"deaths":0,"assists":tick,"earned_gold":15,"level":1,"connected":true}]});
+            super::forward_complete_server_datagram(
+                &serde_json::to_vec(&value).unwrap(),
+                &incoming,
+            )
+            .unwrap();
+            app.update();
+            let game = app.world().resource::<super::GameStateSnapshot>();
+            let own = &game.scoreboard.as_ref().unwrap().players[0];
+            assert_eq!(
+                (own.kills, own.deaths, own.assists),
+                ((tick - 1) as u32, 0, tick as u32)
+            );
+            assert_eq!(own.player_id, game.your_id);
+        }
+    }
+
+    #[test]
     fn admitted_snapshot_and_world_fallback_keep_one_local_root_in_the_same_frame() {
         use crate::player::Player;
         let (mut app, incoming) = snapshot_app();

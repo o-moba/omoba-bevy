@@ -980,3 +980,145 @@ fn bot_defends_spawn_then_resumes_lane_when_enemy_is_gone() {
         "bot must resume its lane after the nearby enemy disappears"
     );
 }
+
+#[test]
+fn home_fountain_heals_both_teams_and_bots_but_never_dead_or_outside_players() {
+    let mut rt = runtime(5);
+    let now = Instant::now();
+    rt.handle_packet(addr(1), join("fountain"), now);
+    for p in rt.players.values_mut() {
+        p.state.hp = 20.0;
+    }
+    regenerate_base_hp(&mut rt.players, &rt.map_layout, &GameState::Running, 1.0);
+    assert!(
+        rt.players
+            .values()
+            .all(|p| (p.state.hp - 32.0).abs() < 0.001)
+    );
+    regenerate_base_hp(&mut rt.players, &rt.map_layout, &GameState::Running, 100.0);
+    assert!(rt.players.values().all(|p| p.state.hp == p.state.max_hp));
+    let human = rt.players.get_mut(&addr(1)).unwrap();
+    human.state.hp = 20.0;
+    human.state.x = rt.map_layout.away.x;
+    human.state.z = rt.map_layout.away.z;
+    regenerate_base_hp(&mut rt.players, &rt.map_layout, &GameState::Running, 1.0);
+    assert_eq!(
+        rt.players[&addr(1)].state.hp,
+        20.0,
+        "enemy base cannot heal"
+    );
+    for phase in [
+        GameState::Lobby,
+        GameState::Victory {
+            winner: Team::Green,
+        },
+        GameState::Running,
+    ] {
+        let p = rt.players.get_mut(&addr(1)).unwrap();
+        p.state.x = rt.map_layout.home.x + BASE_HEAL_RADIUS + 0.01;
+        p.state.z = rt.map_layout.home.z;
+        regenerate_base_hp(&mut rt.players, &rt.map_layout, &phase, 1.0);
+        assert_eq!(rt.players[&addr(1)].state.hp, 20.0);
+    }
+    for (joined, hp, phase) in [
+        (true, 0.0, GameState::Running),
+        (false, 20.0, GameState::Running),
+        (
+            true,
+            20.0,
+            GameState::Victory {
+                winner: Team::Green,
+            },
+        ),
+    ] {
+        let p = rt.players.get_mut(&addr(1)).unwrap();
+        p.joined = joined;
+        p.state.hp = hp;
+        p.state.x = rt.map_layout.home.x;
+        p.state.z = rt.map_layout.home.z;
+        regenerate_base_hp(&mut rt.players, &rt.map_layout, &phase, 1.0);
+        assert_eq!(rt.players[&addr(1)].state.hp, hp);
+    }
+}
+
+#[test]
+fn live_udp_scoreboard_carries_accepted_kills_deaths_assists() {
+    let mut rt = runtime(2);
+    let client = UdpSocket::bind("127.0.0.1:0").unwrap();
+    send_udp(
+        &client,
+        &mut rt,
+        ClientPacket::Hello {
+            protocol_version: shared::protocol::PROTOCOL_VERSION,
+        },
+    );
+    send_udp(&client, &mut rt, join("scoreboard-observer"));
+    let human = rt.players[&client.local_addr().unwrap()].state.clone();
+    let ally = rt
+        .players
+        .values()
+        .find(|p| p.state.is_bot && p.state.team == human.team)
+        .unwrap()
+        .state
+        .id;
+    let enemy = rt
+        .players
+        .values()
+        .find(|p| p.state.team != human.team)
+        .unwrap()
+        .state
+        .id;
+    let now = Instant::now();
+    for (attacker, damage) in [(ally, 5.0), (human.id, 999.0)] {
+        let receipt = apply_player_damage(&mut rt.players, enemy, damage, now).unwrap();
+        rt.combat_log.extend(
+            now,
+            [HitSource::new(
+                CombatEntityKind::Player,
+                attacker,
+                ProjectileStyle::Standard,
+            )
+            .annotate(receipt)],
+        );
+    }
+    let ServerPacket::Snapshot {
+        scoreboard: Some(board),
+        ..
+    } = read_snapshot(&client, &mut rt)
+    else {
+        panic!("active wire snapshot requires a scoreboard");
+    };
+    let own = board
+        .players
+        .iter()
+        .find(|p| p.player_id == human.id)
+        .unwrap();
+    assert_eq!((own.kills, own.deaths, own.assists), (1, 0, 0));
+    assert_eq!(
+        board
+            .players
+            .iter()
+            .find(|p| p.player_id == ally)
+            .unwrap()
+            .assists,
+        1
+    );
+    assert_eq!(
+        board
+            .players
+            .iter()
+            .find(|p| p.player_id == enemy)
+            .unwrap()
+            .deaths,
+        1
+    );
+    assert_eq!(
+        board
+            .players
+            .iter()
+            .filter(|p| p.team == shared::map::Team::Green)
+            .map(|p| p.kills)
+            .sum::<u32>(),
+        1
+    );
+}

@@ -1906,6 +1906,7 @@ impl ServerRuntime {
             );
         }
         regenerate_team_buff_hp(players, team_buffs, game_state, dt, now);
+        regenerate_base_hp(players, map_layout, game_state, dt);
         accrue_passive_gold(players, game_state, gold_dt);
         restore_god_mode_players(players);
         handle_respawns(players, structures, map_layout, game_state, now);
@@ -2912,6 +2913,32 @@ fn apply_neutral_damage(
         neutral.state.hp,
         Vec3f::new(neutral.state.x, neutral.state.y, neutral.state.z),
     )
+}
+
+/// Recovery is authoritative and only active inside the hero's own fountain.
+fn regenerate_base_hp(
+    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+    map: &MapLayoutState,
+    phase: &GameState,
+    dt: f32,
+) {
+    if !matches!(phase, GameState::Running) || !dt.is_finite() || dt <= 0.0 {
+        return;
+    }
+    for player in players
+        .values_mut()
+        .filter(|p| p.joined && p.state.hp > 0.0)
+    {
+        let base = match player.state.team {
+            Team::Green => map.home,
+            Team::Blue => map.away,
+        };
+        if (player.state.x - base.x).hypot(player.state.z - base.z) <= BASE_HEAL_RADIUS {
+            player.state.hp = (player.state.hp
+                + player.state.max_hp * BASE_HEAL_FRACTION_PER_SECOND * dt)
+                .min(player.state.max_hp);
+        }
+    }
 }
 
 /// Applies boss-buff HP regeneration to every alive player of a buffed team,

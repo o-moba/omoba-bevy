@@ -221,7 +221,7 @@ fn drive(
         server.open = qa.stage == 10;
     }
     for (name, node, mut scroll) in &mut scrolls {
-        if name.as_str() == "PauseMenuPanel" {
+        if name.as_str() == "PauseMenuSettingsSection" {
             scroll.y = if qa.stage == 9 {
                 ((node.content_size().y - node.size().y) * node.inverse_scale_factor()).max(0.0)
             } else {

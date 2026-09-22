@@ -17,6 +17,9 @@ use std::time::Duration;
 pub const MAX_HP: f32 = 100.0;
 pub const MAX_MANA: f32 = 100.0;
 pub const MANA_REGEN_PER_SECOND: f32 = 8.0;
+/// Own-base fountain restores 12% of maximum HP per second within the shop zone.
+pub const BASE_HEAL_FRACTION_PER_SECOND: f32 = 0.12;
+pub const BASE_HEAL_RADIUS: f32 = shared::shop::SHOP_RADIUS;
 
 // --- Projectile simulation (ability numbers live in the shared class kits) ---
 pub const PROJECTILE_SPEED: f32 = 19.0;
