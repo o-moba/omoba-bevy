@@ -184,7 +184,7 @@ dependencies = [
 
 [[package]]
 name = "arena-sync"
-version = "0.22.0-rc.4"
+version = "0.22.0-rc.5"
 dependencies = [
  "base64",
  "reqwest",
@@ -1867,7 +1867,7 @@ dependencies = [
 
 [[package]]
 name = "client"
-version = "0.22.0-rc.4"
+version = "0.22.0-rc.5"
 dependencies = [
  "bevy",
  "crossbeam-channel",
@@ -2388,7 +2388,7 @@ dependencies = [
 [[package]]
 name = "ekza-bevy-sdk"
 version = "0.7.0"
-source = "git+https://github.com/ekza-space/ekza-bevy-sdk?rev=42c39e4bf5aea2e3a051f86ba27cbf6e2c46d377#42c39e4bf5aea2e3a051f86ba27cbf6e2c46d377"
+source = "git+https://github.com/ekza-space/ekza-bevy-sdk?rev=247ddbf6dbfc9bac95b52b74ce3a0a1321466a24#247ddbf6dbfc9bac95b52b74ce3a0a1321466a24"
 dependencies = [
  "bevy",
  "reqwest",
@@ -2987,7 +2987,7 @@ dependencies = [
 
 [[package]]
 name = "harness"
-version = "0.22.0-rc.4"
+version = "0.22.0-rc.5"
 dependencies = [
  "serde",
  "serde_json",
@@ -4245,7 +4245,7 @@ dependencies = [
 
 [[package]]
 name = "omoba-account-api"
-version = "0.22.0-rc.4"
+version = "0.22.0-rc.5"
 dependencies = [
  "axum",
  "ed25519-dalek",
@@ -4263,7 +4263,7 @@ dependencies = [
 
 [[package]]
 name = "omoba-passport"
-version = "0.22.0-rc.4"
+version = "0.22.0-rc.5"
 dependencies = [
  "ekza-bevy-sdk",
  "reqwest",
@@ -5120,7 +5120,7 @@ dependencies = [
 
 [[package]]
 name = "server"
-version = "0.22.0-rc.4"
+version = "0.22.0-rc.5"
 dependencies = [
  "bevy",
  "ed25519-dalek",
@@ -5167,7 +5167,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "0.22.0-rc.4"
+version = "0.22.0-rc.5"
 dependencies = [
  "ekza-bevy-sdk",
  "serde",
@@ -5208,7 +5208,7 @@ checksum = "d66dc143e6b11c1eddc06d5c423cfc97062865baf299914ab64caa38182078fe"
 
 [[package]]
 name = "skills"
-version = "0.22.0-rc.4"
+version = "0.22.0-rc.5"
 
 [[package]]
 name = "skrifa"
@@ -6584,7 +6584,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

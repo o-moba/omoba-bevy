@@ -17,6 +17,20 @@ class XcodeBridgeTests(unittest.TestCase):
                     OMOBA_CARGO_TARGET_DIR=str(root/'cache'), PRODUCT_BUNDLE_IDENTIFIER='space.ekza.omoba.beta',
                     SDKROOT='/selected/iphoneos.sdk')
 
+    def test_local_ekza_settings_apply_only_to_debug_and_private_host(self):
+        import json
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root/'.ekza-lan').mkdir()
+            path = root/'.ekza-lan/client.json'
+            path.write_text(json.dumps({'development_host':'192.168.1.71','registry':'http://192.168.1.71:8018','game_server':'192.168.1.71:4030'}))
+            self.assertEqual(xb.ekza_build_settings({'CONFIGURATION':'Debug'}, root)['EKZA_DEV_HTTP_HOST'], '192.168.1.71')
+            self.assertEqual(xb.ekza_build_settings({'CONFIGURATION':'Debug'}, root)['OMOBA_DEFAULT_GAME_SERVER_ADDR'], '192.168.1.71:4030')
+            self.assertNotIn('OMOBA_DEFAULT_GAME_SERVER_ADDR', xb.ekza_build_settings({'CONFIGURATION':'Debug','OMOBA_GAME_SERVER':'192.168.1.71:4010'}, root))
+            self.assertEqual(xb.ekza_build_settings({'CONFIGURATION':'Release'}, root), {})
+            path.write_text(json.dumps({'development_host':'8.8.8.8','registry':'http://8.8.8.8'}))
+            with self.assertRaises(ValueError): xb.ekza_build_settings({'CONFIGURATION':'Debug'}, root)
+
     def test_rejects_simulator_and_non_arm64(self):
         for field, value in [('PLATFORM_NAME','iphonesimulator'), ('ARCHS','arm64 x86_64')]:
             with self.subTest(field=field):

@@ -23,6 +23,7 @@ impl Plugin for AvatarQaPlugin {
                 dimension("OMOBA_QA_HEIGHT", 720),
             ),
             slug: std::env::var("OMOBA_AVATAR_QA_SLUG").ok(),
+            live_registry: std::env::var("OMOBA_AVATAR_QA_LIVE_REGISTRY").as_deref() == Ok("1"),
             stage: 0,
             frames: 0,
             started: Instant::now(),
@@ -52,6 +53,7 @@ struct AvatarQa {
     directory: PathBuf,
     pixels: UVec2,
     slug: Option<String>,
+    live_registry: bool,
     stage: usize,
     frames: u32,
     started: Instant,
@@ -89,7 +91,13 @@ fn setup(mut commands: Commands, mut next: ResMut<NextState<AppScreen>>) {
             right: Val::Px(8.0),
             ..default()
         },
-        Text::new("QA · SDK service fixture · no external ownership claim"),
+        Text::new(
+            if std::env::var("OMOBA_AVATAR_QA_LIVE_REGISTRY").as_deref() == Ok("1") {
+                "QA · local Studio · automated input"
+            } else {
+                "QA · SDK service fixture · no external ownership claim"
+            },
+        ),
         TextFont {
             font_size: 8.0,
             ..default()
@@ -250,7 +258,7 @@ fn capture(
         if qa.stage == if qa.slug.is_some() { 5 } else { 3 } {
             let _ = std::fs::write(qa.directory.join("qa-summary.json"), serde_json::to_vec_pretty(&serde_json::json!({
                 "status":"passed", "scenario":"avatar-collection", "version":env!("CARGO_PKG_VERSION"),
-                "sdk_service_fixture":true, "actual_model_download_and_validation":qa.slug.is_some(),
+                "sdk_service_fixture":!qa.live_registry, "local_live_registry":qa.live_registry, "actual_model_download_and_validation":qa.slug.is_some(),
                 "raw_touch_input_injected":true, "manual_or_physical_device_input":false, "captures":qa.captures,
             })).unwrap());
             qa.finished = true;
@@ -275,7 +283,7 @@ fn capture(
     let store_state = wanted_slug
         .filter(|_| is_sdk)
         .map(omoba_passport::store::model_state);
-    if qa.stage == 2 && is_sdk && preview.status != PreviewStatus::Loading {
+    if qa.stage == 2 && is_sdk && !qa.live_registry && preview.status != PreviewStatus::Loading {
         if preview.status == PreviewStatus::Ready {
             abort(
                 &mut qa,

@@ -26,6 +26,7 @@ impl Plugin for CollectionScreenPlugin {
                 Update,
                 (
                     refresh_collection_catalogue,
+                    refresh_connection_labels,
                     drag_to_rotate,
                     collection_actions,
                     scroll_collection,
@@ -128,10 +129,13 @@ fn spawn_catalogue_grid(
                     "CollectionConnectAccount",
                 );
             });
-            grid.spawn(widgets::label(
-                &crate::passport::avatar_account_status_line(),
-                11.0,
-                widgets::MUTED,
+            grid.spawn((
+                widgets::label(
+                    &crate::passport::avatar_account_status_line(),
+                    11.0,
+                    widgets::MUTED,
+                ),
+                Name::new("CollectionAccountStatus"),
             ));
         }
         grid.spawn(Node {
@@ -157,14 +161,39 @@ fn spawn_catalogue_grid(
     }
     // Preserve existing paid-avatar pairing as an optional action, below the
     // primary account/free library path.
-    if !crate::passport::is_connected() {
+    {
         widgets::button(
             grid,
-            "Connect wallet for purchases",
+            "Connect wallet (optional)",
             ButtonKind::Secondary,
             CollectionAction::ConnectWallet,
             "CollectionConnectWallet",
         );
+        grid.spawn((
+            widgets::label(&crate::passport::wallet_status_line(), 11.0, widgets::MUTED),
+            Name::new("CollectionWalletStatus"),
+        ));
+    }
+}
+
+fn refresh_connection_labels(mut labels: Query<(&Name, &mut Text)>) {
+    let account = crate::passport::avatar_account_status_line();
+    let wallet = crate::passport::wallet_status_line();
+    let account_button = crate::passport::account_button_label();
+    let wallet_button = crate::passport::wallet_button_label();
+    let catalogue = omoba_passport::store::catalogue_status();
+    for (name, mut text) in &mut labels {
+        let value = match name.as_str() {
+            "CollectionAccountStatus" => account.as_str(),
+            "CollectionWalletStatus" => wallet.as_str(),
+            "CollectionStudioStatus" => catalogue.label(),
+            "CollectionConnectAccountLabel" => account_button,
+            "CollectionConnectWalletLabel" => wallet_button,
+            _ => continue,
+        };
+        if text.0 != value {
+            text.0 = value.to_owned();
+        }
     }
 }
 
@@ -175,24 +204,12 @@ fn refresh_collection_catalogue(
     mut thumbnails: ResMut<AvatarThumbnails>,
     preview: Res<AvatarPreview>,
     mut grids: Query<(Entity, &mut CatalogueRevision), With<CollectionGrid>>,
-    mut account_line: Local<String>,
-    mut account_connected: Local<Option<bool>>,
-    mut wallet_line: Local<String>,
 ) {
     crate::passport::poll_account();
     crate::passport::poll_wallet();
     let catalogue = crate::passport::avatar_catalogue();
-    let account = crate::passport::avatar_account_status_line();
-    let wallet = crate::passport::wallet_status_line();
-    let connected = crate::passport::account_connected();
-    let account_changed = *account_line != account
-        || *wallet_line != wallet
-        || account_connected.is_some_and(|previous| previous != connected);
-    *account_connected = Some(connected);
-    *account_line = account;
-    *wallet_line = wallet;
     for (grid, mut revision) in &mut grids {
-        if revision.0 == catalogue.revision && !account_changed {
+        if revision.0 == catalogue.revision {
             continue;
         }
         ensure_thumbnails(&asset_server, &mut thumbnails);
@@ -1124,6 +1141,66 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn connection_status_changes_do_not_replace_pressed_controls_or_scroll() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Image>()
+            .init_resource::<AvatarPreview>()
+            .init_resource::<AvatarThumbnails>()
+            .add_systems(
+                Update,
+                (refresh_collection_catalogue, refresh_connection_labels).chain(),
+            );
+        let grid = app
+            .world_mut()
+            .spawn((
+                CollectionGrid,
+                CatalogueRevision(u64::MAX),
+                Node::default(),
+                ScrollPosition(Vec2::new(0.0, 120.0)),
+            ))
+            .id();
+        app.update();
+        let button = app
+            .world_mut()
+            .query::<(Entity, &Name)>()
+            .iter(app.world())
+            .find(|(_, name)| name.as_str() == "CollectionConnectAccount")
+            .unwrap()
+            .0;
+        let label = app
+            .world_mut()
+            .query::<(Entity, &Name)>()
+            .iter(app.world())
+            .find(|(_, name)| name.as_str() == "CollectionAccountStatus")
+            .unwrap()
+            .0;
+        app.world_mut()
+            .entity_mut(button)
+            .insert(Interaction::Pressed);
+        app.world_mut().get_mut::<Text>(label).unwrap().0 = "Previous connection state".into();
+        let children: Vec<_> = app.world().get::<Children>(grid).unwrap().iter().collect();
+        app.update();
+        assert_eq!(
+            *app.world().get::<Interaction>(button).unwrap(),
+            Interaction::Pressed
+        );
+        assert_ne!(
+            app.world().get::<Text>(label).unwrap().0,
+            "Previous connection state"
+        );
+        assert_eq!(
+            app.world()
+                .get::<Children>(grid)
+                .unwrap()
+                .iter()
+                .collect::<Vec<_>>(),
+            children
+        );
+        assert_eq!(app.world().get::<ScrollPosition>(grid).unwrap().y, 120.0);
     }
 
     #[test]

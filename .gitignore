@@ -138,3 +138,6 @@ node_modules/
 
 # Personal Xcode signing and local build overrides.
 /mobile/ios/Omoba.local.xcconfig
+
+# Private local Ekza rehearsal configuration and logs
+.ekza-lan/

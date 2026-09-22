@@ -113,3 +113,33 @@ mod tests {
         assert_eq!(preferences_file_path(None, None, "prefs.json"), None);
     }
 }
+
+/// The game owns native browser presentation; the SDK still validates the URL.
+pub fn open_external_url(raw: &str) -> Result<(), String> {
+    let url = ekza_bevy_sdk::passport::pairing::safe_url_with_query(raw)?;
+    #[cfg(target_os = "ios")]
+    {
+        let url = std::ffi::CString::new(url).map_err(|_| "Invalid browser link")?;
+        unsafe extern "C" {
+            fn omoba_browser_open(url: *const std::ffi::c_char);
+        }
+        // Swift copies the string synchronously, then opens UIKit on the main queue.
+        unsafe { omoba_browser_open(url.as_ptr()) };
+        Ok(())
+    }
+    #[cfg(not(target_os = "ios"))]
+    omoba_passport::open_in_browser(&url)
+}
+
+pub fn browser_approval_hint() -> &'static str {
+    #[cfg(target_os = "ios")]
+    {
+        unsafe extern "C" {
+            fn omoba_browser_failed() -> bool;
+        }
+        if unsafe { omoba_browser_failed() } {
+            return "Browser could not open · retry the button or open this link manually";
+        }
+    }
+    "Confirm in your browser, then return to Omoba"
+}

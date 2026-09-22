@@ -8,6 +8,13 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 - Refresh the staged Rust executable timestamp so incremental Xcode device builds re-sign the current executable.
 
+## [0.22.0-rc.5] - 2026-09-23
+
+- Keep avatar collection controls stable during account/catalogue updates and expose wallet approval status and retry actions.
+- Open Ekza account and wallet approval pages through the native iOS browser bridge.
+- Add explicit Debug-only local Studio configuration and a LAN rehearsal launcher using the existing isolated test database.
+- Pin the Ekza SDK fix for opt-in private-host HTTP development; release SDK builds retain HTTPS requirements.
+
 ## [0.22.0-rc.4] - 2026-09-23
 
 - Add server-authoritative own-base healing at 12% maximum HP per second inside the shop zone.

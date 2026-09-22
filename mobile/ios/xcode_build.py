@@ -6,6 +6,8 @@ are read here. The existing device builder remains an independent CLI workflow.
 """
 from __future__ import annotations
 import json
+import ipaddress
+from urllib.parse import urlsplit
 import os
 from pathlib import Path
 import plistlib
@@ -45,10 +47,40 @@ def source_identity() -> dict:
     return {'revision': git('rev-parse', 'HEAD'), 'tracked_diff': git('diff', 'HEAD', '--', 'Cargo.toml', 'Cargo.lock', 'client', 'shared', 'passport', 'skills', 'mobile/ios', 'scripts')}
 
 
+def ekza_build_settings(env: dict[str, str], root: Path = ROOT) -> dict[str, str]:
+    """Only Debug Run loads the local rehearsal configuration; Archives ignore it."""
+    if env.get('CONFIGURATION', 'Debug') != 'Debug':
+        return {}
+    path = root / '.ekza-lan/client.json'
+    if not path.is_file():
+        return {}
+    value = json.loads(path.read_text())
+    host = str(value['development_host'])
+    ip = ipaddress.IPv4Address(host)
+    if not any(ip in ipaddress.ip_network(cidr) for cidr in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16')):
+        raise ValueError('Ekza LAN development requires an explicit private IPv4 host.')
+    registry = str(value['registry'])
+    parts = urlsplit(registry)
+    if parts.scheme != 'http' or parts.hostname != host or parts.username or parts.password or parts.query or parts.fragment:
+        raise ValueError('Ekza registry must use the configured LAN host without credentials.')
+    result = {'OMOBA_DEFAULT_REGISTRY_URL': registry, 'EKZA_DEV_HTTP_HOST': host}
+    if game := value.get('game_server'):
+        address, separator, port = str(game).rpartition(':')
+        if address != host or not separator or not port.isdigit() or not 1024 <= int(port) <= 65535:
+            raise ValueError('Ekza LAN game server must use the same private host and a valid port.')
+        if not env.get('OMOBA_GAME_SERVER'):
+            result['OMOBA_DEFAULT_GAME_SERVER_ADDR'] = str(game)
+    return result
+
+
 def build(env: dict[str, str]) -> None:
     cfg = settings(env)
     before = source_identity()
     build_env = ios_build_environment(cfg['cache'], env['SDKROOT'], env.get('OMOBA_GAME_SERVER') or None)
+    # Never inherit a LAN exception into Archive from the invoking shell.
+    for key in ('EKZA_DEV_HTTP_HOST', 'OMOBA_DEFAULT_REGISTRY_URL', 'OMOBA_DEFAULT_PASSPORT_URL'):
+        build_env.pop(key, None)
+    build_env.update(ekza_build_settings(env))
     # Xcode may set architecture/linker flags for its own toolchain. Cargo owns
     # the executable and the device builder's retained-symbol configuration.
     subprocess.run(['cargo', 'build', '--locked', '-p', 'client', '--bin', 'client',

@@ -769,3 +769,9 @@ activate on short release; scrolling cannot trigger a button underneath the fing
 Live K/D/A and team kills are read from the authoritative snapshot scoreboard.
 Older running server binaries that omit that field show unavailable statistics;
 restart the server from current source as well as rebuilding the client.
+
+## Ekza connection and LAN Studio testing (0.22.0-rc.5)
+
+Avatar collection account/catalogue messages update existing labels without replacing held controls. Wallet pairing has visible progress and approval-page retry. iOS opens approval links using UIKit on the main queue; scoped Ekza account sessions still restore from private storage.
+
+An explicit Debug-only local Studio configuration and `scripts/ekza_lan.py` connect the game, account service and approved catalogue to the same local Registry. The SDK's exact private-host development exception is ignored by release builds. See [LAN walkthrough](ekza-lan.md) for the real author → curator → game-owner → player flow. No wallet is required for approved free avatars.
