@@ -321,3 +321,11 @@ pub(crate) fn structure_radius(kind: StructureKind) -> f32 {
         StructureKind::BaseTower => BASE_TOWER_SIZE * 0.5,
     }
 }
+
+/// Movement footprint, not attack-target reach.
+pub(crate) fn structure_collision_radius(kind: StructureKind) -> f32 {
+    match kind {
+        StructureKind::Tower => shared::TOWER_TARGET_RADIUS,
+        StructureKind::BaseTower => shared::navigation::BASE_COLLISION_RADIUS,
+    }
+}

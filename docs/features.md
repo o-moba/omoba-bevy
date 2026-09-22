@@ -742,3 +742,14 @@ validation does not assert Apple upload acceptance.
 
 The Rust staging phase refreshes the executable modification time even when Cargo
 reuses its cached binary, allowing Xcode to invalidate its previous signing output.
+
+## Structure movement consistency
+
+Practice bot planning uses the physical structure footprint enforced by movement
+authority, separate from combat target reach. Local structure movement uses the
+same swept collision primitive and keeps planning clearance when sliding around
+buildings, so ordinary 20 Hz position samples do not cut through a structure.
+
+On iOS, winit may emit `RedrawRequested` informational messages and `AboutToWait`
+event-order warnings. These concern the native window loop, not UDP sync errors.
+Warnings remain visible; the movement fix does not change the native event loop.

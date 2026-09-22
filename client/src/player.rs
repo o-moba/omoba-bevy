@@ -1021,7 +1021,7 @@ fn move_player_mobile(
             * utility.map_or(1.0, |u| u.state.movement_multiplier());
         // Bound a resumed/hitched frame; the server movement envelope remains authoritative.
         let desired = current + direction * speed * time.delta_secs().min(0.1);
-        let mut desired = resolve_player_collisions(desired, &other_players, &structures);
+        let mut desired = resolve_player_collisions(current, desired, &other_players, &structures);
         if let Some(map) = map.as_ref() {
             desired = map.clamp_position(desired);
         }
@@ -1251,7 +1251,7 @@ fn move_player(
 
         if distance < move_delta || distance < 0.01 {
             let mut desired = target_pos_flat;
-            desired = resolve_player_collisions(desired, &other_players, &structures);
+            desired = resolve_player_collisions(current_pos, desired, &other_players, &structures);
             if let Some(map_layout) = map_layout.as_ref() {
                 desired = map_layout.clamp_position(desired);
             }
@@ -1270,7 +1270,7 @@ fn move_player(
             }
         } else {
             let mut desired = current_pos + direction * move_delta;
-            desired = resolve_player_collisions(desired, &other_players, &structures);
+            desired = resolve_player_collisions(current_pos, desired, &other_players, &structures);
             if let Some(map_layout) = map_layout.as_ref() {
                 desired = map_layout.clamp_position(desired);
             }
@@ -1492,6 +1492,7 @@ fn structure_revision(structures: &[(Vec3, StructureKind)]) -> u64 {
 }
 
 fn resolve_player_collisions(
+    from: Vec3,
     desired: Vec3,
     other_players: &[Vec3],
     structures: &[(Vec3, StructureKind)],
@@ -1514,7 +1515,11 @@ fn resolve_player_collisions(
     }
 
     for &(obstacle_pos, kind) in structures.iter() {
-        let min_distance = crate::navigation::structure_collision_radius(kind);
+        // Keep the same clearance as planned routes. Otherwise successive
+        // thumb frames on the physical boundary form a chord through the
+        // structure when sampled by the network, and authority rejects it.
+        let min_distance = crate::navigation::structure_collision_radius(kind)
+            + shared::navigation::PLANNING_CLEARANCE;
         let delta = Vec3::new(
             resolved.x - obstacle_pos.x,
             0.0,
@@ -1532,7 +1537,16 @@ fn resolve_player_collisions(
         }
     }
 
-    resolved
+    let discs: Vec<_> = structures
+        .iter()
+        .map(|(p, kind)| shared::navigation::Disc {
+            center: [p.x, p.z],
+            radius: crate::navigation::structure_collision_radius(*kind)
+                - shared::navigation::HERO_RADIUS,
+        })
+        .collect();
+    let [x, z] = shared::navigation::clip_discs([from.x, from.z], [resolved.x, resolved.z], &discs);
+    Vec3::new(x, resolved.y, z)
 }
 
 fn resolve_player_structure_overlap(
@@ -1576,6 +1590,47 @@ fn resolve_player_structure_overlap(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn local_structure_sweep_blocks_crossing_and_allows_outward_recovery() {
+        use super::*;
+        let structures = [(Vec3::ZERO, StructureKind::Tower)];
+        let blocked = resolve_player_collisions(Vec3::NEG_X * 5.0, Vec3::X * 5.0, &[], &structures);
+        assert!(blocked.x < -crate::navigation::structure_collision_radius(StructureKind::Tower));
+        let escaped = resolve_player_collisions(Vec3::X, Vec3::X * 3.0, &[], &structures);
+        assert_eq!(escaped, Vec3::X * 3.0);
+    }
+
+    #[test]
+    fn mobile_structure_sliding_agrees_with_server_at_twenty_hz() {
+        use super::*;
+        // Reproduce direct thumb motion around a base, with three render frames
+        // per network sample. Endpoints alone are not a safe swept trajectory.
+        let center = Vec3::new(-79.549515, 0.5, -79.549515);
+        let structures = [(center, StructureKind::BaseTower)];
+        let discs = [shared::navigation::Disc {
+            center: [center.x, center.z],
+            radius: shared::navigation::BASE_COLLISION_RADIUS,
+        }];
+        let mut local = center + Vec3::new(4.5, 0.0, 0.0);
+        let mut server = [local.x, local.z];
+        for frame in 0..240 {
+            let desired = local + Vec3::new(-0.6, 0.0, 0.8) * PLAYER_SPEED / 60.0;
+            local = resolve_player_collisions(local, desired, &[], &structures);
+            if frame % 3 == 2 {
+                server = shared::navigation::clip_discs(server, [local.x, local.z], &discs);
+                let error = (server[0] - local.x).hypot(server[1] - local.z);
+                assert!(
+                    error < 0.02,
+                    "prediction diverged at frame {frame}: error={error}, local={local:?}, server={server:?}"
+                );
+            }
+        }
+        assert!(
+            local.z > center.z + 10.0,
+            "thumb movement must slide past the base"
+        );
+    }
+
     #[test]
     fn mobile_joystick_uses_screen_axes_and_retains_analog_speed() {
         let camera = GlobalTransform::from(

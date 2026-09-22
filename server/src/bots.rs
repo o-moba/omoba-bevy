@@ -424,7 +424,7 @@ impl ServerRuntime {
             .filter(|s| s.state.hp > 0.0)
             .map(|s| shared::navigation::Disc {
                 center: [s.state.x, s.state.z],
-                radius: structure_radius(s.state.kind),
+                radius: structure_collision_radius(s.state.kind),
             })
             .collect();
         for addr in addresses {

@@ -396,39 +396,15 @@ pub(crate) fn clip_live_structures(
     to: [f32; 2],
     structures: &HashMap<u64, Structure>,
 ) -> [f32; 2] {
-    let delta = [to[0] - from[0], to[1] - from[1]];
-    let length_sq = delta[0] * delta[0] + delta[1] * delta[1];
-    if length_sq <= 0.000_000_1 {
-        return to;
-    }
-    let mut fraction = 1.0_f32;
-    for structure in structures.values().filter(|s| s.state.hp > 0.0) {
-        let radius = match structure.state.kind {
-            StructureKind::Tower => shared::TOWER_TARGET_RADIUS,
-            StructureKind::BaseTower => 3.2,
-        } + shared::navigation::HERO_RADIUS;
-        let offset = [from[0] - structure.state.x, from[1] - structure.state.z];
-        let dot = offset[0] * delta[0] + offset[1] * delta[1];
-        let c = offset[0] * offset[0] + offset[1] * offset[1] - radius * radius;
-        if c < 0.0 {
-            if dot < 0.0 {
-                return from;
-            }
-            continue;
-        }
-        if dot >= 0.0 {
-            continue;
-        }
-        let discriminant = dot * dot - length_sq * c;
-        if discriminant < 0.0 {
-            continue;
-        }
-        let contact = (-dot - discriminant.sqrt()) / length_sq;
-        if (0.0..=fraction).contains(&contact) {
-            fraction = (contact - 0.001 / length_sq.sqrt()).max(0.0);
-        }
-    }
-    [from[0] + delta[0] * fraction, from[1] + delta[1] * fraction]
+    let discs: Vec<_> = structures
+        .values()
+        .filter(|s| s.state.hp > 0.0)
+        .map(|s| shared::navigation::Disc {
+            center: [s.state.x, s.state.z],
+            radius: structure_collision_radius(s.state.kind),
+        })
+        .collect();
+    shared::navigation::clip_discs(from, to, &discs)
 }
 
 pub(crate) fn handle_respawns(

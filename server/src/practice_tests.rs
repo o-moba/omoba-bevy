@@ -708,7 +708,7 @@ fn bot_pushes_a_real_lane_and_damages_towers_without_crossing_live_structure_dis
             .filter(|s| s.state.hp > 0.0)
             .map(|s| shared::navigation::Disc {
                 center: [s.state.x, s.state.z],
-                radius: structure_radius(s.state.kind),
+                radius: structure_collision_radius(s.state.kind),
             })
             .collect();
         now += Duration::from_millis(100);
@@ -896,5 +896,87 @@ fn live_udp_practice_solo_and_running_late_join_publish_real_bot_replacement() {
     assert!(players.iter().any(|p| p.id == your_id));
     println!(
         "LIVE_UDP_PRACTICE solo_running=true bots=1 late_join_same_round=true bot_identity_replaced=true humans=2"
+    );
+}
+
+#[test]
+fn all_practice_bots_leave_spawn_and_advance_without_nearby_enemies() {
+    let mut rt = runtime(5);
+    let mut now = Instant::now();
+    rt.handle_packet(addr(1), join("all-lanes-observer"), now);
+    for phase in ["initial spawn", "respawn"] {
+        let starts: HashMap<_, _> = rt
+            .players
+            .iter()
+            .filter(|(_, p)| p.state.is_bot)
+            .map(|(a, p)| (*a, [p.state.x, p.state.z]))
+            .collect();
+        for _ in 0..400 {
+            now += Duration::from_millis(50);
+            rt.simulate_bots(now, 0.05);
+        }
+        for (a, start) in starts {
+            let p = &rt.players[&a].state;
+            let distance = (p.x - start[0]).hypot(p.z - start[1]);
+            assert!(
+                distance > 20.0,
+                "bot {} {:?} stalled after {phase}: moved {distance}",
+                p.id,
+                p.team
+            );
+        }
+        // Ordinary death clears the route and ordinary respawn must allow it
+        // to leave the same crowded base again with its assigned lane intact.
+        let bots: Vec<_> = rt
+            .players
+            .values()
+            .filter(|p| p.state.is_bot)
+            .map(|p| p.state.id)
+            .collect();
+        for id in bots {
+            apply_player_damage(&mut rt.players, id, 9999.0, now);
+        }
+        rt.simulate_bots(now, 0.05);
+        now += RESPAWN_DELAY + Duration::from_secs(1);
+        handle_respawns(
+            &mut rt.players,
+            &rt.structures,
+            &rt.map_layout,
+            &rt.game_state,
+            now,
+        );
+    }
+}
+
+#[test]
+fn bot_defends_spawn_then_resumes_lane_when_enemy_is_gone() {
+    let mut rt = runtime(2);
+    let mut now = Instant::now();
+    rt.handle_packet(addr(1), join("defence-observer"), now);
+    let bot_addr = *rt
+        .players
+        .iter()
+        .filter(|(_, p)| p.state.is_bot && p.state.team == Team::Blue)
+        .min_by_key(|(_, p)| p.state.id)
+        .unwrap()
+        .0;
+    let start = rt.players[&bot_addr].state.clone();
+    let human = rt.players.get_mut(&addr(1)).unwrap();
+    human.state.x = start.x + 3.0;
+    human.state.z = start.z;
+    rt.simulate_bots(now, 0.05);
+    assert!(
+        !rt.projectiles.is_empty() || rt.players[&addr(1)].state.hp < MAX_HP,
+        "nearby enemy must trigger defence"
+    );
+    rt.players.get_mut(&addr(1)).unwrap().state.hp = 0.0;
+    for _ in 0..400 {
+        now += Duration::from_millis(50);
+        rt.simulate_bots(now, 0.05);
+    }
+    let bot = &rt.players[&bot_addr].state;
+    assert!(
+        (bot.x - start.x).hypot(bot.z - start.z) > 20.0,
+        "bot must resume its lane after the nearby enemy disappears"
     );
 }
