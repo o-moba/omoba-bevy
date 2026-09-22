@@ -6,6 +6,13 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Persistent Ekza account connection (0.21.0-rc.2)
+- Restore the connected account after restart with the SDK's private, atomic,
+  backend/project-scoped credential file; revalidate it against Registry.
+- Refresh in the background, retain the last valid session through outages, and
+  clear revoked sessions. A visible Sign out action clears this installation.
+- Pin Ekza Bevy SDK 0.7.0 at `42c39e4`; no sibling checkout override is required.
+
 ### Phone attack button finds and chases a target
 - With nothing locked, the attack button now looks beyond its own reach (at least 12
   units, attack range + 6 for ranged heroes) instead of only inside the attack range, so

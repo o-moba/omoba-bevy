@@ -614,3 +614,13 @@ is intentionally empty at startup, so `load_builtin_model_catalog` and its remot
 downloader are not the active roster import path. Android uses the SDK without
 its optional desktop Bevy/HTTP feature set. These boundaries should guide further
 SDK extraction instead of claiming all avatar loading already lives in the SDK.
+
+### Persistent Ekza account library
+
+Hero selection connects to Ekza with a device code through `ekza-bevy-sdk`.
+New Registry connections last 90 days. The client stores its opaque credential in
+`ekza-store/account/session.json` under its private settings directory (0600 on
+Unix), restores it with a fresh SDK library check, and refreshes every 15 seconds.
+Registry outages retain credentials; authorization rejection clears them. Sign
+out removes the local credential; Studio Account revokes access server-side.
+Public approved community models remain free even after account logout.

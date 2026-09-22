@@ -333,6 +333,7 @@ fn wallet_connect_ui_system(
     overlay_query: Query<Entity, With<TeamSelectRoot>>,
     mut listed_purchases: Local<Option<usize>>,
     mut listed_library: Local<Option<(usize, usize)>>,
+    mut listed_account: Local<Option<bool>>,
 ) {
     if selection.team.is_some() || overlay_query.is_empty() {
         return;
@@ -372,7 +373,11 @@ fn wallet_connect_ui_system(
         crate::passport::library_avatars().len(),
         crate::passport::community_avatars().len(),
     );
-    let stale = listed_purchases.is_some_and(|listed| listed != purchases)
+    let connected = crate::passport::account_connected();
+    let account_changed = listed_account.is_some_and(|previous| previous != connected);
+    *listed_account = Some(connected);
+    let stale = account_changed
+        || listed_purchases.is_some_and(|listed| listed != purchases)
         || listed_library.is_some_and(|listed| listed != library);
     *listed_purchases = Some(purchases);
     *listed_library = Some(library);
@@ -935,9 +940,15 @@ fn spawn_ekza_row(parent: &mut ChildSpawnerCommands) {
                 AccountStatusText,
                 Name::new("EkzaAccountStatus"),
             ));
-            if !crate::passport::account_connected() {
-                spawn_connect_button(row, "Connect account", ConnectTarget::Account);
-            }
+            spawn_connect_button(
+                row,
+                if crate::passport::account_connected() {
+                    "Sign out of Ekza"
+                } else {
+                    "Connect account"
+                },
+                ConnectTarget::Account,
+            );
         });
 }
 

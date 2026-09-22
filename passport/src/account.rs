@@ -4,7 +4,9 @@
 //! for Omoba did this player save or create. It grants nothing. The game server admits
 //! a free avatar from its own registry read, connected account or not.
 
-pub use ekza_bevy_sdk::account::{AccountClient, AccountFlow, AccountSession};
+pub use ekza_bevy_sdk::account::{
+    AccountClient, AccountCredential, AccountError, AccountFlow, AccountSession,
+};
 
 /// The registry the client store and the game server already use.
 pub fn client() -> Result<AccountClient, String> {
