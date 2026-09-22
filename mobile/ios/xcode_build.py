@@ -62,7 +62,9 @@ def build(env: dict[str, str]) -> None:
         raise ValueError('Source changed while Cargo was building. Build again from a stable checkout.')
     bundle = cfg['bundle']
     bundle.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(binary, bundle / 'client')
+    # Cargo may reuse an older unsigned binary. Preserve fresh output mtime so
+    # Xcode invalidates CodeSign after we overwrite its previously signed file.
+    shutil.copyfile(binary, bundle / 'client')
     (bundle / 'client').chmod(0o755)
     # This directory belongs exclusively to this phase. Replacement removes
     # deleted source assets on incremental builds without touching Xcode output.

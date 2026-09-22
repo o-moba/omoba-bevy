@@ -739,3 +739,6 @@ locked Rust source and stages tracked assets plus matching symbols. Xcode owns
 signing and Organizer distribution. Local signing/team overrides remain ignored.
 See [TestFlight instructions](../mobile/ios/TESTFLIGHT.md); local unsigned archive
 validation does not assert Apple upload acceptance.
+
+The Rust staging phase refreshes the executable modification time even when Cargo
+reuses its cached binary, allowing Xcode to invalidate its previous signing output.

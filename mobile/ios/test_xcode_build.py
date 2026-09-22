@@ -42,6 +42,7 @@ class XcodeBridgeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);env=self.env(root)
             binary=root/'cache/aarch64-apple-ios/debug/client';binary.parent.mkdir(parents=True);binary.write_bytes(b'current-rust')
+            os.utime(binary, ns=(1_000_000_000, 1_000_000_000))
             dsym=Path(str(binary)+'.dSYM');(dsym/'Contents/Resources/DWARF').mkdir(parents=True);(dsym/'Contents/Resources/DWARF/client').write_bytes(b'symbols')
             bundle=root/'products/OmobaBeta.app';(bundle/'assets').mkdir(parents=True)
             (bundle/'assets/deleted.glb').write_bytes(b'obsolete')
@@ -56,14 +57,21 @@ class XcodeBridgeTests(unittest.TestCase):
                  patch.object(xb,'collect_legal_notices',return_value=[]), \
                  patch.object(xb,'copy_legal_notices',side_effect=lambda _,dest:dest.mkdir(parents=True)), \
                  patch.object(xb,'app_info',return_value=info):
-                xb.build(env)
+                for _ in range(2):
+                    # Simulate the prior signed output while Cargo reuses an old binary.
+                    staged = bundle/'client'
+                    staged.write_bytes(b'previously-signed')
+                    previous_mtime = staged.stat().st_mtime_ns
+                    xb.build(env)
+                    self.assertGreaterEqual(staged.stat().st_mtime_ns, previous_mtime)
+                    self.assertGreater(staged.stat().st_mtime_ns, binary.stat().st_mtime_ns)
             self.assertFalse((bundle/'assets/deleted.glb').exists())
             self.assertEqual((bundle/'assets/hero.glb').read_bytes(),b'current-model')
             self.assertEqual((bundle/'client').read_bytes(),binary.read_bytes())
             self.assertEqual((bundle/'Info.plist').read_bytes(),b'xcode-owned')
             self.assertEqual((bundle/'Assets.car').read_bytes(),b'compiled-icon')
             self.assertEqual(plistlib.loads((root/'derived/Omoba-Info.plist').read_bytes())['CFBundleVersion'],'12')
-            self.assertEqual(validate.call_count,2)
+            self.assertEqual(validate.call_count,4)
             command=cargo.call_args.args[0];self.assertIn('--locked',command)
             self.assertEqual(cargo.call_args.kwargs['env']['SDKROOT'],env['SDKROOT'])
             self.assertEqual(cargo.call_args.kwargs['env']['CARGO_PROFILE_DEV_SPLIT_DEBUGINFO'],'packed')
