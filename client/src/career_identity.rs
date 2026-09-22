@@ -192,7 +192,71 @@ pub(crate) struct CareerIdentity {
     pending_rename: Option<(String, u64, String)>,
 }
 
+/// An in-process signing capability scoped to one authenticated server session.
+/// It is never serialized, logged, or sent over the network.
+pub(crate) struct GameplaySigner {
+    pub key: SigningKey,
+    pub principal: shared::public_transport::GameplayPrincipal,
+    pub server_epoch: u64,
+    pub match_id: u64,
+}
+
 impl CareerIdentity {
+    /// Observe an ordered account reply before UI query filtering can hide an
+    /// authorization error. Empty bootstrap views are not an authentication
+    /// revocation: only an explicit loss of server authority starts a new login.
+    pub(crate) fn observe_server_auth(
+        &mut self,
+        view: &shared::career::CareerView,
+        server_addr: &str,
+        server_epoch: u64,
+    ) {
+        if self.auth_nonce.is_none()
+            || !view.storage_enabled
+            || view.auth_nonce.is_some()
+            || !self.scope.as_ref().is_some_and(|scope| {
+                scope.server_addr == server_addr && scope.server_epoch == server_epoch
+            })
+        {
+            return;
+        }
+        if matches!(
+            view.error.as_deref(),
+            Some(
+                "Sign in before using your profile."
+                    | "Account authorization could not be refreshed. Reconnect when the account service is available."
+                    | "This device was revoked. Authorize this device again from your account."
+            )
+        ) {
+            // Reusing the saved key is safe: the new Authenticate still needs
+            // server verification, including the persistent key revocation gate.
+            self.invalidate();
+        }
+    }
+
+    pub(crate) fn gameplay_signer(
+        &self,
+        server_addr: &str,
+        server_epoch: u64,
+        match_id: u64,
+        session_id: &str,
+    ) -> Option<GameplaySigner> {
+        if match_id == 0 || !self.authenticated_for_scope(server_addr, server_epoch, session_id) {
+            return None;
+        }
+        let key = self.key.as_ref()?.clone();
+        Some(GameplaySigner {
+            principal: shared::public_transport::GameplayPrincipal {
+                public_key: hex(key.verifying_key().as_bytes()),
+                session_id: session_id.to_owned(),
+                session_nonce: self.auth_nonce.clone()?,
+            },
+            key,
+            server_epoch,
+            match_id,
+        })
+    }
+
     pub(crate) fn public_key(&self) -> Result<String, String> {
         self.key
             .as_ref()
@@ -701,6 +765,136 @@ mod tests {
             ..default()
         }
     }
+    #[test]
+    fn bootstrap_views_and_unrelated_errors_do_not_invalidate_signed_identity() {
+        let mut identity = identity();
+        identity.auth_nonce = Some("a".repeat(64));
+        for view in [
+            shared::career::CareerView::default(),
+            shared::career::CareerView {
+                storage_enabled: true,
+                ..default()
+            },
+            shared::career::CareerView {
+                storage_enabled: true,
+                error: Some("Account service is busy. Retry shortly.".into()),
+                ..default()
+            },
+            shared::career::CareerView {
+                storage_enabled: true,
+                auth_nonce: Some("a".repeat(64)),
+                error: Some("Sign in before using your profile.".into()),
+                ..default()
+            },
+        ] {
+            identity.observe_server_auth(&view, "localhost:4000", 42);
+            assert!(
+                identity
+                    .gameplay_signer("localhost:4000", 42, 1, "session")
+                    .is_some()
+            );
+        }
+        let rejection = shared::career::CareerView {
+            storage_enabled: true,
+            error: Some("Sign in before using your profile.".into()),
+            ..default()
+        };
+        identity.observe_server_auth(&rejection, "other:4000", 42);
+        identity.observe_server_auth(&rejection, "localhost:4000", 41);
+        assert!(identity.authenticated_for_scope("localhost:4000", 42, "session"));
+    }
+
+    #[test]
+    fn explicit_auth_loss_restarts_handshake_without_reusing_old_authority() {
+        for error in [
+            "Sign in before using your profile.",
+            "Account authorization could not be refreshed. Reconnect when the account service is available.",
+            "This device was revoked. Authorize this device again from your account.",
+        ] {
+            let mut identity = identity();
+            let challenge = AuthChallenge {
+                public_key: identity.public_key().unwrap(),
+                nonce: "a".repeat(64),
+                server_epoch: 42,
+                session_id: "session".into(),
+                nickname: "小明".into(),
+            };
+            identity.auth_nonce = Some(challenge.nonce.clone());
+            identity.signed_challenge = Some(challenge.clone());
+            identity.authenticate_sent = true;
+            identity.started = Some(Instant::now() - AUTH_TIMEOUT);
+            identity.sequence = 19;
+            identity.observe_server_auth(
+                &shared::career::CareerView {
+                    storage_enabled: true,
+                    error: Some(error.into()),
+                    ..default()
+                },
+                "localhost:4000",
+                42,
+            );
+            assert!(
+                identity
+                    .gameplay_signer("localhost:4000", 42, 1, "session")
+                    .is_none()
+            );
+
+            let mut session = ClientSession::admitted_for_test();
+            session.server_addr_display = "localhost:4000".into();
+            let mut career = CareerClient::default();
+            career.nickname = "小明".into();
+            // A delayed prior login reply must not restore the invalidated nonce.
+            career.view = shared::career::CareerView {
+                storage_enabled: true,
+                auth_nonce: Some(challenge.nonce.clone()),
+                challenge: Some(challenge.clone()),
+                profile: Some(shared::career::ProfileSummary {
+                    profile_id: "b".repeat(64),
+                    nickname: "小明".into(),
+                    rating: 1000,
+                    rated_matches: 0,
+                    matches_played: 0,
+                    wins: 0,
+                    losses: 0,
+                    progression_xp: 0,
+                }),
+                ..default()
+            };
+            let mut app = App::new();
+            app.add_message::<NicknameChanged>()
+                .add_message::<NetworkCommand>()
+                .insert_resource(identity)
+                .insert_resource(career)
+                .insert_resource(session)
+                .insert_resource(ClientSessionId("session".into()))
+                .insert_resource(GameStateSnapshot {
+                    meta: shared::protocol::SnapshotMeta::new(42, 1, 1),
+                    ..default()
+                })
+                .add_systems(Update, identity_driver);
+            app.update();
+            let messages: Vec<_> = app
+                .world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .collect();
+            assert_eq!(messages.len(), 1, "auth loss must request a new challenge");
+            assert!(matches!(
+                &messages[0],
+                NetworkCommand::Career(CareerRequest::Challenge { public_key, session_id, .. })
+                    if public_key == &challenge.public_key && session_id == "session"
+            ));
+            let identity = app.world().resource::<CareerIdentity>();
+            assert!(
+                identity
+                    .gameplay_signer("localhost:4000", 42, 1, "session")
+                    .is_none()
+            );
+            assert!(identity.signed_challenge.is_none());
+            assert_eq!(identity.sequence, 0);
+        }
+    }
+
     #[test]
     fn unexpected_challenges_and_namespace_changes_are_refused() {
         let mut identity = identity();

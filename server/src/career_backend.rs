@@ -104,6 +104,7 @@ enum Job {
     Presence(Vec<(String, Option<String>)>),
 }
 enum Reply {
+    RecoveryChecked,
     RefreshAccess {
         addr: SocketAddr,
         nonce: String,
@@ -147,8 +148,16 @@ struct PendingRecord {
     recovered_live: bool,
 }
 
+#[derive(Clone, Copy)]
+enum RecoveryScope {
+    Global,
+    Disabled,
+    Epoch(u64),
+}
+
 pub struct CareerBackend {
     epoch: u64,
+    recovery_checked: Option<Instant>,
     tx: Option<SyncSender<Job>>,
     rx: Mutex<Receiver<Reply>>,
     clients: HashMap<SocketAddr, Client>,
@@ -156,6 +165,7 @@ pub struct CareerBackend {
     settled: Vec<MatchResult>,
     cancelled: Vec<SocketAddr>,
     social: Vec<(SocketAddr, shared::social::SocialRequest)>,
+    match_requests: Vec<(SocketAddr, u64, shared::match_service::MatchPreference)>,
     last_presence: Instant,
     matches: HashMap<String, String>,
     pending_ids: HashSet<String>,
@@ -171,20 +181,45 @@ impl CareerBackend {
         let outbox = std::env::var_os("OMOBA_CAREER_OUTBOX")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(".omoba/career-outbox"));
-        Self::with_config(epoch, url, outbox)
+        let scope = match std::env::var("OMOBA_SERVER_ROLE").ok().as_deref() {
+            Some("lobby") => RecoveryScope::Disabled,
+            Some("match") if std::env::var("OMOBA_MATCH_RECOVERY").as_deref() == Ok("1") => {
+                std::env::var_os("OMOBA_MATCH_ALLOCATION")
+                    .map(PathBuf::from)
+                    .and_then(|p| p.parent().map(|p| p.join("status.json")))
+                    .and_then(|p| fs::read(p).ok())
+                    .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                    .and_then(|v| v.get("server_epoch").and_then(|v| v.as_u64()))
+                    .filter(|&v| v != 0)
+                    .map_or(RecoveryScope::Disabled, RecoveryScope::Epoch)
+            }
+            Some("match") => RecoveryScope::Epoch(epoch),
+            _ => RecoveryScope::Global,
+        };
+        Self::with_recovery(epoch, url, outbox, scope)
     }
+    #[cfg(test)]
     fn with_config(epoch: u64, url: Option<String>, outbox: PathBuf) -> Self {
+        Self::with_recovery(epoch, url, outbox, RecoveryScope::Global)
+    }
+    fn with_recovery(
+        epoch: u64,
+        url: Option<String>,
+        outbox: PathBuf,
+        scope: RecoveryScope,
+    ) -> Self {
         let (reply_tx, rx) = mpsc::sync_channel(MAX_JOBS * 2);
         let tx = url.map(|url| {
             let (tx, jobs) = mpsc::sync_channel(MAX_JOBS);
             std::thread::Builder::new()
                 .name("omoba-career".into())
-                .spawn(move || worker(url, outbox, jobs, reply_tx))
+                .spawn(move || worker(url, outbox, jobs, reply_tx, scope))
                 .expect("career worker starts");
             tx
         });
         Self {
             epoch,
+            recovery_checked: None,
             tx,
             rx: Mutex::new(rx),
             clients: HashMap::new(),
@@ -192,6 +227,7 @@ impl CareerBackend {
             settled: Vec::new(),
             cancelled: Vec::new(),
             social: Vec::new(),
+            match_requests: Vec::new(),
             last_presence: Instant::now(),
             matches: HashMap::new(),
             pending_ids: HashSet::new(),
@@ -214,6 +250,7 @@ impl CareerBackend {
         let (_, rx) = mpsc::sync_channel(MAX_JOBS);
         Self {
             epoch,
+            recovery_checked: None,
             tx: Some(tx),
             rx: Mutex::new(rx),
             clients: HashMap::new(),
@@ -222,6 +259,7 @@ impl CareerBackend {
             cancelled: Vec::new(),
             last_presence: Instant::now(),
             social: Vec::new(),
+            match_requests: Vec::new(),
             matches: HashMap::new(),
             pending_ids: HashSet::new(),
             rejected: HashMap::new(),
@@ -334,6 +372,32 @@ impl CareerBackend {
     #[cfg(test)]
     pub fn test_is_playing(&self, addr: SocketAddr) -> bool {
         self.clients.get(&addr).is_some_and(|client| client.playing)
+    }
+    pub fn recovery_confirmed_since(&self, since: Instant) -> bool {
+        self.recovery_checked.is_some_and(|at| at >= since)
+    }
+    pub fn take_match_requests(
+        &mut self,
+    ) -> Vec<(SocketAddr, u64, shared::match_service::MatchPreference)> {
+        std::mem::take(&mut self.match_requests)
+    }
+    pub fn gameplay_principal(
+        &self,
+        addr: SocketAddr,
+    ) -> Option<shared::public_transport::GameplayPrincipal> {
+        let c = self.clients.get(&addr)?;
+        let auth = c.auth.as_ref()?;
+        c.view.profile.as_ref()?;
+        if c.key_checked
+            .is_none_or(|at| at.elapsed() >= COSMETIC_CACHE_TTL)
+        {
+            return None;
+        }
+        Some(shared::public_transport::GameplayPrincipal {
+            public_key: auth.public_key.clone(),
+            session_id: auth.session_id.clone(),
+            session_nonce: auth.nonce.clone(),
+        })
     }
     pub fn take_cancelled(&mut self) -> Vec<SocketAddr> {
         std::mem::take(&mut self.cancelled)
@@ -512,6 +576,16 @@ impl CareerBackend {
                 }
                 c.sequence = sequence;
                 c.view.error = None;
+                if let CareerAction::FindMatch {
+                    request_id,
+                    preference,
+                } = action
+                {
+                    if c.view.profile.is_some() && self.match_requests.len() < MAX_JOBS {
+                        self.match_requests.push((addr, request_id, preference));
+                    }
+                    return;
+                }
                 if matches!(action, CareerAction::CancelQueue) {
                     self.cancelled.push(addr);
                     return;
@@ -560,6 +634,9 @@ impl CareerBackend {
                 break;
             };
             match reply {
+                Reply::RecoveryChecked => {
+                    self.recovery_checked = Some(Instant::now());
+                }
                 Reply::RefreshAccess {
                     addr,
                     nonce,
@@ -802,7 +879,8 @@ fn authorized_supporter_aura(
 
 fn action_id(action: &CareerAction) -> Option<u64> {
     match action {
-        CareerAction::SupporterStatus { request_id }
+        CareerAction::FindMatch { request_id, .. }
+        | CareerAction::SupporterStatus { request_id }
         | CareerAction::EquipSupporterAura { request_id, .. }
         | CareerAction::History { request_id, .. }
         | CareerAction::Detail { request_id, .. }
@@ -858,7 +936,7 @@ async fn account_action(
         CareerAction::Rename { nickname, .. } => {
             view.profile = Some(store.rename(id, &nickname).await?)
         }
-        CareerAction::CancelQueue => {}
+        CareerAction::CancelQueue | CareerAction::FindMatch { .. } => {}
         CareerAction::Social { .. } => {
             return Err("Social requests are handled by the game server.".into());
         }
@@ -906,7 +984,13 @@ fn write_record(root: &Path, record: &PendingRecord) -> Result<(), String> {
     Ok(())
 }
 
-fn worker(url: String, outbox: PathBuf, jobs: Receiver<Job>, replies: SyncSender<Reply>) {
+fn worker(
+    url: String,
+    outbox: PathBuf,
+    jobs: Receiver<Job>,
+    replies: SyncSender<Reply>,
+    scope: RecoveryScope,
+) {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -1211,7 +1295,17 @@ fn worker(url: String, outbox: PathBuf, jobs: Receiver<Job>, replies: SyncSender
                     let _ = rt.block_on(s.adopt_expired(id));
                 }
                 if pending.is_empty() {
-                    if let Ok(results) = rt.block_on(s.recover_expired()) {
+                    let recovered = match scope {
+                        RecoveryScope::Global => rt.block_on(s.recover_expired()),
+                        RecoveryScope::Disabled => Ok(Vec::new()),
+                        RecoveryScope::Epoch(epoch) => {
+                            rt.block_on(s.recover_expired_for_epoch(epoch))
+                        }
+                    };
+                    if let Ok(results) = recovered {
+                        if matches!(scope, RecoveryScope::Epoch(_)) {
+                            let _ = replies.try_send(Reply::RecoveryChecked);
+                        }
                         for result in results {
                             if let Ok(profiles) = rt.block_on(settled_profiles(s, &result)) {
                                 if replies

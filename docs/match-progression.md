@@ -1,8 +1,9 @@
 # Match results, profiles and friends
 
-Implemented in `0.19.0-rc.6`. PostgreSQL is the shared career database. Replays
-are explicitly deferred. This document describes the implemented beta boundary
-and identifies the remaining work before a larger global service.
+Career persistence began in `0.19.0-rc.6` and now supports the public allocator in
+`0.22.0-rc.1`. PostgreSQL is the shared career database. Full simulation replays
+remain deferred. See [public lobby operations and validation](public-mvp.md) for
+multi-process deployment; the standalone setup below remains available.
 
 ## What players get
 
@@ -20,7 +21,9 @@ bounded to 64 relationships per account. Presence expires after 30 seconds when
 refreshes stop. Lists refresh on opening or Refresh; no push chat is implied.
 
 Since `0.19.0-rc.7`, [match/team chat, reactions and bot practice](bot-practice-and-social.md)
-are also available. Practice receipts stay local and give no permanent career credit.
+are also available. Standalone practice receipts stay local and give no permanent
+career credit. Approved bot games allocated by the public lobby save history and
+50/25 win/loss XP, while leaving competitive rating unchanged.
 Party invitations, coordinated group matchmaking and voice are future work. Friends do not
 bypass roster capacity, account reservations or matchmaking rules.
 
@@ -66,18 +69,20 @@ flowchart LR
   W --> O[Durable local outbox]
 ```
 
-The beta uses a modular worker inside each trusted game server, not a public
-website account API. Signature validation and simulation run at the game boundary;
+Each trusted game process uses a modular career worker. The public lobby allocates
+independent game processes that share PostgreSQL; the optional website Account API
+is a separate service. Signature validation and simulation run at the game boundary;
 all SQL and filesystem receipt writes run outside the simulation tick. The worker
 uses a bounded pool and queue; lease renewal runs independently of long database
-batches. Share the PostgreSQL database across trusted servers to share profiles,
+batches. Allocated match workers have one database connection each; lobby and
+standalone game career pools allow up to four. Budget other services separately. Share the PostgreSQL database across trusted servers to share profiles,
 history and friendships. Never grant arbitrary community servers access to the
 official career database.
 
-This separation is suitable for later extraction into an authenticated backend
-service. A website/launcher would use an HTTPS account API, and regional game
-servers would submit authenticated allocations/results there. That HTTP service,
-regional routing and website profile integration are not implemented by this change.
+The existing [Account API](../account-api/README.md) serves portal history,
+friendships and device management behind HTTPS. Game results still use the trusted
+server's direct PostgreSQL adapter. Regional routing and a distributed queue owner
+are outside this single-host public allocator.
 
 ## Identity and account authorization
 
@@ -94,10 +99,11 @@ Replayed or altered account requests cannot change a friendship or profile.
 Historical names and loadouts are frozen in the match receipt. Private keys are
 never included in packets, logs or the public friend code.
 
-Device-key storage currently identifies an installation. Key export/import,
-email/password recovery, multiple linked devices and linking the optional avatar
-passport are not implemented. Losing the key loses access to that profile;
-corrupt keys are preserved and reported rather than silently replacing an account.
+Device-key storage identifies an installation. The existing Account API supports
+browser-authorized device enrollment/recovery; the native client does not export
+its private key. Recovery requires a previously established authorized account
+path. Corrupt local keys are preserved and reported rather than silently replacing
+an account. Ekza avatar-library credentials remain separate from the game profile.
 Account signatures provide authenticity; the existing UDP transport is not an
 encrypted account API. TLS configuration for remote PostgreSQL remains an operator
 responsibility.
@@ -120,7 +126,9 @@ is rejected. Saved acknowledgement includes refreshed profiles before requeue.
 A 90-second owner lease and 10-second renewal distinguish a live match from a lost
 server. Recovery only acts on expired owners. It finishes staged terminal intent,
 or records an interrupted checkpoint with no ranked reward. Local terminal outbox
-replay precedes the expired-allocation sweep. An outage before a terminal receipt
+replay precedes the expired-allocation sweep. Public workers sweep only their
+original server epoch; the public lobby does not perform a global sweep that could
+interrupt another worker before its local outbox replays. An outage before a terminal receipt
 reaches durable storage can still leave an interrupted match rather than a win;
 a periodic checkpoint is not a replay or a zero-loss record of every simulation tick.
 
@@ -139,8 +147,13 @@ competitive ranking model. Damage farming never directly increases MMR.
 
 Only authenticated full release rosters on the approved actual default map/ruleset
 are eligible. Development, QA, custom tuning, guests, abandoned and interrupted
-rounds are explicitly unranked. Completed unrated rounds may appear in history
-without ranked XP/MMR. The system does not claim bot detection or smurf prevention.
+rounds are explicitly unranked. Approved public `public-casual-v1` bot games award
+50 XP for a win and 25 for a loss, with unchanged rating and rated-match count.
+Only authenticated humans receive that progression; bots never own career profiles.
+Development, custom-map, standalone practice and interrupted/abandoned games grant
+no public progression XP. Other saved unrated results can retain history and
+participation counters without ranked rewards. The system does not claim bot
+detection or smurf prevention.
 
 ## Verification and scale limits
 
@@ -151,8 +164,11 @@ actual queue admission, allocation acknowledgement, combat victory and saved his
 Native renderer QA captures desktop and phone layouts with an explicitly labeled
 synthetic fixture; it does not substitute for physical iOS/Android testing.
 
-There is one arena/queue per game process and a bounded modular account worker.
-Thousands of concurrent players, global queue ownership, regional latency routing,
+Each game worker still hosts one arena; the public coordinator owns the queue and
+allocates multiple isolated workers with a configured capacity. Local 100-client
+checks and the expensive one-human/nine-bot mode require measured evidence; the
+configuration limit alone proves no capacity. Thousands of concurrent players,
+global queue ownership, regional latency routing,
 production failover/restore, rate calibration and physical-device acceptance need
 separate load and release validation. PostgreSQL provides the transaction foundation;
 its presence alone is not evidence of that operational capacity.

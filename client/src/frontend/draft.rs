@@ -185,6 +185,14 @@ fn draft_actions(
     mut state: ResMut<DraftClient>,
     mut session: MessageWriter<SessionUiCommand>,
 ) {
+    // Leaving remains available when transport teardown removed the roster.
+    for (interaction, action) in &buttons {
+        if *interaction == Interaction::Pressed && matches!(action, DraftAction::Leave) {
+            state.reset();
+            session.write(SessionUiCommand::LeaveMatch);
+            return;
+        }
+    }
     let Some(draft) = &game.prematch else {
         return;
     };

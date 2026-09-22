@@ -462,6 +462,17 @@ fn postgres_live_udp_signed_profiles_queue_real_cast_and_durable_history() {
         eprintln!("SKIP postgres_live_udp: OMOBA_TEST_DATABASE_URL is not configured");
         return;
     };
+    // Fixture administration precedes the runtime, which intentionally cannot
+    // create schema. This makes the test independent of other test ordering.
+    let admin = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let prepared = admin
+        .block_on(career_store::CareerStore::connect(&url))
+        .expect("prepare isolated career schema");
+    drop(prepared);
+    drop(admin);
     let mut rt = runtime(MatchConfig::release(1), false);
     let outbox = std::env::temp_dir().join(format!(
         "omoba-career-udp-{}-{}",

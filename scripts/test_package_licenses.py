@@ -57,11 +57,11 @@ class PackageLicenseTests(unittest.TestCase):
         for relative in (
             "scripts/beta_launcher.py", "docs/progress/2026-09-07-beta-test-guide.md",
             "art/verdant-confluence/PROVENANCE.md", "assets-src/animations/README.md",
-            "docs/progress/2026-09-05-distribution-review.md",
+            "docs/progress/2026-09-05-distribution-review.md", "docs/public-mvp.md",
         ):
             self.write(relative, b"Fixture packaging input\n")
         self.write("Cargo.toml", b'[workspace.package]\nversion = "0.1.0-test"\n')
-        for name in ("client", "server", "bots"):
+        for name in ("client", "server", "bots", "migrate-career", "omoba-account-api"):
             self.write("fixture-binaries/" + name, b"Fixture executable\n")
         self.git("init", "--quiet")
         self.git("add", ".")
@@ -159,15 +159,21 @@ class PackageLicenseTests(unittest.TestCase):
                 mock.patch.object(NATIVE, "run", side_effect=fake_run), \
                 mock.patch.object(NATIVE, "validate", return_value={"status": "PASS", "errors": []}), \
                 mock.patch.object(NATIVE, "build_executables", return_value={
-                    name: self.root / "fixture-binaries" / name for name in ("client", "server", "bots")
+                    name: self.root / "fixture-binaries" / name for name in ("client", "server", "bots", "migrate-career", "omoba-account-api")
                 }), contextlib.redirect_stdout(io.StringIO()):
             NATIVE.main()
         self.assert_notices(lambda name: (output / "legal" / name).read_bytes())
         self.assertTrue((output / "server").is_file())
+        for name in ("migrate-career", "omoba-account-api", "PUBLIC-MVP.md", "launch-lobby.sh",
+                     "launch-client.sh", "launch-server.sh", "launch-bots.sh", "join-server.sh", "practice.sh", "host.sh"):
+            self.assertTrue((output / name).is_file(), name)
+        self.assertEqual((output / "PUBLIC-MVP.md").read_bytes(), (self.root / "docs/public-mvp.md").read_bytes())
         for relative, expected in self.local_notices.items():
             self.assertEqual((output / "assets" / relative).read_bytes(), expected)
         identity = json.loads((output / "BUILD.json").read_text())
         self.assertIn("legal/LICENSES/AGPL-3.0-only.txt", identity["sha256"])
+        for name in ("migrate-career", "omoba-account-api", "PUBLIC-MVP.md", "launch-lobby.sh"):
+            self.assertIn(name, identity["sha256"])
 
     def test_mobile_packages_include_notices_before_signing(self):
         for module in (ANDROID, IOS):

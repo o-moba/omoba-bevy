@@ -1,16 +1,18 @@
 # PostgreSQL career adapter
 
 `career_store.rs` uses these PostgreSQL migrations with SQLx dynamic queries. It
-does not use the older SQLite prototype. `connect` applies versions 1 and 2 transactionally
-under a migration advisory lock, upgrades existing version 1, and rejects
-unknown versions. Since 0.20.0-rc.1, use `migrate-career` (or Account API `migrate`)
+does not use the older SQLite prototype. `connect` applies career schema versions
+1–3 transactionally under a migration advisory lock, upgrades supported earlier
+versions, and rejects unknown versions. Since 0.20.0-rc.1, use `migrate-career` (or Account API `migrate`)
 explicitly as the migration owner. The game worker uses `connect_runtime` and
 requires no DDL permissions; startup rejects missing/unknown versions. See
 [portal roles and grants](../../../account-api/README.md). Use a dedicated
 database/schema; no extension is needed. Version 2 requires PostgreSQL built with
 ICU and the `"und-x-icu"` collation for Unicode case-insensitive player handles.
-SQLx connection pools are bounded to four connections and configure statement
-and lock timeouts plus `synchronous_commit = on`. Infrastructure backups,
+CareerStore runtime SQLx pools are bounded to one connection when
+`OMOBA_SERVER_ROLE=match`, and four connections for lobby/standalone game roles.
+They configure statement and lock timeouts plus `synchronous_commit = on`.
+The optional Account API pool and administrative connections need their own budget. Infrastructure backups,
 replication, credentials, TLS policy and disaster recovery remain deployment work.
 
 ## Accounts, profiles and friends
@@ -19,8 +21,9 @@ The trusted worker must verify device signatures before calling `authenticate`
 or account operations. PostgreSQL maps each public key to a separately generated,
 immutable 64-character random profile ID. Repeated/concurrent authentication keeps
 the existing nickname; only explicit authorized `rename` changes it. This mapping
-permits future additional keys without changing account identity, but account
-recovery/key-linking is not implemented by this adapter.
+supports the device-key table introduced by schema version 3. Browser-authorized
+device enrollment/recovery is provided by the separate Account API; the persistence
+adapter does not itself approve new devices or export private device keys.
 
 Friends use one canonical unordered pair of profile IDs. A reverse pending
 request never accepts itself; only the recipient may accept or reject. Requests,
@@ -52,9 +55,10 @@ Retries must reuse the same result ID and immutable allocation identity.
 
 Call `start` and wait for durable acknowledgment before Running. It freezes
 profile/player/team/name/loadout identity, ruleset, map and start time, and reserves
-each authenticated profile uniquely until settlement. Unrated allocations allow
-append-only late participants through `checkpoint` or `stage`; existing identities
-cannot change or disappear. Rated allocations have an exact frozen roster.
+each authenticated profile uniquely until settlement. Legacy non-public unrated
+allocations allow append-only late participants through `checkpoint` or `stage`;
+existing identities cannot change or disappear. Rated and `public-casual-v1`
+allocations both have an exact frozen roster.
 Unique seat numbers from 0 to 31 bound each roster without a concurrent COUNT race.
 
 `checkpoint` saves current statistics without rewards. Older-duration retries
@@ -76,8 +80,13 @@ profiles must share newcomer status and have a full-roster rating spread at most
 300. A stale queue selection is rejected without reserving seats; the worker must
 refresh profiles before a new attempt. This final check does not recompute team
 assignment from changed ratings. Elo uses the common K=32 policy with per-player 0–5000 clamps.
-Only rated completed matches grant permanent XP: 100 for completion plus 50 to
-winners. Every persisted authenticated participation increments matches played;
+Rated completed matches grant 150 XP for a win or 100 for a loss. Approved public
+casual completions grant 50/25 win/loss XP without any Elo/rated-match change.
+The adapter requires `public-casual-v1`, reason `allocated_bots`, default map metadata,
+ten balanced seats, at least one human and one bot, authenticated human profiles,
+and no profile identities on bots. Runtime additionally verifies actual map and
+gameplay modifiers before selecting this policy. Other unrated modes grant no XP.
+Every persisted authenticated participation increments matches played;
 completed outcomes count a win/loss even when unrated. Interrupted/abandoned
 outcomes grant no rating, win/loss or XP. Guests have no profile credit. Match-time
 names and loadouts remain unchanged after later profile renames.
@@ -93,13 +102,17 @@ Old owners then fail checkpoint and settlement ownership checks.
 On worker restart, replay its durable local outbox before sweeping expired games.
 If an old lease is still live, wait for expiry before adopting its unfinished
 allocation. `ensure_allocation` reconciles either preserved original Start metadata
-or an append-only unrated checkpoint roster, creates a missing allocation, or
+or a compatible checkpoint roster (append-only only for legacy non-public unrated
+games), creates a missing allocation, or
 adopts an expired one under lock. It never compares checkpoint statistics or
 rewrites a settled result; subsequent `stage` still checks immutable terminal
 intent. Preserve original Start metadata when coalescing the local spool so a
 terminal receipt can recover even if the initial allocation write failed.
 `recover_expired` processes at most 32 expired allocations per call,
-rechecking ownership under row lock. Persisted terminal intents are settled as
+rechecking ownership under row lock. Public workers call the epoch-filtered
+`recover_expired_for_epoch` using their original worker epoch, including after a
+recovery-only process restart. The public lobby never runs the global sweep;
+standalone servers retain the legacy global recovery method. Persisted terminal intents are settled as
 recorded; live checkpoints become Interrupted with database-derived end time and
 no ranked rewards. It never interrupts a live remote owner. If a sweep settles an
 allocation Interrupted before an unstaged local victory is replayed, that immutable

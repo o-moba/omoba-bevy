@@ -7,7 +7,7 @@ license.workspace = true
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-ekza-bevy-sdk = { git = "https://github.com/ekza-space/ekza-bevy-sdk", rev = "31b03356cab220ef3d8cc7abc668c0675b64da87", default-features = false }
+ekza-bevy-sdk = { git = "https://github.com/ekza-space/ekza-bevy-sdk", rev = "42c39e4bf5aea2e3a051f86ba27cbf6e2c46d377", default-features = false }
 
 [lints]
 workspace = true

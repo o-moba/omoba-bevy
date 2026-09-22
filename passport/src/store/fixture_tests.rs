@@ -22,7 +22,7 @@ impl Fixture {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
-        let catalogue = Arc::new(Mutex::new(json!({ "items": [] })));
+        let catalogue = Arc::new(Mutex::new(catalogue_envelope(vec![])));
         let unavailable = Arc::new(AtomicBool::new(false));
         let stop = Arc::new(AtomicBool::new(false));
         let partial = Arc::new(AtomicBool::new(false));
@@ -106,6 +106,10 @@ impl Drop for Fixture {
     }
 }
 
+fn catalogue_envelope(items: Vec<Value>) -> Value {
+    json!({"schema": "ekza.avatar.catalog.v2", "count": items.len(), "items": items})
+}
+
 fn avatar(origin: &str, id: u8, access: &str, sha: &str, size: usize) -> Value {
     json!({
         "id": format!("ekza:avatar:00000000-0000-4000-8000-{id:012}"),
@@ -138,8 +142,7 @@ fn sdk_http_catalogue_refresh_validation_and_failed_cache_are_real() {
     let paid = avatar(&fixture.origin, 2, "owned", &sha, bytes.len());
     let mut unapproved = avatar(&fixture.origin, 3, "free", &sha, bytes.len());
     unapproved["projectSupport"][0]["status"] = "pending".into();
-    *fixture.catalogue.lock().unwrap() =
-        json!({"schema":"ekza.catalog.v2", "items":[free, paid, unapproved]});
+    *fixture.catalogue.lock().unwrap() = catalogue_envelope(vec![free, paid, unapproved]);
     let root = std::env::temp_dir().join(format!("omoba-sdk-fixture-{}", std::process::id()));
     let runtime = Box::leak(Box::new(Runtime {
         store: AvatarStore::new(root.clone(), &fixture.origin, crate::selector()).unwrap(),
@@ -181,8 +184,10 @@ fn sdk_http_catalogue_refresh_validation_and_failed_cache_are_real() {
     let mut renamed = avatar(&fixture.origin, 1, "owned", &sha, bytes.len());
     renamed["name"] = "Renamed Studio fixture".into();
     renamed["thumbnailUrl"] = format!("{}/portrait2.png", fixture.origin).into();
-    *fixture.catalogue.lock().unwrap() =
-        json!({"items":[renamed, avatar(&fixture.origin, 2, "owned", &sha, bytes.len())]});
+    *fixture.catalogue.lock().unwrap() = catalogue_envelope(vec![
+        renamed,
+        avatar(&fixture.origin, 2, "owned", &sha, bytes.len()),
+    ]);
     refresh_now(runtime);
     {
         let state = runtime.state.lock().unwrap();
@@ -202,7 +207,7 @@ fn sdk_http_catalogue_refresh_validation_and_failed_cache_are_real() {
     // Same count, different identities: stale avatars must disappear from menus.
     let replacement = avatar(&fixture.origin, 4, "free", &sha, bytes.len());
     let corrupt = avatar(&fixture.origin, 5, "free", &"a".repeat(64), bytes.len());
-    *fixture.catalogue.lock().unwrap() = json!({"items":[replacement, corrupt]});
+    *fixture.catalogue.lock().unwrap() = catalogue_envelope(vec![replacement, corrupt]);
     refresh_now(runtime);
     let current = runtime.state.lock().unwrap().items.clone();
     assert_eq!(initial.len(), current.len());
@@ -244,7 +249,7 @@ fn sdk_http_catalogue_refresh_validation_and_failed_cache_are_real() {
         CatalogueStatus::Unavailable { cached: 2 }
     );
     fixture.partial.store(false, Ordering::Relaxed);
-    *fixture.catalogue.lock().unwrap() = json!({"items":[]});
+    *fixture.catalogue.lock().unwrap() = catalogue_envelope(vec![]);
     refresh_now(runtime);
     assert_eq!(
         status_for(&runtime.state.lock().unwrap()),

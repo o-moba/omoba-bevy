@@ -27,6 +27,8 @@ impl Plugin for HomeScreenPlugin {
 #[derive(Component, Clone, Copy)]
 enum HomeAction {
     Play,
+    HumansOnly,
+    BotPractice,
     Card,
     Collection,
     History,
@@ -48,6 +50,7 @@ struct HomeSignature {
     connection: ClientConnectionState,
     card: ProfileCard,
     last_result: Option<String>,
+    public_matchmaking: bool,
 }
 
 fn signature(career: &CareerClient, session: &ClientSession, card: &ProfileCard) -> HomeSignature {
@@ -63,6 +66,7 @@ fn signature(career: &CareerClient, session: &ClientSession, card: &ProfileCard)
         losses: profile.map_or(0, |profile| profile.losses),
         connection: session.state,
         card: card.clone(),
+        public_matchmaking: career.view.match_service.is_some(),
         last_result: career
             .view
             .last_result
@@ -305,11 +309,16 @@ fn spawn_home(
                     }
                     widgets::button(
                         column,
-                        "PLAY",
+                        if career.view.match_service.is_some() { "QUICK MATCH" } else { "PLAY" },
                         ButtonKind::Primary,
                         HomeAction::Play,
                         "HomePlay",
                     );
+                    if career.view.match_service.is_some() {
+                        widgets::button(column, "Wait for players", ButtonKind::Secondary, HomeAction::HumansOnly, "HomeHumansOnly");
+                        widgets::button(column, "Play with bots", ButtonKind::Secondary, HomeAction::BotPractice, "HomeBotPractice");
+                        column.spawn(widgets::label("Quick match fills empty seats with bots.\nProgress in every match · rating in PvP.", 12.0, widgets::MUTED));
+                    }
                     if !phone {
                         column.spawn(widgets::label(
                             "Choose a hero. Make your mark.",
@@ -317,6 +326,7 @@ fn spawn_home(
                             widgets::MUTED,
                         ));
                     }
+                    if !phone {
                     column
                         .spawn(Node {
                             flex_direction: FlexDirection::Column,
@@ -348,18 +358,32 @@ fn spawn_home(
                                 "HomeFriends",
                             );
                         });
+                    }
                 });
             });
 
+            if phone {
+                root.spawn(Node {
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::SpaceBetween,
+                    column_gap: Val::Px(12.0),
+                    ..default()
+                }).with_children(|footer| {
+                    footer.spawn(widgets::label("MENU opens settings · SERVER sets the address", 12.0, widgets::MUTED));
+                    footer.spawn(Node { column_gap: Val::Px(12.0), ..default() })
+                        .with_children(|navigation| {
+                            widgets::button(navigation, "Avatars", ButtonKind::Secondary, HomeAction::Collection, "HomeCollection");
+                            widgets::button(navigation, "Match history", ButtonKind::Secondary, HomeAction::History, "HomeHistory");
+                            widgets::button(navigation, "Friends", ButtonKind::Secondary, HomeAction::Friends, "HomeFriends");
+                        });
+                });
+            } else {
             root.spawn(widgets::label(
-                if phone {
-                    "MENU opens settings · SERVER sets the address"
-                } else {
-                    "Escape · Settings                         OMOBA · Verdant Arena"
-                },
+                "Escape · Settings                         OMOBA · Verdant Arena",
                 12.0,
                 widgets::MUTED,
             ));
+            }
         });
 }
 
@@ -367,6 +391,7 @@ fn home_actions(
     mut next: ResMut<NextState<AppScreen>>,
     mut career: ResMut<CareerClient>,
     mut requests: MessageWriter<NetworkCommand>,
+    mut matchmaking: ResMut<crate::match_service::MatchServiceClient>,
     buttons: Query<(&Interaction, &HomeAction), Changed<Interaction>>,
 ) {
     for (interaction, action) in &buttons {
@@ -374,7 +399,14 @@ fn home_actions(
             continue;
         }
         match action {
-            HomeAction::Play => next.set(AppScreen::HeroSelect),
+            HomeAction::Play | HomeAction::HumansOnly | HomeAction::BotPractice => {
+                matchmaking.preference = match action {
+                    HomeAction::HumansOnly => shared::match_service::MatchPreference::HumansOnly,
+                    HomeAction::BotPractice => shared::match_service::MatchPreference::BotPractice,
+                    _ => shared::match_service::MatchPreference::Quick,
+                };
+                next.set(AppScreen::HeroSelect);
+            }
             HomeAction::Card => next.set(AppScreen::Card),
             HomeAction::Collection => next.set(AppScreen::Collection),
             HomeAction::History => crate::career::open_history_modal(&mut career, &mut requests),

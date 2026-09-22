@@ -1,8 +1,10 @@
 # Bot practice, match chat and reactions
 
-Practice starts a playable arena with one human. The server fills vacant seats
-with labelled bot heroes; Release retains its human queue and does not silently
-substitute these bots. Chat and picture reactions work in admitted matches and
+The standalone practice launcher starts a playable arena with one human and fills
+vacant seats with labelled bot heroes. The separate public lobby offers Quick bot
+fallback and Play with bots, saves approved human progression, and freezes its
+allocated roster. See [the public multiplayer guide](public-mvp.md). The behavior
+below describes standalone practice unless explicitly stated otherwise. Chat and picture reactions work in admitted matches and
 use a separate, bounded social stream.
 
 ## Start a practice session
@@ -50,18 +52,21 @@ can die and respawn. The controller uses the existing movement, targeting,
 damage, cooldown and mana rules. Bot actor IDs are marked explicitly and their
 internal addresses reject network commands. They do not send chat or reactions.
 
-Late humans receive their own player identity and safe spawn; the server removes
+In standalone practice, late humans receive their own player identity and safe
+spawn; the server removes
 a bot on the assigned team rather than transferring its score or inventory.
 Reconnect keeps the human's retained identity. Full human capacity rejects a
 further join. A round's lifetime participant list is bounded to 32 identities;
 repeated arrivals/refills that would exceed it trigger a fresh practice round
 instead of reusing historical identities. Connected humans stay for that reset.
 
-Practice results are local, unsaved match receipts. They give no permanent XP,
+Standalone practice results are local, unsaved match receipts. They give no permanent XP,
 MMR, profile counters or PostgreSQL match history, even when `OMOBA_DATABASE_URL`
 is configured. The account/friends service may still be available independently.
 Practice is not a ranked shortcut. The persistence adapter also rejects any
-bot-marked participant in a rated allocation or result.
+bot-marked participant in a rated allocation or result. Publicly allocated bot
+games instead use the approved `public-casual-v1` policy: durable human history and
+50/25 win/loss XP, unchanged Elo, and no new human joining a running roster.
 
 ## Chat and reaction controls
 

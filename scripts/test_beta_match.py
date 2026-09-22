@@ -11,7 +11,7 @@ from verify_beta_match import BASE_ITEM_BONUSES, STARTING_GOLD, MatchProof, Tele
 
 
 def countdown(match_id=1, elapsed=0, tick=1):
-    return dict(meta=dict(match_id=match_id, server_epoch=1, snapshot_tick=tick),
+    return dict(meta=dict(match_id=match_id, server_epoch=1, snapshot_tick=tick, protocol_version=2),
                 elapsed_secs=elapsed, phase='starting', state='Starting { countdown_ms: 3000 }',
                 join_error='None', minions=0, buffs=0,
                 players=[dict(id=i, team='Some(Blue)' if i % 2 else 'Some(Green)',

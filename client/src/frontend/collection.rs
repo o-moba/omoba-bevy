@@ -116,15 +116,17 @@ fn spawn_catalogue_grid(
                     CollectionAction::Refresh,
                     "CollectionRefresh",
                 );
-                if !crate::passport::account_connected() {
-                    widgets::button(
-                        row,
-                        "Connect Ekza",
-                        ButtonKind::Secondary,
-                        CollectionAction::ConnectAccount,
-                        "CollectionConnectAccount",
-                    );
-                }
+                widgets::button(
+                    row,
+                    if crate::passport::account_connected() {
+                        "Sign out of Ekza"
+                    } else {
+                        "Connect Ekza"
+                    },
+                    ButtonKind::Secondary,
+                    CollectionAction::ConnectAccount,
+                    "CollectionConnectAccount",
+                );
             });
             grid.spawn(widgets::label(
                 &crate::passport::avatar_account_status_line(),
@@ -174,6 +176,7 @@ fn refresh_collection_catalogue(
     preview: Res<AvatarPreview>,
     mut grids: Query<(Entity, &mut CatalogueRevision), With<CollectionGrid>>,
     mut account_line: Local<String>,
+    mut account_connected: Local<Option<bool>>,
     mut wallet_line: Local<String>,
 ) {
     crate::passport::poll_account();
@@ -181,7 +184,11 @@ fn refresh_collection_catalogue(
     let catalogue = crate::passport::avatar_catalogue();
     let account = crate::passport::avatar_account_status_line();
     let wallet = crate::passport::wallet_status_line();
-    let account_changed = *account_line != account || *wallet_line != wallet;
+    let connected = crate::passport::account_connected();
+    let account_changed = *account_line != account
+        || *wallet_line != wallet
+        || account_connected.is_some_and(|previous| previous != connected);
+    *account_connected = Some(connected);
     *account_line = account;
     *wallet_line = wallet;
     for (grid, mut revision) in &mut grids {

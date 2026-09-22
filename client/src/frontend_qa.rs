@@ -196,9 +196,13 @@ fn drive(
     mut pause: ResMut<crate::pause_menu::PauseMenuState>,
     server: Option<ResMut<crate::mobile_ui::ServerEntry>>,
     mut scrolls: Query<(&Name, &ComputedNode, &mut ScrollPosition)>,
+    mut career: ResMut<crate::career::CareerClient>,
 ) {
     if qa.finished || qa.stage >= VIEWS.len() {
         return;
+    }
+    if std::env::var("OMOBA_PUBLIC_MVP_QA").as_deref() == Ok("1") {
+        career.view.match_service = Some(shared::match_service::MatchServiceView::Idle);
     }
     if let Ok(mut window) = windows.single_mut()
         && (window.resolution.physical_width() != qa.pixels.x
@@ -382,6 +386,16 @@ fn observe(
         }
     }
     let required: &[&str] = match qa.stage {
+        0 if std::env::var("OMOBA_PUBLIC_MVP_QA").as_deref() == Ok("1") => &[
+            "HomePlay",
+            "HomeHumansOnly",
+            "HomeBotPractice",
+            "HomeCustomizeCard",
+            "HomeAccount",
+            "HomeCollection",
+            "HomeHistory",
+            "HomeFriends",
+        ],
         0 => &[
             "HomePlay",
             "HomeCustomizeCard",

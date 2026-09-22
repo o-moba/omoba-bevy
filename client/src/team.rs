@@ -340,6 +340,7 @@ fn wallet_connect_ui_system(
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     overlay_query: Query<Entity, With<TeamSelectRoot>>,
     mut listed_revision: Local<Option<u64>>,
+    mut listed_account: Local<Option<bool>>,
     grid_scroll: Query<&ScrollPosition, With<ModelAvatarGrid>>,
 ) {
     if selection.team.is_some() || overlay_query.is_empty() {
@@ -374,7 +375,14 @@ fn wallet_connect_ui_system(
         }
     }
     let catalogue = crate::passport::avatar_catalogue();
-    let stale = listed_revision.is_some_and(|listed| listed != catalogue.revision);
+    let connected = crate::passport::account_connected();
+    let stale = picker_catalogue_changed(
+        *listed_revision,
+        catalogue.revision,
+        *listed_account,
+        connected,
+    );
+    *listed_account = Some(connected);
     *listed_revision = Some(catalogue.revision);
     if just_connected || account_just_connected || stale {
         if let Ok(scroll) = grid_scroll.single() {
@@ -396,6 +404,16 @@ fn wallet_connect_ui_system(
             is_compact(&windows),
         );
     }
+}
+
+fn picker_catalogue_changed(
+    previous_revision: Option<u64>,
+    revision: u64,
+    previous_account: Option<bool>,
+    connected: bool,
+) -> bool {
+    previous_revision.is_some_and(|previous| previous != revision)
+        || previous_account.is_some_and(|previous| previous != connected)
 }
 
 #[derive(Component)]
@@ -965,9 +983,15 @@ fn spawn_ekza_row(parent: &mut ChildSpawnerCommands) {
                 AccountStatusText,
                 Name::new("EkzaAccountStatus"),
             ));
-            if !crate::passport::account_connected() {
-                spawn_connect_button(row, "Connect account", ConnectTarget::Account);
-            }
+            spawn_connect_button(
+                row,
+                if crate::passport::account_connected() {
+                    "Sign out of Ekza"
+                } else {
+                    "Connect account"
+                },
+                ConnectTarget::Account,
+            );
         });
 }
 
@@ -1633,6 +1657,14 @@ mod tests {
     /// Bevy checks query conflicts when a system is initialized, not when it compiles.
     /// The picker system holds two `&mut Text` and two `&mut BackgroundColor` queries
     /// (wallet and account); they must stay disjoint or the game panics on start.
+    #[test]
+    fn picker_refreshes_account_action_even_with_an_unchanged_empty_library() {
+        assert!(!picker_catalogue_changed(Some(3), 3, Some(false), false));
+        assert!(picker_catalogue_changed(Some(3), 3, Some(false), true));
+        assert!(picker_catalogue_changed(Some(3), 3, Some(true), false));
+        assert!(picker_catalogue_changed(Some(3), 4, Some(true), true));
+    }
+
     #[test]
     fn picker_system_queries_are_disjoint() {
         let mut world = World::new();

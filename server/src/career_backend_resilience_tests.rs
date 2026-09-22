@@ -25,7 +25,8 @@ impl OwnedWorker {
             }
         }
         let path = outbox.clone();
-        let handle = std::thread::spawn(move || worker(url, path, receiver, sender));
+        let handle =
+            std::thread::spawn(move || worker(url, path, receiver, sender, RecoveryScope::Global));
         Self {
             jobs: Some(jobs),
             replies,

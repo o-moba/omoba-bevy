@@ -250,7 +250,7 @@ impl ServerRuntime {
         packet: &ClientPacket,
         now: Instant,
     ) -> bool {
-        if self.match_config.mode != MatchMode::Practice {
+        if self.match_config.mode != MatchMode::Practice || self.match_service.worker().is_some() {
             return true;
         }
         let ClientPacket::Join { session_id, .. } = packet else {
@@ -301,6 +301,12 @@ impl ServerRuntime {
     }
 
     pub(crate) fn fill_practice_bots(&mut self, now: Instant) {
+        // Allocated bots are created exactly once after every frozen human arrives.
+        if self.match_service.worker().is_some()
+            && (!self.allocated_humans_ready() || self.match_started_at.is_some())
+        {
+            return;
+        }
         if self.match_config.mode != MatchMode::Practice
             || self.bots.defer_fill
             || matches!(self.game_state, GameState::Victory { .. })

@@ -12,7 +12,11 @@ mod combat_feedback;
 mod gameplay;
 #[cfg(test)]
 mod map_config_tests;
+mod match_allocation;
+mod match_pool;
+mod match_service;
 mod match_stats;
+mod public_transport;
 use server::matchmaking;
 #[cfg(test)]
 mod minion_path_tests;
@@ -1097,6 +1101,8 @@ impl RateLimitedDiagnostic {
 
 #[derive(Resource)]
 struct ServerRuntime {
+    match_service: match_service::MatchService,
+    public_transport: public_transport::PublicTransport,
     prematch: prematch::PrematchRuntime,
     social: social::SocialRuntime,
     bots: bots::BotControllers,
@@ -1122,6 +1128,7 @@ struct ServerRuntime {
     invalid_request_diagnostic: RateLimitedDiagnostic,
     snapshot_send_diagnostic: RateLimitedDiagnostic,
     last_snapshot_at: Instant,
+    last_bootstrap_at: Instant,
     last_simulation_at: Instant,
     last_wave_spawn_at: Instant,
     match_config: MatchConfig,
@@ -1159,6 +1166,8 @@ impl ServerRuntime {
             .as_nanos() as u64
             | 1;
         Self {
+            match_service: match_service::MatchService::default(),
+            public_transport: public_transport::PublicTransport::default(),
             prematch: prematch::PrematchRuntime::default(),
             bots: bots::BotControllers::default(),
             social: social::SocialRuntime::default(),
@@ -1184,6 +1193,7 @@ impl ServerRuntime {
             invalid_request_diagnostic: RateLimitedDiagnostic::default(),
             snapshot_send_diagnostic: RateLimitedDiagnostic::default(),
             last_snapshot_at: Instant::now(),
+            last_bootstrap_at: Instant::now(),
             last_simulation_at: Instant::now(),
             last_wave_spawn_at: Instant::now(),
             match_config,
@@ -1226,15 +1236,45 @@ impl ServerRuntime {
                 player.join_error = Some(shared::protocol::JoinRejection::AvatarNotAuthorized);
             }
         }
-        loop {
+        let receive_started = Instant::now();
+        for _ in 0..128 {
+            if receive_started.elapsed() >= Duration::from_millis(2) {
+                break;
+            }
             match self.socket.recv_from(&mut self.recv_buf) {
                 Ok((len, addr)) => {
                     let now = Instant::now();
-                    if len > MAX_CLIENT_REQUEST_PAYLOAD_BYTES {
+                    if len
+                        > if self.match_service.is_public() {
+                            shared::public_transport::MAX_PUBLIC_DATAGRAM_BYTES
+                        } else {
+                            MAX_CLIENT_REQUEST_PAYLOAD_BYTES
+                        }
+                    {
                         if let Some(suppressed) = self.invalid_request_diagnostic.record(now) {
                             eprintln!(
                                 "Rejected oversized client datagram from {addr}: {len} bytes exceeds request limit {MAX_CLIENT_REQUEST_PAYLOAD_BYTES}; suppressed {suppressed} similar errors"
                             );
+                        }
+                        continue;
+                    }
+                    if self.match_service.is_public() {
+                        match self.public_transport.receive(
+                            addr,
+                            &self.recv_buf[..len],
+                            self.server_epoch,
+                            self.match_id,
+                            self.match_service.is_lobby(),
+                            self.career.backend.gameplay_principal(addr),
+                            now,
+                        ) {
+                            public_transport::Decision::Dispatch(packet) => {
+                                self.handle_packet(addr, packet, now)
+                            }
+                            public_transport::Decision::Reply(bytes) => {
+                                let _ = self.socket.send_to(&bytes, addr);
+                            }
+                            public_transport::Decision::Drop => {}
                         }
                         continue;
                     }
@@ -1350,7 +1390,24 @@ impl ServerRuntime {
         self.handle_packet_authorized(addr, packet, now);
     }
 
-    fn handle_packet_authorized(&mut self, addr: SocketAddr, packet: ClientPacket, now: Instant) {
+    fn handle_packet_authorized(
+        &mut self,
+        addr: SocketAddr,
+        mut packet: ClientPacket,
+        now: Instant,
+    ) {
+        if matches!(packet, ClientPacket::Join { .. })
+            && !self.authorize_allocated_join(addr, &packet)
+        {
+            self.career_error(addr, "This match is reserved for its allocated roster.");
+            return;
+        }
+        let allocated_team = self.allocated_team(addr, &packet);
+        if self.match_service.worker().is_some() {
+            if let ClientPacket::Join { prematch, .. } = &mut packet {
+                *prematch = true;
+            }
+        }
         self.maintain_roster(now);
         if self
             .players
@@ -1374,6 +1431,15 @@ impl ServerRuntime {
             }
         }
         if matches!(packet, ClientPacket::Leave) {
+            // Public transport authenticated this command independently of the
+            // account-action throttle. It is also the reliable local-exit path
+            // when an immediately preceding CancelQueue datagram was dropped.
+            if self.match_service.is_lobby()
+                && self.career.backend.authenticated_session(addr).is_some()
+                && let Some(profile) = self.career.backend.profile(addr)
+            {
+                self.match_service.cancel(&profile.profile_id);
+            }
             self.leave_match(addr, now);
             return;
         }
@@ -1541,7 +1607,7 @@ impl ServerRuntime {
                 // Team resolution: dev mode honors the client's
                 // choice; release mode balances teams server-side
                 // (rejoining players keep their original team).
-                let assigned_team = match match_config.mode {
+                let assigned_team = allocated_team.or_else(|| match match_config.mode {
                     MatchMode::Practice => bots::assign_human_team(players, match_config.team_size),
                     MatchMode::Dev if prematch => assign_reserved_release_team(
                         players,
@@ -1565,7 +1631,7 @@ impl ServerRuntime {
                             )
                         })
                     }
-                };
+                });
                 let Some(assigned_team) = assigned_team else {
                     println!(
                         "Matchmaking: match is full ({} players) - join from {addr} rejected",
@@ -1703,6 +1769,10 @@ impl ServerRuntime {
     fn prepare_tick(&mut self) -> (Instant, f32) {
         self.poll_career(Instant::now());
         self.receive_packets();
+        self.tick_match_service(Instant::now());
+        if self.match_service.is_public() {
+            self.send_lobby_snapshots(Instant::now());
+        }
 
         let now = Instant::now();
         let dt = now
@@ -1714,6 +1784,23 @@ impl ServerRuntime {
     }
 
     fn simulate_after_mana(&mut self, now: Instant, dt: f32) {
+        if self.match_service.is_lobby() {
+            self.maintain_roster(now);
+            self.send_lobby_snapshots(now);
+            self.send_career_views(now);
+            return;
+        }
+        if self
+            .match_service
+            .worker()
+            .is_some_and(|w| w.recovery || w.aborted)
+        {
+            self.send_career_views(now);
+            return;
+        }
+        // Completed workers keep repeating Victory snapshots throughout their
+        // retirement grace period. Victory gates gameplay below; a durable
+        // result ACK must not turn one lossy UDP snapshot into the only signal.
         self.maintain_roster(now);
         self.fill_practice_bots(now);
         // Formation's final interval belongs to the countdown, not earned income.
@@ -1903,7 +1990,26 @@ impl ServerRuntime {
                 None
             };
 
-            for (addr, player) in players.iter().filter(|(_, player)| !player.state.is_bot) {
+            for (addr, player) in
+                players.iter().filter(|(addr, player)| {
+                    !player.state.is_bot
+                        && (!self.match_service.is_public()
+                            || self.public_transport.validated(**addr, now)
+                                && self.career.backend.gameplay_principal(**addr).is_some_and(
+                                    |p| {
+                                        self.match_service.can_observe(
+                                            &p.session_id,
+                                            self.career
+                                                .backend
+                                                .profile(**addr)
+                                                .as_ref()
+                                                .map(|p| p.profile_id.as_str())
+                                                .unwrap_or(""),
+                                        )
+                                    },
+                                ))
+                })
+            {
                 let packet = ServerPacket::Snapshot {
                     match_mode: self.match_config.mode_id().into(),
                     geometry_id: map_config.geometry_id.clone(),
@@ -2162,7 +2268,28 @@ fn main() -> io::Result<()> {
     socket.set_nonblocking(true)?;
     println!("UDP game server is listening on {bind_addr}");
 
-    let match_config = MatchConfig::from_env();
+    let match_service = match_service::MatchService::from_env().map_err(io::Error::other)?;
+    if match_service.is_public()
+        && std::env::var("OMOBA_DATABASE_URL")
+            .ok()
+            .is_none_or(|v| v.trim().is_empty())
+    {
+        return Err(io::Error::other("Public roles require OMOBA_DATABASE_URL"));
+    }
+    let mut match_config = MatchConfig::from_env();
+    if let Some(worker) = match_service.worker() {
+        if worker.manifest.bind != bind_addr {
+            return Err(io::Error::other("Worker bind differs from allocation"));
+        }
+        match_config = MatchConfig {
+            mode: if worker.manifest.humans.len() == 10 {
+                MatchMode::Release
+            } else {
+                MatchMode::Practice
+            },
+            team_size: 5,
+        };
+    }
     match match_config.mode {
         MatchMode::Release => println!(
             "Match mode: release - matches form to {}v{} before starting (OMOBA_MATCH_MODE=dev for instant start)",
@@ -2177,14 +2304,12 @@ fn main() -> io::Result<()> {
         ),
     }
 
+    let mut runtime = ServerRuntime::new_with_map(socket, match_config, map_config);
+    runtime.match_service = match_service;
     App::new()
         .add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(SIMULATION_STEP_SLEEP)))
         .add_plugins(GameplayPlugin)
-        .insert_resource(ServerRuntime::new_with_map(
-            socket,
-            match_config,
-            map_config,
-        ))
+        .insert_resource(runtime)
         .init_resource::<TickContext>()
         .init_resource::<SimulationDeltaSeconds>()
         .init_resource::<EcsPlayerEntities>()

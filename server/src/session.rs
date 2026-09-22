@@ -136,7 +136,7 @@ pub(crate) fn ensure_player_for_join(
 
         if let Some(mut player) = players.remove(&existing_addr) {
             println!(
-                "Reclaiming timed-out player {} for session {session_id} from {existing_addr} to {addr}",
+                "Reclaiming timed-out player {} from {existing_addr} to {addr}",
                 player.state.id
             );
             player.framed_snapshots = framed_snapshots;
@@ -154,7 +154,7 @@ pub(crate) fn ensure_player_for_join(
     if let Some(mut disconnected) = disconnected_sessions.remove(&session_id) {
         if now.duration_since(disconnected.disconnected_at) <= SESSION_RECLAIM_WINDOW {
             println!(
-                "Reclaiming disconnected player {} for session {session_id} from new endpoint {addr}",
+                "Reclaiming disconnected player {} from new endpoint {addr}",
                 disconnected.player.state.id
             );
             disconnected.player.framed_snapshots = framed_snapshots;
@@ -600,7 +600,12 @@ impl ServerRuntime {
             || !self.disconnected_sessions.is_empty()
         {
             let empty_since = self.empty_since.get_or_insert(now);
-            if now.saturating_duration_since(*empty_since) >= EMPTY_ROSTER_GRACE {
+            let grace = if self.match_service.worker().is_some() {
+                SESSION_RECLAIM_WINDOW + Duration::from_secs(1)
+            } else {
+                EMPTY_ROSTER_GRACE
+            };
+            if now.saturating_duration_since(*empty_since) >= grace {
                 println!(
                     "MATCH_METRIC event=abandoned epoch={} match={} elapsed_ms={}",
                     self.server_epoch,
@@ -615,6 +620,10 @@ impl ServerRuntime {
 
     pub(crate) fn restart_round(&mut self, now: Instant) {
         self.finish_career_round(shared::career::MatchOutcome::Abandoned, None, now);
+        if let crate::match_service::MatchService::Worker(worker) = &mut self.match_service {
+            worker.aborted = true;
+            return;
+        }
         if self.match_config.mode == MatchMode::Practice {
             self.players.retain(|_, player| !player.state.is_bot);
             self.bots.clear();

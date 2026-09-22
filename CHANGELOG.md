@@ -6,6 +6,23 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.22.0-rc.1] - 2026-09-22
+
+### Public multiplayer MVP
+- Add an authenticated lobby with quick bot fallback, humans-only waiting and solo bot matches, backed by a bounded pool of isolated arena processes.
+- Freeze each allocated roster, wait for team draft/loading and durable start, preserve returning participants, and reject fresh mid-match joins.
+- Save approved bot-match history and progression (50/25 win/loss XP) without competitive rating; keep eligible full-human rating authoritative and settlement idempotent.
+- Add return-path UDP admission, signed replay-resistant gameplay commands, bounded traffic work and private worker manifests/outboxes.
+- Preserve lobby preferences during worker handoff/reconnect, allow leaving draft during outages, refresh saved results on the result screen, and package public service launch instructions.
+- Add real PostgreSQL, public-protocol lifecycle and 100-client capacity probes. Public hosting and platform distribution remain operator release gates.
+
+### Persistent Ekza account connection
+- Restore a connected Ekza library after restart with the SDK's private, atomic,
+  backend/project-scoped credential file and fresh Registry validation.
+- Background refresh retains sessions through outages and clears revoked sessions.
+  Hero selection and Collection expose local sign out and retain catalogue/scroll updates.
+- Pin Ekza Bevy SDK 0.7.0 at `42c39e4`; preserve dynamic catalogue entitlement changes.
+
 ## [0.21.0-rc.5] - 2026-09-22
 
 ### Shared run animation and VRM humanoid foundation

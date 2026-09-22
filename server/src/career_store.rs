@@ -22,6 +22,7 @@ use std::{
 
 const MIGRATION: &str = include_str!("../migrations/postgres/001_career.sql");
 const RULESET: &str = "verdant-default-v1";
+pub(crate) const PUBLIC_CASUAL_RULESET: &str = "public-casual-v1";
 const MAX_JSON: usize = 1024 * 1024;
 const MAX_SOCIAL: i64 = 64;
 
@@ -190,8 +191,12 @@ impl CareerStore {
     }
 
     async fn open_pool(database_url: &str) -> Result<PgPool, String> {
+        // A worker owns one match and serializes its career operations. Keeping
+        // one connection per worker leaves room for the lobby and account API
+        // when the allocator runs the 100-room bot-practice capacity case.
+        let role = std::env::var("OMOBA_SERVER_ROLE").ok();
         PgPoolOptions::new()
-            .max_connections(4)
+            .max_connections(pool_connections(role.as_deref()))
             .acquire_timeout(Duration::from_secs(5))
             .after_connect(|connection, _| {
                 Box::pin(async move {
@@ -454,7 +459,7 @@ impl CareerStore {
                 // checkpoint. Otherwise the supplied roster must preserve all
                 // known checkpoint identities and can only append when unrated.
                 if same_allocation(&allocation, &result, false).is_err() {
-                    same_allocation(&checkpoint, &result, !checkpoint.rated)?;
+                    same_allocation(&checkpoint, &result, roster_can_grow(&checkpoint))?;
                 }
                 if row.try_get::<String, _>("status")? == "settled" {
                     tx.commit().await?;
@@ -498,7 +503,7 @@ impl CareerStore {
             .ok_or("Match must be durably started first.")?;
         require_owner(&row, &self.owner)?;
         let previous: Json<MatchResult> = row.try_get("checkpoint")?;
-        same_allocation(&previous, &result, !previous.rated)?;
+        same_allocation(&previous, &result, roster_can_grow(&previous))?;
         if row.try_get::<String, _>("status")? != "running" {
             return Err("Terminal result is already frozen.".into());
         }
@@ -626,6 +631,7 @@ impl CareerStore {
         } else {
             BTreeMap::new()
         };
+        let public_casual = result.ruleset == PUBLIC_CASUAL_RULESET;
         for participant in &mut result.participants {
             let Some(id) = &participant.profile_id else {
                 continue;
@@ -661,13 +667,19 @@ impl CareerStore {
                         .rated_matches
                         .checked_add(1)
                         .ok_or("Rated match counter is full.")?;
-                    participant.progression_xp_gained = if won { 150 } else { 100 };
-                    profile.progression_xp = profile
-                        .progression_xp
-                        .checked_add(u64::from(participant.progression_xp_gained))
-                        .filter(|&xp| xp <= i64::MAX as u64)
-                        .ok_or("Career progression counter is full.")?;
                 }
+                participant.progression_xp_gained = if result.rated {
+                    if won { 150 } else { 100 }
+                } else if public_casual {
+                    if won { 50 } else { 25 }
+                } else {
+                    0
+                };
+                profile.progression_xp = profile
+                    .progression_xp
+                    .checked_add(u64::from(participant.progression_xp_gained))
+                    .filter(|&xp| xp <= i64::MAX as u64)
+                    .ok_or("Career progression counter is full.")?;
             }
             sqlx::query("UPDATE career_profiles SET rating=$2,rated_matches=$3,matches_played=$4,wins=$5,losses=$6,progression_xp=$7 WHERE profile_id=$1")
                 .bind(id).bind(profile.rating).bind(i64::from(profile.rated_matches)).bind(i64::from(profile.matches_played))
@@ -713,7 +725,22 @@ impl CareerStore {
         }).await
     }
     pub async fn recover_expired(&self) -> Result<Vec<MatchResult>, String> {
-        let ids: Vec<String> = sqlx::query_scalar("SELECT result_id FROM career_matches WHERE status!='settled' AND lease_until<=clock_timestamp() ORDER BY seq LIMIT 32")
+        self.recover_expired_scope(None).await
+    }
+
+    /// An allocated worker must never settle another worker's expired match
+    /// before that worker has replayed its durable terminal outbox. Recovery
+    /// children use the original worker epoch retained in the allocation status.
+    pub async fn recover_expired_for_epoch(&self, epoch: u64) -> Result<Vec<MatchResult>, String> {
+        if epoch == 0 {
+            return Err("Recovery requires a valid original server epoch.".into());
+        }
+        self.recover_expired_scope(Some(epoch)).await
+    }
+
+    async fn recover_expired_scope(&self, epoch: Option<u64>) -> Result<Vec<MatchResult>, String> {
+        let ids: Vec<String> = sqlx::query_scalar("SELECT result_id FROM career_matches WHERE status!='settled' AND lease_until<=clock_timestamp() AND ($1::text IS NULL OR server_epoch=$1) ORDER BY seq LIMIT 32")
+            .bind(epoch.map(|value| value.to_string()))
             .fetch_all(&self.pool).await.map_err(|e| StoreError::from(e).to_string())?;
         let mut recovered = Vec::new();
         for id in ids {
@@ -1051,6 +1078,45 @@ fn validate_current_cohort(profiles: &BTreeMap<String, ProfileSummary>) -> Store
     }
     Ok(())
 }
+fn pool_connections(role: Option<&str>) -> u32 {
+    if role == Some("match") { 1 } else { 4 }
+}
+
+fn roster_can_grow(result: &MatchResult) -> bool {
+    !result.rated && result.ruleset != PUBLIC_CASUAL_RULESET
+}
+
+/// The trusted allocator/runtime chooses this marker only after checking actual
+/// map/modifier settings. Persisted metadata still fails closed on malformed or
+/// unauthenticated rosters. This policy grants progression, never competitive Elo.
+fn validate_public_casual(result: &MatchResult) -> StoreResult<()> {
+    let interrupted_recovery = result.outcome != MatchOutcome::Completed
+        && result.unrated_reason.as_deref() == Some("server_interrupted");
+    let bots = result.participants.iter().filter(|p| p.is_bot).count();
+    if result.rated
+        || (result.unrated_reason.as_deref() != Some("allocated_bots") && !interrupted_recovery)
+        || result.map_profile != shared::map::ResolvedMap::default().map_profile
+        || result.participants.len() != 10
+        || bots == 0
+        || bots == result.participants.len()
+        || result
+            .participants
+            .iter()
+            .filter(|p| p.team == Team::Green)
+            .count()
+            != 5
+        || result
+            .participants
+            .iter()
+            .any(|p| p.is_bot == p.profile_id.is_some())
+    {
+        return Err(
+            "Public casual progression requires the approved allocated human/bot roster.".into(),
+        );
+    }
+    Ok(())
+}
+
 fn normalize(mut result: MatchResult) -> StoreResult<MatchResult> {
     if result.result_id.is_empty()
         || result.result_id.len() > 128
@@ -1104,6 +1170,9 @@ fn normalize(mut result: MatchResult) -> StoreResult<MatchResult> {
     }
     result.saved = false;
     result.participants.sort_by_key(|p| p.player_id);
+    if result.ruleset == PUBLIC_CASUAL_RULESET {
+        validate_public_casual(&result)?;
+    }
     if serde_json::to_vec(&result)
         .map_err(|_| "Invalid result JSON.")?
         .len()
@@ -1197,7 +1266,7 @@ fn same_terminal_allocation(old: &MatchResult, new: &MatchResult) -> StoreResult
         comparable.rated = old.rated;
         comparable.unrated_reason = old.unrated_reason.clone();
     }
-    same_allocation(old, &comparable, !old.rated)
+    same_allocation(old, &comparable, roster_can_grow(old))
 }
 
 #[cfg(test)]

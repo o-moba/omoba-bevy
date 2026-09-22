@@ -33,6 +33,7 @@ mod map_qa;
 mod map_visuals;
 mod maps;
 mod match_hud;
+mod match_service;
 mod minimap;
 mod minimap_route;
 mod minions;
@@ -145,6 +146,7 @@ pub fn main() {
         GameStateUiPlugin,
     ))
     .add_plugins(edge_hud::EdgeHudPlugin)
+    .add_plugins(match_service::MatchServicePlugin)
     .add_plugins((FrontendPlugin, frontend_qa::FrontendQaPlugin))
     .add_plugins((
         input_context::InputContextPlugin,

@@ -288,7 +288,7 @@ class CandidateAssetGateTests(unittest.TestCase):
         target = repository / "target"
         (target / "debug").mkdir(parents=True)
         suffix = ".exe" if os.name == "nt" else ""
-        for binary in ["client", "server", "bots"]:
+        for binary in package_native.REQUIRED_EXECUTABLES:
             (target / "debug" / (binary + suffix)).write_bytes(b"test fixture; never executed")
         listed = "\n".join("client/assets/" + p.relative_to(self.assets).as_posix()
                            for p in self.assets.rglob("*") if p.is_file())
@@ -307,7 +307,7 @@ class CandidateAssetGateTests(unittest.TestCase):
                 mock.patch.dict(os.environ, {"CARGO_TARGET_DIR": str(target)}), \
                 mock.patch.object(package_native, "source_identity", return_value={}), \
                 mock.patch.object(package_native, "build_executables", return_value={
-                    name: target / "debug" / (name + suffix) for name in ("client", "server", "bots")
+                    name: target / "debug" / (name + suffix) for name in package_native.REQUIRED_EXECUTABLES
                 }) as cargo, \
                 mock.patch.object(package_native, "run", return_value=listed), \
                 mock.patch.object(package_native.shutil, "copy2", side_effect=corrupted_copy):

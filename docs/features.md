@@ -1,12 +1,16 @@
 # Feature Inventory
 
+## Public multiplayer MVP (0.22.0-rc.1)
+
+The public lobby offers Quick match (30-second bot fallback), Wait for players (ten humans only), and Play with bots. Independent worker processes own immutable ten-player rosters, automatic teams, shared draft/countdown/loading and a durable start barrier. New humans cannot replace bots after a match starts; existing participants can reconnect. PostgreSQL saves history and progression for approved allocated bot games, with competitive rating reserved for eligible bot-free PvP. Signed gameplay packets, bounded admission and isolated durable outboxes protect the public match boundary. See [launch, recovery and capacity instructions](public-mvp.md).
+
 ## Shared running and VRM skeletal motion (0.21.0-rc.5)
 
 All 15 shipped playable 3D avatars use the engine's shared Run motion during normal movement. Local intent and remote movement drive the same state machine; Walk stays reserved for future debuffs. Idle and combat actions remain separate. Existing 2D running sprites are unchanged.
 
 Validated VRM0/VRM1 skinned humanoids receive runtime clips adapted to their bone map and rest pose, including models with no embedded clips. Original skin bytes remain unchanged. This is skeletal compatibility for a documented subset, not complete VRM materials/face/hair support. Approved Studio models gain runtime Run through normal verified loading; accepting externally published clipless models still requires a versioned profile rollout. See [architecture, import and limits](humanoid-motion.md).
 
-Canonical version: `0.21.0-rc.5`
+Canonical version: `0.22.0-rc.1`
 
 ## Team draft and shared loading
 
@@ -182,11 +186,13 @@ Ogg assets in a versioned manifest. See [audio controls and authoring](game-audi
 
 ## Native bot practice and match communication
 
-An explicit practice server admits a solo player immediately and fills remaining
-seats with labelled server-controlled heroes. Late humans replace bots safely;
+A standalone practice server admits a solo player immediately and fills remaining
+seats with labelled server-controlled heroes. In that local mode, late humans replace bots safely;
 bots use the actual navigation/combat rules. Practice retains a local scoreboard
 and gives no permanent career credit. `make practice` launches client and server;
-`make practice-server` hosts this mode without a local client.
+`make practice-server` hosts this mode without a local client. Publicly allocated
+bot matches instead freeze the human roster and save approved human history and
+50/25 win/loss XP, with no competitive rating change.
 
 Joined participants can use team/match chat and four picture reactions. The
 server validates sender identity, scope, audience and rate limits. PC/mobile UI
@@ -711,3 +717,16 @@ controls to fit the viewport. These menu states are explicitly labeled fixtures.
 measures the north sightline, HUD text containment, control bounds, and unrelated
 panel overlap in actual Bevy screenshots. Phone previews use the development
 `OMOBA_TOUCH_CONTROLS=1` path and do not replace physical-device validation.
+
+
+### Persistent Ekza account library
+
+Hero selection and Collection connect to Ekza through `ekza-bevy-sdk` and expose
+local sign out. The client stores its scoped opaque credential in
+`ekza-store/account/session.json` under its private settings directory (0600 on
+Unix), restores it with a fresh SDK library check, and refreshes every 15 seconds.
+Registry outages retain credentials; authorization rejection clears them. Sign
+out removes the local credential and invalidates pending background work;
+Studio Account revokes access server-side. Public approved community models
+remain free after logout. Catalogue identity, metadata, live entitlement changes
+and scrolling stay intact when an account is restored or signed out.

@@ -175,6 +175,7 @@ fn drive_screen_from_session(
     mut notice: ResMut<JoinNotice>,
     local_player: Query<(), With<Player>>,
     mut uncommitted_frames: Local<u8>,
+    matchmaking: Option<Res<crate::match_service::MatchServiceClient>>,
 ) {
     if paused.0 || automation_bypass() {
         return;
@@ -214,6 +215,8 @@ fn drive_screen_from_session(
                 ));
                 session.abandon_join();
                 next.set(AppScreen::HeroSelect);
+            } else if !committed && matchmaking.as_ref().is_some_and(|flow| flow.is_searching()) {
+                *uncommitted_frames = 0;
             } else if !committed {
                 *uncommitted_frames = uncommitted_frames.saturating_add(1);
                 if *uncommitted_frames > UNCOMMITTED_GRACE_FRAMES {

@@ -1,3 +1,5 @@
+mod public_transport;
+
 use shared::combat::{CombatEntityKind, CombatEvent, MinionKind, ProjectileStyle};
 use shared::protocol::{JoinRejection, PROTOCOL_VERSION, SnapshotMeta, SnapshotOrder};
 use shared::transport::{SnapshotAssembler, TransportError};
@@ -11,6 +13,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     io,
     net::{SocketAddr, ToSocketAddrs, UdpSocket},
+    sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant},
 };
@@ -79,6 +82,8 @@ pub enum SessionUiCommand {
     Retry,
     /// Validated address chosen in the pre-join UI. Never transfers an active match.
     ConnectTo(String),
+    /// Switch to a trusted lobby allocation without overwriting the saved lobby.
+    ConnectAllocated(String),
     /// Leave the current match or queue and return to the front end. The
     /// server is told to release the seat; the connection stays up.
     LeaveMatch,
@@ -151,6 +156,7 @@ pub struct ClientSession {
     snapshot_order: SnapshotOrder,
     career_server_epoch: u64,
     career_packet_sequence: u64,
+    ephemeral_endpoint: bool,
 }
 
 impl Default for ClientSession {
@@ -172,6 +178,7 @@ impl Default for ClientSession {
             snapshot_order: SnapshotOrder::default(),
             career_server_epoch: 0,
             career_packet_sequence: 0,
+            ephemeral_endpoint: false,
         }
     }
 }
@@ -966,8 +973,11 @@ pub struct GameStateSnapshot {
     pub scoreboard: Option<shared::live_score::LiveScoreboard>,
 }
 
+type SharedGameplaySigner = Arc<Mutex<Option<crate::career_identity::GameplaySigner>>>;
+
 #[derive(Resource)]
 struct NetworkChannels {
+    gameplay_signer: SharedGameplaySigner,
     outgoing: Sender<ClientPacket>,
     incoming: Receiver<ServerPacket>,
     signals: Receiver<NetThreadSignal>,
@@ -1398,14 +1408,24 @@ fn spawn_network_transport(
     client_session.clear_join_attempt();
     client_session.snapshot_order = SnapshotOrder::default();
     client_session.server_addr_display.clone_from(&server_addr);
-    commands.insert_resource(ResolvedServerAddressForPrefs(server_addr.clone()));
-    let (outgoing_tx, outgoing_rx) = unbounded::<ClientPacket>();
+    if !client_session.ephemeral_endpoint {
+        commands.insert_resource(ResolvedServerAddressForPrefs(server_addr.clone()));
+    }
+    let (outgoing_tx, outgoing_rx) = crossbeam_channel::bounded::<ClientPacket>(256);
     let (incoming_tx, incoming_rx) = crossbeam_channel::bounded::<ServerPacket>(8);
     let (signal_tx, signal_rx) = unbounded::<NetThreadSignal>();
 
+    let gameplay_signer: SharedGameplaySigner = Arc::default();
+    let signer_for_thread = gameplay_signer.clone();
     let addr_for_thread = server_addr;
     thread::spawn(move || {
-        run_udp_client(addr_for_thread, outgoing_rx, incoming_tx, signal_tx);
+        run_udp_client(
+            addr_for_thread,
+            outgoing_rx,
+            incoming_tx,
+            signal_tx,
+            signer_for_thread,
+        );
     });
 
     client_session.state = ClientConnectionState::WaitingForServer;
@@ -1415,6 +1435,7 @@ fn spawn_network_transport(
     client_session.last_qualifying_snapshot_wall = None;
 
     commands.insert_resource(NetworkChannels {
+        gameplay_signer,
         outgoing: outgoing_tx,
         incoming: incoming_rx,
         signals: signal_rx,
@@ -1467,6 +1488,7 @@ fn run_udp_client(
     outgoing: Receiver<ClientPacket>,
     incoming: Sender<ServerPacket>,
     signals: Sender<NetThreadSignal>,
+    gameplay_signer: SharedGameplaySigner,
 ) {
     println!("Connecting to server at {server_addr}");
     let socket = match connect_udp_server(server_addr.as_str()) {
@@ -1485,6 +1507,7 @@ fn run_udp_client(
     }
     println!("UDP socket connected to {server_addr}; waiting for first snapshot");
 
+    let mut public_transport = public_transport::PublicClientTransport::new();
     let mut assembler = SnapshotAssembler::default();
     let mut recv_buf = vec![0_u8; SERVER_DATAGRAM_RECEIVE_CAPACITY];
     let mut last_heartbeat_at = Instant::now();
@@ -1498,6 +1521,8 @@ fn run_udp_client(
 
     let _ = udp_try_send(
         &socket,
+        &mut public_transport,
+        &gameplay_signer,
         &ClientPacket::Hello {
             protocol_version: PROTOCOL_VERSION,
         },
@@ -1507,11 +1532,13 @@ fn run_udp_client(
     );
 
     loop {
-        loop {
+        for _ in 0..128 {
             match outgoing.try_recv() {
                 Ok(packet) => {
                     udp_try_send(
                         &socket,
+                        &mut public_transport,
+                        &gameplay_signer,
                         &packet,
                         &mut consecutive_send_errors,
                         &mut transport_failure_reported,
@@ -1527,6 +1554,8 @@ fn run_udp_client(
             assembler.expire(Instant::now());
             udp_try_send(
                 &socket,
+                &mut public_transport,
+                &gameplay_signer,
                 &ClientPacket::Hello {
                     protocol_version: PROTOCOL_VERSION,
                 },
@@ -1537,10 +1566,13 @@ fn run_udp_client(
             last_heartbeat_at = Instant::now();
         }
 
-        loop {
+        for _ in 0..128 {
             match socket.recv(&mut recv_buf) {
                 Ok(len) => {
                     consecutive_recv_errors = 0;
+                    if public_transport.handle_challenge(&socket, &recv_buf[..len]) {
+                        continue;
+                    }
                     let payload = match assembler.push(&recv_buf[..len], Instant::now()) {
                         Ok(Some(payload)) => payload,
                         Ok(None) => continue,
@@ -1563,6 +1595,9 @@ fn run_udp_client(
                     };
                     match forward_complete_server_datagram(&payload, &incoming) {
                         Ok(published) => {
+                            if published {
+                                public_transport.observed_server_packet();
+                            }
                             if published && !first_snapshot_received {
                                 println!(
                                     "First snapshot received from {server_addr}; connection is live"
@@ -1660,12 +1695,14 @@ fn validate_client_payload_size(payload_len: usize) -> io::Result<()> {
 
 fn udp_try_send(
     socket: &UdpSocket,
+    public_transport: &mut public_transport::PublicClientTransport,
+    gameplay_signer: &SharedGameplaySigner,
     packet: &ClientPacket,
     consecutive_send_errors: &mut u32,
     transport_failure_reported: &mut bool,
     signals: &Sender<NetThreadSignal>,
 ) -> bool {
-    match send_packet(socket, packet) {
+    match public_transport.send(socket, packet, gameplay_signer) {
         Ok(()) => {
             *consecutive_send_errors = 0;
             true
@@ -1716,7 +1753,7 @@ fn send_local_state(
         z: player_transform.translation.z,
         yaw,
     };
-    let _ = channels.outgoing.send(packet);
+    let _ = channels.outgoing.try_send(packet);
 }
 
 fn mirror_debug_flags_to_network_state(
@@ -1752,12 +1789,30 @@ fn send_network_commands(
     mut career_identity: Option<ResMut<crate::career_identity::CareerIdentity>>,
     mut career_client: Option<ResMut<crate::career::CareerClient>>,
     mut social_client: Option<ResMut<crate::social::SocialClient>>,
+    mut match_service: Option<ResMut<crate::match_service::MatchServiceClient>>,
 ) {
     let Some(channels) = channels else {
         return;
     };
 
+    if let Ok(mut signer) = channels.gameplay_signer.lock() {
+        *signer = career_identity.as_ref().and_then(|identity| {
+            snapshot.as_ref().and_then(|snapshot| {
+                identity.gameplay_signer(
+                    &client_session.server_addr_display,
+                    snapshot.meta.server_epoch,
+                    snapshot.meta.match_id,
+                    &client_session_id.0,
+                )
+            })
+        });
+    }
     for command in command_events.read() {
+        if let (Some(service), Some(career)) = (match_service.as_mut(), career_client.as_ref())
+            && service.intercept_join(&career.view, &client_session.server_addr_display, command)
+        {
+            continue;
+        }
         match command {
             NetworkCommand::Social {
                 request_id,
@@ -1811,7 +1866,7 @@ fn send_network_commands(
                     match packet {
                         Ok(packet) => channels
                             .outgoing
-                            .send(packet)
+                            .try_send(packet)
                             .err()
                             .map(|_| "Connection lost.".to_owned()),
                         Err(error) => Some(error),
@@ -1839,7 +1894,7 @@ fn send_network_commands(
                     Ok(signed) => {
                         let _ = channels
                             .outgoing
-                            .send(ClientPacket::Career { request: signed });
+                            .try_send(ClientPacket::Career { request: signed });
                         if matches!(request, shared::career::CareerRequest::CancelQueue) {
                             client_session.last_join = None;
                             client_session.join_flow_committed = false;
@@ -1870,7 +1925,7 @@ fn send_network_commands(
                     continue;
                 };
                 *utility_sequence = request_id;
-                let _ = channels.outgoing.send(ClientPacket::Utility {
+                let _ = channels.outgoing.try_send(ClientPacket::Utility {
                     action: *action,
                     direction: direction.to_array(),
                     server_epoch: meta.server_epoch,
@@ -1897,7 +1952,7 @@ fn send_network_commands(
                     continue;
                 };
                 *basic_sequence = request_id;
-                let _ = channels.outgoing.send(ClientPacket::BasicAttack {
+                let _ = channels.outgoing.try_send(ClientPacket::BasicAttack {
                     target: *target,
                     server_epoch: meta.server_epoch,
                     match_id: meta.match_id,
@@ -1908,14 +1963,14 @@ fn send_network_commands(
                 if !client_session.join_confirmed() {
                     continue;
                 }
-                let _ = channels.outgoing.send(ClientPacket::Cast {
+                let _ = channels.outgoing.try_send(ClientPacket::Cast {
                     target: *target,
                     slot: *slot,
                 });
             }
             NetworkCommand::Prematch(request) => {
                 if client_session.admitted {
-                    let _ = channels.outgoing.send(ClientPacket::Prematch {
+                    let _ = channels.outgoing.try_send(ClientPacket::Prematch {
                         request: request.clone(),
                     });
                 }
@@ -1967,7 +2022,7 @@ fn send_network_commands(
                 if !client_session.join_confirmed() {
                     continue;
                 }
-                let _ = channels.outgoing.send(ClientPacket::RequestRematch);
+                let _ = channels.outgoing.try_send(ClientPacket::RequestRematch);
             }
             NetworkCommand::SetGodMode { enabled } => {
                 if !client_session.join_confirmed() {
@@ -1975,7 +2030,7 @@ fn send_network_commands(
                 }
                 let _ = channels
                     .outgoing
-                    .send(ClientPacket::SetGodMode { enabled: *enabled });
+                    .try_send(ClientPacket::SetGodMode { enabled: *enabled });
             }
             NetworkCommand::SetSpeedBoost { enabled } => {
                 if !client_session.join_confirmed() {
@@ -1983,7 +2038,7 @@ fn send_network_commands(
                 }
                 let _ = channels
                     .outgoing
-                    .send(ClientPacket::SetSpeedBoost { enabled: *enabled });
+                    .try_send(ClientPacket::SetSpeedBoost { enabled: *enabled });
             }
             NetworkCommand::BuyItem {
                 server_epoch,
@@ -1992,7 +2047,7 @@ fn send_network_commands(
                 match_id,
             } => {
                 if client_session.join_confirmed() {
-                    let _ = channels.outgoing.send(ClientPacket::BuyItem {
+                    let _ = channels.outgoing.try_send(ClientPacket::BuyItem {
                         server_epoch: *server_epoch,
                         item_id: item_id.clone(),
                         request_id: *request_id,
@@ -2006,7 +2061,7 @@ fn send_network_commands(
                 }
                 let _ = channels
                     .outgoing
-                    .send(ClientPacket::UpgradeSkill { slot: *slot });
+                    .try_send(ClientPacket::UpgradeSkill { slot: *slot });
             }
         }
     }
@@ -2053,7 +2108,7 @@ fn send_join_attempt(
                 return;
             }
         };
-    let result = channels.outgoing.send(ClientPacket::Join {
+    let result = channels.outgoing.try_send(ClientPacket::Join {
         prematch: join.prematch,
         team: join.team,
         character: join.character,
@@ -2092,6 +2147,7 @@ fn ingest_server_snapshot_packets(
     mut incoming_dead: ResMut<NetIncomingDisconnected>,
     team_selection: Res<TeamSelection>,
     mut career_client: Option<ResMut<crate::career::CareerClient>>,
+    mut career_identity: Option<ResMut<crate::career_identity::CareerIdentity>>,
     mut social_client: Option<ResMut<crate::social::SocialClient>>,
 ) {
     pending.frame = None;
@@ -2136,6 +2192,13 @@ fn ingest_server_snapshot_packets(
                         continue;
                     }
                     client_session.career_packet_sequence = sequence;
+                    if let Some(identity) = career_identity.as_mut() {
+                        identity.observe_server_auth(
+                            &career,
+                            &client_session.server_addr_display,
+                            server_epoch,
+                        );
+                    }
                     if matches!(
                         career.queue,
                         shared::career::QueueView::Waiting { .. }
@@ -3326,6 +3389,9 @@ fn update_session_lifecycle(
     mut session_ui: MessageReader<SessionUiCommand>,
     mut career: Option<ResMut<crate::career::CareerClient>>,
     mut social: Option<ResMut<crate::social::SocialClient>>,
+    mut match_service: Option<ResMut<crate::match_service::MatchServiceClient>>,
+    mut career_identity: Option<ResMut<crate::career_identity::CareerIdentity>>,
+    session_id: Option<Res<ClientSessionId>>,
 ) {
     let TeardownQueries {
         remote_query,
@@ -3357,16 +3423,65 @@ fn update_session_lifecycle(
                     // authenticates this account against its configured backend.
                     career.clear_account();
                 }
+                client_session.ephemeral_endpoint = false;
+                commands.remove_resource::<NetworkChannels>();
+                spawn_network_transport(&mut commands, &mut client_session, address);
+                incoming_dead.0 = false;
+                retried_this_frame = true;
+            }
+            SessionUiCommand::ConnectAllocated(raw) => {
+                let Some(address) = crate::persistence::validate_game_server_addr(raw) else {
+                    continue;
+                };
+                client_session.abandon_join();
+                despawn_tracked_net_entities(
+                    &mut commands,
+                    &mut network_state,
+                    remote_query,
+                    projectile_query,
+                    structure_query,
+                    minion_query,
+                    neutral_query,
+                );
+                despawn_local_players(&mut commands, player_query);
+                *game_state_snapshot = GameStateSnapshot::default();
+                commands.insert_resource(PendingServerSnapshotFrame::default());
+                if let Some(career) = career.as_mut() {
+                    career.clear_account();
+                }
+                if let Some(social) = social.as_mut() {
+                    social.clear();
+                }
+                cam_state.locked = false;
+                client_session.ephemeral_endpoint = true;
                 commands.remove_resource::<NetworkChannels>();
                 spawn_network_transport(&mut commands, &mut client_session, address);
                 incoming_dead.0 = false;
                 retried_this_frame = true;
             }
             SessionUiCommand::LeaveMatch => {
+                if match_service.as_ref().is_some_and(|service| service.active)
+                    && let (Some(channels), Some(identity), Some(session_id)) = (
+                        channels.as_ref(),
+                        career_identity.as_mut(),
+                        session_id.as_ref(),
+                    )
+                    && let Ok(request) = identity.prepare_request(
+                        &shared::career::CareerRequest::CancelQueue,
+                        &client_session.server_addr_display,
+                        game_state_snapshot.meta.server_epoch,
+                        &session_id.0,
+                    )
+                {
+                    let _ = channels.outgoing.try_send(ClientPacket::Career { request });
+                }
+                let return_to_lobby = match_service
+                    .as_mut()
+                    .and_then(|service| service.take_return_to_lobby());
                 // The server releases the seat (or the queue entry) on `Leave`;
                 // the connection itself stays up for the menus and the career.
                 if let Some(channels) = channels.as_ref() {
-                    let _ = channels.outgoing.send(ClientPacket::Leave);
+                    let _ = channels.outgoing.try_send(ClientPacket::Leave);
                 }
                 client_session.abandon_join();
                 // Snapshots already in flight may still list this player; with
@@ -3377,6 +3492,30 @@ fn update_session_lifecycle(
                 commands.insert_resource(crate::frontend::PendingScreen(Some(
                     crate::frontend::AppScreen::Home,
                 )));
+                if let Some(address) = return_to_lobby {
+                    despawn_tracked_net_entities(
+                        &mut commands,
+                        &mut network_state,
+                        remote_query,
+                        projectile_query,
+                        structure_query,
+                        minion_query,
+                        neutral_query,
+                    );
+                    *game_state_snapshot = GameStateSnapshot::default();
+                    commands.insert_resource(PendingServerSnapshotFrame::default());
+                    if let Some(career) = career.as_mut() {
+                        career.clear_account();
+                    }
+                    if let Some(social) = social.as_mut() {
+                        social.clear();
+                    }
+                    client_session.ephemeral_endpoint = false;
+                    commands.remove_resource::<NetworkChannels>();
+                    spawn_network_transport(&mut commands, &mut client_session, address);
+                    incoming_dead.0 = false;
+                    retried_this_frame = true;
+                }
             }
             SessionUiCommand::Retry => {
                 if client_session.state == ClientConnectionState::Disconnected
@@ -3718,6 +3857,7 @@ mod basic_attack_network_tests {
         let mut app = App::new();
         app.add_message::<NetworkCommand>()
             .insert_resource(NetworkChannels {
+                gameplay_signer: Default::default(),
                 outgoing,
                 incoming,
                 signals,
@@ -3788,6 +3928,7 @@ mod basic_attack_network_tests {
         let mut app = App::new();
         app.add_message::<NetworkCommand>()
             .insert_resource(NetworkChannels {
+                gameplay_signer: Default::default(),
                 outgoing,
                 incoming,
                 signals,
@@ -3964,6 +4105,7 @@ mod tests {
         let (_, signals) = crossbeam_channel::unbounded();
         let mut app = App::new();
         app.insert_resource(super::NetworkChannels {
+            gameplay_signer: Default::default(),
             outgoing: tx,
             incoming: incoming_rx,
             signals,
@@ -4026,6 +4168,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
             .insert_resource(super::NetworkChannels {
+                gameplay_signer: Default::default(),
                 outgoing,
                 incoming: incoming_rx,
                 signals,
@@ -4599,6 +4742,7 @@ mod tests {
         let baseline = Instant::now() - Duration::from_secs(1);
         let mut app = App::new();
         app.insert_resource(super::NetworkChannels {
+            gameplay_signer: Default::default(),
             outgoing: outgoing_tx,
             incoming: incoming_rx,
             signals: signal_rx,
@@ -4760,6 +4904,80 @@ mod connection_ui_tests {
     use crate::sprite::SpriteVisualAssets;
 
     #[test]
+    fn allocated_handoff_retry_and_leave_preserve_saved_lobby_and_clear_old_scene() {
+        let lobby = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let arena = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let lobby_address = lobby.local_addr().unwrap().to_string();
+        let arena_address = arena.local_addr().unwrap().to_string();
+        let mut flow = crate::match_service::MatchServiceClient::default();
+        flow.active = true;
+        flow.lobby_addr = Some(lobby_address.clone());
+        flow.allocation = Some(shared::match_service::MatchAllocation {
+            allocation_id: "handoff-test".into(),
+            endpoint: arena_address.clone(),
+            preference: shared::match_service::MatchPreference::Quick,
+            team: shared::map::Team::Green,
+            human_count: 1,
+            bot_count: 9,
+            rated: true,
+            join_deadline_ms: 1,
+        });
+        let mut app = App::new();
+        app.insert_resource(flow)
+            .insert_resource(ResolvedServerAddressForPrefs(lobby_address.clone()))
+            .insert_resource(ClientSession {
+                state: ClientConnectionState::Connected,
+                server_addr_display: lobby_address.clone(),
+                ..default()
+            })
+            .init_resource::<NetIncomingDisconnected>()
+            .init_resource::<PendingServerSnapshotFrame>()
+            .init_resource::<NetworkState>()
+            .init_resource::<GameStateSnapshot>()
+            .init_resource::<TeamSelection>()
+            .init_resource::<CameraState>()
+            .add_message::<SessionUiCommand>()
+            .add_systems(Update, update_session_lifecycle);
+        let old_player = app.world_mut().spawn(Player).id();
+        app.world_mut()
+            .write_message(SessionUiCommand::ConnectAllocated(arena_address.clone()));
+        app.update();
+        assert!(app.world().get_entity(old_player).is_err());
+        assert_eq!(
+            app.world().resource::<ClientSession>().server_addr_display,
+            arena_address
+        );
+        assert!(app.world().resource::<ClientSession>().ephemeral_endpoint);
+        assert_eq!(
+            app.world().resource::<ResolvedServerAddressForPrefs>().0,
+            lobby_address
+        );
+        app.world_mut().resource_mut::<ClientSession>().state = ClientConnectionState::Disconnected;
+        app.world_mut().write_message(SessionUiCommand::Retry);
+        app.update();
+        assert_eq!(
+            app.world().resource::<ResolvedServerAddressForPrefs>().0,
+            lobby_address
+        );
+        app.world_mut().write_message(SessionUiCommand::LeaveMatch);
+        app.update();
+        assert_eq!(
+            app.world().resource::<ClientSession>().server_addr_display,
+            lobby_address
+        );
+        assert!(!app.world().resource::<ClientSession>().ephemeral_endpoint);
+        assert!(
+            !app.world()
+                .resource::<crate::match_service::MatchServiceClient>()
+                .active
+        );
+        assert_eq!(
+            app.world().resource::<ResolvedServerAddressForPrefs>().0,
+            lobby_address
+        );
+    }
+
+    #[test]
     fn old_framed_server_reports_protocol_mismatch_and_stops_automatic_reconnect() {
         let server = UdpSocket::bind("127.0.0.1:0").unwrap();
         server
@@ -4770,7 +4988,13 @@ mod connection_ui_tests {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
         let (signals_tx, signals_rx) = crossbeam_channel::unbounded();
         let worker = std::thread::spawn(move || {
-            run_udp_client(server_addr, outgoing_rx, incoming_tx, signals_tx);
+            run_udp_client(
+                server_addr,
+                outgoing_rx,
+                incoming_tx,
+                signals_tx,
+                Default::default(),
+            );
         });
         let mut packet = [0_u8; 1200];
         let (length, client_addr) = server.recv_from(&mut packet).unwrap();
@@ -4809,6 +5033,7 @@ mod connection_ui_tests {
         signals_tx.send(signal).unwrap();
         let mut app = App::new();
         app.insert_resource(NetworkChannels {
+            gameplay_signer: Default::default(),
             outgoing,
             incoming,
             signals,

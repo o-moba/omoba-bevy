@@ -871,3 +871,268 @@ async fn career_store_social_reverse_requests_idempotent_actions_and_cross_owner
     }
     f.close().await;
 }
+
+fn public_casual(a: &ProfileSummary, b: &ProfileSummary, n: u64) -> MatchResult {
+    let mut game = result(a, b, n);
+    game.map_profile = shared::map::ResolvedMap::default().map_profile;
+    game.ruleset = PUBLIC_CASUAL_RULESET.into();
+    game.rated = false;
+    game.unrated_reason = Some("allocated_bots".into());
+    for player_id in 3..=10 {
+        let mut bot = participant(
+            a,
+            player_id,
+            if player_id % 2 == 1 {
+                Team::Green
+            } else {
+                Team::Blue
+            },
+        );
+        bot.is_bot = true;
+        bot.profile_id = None;
+        bot.nickname = format!("Bot-{player_id}");
+        game.participants.push(bot);
+    }
+    game
+}
+
+#[test]
+fn career_store_public_casual_policy_requires_frozen_authenticated_default_roster() {
+    let a = ProfileSummary::new("a".repeat(64), "Player-A".into());
+    let b = ProfileSummary::new("b".repeat(64), "Player-B".into());
+    let game = public_casual(&a, &b, 1);
+    assert!(normalize(starting(&game)).is_ok());
+    assert!(normalize_terminal(game.clone()).is_ok());
+    assert!(!roster_can_grow(&game));
+    for bad in 0..7 {
+        let mut invalid = game.clone();
+        match bad {
+            0 => invalid.rated = true,
+            1 => invalid.unrated_reason = Some("development".into()),
+            2 => invalid.map_profile = "custom".into(),
+            3 => invalid.participants.truncate(9),
+            4 => invalid.participants[0].profile_id = None,
+            5 => invalid.participants[2].profile_id = Some("c".repeat(64)),
+            6 => invalid.participants[2].team = Team::Blue,
+            _ => unreachable!(),
+        }
+        assert!(
+            normalize_terminal(invalid).is_err(),
+            "invalid variant {bad}"
+        );
+    }
+    let mut recovered = game.clone();
+    recovered.outcome = MatchOutcome::Interrupted;
+    recovered.winner = None;
+    recovered.unrated_reason = Some("server_interrupted".into());
+    assert!(normalize_terminal(recovered).is_ok());
+    let mut extra = game.clone();
+    extra.participants.push(participant(&a, 11, Team::Green));
+    assert!(same_allocation(&starting(&game), &starting(&extra), roster_can_grow(&game)).is_err());
+    assert_eq!(pool_connections(Some("match")), 1);
+    assert_eq!(pool_connections(Some("lobby")), 4);
+    assert_eq!(pool_connections(None), 4);
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn career_store_public_casual_progression_is_idempotent_and_survives_reopen() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let game = public_casual(&a, &b, 1);
+    f.store.start(starting(&game)).await.unwrap();
+    let (first, duplicate) =
+        tokio::join!(f.store.settle(game.clone()), f.store.settle(game.clone()));
+    let saved = first.unwrap();
+    assert_eq!(saved, duplicate.unwrap());
+    assert!(saved.saved && !saved.rated);
+    assert!(saved.participants.iter().all(|p| p.rating.is_none()));
+    assert_eq!(saved.participants[0].progression_xp_gained, 50);
+    assert_eq!(saved.participants[1].progression_xp_gained, 25);
+    assert!(
+        saved.participants.iter().filter(|p| p.is_bot).all(|p| {
+            p.profile_id.is_none() && p.progression_xp_gained == 0 && p.rating.is_none()
+        })
+    );
+    let winner = f.store.profile(&a.profile_id).await.unwrap();
+    let loser = f.store.profile(&b.profile_id).await.unwrap();
+    assert_eq!(
+        (
+            winner.rating,
+            winner.rated_matches,
+            winner.matches_played,
+            winner.wins,
+            winner.losses,
+            winner.progression_xp
+        ),
+        (a.rating, 0, 1, 1, 0, 50)
+    );
+    assert_eq!(
+        (
+            loser.rating,
+            loser.rated_matches,
+            loser.matches_played,
+            loser.wins,
+            loser.losses,
+            loser.progression_xp
+        ),
+        (b.rating, 0, 1, 0, 1, 25)
+    );
+    // Close the original pool, then construct a runtime owner on new connections:
+    // history and idempotency must come from PostgreSQL, not process memory.
+    f.store.pool.close().await;
+    let schema = f.schema.clone();
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .after_connect(move |connection, _| {
+            let schema = schema.clone();
+            Box::pin(async move {
+                sqlx::query(&format!("SET search_path TO {schema}"))
+                    .execute(connection)
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect(&std::env::var("OMOBA_TEST_DATABASE_URL").unwrap())
+        .await
+        .unwrap();
+    let reopened = CareerStore::runtime_from_pool(pool).await.unwrap();
+    assert_eq!(reopened.settle(game).await.unwrap(), saved);
+    assert_eq!(reopened.profile(&a.profile_id).await.unwrap(), winner);
+    assert_eq!(reopened.profile(&b.profile_id).await.unwrap(), loser);
+    for profile in [&a, &b] {
+        let (history, next) = reopened.history(&profile.profile_id, None).await.unwrap();
+        assert_eq!(history.len(), 1);
+        assert!(next.is_none());
+        assert_eq!(history[0].result_id, saved.result_id);
+        assert_eq!(
+            reopened
+                .detail(&profile.profile_id, &saved.result_id)
+                .await
+                .unwrap(),
+            saved
+        );
+    }
+    let active: i64 = sqlx::query_scalar("SELECT count(*) FROM career_active_profiles")
+        .fetch_one(&reopened.pool)
+        .await
+        .unwrap();
+    assert_eq!(active, 0);
+    reopened.pool.close().await;
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn career_store_interrupted_custom_and_development_never_grant_casual_xp() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let interrupted = public_casual(&a, &b, 1);
+    f.store.start(starting(&interrupted)).await.unwrap();
+    f.expire(&interrupted.result_id).await;
+    let recovered = f.another_owner().await.recover_expired().await.unwrap();
+    assert_eq!(recovered.len(), 1);
+    assert_eq!(recovered[0].outcome, MatchOutcome::Interrupted);
+    assert!(
+        recovered[0]
+            .participants
+            .iter()
+            .all(|p| p.progression_xp_gained == 0 && p.rating.is_none())
+    );
+    for (number, ruleset, reason) in [
+        (2, "custom-unrated-v1", "custom"),
+        (3, RULESET, "development"),
+        (4, "practice-bots-v1", "practice"),
+    ] {
+        let mut game = public_casual(&a, &b, number);
+        game.ruleset = ruleset.into();
+        game.unrated_reason = Some(reason.into());
+        f.store.start(starting(&game)).await.unwrap();
+        let saved = f.store.settle(game).await.unwrap();
+        assert!(
+            saved
+                .participants
+                .iter()
+                .all(|p| p.progression_xp_gained == 0 && p.rating.is_none())
+        );
+    }
+    for profile in [&a, &b] {
+        let current = f.store.profile(&profile.profile_id).await.unwrap();
+        assert_eq!(
+            (
+                current.rating,
+                current.rated_matches,
+                current.progression_xp
+            ),
+            (profile.rating, 0, 0)
+        );
+        assert_eq!(current.matches_played, 4);
+        assert_eq!(
+            f.store
+                .history(&profile.profile_id, None)
+                .await
+                .unwrap()
+                .0
+                .len(),
+            4
+        );
+    }
+    f.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn career_store_public_worker_recovery_does_not_settle_another_epoch() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    let c = f.profile(3).await;
+    let d = f.profile(4).await;
+    let first = result(&a, &b, 1);
+    let mut other = result(&c, &d, 2);
+    other.server_epoch = u64::MAX - 1;
+    f.store.start(starting(&first)).await.unwrap();
+    f.store.start(starting(&other)).await.unwrap();
+    f.expire(&first.result_id).await;
+    f.expire(&other.result_id).await;
+    let recovery = f.another_owner().await;
+    assert!(recovery.recover_expired_for_epoch(0).await.is_err());
+    let recovered = recovery
+        .recover_expired_for_epoch(first.server_epoch)
+        .await
+        .unwrap();
+    assert_eq!(recovered.len(), 1);
+    assert_eq!(recovered[0].result_id, first.result_id);
+    assert_eq!(recovered[0].outcome, MatchOutcome::Interrupted);
+    assert!(
+        recovery
+            .settled_result(&other.result_id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(recovery.profile(&c.profile_id).await.unwrap(), c);
+    let state: String = sqlx::query_scalar("SELECT status FROM career_matches WHERE result_id=$1")
+        .bind(&other.result_id)
+        .fetch_one(&recovery.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        state, "running",
+        "another worker's local terminal outbox can still be replayed"
+    );
+    recovery.adopt_expired(&other.result_id).await.unwrap();
+    let saved = recovery.settle(other).await.unwrap();
+    assert_eq!(saved.outcome, MatchOutcome::Completed);
+    assert_eq!(saved.participants[0].progression_xp_gained, 150);
+    assert!(
+        recovery
+            .recover_expired_for_epoch(first.server_epoch)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    f.close().await;
+}
