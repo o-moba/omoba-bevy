@@ -240,12 +240,22 @@ fn update_quick_buy(
 ) {
     for (name, mut node) in &mut roots {
         if name.as_str() == "QuickBuyHud" {
-            let (left, top, gap) = mobile
-                .as_ref()
-                .filter(|m| m.enabled)
-                .map_or((16.0, 168.0, 6.0), |m| {
-                    (m.safe.left, m.safe.top + 122.0 * m.scale(), 4.0)
-                });
+            let (left, top, gap) =
+                mobile
+                    .as_ref()
+                    .filter(|m| m.enabled)
+                    .map_or((16.0, 168.0, 6.0), |m| {
+                        (
+                            m.safe.left,
+                            m.safe.top
+                                + if m.viewport.y <= 340.0 {
+                                    102.0
+                                } else {
+                                    122.0 * m.scale()
+                                },
+                            4.0,
+                        )
+                    });
             node.left = Val::Px(left);
             node.top = Val::Px(top);
             node.column_gap = Val::Px(gap);

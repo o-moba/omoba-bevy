@@ -127,6 +127,7 @@ pub enum ClientPacket {
         slot: u8,
     },
     Join {
+        prematch: bool,
         team: Team,
         character: Character,
         hero_class: HeroClass,
@@ -134,6 +135,9 @@ pub enum ClientPacket {
         #[serde(default)]
         sprite_character: Option<String>,
         session_id: Option<String>,
+    },
+    Prematch {
+        request: shared::prematch::PrematchRequest,
     },
     Ping,
     SetGodMode {
@@ -391,6 +395,8 @@ pub enum ServerPacket {
         players: Vec<PlayerState>,
         #[serde(default)]
         scoreboard: Option<shared::live_score::LiveScoreboard>,
+        #[serde(default)]
+        prematch: Option<shared::prematch::PrematchSnapshot>,
         /// Alive (non-respawn-gated) jungle neutrals, including raid bosses.
         #[serde(default)]
         neutrals: Vec<NeutralState>,
@@ -410,6 +416,11 @@ pub enum ServerPacket {
 }
 
 impl ServerPacket {
+    pub fn prematch(&self) -> Option<&shared::prematch::PrematchSnapshot> {
+        match self {
+            Self::Snapshot { prematch, .. } => prematch.as_ref(),
+        }
+    }
     pub fn scoreboard(&self) -> Option<&shared::live_score::LiveScoreboard> {
         match self {
             Self::Snapshot { scoreboard, .. } => scoreboard.as_ref(),

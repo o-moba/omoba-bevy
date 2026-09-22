@@ -500,9 +500,19 @@ fn adapt_phone_layout(
             }
             "ClassSelectTitle" => absolute(&mut node, left, top + 7.0, class_width, None),
             "ClassButtonsRow" => {
-                absolute(&mut node, left, top + 36.0, class_width, None);
+                absolute(
+                    &mut node,
+                    left,
+                    top + if mobile.viewport.y <= 340.0 {
+                        30.0
+                    } else {
+                        36.0
+                    },
+                    class_width,
+                    None,
+                );
                 node.flex_direction = FlexDirection::Column;
-                node.row_gap = Val::Px(6.0);
+                node.row_gap = Val::Px(if mobile.viewport.y <= 340.0 { 4.0 } else { 6.0 });
             }
             "AvatarSelectTitle" => {
                 absolute(&mut node, grid_left, top + 7.0, grid_width - 220.0, None)
@@ -537,15 +547,15 @@ fn adapt_phone_layout(
                 );
                 node.column_gap = Val::Px(10.0);
             }
-            "TeamGreenButton" | "TeamBlueButton" => {
-                node.width = Val::Px((grid_width - 10.0) * 0.5);
+            "FindMatchButton" => {
+                node.width = Val::Px(grid_width);
                 node.height = Val::Px(44.0);
             }
             // The hint starts beside the Back button, not under it.
             "TeamSelectHint" => absolute(
                 &mut node,
                 grid_left,
-                mobile.viewport.y - bottom - 17.0,
+                mobile.viewport.y - bottom - 20.0,
                 grid_width,
                 None,
             ),
@@ -711,7 +721,10 @@ fn adapt_phone_layout(
     for (name, mut text) in &mut copy {
         match name.as_str() {
             "RendererStatus" => text.0 = "Swipe to choose your hero".into(),
-            "TeamSelectHint" => text.0 = "Choose your class and hero, then join a team. Teams balance automatically.".into(),
+            "ClassSelectTitle" => text.0 = "01  CLASS".into(),
+            "AvatarSelectTitle" => text.0 = "02  HERO".into(),
+            "TeamSelectTitle" => text.0 = "03  MATCH".into(),
+            "TeamSelectHint" => text.0 = "Your team and side are assigned automatically.".into(),
 
             "ShopCloseLabel" => text.0 = "CLOSE".into(),
             "ShopSummary" => text.0 = text.0.replace("click an item", "tap an item"),

@@ -13,6 +13,7 @@ fn addr(port: u16) -> SocketAddr {
 
 fn join(session: &str, team: Team) -> ClientPacket {
     ClientPacket::Join {
+        prematch: false,
         team,
         character: CharacterChoice::Ipfs,
         hero_class: HeroClass::default(),

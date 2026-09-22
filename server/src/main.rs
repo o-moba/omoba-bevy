@@ -22,6 +22,7 @@ mod neutrals;
 mod passport_admission;
 #[cfg(test)]
 mod practice_tests;
+mod prematch;
 mod progression;
 #[cfg(test)]
 mod release_tests;
@@ -121,6 +122,8 @@ enum ClientPacket {
         request_id: u64,
     },
     Join {
+        #[serde(default)]
+        prematch: bool,
         team: Team,
         #[serde(default = "default_character_choice")]
         character: CharacterChoice,
@@ -137,6 +140,9 @@ enum ClientPacket {
         session_id: Option<String>,
         #[serde(default)]
         passport_ticket: Option<String>,
+    },
+    Prematch {
+        request: shared::prematch::PrematchRequest,
     },
     Ping,
     RequestRematch,
@@ -545,6 +551,8 @@ enum ServerPacket {
         players: Vec<PlayerState>,
         #[serde(default)]
         scoreboard: Option<shared::live_score::LiveScoreboard>,
+        #[serde(default)]
+        prematch: Option<shared::prematch::PrematchSnapshot>,
         projectiles: Vec<ProjectileState>,
         #[serde(default)]
         combat_events: Vec<CombatEvent>,
@@ -919,6 +927,7 @@ struct ConnectedPlayer {
     state: PlayerState,
     career_profile: Option<shared::career::ProfileSummary>,
     career_capable: bool,
+    draft: prematch::DraftState,
     /// False until the endpoint sends a `Join` packet. Pre-join endpoints are
     /// kept for addressing (snapshots are still sent to them) but are excluded
     /// from the replicated player list and from all gameplay simulation.
@@ -1088,6 +1097,7 @@ impl RateLimitedDiagnostic {
 
 #[derive(Resource)]
 struct ServerRuntime {
+    prematch: prematch::PrematchRuntime,
     social: social::SocialRuntime,
     bots: bots::BotControllers,
     career: career_runtime::CareerRuntime,
@@ -1149,6 +1159,7 @@ impl ServerRuntime {
             .as_nanos() as u64
             | 1;
         Self {
+            prematch: prematch::PrematchRuntime::default(),
             bots: bots::BotControllers::default(),
             social: social::SocialRuntime::default(),
             career: career_runtime::CareerRuntime::new(server_epoch),
@@ -1189,6 +1200,15 @@ impl ServerRuntime {
 
     fn receive_packets(&mut self) {
         for completion in self.passport_admissions.completed() {
+            if let ClientPacket::Prematch { request } = completion.packet {
+                self.complete_prematch_admission(
+                    completion.addr,
+                    request,
+                    completion.allowed,
+                    Instant::now(),
+                );
+                continue;
+            }
             // Approval cannot change an already admitted loadout. A timed-out
             // endpoint is required to reconnect rather than resurrected here.
             if completion.allowed
@@ -1255,6 +1275,10 @@ impl ServerRuntime {
             return;
         }
         self.career.backend.touch(addr);
+        if let ClientPacket::Prematch { request } = packet {
+            self.handle_prematch(addr, request, now);
+            return;
+        }
         if matches!(&packet, ClientPacket::Join { .. })
             && !self.players.get(&addr).is_some_and(|player| player.joined)
         {
@@ -1379,6 +1403,7 @@ impl ServerRuntime {
             ClientPacket::Career { .. } | ClientPacket::Social { .. } => {
                 unreachable!("handled before gameplay admission")
             }
+            ClientPacket::Prematch { .. } => unreachable!("handled before gameplay admission"),
             ClientPacket::Leave => unreachable!("handled before the gameplay match"),
             ClientPacket::Hello { protocol_version } => {
                 ensure_player_connected(players, map_layout, addr, next_player_id, now);
@@ -1472,6 +1497,7 @@ impl ServerRuntime {
                 );
             }
             ClientPacket::Join {
+                prematch,
                 team,
                 character,
                 hero_class,
@@ -1517,6 +1543,11 @@ impl ServerRuntime {
                 // (rejoining players keep their original team).
                 let assigned_team = match match_config.mode {
                     MatchMode::Practice => bots::assign_human_team(players, match_config.team_size),
+                    MatchMode::Dev if prematch => assign_reserved_release_team(
+                        players,
+                        disconnected_sessions,
+                        match_config.team_size,
+                    ),
                     MatchMode::Dev => (joined_count(players)
                         + (disconnected_sessions.len() as u32)
                         < match_config.roster_size())
@@ -1554,6 +1585,7 @@ impl ServerRuntime {
                 }
                 if let Some(player) = players.get_mut(&addr) {
                     player.join_error = None;
+                    player.draft.capable = prematch;
                     handle_join_request_with_sprite(
                         player,
                         assigned_team,
@@ -1568,7 +1600,16 @@ impl ServerRuntime {
                 if *targeting_qa {
                     targeting_qa::place_initial_join(players, addr);
                 }
-                advance_formation_on_join(game_state, players, neutrals, *match_config, now);
+                if players.values().any(|p| p.joined && p.draft.capable)
+                    && self.match_started_at.is_none()
+                {
+                    *game_state = GameState::Forming {
+                        ready: joined_count(players),
+                        needed: match_config.roster_size(),
+                    };
+                } else {
+                    advance_formation_on_join(game_state, players, neutrals, *match_config, now);
+                }
             }
             ClientPacket::Ping => {
                 ensure_player_connected(players, map_layout, addr, next_player_id, now);
@@ -1654,6 +1695,7 @@ impl ServerRuntime {
             }
         }
         self.fill_practice_bots(now);
+        self.tick_prematch(now);
         self.track_round_start(now);
         self.register_career_participant(addr);
     }
@@ -1688,14 +1730,16 @@ impl ServerRuntime {
             self.restart_round(now);
         }
         self.advance_career_queue(now);
-        tick_match_formation(
-            &mut self.game_state,
-            &self.players,
-            &mut self.neutrals,
-            self.match_config,
-            dt,
-            now,
-        );
+        if !self.tick_prematch(now) {
+            tick_match_formation(
+                &mut self.game_state,
+                &self.players,
+                &mut self.neutrals,
+                self.match_config,
+                dt,
+                now,
+            );
+        }
         self.track_round_start(now);
         self.simulate_bots(now, dt);
         let career_flow = self.career_flow_active();
@@ -1873,6 +1917,13 @@ impl ServerRuntime {
                     your_id: player.state.id,
                     players: players_snapshot.clone(),
                     scoreboard: scoreboard.clone(),
+                    prematch: prematch::snapshot(
+                        &self.prematch,
+                        players,
+                        player,
+                        self.match_config,
+                        now,
+                    ),
                     projectiles: projectiles_snapshot.clone(),
                     combat_events: combat_log.snapshot(now),
                     structures: structures_snapshot.clone(),
@@ -3546,6 +3597,7 @@ mod tests {
             your_id: 1,
             players: Vec::new(),
             scoreboard: None,
+            prematch: None,
             projectiles: Vec::new(),
             combat_events: Vec::new(),
             structures: Vec::new(),
@@ -3591,6 +3643,7 @@ mod tests {
             your_id: player.state.id,
             players: build_players_snapshot(&players),
             scoreboard: None,
+            prematch: None,
             projectiles: Vec::new(),
             combat_events: Vec::new(),
             structures: Vec::new(),

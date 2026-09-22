@@ -12,6 +12,7 @@ fn fixture() -> (ServerRuntime, SocketAddr, SocketAddr, TargetId, Instant) {
         runtime.handle_packet(
             addr,
             ClientPacket::Join {
+                prematch: false,
                 team,
                 character: CharacterChoice::Ipfs,
                 hero_class: HeroClass::Warrior,
@@ -311,6 +312,7 @@ fn actual_udp_receiver_accepts_the_basic_wire_contract_once() {
     rt.handle_packet(
         addr,
         ClientPacket::Join {
+            prematch: false,
             team: Team::Green,
             character: CharacterChoice::Ipfs,
             hero_class: HeroClass::Warrior,

@@ -9,6 +9,7 @@ fn fixture() -> (ServerRuntime, SocketAddr, Instant) {
     rt.handle_packet(
         addr,
         ClientPacket::Join {
+            prematch: false,
             team: Team::Green,
             character: CharacterChoice::Cube,
             hero_class: HeroClass::Warrior,

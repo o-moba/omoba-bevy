@@ -243,7 +243,9 @@ pub fn library_avatars() -> Vec<&'static shared::AvatarDefinition> {
     };
     shared::store_avatars()
         .into_iter()
-        .filter(|avatar| avatar.free && session.has(&avatar.slug))
+        .filter(|avatar| {
+            store::free_access(&avatar.slug).unwrap_or(avatar.free) && session.has(&avatar.slug)
+        })
         .collect()
 }
 
@@ -310,7 +312,9 @@ pub fn default_avatars() -> Vec<&'static shared::AvatarDefinition> {
 pub fn purchased_avatars() -> Vec<&'static shared::AvatarDefinition> {
     shared::store_avatars()
         .into_iter()
-        .filter(|avatar| !avatar.free && can_select(avatar))
+        .filter(|avatar| {
+            !store::free_access(&avatar.slug).unwrap_or(avatar.free) && can_select(avatar)
+        })
         .collect()
 }
 
@@ -323,17 +327,10 @@ pub fn community_avatars() -> Vec<&'static shared::AvatarDefinition> {
         .collect();
     shared::store_avatars()
         .into_iter()
-        .filter(|avatar| avatar.free && !mine.contains(&avatar.slug))
+        .filter(|avatar| {
+            store::free_access(&avatar.slug).unwrap_or(avatar.free) && !mine.contains(&avatar.slug)
+        })
         .collect()
-}
-
-/// Empty-state copy for the purchased section.
-pub fn purchased_hint() -> &'static str {
-    if SESSION.get().is_some() {
-        "No Ekza avatars approved for Omoba in this wallet yet · buy one on avatar.ekza.io"
-    } else {
-        "Connect your Ekza wallet to wear avatars you own"
-    }
 }
 
 /// Asset path of an avatar thumbnail, wherever its file lives.
@@ -347,7 +344,7 @@ pub fn thumbnail_asset_path(avatar: &shared::AvatarDefinition) -> Option<String>
 }
 
 pub fn can_select(avatar: &shared::AvatarDefinition) -> bool {
-    avatar.free
+    store::free_access(&avatar.slug).unwrap_or(avatar.free)
         || avatar.passport.as_ref().is_none_or(|protected| {
             SESSION
                 .get()
@@ -362,7 +359,7 @@ pub fn ticket_for_slug(slug: Option<&str>, session_id: &str) -> TicketPoll {
     let Some(protected) = &avatar.passport else {
         return TicketPoll::Free;
     };
-    if avatar.free {
+    if store::free_access(&avatar.slug).unwrap_or(avatar.free) {
         // No ownership to prove. The model installs on first use like any store
         // avatar another player wears.
         return TicketPoll::Free;
@@ -402,4 +399,188 @@ pub fn ticket_for_slug(slug: Option<&str>, session_id: &str) -> TicketPoll {
         Some(Ok(ticket)) => TicketPoll::Ready(ticket.clone()),
         Some(Err(error)) => TicketPoll::Denied(error.clone()),
     }
+}
+
+/// Shared order and source labels for Collection and the pre-match picker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AvatarCatalogueSource {
+    Default,
+    Library,
+    Purchased,
+    Community,
+}
+
+impl AvatarCatalogueSource {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Default => "Included",
+            Self::Library => "Your library",
+            Self::Purchased => "Owned",
+            Self::Community => "Free · Studio",
+        }
+    }
+}
+
+pub struct AvatarCatalogueEntry {
+    pub avatar: shared::AvatarDefinition,
+    pub source: AvatarCatalogueSource,
+}
+
+pub struct AvatarCatalogue {
+    pub entries: Vec<AvatarCatalogueEntry>,
+    /// Identity/metadata/entitlement based; equal-count replacements change it.
+    pub revision: u64,
+    pub status: store::CatalogueStatus,
+}
+
+pub fn avatar_catalogue() -> AvatarCatalogue {
+    let status = store::catalogue_status();
+    let mut entries: Vec<_> = default_avatars()
+        .into_iter()
+        .map(|avatar| AvatarCatalogueEntry {
+            avatar: avatar.clone(),
+            source: AvatarCatalogueSource::Default,
+        })
+        .collect();
+    let library: Vec<_> = library_avatars()
+        .iter()
+        .map(|avatar| avatar.slug.clone())
+        .collect();
+    let community: Vec<_> = community_avatars()
+        .iter()
+        .map(|avatar| avatar.slug.clone())
+        .collect();
+    let mut studio = Vec::new();
+    for avatar in store::catalogue_definitions() {
+        let source = if library.contains(&avatar.slug) {
+            AvatarCatalogueSource::Library
+        } else if community.contains(&avatar.slug) {
+            AvatarCatalogueSource::Community
+        } else if !avatar.free && can_select(&avatar) {
+            AvatarCatalogueSource::Purchased
+        } else {
+            continue;
+        };
+        studio.push(AvatarCatalogueEntry { avatar, source });
+    }
+    let order = |source| match source {
+        AvatarCatalogueSource::Default => 0,
+        AvatarCatalogueSource::Library => 1,
+        AvatarCatalogueSource::Purchased => 2,
+        AvatarCatalogueSource::Community => 3,
+    };
+    studio.sort_by(|a, b| {
+        order(a.source)
+            .cmp(&order(b.source))
+            .then(a.avatar.display_name.cmp(&b.avatar.display_name))
+            .then(a.avatar.slug.cmp(&b.avatar.slug))
+    });
+    for entry in studio {
+        if !entries
+            .iter()
+            .any(|existing| existing.avatar.slug == entry.avatar.slug)
+        {
+            entries.push(entry);
+        }
+    }
+    let revision = catalogue_revision(&entries, &status);
+    AvatarCatalogue {
+        entries,
+        revision,
+        status,
+    }
+}
+
+fn catalogue_revision(entries: &[AvatarCatalogueEntry], status: &store::CatalogueStatus) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    status.hash(&mut hash);
+    for entry in entries {
+        entry.avatar.slug.hash(&mut hash);
+        entry.avatar.display_name.hash(&mut hash);
+        entry.avatar.thumbnail.hash(&mut hash);
+        entry.source.hash(&mut hash);
+        entry.avatar.free.hash(&mut hash);
+        entry.avatar.license.hash(&mut hash);
+        entry.avatar.author.hash(&mut hash);
+        can_select(&entry.avatar).hash(&mut hash);
+    }
+    hash.finish()
+}
+
+pub fn refresh_avatar_catalogue() {
+    store::request_user_refresh();
+}
+
+#[cfg(test)]
+mod catalogue_tests {
+    use super::*;
+
+    #[test]
+    fn same_slug_metadata_changes_invalidate_the_catalogue_snapshot() {
+        let avatar = shared::avatar_roster()[0].clone();
+        let status = store::CatalogueStatus::Ready { count: 1 };
+        let mut entries = vec![AvatarCatalogueEntry {
+            avatar,
+            source: AvatarCatalogueSource::Community,
+        }];
+        let before = catalogue_revision(&entries, &status);
+        entries[0].avatar.display_name.push_str(" revised");
+        assert_ne!(before, catalogue_revision(&entries, &status));
+        let named = catalogue_revision(&entries, &status);
+        entries[0].avatar.thumbnail = Some("changed.png".into());
+        assert_ne!(named, catalogue_revision(&entries, &status));
+        let pictured = catalogue_revision(&entries, &status);
+        entries[0].avatar.free = !entries[0].avatar.free;
+        assert_ne!(pictured, catalogue_revision(&entries, &status));
+    }
+
+    #[test]
+    fn same_count_identity_and_source_changes_invalidate_catalogue() {
+        let roster = shared::avatar_roster();
+        assert!(roster.len() > 1);
+        let make = |index: usize, source| {
+            vec![AvatarCatalogueEntry {
+                avatar: roster[index].clone(),
+                source,
+            }]
+        };
+        let status = store::CatalogueStatus::Ready { count: 1 };
+        let first = catalogue_revision(&make(0, AvatarCatalogueSource::Default), &status);
+        assert_ne!(
+            first,
+            catalogue_revision(&make(1, AvatarCatalogueSource::Default), &status)
+        );
+        assert_ne!(
+            first,
+            catalogue_revision(&make(0, AvatarCatalogueSource::Library), &status)
+        );
+    }
+}
+
+/// Collection-facing connection status: no transport diagnostics or credentials.
+pub fn avatar_account_status_line() -> String {
+    if ACCOUNT_FLOW
+        .lock()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|flow| matches!(flow.state(), PairingState::Failed(_)))
+    {
+        "Ekza account is unavailable · connect again to retry".into()
+    } else {
+        account_status_line()
+    }
+}
+
+/// Current menu copy without rewriting the immutable model/approval identity.
+pub fn avatar_display_name(slug: Option<&str>) -> String {
+    let Some(slug) = slug else {
+        return "Default avatar".into();
+    };
+    store::catalogue_definitions()
+        .into_iter()
+        .find(|avatar| avatar.slug == slug)
+        .map(|avatar| avatar.display_name)
+        .or_else(|| shared::avatar_definition(slug).map(|avatar| avatar.display_name.clone()))
+        .unwrap_or_else(|| "Default avatar".into())
 }

@@ -1,6 +1,29 @@
 # Feature Inventory
 
-Canonical version: `0.21.0-rc.3`
+Canonical version: `0.21.0-rc.4`
+
+## Team draft and shared loading
+
+Normal Find match assigns a team and map side automatically. Each assigned team
+can inspect accepted avatar/class choices, choose an intended Solo, Jungle, Mid,
+Carry or Support role, and lock or unlock its choice. Duplicate and composition
+warnings inform the team without banning the overlap needed with four classes
+and five-player teams. The roster scrolls for larger configured teams.
+
+All required human players lock before the shared three-second countdown. The
+loading screen retains the frozen roster and shows actual readiness. A client
+acknowledges only after map and final avatar dependencies load; the server waits
+for every required participant and the durable career-start acknowledgment.
+Thirty-second loading timeout returns the team to draft with retry/leave controls.
+Requests bind epoch, match, generation and sequence; reconnect retains accepted
+choices and a running match bypasses the draft. Legacy clients remain opt-out.
+
+Collection opens facing forward without automatic rotation. Pointer and touch
+drags own their gesture and rotate naturally. The avatar catalogue lists defaults
+first, then approved Studio, saved and purchased entries with loading, empty,
+cached and unavailable states. Refresh preserves selection and scroll. SDK
+hash/size/humanoid and paid-ownership checks remain mandatory. A temporary v2
+catalogue failure retains cache; only404 enables legacy feed fallback.
 
 ## Compact match HUD and utility actions
 
@@ -9,7 +32,7 @@ two unowned recommended quick purchases below it. Tapping gold opens the full sh
 which also shows equipment. Quick purchases use the existing base, price, life,
 inventory, request/retry and server-receipt rules.
 
-Phone movement stays at lower left; the lower-right fan holds main attack, explicit
+Phone movement stays at lower left; the lower-right circle places main attack at its center, surrounded by explicit
 minion/structure targeting, four skill circles with segmented rank indicators, and
 dash/haste utilities. One upgrade-mode control turns eligible skill circles into
 full-size upgrade targets. Desktop retains the four centered bottom skill cards.

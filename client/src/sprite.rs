@@ -99,6 +99,13 @@ pub struct PlayerSpriteVisual {
     pending_action: Option<SpriteAnimationState>,
 }
 
+impl PlayerSpriteVisual {
+    /// Authoritative hero whose selected sprite this rendered proxy represents.
+    pub(crate) fn owner(&self) -> Entity {
+        self.owner
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SpriteAnimationState {
     Idle,

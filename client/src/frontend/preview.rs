@@ -40,6 +40,8 @@ pub enum PreviewStatus {
     /// The model (or its animations) is still loading.
     Loading,
     Ready,
+    /// The selected SDK model could not be downloaded or validated.
+    Unavailable,
     /// The model rendered but carries no animation clips.
     NoAnimations,
 }
@@ -61,6 +63,7 @@ pub struct AvatarPreview {
     pub selected: usize,
     pub status: PreviewStatus,
     spawned_slug: Option<String>,
+    spawned_store_state: Option<omoba_passport::store::ModelState>,
     pivot: Option<Entity>,
     model: Option<Entity>,
     player: Option<Entity>,
@@ -73,8 +76,7 @@ pub struct AvatarPreview {
 }
 
 impl AvatarPreview {
-    /// Shows `slug` standing still and facing the camera. Screens that want the
-    /// turntable (the collection) switch `auto_spin` back on.
+    /// Shows `slug` standing still and facing the camera.
     pub fn show_portrait(&mut self, slug: &str) {
         self.show(slug);
         self.auto_spin = false;
@@ -87,7 +89,8 @@ impl AvatarPreview {
             return;
         }
         self.slug = Some(slug.to_owned());
-        self.yaw = 0.0;
+        self.yaw = std::f32::consts::PI;
+        self.auto_spin = false;
     }
 
     pub fn selected_clip(&self) -> Option<&PreviewClip> {
@@ -131,12 +134,13 @@ impl FromWorld for AvatarPreview {
         Self {
             image,
             slug: None,
-            yaw: 0.0,
-            auto_spin: true,
+            yaw: std::f32::consts::PI,
+            auto_spin: false,
             clips: Vec::new(),
             selected: 0,
             status: PreviewStatus::Empty,
             spawned_slug: None,
+            spawned_store_state: None,
             pivot: None,
             model: None,
             player: None,
@@ -224,9 +228,28 @@ fn sync_preview_model(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut pedestal: Local<Option<(Handle<Mesh>, Handle<StandardMaterial>)>>,
 ) {
-    if preview.slug == preview.spawned_slug {
+    // Poll independently: draining take_changed here would steal updates from
+    // the in-match renderer. A Ready transition replaces the loading preview.
+    let store_state = preview.slug.as_deref().and_then(|slug| {
+        if omoba_passport::store::knows(slug) {
+            Some(omoba_passport::store::model_state(slug))
+        } else if preview.slug == preview.spawned_slug && preview.spawned_store_state.is_some() {
+            // A successful catalogue refresh removed this SDK entry. Never
+            // relabel a built-in fallback as the selected downloaded model.
+            Some(omoba_passport::store::ModelState::Unavailable)
+        } else {
+            None
+        }
+    });
+    if !preview_model_changed(
+        &preview.slug,
+        &preview.spawned_slug,
+        &store_state,
+        &preview.spawned_store_state,
+    ) {
         return;
     }
+    preview.spawned_store_state = store_state.clone();
     if let Some(pivot) = preview.pivot.take() {
         commands
             .entity(pivot)
@@ -247,6 +270,17 @@ fn sync_preview_model(
         preview.status = PreviewStatus::Empty;
         return;
     };
+    match store_state {
+        Some(omoba_passport::store::ModelState::Pending) => {
+            preview.status = PreviewStatus::Loading;
+            return;
+        }
+        Some(omoba_passport::store::ModelState::Unavailable) => {
+            preview.status = PreviewStatus::Unavailable;
+            return;
+        }
+        _ => {}
+    }
     let (scene, gltf) = models.resolve(crate::team::CharacterChoice::default(), Some(&slug));
     let Some(scene) = scene else {
         preview.status = PreviewStatus::Empty;
@@ -315,6 +349,15 @@ fn sync_preview_model(
     preview.status = PreviewStatus::Loading;
 }
 
+fn preview_model_changed(
+    selected: &Option<String>,
+    spawned: &Option<String>,
+    state: &Option<omoba_passport::store::ModelState>,
+    spawned_state: &Option<omoba_passport::store::ModelState>,
+) -> bool {
+    selected != spawned || state != spawned_state
+}
+
 /// glTF scene children spawn over several frames and do not inherit render
 /// layers, so every descendant is tagged as it appears.
 fn tag_preview_layers(
@@ -352,10 +395,20 @@ fn bind_preview_animations(
     mut preview: ResMut<AvatarPreview>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
     gltfs: Res<Assets<Gltf>>,
+    asset_server: Res<AssetServer>,
     children: Query<&Children>,
     mut players: Query<&mut AnimationPlayer>,
 ) {
     if preview.bound || preview.model.is_none() {
+        return;
+    }
+    if preview.gltf.as_ref().is_some_and(|handle| {
+        matches!(
+            asset_server.get_load_state(handle.id()),
+            Some(bevy::asset::LoadState::Failed(_))
+        )
+    }) {
+        preview.status = PreviewStatus::Unavailable;
         return;
     }
     let Some(gltf) = preview.gltf.clone().and_then(|handle| gltfs.get(&handle)) else {
@@ -500,6 +553,45 @@ fn release_preview_off_screen(screen: Res<State<AppScreen>>, mut preview: ResMut
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sdk_preview_refreshes_without_consuming_match_change_queue() {
+        use omoba_passport::store::ModelState;
+        let slug = Some("approved-sdk-avatar".to_string());
+        assert!(preview_model_changed(
+            &slug,
+            &slug,
+            &Some(ModelState::Ready),
+            &Some(ModelState::Pending)
+        ));
+        assert!(!preview_model_changed(
+            &slug,
+            &slug,
+            &Some(ModelState::Ready),
+            &Some(ModelState::Ready)
+        ));
+        assert!(preview_model_changed(
+            &slug,
+            &slug,
+            &Some(ModelState::Ready),
+            &None
+        ));
+    }
+
+    #[test]
+    fn avatar_selection_starts_stationary_and_facing_camera() {
+        let mut world = World::new();
+        world.init_resource::<Assets<Image>>();
+        let mut preview = AvatarPreview::from_world(&mut world);
+        preview.show("one");
+        assert_eq!(preview.yaw, std::f32::consts::PI);
+        assert!(!preview.auto_spin);
+        preview.yaw = 0.5;
+        preview.auto_spin = true;
+        preview.show("two");
+        assert_eq!(preview.yaw, std::f32::consts::PI);
+        assert!(!preview.auto_spin);
+    }
 
     #[test]
     fn clip_labels_are_readable() {

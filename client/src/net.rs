@@ -95,6 +95,7 @@ pub struct NetIncomingDisconnected(pub bool);
 /// dumping an already-joined player back onto the select screen (TASK-25).
 #[derive(Clone)]
 pub struct CommittedJoin {
+    pub prematch: bool,
     pub team: Team,
     pub character: CharacterChoice,
     pub hero_class: HeroClass,
@@ -106,6 +107,7 @@ pub struct CommittedJoin {
 impl CommittedJoin {
     pub(crate) fn for_test() -> Self {
         Self {
+            prematch: false,
             team: Team::Green,
             character: CharacterChoice::default(),
             hero_class: HeroClass::default(),
@@ -507,6 +509,13 @@ pub enum NetworkCommand {
         /// Hotbar slot index (0=Q .. 3=R).
         slot: u8,
     },
+    Prematch(shared::prematch::PrematchRequest),
+    JoinPrematch {
+        character: CharacterChoice,
+        hero_class: HeroClass,
+        avatar: Option<String>,
+        sprite_character: Option<String>,
+    },
     Join {
         team: Team,
         character: CharacterChoice,
@@ -541,6 +550,9 @@ enum ClientPacket {
     /// Deliberate leave: the server releases the seat or the queue entry now
     /// instead of holding it for a reconnect.
     Leave,
+    Prematch {
+        request: shared::prematch::PrematchRequest,
+    },
     Social {
         request: shared::social::SocialRequest,
     },
@@ -577,6 +589,8 @@ enum ClientPacket {
         request_id: u64,
     },
     Join {
+        #[serde(default)]
+        prematch: bool,
         team: Team,
         #[serde(default = "default_character_choice")]
         character: CharacterChoice,
@@ -892,6 +906,8 @@ enum ServerPacket {
         #[serde(default)]
         scoreboard: Option<shared::live_score::LiveScoreboard>,
         #[serde(default)]
+        prematch: Option<shared::prematch::PrematchSnapshot>,
+        #[serde(default)]
         projectiles: Vec<ProjectileState>,
         #[serde(default)]
         structures: Vec<StructureState>,
@@ -934,6 +950,8 @@ pub enum GameState {
 
 #[derive(Resource, Default, Clone)]
 pub struct GameStateSnapshot {
+    pub your_id: u64,
+    pub prematch: Option<shared::prematch::PrematchSnapshot>,
     pub match_mode: String,
     pub geometry_id: String,
     pub map_profile: String,
@@ -961,7 +979,10 @@ struct NetworkChannels {
 fn respawn_players_with_new_store_models(
     mut commands: Commands,
     mut network_state: ResMut<NetworkState>,
-    remote_query: Query<(Entity, &NetworkPlayerId, &NetworkAvatar), With<RemotePlayer>>,
+    remote_query: Query<
+        (Entity, &NetworkPlayerId, &NetworkAvatar),
+        Or<(With<RemotePlayer>, With<Player>)>,
+    >,
 ) {
     let changed = omoba_passport::store::take_changed();
     if changed.is_empty() {
@@ -1000,6 +1021,7 @@ struct PendingServerSnapshotFrame {
 }
 
 struct PendingSnapshotData {
+    prematch: Option<shared::prematch::PrematchSnapshot>,
     match_mode: String,
     geometry_id: String,
     map_profile: String,
@@ -1891,6 +1913,34 @@ fn send_network_commands(
                     slot: *slot,
                 });
             }
+            NetworkCommand::Prematch(request) => {
+                if client_session.admitted {
+                    let _ = channels.outgoing.send(ClientPacket::Prematch {
+                        request: request.clone(),
+                    });
+                }
+            }
+            NetworkCommand::JoinPrematch {
+                character,
+                hero_class,
+                avatar,
+                sprite_character,
+            } => {
+                if client_session.admitted {
+                    continue;
+                }
+                client_session.clear_join_attempt();
+                client_session.join_flow_committed = true;
+                client_session.last_join = Some(CommittedJoin {
+                    prematch: true,
+                    team: Team::Green,
+                    character: *character,
+                    hero_class: *hero_class,
+                    avatar: avatar.clone(),
+                    sprite_character: sprite_character.clone(),
+                });
+                send_join_attempt(&channels, &mut client_session, &client_session_id);
+            }
             NetworkCommand::Join {
                 team,
                 character,
@@ -1904,6 +1954,7 @@ fn send_network_commands(
                 client_session.clear_join_attempt();
                 client_session.join_flow_committed = true;
                 client_session.last_join = Some(CommittedJoin {
+                    prematch: false,
                     team: *team,
                     character: *character,
                     hero_class: *hero_class,
@@ -2003,6 +2054,7 @@ fn send_join_attempt(
             }
         };
     let result = channels.outgoing.send(ClientPacket::Join {
+        prematch: join.prematch,
         team: join.team,
         character: join.character,
         hero_class: join.hero_class,
@@ -2107,6 +2159,7 @@ fn ingest_server_snapshot_packets(
                     your_id,
                     players,
                     scoreboard,
+                    prematch,
                     projectiles,
                     structures,
                     minions,
@@ -2159,6 +2212,7 @@ fn ingest_server_snapshot_packets(
                         your_id,
                         players,
                         scoreboard,
+                        prematch,
                         projectiles,
                         structures,
                         minions,
@@ -2234,6 +2288,7 @@ fn apply_server_snapshot(
         game_state,
         rematch_in_secs,
         selected_team_for_spawn,
+        prematch,
     } = data;
 
     if client_session.state != ClientConnectionState::Connected {
@@ -2243,6 +2298,8 @@ fn apply_server_snapshot(
     client_session.last_qualifying_snapshot_wall = Some(snapshot_wall_time);
 
     network_state.local_id = Some(your_id);
+    game_state_snapshot.your_id = your_id;
+    game_state_snapshot.prematch = prematch;
     game_state_snapshot.match_mode = match_mode;
     game_state_snapshot.geometry_id = geometry_id;
     game_state_snapshot.map_profile = map_profile;
@@ -2253,6 +2310,49 @@ fn apply_server_snapshot(
     game_state_snapshot.combat_events = combat_events;
     game_state_snapshot.scoreboard = scoreboard;
 
+    // Reconnect uses the accepted draft loadout, never a stale pre-search choice.
+    if let Some(own) = game_state_snapshot
+        .prematch
+        .as_ref()
+        .and_then(|draft| draft.players.iter().find(|p| p.player_id == your_id))
+    {
+        team_selection.character = own.character;
+        team_selection.hero_class = own.hero_class;
+        team_selection.avatar = own.avatar.clone();
+        if let Some(sprite) = &own.sprite_character {
+            team_selection.sprite_character = sprite.clone();
+        }
+        if let Some(join) = client_session.last_join.as_mut() {
+            join.character = own.character;
+            join.hero_class = own.hero_class;
+            join.avatar = own.avatar.clone();
+            join.sprite_character = own.sprite_character.clone();
+            join.team = match own.team {
+                shared::map::Team::Green => Team::Green,
+                shared::map::Team::Blue => Team::Blue,
+            };
+        }
+    }
+    // Spawn the final roster only once frozen; redraft discards old models.
+    if game_state_snapshot
+        .prematch
+        .as_ref()
+        .is_some_and(|p| p.phase == shared::prematch::PrematchPhase::Draft)
+    {
+        for (entity, _) in &local_player_query {
+            commands
+                .entity(entity)
+                .despawn_related::<Children>()
+                .despawn();
+        }
+        for (_, entity) in network_state.remote_players.drain() {
+            commands
+                .entity(entity)
+                .despawn_related::<Children>()
+                .despawn();
+        }
+        return;
+    }
     let local_player_state = players.iter().find(|player| player.id == your_id);
     let local_players = local_player_query
         .iter()
@@ -2345,7 +2445,7 @@ fn apply_server_snapshot(
         // Snapshots list joined players only, so our presence in the list is
         // the server's join ack. The server may have assigned a different
         // team than requested (release-mode balancing) - adopt it as truth.
-        if selected_team_for_spawn.is_none() {
+        if selected_team_for_spawn.is_none() && !client_session.has_committed_join() {
             return;
         }
         if team_selection.team != Some(local_player_state.team) {
@@ -3871,6 +3971,7 @@ mod tests {
         .insert_resource(super::ClientSession {
             state: ClientConnectionState::Connected,
             last_join: Some(super::CommittedJoin {
+                prematch: false,
                 team: crate::team::Team::Green,
                 character: ekza_bevy_sdk::EkzaCharacter::Ipfs,
                 hero_class: shared::HeroClass::Warrior,
@@ -4716,6 +4817,7 @@ mod connection_ui_tests {
             state: ClientConnectionState::Connected,
             admitted: true,
             last_join: Some(CommittedJoin {
+                prematch: false,
                 team: Team::Green,
                 character: CharacterChoice::Ipfs,
                 hero_class: shared::HeroClass::Warrior,

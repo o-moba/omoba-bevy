@@ -33,6 +33,7 @@ pub(crate) fn ensure_player_connected(
         ConnectedPlayer {
             career_profile: None,
             career_capable: false,
+            draft: Default::default(),
             state: PlayerState {
                 supporter_aura: None,
                 is_bot: false,
@@ -561,6 +562,9 @@ impl ServerRuntime {
             })
             .map(|(addr, _)| *addr)
             .collect::<Vec<_>>();
+        let draft_roster_changed = expired
+            .iter()
+            .any(|addr| self.players.get(addr).is_some_and(|p| p.joined));
         for addr in expired {
             self.disconnect_career_player(addr, now);
             let player = self.players.remove(&addr).unwrap();
@@ -583,6 +587,9 @@ impl ServerRuntime {
                     );
                 }
             }
+        }
+        if draft_roster_changed {
+            self.invalidate_prematch_roster(now);
         }
         self.disconnected_sessions.retain(|_, session| {
             now.saturating_duration_since(session.disconnected_at) <= SESSION_RECLAIM_WINDOW
@@ -613,6 +620,14 @@ impl ServerRuntime {
             self.bots.clear();
         }
         self.reset_career_round();
+        self.prematch = Default::default();
+        for player in self.players.values_mut() {
+            let capable = player.draft.capable;
+            player.draft = prematch::DraftState {
+                capable,
+                ..Default::default()
+            };
+        }
         reset_match_with_map(
             &mut self.players,
             &mut self.structures,
@@ -635,7 +650,7 @@ impl ServerRuntime {
         self.empty_since = None;
         self.metrics_players.clear();
         self.metrics_objectives.clear();
-        if joined_count(&self.players) > 0 {
+        if joined_count(&self.players) > 0 && !self.prematch_required() {
             advance_formation_on_join(
                 &mut self.game_state,
                 &self.players,
@@ -645,6 +660,7 @@ impl ServerRuntime {
             );
         }
         self.fill_practice_bots(now);
+        self.tick_prematch(now);
         self.track_round_start(now);
         println!(
             "MATCH_METRIC event=round_reset epoch={} match={} connected={}",

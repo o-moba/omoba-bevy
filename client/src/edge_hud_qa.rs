@@ -1,7 +1,7 @@
 //! Opt-in presentation fixtures and production-action drivers for the edge HUD.
 //! Synthetic actors/ledger never leave the client. Purchases/utilities require
 //! authoritative receipts/acknowledgments, and are reported separately.
-use super::{BetaUiQa, measured_rect};
+use super::{BetaUiQa, clears_playfield, measured_logical_rect, measured_rect};
 use crate::{
     combat::{CombatStats, TargetState},
     input_context::{GameplayInputContext, InputContextSet},
@@ -353,7 +353,95 @@ pub(super) fn tracked(name: &str) -> bool {
                 | "MobileTowerAttack"
                 | "MobileDash"
                 | "MobileHaste"
+                | "MobileAttackCancel"
         )
+}
+
+/// Inspect actual rendered geometry, including art and expanded touch bounds.
+/// This complements the model tests and catches draw/layout scale divergence.
+pub(super) fn mobile_geometry_valid(
+    nodes: &[serde_json::Value],
+    mobile: &crate::mobile_controls::MobileControls,
+) -> bool {
+    let shown = |name: &str| {
+        nodes
+            .iter()
+            .find(|node| node["name"] == name && node["visible"] == true)
+            .and_then(measured_logical_rect)
+    };
+    let Some(attack) = shown("MobileAttack") else {
+        return false;
+    };
+    let layout = mobile.layout();
+    let scale = mobile.combat_scale();
+    if attack.center().distance(layout.attack_center) > 1.0 {
+        return false;
+    }
+    let mut circles = Vec::new();
+    for name in [
+        "MobileJoystick",
+        "MobileAttack",
+        "MobileAbility-0",
+        "MobileAbility-1",
+        "MobileAbility-2",
+        "MobileAbility-3",
+        "MobileMinionAttack",
+        "MobileTowerAttack",
+        "MobileDash",
+        "MobileHaste",
+        "MobileRankMode",
+        "MobileAttackCancel",
+    ] {
+        let Some(rect) = shown(name) else {
+            if matches!(name, "MobileRankMode" | "MobileAttackCancel") {
+                continue;
+            }
+            return false;
+        };
+        if rect.width().min(rect.height()) < 43.5 || (rect.width() - rect.height()).abs() > 1.0 {
+            return false;
+        }
+        let center = rect.center();
+        let mut radius = rect.width() * 0.5;
+        let satellite = name.starts_with("MobileAbility-")
+            || matches!(name, "MobileMinionAttack" | "MobileTowerAttack");
+        if satellite && (center.distance(attack.center()) - 92.0 * scale).abs() > 1.0 {
+            return false;
+        }
+        if let Some(slot) = name.strip_prefix("MobileAbility-") {
+            let Some(rank) = shown(&format!("MobileRankRing-{slot}")) else {
+                return false;
+            };
+            if rank.center().distance(center) > 1.0
+                || (rank.width() * 0.5 - radius - 3.0 * scale).abs() > 1.0
+            {
+                return false;
+            }
+            radius = rank.width() * 0.5;
+        } else if name == "MobileJoystick" {
+            radius *= 1.3;
+        }
+        if center.x - radius < mobile.safe.left - 1.0
+            || center.y - radius < mobile.safe.top - 1.0
+            || center.x + radius > mobile.viewport.x - mobile.safe.right + 1.0
+            || center.y + radius > mobile.viewport.y - mobile.safe.bottom + 1.0
+        {
+            return false;
+        }
+        if !clears_playfield(
+            Rect::from_center_size(center, Vec2::splat(radius * 2.0)),
+            mobile.viewport,
+            true,
+        ) {
+            return false;
+        }
+        circles.push((center, radius));
+    }
+    circles.iter().enumerate().all(|(index, (center, radius))| {
+        circles[index + 1..].iter().all(|(other, other_radius)| {
+            center.distance(*other) >= radius + other_radius + 3.5 * scale - 1.0
+        })
+    })
 }
 
 pub(super) fn validate(
@@ -414,6 +502,108 @@ pub(super) fn record(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn rendered_control_fixture(
+        mobile: &crate::mobile_controls::MobileControls,
+    ) -> Vec<serde_json::Value> {
+        let layout = mobile.layout();
+        let mut circles = vec![
+            (
+                "MobileAttack".to_owned(),
+                layout.attack_center,
+                layout.attack_radius,
+            ),
+            (
+                "MobileJoystick".to_owned(),
+                layout.joystick_center,
+                layout.joystick_radius,
+            ),
+            (
+                "MobileMinionAttack".to_owned(),
+                layout.category_centers[0],
+                layout.auxiliary_radius,
+            ),
+            (
+                "MobileTowerAttack".to_owned(),
+                layout.category_centers[1],
+                layout.auxiliary_radius,
+            ),
+            (
+                "MobileDash".to_owned(),
+                layout.utility_centers[0],
+                layout.auxiliary_radius,
+            ),
+            (
+                "MobileHaste".to_owned(),
+                layout.utility_centers[1],
+                layout.auxiliary_radius,
+            ),
+            (
+                "MobileRankMode".to_owned(),
+                layout.upgrade_center,
+                layout.upgrade_radius,
+            ),
+            (
+                "MobileAttackCancel".to_owned(),
+                layout.cancel_center,
+                layout.cancel_radius,
+            ),
+        ];
+        for slot in 0..4 {
+            circles.push((
+                format!("MobileAbility-{slot}"),
+                layout.ability_centers[slot],
+                layout.ability_radii[slot],
+            ));
+            circles.push((
+                format!("MobileRankRing-{slot}"),
+                layout.ability_centers[slot],
+                layout.ability_radii[slot] + 3.0 * mobile.combat_scale(),
+            ));
+        }
+        circles
+            .into_iter()
+            .map(|(name, center, radius)| {
+                serde_json::json!({
+                    "name":name, "visible":true,
+                    "logical_min":[center.x - radius, center.y - radius],
+                    "logical_size":[radius * 2.0, radius * 2.0],
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn rendered_radial_guard_checks_orbit_art_and_expanded_touch_bounds() {
+        for viewport in [
+            Vec2::new(693.0, 320.0),
+            Vec2::new(844.0, 390.0),
+            Vec2::new(932.0, 430.0),
+        ] {
+            let mut mobile = crate::mobile_controls::MobileControls::default();
+            mobile.viewport = viewport;
+            let nodes = rendered_control_fixture(&mobile);
+            assert!(mobile_geometry_valid(&nodes, &mobile));
+            for (name, axis, delta) in [("MobileTowerAttack", 0, 3.0), ("MobileJoystick", 1, 6.0)] {
+                let mut displaced = nodes.clone();
+                let node = displaced
+                    .iter_mut()
+                    .find(|node| node["name"] == name)
+                    .unwrap();
+                node["logical_min"][axis] =
+                    serde_json::json!(node["logical_min"][axis].as_f64().unwrap() + delta);
+                assert!(!mobile_geometry_valid(&displaced, &mobile));
+            }
+            let mut bad_ring = nodes.clone();
+            let ring = bad_ring
+                .iter_mut()
+                .find(|node| node["name"] == "MobileRankRing-0")
+                .unwrap();
+            ring["logical_size"] = serde_json::json!([30.0, 30.0]);
+            assert!(!mobile_geometry_valid(&bad_ring, &mobile));
+        }
+    }
+
     #[test]
     fn quick_buy_requires_matching_success_receipt_and_authoritative_inventory() {
         let state = EdgeQa {

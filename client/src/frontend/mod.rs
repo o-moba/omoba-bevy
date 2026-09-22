@@ -12,6 +12,7 @@
 
 pub mod card;
 pub mod collection;
+pub mod draft;
 pub mod home;
 pub mod loading;
 pub mod postmatch;
@@ -35,10 +36,12 @@ pub enum AppScreen {
     Card,
     /// Avatar collection with the 3D preview.
     Collection,
-    /// Class + avatar + side pick. Locking in sends the join/queue packet.
+    /// Initial class/avatar selection before automatic team assignment.
     HeroSelect,
     /// Matchmaking search driven by `QueueView`.
     Searching,
+    /// Shared team roster, intended roles and authoritative lock-in.
+    Draft,
     /// Match found: the map is coming up.
     Loading,
     /// Live match; the shell is out of the way.
@@ -94,6 +97,7 @@ impl Plugin for FrontendPlugin {
                 collection::CollectionScreenPlugin,
                 preview::AvatarPreviewPlugin,
                 searching::SearchingScreenPlugin,
+                draft::DraftScreenPlugin,
                 loading::LoadingScreenPlugin,
                 postmatch::PostMatchScreenPlugin,
             ));
@@ -182,6 +186,20 @@ fn drive_screen_from_session(
     if current != AppScreen::Searching {
         *uncommitted_frames = 0;
     }
+    if committed
+        && admitted
+        && let Some(prematch) = &game.prematch
+    {
+        let destination = match prematch.phase {
+            shared::prematch::PrematchPhase::Draft => AppScreen::Draft,
+            shared::prematch::PrematchPhase::Countdown
+            | shared::prematch::PrematchPhase::Loading => AppScreen::Loading,
+        };
+        if current != destination {
+            next.set(destination);
+        }
+        return;
+    }
     match current {
         AppScreen::Searching => {
             if session.join_blocked() {
@@ -213,7 +231,7 @@ fn drive_screen_from_session(
                 }
             }
         }
-        AppScreen::Loading => {
+        AppScreen::Draft | AppScreen::Loading => {
             if !committed && !admitted {
                 next.set(AppScreen::Home);
             } else if in_world && matches!(game.state, GameState::Running) {
@@ -284,7 +302,9 @@ fn scale_menus_to_the_window(
             || career.as_ref().is_some_and(|state| state.modal_open())
             || server.as_ref().is_some_and(|state| state.open)
             || help.as_ref().is_some_and(|state| state.0));
-    let wanted = if screen.get().is_menu() && !phone_picker {
+    // Draft/loading have their own real-pixel compact layout and 44px controls.
+    let shared_prematch = matches!(screen.get(), AppScreen::Draft | AppScreen::Loading);
+    let wanted = if screen.get().is_menu() && !phone_picker && !shared_prematch {
         menu_scale(window.resolution.height())
     } else {
         1.0
@@ -331,6 +351,7 @@ mod tests {
             AppScreen::Collection,
             AppScreen::HeroSelect,
             AppScreen::Searching,
+            AppScreen::Draft,
             AppScreen::Loading,
         ] {
             assert!(screen.is_menu(), "{screen:?} must hide the world");
@@ -524,6 +545,52 @@ mod tests {
         };
         settle(&mut app);
         assert_eq!(screen(&app), AppScreen::PostMatch);
+    }
+
+    #[test]
+    fn authoritative_draft_countdown_loading_and_timeout_drive_shared_screens() {
+        use shared::prematch::{PrematchPhase, PrematchSnapshot};
+        let mut app = driver_app();
+        app.world_mut().resource_mut::<GameStateSnapshot>().prematch = Some(PrematchSnapshot {
+            generation: 1,
+            phase: PrematchPhase::Draft,
+            remaining_ms: 0,
+            needed: 2,
+            players: Vec::new(),
+            last_request_id: 0,
+            error: None,
+        });
+        enter(
+            &mut app,
+            AppScreen::Searching,
+            ClientSession::admitted_for_test(),
+        );
+        settle(&mut app);
+        assert_eq!(screen(&app), AppScreen::Draft);
+        for phase in [PrematchPhase::Countdown, PrematchPhase::Loading] {
+            app.world_mut()
+                .resource_mut::<GameStateSnapshot>()
+                .prematch
+                .as_mut()
+                .unwrap()
+                .phase = phase;
+            settle(&mut app);
+            assert_eq!(screen(&app), AppScreen::Loading);
+        }
+        // A timed-out asset barrier returns every participant to the same draft.
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .prematch
+            .as_mut()
+            .unwrap()
+            .phase = PrematchPhase::Draft;
+        settle(&mut app);
+        assert_eq!(screen(&app), AppScreen::Draft);
+        app.world_mut().resource_mut::<GameStateSnapshot>().prematch = None;
+        app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Running;
+        app.world_mut().spawn(Player);
+        settle(&mut app);
+        assert_eq!(screen(&app), AppScreen::InMatch);
     }
 
     #[test]

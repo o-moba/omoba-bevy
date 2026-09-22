@@ -101,6 +101,28 @@ impl Bot {
             .expect("bot failed to send packet to the server");
     }
 
+    /// Negotiates coordinated draft and automatic server-side team assignment.
+    pub fn join_draft(
+        &self,
+        character: Character,
+        hero_class: HeroClass,
+        session_id: Option<String>,
+    ) {
+        self.send(&ClientPacket::Join {
+            prematch: true,
+            team: Team::Green,
+            character,
+            hero_class,
+            avatar: None,
+            sprite_character: None,
+            session_id,
+        });
+    }
+
+    pub fn prematch(&self, request: shared::prematch::PrematchRequest) {
+        self.send(&ClientPacket::Prematch { request });
+    }
+
     /// Joins a team as the given character with the default loadout
     /// (Warrior class, no roster avatar).
     pub fn join(&self, team: Team, character: Character) {
@@ -128,6 +150,7 @@ impl Bot {
         sprite_character: Option<&str>,
     ) {
         self.send(&ClientPacket::Join {
+            prematch: false,
             team,
             character,
             hero_class,

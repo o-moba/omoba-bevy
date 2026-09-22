@@ -20,6 +20,7 @@ fn addr(index: u16) -> SocketAddr {
 }
 fn join(session: &str) -> ClientPacket {
     ClientPacket::Join {
+        prematch: false,
         team: Team::Green,
         character: CharacterChoice::Cube,
         hero_class: HeroClass::Mage,
@@ -108,6 +109,7 @@ fn bot_models_are_distinct_bundled_free_avatars_with_unchanged_sprite_assignment
             path.display()
         );
         let packet = ClientPacket::Join {
+            prematch: false,
             team: Team::Green,
             character: CharacterChoice::Cube,
             hero_class: HeroClass::Mage,
@@ -244,6 +246,7 @@ fn a_deliberate_leave_frees_the_seat_and_lets_the_same_session_pick_again() {
     // Same session id, straight away, with another hero: no `SessionActive`,
     // and the new pick is what the server admits.
     let again = ClientPacket::Join {
+        prematch: false,
         team: Team::Blue,
         character: CharacterChoice::Cube,
         hero_class: HeroClass::Cleric,

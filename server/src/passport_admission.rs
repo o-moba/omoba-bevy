@@ -104,15 +104,41 @@ impl Default for PassportAdmissions {
 }
 
 impl PassportAdmissions {
+    pub fn is_pending(&self, addr: SocketAddr) -> bool {
+        self.pending.contains(&addr)
+    }
+
     pub fn begin(&mut self, addr: SocketAddr, packet: &ClientPacket) -> Admission {
-        let ClientPacket::Join {
-            avatar,
-            passport_ticket,
-            session_id,
-            ..
-        } = packet
-        else {
-            return Admission::Free;
+        self.begin_with_session(addr, packet, None)
+    }
+
+    pub fn begin_with_session(
+        &mut self,
+        addr: SocketAddr,
+        packet: &ClientPacket,
+        session: Option<&str>,
+    ) -> Admission {
+        let draft_session = session.map(str::to_owned);
+        let (avatar, passport_ticket, session_id) = match packet {
+            ClientPacket::Join {
+                avatar,
+                passport_ticket,
+                session_id,
+                ..
+            } => (avatar, passport_ticket, session_id),
+            ClientPacket::Prematch {
+                request:
+                    shared::prematch::PrematchRequest {
+                        action:
+                            shared::prematch::PrematchAction::Select {
+                                avatar,
+                                passport_ticket,
+                                ..
+                            },
+                        ..
+                    },
+            } => (avatar, passport_ticket, &draft_session),
+            _ => return Admission::Free,
         };
         let Some(slug) = avatar.as_deref() else {
             return Admission::Free;
@@ -372,6 +398,7 @@ mod tests {
     }
     fn join(avatar: &str) -> ClientPacket {
         ClientPacket::Join {
+            prematch: false,
             team: Team::Green,
             character: CharacterChoice::Ipfs,
             hero_class: HeroClass::Mage,
@@ -390,6 +417,145 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         panic!("the registry read never completed");
+    }
+
+    #[test]
+    fn draft_selection_uses_the_same_server_catalogue_and_rejected_paid_choice_keeps_loadout() {
+        use shared::prematch::{PrematchAction, PrematchRequest, Role};
+        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        socket.set_nonblocking(true).unwrap();
+        let mut rt = ServerRuntime::new(socket, MatchConfig::dev());
+        rt.passport_admissions = admissions(feed);
+        let addr: SocketAddr = "127.0.0.1:59901".parse().unwrap();
+        let now = Instant::now();
+        rt.handle_packet(
+            addr,
+            ClientPacket::Join {
+                prematch: true,
+                team: Team::Blue,
+                character: CharacterChoice::Ipfs,
+                hero_class: HeroClass::Mage,
+                avatar: None,
+                sprite_character: None,
+                session_id: Some("draft-free".into()),
+                passport_ticket: None,
+            },
+            now,
+        );
+        let generation = prematch::snapshot(
+            &rt.prematch,
+            &rt.players,
+            &rt.players[&addr],
+            rt.match_config,
+            now,
+        )
+        .unwrap()
+        .generation;
+        let free = store_item(STUDIO_FREE, 'c', true);
+        let owned = store_item(
+            &format!("solana:devnet:avatar-data:{}", "4".repeat(32)),
+            'd',
+            false,
+        );
+        let action = |slug: String| PrematchAction::Select {
+            character: CharacterChoice::Ipfs,
+            hero_class: HeroClass::Cleric,
+            avatar: Some(slug),
+            sprite_character: None,
+            role: Role::Support,
+            passport_ticket: None,
+        };
+        let request = |id, action| PrematchRequest {
+            server_epoch: rt.server_epoch,
+            match_id: rt.match_id,
+            generation,
+            request_id: id,
+            action,
+        };
+        let approved_request = request(1, action(free.slug.clone()));
+        let denied_request = request(2, action(owned.slug));
+        rt.handle_packet(
+            addr,
+            ClientPacket::Prematch {
+                request: approved_request.clone(),
+            },
+            now,
+        );
+        // Receipt alone must not look like a final approval to the frontend.
+        assert_eq!(
+            prematch::snapshot(
+                &rt.prematch,
+                &rt.players,
+                &rt.players[&addr],
+                rt.match_config,
+                now
+            )
+            .unwrap()
+            .last_request_id,
+            0
+        );
+        rt.handle_packet(
+            addr,
+            ClientPacket::Prematch {
+                request: approved_request,
+            },
+            now,
+        );
+        assert_eq!(
+            prematch::snapshot(
+                &rt.prematch,
+                &rt.players,
+                &rt.players[&addr],
+                rt.match_config,
+                now
+            )
+            .unwrap()
+            .last_request_id,
+            0
+        );
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while rt.players[&addr].state.avatar.as_deref() != Some(free.slug.as_str())
+            && Instant::now() < deadline
+        {
+            rt.receive_packets();
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(
+            rt.players[&addr].state.avatar.as_deref(),
+            Some(free.slug.as_str())
+        );
+        assert_eq!(rt.players[&addr].state.hero_class, HeroClass::Cleric);
+        assert_eq!(
+            prematch::snapshot(
+                &rt.prematch,
+                &rt.players,
+                &rt.players[&addr],
+                rt.match_config,
+                now
+            )
+            .unwrap()
+            .last_request_id,
+            1
+        );
+        rt.handle_packet(
+            addr,
+            ClientPacket::Prematch {
+                request: denied_request,
+            },
+            Instant::now(),
+        );
+        assert_eq!(
+            rt.players[&addr].state.avatar.as_deref(),
+            Some(free.slug.as_str())
+        );
+        assert!(
+            rt.players[&addr]
+                .draft
+                .error
+                .as_deref()
+                .unwrap()
+                .contains("ownership")
+        );
     }
 
     #[test]

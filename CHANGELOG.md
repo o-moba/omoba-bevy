@@ -6,6 +6,16 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.21.0-rc.4] - 2026-09-22
+
+### Coordinated team draft and avatar presentation
+- Mobile attack now sits at the exact center of a shared circle: four skills, minion targeting and tower targeting use one radius, with separate dash/haste controls. Desktop keeps its centered bottom skill bar. Compact phones retain safe touch areas and a smaller upper-left map.
+- Find match assigns the team and starting side automatically. A shared draft shows teammates, avatars, classes, intended roles and lock status, with composition warnings. Teammates see accepted changes before locking in.
+- A common countdown leads to a shared loading roster. Gameplay waits for required clients' actual map/avatar readiness and the existing durable match-start acknowledgment. Dropout, reconnect and loading timeout preserve an explicit retry path.
+- Collection previews open facing the viewer, stationary, and rotate with the drag. Validated SDK downloads replace preview and match fallback models when ready.
+- Default avatars precede a persistent Ekza Studio/library section with asynchronous refresh, thumbnails and truthful loading, empty, cached and unavailable states. Temporary catalogue failures retain the cached roster; existing authorization and model validation remain in place.
+- New protocol fields are opt-in for legacy clients and harnesses. Physical-device testing and the previously observed renderer-teardown issue remain release follow-ups.
+
 ## [0.21.0-rc.3] - 2026-09-22
 
 ### Compact mobile MOBA controls and live match information

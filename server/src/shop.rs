@@ -111,6 +111,7 @@ mod tests {
 
     fn join(team: Team, session: &str) -> ClientPacket {
         ClientPacket::Join {
+            prematch: false,
             team,
             character: CharacterChoice::Ipfs,
             hero_class: HeroClass::Mage,

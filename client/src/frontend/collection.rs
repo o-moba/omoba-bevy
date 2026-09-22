@@ -2,7 +2,9 @@
 //! preview, animation switching and the showcase/loadout choices.
 
 use bevy::input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel};
+use bevy::input::touch::{TouchInput, TouchPhase};
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 use shared::AvatarDefinition;
 
 use super::AppScreen;
@@ -11,39 +13,22 @@ use super::preview::{AvatarPreview, PreviewStatus};
 use super::widgets::{self, ButtonKind, MenuButton};
 use crate::team::{AvatarThumbnails, TeamSelection};
 
-/// Where an avatar comes from. The collection groups by this so a player can
-/// see what they own versus what the community published.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum AvatarSource {
-    /// Shipped with the game; everyone can play it.
-    Roster,
-    /// Owned through the Ekza store or the player's own library.
-    Owned,
-    /// Published by other players; viewable, not always playable.
-    Community,
-}
-
-impl AvatarSource {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Roster => "Included",
-            Self::Owned => "Owned",
-            Self::Community => "Community",
-        }
-    }
-}
+pub use crate::passport::AvatarCatalogueSource as AvatarSource;
 
 pub struct CollectionScreenPlugin;
 
 impl Plugin for CollectionScreenPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(AppScreen::Collection), spawn_collection)
+        app.init_resource::<CollectionDrag>()
+            .add_systems(OnEnter(AppScreen::Collection), spawn_collection)
+            .add_systems(OnExit(AppScreen::Collection), clear_collection_drag)
             .add_systems(
                 Update,
                 (
+                    refresh_collection_catalogue,
+                    drag_to_rotate,
                     collection_actions,
                     scroll_collection,
-                    drag_to_rotate,
                     refresh_collection_details,
                 )
                     .chain()
@@ -60,6 +45,9 @@ enum CollectionAction {
     ToggleSpin,
     Showcase,
     Equip,
+    Refresh,
+    ConnectAccount,
+    ConnectWallet,
 }
 
 #[derive(Component)]
@@ -70,38 +58,147 @@ struct PreviewSurface;
 struct CollectionGrid;
 
 #[derive(Component)]
+struct CatalogueRevision(u64);
+
+#[derive(Component)]
 struct ClipRow;
 
 #[derive(Component)]
 struct DetailPanel;
 
-/// Every avatar the player can inspect, de-duplicated, owned first.
-pub fn collection_entries() -> Vec<(&'static AvatarDefinition, AvatarSource)> {
-    let mut entries: Vec<(&'static AvatarDefinition, AvatarSource)> = Vec::new();
-    let mut push = |avatar: &'static AvatarDefinition, source: AvatarSource| {
-        if !entries
-            .iter()
-            .any(|(existing, _)| existing.slug == avatar.slug)
-        {
-            entries.push((avatar, source));
+/// Same ordering and approved membership as the pre-match picker.
+pub fn collection_entries() -> Vec<(AvatarDefinition, AvatarSource)> {
+    crate::passport::avatar_catalogue()
+        .entries
+        .into_iter()
+        .map(|entry| (entry.avatar, entry.source))
+        .collect()
+}
+
+fn ensure_thumbnails(asset_server: &AssetServer, thumbnails: &mut AvatarThumbnails) {
+    for entry in crate::passport::avatar_catalogue().entries {
+        if let Some(path) = crate::passport::thumbnail_asset_path(&entry.avatar) {
+            thumbnails
+                .0
+                .insert(entry.avatar.slug.clone(), asset_server.load(path));
         }
-    };
-    for avatar in crate::passport::purchased_avatars() {
-        push(avatar, AvatarSource::Owned);
     }
-    for avatar in crate::passport::library_avatars() {
-        push(avatar, AvatarSource::Owned);
+}
+
+fn spawn_catalogue_grid(
+    grid: &mut ChildSpawnerCommands,
+    catalogue: &crate::passport::AvatarCatalogue,
+    selected: Option<&str>,
+    thumbnails: &AvatarThumbnails,
+) {
+    grid.spawn(widgets::heading("Included heroes", 17.0));
+    for (defaults, title) in [(true, ""), (false, "Ekza Studio · Library")] {
+        if !defaults {
+            grid.spawn((
+                widgets::heading(title, 17.0),
+                Name::new("CollectionStudioHeading"),
+            ));
+            grid.spawn((
+                widgets::label(catalogue.status.label(), 12.0, widgets::MUTED),
+                Name::new("CollectionStudioStatus"),
+            ));
+            grid.spawn(Node {
+                flex_wrap: FlexWrap::Wrap,
+                column_gap: Val::Px(6.0),
+                row_gap: Val::Px(6.0),
+                ..default()
+            })
+            .with_children(|row| {
+                widgets::button(
+                    row,
+                    "Refresh",
+                    ButtonKind::Secondary,
+                    CollectionAction::Refresh,
+                    "CollectionRefresh",
+                );
+                if !crate::passport::account_connected() {
+                    widgets::button(
+                        row,
+                        "Connect Ekza",
+                        ButtonKind::Secondary,
+                        CollectionAction::ConnectAccount,
+                        "CollectionConnectAccount",
+                    );
+                }
+            });
+            grid.spawn(widgets::label(
+                &crate::passport::avatar_account_status_line(),
+                11.0,
+                widgets::MUTED,
+            ));
+        }
+        grid.spawn(Node {
+            flex_direction: FlexDirection::Row,
+            flex_wrap: FlexWrap::Wrap,
+            column_gap: Val::Px(10.0),
+            row_gap: Val::Px(10.0),
+            ..default()
+        })
+        .with_children(|tiles| {
+            for entry in &catalogue.entries {
+                if (entry.source == AvatarSource::Default) == defaults {
+                    spawn_avatar_tile(
+                        tiles,
+                        &entry.avatar,
+                        entry.source,
+                        selected == Some(entry.avatar.slug.as_str()),
+                        thumbnails,
+                    );
+                }
+            }
+        });
     }
-    for avatar in crate::passport::default_avatars() {
-        push(avatar, AvatarSource::Roster);
+    // Preserve existing paid-avatar pairing as an optional action, below the
+    // primary account/free library path.
+    if !crate::passport::is_connected() {
+        widgets::button(
+            grid,
+            "Connect wallet for purchases",
+            ButtonKind::Secondary,
+            CollectionAction::ConnectWallet,
+            "CollectionConnectWallet",
+        );
     }
-    for avatar in crate::passport::community_avatars() {
-        push(avatar, AvatarSource::Community);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn refresh_collection_catalogue(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut thumbnails: ResMut<AvatarThumbnails>,
+    preview: Res<AvatarPreview>,
+    mut grids: Query<(Entity, &mut CatalogueRevision), With<CollectionGrid>>,
+    mut account_line: Local<String>,
+    mut wallet_line: Local<String>,
+) {
+    crate::passport::poll_account();
+    crate::passport::poll_wallet();
+    let catalogue = crate::passport::avatar_catalogue();
+    let account = crate::passport::avatar_account_status_line();
+    let wallet = crate::passport::wallet_status_line();
+    let account_changed = *account_line != account || *wallet_line != wallet;
+    *account_line = account;
+    *wallet_line = wallet;
+    for (grid, mut revision) in &mut grids {
+        if revision.0 == catalogue.revision && !account_changed {
+            continue;
+        }
+        ensure_thumbnails(&asset_server, &mut thumbnails);
+        revision.0 = catalogue.revision;
+        // Keep the scrolling entity and selected preview; only replace its
+        // contents. A same-count roster replacement therefore preserves offset.
+        commands
+            .entity(grid)
+            .despawn_related::<Children>()
+            .with_children(|grid| {
+                spawn_catalogue_grid(grid, &catalogue, preview.slug.as_deref(), &thumbnails);
+            });
     }
-    for avatar in shared::avatar_roster() {
-        push(avatar, AvatarSource::Roster);
-    }
-    entries
 }
 
 fn spawn_collection(
@@ -109,8 +206,11 @@ fn spawn_collection(
     mut preview: ResMut<AvatarPreview>,
     card: Res<ProfileCard>,
     selection: Res<TeamSelection>,
-    thumbnails: Res<AvatarThumbnails>,
+    mut thumbnails: ResMut<AvatarThumbnails>,
+    asset_server: Res<AssetServer>,
 ) {
+    ensure_thumbnails(&asset_server, &mut thumbnails);
+    let catalogue = crate::passport::avatar_catalogue();
     let phone = crate::platform::ui_profile() == crate::platform::UiProfile::Mobile;
     let entries = collection_entries();
     // Open on something: the current loadout avatar, else the showcase, else
@@ -118,12 +218,15 @@ fn spawn_collection(
     let initial = selection
         .avatar
         .clone()
-        .or_else(|| card.showcase_avatar.clone())
+        .filter(|slug| entries.iter().any(|(avatar, _)| avatar.slug == *slug))
+        .or_else(|| {
+            card.showcase_avatar
+                .clone()
+                .filter(|slug| entries.iter().any(|(avatar, _)| avatar.slug == *slug))
+        })
         .or_else(|| entries.first().map(|(avatar, _)| avatar.slug.clone()));
     if let Some(slug) = initial.as_deref() {
-        preview.show(slug);
-        // The collection is where a player inspects a model: turn it.
-        preview.auto_spin = true;
+        preview.show_portrait(slug);
     }
     let image = preview.image.clone();
     commands
@@ -175,8 +278,8 @@ fn spawn_collection(
                         padding: UiRect::all(Val::Px(12.0)),
                         border: UiRect::all(Val::Px(1.0)),
                         border_radius: BorderRadius::all(Val::Px(12.0)),
-                        flex_direction: FlexDirection::Row,
-                        flex_wrap: FlexWrap::Wrap,
+                        flex_direction: FlexDirection::Column,
+                        flex_shrink: 0.0,
                         align_content: AlignContent::FlexStart,
                         column_gap: Val::Px(10.0),
                         row_gap: Val::Px(10.0),
@@ -186,18 +289,11 @@ fn spawn_collection(
                     BackgroundColor(widgets::PANEL),
                     BorderColor::all(widgets::PANEL_EDGE),
                     CollectionGrid,
+                    CatalogueRevision(catalogue.revision),
                     Name::new("CollectionGrid"),
                 ))
                 .with_children(|grid| {
-                    for (avatar, source) in &entries {
-                        spawn_avatar_tile(
-                            grid,
-                            avatar,
-                            *source,
-                            initial.as_deref() == Some(avatar.slug.as_str()),
-                            &thumbnails,
-                        );
-                    }
+                    spawn_catalogue_grid(grid, &catalogue, initial.as_deref(), &thumbnails);
                 });
 
                 // Preview column.
@@ -357,9 +453,13 @@ fn collection_actions(
     mut card: ResMut<ProfileCard>,
     mut selection: ResMut<TeamSelection>,
     mut next: ResMut<NextState<AppScreen>>,
+    drag: Res<CollectionDrag>,
     buttons: Query<(&Interaction, &CollectionAction), Changed<Interaction>>,
     mut tiles: Query<(&CollectionAction, &mut MenuButton)>,
 ) {
+    if drag.block_actions {
+        return;
+    }
     let mut picked: Option<String> = None;
     for (interaction, action) in &buttons {
         if *interaction != Interaction::Pressed {
@@ -367,6 +467,9 @@ fn collection_actions(
         }
         match action {
             CollectionAction::Back => next.set(AppScreen::Home),
+            CollectionAction::Refresh => crate::passport::refresh_avatar_catalogue(),
+            CollectionAction::ConnectAccount => crate::passport::connect_account(),
+            CollectionAction::ConnectWallet => crate::passport::connect(),
             CollectionAction::Select(slug) => {
                 preview.show(slug);
                 picked = Some(slug.clone());
@@ -445,21 +548,157 @@ fn scrolled(current: f32, delta: f32, computed: &ComputedNode) -> f32 {
     (current + delta).clamp(0.0, maximum)
 }
 
-/// Dragging across the preview turns the model; releasing keeps the angle.
+#[derive(Resource, Default)]
+struct CollectionDrag {
+    owner: Option<DragOwner>,
+    // Captured before action dispatch and retained through release/cancel.
+    block_actions: bool,
+}
+
+#[derive(Clone, Copy)]
+enum DragOwner {
+    Mouse,
+    PreviewTouch {
+        id: u64,
+        previous: Vec2,
+    },
+    GridTouch {
+        id: u64,
+        previous: Vec2,
+        moved: bool,
+    },
+}
+
+fn clear_collection_drag(mut drag: ResMut<CollectionDrag>) {
+    drag.owner = None;
+    drag.block_actions = false;
+}
+
+fn rotate_delta(preview: &mut AvatarPreview, delta_x: f32) {
+    if delta_x != 0.0 {
+        preview.auto_spin = false;
+        // A rightward drag pulls the front of the model toward the right.
+        preview.yaw += delta_x * 0.012;
+    }
+}
+
+fn surface_rect(node: &ComputedNode, transform: &UiGlobalTransform, window_scale: f32) -> Rect {
+    // TouchInput/cursor positions are logical window pixels. UiScale is already
+    // applied to the rendered node; undo only display DPI, not menu scaling.
+    Rect::from_center_size(
+        transform.translation / window_scale,
+        node.size() * transform.to_scale_angle_translation().0.abs() / window_scale,
+    )
+}
+
+/// The first pointer owns the gesture until release/cancel, including outside
+/// the preview. Unrelated touches never steal it or turn the avatar.
+#[allow(clippy::too_many_arguments)]
 fn drag_to_rotate(
     mut preview: ResMut<AvatarPreview>,
+    mut drag: ResMut<CollectionDrag>,
     mut motion: MessageReader<MouseMotion>,
-    surfaces: Query<&Interaction, With<PreviewSurface>>,
+    mut touches: MessageReader<TouchInput>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    surfaces: Query<(&ComputedNode, &UiGlobalTransform), With<PreviewSurface>>,
+    mut grids: Query<
+        (&ComputedNode, &UiGlobalTransform, &mut ScrollPosition),
+        With<CollectionGrid>,
+    >,
 ) {
-    let dragging = surfaces
-        .iter()
-        .any(|interaction| *interaction == Interaction::Pressed);
-    let delta: f32 = motion.read().map(|event| event.delta.x).sum();
-    if !dragging || delta == 0.0 {
+    drag.block_actions = matches!(
+        drag.owner,
+        Some(
+            DragOwner::Mouse
+                | DragOwner::PreviewTouch { .. }
+                | DragOwner::GridTouch { moved: true, .. }
+        )
+    );
+    let delta_x: f32 = motion.read().map(|event| event.delta.x).sum();
+    let Some(window) = windows.single().ok().filter(|window| window.focused) else {
+        touches.clear();
+        drag.owner = None;
+        drag.block_actions = true;
         return;
+    };
+    let mut touched = false;
+    for event in touches.read() {
+        touched = true;
+        match event.phase {
+            TouchPhase::Started if drag.owner.is_none() => {
+                if surfaces.iter().any(|(node, transform)| {
+                    surface_rect(node, transform, window.scale_factor()).contains(event.position)
+                }) {
+                    drag.owner = Some(DragOwner::PreviewTouch {
+                        id: event.id,
+                        previous: event.position,
+                    });
+                    drag.block_actions = true;
+                } else if grids.iter().any(|(node, transform, _)| {
+                    surface_rect(node, transform, window.scale_factor()).contains(event.position)
+                }) {
+                    drag.owner = Some(DragOwner::GridTouch {
+                        id: event.id,
+                        previous: event.position,
+                        moved: false,
+                    });
+                }
+            }
+            TouchPhase::Moved => match drag.owner {
+                Some(DragOwner::PreviewTouch { id, previous }) if id == event.id => {
+                    rotate_delta(&mut preview, event.position.x - previous.x);
+                    drag.owner = Some(DragOwner::PreviewTouch {
+                        id,
+                        previous: event.position,
+                    });
+                }
+                Some(DragOwner::GridTouch {
+                    id,
+                    previous,
+                    moved,
+                }) if id == event.id => {
+                    let moved = moved || event.position.distance(previous) > 4.0;
+                    drag.block_actions |= moved;
+                    for (node, _, mut scroll) in &mut grids {
+                        scroll.y = scrolled(scroll.y, previous.y - event.position.y, node);
+                    }
+                    drag.owner = Some(DragOwner::GridTouch {
+                        id,
+                        previous: event.position,
+                        moved,
+                    });
+                }
+                _ => {}
+            },
+            TouchPhase::Ended | TouchPhase::Canceled => {
+                if matches!(drag.owner, Some(DragOwner::PreviewTouch { id, .. } | DragOwner::GridTouch { id, .. }) if id == event.id)
+                {
+                    drag.owner = None;
+                }
+            }
+            _ => {}
+        }
     }
-    preview.auto_spin = false;
-    preview.yaw -= delta * 0.012;
+    if !touched
+        && drag.owner.is_none()
+        && mouse.just_pressed(MouseButton::Left)
+        && window.cursor_position().is_some_and(|point| {
+            surfaces.iter().any(|(node, transform)| {
+                surface_rect(node, transform, window.scale_factor()).contains(point)
+            })
+        })
+    {
+        drag.owner = Some(DragOwner::Mouse);
+        drag.block_actions = true;
+    }
+    if matches!(drag.owner, Some(DragOwner::Mouse)) {
+        if mouse.pressed(MouseButton::Left) {
+            rotate_delta(&mut preview, delta_x);
+        } else {
+            drag.owner = None;
+        }
+    }
 }
 
 /// Keeps the clip buttons and the detail panel in step with the loaded model.
@@ -469,7 +708,7 @@ fn refresh_collection_details(
     card: Res<ProfileCard>,
     selection: Res<TeamSelection>,
     clip_row: Query<Entity, With<ClipRow>>,
-    detail: Query<Entity, With<DetailPanel>>,
+    detail: Query<(Entity, Ref<DetailPanel>)>,
     mut last: Local<
         Option<(
             Option<String>,
@@ -479,14 +718,19 @@ fn refresh_collection_details(
             bool,
             bool,
             bool,
+            bool,
+            u64,
         )>,
     >,
 ) {
-    let playable = preview
-        .slug
-        .as_deref()
-        .and_then(shared::avatar_definition)
-        .is_some_and(crate::passport::can_select);
+    let catalogue = crate::passport::avatar_catalogue();
+    let definition = catalogue
+        .entries
+        .iter()
+        .find(|entry| Some(entry.avatar.slug.as_str()) == preview.slug.as_deref())
+        .map(|entry| &entry.avatar)
+        .or_else(|| preview.slug.as_deref().and_then(shared::avatar_definition));
+    let playable = definition.is_some_and(crate::passport::can_select);
     let current = (
         preview.slug.clone(),
         preview.status,
@@ -495,8 +739,10 @@ fn refresh_collection_details(
         preview.auto_spin,
         card.showcase_avatar == preview.slug,
         selection.avatar == preview.slug,
+        playable,
+        catalogue.revision,
     );
-    if last.as_ref() == Some(&current) {
+    if last.as_ref() == Some(&current) && detail.iter().all(|(_, panel)| !panel.is_added()) {
         return;
     }
     *last = Some(current);
@@ -519,6 +765,13 @@ fn refresh_collection_details(
                 }
                 PreviewStatus::Loading => {
                     row.spawn(widgets::label("Loading model…", 13.0, widgets::MUTED));
+                }
+                PreviewStatus::Unavailable => {
+                    row.spawn(widgets::label(
+                        "Model unavailable · refresh Studio to retry",
+                        13.0,
+                        widgets::GOLD,
+                    ));
                 }
                 PreviewStatus::NoAnimations => {
                     row.spawn(widgets::label(
@@ -549,9 +802,8 @@ fn refresh_collection_details(
         });
     }
 
-    if let Ok(panel) = detail.single() {
+    if let Ok((panel, _)) = detail.single() {
         commands.entity(panel).despawn_related::<Children>();
-        let definition = preview.slug.as_deref().and_then(shared::avatar_definition);
         let is_showcase = card.showcase_avatar == preview.slug;
         let is_equipped = selection.avatar == preview.slug;
         commands.entity(panel).with_children(|panel| {
@@ -612,6 +864,272 @@ fn refresh_collection_details(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn drag_app() -> (App, Entity) {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Assets<Image>>()
+            .init_resource::<AvatarPreview>()
+            .init_resource::<CollectionDrag>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<TeamSelection>()
+            .init_resource::<ProfileCard>()
+            .init_resource::<NextState<AppScreen>>()
+            .add_message::<MouseMotion>()
+            .add_message::<TouchInput>()
+            .add_systems(Update, (drag_to_rotate, collection_actions).chain());
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
+        app.world_mut().spawn((
+            PreviewSurface,
+            ComputedNode {
+                size: Vec2::splat(100.0),
+                ..default()
+            },
+            UiGlobalTransform::from_translation(Vec2::splat(100.0)),
+        ));
+        (app, window)
+    }
+
+    fn touch(app: &mut App, window: Entity, id: u64, phase: TouchPhase, position: Vec2) {
+        app.world_mut().write_message(TouchInput {
+            window,
+            id,
+            phase,
+            position,
+            force: None,
+        });
+        app.update();
+    }
+
+    #[test]
+    fn scaled_phone_menu_uses_visible_window_coordinates_for_touch_hits() {
+        let (mut app, window) = drag_app();
+        let surface = app
+            .world_mut()
+            .query_filtered::<Entity, With<PreviewSurface>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut().entity_mut(surface).insert((
+            ComputedNode {
+                size: Vec2::new(81.0, 109.0),
+                inverse_scale_factor: 1.0 / 0.61,
+                ..default()
+            },
+            UiGlobalTransform::from_translation(Vec2::new(630.5, 133.5)),
+        ));
+        let initial = app.world().resource::<AvatarPreview>().yaw;
+        touch(
+            &mut app,
+            window,
+            1,
+            TouchPhase::Started,
+            Vec2::new(630.5, 133.5),
+        );
+        touch(
+            &mut app,
+            window,
+            1,
+            TouchPhase::Moved,
+            Vec2::new(694.5, 133.5),
+        );
+        assert!((app.world().resource::<AvatarPreview>().yaw - initial - 0.768).abs() < 0.001);
+    }
+
+    #[test]
+    fn preview_touch_keeps_owner_outside_and_ignores_second_finger_until_cancel() {
+        let (mut app, window) = drag_app();
+        let initial = app.world().resource::<AvatarPreview>().yaw;
+        touch(&mut app, window, 1, TouchPhase::Started, Vec2::splat(100.0));
+        touch(&mut app, window, 2, TouchPhase::Started, Vec2::splat(110.0));
+        touch(&mut app, window, 2, TouchPhase::Moved, Vec2::splat(140.0));
+        assert_eq!(app.world().resource::<AvatarPreview>().yaw, initial);
+        touch(
+            &mut app,
+            window,
+            1,
+            TouchPhase::Moved,
+            Vec2::new(300.0, 100.0),
+        );
+        let turned = app.world().resource::<AvatarPreview>().yaw;
+        assert!(
+            (turned - initial - 2.4).abs() < 0.001,
+            "rightward drag must increase yaw"
+        );
+        touch(&mut app, window, 2, TouchPhase::Ended, Vec2::splat(140.0));
+        assert!(app.world().resource::<CollectionDrag>().owner.is_some());
+        touch(
+            &mut app,
+            window,
+            1,
+            TouchPhase::Canceled,
+            Vec2::new(300.0, 100.0),
+        );
+        assert!(app.world().resource::<CollectionDrag>().owner.is_none());
+        touch(&mut app, window, 1, TouchPhase::Moved, Vec2::splat(100.0));
+        assert_eq!(app.world().resource::<AvatarPreview>().yaw, turned);
+    }
+
+    #[test]
+    fn same_frame_preview_touch_suppresses_unrelated_actions_in_the_real_chain() {
+        let (mut app, window) = drag_app();
+        app.world_mut()
+            .resource_mut::<AvatarPreview>()
+            .show("selected-preview");
+        app.world_mut()
+            .resource_mut::<ProfileCard>()
+            .showcase_avatar = None;
+        app.world_mut()
+            .spawn((CollectionAction::Showcase, Interaction::Pressed));
+        app.world_mut().write_message(TouchInput {
+            window,
+            id: 1,
+            phase: TouchPhase::Started,
+            position: Vec2::splat(100.0),
+            force: None,
+        });
+        app.world_mut().write_message(TouchInput {
+            window,
+            id: 2,
+            phase: TouchPhase::Started,
+            position: Vec2::new(500.0, 100.0),
+            force: None,
+        });
+        app.update();
+        assert!(
+            app.world()
+                .resource::<ProfileCard>()
+                .showcase_avatar
+                .is_none()
+        );
+        assert!(app.world().resource::<CollectionDrag>().block_actions);
+        touch(&mut app, window, 1, TouchPhase::Ended, Vec2::splat(100.0));
+        assert!(
+            app.world().resource::<CollectionDrag>().block_actions,
+            "release frame must not dispatch an unrelated pressed action"
+        );
+    }
+
+    #[test]
+    fn an_ordinary_grid_tap_still_selects_an_avatar() {
+        let (mut app, window) = drag_app();
+        app.world_mut().spawn((
+            CollectionGrid,
+            ScrollPosition::default(),
+            ComputedNode {
+                size: Vec2::splat(100.0),
+                ..default()
+            },
+            UiGlobalTransform::from_translation(Vec2::new(300.0, 100.0)),
+        ));
+        app.world_mut().spawn((
+            CollectionAction::Select("grid-choice".into()),
+            Interaction::Pressed,
+            MenuButton::tile(false),
+        ));
+        touch(
+            &mut app,
+            window,
+            1,
+            TouchPhase::Started,
+            Vec2::new(300.0, 100.0),
+        );
+        assert_eq!(
+            app.world().resource::<AvatarPreview>().slug.as_deref(),
+            Some("grid-choice")
+        );
+        assert!(!app.world().resource::<CollectionDrag>().block_actions);
+    }
+
+    #[test]
+    fn mouse_drag_retains_ownership_and_clears_on_focus_loss() {
+        let (mut app, window) = drag_app();
+        app.world_mut()
+            .entity_mut(window)
+            .get_mut::<Window>()
+            .unwrap()
+            .set_cursor_position(Some(Vec2::splat(100.0)));
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        app.update();
+        app.world_mut()
+            .entity_mut(window)
+            .get_mut::<Window>()
+            .unwrap()
+            .set_cursor_position(Some(Vec2::new(500.0, 100.0)));
+        app.world_mut().write_message(MouseMotion {
+            delta: Vec2::new(10.0, 0.0),
+        });
+        app.update();
+        let yaw = app.world().resource::<AvatarPreview>().yaw;
+        assert!((yaw - std::f32::consts::PI - 0.12).abs() < 0.001);
+        app.world_mut()
+            .entity_mut(window)
+            .get_mut::<Window>()
+            .unwrap()
+            .focused = false;
+        app.update();
+        assert!(app.world().resource::<CollectionDrag>().owner.is_none());
+    }
+
+    #[test]
+    fn catalogue_rebuild_preserves_selection_scroll_and_loads_direct_entry_thumbnails() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Image>()
+            .init_resource::<AvatarPreview>()
+            .init_resource::<AvatarThumbnails>()
+            .add_systems(Update, refresh_collection_catalogue);
+        let selected = shared::avatar_roster()[0].slug.clone();
+        app.world_mut()
+            .resource_mut::<AvatarPreview>()
+            .show_portrait(&selected);
+        let grid = app
+            .world_mut()
+            .spawn((
+                CollectionGrid,
+                CatalogueRevision(u64::MAX),
+                Node::default(),
+                ScrollPosition(Vec2::new(0.0, 120.0)),
+            ))
+            .id();
+        app.update();
+        assert_eq!(app.world().get::<ScrollPosition>(grid).unwrap().y, 120.0);
+        assert_eq!(
+            app.world().resource::<AvatarPreview>().slug.as_deref(),
+            Some(selected.as_str())
+        );
+        assert_eq!(
+            app.world().get::<CatalogueRevision>(grid).unwrap().0,
+            crate::passport::avatar_catalogue().revision
+        );
+        assert!(!app.world().get::<Children>(grid).unwrap().is_empty());
+        for avatar in crate::passport::default_avatars() {
+            if avatar.thumbnail.is_some() {
+                assert!(
+                    app.world()
+                        .resource::<AvatarThumbnails>()
+                        .0
+                        .contains_key(&avatar.slug)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn defaults_precede_the_studio_library() {
+        let entries = collection_entries();
+        let mut studio = false;
+        for (_, source) in entries {
+            if source != AvatarSource::Default {
+                studio = true;
+            }
+            assert!(!studio || source != AvatarSource::Default);
+        }
+    }
 
     #[test]
     fn collection_has_no_duplicate_slugs() {

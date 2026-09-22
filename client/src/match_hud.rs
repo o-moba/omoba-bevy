@@ -204,8 +204,13 @@ fn adapt_desktop_dock(
         if name.as_str() == "MatchHudColumn" {
             let (left, top, width) = phone.map_or((16.0, 218.0, 144.0), |m| {
                 (
-                    m.safe.left,
-                    m.safe.top + 172.0 * m.scale(),
+                    m.safe.left + if m.viewport.y <= 340.0 { 102.0 } else { 0.0 },
+                    m.safe.top
+                        + if m.viewport.y <= 340.0 {
+                            0.0
+                        } else {
+                            172.0 * m.scale()
+                        },
                     140.0 * m.scale(),
                 )
             });

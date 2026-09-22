@@ -12,6 +12,7 @@ fn fixture() -> (ServerRuntime, SocketAddr, SocketAddr, Instant) {
         rt.handle_packet(
             addr,
             ClientPacket::Join {
+                prematch: false,
                 team,
                 character: CharacterChoice::Ipfs,
                 hero_class: HeroClass::Warrior,
@@ -517,6 +518,7 @@ fn cosmetic_history_yields_space_to_gameplay_and_keeps_newest_receipts() {
         your_id: player.id,
         players: vec![player],
         scoreboard: None,
+        prematch: None,
         projectiles: vec![],
         combat_events: vec![],
         structures: vec![],

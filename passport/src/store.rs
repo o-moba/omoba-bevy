@@ -18,6 +18,7 @@ use ekza_bevy_sdk::{
 };
 use std::{
     collections::HashMap,
+    io::Read,
     path::{Path, PathBuf},
     sync::{Mutex, OnceLock},
     time::{Duration, Instant},
@@ -40,6 +41,93 @@ pub enum ModelState {
     Unavailable,
 }
 
+/// Safe, non-sensitive catalogue state for every avatar picker.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum CatalogueStatus {
+    Loading { cached: usize },
+    Empty,
+    Ready { count: usize },
+    Unavailable { cached: usize },
+}
+
+impl CatalogueStatus {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Loading { .. } => "Loading approved Studio avatars…",
+            Self::Empty => "No Studio avatars approved for OMOBA yet",
+            Self::Ready { .. } => "Approved free avatars and your saved or purchased library",
+            Self::Unavailable { cached: 0 } => "Studio is unavailable · refresh to try again",
+            Self::Unavailable { .. } => "Studio is unavailable · showing the saved catalogue",
+        }
+    }
+}
+
+pub fn catalogue_status() -> CatalogueStatus {
+    let Some(runtime) = runtime() else {
+        return CatalogueStatus::Unavailable { cached: 0 };
+    };
+    status_for(&runtime.state.lock().unwrap())
+}
+
+fn status_for(state: &State) -> CatalogueStatus {
+    let count = state.items.len();
+    if state.refreshing || state.last_refresh.is_none() {
+        CatalogueStatus::Loading { cached: count }
+    } else if state.refresh_failed {
+        CatalogueStatus::Unavailable { cached: count }
+    } else if count == 0 {
+        CatalogueStatus::Empty
+    } else {
+        CatalogueStatus::Ready { count }
+    }
+}
+
+/// Current accepted catalogue, excluding entries removed by a successful refresh.
+/// Shared definitions stay immutable for in-flight renderers; picker membership
+/// is derived from this list rather than that append-only definition registry.
+pub fn catalogue_slugs() -> Vec<String> {
+    let mut slugs = runtime().map_or_else(Vec::new, |runtime| {
+        runtime
+            .state
+            .lock()
+            .unwrap()
+            .items
+            .keys()
+            .cloned()
+            .collect()
+    });
+    slugs.sort();
+    slugs
+}
+
+/// Owned display snapshots; shared model identities remain immutable.
+pub fn catalogue_definitions() -> Vec<shared::AvatarDefinition> {
+    runtime().map_or_else(Vec::new, |runtime| {
+        runtime
+            .state
+            .lock()
+            .unwrap()
+            .definitions
+            .values()
+            .cloned()
+            .collect()
+    })
+}
+
+/// Current access hint from the approved catalogue, independent of an older
+/// immutable shared definition. The game server still decides admission.
+pub fn free_access(slug: &str) -> Option<bool> {
+    runtime().and_then(|runtime| {
+        runtime
+            .state
+            .lock()
+            .unwrap()
+            .items
+            .get(slug)
+            .map(|item| item.free)
+    })
+}
+
 enum Install {
     Pending,
     Ready,
@@ -49,14 +137,17 @@ enum Install {
 #[derive(Default)]
 struct State {
     items: HashMap<String, StoreAvatar>,
+    definitions: HashMap<String, shared::AvatarDefinition>,
     installs: HashMap<String, Install>,
     changed: Vec<String>,
     refreshing: bool,
     last_refresh: Option<Instant>,
+    refresh_failed: bool,
 }
 
 struct Runtime {
     store: AvatarStore,
+    registry: String,
     state: Mutex<State>,
 }
 
@@ -92,6 +183,7 @@ pub fn initialize(root: PathBuf, wait_for_catalogue: bool) {
         match AvatarStore::new(root, &registry, crate::selector()) {
             Ok(store) => Some(Runtime {
                 store,
+                registry,
                 state: Mutex::default(),
             }),
             Err(error) => {
@@ -114,44 +206,127 @@ pub fn initialize(root: PathBuf, wait_for_catalogue: bool) {
 /// Ask for a catalogue refresh (rate limited, never blocks). Called when a
 /// player shows up wearing a store slug this client has not heard of yet.
 pub fn request_refresh() {
+    request_refresh_after(REFRESH_INTERVAL, false);
+}
+
+/// Explicit user retry is still bounded and never starts parallel downloads.
+pub fn request_user_refresh() {
+    request_refresh_after(Duration::from_secs(2), true);
+}
+
+fn request_refresh_after(interval: Duration, retry_models: bool) {
     let Some(runtime) = runtime() else {
         return;
     };
     {
         let mut state = runtime.state.lock().unwrap();
-        if state.refreshing
-            || state
-                .last_refresh
-                .is_some_and(|at| at.elapsed() < REFRESH_INTERVAL)
-        {
+        if state.refreshing || state.last_refresh.is_some_and(|at| at.elapsed() < interval) {
             return;
         }
         state.refreshing = true;
+        if retry_models {
+            state
+                .installs
+                .retain(|_, install| !matches!(install, Install::Failed(_)));
+        }
     }
     std::thread::spawn(move || refresh_now(runtime));
 }
 
 fn refresh_now(runtime: &'static Runtime) {
     runtime.state.lock().unwrap().refreshing = true;
-    let result = runtime.store.refresh();
+    let result = refresh_catalogue(runtime);
+    let failed = result.is_err();
     match result {
         Ok(items) => adopt(runtime, items),
         Err(error) => eprintln!("Ekza avatar catalogue refresh failed: {error}"),
     }
     let mut state = runtime.state.lock().unwrap();
     state.refreshing = false;
+    state.refresh_failed = failed;
     state.last_refresh = Some(Instant::now());
+}
+
+/// The locked SDK predates v2 outage semantics. Keep its parser, approved
+/// template filter, cache format and verified installer, but do not downgrade
+/// a failed/partial Studio catalogue into a successful empty v1 catalogue.
+fn refresh_catalogue(runtime: &Runtime) -> Result<Vec<StoreAvatar>, String> {
+    use ekza_bevy_sdk::{
+        catalog::CatalogV2Response,
+        registry::feed_url,
+        store::{STORE_SCHEMA, templates_v2},
+    };
+    let mut url = feed_url(&runtime.registry).map_err(|_| "Invalid Studio origin")?;
+    let path = format!("{}/v2/avatars", url.path().trim_end_matches('/'));
+    url.set_path(&path);
+    url.set_query(None);
+    let selector = runtime.store.selector();
+    url.query_pairs_mut()
+        .append_pair("project", &selector.project_id)
+        .append_pair("platform", &selector.platform)
+        .append_pair("profile", &selector.profile);
+    let client = reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|_| "Studio connection unavailable")?;
+    let response = client
+        .get(url)
+        .header("accept", "application/json")
+        .send()
+        .map_err(|_| "Studio connection unavailable")?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        // Compatibility is permitted only for a registry without the v2 API.
+        return runtime.store.refresh();
+    }
+    if !response.status().is_success()
+        || response
+            .headers()
+            .get("x-studio-status")
+            .is_some_and(|status| status.as_bytes().eq_ignore_ascii_case(b"unavailable"))
+    {
+        return Err("Studio catalogue temporarily unavailable".into());
+    }
+    const MAX_CATALOGUE_BYTES: u64 = 8 * 1024 * 1024;
+    let mut bytes = Vec::new();
+    response
+        .take(MAX_CATALOGUE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "Studio catalogue could not be read")?;
+    if bytes.len() as u64 > MAX_CATALOGUE_BYTES {
+        return Err("Studio catalogue exceeds the size limit".into());
+    }
+    let document: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|_| "Studio catalogue has an invalid format")?;
+    if !document
+        .get("items")
+        .is_some_and(serde_json::Value::is_array)
+    {
+        return Err("Studio catalogue is incomplete".into());
+    }
+    let catalogue: CatalogV2Response =
+        serde_json::from_value(document).map_err(|_| "Studio catalogue has an invalid format")?;
+    let items = templates_v2(&catalogue.items, selector);
+    let persisted = serde_json::to_vec_pretty(&serde_json::json!({
+        "schema": STORE_SCHEMA, "avatars": &items,
+    }))
+    .map_err(|_| "Studio catalogue could not be saved")?;
+    ekza_bevy_sdk::cache::atomic_write(&runtime.store.root().join("store.json"), &persisted)
+        .map_err(|_| "Studio catalogue could not be saved")?;
+    Ok(items)
 }
 
 /// Register catalogue items with the shared roster; new slugs are reported
 /// through [`take_changed`] so already spawned players can pick them up.
 fn adopt(runtime: &Runtime, items: Vec<StoreAvatar>) {
+    let mut accepted = HashMap::new();
+    let mut definitions = HashMap::new();
+    let mut newly_known = Vec::new();
     for item in items {
-        if runtime.state.lock().unwrap().items.contains_key(&item.slug) {
-            continue;
-        }
+        let was_known = runtime.state.lock().unwrap().items.contains_key(&item.slug);
         let thumbnail = thumbnail(&runtime.store, &item);
-        let registered = shared::register_store_avatar(shared::AvatarDefinition {
+        let definition = shared::AvatarDefinition {
             slug: item.slug.clone(),
             display_name: item.name.clone(),
             collection: "Ekza store".into(),
@@ -164,30 +339,41 @@ fn adopt(runtime: &Runtime, items: Vec<StoreAvatar>) {
             thumbnail,
             passport: Some(item.protected.clone()),
             free: item.free,
-        });
+        };
+        let registered = shared::register_store_avatar(definition.clone());
         // A slug the server registered first (same derivation) is equally fine.
         if registered.is_some_and(|entry| entry.passport.as_ref() == Some(&item.protected)) {
-            let mut state = runtime.state.lock().unwrap();
-            state.changed.push(item.slug.clone());
-            state.items.insert(item.slug.clone(), item);
+            if !was_known {
+                newly_known.push(item.slug.clone());
+            }
+            definitions.insert(item.slug.clone(), definition);
+            accepted.insert(item.slug.clone(), item);
         }
     }
+    // Publish membership and notifications together: a renderer must never
+    // drain a newly-known slug before model_state can resolve that slug.
+    let mut state = runtime.state.lock().unwrap();
+    state.items = accepted;
+    state.definitions = definitions;
+    state.changed.extend(newly_known);
 }
 
 /// Best-effort thumbnail next to the models; the extension follows the real
 /// image container. Failure only means a text-only button.
 fn thumbnail(store: &AvatarStore, item: &StoreAvatar) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let url = item.thumbnail_url.as_deref()?;
+    let key = format!("{}-{:x}", item.slug, Sha256::digest(url.as_bytes()));
     let directory = store.root().join("avatars");
     for extension in ["png", "jpg", "webp"] {
-        let name = format!("{}.{extension}", item.slug);
+        let name = format!("{key}.{extension}");
         if directory.join(&name).is_file() {
             return Some(name);
         }
     }
-    let url = item.thumbnail_url.as_deref()?;
     let cache = AssetCache::new(store.root().join(".ekza-cache")).ok()?;
     let (file, kind) = cache.fetch_thumbnail(url).ok()?;
-    let name = format!("{}.{}", item.slug, kind.extension());
+    let name = format!("{key}.{}", kind.extension());
     std::fs::create_dir_all(&directory).ok()?;
     std::fs::copy(&file.path, directory.join(&name)).ok()?;
     Some(name)
@@ -272,3 +458,36 @@ pub fn take_changed() -> Vec<String> {
         std::mem::take(&mut runtime.state.lock().unwrap().changed)
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn catalogue_states_distinguish_loading_empty_and_failed_cache() {
+        let mut state = State::default();
+        assert_eq!(status_for(&state), CatalogueStatus::Loading { cached: 0 });
+        state.last_refresh = Some(Instant::now());
+        assert_eq!(status_for(&state), CatalogueStatus::Empty);
+        state.refresh_failed = true;
+        assert_eq!(
+            status_for(&state),
+            CatalogueStatus::Unavailable { cached: 0 }
+        );
+        state.refreshing = true;
+        assert_eq!(status_for(&state), CatalogueStatus::Loading { cached: 0 });
+        assert!(
+            !CatalogueStatus::Unavailable { cached: 2 }
+                .label()
+                .contains("http")
+        );
+        assert!(
+            CatalogueStatus::Unavailable { cached: 2 }
+                .label()
+                .contains("saved")
+        );
+    }
+}
+
+#[cfg(test)]
+mod fixture_tests;

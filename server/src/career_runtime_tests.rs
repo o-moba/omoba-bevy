@@ -23,6 +23,7 @@ fn profile(id: u64, rating: i32, experienced: bool) -> ProfileSummary {
 }
 fn join(session: &str) -> ClientPacket {
     ClientPacket::Join {
+        prematch: false,
         team: Team::Green,
         character: CharacterChoice::Ipfs,
         hero_class: HeroClass::Mage,

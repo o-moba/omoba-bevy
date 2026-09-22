@@ -20,6 +20,8 @@ use bevy::{
 
 use crate::frontend::{AppScreen, ScreenDriverPaused, preview::AvatarPreview};
 
+mod avatar;
+
 /// Frames each screen is given to lay out. The collection also waits for a
 /// glTF to load, so it gets its own budget.
 const SETTLE_FRAMES: u32 = 32;
@@ -63,6 +65,10 @@ impl Plugin for FrontendQaPlugin {
         else {
             return;
         };
+        if std::env::var("OMOBA_AVATAR_QA").is_ok_and(|value| value == "1") {
+            app.add_plugins(avatar::AvatarQaPlugin { directory });
+            return;
+        }
         if std::env::var("OMOBA_FRONTEND_QA_FLOW").is_ok_and(|value| value == "1") {
             // Live-flow capture owns the screens instead of this harness.
             app.add_plugins(crate::frontend_flow_qa::FrontendFlowQaPlugin);
@@ -362,7 +368,7 @@ fn observe(
             || name.as_str().starts_with("Help")
             || name.as_str() == "PhoneMenuBar"
             || name.as_str().starts_with("HeroSelect")
-            || matches!(name.as_str(), "TeamGreenButton" | "TeamBlueButton")
+            || matches!(name.as_str(), "FindMatchButton")
             || name.as_str().starts_with("PauseMenu")
             || matches!(name.as_str(), "SettingsButton" | "BackButton")
         {
@@ -391,7 +397,7 @@ fn observe(
             "AvatarShowcase",
             "AvatarEquip",
         ],
-        3 => &["HeroSelectBack", "TeamGreenButton", "TeamBlueButton"],
+        3 => &["HeroSelectBack", "FindMatchButton"],
         4 => &["SearchingCancel"],
         6 => &["PostMatchPlayAgain", "PostMatchBackToMenu"],
         7 => &[

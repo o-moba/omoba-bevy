@@ -202,7 +202,17 @@ fn adapt_minimap_edge(
             DESKTOP_MINIMAP_INSET,
             DESKTOP_MINIMAP_SIZE,
         ),
-        |m| (m.safe.left, m.safe.top, 116.0 * m.scale()),
+        |m| {
+            (
+                m.safe.left,
+                m.safe.top,
+                if m.viewport.y <= 340.0 {
+                    96.0
+                } else {
+                    116.0 * m.scale()
+                },
+            )
+        },
     );
     for (mut node, mut transform) in &mut roots {
         node.left = Val::Px(left + (size - MINIMAP_SIZE) * 0.5);

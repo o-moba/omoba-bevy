@@ -425,7 +425,12 @@ fn spawn_local_player_on_team(
     mut camera_query: Query<&mut Transform, With<MainCamera>>,
     visual_mode: Res<PlayerVisualMode>,
 ) {
-    if team_selection.team.is_none() || !session.join_confirmed() {
+    // The opt-in draft owns its final spawn in the snapshot pipeline. This
+    // legacy fallback must not recreate a hero while Draft removes old models.
+    if session.last_join.as_ref().is_some_and(|join| join.prematch)
+        || team_selection.team.is_none()
+        || !session.join_confirmed()
+    {
         return;
     }
     if existing_players.iter().next().is_some() {
@@ -575,6 +580,43 @@ fn force_vrm_models_double_sided(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prematch_admission_cannot_spawn_through_the_legacy_fallback() {
+        let mut session = crate::net::ClientSession::admitted_for_test();
+        session.last_join.as_mut().unwrap().prematch = true;
+        let mut app = App::new();
+        app.insert_resource(PlayerVisualMode::Models3d)
+            .insert_resource(session)
+            .insert_resource(TeamSelection {
+                team: Some(Team::Green),
+                ..default()
+            })
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<LightingSettings>()
+            .init_resource::<CameraState>()
+            .init_resource::<MapLayout>()
+            .add_systems(Startup, setup_scene)
+            .add_systems(Update, spawn_local_player_on_team);
+        app.update();
+        assert_eq!(
+            app.world_mut().query::<&Player>().iter(app.world()).count(),
+            0
+        );
+        // Preserve the deliberately negotiated legacy/offline fallback.
+        app.world_mut()
+            .resource_mut::<crate::net::ClientSession>()
+            .last_join
+            .as_mut()
+            .unwrap()
+            .prematch = false;
+        app.update();
+        assert_eq!(
+            app.world_mut().query::<&Player>().iter(app.world()).count(),
+            1
+        );
+    }
 
     #[test]
     fn removed_avatar_request_falls_back_without_loading_the_disputed_model() {

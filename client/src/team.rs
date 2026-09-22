@@ -130,7 +130,14 @@ impl Plugin for TeamSelectPlugin {
                 )
                     .run_if(in_state(AppScreen::HeroSelect)),
             )
-            .add_systems(Update, attach_avatar_thumbnails)
+            .add_systems(
+                Update,
+                (
+                    attach_avatar_thumbnails,
+                    refresh_picker_catalogue,
+                    restore_picker_scroll,
+                ),
+            )
             .add_systems(
                 Update,
                 wallet_connect_ui_system
@@ -291,11 +298,12 @@ fn load_avatar_thumbnails(
     if visual_mode != PlayerVisualMode::Models3d {
         return;
     }
-    for avatar in avatar_roster().iter().chain(shared::store_avatars()) {
-        if thumbnails.0.contains_key(&avatar.slug) {
-            continue;
-        }
-        if let Some(thumbnail) = crate::passport::thumbnail_asset_path(avatar) {
+    for avatar in avatar_roster()
+        .iter()
+        .cloned()
+        .chain(omoba_passport::store::catalogue_definitions())
+    {
+        if let Some(thumbnail) = crate::passport::thumbnail_asset_path(&avatar) {
             thumbnails
                 .0
                 .insert(avatar.slug.clone(), asset_server.load(thumbnail));
@@ -331,8 +339,8 @@ fn wallet_connect_ui_system(
     preview: Res<crate::frontend::preview::AvatarPreview>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     overlay_query: Query<Entity, With<TeamSelectRoot>>,
-    mut listed_purchases: Local<Option<usize>>,
-    mut listed_library: Local<Option<(usize, usize)>>,
+    mut listed_revision: Local<Option<u64>>,
+    grid_scroll: Query<&ScrollPosition, With<ModelAvatarGrid>>,
 ) {
     if selection.team.is_some() || overlay_query.is_empty() {
         return;
@@ -365,18 +373,13 @@ fn wallet_connect_ui_system(
             text.0.clone_from(&account_line);
         }
     }
-    let purchases = crate::passport::purchased_avatars().len();
-    // The library and the community list change when the store refreshes or the
-    // player saves an avatar in the browser.
-    let library = (
-        crate::passport::library_avatars().len(),
-        crate::passport::community_avatars().len(),
-    );
-    let stale = listed_purchases.is_some_and(|listed| listed != purchases)
-        || listed_library.is_some_and(|listed| listed != library);
-    *listed_purchases = Some(purchases);
-    *listed_library = Some(library);
+    let catalogue = crate::passport::avatar_catalogue();
+    let stale = listed_revision.is_some_and(|listed| listed != catalogue.revision);
+    *listed_revision = Some(catalogue.revision);
     if just_connected || account_just_connected || stale {
+        if let Ok(scroll) = grid_scroll.single() {
+            commands.insert_resource(PickerScrollRestore(scroll.y));
+        }
         for overlay in &overlay_query {
             commands
                 .entity(overlay)
@@ -392,6 +395,31 @@ fn wallet_connect_ui_system(
             preview.image.clone(),
             is_compact(&windows),
         );
+    }
+}
+
+#[derive(Component)]
+struct RefreshCatalogueButton;
+#[derive(Resource)]
+struct PickerScrollRestore(f32);
+fn refresh_picker_catalogue(
+    buttons: Query<&Interaction, (Changed<Interaction>, With<RefreshCatalogueButton>)>,
+) {
+    if buttons.iter().any(|i| *i == Interaction::Pressed) {
+        crate::passport::refresh_avatar_catalogue();
+    }
+}
+fn restore_picker_scroll(
+    mut commands: Commands,
+    pending: Option<Res<PickerScrollRestore>>,
+    mut grids: Query<&mut ScrollPosition, With<ModelAvatarGrid>>,
+) {
+    let Some(pending) = pending else {
+        return;
+    };
+    if let Ok(mut scroll) = grids.single_mut() {
+        scroll.y = pending.0;
+        commands.remove_resource::<PickerScrollRestore>();
     }
 }
 
@@ -573,9 +601,14 @@ pub fn spawn_team_select_ui(
                     if visual_mode != PlayerVisualMode::Models3d {
                         return;
                     }
-                    // In the box: the shipped roster, free for everyone.
+                    let catalogue = crate::passport::avatar_catalogue();
                     spawn_avatar_group_label(grid, "Default avatars", "DefaultAvatarsLabel");
-                    for avatar in crate::passport::default_avatars() {
+                    for entry in catalogue
+                        .entries
+                        .iter()
+                        .filter(|e| e.source == crate::passport::AvatarCatalogueSource::Default)
+                    {
+                        let avatar = &entry.avatar;
                         spawn_avatar_button(
                             grid,
                             &avatar.slug,
@@ -583,48 +616,54 @@ pub fn spawn_team_select_ui(
                             selection.avatar.as_deref() == Some(avatar.slug.as_str()),
                         );
                     }
-                    // The connected account's own library: saved or created on Ekza.
-                    let library = crate::passport::library_avatars();
-                    if !library.is_empty() {
-                        spawn_avatar_group_label(grid, "My Ekza library", "LibraryAvatarsLabel");
-                    }
-                    for avatar in library {
+                    spawn_avatar_group_label(
+                        grid,
+                        "Ekza Studio · your library",
+                        "StudioAvatarsLabel",
+                    );
+                    spawn_avatar_group_hint(grid, catalogue.status.label());
+                    grid.spawn((
+                        Button,
+                        Node {
+                            min_width: Val::Px(120.0),
+                            min_height: Val::Px(44.0),
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::Center,
+                            padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
+                            border_radius: BorderRadius::all(Val::Px(6.0)),
+                            ..default()
+                        },
+                        BackgroundColor(WALLET_BUTTON_COLOR),
+                        RefreshCatalogueButton,
+                        Name::new("PickerRefreshStudio"),
+                    ))
+                    .with_children(|button| {
+                        button.spawn((
+                            Text::new("Refresh Studio"),
+                            TextFont {
+                                font_size: 13.0,
+                                ..default()
+                            },
+                            TextColor(Color::WHITE),
+                        ));
+                    });
+                    for entry in catalogue
+                        .entries
+                        .iter()
+                        .filter(|e| e.source != crate::passport::AvatarCatalogueSource::Default)
+                    {
+                        let avatar = &entry.avatar;
                         spawn_avatar_button(
                             grid,
                             &avatar.slug,
-                            &avatar.display_name,
+                            &format!("{} · {}", avatar.display_name, entry.source.label()),
                             selection.avatar.as_deref() == Some(avatar.slug.as_str()),
                         );
                     }
-                    // Free, made by creators in Ekza Studio and approved for Omoba.
-                    let community = crate::passport::community_avatars();
-                    if !community.is_empty() {
-                        spawn_avatar_group_label(
+                    if !crate::passport::account_connected() {
+                        spawn_avatar_group_hint(
                             grid,
-                            "Ekza community avatars",
-                            "CommunityAvatarsLabel",
-                        );
-                    }
-                    for avatar in community {
-                        spawn_avatar_button(
-                            grid,
-                            &avatar.slug,
-                            &avatar.display_name,
-                            selection.avatar.as_deref() == Some(avatar.slug.as_str()),
-                        );
-                    }
-                    // Not in the box: bought on Ekza, delivered through the SDK.
-                    spawn_avatar_group_label(grid, "Your Ekza avatars", "PurchasedAvatarsLabel");
-                    let purchased = crate::passport::purchased_avatars();
-                    if purchased.is_empty() {
-                        spawn_avatar_group_hint(grid, crate::passport::purchased_hint());
-                    }
-                    for avatar in purchased {
-                        spawn_avatar_button(
-                            grid,
-                            &avatar.slug,
-                            &avatar.display_name,
-                            selection.avatar.as_deref() == Some(avatar.slug.as_str()),
+                            "Connect Ekza to see your saved and purchased avatars.",
                         );
                     }
                 });
@@ -675,7 +714,7 @@ pub fn spawn_team_select_ui(
 
             spawn_ekza_row(parent);
 
-            spawn_section_title(parent, "03  JOIN YOUR TEAM", "TeamSelectTitle");
+            spawn_section_title(parent, "03  FIND YOUR TEAM", "TeamSelectTitle");
 
             parent
                 .spawn((
@@ -687,12 +726,11 @@ pub fn spawn_team_select_ui(
                     Name::new("TeamButtonsRow"),
                 ))
                 .with_children(|row| {
-                    spawn_team_button(row, Team::Green, "TeamGreenButton");
-                    spawn_team_button(row, Team::Blue, "TeamBlueButton");
+                    spawn_team_button(row, Team::Green, "FindMatchButton");
                 });
 
             parent.spawn((
-                Text::new("Pick a class and an avatar, then a side: locking in starts the search."),
+                Text::new("Choose a hero. Your team and starting side are assigned automatically."),
                 TextFont {
                     font_size: 15.0,
                     ..default()
@@ -740,11 +778,7 @@ fn spawn_hero_panel(
     preview_image: Handle<Image>,
 ) {
     let class = selection.hero_class;
-    let avatar_name = selection
-        .avatar
-        .as_deref()
-        .and_then(shared::avatar_definition)
-        .map_or("Default avatar", |avatar| avatar.display_name.as_str());
+    let avatar_name = crate::passport::avatar_display_name(selection.avatar.as_deref());
     parent
         .spawn((
             Node {
@@ -860,11 +894,7 @@ fn sync_hero_panel(
     if let Some(slug) = selection.avatar.as_deref() {
         preview.show_portrait(slug);
     }
-    let avatar_name = selection
-        .avatar
-        .as_deref()
-        .and_then(shared::avatar_definition)
-        .map_or("Default avatar", |avatar| avatar.display_name.as_str());
+    let avatar_name = crate::passport::avatar_display_name(selection.avatar.as_deref());
     for mut text in &mut names {
         if text.0 != avatar_name {
             text.0 = avatar_name.to_owned();
@@ -1292,7 +1322,7 @@ fn spawn_team_button(row: &mut ChildSpawnerCommands, team: Team, name: &str) {
     ))
     .with_children(|button| {
         button.spawn((
-            Text::new(format!("Lock in · {} side", team.as_str())),
+            Text::new("Find match"),
             TextFont {
                 font_size: 22.0,
                 ..default()
@@ -1493,7 +1523,7 @@ fn team_select_ui_system(
                 if client_session.state == ClientConnectionState::Disconnected {
                     info!(
                         "[omoba:cli] event=join_deferred reason=disconnected \
-                         msg=\"Reconnecting to server; pick a team again once connected.\""
+                         msg=\"Reconnecting to server; try finding a match once connected.\""
                     );
                     session_ui_writer.write(SessionUiCommand::Retry);
                     continue;
@@ -1510,8 +1540,7 @@ fn team_select_ui_system(
                     selection.avatar,
                     selection.character
                 );
-                command_writer.write(NetworkCommand::Join {
-                    team: button.team,
+                command_writer.write(NetworkCommand::JoinPrematch {
                     character: selection.character,
                     hero_class: selection.hero_class,
                     avatar: selection.avatar.clone(),
@@ -1686,8 +1715,7 @@ mod tests {
         assert_eq!(inactive.single(app.world()).unwrap().display, Display::None);
         let mut choices = app.world_mut().query::<&AvatarSelectButton>();
         assert_eq!(choices.iter(app.world()).count(), avatar_roster().len());
-        // Shipped defaults and SDK-delivered purchases are separate groups;
-        // without a paired wallet the purchased group explains itself.
+        // Defaults precede the persistent Studio section, even without a connection.
         let mut names = app.world_mut().query::<&Name>();
         let names: Vec<String> = names
             .iter(app.world())
@@ -1695,7 +1723,7 @@ mod tests {
             .collect();
         for expected in [
             "DefaultAvatarsLabel",
-            "PurchasedAvatarsLabel",
+            "StudioAvatarsLabel",
             "PurchasedAvatarsHint",
             // Pairing starts from the menu, not from a launch flag.
             "WalletConnectButton",
@@ -1710,7 +1738,7 @@ mod tests {
         let mut sprite_choices = app.world_mut().query::<&SpriteSelectButton>();
         assert_eq!(sprite_choices.iter(app.world()).count(), 0);
         let mut teams = app.world_mut().query::<&TeamSelectButton>();
-        assert_eq!(teams.iter(app.world()).count(), 2);
+        assert_eq!(teams.iter(app.world()).count(), 1);
         // A 720p / 768p roster viewport is bounded while the complete content scrolls.
         for height in [720.0, 768.0] {
             app.world_mut().entity_mut(grid).insert(ComputedNode {

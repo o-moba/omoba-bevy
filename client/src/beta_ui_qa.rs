@@ -165,11 +165,27 @@ fn prepare_controls(
     mut next: ResMut<NextState<crate::frontend::AppScreen>>,
     selection: Res<crate::team::TeamSelection>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    mut network: MessageWriter<crate::net::NetworkCommand>,
 ) {
     // World harnesses bypass the session-driven frontend. The picker is now
     // created only on HeroSelect, so this legacy HUD sequence owns those two
     // presentation states while admission still uses the real lock-in button.
     use crate::frontend::AppScreen;
+    // This legacy HUD fixture bypasses the shell; normal Find match always
+    // negotiates the coordinated draft, covered by frontend_flow_qa.
+    if qa.stage == 1 && session.is_connected() && !session.has_committed_join() {
+        network.write(crate::net::NetworkCommand::Join {
+            team: if std::env::var("OMOBA_QA_TEAM").as_deref() == Ok("blue") {
+                crate::team::Team::Blue
+            } else {
+                crate::team::Team::Green
+            },
+            character: selection.character,
+            hero_class: selection.hero_class,
+            avatar: selection.avatar.clone(),
+            sprite_character: Some(selection.sprite_character.clone()),
+        });
+    }
     let wanted = if qa.stage == 0 {
         Some(AppScreen::HeroSelect)
     } else if session.join_confirmed() {
@@ -207,15 +223,6 @@ fn prepare_controls(
                     && name.as_str() == format!("ClassButton-{}", class.id())
             });
         let press = class_press
-            || (qa.stage == 1
-                && session.is_connected()
-                && !session.join_confirmed()
-                && name.as_str()
-                    == if std::env::var("OMOBA_QA_TEAM").as_deref() == Ok("blue") {
-                        "TeamBlueButton"
-                    } else {
-                        "TeamGreenButton"
-                    })
             || (qa.stage == 2 && help.0 && name.as_str() == "HelpDismissButton")
             || (qa.stage == 3 && !shop.open && name.as_str() == "GoldShopButton")
             || (qa.stage == 5 && shop.open && phone && name.as_str() == "ShopCloseButton")
@@ -572,7 +579,7 @@ fn capture(
         return;
     }
     let primary_nodes: Vec<_> = scene.nodes.iter().filter(|(name, _, _, _)| edge::tracked(name.as_str()) || matches!(name.as_str(),
-        "TeamGreenButton" | "TeamBlueButton" | "AvatarGrid" | "HelpDismissButton" | "HelpOverlayRoot" | "GameStateLabel" | "ConnectionStatusPanel" | "MinimapRoot" | "MatchObjectivePanel" | "MatchHudColumn" | "SkillBarRoot" | "SkillSlot-Q" | "SkillSlot-R" | "EquipmentHud" | "ShopOpenButton" | "ShopPanel" | "ShopCloseButton" | "ShopBuy-EB" | "ShopBuy-GC" | "ShopSummary" | "ShopFeedback" | "MobileJoystick" | "MobileAttack" | "MobileAbility-0" | "MobileAbility-1" | "MobileAbility-2" | "MobileAbility-3" | "MobileUpgrade-0" | "MobileUpgrade-1" | "MobileUpgrade-2" | "MobileUpgrade-3" | "PhoneMenuBar" | "QaSkillUpgradeFixtureLabel" | "SocialEntry" | "SocialStatus" | "CareerEntryActions" | "HudProgressionText" | "HudXpText" | "MatchStatusText" | "MatchBuffText" | "EquipmentGold")
+        "FindMatchButton" | "AvatarGrid" | "HelpDismissButton" | "HelpOverlayRoot" | "GameStateLabel" | "ConnectionStatusPanel" | "MinimapRoot" | "MatchObjectivePanel" | "MatchHudColumn" | "SkillBarRoot" | "SkillSlot-Q" | "SkillSlot-R" | "EquipmentHud" | "ShopOpenButton" | "ShopPanel" | "ShopCloseButton" | "ShopBuy-EB" | "ShopBuy-GC" | "ShopSummary" | "ShopFeedback" | "MobileJoystick" | "MobileAttack" | "MobileAbility-0" | "MobileAbility-1" | "MobileAbility-2" | "MobileAbility-3" | "MobileUpgrade-0" | "MobileUpgrade-1" | "MobileUpgrade-2" | "MobileUpgrade-3" | "PhoneMenuBar" | "QaSkillUpgradeFixtureLabel" | "SocialEntry" | "SocialStatus" | "CareerEntryActions" | "HudProgressionText" | "HudXpText" | "MatchStatusText" | "MatchBuffText" | "EquipmentGold")
             || name.as_str().starts_with("ShopBuy-") || name.as_str().starts_with("ShopDescription-") || name.as_str().starts_with("ShopDetails-") || name.as_str().starts_with("SkillName-") || name.as_str().starts_with("SkillRank-") || name.as_str().starts_with("SkillSlot-") || name.as_str().starts_with("SkillIcon-"))
         .map(|(name, node, transform, visible)| {
             let center = transform.translation;
@@ -615,7 +622,15 @@ fn capture(
             let Some(rect) = measured_logical_rect(node) else {
                 return false;
             };
-            let expected = if phone { 116.0 } else { 144.0 };
+            let expected = if phone {
+                if qa.height <= 340 {
+                    96.0
+                } else {
+                    116.0 * mobile.as_ref().unwrap().scale()
+                }
+            } else {
+                144.0
+            };
             let inset = if phone {
                 mobile.as_ref().unwrap().safe.left
             } else {
@@ -642,9 +657,14 @@ fn capture(
                     clears_playfield(rect, Vec2::new(qa.width as f32, qa.height as f32), phone)
                 })
             });
-    if !minimap_top_left || !playfield_clear {
+    let radial_geometry_valid = !resting
+        || !phone
+        || mobile
+            .as_deref()
+            .is_some_and(|mobile| edge::mobile_geometry_valid(&primary_nodes, mobile));
+    if !minimap_top_left || !playfield_clear || !radial_geometry_valid {
         error!(
-            "BETA_UI_QA failed: edge placement/top-left map or open playfield: map={minimap_top_left} playfield={playfield_clear} {primary_nodes:?}"
+            "BETA_UI_QA failed: edge placement/top-left map, open playfield or radial geometry: map={minimap_top_left} playfield={playfield_clear} radial={radial_geometry_valid} {primary_nodes:?}"
         );
         exit.write(AppExit::error());
         return;
@@ -754,7 +774,7 @@ fn capture(
         return;
     }
     let required: &[&str] = match stage {
-        0 => &["TeamGreenButton", "TeamBlueButton", "AvatarGrid"],
+        0 => &["FindMatchButton", "AvatarGrid"],
         1 => &["HelpDismissButton", "HelpOverlayRoot"],
         3 | 4 => &[
             "ShopPanel",
@@ -906,7 +926,7 @@ fn capture(
         "authoritative_class":scene.hero_classes.single().ok().map(|class|class.0.id()), "skill_art_clear":skill_art_clear, "shop_close_clear":shop_close_clear, "server_epoch":game.meta.server_epoch, "snapshot_tick":game.meta.snapshot_tick,
         "synthetic_result":stage == 6, "synthetic_progression":synthetic_progression,
         "progression_fixture":synthetic_progression.then(||serde_json::json!({"level":6,"skill_points":4,"ranks":[1,1,1,1],"server_unchanged":true})),
-        "minimap":minimap.diagnostics(), "minimap_top_left":minimap_top_left, "playfield_clear":playfield_clear, "hud_text_fits":hud_text_fits, "shop_modal":shop.open, "gameplay_allowed":context.gameplay_allowed(), "pause_open":pause.open,
+        "minimap":minimap.diagnostics(), "minimap_top_left":minimap_top_left, "playfield_clear":playfield_clear, "radial_geometry_valid":radial_geometry_valid, "hud_text_fits":hud_text_fits, "shop_modal":shop.open, "gameplay_allowed":context.gameplay_allowed(), "pause_open":pause.open,
         "edge":edge::record(stage, scene.edge.as_deref(), &game, scene.utility.single().ok(), &scene.texts),
         "equipment":equipment.single().ok().map(|e|serde_json::json!({"gold":e.gold,"inventory":e.inventory,"bonuses":e.item_bonuses,"receipt":e.last_purchase})), "primary_controls_fit":controls_fit, "shop_text_fits":shop_text_fits, "primary_nodes":primary_nodes});
     if qa.edge
@@ -1006,14 +1026,28 @@ fn clears_playfield(panel: Rect, viewport: Vec2, phone: bool) -> bool {
     // Target health intentionally occupies upper-center; protect the actual hero
     // neighborhood and mobile lower-center opening from resting opaque panels.
     let regions = if phone {
+        let mut mobile = crate::mobile_controls::MobileControls::default();
+        mobile.viewport = viewport;
+        let layout = mobile.layout();
+        let gutter = 16.0 * mobile.combat_scale();
         [
+            // Protect the central hero neighborhood. The complete radial group
+            // now occupies the right third, including its outside rank control.
             Rect::from_corners(
-                Vec2::new(0.30, 0.30) * viewport,
-                Vec2::new(0.65, 0.60) * viewport,
+                Vec2::new(0.35, 0.30) * viewport,
+                Vec2::new(0.53, 0.60) * viewport,
             ),
+            // Preserve the actual passage between both thumb groups, including
+            // the joystick's full hit area and a gutter before utility buttons.
             Rect::from_corners(
-                Vec2::new(188.0 / 844.0, 239.0 / 390.0) * viewport,
-                Vec2::new(548.0 / 844.0, 367.0 / 390.0) * viewport,
+                Vec2::new(
+                    layout.joystick_center.x + layout.joystick_radius * 1.3 + gutter,
+                    viewport.y * 0.62,
+                ),
+                Vec2::new(
+                    layout.utility_centers[0].x - layout.auxiliary_radius - gutter,
+                    viewport.y - mobile.safe.bottom - 3.0,
+                ),
             ),
         ]
     } else {
@@ -1074,6 +1108,60 @@ mod layout_tests {
                 ),
                 viewport,
                 false
+            ));
+        }
+    }
+
+    #[test]
+    fn radial_controls_leave_hero_and_lower_center_passage_open() {
+        for viewport in [
+            Vec2::new(693.0, 320.0),
+            Vec2::new(844.0, 390.0),
+            Vec2::new(932.0, 430.0),
+        ] {
+            let mut mobile = crate::mobile_controls::MobileControls::default();
+            mobile.viewport = viewport;
+            let layout = mobile.layout();
+            for (center, radius) in layout
+                .ability_centers
+                .into_iter()
+                .zip(
+                    layout
+                        .ability_radii
+                        .map(|radius| radius + 3.0 * mobile.combat_scale()),
+                )
+                .chain(
+                    layout
+                        .utility_centers
+                        .into_iter()
+                        .map(|center| (center, layout.auxiliary_radius)),
+                )
+                .chain([
+                    (layout.upgrade_center, layout.upgrade_radius),
+                    (layout.cancel_center, layout.cancel_radius),
+                ])
+            {
+                assert!(
+                    clears_playfield(
+                        Rect::from_center_size(center, Vec2::splat(radius * 2.0)),
+                        viewport,
+                        true
+                    ),
+                    "control at {center:?} blocks {viewport:?}"
+                );
+            }
+            assert!(!clears_playfield(
+                Rect::from_center_size(viewport * 0.5, Vec2::splat(40.0)),
+                viewport,
+                true
+            ));
+            assert!(!clears_playfield(
+                Rect::from_center_size(
+                    Vec2::new(viewport.x * 0.4, viewport.y - 44.0),
+                    Vec2::new(300.0, 48.0)
+                ),
+                viewport,
+                true
             ));
         }
     }

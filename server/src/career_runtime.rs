@@ -361,6 +361,7 @@ impl ServerRuntime {
         now: Instant,
     ) {
         let ClientPacket::Join {
+            prematch,
             team,
             character,
             hero_class,
@@ -416,6 +417,7 @@ impl ServerRuntime {
         }
         let player = self.players.get_mut(&addr).unwrap();
         player.career_profile = Some(profile);
+        player.draft.capable = prematch;
         handle_join_request_with_sprite(
             player,
             team,
@@ -759,6 +761,15 @@ impl ServerRuntime {
         }
     }
 
+    /// A loading roster changed while durable allocation was pending. Keep the
+    /// existing queue reservation, but retire this allocation before a new draft.
+    pub(crate) fn invalidate_prematch_allocation(&mut self, now: Instant) {
+        if self.match_started_at.is_none() && self.career.round.is_some() {
+            self.finish_career_round(MatchOutcome::Abandoned, None, now);
+            self.career.round = None;
+        }
+    }
+
     pub(crate) fn reset_career_round(&mut self) {
         let career_flow = self.career_flow_active();
         self.career.round = None;
@@ -822,6 +833,7 @@ impl ServerRuntime {
             self.disconnected_sessions.remove(&session_id);
         }
         if was_joined {
+            self.invalidate_prematch_roster(now);
             println!(
                 "MATCH_METRIC event=leave epoch={} match={} player={} elapsed_ms={}",
                 self.server_epoch,
@@ -1015,6 +1027,7 @@ impl ServerRuntime {
         let player = self.players.get_mut(&addr).unwrap();
         player.joined = false;
         let packet = ClientPacket::Join {
+            prematch: player.draft.capable,
             team: player.state.team,
             character: player.state.character,
             hero_class: player.state.hero_class,

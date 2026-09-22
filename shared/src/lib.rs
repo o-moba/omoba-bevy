@@ -13,6 +13,7 @@ pub mod jungle;
 pub mod live_score;
 pub mod map;
 pub mod navigation;
+pub mod prematch;
 pub mod protocol;
 pub mod shop;
 pub mod social;

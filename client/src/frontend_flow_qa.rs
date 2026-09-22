@@ -72,7 +72,7 @@ enum FlowStep {
     Leave,
     /// Home again, with the seat released; then PLAY a second time.
     HomeAgain,
-    /// Pick another class and the other side.
+    /// Pick another class and accept an automatically assigned side.
     SecondSelect,
     /// The second lock-in must reach a match too: no `SessionActive`, no
     /// reclaimed old seat, no dead picker.
@@ -121,6 +121,8 @@ impl FlowQa {
             "join_committed_from_the_menus": self.join_committed_on_home,
             "local_hero_before_lock_in": self.world_before_lock_in,
             "rejoined_after_leave": self.rejoined_after_leave,
+            "coordinated_peer_run": std::env::var("OMOBA_FRONTEND_QA_PEER").as_deref() == Ok("1"),
+            "prematch_captures": (["04-team-draft.png", "05-team-countdown.png", "06-team-loading.png"].map(|name| serde_json::json!({"file":name,"exists":self.directory.join(name).is_file()}))),
             "in_match_capture": passed.then(|| "07-in-match.png".to_owned()),
             "manual_input_verified": false,
         });
@@ -152,13 +154,31 @@ fn drive_flow(
     screen: Res<State<AppScreen>>,
     session: Res<ClientSession>,
     players: Query<(), With<Player>>,
+    snapshot: Res<crate::net::GameStateSnapshot>,
+    mut draft_since: Local<Option<Instant>>,
     mut buttons: Query<(&Name, &mut Interaction)>,
     mut session_ui: MessageWriter<crate::net::SessionUiCommand>,
-    windows: Query<Entity, With<PrimaryWindow>>,
+    mut windows: Query<(Entity, &mut Window), With<PrimaryWindow>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     if qa.finished {
         return;
+    }
+    for (_, mut window) in &mut windows {
+        let dimension = |key: &str, fallback: u32| {
+            std::env::var(key)
+                .ok()
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(fallback)
+        };
+        window.resolution.set_scale_factor_override(Some(1.0));
+        let (width, height) = (
+            dimension("OMOBA_QA_WIDTH", 1280),
+            dimension("OMOBA_QA_HEIGHT", 720),
+        );
+        if window.physical_width() != width || window.physical_height() != height {
+            window.resolution.set_physical_resolution(width, height);
+        }
     }
     let current = *screen.get();
     qa.record(current);
@@ -167,6 +187,51 @@ fn drive_flow(
         return;
     }
     qa.frames += 1;
+    if matches!(qa.step, FlowStep::AwaitMatch | FlowStep::AwaitSecondMatch) {
+        if current == AppScreen::Draft {
+            let since = draft_since.get_or_insert_with(Instant::now);
+            if !players.is_empty() {
+                qa.finish(
+                    "failed",
+                    Some("world hero spawned before the team locked its draft"),
+                    &mut exit,
+                );
+                return;
+            }
+            if since.elapsed() < Duration::from_secs(2) {
+                press(&mut buttons, "DraftRole-Jungle");
+            }
+            if since.elapsed() > Duration::from_secs(2) {
+                let path = qa.directory.join("04-team-draft.png");
+                if !path.exists() {
+                    let _ = std::fs::create_dir_all(&qa.directory);
+                    commands
+                        .spawn(Screenshot::primary_window())
+                        .observe(save_to_disk(path));
+                }
+            }
+            if since.elapsed() > Duration::from_secs(4) {
+                press(&mut buttons, "DraftLock");
+            }
+        } else {
+            *draft_since = None;
+        }
+        if current == AppScreen::Loading {
+            if let Some(prematch) = snapshot.prematch.as_ref() {
+                let filename = match prematch.phase {
+                    shared::prematch::PrematchPhase::Countdown => "05-team-countdown.png",
+                    shared::prematch::PrematchPhase::Loading => "06-team-loading.png",
+                    _ => "04-team-draft.png",
+                };
+                let path = qa.directory.join(filename);
+                if !path.exists() {
+                    commands
+                        .spawn(Screenshot::primary_window())
+                        .observe(save_to_disk(path));
+                }
+            }
+        }
+    }
     match qa.step {
         FlowStep::Home => {
             // The promise under test: the menus never talk to the match.
@@ -212,7 +277,7 @@ fn drive_flow(
             if qa.frames < SELECT_FRAMES {
                 return;
             }
-            press(&mut buttons, "TeamGreenButton");
+            press(&mut buttons, "FindMatchButton");
         }
         FlowStep::AwaitMatch => {
             if current == AppScreen::InMatch {
@@ -245,7 +310,11 @@ fn drive_flow(
                 .metadata()
                 .is_ok_and(|file| file.len() > 32)
             {
-                qa.step = FlowStep::Leave;
+                qa.step = if std::env::var("OMOBA_FRONTEND_QA_PEER").as_deref() == Ok("1") {
+                    FlowStep::Done
+                } else {
+                    FlowStep::Leave
+                };
                 qa.frames = 0;
             }
         }
@@ -286,12 +355,12 @@ fn drive_flow(
             if current != AppScreen::HeroSelect {
                 return;
             }
-            // Another class first, then the other side.
+            // Another class first, then an automatically assigned side.
             if qa.frames < SELECT_FRAMES {
                 press(&mut buttons, "ClassButton-cleric");
                 return;
             }
-            press(&mut buttons, "TeamBlueButton");
+            press(&mut buttons, "FindMatchButton");
         }
         FlowStep::AwaitSecondMatch => {
             if let Some(rejection) = session.join_rejection() {
@@ -304,7 +373,7 @@ fn drive_flow(
             }
         }
         FlowStep::Done => {
-            for window in &windows {
+            for (window, _) in &windows {
                 commands.entity(window).despawn();
             }
             qa.finish("passed", None, &mut exit);

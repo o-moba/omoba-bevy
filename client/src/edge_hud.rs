@@ -680,15 +680,43 @@ fn layout(
             "TargetHealthRoot" => {
                 let width = if phone { 160.0 } else { 224.0 };
                 node.left = Val::Px((window.width() - width) * 0.5);
-                node.top = Val::Px(top);
+                node.top = Val::Px(
+                    top + if phone && window.width() < 800.0 {
+                        48.0
+                    } else {
+                        0.0
+                    },
+                );
                 node.width = Val::Px(width);
             }
+            "ScoreboardRoot" => {
+                node.padding = if phone {
+                    UiRect {
+                        left: Val::Px(mobile.safe.left),
+                        right: Val::Px(mobile.safe.right),
+                        top: Val::Px(mobile.safe.top),
+                        bottom: Val::Px(mobile.safe.bottom),
+                    }
+                } else {
+                    UiRect::ZERO
+                };
+            }
             "ScoreboardPanel" => {
+                node.max_width = Val::Percent(if phone { 100.0 } else { 94.0 });
+                node.max_height = Val::Percent(if phone { 100.0 } else { 92.0 });
                 node.width = Val::Px(if phone { 620.0 } else { 760.0 });
                 node.padding = UiRect::all(Val::Px(if phone { 12.0 } else { 16.0 }));
             }
             "ScoreboardGreenRows" | "ScoreboardBlueRows" => {
-                node.height = Val::Px(if phone { 145.0 } else { 190.0 });
+                node.height = Val::Px(if phone {
+                    if window.height() <= 340.0 {
+                        135.0
+                    } else {
+                        145.0
+                    }
+                } else {
+                    190.0
+                });
             }
             _ => {}
         }
