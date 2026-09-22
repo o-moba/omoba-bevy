@@ -512,6 +512,33 @@ pub fn refresh_avatar_catalogue() {
     store::request_user_refresh();
 }
 
+/// Collection-facing connection status: no transport diagnostics or credentials.
+pub fn avatar_account_status_line() -> String {
+    if ACCOUNT_FLOW
+        .lock()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|flow| matches!(flow.state(), PairingState::Failed(_)))
+    {
+        "Ekza account is unavailable · connect again to retry".into()
+    } else {
+        account_status_line()
+    }
+}
+
+/// Current menu copy without rewriting the immutable model/approval identity.
+pub fn avatar_display_name(slug: Option<&str>) -> String {
+    let Some(slug) = slug else {
+        return "Default avatar".into();
+    };
+    store::catalogue_definitions()
+        .into_iter()
+        .find(|avatar| avatar.slug == slug)
+        .map(|avatar| avatar.display_name)
+        .or_else(|| shared::avatar_definition(slug).map(|avatar| avatar.display_name.clone()))
+        .unwrap_or_else(|| "Default avatar".into())
+}
+
 #[cfg(test)]
 mod catalogue_tests {
     use super::*;
@@ -556,31 +583,4 @@ mod catalogue_tests {
             catalogue_revision(&make(0, AvatarCatalogueSource::Library), &status)
         );
     }
-}
-
-/// Collection-facing connection status: no transport diagnostics or credentials.
-pub fn avatar_account_status_line() -> String {
-    if ACCOUNT_FLOW
-        .lock()
-        .unwrap()
-        .as_ref()
-        .is_some_and(|flow| matches!(flow.state(), PairingState::Failed(_)))
-    {
-        "Ekza account is unavailable · connect again to retry".into()
-    } else {
-        account_status_line()
-    }
-}
-
-/// Current menu copy without rewriting the immutable model/approval identity.
-pub fn avatar_display_name(slug: Option<&str>) -> String {
-    let Some(slug) = slug else {
-        return "Default avatar".into();
-    };
-    store::catalogue_definitions()
-        .into_iter()
-        .find(|avatar| avatar.slug == slug)
-        .map(|avatar| avatar.display_name)
-        .or_else(|| shared::avatar_definition(slug).map(|avatar| avatar.display_name.clone()))
-        .unwrap_or_else(|| "Default avatar".into())
 }

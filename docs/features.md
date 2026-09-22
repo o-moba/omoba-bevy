@@ -1,6 +1,12 @@
 # Feature Inventory
 
-Canonical version: `0.21.0-rc.4`
+## Shared running and VRM skeletal motion (0.21.0-rc.5)
+
+All 15 shipped playable 3D avatars use the engine's shared Run motion during normal movement. Local intent and remote movement drive the same state machine; Walk stays reserved for future debuffs. Idle and combat actions remain separate. Existing 2D running sprites are unchanged.
+
+Validated VRM0/VRM1 skinned humanoids receive runtime clips adapted to their bone map and rest pose, including models with no embedded clips. Original skin bytes remain unchanged. This is skeletal compatibility for a documented subset, not complete VRM materials/face/hair support. Approved Studio models gain runtime Run through normal verified loading; accepting externally published clipless models still requires a versioned profile rollout. See [architecture, import and limits](humanoid-motion.md).
+
+Canonical version: `0.21.0-rc.5`
 
 ## Team draft and shared loading
 

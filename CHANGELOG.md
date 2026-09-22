@@ -6,6 +6,14 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.21.0-rc.5] - 2026-09-22
+
+### Shared run animation and VRM humanoid foundation
+- All 15 shipped 3D heroes use a real shared sprint motion during normal local or remote movement. Walking remains a separate motion reserved for future debuffs; existing 2D Run sequences remain unchanged.
+- VRM0/VRM1 humanoid metadata drives runtime retargeting from one engine-owned motion library. Per-instance skin-index binding supports validated clipless models without baking animation into each skin or changing approved model bytes.
+- Added a bounded offline VRM compatibility validator and explicit unsupported-rig diagnostics. Existing Studio profile, integrity and ownership admission checks remain intact; external clipless profile rollout is documented separately.
+- Added all-roster motion audits, malformed-rig/instance lifecycle regressions and a labeled native capture harness.
+
 ## [0.21.0-rc.4] - 2026-09-22
 
 ### Coordinated team draft and avatar presentation

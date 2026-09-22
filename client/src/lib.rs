@@ -1,5 +1,6 @@
 use bevy::{asset::AssetPlugin, prelude::*};
 
+mod animation_qa;
 mod audio_qa;
 mod audio_settings;
 mod beta_ui_qa;
@@ -24,6 +25,7 @@ mod game_state;
 mod game_vfx;
 mod god_mode;
 mod help_overlay;
+mod humanoid;
 mod input_bindings;
 mod input_context;
 mod jungle;
@@ -92,6 +94,10 @@ use world2d::World2dPlugin;
 
 #[bevy_main]
 pub fn main() {
+    if let Some(directory) = std::env::var_os("OMOBA_ANIMATION_QA") {
+        animation_qa::run(directory.into());
+        return;
+    }
     passport::initialize();
     // Headless model size analyzer (prints a bind-pose height table and exits).
     if std::env::var("OMOBA_MEASURE_MODELS").is_ok_and(|value| value == "1") {

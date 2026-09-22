@@ -1,6 +1,6 @@
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs::system::SystemParam;
-use bevy::gltf::Gltf;
+use bevy::gltf::{Gltf, GltfLoaderSettings};
 use bevy::light::CascadeShadowConfigBuilder;
 use bevy::prelude::*;
 use bevy::render::view::Hdr;
@@ -95,8 +95,13 @@ impl AvatarAssetCache {
             .or_insert_with(|| {
                 info!("Loading roster avatar model '{slug}'");
                 (
-                    asset_server.load(format!("{path}#Scene0")),
-                    asset_server.load(path),
+                    asset_server.load_with_settings(
+                        format!("{path}#Scene0"),
+                        |settings: &mut GltfLoaderSettings| settings.include_source = true,
+                    ),
+                    asset_server.load_with_settings(path, |settings: &mut GltfLoaderSettings| {
+                        settings.include_source = true
+                    }),
                 )
             })
             .clone()
@@ -542,7 +547,7 @@ fn spawn_player_entity(
 /// the whole mesh renders. Scoped to VRM-derived characters (the legacy Paco model
 /// and every roster avatar, which are all VRM-staged GLBs) to leave other models
 /// untouched. Idempotent: each material asset is patched once.
-fn force_vrm_models_double_sided(
+pub(crate) fn force_vrm_models_double_sided(
     roots: Query<
         (Entity, &NetworkCharacterChoice, Option<&NetworkAvatar>),
         With<NormalizeModelScale>,

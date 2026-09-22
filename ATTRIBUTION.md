@@ -84,7 +84,10 @@ The runtime step preserves the source and is reproducible with
 
 Retained imported models include Quaternius Universal Animation Library clips,
 credited as CC0 in `assets-src/animations/README.md`, which records source links,
-clip names and retargeting. The native package includes that attribution record.
+clip names and retargeting. The same CC0 library supplies the engine-owned
+`client/assets/animations/humanoid-motion-v1.json`, including the distinct
+`Sprint_Loop` running motion. Its source hashes and adaptations are recorded in
+the asset and animation README. The native package includes that attribution record.
 
 ## Starter reaction artwork — 0.19.0-rc.7
 

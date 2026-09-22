@@ -82,15 +82,6 @@ impl Plugin for PlayerPlugin {
                 .after(CombatPointerInputSet)
                 .in_set(WorldMovementInputSet),
         )
-        .add_systems(
-            Update,
-            (
-                setup_player_animation_library,
-                bind_player_animation_players,
-                sync_player_animation_state.after(move_player),
-            )
-                .chain(),
-        )
         .add_systems(Update, resolve_player_structure_overlap.after(move_player))
         .add_systems(PostUpdate, apply_gravity)
         .init_resource::<RespawnCountdown>()
@@ -98,7 +89,28 @@ impl Plugin for PlayerPlugin {
         .init_resource::<PlayerAnimationLibrary>()
         .add_systems(Startup, setup_respawn_ui)
         .add_systems(Update, respawn_countdown_system);
+        register_hero_animation_systems(app);
     }
+}
+
+/// The real animation pipeline is also used by the opt-in native motion audit.
+pub(crate) fn register_hero_animation_systems(app: &mut App) {
+    app.init_resource::<PlayerAnimationLibrary>()
+        .init_resource::<crate::humanoid::HumanoidRuntimeLibrary>()
+        .add_systems(
+            // SceneSpawner runs after Update and may restore imported targets.
+            // Bind after scene writes, before animation consumes those targets.
+            PostUpdate,
+            (
+                setup_player_animation_library,
+                prepare_runtime_humanoid_requests,
+                crate::humanoid::bind_runtime_humanoids,
+                bind_player_animation_players,
+                sync_player_animation_state,
+            )
+                .chain()
+                .before(bevy::app::AnimationSystems),
+        );
 }
 
 #[derive(Component)]
@@ -193,19 +205,21 @@ impl PlayerAnimationLibrary {
 struct CharacterAnimationSet {
     graph: Handle<AnimationGraph>,
     idle_node: AnimationNodeIndex,
-    walk_node: AnimationNodeIndex,
+    run_node: AnimationNodeIndex,
+    walk_node: Option<AnimationNodeIndex>,
+    runtime: bool,
     attack_node: Option<AnimationNodeIndex>,
     cast_node: Option<AnimationNodeIndex>,
     death_node: Option<AnimationNodeIndex>,
 }
 
-/// Grace period before Walk falls back to Idle. Remote players advance in
+/// Grace period before Run falls back to Idle. Remote players advance in
 /// snapshot-interpolation bursts with still frames in between; without this
-/// hysteresis the animation flaps Walk<->Idle several times per second.
+/// hysteresis the animation flaps Run<->Idle several times per second.
 const LOCOMOTION_IDLE_GRACE_SECS: f32 = 0.25;
 
 #[derive(Component)]
-struct PlayerAnimationBinding {
+pub(crate) struct PlayerAnimationBinding {
     owner: Entity,
     key: AvatarKey,
     playback: HeroAnimationPlayback,
@@ -214,9 +228,18 @@ struct PlayerAnimationBinding {
     seconds_since_movement: f32,
 }
 
+impl PlayerAnimationBinding {
+    pub(crate) fn is_running(&self) -> bool {
+        self.playback.state == HeroAnimationState::Run
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum HeroAnimationState {
     Idle,
+    Run,
+    /// Reserved for an explicit future debuff locomotion policy.
+    #[allow(dead_code)]
     Walk,
     Attack,
     Cast,
@@ -227,7 +250,8 @@ impl CharacterAnimationSet {
     fn node(&self, state: HeroAnimationState) -> AnimationNodeIndex {
         match state {
             HeroAnimationState::Idle => self.idle_node,
-            HeroAnimationState::Walk => self.walk_node,
+            HeroAnimationState::Run => self.run_node,
+            HeroAnimationState::Walk => self.walk_node.unwrap_or(self.idle_node),
             HeroAnimationState::Attack => self.attack_node.unwrap_or(self.idle_node),
             HeroAnimationState::Cast => self.cast_node.unwrap_or(self.idle_node),
             HeroAnimationState::Death => self.death_node.unwrap_or(self.idle_node),
@@ -288,7 +312,7 @@ impl HeroAnimationPlayback {
         let respawned = !self.alive && alive;
         self.alive = alive;
         let locomotion = if moving {
-            HeroAnimationState::Walk
+            HeroAnimationState::Run
         } else {
             HeroAnimationState::Idle
         };
@@ -327,7 +351,10 @@ fn start_hero_animation(
 ) {
     player.stop_all();
     let active = player.start(set.node(state));
-    if matches!(state, HeroAnimationState::Idle | HeroAnimationState::Walk) {
+    if matches!(
+        state,
+        HeroAnimationState::Idle | HeroAnimationState::Run | HeroAnimationState::Walk
+    ) {
         active.repeat();
     } else if state == HeroAnimationState::Death && !set.available(state) {
         // A missing death clip freezes a safe pose until authoritative respawn.
@@ -342,10 +369,17 @@ fn setup_player_animation_library(
     avatar_cache: Res<AvatarAssetCache>,
     gltf_assets: Res<Assets<Gltf>>,
     mut animation_graphs: ResMut<Assets<AnimationGraph>>,
+    mut runtime: ResMut<crate::humanoid::HumanoidRuntimeLibrary>,
+    mut animation_clips: ResMut<Assets<AnimationClip>>,
+    actual_models: Query<
+        (
+            &NetworkCharacterChoice,
+            Option<&NetworkAvatar>,
+            &crate::model_scale::ModelScaleSource,
+        ),
+        Or<(With<Player>, With<RemotePlayer>)>,
+    >,
 ) {
-    let Some(catalog) = catalog else {
-        return;
-    };
     let revision = cosmetics.as_ref().map_or(0, |registry| registry.revision());
     if library.cosmetic_revision != revision {
         library.cosmetic_revision = revision;
@@ -359,9 +393,10 @@ fn setup_player_animation_library(
         CharacterChoice::Wang,
     ]
     .into_iter()
-    .map(|character| {
-        let (_scene, maybe_gltf) = model_assets_for_choice(&catalog, character);
-        (AvatarKey::Character(character), maybe_gltf)
+    .filter_map(|character| {
+        let catalog = catalog.as_ref()?;
+        let (_scene, maybe_gltf) = model_assets_for_choice(catalog, character);
+        Some((AvatarKey::Character(character), maybe_gltf))
     })
     .collect();
     for (slug, gltf_handle) in avatar_cache.requested() {
@@ -369,6 +404,13 @@ fn setup_player_animation_library(
             AvatarKey::Roster(slug.to_owned()),
             Some(gltf_handle.clone()),
         ));
+    }
+
+    // The instantiated model wins over a stale catalogue handle during replacement.
+    for (choice, avatar, source) in &actual_models {
+        let key = avatar_key(choice.0, avatar);
+        candidates.retain(|(candidate, _)| candidate != &key);
+        candidates.push((key, Some(source.gltf.clone())));
     }
 
     for (key, maybe_gltf) in candidates {
@@ -394,6 +436,97 @@ fn setup_player_animation_library(
             .source_gltfs
             .insert(key.clone(), gltf_handle.clone());
 
+        let cosmetic_key = match &key {
+            AvatarKey::Roster(slug) => slug.clone(),
+            AvatarKey::Character(character) => {
+                format!("character:{character:?}").to_ascii_lowercase()
+            }
+        };
+        let aliases = cosmetics
+            .as_ref()
+            .and_then(|registry| registry.animation_aliases(&cosmetic_key));
+        let is_humanoid = gltf.source.as_ref().is_some_and(|source| {
+            source.extension_value("VRM").is_some() || source.extension_value("VRMC_vrm").is_some()
+        });
+        if is_humanoid {
+            match runtime.ensure(&gltf_handle, gltf, &mut animation_clips) {
+                Ok(mut motion) => {
+                    // Keep explicit cosmetic overrides by translating their
+                    // original glTF targets into this runtime rig's namespace.
+                    // Unsupported aliases fall back as a whole, never as a
+                    // partially animated pose.
+                    let mut apply_alias =
+                        |state: &str,
+                         names: Option<&Vec<String>>,
+                         destination: &mut Handle<AnimationClip>| {
+                            let Some(names) = names else {
+                                return;
+                            };
+                            for name in names {
+                                if state == "run" && name.to_ascii_lowercase().contains("walk") {
+                                    warn!("Ignoring walk clip as ordinary Run alias for {:?}", key);
+                                    continue;
+                                }
+                                let Some(original) = gltf
+                                    .named_animations
+                                    .get(name.as_str())
+                                    .and_then(|handle| animation_clips.get(handle))
+                                    .cloned()
+                                else {
+                                    continue;
+                                };
+                                match runtime.remap_embedded_clip(&gltf_handle, gltf, &original) {
+                                    Ok(clip) => {
+                                        *destination = animation_clips.add(clip);
+                                        return;
+                                    }
+                                    Err(error) => warn!(
+                                        "Unsupported {state} alias {name:?} for {:?}: {error}",
+                                        key
+                                    ),
+                                }
+                            }
+                        };
+                    apply_alias("idle", aliases.map(|a| &a.idle), &mut motion.idle);
+                    apply_alias("run", aliases.map(|a| &a.run), &mut motion.run);
+                    apply_alias("walk", aliases.map(|a| &a.walk), &mut motion.walk);
+                    apply_alias("attack", aliases.map(|a| &a.attack), &mut motion.attack);
+                    apply_alias("cast", aliases.map(|a| &a.cast), &mut motion.cast);
+                    apply_alias("death", aliases.map(|a| &a.death), &mut motion.death);
+                    let (graph, nodes) = AnimationGraph::from_clips([
+                        motion.idle,
+                        motion.run,
+                        motion.walk,
+                        motion.attack,
+                        motion.cast,
+                        motion.death,
+                    ]);
+                    library.sets.insert(
+                        key.clone(),
+                        CharacterAnimationSet {
+                            graph: animation_graphs.add(graph),
+                            idle_node: nodes[0],
+                            run_node: nodes[1],
+                            walk_node: Some(nodes[2]),
+                            runtime: true,
+                            attack_node: Some(nodes[3]),
+                            cast_node: Some(nodes[4]),
+                            death_node: Some(nodes[5]),
+                        },
+                    );
+                    info!(
+                        "Shared humanoid motion ready for {:?}: Run = Sprint_Loop (runtime retarget)",
+                        key
+                    );
+                }
+                Err(error) => {
+                    library.sets.remove(&key);
+                    warn!("Humanoid motion unavailable for {:?}: {}", key, error);
+                }
+            }
+            continue;
+        }
+
         let find_clip = |substrings: &[&str]| -> Option<(String, Handle<AnimationClip>)> {
             for needle in substrings {
                 if let Some((animation_name, handle)) =
@@ -409,15 +542,6 @@ fn setup_player_animation_library(
             None
         };
 
-        let cosmetic_key = match &key {
-            AvatarKey::Roster(slug) => slug.clone(),
-            AvatarKey::Character(character) => {
-                format!("character:{character:?}").to_ascii_lowercase()
-            }
-        };
-        let aliases = cosmetics
-            .as_ref()
-            .and_then(|registry| registry.animation_aliases(&cosmetic_key));
         let exact_clip = |names: Option<&Vec<String>>| -> Option<(String, Handle<AnimationClip>)> {
             names?.iter().find_map(|name| {
                 gltf.named_animations
@@ -427,13 +551,15 @@ fn setup_player_animation_library(
         };
         let mut idle =
             exact_clip(aliases.map(|aliases| &aliases.idle)).or_else(|| find_clip(&["idle"]));
-        let mut walk = exact_clip(aliases.map(|aliases| &aliases.walk))
-            .or_else(|| exact_clip(aliases.map(|aliases| &aliases.run)))
+        let reserved_walk = exact_clip(aliases.map(|aliases| &aliases.walk))
             .or_else(|| find_clip(&["walkcycle", "walk_cycle", "walk"]));
+        let mut walk = exact_clip(aliases.map(|aliases| &aliases.run))
+            .or_else(|| find_clip(&["sprint", "run", "jog"]))
+            .or_else(|| reserved_walk.clone());
         if matches!((&idle, &walk), (Some((_, idle)), Some((_, walk))) if idle == walk) {
             // A conflicting cosmetic alias must not disable valid built-in locomotion.
             idle = find_clip(&["idle"]);
-            walk = find_clip(&["walkcycle", "walk_cycle", "walk"]);
+            walk = find_clip(&["sprint", "run", "jog", "walkcycle", "walk_cycle", "walk"]);
         }
         if let (Some((idle_name, idle_clip)), Some((walk_name, walk_clip))) = (idle, walk) {
             if idle_clip == walk_clip {
@@ -471,7 +597,9 @@ fn setup_player_animation_library(
                 CharacterAnimationSet {
                     graph: graph_handle,
                     idle_node,
-                    walk_node,
+                    run_node: walk_node,
+                    walk_node: Some(walk_node),
+                    runtime: false,
                     attack_node: optional_indices[0].and_then(|index| nodes.get(index).copied()),
                     cast_node: optional_indices[1].and_then(|index| nodes.get(index).copied()),
                     death_node: optional_indices[2].and_then(|index| nodes.get(index).copied()),
@@ -513,6 +641,45 @@ fn sync_jump_fallback_mode(
     }
 }
 
+fn prepare_runtime_humanoid_requests(
+    mut commands: Commands,
+    library: Res<PlayerAnimationLibrary>,
+    models: Query<
+        (
+            Entity,
+            &NetworkCharacterChoice,
+            Option<&NetworkAvatar>,
+            &crate::model_scale::ModelScaleSource,
+            Option<&crate::humanoid::RuntimeHumanoidRequest>,
+        ),
+        Or<(With<Player>, With<RemotePlayer>)>,
+    >,
+) {
+    for (entity, choice, avatar, source, request) in &models {
+        let key = avatar_key(choice.0, avatar);
+        if library.get_set(&key).is_some_and(|set| set.runtime)
+            && library.source_gltfs.get(&key) == Some(&source.gltf)
+            && request.is_none_or(|request| request.model != source.gltf)
+        {
+            commands
+                .entity(entity)
+                .insert(crate::humanoid::RuntimeHumanoidRequest {
+                    model: source.gltf.clone(),
+                });
+            commands.entity(entity).remove::<PlayerAnimationBinding>();
+        } else if request.is_some()
+            && (!library.get_set(&key).is_some_and(|set| set.runtime)
+                || library.source_gltfs.get(&key) != Some(&source.gltf))
+        {
+            // The runtime binder clears owned targets and its player atomically.
+            commands.entity(entity).remove::<(
+                crate::humanoid::RuntimeHumanoidRequest,
+                PlayerAnimationBinding,
+            )>();
+        }
+    }
+}
+
 fn bind_player_animation_players(
     mut commands: Commands,
     library: Res<PlayerAnimationLibrary>,
@@ -527,7 +694,11 @@ fn bind_player_animation_players(
     >,
     child_of_query: Query<&ChildOf>,
     mut animation_players: Query<
-        (Entity, &mut AnimationPlayer),
+        (
+            Entity,
+            &mut AnimationPlayer,
+            Option<&crate::humanoid::RuntimeHumanoidPlayer>,
+        ),
         (With<AnimationPlayer>, Without<PlayerAnimationBinding>),
     >,
 ) {
@@ -535,7 +706,7 @@ fn bind_player_animation_players(
         return;
     }
 
-    for (animation_entity, mut animation_player) in &mut animation_players {
+    for (animation_entity, mut animation_player, runtime_player) in &mut animation_players {
         let mut current = animation_entity;
         let mut owner = None;
         loop {
@@ -560,6 +731,10 @@ fn bind_player_animation_players(
         let Some(set) = library.get_set(&key) else {
             continue;
         };
+        if set.runtime != runtime_player.is_some() {
+            animation_player.stop_all();
+            continue;
+        }
         let (last_owner_position, sequence) = owner_transform_query
             .get(owner)
             .map(|(transform, action)| {
@@ -1869,7 +2044,7 @@ mod animation_tests {
                 true
             })
         );
-        assert_eq!(playback.state, HeroAnimationState::Walk);
+        assert_eq!(playback.state, HeroAnimationState::Run);
         assert!(playback.advance(false, false, attack, true, |_| true));
         assert_eq!(playback.state, HeroAnimationState::Death);
         assert!(
@@ -1968,7 +2143,9 @@ mod animation_tests {
         CharacterAnimationSet {
             graph: Handle::default(),
             idle_node: nodes[0],
-            walk_node: nodes[1],
+            run_node: nodes[1],
+            walk_node: None,
+            runtime: false,
             attack_node: Some(nodes[2]),
             cast_node: Some(nodes[3]),
             death_node: Some(nodes[4]),
@@ -2088,6 +2265,96 @@ mod animation_tests {
                     .get::<AnimationPlayer>(*child)
                     .unwrap()
                     .is_playing_animation(set.idle_node)
+            );
+        }
+    }
+
+    #[test]
+    fn both_movement_paths_run_and_remote_pauses_keep_locomotion_stable() {
+        let mut app = App::new();
+        let set = animation_set();
+        let mut library = PlayerAnimationLibrary::default();
+        library
+            .sets
+            .insert(AvatarKey::Roster("agnes".into()), set.clone());
+        app.insert_resource(Time::<()>::default())
+            .insert_resource(library)
+            .add_systems(
+                Update,
+                (bind_player_animation_players, sync_player_animation_state).chain(),
+            );
+        let mut actors = Vec::new();
+        for local in [true, false] {
+            let owner = app
+                .world_mut()
+                .spawn((
+                    Transform::default(),
+                    CombatStats::default(),
+                    NetworkCharacterChoice(CharacterChoice::Cube),
+                    NetworkAvatar(Some("agnes".into())),
+                    PlayerCosmeticAction::default(),
+                ))
+                .id();
+            if local {
+                app.world_mut().entity_mut(owner).insert(Player);
+            } else {
+                app.world_mut().entity_mut(owner).insert(RemotePlayer);
+            }
+            let child = app
+                .world_mut()
+                .spawn((AnimationPlayer::default(), ChildOf(owner)))
+                .id();
+            actors.push((owner, child));
+        }
+        app.update();
+        app.world_mut()
+            .entity_mut(actors[0].0)
+            .insert(MovementTarget { target: Vec3::X });
+        app.world_mut()
+            .get_mut::<Transform>(actors[1].0)
+            .unwrap()
+            .translation
+            .x = 0.1;
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_secs_f32(0.1));
+        app.update();
+        for (_, child) in &actors {
+            assert!(
+                app.world()
+                    .get::<PlayerAnimationBinding>(*child)
+                    .unwrap()
+                    .is_running()
+            );
+            assert!(
+                app.world()
+                    .get::<AnimationPlayer>(*child)
+                    .unwrap()
+                    .is_playing_animation(set.run_node)
+            );
+        }
+        // A still interpolation frame must not flash to idle.
+        app.update();
+        assert!(
+            app.world()
+                .get::<PlayerAnimationBinding>(actors[1].1)
+                .unwrap()
+                .is_running()
+        );
+        app.world_mut()
+            .entity_mut(actors[0].0)
+            .remove::<MovementTarget>();
+        for _ in 0..4 {
+            app.update();
+        }
+        for (_, child) in &actors {
+            assert_eq!(
+                app.world()
+                    .get::<PlayerAnimationBinding>(*child)
+                    .unwrap()
+                    .playback
+                    .state,
+                HeroAnimationState::Idle
             );
         }
     }

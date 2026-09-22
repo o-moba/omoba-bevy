@@ -131,3 +131,7 @@ node_modules/
 .idea/
 .vscode/
 *.log
+
+# Engine-owned shared humanoid motion (not baked into avatar models).
+!client/assets/animations/
+!client/assets/animations/**

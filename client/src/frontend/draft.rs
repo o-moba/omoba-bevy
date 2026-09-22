@@ -1122,8 +1122,10 @@ mod tests {
 
     fn request_app() -> App {
         let mut app = App::new();
-        let mut game = GameStateSnapshot::default();
-        game.your_id = 7;
+        let mut game = GameStateSnapshot {
+            your_id: 7,
+            ..default()
+        };
         game.meta.server_epoch = 10;
         game.meta.match_id = 3;
         game.prematch = Some(shared::prematch::PrematchSnapshot {
