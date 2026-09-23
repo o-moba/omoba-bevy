@@ -161,8 +161,15 @@ pub struct StructureStats {
     pub max_hp: f32,
     pub attack_range: f32,
     pub attack_damage: f32,
+    /// Applied only when the structure targets a hero; omitted legacy profiles use one.
+    #[serde(default = "default_hero_damage_multiplier")]
+    pub hero_damage_multiplier: f32,
     pub attack_cooldown_ms: u64,
 }
+fn default_hero_damage_multiplier() -> f32 {
+    1.0
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct StatOverrides {
@@ -502,9 +509,11 @@ fn validate_stats(stats: &StructureStats) -> Result<(), String> {
         || !(1.0..=60.0).contains(&stats.attack_range)
         || !stats.attack_damage.is_finite()
         || !(0.0..=10_000.0).contains(&stats.attack_damage)
+        || !stats.hero_damage_multiplier.is_finite()
+        || !(0.0..=10.0).contains(&stats.hero_damage_multiplier)
         || !(100..=60_000).contains(&stats.attack_cooldown_ms)
     {
-        return Err("stats require finite HP 1..100000, range 1..60, damage 0..10000, cooldown_ms 100..60000".into());
+        return Err("stats require finite HP 1..100000, range 1..60, damage 0..10000, hero_damage_multiplier 0..10, cooldown_ms 100..60000".into());
     }
     Ok(())
 }
@@ -553,6 +562,18 @@ mod tests {
             |m| m.structures[0].profile = "absent".into(),
             |m| m.structures[0].overrides.max_hp = Some(f32::NAN),
             |m| m.structures[0].overrides.max_hp = Some(0.0),
+            |m| {
+                m.profiles
+                    .get_mut("lane_tower")
+                    .unwrap()
+                    .hero_damage_multiplier = f32::NAN
+            },
+            |m| {
+                m.profiles
+                    .get_mut("lane_tower")
+                    .unwrap()
+                    .hero_damage_multiplier = 11.0
+            },
             |m| m.structures[0].overrides.attack_range = Some(f32::INFINITY),
             |m| m.structures[0].overrides.attack_cooldown_ms = Some(0),
             |m| {

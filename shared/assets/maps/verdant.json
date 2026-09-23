@@ -3,8 +3,8 @@
   "geometry_id": "verdant-confluence-v1",
   "map_profile": "verdant_default",
   "profiles": {
-    "lane_tower": { "max_hp": 240.0, "attack_range": 20.0, "attack_damage": 14.0, "attack_cooldown_ms": 900 },
-    "base": { "max_hp": 650.0, "attack_range": 24.0, "attack_damage": 18.0, "attack_cooldown_ms": 850 }
+    "lane_tower": { "max_hp": 240.0, "attack_range": 20.0, "attack_damage": 14.0, "hero_damage_multiplier": 2.0, "attack_cooldown_ms": 900 },
+    "base": { "max_hp": 650.0, "attack_range": 24.0, "attack_damage": 18.0, "hero_damage_multiplier": 2.0, "attack_cooldown_ms": 850 }
   },
   "structures": [
     { "id": 1, "key": "top_green_outer", "team": "green", "kind": "tower", "lane": "top", "t": 0.30, "profile": "lane_tower", "visual_profile": "tower_green" },

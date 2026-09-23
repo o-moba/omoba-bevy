@@ -1,12 +1,16 @@
 #![allow(clippy::items_after_test_module)]
 
 mod balance;
+#[cfg(test)]
+mod balance_probe;
 mod basic_attack;
 mod bots;
 mod career_backend;
 mod career_runtime;
 #[cfg(test)]
 mod career_runtime_tests;
+#[cfg(test)]
+mod objective_balance_tests;
 use server::career_store;
 mod combat_feedback;
 mod gameplay;
@@ -53,8 +57,6 @@ use session::*;
 use shared::combat::{CombatEntity, CombatEntityKind, CombatEvent, MinionKind, ProjectileStyle};
 #[cfg(test)]
 use shared::scaled_cooldown;
-#[cfg(test)]
-use shared::shop::item_cooldown;
 use shared::shop::{ItemBonuses, ItemId, PurchaseReceipt, STARTING_GOLD};
 use shared::{
     HeroClass, PlayerActionKind, SkillSlot, TargetingMode, ability_for_class_slot,
@@ -246,6 +248,11 @@ struct PlayerState {
     basic_attack_cooldown_secs: f32,
     #[serde(default)]
     basic_attack_remaining_secs: f32,
+    /// Authoritative skill clocks, including reconnect and sandbox changes.
+    #[serde(default)]
+    skill_cooldown_remaining_secs: [f32; 4],
+    #[serde(default)]
+    skill_recovery_remaining_secs: f32,
     /// Replay high-water mark, retained across reconnect and respawn in this round.
     #[serde(default)]
     basic_attack_request_id: u64,
@@ -992,6 +999,7 @@ struct Structure {
     last_attack_at: Option<Instant>,
     attack_range: f32,
     attack_damage: f32,
+    hero_damage_multiplier: f32,
     attack_cooldown: Duration,
 }
 
@@ -2495,7 +2503,14 @@ fn handle_cast_request(
         return;
     }
 
-    let effect_scale = rank_effect_scale(rank);
+    if sandbox::skill_recovery_remaining(caster, now) > 0.0 {
+        return;
+    }
+    let effect_scale = rank_effect_scale(rank)
+        * shared::hero_balance::ability_power_multiplier(
+            caster.state.hero_class,
+            caster.state.level,
+        );
     if def.targeting == TargetingMode::SelfTarget {
         let Some(caster_mut) = players.get_mut(&caster_addr) else {
             return;
@@ -2508,6 +2523,7 @@ fn handle_cast_request(
             caster_mut.state.mana -= mana_cost;
         }
         caster_mut.last_cast_at[skill_slot.index()] = Some(now);
+        sandbox::refresh_skill_cooldowns(caster_mut, now);
         record_player_action(caster_mut, skill_slot);
         if let Some(heal) = def.self_heal {
             caster_mut.state.hp =
@@ -2627,6 +2643,7 @@ fn handle_cast_request(
         caster_mut.state.mana -= mana_cost;
     }
     caster_mut.last_cast_at[skill_slot.index()] = Some(now);
+    sandbox::refresh_skill_cooldowns(caster_mut, now);
     record_player_action(caster_mut, skill_slot);
 
     // Higher invested rank = proportionally more projectile damage; active
@@ -3778,7 +3795,7 @@ fn simulate_tower_attacks(
                 tower_position,
                 target_id,
                 target_pos,
-                structure.attack_damage,
+                structure.attack_damage * structure.hero_damage_multiplier,
                 match structure.state.kind {
                     StructureKind::Tower => TOWER_SHOT_HEIGHT,
                     StructureKind::BaseTower => BASE_TOWER_SHOT_HEIGHT,
@@ -5182,7 +5199,15 @@ mod tests {
         );
         let state = &players.get(&caster).unwrap().state;
         assert!(
-            (state.hp - (40.0 + w.self_heal.unwrap())).abs() < EPSILON,
+            (state.hp
+                - (40.0
+                    + w.self_heal.unwrap()
+                        * shared::hero_balance::ability_power_multiplier(
+                            state.hero_class,
+                            state.level
+                        )))
+            .abs()
+                < EPSILON,
             "unlocked W must heal by the kit amount"
         );
         assert!((state.mana - (state.max_mana - w.base_mana_cost)).abs() < EPSILON);

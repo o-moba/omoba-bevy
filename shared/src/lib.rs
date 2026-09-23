@@ -9,6 +9,7 @@ use std::time::Duration;
 pub mod career;
 pub mod combat;
 pub mod device_account;
+pub mod hero_balance;
 pub mod jungle;
 pub mod live_score;
 pub mod map;
@@ -292,7 +293,7 @@ pub const WARRIOR_ABILITIES: [AbilityDefinition; 4] = [
         "Slams the selected enemy at close range.",
         TargetingMode::UnitTarget,
         10.0,
-        0.5,
+        2.0,
         12.0,
         Some(24.0),
         None,
@@ -316,7 +317,7 @@ pub const WARRIOR_ABILITIES: [AbilityDefinition; 4] = [
         "A crushing blow with very short reach.",
         TargetingMode::UnitTarget,
         22.0,
-        2.5,
+        2.8,
         10.0,
         Some(38.0),
         None,
@@ -343,7 +344,7 @@ pub const MAGE_ABILITIES: [AbilityDefinition; 4] = [
         "Homing bolt toward a selected enemy.",
         TargetingMode::UnitTarget,
         22.0,
-        0.4,
+        2.2,
         30.0,
         Some(18.0),
         None,
@@ -394,7 +395,7 @@ pub const RANGER_ABILITIES: [AbilityDefinition; 4] = [
         "Very fast arrow with modest damage.",
         TargetingMode::UnitTarget,
         14.0,
-        0.25,
+        1.8,
         24.0,
         Some(14.0),
         None,
@@ -445,7 +446,7 @@ pub const CLERIC_ABILITIES: [AbilityDefinition; 4] = [
         "Radiant bolt against a selected enemy.",
         TargetingMode::UnitTarget,
         12.0,
-        0.6,
+        2.0,
         22.0,
         Some(16.0),
         None,

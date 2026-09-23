@@ -4,6 +4,13 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [0.23.0-rc.2] - 2026-09-23
+
+- Rebalance starting health and Q cadence across all four classes, add bounded level-based movement, basic damage/rate and skill growth, and prevent same-tick cross-slot skill volleys.
+- Reconcile authoritative skill cooldowns on the client, buffer the next skill through recovery, and match player/bot movement to the shared progression curve.
+- Preserve early tower safety with a built-in hero-target damage multiplier while retaining minion siege cadence and custom-map defaults.
+- Add repeatable before/after combat matrices, finite-mana/sustain samples, objective safety measurements and research-backed tuning notes in `docs/balance-tuning.md`.
+
 ## [0.23.0-rc.1] - 2026-09-23
 
 - Add an opt-in local Combat Test launcher and unified developer panel with direct hero selection, actor progression/stat/equipment controls and reset/teleport.

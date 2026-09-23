@@ -58,6 +58,8 @@ pub(crate) fn ensure_player_connected(
                 last_purchase: None,
                 basic_attack_cooldown_secs: 0.0,
                 basic_attack_remaining_secs: 0.0,
+                skill_cooldown_remaining_secs: [0.0; 4],
+                skill_recovery_remaining_secs: 0.0,
                 basic_attack_request_id: 0,
                 xp: 0,
                 level: STARTING_LEVEL,
@@ -270,8 +272,8 @@ pub(crate) fn reset_player_round(
     player.state.y = PLAYER_GROUND_Y;
     player.state.z = spawn.z;
     player.state.yaw = 0.0;
-    player.state.hp = MAX_HP;
-    player.state.max_hp = MAX_HP;
+    player.state.max_hp = shared::hero_balance::base_hp(player.state.hero_class);
+    player.state.hp = player.state.max_hp;
     player.state.mana = MAX_MANA;
     player.state.max_mana = MAX_MANA;
     player.state.gold = STARTING_GOLD;
@@ -297,12 +299,15 @@ pub(crate) fn reset_player_round(
     player.last_movement_at = now;
     player.last_cast_at = [None; 4];
     player.last_basic_attack_at = None;
-    player.state.basic_attack_cooldown_secs = shared::shop::basic_attack_cooldown(
-        shared::basic_attack_for_class(player.state.hero_class),
+    player.state.basic_attack_cooldown_secs = shared::hero_balance::basic_cooldown(
+        player.state.hero_class,
+        player.state.level,
         player.state.item_bonuses,
     )
     .as_secs_f32();
     player.state.basic_attack_remaining_secs = 0.0;
+    player.state.skill_cooldown_remaining_secs = [0.0; 4];
+    player.state.skill_recovery_remaining_secs = 0.0;
     player.state.basic_attack_request_id = 0;
     player.respawn_at = None;
     player.sandbox = None;
@@ -363,7 +368,9 @@ pub(crate) fn handle_transform_request_with_structures(
         .duration_since(player.last_movement_at)
         .as_secs_f32()
         .clamp(0.0, MOVEMENT_MAX_DELTA_SECONDS);
-    let speed_mult = player.speed_mult.max(0.1) * utility_movement_multiplier(player, now);
+    let speed_mult = player.speed_mult.max(0.1)
+        * utility_movement_multiplier(player, now)
+        * shared::hero_balance::movement_multiplier(player.state.hero_class, player.state.level);
     let max_distance =
         PLAYER_SPEED * speed_mult * player.state.item_bonuses.move_speed_multiplier * elapsed
             + MOVEMENT_POSITION_TOLERANCE;
@@ -445,6 +452,8 @@ pub(crate) fn handle_respawns(
         player.last_cast_at = [None; 4];
         player.last_basic_attack_at = None;
         player.state.basic_attack_remaining_secs = 0.0;
+        player.state.skill_cooldown_remaining_secs = [0.0; 4];
+        player.state.skill_recovery_remaining_secs = 0.0;
         // Preserve request high-water through death; delayed strikes from the
         // same round must not become fresh attacks after respawn.
     }

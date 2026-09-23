@@ -165,8 +165,8 @@ fn aggro_resets_after_target_death_disconnect_leave_or_leash_escape() {
 fn ordinary_last_hit_recovery_is_bounded_once_only_and_never_revives_or_heals_boss_killers() {
     let now = Instant::now();
     for (kind, starting_hp, expected_hp) in [
-        (NeutralCampType::Skirmisher, 10.0, 30.0),
-        (NeutralCampType::Skirmisher, 95.0, 100.0),
+        (NeutralCampType::Skirmisher, 10.0, 46.0),
+        (NeutralCampType::Skirmisher, 175.0, 180.0),
         (NeutralCampType::Skirmisher, 0.0, 0.0),
         (NeutralCampType::WendigoBoss, 10.0, 10.0),
     ] {

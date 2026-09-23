@@ -1196,6 +1196,8 @@ fn move_player_mobile(
                 &CombatStats,
                 Option<&crate::net::PlayerEquipment>,
                 Option<&crate::net::PlayerUtility>,
+                Option<&crate::net::NetworkHeroClass>,
+                Option<&crate::net::PlayerProgression>,
             ),
             With<Player>,
         >,
@@ -1227,7 +1229,9 @@ fn move_player_mobile(
         .ok()
         .map(|camera| mobile_screen_direction(mobile.movement, camera, *mode))
         .unwrap_or(Vec3::ZERO);
-    for (entity, mut transform, stats, equipment, utility) in &mut transforms.p0() {
+    for (entity, mut transform, stats, equipment, utility, class, progression) in
+        &mut transforms.p0()
+    {
         commands.entity(entity).remove::<Jumping>();
         if !allowed || !stats.is_alive() {
             commands
@@ -1250,7 +1254,8 @@ fn move_player_mobile(
             game.as_deref(),
             PLAYER_SPEED
                 * if boost.0 { DEBUG_SPEED_MULTIPLIER } else { 1.0 }
-                * equipment.map_or(1.0, |e| e.item_bonuses.move_speed_multiplier),
+                * equipment.map_or(1.0, |e| e.item_bonuses.move_speed_multiplier)
+                * hero_movement_multiplier(class, progression),
         ) * utility.map_or(1.0, |u| u.state.movement_multiplier());
         // Bound a resumed/hitched frame; the server movement envelope remains authoritative.
         let desired = current
@@ -1428,6 +1433,8 @@ fn move_player(
                 &CombatStats,
                 Option<&crate::net::PlayerEquipment>,
                 Option<&crate::net::PlayerUtility>,
+                Option<&crate::net::NetworkHeroClass>,
+                Option<&crate::net::PlayerProgression>,
             ),
             (With<Player>, With<MovementTarget>),
         >,
@@ -1456,7 +1463,9 @@ fn move_player(
         .collect::<Vec<_>>();
 
     let mut player_query = transform_sets.p0();
-    for (entity, mut transform, mut route, stats, equipment, utility) in player_query.iter_mut() {
+    for (entity, mut transform, mut route, stats, equipment, utility, class, progression) in
+        player_query.iter_mut()
+    {
         if !stats.is_alive() {
             commands
                 .entity(entity)
@@ -1484,7 +1493,8 @@ fn move_player(
             speed
                 * equipment.map_or(1.0, |equipment| {
                     equipment.item_bonuses.move_speed_multiplier
-                }),
+                })
+                * hero_movement_multiplier(class, progression),
         ) * utility.map_or(1.0, |u| u.state.movement_multiplier());
         let move_delta =
             speed * time.delta_secs() * crate::sandbox::time_scale(game_state.as_deref());
@@ -1942,6 +1952,32 @@ mod tests {
     }
 
     use super::*;
+    #[test]
+    fn level_ten_route_prediction_moves_at_grown_speed_with_boots() {
+        for class in shared::HeroClass::ALL {
+            let (mut app, hero) = navigation_input_app();
+            app.world_mut().entity_mut(hero).insert((
+                crate::net::NetworkHeroClass(class),
+                crate::net::PlayerProgression {
+                    level: 10,
+                    ..default()
+                },
+                crate::net::PlayerEquipment {
+                    item_bonuses: shared::shop::item_bonuses(&[shared::shop::ItemId::TrailBoots]),
+                    ..default()
+                },
+            ));
+            minimap_order(&mut app, Vec3::new(8.0, 0.0, 0.0));
+            app.update();
+            let before = app.world().get::<Transform>(hero).unwrap().translation;
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_millis(50));
+            app.update();
+            let after = app.world().get::<Transform>(hero).unwrap().translation;
+            assert!((before.xz().distance(after.xz()) - 5.0 * 1.24 * 1.08 * 0.05).abs() < 0.001);
+        }
+    }
 
     #[test]
     fn player_grounding_preserves_sprite_corners_and_tracks_verdant_walktops() {
@@ -3109,4 +3145,15 @@ mod animation_tests {
                 .is_none()
         );
     }
+}
+
+/// Apply innate progression before the explicit sandbox speed override.
+fn hero_movement_multiplier(
+    class: Option<&crate::net::NetworkHeroClass>,
+    progression: Option<&crate::net::PlayerProgression>,
+) -> f32 {
+    shared::hero_balance::movement_multiplier(
+        class.map_or(shared::HeroClass::default(), |c| c.0),
+        progression.map_or(1, |p| p.level),
+    )
 }

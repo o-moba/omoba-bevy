@@ -1,5 +1,9 @@
 # Feature Inventory
 
+## Measured combat pacing and growth (0.23.0-rc.2)
+
+Starting durability and Q intervals now leave an early response window; levels increase movement, basic attack speed/damage and skill power. All four skills share a short recovery interval, while basic attacks keep an independent clock. The client buffers the next skill and restores server cooldowns across reconnect. Default towers scale damage against heroes without shortening minion siege windows. The 48-encounter production-path benchmark measures a level-one median of 10.53s and level-ten mean of 4.24s; these are controlled stationary targets, not competitive win rates. See [formulas, research, limitations and reproduction](balance-tuning.md).
+
 ## Public multiplayer MVP (0.22.0-rc.2)
 
 The public lobby offers Quick match (30-second bot fallback), Wait for players (ten humans only), and Play with bots. Independent worker processes own immutable ten-player rosters, automatic teams, shared draft/countdown/loading and a durable start barrier. New humans cannot replace bots after a match starts; existing participants can reconnect. PostgreSQL saves history and progression for approved allocated bot games, with competitive rating reserved for eligible bot-free PvP. Signed gameplay packets, bounded admission and isolated durable outboxes protect the public match boundary. See [launch, recovery and capacity instructions](public-mvp.md).
@@ -10,7 +14,7 @@ All 15 shipped playable 3D avatars use the engine's shared Run motion during nor
 
 Validated VRM0/VRM1 skinned humanoids receive runtime clips adapted to their bone map and rest pose, including models with no embedded clips. Original skin bytes remain unchanged. This is skeletal compatibility for a documented subset, not complete VRM materials/face/hair support. Approved Studio models gain runtime Run through normal verified loading; accepting externally published clipless models still requires a versioned profile rollout. See [architecture, import and limits](humanoid-motion.md).
 
-Canonical version: `0.23.0-rc.1`
+Canonical version: `0.23.0-rc.2`
 
 ## Team draft and shared loading
 

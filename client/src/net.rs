@@ -695,6 +695,10 @@ struct PlayerState {
     #[serde(default)]
     basic_attack_request_id: u64,
     #[serde(default)]
+    skill_recovery_remaining_secs: f32,
+    #[serde(default)]
+    skill_cooldown_remaining_secs: [f32; 4],
+    #[serde(default)]
     xp: u32,
     #[serde(default = "default_player_level")]
     level: u32,
@@ -1172,6 +1176,29 @@ impl From<&PlayerState> for PlayerBasicAttackCooldown {
             duration_secs,
             remaining_secs,
             last_request_id: player.basic_attack_request_id,
+        }
+    }
+}
+
+/// Server skill deadlines, including the shared interval between different slots.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct PlayerSkillCooldowns {
+    pub remaining_secs: [f32; 4],
+    pub recovery_secs: f32,
+}
+
+impl From<&PlayerState> for PlayerSkillCooldowns {
+    fn from(player: &PlayerState) -> Self {
+        let finite = |value: f32| {
+            if value.is_finite() {
+                value.max(0.0)
+            } else {
+                0.0
+            }
+        };
+        Self {
+            remaining_secs: player.skill_cooldown_remaining_secs.map(finite),
+            recovery_secs: finite(player.skill_recovery_remaining_secs),
         }
     }
 }
@@ -2522,6 +2549,7 @@ fn apply_server_snapshot(
                 player_state_to_equipment(local_player_state),
                 (
                     PlayerBasicAttackCooldown::from(local_player_state),
+                    PlayerSkillCooldowns::from(local_player_state),
                     PlayerUtility::from(local_player_state),
                 ),
             ));
@@ -2615,6 +2643,7 @@ fn apply_server_snapshot(
                     player_state_to_equipment(local_player_state),
                     (
                         PlayerBasicAttackCooldown::from(local_player_state),
+                        PlayerSkillCooldowns::from(local_player_state),
                         PlayerUtility::from(local_player_state),
                     ),
                     Name::new("Player"),
@@ -2649,6 +2678,7 @@ fn apply_server_snapshot(
                 player_state_to_equipment(local_player_state),
                 (
                     PlayerBasicAttackCooldown::from(local_player_state),
+                    PlayerSkillCooldowns::from(local_player_state),
                     PlayerUtility::from(local_player_state),
                 ),
                 Name::new("Player"),
@@ -2687,6 +2717,7 @@ fn apply_server_snapshot(
                     player_state_to_equipment(local_player_state),
                     (
                         PlayerBasicAttackCooldown::from(local_player_state),
+                        PlayerSkillCooldowns::from(local_player_state),
                         PlayerUtility::from(local_player_state),
                     ),
                     Name::new("Player"),
@@ -2744,6 +2775,7 @@ fn apply_server_snapshot(
                 player_state_to_equipment(player),
                 (
                     PlayerBasicAttackCooldown::from(player),
+                    PlayerSkillCooldowns::from(player),
                     PlayerUtility::from(player),
                 ),
             ));
@@ -2786,6 +2818,7 @@ fn apply_server_snapshot(
             player_state_to_equipment(player),
             (
                 PlayerBasicAttackCooldown::from(player),
+                PlayerSkillCooldowns::from(player),
                 PlayerUtility::from(player),
             ),
         ));

@@ -71,8 +71,13 @@ impl SandboxRuntime {
                 resistance: c.resistance,
                 move_speed: PLAYER_SPEED
                     * p.speed_mult
-                    * p.state.item_bonuses.move_speed_multiplier,
-                attack_speed: p.state.item_bonuses.attack_speed_multiplier,
+                    * p.state.item_bonuses.move_speed_multiplier
+                    * shared::hero_balance::movement_multiplier(p.state.hero_class, p.state.level),
+                attack_speed: p.state.item_bonuses.attack_speed_multiplier
+                    * shared::hero_balance::attack_rate_multiplier(
+                        p.state.hero_class,
+                        p.state.level,
+                    ),
                 attack_damage: effective_basic_attack_damage(p),
                 cooldowns: std::array::from_fn(|i| {
                     let d = effective_ability_cooldown(p, SkillSlot::from_index(i as u8).unwrap());
@@ -186,6 +191,8 @@ fn clear_cooldowns(p: &mut ConnectedPlayer) {
     p.state.utility.dash_remaining_secs = 0.0;
     p.state.utility.haste_remaining_secs = 0.0;
     p.state.basic_attack_remaining_secs = 0.0;
+    p.state.skill_cooldown_remaining_secs = [0.0; 4];
+    p.state.skill_recovery_remaining_secs = 0.0;
 }
 pub(crate) fn apply_actor(p: &mut ConnectedPlayer, c: &ActorConfig, reset: bool, now: Instant) {
     let changed_hero = p.state.hero_class != c.hero;
@@ -242,6 +249,7 @@ pub(crate) fn apply_actor(p: &mut ConnectedPlayer, c: &ActorConfig, reset: bool,
     if c.no_cooldowns {
         clear_cooldowns(p);
     }
+    refresh_skill_cooldowns(p, now);
 }
 impl ServerRuntime {
     pub(crate) fn sandbox_allowed(&self) -> bool {
@@ -799,7 +807,11 @@ impl ServerRuntime {
         let dx = next[0] - origin[0];
         let dz = next[1] - origin[1];
         let distance = dx.hypot(dz).max(0.001);
-        let step = (PLAYER_SPEED * p.speed_mult * p.state.item_bonuses.move_speed_multiplier * dt)
+        let step = (PLAYER_SPEED
+            * p.speed_mult
+            * p.state.item_bonuses.move_speed_multiplier
+            * shared::hero_balance::movement_multiplier(p.state.hero_class, p.state.level)
+            * dt)
             .min(distance);
         handle_transform_request_with_structures(
             self.players.get_mut(&addr).unwrap(),
@@ -823,37 +835,68 @@ fn dummy_actor(c: &DummyConfig) -> ActorConfig {
     }
 }
 
-/// Ordinary item helpers deliberately floor beneficial item multipliers at one.
-/// Sandbox values are validated independently and intentionally support zero
-/// damage and slower attacks. Keep that exception local to sandbox actors.
+/// Preserve ordinary item floors while supporting validated sandbox overrides.
+fn combat_bonuses(player: &ConnectedPlayer) -> ItemBonuses {
+    let mut bonuses = player.state.item_bonuses;
+    if player.sandbox.is_none() {
+        bonuses.damage_multiplier = bonuses.damage_multiplier.max(1.0);
+        bonuses.attack_speed_multiplier = bonuses.attack_speed_multiplier.max(1.0);
+    }
+    bonuses
+}
 pub(crate) fn effective_basic_attack_damage(player: &ConnectedPlayer) -> f32 {
-    let definition = shared::basic_attack_for_class(player.state.hero_class);
-    if player.sandbox.is_some() {
-        definition.damage * player.state.item_bonuses.damage_multiplier.max(0.0)
-    } else {
-        shared::shop::basic_attack_damage(definition, player.state.item_bonuses)
-    }
+    shared::hero_balance::basic_damage(
+        player.state.hero_class,
+        player.state.level,
+        combat_bonuses(player),
+    )
 }
-
 pub(crate) fn effective_basic_attack_cooldown(player: &ConnectedPlayer) -> Duration {
-    let definition = shared::basic_attack_for_class(player.state.hero_class);
-    if player.sandbox.is_some() {
-        Duration::from_secs_f32(definition.cooldown_secs)
-            .div_f32(player.state.item_bonuses.attack_speed_multiplier.max(0.1))
-    } else {
-        shared::shop::basic_attack_cooldown(definition, player.state.item_bonuses)
-    }
+    shared::hero_balance::basic_cooldown(
+        player.state.hero_class,
+        player.state.level,
+        combat_bonuses(player),
+    )
 }
-
 pub(crate) fn effective_ability_cooldown(player: &ConnectedPlayer, slot: SkillSlot) -> Duration {
-    let definition = ability_for_class_slot(player.state.hero_class, slot);
-    let rank = player.state.ranks[slot.index()].clamp(1, definition.max_rank);
-    if player.sandbox.is_some() && slot == SkillSlot::Q {
-        shared::scaled_cooldown(definition, rank)
-            .div_f32(player.state.item_bonuses.attack_speed_multiplier.max(0.1))
-    } else {
-        shared::shop::item_cooldown(definition, rank, slot, player.state.item_bonuses)
+    shared::hero_balance::ability_cooldown(
+        player.state.hero_class,
+        player.state.level,
+        player.state.ranks[slot.index()],
+        slot,
+        combat_bonuses(player),
+    )
+}
+pub(crate) fn skill_recovery_remaining(player: &ConnectedPlayer, now: Instant) -> f32 {
+    if player.state.hp <= 0.0 || player.sandbox.as_ref().is_some_and(|c| c.no_cooldowns) {
+        return 0.0;
     }
+    let recovery = Duration::from_secs_f32(shared::hero_balance::skill_recovery_secs(
+        player.state.level,
+    ));
+    player
+        .last_cast_at
+        .iter()
+        .flatten()
+        .max()
+        .map_or(0.0, |last| {
+            recovery
+                .saturating_sub(now.saturating_duration_since(*last))
+                .as_secs_f32()
+        })
+}
+pub(crate) fn refresh_skill_cooldowns(player: &mut ConnectedPlayer, now: Instant) {
+    player.state.skill_recovery_remaining_secs = skill_recovery_remaining(player, now);
+    player.state.skill_cooldown_remaining_secs = std::array::from_fn(|i| {
+        if player.state.hp <= 0.0 || player.sandbox.as_ref().is_some_and(|c| c.no_cooldowns) {
+            return 0.0;
+        }
+        player.last_cast_at[i].map_or(0.0, |last| {
+            effective_ability_cooldown(player, SkillSlot::ALL[i])
+                .saturating_sub(now.saturating_duration_since(last))
+                .as_secs_f32()
+        })
+    });
 }
 
 #[cfg(test)]

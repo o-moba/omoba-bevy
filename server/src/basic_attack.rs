@@ -169,6 +169,7 @@ pub(crate) fn refresh_basic_attack_cooldowns(
     now: Instant,
 ) {
     for player in players.values_mut() {
+        sandbox::refresh_skill_cooldowns(player, now);
         if player.state.hp <= 0.0 || player.sandbox.as_ref().is_some_and(|c| c.no_cooldowns) {
             player.last_basic_attack_at = None;
         }

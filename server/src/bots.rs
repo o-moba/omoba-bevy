@@ -635,8 +635,13 @@ impl ServerRuntime {
                 .map(|p| (p.state.id, [p.state.x, p.state.z]))
                 .collect();
             others.sort_unstable_by_key(|(id, _)| *id);
-            let step =
-                PLAYER_SPEED * self.players[&addr].state.item_bonuses.move_speed_multiplier * dt;
+            let step = PLAYER_SPEED
+                * self.players[&addr].state.item_bonuses.move_speed_multiplier
+                * shared::hero_balance::movement_multiplier(
+                    self.players[&addr].state.hero_class,
+                    self.players[&addr].state.level,
+                )
+                * dt;
             let accepted = steer_bot_step(id, origin, desired, step, &others, &discs);
             let movement = [accepted[0] - origin[0], accepted[1] - origin[1]];
             if movement[0].hypot(movement[1]) > 0.000_1 {

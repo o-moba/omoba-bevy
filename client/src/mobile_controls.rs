@@ -1043,12 +1043,14 @@ fn setup_mobile_controls(
 #[allow(clippy::too_many_arguments)]
 fn draw_mobile_controls(
     mobile: Res<MobileControls>,
+    game: Option<Res<crate::net::GameStateSnapshot>>,
     context: Res<GameplayInputContext>,
     local: Query<
         (
             &CombatStats,
             Option<&PlayerProgression>,
             Option<&NetworkHeroClass>,
+            Option<&crate::net::PlayerEquipment>,
         ),
         With<Player>,
     >,
@@ -1073,15 +1075,22 @@ fn draw_mobile_controls(
     let layout = mobile.layout();
     let s = mobile.combat_scale();
     let local = local.single().ok();
-    let prog = local.and_then(|(_, p, _)| p).copied().unwrap_or_default();
+    let prog = local
+        .and_then(|(_, p, _, _)| p)
+        .copied()
+        .unwrap_or_default();
     let class = local
-        .and_then(|(_, _, c)| c)
+        .and_then(|(_, _, c, _)| c)
         .map(|c| c.0)
         .unwrap_or(selection.hero_class);
+    let bonuses = local
+        .and_then(|(_, _, _, equipment)| equipment)
+        .map_or_else(Default::default, |equipment| equipment.item_bonuses);
+    let sandbox = game.as_ref().and_then(|g| g.sandbox.as_ref());
     let visible = mobile.enabled
         && mobile.landscape
         && context.gameplay_allowed()
-        && local.is_some_and(|(stats, _, _)| stats.is_alive());
+        && local.is_some_and(|(stats, _, _, _)| stats.is_alive());
     let aiming = mobile
         .captures
         .values()
@@ -1110,7 +1119,7 @@ fn draw_mobile_controls(
         }
         let ready = prog.unlocked()[*slot]
             && cooldown.remaining_secs[*slot] <= 0.0
-            && local.is_some_and(|(stats, _, _)| {
+            && local.is_some_and(|(stats, _, _, _)| {
                 stats.mana >= scaled_mana_cost(def, prog.ranks[*slot].max(1))
             });
         icon.color = if ready {
@@ -1217,7 +1226,7 @@ fn draw_mobile_controls(
             MobileVisual::Ability(slot) => {
                 let def = ability_for_class_slot(class, SkillSlot::from_index(slot as u8).unwrap());
                 let unlocked = prog.unlocked()[slot];
-                let mana = local.is_some_and(|(stats, _, _)| {
+                let mana = local.is_some_and(|(stats, _, _, _)| {
                     stats.mana >= scaled_mana_cost(def, prog.ranks[slot].max(1))
                 });
                 let active = mobile
@@ -1349,11 +1358,17 @@ fn draw_mobile_controls(
                 let label = slot.map(|slot| {
                     let def = ability_for_class_slot(class, SkillSlot::from_index(slot as u8).unwrap());
                     let rank = prog.ranks[slot].max(1);
+                    let duration = if sandbox.is_some_and(|s| s.config.player.no_cooldowns) {
+                        0.0
+                    } else {
+                        crate::combat::effective_cast_duration(class, prog.level, rank,
+                            SkillSlot::ALL[slot], bonuses, sandbox.is_some())
+                    };
                     let availability = if prog.unlocked()[slot] {
                         format!("Rank {rank}")
                     } else { format!("Unlocks at level {}", shared::SLOT_UNLOCK_LEVELS[slot]) };
                     format!("{}  ·  {}\n{}\n\n{:.0} mana  ·  {:.1}s cooldown\nRelease to close · tap or drag to cast", def.name, availability, def.description,
-                        scaled_mana_cost(def, rank), shared::scaled_cooldown(def, rank).as_secs_f32())
+                        scaled_mana_cost(def, rank), duration)
                 }).unwrap_or_default();
                 (
                     Vec2::new(mobile.viewport.x * 0.5, mobile.safe.top + 100.0 * s),
@@ -1446,6 +1461,78 @@ fn draw_mobile_controls(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn skill_description_shows_level_item_and_sandbox_cooldowns() {
+        for (slot, slow_sandbox, no_cooldowns, expected) in [
+            (0, false, false, "1.1s cooldown"),
+            (1, false, false, "4.5s cooldown"),
+            (0, true, false, "5.0s cooldown"),
+            (0, true, true, "0.0s cooldown"),
+        ] {
+            let mut mobile = controls();
+            let point = mobile.layout().ability_centers[slot];
+            mobile.event(1, TouchPhase::Started, point);
+            mobile.advance_hold_time(SKILL_DESCRIPTION_SECONDS);
+            assert_eq!(mobile.inspected_skill(), Some(slot));
+            let mut app = App::new();
+            app.insert_resource(mobile)
+                .init_resource::<GameplayInputContext>()
+                .init_resource::<TeamSelection>()
+                .init_resource::<LocalCastCooldown>()
+                .add_systems(Update, draw_mobile_controls);
+            let mut bonuses = shared::shop::item_bonuses(&[
+                shared::shop::ItemId::SwiftGrip,
+                shared::shop::ItemId::FocusCharm,
+            ]);
+            if slow_sandbox {
+                bonuses.attack_speed_multiplier = 0.25;
+                let mut config = shared::sandbox::SandboxConfig::default();
+                config.player.no_cooldowns = no_cooldowns;
+                app.insert_resource(crate::net::GameStateSnapshot {
+                    sandbox: Some(shared::sandbox::SandboxSnapshot {
+                        config,
+                        ack: None,
+                        last_request_id: 0,
+                        actors: vec![],
+                        analytics: default(),
+                        simulation_secs: 0.0,
+                        frame: 0,
+                    }),
+                    ..default()
+                });
+            }
+            app.world_mut().spawn((
+                Player,
+                CombatStats::default(),
+                PlayerProgression {
+                    level: 10,
+                    ..default()
+                },
+                NetworkHeroClass(shared::HeroClass::Warrior),
+                crate::net::PlayerEquipment {
+                    item_bonuses: bonuses,
+                    ..default()
+                },
+            ));
+            let label = app
+                .world_mut()
+                .spawn((Text::default(), TextFont::default()))
+                .id();
+            app.world_mut()
+                .spawn((
+                    MobileVisual::SkillDescription,
+                    Node::default(),
+                    BackgroundColor::default(),
+                    BorderColor::default(),
+                    UiTransform::default(),
+                ))
+                .add_child(label);
+            app.update();
+            let text = &app.world().get::<Text>(label).unwrap().0;
+            assert!(text.contains(expected), "expected {expected}, got {text}");
+        }
+    }
+
     fn controls() -> MobileControls {
         MobileControls {
             enabled: true,

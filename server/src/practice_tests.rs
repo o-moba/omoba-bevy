@@ -155,7 +155,12 @@ fn late_human_replaces_bot_at_safe_spawn_without_inheriting_stats_or_identity() 
     assert_eq!(human.team, Team::Blue);
     assert_eq!(
         (human.x, human.z, human.hp, human.level),
-        (spawn.x, spawn.z, MAX_HP, STARTING_LEVEL)
+        (
+            spawn.x,
+            spawn.z,
+            shared::hero_balance::base_hp(human.hero_class),
+            STARTING_LEVEL
+        )
     );
     assert_eq!(joined_count(&rt.players), 2);
     let scoreboard = rt.combat_log.ledger.live_scoreboard().unwrap();
@@ -552,7 +557,7 @@ fn bots_attack_cast_take_real_damage_and_respawn_using_normal_timers() {
     rt.simulate_bots(now, 0.1);
     assert_eq!(
         rt.players[&addr(1)].state.hp,
-        MAX_HP,
+        rt.players[&addr(1)].state.max_hp,
         "damage waits for actual projectile travel"
     );
     assert!(rt.players[&bot_addr].state.mana < MAX_MANA);
@@ -580,7 +585,7 @@ fn bots_attack_cast_take_real_damage_and_respawn_using_normal_timers() {
         now + Duration::from_millis(500),
     );
     rt.combat_log.extend(now, receipts);
-    assert!(rt.players[&addr(1)].state.hp < MAX_HP);
+    assert!(rt.players[&addr(1)].state.hp < rt.players[&addr(1)].state.max_hp);
     assert!(
         rt.combat_log
             .ledger
@@ -610,7 +615,7 @@ fn bots_attack_cast_take_real_damage_and_respawn_using_normal_timers() {
             rt.players[&bot_addr].state.z,
             rt.players[&bot_addr].state.hp
         ),
-        (spawn.x, spawn.z, MAX_HP)
+        (spawn.x, spawn.z, rt.players[&bot_addr].state.max_hp)
     );
 }
 
@@ -966,7 +971,8 @@ fn bot_defends_spawn_then_resumes_lane_when_enemy_is_gone() {
     human.state.z = start.z;
     rt.simulate_bots(now, 0.05);
     assert!(
-        !rt.projectiles.is_empty() || rt.players[&addr(1)].state.hp < MAX_HP,
+        !rt.projectiles.is_empty()
+            || rt.players[&addr(1)].state.hp < rt.players[&addr(1)].state.max_hp,
         "nearby enemy must trigger defence"
     );
     rt.players.get_mut(&addr(1)).unwrap().state.hp = 0.0;
@@ -990,11 +996,9 @@ fn home_fountain_heals_both_teams_and_bots_but_never_dead_or_outside_players() {
         p.state.hp = 20.0;
     }
     regenerate_base_hp(&mut rt.players, &rt.map_layout, &GameState::Running, 1.0);
-    assert!(
-        rt.players
-            .values()
-            .all(|p| (p.state.hp - 32.0).abs() < 0.001)
-    );
+    assert!(rt.players.values().all(|p| {
+        (p.state.hp - (20.0 + p.state.max_hp * BASE_HEAL_FRACTION_PER_SECOND)).abs() < 0.001
+    }));
     regenerate_base_hp(&mut rt.players, &rt.map_layout, &GameState::Running, 100.0);
     assert!(rt.players.values().all(|p| p.state.hp == p.state.max_hp));
     let human = rt.players.get_mut(&addr(1)).unwrap();
