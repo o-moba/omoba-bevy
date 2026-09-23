@@ -4,6 +4,13 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [0.23.0-rc.5] - 2026-09-23
+
+- Add Offline practice from Home: choose a bundled hero/avatar and test 3D movement, class attacks, all four skills and dash/haste without starting or reaching a server.
+- Practice starts at level six with recovering targets and mana; it never awards online progress, match history or rating. Leaving restores the saved online endpoint.
+- Keep a touch-sized close button and navigation footer visible in Game menu; scroll settings and main actions in short windows and prevent drag gestures from activating Controls guide.
+- Validate actual menu layout and touch scrolling at phone/iPad viewport and DPI sizes, plus native offline rendering.
+
 ## [0.23.0-rc.4] - 2026-09-23
 
 - Add server-authoritative shared team vision and ten symmetric, walkable brush patches in the 3D battlefield.

@@ -45,6 +45,7 @@ mod model_scale;
 mod navigation;
 mod navigation_qa;
 mod net;
+mod offline_qa;
 mod passport;
 mod pause_menu;
 mod persistence;
@@ -199,6 +200,7 @@ pub fn main() {
     .add_plugins(team_vision::TeamVisionPlugin)
     .add_plugins(team_vision_qa::TeamVisionQaPlugin)
     .add_plugins(audio_qa::AudioQaPlugin)
+    .add_plugins(offline_qa::OfflineQaPlugin)
     .add_plugins(career_identity::CareerIdentityPlugin)
     .add_plugins(career_visual_qa::CareerVisualQaPlugin)
     .add_plugins(map_visuals::MapVisualsPlugin)

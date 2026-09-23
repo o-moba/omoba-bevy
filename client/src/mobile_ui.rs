@@ -636,13 +636,14 @@ fn adapt_phone_layout(
                 node.padding = UiRect::axes(Val::Px(10.0), Val::Px(5.0));
             }
             "PauseMenuPanel" => {
+                node.top = Val::Px((top - bottom) * 0.5);
                 node.width = Val::Px(width.min(650.0));
-                // The main menu grows with its four full-size actions. A
-                // fixed 270px panel clipped Exit after Controls guide was added.
+                // Bound both bodies so short windows scroll between the fixed
+                // header/close control and footer.
                 node.height = if pause.as_ref().is_some_and(|pause| pause.in_settings) {
                     Val::Px(height)
                 } else {
-                    Val::Auto
+                    Val::Px(height.min(360.0))
                 };
                 node.max_height = Val::Px(height);
                 node.padding = UiRect::all(Val::Px(10.0));
@@ -800,7 +801,11 @@ fn scroll_phone_panels(
         if career.as_ref().is_some_and(|c| c.modal_open()) {
             name == "CareerBody"
         } else if pause.as_ref().is_some_and(|p| p.open) {
-            name == "PauseMenuSettingsSection"
+            if pause.as_ref().is_some_and(|p| p.in_settings) {
+                name == "PauseMenuSettingsSection"
+            } else {
+                name == "PauseMenuMainSection"
+            }
         } else {
             name == "HelpBody" || name == "ShopCards"
         }
@@ -858,6 +863,14 @@ fn scroll_phone_panels(
             drag.held = None;
         }
     }
+}
+
+#[cfg(test)]
+pub(crate) fn add_pause_layout_test_systems(app: &mut App) {
+    app.add_systems(
+        PostUpdate,
+        (adapt_phone_layout, scroll_phone_panels).before(bevy::ui::UiSystems::Layout),
+    );
 }
 
 #[cfg(test)]

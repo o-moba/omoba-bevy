@@ -1,5 +1,9 @@
 # Feature Inventory
 
+## Offline character practice (0.23.0-rc.5)
+
+Home → Offline practice → choose a bundled avatar/class → Start practice. The 3D client runs a small in-process practice simulation through its normal snapshot/render/input pipeline, with no socket listener or external server. Level six unlocks every skill; four enemy practice heroes include a stationary melee target and moving animation examples, and defeated targets recover after three seconds. Mana regenerates for repeated tests. Basic attacks, class skills and dash/haste use shared definitions. Practice is not full bot matchmaking: there are no lane waves, ranked results, inventory purchases or progression rewards. Leave practice in Game menu restores the saved online server; bundled characters work without Ekza login. Game menu has a fixed × header and fixed navigation footer, with independently scrollable content.
+
 ## Combat particles and healing butterflies (0.23.0-rc.3)
 
 Magic orbs have orbiting sparks and fading tails; confirmed hits produce short radial bursts. Six symmetric forest flocks glow and flap, grant one injured living collector up to 5% maximum HP, then respawn after 30 seconds. Availability and HP belong to the server. A soft oval vignette frames the battlefield below the HUD in 3D and Sprite2d. See [rules, rendering limits and native capture instructions](forest-combat-vfx.md).

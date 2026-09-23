@@ -362,7 +362,7 @@ fn actions(
     game: Res<GameStateSnapshot>,
     mut state: ResMut<ScoreboardState>,
     mut pause: ResMut<crate::pause_menu::PauseMenuState>,
-    mut help: ResMut<crate::help_overlay::HelpOverlayVisible>,
+    help: Res<crate::help_overlay::HelpOverlayVisible>,
     shop: Option<Res<crate::shop::ShopState>>,
     social: Option<Res<crate::social::SocialClient>>,
     career: Option<Res<crate::career::CareerClient>>,
@@ -412,11 +412,6 @@ fn actions(
                 state.open = false;
                 pause.open = true;
                 pause.in_settings = false;
-            }
-            "PauseMenuHelpButton" => {
-                pause.open = false;
-                state.open = false;
-                help.0 = true;
             }
             _ => {}
         }

@@ -81,7 +81,10 @@ impl Plugin for FrontendPlugin {
             .init_resource::<JoinNotice>()
             .add_systems(Startup, bypass_shell_for_automation)
             .add_systems(Update, retry_connection_from_menus)
-            .add_systems(Update, scale_menus_to_the_window)
+            .add_systems(
+                Update,
+                scale_menus_to_the_window.after(crate::pause_menu::PauseMenuSet::Visuals),
+            )
             .add_systems(
                 Update,
                 (apply_pending_screen, drive_screen_from_session)
@@ -313,7 +316,8 @@ fn scale_menus_to_the_window(
             || help.as_ref().is_some_and(|state| state.0));
     // Draft/loading have their own real-pixel compact layout and 44px controls.
     let shared_prematch = matches!(screen.get(), AppScreen::Draft | AppScreen::Loading);
-    let wanted = if screen.get().is_menu() && !phone_picker && !shared_prematch {
+    let unscaled_pause = pause.as_ref().is_some_and(|state| state.open);
+    let wanted = if screen.get().is_menu() && !phone_picker && !shared_prematch && !unscaled_pause {
         menu_scale(window.resolution.height())
     } else {
         1.0

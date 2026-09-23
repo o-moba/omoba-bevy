@@ -49,6 +49,7 @@ impl Plugin for PauseMenuPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PauseMenuState>()
             .init_resource::<AudioSettings>()
+            .init_resource::<crate::help_overlay::HelpOverlayVisible>()
             .add_systems(Startup, setup_pause_menu_ui)
             .add_systems(
                 Update,
@@ -83,6 +84,9 @@ impl Plugin for PauseMenuPlugin {
                         .after(handle_resume_button),
                     handle_reset_graphics_defaults_button,
                     handle_exit_button,
+                    handle_leave_practice_button,
+                    handle_controls_button,
+                    sync_practice_actions,
                     sync_settings_server_addr_label,
                 )
                     .after(collect_pause_button_taps)
@@ -109,6 +113,12 @@ struct PauseMenuRoot;
 struct MainMenuSection;
 
 #[derive(Component)]
+struct MainMenuFooter;
+
+#[derive(Component)]
+struct CloseButton;
+
+#[derive(Component)]
 struct SettingsSection;
 #[derive(Component)]
 struct SettingsFooter;
@@ -124,6 +134,9 @@ struct ResetGraphicsDefaultsButton;
 
 #[derive(Component)]
 struct ExitButton;
+
+#[derive(Component)]
+struct LeavePracticeButton;
 
 #[derive(Component)]
 struct ResumeButton;
@@ -230,7 +243,7 @@ fn size_desktop_pause_panel(
     let height = if menu.in_settings {
         Val::Px(PANEL_HEIGHT)
     } else {
-        Val::Auto
+        Val::Px(380.0)
     };
     for mut panel in &mut panels {
         if panel.height != height {
@@ -283,19 +296,52 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                     Name::new("PauseMenuPanel"),
                 ))
                 .with_children(|panel| {
-                    panel.spawn((
-                        Text::new("Game menu"),
-                        TextFont {
-                            font_size: 32.0,
-                            ..default()
-                        },
-                        TextColor(crate::ui_theme::IVORY),
-                        Name::new("PauseMenuTitle"),
-                        Node {
-                            flex_shrink: 0.0,
-                            ..default()
-                        },
-                    ));
+                    panel
+                        .spawn((
+                            Node {
+                                width: Val::Percent(100.0),
+                                min_height: Val::Px(46.0),
+                                flex_shrink: 0.0,
+                                justify_content: JustifyContent::SpaceBetween,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            Name::new("PauseMenuHeader"),
+                        ))
+                        .with_children(|header| {
+                            header.spawn((
+                                Text::new("Game menu"),
+                                crate::ui_theme::text(28.0),
+                                TextColor(crate::ui_theme::IVORY),
+                                Name::new("PauseMenuTitle"),
+                            ));
+                            header
+                                .spawn((
+                                    Button,
+                                    CloseButton,
+                                    PauseButtonGesture::default(),
+                                    Node {
+                                        width: Val::Px(46.0),
+                                        height: Val::Px(46.0),
+                                        flex_shrink: 0.0,
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
+                                        border: UiRect::all(Val::Px(1.0)),
+                                        border_radius: BorderRadius::all(Val::Px(6.0)),
+                                        ..default()
+                                    },
+                                    BackgroundColor(BUTTON_COLOR),
+                                    BorderColor::all(crate::ui_theme::EDGE),
+                                    Name::new("PauseMenuCloseButton"),
+                                ))
+                                .with_children(|button| {
+                                    button.spawn((
+                                        Text::new("×"),
+                                        crate::ui_theme::text(28.0),
+                                        TextColor(crate::ui_theme::IVORY),
+                                    ));
+                                });
+                        });
 
                     panel
                         .spawn((
@@ -305,9 +351,15 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                 display: Display::Flex,
                                 align_items: AlignItems::Center,
                                 justify_content: JustifyContent::FlexStart,
-                                flex_shrink: 0.0,
+                                flex_shrink: 1.0,
+                                flex_grow: 1.0,
+                                flex_basis: Val::Px(0.0),
+                                min_height: Val::Px(0.0),
+                                overflow: Overflow::scroll_y(),
                                 ..default()
                             },
+                            ScrollPosition::default(),
+                            crate::mobile_ui::TouchScrollPanel,
                             MainMenuSection,
                             Name::new("PauseMenuMainSection"),
                         ))
@@ -324,12 +376,6 @@ fn setup_pause_menu_ui(mut commands: Commands) {
 
                             spawn_menu_button(
                                 main,
-                                "Return to game",
-                                ResumeButton,
-                                "PauseMenuResumeButton",
-                            );
-                            spawn_menu_button(
-                                main,
                                 "Settings",
                                 SettingsOpenButton,
                                 "SettingsButton",
@@ -341,6 +387,12 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                 "PauseMenuHelpButton",
                             );
                             spawn_menu_button(main, "Exit game", ExitButton, "PauseMenuExitButton");
+                            spawn_menu_button(
+                                main,
+                                "Leave practice",
+                                LeavePracticeButton,
+                                "PauseMenuLeavePracticeButton",
+                            );
                         });
 
                     panel
@@ -514,6 +566,25 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                 "Reset graphics",
                                 ResetGraphicsDefaultsButton,
                                 "PauseMenuResetGraphicsButton",
+                            );
+                        });
+                    panel
+                        .spawn((
+                            Node {
+                                flex_shrink: 0.0,
+                                min_height: Val::Px(BUTTON_HEIGHT),
+                                justify_content: JustifyContent::Center,
+                                ..default()
+                            },
+                            MainMenuFooter,
+                            Name::new("PauseMenuMainFooter"),
+                        ))
+                        .with_children(|footer| {
+                            spawn_menu_button(
+                                footer,
+                                "Return to game",
+                                ResumeButton,
+                                "PauseMenuResumeButton",
                             );
                         });
                     panel
@@ -761,7 +832,7 @@ fn sync_pause_menu_visibility(
 fn sync_pause_menu_sections(
     menu_state: Res<PauseMenuState>,
     mut section_queries: ParamSet<(
-        Query<(&mut Visibility, &mut Node), With<MainMenuSection>>,
+        Query<(&mut Visibility, &mut Node), Or<(With<MainMenuSection>, With<MainMenuFooter>)>>,
         Query<(&mut Visibility, &mut Node), Or<(With<SettingsSection>, With<SettingsFooter>)>>,
     )>,
 ) {
@@ -769,7 +840,7 @@ fn sync_pause_menu_sections(
         return;
     }
 
-    if let Ok((mut main_visibility, mut main_node)) = section_queries.p0().single_mut() {
+    for (mut main_visibility, mut main_node) in &mut section_queries.p0() {
         *main_visibility = if menu_state.in_settings {
             Visibility::Hidden
         } else {
@@ -1240,7 +1311,10 @@ fn scroll_desktop_settings(
     menu: Res<PauseMenuState>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     mut wheel: MessageReader<MouseWheel>,
-    mut panels: Query<(&ComputedNode, &mut ScrollPosition), With<SettingsSection>>,
+    mut panels: Query<
+        (&ComputedNode, &mut ScrollPosition, Has<SettingsSection>),
+        Or<(With<SettingsSection>, With<MainMenuSection>)>,
+    >,
 ) {
     let delta: f32 = wheel
         .read()
@@ -1253,10 +1327,13 @@ fn scroll_desktop_settings(
                 }
         })
         .sum();
-    if !menu.open || !menu.in_settings || mobile.as_ref().is_some_and(|mobile| mobile.enabled) {
+    if !menu.open || mobile.as_ref().is_some_and(|mobile| mobile.enabled) {
         return;
     }
-    for (node, mut scroll) in &mut panels {
+    for (node, mut scroll, settings) in &mut panels {
+        if settings != menu.in_settings {
+            continue;
+        }
         let max = ((node.content_size().y - node.size().y) * node.inverse_scale_factor()).max(0.0);
         scroll.y = (scroll.y - delta).clamp(0.0, max);
     }
@@ -1265,7 +1342,7 @@ fn scroll_desktop_settings(
 fn reset_pause_scroll_on_navigation(
     menu: Res<PauseMenuState>,
     mut previous: Local<Option<(bool, bool)>>,
-    mut panels: Query<&mut ScrollPosition, With<SettingsSection>>,
+    mut panels: Query<&mut ScrollPosition, Or<(With<SettingsSection>, With<MainMenuSection>)>>,
 ) {
     let current = (menu.open, menu.in_settings);
     if *previous != Some(current) {
@@ -1386,6 +1463,88 @@ fn handle_reset_graphics_defaults_button(
     }
 }
 
+fn sync_practice_actions(
+    session: Res<ClientSession>,
+    mut buttons: Query<
+        (&mut Node, Has<LeavePracticeButton>),
+        Or<(With<ExitButton>, With<LeavePracticeButton>)>,
+    >,
+    mut hints: Query<(&Name, &mut Text)>,
+) {
+    let offline = session.is_offline();
+    for (mut node, leave_practice) in &mut buttons {
+        let display = if offline == leave_practice {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        if node.display != display {
+            node.display = display;
+        }
+    }
+    for (name, mut text) in &mut hints {
+        if name.as_str() == "PauseMenuMainTitle" {
+            let label = if offline {
+                "Offline practice · No rating or progression rewards."
+            } else {
+                "Your match continues while this menu is open."
+            };
+            if text.0 != label {
+                text.0 = label.into();
+            }
+        }
+    }
+}
+
+fn handle_controls_button(
+    mut menu: ResMut<PauseMenuState>,
+    mut help: ResMut<crate::help_overlay::HelpOverlayVisible>,
+    mut buttons: Query<
+        (&Interaction, &PauseButtonGesture, &mut BackgroundColor),
+        (
+            Or<(Changed<Interaction>, Changed<PauseButtonGesture>)>,
+            With<crate::edge_hud::MatchHelpButton>,
+        ),
+    >,
+) {
+    for (interaction, gesture, mut color) in &mut buttons {
+        match gesture.effective(*interaction) {
+            Interaction::Pressed if menu.open => {
+                menu.open = false;
+                menu.in_settings = false;
+                help.0 = true;
+            }
+            Interaction::Hovered => *color = BUTTON_HOVER_COLOR.into(),
+            _ => *color = BUTTON_COLOR.into(),
+        }
+    }
+}
+
+fn handle_leave_practice_button(
+    session: Res<ClientSession>,
+    mut menu: ResMut<PauseMenuState>,
+    mut commands: MessageWriter<crate::net::SessionUiCommand>,
+    mut buttons: Query<
+        (&Interaction, &PauseButtonGesture, &mut BackgroundColor),
+        (
+            Or<(Changed<Interaction>, Changed<PauseButtonGesture>)>,
+            With<LeavePracticeButton>,
+        ),
+    >,
+) {
+    for (interaction, gesture, mut color) in &mut buttons {
+        match gesture.effective(*interaction) {
+            Interaction::Pressed if session.is_offline() => {
+                commands.write(crate::net::SessionUiCommand::LeaveMatch);
+                menu.open = false;
+                menu.in_settings = false;
+            }
+            Interaction::Hovered => *color = BUTTON_HOVER_COLOR.into(),
+            _ => *color = BUTTON_COLOR.into(),
+        }
+    }
+}
+
 fn handle_exit_button(
     mut commands: Commands,
     mut interaction_query: Query<
@@ -1430,7 +1589,7 @@ fn handle_resume_button(
         (
             Or<(Changed<Interaction>, Changed<PauseButtonGesture>)>,
             With<Button>,
-            With<ResumeButton>,
+            Or<(With<ResumeButton>, With<CloseButton>)>,
         ),
     >,
 ) {
@@ -1449,6 +1608,282 @@ fn handle_resume_button(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Real Bevy/Taffy layout, font measurement and clipping; no fabricated
+    // ComputedNode rectangles. GPU/window event loop are not required.
+    fn layout_app(size: Vec2, dpi: f32, mobile_enabled: bool) -> (App, Entity) {
+        use bevy::camera::{ComputedCameraValues, RenderTargetInfo};
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
+            bevy::image::ImagePlugin::default(),
+            bevy::text::TextPlugin,
+            bevy::transform::TransformPlugin,
+            bevy::input::InputPlugin,
+            bevy::ui::UiPlugin,
+            bevy::camera::visibility::VisibilityPlugin,
+            bevy::picking::PickingPlugin,
+            bevy::picking::InteractionPlugin,
+        ));
+        app.init_resource::<Assets<bevy::mesh::Mesh>>()
+            .init_resource::<Assets<TextureAtlasLayout>>()
+            .init_resource::<ClientSession>()
+            .insert_resource(PauseMenuState {
+                open: true,
+                in_settings: true,
+            })
+            .init_resource::<AudioSettings>()
+            .init_resource::<crate::help_overlay::HelpOverlayVisible>()
+            .add_systems(Startup, setup_pause_menu_ui)
+            .add_systems(
+                Update,
+                (
+                    collect_pause_button_taps,
+                    handle_audio_buttons,
+                    handle_resume_button,
+                    handle_controls_button,
+                    sync_pause_menu_visibility,
+                    sync_pause_menu_sections,
+                    reset_pause_scroll_on_navigation,
+                    sync_practice_actions,
+                )
+                    .chain(),
+            )
+            .add_systems(
+                PostUpdate,
+                (size_desktop_pause_panel, scroll_desktop_settings)
+                    .before(bevy::ui::UiSystems::Layout),
+            );
+        let mut mobile = crate::mobile_controls::MobileControls::default();
+        mobile.enabled = mobile_enabled;
+        mobile.focused = true;
+        mobile.landscape = true;
+        mobile.viewport = size;
+        app.insert_resource(mobile);
+        crate::mobile_ui::add_pause_layout_test_systems(&mut app);
+        let mut window = Window::default();
+        window.resolution.set_scale_factor_override(Some(dpi));
+        window.resolution.set(size.x, size.y);
+        let window = app.world_mut().spawn((window, PrimaryWindow)).id();
+        app.world_mut().spawn((
+            Camera2d,
+            Camera {
+                computed: ComputedCameraValues {
+                    target_info: Some(RenderTargetInfo {
+                        physical_size: (size * dpi).as_uvec2(),
+                        scale_factor: dpi,
+                    }),
+                    ..default()
+                },
+                ..default()
+            },
+        ));
+        app.finish();
+        app.cleanup();
+        for _ in 0..5 {
+            app.update();
+        }
+        (app, window)
+    }
+
+    fn named(app: &mut App, name: &str) -> Entity {
+        app.world_mut()
+            .query::<(Entity, &Name)>()
+            .iter(app.world())
+            .find(|(_, n)| n.as_str() == name)
+            .unwrap()
+            .0
+    }
+
+    fn rect(app: &App, entity: Entity, dpi: f32) -> Rect {
+        crate::mobile_ui::logical_ui_rect(
+            app.world().get::<ComputedNode>(entity).unwrap(),
+            app.world().get::<UiGlobalTransform>(entity).unwrap(),
+            app.world().get::<bevy::ui::CalculatedClip>(entity),
+            dpi,
+        )
+    }
+
+    #[test]
+    fn real_layout_keeps_close_and_footer_reachable_and_touch_scrolls_settings() {
+        for (size, dpi) in [
+            (Vec2::new(568.0, 320.0), 2.0),
+            (Vec2::new(844.0, 390.0), 3.0),
+            (Vec2::new(1024.0, 768.0), 2.0),
+            (Vec2::new(1180.0, 820.0), 2.0),
+        ] {
+            let (mut app, window) = layout_app(size, dpi, true);
+            let close = named(&mut app, "PauseMenuCloseButton");
+            let footer = named(&mut app, "BackButton");
+            let body = named(&mut app, "PauseMenuSettingsSection");
+            let reset = named(&mut app, "PauseMenuResetGraphicsButton");
+            let viewport = Rect::from_corners(Vec2::ZERO, size);
+            for entity in [close, footer] {
+                let r = rect(&app, entity, dpi);
+                assert!(r.width() >= 44.0 && r.height() >= 44.0, "{size:?}: {r:?}");
+                assert!(
+                    viewport.contains(r.min) && viewport.contains(r.max),
+                    "{size:?}: {r:?}"
+                );
+            }
+            let close_before = rect(&app, close, dpi);
+            let before = *app.world().resource::<AudioSettings>();
+            let area = rect(&app, body, dpi);
+            for id in 1..10 {
+                for (phase, point) in [
+                    (TouchPhase::Started, area.center()),
+                    (TouchPhase::Moved, area.center() - Vec2::Y * 200.0),
+                    (TouchPhase::Ended, area.center() - Vec2::Y * 200.0),
+                ] {
+                    app.world_mut().write_message(TouchInput {
+                        phase,
+                        position: point,
+                        window,
+                        id,
+                        force: None,
+                    });
+                    app.update();
+                }
+            }
+            let scroll = app.world().get::<ScrollPosition>(body).unwrap().y;
+            let reset_rect = rect(&app, reset, dpi);
+            println!(
+                "viewport={size:?} dpi={dpi} scroll={scroll} body={area:?} reset={reset_rect:?} close={close_before:?}"
+            );
+            assert!(scroll > 0.0, "settings must have real scrollable content");
+            assert!(
+                reset_rect.height() >= 44.0,
+                "last setting must be reachable: {reset_rect:?}"
+            );
+            assert_eq!(rect(&app, close, dpi), close_before);
+            assert_eq!(*app.world().resource::<AudioSettings>(), before);
+            for settings in [true, false] {
+                {
+                    let mut state = app.world_mut().resource_mut::<PauseMenuState>();
+                    state.open = true;
+                    state.in_settings = settings;
+                }
+                app.update();
+                app.update();
+                if !settings {
+                    let main = named(&mut app, "PauseMenuMainSection");
+                    let guide = named(&mut app, "PauseMenuHelpButton");
+                    let start = rect(&app, guide, dpi).center();
+                    for (phase, position) in [
+                        (TouchPhase::Started, start),
+                        (TouchPhase::Moved, start - Vec2::Y * 180.0),
+                        (TouchPhase::Ended, start - Vec2::Y * 180.0),
+                    ] {
+                        app.world_mut().write_message(TouchInput {
+                            phase,
+                            position,
+                            window,
+                            id: 80,
+                            force: None,
+                        });
+                        app.update();
+                    }
+                    assert!(
+                        !app.world()
+                            .resource::<crate::help_overlay::HelpOverlayVisible>()
+                            .0
+                    );
+                    assert!(app.world().resource::<PauseMenuState>().open);
+                    if size.y <= 320.0 {
+                        assert!(app.world().get::<ScrollPosition>(main).unwrap().y > 0.0);
+                    }
+                    let exit = named(&mut app, "PauseMenuExitButton");
+                    assert!(rect(&app, exit, dpi).height() >= 44.0);
+                }
+                let r = rect(&app, close, dpi);
+                assert!(viewport.contains(r.min) && viewport.contains(r.max));
+                for phase in [TouchPhase::Started, TouchPhase::Ended] {
+                    app.world_mut().write_message(TouchInput {
+                        phase,
+                        position: r.center(),
+                        window,
+                        id: 88,
+                        force: None,
+                    });
+                    app.update();
+                }
+                assert!(
+                    !app.world().resource::<PauseMenuState>().open,
+                    "close must work from settings={settings}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn real_short_desktop_layout_scrolls_both_bodies_and_keeps_fixed_actions() {
+        for size in [Vec2::new(640.0, 280.0), Vec2::new(1280.0, 720.0)] {
+            let (mut app, window) = layout_app(size, 1.0, false);
+            let close = named(&mut app, "PauseMenuCloseButton");
+            for settings in [false, true] {
+                app.world_mut().resource_mut::<PauseMenuState>().in_settings = settings;
+                app.update();
+                app.update();
+                let body = named(
+                    &mut app,
+                    if settings {
+                        "PauseMenuSettingsSection"
+                    } else {
+                        "PauseMenuMainSection"
+                    },
+                );
+                let footer = named(
+                    &mut app,
+                    if settings {
+                        "BackButton"
+                    } else {
+                        "PauseMenuResumeButton"
+                    },
+                );
+                let last = named(
+                    &mut app,
+                    if settings {
+                        "PauseMenuResetGraphicsButton"
+                    } else {
+                        "PauseMenuExitButton"
+                    },
+                );
+                let close_before = rect(&app, close, 1.0);
+                let footer_before = rect(&app, footer, 1.0);
+                app.world_mut().write_message(MouseWheel {
+                    unit: MouseScrollUnit::Pixel,
+                    x: 0.0,
+                    y: -2000.0,
+                    window,
+                });
+                app.update();
+                let last_rect = rect(&app, last, 1.0);
+                assert!(
+                    last_rect.height() >= 44.0,
+                    "{size:?}, settings={settings}: last action {last_rect:?}"
+                );
+                for r in [close_before, footer_before] {
+                    assert!(r.min.y >= 0.0 && r.max.y <= size.y && r.height() >= 44.0);
+                }
+                assert_eq!(rect(&app, close, 1.0), close_before);
+                assert_eq!(rect(&app, footer, 1.0), footer_before);
+                println!(
+                    "desktop={size:?} settings={settings} scroll={} last={last_rect:?}",
+                    app.world().get::<ScrollPosition>(body).unwrap().y
+                );
+                *app.world_mut().get_mut::<Interaction>(close).unwrap() = Interaction::Pressed;
+                use bevy::ecs::system::RunSystemOnce;
+                app.world_mut()
+                    .run_system_once(handle_resume_button)
+                    .unwrap();
+                assert!(!app.world().resource::<PauseMenuState>().open);
+                *app.world_mut().get_mut::<Interaction>(close).unwrap() = Interaction::None;
+                app.world_mut().resource_mut::<PauseMenuState>().open = true;
+                app.update();
+            }
+        }
+    }
 
     #[test]
     fn offline_shell_settings_stay_open_but_disconnected_match_menu_closes() {

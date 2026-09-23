@@ -1,3 +1,4 @@
+mod offline;
 mod public_transport;
 
 use shared::combat::{CombatEntityKind, CombatEvent, MinionKind, ProjectileStyle};
@@ -80,6 +81,8 @@ pub enum NetThreadSignal {
 pub enum SessionUiCommand {
     /// User explicitly resumes waiting for snapshots after **Disconnected** (P2 manual recovery).
     Retry,
+    /// Replace remote I/O with an in-process, unrated character practice.
+    StartOffline,
     /// Validated address chosen in the pre-join UI. Never transfers an active match.
     ConnectTo(String),
     /// Switch to a trusted lobby allocation without overwriting the saved lobby.
@@ -157,6 +160,7 @@ pub struct ClientSession {
     career_server_epoch: u64,
     career_packet_sequence: u64,
     ephemeral_endpoint: bool,
+    offline_return_addr: Option<String>,
 }
 
 impl Default for ClientSession {
@@ -179,6 +183,7 @@ impl Default for ClientSession {
             career_server_epoch: 0,
             career_packet_sequence: 0,
             ephemeral_endpoint: false,
+            offline_return_addr: None,
         }
     }
 }
@@ -227,6 +232,10 @@ fn should_attempt_reconnect(
 }
 
 impl ClientSession {
+    pub(crate) fn is_offline(&self) -> bool {
+        self.offline_return_addr.is_some()
+    }
+
     #[cfg(test)]
     pub(crate) fn admitted_for_test() -> Self {
         Self {
@@ -394,6 +403,7 @@ impl Plugin for NetworkingPlugin {
                 (
                     start_networking.after(crate::persistence::load_persistent_client_settings),
                     setup_connection_status_ui,
+                    offline::setup_banner,
                 ),
             )
             .add_systems(
@@ -404,7 +414,10 @@ impl Plugin for NetworkingPlugin {
                 Update,
                 send_network_commands.in_set(ClientNetPipeline::SendCommands),
             )
-            .add_systems(Update, mirror_debug_flags_to_network_state)
+            .add_systems(
+                Update,
+                (mirror_debug_flags_to_network_state, offline::sync_banner),
+            )
             .add_systems(
                 Update,
                 (
@@ -415,7 +428,9 @@ impl Plugin for NetworkingPlugin {
             )
             .add_systems(
                 Update,
-                ingest_server_snapshot_packets.in_set(ClientNetPipeline::IngestSnapshot),
+                (offline::step, ingest_server_snapshot_packets)
+                    .chain()
+                    .in_set(ClientNetPipeline::IngestSnapshot),
             )
             .add_systems(
                 Update,
@@ -1476,7 +1491,13 @@ fn start_networking(
             "Ignoring invalid GAME_SERVER_ADDR/file value {preferred_addr:?}; falling back to {server_addr}"
         );
     }
-    spawn_network_transport(&mut commands, &mut client_session, server_addr);
+    if std::env::var("OMOBA_OFFLINE_PRACTICE").is_ok_and(|v| v == "1") {
+        client_session.offline_return_addr = Some(server_addr);
+        client_session.ephemeral_endpoint = true;
+        spawn_network_transport(&mut commands, &mut client_session, offline::ADDRESS.into());
+    } else {
+        spawn_network_transport(&mut commands, &mut client_session, server_addr);
+    }
 }
 
 fn validated_server_addr_or_default(raw: &str) -> String {
@@ -1503,15 +1524,24 @@ fn spawn_network_transport(
     let gameplay_signer: SharedGameplaySigner = Arc::default();
     let signer_for_thread = gameplay_signer.clone();
     let addr_for_thread = server_addr;
-    thread::spawn(move || {
-        run_udp_client(
-            addr_for_thread,
+    if client_session.is_offline() {
+        commands.insert_resource(offline::LocalPractice::new(
             outgoing_rx,
             incoming_tx,
             signal_tx,
-            signer_for_thread,
-        );
-    });
+        ));
+    } else {
+        commands.remove_resource::<offline::LocalPractice>();
+        thread::spawn(move || {
+            run_udp_client(
+                addr_for_thread,
+                outgoing_rx,
+                incoming_tx,
+                signal_tx,
+                signer_for_thread,
+            );
+        });
+    }
 
     client_session.state = ClientConnectionState::WaitingForServer;
     client_session.waiting_since = Some(Instant::now());
@@ -1893,6 +1923,9 @@ fn send_network_commands(
         });
     }
     for command in command_events.read() {
+        if client_session.is_offline() && matches!(command, NetworkCommand::Career(_) | NetworkCommand::Social {..} | NetworkCommand::BuyItem {..}) {
+            continue;
+        }
         if let (Some(service), Some(career)) = (match_service.as_mut(), career_client.as_ref())
             && service.intercept_join(&career.view, &client_session.server_addr_display, command)
         {
@@ -2185,7 +2218,9 @@ fn send_join_attempt(
         session.join_exhausted = true;
         return;
     }
-    let passport_ticket =
+    let passport_ticket = if session.is_offline() {
+        None
+    } else {
         match crate::passport::ticket_for_slug(join.avatar.as_deref(), &session_id.0) {
             crate::passport::TicketPoll::Free => None,
             crate::passport::TicketPoll::Ready(ticket) => Some(ticket),
@@ -2199,7 +2234,8 @@ fn send_join_attempt(
                 session.join_exhausted = true;
                 return;
             }
-        };
+        }
+    };
     let result = channels.outgoing.try_send(ClientPacket::Join {
         prematch: join.prematch,
         team: join.team,
@@ -3514,6 +3550,51 @@ fn update_session_lifecycle(
     let mut retried_this_frame = false;
     for event in session_ui.read() {
         match event {
+            SessionUiCommand::StartOffline => {
+                if client_session.has_committed_join() || client_session.is_offline() {
+                    continue;
+                }
+                if let Some(channels) = channels.as_ref() {
+                    let _ = channels.outgoing.try_send(ClientPacket::Leave);
+                }
+                client_session.offline_return_addr =
+                    Some(client_session.server_addr_display.clone());
+                client_session.ephemeral_endpoint = true;
+                client_session.abandon_join();
+                team_selection.team = None;
+                // Practice only uses avatars bundled with the app; no wallet or download.
+                if !offline::shipped_avatar(team_selection.avatar.as_deref()) {
+                    team_selection.avatar = None;
+                }
+                despawn_tracked_net_entities(
+                    &mut commands,
+                    &mut network_state,
+                    remote_query,
+                    projectile_query,
+                    structure_query,
+                    minion_query,
+                    neutral_query,
+                );
+                despawn_local_players(&mut commands, player_query);
+                *game_state_snapshot = GameStateSnapshot::default();
+                commands.insert_resource(PendingServerSnapshotFrame::default());
+                if let Some(service) = match_service.as_mut() {
+                    service.take_return_to_lobby();
+                }
+                if let Some(career) = career.as_mut() {
+                    career.clear_account();
+                }
+                if let Some(social) = social.as_mut() {
+                    social.clear();
+                }
+                spawn_network_transport(
+                    &mut commands,
+                    &mut client_session,
+                    offline::ADDRESS.into(),
+                );
+                incoming_dead.0 = false;
+                retried_this_frame = true;
+            }
             SessionUiCommand::ConnectTo(raw) => {
                 if client_session.join_flow_committed || client_session.last_join.is_some() {
                     continue;
@@ -3533,6 +3614,7 @@ fn update_session_lifecycle(
                     // authenticates this account against its configured backend.
                     career.clear_account();
                 }
+                client_session.offline_return_addr = None;
                 client_session.ephemeral_endpoint = false;
                 commands.remove_resource::<NetworkChannels>();
                 spawn_network_transport(&mut commands, &mut client_session, address);
@@ -3585,9 +3667,11 @@ fn update_session_lifecycle(
                 {
                     let _ = channels.outgoing.try_send(ClientPacket::Career { request });
                 }
-                let return_to_lobby = match_service
-                    .as_mut()
-                    .and_then(|service| service.take_return_to_lobby());
+                let return_to_lobby = client_session.offline_return_addr.take().or_else(|| {
+                    match_service
+                        .as_mut()
+                        .and_then(|service| service.take_return_to_lobby())
+                });
                 // The server releases the seat (or the queue entry) on `Leave`;
                 // the connection itself stays up for the menus and the career.
                 if let Some(channels) = channels.as_ref() {
@@ -5272,6 +5356,195 @@ mod tests {
 mod connection_ui_tests {
     use super::*;
     use crate::sprite::SpriteVisualAssets;
+
+    #[test]
+    fn offline_leave_restores_saved_endpoint_and_next_join_uses_real_udp_transport() {
+        use crate::world::{AvatarAssetCache, PlayerModelCatalog};
+        use bevy::{asset::AssetApp, ecs::system::RunSystemOnce};
+
+        let server = UdpSocket::bind("127.0.0.1:0").unwrap();
+        server
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let saved_address = server.local_addr().unwrap().to_string();
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+            .init_asset::<Scene>()
+            .init_asset::<bevy::gltf::Gltf>()
+            .insert_resource(ClientSession {
+                server_addr_display: saved_address.clone(),
+                ..default()
+            })
+            .insert_resource(ResolvedServerAddressForPrefs(saved_address.clone()))
+            .insert_resource(ClientSessionId("offline-online-lifecycle-test".into()))
+            .insert_resource(PlayerVisualMode::Models3d)
+            .insert_resource(PlayerAssets {
+                scene: None,
+                gltf: None,
+                mesh: default(),
+                material: default(),
+            })
+            .init_resource::<PlayerModelCatalog>()
+            .init_resource::<AvatarAssetCache>()
+            .init_resource::<NetIncomingDisconnected>()
+            .init_resource::<PendingServerSnapshotFrame>()
+            .init_resource::<NetworkState>()
+            .init_resource::<GameStateSnapshot>()
+            .init_resource::<TeamSelection>()
+            .init_resource::<CameraState>()
+            .init_resource::<crate::maps::MapLayout>()
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .add_message::<SessionUiCommand>()
+            .add_systems(
+                Update,
+                (
+                    update_session_lifecycle,
+                    offline::step,
+                    ingest_server_snapshot_packets,
+                    apply_server_snapshot,
+                )
+                    .chain(),
+            );
+
+        app.world_mut()
+            .write_message(SessionUiCommand::StartOffline);
+        app.update();
+        assert!(app.world().resource::<ClientSession>().is_offline());
+        assert!(app.world().contains_resource::<offline::LocalPractice>());
+        assert_eq!(
+            app.world().resource::<ResolvedServerAddressForPrefs>().0,
+            saved_address
+        );
+
+        fn send_test_join(app: &mut App, hero_class: HeroClass) {
+            app.world_mut()
+                .run_system_once(
+                    move |channels: Res<NetworkChannels>,
+                          mut session: ResMut<ClientSession>,
+                          identity: Res<ClientSessionId>,
+                          mut selection: ResMut<TeamSelection>| {
+                        selection.team = Some(Team::Green);
+                        session.last_join = Some(CommittedJoin {
+                            hero_class,
+                            ..CommittedJoin::for_test()
+                        });
+                        send_join_attempt(&channels, &mut session, &identity);
+                    },
+                )
+                .unwrap();
+        }
+        send_test_join(&mut app, HeroClass::Warrior);
+        app.update();
+        assert!(app.world().resource::<ClientSession>().join_confirmed());
+        assert_eq!(
+            app.world().resource::<GameStateSnapshot>().match_mode,
+            "offline_practice"
+        );
+        let local = app
+            .world_mut()
+            .query_filtered::<Entity, With<Player>>()
+            .single(app.world())
+            .unwrap();
+        let targets: Vec<_> = app
+            .world()
+            .resource::<NetworkState>()
+            .remote_players
+            .values()
+            .copied()
+            .collect();
+        assert!(
+            !targets.is_empty(),
+            "the real local snapshot must spawn practice targets"
+        );
+        let visual = app
+            .world_mut()
+            .spawn(Name::new("practice target child"))
+            .id();
+        app.world_mut().entity_mut(targets[0]).add_child(visual);
+
+        app.world_mut().write_message(SessionUiCommand::LeaveMatch);
+        app.update();
+        assert!(!app.world().contains_resource::<offline::LocalPractice>());
+        assert!(app.world().get_entity(local).is_err());
+        assert!(app.world().get_entity(visual).is_err());
+        assert!(
+            targets
+                .iter()
+                .all(|entity| app.world().get_entity(*entity).is_err())
+        );
+        assert!(
+            app.world()
+                .resource::<NetworkState>()
+                .remote_players
+                .is_empty()
+        );
+        assert!(!app.world().resource::<ClientSession>().is_offline());
+        assert!(!app.world().resource::<ClientSession>().ephemeral_endpoint);
+        assert!(!app.world().resource::<ClientSession>().has_committed_join());
+        assert_eq!(
+            app.world().resource::<ClientSession>().server_addr_display,
+            saved_address
+        );
+        assert_eq!(
+            app.world().resource::<ResolvedServerAddressForPrefs>().0,
+            saved_address
+        );
+        assert_eq!(
+            app.world().resource::<crate::frontend::PendingScreen>().0,
+            Some(crate::frontend::AppScreen::Home)
+        );
+
+        send_test_join(&mut app, HeroClass::Mage);
+        let mut packet = [0_u8; 4096];
+        let mut received_join = false;
+        for _ in 0..4 {
+            let (length, _) = server
+                .recv_from(&mut packet)
+                .expect("the restored production UDP transport must reach the saved endpoint");
+            if matches!(
+                serde_json::from_slice::<shared::public_transport::PublicClientDatagram>(
+                    &packet[..length]
+                ),
+                Ok(shared::public_transport::PublicClientDatagram::TransportProbe { .. })
+            ) {
+                continue;
+            }
+            match serde_json::from_slice::<ClientPacket>(&packet[..length]).unwrap() {
+                ClientPacket::Hello { .. } => {}
+                ClientPacket::Join {
+                    session_id,
+                    team,
+                    hero_class,
+                    passport_ticket,
+                    ..
+                } => {
+                    assert_eq!(session_id.as_deref(), Some("offline-online-lifecycle-test"));
+                    assert_eq!(team, Team::Green);
+                    assert_eq!(
+                        hero_class,
+                        HeroClass::Mage,
+                        "must be the new online join, not a queued offline join"
+                    );
+                    assert!(passport_ticket.is_none());
+                    received_join = true;
+                    break;
+                }
+                other => {
+                    panic!("offline packets must not leak to the restored endpoint: {other:?}")
+                }
+            }
+        }
+        assert!(
+            received_join,
+            "online Join was not received by the UDP fixture"
+        );
+        assert!(!app.world().contains_resource::<offline::LocalPractice>());
+        assert_eq!(
+            app.world().resource::<ResolvedServerAddressForPrefs>().0,
+            saved_address
+        );
+    }
 
     #[test]
     fn allocated_handoff_retry_and_leave_preserve_saved_lobby_and_clear_old_scene() {
