@@ -470,6 +470,15 @@ impl ServerRuntime {
                         .target
                         .filter(|target| {
                             target.kind != TargetKind::Structure
+                                && vision::target_visible(
+                                    team,
+                                    *target,
+                                    &self.players,
+                                    &self.minions,
+                                    &self.structures,
+                                    &self.neutrals,
+                                    now,
+                                )
                                 && basic_attack::resolve_hostile_target(
                                     team,
                                     *target,
@@ -482,7 +491,7 @@ impl ServerRuntime {
                                     (p.x - origin[0]).hypot(p.z - origin[1]) <= VISION + 2.0
                                 })
                         })
-                        .or_else(|| self.bot_target(team, origin, controller.lane))
+                        .or_else(|| self.bot_target(team, origin, controller.lane, now))
                 };
                 if controller.target != previous_target {
                     controller.holding_range = false;
@@ -537,17 +546,30 @@ impl ServerRuntime {
                     }
                 }
             }
-            let target = controller.target.and_then(|target| {
-                basic_attack::resolve_hostile_target(
-                    team,
-                    target,
-                    &self.players,
-                    &self.minions,
-                    &self.structures,
-                    &self.neutrals,
-                )
-                .map(|(position, radius)| (target, position, radius))
-            });
+            let target = controller
+                .target
+                .filter(|target| {
+                    vision::target_visible(
+                        team,
+                        *target,
+                        &self.players,
+                        &self.minions,
+                        &self.structures,
+                        &self.neutrals,
+                        now,
+                    )
+                })
+                .and_then(|target| {
+                    basic_attack::resolve_hostile_target(
+                        team,
+                        target,
+                        &self.players,
+                        &self.minions,
+                        &self.structures,
+                        &self.neutrals,
+                    )
+                    .map(|(position, radius)| (target, position, radius))
+                });
             let reach = shared::basic_attack_for_class(self.players[&addr].state.hero_class).range;
             let mut in_range = false;
             let destination = if retreating {
@@ -666,7 +688,13 @@ impl ServerRuntime {
         }
     }
 
-    fn bot_target(&self, team: Team, origin: [f32; 2], lane: Lane) -> Option<TargetId> {
+    pub(crate) fn bot_target(
+        &self,
+        team: Team,
+        origin: [f32; 2],
+        lane: Lane,
+        now: Instant,
+    ) -> Option<TargetId> {
         let distance = |x: f32, z: f32| (x - origin[0]).hypot(z - origin[1]);
         // Fight nearby lane units before diving a structure. Stable ID tie breaks
         // keep behavior independent of HashMap iteration order.
@@ -700,7 +728,18 @@ impl ServerRuntime {
         );
         if let Some((_, target)) = units
             .into_iter()
-            .filter(|(d, _)| *d <= VISION)
+            .filter(|(d, target)| {
+                *d <= VISION
+                    && vision::target_visible(
+                        team,
+                        *target,
+                        &self.players,
+                        &self.minions,
+                        &self.structures,
+                        &self.neutrals,
+                        now,
+                    )
+            })
             .min_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.id.cmp(&b.1.id)))
         {
             return Some(target);
@@ -716,7 +755,21 @@ impl ServerRuntime {
                         StructureRole::LaneTower { lane: tower_lane } => tower_lane == lane,
                     }
             })
-            .filter(|s| distance(s.state.x, s.state.z) <= VISION + s.attack_range)
+            .filter(|s| {
+                distance(s.state.x, s.state.z) <= VISION + s.attack_range
+                    && vision::target_visible(
+                        team,
+                        TargetId {
+                            kind: TargetKind::Structure,
+                            id: s.state.id,
+                        },
+                        &self.players,
+                        &self.minions,
+                        &self.structures,
+                        &self.neutrals,
+                        now,
+                    )
+            })
             .min_by(|a, b| {
                 distance(a.state.x, a.state.z)
                     .total_cmp(&distance(b.state.x, b.state.z))

@@ -25,6 +25,7 @@ pub mod social;
 pub mod supporter;
 pub mod transport;
 pub mod utility;
+pub mod vision;
 pub mod web_account;
 
 /// Resolve packaged assets before the development checkout. Launchers can

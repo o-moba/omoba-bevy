@@ -12,6 +12,15 @@ pub(crate) fn enabled(mode: MatchMode) -> bool {
         mode,
         std::env::var("OMOBA_MATCH_MODE").ok().as_deref(),
         std::env::var("OMOBA_TARGETING_QA").ok().as_deref(),
+    ) || vision_enabled(mode)
+}
+
+pub(crate) fn vision_enabled(mode: MatchMode) -> bool {
+    enabled_for(
+        cfg!(debug_assertions),
+        mode,
+        std::env::var("OMOBA_MATCH_MODE").ok().as_deref(),
+        std::env::var("OMOBA_VISION_QA").ok().as_deref(),
     )
 }
 
@@ -33,10 +42,20 @@ pub(crate) fn place_initial_join(
         .values()
         .filter(|p| p.joined && p.state.team == team && p.state.id < player.state.id)
         .count();
-    let position = match team {
-        Team::Green if index == 0 => Some(GREEN),
-        Team::Blue => BLUE.get(index).copied(),
-        _ => None,
+    let position = if vision_enabled(MatchMode::Dev) {
+        let zone = shared::vision::brush_layout()[0];
+        let offset = if team == Team::Green {
+            zone.radius + 5.0
+        } else {
+            zone.radius + 1.0
+        };
+        Some([zone.center[0] + offset, zone.center[1]])
+    } else {
+        match team {
+            Team::Green if index == 0 => Some(GREEN),
+            Team::Blue => BLUE.get(index).copied(),
+            _ => None,
+        }
     };
     let Some([x, z]) = position else { return };
     // Refuse setup if a later map revision makes these points obstructed.

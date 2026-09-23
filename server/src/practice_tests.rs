@@ -862,6 +862,7 @@ fn live_udp_practice_solo_and_running_late_join_publish_real_bot_replacement() {
         meta,
         game_state,
         players,
+        scoreboard,
         your_id,
         ..
     } = read_snapshot(&first, &mut rt)
@@ -870,10 +871,19 @@ fn live_udp_practice_solo_and_running_late_join_publish_real_bot_replacement() {
     };
     assert_eq!(match_mode, "practice");
     assert_eq!(game_state, GameState::Running);
-    assert_eq!(players.len(), 2);
-    assert_eq!(players.iter().filter(|p| p.is_bot).count(), 1);
+    assert_eq!(players.len(), 1, "opponent spawn is outside team sight");
+    let scoreboard = scoreboard.unwrap();
+    assert_eq!(scoreboard.players.iter().filter(|p| p.connected).count(), 2);
+    assert!(players.iter().all(|p| !p.is_bot));
     assert!(!players.iter().find(|p| p.id == your_id).unwrap().is_bot);
-    let old_bot = players.iter().find(|p| p.is_bot).unwrap().id;
+    let old_bot = rt
+        .players
+        .values()
+        .find(|p| p.state.is_bot)
+        .unwrap()
+        .state
+        .id;
+    assert!(scoreboard.players.iter().any(|p| p.player_id == old_bot));
     let second = UdpSocket::bind("127.0.0.1:0").unwrap();
     send_udp(
         &second,
@@ -887,6 +897,7 @@ fn live_udp_practice_solo_and_running_late_join_publish_real_bot_replacement() {
         meta: late_meta,
         game_state,
         players,
+        scoreboard,
         your_id: second_id,
         ..
     } = read_snapshot(&second, &mut rt)
@@ -895,10 +906,19 @@ fn live_udp_practice_solo_and_running_late_join_publish_real_bot_replacement() {
     };
     assert_eq!(meta.match_id, late_meta.match_id);
     assert_eq!(game_state, GameState::Running);
-    assert_eq!(players.len(), 2);
+    assert_eq!(players.len(), 1, "opponent spawn is outside team sight");
+    let scoreboard = scoreboard.unwrap();
+    assert_eq!(scoreboard.players.iter().filter(|p| p.connected).count(), 2);
     assert!(players.iter().all(|p| !p.is_bot && p.id != old_bot));
     assert_ne!(your_id, second_id);
-    assert!(players.iter().any(|p| p.id == your_id));
+    assert!(scoreboard.players.iter().any(|p| p.player_id == your_id));
+    assert!(
+        scoreboard
+            .players
+            .iter()
+            .filter(|p| p.connected)
+            .all(|p| p.player_id != old_bot)
+    );
     println!(
         "LIVE_UDP_PRACTICE solo_running=true bots=1 late_join_same_round=true bot_identity_replaced=true humans=2"
     );

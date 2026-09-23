@@ -47,6 +47,8 @@ fn every_class_sends_styled_flight_then_one_confirmed_receipt_and_no_immune_hit(
         while baseline.player(b).is_none() {
             baseline = snapshot(&mut attacker);
         }
+        let full_hp = baseline.player(b).unwrap().max_hp;
+        assert_eq!(baseline.player(b).unwrap().hp, full_hp);
         assert!(baseline.combat_events().is_empty());
         assert!((baseline.player(a).unwrap().x - baseline.player(b).unwrap().x).abs() <= 4.01);
         strike(&attacker, &baseline, b, 1);
@@ -69,7 +71,7 @@ fn every_class_sends_styled_flight_then_one_confirmed_receipt_and_no_immune_hit(
                 saw_flight = true;
                 assert_eq!(
                     packet.player(b).unwrap().hp,
-                    100.0,
+                    full_hp,
                     "flight precedes damage"
                 );
             }
@@ -87,7 +89,7 @@ fn every_class_sends_styled_flight_then_one_confirmed_receipt_and_no_immune_hit(
                 assert!(!event.killed);
                 repeated_receipt |= !observed.insert(event.id);
                 event_id = Some(event.id);
-                assert_eq!(packet.player(b).unwrap().hp, 100.0 - damage);
+                assert_eq!(packet.player(b).unwrap().hp, full_hp - damage);
             }
             // Same-round retries must not fabricate a second strike or receipt.
             strike(&attacker, &baseline, b, 1);
@@ -105,10 +107,10 @@ fn every_class_sends_styled_flight_then_one_confirmed_receipt_and_no_immune_hit(
         victim.set_god_mode(true);
         let mut packet = snapshot(&mut attacker);
         let ready = Instant::now() + Duration::from_secs(3);
-        while packet.player(b).unwrap().hp < 100.0 && Instant::now() < ready {
+        while packet.player(b).unwrap().hp < full_hp && Instant::now() < ready {
             packet = snapshot(&mut attacker);
         }
-        assert_eq!(packet.player(b).unwrap().hp, 100.0);
+        assert_eq!(packet.player(b).unwrap().hp, full_hp);
         assert!(
             packet.combat_events().is_empty(),
             "healing is not damage; old receipt expired"
@@ -122,7 +124,7 @@ fn every_class_sends_styled_flight_then_one_confirmed_receipt_and_no_immune_hit(
                 packet.combat_events().is_empty(),
                 "god mode cannot emit a hit"
             );
-            assert_eq!(packet.player(b).unwrap().hp, 100.0);
+            assert_eq!(packet.player(b).unwrap().hp, full_hp);
         }
         eprintln!(
             "{class:?}: styled flight, one {damage} HP receipt, loss repetition/replay guard and immunity verified"
@@ -136,6 +138,9 @@ fn normal_waves_have_two_melee_one_caster_and_caster_damage_arrives_after_releas
     let mut observer = Bot::connect_framed(server.addr());
     observer.join(Team::Green, Character::Ipfs);
     observer.set_god_mode(true);
+    let mut opposing_observer = Bot::connect_framed(server.addr());
+    opposing_observer.join(Team::Blue, Character::Ipfs);
+    opposing_observer.set_god_mode(true);
     let started = Instant::now();
     let mut checked_wave = false;
     let mut kind_by_id = HashMap::new();
@@ -145,11 +150,16 @@ fn normal_waves_have_two_melee_one_caster_and_caster_damage_arrives_after_releas
     let mut confirmed_caster_hit = false;
     while started.elapsed() < Duration::from_secs(65) {
         let packet = snapshot(&mut observer);
+        let opposing_packet = snapshot(&mut opposing_observer);
         for minion in packet.minions() {
             kind_by_id.insert(minion.id, minion.kind);
         }
-        if !checked_wave && packet.minions().len() == 18 {
-            for team in [Team::Green, Team::Blue] {
+        if !checked_wave && packet.minions().len() == 9 && opposing_packet.minions().len() == 9 {
+            for (team, packet) in [(Team::Green, &packet), (Team::Blue, &opposing_packet)] {
+                assert!(
+                    packet.minions().iter().all(|m| m.team == Some(team)),
+                    "first wave is recipient-owned sight"
+                );
                 for lane in ["top", "mid", "bot"] {
                     let group: Vec<_> = packet
                         .minions()

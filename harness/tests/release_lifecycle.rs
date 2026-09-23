@@ -95,6 +95,12 @@ fn assert_preserved_with_income(before: &Value, after: &Value, max_gold_gain: u6
     let mut comparable = after.clone();
     comparable["gold"] = before["gold"].clone();
     assert_eq!(
+        after["earned_gold"].as_u64().unwrap() - before["earned_gold"].as_u64().unwrap(),
+        after_gold - before_gold,
+        "passive wallet and earned income agree"
+    );
+    comparable["earned_gold"] = before["earned_gold"].clone();
+    assert_eq!(
         &comparable, before,
         "gameplay, equipment or loadout changed"
     );
@@ -119,7 +125,10 @@ fn launched_release_server_duplicate_reservation_conflict_and_reconnect_preserve
     let purchased = wait(&mut first, &[&second], |s| {
         own(s)["inventory"] == json!(["vitality_gem"])
     });
-    assert_eq!(own(&purchased)["max_hp"], 130.0);
+    assert_eq!(
+        own(&purchased)["max_hp"].as_f64().unwrap(),
+        own(&admitted)["max_hp"].as_f64().unwrap() + 30.0
+    );
     let start = own(&purchased);
     first.send(
         json!({"type":"transform","x":start["x"].as_f64().unwrap()+0.5,
@@ -146,21 +155,16 @@ fn launched_release_server_duplicate_reservation_conflict_and_reconnect_preserve
     });
     drop(conflict);
     drop(first);
-    // A silent socket remains joined until its timeout and earns gold. Keep
-    // the latest observed state rather than comparing with the older wallet.
-    let mut before_reservation = before;
+    // The remote actor is hidden at its spawn throughout. Public connection
+    // status, rather than actor visibility, confirms the timeout/reservation.
     wait(&mut second, &[], |s| {
-        if let Some(player) = s["players"]
+        s["scoreboard"]["players"]
             .as_array()
-            .unwrap()
-            .iter()
-            .find(|p| p["id"] == id)
-        {
-            before_reservation = player.clone();
-            false
-        } else {
-            true
-        }
+            .is_some_and(|players| {
+                players
+                    .iter()
+                    .any(|p| p["player_id"] == id && p["connected"] == false)
+            })
     });
     let mut replacement = Peer::connect(server.addr());
     replacement.join("replacement", "green", "cube");
@@ -168,18 +172,13 @@ fn launched_release_server_duplicate_reservation_conflict_and_reconnect_preserve
         s["join_error"] == "match_full"
     });
     let mut reclaimed = Peer::connect(server.addr());
-    let reclaimed_at = Instant::now();
     reclaimed.join("live-a", "blue", "cube");
     let restored = wait(&mut reclaimed, &[&second], |s| {
-        s["your_id"] == id && s["players"].as_array().unwrap().len() == 2
+        s["your_id"] == id && s["players"].as_array().unwrap().len() == 1
     });
-    // At most one income boundary can fall between the last live snapshot and
-    // timeout. Income resumes after reclaim; all other fields must be exact.
-    assert_preserved_with_income(
-        &before_reservation,
-        own(&restored),
-        reclaimed_at.elapsed().as_secs() + 2,
-    );
+    // Compare against the last own receipt. Bound legitimate passive income
+    // over disconnect/reclaim while every other field remains exact.
+    assert_preserved_with_income(&before, own(&restored), before_at.elapsed().as_secs() + 2);
     assert_eq!(restored["join_error"], Value::Null);
     assert_eq!(restored["match_id"], admitted["match_id"]);
     assert!(restored["snapshot_tick"].as_u64() > duplicate["snapshot_tick"].as_u64());

@@ -114,12 +114,21 @@ fn real_server_legacy_json_compatibility_survives_malformed_requests() {
         );
         let snapshot: Value =
             serde_json::from_slice(&payload).expect("complete legacy JSON snapshot");
-        if snapshot["game_state"]["type"] == "running" && array_len(&snapshot, "players") == 2 {
+        if snapshot["game_state"]["type"] == "running" && array_len(&snapshot, "players") == 1 {
             break (payload, snapshot);
         }
     };
     assert!(payload.len() <= host_ceiling);
-    assert_eq!(array_len(&snapshot, "structures"), 8);
+    assert_eq!(array_len(&snapshot["scoreboard"], "players"), 2);
+    assert!(snapshot["vision"].is_object());
+    assert!(
+        snapshot["players"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|actor| actor["team"] == "green")
+    );
+    assert_eq!(array_len(&snapshot, "structures"), 4);
     assert_eq!(
         snapshot["protocol_version"],
         shared::protocol::PROTOCOL_VERSION
@@ -147,17 +156,17 @@ fn real_server_legacy_json_compatibility_survives_malformed_requests() {
         };
         let next: Value = serde_json::from_slice(&bytes).expect("whole recovery snapshot");
         if next["your_id"].as_u64() == Some(expected_your_id)
-            && array_len(&next, "players") == 2
+            && array_len(&next, "players") == 1
             && next["snapshot_tick"].as_u64() > snapshot["snapshot_tick"].as_u64()
         {
-            assert_eq!(array_len(&next, "structures"), 8);
+            assert_eq!(array_len(&next, "structures"), 4);
             break;
         }
     }
     eprintln!(
         "LEGACY_COMPATIBILITY_MEASUREMENT {}",
         serde_json::json!({
-            "snapshot_bytes": payload.len(), "players":2,"structures":8,
+            "snapshot_bytes": payload.len(), "players":1,"structures":4,"public_roster":2,"team_vision":true,
             "maximum_observed_host_send_bytes":host_ceiling,
             "complete_json":true, "malformed_request_recovery":true,
             "full_5v5_payload_budget":"measured separately by framed_snapshots; payloads above host ceiling cannot use legacy UDP",
@@ -243,9 +252,9 @@ fn real_server_framed_populated_snapshot_above_8_kib_survives_malformed_requests
         };
         let running = snapshot["game_state"]["type"].as_str() == Some("running");
         if running
-            && array_len(&snapshot, "players") == 10
-            && array_len(&snapshot, "structures") == 8
-            && array_len(&snapshot, "minions") == 18
+            && array_len(&snapshot, "players") == 5
+            && array_len(&snapshot, "structures") == 4
+            && array_len(&snapshot, "minions") == 9
             && payload.len() > OLD_CLIENT_BOUNDARY
         {
             qualifying = Some((payload, snapshot));
@@ -254,20 +263,33 @@ fn real_server_framed_populated_snapshot_above_8_kib_survives_malformed_requests
     }
 
     let (payload, snapshot) = qualifying.expect(
-        "real server never produced a complete >8 KiB 5v5 snapshot with 8 structures and 18 minions",
+        "real server never produced a complete >8 KiB 5v5 snapshot with 5 allied players, 4 structures and 9 minions",
     );
     eprintln!(
-        "received complete framed real-server snapshot: {} bytes (runtime-dependent; asserted {} < bytes <= {}), 10 players, 8 structures, 18 minions; each datagram <=1200 bytes",
+        "received complete framed real-server snapshot: {} bytes (runtime-dependent; asserted {} < bytes <= {}), 5 allied players, 4 structures, 9 minions; each datagram <=1200 bytes",
         payload.len(),
         OLD_CLIENT_BOUNDARY,
         IPV4_UDP_MAX_PAYLOAD_BYTES,
     );
     assert!(payload.len() <= IPV4_UDP_MAX_PAYLOAD_BYTES);
+    assert_eq!(array_len(&snapshot["scoreboard"], "players"), 10);
+    let vision: shared::vision::TeamVision =
+        serde_json::from_value(snapshot["vision"].clone()).expect("authoritative team sight");
+    assert!(!vision.sources.is_empty());
+    for field in ["players", "structures", "minions"] {
+        assert!(
+            snapshot[field]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|actor| actor["team"] == "green")
+        );
+    }
     for player in snapshot["players"].as_array().expect("players array") {
         assert_eq!(player["avatar"].as_str(), Some(avatar.slug.as_str()));
     }
-    assert_eq!(last_entity_id(&snapshot, "structures"), Some(8));
-    assert_eq!(last_entity_id(&snapshot, "minions"), Some(18));
+    assert_eq!(last_entity_id(&snapshot, "structures"), Some(7));
+    assert_eq!(last_entity_id(&snapshot, "minions"), Some(15));
 
     // Both a malformed request and a whole oversized request are rejected;
     // neither may kill the server or remove/mutate the already joined player.
@@ -294,10 +316,12 @@ fn real_server_framed_populated_snapshot_above_8_kib_survives_malformed_requests
         let Ok(next) = serde_json::from_slice::<Value>(&next_payload) else {
             continue;
         };
-        if next["your_id"].as_u64() == Some(expected_your_id) && array_len(&next, "players") == 10 {
+        if next["your_id"].as_u64() == Some(expected_your_id) && array_len(&next, "players") == 5 {
             break next;
         }
     };
-    assert_eq!(array_len(&recovered, "structures"), 8);
-    assert_eq!(array_len(&recovered, "minions"), 18);
+    assert_eq!(array_len(&recovered, "structures"), 4);
+    assert_eq!(array_len(&recovered, "minions"), 9);
+    assert_eq!(array_len(&recovered["scoreboard"], "players"), 10);
+    assert!(recovered["vision"].is_object());
 }

@@ -314,7 +314,11 @@ mod tests {
         else {
             panic!()
         };
-        assert_eq!(forest_pickups.len(), FOREST_PICKUP_COUNT);
+        assert_eq!(
+            forest_pickups.len(),
+            1,
+            "only the nearby pickup is in team sight"
+        );
         assert!(!forest_pickups[0].available);
         assert_eq!(forest_pickups[0].last_collector_id, Some(players[0].id));
         assert_eq!(forest_pickups[0].healed_amount, 10.0);

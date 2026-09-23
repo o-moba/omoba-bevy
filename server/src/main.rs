@@ -43,6 +43,7 @@ mod targeting_qa;
 #[cfg(test)]
 mod terminal_result_tests;
 mod utility;
+mod vision;
 mod world;
 
 use balance::*;
@@ -555,6 +556,8 @@ enum ServerPacket {
         career: shared::career::CareerView,
     },
     Snapshot {
+        #[serde(default)]
+        vision: Option<shared::vision::TeamVision>,
         #[serde(default)]
         sandbox: Option<shared::sandbox::SandboxSnapshot>,
         #[serde(default)]
@@ -2103,7 +2106,8 @@ impl ServerRuntime {
                                 ))
                 })
             {
-                let packet = ServerPacket::Snapshot {
+                let mut packet = ServerPacket::Snapshot {
+                    vision: None,
                     sandbox: self
                         .sandbox
                         .as_ref()
@@ -2137,6 +2141,19 @@ impl ServerRuntime {
                     game_state: game_state.clone(),
                     rematch_in_secs,
                 };
+
+                if self.sandbox.is_none() {
+                    vision::filter_snapshot(
+                        &mut packet,
+                        player,
+                        players,
+                        minions,
+                        structures,
+                        neutrals,
+                        projectiles,
+                        now,
+                    );
+                }
 
                 let payloads = if player.framed_snapshots {
                     serialize_snapshot_datagram(&packet)
@@ -2547,6 +2564,19 @@ fn handle_cast_request(
     }
 
     let caster_team = caster.state.team;
+    if caster.sandbox.is_none()
+        && !vision::target_visible(
+            caster_team,
+            target,
+            players,
+            minions,
+            structures,
+            neutrals,
+            now,
+        )
+    {
+        return;
+    }
     let (target_position, target_radius) = match target.kind {
         TargetKind::Player => {
             let Some(target_player) = players.values().find(|player| {
@@ -3412,9 +3442,28 @@ fn simulate_minions(
         return Vec::new();
     }
 
+    let green_sight = vision::sources(Team::Green, players, minions, structures);
+    let blue_sight = vision::sources(Team::Blue, players, minions, structures);
+    let visible_players: HashSet<u64> = players
+        .values()
+        .filter(|p| {
+            vision::player_visible(
+                if p.state.team == Team::Green {
+                    &blue_sight
+                } else {
+                    &green_sight
+                },
+                p,
+                now,
+            )
+        })
+        .map(|p| p.state.id)
+        .collect();
     let player_targets = players
         .values()
-        .filter(|player| player.joined && player.state.hp > 0.0)
+        .filter(|player| {
+            player.joined && player.state.hp > 0.0 && visible_players.contains(&player.state.id)
+        })
         .map(|player| {
             (
                 player.state.id,
@@ -3734,6 +3783,8 @@ fn simulate_tower_attacks(
     if !matches!(game_state, GameState::Running) {
         return Vec::new();
     }
+    let green_sight = vision::sources(Team::Green, players, minions, structures);
+    let blue_sight = vision::sources(Team::Blue, players, minions, structures);
     let mut towers_to_fire: Vec<(u64, Team, Vec3f, u64, Vec3f, f32, f32)> = Vec::new();
     let mut minion_damage_events: Vec<(u64, f32, Team, HitSource)> = Vec::new();
 
@@ -3785,7 +3836,17 @@ fn simulate_tower_attacks(
 
         let mut best_target: Option<(u64, Vec3f, f32)> = None;
         for player in players.values() {
-            if !player.joined || player.state.hp <= 0.0 || player.state.team == structure.state.team
+            if !vision::player_visible(
+                if structure.state.team == Team::Green {
+                    &green_sight
+                } else {
+                    &blue_sight
+                },
+                player,
+                now,
+            ) || !player.joined
+                || player.state.hp <= 0.0
+                || player.state.team == structure.state.team
             {
                 continue;
             }
@@ -3893,6 +3954,7 @@ mod tests {
 
     fn empty_snapshot() -> ServerPacket {
         ServerPacket::Snapshot {
+            vision: None,
             sandbox: None,
             match_mode: "dev".into(),
             geometry_id: shared::map::GEOMETRY_ID.to_owned(),
@@ -3941,6 +4003,7 @@ mod tests {
         player.state.avatar = Some("x".repeat(IPV4_UDP_MAX_PAYLOAD_BYTES));
 
         let packet = ServerPacket::Snapshot {
+            vision: None,
             sandbox: None,
             match_mode: "dev".into(),
             geometry_id: shared::map::GEOMETRY_ID.to_owned(),

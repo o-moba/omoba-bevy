@@ -66,6 +66,8 @@ mod supporter_storekit;
 mod targeting;
 mod targeting_qa;
 mod team;
+mod team_vision;
+mod team_vision_qa;
 mod ui_theme;
 mod verdant3d;
 mod visual_qa;
@@ -194,6 +196,8 @@ pub fn main() {
     .add_plugins(game_audio::GameAudioPlugin)
     .add_plugins(game_vfx::GameVfxPlugin)
     .add_plugins(battlefield_atmosphere::BattlefieldAtmospherePlugin)
+    .add_plugins(team_vision::TeamVisionPlugin)
+    .add_plugins(team_vision_qa::TeamVisionQaPlugin)
     .add_plugins(audio_qa::AudioQaPlugin)
     .add_plugins(career_identity::CareerIdentityPlugin)
     .add_plugins(career_visual_qa::CareerVisualQaPlugin)

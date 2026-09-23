@@ -914,6 +914,8 @@ enum ServerPacket {
         sandbox: Option<shared::sandbox::SandboxSnapshot>,
         #[serde(default)]
         forest_pickups: Vec<shared::forest_pickups::ForestPickupState>,
+        #[serde(default)]
+        vision: Option<shared::vision::TeamVision>,
         #[serde(flatten, default)]
         meta: SnapshotMeta,
         #[serde(default)]
@@ -975,6 +977,7 @@ pub enum GameState {
 pub struct GameStateSnapshot {
     pub sandbox: Option<shared::sandbox::SandboxSnapshot>,
     pub forest_pickups: Vec<shared::forest_pickups::ForestPickupState>,
+    pub vision: Option<shared::vision::TeamVision>,
     pub your_id: u64,
     pub prematch: Option<shared::prematch::PrematchSnapshot>,
     pub match_mode: String,
@@ -1074,6 +1077,7 @@ struct PendingServerSnapshotFrame {
 }
 
 struct PendingSnapshotData {
+    vision: Option<shared::vision::TeamVision>,
     forest_pickups: Vec<shared::forest_pickups::ForestPickupState>,
     sandbox: Option<shared::sandbox::SandboxSnapshot>,
     prematch: Option<shared::prematch::PrematchSnapshot>,
@@ -2304,6 +2308,7 @@ fn ingest_server_snapshot_packets(
                 ServerPacket::Snapshot {
                     sandbox,
                     forest_pickups,
+                    vision,
                     geometry_id,
                     map_profile,
                     match_mode,
@@ -2359,6 +2364,7 @@ fn ingest_server_snapshot_packets(
                     latest_snapshot = Some(PendingSnapshotData {
                         sandbox,
                         forest_pickups,
+                        vision,
                         match_mode,
                         geometry_id,
                         map_profile,
@@ -2428,6 +2434,7 @@ fn apply_server_snapshot(
     let PendingSnapshotData {
         sandbox,
         forest_pickups,
+        vision,
         match_mode,
         geometry_id,
         map_profile,
@@ -2468,6 +2475,7 @@ fn apply_server_snapshot(
     game_state_snapshot.scoreboard = scoreboard;
     game_state_snapshot.sandbox = sandbox;
     game_state_snapshot.forest_pickups = forest_pickups;
+    game_state_snapshot.vision = vision;
 
     // Reconnect uses the accepted draft loadout, never a stale pre-search choice.
     if let Some(own) = game_state_snapshot
@@ -4312,6 +4320,242 @@ mod tests {
         super::configure_network_pipeline(&mut app);
         crate::world::register_local_player_spawn(&mut app);
         (app, incoming)
+    }
+
+    /// Recipient-shaped packets exercise the ordinary ingest/apply pipeline;
+    /// omission is the server visibility contract, not a client hiding flag.
+    fn team_vision_snapshot(tick: u64, enemy_visible: bool, local_dead: bool) -> ServerPacket {
+        let mut value = serde_json::to_value(admission_snapshot(1, tick, true, None)).unwrap();
+        let mut heroes = value["players"].as_array().unwrap()[..3].to_vec();
+        for hero in &mut heroes {
+            hero["avatar"] = serde_json::Value::Null;
+        }
+        if local_dead {
+            heroes[0]["hp"] = json!(0.0);
+        }
+        heroes.retain(|hero| hero["id"] != 2 || enemy_visible);
+        value["players"] = json!(heroes);
+        for field in ["structures", "minions", "neutrals", "projectiles"] {
+            value[field] = json!([]);
+        }
+        value["vision"] = json!({
+            "sources": [{"position": [tick as f32, -6.0], "radius": 32.0}],
+            "local_brush": if tick % 2 == 0 { Some(1) } else { None },
+            "local_hidden": tick % 2 == 0
+        });
+        serde_json::from_value(value).unwrap()
+    }
+
+    fn network_hero_entity(app: &mut App, id: u64) -> Entity {
+        app.world_mut()
+            .query::<(Entity, &super::NetworkPlayerId)>()
+            .iter(app.world())
+            .find_map(|(entity, player)| (player.0 == id).then_some(entity))
+            .unwrap()
+    }
+
+    #[test]
+    fn team_vision_omission_despawns_visual_tree_and_reacquires_once() {
+        let (mut app, incoming) = snapshot_app();
+        incoming.send(team_vision_snapshot(1, true, false)).unwrap();
+        app.update();
+        let local = network_hero_entity(&mut app, 1);
+        let ally = network_hero_entity(&mut app, 3);
+        let mut previous_enemy = network_hero_entity(&mut app, 2);
+        for hidden_tick in [2, 4, 6] {
+            let attached_visual = app
+                .world_mut()
+                .spawn((
+                    Name::new("test attached actor visual"),
+                    Mesh3d::default(),
+                    Transform::default(),
+                ))
+                .id();
+            let attached_trail = app.world_mut().spawn(Name::new("test nested trail")).id();
+            app.world_mut()
+                .entity_mut(attached_visual)
+                .add_child(attached_trail);
+            app.world_mut()
+                .entity_mut(previous_enemy)
+                .add_child(attached_visual);
+            incoming
+                .send(team_vision_snapshot(hidden_tick, false, false))
+                .unwrap();
+            app.update();
+            for gone in [previous_enemy, attached_visual, attached_trail] {
+                assert!(
+                    app.world().get_entity(gone).is_err(),
+                    "hidden actor tree remains: {gone:?}"
+                );
+            }
+            assert!(
+                !app.world()
+                    .resource::<super::NetworkState>()
+                    .remote_players
+                    .contains_key(&2)
+            );
+            assert_eq!(
+                network_hero_entity(&mut app, 1),
+                local,
+                "local actor must survive enemy omission"
+            );
+            assert_eq!(
+                network_hero_entity(&mut app, 3),
+                ally,
+                "shared-sight ally must survive enemy omission"
+            );
+            incoming
+                .send(team_vision_snapshot(hidden_tick + 1, true, false))
+                .unwrap();
+            app.update();
+            let reacquired = network_hero_entity(&mut app, 2);
+            assert_ne!(
+                reacquired, previous_enemy,
+                "reacquisition must not revive a stale entity handle"
+            );
+            let enemies = app
+                .world_mut()
+                .query::<&super::NetworkPlayerId>()
+                .iter(app.world())
+                .filter(|id| id.0 == 2)
+                .count();
+            assert_eq!(enemies, 1, "repeated reacquisition duplicated the actor");
+            assert_eq!(
+                app.world().resource::<super::NetworkState>().remote_players[&2],
+                reacquired
+            );
+            previous_enemy = reacquired;
+        }
+    }
+
+    #[test]
+    fn team_vision_wire_updates_preserve_living_ally_after_local_death() {
+        let (mut app, incoming) = snapshot_app();
+        incoming.send(team_vision_snapshot(1, true, false)).unwrap();
+        app.update();
+        let local = network_hero_entity(&mut app, 1);
+        let ally = network_hero_entity(&mut app, 3);
+        for tick in 2..=3 {
+            incoming
+                .send(team_vision_snapshot(tick, false, true))
+                .unwrap();
+            app.update();
+            assert_eq!(network_hero_entity(&mut app, 1), local);
+            assert_eq!(network_hero_entity(&mut app, 3), ally);
+            assert_eq!(
+                app.world()
+                    .get::<crate::combat::CombatStats>(local)
+                    .unwrap()
+                    .hp,
+                0.0
+            );
+            assert!(
+                app.world()
+                    .get::<crate::combat::CombatStats>(ally)
+                    .unwrap()
+                    .hp
+                    > 0.0
+            );
+            let vision = app
+                .world()
+                .resource::<super::GameStateSnapshot>()
+                .vision
+                .as_ref()
+                .unwrap();
+            assert_eq!(
+                vision.sources.len(),
+                1,
+                "client must preserve server-authorized shared sources after local death"
+            );
+            assert_eq!(vision.sources[0].position, [tick as f32, -6.0]);
+            assert_eq!(
+                vision.local_brush,
+                if tick % 2 == 0 { Some(1) } else { None }
+            );
+            assert_eq!(vision.local_hidden, tick % 2 == 0);
+        }
+    }
+
+    #[test]
+    fn team_vision_snapshot_none_and_session_teardown_clear_authoritative_state() {
+        use bevy::ecs::system::RunSystemOnce;
+        let (mut app, incoming) = snapshot_app();
+        incoming.send(team_vision_snapshot(1, true, false)).unwrap();
+        app.update();
+        assert!(
+            app.world()
+                .resource::<super::GameStateSnapshot>()
+                .vision
+                .is_some()
+        );
+        let mut omitted = serde_json::to_value(team_vision_snapshot(2, false, false)).unwrap();
+        omitted.as_object_mut().unwrap().remove("vision");
+        incoming
+            .send(serde_json::from_value(omitted).unwrap())
+            .unwrap();
+        app.update();
+        assert!(
+            app.world()
+                .resource::<super::GameStateSnapshot>()
+                .vision
+                .is_none(),
+            "legacy/no-vision packet must not retain stale sources"
+        );
+        incoming.send(team_vision_snapshot(3, true, false)).unwrap();
+        app.update();
+        let local = network_hero_entity(&mut app, 1);
+        let enemy = network_hero_entity(&mut app, 2);
+        let attached = app.world_mut().spawn(Name::new("session visual")).id();
+        app.world_mut().entity_mut(enemy).add_child(attached);
+        app.world_mut()
+            .run_system_once(
+                |mut commands: Commands,
+                 mut session: ResMut<super::ClientSession>,
+                 mut network: ResMut<super::NetworkState>,
+                 mut snapshot: ResMut<super::GameStateSnapshot>,
+                 mut team: ResMut<TeamSelection>,
+                 mut camera: ResMut<crate::camera::CameraState>,
+                 queries: super::TeardownQueries| {
+                    super::perform_network_teardown(
+                        super::TeardownReason::TransportFailure,
+                        &mut commands,
+                        &mut session,
+                        &mut network,
+                        &mut snapshot,
+                        &mut team,
+                        &mut camera,
+                        &queries.remote_query,
+                        &queries.projectile_query,
+                        &queries.structure_query,
+                        &queries.minion_query,
+                        &queries.neutral_query,
+                        &queries.player_query,
+                    );
+                },
+            )
+            .unwrap();
+        assert!(
+            app.world()
+                .resource::<super::GameStateSnapshot>()
+                .vision
+                .is_none()
+        );
+        assert!(
+            app.world()
+                .resource::<super::NetworkState>()
+                .remote_players
+                .is_empty()
+        );
+        assert_eq!(
+            app.world().resource::<super::ClientSession>().state,
+            ClientConnectionState::Disconnected
+        );
+        for gone in [local, enemy, attached] {
+            assert!(
+                app.world().get_entity(gone).is_err(),
+                "teardown left actor or attached visual {gone:?}"
+            );
+        }
     }
 
     #[test]

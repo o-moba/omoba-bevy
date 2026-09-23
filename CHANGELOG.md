@@ -4,6 +4,15 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [0.23.0-rc.4] - 2026-09-23
+
+- Add server-authoritative shared team vision and ten symmetric, walkable brush patches in the 3D battlefield.
+- Conceal enemy heroes in brush until an allied observer enters the same patch or the enemy performs an accepted hostile targeted action; the latter reveals them for two seconds within ordinary team sight.
+- Filter hidden actors, projectiles, combat events and pickup receipts per recipient, reject fresh hidden-target attacks, and apply visibility to bot, minion and tower targeting.
+- Preserve visible killing-hit effects for dead minions, neutrals and structures while still filtering hidden impacts.
+- Add soft live battlefield/minimap fog, swaying gameplay grass and a local concealed/revealed indicator, with native desktop/mobile preview verification.
+- Document sight distances, already-launched homing behavior and bounded rendering in `docs/team-vision.md`.
+
 ## [0.23.0-rc.3] - 2026-09-23
 
 - Add readable magic orbs, orbiting sparks, bounded projectile particle trails and larger confirmed-hit bursts; replace the Warrior's segmented yellow projectile with a steel blade.

@@ -1,5 +1,6 @@
-//! Real UDP map configuration receipts. No teleports, damage or synthetic state.
-use harness::{Bot, ServerPacket, ServerProcess, Team};
+//! Real UDP map configuration receipts from the public release formation phase.
+//! No teleports, damage, fog bypass or synthetic state.
+use harness::{Bot, Character, GameState, ServerPacket, ServerProcess, Team};
 use shared::map::{DEFAULT_JSON, MapDefinition, ResolvedMap};
 use std::{
     path::PathBuf,
@@ -31,9 +32,17 @@ impl Drop for ConfigurationFile {
 }
 
 fn receipt(bot: &mut Bot) -> ServerPacket {
-    bot.ping();
-    bot.recv_snapshot(Instant::now() + Duration::from_secs(3))
-        .expect("complete live UDP snapshot")
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        bot.ping();
+        let packet = bot
+            .recv_snapshot(deadline)
+            .expect("complete live UDP snapshot");
+        if matches!(packet.game_state(), GameState::Forming { .. }) {
+            return packet;
+        }
+        assert!(Instant::now() < deadline, "public forming receipt");
+    }
 }
 
 fn assert_receipt(packet: &ServerPacket, expected: &ResolvedMap) {
@@ -83,9 +92,10 @@ fn default_map_is_eight_exact_authoritative_objects_over_udp() {
     let config = ConfigurationFile::new(DEFAULT_JSON);
     let server = ServerProcess::spawn_with_env(&[
         ("OMOBA_MAP_CONFIG", config.path()),
-        ("OMOBA_MATCH_MODE", "dev"),
+        ("OMOBA_MATCH_MODE", "release"),
     ]);
     let mut observer = Bot::connect_framed(server.addr());
+    observer.join(Team::Green, Character::Ipfs);
     let packet = receipt(&mut observer);
     let expected = ResolvedMap::default();
     assert_eq!(expected.structures.len(), 8);
@@ -119,9 +129,10 @@ fn custom_tower_count_position_hp_tiers_and_identity_are_pinned_after_startup() 
     let config = ConfigurationFile::new(json);
     let server = ServerProcess::spawn_with_env(&[
         ("OMOBA_MAP_CONFIG", config.path()),
-        ("OMOBA_MATCH_MODE", "dev"),
+        ("OMOBA_MATCH_MODE", "release"),
     ]);
     let mut observer = Bot::connect_framed(server.addr());
+    observer.join(Team::Green, Character::Ipfs);
     assert_receipt(&receipt(&mut observer), &resolved);
     let outer = resolved.structures.iter().find(|s| s.id == 3).unwrap();
     let inner = resolved.structures.iter().find(|s| s.id == 9).unwrap();
@@ -141,6 +152,7 @@ fn custom_tower_count_position_hp_tiers_and_identity_are_pinned_after_startup() 
     // This checks startup pinning, not the separate server round-reset unit test.
     std::fs::write(&config.0, DEFAULT_JSON).unwrap();
     let mut fresh_observer = Bot::connect_framed(server.addr());
+    fresh_observer.join(Team::Green, Character::Ipfs);
     assert_receipt(&receipt(&mut fresh_observer), &resolved);
     assert_receipt(&receipt(&mut observer), &resolved);
 }

@@ -787,3 +787,19 @@ An explicit Debug-only local Studio configuration and `scripts/ekza_lan.py` conn
 ## Combat Test sandbox
 
 The explicit local development launcher `python3 scripts/combat_test.py` opens a hero picker or directly enters a configured scenario without matchmaking. Its Dev Panel exposes authoritative progression, skill ranks/unlocks, health/mana, combat multipliers, all shipped items, reset and teleport; configurable enemy AI, damage dummy analytics, direct loopback 1v1, minion controls and simulation pause/speed/frame stepping share the real game rules. Native animation previews and geometry/state overlays support combat debugging. Named JSON presets survive ordinary rebuilds. Ordinary release/practice and career ratings reject sandbox mutation. See [Combat Test](combat-test.md) for complete launch/control/measurement semantics.
+
+
+## Team vision and gameplay brush (0.23.0-rc.4)
+
+The 3D battlefield uses server-owned shared radial sight from living allied heroes,
+minions and structures. Unseen enemy actors are omitted from each recipient's
+snapshot, including indirect projectile/event channels; the public scoreboard stays
+available. Fresh target-locked attacks and bot/minion/tower acquisition require
+visibility. Already-launched homing attacks can still land after concealment.
+
+Ten mirrored, walkable tall-grass patches provide hero concealment. Entering the
+same patch grants detection; an accepted hostile targeted attack reveals its caster
+for two seconds within enemy radial sight. Soft fog follows the team sources on the
+battlefield and minimap, and an in-brush label reports concealed/revealed status.
+See [team vision rules and verification](team-vision.md). Terrain line of sight,
+wards and true invisibility are outside this iteration; 2D presentation is paused.

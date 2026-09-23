@@ -549,8 +549,8 @@ fn local_hero_class(
 struct CombatBarRoot;
 
 #[derive(Component)]
-struct CombatBarAnchor {
-    target: Entity,
+pub(crate) struct CombatBarAnchor {
+    pub(crate) target: Entity,
     y_offset: f32,
 }
 

@@ -100,6 +100,7 @@ pub(crate) fn handle_basic_attack_request(
         return;
     }
     let team = attacker.state.team;
+    let sandbox = attacker.sandbox.is_some();
     let origin = Vec3f::new(
         attacker.state.x,
         attacker.state.y + CAST_SPAWN_HEIGHT,
@@ -107,6 +108,11 @@ pub(crate) fn handle_basic_attack_request(
     );
     let damage =
         sandbox::effective_basic_attack_damage(attacker) * team_buffs.damage_multiplier(team, now);
+    if !sandbox
+        && !vision::target_visible(team, target, players, minions, structures, neutrals, now)
+    {
+        return;
+    }
     let Some((position, radius)) =
         resolve_hostile_target(team, target, players, minions, structures, neutrals)
     else {
