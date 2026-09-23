@@ -26,7 +26,7 @@ pub const PROJECTILE_SPEED: f32 = 19.0;
 /// Skill slots tracked by progression (`skill_points`); matches the shared Q/W/E/R kits.
 #[allow(dead_code)]
 pub const SKILL_SLOT_COUNT: usize = 4;
-pub const PROJECTILE_RADIUS: f32 = 0.22;
+pub const PROJECTILE_RADIUS: f32 = shared::PROJECTILE_COLLISION_RADIUS;
 pub const PROJECTILE_LIFETIME: Duration = Duration::from_secs(3);
 pub const PLAYER_HIT_RADIUS: f32 = shared::PLAYER_TARGET_RADIUS;
 pub const CAST_SPAWN_HEIGHT: f32 = 0.85;

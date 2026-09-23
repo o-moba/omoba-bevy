@@ -4,6 +4,13 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [0.23.0-rc.1] - 2026-09-23
+
+- Add an opt-in local Combat Test launcher and unified developer panel with direct hero selection, actor progression/stat/equipment controls and reset/teleport.
+- Add authoritative training dummy measurements, configurable enemy AI, direct two-client duels, reusable test presets, real minion controls and simulation pause/speed/frame stepping.
+- Add actual animation graph inspection and combat geometry/state overlays while keeping network clocks live. Sandbox commands are isolated from practice, release and rated matches.
+- See `docs/combat-test.md` for launch commands, controls, damage semantics and developer extension instructions.
+
 ## [Unreleased]
 
 - Refresh the staged Rust executable timestamp so incremental Xcode device builds re-sign the current executable.

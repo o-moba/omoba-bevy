@@ -151,7 +151,7 @@ fn steer_bot_step(
     best
 }
 
-fn bot_avatar(class: HeroClass, slot: u16) -> Option<&'static str> {
+pub(crate) fn bot_avatar(class: HeroClass, slot: u16) -> Option<&'static str> {
     // Fixed bundled models only; runtime-synced/paid cosmetics are never selected.
     // Each class alternates two free appearances without changing its sprite kit.
     let preferred = match class {

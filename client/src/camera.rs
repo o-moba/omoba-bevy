@@ -184,6 +184,7 @@ fn update_camera(
     mouse_input: Res<ButtonInput<MouseButton>>,
     context: Res<GameplayInputContext>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    sandbox: Option<Res<crate::sandbox::SandboxClient>>,
 ) {
     let Ok((camera, mut projection, mut camera_transform)) = camera_query.single_mut() else {
         return;
@@ -197,6 +198,25 @@ fn update_camera(
 
     if !context.camera_allowed() {
         mouse_wheel_events.clear();
+        // Sandbox commands can relocate/rebuild the actor while the panel is
+        // modal. Keep passive follow alive without consuming camera gestures.
+        if sandbox.as_ref().is_some_and(|s| s.enabled && s.open)
+            && let Ok(player) = player_query.single()
+        {
+            let target = player.translation;
+            if *mode == PlayerVisualMode::Sprite2d {
+                let xy = crate::world2d::simulation_xz_to_render_xy(target);
+                camera_transform.translation.x = xy.x;
+                camera_transform.translation.y = xy.y;
+            } else {
+                let team = player_team.single().copied().unwrap_or(Team::Blue);
+                let mut offset = Quat::from_rotation_y(cam_state.orbit_yaw)
+                    * locked_camera_offset_for_team(cam_state.zoom, team);
+                offset.y *= cam_state.orbit_height;
+                *camera_transform = Transform::from_translation(target + offset)
+                    .looking_at(Vec3::new(target.x, PLAYER_SIZE / 2.0, target.z), Vec3::Y);
+            }
+        }
         return;
     }
     if mobile.as_ref().is_some_and(|mobile| mobile.enabled) {
@@ -442,6 +462,62 @@ fn update_camera_2d(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sandbox_modal_follows_relocated_hero_without_camera_gestures() {
+        let mut app = App::new();
+        let mut sandbox = crate::sandbox::SandboxClient::default();
+        sandbox.enabled = true;
+        sandbox.open = true;
+        app.init_resource::<Time>()
+            .init_resource::<CameraState>()
+            .init_resource::<MapLayout>()
+            .insert_resource(PlayerVisualMode::Models3d)
+            .insert_resource(sandbox)
+            .insert_resource(GameplayInputContext {
+                modal_open: true,
+                ..default()
+            })
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .add_message::<MouseMotion>()
+            .add_message::<MouseWheel>()
+            .add_systems(Update, update_camera);
+        let camera = app
+            .world_mut()
+            .spawn((
+                Camera::default(),
+                Projection::Perspective(default()),
+                Transform::default(),
+                MainCamera,
+            ))
+            .id();
+        let hero = app
+            .world_mut()
+            .spawn((Player, Team::Green, Transform::from_xyz(-3.0, 0.5, 0.0)))
+            .id();
+        app.update();
+        let offset = locked_camera_offset_for_team(1.0, Team::Green);
+        assert_eq!(
+            app.world().get::<Transform>(camera).unwrap().translation,
+            Vec3::new(-3.0, 0.5, 0.0) + offset
+        );
+        app.world_mut()
+            .get_mut::<Transform>(hero)
+            .unwrap()
+            .translation = Vec3::new(10.0, 0.5, 4.0);
+        app.world_mut()
+            .resource_mut::<Messages<MouseMotion>>()
+            .write(MouseMotion {
+                delta: Vec2::splat(100.0),
+            });
+        app.update();
+        assert_eq!(
+            app.world().get::<Transform>(camera).unwrap().translation,
+            Vec3::new(10.0, 0.5, 4.0) + offset
+        );
+        assert_eq!(app.world().resource::<CameraState>().orbit_yaw, 0.0);
+    }
 
     #[test]
     fn zoom_limits_are_ordered_and_usable() {

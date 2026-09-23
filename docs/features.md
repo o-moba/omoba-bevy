@@ -10,7 +10,7 @@ All 15 shipped playable 3D avatars use the engine's shared Run motion during nor
 
 Validated VRM0/VRM1 skinned humanoids receive runtime clips adapted to their bone map and rest pose, including models with no embedded clips. Original skin bytes remain unchanged. This is skeletal compatibility for a documented subset, not complete VRM materials/face/hair support. Approved Studio models gain runtime Run through normal verified loading; accepting externally published clipless models still requires a versioned profile rollout. See [architecture, import and limits](humanoid-motion.md).
 
-Canonical version: `0.22.0-rc.1`
+Canonical version: `0.23.0-rc.1`
 
 ## Team draft and shared loading
 
@@ -775,3 +775,7 @@ restart the server from current source as well as rebuilding the client.
 Avatar collection account/catalogue messages update existing labels without replacing held controls. Wallet pairing has visible progress and approval-page retry. iOS opens approval links using UIKit on the main queue; scoped Ekza account sessions still restore from private storage.
 
 An explicit Debug-only local Studio configuration and `scripts/ekza_lan.py` connect the game, account service and approved catalogue to the same local Registry. The SDK's exact private-host development exception is ignored by release builds. See [LAN walkthrough](ekza-lan.md) for the real author → curator → game-owner → player flow. No wallet is required for approved free avatars.
+
+## Combat Test sandbox
+
+The explicit local development launcher `python3 scripts/combat_test.py` opens a hero picker or directly enters a configured scenario without matchmaking. Its Dev Panel exposes authoritative progression, skill ranks/unlocks, health/mana, combat multipliers, all shipped items, reset and teleport; configurable enemy AI, damage dummy analytics, direct loopback 1v1, minion controls and simulation pause/speed/frame stepping share the real game rules. Native animation previews and geometry/state overlays support combat debugging. Named JSON presets survive ordinary rebuilds. Ordinary release/practice and career ratings reject sandbox mutation. See [Combat Test](combat-test.md) for complete launch/control/measurement semantics.

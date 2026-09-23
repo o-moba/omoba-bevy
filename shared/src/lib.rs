@@ -17,6 +17,7 @@ pub mod navigation;
 pub mod prematch;
 pub mod protocol;
 pub mod public_transport;
+pub mod sandbox;
 pub mod shop;
 pub mod social;
 pub mod supporter;
@@ -107,6 +108,8 @@ pub const BASIC_ATTACK_ACTION_SLOT: u8 = u8::MAX;
 /// Shared target surfaces for authoritative attack reach and client approach.
 /// These are the existing simulation radii, independent of visual model scale.
 pub const PLAYER_TARGET_RADIUS: f32 = 0.62;
+/// Projectile hit volume shared by authoritative combat and debug visualization.
+pub const PROJECTILE_COLLISION_RADIUS: f32 = 0.22;
 pub const MINION_TARGET_RADIUS: f32 = 0.55;
 pub const NEUTRAL_TARGET_RADIUS: f32 = 0.62;
 pub const TOWER_TARGET_RADIUS: f32 = 1.3;

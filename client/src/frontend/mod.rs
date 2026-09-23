@@ -131,7 +131,13 @@ fn bypass_for(keys: impl Iterator<Item = String>) -> bool {
 }
 
 fn bypass_shell_for_automation(mut next: ResMut<NextState<AppScreen>>) {
-    if automation_bypass() {
+    if crate::sandbox::requested() {
+        next.set(if crate::sandbox::launch().hero.is_some() {
+            AppScreen::InMatch
+        } else {
+            AppScreen::HeroSelect
+        });
+    } else if automation_bypass() {
         next.set(AppScreen::InMatch);
     }
 }

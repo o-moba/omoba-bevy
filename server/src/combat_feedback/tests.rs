@@ -510,6 +510,7 @@ fn cosmetic_history_yields_space_to_gameplay_and_keeps_newest_receipts() {
     let mut player = rt.players[&a].state.clone();
     player.avatar = Some(String::new());
     let mut packet = ServerPacket::Snapshot {
+        sandbox: None,
         match_mode: "dev".into(),
         geometry_id: shared::map::GEOMETRY_ID.to_owned(),
         map_profile: "verdant_default".to_owned(),

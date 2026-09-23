@@ -226,6 +226,9 @@ pub(crate) struct PlayerAnimationBinding {
     last_owner_position: Vec3,
     /// Seconds since the owner last visibly moved (drives the idle grace).
     seconds_since_movement: f32,
+    sandbox_preview: Option<u64>,
+    sandbox_paused: bool,
+    sandbox_time: Option<((u64, u64), f64)>,
 }
 
 impl PlayerAnimationBinding {
@@ -263,6 +266,7 @@ impl CharacterAnimationSet {
             HeroAnimationState::Attack => self.attack_node.is_some(),
             HeroAnimationState::Cast => self.cast_node.is_some(),
             HeroAnimationState::Death => self.death_node.is_some(),
+            HeroAnimationState::Walk => self.walk_node.is_some(),
             _ => true,
         }
     }
@@ -577,8 +581,8 @@ fn setup_player_animation_library(
             let death = exact_clip(aliases.map(|aliases| &aliases.death))
                 .or_else(|| find_clip(&["death", "die"]));
             let mut clips = vec![idle_clip, walk_clip];
-            let mut optional_indices = [None; 3];
-            for (index, clip) in [attack, cast, death].into_iter().enumerate() {
+            let mut optional_indices = [None; 4];
+            for (index, clip) in [attack, cast, death, reserved_walk].into_iter().enumerate() {
                 if let Some((_name, handle)) = clip {
                     optional_indices[index] = Some(clips.len());
                     clips.push(handle);
@@ -598,7 +602,7 @@ fn setup_player_animation_library(
                     graph: graph_handle,
                     idle_node,
                     run_node: walk_node,
-                    walk_node: Some(walk_node),
+                    walk_node: optional_indices[3].and_then(|index| nodes.get(index).copied()),
                     runtime: false,
                     attack_node: optional_indices[0].and_then(|index| nodes.get(index).copied()),
                     cast_node: optional_indices[1].and_then(|index| nodes.get(index).copied()),
@@ -755,17 +759,121 @@ fn bind_player_animation_players(
                 playback: HeroAnimationPlayback::new(sequence),
                 last_owner_position,
                 seconds_since_movement: LOCOMOTION_IDLE_GRACE_SECS,
+                sandbox_preview: None,
+                sandbox_paused: false,
+                sandbox_time: None,
             },
         ));
     }
 }
 
+/// Preview chooses an actual graph node and reports missing clips explicitly.
+fn sandbox_preview_state(
+    kind: crate::sandbox::PreviewKind,
+    set: &CharacterAnimationSet,
+) -> (HeroAnimationState, String) {
+    use crate::sandbox::PreviewKind;
+    let requested = match kind {
+        PreviewKind::Idle => HeroAnimationState::Idle,
+        PreviewKind::Run => HeroAnimationState::Run,
+        PreviewKind::Walk => HeroAnimationState::Walk,
+        PreviewKind::Attack => HeroAnimationState::Attack,
+        PreviewKind::Cast => HeroAnimationState::Cast,
+        PreviewKind::Hit => HeroAnimationState::Attack,
+        PreviewKind::Death => HeroAnimationState::Death,
+    };
+    if kind == PreviewKind::Hit {
+        let fallback = if set.available(HeroAnimationState::Attack) {
+            HeroAnimationState::Attack
+        } else {
+            HeroAnimationState::Idle
+        };
+        return (
+            fallback,
+            format!("Hit → {fallback:?} (Hit clip unavailable)"),
+        );
+    }
+    if !set.available(requested) {
+        // Retain Death's existing safe-pose freeze rather than pretending Idle is death.
+        let state = if requested == HeroAnimationState::Death {
+            requested
+        } else {
+            HeroAnimationState::Idle
+        };
+        return (
+            state,
+            format!(
+                "{kind:?} → Idle (clip unavailable{})",
+                if requested == HeroAnimationState::Death {
+                    "; frozen"
+                } else {
+                    ""
+                }
+            ),
+        );
+    }
+    (requested, format!("{requested:?} · preview"))
+}
+fn sandbox_available_animations(set: &CharacterAnimationSet) -> Vec<String> {
+    [
+        HeroAnimationState::Idle,
+        HeroAnimationState::Run,
+        HeroAnimationState::Walk,
+        HeroAnimationState::Attack,
+        HeroAnimationState::Cast,
+        HeroAnimationState::Death,
+    ]
+    .into_iter()
+    .filter(|state| set.available(*state))
+    .map(|state| {
+        if state == HeroAnimationState::Run && set.walk_node == Some(set.run_node) {
+            "Run (shared locomotion clip)".into()
+        } else {
+            format!("{state:?}")
+        }
+    })
+    .collect()
+}
+fn animation_clip_duration(
+    set: &CharacterAnimationSet,
+    state: HeroAnimationState,
+    graphs: Option<&Assets<AnimationGraph>>,
+    clips: Option<&Assets<AnimationClip>>,
+) -> Option<f32> {
+    let node = graphs?.get(&set.graph)?.get(set.node(state))?;
+    let bevy::animation::graph::AnimationNodeType::Clip(handle) = &node.node_type else {
+        return None;
+    };
+    clips?
+        .get(handle)
+        .map(AnimationClip::duration)
+        .filter(|duration| *duration > 0.0 && duration.is_finite())
+}
+fn sandbox_seek_time(current: f32, delta: f32, duration: Option<f32>, looping: bool) -> f32 {
+    let next = current + delta;
+    duration.map_or(next, |duration| {
+        if looping {
+            next.rem_euclid(duration)
+        } else {
+            next.min(duration)
+        }
+    })
+}
+
 fn sync_player_animation_state(
     time: Res<Time>,
     game_state: Option<Res<GameStateSnapshot>>,
+    sandbox: Option<Res<crate::sandbox::SandboxClient>>,
+    mut readout: Option<ResMut<crate::sandbox::AnimationReadout>>,
+    graphs: Option<Res<Assets<AnimationGraph>>>,
+    clips: Option<Res<Assets<AnimationClip>>>,
     library: Res<PlayerAnimationLibrary>,
     character_query: Query<
-        (&NetworkCharacterChoice, Option<&NetworkAvatar>),
+        (
+            &NetworkCharacterChoice,
+            Option<&NetworkAvatar>,
+            Option<&crate::net::NetworkPlayerId>,
+        ),
         Or<(With<Player>, With<RemotePlayer>)>,
     >,
     local_movement_query: Query<(Option<&MovementTarget>, Option<&Jumping>), With<Player>>,
@@ -779,15 +887,40 @@ fn sync_player_animation_state(
         &mut AnimationGraphHandle,
     )>,
 ) {
+    let snapshot = game_state.as_ref().and_then(|g| g.sandbox.as_ref());
+    let paused = snapshot.is_some_and(|s| s.config.environment.paused);
+    let speed = snapshot.map_or(1.0, |s| s.config.environment.time_scale);
+    if let Some(readout) = &mut readout {
+        readout.0.clear();
+        for (choice, avatar, id) in &character_query {
+            if let Some(id) = id {
+                let available = library
+                    .get_set(&avatar_key(choice.0, avatar))
+                    .map(sandbox_available_animations)
+                    .unwrap_or_default();
+                readout.0.insert(
+                    id.0,
+                    (
+                        if available.is_empty() {
+                            "No skeletal clips available / model loading".into()
+                        } else {
+                            "Waiting for animation binding".into()
+                        },
+                        available,
+                    ),
+                );
+            }
+        }
+    }
     for (mut animation_player, mut binding, mut graph_handle) in &mut animation_query {
         let Ok((owner_transform, stats, action)) = player_state_query.get(binding.owner) else {
             continue;
         };
         let action = action.copied().unwrap_or_default();
-        let desired_key = character_query
+        let (desired_key, id) = character_query
             .get(binding.owner)
-            .map(|(choice, avatar)| avatar_key(choice.0, avatar))
-            .unwrap_or_else(|_| binding.key.clone());
+            .map(|(choice, avatar, id)| (avatar_key(choice.0, avatar), id.map(|id| id.0)))
+            .unwrap_or_else(|_| (binding.key.clone(), None));
         let key_changed = desired_key != binding.key;
         if key_changed {
             if library.get_set(&desired_key).is_none() {
@@ -806,6 +939,31 @@ fn sync_player_animation_state(
         let Some(set) = library.get_set(&binding.key) else {
             continue;
         };
+        let sim_time = game_state.as_ref().and_then(|g| {
+            g.sandbox
+                .as_ref()
+                .map(|s| ((g.meta.server_epoch, g.meta.match_id), s.simulation_secs))
+        });
+        // Only a new authoritative paused timestamp can advance a paused pose.
+        // Normal playback uses speed without changing Bevy Time or transport clocks.
+        let step_delta = if paused && binding.sandbox_paused {
+            match (binding.sandbox_time, sim_time) {
+                (Some((previous_round, previous)), Some((round, current)))
+                    if previous_round == round =>
+                {
+                    (current - previous).max(0.0) as f32
+                }
+                _ => 0.0,
+            }
+        } else {
+            0.0
+        };
+        binding.sandbox_time = sim_time;
+        let simulation_delta = if paused {
+            step_delta
+        } else {
+            time.delta_secs() * speed
+        };
         let distance = owner_transform
             .translation
             .distance(binding.last_owner_position);
@@ -814,24 +972,65 @@ fn sync_player_animation_state(
         if moved {
             binding.seconds_since_movement = 0.0;
         } else {
-            binding.seconds_since_movement += time.delta_secs();
+            binding.seconds_since_movement += simulation_delta;
         }
         let moved_recently = binding.seconds_since_movement < LOCOMOTION_IDLE_GRACE_SECS;
         let moving_by_intent = local_movement_query
             .get(binding.owner)
             .map(|(target, jumping)| target.is_some() || jumping.is_some())
             .unwrap_or(false);
-        let active_node = set.node(binding.playback.state);
-        let finished = animation_player
-            .animation(active_node)
-            .is_none_or(|active| active.is_finished());
-        let restart = binding.playback.advance(
-            stats.is_alive(),
-            moving_by_intent || moved || moved_recently,
-            action,
-            finished,
-            |state| set.available(state),
-        );
+        let preview = if snapshot.is_some() {
+            sandbox
+                .as_ref()
+                .and_then(|s| s.preview.as_ref())
+                .filter(|p| Some(p.id) == id)
+        } else {
+            None
+        };
+        let ended_preview = preview.is_none() && binding.sandbox_preview.is_some();
+        if ended_preview {
+            binding.playback = HeroAnimationPlayback::new(action.sequence);
+        }
+        let (restart, label) = if let Some(preview) = preview {
+            let (state, label) = sandbox_preview_state(preview.kind, set);
+            let restart = binding.sandbox_preview != Some(preview.sequence)
+                || binding.playback.state != state;
+            binding.playback.state = state;
+            binding.sandbox_preview = Some(preview.sequence);
+            (restart, label)
+        } else {
+            binding.sandbox_preview = None;
+            let active = animation_player.animation(set.node(binding.playback.state));
+            let duration = animation_clip_duration(
+                set,
+                binding.playback.state,
+                graphs.as_deref(),
+                clips.as_deref(),
+            );
+            let finished = active.is_none_or(|active| {
+                active.is_finished()
+                    || ((!paused || step_delta > 0.0)
+                        && duration.is_some_and(|duration| active.seek_time() >= duration)
+                        && active.repeat_mode() == bevy::animation::RepeatAnimation::Never)
+            });
+            let restart = binding.playback.advance(
+                stats.is_alive(),
+                moving_by_intent || moved || moved_recently,
+                action,
+                finished,
+                |state| set.available(state),
+            );
+            (
+                restart || ended_preview,
+                if binding.playback.state == HeroAnimationState::Death
+                    && !set.available(HeroAnimationState::Death)
+                {
+                    "Death → Idle (clip unavailable; frozen)".into()
+                } else {
+                    format!("{:?}", binding.playback.state)
+                },
+            )
+        };
         let expected_graph_handle = AnimationGraphHandle(set.graph.clone());
         if key_changed
             || round_changed
@@ -841,6 +1040,37 @@ fn sync_player_animation_state(
         {
             *graph_handle = expected_graph_handle;
             start_hero_animation(&mut animation_player, set, binding.playback.state);
+        }
+        let duration = animation_clip_duration(
+            set,
+            binding.playback.state,
+            graphs.as_deref(),
+            clips.as_deref(),
+        );
+        let fallback_frozen = binding.playback.state == HeroAnimationState::Death
+            && !set.available(HeroAnimationState::Death);
+        for (_, active) in animation_player.playing_animations_mut() {
+            active.set_speed(speed);
+            if paused || fallback_frozen {
+                active.pause();
+                if step_delta > 0.0 && !fallback_frozen {
+                    let looping = active.repeat_mode() == bevy::animation::RepeatAnimation::Forever;
+                    active.seek_to(sandbox_seek_time(
+                        active.seek_time(),
+                        step_delta,
+                        duration,
+                        looping,
+                    ));
+                }
+            } else if binding.sandbox_paused {
+                active.resume();
+            }
+        }
+        binding.sandbox_paused = paused;
+        if let (Some(id), Some(readout)) = (id, readout.as_mut()) {
+            readout
+                .0
+                .insert(id, (label, sandbox_available_animations(set)));
         }
     }
 }
@@ -951,6 +1181,7 @@ fn handle_player_input(
 /// clipping path. It never creates a long-lived route or an automatic chase.
 #[allow(clippy::type_complexity)]
 fn move_player_mobile(
+    game: Option<Res<GameStateSnapshot>>,
     mut commands: Commands,
     time: Res<Time>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
@@ -1015,12 +1246,18 @@ fn move_player_mobile(
             .entity(entity)
             .remove::<(MovementTarget, MovementRoute)>();
         let current = transform.translation;
-        let speed = PLAYER_SPEED
-            * if boost.0 { DEBUG_SPEED_MULTIPLIER } else { 1.0 }
-            * equipment.map_or(1.0, |e| e.item_bonuses.move_speed_multiplier)
-            * utility.map_or(1.0, |u| u.state.movement_multiplier());
+        let speed = crate::sandbox::movement_speed(
+            game.as_deref(),
+            PLAYER_SPEED
+                * if boost.0 { DEBUG_SPEED_MULTIPLIER } else { 1.0 }
+                * equipment.map_or(1.0, |e| e.item_bonuses.move_speed_multiplier),
+        ) * utility.map_or(1.0, |u| u.state.movement_multiplier());
         // Bound a resumed/hitched frame; the server movement envelope remains authoritative.
-        let desired = current + direction * speed * time.delta_secs().min(0.1);
+        let desired = current
+            + direction
+                * speed
+                * time.delta_secs().min(0.1)
+                * crate::sandbox::time_scale(game.as_deref());
         let mut desired = resolve_player_collisions(current, desired, &other_players, &structures);
         if let Some(map) = map.as_ref() {
             desired = map.clamp_position(desired);
@@ -1242,12 +1479,15 @@ fn move_player(
         } else {
             PLAYER_SPEED
         };
-        let speed = speed
-            * equipment.map_or(1.0, |equipment| {
-                equipment.item_bonuses.move_speed_multiplier
-            })
-            * utility.map_or(1.0, |u| u.state.movement_multiplier());
-        let move_delta = speed * time.delta_secs();
+        let speed = crate::sandbox::movement_speed(
+            game_state.as_deref(),
+            speed
+                * equipment.map_or(1.0, |equipment| {
+                    equipment.item_bonuses.move_speed_multiplier
+                }),
+        ) * utility.map_or(1.0, |u| u.state.movement_multiplier());
+        let move_delta =
+            speed * time.delta_secs() * crate::sandbox::time_scale(game_state.as_deref());
 
         if distance < move_delta || distance < 0.01 {
             let mut desired = target_pos_flat;
@@ -1293,8 +1533,44 @@ fn move_player(
     }
 }
 
+/// A local presentation clock: pause/frame steps follow authority, never global Time.
+#[derive(Default)]
+struct SandboxVisualClock {
+    last: Option<((u64, u64), f64)>,
+    paused: bool,
+}
+impl SandboxVisualClock {
+    fn delta(&mut self, time: &Time, game: Option<&GameStateSnapshot>) -> f32 {
+        let Some((game, snapshot)) = game.and_then(|g| g.sandbox.as_ref().map(|s| (g, s))) else {
+            self.last = None;
+            self.paused = false;
+            return time.delta_secs();
+        };
+        let identity = (game.meta.server_epoch, game.meta.match_id);
+        let paused = snapshot.config.environment.paused;
+        let delta = if paused {
+            if self.paused {
+                self.last
+                    .filter(|(old, _)| *old == identity)
+                    .map_or(0.0, |(_, previous)| {
+                        (snapshot.simulation_secs - previous).max(0.0) as f32
+                    })
+            } else {
+                0.0
+            }
+        } else {
+            time.delta_secs() * snapshot.config.environment.time_scale
+        };
+        self.last = Some((identity, snapshot.simulation_secs));
+        self.paused = paused;
+        delta
+    }
+}
+
 fn animate_jump(
     time: Res<Time>,
+    game: Option<Res<GameStateSnapshot>>,
+    mut clock: Local<SandboxVisualClock>,
     map_layout: Res<MapLayout>,
     visual_mode: Res<PlayerVisualMode>,
     mut query: Query<
@@ -1302,8 +1578,9 @@ fn animate_jump(
         (With<Player>, With<MovementTarget>),
     >,
 ) {
+    let dt = clock.delta(&time, game.as_deref());
     for (mut transform, mut jumping, normalization) in query.iter_mut() {
-        jumping.timer.tick(time.delta());
+        jumping.timer.tick(std::time::Duration::from_secs_f32(dt));
 
         let progress = jumping.timer.fraction();
 
@@ -1323,6 +1600,8 @@ fn animate_jump(
 
 fn apply_gravity(
     time: Res<Time>,
+    game: Option<Res<GameStateSnapshot>>,
+    mut clock: Local<SandboxVisualClock>,
     map_layout: Res<MapLayout>,
     visual_mode: Res<PlayerVisualMode>,
     mut query: Query<
@@ -1335,7 +1614,10 @@ fn apply_gravity(
         With<Player>,
     >,
 ) {
-    let dt = time.delta_secs();
+    let dt = clock.delta(&time, game.as_deref());
+    if dt <= 0.0 {
+        return;
+    }
 
     for (mut transform, mut velocity, jumping, normalization) in query.iter_mut() {
         if jumping.is_some() {
@@ -1427,14 +1709,19 @@ fn respawn_countdown_system(
         return;
     };
 
+    let display_time = game_state
+        .as_ref()
+        .and_then(|g| g.sandbox.as_ref())
+        .map_or(time.elapsed_secs(), |s| s.simulation_secs as f32);
     if stats.is_alive() {
         if state.end_time.is_some() {
             state.end_time = None;
             state.last_shown = -1;
             *visibility = Visibility::Hidden;
             text.0.clear();
-            let spawn = map_layout.team_spawn(*team);
-            transform.translation = spawn;
+            if game_state.as_ref().is_none_or(|g| g.sandbox.is_none()) {
+                transform.translation = map_layout.team_spawn(*team);
+            }
             velocity.0 = 0.0;
             commands.entity(entity).remove::<MovementTarget>();
             commands.entity(entity).remove::<Jumping>();
@@ -1446,13 +1733,13 @@ fn respawn_countdown_system(
     }
 
     if state.last_hp > 0.0 && stats.hp <= 0.0 {
-        state.end_time = Some(time.elapsed_secs() + RESPAWN_DELAY_SECONDS);
+        state.end_time = Some(display_time + RESPAWN_DELAY_SECONDS);
         state.last_shown = -1;
     }
     let end_time = state
         .end_time
-        .get_or_insert_with(|| time.elapsed_secs() + RESPAWN_DELAY_SECONDS);
-    let remaining = (*end_time - time.elapsed_secs()).ceil().max(0.0) as i32;
+        .get_or_insert_with(|| display_time + RESPAWN_DELAY_SECONDS);
+    let remaining = (*end_time - display_time).ceil().max(0.0) as i32;
 
     *visibility = Visibility::Visible;
     if remaining != state.last_shown {
@@ -2421,5 +2708,405 @@ mod animation_tests {
         let mut player = AnimationPlayer::default();
         start_hero_animation(&mut player, &set, HeroAnimationState::Death);
         assert!(player.animation(set.idle_node).unwrap().is_paused());
+    }
+
+    fn sandbox_animation_app() -> (App, CharacterAnimationSet, Vec<(Entity, Entity)>) {
+        let mut clips = Assets::<AnimationClip>::default();
+        let handles: Vec<_> = (0..6)
+            .map(|_| {
+                let mut clip = AnimationClip::default();
+                clip.set_duration(1.0);
+                clips.add(clip)
+            })
+            .collect();
+        let (graph, nodes) = AnimationGraph::from_clips(handles);
+        let mut graphs = Assets::<AnimationGraph>::default();
+        let set = CharacterAnimationSet {
+            graph: graphs.add(graph),
+            idle_node: nodes[0],
+            run_node: nodes[1],
+            walk_node: Some(nodes[2]),
+            runtime: false,
+            attack_node: Some(nodes[3]),
+            cast_node: Some(nodes[4]),
+            death_node: Some(nodes[5]),
+        };
+        let mut library = PlayerAnimationLibrary::default();
+        library
+            .sets
+            .insert(AvatarKey::Roster("agnes".into()), set.clone());
+        let mut game = GameStateSnapshot::default();
+        game.meta = shared::protocol::SnapshotMeta::new(77, 1, 1);
+        game.sandbox = Some(shared::sandbox::SandboxSnapshot {
+            config: Default::default(),
+            ack: None,
+            last_request_id: 0,
+            actors: Vec::new(),
+            analytics: Default::default(),
+            simulation_secs: 0.0,
+            frame: 0,
+        });
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default())
+            .insert_resource(library)
+            .insert_resource(graphs)
+            .insert_resource(clips)
+            .insert_resource(game)
+            .init_resource::<crate::sandbox::SandboxClient>()
+            .init_resource::<crate::sandbox::AnimationReadout>()
+            .add_systems(
+                Update,
+                (bind_player_animation_players, sync_player_animation_state).chain(),
+            );
+        let mut entities = Vec::new();
+        for id in 1..=2 {
+            let owner = app
+                .world_mut()
+                .spawn((
+                    Transform::default(),
+                    CombatStats::default(),
+                    NetworkCharacterChoice(CharacterChoice::Cube),
+                    NetworkAvatar(Some("agnes".into())),
+                    crate::net::NetworkPlayerId(id),
+                    PlayerCosmeticAction::default(),
+                ))
+                .id();
+            if id == 1 {
+                app.world_mut().entity_mut(owner).insert(Player);
+            } else {
+                app.world_mut().entity_mut(owner).insert(RemotePlayer);
+            }
+            let child = app
+                .world_mut()
+                .spawn((AnimationPlayer::default(), ChildOf(owner)))
+                .id();
+            entities.push((owner, child));
+        }
+        app.update();
+        (app, set, entities)
+    }
+    fn preview(app: &mut App, id: u64, kind: crate::sandbox::PreviewKind, sequence: u64) {
+        app.world_mut()
+            .resource_mut::<crate::sandbox::SandboxClient>()
+            .preview = Some(crate::sandbox::Preview { id, kind, sequence });
+    }
+    #[test]
+    fn sandbox_previews_target_only_selected_actor_and_repeated_action_restarts() {
+        use crate::sandbox::PreviewKind;
+        let (mut app, set, actors) = sandbox_animation_app();
+        for (index, kind) in [
+            PreviewKind::Idle,
+            PreviewKind::Run,
+            PreviewKind::Walk,
+            PreviewKind::Attack,
+            PreviewKind::Cast,
+            PreviewKind::Hit,
+            PreviewKind::Death,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            preview(&mut app, 1, kind, index as u64 + 1);
+            app.update();
+            let (expected, _) = sandbox_preview_state(kind, &set);
+            assert!(
+                app.world()
+                    .get::<AnimationPlayer>(actors[0].1)
+                    .unwrap()
+                    .is_playing_animation(set.node(expected))
+            );
+            assert!(
+                app.world()
+                    .get::<AnimationPlayer>(actors[1].1)
+                    .unwrap()
+                    .is_playing_animation(set.idle_node)
+            );
+            let readout = app.world().resource::<crate::sandbox::AnimationReadout>();
+            assert_eq!(readout.0[&1].1.len(), 6);
+            assert!(readout.0[&1].1.iter().all(|s| !s.contains("Hit")));
+            if kind == PreviewKind::Hit {
+                assert!(readout.0[&1].0.contains("Hit → Attack"));
+            }
+        }
+        preview(&mut app, 2, PreviewKind::Attack, 20);
+        app.update();
+        app.world_mut()
+            .get_mut::<AnimationPlayer>(actors[1].1)
+            .unwrap()
+            .animation_mut(set.attack_node.unwrap())
+            .unwrap()
+            .seek_to(0.7);
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<AnimationPlayer>(actors[1].1)
+                .unwrap()
+                .animation(set.attack_node.unwrap())
+                .unwrap()
+                .seek_time(),
+            0.7
+        );
+        preview(&mut app, 2, PreviewKind::Attack, 21);
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<AnimationPlayer>(actors[1].1)
+                .unwrap()
+                .animation(set.attack_node.unwrap())
+                .unwrap()
+                .seek_time(),
+            0.0
+        );
+        assert!(
+            app.world()
+                .get::<AnimationPlayer>(actors[0].1)
+                .unwrap()
+                .is_playing_animation(set.idle_node)
+        );
+    }
+    #[test]
+    fn sandbox_pause_steps_real_graph_once_and_preserves_one_shot_end_pose() {
+        use crate::sandbox::PreviewKind;
+        let (mut app, set, actors) = sandbox_animation_app();
+        preview(&mut app, 1, PreviewKind::Attack, 1);
+        app.update();
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .sandbox
+            .as_mut()
+            .unwrap()
+            .config
+            .environment
+            .paused = true;
+        app.update();
+        assert!(
+            app.world()
+                .get::<AnimationPlayer>(actors[0].1)
+                .unwrap()
+                .all_paused()
+        );
+        assert!(
+            app.world()
+                .get::<AnimationPlayer>(actors[1].1)
+                .unwrap()
+                .all_paused()
+        );
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .sandbox
+            .as_mut()
+            .unwrap()
+            .simulation_secs += 1.0 / 60.0;
+        app.update();
+        let seek = app
+            .world()
+            .get::<AnimationPlayer>(actors[0].1)
+            .unwrap()
+            .animation(set.attack_node.unwrap())
+            .unwrap()
+            .seek_time();
+        assert!((seek - 1.0 / 60.0).abs() < 0.00001);
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<AnimationPlayer>(actors[0].1)
+                .unwrap()
+                .animation(set.attack_node.unwrap())
+                .unwrap()
+                .seek_time(),
+            seek
+        );
+        preview(&mut app, 1, PreviewKind::Death, 2);
+        app.update();
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .sandbox
+            .as_mut()
+            .unwrap()
+            .simulation_secs += 2.0;
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<AnimationPlayer>(actors[0].1)
+                .unwrap()
+                .animation(set.death_node.unwrap())
+                .unwrap()
+                .seek_time(),
+            1.0
+        );
+        app.update();
+        assert!(
+            app.world()
+                .get::<AnimationPlayer>(actors[0].1)
+                .unwrap()
+                .is_playing_animation(set.death_node.unwrap())
+        );
+        app.world_mut()
+            .resource_mut::<crate::sandbox::SandboxClient>()
+            .preview = None;
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .sandbox
+            .as_mut()
+            .unwrap()
+            .config
+            .environment
+            .paused = false;
+        app.update();
+        assert!(
+            app.world()
+                .get::<AnimationPlayer>(actors[0].1)
+                .unwrap()
+                .is_playing_animation(set.idle_node)
+        );
+        assert!(
+            !app.world()
+                .get::<AnimationPlayer>(actors[0].1)
+                .unwrap()
+                .all_paused()
+        );
+    }
+    #[test]
+    fn sandbox_speed_applies_to_ordinary_and_forced_animations_and_resets_after_exit() {
+        let (mut app, set, actors) = sandbox_animation_app();
+        for scale in shared::sandbox::TIME_SCALES {
+            app.world_mut()
+                .resource_mut::<GameStateSnapshot>()
+                .sandbox
+                .as_mut()
+                .unwrap()
+                .config
+                .environment
+                .time_scale = scale;
+            preview(&mut app, 1, crate::sandbox::PreviewKind::Run, 1);
+            app.update();
+            for (_, child) in &actors {
+                let player = app.world().get::<AnimationPlayer>(*child).unwrap();
+                assert!(
+                    player
+                        .playing_animations()
+                        .all(|(_, active)| active.speed() == scale)
+                );
+            }
+        }
+        app.world_mut().resource_mut::<GameStateSnapshot>().sandbox = None;
+        app.update();
+        for (_, child) in &actors {
+            let player = app.world().get::<AnimationPlayer>(*child).unwrap();
+            assert_eq!(player.animation(set.idle_node).unwrap().speed(), 1.0);
+            assert!(!player.all_paused());
+        }
+    }
+    #[test]
+    fn sandbox_missing_clips_are_reported_and_frame_seek_wraps_only_loops() {
+        use crate::sandbox::PreviewKind;
+        let mut set = animation_set();
+        set.attack_node = None;
+        set.cast_node = None;
+        set.death_node = None;
+        let available = sandbox_available_animations(&set);
+        assert_eq!(available, vec!["Idle", "Run"]);
+        for kind in [
+            PreviewKind::Walk,
+            PreviewKind::Attack,
+            PreviewKind::Cast,
+            PreviewKind::Hit,
+            PreviewKind::Death,
+        ] {
+            let (state, label) = sandbox_preview_state(kind, &set);
+            assert!(label.contains("unavailable"));
+            assert_eq!(set.node(state), set.idle_node);
+        }
+        assert!((sandbox_seek_time(0.99, 0.02, Some(1.0), true) - 0.01).abs() < 0.00001);
+        assert_eq!(sandbox_seek_time(0.99, 0.02, Some(1.0), false), 1.0);
+    }
+    #[test]
+    fn sandbox_visual_clock_freezes_steps_and_returns_to_wall_delta() {
+        let (mut app, _, _) = sandbox_animation_app();
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_millis(100));
+        let mut clock = SandboxVisualClock::default();
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .sandbox
+            .as_mut()
+            .unwrap()
+            .config
+            .environment
+            .time_scale = 0.25;
+        let delta = clock.delta(
+            app.world().resource::<Time>(),
+            Some(app.world().resource::<GameStateSnapshot>()),
+        );
+        assert!((delta - 0.025).abs() < 0.00001);
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .sandbox
+            .as_mut()
+            .unwrap()
+            .config
+            .environment
+            .paused = true;
+        assert_eq!(
+            clock.delta(
+                app.world().resource::<Time>(),
+                Some(app.world().resource::<GameStateSnapshot>())
+            ),
+            0.0
+        );
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .sandbox
+            .as_mut()
+            .unwrap()
+            .simulation_secs += 1.0 / 60.0;
+        let delta = clock.delta(
+            app.world().resource::<Time>(),
+            Some(app.world().resource::<GameStateSnapshot>()),
+        );
+        assert!((delta - 1.0 / 60.0).abs() < 0.00001);
+        assert_eq!(
+            clock.delta(
+                app.world().resource::<Time>(),
+                Some(app.world().resource::<GameStateSnapshot>())
+            ),
+            0.0
+        );
+        assert!((clock.delta(app.world().resource::<Time>(), None) - 0.1).abs() < 0.00001);
+    }
+    #[test]
+    fn sandbox_refill_after_death_preserves_authoritatively_reconciled_position() {
+        let (mut app, _, actors) = sandbox_animation_app();
+        app.init_resource::<MapLayout>()
+            .init_resource::<DebugConsole>();
+        app.insert_resource(RespawnCountdown {
+            end_time: Some(5.0),
+            last_shown: 1,
+            last_hp: 0.0,
+        });
+        app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Running;
+        app.world_mut().entity_mut(actors[0].0).insert((
+            Team::Green,
+            VerticalVelocity::default(),
+            Transform::from_xyz(3.0, 0.5, 2.0),
+        ));
+        app.world_mut()
+            .spawn((Text::new("1"), Visibility::Visible, RespawnCountdownText));
+        app.add_systems(Update, respawn_countdown_system);
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<Transform>(actors[0].0)
+                .unwrap()
+                .translation,
+            Vec3::new(3.0, 0.5, 2.0)
+        );
+        assert!(
+            app.world()
+                .resource::<RespawnCountdown>()
+                .end_time
+                .is_none()
+        );
     }
 }

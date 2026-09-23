@@ -68,6 +68,10 @@ pub(crate) fn handle_purchase(
         player.state.hp = (player.state.hp + hp_bonus).min(player.state.max_hp);
         player.state.max_mana += mana_bonus;
         player.state.mana = (player.state.mana + mana_bonus).min(player.state.max_mana);
+        if let Some(mut c) = player.sandbox.clone() {
+            c.inventory = player.state.inventory.clone();
+            sandbox::apply_actor(player, &c, false, player.last_movement_at);
+        }
         println!(
             "MATCH_METRIC event=purchase match={match_id} player={} request={request_id} item={} cost={} gold={}",
             player.state.id,

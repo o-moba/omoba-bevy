@@ -130,13 +130,16 @@ impl TargetValidity<'_, '_> {
 
 pub(crate) fn tick_basic_attack(
     time: Res<Time>,
+    game: Option<Res<crate::net::GameStateSnapshot>>,
     mut basic: ResMut<BasicAttackState>,
     authoritative: Query<
         &PlayerBasicAttackCooldown,
         (With<Player>, Changed<PlayerBasicAttackCooldown>),
     >,
 ) {
-    basic.remaining_secs = (basic.remaining_secs - time.delta_secs()).max(0.0);
+    basic.remaining_secs = (basic.remaining_secs
+        - time.delta_secs() * crate::sandbox::time_scale(game.as_deref()))
+    .max(0.0);
     if let Ok(server) = authoritative.single() {
         if server.last_request_id < basic.acknowledged_request_id {
             return;

@@ -414,6 +414,7 @@ impl ServerRuntime {
                 continue;
             }
             let packet = ServerPacket::Snapshot {
+                sandbox: None,
                 match_mode: if self.match_service.is_lobby() {
                     "lobby"
                 } else {

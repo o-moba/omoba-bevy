@@ -10,7 +10,7 @@ use bevy::{
     window::{AppLifecycle, PrimaryWindow, WindowFocused},
 };
 use shared::utility::UtilityAction;
-use shared::{SkillSlot, ability_for_class_slot, scaled_mana_cost, unlocked_slots_for_level};
+use shared::{SkillSlot, ability_for_class_slot, scaled_mana_cost};
 
 use crate::{
     combat::{CombatStats, LocalCastCooldown},
@@ -670,7 +670,7 @@ fn read_mobile_controls(
         mobile.upgrade_enabled = std::array::from_fn(|slot| {
             prog.skill_points > 0
                 && prog.ranks[slot] < shared::MAX_ABILITY_RANK
-                && unlocked_slots_for_level(prog.level.max(1))[slot]
+                && prog.unlocked()[slot]
         });
         mobile.upgrade_mode &= mobile.upgrade_enabled.iter().any(|enabled| *enabled);
     }
@@ -1108,7 +1108,7 @@ fn draw_mobile_controls(
         if let Some(image) = images.as_ref().and_then(|images| images.get(&icon.image)) {
             icon.rect = crate::skill_icons::icon_rect(def.id, image.size().as_vec2());
         }
-        let ready = unlocked_slots_for_level(prog.level.max(1))[*slot]
+        let ready = prog.unlocked()[*slot]
             && cooldown.remaining_secs[*slot] <= 0.0
             && local.is_some_and(|(stats, _, _)| {
                 stats.mana >= scaled_mana_cost(def, prog.ranks[*slot].max(1))
@@ -1216,7 +1216,7 @@ fn draw_mobile_controls(
             ),
             MobileVisual::Ability(slot) => {
                 let def = ability_for_class_slot(class, SkillSlot::from_index(slot as u8).unwrap());
-                let unlocked = unlocked_slots_for_level(prog.level.max(1))[slot];
+                let unlocked = prog.unlocked()[slot];
                 let mana = local.is_some_and(|(stats, _, _)| {
                     stats.mana >= scaled_mana_cost(def, prog.ranks[slot].max(1))
                 });
@@ -1349,7 +1349,7 @@ fn draw_mobile_controls(
                 let label = slot.map(|slot| {
                     let def = ability_for_class_slot(class, SkillSlot::from_index(slot as u8).unwrap());
                     let rank = prog.ranks[slot].max(1);
-                    let availability = if unlocked_slots_for_level(prog.level.max(1))[slot] {
+                    let availability = if prog.unlocked()[slot] {
                         format!("Rank {rank}")
                     } else { format!("Unlocks at level {}", shared::SLOT_UNLOCK_LEVELS[slot]) };
                     format!("{}  ·  {}\n{}\n\n{:.0} mana  ·  {:.1}s cooldown\nRelease to close · tap or drag to cast", def.name, availability, def.description,

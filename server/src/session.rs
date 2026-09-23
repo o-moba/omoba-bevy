@@ -31,6 +31,8 @@ pub(crate) fn ensure_player_connected(
         let spawn = spawn_position_for_team(map_layout, Team::Green);
 
         ConnectedPlayer {
+            sandbox: None,
+            sandbox_infinite_hp: false,
             career_profile: None,
             career_capable: false,
             draft: Default::default(),
@@ -303,6 +305,8 @@ pub(crate) fn reset_player_round(
     player.state.basic_attack_remaining_secs = 0.0;
     player.state.basic_attack_request_id = 0;
     player.respawn_at = None;
+    player.sandbox = None;
+    player.sandbox_infinite_hp = false;
     player.god_mode = false;
     player.speed_mult = 1.0;
 }
@@ -359,7 +363,7 @@ pub(crate) fn handle_transform_request_with_structures(
         .duration_since(player.last_movement_at)
         .as_secs_f32()
         .clamp(0.0, MOVEMENT_MAX_DELTA_SECONDS);
-    let speed_mult = player.speed_mult.max(1.0) * utility_movement_multiplier(player, now);
+    let speed_mult = player.speed_mult.max(0.1) * utility_movement_multiplier(player, now);
     let max_distance =
         PLAYER_SPEED * speed_mult * player.state.item_bonuses.move_speed_multiplier * elapsed
             + MOVEMENT_POSITION_TOLERANCE;
@@ -418,6 +422,9 @@ pub(crate) fn handle_respawns(
         return;
     }
     for player in players.values_mut() {
+        if player.sandbox.is_some() && player.state.is_bot {
+            continue;
+        }
         let Some(respawn_at) = player.respawn_at else {
             continue;
         };
@@ -595,6 +602,11 @@ impl ServerRuntime {
     }
 
     pub(crate) fn restart_round(&mut self, now: Instant) {
+        if self.sandbox_allowed() {
+            let now = self.sandbox.as_ref().unwrap().now;
+            self.reset_sandbox_duel(now);
+            return;
+        }
         self.finish_career_round(shared::career::MatchOutcome::Abandoned, None, now);
         if let crate::match_service::MatchService::Worker(worker) = &mut self.match_service {
             worker.aborted = true;

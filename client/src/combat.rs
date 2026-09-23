@@ -19,7 +19,7 @@ use crate::targeting::{BasicAttackState, TargetAimPreview};
 use crate::team::{Team, TeamSelection};
 use shared::{
     HeroClass, MAX_ABILITY_RANK, SkillSlot, TargetingMode, ability_for_class_slot,
-    scaled_cast_range, scaled_cooldown, scaled_mana_cost, unlocked_slots_for_level,
+    scaled_cast_range, scaled_cooldown, scaled_mana_cost,
 };
 
 /// Must match server `server/src/balance.rs` player baselines (display / local defaults).
@@ -434,10 +434,16 @@ struct SkillNameLabel {
     slot: usize,
 }
 
-fn tick_local_cast_cooldown(time: Res<Time>, mut cd: ResMut<LocalCastCooldown>) {
+fn tick_local_cast_cooldown(
+    time: Res<Time>,
+    game: Option<Res<GameStateSnapshot>>,
+    mut cd: ResMut<LocalCastCooldown>,
+) {
     for remaining in cd.remaining_secs.iter_mut() {
         if *remaining > 0.0 {
-            *remaining = (*remaining - time.delta_secs()).max(0.0);
+            *remaining = (*remaining
+                - time.delta_secs() * crate::sandbox::time_scale(game.as_deref()))
+            .max(0.0);
         }
     }
 }
@@ -446,6 +452,7 @@ fn tick_local_cast_cooldown(time: Res<Time>, mut cd: ResMut<LocalCastCooldown>) 
 /// Reducing haste after elapsed time must subtract the duration difference,
 /// rather than multiplying the remaining time (which incorrectly rescales history).
 fn sync_authoritative_cooldown_durations(
+    game: Option<Res<GameStateSnapshot>>,
     player: Query<
         (
             &PlayerProgression,
@@ -459,17 +466,29 @@ fn sync_authoritative_cooldown_durations(
     let Ok((progression, class, equipment)) = player.single() else {
         return;
     };
+    let sandbox_actor = game
+        .as_ref()
+        .and_then(|g| g.sandbox.as_ref())
+        .and_then(|s| {
+            s.actors
+                .iter()
+                .find(|a| a.actor == shared::sandbox::SandboxActor::Player)
+        });
+    if let Some(actor) = sandbox_actor {
+        cooldowns.remaining_secs = actor.cooldowns;
+    }
     for slot in SkillSlot::ALL {
         let index = slot.index();
         let definition = ability_for_class_slot(class.0, slot);
-        let duration = shared::shop::item_cooldown(
+        let duration = effective_cast_duration(
             definition,
             progression.ranks[index],
             slot,
             equipment.item_bonuses,
-        )
-        .as_secs_f32();
-        if cooldowns.remaining_secs[index] > 0.0
+            sandbox_actor.is_some(),
+        );
+        if sandbox_actor.is_none()
+            && cooldowns.remaining_secs[index] > 0.0
             && cooldowns.total_secs[index] > 0.0
             && cooldowns.total_secs[index] != duration
         {
@@ -477,6 +496,21 @@ fn sync_authoritative_cooldown_durations(
                 (cooldowns.remaining_secs[index] + duration - cooldowns.total_secs[index]).max(0.0);
         }
         cooldowns.total_secs[index] = duration;
+    }
+}
+
+fn effective_cast_duration(
+    definition: &shared::AbilityDefinition,
+    rank: u8,
+    slot: SkillSlot,
+    bonuses: shared::shop::ItemBonuses,
+    sandbox: bool,
+) -> f32 {
+    if sandbox && slot == SkillSlot::Q {
+        shared::scaled_cooldown(definition, rank).as_secs_f32()
+            / bonuses.attack_speed_multiplier.max(0.1)
+    } else {
+        shared::shop::item_cooldown(definition, rank, slot, bonuses).as_secs_f32()
     }
 }
 
@@ -812,7 +846,7 @@ fn update_skill_bar_system(
             Display::None
         };
         let rank = prog.ranks[icon.slot].max(1);
-        let available = unlocked_slots_for_level(prog.level.max(1))[icon.slot]
+        let available = prog.unlocked()[icon.slot]
             && cooldowns.remaining_secs[icon.slot] <= 0.0
             && local
                 .is_none_or(|(_, _, stats, _)| stats.mana >= scaled_mana_cost(definition, rank));
@@ -838,7 +872,7 @@ fn update_skill_bar_system(
         let slot = SkillSlot::from_index(label.slot as u8).expect("hotbar slot");
         let definition = ability_for_class_slot(class, slot);
         let cost = scaled_mana_cost(definition, rank);
-        let status = if !unlocked_slots_for_level(prog.level.max(1))[label.slot] {
+        let status = if !prog.unlocked()[label.slot] {
             format!("Locked Lv {}", shared::SLOT_UNLOCK_LEVELS[label.slot])
         } else if cooldowns.remaining_secs[label.slot] > 0.0 {
             format!("{:.1}s", cooldowns.remaining_secs[label.slot])
@@ -880,9 +914,8 @@ fn update_skill_bar_system(
 
     for (button, interaction, mut color, mut node) in &mut upgrade_buttons {
         let rank = prog.ranks.get(button.slot).copied().unwrap_or(1).max(1);
-        let can_upgrade = prog.skill_points > 0
-            && rank < MAX_ABILITY_RANK
-            && unlocked_slots_for_level(prog.level.max(1))[button.slot];
+        let can_upgrade =
+            prog.skill_points > 0 && rank < MAX_ABILITY_RANK && prog.unlocked()[button.slot];
         // Arrow only shows when a point can actually be spent on this slot.
         let display = if can_upgrade {
             Display::Flex
@@ -920,7 +953,7 @@ fn skill_upgrade_input_system(
     let Some(prog) = progression.iter().next() else {
         return;
     };
-    let unlocked = unlocked_slots_for_level(prog.level.max(1));
+    let unlocked = prog.unlocked();
     let eligible = |slot: usize| {
         prog.skill_points > 0 && unlocked[slot] && prog.ranks[slot] < MAX_ABILITY_RANK
     };
@@ -1057,7 +1090,7 @@ fn try_cast_slot(
         return false;
     }
     let def = ability_for_class_slot(class, slot);
-    if !unlocked_slots_for_level(prog.level.max(1))[slot.index()] {
+    if !prog.unlocked()[slot.index()] {
         let message = format!(
             "{} is locked until level {}.",
             def.name,
@@ -1285,6 +1318,7 @@ fn resolve_pending_cast_system(
     equipment: Query<&crate::net::PlayerEquipment, With<Player>>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     validity: crate::targeting::TargetValidity,
+    game: Option<Res<GameStateSnapshot>>,
 ) {
     let touch_mode = mobile.as_ref().is_some_and(|mobile| mobile.enabled);
     if !context.gameplay_allowed() {
@@ -1311,7 +1345,7 @@ fn resolve_pending_cast_system(
     let rank = prog.ranks[slot.index()].clamp(1, definition.max_rank);
     let rejection = if !stats.is_alive() {
         Some("Wait for respawn.".to_string())
-    } else if !unlocked_slots_for_level(prog.level.max(1))[slot.index()] {
+    } else if !prog.unlocked()[slot.index()] {
         Some(format!(
             "{} unlocks at level {}.",
             definition.name,
@@ -1414,8 +1448,13 @@ fn resolve_pending_cast_system(
             .single()
             .map(|equipment| equipment.item_bonuses)
             .unwrap_or_default();
-        cast_cd.remaining_secs[slot.index()] =
-            shared::shop::item_cooldown(definition, rank, slot, bonuses).as_secs_f32();
+        cast_cd.remaining_secs[slot.index()] = effective_cast_duration(
+            definition,
+            rank,
+            slot,
+            bonuses,
+            game.as_ref().is_some_and(|g| g.sandbox.is_some()),
+        );
         cast_cd.total_secs[slot.index()] = cast_cd.remaining_secs[slot.index()];
     }
     pending_cast.cancel();
@@ -1517,7 +1556,7 @@ fn mobile_cast_system(
         if slot < 4
             && prog.skill_points > 0
             && prog.ranks[slot] < MAX_ABILITY_RANK
-            && unlocked_slots_for_level(prog.level.max(1))[slot]
+            && prog.unlocked()[slot]
         {
             commands.write(NetworkCommand::UpgradeSkill { slot: slot as u8 });
         }
@@ -2407,6 +2446,25 @@ fn screen_pick_distance(pointer: Vec2, actor_center: Vec2, radius_px: f32) -> Op
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sandbox_slow_attack_rate_matches_authoritative_q_duration() {
+        let def = ability_for_class_slot(HeroClass::Mage, SkillSlot::Q);
+        let bonuses = shared::shop::ItemBonuses {
+            attack_speed_multiplier: 0.25,
+            ..default()
+        };
+        let normal = effective_cast_duration(def, 1, SkillSlot::Q, bonuses, false);
+        assert_eq!(
+            effective_cast_duration(def, 1, SkillSlot::Q, bonuses, true),
+            normal * 4.0
+        );
+        let w = ability_for_class_slot(HeroClass::Mage, SkillSlot::W);
+        assert_eq!(
+            effective_cast_duration(w, 1, SkillSlot::W, bonuses, true),
+            effective_cast_duration(w, 1, SkillSlot::W, bonuses, false)
+        );
+    }
 
     #[test]
     fn utility_intents_obey_snapshot_cooldowns_and_clear_on_modal_death_or_focus_loss() {

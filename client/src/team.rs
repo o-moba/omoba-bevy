@@ -732,7 +732,15 @@ pub fn spawn_team_select_ui(
 
             spawn_ekza_row(parent);
 
-            spawn_section_title(parent, "03  FIND YOUR TEAM", "TeamSelectTitle");
+            spawn_section_title(
+                parent,
+                if crate::sandbox::requested() {
+                    "03  ENTER COMBAT TEST"
+                } else {
+                    "03  FIND YOUR TEAM"
+                },
+                "TeamSelectTitle",
+            );
 
             parent
                 .spawn((
@@ -1346,7 +1354,11 @@ fn spawn_team_button(row: &mut ChildSpawnerCommands, team: Team, name: &str) {
     ))
     .with_children(|button| {
         button.spawn((
-            Text::new("Find match"),
+            Text::new(if crate::sandbox::requested() {
+                "Enter Combat Test"
+            } else {
+                "Find match"
+            }),
             TextFont {
                 font_size: 22.0,
                 ..default()
@@ -1564,12 +1576,22 @@ fn team_select_ui_system(
                     selection.avatar,
                     selection.character
                 );
-                command_writer.write(NetworkCommand::JoinPrematch {
-                    character: selection.character,
-                    hero_class: selection.hero_class,
-                    avatar: selection.avatar.clone(),
-                    sprite_character: Some(selection.sprite_character.clone()),
-                });
+                if crate::sandbox::requested() {
+                    command_writer.write(NetworkCommand::Join {
+                        team: button.team,
+                        character: selection.character,
+                        hero_class: selection.hero_class,
+                        avatar: selection.avatar.clone(),
+                        sprite_character: Some(selection.sprite_character.clone()),
+                    });
+                } else {
+                    command_writer.write(NetworkCommand::JoinPrematch {
+                        character: selection.character,
+                        hero_class: selection.hero_class,
+                        avatar: selection.avatar.clone(),
+                        sprite_character: Some(selection.sprite_character.clone()),
+                    });
+                }
                 if let Ok(overlay) = overlay_query.single() {
                     commands
                         .entity(overlay)
@@ -1578,7 +1600,11 @@ fn team_select_ui_system(
                 }
                 // The hero is locked: matchmaking owns the screen from here.
                 if let Some(screen) = screen.as_deref_mut() {
-                    screen.set(AppScreen::Searching);
+                    screen.set(if crate::sandbox::requested() {
+                        AppScreen::InMatch
+                    } else {
+                        AppScreen::Searching
+                    });
                 }
             }
             Interaction::Hovered => {

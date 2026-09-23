@@ -52,6 +52,7 @@ mod presentation2d;
 mod presentation3d;
 mod projectile_visuals;
 mod reaction_visuals;
+mod sandbox;
 mod session_config;
 mod shop;
 mod skill_icons;
@@ -97,6 +98,10 @@ use world2d::World2dPlugin;
 pub fn main() {
     if let Some(directory) = std::env::var_os("OMOBA_ANIMATION_QA") {
         animation_qa::run(directory.into());
+        return;
+    }
+    if let Err(error) = sandbox::validate_launch() {
+        eprintln!("Combat Test: {error}");
         return;
     }
     passport::initialize();
@@ -145,6 +150,7 @@ pub fn main() {
         TeamSelectPlugin,
         GameStateUiPlugin,
     ))
+    .add_plugins(sandbox::SandboxPlugin)
     .add_plugins(edge_hud::EdgeHudPlugin)
     .add_plugins(match_service::MatchServicePlugin)
     .add_plugins((FrontendPlugin, frontend_qa::FrontendQaPlugin))

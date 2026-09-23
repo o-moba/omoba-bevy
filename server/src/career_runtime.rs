@@ -532,6 +532,9 @@ impl ServerRuntime {
     }
 
     fn rating_eligibility(&self, roster: &[ParticipantResult]) -> Result<(), &'static str> {
+        if self.sandbox.is_some() {
+            return Err("Combat Sandbox is never eligible for career credit.");
+        }
         if self.match_config.mode == MatchMode::Practice {
             return Err("Bot practice: local result only; no permanent career credit.");
         }

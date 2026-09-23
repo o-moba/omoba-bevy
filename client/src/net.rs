@@ -407,7 +407,11 @@ impl Plugin for NetworkingPlugin {
             .add_systems(Update, mirror_debug_flags_to_network_state)
             .add_systems(
                 Update,
-                respawn_players_with_new_store_models.before(ClientNetPipeline::ApplySnapshot),
+                (
+                    respawn_players_with_new_store_models,
+                    respawn_sandbox_models,
+                )
+                    .before(ClientNetPipeline::ApplySnapshot),
             )
             .add_systems(
                 Update,
@@ -498,6 +502,7 @@ fn ground_networked_entities(
 
 #[derive(Message, Clone, Debug)]
 pub enum NetworkCommand {
+    Sandbox(shared::sandbox::SandboxRequest),
     /// Profile/history requests are valid before arena admission as well.
     Career(shared::career::CareerRequest),
     Social {
@@ -554,6 +559,9 @@ pub enum NetworkCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ClientPacket {
+    Sandbox {
+        request: shared::sandbox::SandboxRequest,
+    },
     /// Deliberate leave: the server releases the seat or the queue entry now
     /// instead of holding it for a reconnect.
     Leave,
@@ -898,6 +906,8 @@ enum ServerPacket {
         career: shared::career::CareerView,
     },
     Snapshot {
+        #[serde(default)]
+        sandbox: Option<shared::sandbox::SandboxSnapshot>,
         #[serde(flatten, default)]
         meta: SnapshotMeta,
         #[serde(default)]
@@ -957,6 +967,7 @@ pub enum GameState {
 
 #[derive(Resource, Default, Clone)]
 pub struct GameStateSnapshot {
+    pub sandbox: Option<shared::sandbox::SandboxSnapshot>,
     pub your_id: u64,
     pub prematch: Option<shared::prematch::PrematchSnapshot>,
     pub match_mode: String,
@@ -1009,6 +1020,31 @@ fn respawn_players_with_new_store_models(
     }
 }
 
+// Replace the loaded scene as well as its cosmetic component when a developer
+// changes appearance. The ordinary next snapshot reconstructs the actor.
+fn respawn_sandbox_models(
+    mut commands: Commands,
+    game: Res<GameStateSnapshot>,
+    mut state: ResMut<NetworkState>,
+    players: Query<(Entity, &NetworkPlayerId, &NetworkAvatar)>,
+    mut seen: Local<HashMap<u64, Option<String>>>,
+) {
+    if game.sandbox.is_none() {
+        seen.clear();
+        return;
+    }
+    seen.retain(|id, _| players.iter().any(|(_, current, _)| current.0 == *id));
+    for (entity, id, avatar) in &players {
+        let changed = seen
+            .insert(id.0, avatar.0.clone())
+            .is_some_and(|old| old != avatar.0);
+        if changed {
+            state.remote_players.remove(&id.0);
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
 #[derive(Resource, Default)]
 struct NetworkState {
     local_id: Option<u64>,
@@ -1031,6 +1067,7 @@ struct PendingServerSnapshotFrame {
 }
 
 struct PendingSnapshotData {
+    sandbox: Option<shared::sandbox::SandboxSnapshot>,
     prematch: Option<shared::prematch::PrematchSnapshot>,
     match_mode: String,
     geometry_id: String,
@@ -1080,8 +1117,12 @@ impl From<&PlayerState> for PlayerUtility {
 
 /// Keep authoritative remaining durations moving between snapshots, including
 /// packet loss or a paused virtual clock. Each new snapshot replaces this estimate.
-fn age_utility_timers(time: Res<Time<Real>>, mut players: Query<&mut PlayerUtility>) {
-    let elapsed = time.delta_secs();
+fn age_utility_timers(
+    time: Res<Time<Real>>,
+    game: Option<Res<GameStateSnapshot>>,
+    mut players: Query<&mut PlayerUtility>,
+) {
+    let elapsed = time.delta_secs() * crate::sandbox::time_scale(game.as_deref());
     for mut utility in &mut players {
         let state = &mut utility.state;
         state.dash_remaining_secs = (state.dash_remaining_secs - elapsed).max(0.0);
@@ -1181,6 +1222,7 @@ pub struct PlayerEquipment {
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct PlayerProgression {
+    pub sandbox_unlocked: Option<[bool; 4]>,
     pub level: u32,
     pub xp: u32,
     pub next_level_xp: u32,
@@ -1189,9 +1231,17 @@ pub struct PlayerProgression {
     pub ranks: [u8; 4],
 }
 
+impl PlayerProgression {
+    pub fn unlocked(&self) -> [bool; 4] {
+        self.sandbox_unlocked
+            .unwrap_or_else(|| shared::unlocked_slots_for_level(self.level.max(1)))
+    }
+}
+
 impl Default for PlayerProgression {
     fn default() -> Self {
         Self {
+            sandbox_unlocked: None,
             level: 1,
             xp: 0,
             next_level_xp: 0,
@@ -2018,6 +2068,13 @@ fn send_network_commands(
                 });
                 send_join_attempt(&channels, &mut client_session, &client_session_id);
             }
+            NetworkCommand::Sandbox(request) => {
+                if client_session.join_confirmed() {
+                    let _ = channels.outgoing.try_send(ClientPacket::Sandbox {
+                        request: request.clone(),
+                    });
+                }
+            }
             NetworkCommand::RequestRematch => {
                 if !client_session.join_confirmed() {
                     continue;
@@ -2214,6 +2271,7 @@ fn ingest_server_snapshot_packets(
                     }
                 }
                 ServerPacket::Snapshot {
+                    sandbox,
                     geometry_id,
                     map_profile,
                     match_mode,
@@ -2267,6 +2325,7 @@ fn ingest_server_snapshot_packets(
                         client_session.join_exhausted = false;
                     }
                     latest_snapshot = Some(PendingSnapshotData {
+                        sandbox,
                         match_mode,
                         geometry_id,
                         map_profile,
@@ -2334,6 +2393,7 @@ fn apply_server_snapshot(
         return;
     };
     let PendingSnapshotData {
+        sandbox,
         match_mode,
         geometry_id,
         map_profile,
@@ -2372,6 +2432,7 @@ fn apply_server_snapshot(
     game_state_snapshot.team_buffs = team_buffs;
     game_state_snapshot.combat_events = combat_events;
     game_state_snapshot.scoreboard = scoreboard;
+    game_state_snapshot.sandbox = sandbox;
 
     // Reconnect uses the accepted draft loadout, never a stale pre-search choice.
     if let Some(own) = game_state_snapshot
@@ -3704,6 +3765,7 @@ fn player_state_to_equipment(player: &PlayerState) -> PlayerEquipment {
 
 fn player_state_to_progression(player: &PlayerState) -> PlayerProgression {
     PlayerProgression {
+        sandbox_unlocked: None,
         level: player.level.max(1),
         xp: player.xp,
         next_level_xp: player.next_level_xp,
