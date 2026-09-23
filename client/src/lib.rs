@@ -3,6 +3,7 @@ use bevy::{asset::AssetPlugin, prelude::*};
 mod animation_qa;
 mod audio_qa;
 mod audio_settings;
+mod battlefield_atmosphere;
 mod beta_ui_qa;
 mod bosses;
 mod camera;
@@ -17,6 +18,7 @@ mod creatures3d;
 mod debug_console;
 mod decor;
 mod edge_hud;
+mod forest_pickup_qa;
 mod frontend;
 mod frontend_flow_qa;
 mod frontend_qa;
@@ -191,12 +193,14 @@ pub fn main() {
     .add_plugins(supporter_storekit::SupporterStoreKitPlugin)
     .add_plugins(game_audio::GameAudioPlugin)
     .add_plugins(game_vfx::GameVfxPlugin)
+    .add_plugins(battlefield_atmosphere::BattlefieldAtmospherePlugin)
     .add_plugins(audio_qa::AudioQaPlugin)
     .add_plugins(career_identity::CareerIdentityPlugin)
     .add_plugins(career_visual_qa::CareerVisualQaPlugin)
     .add_plugins(map_visuals::MapVisualsPlugin)
     .add_plugins(map_qa::MapQaPlugin)
     .add_plugins(combat_qa::CombatQaPlugin)
+    .add_plugins(forest_pickup_qa::ForestPickupQaPlugin)
     .add_plugins(targeting_qa::TargetingQaPlugin)
     .run();
 }

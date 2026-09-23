@@ -912,6 +912,8 @@ enum ServerPacket {
     Snapshot {
         #[serde(default)]
         sandbox: Option<shared::sandbox::SandboxSnapshot>,
+        #[serde(default)]
+        forest_pickups: Vec<shared::forest_pickups::ForestPickupState>,
         #[serde(flatten, default)]
         meta: SnapshotMeta,
         #[serde(default)]
@@ -972,6 +974,7 @@ pub enum GameState {
 #[derive(Resource, Default, Clone)]
 pub struct GameStateSnapshot {
     pub sandbox: Option<shared::sandbox::SandboxSnapshot>,
+    pub forest_pickups: Vec<shared::forest_pickups::ForestPickupState>,
     pub your_id: u64,
     pub prematch: Option<shared::prematch::PrematchSnapshot>,
     pub match_mode: String,
@@ -1071,6 +1074,7 @@ struct PendingServerSnapshotFrame {
 }
 
 struct PendingSnapshotData {
+    forest_pickups: Vec<shared::forest_pickups::ForestPickupState>,
     sandbox: Option<shared::sandbox::SandboxSnapshot>,
     prematch: Option<shared::prematch::PrematchSnapshot>,
     match_mode: String,
@@ -2299,6 +2303,7 @@ fn ingest_server_snapshot_packets(
                 }
                 ServerPacket::Snapshot {
                     sandbox,
+                    forest_pickups,
                     geometry_id,
                     map_profile,
                     match_mode,
@@ -2353,6 +2358,7 @@ fn ingest_server_snapshot_packets(
                     }
                     latest_snapshot = Some(PendingSnapshotData {
                         sandbox,
+                        forest_pickups,
                         match_mode,
                         geometry_id,
                         map_profile,
@@ -2421,6 +2427,7 @@ fn apply_server_snapshot(
     };
     let PendingSnapshotData {
         sandbox,
+        forest_pickups,
         match_mode,
         geometry_id,
         map_profile,
@@ -2460,6 +2467,7 @@ fn apply_server_snapshot(
     game_state_snapshot.combat_events = combat_events;
     game_state_snapshot.scoreboard = scoreboard;
     game_state_snapshot.sandbox = sandbox;
+    game_state_snapshot.forest_pickups = forest_pickups;
 
     // Reconnect uses the accepted draft loadout, never a stale pre-search choice.
     if let Some(own) = game_state_snapshot

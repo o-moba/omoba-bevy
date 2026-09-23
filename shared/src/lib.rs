@@ -9,6 +9,7 @@ use std::time::Duration;
 pub mod career;
 pub mod combat;
 pub mod device_account;
+pub mod forest_pickups;
 pub mod hero_balance;
 pub mod jungle;
 pub mod live_score;

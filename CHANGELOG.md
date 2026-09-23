@@ -4,6 +4,13 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [0.23.0-rc.3] - 2026-09-23
+
+- Add readable magic orbs, orbiting sparks, bounded projectile particle trails and larger confirmed-hit bursts; replace the Warrior's segmented yellow projectile with a steel blade.
+- Add six shared healing butterfly flocks: server-authoritative 5% maximum-HP collection, single contested winner, 30-second respawn and replicated availability.
+- Add a noninteractive soft oval battlefield vignette, with glowing animated butterfly presentation in both 3D and Sprite2d.
+- Add native pickup lifecycle captures and document rendering budgets and gameplay rules in `docs/forest-combat-vfx.md`.
+
 ## [0.23.0-rc.2] - 2026-09-23
 
 - Rebalance starting health and Q cadence across all four classes, add bounded level-based movement, basic damage/rate and skill growth, and prevent same-tick cross-slot skill volleys.

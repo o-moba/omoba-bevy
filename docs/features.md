@@ -1,5 +1,9 @@
 # Feature Inventory
 
+## Combat particles and healing butterflies (0.23.0-rc.3)
+
+Magic orbs have orbiting sparks and fading tails; confirmed hits produce short radial bursts. Six symmetric forest flocks glow and flap, grant one injured living collector up to 5% maximum HP, then respawn after 30 seconds. Availability and HP belong to the server. A soft oval vignette frames the battlefield below the HUD in 3D and Sprite2d. See [rules, rendering limits and native capture instructions](forest-combat-vfx.md).
+
 ## Measured combat pacing and growth (0.23.0-rc.2)
 
 Starting durability and Q intervals now leave an early response window; levels increase movement, basic attack speed/damage and skill power. All four skills share a short recovery interval, while basic attacks keep an independent clock. The client buffers the next skill and restores server cooldowns across reconnect. Default towers scale damage against heroes without shortening minion siege windows. The 48-encounter production-path benchmark measures a level-one median of 10.53s and level-ten mean of 4.24s; these are controlled stationary targets, not competitive win rates. See [formulas, research, limitations and reproduction](balance-tuning.md).
@@ -14,7 +18,7 @@ All 15 shipped playable 3D avatars use the engine's shared Run motion during nor
 
 Validated VRM0/VRM1 skinned humanoids receive runtime clips adapted to their bone map and rest pose, including models with no embedded clips. Original skin bytes remain unchanged. This is skeletal compatibility for a documented subset, not complete VRM materials/face/hair support. Approved Studio models gain runtime Run through normal verified loading; accepting externally published clipless models still requires a versioned profile rollout. See [architecture, import and limits](humanoid-motion.md).
 
-Canonical version: `0.23.0-rc.2`
+Canonical version: `0.23.0-rc.3`
 
 ## Team draft and shared loading
 

@@ -17,17 +17,24 @@ use crate::{
     world2d::{layer, simulation_xz_to_render_xy},
 };
 
-const MAX_VISUALS: usize = 384;
+pub(crate) const MAX_VISUALS: usize = 384;
 
 pub struct ProjectileVisualsPlugin;
 impl Plugin for ProjectileVisualsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_assets).add_systems(
-            PostUpdate,
-            (attach_visuals, update_visuals, draw_trails)
-                .chain()
-                .before(bevy::transform::TransformSystems::Propagate),
-        );
+        app.add_systems(Startup, setup_assets)
+            .add_systems(
+                PostUpdate,
+                (attach_visuals, update_visuals, animate_orbits)
+                    .chain()
+                    .before(bevy::transform::TransformSystems::Propagate),
+            )
+            .add_systems(
+                PostUpdate,
+                draw_trails
+                    .after(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate)
+                    .after(bevy::transform::TransformSystems::Propagate),
+            );
     }
 }
 
@@ -58,12 +65,12 @@ fn setup_assets(
 ) {
     commands.insert_resource(ProjectileAssets {
         block: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
-        crystal: meshes.add(Sphere::new(1.0).mesh().ico(0).expect("icosahedron")),
+        crystal: meshes.add(Sphere::new(1.0).mesh().ico(1).expect("icosphere")),
         cone: meshes.add(Cone {
             radius: 1.0,
             height: 1.0,
         }),
-        white: materials.add(material(Color::srgb(1.0, 0.97, 0.85))),
+        white: materials.add(material(Color::srgb(0.94, 1.0, 1.0))),
         green: materials.add(material(Color::srgb(0.15, 1.0, 0.35))),
         blue: materials.add(material(Color::srgb(0.2, 0.55, 1.0))),
         profiles: HashMap::new(),
@@ -96,7 +103,7 @@ fn spawn_part(
     rotation: Quat,
     name: &str,
 ) {
-    parent.spawn((
+    let mut part = parent.spawn((
         Mesh3d(mesh.clone()),
         MeshMaterial3d(material.clone()),
         Transform::from_translation(position)
@@ -104,6 +111,17 @@ fn spawn_part(
             .with_rotation(rotation),
         Name::new(format!("Projectile-{name}")),
     ));
+    if name == "Arcane-Spark" {
+        part.insert(OrbitingSpark(position.y.atan2(position.x)));
+    }
+}
+#[derive(Component)]
+struct OrbitingSpark(f32);
+fn animate_orbits(time: Res<Time>, mut sparks: Query<(&OrbitingSpark, &mut Transform)>) {
+    for (phase, mut pose) in &mut sparks {
+        let angle = phase.0 + time.elapsed_secs() * 8.0;
+        pose.translation = Vec3::new(angle.cos() * 0.62, angle.sin() * 0.62, -0.1);
+    }
 }
 
 fn spawn_shape(
@@ -152,7 +170,7 @@ fn spawn_shape(
                 &assets.crystal,
                 tint,
                 Vec3::ZERO,
-                Vec3::new(0.33, 0.33, 0.74),
+                Vec3::splat(0.46),
                 Quat::IDENTITY,
                 "Arcane-Core",
             );
@@ -162,7 +180,7 @@ fn spawn_shape(
                     &assets.crystal,
                     &assets.white,
                     Vec3::new(angle.cos() * 0.45, angle.sin() * 0.45, -0.32),
-                    Vec3::new(0.09, 0.09, 0.24),
+                    Vec3::splat(0.11),
                     Quat::IDENTITY,
                     "Arcane-Spark",
                 );
@@ -192,28 +210,34 @@ fn spawn_shape(
             }
         }
         ProjectileShape::Crescent => {
-            for index in 0..9 {
-                let angle = -1.15 + index as f32 * 2.30 / 8.0;
-                let taper = 1.0 - (angle / 1.5).abs() * 0.5;
-                spawn_part(
-                    parent,
-                    block,
-                    tint,
-                    Vec3::new(angle.sin() * 0.95, 0.0, angle.cos() * 0.70 - 0.3),
-                    Vec3::new(0.31, 0.075, 0.25 * taper),
-                    Quat::from_rotation_y(angle),
-                    "Warrior-Crescent",
-                );
-                spawn_part(
-                    parent,
-                    block,
-                    &assets.white,
-                    Vec3::new(angle.sin() * 1.0, 0.045, angle.cos() * 0.78 - 0.3),
-                    Vec3::new(0.30, 0.03, 0.045),
-                    Quat::from_rotation_y(angle),
-                    "Warrior-Edge",
-                );
-            }
+            // A compact silver thrown blade with a luminous guard, not chunky yellow fruit.
+            spawn_part(
+                parent,
+                block,
+                &assets.white,
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(0.19, 0.09, 1.30),
+                Quat::IDENTITY,
+                "Warrior-Blade",
+            );
+            spawn_part(
+                parent,
+                &assets.cone,
+                &assets.white,
+                Vec3::new(0.0, 0.0, 0.72),
+                Vec3::new(0.19, 0.50, 0.09),
+                Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+                "Warrior-Point",
+            );
+            spawn_part(
+                parent,
+                block,
+                tint,
+                Vec3::new(0.0, 0.0, -0.48),
+                Vec3::new(0.65, 0.13, 0.15),
+                Quat::IDENTITY,
+                "Warrior-Guard",
+            );
         }
         ProjectileShape::Bolt => {
             spawn_part(
@@ -449,9 +473,13 @@ fn update_visuals(
 fn draw_trails(
     mut gizmos: Gizmos,
     mode: Res<PlayerVisualMode>,
-    roots: Query<(&Transform, &ProjectileVisual)>,
+    mut roots: Query<(&Transform, &mut ProjectileVisual, &InheritedVisibility)>,
 ) {
-    for (transform, visual) in &roots {
+    for (transform, mut visual, inherited) in &mut roots {
+        if !inherited.get() {
+            visual.trail.clear();
+            continue;
+        }
         let points: Vec<_> = visual
             .trail
             .iter()

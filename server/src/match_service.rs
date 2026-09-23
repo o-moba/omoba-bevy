@@ -439,6 +439,7 @@ impl ServerRuntime {
                 minions: Vec::new(),
                 neutrals: Vec::new(),
                 team_buffs: Vec::new(),
+                forest_pickups: Vec::new(),
                 game_state: GameState::Lobby,
                 rematch_in_secs: None,
             };

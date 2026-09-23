@@ -13,6 +13,7 @@ mod career_runtime_tests;
 mod objective_balance_tests;
 use server::career_store;
 mod combat_feedback;
+mod forest_pickups;
 mod gameplay;
 #[cfg(test)]
 mod map_config_tests;
@@ -582,6 +583,8 @@ enum ServerPacket {
         /// Active boss team buffs (additive field; absent = no buffs).
         #[serde(default)]
         team_buffs: Vec<TeamBuffState>,
+        #[serde(default)]
+        forest_pickups: Vec<shared::forest_pickups::ForestPickupState>,
         game_state: GameState,
         #[serde(default)]
         rematch_in_secs: Option<u64>,
@@ -1143,6 +1146,7 @@ struct ServerRuntime {
     next_minion_id: u64,
     neutrals: HashMap<u64, Neutral>,
     team_buffs: TeamBuffs,
+    forest_pickups: forest_pickups::ForestPickups,
     recv_buf: Vec<u8>,
     invalid_request_diagnostic: RateLimitedDiagnostic,
     snapshot_send_diagnostic: RateLimitedDiagnostic,
@@ -1209,6 +1213,7 @@ impl ServerRuntime {
             next_minion_id: 1,
             neutrals,
             team_buffs: TeamBuffs::default(),
+            forest_pickups: forest_pickups::ForestPickups::default(),
             recv_buf: vec![0_u8; CLIENT_DATAGRAM_RECEIVE_CAPACITY],
             invalid_request_diagnostic: RateLimitedDiagnostic::default(),
             snapshot_send_diagnostic: RateLimitedDiagnostic::default(),
@@ -1917,6 +1922,7 @@ impl ServerRuntime {
             next_minion_id,
             neutrals,
             team_buffs,
+            forest_pickups,
             last_wave_spawn_at,
             last_snapshot_at,
             snapshot_send_diagnostic,
@@ -1982,6 +1988,9 @@ impl ServerRuntime {
                 now,
                 simulate_neutrals(players, neutrals, game_state, dt, now),
             );
+        }
+        if sandbox_simulating {
+            forest_pickups.tick(players, game_state, now);
         }
         regenerate_team_buff_hp(players, team_buffs, game_state, dt, now);
         regenerate_base_hp(players, map_layout, game_state, dt);
@@ -2124,6 +2133,7 @@ impl ServerRuntime {
                     minions: minions_snapshot.clone(),
                     neutrals: neutrals_snapshot.clone(),
                     team_buffs: team_buffs_snapshot.clone(),
+                    forest_pickups: forest_pickups.snapshot(game_state),
                     game_state: game_state.clone(),
                     rematch_in_secs,
                 };
@@ -3899,6 +3909,7 @@ mod tests {
             minions: Vec::new(),
             neutrals: Vec::new(),
             team_buffs: Vec::new(),
+            forest_pickups: Vec::new(),
             game_state: GameState::Running,
             rematch_in_secs: None,
         }
@@ -3946,6 +3957,7 @@ mod tests {
             minions: Vec::new(),
             neutrals: Vec::new(),
             team_buffs: Vec::new(),
+            forest_pickups: Vec::new(),
             game_state: GameState::Running,
             rematch_in_secs: None,
         };

@@ -526,6 +526,7 @@ fn cosmetic_history_yields_space_to_gameplay_and_keeps_newest_receipts() {
         minions: vec![],
         neutrals: vec![],
         team_buffs: vec![],
+        forest_pickups: vec![],
         game_state: GameState::Running,
         rematch_in_secs: None,
     };

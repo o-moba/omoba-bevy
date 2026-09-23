@@ -515,6 +515,7 @@ impl ServerRuntime {
             .extend(build_boss_neutrals(&mut next_neutral_id));
         schedule_boss_spawns(&mut self.neutrals, now);
         self.team_buffs = TeamBuffs::default();
+        self.forest_pickups.reset_availability();
         self.combat_log.reset_sandbox(now);
         self.game_state = GameState::Running;
         self.victory_at = None;
