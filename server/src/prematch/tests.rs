@@ -57,7 +57,7 @@ fn view(rt: &ServerRuntime, addr: SocketAddr, now: Instant) -> PrematchSnapshot 
         &rt.prematch,
         &rt.world.players,
         &rt.world.players[&addr],
-        rt.match_config,
+        rt.rules,
         now,
     )
     .unwrap()
@@ -85,7 +85,7 @@ fn automatic_teams_and_opt_in_draft_work_in_all_modes_legacy_remains_inert() {
             &rt.prematch,
             &rt.world.players,
             &rt.world.players[&address(1)],
-            rt.match_config,
+            rt.rules,
             now
         )
         .is_none()
@@ -444,7 +444,7 @@ fn real_udp_peers_negotiate_and_replicate_draft_without_client_fixtures() {
             &rt.prematch,
             &rt.world.players,
             &rt.world.players[&d],
-            rt.match_config,
+            rt.rules,
             Instant::now()
         )
         .is_none()
@@ -549,7 +549,7 @@ fn running_reconnect_bypasses_draft_and_preserves_class_role_identity() {
             &rt.prematch,
             &rt.world.players,
             &rt.world.players[&address(2)],
-            rt.match_config,
+            rt.rules,
             now
         )
         .is_none()

@@ -210,7 +210,7 @@ impl ServerRuntime {
                     .sandbox
                     .as_ref()
                     .map(|s| s.snapshot(addr, &world.players, &self.combat_log)),
-                match_mode: self.match_config.mode_id().into(),
+                match_mode: self.rules.mode_id().into(),
                 geometry_id: world.map_config.geometry_id.clone(),
                 map_profile: world.map_config.map_profile.clone(),
                 meta: shared::protocol::SnapshotMeta::new(
@@ -228,7 +228,7 @@ impl ServerRuntime {
                     &self.prematch,
                     &world.players,
                     player,
-                    self.match_config,
+                    self.rules,
                     now,
                 ),
                 projectiles: projectiles_snapshot.clone(),

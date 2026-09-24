@@ -419,7 +419,7 @@ impl ServerRuntime {
                 match_mode: if self.match_service.is_lobby() {
                     "lobby"
                 } else {
-                    self.match_config.mode_id()
+                    self.rules.mode_id()
                 }
                 .into(),
                 geometry_id: self.world.map_config.geometry_id.clone(),

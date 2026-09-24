@@ -264,7 +264,7 @@ fn validate_config(c: &SandboxConfig) -> Result<(), String> {
 impl ServerRuntime {
     pub(crate) fn sandbox_allowed(&self) -> bool {
         self.sandbox.is_some()
-            && self.match_config.mode == MatchMode::Dev
+            && self.rules.combat_sandbox_allowed
             && !self.match_service.is_public()
             && self.match_service.worker().is_none()
     }

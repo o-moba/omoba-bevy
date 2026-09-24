@@ -493,7 +493,7 @@ impl ServerRuntime {
             worker.aborted = true;
             return;
         }
-        if self.match_config.mode == MatchMode::Practice {
+        if self.rules.fills_with_bots {
             self.world
                 .players
                 .retain(|_, player| !player.hero.identity.is_bot);
@@ -520,7 +520,7 @@ impl ServerRuntime {
         self.metrics_players.clear();
         self.metrics_objectives.clear();
         if joined_count(&self.world.players) > 0 && !self.prematch_required() {
-            advance_formation_on_join(&mut self.world, self.match_config, now);
+            advance_formation_on_join(&mut self.world, self.rules, now);
         }
         self.fill_practice_bots(now);
         self.tick_prematch(now);

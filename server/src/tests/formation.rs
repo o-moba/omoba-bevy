@@ -44,7 +44,7 @@ fn team_size_parses_and_clamps() {
 
 #[test]
 fn release_solo_join_forms_but_never_starts() {
-    let config = MatchConfig::release(5);
+    let config = MatchRules::release(5);
     let mut world = joined_roster(1, config.team_size);
     world.game_state = GameState::Lobby;
     let now = Instant::now();
@@ -72,7 +72,7 @@ fn release_solo_join_forms_but_never_starts() {
 
 #[test]
 fn release_match_waits_at_nine_players() {
-    let config = MatchConfig::release(5);
+    let config = MatchRules::release(5);
     let mut world = joined_roster(9, config.team_size);
     world.game_state = GameState::Forming {
         ready: 1,
@@ -90,7 +90,7 @@ fn release_match_waits_at_nine_players() {
 
 #[test]
 fn release_match_starts_after_full_roster_and_countdown() {
-    let config = MatchConfig::release(5);
+    let config = MatchRules::release(5);
     let mut world = joined_roster(10, config.team_size);
     world.game_state = GameState::Forming {
         ready: 9,
@@ -147,7 +147,7 @@ fn release_team_assignment_always_fills_smaller_team() {
 
 #[test]
 fn dev_mode_first_join_starts_match_immediately() {
-    let config = MatchConfig::dev();
+    let config = MatchRules::dev();
     let mut world = joined_roster(1, config.team_size);
     world.game_state = GameState::Lobby;
 
@@ -157,7 +157,7 @@ fn dev_mode_first_join_starts_match_immediately() {
 
 #[test]
 fn starting_countdown_rolls_back_when_a_player_drops() {
-    let config = MatchConfig::release(1);
+    let config = MatchRules::release(1);
     let mut world = joined_roster(2, config.team_size);
     world.game_state = GameState::Starting {
         countdown_ms: MATCH_START_COUNTDOWN_MS,
@@ -176,7 +176,7 @@ fn starting_countdown_rolls_back_when_a_player_drops() {
 
 #[test]
 fn forming_returns_to_lobby_when_queue_empties() {
-    let config = MatchConfig::release(5);
+    let config = MatchRules::release(5);
     let mut world = GameWorld::empty();
     world.game_state = GameState::Forming {
         ready: 1,

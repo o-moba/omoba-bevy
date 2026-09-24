@@ -446,7 +446,7 @@ mod tests {
             &rt.prematch,
             &rt.world.players,
             &rt.world.players[&addr],
-            rt.match_config,
+            rt.rules,
             now,
         )
         .unwrap()
@@ -487,7 +487,7 @@ mod tests {
                 &rt.prematch,
                 &rt.world.players,
                 &rt.world.players[&addr],
-                rt.match_config,
+                rt.rules,
                 now
             )
             .unwrap()
@@ -506,7 +506,7 @@ mod tests {
                 &rt.prematch,
                 &rt.world.players,
                 &rt.world.players[&addr],
-                rt.match_config,
+                rt.rules,
                 now
             )
             .unwrap()
@@ -533,7 +533,7 @@ mod tests {
                 &rt.prematch,
                 &rt.world.players,
                 &rt.world.players[&addr],
-                rt.match_config,
+                rt.rules,
                 now
             )
             .unwrap()

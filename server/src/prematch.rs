@@ -93,10 +93,9 @@ impl ServerRuntime {
             );
         }
         let ready = joined_count(&self.world.players);
-        let needed = if self.match_config.mode == MatchMode::Dev {
-            ready.max(1)
-        } else {
-            self.match_config.roster_size()
+        let needed = match self.rules.prematch_roster {
+            RosterPolicy::Present => ready.max(1),
+            RosterPolicy::Full => self.rules.roster_size(),
         };
         let all = |test: fn(&DraftState) -> bool| {
             self.world
@@ -339,7 +338,7 @@ pub(super) fn snapshot(
     runtime: &PrematchRuntime,
     players: &HashMap<SocketAddr, ConnectedPlayer>,
     recipient: &ConnectedPlayer,
-    config: MatchConfig,
+    rules: MatchRules,
     now: Instant,
 ) -> Option<PrematchSnapshot> {
     if !recipient.draft.capable || !recipient.joined {
@@ -381,10 +380,9 @@ pub(super) fn snapshot(
         generation: runtime.generation,
         phase,
         remaining_ms: remaining_ms(runtime.deadline, now),
-        needed: if config.mode == MatchMode::Dev {
-            players.values().filter(|p| p.joined).count().max(1) as u32
-        } else {
-            config.roster_size()
+        needed: match rules.prematch_roster {
+            RosterPolicy::Present => players.values().filter(|p| p.joined).count().max(1) as u32,
+            RosterPolicy::Full => rules.roster_size(),
         },
         players: roster,
         last_request_id: recipient.draft.acknowledged_request_id,
