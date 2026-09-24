@@ -114,4 +114,20 @@ flake, and the quick wins Q1–Q9 (§8.1). Every claim was re-checked on
 
 ## Checks
 
-GATE_PLACEHOLDER
+All on this tree (the last run with `CARGO_PROFILE_DEV_DEBUG=0` to fit the
+container's disk; same tests):
+
+- `cargo fmt --all -- --check`: clean.
+- `cargo clippy --workspace --all-targets --no-deps -- -D warnings`: clean.
+- `cargo clippy -p client --lib --no-deps --no-default-features -- -D warnings`: clean.
+- `cargo test --workspace --locked --exclude harness`: client lib 561,
+  shared 88, server 283 (+3 ignored; `postgres_live_udp` skips without a
+  URL), career-store 13 (+15 ignored), account-api 6 (+17 ignored), passport
+  18 (+3 ignored); counts unchanged.
+- `cargo build -p server && cargo test --locked -p harness -- --test-threads=1`:
+  22 unit + 24 black-box, all passed.
+- `python3 -m unittest discover -s scripts -p 'test_*.py'`: 96 tests OK
+  (skipped 1; was 93, +3 for the PostgreSQL runner).
+- `make test-postgres` against local PostgreSQL 16: see O1 above.
+- Flake loop on the final build: the test alone 200/200, the `match_pool`
+  tests 2 000/2 000.
