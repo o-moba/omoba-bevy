@@ -146,8 +146,10 @@ fn choose_authoritative_local_player<T: Copy + Eq>(
 #[derive(Resource, Default)]
 pub(in crate::net) struct StagedSnapshot {
     data: Option<PendingSnapshotData>,
-    /// Which entity work still runs; `Finish` reports it as the outcome.
+    /// Which entity stages still run; `Finish` reports it as the outcome.
     gate: ApplyOutcome,
+    /// What `LocalPlayer` did to the local hero; `Finish` reports it.
+    local: LocalHeroApply,
 }
 
 /// How far snapshot application got for one snapshot.
@@ -163,6 +165,32 @@ pub enum ApplyOutcome {
     /// selected and no join is committed: the local spawn, remote players and
     /// world entities were skipped.
     LocalPending,
+}
+
+/// What the `LocalPlayer` stage did to the local hero for one snapshot.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum LocalHeroApply {
+    /// No hero state was applied: the snapshot does not list the local hero,
+    /// or the spawn waits for a team or a committed join (`LocalPending`).
+    #[default]
+    Unchanged,
+    /// The existing hero took the server's state. `corrected`: its transform
+    /// snapped to the server position; `dashed`: a new dash was acknowledged
+    /// (which always snaps).
+    Updated {
+        entity: Entity,
+        corrected: bool,
+        dashed: bool,
+    },
+    /// The hero was spawned at the server `position` on the server-assigned
+    /// `team`, and the camera locked on it.
+    Spawned {
+        entity: Entity,
+        position: Vec3,
+        team: Team,
+    },
+    /// The Draft gate despawned the local hero.
+    Cleared,
 }
 
 /// Written by `SnapshotApply::Finish` once per applied snapshot, after every
@@ -181,6 +209,7 @@ pub struct SnapshotApplied {
     pub your_id: u64,
     pub round: Option<RoundId>,
     pub outcome: ApplyOutcome,
+    pub local: LocalHeroApply,
 }
 
 /// Snapshot application as chained stages, each a member of
@@ -196,9 +225,24 @@ pub(in crate::net) fn snapshot_apply_systems() -> ScheduleConfigs<ScheduleSystem
         apply_snapshot_resources
             .run_if(snapshot_staged)
             .in_set(SnapshotApply::Resources),
-        apply_snapshot_entities
+        apply_snapshot_local_player
             .run_if(snapshot_staged)
-            .in_set(SnapshotApply::Entities),
+            .in_set(SnapshotApply::LocalPlayer),
+        apply_snapshot_remote_players
+            .run_if(world_stages_open)
+            .in_set(SnapshotApply::RemotePlayers),
+        apply_snapshot_projectiles
+            .run_if(world_stages_open)
+            .in_set(SnapshotApply::Projectiles),
+        apply_snapshot_structures
+            .run_if(world_stages_open)
+            .in_set(SnapshotApply::Structures),
+        apply_snapshot_minions
+            .run_if(world_stages_open)
+            .in_set(SnapshotApply::Minions),
+        apply_snapshot_neutrals
+            .run_if(world_stages_open)
+            .in_set(SnapshotApply::Neutrals),
         finish_snapshot_apply
             .run_if(snapshot_staged)
             .in_set(SnapshotApply::Finish),
@@ -212,12 +256,20 @@ fn snapshot_staged(staged: Res<StagedSnapshot>) -> bool {
     staged.data.is_some()
 }
 
+/// The stages after `LocalPlayer` run only while neither the Draft gate nor
+/// the uncommitted-local-hero gate closed them. The condition is evaluated
+/// when the stage is reached, after `LocalPlayer` set the gate.
+fn world_stages_open(staged: Res<StagedSnapshot>) -> bool {
+    staged.data.is_some() && staged.gate == ApplyOutcome::Full
+}
+
 fn begin_snapshot_apply(
     mut pending: ResMut<PendingServerSnapshotFrame>,
     mut staged: ResMut<StagedSnapshot>,
 ) {
     staged.data = pending.frame.take();
     staged.gate = ApplyOutcome::Full;
+    staged.local = LocalHeroApply::Unchanged;
 }
 
 fn apply_snapshot_session(staged: Res<StagedSnapshot>, mut client_session: ResMut<ClientSession>) {
@@ -245,7 +297,7 @@ fn apply_snapshot_resources(
     mut game_state_snapshot: ResMut<GameStateSnapshot>,
     mut team_selection: ResMut<TeamSelection>,
 ) {
-    let StagedSnapshot { data, gate } = &mut *staged;
+    let StagedSnapshot { data, gate, .. } = &mut *staged;
     let Some(data) = data.as_mut() else {
         return;
     };
@@ -300,7 +352,7 @@ fn apply_snapshot_resources(
             join.team = own.team.into();
         }
     }
-    // The Draft roster is not final: the entity stage only clears the heroes.
+    // The Draft roster is not final: `LocalPlayer` only clears the heroes.
     if game_state_snapshot
         .prematch
         .as_ref()
@@ -318,67 +370,74 @@ fn finish_snapshot_apply(
         return;
     };
     let outcome = std::mem::take(&mut staged.gate);
+    let local = std::mem::take(&mut staged.local);
     applied.write(SnapshotApplied {
         meta: data.meta,
         your_id: data.your_id,
         round: RoundId::from_meta(&data.meta),
         outcome,
+        local,
     });
 }
 
-/// Grouped UI-side resources for [`apply_snapshot_entities`] (Bevy caps
-/// system functions at 16 parameters).
-#[derive(bevy::ecs::system::SystemParam)]
-pub(in crate::net) struct SnapshotUiState<'w> {
-    cam_state: ResMut<'w, CameraState>,
-    team_selection: ResMut<'w, TeamSelection>,
-    visual_mode: Res<'w, PlayerVisualMode>,
+/// The components every local hero spawns with, whatever its presentation
+/// (2D sprite, 3D scene or mesh fallback); the caller adds the transform and
+/// the presentation's own components.
+fn local_hero_components(state: &PlayerState, your_id: u64) -> impl Bundle {
+    (
+        Player,
+        PlayerBody,
+        VerticalVelocity::default(),
+        Team::from(state.team),
+        (
+            NetworkPlayerId(your_id),
+            NetworkCharacterChoice(state.character),
+            NetworkAvatar(state.avatar.clone()),
+            NetworkSpriteCharacter(state.sprite_character.clone()),
+            PlayerCosmeticAction::from(state),
+            NetworkHeroClass(state.hero_class),
+            crate::supporter::NetworkSupporterAura(state.supporter_aura),
+        ),
+        player_state_to_combat_stats(state),
+        player_state_to_progression(state),
+        player_state_to_equipment(state),
+        (
+            PlayerBasicAttackCooldown::from(state),
+            PlayerSkillCooldowns::from(state),
+            PlayerUtility::from(state),
+        ),
+        Name::new("Player"),
+    )
 }
 
-/// Local hero, remote players, projectiles, structures, minions and neutrals
-/// (roadmap step 15b2 splits it further).
-fn apply_snapshot_entities(
+/// `SnapshotApply::LocalPlayer`. During Draft it despawns every hero, local
+/// and remote, and the world stages stay closed. Otherwise it keeps exactly
+/// one local `Player`, applies the server's state to it (dash
+/// acknowledgement, position correction) or spawns it and locks the camera
+/// on it; a listed local hero without a team or a committed join closes the
+/// gate (`LocalPending`) instead of spawning.
+fn apply_snapshot_local_player(
     mut commands: Commands,
     mut staged: ResMut<StagedSnapshot>,
     client_session: Res<ClientSession>,
     mut network_state: ResMut<NetworkState>,
-    mut transform_sets: ParamSet<(
-        Query<&mut Transform>,
-        Query<&mut Transform, With<MainCamera>>,
-    )>,
-    mut remote_query: Query<
-        (&mut RemotePlayerInterpolation, Option<&PlayerUtility>),
-        With<RemotePlayer>,
-    >,
-    projectile_query: Query<&NetworkProjectile>,
-    structure_query: Query<&NetworkStructure>,
-    minion_query: Query<&NetworkMinion>,
-    neutral_query: Query<&NetworkNeutral>,
     local_player_query: Query<(Entity, Option<&NetworkPlayerId>), With<Player>>,
+    mut local_transforms: Query<&mut Transform, (With<Player>, Without<MainCamera>)>,
+    mut camera_transforms: Query<&mut Transform, (With<MainCamera>, Without<Player>)>,
     action_query: Query<Option<&PlayerCosmeticAction>>,
     player_assets: Res<PlayerAssets>,
     mut models: PlayerModelResolver,
-    mut ui_state: SnapshotUiState,
+    mut cam_state: ResMut<CameraState>,
+    mut team_selection: ResMut<TeamSelection>,
+    visual_mode: Res<PlayerVisualMode>,
     mut utility_vfx: MessageWriter<crate::game_vfx::UtilityVfx>,
 ) {
-    let SnapshotUiState {
-        cam_state,
-        team_selection,
-        visual_mode,
-    } = &mut ui_state;
-    let StagedSnapshot { data, gate } = &mut *staged;
-    let Some(data) = data.as_mut() else {
+    let StagedSnapshot { data, gate, local } = &mut *staged;
+    let Some(data) = data.as_ref() else {
         return;
     };
     let meta = data.meta;
-    let snapshot_wall_time = data.wall_time;
     let your_id = data.your_id;
-    let selected_team_for_spawn = data.selected_team_for_spawn;
-    let players = std::mem::take(&mut data.players);
-    let projectiles = std::mem::take(&mut data.projectiles);
-    let structures = std::mem::take(&mut data.structures);
-    let minions = std::mem::take(&mut data.minions);
-    let neutrals = std::mem::take(&mut data.neutrals);
 
     // Spawn the final roster only once frozen; redraft discards old models.
     if *gate == ApplyOutcome::Draft {
@@ -387,6 +446,7 @@ fn apply_snapshot_entities(
                 .entity(entity)
                 .despawn_related::<Children>()
                 .despawn();
+            *local = LocalHeroApply::Cleared;
         }
         for (_, entity) in network_state.remote_players.drain() {
             commands
@@ -396,7 +456,7 @@ fn apply_snapshot_entities(
         }
         return;
     }
-    let local_player_state = players.iter().find(|player| player.id == your_id);
+    let local_player_state = data.players.iter().find(|player| player.id == your_id);
     let local_players = local_player_query
         .iter()
         .map(|(entity, maybe_id)| (entity, maybe_id.map(|id| id.0)))
@@ -463,7 +523,8 @@ fn apply_snapshot_entities(
                     .entity(local_entity)
                     .remove::<(crate::player::MovementTarget, crate::player::MovementRoute)>();
             }
-            if let Ok(mut local_transform) = transform_sets.p0().get_mut(local_entity) {
+            let mut corrected = false;
+            if let Ok(mut local_transform) = local_transforms.get_mut(local_entity) {
                 // Snap on meaningful server corrections (first team spawn, respawn, etc.).
                 // While speed-boosting, the local player legitimately leads the last
                 // server-acked position further, so widen the threshold to avoid
@@ -488,15 +549,21 @@ fn apply_snapshot_entities(
                 {
                     local_transform.translation = server_translation;
                     local_transform.rotation = Quat::from_rotation_y(local_player_state.yaw);
+                    corrected = true;
                 }
             }
+            *local = LocalHeroApply::Updated {
+                entity: local_entity,
+                corrected,
+                dashed: dash_accepted,
+            };
         }
     } else if let Some(local_player_state) = local_player_state {
         // Spawn only after the local join was committed (a team was picked).
         // Snapshots list joined players only, so our presence in the list is
         // the server's join ack. The server may have assigned a different
         // team than requested (release-mode balancing) - adopt it as truth.
-        if selected_team_for_spawn.is_none() && !client_session.has_committed_join() {
+        if data.selected_team_for_spawn.is_none() && !client_session.has_committed_join() {
             *gate = ApplyOutcome::LocalPending;
             return;
         }
@@ -513,7 +580,7 @@ fn apply_snapshot_entities(
             local_player_state.y,
             local_player_state.z,
         );
-        let (local_scene, local_gltf) = if **visual_mode == PlayerVisualMode::Models3d {
+        let (local_scene, local_gltf) = if *visual_mode == PlayerVisualMode::Models3d {
             models.resolve(
                 local_player_state.character,
                 local_player_state.avatar.as_deref(),
@@ -521,33 +588,13 @@ fn apply_snapshot_entities(
         } else {
             (None, None)
         };
-        let entity = if **visual_mode == PlayerVisualMode::Sprite2d {
+        let hero = local_hero_components(local_player_state, your_id);
+        let entity = if *visual_mode == PlayerVisualMode::Sprite2d {
             commands
                 .spawn((
                     Transform::from_translation(spawn),
                     Visibility::default(),
-                    Player,
-                    PlayerBody,
-                    VerticalVelocity::default(),
-                    Team::from(local_player_state.team),
-                    (
-                        NetworkPlayerId(your_id),
-                        NetworkCharacterChoice(local_player_state.character),
-                        NetworkAvatar(local_player_state.avatar.clone()),
-                        NetworkSpriteCharacter(local_player_state.sprite_character.clone()),
-                        PlayerCosmeticAction::from(local_player_state),
-                        NetworkHeroClass(local_player_state.hero_class),
-                        crate::supporter::NetworkSupporterAura(local_player_state.supporter_aura),
-                    ),
-                    player_state_to_combat_stats(local_player_state),
-                    player_state_to_progression(local_player_state),
-                    player_state_to_equipment(local_player_state),
-                    (
-                        PlayerBasicAttackCooldown::from(local_player_state),
-                        PlayerSkillCooldowns::from(local_player_state),
-                        PlayerUtility::from(local_player_state),
-                    ),
-                    Name::new("Player"),
+                    hero,
                 ))
                 .id()
         } else if let Some(scene_handle) = local_scene {
@@ -560,29 +607,8 @@ fn apply_snapshot_entities(
                 },
                 GlobalTransform::default(),
                 Visibility::default(),
-                Player,
-                PlayerBody,
-                VerticalVelocity::default(),
-                Team::from(local_player_state.team),
                 NormalizeModelScale::for_player_model(),
-                (
-                    NetworkPlayerId(your_id),
-                    NetworkCharacterChoice(local_player_state.character),
-                    NetworkAvatar(local_player_state.avatar.clone()),
-                    NetworkSpriteCharacter(local_player_state.sprite_character.clone()),
-                    PlayerCosmeticAction::from(local_player_state),
-                    NetworkHeroClass(local_player_state.hero_class),
-                    crate::supporter::NetworkSupporterAura(local_player_state.supporter_aura),
-                ),
-                player_state_to_combat_stats(local_player_state),
-                player_state_to_progression(local_player_state),
-                player_state_to_equipment(local_player_state),
-                (
-                    PlayerBasicAttackCooldown::from(local_player_state),
-                    PlayerSkillCooldowns::from(local_player_state),
-                    PlayerUtility::from(local_player_state),
-                ),
-                Name::new("Player"),
+                hero,
             ));
             if let Some(gltf) = local_gltf {
                 entity_commands.insert(ModelScaleSource {
@@ -600,37 +626,16 @@ fn apply_snapshot_entities(
                     Mesh3d(player_assets.mesh.clone()),
                     MeshMaterial3d(player_assets.material.clone()),
                     Transform::from_translation(spawn),
-                    Player,
-                    PlayerBody,
-                    VerticalVelocity::default(),
-                    Team::from(local_player_state.team),
-                    (
-                        NetworkPlayerId(your_id),
-                        NetworkCharacterChoice(local_player_state.character),
-                        NetworkAvatar(local_player_state.avatar.clone()),
-                        NetworkSpriteCharacter(local_player_state.sprite_character.clone()),
-                        PlayerCosmeticAction::from(local_player_state),
-                        NetworkHeroClass(local_player_state.hero_class),
-                        crate::supporter::NetworkSupporterAura(local_player_state.supporter_aura),
-                    ),
-                    player_state_to_combat_stats(local_player_state),
-                    player_state_to_progression(local_player_state),
-                    player_state_to_equipment(local_player_state),
-                    (
-                        PlayerBasicAttackCooldown::from(local_player_state),
-                        PlayerSkillCooldowns::from(local_player_state),
-                        PlayerUtility::from(local_player_state),
-                    ),
-                    Name::new("Player"),
+                    hero,
                 ))
                 .id()
         };
 
         network_state.local_team = Some(local_player_state.team.into());
         accept_dash_ack(&mut network_state.local_dash_ack, meta, local_player_state);
-        if let Ok(mut camera_transform) = transform_sets.p1().single_mut() {
+        if let Ok(mut camera_transform) = camera_transforms.single_mut() {
             cam_state.locked = true;
-            if **visual_mode == PlayerVisualMode::Sprite2d {
+            if *visual_mode == PlayerVisualMode::Sprite2d {
                 let xy = crate::world2d::simulation_xz_to_render_xy(spawn);
                 camera_transform.translation.x = xy.x;
                 camera_transform.translation.y = xy.y;
@@ -642,13 +647,39 @@ fn apply_snapshot_entities(
                 *camera_transform = camera_transform.looking_at(look_target, Vec3::Y);
             }
         }
-
-        commands.entity(entity);
+        *local = LocalHeroApply::Spawned {
+            entity,
+            position: spawn,
+            team: assigned_team,
+        };
     }
+}
 
+/// `SnapshotApply::RemotePlayers` (open gate only): moves every listed
+/// remote hero (a teleport and a dash VFX for a new dash) or spawns it, and
+/// despawns the ones the snapshot no longer lists.
+fn apply_snapshot_remote_players(
+    mut commands: Commands,
+    staged: Res<StagedSnapshot>,
+    mut network_state: ResMut<NetworkState>,
+    mut remote_query: Query<
+        (&mut RemotePlayerInterpolation, Option<&PlayerUtility>),
+        With<RemotePlayer>,
+    >,
+    action_query: Query<Option<&PlayerCosmeticAction>>,
+    player_assets: Res<PlayerAssets>,
+    mut models: PlayerModelResolver,
+    visual_mode: Res<PlayerVisualMode>,
+    mut utility_vfx: MessageWriter<crate::game_vfx::UtilityVfx>,
+) {
+    let Some(data) = staged.data.as_ref() else {
+        return;
+    };
+    let your_id = data.your_id;
+    let snapshot_wall_time = data.wall_time;
     let mut seen_remote_ids = HashSet::new();
 
-    for player in &players {
+    for player in &data.players {
         if player.id == your_id {
             continue;
         }
@@ -698,7 +729,7 @@ fn apply_snapshot_entities(
             continue;
         }
 
-        let (scene_handle, gltf_handle) = if **visual_mode == PlayerVisualMode::Models3d {
+        let (scene_handle, gltf_handle) = if *visual_mode == PlayerVisualMode::Models3d {
             models.resolve(player.character, player.avatar.as_deref())
         } else {
             (None, None)
@@ -734,7 +765,7 @@ fn apply_snapshot_entities(
                 PlayerUtility::from(player),
             ),
         ));
-        if **visual_mode == PlayerVisualMode::Models3d {
+        if *visual_mode == PlayerVisualMode::Models3d {
             entity_commands.insert(NormalizeModelScale::for_player_model());
             if let Some(gltf) = gltf_handle {
                 entity_commands.insert(ModelScaleSource {
@@ -781,13 +812,25 @@ fn apply_snapshot_entities(
             }
         }
     }
+}
 
+/// `SnapshotApply::Projectiles` (open gate only).
+fn apply_snapshot_projectiles(
+    mut commands: Commands,
+    staged: Res<StagedSnapshot>,
+    mut network_state: ResMut<NetworkState>,
+    mut transforms: Query<&mut Transform, With<NetworkProjectile>>,
+    projectile_query: Query<&NetworkProjectile>,
+) {
+    let Some(data) = staged.data.as_ref() else {
+        return;
+    };
     let mut seen_projectile_ids = HashSet::new();
-    for projectile in &projectiles {
+    for projectile in &data.projectiles {
         seen_projectile_ids.insert(projectile.id);
 
         if let Some(entity) = network_state.projectiles.get(&projectile.id).copied() {
-            if let Ok(mut transform) = transform_sets.p0().get_mut(entity) {
+            if let Ok(mut transform) = transforms.get_mut(entity) {
                 transform.translation = Vec3::new(projectile.x, projectile.y, projectile.z);
             }
             commands
@@ -823,13 +866,25 @@ fn apply_snapshot_entities(
             }
         }
     }
+}
 
+/// `SnapshotApply::Structures` (open gate only).
+fn apply_snapshot_structures(
+    mut commands: Commands,
+    staged: Res<StagedSnapshot>,
+    mut network_state: ResMut<NetworkState>,
+    mut transforms: Query<&mut Transform, With<NetworkStructure>>,
+    structure_query: Query<&NetworkStructure>,
+) {
+    let Some(data) = staged.data.as_ref() else {
+        return;
+    };
     let mut seen_structure_ids = HashSet::new();
-    for structure in &structures {
+    for structure in &data.structures {
         seen_structure_ids.insert(structure.id);
 
         if let Some(entity) = network_state.structures.get(&structure.id).copied() {
-            if let Ok(mut transform) = transform_sets.p0().get_mut(entity) {
+            if let Ok(mut transform) = transforms.get_mut(entity) {
                 transform.translation = Vec3::new(structure.x, structure.y, structure.z);
             }
             commands.entity(entity).insert((
@@ -876,15 +931,28 @@ fn apply_snapshot_entities(
             }
         }
     }
+}
 
+/// `SnapshotApply::Minions` (open gate only).
+fn apply_snapshot_minions(
+    mut commands: Commands,
+    staged: Res<StagedSnapshot>,
+    mut network_state: ResMut<NetworkState>,
+    transforms: Query<&Transform, With<NetworkMinion>>,
+    minion_query: Query<&NetworkMinion>,
+    visual_mode: Res<PlayerVisualMode>,
+) {
+    let Some(data) = staged.data.as_ref() else {
+        return;
+    };
     let mut seen_minion_ids = HashSet::new();
-    for minion in &minions {
+    for minion in &data.minions {
         seen_minion_ids.insert(minion.id);
         let target_translation = Vec3::new(minion.x, minion.y, minion.z);
         let target_rotation = Quat::from_rotation_y(minion.yaw);
 
         if let Some(entity) = network_state.minions.get(&minion.id).copied() {
-            if let Ok(transform) = transform_sets.p0().get_mut(entity) {
+            if let Ok(transform) = transforms.get(entity) {
                 let interpolation = NetEntityInterpolation {
                     from_translation: transform.translation,
                     to_translation: target_translation,
@@ -926,7 +994,7 @@ fn apply_snapshot_entities(
             minion_state_to_combat_stats(minion),
             Name::new(format!("Minion-{}-{:?}", minion.id, minion.lane)),
         ));
-        if **visual_mode == PlayerVisualMode::Models3d {
+        if *visual_mode == PlayerVisualMode::Models3d {
             // Original procedural meshes attach once in MinionVisualsPlugin.
             entity_commands.insert(NormalizeModelScale::scaled_by(MINION_MODEL_HEIGHT_SCALE));
         }
@@ -934,14 +1002,43 @@ fn apply_snapshot_entities(
         network_state.minions.insert(minion.id, entity);
     }
 
+    let stale_minion_ids = network_state
+        .minions
+        .keys()
+        .copied()
+        .filter(|id| !seen_minion_ids.contains(id))
+        .collect::<Vec<_>>();
+    for minion_id in stale_minion_ids {
+        if let Some(entity) = network_state.minions.remove(&minion_id) {
+            if minion_query.get(entity).is_ok() {
+                commands
+                    .entity(entity)
+                    .despawn_related::<Children>()
+                    .despawn();
+            }
+        }
+    }
+}
+
+/// `SnapshotApply::Neutrals` (open gate only): jungle camps and bosses.
+fn apply_snapshot_neutrals(
+    mut commands: Commands,
+    staged: Res<StagedSnapshot>,
+    mut network_state: ResMut<NetworkState>,
+    transforms: Query<&Transform, With<NetworkNeutral>>,
+    neutral_query: Query<&NetworkNeutral>,
+) {
+    let Some(data) = staged.data.as_ref() else {
+        return;
+    };
     let mut seen_neutral_ids = HashSet::new();
-    for neutral in &neutrals {
+    for neutral in &data.neutrals {
         seen_neutral_ids.insert(neutral.id);
         let target_translation = Vec3::new(neutral.x, neutral.y, neutral.z);
         let target_rotation = Quat::from_rotation_y(neutral.yaw);
 
         if let Some(entity) = network_state.neutrals.get(&neutral.id).copied() {
-            if let Ok(transform) = transform_sets.p0().get_mut(entity) {
+            if let Ok(transform) = transforms.get(entity) {
                 let interpolation = NetEntityInterpolation {
                     from_translation: transform.translation,
                     to_translation: target_translation,
@@ -1014,23 +1111,6 @@ fn apply_snapshot_entities(
     for neutral_id in stale_neutral_ids {
         if let Some(entity) = network_state.neutrals.remove(&neutral_id) {
             if neutral_query.get(entity).is_ok() {
-                commands
-                    .entity(entity)
-                    .despawn_related::<Children>()
-                    .despawn();
-            }
-        }
-    }
-
-    let stale_minion_ids = network_state
-        .minions
-        .keys()
-        .copied()
-        .filter(|id| !seen_minion_ids.contains(id))
-        .collect::<Vec<_>>();
-    for minion_id in stale_minion_ids {
-        if let Some(entity) = network_state.minions.remove(&minion_id) {
-            if minion_query.get(entity).is_ok() {
                 commands
                     .entity(entity)
                     .despawn_related::<Children>()
@@ -1558,6 +1638,154 @@ mod tests {
         let applied = drain_snapshot_applied(&mut app);
         assert_eq!(applied.len(), 1);
         assert_eq!(applied[0].outcome, ApplyOutcome::LocalPending);
+    }
+
+    // Split entity stages (roadmap step 15b2): what `LocalPlayer` reports and
+    // the dash VFX order across the local and remote stages (hazard 5).
+
+    #[test]
+    fn local_hero_apply_reports_spawn_update_correction_dash_and_draft_clear() {
+        use crate::game_vfx::UtilityVfx;
+        use crate::net::session::CommittedJoin;
+        let (mut app, incoming) = snapshot_app();
+        // A prematch join: the world fallback leaves the hero to the draft.
+        app.world_mut().resource_mut::<ClientSession>().last_join = Some(CommittedJoin {
+            prematch: true,
+            ..CommittedJoin::for_test()
+        });
+        let apply = |app: &mut App, tick: u64, edit: fn(&mut serde_json::Value)| {
+            let mut value = serde_json::to_value(admission_snapshot(1, tick, true, None)).unwrap();
+            for hero in value["players"].as_array_mut().unwrap() {
+                hero["avatar"] = serde_json::Value::Null;
+            }
+            edit(&mut value);
+            incoming
+                .send(serde_json::from_value(value).unwrap())
+                .unwrap();
+            app.update();
+            let applied = drain_snapshot_applied(app);
+            assert_eq!(applied.len(), 1);
+            (applied[0].outcome, applied[0].local)
+        };
+        let (outcome, spawned) = apply(&mut app, 1, |_| {});
+        let hero = network_hero_entity(&mut app, 1);
+        assert_eq!(outcome, ApplyOutcome::Full);
+        assert_eq!(
+            spawned,
+            LocalHeroApply::Spawned {
+                entity: hero,
+                position: Vec3::new(1.125, 0.5, -2.25),
+                team: Team::Green,
+            }
+        );
+        let updated = |corrected, dashed| LocalHeroApply::Updated {
+            entity: hero,
+            corrected,
+            dashed,
+        };
+        assert_eq!(apply(&mut app, 2, |_| {}).1, updated(false, false));
+        let moved = |value: &mut serde_json::Value| value["players"][0]["x"] = json!(20.0);
+        assert_eq!(apply(&mut app, 3, moved).1, updated(true, false));
+        assert_eq!(
+            app.world().get::<Transform>(hero).unwrap().translation.x,
+            20.0
+        );
+
+        app.world_mut()
+            .resource_mut::<Messages<UtilityVfx>>()
+            .clear();
+        let both_dash = |value: &mut serde_json::Value| {
+            value["players"][0]["x"] = json!(20.0);
+            for index in [0, 1] {
+                value["players"][index]["utility"] = json!({"dash_sequence": 1});
+            }
+        };
+        assert_eq!(apply(&mut app, 4, both_dash).1, updated(true, true));
+        let seeds = app
+            .world_mut()
+            .resource_mut::<Messages<UtilityVfx>>()
+            .drain()
+            .map(|vfx| match vfx {
+                UtilityVfx::Dash { seed, .. } => seed,
+                other => panic!("unexpected utility VFX {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(seeds, vec![1, 2 << 16 | 1], "local dash first, then remote");
+
+        let unlisted = |value: &mut serde_json::Value| {
+            value["players"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|hero| hero["id"] != 1);
+        };
+        assert_eq!(apply(&mut app, 5, unlisted).1, LocalHeroApply::Unchanged);
+        let draft = |value: &mut serde_json::Value| {
+            value["prematch"] = json!({"generation": 1, "phase": "draft", "remaining_ms": 1000,
+                "needed": 10, "players": [], "last_request_id": 0, "error": null});
+        };
+        assert_eq!(
+            apply(&mut app, 6, draft),
+            (ApplyOutcome::Draft, LocalHeroApply::Cleared)
+        );
+        assert_eq!(
+            apply(&mut app, 7, draft),
+            (ApplyOutcome::Draft, LocalHeroApply::Unchanged),
+            "nothing left to clear"
+        );
+    }
+
+    // Round changes for the reactions after `ApplySnapshot` (roadmap step 15c):
+    // the teardown gap the combat round reset used to ride out itself.
+
+    #[test]
+    fn teardown_gap_keeps_the_last_round_so_only_the_next_round_is_a_change() {
+        use crate::net::session::CommittedJoin;
+        let (mut app, incoming) = snapshot_app();
+        app.world_mut().resource_mut::<ClientSession>().last_join = Some(CommittedJoin::for_test());
+        incoming.send(admission_snapshot(1, 1, true, None)).unwrap();
+        app.update();
+        drain_session_events(&mut app);
+        let round = |match_id| RoundId {
+            server_epoch: 1,
+            match_id,
+        };
+
+        tear_down(&mut app, TeardownReason::TransportFailure);
+        app.update();
+        // The gap: pollers of `GameStateSnapshot` see zero ids, `net` keeps
+        // the round and announces no change.
+        let meta = app.world().resource::<GameStateSnapshot>().meta;
+        assert_eq!(RoundId::from_meta(&meta), None);
+        assert_eq!(
+            app.world().resource::<NetworkState>().last_round,
+            Some(round(1))
+        );
+        assert!(
+            !drain_session_events(&mut app)
+                .iter()
+                .any(|event| matches!(event, SessionEvent::RoundChanged { .. }))
+        );
+
+        // The reconnect lands straight in the next round (the transport swap
+        // on the same channels, as in the session tests).
+        {
+            let mut session = app.world_mut().resource_mut::<ClientSession>();
+            session.discard_incoming_snapshots = false;
+            session.state = ClientConnectionState::WaitingForServer;
+        }
+        incoming.send(admission_snapshot(2, 1, true, None)).unwrap();
+        app.update();
+        assert_eq!(
+            drain_session_events(&mut app),
+            vec![
+                SessionEvent::Connected,
+                SessionEvent::Joined { your_id: 1 },
+                SessionEvent::RoundChanged {
+                    previous: round(1),
+                    current: round(2),
+                },
+            ]
+        );
     }
 
     #[test]

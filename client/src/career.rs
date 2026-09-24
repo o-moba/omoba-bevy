@@ -1,7 +1,7 @@
 //! Authoritative career UI. Match receipts outlive live entities and connections.
 use crate::{
     input_context::InputContextSet,
-    net::{GameState, GameStateSnapshot, NetworkCommand},
+    net::{GameState, GameStateSnapshot, NetworkCommand, SessionEvent, SessionReactions},
     platform::UiProfile,
     sprite::{PlayerVisualMode, SpriteVisualAssets},
     ui_theme as ui,
@@ -425,9 +425,32 @@ impl Plugin for CareerPlugin {
             )
             .add_systems(Update, render.after(CareerUiSet))
             .add_systems(
+                Update,
+                clear_account_on_scope_reset.in_set(SessionReactions),
+            )
+            .add_systems(
                 PostUpdate,
                 scroll_desktop.before(bevy::ui::UiSystems::Layout),
             );
+    }
+}
+
+/// Another server scope (offline practice, a new address, an allocated
+/// arena, the lobby after a leave) makes the account view stale: clear
+/// transport-local views until the destination server authenticates this
+/// account against its configured backend. Runs in `SessionReactions`, in the
+/// frame the session announced [`SessionEvent::ServerScopeReset`], so the
+/// next frame's ingest applies the new server's view to a cleared client.
+pub(crate) fn clear_account_on_scope_reset(
+    mut session_events: MessageReader<SessionEvent>,
+    mut career: ResMut<CareerClient>,
+) {
+    let mut scope_reset = false;
+    for event in session_events.read() {
+        scope_reset |= *event == SessionEvent::ServerScopeReset;
+    }
+    if scope_reset {
+        career.clear_account();
     }
 }
 #[derive(Component)]

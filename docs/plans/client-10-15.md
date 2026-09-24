@@ -4,7 +4,7 @@ Read-only analysis of `main` after PR #33 (line numbers refer to that tree and d
 
 # Step 15: client session events and staged snapshot application
 
-**Status:** 15a and 15b1 are done (one PR; notes in [progress/2026-09-24-client-session-events.md](../progress/2026-09-24-client-session-events.md)); 15b2 is next. Differences from 15.3: `StagedSnapshot.gate` is an `ApplyOutcome` (no separate `ApplyGate` type), `SnapshotApplied` has no `local` field yet, `SnapshotUiState` stays until 15b2 (the single entity stage still needs it), and `flush_session_events` is the last system of `snapshot_apply_systems()`.
+**Status:** 15a and 15b1 are done (#39; notes in [progress/2026-09-24-client-session-events.md](../progress/2026-09-24-client-session-events.md)); 15b2, 15c and 15d are done (one PR; notes in [progress/2026-09-24-client-apply-stages.md](../progress/2026-09-24-client-apply-stages.md)); 15e is next. Differences from 15.3: `StagedSnapshot.gate` is an `ApplyOutcome` (no separate `ApplyGate` type) and `flush_session_events` is the last system of `snapshot_apply_systems()`. `SnapshotApplied.local` (`LocalHeroApply`) and the split entity stages are as designed and `SnapshotUiState` is gone. The combat round reset and the mobile clear read `RoundChanged` after `ApplySnapshot` (where it is flushed), not in `SessionReactions`; `SnapshotApplied` still has no reader outside the tests, so its `expect(dead_code)` stays until 15f.
 
 ## 15.1 Who reads or writes session state outside `client/src/net/`
 
@@ -157,7 +157,7 @@ It is emitted by the `Finish` stage. Its first real consumers are the optional c
 
 ## 15.5 Step 15 slices (in order; 543 tests unchanged unless noted)
 
-Status: 15a and 15b1 done (client lib 549 → 557); 15b2-15e open; 15f and 15g optional.
+Status: 15a and 15b1 done (#39, client lib 549 → 557); 15b2, 15c and 15d done (one PR, 557 → 561); 15e open; 15f and 15g optional.
 
 | # | Slice | Size | Notes |
 |---|---|---|---|

@@ -83,13 +83,16 @@ pub enum SessionEvent {
         reconnecting: bool,
     },
     /// The player left the match or the queue; `returning_to` is the lobby
-    /// address the client reconnects to, if any.
+    /// address the client reconnects to, if any. The front end goes Home.
     Left { returning_to: Option<String> },
-    /// Career and social views belong to the previous server and are stale.
+    /// Career and social views belong to the previous server and are stale;
+    /// `CareerClient` and `SocialClient` clear themselves in
+    /// `SessionReactions`, before the next frame's ingest.
     ServerScopeReset,
     /// A snapshot of a different round than the last one was applied. Rounds
     /// with a zero epoch or match id are skipped and a reconnect to the same
-    /// round is not a change (the `CombatRoundIdentity` semantics).
+    /// round is not a change. Read after `ApplySnapshot` (same frame) by the
+    /// combat round reset and the mobile-controls clear.
     RoundChanged { previous: RoundId, current: RoundId },
 }
 
@@ -632,6 +635,14 @@ pub(in crate::net) struct TeardownQueries<'w, 's> {
     pub(in crate::net) player_query: Query<'w, 's, Entity, With<Player>>,
 }
 
+/// Session commands from the UI, the auto-reconnect and the teardowns. Other
+/// modules react to the [`SessionEvent`]s it queues (career and social clear
+/// on `ServerScopeReset`, the front end goes Home on `Left`, all in
+/// `SessionReactions`). Three outside writes stay here on purpose:
+/// `TeamSelection.team = None` is join intent (an in-flight snapshot must not
+/// respawn the hero), and `LeaveMatch` needs the lobby address from
+/// `MatchServiceClient::take_return_to_lobby` and `CareerIdentity` to sign
+/// `CancelQueue` before it sends `Leave`.
 pub(in crate::net) fn update_session_lifecycle(
     mut commands: Commands,
     mut client_session: ResMut<ClientSession>,
@@ -643,8 +654,6 @@ pub(in crate::net) fn update_session_lifecycle(
     mut cam_state: ResMut<CameraState>,
     queries: TeardownQueries,
     mut session_ui: MessageReader<SessionUiCommand>,
-    mut career: Option<ResMut<crate::career::CareerClient>>,
-    mut social: Option<ResMut<crate::social::SocialClient>>,
     mut match_service: Option<ResMut<crate::match_service::MatchServiceClient>>,
     mut career_identity: Option<ResMut<crate::career_identity::CareerIdentity>>,
     session_id: Option<Res<ClientSessionId>>,
@@ -692,12 +701,6 @@ pub(in crate::net) fn update_session_lifecycle(
                     service.take_return_to_lobby();
                 }
                 client_session.outbox.push(SessionEvent::ServerScopeReset);
-                if let Some(career) = career.as_mut() {
-                    career.clear_account();
-                }
-                if let Some(social) = social.as_mut() {
-                    social.clear();
-                }
                 spawn_network_transport(
                     &mut commands,
                     &mut client_session,
@@ -713,20 +716,9 @@ pub(in crate::net) fn update_session_lifecycle(
                 let Some(address) = crate::persistence::validate_game_server_addr(raw) else {
                     continue;
                 };
+                // Checked before `spawn_network_transport` overwrites the address.
                 if address != client_session.server_addr_display {
                     client_session.outbox.push(SessionEvent::ServerScopeReset);
-                }
-                if address != client_session.server_addr_display
-                    && let Some(social) = social.as_mut()
-                {
-                    social.clear();
-                }
-                if address != client_session.server_addr_display
-                    && let Some(career) = career.as_mut()
-                {
-                    // Clear transport-local views until the destination server
-                    // authenticates this account against its configured backend.
-                    career.clear_account();
                 }
                 client_session.offline_return_addr = None;
                 client_session.ephemeral_endpoint = false;
@@ -753,12 +745,6 @@ pub(in crate::net) fn update_session_lifecycle(
                 *game_state_snapshot = GameStateSnapshot::default();
                 commands.insert_resource(PendingServerSnapshotFrame::default());
                 client_session.outbox.push(SessionEvent::ServerScopeReset);
-                if let Some(career) = career.as_mut() {
-                    career.clear_account();
-                }
-                if let Some(social) = social.as_mut() {
-                    social.clear();
-                }
                 cam_state.locked = false;
                 client_session.ephemeral_endpoint = true;
                 commands.remove_resource::<NetworkChannels>();
@@ -801,9 +787,6 @@ pub(in crate::net) fn update_session_lifecycle(
                 team_selection.team = None;
                 despawn_local_players(&mut commands, player_query);
                 cam_state.locked = false;
-                commands.insert_resource(crate::frontend::PendingScreen(Some(
-                    crate::frontend::AppScreen::Home,
-                )));
                 if let Some(address) = return_to_lobby {
                     despawn_tracked_net_entities(
                         &mut commands,
@@ -817,12 +800,6 @@ pub(in crate::net) fn update_session_lifecycle(
                     *game_state_snapshot = GameStateSnapshot::default();
                     commands.insert_resource(PendingServerSnapshotFrame::default());
                     client_session.outbox.push(SessionEvent::ServerScopeReset);
-                    if let Some(career) = career.as_mut() {
-                        career.clear_account();
-                    }
-                    if let Some(social) = social.as_mut() {
-                        social.clear();
-                    }
                     client_session.ephemeral_endpoint = false;
                     commands.remove_resource::<NetworkChannels>();
                     spawn_network_transport(&mut commands, &mut client_session, address);
@@ -1245,6 +1222,92 @@ mod tests {
         );
     }
 
+    // Session reactions (roadmap step 15d, hazard 7): consumers of
+    // `ServerScopeReset` run in `SessionReactions`, in the frame of the reset.
+
+    #[test]
+    fn scope_reset_clears_career_and_social_in_its_frame_so_the_next_view_survives() {
+        use crate::career::CareerClient;
+        use crate::net::{ClientNetPipeline, SessionReactions, configure_network_pipeline};
+        use crate::social::SocialClient;
+        let server = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let address = server.local_addr().unwrap().to_string();
+        let mut career = CareerClient::default();
+        career.public_profile_id = Some("old-server-profile".into());
+        let mut social = SocialClient::default();
+        social.chat_open = true;
+        let mut app = App::new();
+        app.insert_resource(ClientSession {
+            state: ClientConnectionState::Connected,
+            server_addr_display: "127.0.0.1:9".into(),
+            career_server_epoch: 7,
+            ..default()
+        })
+        .insert_resource(career)
+        .insert_resource(social)
+        .init_resource::<NetIncomingDisconnected>()
+        .init_resource::<PendingServerSnapshotFrame>()
+        .init_resource::<NetworkState>()
+        .init_resource::<GameStateSnapshot>()
+        .init_resource::<TeamSelection>()
+        .init_resource::<CameraState>()
+        .add_message::<SessionUiCommand>()
+        .add_message::<SessionEvent>()
+        .add_systems(
+            Update,
+            (
+                ingest_server_snapshot_packets.in_set(ClientNetPipeline::IngestSnapshot),
+                (update_session_lifecycle, flush_session_events)
+                    .chain()
+                    .in_set(ClientNetPipeline::SessionLifecycle),
+                crate::career::clear_account_on_scope_reset.in_set(SessionReactions),
+                crate::social::clear_on_scope_reset.in_set(SessionReactions),
+            ),
+        );
+        configure_network_pipeline(&mut app);
+
+        app.world_mut()
+            .write_message(SessionUiCommand::ConnectTo(address));
+        app.update();
+        assert!(
+            app.world()
+                .resource::<CareerClient>()
+                .public_profile_id
+                .is_none(),
+            "the old server's account is cleared in the frame of the reset"
+        );
+        assert!(!app.world().resource::<SocialClient>().chat_open);
+
+        // The next frame's ingest applies the new server's first career view
+        // (on the new transport's channels; the test stands in for its thread).
+        let (outgoing, _outgoing_rx) = crossbeam_channel::unbounded();
+        let (incoming_tx, incoming) = crossbeam_channel::unbounded();
+        let (_signals_tx, signals) = crossbeam_channel::unbounded();
+        app.insert_resource(NetworkChannels {
+            gameplay_signer: Default::default(),
+            outgoing,
+            incoming,
+            signals,
+        });
+        incoming_tx
+            .send(shared::wire::ServerPacket::Career {
+                server_epoch: 7,
+                sequence: 1,
+                career: shared::career::CareerView {
+                    storage_enabled: true,
+                    ..default()
+                },
+            })
+            .unwrap();
+        app.update();
+        let career = app.world().resource::<CareerClient>();
+        assert!(
+            career.view.storage_enabled,
+            "the new view survives: the reset was consumed in its own frame"
+        );
+        assert!(career.public_profile_id.is_none());
+    }
+
     #[test]
     fn teardown_shows_select_only_without_committed_join() {
         assert!(teardown_shows_select(false));
@@ -1327,6 +1390,7 @@ mod tests {
             .init_resource::<TeamSelection>()
             .init_resource::<CameraState>()
             .init_resource::<crate::maps::MapLayout>()
+            .init_resource::<crate::frontend::PendingScreen>()
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<StandardMaterial>>()
             .add_message::<SessionUiCommand>()
@@ -1340,6 +1404,9 @@ mod tests {
                     offline::step,
                     ingest_server_snapshot_packets,
                     snapshot_apply_systems(),
+                    // The front end's reaction to `Left` (in `SessionReactions`
+                    // in the app), after the flush that writes it.
+                    crate::frontend::return_home_on_leave,
                 )
                     .chain(),
             );

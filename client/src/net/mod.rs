@@ -72,10 +72,19 @@ pub(crate) enum SnapshotApply {
     /// Connection state, the `Connected` and `Joined` edges.
     Session,
     /// `GameStateSnapshot`, the round (`RoundChanged`), the prematch loadout
-    /// and the Draft gate. Runs even when the entity work is skipped.
+    /// and the Draft gate. Runs even when the entity stages are skipped.
     Resources,
-    /// Local hero, remote players, projectiles, structures, minions, neutrals.
-    Entities,
+    /// Draft: despawns every hero and keeps the stages below closed.
+    /// Otherwise reconciles or spawns the local hero, or closes the stages
+    /// below while the listed local hero has no team and no committed join.
+    LocalPlayer,
+    /// Remote heroes (interpolation buffers, dash VFX after the local one).
+    RemotePlayers,
+    Projectiles,
+    Structures,
+    Minions,
+    /// Jungle camps and bosses.
+    Neutrals,
     /// Writes `SnapshotApplied` and clears the staged frame.
     Finish,
 }
@@ -114,7 +123,12 @@ pub(crate) fn configure_network_pipeline(app: &mut App) {
             SnapshotApply::Begin,
             SnapshotApply::Session,
             SnapshotApply::Resources,
-            SnapshotApply::Entities,
+            SnapshotApply::LocalPlayer,
+            SnapshotApply::RemotePlayers,
+            SnapshotApply::Projectiles,
+            SnapshotApply::Structures,
+            SnapshotApply::Minions,
+            SnapshotApply::Neutrals,
             SnapshotApply::Finish,
         )
             .chain()
