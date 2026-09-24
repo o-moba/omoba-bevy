@@ -120,4 +120,23 @@ test).
   and `practice_tests::an_unknown_practice_kind_from_a_newer_client_is_ignored`
   (raw datagrams through the memory transport); the worker test from #34
   also asserts an empty `debug_access()`.
-- Gate: GATE_LINES
+- Re-check after a container restart (the equivalence tests above were run
+  by the first session and deleted with the old code): the old server
+  `auto_rank_skills`/`auto_shop` and the old offline `ranks_for_level`/
+  `shop_with` and harness `choose_shop_item` bodies were copied from
+  `5a1178d` into temporary tests again and compared with the new code
+  (server: 52,650 rank cases and 320,320 shop cases on a real duelist in its
+  base, identical `Hero` and `HeroEconomy`; offline: every class × level
+  1-10 × gold 0-1000, 50,050 cases; harness: every class × owned subset ×
+  gold 0-1000, 320,320 cases). All green; the temporary tests are deleted.
+- Gate (all green):
+  - `cargo fmt --all -- --check`: clean.
+  - `cargo clippy --workspace --all-targets --no-deps -- -D warnings`: clean.
+  - `cargo clippy -p client --lib --no-deps --no-default-features -- -D warnings`: clean.
+  - `cargo test -p shared -p server`: shared 94 passed; server 285 passed,
+    3 ignored.
+  - `cargo test -p client --lib`: 549 passed.
+  - `cargo build -p server && cargo test --locked -p harness -- --test-threads=1`:
+    22 unit + 24 integration passed.
+  - `python3 -m unittest discover -s scripts -p 'test_*.py'`: 93 tests OK
+    (1 skipped).
