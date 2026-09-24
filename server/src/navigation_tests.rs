@@ -42,7 +42,7 @@ fn transform_packets_cannot_tunnel_through_trees_but_a_legal_route_arrives() {
         },
         now,
     );
-    let player = runtime.players.get_mut(&address).unwrap();
+    let player = runtime.world.players.get_mut(&address).unwrap();
     player.state.x = start[0];
     player.state.z = start[1];
     player.speed_mult = 100.0; // Even a legal large debug-speed step cannot tunnel.
@@ -59,14 +59,14 @@ fn transform_packets_cannot_tunnel_through_trees_but_a_legal_route_arrives() {
             },
             now,
         );
-        let p = &runtime.players[&address].state;
+        let p = &runtime.world.players[&address].state;
         assert!(
             p.x < center[0] - 0.5,
             "direct packets passed through the trunk"
         );
         assert!(map.point_clear([p.x, p.z]));
     }
-    let player = runtime.players.get_mut(&address).unwrap();
+    let player = runtime.world.players.get_mut(&address).unwrap();
     player.state.x = start[0];
     player.state.z = start[1];
     player.speed_mult = 1.0;
@@ -74,7 +74,7 @@ fn transform_packets_cannot_tunnel_through_trees_but_a_legal_route_arrives() {
     let mut steps = 0;
     for waypoint in route {
         loop {
-            let p = &runtime.players[&address].state;
+            let p = &runtime.world.players[&address].state;
             let from = [p.x, p.z];
             let dx = waypoint[0] - p.x;
             let dz = waypoint[1] - p.z;
@@ -95,13 +95,13 @@ fn transform_packets_cannot_tunnel_through_trees_but_a_legal_route_arrives() {
                 },
                 now,
             );
-            let p = &runtime.players[&address].state;
+            let p = &runtime.world.players[&address].state;
             assert!(map.segment_clear(from, [p.x, p.z]));
             assert!((p.x - from[0]).hypot(p.z - from[1]) <= 0.501);
             steps += 1;
             assert!(steps < 160, "legal forest route stopped making progress");
         }
     }
-    let p = &runtime.players[&address].state;
+    let p = &runtime.world.players[&address].state;
     assert!((p.x - end[0]).hypot(p.z - end[1]) < 0.01);
 }

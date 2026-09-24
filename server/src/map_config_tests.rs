@@ -155,29 +155,20 @@ fn configured_tiers_gate_damage_then_base_and_ignore_empty_lanes() {
 #[test]
 fn minions_target_front_tier_even_when_nearer_to_inner_or_base() {
     let layout = build_map_layout();
-    let mut structures = mid_only();
-    let mut minions = HashMap::new();
-    spawn_minion_wave_for_team_lane(&layout, &mut minions, &mut 1, Team::Blue, Lane::Mid);
-    minions.retain(|&id, _| id == 1);
+    let mut world = GameWorld::empty();
+    world.structures = mid_only();
+    spawn_minion_wave_for_team_lane(&layout, &mut world.minions, &mut 1, Team::Blue, Lane::Mid);
+    world.minions.retain(|&id, _| id == 1);
     let now = Instant::now();
     for (dead, expected) in [(None, 3), (Some(3), 9), (Some(9), 7)] {
         if let Some(id) = dead {
-            structures.get_mut(&id).unwrap().state.hp = 0.0;
+            world.structures.get_mut(&id).unwrap().state.hp = 0.0;
         }
-        let minion = minions.get_mut(&1).unwrap();
+        let minion = world.minions.get_mut(&1).unwrap();
         minion.state.x = layout.home.x + 3.0;
         minion.state.z = layout.home.z + 3.0;
-        simulate_minions(
-            &mut HashMap::new(),
-            &mut minions,
-            &mut structures,
-            &mut HashMap::new(),
-            &mut 1,
-            &mut GameState::Running,
-            0.0,
-            now,
-        );
-        assert_eq!(minions[&1].state.target_id, Some(expected));
+        simulate_minions(&mut world, TickCtx { now, dt: 0.0 });
+        assert_eq!(world.minions[&1].state.target_id, Some(expected));
     }
 }
 
@@ -192,74 +183,32 @@ fn instance_threat_overrides_drive_actual_range_damage_and_cooldown() {
     outer.overrides.attack_range = Some(6.0);
     outer.overrides.attack_damage = Some(17.0);
     outer.overrides.attack_cooldown_ms = Some(1250);
-    let mut structures = build_configured_structures(&definition.resolve().unwrap());
-    structures.retain(|&id, _| id == 3);
-    let position = structures[&3].state.clone();
-    let mut minions = HashMap::new();
+    let mut world = GameWorld::empty();
+    world.structures = build_configured_structures(&definition.resolve().unwrap());
+    world.structures.retain(|&id, _| id == 3);
+    let position = world.structures[&3].state.clone();
     spawn_minion_wave_for_team_lane(
         &build_map_layout(),
-        &mut minions,
+        &mut world.minions,
         &mut 1,
         Team::Blue,
         Lane::Mid,
     );
-    minions.retain(|&id, _| id == 1);
-    let target = minions.get_mut(&1).unwrap();
+    world.minions.retain(|&id, _| id == 1);
+    let target = world.minions.get_mut(&1).unwrap();
     target.state.x = position.x + 7.0;
     target.state.z = position.z;
     let hp = target.state.hp;
     let now = Instant::now();
-    let mut players = HashMap::new();
-    let mut projectiles = HashMap::new();
-    let mut next = 1;
-    assert!(
-        simulate_tower_attacks(
-            &mut players,
-            &mut minions,
-            &mut projectiles,
-            &mut structures,
-            &mut next,
-            &GameState::Running,
-            now
-        )
-        .is_empty()
-    );
-    minions.get_mut(&1).unwrap().state.x = position.x + 3.0;
-    let receipts = simulate_tower_attacks(
-        &mut players,
-        &mut minions,
-        &mut projectiles,
-        &mut structures,
-        &mut next,
-        &GameState::Running,
-        now,
-    );
+    assert!(simulate_tower_attacks(&mut world, now).is_empty());
+    world.minions.get_mut(&1).unwrap().state.x = position.x + 3.0;
+    let receipts = simulate_tower_attacks(&mut world, now);
     assert_eq!(receipts.len(), 1);
     assert_eq!(receipts[0].amount, 17.0);
-    assert_eq!(minions[&1].state.hp, hp - 17.0);
-    assert!(
-        simulate_tower_attacks(
-            &mut players,
-            &mut minions,
-            &mut projectiles,
-            &mut structures,
-            &mut next,
-            &GameState::Running,
-            now + Duration::from_millis(1249)
-        )
-        .is_empty()
-    );
+    assert_eq!(world.minions[&1].state.hp, hp - 17.0);
+    assert!(simulate_tower_attacks(&mut world, now + Duration::from_millis(1249)).is_empty());
     assert_eq!(
-        simulate_tower_attacks(
-            &mut players,
-            &mut minions,
-            &mut projectiles,
-            &mut structures,
-            &mut next,
-            &GameState::Running,
-            now + Duration::from_millis(1250)
-        )
-        .len(),
+        simulate_tower_attacks(&mut world, now + Duration::from_millis(1250)).len(),
         1
     );
 }
@@ -267,21 +216,18 @@ fn instance_threat_overrides_drive_actual_range_damage_and_cooldown() {
 #[test]
 fn packet_transform_respects_configured_live_discs_and_death_removes_blocker() {
     let mut rt = runtime(example());
-    rt.game_state = GameState::Running;
+    rt.world.game_state = GameState::Running;
     let address: SocketAddr = "127.0.0.1:57931".parse().unwrap();
     let mut now = Instant::now();
-    ensure_player_connected(
-        &mut rt.players,
-        &rt.map_layout,
-        address,
-        &mut rt.next_player_id,
-        now,
-    );
-    let center = [rt.structures[&3].state.x, rt.structures[&3].state.z];
+    rt.world.ensure_connected(address, now);
+    let center = [
+        rt.world.structures[&3].state.x,
+        rt.world.structures[&3].state.z,
+    ];
     let start = [center[0] - 5.0, center[1]];
     let end = [center[0] + 5.0, center[1]];
     assert!(shared::navigation::world_navigation().segment_clear(start, end));
-    let player = rt.players.get_mut(&address).unwrap();
+    let player = rt.world.players.get_mut(&address).unwrap();
     player.joined = true;
     player.state.x = start[0];
     player.state.z = start[1];
@@ -299,14 +245,14 @@ fn packet_transform_respects_configured_live_discs_and_death_removes_blocker() {
             },
             now,
         );
-        let p = &rt.players[&address].state;
+        let p = &rt.world.players[&address].state;
         assert!(p.x < center[0] - 1.79);
         assert!(
             p.x > start[0] + 1.0,
             "test movement must reach the actual tower surface"
         );
     }
-    rt.structures.get_mut(&3).unwrap().state.hp = 0.0;
+    rt.world.structures.get_mut(&3).unwrap().state.hp = 0.0;
     now += Duration::from_millis(100);
     rt.handle_packet(
         address,
@@ -319,7 +265,7 @@ fn packet_transform_respects_configured_live_discs_and_death_removes_blocker() {
         },
         now,
     );
-    assert!((rt.players[&address].state.x - end[0]).abs() < 0.001);
+    assert!((rt.world.players[&address].state.x - end[0]).abs() < 0.001);
 }
 
 #[test]
@@ -327,34 +273,35 @@ fn pinned_configuration_reconstructs_same_round_objects_and_identity() {
     let config = example();
     let mut rt = runtime(config);
     let before: Vec<_> = rt
+        .world
         .map_config
         .structures
         .iter()
         .map(|s| {
             (
                 s.id,
-                serde_json::to_value(&rt.structures[&s.id].state).unwrap(),
+                serde_json::to_value(&rt.world.structures[&s.id].state).unwrap(),
             )
         })
         .collect();
-    for s in rt.structures.values_mut() {
+    for s in rt.world.structures.values_mut() {
         s.state.hp = 0.0;
         s.state.x = 0.0;
         s.attack_range = 1.0;
         s.last_attack_at = Some(Instant::now());
     }
     rt.restart_round(Instant::now());
-    assert_eq!(rt.map_config.map_profile, "verdant_two_tier_example");
-    assert_eq!(rt.map_config.geometry_id, shared::map::GEOMETRY_ID);
-    assert_eq!(rt.structures.len(), 10);
+    assert_eq!(rt.world.map_config.map_profile, "verdant_two_tier_example");
+    assert_eq!(rt.world.map_config.geometry_id, shared::map::GEOMETRY_ID);
+    assert_eq!(rt.world.structures.len(), 10);
     for (id, state) in before {
         assert_eq!(
-            serde_json::to_value(&rt.structures[&id].state).unwrap(),
+            serde_json::to_value(&rt.world.structures[&id].state).unwrap(),
             state
         );
-        assert!(rt.structures[&id].last_attack_at.is_none());
+        assert!(rt.world.structures[&id].last_attack_at.is_none());
     }
-    assert_eq!(rt.structures[&9].attack_range, 20.0);
+    assert_eq!(rt.world.structures[&9].attack_range, 20.0);
     assert_eq!(rt.match_id, 2);
 }
 
@@ -387,28 +334,21 @@ fn melee_march_hits_maximum_lateral_offset_towers_on_both_teams() {
         // Exactly three meters perpendicular to the diagonal lane. Before
         // horizontal reach, the 2.5m box-center height made this unreachable.
         *offset = [2.12132, -2.12132];
-        let mut structures = build_configured_structures(&definition.resolve().unwrap());
-        let tower_position = structures[&target_id].state.clone();
-        let mut minions = HashMap::new();
-        spawn_minion_wave_for_team_lane(&layout, &mut minions, &mut 1, attacker, Lane::Mid);
-        minions.retain(|&id, _| id == 1);
-        assert_eq!(minions[&1].state.kind, MinionKind::Melee);
-        let mut players = HashMap::new();
-        let mut projectiles = HashMap::new();
-        let mut next_projectile = 1;
-        let mut game_state = GameState::Running;
+        let mut world = GameWorld::empty();
+        world.structures = build_configured_structures(&definition.resolve().unwrap());
+        let tower_position = world.structures[&target_id].state.clone();
+        spawn_minion_wave_for_team_lane(&layout, &mut world.minions, &mut 1, attacker, Lane::Mid);
+        world.minions.retain(|&id, _| id == 1);
+        assert_eq!(world.minions[&1].state.kind, MinionKind::Melee);
         let now = Instant::now();
         let mut struck = false;
         for step in 1..=1000 {
             let receipts = simulate_minions(
-                &mut players,
-                &mut minions,
-                &mut structures,
-                &mut projectiles,
-                &mut next_projectile,
-                &mut game_state,
-                0.1,
-                now + Duration::from_millis(step * 100),
+                &mut world,
+                TickCtx {
+                    now: now + Duration::from_millis(step * 100),
+                    dt: 0.1,
+                },
             );
             if let Some(receipt) = receipts
                 .iter()
@@ -426,35 +366,26 @@ fn melee_march_hits_maximum_lateral_offset_towers_on_both_teams() {
             "{attacker:?} melee marched past the offset tower without striking"
         );
         assert_eq!(
-            structures[&target_id].state.hp,
+            world.structures[&target_id].state.hp,
             tower_position.hp - MINION_ATTACK_DAMAGE
         );
-        assert!(projectiles.is_empty(), "melee damage remains direct");
-        assert!(minions[&1].state.attack_sequence > 0);
+        assert!(world.projectiles.is_empty(), "melee damage remains direct");
+        assert!(world.minions[&1].state.attack_sequence > 0);
         // Caster keeps its longer range and still emits a travelling projectile
         // aimed at the target's Y, although range is measured on the ground.
-        minions.clear();
-        spawn_minion_wave_for_team_lane(&layout, &mut minions, &mut 1, attacker, Lane::Mid);
-        minions.retain(|&id, _| id == 3);
-        let caster = minions.get_mut(&3).unwrap();
+        world.minions.clear();
+        spawn_minion_wave_for_team_lane(&layout, &mut world.minions, &mut 1, attacker, Lane::Mid);
+        world.minions.retain(|&id, _| id == 3);
+        let caster = world.minions.get_mut(&3).unwrap();
         caster.state.x = tower_position.x + 6.0;
         caster.state.z = tower_position.z;
-        let receipts = simulate_minions(
-            &mut players,
-            &mut minions,
-            &mut structures,
-            &mut projectiles,
-            &mut next_projectile,
-            &mut game_state,
-            0.0,
-            now,
-        );
+        let receipts = simulate_minions(&mut world, TickCtx { now, dt: 0.0 });
         assert!(
             receipts.is_empty(),
             "caster damage must await projectile impact"
         );
-        assert_eq!(projectiles.len(), 1);
-        let projectile = projectiles.values().next().unwrap();
+        assert_eq!(world.projectiles.len(), 1);
+        let projectile = world.projectiles.values().next().unwrap();
         assert_eq!(projectile.state.style, ProjectileStyle::CasterBolt);
         assert_eq!(projectile.target.id, target_id);
         assert_eq!(projectile.target.kind, TargetKind::Structure);

@@ -444,8 +444,8 @@ mod tests {
         );
         let generation = prematch::snapshot(
             &rt.prematch,
-            &rt.players,
-            &rt.players[&addr],
+            &rt.world.players,
+            &rt.world.players[&addr],
             rt.match_config,
             now,
         )
@@ -485,8 +485,8 @@ mod tests {
         assert_eq!(
             prematch::snapshot(
                 &rt.prematch,
-                &rt.players,
-                &rt.players[&addr],
+                &rt.world.players,
+                &rt.world.players[&addr],
                 rt.match_config,
                 now
             )
@@ -504,8 +504,8 @@ mod tests {
         assert_eq!(
             prematch::snapshot(
                 &rt.prematch,
-                &rt.players,
-                &rt.players[&addr],
+                &rt.world.players,
+                &rt.world.players[&addr],
                 rt.match_config,
                 now
             )
@@ -514,22 +514,22 @@ mod tests {
             0
         );
         let deadline = Instant::now() + Duration::from_secs(2);
-        while rt.players[&addr].state.avatar.as_deref() != Some(free.slug.as_str())
+        while rt.world.players[&addr].state.avatar.as_deref() != Some(free.slug.as_str())
             && Instant::now() < deadline
         {
             rt.receive_packets();
             std::thread::sleep(Duration::from_millis(2));
         }
         assert_eq!(
-            rt.players[&addr].state.avatar.as_deref(),
+            rt.world.players[&addr].state.avatar.as_deref(),
             Some(free.slug.as_str())
         );
-        assert_eq!(rt.players[&addr].state.hero_class, HeroClass::Cleric);
+        assert_eq!(rt.world.players[&addr].state.hero_class, HeroClass::Cleric);
         assert_eq!(
             prematch::snapshot(
                 &rt.prematch,
-                &rt.players,
-                &rt.players[&addr],
+                &rt.world.players,
+                &rt.world.players[&addr],
                 rt.match_config,
                 now
             )
@@ -545,11 +545,11 @@ mod tests {
             Instant::now(),
         );
         assert_eq!(
-            rt.players[&addr].state.avatar.as_deref(),
+            rt.world.players[&addr].state.avatar.as_deref(),
             Some(free.slug.as_str())
         );
         assert!(
-            rt.players[&addr]
+            rt.world.players[&addr]
                 .draft
                 .error
                 .as_deref()

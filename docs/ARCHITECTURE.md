@@ -58,15 +58,31 @@ as the UDP transport, so the rest of the client does not know it is offline.
 
 ## Server tick
 
-`ServerRuntime` (`server/src/main.rs`) owns the socket, the entity maps and
-the sub-runtimes (bots, prematch, career, social, sandbox). A tick is:
+`ServerRuntime` (`server/src/runtime/mod.rs`) owns the socket, the
+sub-runtimes (bots, prematch, career, social, sandbox) and one `GameWorld`
+(`server/src/game_world.rs`): the entity maps (players, disconnected
+sessions, projectiles, structures, minions, neutrals), team buffs, forest
+pickups, the game state, the map layout and config, the id allocators and
+the wave clock. Simulation functions and request handlers take
+`&mut GameWorld` plus a `TickCtx { now, dt }` (or just `now`) instead of a
+parameter per map; only the leaf damage helpers (`apply_*_damage`) still take
+individual maps because they run inside loops that hold other fields.
+`main.rs` is the module list plus `fn main`. A tick is:
 
-1. `receive_packets` decodes datagrams; public roles verify signed commands
-   first (`public_transport`). `handle_packet` admits identity, then
-   `handle_packet_authorized` applies gameplay commands.
-2. `simulate_after_mana` advances formation, bots, minions, towers, neutrals,
-   projectiles and respawns, records combat receipts into the round ledger,
-   then builds one snapshot per recipient (vision filtered) and sends it.
+1. `runtime::dispatch::receive_packets` decodes datagrams; public roles verify
+   signed commands first (`public_transport`). `handle_packet` admits
+   identity, then `handle_packet_authorized` applies gameplay commands.
+2. `runtime::tick::simulate_after_mana` advances formation (`formation`),
+   bots, then the `sim` modules (`minions`, `towers`, `projectiles`,
+   `neutrals`, plus regeneration and respawns in `sim/mod.rs` and `session`),
+   records combat receipts into the round ledger, and
+   `snapshot::broadcast_snapshots` builds one snapshot per recipient (vision
+   filtered) and sends it.
+
+Supporting modules: `entities` (the server-side records and ECS mirror
+components), `ecs` (the Bevy resources and systems that run the tick),
+`sim/cast.rs` (ability casts), `vision` (server-owned sight, takes
+`&GameWorld`). Unit tests for these live under `server/src/tests/`.
 
 Bots are ordinary `ConnectedPlayer`s on unspecified IPv6 addresses; their
 addresses never accept network commands. Practice, development and release
@@ -109,8 +125,11 @@ Ordered by value over cost. Each step is a separate change with the full
 4. Crate hygiene: retire the orphan `skills` crate, move the career store out
    of the server package (done); keep I/O out of the shared model (the avatar
    and sprite rosters still embed client manifests and read env vars; open).
-5. Server `World` + tick context instead of many-map parameters; split
-   `main.rs` into protocol, dispatch, tick, snapshot and simulation modules.
+5. Server `GameWorld` + tick context instead of many-map parameters; split
+   `main.rs` into runtime (dispatch, tick), snapshot, formation, entities,
+   ECS and simulation modules (done; splitting `handle_packet_authorized`
+   into per-command handlers and removing the crate-root glob re-exports are
+   the follow-up).
 6. Authoritative hero state separate from replicated views; one ECS story.
 7. Match rules as one policy object; career, transport and clock behind
    traits.

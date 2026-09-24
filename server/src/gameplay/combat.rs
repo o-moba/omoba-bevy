@@ -34,6 +34,7 @@ pub(crate) fn sync_minions_into_ecs_system(
     mut query: Query<(&mut Transform3D, &mut Health, &mut TeamMarker), With<CombatMinion>>,
 ) {
     let live_ids = runtime
+        .world
         .minions
         .values()
         .filter(|minion| minion.state.hp > 0.0)
@@ -54,6 +55,7 @@ pub(crate) fn sync_minions_into_ecs_system(
     }
 
     for minion in runtime
+        .world
         .minions
         .values()
         .filter(|minion| minion.state.hp > 0.0)
@@ -115,7 +117,7 @@ pub(crate) fn collect_projectile_minion_damage_system(
     let Some(now) = tick.now else {
         return;
     };
-    if !matches!(runtime.game_state, GameState::Running) {
+    if !matches!(runtime.world.game_state, GameState::Running) {
         return;
     }
     if tick.dt <= 0.0 {
@@ -125,7 +127,7 @@ pub(crate) fn collect_projectile_minion_damage_system(
     let dt = tick.dt;
     let mut queued_damage: Vec<DamageEvent> = Vec::new();
 
-    runtime.projectiles.retain(|_, projectile| {
+    runtime.world.projectiles.retain(|_, projectile| {
         if projectile.target.kind != TargetKind::Minion {
             return true;
         }
@@ -203,7 +205,7 @@ pub(crate) fn apply_projectile_minion_damage_system(
     mut runtime: ResMut<ServerRuntime>,
     mut damage_events: MessageReader<DamageEvent>,
 ) {
-    if !matches!(runtime.game_state, GameState::Running) {
+    if !matches!(runtime.world.game_state, GameState::Running) {
         // Drain queued impacts so they cannot leak into a subsequent round.
         damage_events.clear();
         return;
@@ -214,8 +216,8 @@ pub(crate) fn apply_projectile_minion_damage_system(
     let runtime = runtime.as_mut();
     for damage_event in damage_events.read() {
         let event = apply_minion_damage(
-            &mut runtime.players,
-            &mut runtime.minions,
+            &mut runtime.world.players,
+            &mut runtime.world.minions,
             damage_event.target_id,
             damage_event.amount,
             damage_event.attacker_team,

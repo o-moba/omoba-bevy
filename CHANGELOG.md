@@ -6,6 +6,10 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Server runtime structure
+- `server/src/main.rs` (6000 lines) is split into `runtime/{mod,dispatch,tick}.rs`, `snapshot.rs`, `formation.rs`, `entities.rs`, `ecs.rs`, `game_world.rs` and `sim/{mod,cast,projectiles,minions,neutrals,towers}.rs`; its 50 inline tests moved to `server/src/tests/`. `main.rs` keeps the module list and `fn main`.
+- New `GameWorld` groups the entity maps, team buffs, forest pickups, game state, map layout/config, id allocators and the wave clock; `ServerRuntime.world` replaces 15 loose fields. Simulation (`simulate_projectiles/minions/tower_attacks/neutrals`, `spawn_minion_waves_if_due`, `handle_respawns`, regeneration), request handlers (`handle_cast_request`, `handle_basic_attack_request`), vision (`target_visible`, `filter_snapshot`, `sources`) and formation take `&mut GameWorld` with a `TickCtx { now, dt }` instead of 5-12 map parameters; `ensure_player_connected`, `ensure_player_for_join` and `reset_match_with_map` became `GameWorld::{ensure_connected, ensure_player_for_join, reset_round}`. The dispatcher and the tick no longer destructure `self`; the snapshot broadcast is `ServerRuntime::broadcast_snapshots`. No behavior change; the wire format and every test are unchanged.
+
 ### Crate hygiene
 - New `career-store` crate holds the Postgres career store, its migrations and the queue policy; the game server and the account API link it directly, so the account API no longer depends on the whole game server (Bevy, the Ekza SDK). The server package is binary-only again.
 - Remove the orphan `skills` crate (nothing depended on it and its numbers contradicted `shared`), the unused `PlayerAbilitySnapshot`, 64 redundant clippy allows already covered by the workspace policy, and two references to a documentation page that never shipped.

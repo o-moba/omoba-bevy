@@ -64,7 +64,7 @@ fn handler_duplicate_and_reclaim_preserve_wounded_and_dead_full_state() {
         let now = Instant::now();
         rt.handle_packet(addr(55101), join("original", Team::Blue), now);
         rt.handle_packet(addr(55102), join("opponent", Team::Blue), now);
-        let player = rt.players.get_mut(&addr(55101)).unwrap();
+        let player = rt.world.players.get_mut(&addr(55101)).unwrap();
         progress(player, now, dead);
         let before = player.state.clone();
         let casts = player.last_cast_at;
@@ -82,7 +82,7 @@ fn handler_duplicate_and_reclaim_preserve_wounded_and_dead_full_state() {
             *avatar = None;
         }
         rt.handle_packet(addr(55101), duplicate, now + Duration::from_millis(100));
-        let player = &rt.players[&addr(55101)];
+        let player = &rt.world.players[&addr(55101)];
         assert_gameplay_same(&before, casts, respawn, player);
         assert_eq!(player.session_id.as_deref(), Some("original"));
         // Cross-endpoint reuse while live is rejected and visible.
@@ -92,12 +92,12 @@ fn handler_duplicate_and_reclaim_preserve_wounded_and_dead_full_state() {
             now + Duration::from_secs(1),
         );
         assert_eq!(
-            rt.players[&addr(55103)].join_error,
+            rt.world.players[&addr(55103)].join_error,
             Some(shared::protocol::JoinRejection::SessionActive)
         );
-        assert!(!rt.players[&addr(55103)].joined);
+        assert!(!rt.world.players[&addr(55103)].joined);
         let reclaim_at = now + PLAYER_TIMEOUT + Duration::from_secs(1);
-        rt.players.get_mut(&addr(55102)).unwrap().last_seen = reclaim_at;
+        rt.world.players.get_mut(&addr(55102)).unwrap().last_seen = reclaim_at;
         rt.handle_packet(
             addr(55104),
             ClientPacket::Hello {
@@ -106,10 +106,10 @@ fn handler_duplicate_and_reclaim_preserve_wounded_and_dead_full_state() {
             reclaim_at,
         );
         rt.handle_packet(addr(55104), join("original", Team::Blue), reclaim_at);
-        assert_gameplay_same(&before, casts, respawn, &rt.players[&addr(55104)]);
-        assert!(rt.players[&addr(55104)].framed_snapshots);
-        assert!(!rt.players.contains_key(&addr(55101)));
-        assert_eq!(joined_count(&rt.players), 2);
+        assert_gameplay_same(&before, casts, respawn, &rt.world.players[&addr(55104)]);
+        assert!(rt.world.players[&addr(55104)].framed_snapshots);
+        assert!(!rt.world.players.contains_key(&addr(55101)));
+        assert_eq!(joined_count(&rt.world.players), 2);
     }
 }
 
@@ -119,28 +119,33 @@ fn handler_capacity_counts_reservations_and_expired_claim_is_fresh() {
     let now = Instant::now();
     rt.handle_packet(addr(55201), join("a", Team::Blue), now);
     rt.handle_packet(addr(55202), join("b", Team::Blue), now);
-    let old_id = rt.players[&addr(55201)].state.id;
+    let old_id = rt.world.players[&addr(55201)].state.id;
     let later = now + PLAYER_TIMEOUT + Duration::from_secs(1);
-    rt.players.get_mut(&addr(55202)).unwrap().last_seen = later;
+    rt.world.players.get_mut(&addr(55202)).unwrap().last_seen = later;
     rt.handle_packet(addr(55203), join("replacement", Team::Blue), later);
-    assert_eq!(rt.disconnected_sessions.len(), 1);
+    assert_eq!(rt.world.disconnected_sessions.len(), 1);
     assert_eq!(
-        rt.players[&addr(55203)].join_error,
+        rt.world.players[&addr(55203)].join_error,
         Some(shared::protocol::JoinRejection::MatchFull)
     );
     rt.handle_packet(addr(55204), join("a", Team::Blue), later);
-    assert_eq!(rt.players[&addr(55204)].state.id, old_id);
-    assert_eq!(joined_count(&rt.players), 2);
+    assert_eq!(rt.world.players[&addr(55204)].state.id, old_id);
+    assert_eq!(joined_count(&rt.world.players), 2);
     let expired = later + PLAYER_TIMEOUT + SESSION_RECLAIM_WINDOW + Duration::from_secs(1);
-    rt.players.get_mut(&addr(55202)).unwrap().last_seen = expired;
+    rt.world.players.get_mut(&addr(55202)).unwrap().last_seen = expired;
     rt.handle_packet(addr(55205), join("replacement", Team::Blue), expired);
-    assert!(rt.players[&addr(55205)].joined);
+    assert!(rt.world.players[&addr(55205)].joined);
     rt.handle_packet(addr(55206), join("a", Team::Green), expired);
     assert_eq!(
-        rt.players[&addr(55206)].join_error,
+        rt.world.players[&addr(55206)].join_error,
         Some(shared::protocol::JoinRejection::MatchFull)
     );
-    assert!(!rt.players.values().any(|player| player.state.id == old_id));
+    assert!(
+        !rt.world
+            .players
+            .values()
+            .any(|player| player.state.id == old_id)
+    );
 }
 
 #[test]
@@ -149,14 +154,14 @@ fn handler_release_rejects_debug_and_bad_protocol_while_explicit_dev_accepts_deb
         let mut rt = runtime(config);
         let now = Instant::now();
         rt.handle_packet(addr(55301), join("a", Team::Green), now);
-        progress(rt.players.get_mut(&addr(55301)).unwrap(), now, true);
+        progress(rt.world.players.get_mut(&addr(55301)).unwrap(), now, true);
         rt.handle_packet(addr(55301), ClientPacket::SetGodMode { enabled: true }, now);
         rt.handle_packet(
             addr(55301),
             ClientPacket::SetSpeedBoost { enabled: true },
             now,
         );
-        let player = &rt.players[&addr(55301)];
+        let player = &rt.world.players[&addr(55301)];
         assert_eq!(player.god_mode, config.mode == MatchMode::Dev);
         if config.mode == MatchMode::Release {
             assert_eq!(player.state.hp, 0.0);
@@ -174,9 +179,9 @@ fn handler_release_rejects_debug_and_bad_protocol_while_explicit_dev_accepts_deb
             now,
         );
         rt.handle_packet(addr(55302), join("bad", Team::Blue), now);
-        assert!(!rt.players[&addr(55302)].joined);
+        assert!(!rt.world.players[&addr(55302)].joined);
         assert_eq!(
-            rt.players[&addr(55302)].join_error,
+            rt.world.players[&addr(55302)].join_error,
             Some(shared::protocol::JoinRejection::ProtocolMismatch)
         );
         rt.handle_packet(
@@ -187,36 +192,37 @@ fn handler_release_rejects_debug_and_bad_protocol_while_explicit_dev_accepts_deb
             now,
         );
         rt.handle_packet(addr(55302), join("bad", Team::Blue), now);
-        assert!(rt.players[&addr(55302)].joined);
-        assert_eq!(rt.players[&addr(55302)].join_error, None);
+        assert!(rt.world.players[&addr(55302)].joined);
+        assert_eq!(rt.world.players[&addr(55302)].join_error, None);
     }
 }
 
 fn contaminate_round(rt: &mut ServerRuntime, now: Instant) {
-    for player in rt.players.values_mut() {
+    for player in rt.world.players.values_mut() {
         progress(player, now, true);
     }
-    for structure in rt.structures.values_mut() {
+    for structure in rt.world.structures.values_mut() {
         structure.state.hp = 0.0;
         structure.last_attack_at = Some(now);
     }
-    for neutral in rt.neutrals.values_mut() {
+    for neutral in rt.world.neutrals.values_mut() {
         neutral.state.hp = 0.0;
         neutral.state.x += 20.0;
         neutral.target_player_id = Some(1);
         neutral.last_attack_at = Some(now);
         neutral.dead_until = Some(now + Duration::from_secs(900));
     }
-    rt.team_buffs
+    rt.world
+        .team_buffs
         .grant(Team::Green, TeamBuffKind::MutatioMight, now);
     spawn_minion_wave_for_team_lane(
-        &rt.map_layout,
-        &mut rt.minions,
-        &mut rt.next_minion_id,
+        &rt.world.map_layout,
+        &mut rt.world.minions,
+        &mut rt.world.next_minion_id,
         Team::Green,
         Lane::Mid,
     );
-    rt.projectiles.insert(
+    rt.world.projectiles.insert(
         99,
         Projectile {
             state: ProjectileState {
@@ -243,14 +249,14 @@ fn contaminate_round(rt: &mut ServerRuntime, now: Instant) {
             expires_at: now + Duration::from_secs(100),
         },
     );
-    rt.game_state = GameState::Victory {
+    rt.world.game_state = GameState::Victory {
         winner: Team::Green,
     };
     rt.victory_at = Some(now);
 }
 
 fn assert_clean_round(rt: &ServerRuntime) {
-    for player in rt.players.values().filter(|player| player.joined) {
+    for player in rt.world.players.values().filter(|player| player.joined) {
         assert_eq!((player.state.hp, player.state.max_hp), (MAX_HP, MAX_HP));
         assert_eq!(
             (player.state.mana, player.state.max_mana),
@@ -280,21 +286,22 @@ fn assert_clean_round(rt: &ServerRuntime) {
         assert_eq!(player.respawn_at, None);
         assert_eq!(player.speed_mult, 1.0);
         assert!(!player.god_mode);
-        let spawn = spawn_position_for_team(&rt.map_layout, player.state.team);
+        let spawn = spawn_position_for_team(&rt.world.map_layout, player.state.team);
         assert_eq!(
             (player.state.x, player.state.z, player.state.yaw),
             (spawn.x, spawn.z, 0.0)
         );
     }
-    assert!(rt.projectiles.is_empty() && rt.minions.is_empty());
-    assert!(rt.disconnected_sessions.is_empty());
-    assert!(rt.team_buffs.snapshot(Instant::now()).is_empty());
+    assert!(rt.world.projectiles.is_empty() && rt.world.minions.is_empty());
+    assert!(rt.world.disconnected_sessions.is_empty());
+    assert!(rt.world.team_buffs.snapshot(Instant::now()).is_empty());
     assert!(
-        rt.structures
+        rt.world
+            .structures
             .values()
             .all(|s| s.state.hp == s.state.max_hp && s.last_attack_at.is_none())
     );
-    for neutral in rt.neutrals.values() {
+    for neutral in rt.world.neutrals.values() {
         assert_eq!(neutral.state.x, neutral.anchor.x);
         assert_eq!(neutral.last_attack_at, None);
         assert_eq!(neutral.target_player_id, None);
@@ -315,8 +322,8 @@ fn canonical_rematch_resets_every_system_and_reforms_underfilled_release_roster(
     rt.handle_packet(addr(55402), join("b", Team::Blue), now);
     contaminate_round(&mut rt, now);
     let old_match = rt.match_id;
-    let player = rt.players.remove(&addr(55402)).unwrap();
-    rt.disconnected_sessions.insert(
+    let player = rt.world.players.remove(&addr(55402)).unwrap();
+    rt.world.disconnected_sessions.insert(
         "b".into(),
         DisconnectedSession {
             player,
@@ -327,7 +334,7 @@ fn canonical_rematch_resets_every_system_and_reforms_underfilled_release_roster(
     assert_eq!(rt.match_id, old_match + 1);
     assert_clean_round(&rt);
     assert_eq!(
-        rt.game_state,
+        rt.world.game_state,
         GameState::Forming {
             ready: 1,
             needed: 2
@@ -335,24 +342,29 @@ fn canonical_rematch_resets_every_system_and_reforms_underfilled_release_roster(
     );
     assert_eq!(rt.match_started_at, None);
     rt.handle_packet(addr(55403), join("b", Team::Blue), now);
-    assert_eq!(rt.players[&addr(55403)].state.level, STARTING_LEVEL);
+    assert_eq!(rt.world.players[&addr(55403)].state.level, STARTING_LEVEL);
     rt.simulate_after_mana(now, 0.01);
-    assert!(matches!(rt.game_state, GameState::Starting { .. }));
+    assert!(matches!(rt.world.game_state, GameState::Starting { .. }));
     rt.simulate_after_mana(now + Duration::from_secs(3), 3.0);
-    assert_eq!(rt.game_state, GameState::Running);
-    assert!(rt.minions.is_empty());
+    assert_eq!(rt.world.game_state, GameState::Running);
+    assert!(rt.world.minions.is_empty());
     let started = rt.match_started_at.unwrap();
-    for player in rt.players.values_mut() {
+    for player in rt.world.players.values_mut() {
         player.last_seen = started + FIRST_MINION_WAVE_DELAY;
     }
     rt.simulate_after_mana(
         started + FIRST_MINION_WAVE_DELAY - Duration::from_millis(1),
         0.0,
     );
-    assert!(rt.minions.is_empty());
+    assert!(rt.world.minions.is_empty());
     rt.simulate_after_mana(started + FIRST_MINION_WAVE_DELAY, 0.0);
-    assert_eq!(rt.minions.len(), MINIONS_PER_WAVE * 6);
-    for neutral in rt.neutrals.values().filter(|n| n.state.camp_type.is_boss()) {
+    assert_eq!(rt.world.minions.len(), MINIONS_PER_WAVE * 6);
+    for neutral in rt
+        .world
+        .neutrals
+        .values()
+        .filter(|n| n.state.camp_type.is_boss())
+    {
         assert_eq!(
             neutral.dead_until,
             Some(started + boss_spawn_delay(neutral.state.camp_type).unwrap())
@@ -365,13 +377,13 @@ fn empty_roster_grace_clears_reservations_and_next_group_gets_clean_match() {
     let mut rt = runtime(MatchConfig::dev());
     let now = Instant::now();
     rt.handle_packet(addr(55501), join("old", Team::Green), now);
-    let old_id = rt.players[&addr(55501)].state.id;
+    let old_id = rt.world.players[&addr(55501)].state.id;
     contaminate_round(&mut rt, now);
-    rt.game_state = GameState::Running;
+    rt.world.game_state = GameState::Running;
     rt.victory_at = None;
     let empty_at = now + PLAYER_TIMEOUT + Duration::from_millis(1);
     rt.maintain_roster(empty_at);
-    assert_eq!(rt.disconnected_sessions.len(), 1);
+    assert_eq!(rt.world.disconnected_sessions.len(), 1);
     rt.maintain_roster(empty_at + EMPTY_ROSTER_GRACE - Duration::from_millis(1));
     assert_eq!(rt.match_id, 1);
     // Pings cannot keep an empty match alive.
@@ -381,16 +393,16 @@ fn empty_roster_grace_clears_reservations_and_next_group_gets_clean_match() {
         empty_at + EMPTY_ROSTER_GRACE,
     );
     assert_eq!(rt.match_id, 2);
-    assert_eq!(rt.game_state, GameState::Lobby);
+    assert_eq!(rt.world.game_state, GameState::Lobby);
     assert_clean_round(&rt);
     rt.handle_packet(
         addr(55502),
         join("old", Team::Blue),
         empty_at + EMPTY_ROSTER_GRACE,
     );
-    assert_ne!(rt.players[&addr(55502)].state.id, old_id);
-    assert_eq!(rt.players[&addr(55502)].state.level, 1);
-    assert_eq!(rt.game_state, GameState::Running);
+    assert_ne!(rt.world.players[&addr(55502)].state.id, old_id);
+    assert_eq!(rt.world.players[&addr(55502)].state.level, 1);
+    assert_eq!(rt.world.game_state, GameState::Running);
     assert_clean_round(&rt);
 }
 
@@ -400,6 +412,7 @@ fn siege_blocks_cast_and_damage_until_own_lane_falls_and_resets() {
     let now = Instant::now();
     rt.handle_packet(addr(55601), join("siege", Team::Green), now);
     let base = rt
+        .world
         .structures
         .values()
         .find(|s| s.state.kind == StructureKind::BaseTower && s.state.team == Team::Blue)
@@ -407,6 +420,7 @@ fn siege_blocks_cast_and_damage_until_own_lane_falls_and_resets() {
         .state
         .clone();
     let own_lane = rt
+        .world
         .structures
         .values()
         .find(|s| s.state.kind == StructureKind::Tower && s.state.team == Team::Blue)
@@ -414,13 +428,14 @@ fn siege_blocks_cast_and_damage_until_own_lane_falls_and_resets() {
         .state
         .id;
     let other_lane = rt
+        .world
         .structures
         .values()
         .find(|s| s.state.kind == StructureKind::Tower && s.state.team == Team::Green)
         .unwrap()
         .state
         .id;
-    let player = rt.players.get_mut(&addr(55601)).unwrap();
+    let player = rt.world.players.get_mut(&addr(55601)).unwrap();
     player.state.x = base.x - 2.0;
     player.state.z = base.z;
     rt.handle_packet(
@@ -434,26 +449,26 @@ fn siege_blocks_cast_and_damage_until_own_lane_falls_and_resets() {
         },
         now,
     );
-    assert!(rt.projectiles.is_empty());
-    assert_eq!(rt.players[&addr(55601)].state.mana, MAX_MANA);
+    assert!(rt.world.projectiles.is_empty());
+    assert_eq!(rt.world.players[&addr(55601)].state.mana, MAX_MANA);
     apply_structure_damage(
-        &mut rt.structures,
+        &mut rt.world.structures,
         base.id,
         50.0,
         Team::Green,
-        &mut rt.game_state,
+        &mut rt.world.game_state,
     );
-    assert_eq!(rt.structures[&base.id].state.hp, base.hp);
-    rt.structures.get_mut(&other_lane).unwrap().state.hp = 0.0;
-    assert!(structure_is_protected(&rt.structures, base.id));
+    assert_eq!(rt.world.structures[&base.id].state.hp, base.hp);
+    rt.world.structures.get_mut(&other_lane).unwrap().state.hp = 0.0;
+    assert!(structure_is_protected(&rt.world.structures, base.id));
     apply_structure_damage(
-        &mut rt.structures,
+        &mut rt.world.structures,
         own_lane,
         999.0,
         Team::Green,
-        &mut rt.game_state,
+        &mut rt.world.game_state,
     );
-    assert!(!structure_is_protected(&rt.structures, base.id));
+    assert!(!structure_is_protected(&rt.world.structures, base.id));
     rt.handle_packet(
         addr(55601),
         ClientPacket::Cast {
@@ -465,17 +480,17 @@ fn siege_blocks_cast_and_damage_until_own_lane_falls_and_resets() {
         },
         now,
     );
-    assert_eq!(rt.projectiles.len(), 1);
+    assert_eq!(rt.world.projectiles.len(), 1);
     apply_structure_damage(
-        &mut rt.structures,
+        &mut rt.world.structures,
         base.id,
         50.0,
         Team::Green,
-        &mut rt.game_state,
+        &mut rt.world.game_state,
     );
-    assert_eq!(rt.structures[&base.id].state.hp, base.hp - 50.0);
+    assert_eq!(rt.world.structures[&base.id].state.hp, base.hp - 50.0);
     rt.restart_round(now);
-    assert!(structure_is_protected(&rt.structures, base.id));
+    assert!(structure_is_protected(&rt.world.structures, base.id));
 }
 
 #[test]
@@ -489,10 +504,11 @@ fn full_roster_progression_baseline_is_reproducible_and_conserves_rewards() {
         let mut milestones = HashMap::new();
         for wave in 1..=20 {
             for _ in 0..MINIONS_PER_WAVE * 3 {
-                award_minion_kill_rewards(&mut rt.players, Team::Green);
+                award_minion_kill_rewards(&mut rt.world.players, Team::Green);
             }
             for level in [2, 4, 6] {
                 let count = rt
+                    .world
                     .players
                     .values()
                     .filter(|p| p.state.level >= level)
@@ -507,10 +523,10 @@ fn full_roster_progression_baseline_is_reproducible_and_conserves_rewards() {
             let expected_gold = u32::from(team_size) * STARTING_GOLD
                 + wave as u32 * MINIONS_PER_WAVE as u32 * 3 * MINION_KILL_GOLD;
             assert_eq!(
-                rt.players.values().map(|p| p.state.gold).sum::<u32>(),
+                rt.world.players.values().map(|p| p.state.gold).sum::<u32>(),
                 expected_gold
             );
-            for p in rt.players.values() {
+            for p in rt.world.players.values() {
                 assert_eq!(p.state.skill_points, p.state.level - 1);
                 assert_eq!(p.state.ranks, [1; 4]);
             }
@@ -536,7 +552,7 @@ fn full_roster_progression_baseline_is_reproducible_and_conserves_rewards() {
 
 fn send_udp(socket: &UdpSocket, rt: &mut ServerRuntime, packet: ClientPacket) {
     let addr = socket.local_addr().unwrap();
-    let before = rt.players.get(&addr).map(|p| p.last_seen);
+    let before = rt.world.players.get(&addr).map(|p| p.last_seen);
     socket
         .send_to(
             &serde_json::to_vec(&packet).unwrap(),
@@ -546,7 +562,7 @@ fn send_udp(socket: &UdpSocket, rt: &mut ServerRuntime, packet: ClientPacket) {
     let deadline = Instant::now() + Duration::from_secs(1);
     loop {
         rt.receive_packets();
-        if rt.players.get(&addr).map(|p| p.last_seen) != before {
+        if rt.world.players.get(&addr).map(|p| p.last_seen) != before {
             break;
         }
         assert!(
@@ -598,8 +614,9 @@ fn live_udp_victory_rematch_uses_real_cast_receiver_and_framed_snapshots() {
     let now = Instant::now();
     rt.simulate_after_mana(now, 0.0);
     rt.simulate_after_mana(now, 3.0);
-    assert_eq!(rt.game_state, GameState::Running);
+    assert_eq!(rt.world.game_state, GameState::Running);
     let base = rt
+        .world
         .structures
         .values()
         .find(|s| s.state.kind == StructureKind::BaseTower && s.state.team == Team::Blue)
@@ -607,35 +624,38 @@ fn live_udp_victory_rematch_uses_real_cast_receiver_and_framed_snapshots() {
         .state
         .clone();
     let lane = rt
+        .world
         .structures
         .values()
         .find(|s| s.state.kind == StructureKind::Tower && s.state.team == Team::Blue)
         .unwrap()
         .state
         .id;
-    for s in rt.structures.values_mut() {
+    for s in rt.world.structures.values_mut() {
         s.attack_range = 0.0;
     }
-    rt.structures.get_mut(&lane).unwrap().state.hp = 0.0;
-    rt.structures.get_mut(&base.id).unwrap().state.hp = 1.0;
-    let player = rt.players.get_mut(&first_addr).unwrap();
+    rt.world.structures.get_mut(&lane).unwrap().state.hp = 0.0;
+    rt.world.structures.get_mut(&base.id).unwrap().state.hp = 1.0;
+    let player = rt.world.players.get_mut(&first_addr).unwrap();
     progress(player, now, false);
     player.state.x = base.x - 2.0;
     player.state.z = base.z;
     player.state.mana = player.state.max_mana;
     player.last_cast_at = [None; 4];
     let camp = rt
+        .world
         .neutrals
         .values_mut()
         .find(|n| !n.state.camp_type.is_boss())
         .unwrap();
     camp.state.hp = 0.0;
     camp.dead_until = Some(now + Duration::from_secs(40));
-    rt.team_buffs
+    rt.world
+        .team_buffs
         .grant(Team::Green, TeamBuffKind::WendigoFavor, now);
-    let before = rt.players[&first_addr].state.clone();
+    let before = rt.world.players[&first_addr].state.clone();
     send_udp(&first, &mut rt, join("udp-changed", Team::Blue));
-    assert_gameplay_same(&before, [None; 4], None, &rt.players[&first_addr]);
+    assert_gameplay_same(&before, [None; 4], None, &rt.world.players[&first_addr]);
     send_udp(
         &first,
         &mut rt,
@@ -647,10 +667,10 @@ fn live_udp_victory_rematch_uses_real_cast_receiver_and_framed_snapshots() {
             slot: 0,
         },
     );
-    assert_eq!(rt.projectiles.len(), 1);
+    assert_eq!(rt.world.projectiles.len(), 1);
     rt.simulate_after_mana(Instant::now(), 1.0);
     assert_eq!(
-        rt.game_state,
+        rt.world.game_state,
         GameState::Victory {
             winner: Team::Green
         }
@@ -685,9 +705,9 @@ fn live_udp_victory_rematch_uses_real_cast_receiver_and_framed_snapshots() {
     assert!(second_meta.snapshot_tick > first_meta.snapshot_tick);
     assert!(matches!(game_state, GameState::Starting { .. }));
     rt.simulate_after_mana(Instant::now(), 3.0);
-    assert_eq!(rt.game_state, GameState::Running);
+    assert_eq!(rt.world.game_state, GameState::Running);
     assert_clean_round(&rt);
-    assert!(structure_is_protected(&rt.structures, base.id));
+    assert!(structure_is_protected(&rt.world.structures, base.id));
     println!(
         "LIVE_UDP_LIFECYCLE victory=green match_before={} match_after={} framed_max_bytes={} clean_second_running=true",
         first_meta.match_id,
@@ -703,40 +723,29 @@ fn shared_xp_level_up_preserves_death_until_the_scheduled_respawn() {
     rt.handle_packet(addr(55800), join("dead", Team::Green), now);
     rt.handle_packet(addr(55801), join("alive", Team::Green), now);
     let respawn_at = now + RESPAWN_DELAY;
-    for player in rt.players.values_mut() {
+    for player in rt.world.players.values_mut() {
         player.state.xp = player.state.next_level_xp - 1;
         player.state.hp = 0.0;
         player.respawn_at = Some(respawn_at);
     }
-    rt.players.get_mut(&addr(55801)).unwrap().state.hp = 40.0;
-    rt.players.get_mut(&addr(55801)).unwrap().respawn_at = None;
-    award_minion_kill_rewards(&mut rt.players, Team::Green);
-    let dead = &rt.players[&addr(55800)];
+    rt.world.players.get_mut(&addr(55801)).unwrap().state.hp = 40.0;
+    rt.world.players.get_mut(&addr(55801)).unwrap().respawn_at = None;
+    award_minion_kill_rewards(&mut rt.world.players, Team::Green);
+    let dead = &rt.world.players[&addr(55800)];
     assert_eq!(dead.state.level, 2);
     assert_eq!(dead.state.hp, 0.0);
     assert_eq!(dead.respawn_at, Some(respawn_at));
-    let alive = &rt.players[&addr(55801)];
+    let alive = &rt.world.players[&addr(55801)];
     assert_eq!(alive.state.level, 2);
     assert_eq!(alive.state.hp, 40.0 + LEVEL_UP_HP_BONUS);
-    handle_respawns(
-        &mut rt.players,
-        &rt.structures,
-        &rt.map_layout,
-        &GameState::Running,
-        respawn_at - Duration::from_millis(1),
-    );
-    assert_eq!(rt.players[&addr(55800)].state.hp, 0.0);
-    handle_respawns(
-        &mut rt.players,
-        &rt.structures,
-        &rt.map_layout,
-        &GameState::Running,
-        respawn_at,
-    );
-    let dead = &rt.players[&addr(55800)];
+    handle_respawns(&mut rt.world, respawn_at - Duration::from_millis(1));
+    assert_eq!(rt.world.players[&addr(55800)].state.hp, 0.0);
+    handle_respawns(&mut rt.world, respawn_at);
+    let dead = &rt.world.players[&addr(55800)];
     assert_eq!(dead.state.hp, MAX_HP + LEVEL_UP_HP_BONUS);
     assert_eq!(dead.state.hp, dead.state.max_hp);
     assert_eq!(dead.respawn_at, None);
-    let spawn = spawn_position_for_team_from_base(&rt.structures, &rt.map_layout, Team::Green);
+    let spawn =
+        spawn_position_for_team_from_base(&rt.world.structures, &rt.world.map_layout, Team::Green);
     assert_eq!((dead.state.x, dead.state.z), (spawn.x, spawn.z));
 }

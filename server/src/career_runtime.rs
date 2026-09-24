@@ -199,7 +199,12 @@ impl ServerRuntime {
             && self.career.backend.enabled()
     }
     pub(crate) fn career_flow_active(&self) -> bool {
-        self.career.backend.enabled() || self.players.values().any(|player| player.career_capable)
+        self.career.backend.enabled()
+            || self
+                .world
+                .players
+                .values()
+                .any(|player| player.career_capable)
     }
     pub(crate) fn career_error(&mut self, addr: SocketAddr, message: impl Into<String>) {
         self.career.errors.insert(addr, message.into());
@@ -211,14 +216,8 @@ impl ServerRuntime {
         request: CareerRequest,
         now: Instant,
     ) {
-        ensure_player_connected(
-            &mut self.players,
-            &self.map_layout,
-            addr,
-            &mut self.next_player_id,
-            now,
-        );
-        let player = self.players.get_mut(&addr).unwrap();
+        self.world.ensure_connected(addr, now);
+        let player = self.world.players.get_mut(&addr).unwrap();
         player.career_capable = true;
         player.last_seen = now;
         let admitted_human = player.joined && !player.state.is_bot;
@@ -243,17 +242,11 @@ impl ServerRuntime {
         let ClientPacket::Join { session_id, .. } = packet else {
             return true;
         };
-        ensure_player_connected(
-            &mut self.players,
-            &self.map_layout,
-            addr,
-            &mut self.next_player_id,
-            now,
-        );
+        self.world.ensure_connected(addr, now);
         if self
             .career
             .blocked_starts
-            .contains(&self.players[&addr].state.id)
+            .contains(&self.world.players[&addr].state.id)
         {
             return false;
         }
@@ -278,11 +271,13 @@ impl ServerRuntime {
             return false;
         }
         let retained = session.as_ref().and_then(|token| {
-            self.players
+            self.world
+                .players
                 .values()
                 .find(|player| player.session_id.as_ref() == Some(token))
                 .or_else(|| {
-                    self.disconnected_sessions
+                    self.world
+                        .disconnected_sessions
                         .get(token)
                         .map(|saved| &saved.player)
                 })
@@ -297,7 +292,7 @@ impl ServerRuntime {
             );
             return false;
         }
-        let current = &self.players[&addr];
+        let current = &self.world.players[&addr];
         if let Some(owner) = &current.career_profile
             && authenticated.as_ref().map(|p| &p.profile_id) != Some(&owner.profile_id)
         {
@@ -309,9 +304,10 @@ impl ServerRuntime {
         }
         if let Some(profile) = &authenticated {
             let conflicting = self
+                .world
                 .players
                 .values()
-                .chain(self.disconnected_sessions.values().map(|s| &s.player))
+                .chain(self.world.disconnected_sessions.values().map(|s| &s.player))
                 .any(|player| {
                     player.state.id != current.state.id
                         && Some(player.state.id) != retained_id
@@ -354,7 +350,7 @@ impl ServerRuntime {
             return false;
         }
         if !current.joined {
-            self.players.get_mut(&addr).unwrap().career_profile = authenticated;
+            self.world.players.get_mut(&addr).unwrap().career_profile = authenticated;
         }
         self.career.errors.remove(&addr);
         true
@@ -379,25 +375,20 @@ impl ServerRuntime {
         else {
             return;
         };
-        let player = self.players.get_mut(&addr).unwrap();
+        let player = self.world.players.get_mut(&addr).unwrap();
         player.last_seen = now;
         if !player.protocol_compatible {
             return;
         }
-        if !ensure_player_for_join(
-            &mut self.players,
-            &mut self.disconnected_sessions,
-            &self.map_layout,
-            addr,
-            normalize_session_id(session_id),
-            &mut self.next_player_id,
-            now,
-        ) {
-            self.players.get_mut(&addr).unwrap().join_error =
+        if !self
+            .world
+            .ensure_player_for_join(addr, normalize_session_id(session_id), now)
+        {
+            self.world.players.get_mut(&addr).unwrap().join_error =
                 Some(shared::protocol::JoinRejection::SessionActive);
             return;
         }
-        let player = &self.players[&addr];
+        let player = &self.world.players[&addr];
         if player.joined {
             self.combat_log
                 .ledger
@@ -421,7 +412,7 @@ impl ServerRuntime {
             self.career_error(addr, error.to_string());
             return;
         }
-        let player = self.players.get_mut(&addr).unwrap();
+        let player = self.world.players.get_mut(&addr).unwrap();
         player.career_profile = Some(profile);
         player.draft.capable = prematch;
         handle_join_request_with_sprite(
@@ -431,7 +422,7 @@ impl ServerRuntime {
             hero_class,
             avatar.as_deref(),
             sprite_character.as_deref(),
-            &self.map_layout,
+            &self.world.map_layout,
             now,
         );
         player.joined = false;
@@ -455,7 +446,7 @@ impl ServerRuntime {
             .collect();
         self.career.queue.cancel(player_id);
         if reserved.contains(&player_id) {
-            for (addr, player) in &mut self.players {
+            for (addr, player) in &mut self.world.players {
                 if reserved.contains(&player.state.id) {
                     player.joined = false;
                     self.career.backend.set_playing(*addr, false);
@@ -469,10 +460,10 @@ impl ServerRuntime {
     }
 
     pub(crate) fn advance_career_queue(&mut self, now: Instant) {
-        if !self.career_queue_enabled() || matches!(self.game_state, GameState::Running) {
+        if !self.career_queue_enabled() || matches!(self.world.game_state, GameState::Running) {
             return;
         }
-        if matches!(self.game_state, GameState::Victory { .. }) {
+        if matches!(self.world.game_state, GameState::Victory { .. }) {
             if self.career.queue.is_empty() {
                 return;
             }
@@ -491,6 +482,7 @@ impl ServerRuntime {
         };
         for assigned in &selection.participants {
             let Some((addr, player)) = self
+                .world
                 .players
                 .iter_mut()
                 .find(|(_, player)| player.state.id == assigned.waiting.player_id)
@@ -511,10 +503,10 @@ impl ServerRuntime {
             player.state.team = assigned.team;
             player.career_profile = Some(assigned.waiting.profile.clone());
             player.joined = true;
-            session::reset_player_round(player, &self.map_layout, now);
+            session::reset_player_round(player, &self.world.map_layout, now);
             self.career.backend.set_playing(*addr, true);
         }
-        self.game_state = GameState::Forming {
+        self.world.game_state = GameState::Forming {
             ready: selection.participants.len() as u32,
             needed: self.match_config.roster_size(),
         };
@@ -535,13 +527,14 @@ impl ServerRuntime {
         }
         if self.targeting_qa
             || self
+                .world
                 .players
                 .values()
                 .any(|p| p.joined && (p.god_mode || p.speed_mult != 1.0))
         {
             return Err("Development gameplay modifiers are enabled.");
         }
-        if !approved_default_map(&self.map_config) {
+        if !approved_default_map(&self.world.map_config) {
             return Err("Custom map or gameplay tuning.");
         }
         if roster.len() != self.match_config.roster_size() as usize
@@ -580,9 +573,9 @@ impl ServerRuntime {
         let durable = !practice || self.match_service.worker().is_some();
         let public_casual = practice
             && self.match_service.worker().is_some()
-            && approved_default_map(&self.map_config)
+            && approved_default_map(&self.world.map_config)
             && !self.targeting_qa
-            && self.players.values().filter(|p| p.joined).all(|p| {
+            && self.world.players.values().filter(|p| p.joined).all(|p| {
                 !p.god_mode && p.speed_mult == 1.0 && (p.state.is_bot || p.career_profile.is_some())
             });
         if durable && self.career.pending.len() >= MAX_PENDING_RESULTS {
@@ -590,6 +583,7 @@ impl ServerRuntime {
         }
         if self.career.round.is_none() {
             let mut roster: Vec<_> = self
+                .world
                 .players
                 .values()
                 .filter(|p| p.joined)
@@ -607,12 +601,12 @@ impl ServerRuntime {
                 started_at_ms: utc_ms(),
                 ended_at_ms: 0,
                 duration_ms: 0,
-                map_profile: self.map_config.map_profile.clone(),
+                map_profile: self.world.map_config.map_profile.clone(),
                 ruleset: if public_casual {
                     "public-casual-v1"
                 } else if practice {
                     "practice-bots-v1"
-                } else if approved_default_map(&self.map_config) {
+                } else if approved_default_map(&self.world.map_config) {
                     RATED_RULESET
                 } else {
                     "custom-unrated-v1"
@@ -650,7 +644,7 @@ impl ServerRuntime {
             // Anyone who joined after the roster was drafted (practice bots
             // filled while a durable start was pending, a late seat) needs a
             // row before the first hit, or their kills and deaths vanish.
-            for player in self.players.values().filter(|p| p.joined) {
+            for player in self.world.players.values().filter(|p| p.joined) {
                 if !round
                     .result
                     .participants
@@ -666,7 +660,7 @@ impl ServerRuntime {
                 .ledger
                 .begin(round.result.participants.clone())
             {
-                for (addr, player) in &self.players {
+                for (addr, player) in &self.world.players {
                     if player.joined {
                         self.career.errors.insert(*addr, error.into());
                     }
@@ -676,7 +670,7 @@ impl ServerRuntime {
             round.started_at = now;
             round.checkpoint_at = now;
             self.career.queue.commit_selection();
-            for (addr, player) in &self.players {
+            for (addr, player) in &self.world.players {
                 if player.joined && !player.state.is_bot {
                     self.career.backend.set_playing(*addr, true);
                 }
@@ -686,7 +680,7 @@ impl ServerRuntime {
     }
 
     pub(crate) fn register_career_participant(&mut self, addr: SocketAddr) {
-        let Some(player) = self.players.get(&addr).filter(|p| p.joined) else {
+        let Some(player) = self.world.players.get(&addr).filter(|p| p.joined) else {
             return;
         };
         if !self.combat_log.ledger.is_started() {
@@ -720,21 +714,22 @@ impl ServerRuntime {
     }
     fn update_career_totals(&mut self) {
         for player in self
+            .world
             .players
             .values()
             .filter(|p| p.joined)
-            .chain(self.disconnected_sessions.values().map(|s| &s.player))
+            .chain(self.world.disconnected_sessions.values().map(|s| &s.player))
         {
             self.combat_log
                 .ledger
                 .update_earned_gold(player.state.id, player.state.earned_gold);
         }
-        for player in self.players.values().filter(|p| p.joined) {
+        for player in self.world.players.values().filter(|p| p.joined) {
             self.combat_log
                 .ledger
                 .update_player(player.state.id, player.state.level, false);
         }
-        for session in self.disconnected_sessions.values() {
+        for session in self.world.disconnected_sessions.values() {
             self.combat_log.ledger.update_player(
                 session.player.state.id,
                 session.player.state.level,
@@ -802,7 +797,7 @@ impl ServerRuntime {
             self.update_career_totals();
             return;
         }
-        if !matches!(self.game_state, GameState::Running) {
+        if !matches!(self.world.game_state, GameState::Running) {
             return;
         }
         self.update_career_totals();
@@ -839,7 +834,7 @@ impl ServerRuntime {
         self.career.round = None;
         self.career.queue.release_selection();
         if career_flow && self.match_config.mode != MatchMode::Practice {
-            for (addr, player) in &mut self.players {
+            for (addr, player) in &mut self.world.players {
                 player.joined = false;
                 self.career.backend.set_playing(*addr, false);
             }
@@ -852,7 +847,7 @@ impl ServerRuntime {
     /// still have at most one participant per round. The endpoint and its career
     /// authentication stay as they are.
     pub(crate) fn leave_match(&mut self, addr: SocketAddr, now: Instant) {
-        let Some(player) = self.players.get_mut(&addr) else {
+        let Some(player) = self.world.players.get_mut(&addr) else {
             return;
         };
         player.last_seen = now;
@@ -871,7 +866,7 @@ impl ServerRuntime {
         self.cancel_career_entry(id, now);
         self.career.blocked_starts.remove(&id);
         self.career.backend.set_playing(addr, false);
-        if let Some(player) = self.players.get_mut(&addr) {
+        if let Some(player) = self.world.players.get_mut(&addr) {
             player.joined = false;
             player.career_profile = None;
             player.join_error = None;
@@ -883,8 +878,8 @@ impl ServerRuntime {
                 // resets gameplay progression. Never recycle its old round
                 // identity: delayed damage still belongs to that retired row.
                 // Timeout/session reclaim does not take this path.
-                player.state.id = self.next_player_id;
-                self.next_player_id += 1;
+                player.state.id = self.world.next_player_id;
+                self.world.next_player_id += 1;
                 if let Some(result) = self.career.last_results.remove(&id) {
                     self.career.last_results.insert(player.state.id, result);
                 }
@@ -894,7 +889,7 @@ impl ServerRuntime {
             }
         }
         if let Some(session_id) = session_id {
-            self.disconnected_sessions.remove(&session_id);
+            self.world.disconnected_sessions.remove(&session_id);
         }
         if was_joined {
             self.invalidate_prematch_roster(now);
@@ -909,21 +904,21 @@ impl ServerRuntime {
     }
 
     pub(crate) fn disconnect_career_player(&mut self, addr: SocketAddr, now: Instant) {
-        if let Some(player) = self.players.get_mut(&addr) {
+        if let Some(player) = self.world.players.get_mut(&addr) {
             self.combat_log
                 .ledger
                 .update_earned_gold(player.state.id, player.state.earned_gold);
             player.haste_expires_at = None;
             player.state.utility.haste_active_secs = 0.0;
         }
-        if let Some(player) = self.players.get(&addr) {
+        if let Some(player) = self.world.players.get(&addr) {
             let id = player.state.id;
             self.combat_log
                 .ledger
                 .update_player(id, player.state.level, true);
             self.cancel_career_entry(id, now);
         }
-        if let Some(player) = self.players.get(&addr) {
+        if let Some(player) = self.world.players.get(&addr) {
             self.career.blocked_starts.remove(&player.state.id);
         }
         self.career.backend.forget(addr);
@@ -934,11 +929,13 @@ impl ServerRuntime {
         // Result delivery caches follow reclaimable identities. Durable pending
         // records remain independently owned by the worker/outbox after expiry.
         let retained_ids: HashSet<_> = self
+            .world
             .players
             .values()
             .map(|p| p.state.id)
             .chain(
-                self.disconnected_sessions
+                self.world
+                    .disconnected_sessions
                     .values()
                     .map(|s| s.player.state.id),
             )
@@ -951,10 +948,10 @@ impl ServerRuntime {
             .retain(|id, _| retained_ids.contains(id));
         self.career
             .errors
-            .retain(|addr, _| self.players.contains_key(addr));
+            .retain(|addr, _| self.world.players.contains_key(addr));
         self.career.backend.poll();
         let mut invalidated = Vec::new();
-        for (addr, player) in &mut self.players {
+        for (addr, player) in &mut self.world.players {
             player.state.supporter_aura = if player.state.is_bot {
                 None
             } else {
@@ -1018,8 +1015,8 @@ impl ServerRuntime {
                     );
                 }
             }
-            if let Some(player) = self.players.get(&addr) {
-                if player.joined && matches!(self.game_state, GameState::Running) {
+            if let Some(player) = self.world.players.get(&addr) {
+                if player.joined && matches!(self.world.game_state, GameState::Running) {
                     continue;
                 }
                 let id = player.state.id;
@@ -1075,7 +1072,7 @@ impl ServerRuntime {
         for participant in participants {
             self.career.queue.cancel(participant.player_id);
             self.career.blocked_starts.insert(participant.player_id);
-            for (addr, player) in &mut self.players {
+            for (addr, player) in &mut self.world.players {
                 if player.state.id == participant.player_id {
                     player.joined = false;
                     self.career.backend.set_playing(*addr, false);
@@ -1090,15 +1087,15 @@ impl ServerRuntime {
         if self.match_service.is_public() {
             return;
         }
-        let Some(player) = self.players.get_mut(&addr) else {
+        let Some(player) = self.world.players.get_mut(&addr) else {
             return;
         };
         player.last_seen = now;
         let id = player.state.id;
-        if player.joined && matches!(self.game_state, GameState::Running) {
+        if player.joined && matches!(self.world.game_state, GameState::Running) {
             return;
         }
-        if matches!(self.game_state, GameState::Victory { .. }) {
+        if matches!(self.world.game_state, GameState::Victory { .. }) {
             self.record_match_metrics(now);
         }
         if let Some(result) = self.career.last_results.get(&id) {
@@ -1115,14 +1112,14 @@ impl ServerRuntime {
         } else {
             return;
         }
-        if matches!(self.game_state, GameState::Victory { .. }) {
+        if matches!(self.world.game_state, GameState::Victory { .. }) {
             self.restart_round(now);
         }
         if let Some(result) = self.career.last_results.remove(&id) {
             self.career.dismissed.insert(id, result.result_id);
         }
         self.career.errors.remove(&addr);
-        let player = self.players.get_mut(&addr).unwrap();
+        let player = self.world.players.get_mut(&addr).unwrap();
         player.joined = false;
         let packet = ClientPacket::Join {
             prematch: player.draft.capable,
@@ -1150,8 +1147,8 @@ impl ServerRuntime {
         } else if self.match_service.is_lobby() {
             view.match_service = Some(shared::match_service::MatchServiceView::Idle);
         }
-        if let Some(player) = self.players.get(&addr) {
-            view.queue = if player.joined && matches!(self.game_state, GameState::Running) {
+        if let Some(player) = self.world.players.get(&addr) {
+            view.queue = if player.joined && matches!(self.world.game_state, GameState::Running) {
                 QueueView::Playing
             } else {
                 self.career
@@ -1193,7 +1190,7 @@ impl ServerRuntime {
         }
         self.career.last_sent = Some(now);
         self.career.sequence = self.career.sequence.saturating_add(1);
-        for (addr, player) in &self.players {
+        for (addr, player) in &self.world.players {
             if !player.career_capable {
                 continue;
             }

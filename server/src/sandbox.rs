@@ -264,6 +264,7 @@ impl ServerRuntime {
         }
         let s = self.sandbox.as_mut().unwrap();
         for p in self
+            .world
             .players
             .values_mut()
             .filter(|p| p.joined && !p.state.is_bot)
@@ -290,7 +291,8 @@ impl ServerRuntime {
             SandboxActor::Enemy => ENEMY_ADDR,
             SandboxActor::Dummy => DUMMY_ADDR,
         };
-        self.players
+        self.world
+            .players
             .get(&addr)
             .filter(|p| p.joined)
             .map(|_| addr)
@@ -301,6 +303,7 @@ impl ServerRuntime {
             return;
         }
         let Some(player) = self
+            .world
             .players
             .get(&addr)
             .filter(|p| p.joined && !p.state.is_bot && p.protocol_compatible)
@@ -356,7 +359,7 @@ impl ServerRuntime {
                     self.validate_sandbox_destination(position)?;
                 }
                 let old = self.sandbox.as_ref().unwrap().config.clone();
-                let p = self.players.get_mut(&addr).unwrap();
+                let p = self.world.players.get_mut(&addr).unwrap();
                 let reset = p.state.hero_class != config.player.hero;
                 let id = p.state.id;
                 let moved = p
@@ -365,7 +368,7 @@ impl ServerRuntime {
                     .is_some_and(|c| c.position != config.player.position);
                 apply_actor(p, &config.player, reset, now);
                 if reset || moved {
-                    self.projectiles.retain(|_, p| {
+                    self.world.projectiles.retain(|_, p| {
                         p.state.owner_id != id
                             && p.target
                                 != TargetId {
@@ -384,12 +387,12 @@ impl ServerRuntime {
                 );
                 let c = dummy_actor(&config.dummy);
                 self.sync_sandbox_actor(DUMMY_ADDR, config.dummy.enabled, &c, false, now);
-                if let Some(p) = self.players.get_mut(&DUMMY_ADDR) {
+                if let Some(p) = self.world.players.get_mut(&DUMMY_ADDR) {
                     p.sandbox_infinite_hp = config.dummy.infinite_hp;
                 }
                 if !config.environment.minions {
-                    self.minions.clear();
-                    self.projectiles.retain(|_, p| {
+                    self.world.minions.clear();
+                    self.world.projectiles.retain(|_, p| {
                         p.state.source_kind != CombatEntityKind::Minion
                             && p.target.kind != TargetKind::Minion
                     });
@@ -397,30 +400,30 @@ impl ServerRuntime {
                 if old.environment.minions != config.environment.minions
                     || old.environment.minions_paused != config.environment.minions_paused
                 {
-                    self.last_wave_spawn_at = now;
+                    self.world.last_wave_spawn_at = now;
                 }
             }
             SandboxCommand::Refill { actor } => {
                 let a = self.sandbox_addr(addr, actor)?;
-                let p = self.players.get_mut(&a).unwrap();
+                let p = self.world.players.get_mut(&a).unwrap();
                 p.state.hp = p.state.max_hp;
                 p.state.mana = p.state.max_mana;
                 p.respawn_at = None;
             }
             SandboxCommand::ResetCooldowns { actor } => {
                 let a = self.sandbox_addr(addr, actor)?;
-                clear_cooldowns(self.players.get_mut(&a).unwrap());
+                clear_cooldowns(self.world.players.get_mut(&a).unwrap());
             }
             SandboxCommand::Teleport { actor, position } => {
                 self.validate_sandbox_destination(position)?;
                 let a = self.sandbox_addr(addr, actor)?;
-                let p = self.players.get_mut(&a).unwrap();
+                let p = self.world.players.get_mut(&a).unwrap();
                 p.state.utility.dash_sequence = p.state.utility.dash_sequence.saturating_add(1);
                 p.state.x = position[0];
                 p.state.z = position[1];
                 p.last_movement_at = now;
                 let id = p.state.id;
-                self.projectiles.retain(|_, p| {
+                self.world.projectiles.retain(|_, p| {
                     p.state.owner_id != id
                         && p.target
                             != TargetId {
@@ -436,7 +439,7 @@ impl ServerRuntime {
             SandboxCommand::ResetDuel => self.reset_sandbox_duel(now),
             SandboxCommand::AddXp { actor, amount } => {
                 let a = self.sandbox_addr(addr, actor)?;
-                let p = &self.players[&a];
+                let p = &self.world.players[&a];
                 let mut c = p.sandbox.clone().ok_or("Actor has no sandbox config")?;
                 let total: u32 = (1..c.level).map(xp_threshold_for_level).sum::<u32>() + c.xp;
                 let mut left = (total as i64 + amount as i64).max(0).min(u32::MAX as i64) as u32;
@@ -446,18 +449,18 @@ impl ServerRuntime {
                     c.level += 1;
                 }
                 c.xp = if c.level == MAX_LEVEL { 0 } else { left };
-                apply_actor(self.players.get_mut(&a).unwrap(), &c, false, now);
+                apply_actor(self.world.players.get_mut(&a).unwrap(), &c, false, now);
                 self.save_actor_config(actor, c);
             }
             SandboxCommand::GrantItem { actor, item } => {
                 let a = self.sandbox_addr(addr, actor)?;
-                let mut c = self.players[&a]
+                let mut c = self.world.players[&a]
                     .sandbox
                     .clone()
                     .ok_or("Actor has no sandbox config")?;
                 c.inventory.push(item);
                 validate_actor(&c)?;
-                apply_actor(self.players.get_mut(&a).unwrap(), &c, false, now);
+                apply_actor(self.world.players.get_mut(&a).unwrap(), &c, false, now);
                 self.save_actor_config(actor, c);
             }
             SandboxCommand::ResetAnalytics => self.combat_log.reset_sandbox(now),
@@ -475,15 +478,15 @@ impl ServerRuntime {
                 for team in [Team::Green, Team::Blue] {
                     for lane in [Lane::Top, Lane::Mid, Lane::Bot] {
                         spawn_minion_wave_for_team_lane(
-                            &self.map_layout,
-                            &mut self.minions,
-                            &mut self.next_minion_id,
+                            &self.world.map_layout,
+                            &mut self.world.minions,
+                            &mut self.world.next_minion_id,
                             team,
                             lane,
                         );
                     }
                 }
-                self.last_wave_spawn_at = now;
+                self.world.last_wave_spawn_at = now;
             }
             SandboxCommand::ForceCast {
                 actor,
@@ -498,6 +501,7 @@ impl ServerRuntime {
     }
     pub(crate) fn reset_sandbox_duel(&mut self, now: Instant) {
         let addresses: Vec<_> = self
+            .world
             .players
             .iter()
             .filter(|(_, p)| p.joined)
@@ -506,24 +510,25 @@ impl ServerRuntime {
         for a in addresses {
             self.reset_sandbox_actor(a, now);
         }
-        self.projectiles.clear();
-        self.minions.clear();
-        self.structures = build_configured_structures(&self.map_config);
+        self.world.projectiles.clear();
+        self.world.minions.clear();
+        self.world.structures = build_configured_structures(&self.world.map_config);
         let mut next_neutral_id = 9001;
-        self.neutrals = build_neutral_camps(&mut next_neutral_id);
-        self.neutrals
+        self.world.neutrals = build_neutral_camps(&mut next_neutral_id);
+        self.world
+            .neutrals
             .extend(build_boss_neutrals(&mut next_neutral_id));
-        schedule_boss_spawns(&mut self.neutrals, now);
-        self.team_buffs = TeamBuffs::default();
-        self.forest_pickups.reset_availability();
+        schedule_boss_spawns(&mut self.world.neutrals, now);
+        self.world.team_buffs = TeamBuffs::default();
+        self.world.forest_pickups.reset_availability();
         self.combat_log.reset_sandbox(now);
-        self.game_state = GameState::Running;
+        self.world.game_state = GameState::Running;
         self.victory_at = None;
-        self.last_wave_spawn_at = now;
+        self.world.last_wave_spawn_at = now;
     }
     fn validate_sandbox_destination(&self, position: [f32; 2]) -> Result<(), String> {
         validate_position(position)?;
-        if self.structures.values().any(|s| {
+        if self.world.structures.values().any(|s| {
             s.state.hp > 0.0
                 && (s.state.x - position[0]).hypot(s.state.z - position[1])
                     < structure_collision_radius(s.state.kind) + shared::navigation::HERO_RADIUS
@@ -549,8 +554,8 @@ impl ServerRuntime {
         now: Instant,
     ) {
         if !enabled {
-            if let Some(p) = self.players.remove(&addr) {
-                self.projectiles.retain(|_, b| {
+            if let Some(p) = self.world.players.remove(&addr) {
+                self.world.projectiles.retain(|_, b| {
                     b.state.owner_id != p.state.id
                         && b.target
                             != TargetId {
@@ -561,16 +566,10 @@ impl ServerRuntime {
             }
             return;
         }
-        let new = !self.players.contains_key(&addr);
+        let new = !self.world.players.contains_key(&addr);
         if new {
-            ensure_player_connected(
-                &mut self.players,
-                &self.map_layout,
-                addr,
-                &mut self.next_player_id,
-                now,
-            );
-            let p = self.players.get_mut(&addr).unwrap();
+            self.world.ensure_connected(addr, now);
+            let p = self.world.players.get_mut(&addr).unwrap();
             p.state.is_bot = true;
             handle_join_request_with_sprite(
                 p,
@@ -579,13 +578,13 @@ impl ServerRuntime {
                 c.hero,
                 bots::bot_avatar(c.hero, 1),
                 None,
-                &self.map_layout,
+                &self.world.map_layout,
                 now,
             );
         }
         if reset {
-            let id = self.players[&addr].state.id;
-            self.projectiles.retain(|_, p| {
+            let id = self.world.players[&addr].state.id;
+            self.world.projectiles.retain(|_, p| {
                 p.state.owner_id != id
                     && p.target
                         != TargetId {
@@ -594,14 +593,19 @@ impl ServerRuntime {
                         }
             });
         }
-        apply_actor(self.players.get_mut(&addr).unwrap(), c, new || reset, now);
+        apply_actor(
+            self.world.players.get_mut(&addr).unwrap(),
+            c,
+            new || reset,
+            now,
+        );
     }
     fn reset_sandbox_actor(&mut self, addr: SocketAddr, now: Instant) {
-        if let Some(p) = self.players.get_mut(&addr) {
+        if let Some(p) = self.world.players.get_mut(&addr) {
             if let Some(c) = p.sandbox.clone() {
                 let id = p.state.id;
                 apply_actor(p, &c, true, now);
-                self.projectiles.retain(|_, p| {
+                self.world.projectiles.retain(|_, p| {
                     p.state.owner_id != id
                         && p.target
                             != TargetId {
@@ -620,7 +624,7 @@ impl ServerRuntime {
         now: Instant,
     ) -> Result<(), String> {
         let skill = SkillSlot::from_index(slot).ok_or("Skill slot must be 0..3")?;
-        let p = &self.players[&addr];
+        let p = &self.world.players[&addr];
         let target = if ability_for_class_slot(p.state.hero_class, skill).targeting
             == TargetingMode::SelfTarget
         {
@@ -629,7 +633,8 @@ impl ServerRuntime {
                 id: p.state.id,
             }
         } else {
-            self.players
+            self.world
+                .players
                 .values()
                 .filter(|t| {
                     t.joined
@@ -648,21 +653,8 @@ impl ServerRuntime {
                 .ok_or("No living hostile target")?
         };
         let before = p.state.action_sequence;
-        handle_cast_request(
-            &mut self.players,
-            &mut self.projectiles,
-            &mut self.minions,
-            &mut self.structures,
-            &mut self.neutrals,
-            &self.team_buffs,
-            addr,
-            target,
-            slot,
-            &mut self.next_projectile_id,
-            &self.game_state,
-            now,
-        );
-        if self.players[&addr].state.action_sequence == before {
+        handle_cast_request(&mut self.world, addr, target, slot, now);
+        if self.world.players[&addr].state.action_sequence == before {
             Err("Ability rejected: check range, unlock, health, mana and cooldown".into())
         } else {
             Ok(())
@@ -674,7 +666,7 @@ impl ServerRuntime {
         }
         self.initialize_sandbox_players();
         let config = self.sandbox.as_ref().unwrap().config.clone();
-        for p in self.players.values_mut() {
+        for p in self.world.players.values_mut() {
             if let Some(c) = &p.sandbox {
                 if c.infinite_resource {
                     p.state.mana = p.state.max_mana;
@@ -688,7 +680,7 @@ impl ServerRuntime {
             return;
         }
         for addr in [ENEMY_ADDR, DUMMY_ADDR] {
-            let Some(p) = self.players.get(&addr) else {
+            let Some(p) = self.world.players.get(&addr) else {
                 continue;
             };
             if p.state.hp <= 0.0 {
@@ -696,16 +688,18 @@ impl ServerRuntime {
                     if p.respawn_at.is_some_and(|t| now >= t) {
                         self.reset_sandbox_actor(addr, now);
                     } else if p.respawn_at.is_none() {
-                        self.players.get_mut(&addr).unwrap().respawn_at = Some(now + RESPAWN_DELAY);
+                        self.world.players.get_mut(&addr).unwrap().respawn_at =
+                            Some(now + RESPAWN_DELAY);
                     }
                 } else {
-                    self.players.get_mut(&addr).unwrap().respawn_at = None;
+                    self.world.players.get_mut(&addr).unwrap().respawn_at = None;
                 }
                 continue;
             }
             let origin = [p.state.x, p.state.z];
             let team = p.state.team;
             let target = self
+                .world
                 .players
                 .values()
                 .filter(|p| p.joined && !p.state.is_bot && p.state.hp > 0.0 && p.state.team != team)
@@ -746,32 +740,26 @@ impl ServerRuntime {
                 ),
                 BotBehavior::Attack | BotBehavior::Fight => {
                     let reach =
-                        shared::basic_attack_for_class(self.players[&addr].state.hero_class).range
+                        shared::basic_attack_for_class(self.world.players[&addr].state.hero_class)
+                            .range
                             + PLAYER_HIT_RADIUS;
                     let desired = config.enemy.attack_distance.min(reach - 0.1);
                     if distance > desired {
                         self.move_sandbox_actor(addr, position, now, dt);
                     }
                     if distance <= reach {
-                        let request = self.players[&addr]
+                        let request = self.world.players[&addr]
                             .state
                             .basic_attack_request_id
                             .saturating_add(1);
                         handle_basic_attack_request(
-                            &mut self.players,
-                            &mut self.projectiles,
-                            &self.minions,
-                            &self.structures,
-                            &self.neutrals,
-                            &self.team_buffs,
+                            &mut self.world,
                             addr,
                             TargetId {
                                 kind: TargetKind::Player,
                                 id,
                             },
                             request,
-                            &mut self.next_projectile_id,
-                            &self.game_state,
                             now,
                         );
                     }
@@ -785,9 +773,10 @@ impl ServerRuntime {
         }
     }
     fn move_sandbox_actor(&mut self, addr: SocketAddr, goal: [f32; 2], now: Instant, dt: f32) {
-        let p = &self.players[&addr];
+        let p = &self.world.players[&addr];
         let origin = [p.state.x, p.state.z];
         let discs: Vec<_> = self
+            .world
             .structures
             .values()
             .filter(|s| s.state.hp > 0.0)
@@ -815,9 +804,9 @@ impl ServerRuntime {
             * dt)
             .min(distance);
         handle_transform_request_with_structures(
-            self.players.get_mut(&addr).unwrap(),
-            &self.map_layout,
-            &self.structures,
+            self.world.players.get_mut(&addr).unwrap(),
+            &self.world.map_layout,
+            &self.world.structures,
             origin[0] + dx / distance * step,
             PLAYER_GROUND_Y,
             origin[1] + dz / distance * step,

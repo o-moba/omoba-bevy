@@ -17,172 +17,174 @@ pub(crate) fn normalize_session_id(raw: Option<String>) -> Option<String> {
     Some(trimmed.to_string())
 }
 
-pub(crate) fn ensure_player_connected(
-    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
-    map_layout: &MapLayoutState,
-    addr: SocketAddr,
-    next_player_id: &mut u64,
-    now: Instant,
-) {
-    players.entry(addr).or_insert_with(|| {
-        let player_id = *next_player_id;
-        *next_player_id += 1;
-        println!("Endpoint {addr} connected (pre-join), reserved player id {player_id}");
-        let spawn = spawn_position_for_team(map_layout, Team::Green);
+impl GameWorld {
+    /// Reserves a player id and a pre-join placeholder for a new endpoint.
+    pub(crate) fn ensure_connected(&mut self, addr: SocketAddr, now: Instant) {
+        let Self {
+            players,
+            map_layout,
+            next_player_id,
+            ..
+        } = self;
+        players.entry(addr).or_insert_with(|| {
+            let player_id = *next_player_id;
+            *next_player_id += 1;
+            println!("Endpoint {addr} connected (pre-join), reserved player id {player_id}");
+            let spawn = spawn_position_for_team(map_layout, Team::Green);
 
-        ConnectedPlayer {
-            sandbox: None,
-            sandbox_infinite_hp: false,
-            career_profile: None,
-            career_capable: false,
-            draft: Default::default(),
-            state: PlayerState {
-                supporter_aura: None,
-                is_bot: false,
-                id: player_id,
-                x: spawn.x,
-                y: PLAYER_GROUND_Y,
-                z: spawn.z,
-                yaw: 0.0,
-                team: Team::Green,
-                hp: MAX_HP,
-                max_hp: MAX_HP,
-                mana: MAX_MANA,
-                max_mana: MAX_MANA,
-                gold: STARTING_GOLD,
-                earned_gold: 0,
-                utility: Default::default(),
-                inventory: Vec::new(),
-                item_bonuses: ItemBonuses::NONE,
-                shop_available: false,
-                last_purchase: None,
-                basic_attack_cooldown_secs: 0.0,
-                basic_attack_remaining_secs: 0.0,
-                skill_cooldown_remaining_secs: [0.0; 4],
-                skill_recovery_remaining_secs: 0.0,
-                basic_attack_request_id: 0,
-                xp: 0,
-                level: STARTING_LEVEL,
-                next_level_xp: xp_threshold_for_level(STARTING_LEVEL),
-                skill_points: 0,
-                ranks: [1; 4],
-                character: default_character_choice(),
-                hero_class: HeroClass::default(),
-                avatar: None,
-                sprite_character: None,
-                action_sequence: 0,
-                action_kind: PlayerActionKind::None,
-                action_slot: 0,
-            },
-            joined: false,
-            session_id: None,
-            framed_snapshots: false,
-            protocol_compatible: true,
-            join_error: None,
-            last_seen: now,
-            last_movement_at: now,
-            last_cast_at: [None; 4],
-            last_basic_attack_at: None,
-            dash_ready_at: None,
-            haste_ready_at: None,
-            haste_expires_at: None,
-            respawn_at: None,
-            god_mode: false,
-            speed_mult: 1.0,
-            purchase_sequence: 0,
-            gold_income_remainder: 0.0,
-        }
-    });
-}
-
-pub(crate) fn ensure_player_for_join(
-    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
-    disconnected_sessions: &mut HashMap<String, DisconnectedSession>,
-    map_layout: &MapLayoutState,
-    addr: SocketAddr,
-    session_id: Option<String>,
-    next_player_id: &mut u64,
-    now: Instant,
-) -> bool {
-    let career_capable = players
-        .get(&addr)
-        .is_some_and(|player| player.career_capable);
-    let framed_snapshots = players
-        .get(&addr)
-        .is_some_and(|player| player.framed_snapshots);
-    let Some(session_id) = session_id else {
-        ensure_player_connected(players, map_layout, addr, next_player_id, now);
-        return true;
-    };
-
-    if players
-        .get(&addr)
-        .and_then(|player| player.session_id.as_deref())
-        == Some(session_id.as_str())
-    {
-        return true;
+            ConnectedPlayer {
+                sandbox: None,
+                sandbox_infinite_hp: false,
+                career_profile: None,
+                career_capable: false,
+                draft: Default::default(),
+                state: PlayerState {
+                    supporter_aura: None,
+                    is_bot: false,
+                    id: player_id,
+                    x: spawn.x,
+                    y: PLAYER_GROUND_Y,
+                    z: spawn.z,
+                    yaw: 0.0,
+                    team: Team::Green,
+                    hp: MAX_HP,
+                    max_hp: MAX_HP,
+                    mana: MAX_MANA,
+                    max_mana: MAX_MANA,
+                    gold: STARTING_GOLD,
+                    earned_gold: 0,
+                    utility: Default::default(),
+                    inventory: Vec::new(),
+                    item_bonuses: ItemBonuses::NONE,
+                    shop_available: false,
+                    last_purchase: None,
+                    basic_attack_cooldown_secs: 0.0,
+                    basic_attack_remaining_secs: 0.0,
+                    skill_cooldown_remaining_secs: [0.0; 4],
+                    skill_recovery_remaining_secs: 0.0,
+                    basic_attack_request_id: 0,
+                    xp: 0,
+                    level: STARTING_LEVEL,
+                    next_level_xp: xp_threshold_for_level(STARTING_LEVEL),
+                    skill_points: 0,
+                    ranks: [1; 4],
+                    character: default_character_choice(),
+                    hero_class: HeroClass::default(),
+                    avatar: None,
+                    sprite_character: None,
+                    action_sequence: 0,
+                    action_kind: PlayerActionKind::None,
+                    action_slot: 0,
+                },
+                joined: false,
+                session_id: None,
+                framed_snapshots: false,
+                protocol_compatible: true,
+                join_error: None,
+                last_seen: now,
+                last_movement_at: now,
+                last_cast_at: [None; 4],
+                last_basic_attack_at: None,
+                dash_ready_at: None,
+                haste_ready_at: None,
+                haste_expires_at: None,
+                respawn_at: None,
+                god_mode: false,
+                speed_mult: 1.0,
+                purchase_sequence: 0,
+                gold_income_remainder: 0.0,
+            }
+        });
     }
 
-    let active_match = players
-        .iter()
-        .find(|(existing_addr, player)| {
-            **existing_addr != addr && player.session_id.as_deref() == Some(session_id.as_str())
-        })
-        .map(|(existing_addr, player)| (*existing_addr, player.last_seen));
+    /// Admits `addr` for a join, reclaiming a retained session when allowed.
+    pub(crate) fn ensure_player_for_join(
+        &mut self,
+        addr: SocketAddr,
+        session_id: Option<String>,
+        now: Instant,
+    ) -> bool {
+        let players = &mut self.players;
+        let career_capable = players
+            .get(&addr)
+            .is_some_and(|player| player.career_capable);
+        let framed_snapshots = players
+            .get(&addr)
+            .is_some_and(|player| player.framed_snapshots);
+        let Some(session_id) = session_id else {
+            self.ensure_connected(addr, now);
+            return true;
+        };
 
-    if let Some((existing_addr, last_seen)) = active_match {
-        if now.duration_since(last_seen) <= PLAYER_TIMEOUT {
-            eprintln!(
-                "Rejecting session id reuse from {addr}: session is still active at {existing_addr}"
-            );
-            return false;
+        if players
+            .get(&addr)
+            .and_then(|player| player.session_id.as_deref())
+            == Some(session_id.as_str())
+        {
+            return true;
         }
 
-        if let Some(mut player) = players.remove(&existing_addr) {
-            println!(
-                "Reclaiming timed-out player {} from {existing_addr} to {addr}",
-                player.state.id
-            );
-            player.framed_snapshots = framed_snapshots;
-            player.career_capable |= career_capable;
-            player.protocol_compatible = true;
-            player.join_error = None;
+        let active_match = players
+            .iter()
+            .find(|(existing_addr, player)| {
+                **existing_addr != addr && player.session_id.as_deref() == Some(session_id.as_str())
+            })
+            .map(|(existing_addr, player)| (*existing_addr, player.last_seen));
+
+        if let Some((existing_addr, last_seen)) = active_match {
+            if now.duration_since(last_seen) <= PLAYER_TIMEOUT {
+                eprintln!(
+                    "Rejecting session id reuse from {addr}: session is still active at {existing_addr}"
+                );
+                return false;
+            }
+
+            if let Some(mut player) = players.remove(&existing_addr) {
+                println!(
+                    "Reclaiming timed-out player {} from {existing_addr} to {addr}",
+                    player.state.id
+                );
+                player.framed_snapshots = framed_snapshots;
+                player.career_capable |= career_capable;
+                player.protocol_compatible = true;
+                player.join_error = None;
+                player.session_id = Some(session_id);
+                player.last_seen = now;
+                player.last_movement_at = now;
+                players.insert(addr, player);
+                return true;
+            }
+        }
+
+        if let Some(mut disconnected) = self.disconnected_sessions.remove(&session_id) {
+            if now.duration_since(disconnected.disconnected_at) <= SESSION_RECLAIM_WINDOW {
+                println!(
+                    "Reclaiming disconnected player {} from new endpoint {addr}",
+                    disconnected.player.state.id
+                );
+                disconnected.player.framed_snapshots = framed_snapshots;
+                disconnected.player.career_capable |= career_capable;
+                disconnected.player.protocol_compatible = true;
+                disconnected.player.join_error = None;
+                disconnected.player.session_id = Some(session_id);
+                disconnected.player.last_seen = now;
+                disconnected.player.last_movement_at = now;
+                players.insert(addr, disconnected.player);
+                return true;
+            }
+        }
+
+        if let Some(player) = players.get_mut(&addr) {
             player.session_id = Some(session_id);
-            player.last_seen = now;
-            player.last_movement_at = now;
-            players.insert(addr, player);
             return true;
         }
-    }
 
-    if let Some(mut disconnected) = disconnected_sessions.remove(&session_id) {
-        if now.duration_since(disconnected.disconnected_at) <= SESSION_RECLAIM_WINDOW {
-            println!(
-                "Reclaiming disconnected player {} from new endpoint {addr}",
-                disconnected.player.state.id
-            );
-            disconnected.player.framed_snapshots = framed_snapshots;
-            disconnected.player.career_capable |= career_capable;
-            disconnected.player.protocol_compatible = true;
-            disconnected.player.join_error = None;
-            disconnected.player.session_id = Some(session_id);
-            disconnected.player.last_seen = now;
-            disconnected.player.last_movement_at = now;
-            players.insert(addr, disconnected.player);
-            return true;
+        self.ensure_connected(addr, now);
+        if let Some(player) = self.players.get_mut(&addr) {
+            player.session_id = Some(session_id);
         }
+        true
     }
-
-    if let Some(player) = players.get_mut(&addr) {
-        player.session_id = Some(session_id);
-        return true;
-    }
-
-    ensure_player_connected(players, map_layout, addr, next_player_id, now);
-    if let Some(player) = players.get_mut(&addr) {
-        player.session_id = Some(session_id);
-    }
-    true
 }
 
 #[cfg(test)]
@@ -416,16 +418,16 @@ pub(crate) fn clip_live_structures(
     shared::navigation::clip_discs(from, to, &discs)
 }
 
-pub(crate) fn handle_respawns(
-    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
-    structures: &HashMap<u64, Structure>,
-    map_layout: &MapLayoutState,
-    game_state: &GameState,
-    now: Instant,
-) {
-    if !matches!(game_state, GameState::Running) {
+pub(crate) fn handle_respawns(world: &mut GameWorld, now: Instant) {
+    if !matches!(world.game_state, GameState::Running) {
         return;
     }
+    let GameWorld {
+        players,
+        structures,
+        map_layout,
+        ..
+    } = world;
     for player in players.values_mut() {
         if player.sandbox.is_some() && player.state.is_bot {
             continue;
@@ -457,61 +459,24 @@ pub(crate) fn handle_respawns(
     }
 }
 
-/// Canonical clean-round state, before formation/start arms the clocks.
-#[cfg(test)]
-pub(crate) fn reset_match(
-    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
-    structures: &mut HashMap<u64, Structure>,
-    minions: &mut HashMap<u64, Minion>,
-    projectiles: &mut HashMap<u64, Projectile>,
-    neutrals: &mut HashMap<u64, Neutral>,
-    team_buffs: &mut TeamBuffs,
-    map_layout: &MapLayoutState,
-    last_wave_spawn_at: &mut Instant,
-    game_state: &mut GameState,
-    now: Instant,
-) {
-    reset_match_with_map(
-        players,
-        structures,
-        minions,
-        projectiles,
-        neutrals,
-        team_buffs,
-        map_layout,
-        &shared::map::ResolvedMap::default(),
-        last_wave_spawn_at,
-        game_state,
-        now,
-    );
-}
-
-pub(crate) fn reset_match_with_map(
-    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
-    structures: &mut HashMap<u64, Structure>,
-    minions: &mut HashMap<u64, Minion>,
-    projectiles: &mut HashMap<u64, Projectile>,
-    neutrals: &mut HashMap<u64, Neutral>,
-    team_buffs: &mut TeamBuffs,
-    map_layout: &MapLayoutState,
-    map_config: &shared::map::ResolvedMap,
-    last_wave_spawn_at: &mut Instant,
-    game_state: &mut GameState,
-    now: Instant,
-) {
-    *structures = build_configured_structures(map_config);
-    minions.clear();
-    projectiles.clear();
-    let mut next_neutral_id = 9_001;
-    *neutrals = build_neutral_camps(&mut next_neutral_id);
-    neutrals.extend(build_boss_neutrals(&mut next_neutral_id));
-    team_buffs.clear();
-    *last_wave_spawn_at = now;
-    for player in players.values_mut() {
-        reset_player_round(player, map_layout, now);
-        player.join_error = None;
+impl GameWorld {
+    /// Canonical clean-round state, before formation/start arms the clocks.
+    pub(crate) fn reset_round(&mut self, now: Instant) {
+        self.structures = build_configured_structures(&self.map_config);
+        self.minions.clear();
+        self.projectiles.clear();
+        let mut next_neutral_id = 9_001;
+        self.neutrals = build_neutral_camps(&mut next_neutral_id);
+        self.neutrals
+            .extend(build_boss_neutrals(&mut next_neutral_id));
+        self.team_buffs.clear();
+        self.last_wave_spawn_at = now;
+        for player in self.players.values_mut() {
+            reset_player_round(player, &self.map_layout, now);
+            player.join_error = None;
+        }
+        self.game_state = GameState::Lobby;
     }
-    *game_state = GameState::Lobby;
 }
 
 /// Count reserved seats as well as connected heroes when assigning release teams.
@@ -542,6 +507,7 @@ pub(crate) fn assign_reserved_release_team(
 impl ServerRuntime {
     pub(crate) fn maintain_roster(&mut self, now: Instant) {
         let expired = self
+            .world
             .players
             .iter()
             .filter(|(_, player)| {
@@ -552,10 +518,10 @@ impl ServerRuntime {
             .collect::<Vec<_>>();
         let draft_roster_changed = expired
             .iter()
-            .any(|addr| self.players.get(addr).is_some_and(|p| p.joined));
+            .any(|addr| self.world.players.get(addr).is_some_and(|p| p.joined));
         for addr in expired {
             self.disconnect_career_player(addr, now);
-            let player = self.players.remove(&addr).unwrap();
+            let player = self.world.players.remove(&addr).unwrap();
             let disconnected_at = player.last_seen + PLAYER_TIMEOUT;
             if player.joined {
                 println!(
@@ -566,7 +532,7 @@ impl ServerRuntime {
                     self.elapsed_match_ms(now)
                 );
                 if let Some(session_id) = player.session_id.clone() {
-                    self.disconnected_sessions.insert(
+                    self.world.disconnected_sessions.insert(
                         session_id,
                         DisconnectedSession {
                             player,
@@ -579,13 +545,18 @@ impl ServerRuntime {
         if draft_roster_changed {
             self.invalidate_prematch_roster(now);
         }
-        self.disconnected_sessions.retain(|_, session| {
+        self.world.disconnected_sessions.retain(|_, session| {
             now.saturating_duration_since(session.disconnected_at) <= SESSION_RECLAIM_WINDOW
         });
-        if self.players.values().any(|p| p.joined && !p.state.is_bot) {
+        if self
+            .world
+            .players
+            .values()
+            .any(|p| p.joined && !p.state.is_bot)
+        {
             self.empty_since = None;
-        } else if !matches!(self.game_state, GameState::Lobby)
-            || !self.disconnected_sessions.is_empty()
+        } else if !matches!(self.world.game_state, GameState::Lobby)
+            || !self.world.disconnected_sessions.is_empty()
         {
             let empty_since = self.empty_since.get_or_insert(now);
             let grace = if self.match_service.worker().is_some() {
@@ -618,49 +589,31 @@ impl ServerRuntime {
             return;
         }
         if self.match_config.mode == MatchMode::Practice {
-            self.players.retain(|_, player| !player.state.is_bot);
+            self.world.players.retain(|_, player| !player.state.is_bot);
             self.bots.clear();
         }
         self.reset_career_round();
         self.prematch = Default::default();
-        for player in self.players.values_mut() {
+        for player in self.world.players.values_mut() {
             let capable = player.draft.capable;
             player.draft = prematch::DraftState {
                 capable,
                 ..Default::default()
             };
         }
-        reset_match_with_map(
-            &mut self.players,
-            &mut self.structures,
-            &mut self.minions,
-            &mut self.projectiles,
-            &mut self.neutrals,
-            &mut self.team_buffs,
-            &self.map_layout,
-            &self.map_config,
-            &mut self.last_wave_spawn_at,
-            &mut self.game_state,
-            now,
-        );
+        self.world.reset_round(now);
         // Only currently connected admitted identities participate in a rematch.
-        self.disconnected_sessions.clear();
+        self.world.disconnected_sessions.clear();
         self.match_id = self.match_id.saturating_add(1);
-        self.forest_pickups = forest_pickups::ForestPickups::default();
+        self.world.forest_pickups = forest_pickups::ForestPickups::default();
         self.combat_log = CombatLog::default();
         self.match_started_at = None;
         self.victory_at = None;
         self.empty_since = None;
         self.metrics_players.clear();
         self.metrics_objectives.clear();
-        if joined_count(&self.players) > 0 && !self.prematch_required() {
-            advance_formation_on_join(
-                &mut self.game_state,
-                &self.players,
-                &mut self.neutrals,
-                self.match_config,
-                now,
-            );
+        if joined_count(&self.world.players) > 0 && !self.prematch_required() {
+            advance_formation_on_join(&mut self.world, self.match_config, now);
         }
         self.fill_practice_bots(now);
         self.tick_prematch(now);
@@ -669,23 +622,23 @@ impl ServerRuntime {
             "MATCH_METRIC event=round_reset epoch={} match={} connected={}",
             self.server_epoch,
             self.match_id,
-            joined_count(&self.players)
+            joined_count(&self.world.players)
         );
     }
 
     pub(crate) fn track_round_start(&mut self, now: Instant) {
-        if matches!(self.game_state, GameState::Running) && self.match_started_at.is_none() {
+        if matches!(self.world.game_state, GameState::Running) && self.match_started_at.is_none() {
             if !self.begin_career_round(now) {
-                self.game_state = GameState::Starting { countdown_ms: 0 };
+                self.world.game_state = GameState::Starting { countdown_ms: 0 };
                 return;
             }
             self.match_started_at = Some(now);
-            self.last_wave_spawn_at = now - (MINION_WAVE_INTERVAL - FIRST_MINION_WAVE_DELAY);
+            self.world.last_wave_spawn_at = now - (MINION_WAVE_INTERVAL - FIRST_MINION_WAVE_DELAY);
             println!(
                 "MATCH_METRIC event=round_start epoch={} match={} connected={} first_wave_secs={}",
                 self.server_epoch,
                 self.match_id,
-                joined_count(&self.players),
+                joined_count(&self.world.players),
                 FIRST_MINION_WAVE_DELAY.as_secs()
             );
         }
@@ -698,7 +651,7 @@ impl ServerRuntime {
 
     pub(crate) fn record_match_metrics(&mut self, now: Instant) {
         let elapsed = self.elapsed_match_ms(now);
-        for player in self.players.values().filter(|player| player.joined) {
+        for player in self.world.players.values().filter(|player| player.joined) {
             let alive = player.state.hp > 0.0;
             let previous = self
                 .metrics_players
@@ -723,6 +676,7 @@ impl ServerRuntime {
             }
         }
         for structure in self
+            .world
             .structures
             .values()
             .filter(|structure| structure.state.hp <= 0.0)
@@ -738,7 +692,7 @@ impl ServerRuntime {
                 );
             }
         }
-        if let GameState::Victory { winner } = self.game_state {
+        if let GameState::Victory { winner } = self.world.game_state {
             self.finish_career_round(shared::career::MatchOutcome::Completed, Some(winner), now);
             if self.victory_at.is_none() {
                 self.victory_at = Some(now);

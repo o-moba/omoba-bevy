@@ -23,19 +23,19 @@ fn fixture() -> (ServerRuntime, SocketAddr, SocketAddr, Instant) {
             },
             now,
         );
-        let p = rt.players.get_mut(&addr).unwrap();
+        let p = rt.world.players.get_mut(&addr).unwrap();
         p.state.x = x;
         p.state.z = -8.0;
     }
-    rt.structures.clear();
-    rt.minions.clear();
-    rt.neutrals.clear();
+    rt.world.structures.clear();
+    rt.world.minions.clear();
+    rt.world.neutrals.clear();
     (rt, a, b, now)
 }
 fn target(rt: &ServerRuntime, addr: SocketAddr) -> TargetId {
     TargetId {
         kind: TargetKind::Player,
-        id: rt.players[&addr].state.id,
+        id: rt.world.players[&addr].state.id,
     }
 }
 fn snapshot(rt: &mut ServerRuntime, addr: SocketAddr, now: Instant) -> ServerPacket {
@@ -47,25 +47,33 @@ fn snapshot(rt: &mut ServerRuntime, addr: SocketAddr, now: Instant) -> ServerPac
         map_profile: "verdant_default".into(),
         meta: Default::default(),
         join_error: None,
-        your_id: rt.players[&addr].state.id,
-        players: build_players_snapshot(&rt.players),
+        your_id: rt.world.players[&addr].state.id,
+        players: build_players_snapshot(&rt.world.players),
         scoreboard: rt.combat_log.ledger.live_scoreboard(),
         prematch: None,
-        projectiles: rt.projectiles.values().map(|p| p.state.clone()).collect(),
+        projectiles: rt
+            .world
+            .projectiles
+            .values()
+            .map(|p| p.state.clone())
+            .collect(),
         combat_events: rt.combat_log.snapshot(now),
         structures: rt
+            .world
             .structures
             .values()
             .filter(|p| p.state.hp > 0.0)
             .map(|p| p.state.clone())
             .collect(),
         minions: rt
+            .world
             .minions
             .values()
             .filter(|p| p.state.hp > 0.0)
             .map(|p| p.state.clone())
             .collect(),
         neutrals: rt
+            .world
             .neutrals
             .values()
             .filter(|p| p.state.hp > 0.0 && p.dead_until.is_none())
@@ -76,49 +84,14 @@ fn snapshot(rt: &mut ServerRuntime, addr: SocketAddr, now: Instant) -> ServerPac
         game_state: GameState::Running,
         rematch_in_secs: None,
     };
-    filter_snapshot(
-        &mut packet,
-        &rt.players[&addr],
-        &rt.players,
-        &rt.minions,
-        &rt.structures,
-        &rt.neutrals,
-        &rt.projectiles,
-        now,
-    );
+    filter_snapshot(&mut packet, &rt.world.players[&addr], &rt.world, now);
     packet
 }
 fn strike(rt: &mut ServerRuntime, a: SocketAddr, t: TargetId, now: Instant) {
-    handle_basic_attack_request(
-        &mut rt.players,
-        &mut rt.projectiles,
-        &rt.minions,
-        &rt.structures,
-        &rt.neutrals,
-        &rt.team_buffs,
-        a,
-        t,
-        1,
-        &mut rt.next_projectile_id,
-        &rt.game_state,
-        now,
-    );
+    handle_basic_attack_request(&mut rt.world, a, t, 1, now);
 }
 fn cast(rt: &mut ServerRuntime, a: SocketAddr, t: TargetId, now: Instant) {
-    handle_cast_request(
-        &mut rt.players,
-        &mut rt.projectiles,
-        &mut rt.minions,
-        &mut rt.structures,
-        &mut rt.neutrals,
-        &rt.team_buffs,
-        a,
-        t,
-        0,
-        &mut rt.next_projectile_id,
-        &rt.game_state,
-        now,
-    );
+    handle_cast_request(&mut rt.world, a, t, 0, now);
 }
 fn minion(id: u64, team: Team, pos: [f32; 2]) -> Minion {
     Minion {
@@ -148,21 +121,12 @@ fn minion(id: u64, team: Team, pos: [f32; 2]) -> Minion {
 #[test]
 fn living_joined_sources_share_move_die_disconnect_and_exclude_opponents() {
     let (mut rt, a, b, now) = fixture();
-    assert_eq!(
-        sources(Team::Green, &rt.players, &rt.minions, &rt.structures).len(),
-        1
-    );
+    assert_eq!(sources(Team::Green, &rt.world).len(), 1);
     let mut allies = vec![];
     for (i, x) in [(3, 48.0), (4, 88.0)] {
         let addr = SocketAddr::from(([127, 0, 0, 1], 58900 + i));
-        ensure_player_connected(
-            &mut rt.players,
-            &rt.map_layout,
-            addr,
-            &mut rt.next_player_id,
-            now,
-        );
-        let p = rt.players.get_mut(&addr).unwrap();
+        rt.world.ensure_connected(addr, now);
+        let p = rt.world.players.get_mut(&addr).unwrap();
         p.joined = true;
         p.state.team = Team::Green;
         p.state.x = x;
@@ -170,99 +134,84 @@ fn living_joined_sources_share_move_die_disconnect_and_exclude_opponents() {
         allies.push(addr);
     }
     assert!(point_visible(
-        &sources(Team::Green, &rt.players, &rt.minions, &rt.structures),
+        &sources(Team::Green, &rt.world),
         [100.0, 0.0],
         false
     ));
-    rt.players.get_mut(&allies[1]).unwrap().state.hp = 0.0;
+    rt.world.players.get_mut(&allies[1]).unwrap().state.hp = 0.0;
     assert!(!point_visible(
-        &sources(Team::Green, &rt.players, &rt.minions, &rt.structures),
+        &sources(Team::Green, &rt.world),
         [100.0, 0.0],
         false
     ));
-    rt.players.get_mut(&allies[0]).unwrap().joined = false;
-    rt.players.get_mut(&a).unwrap().state.hp = 0.0;
-    assert!(sources(Team::Green, &rt.players, &rt.minions, &rt.structures).is_empty());
-    rt.players.remove(&allies[0]);
-    rt.minions.insert(501, minion(501, Team::Green, [0.0, 0.0]));
+    rt.world.players.get_mut(&allies[0]).unwrap().joined = false;
+    rt.world.players.get_mut(&a).unwrap().state.hp = 0.0;
+    assert!(sources(Team::Green, &rt.world).is_empty());
+    rt.world.players.remove(&allies[0]);
+    rt.world
+        .minions
+        .insert(501, minion(501, Team::Green, [0.0, 0.0]));
     assert_eq!(
-        sources(Team::Green, &rt.players, &rt.minions, &rt.structures)[0].radius,
+        sources(Team::Green, &rt.world)[0].radius,
         MINION_SIGHT_RADIUS
     );
-    rt.minions.get_mut(&501).unwrap().state.x = 60.0;
+    rt.world.minions.get_mut(&501).unwrap().state.x = 60.0;
     assert!(point_visible(
-        &sources(Team::Green, &rt.players, &rt.minions, &rt.structures),
+        &sources(Team::Green, &rt.world),
         [80.0, 0.0],
         false
     ));
-    rt.minions.get_mut(&501).unwrap().state.hp = 0.0;
-    assert!(sources(Team::Green, &rt.players, &rt.minions, &rt.structures).is_empty());
-    assert_eq!(
-        sources(Team::Blue, &rt.players, &rt.minions, &rt.structures).len(),
-        1
-    );
-    rt.players.remove(&b);
-    assert!(sources(Team::Blue, &rt.players, &rt.minions, &rt.structures).is_empty());
-    rt.structures = build_structures(&rt.map_layout);
-    let sight = sources(Team::Green, &rt.players, &rt.minions, &rt.structures);
+    rt.world.minions.get_mut(&501).unwrap().state.hp = 0.0;
+    assert!(sources(Team::Green, &rt.world).is_empty());
+    assert_eq!(sources(Team::Blue, &rt.world).len(), 1);
+    rt.world.players.remove(&b);
+    assert!(sources(Team::Blue, &rt.world).is_empty());
+    rt.world.structures = build_structures(&rt.world.map_layout);
+    let sight = sources(Team::Green, &rt.world);
     assert!(sight.iter().any(|s| s.radius == TOWER_SIGHT_RADIUS));
     assert!(sight.iter().any(|s| s.radius == BASE_SIGHT_RADIUS));
-    for s in rt.structures.values_mut() {
+    for s in rt.world.structures.values_mut() {
         s.state.hp = 0.0;
     }
-    assert!(sources(Team::Green, &rt.players, &rt.minions, &rt.structures).is_empty());
+    assert!(sources(Team::Green, &rt.world).is_empty());
 }
 #[test]
 fn unseen_basic_and_cast_reject_without_resources_or_reveal_but_same_brush_accepts() {
     let (mut rt, a, b, now) = fixture();
     let t = target(&rt, b);
-    let mana = rt.players[&a].state.mana;
+    let mana = rt.world.players[&a].state.mana;
     strike(&mut rt, a, t, now);
     cast(&mut rt, a, t, now);
-    assert!(rt.projectiles.is_empty());
-    assert_eq!(rt.players[&a].state.mana, mana);
-    assert_eq!(rt.players[&a].last_basic_attack_at, None);
-    assert_eq!(rt.players[&a].last_cast_at, [None; 4]);
-    assert!(!revealed(&rt.players[&a], now));
-    rt.players.get_mut(&a).unwrap().state.x = -20.0;
+    assert!(rt.world.projectiles.is_empty());
+    assert_eq!(rt.world.players[&a].state.mana, mana);
+    assert_eq!(rt.world.players[&a].last_basic_attack_at, None);
+    assert_eq!(rt.world.players[&a].last_cast_at, [None; 4]);
+    assert!(!revealed(&rt.world.players[&a], now));
+    rt.world.players.get_mut(&a).unwrap().state.x = -20.0;
     cast(&mut rt, a, t, now);
-    assert_eq!(rt.projectiles.len(), 1);
-    assert!(revealed(&rt.players[&a], now));
+    assert_eq!(rt.world.projectiles.len(), 1);
+    assert!(revealed(&rt.world.players[&a], now));
 }
 #[test]
 fn hostile_action_reveal_expires_and_self_cast_does_not_reveal() {
     let (mut rt, a, b, now) = fixture();
     let t = target(&rt, a);
-    assert!(!target_visible(
-        Team::Green,
-        target(&rt, b),
-        &rt.players,
-        &rt.minions,
-        &rt.structures,
-        &rt.neutrals,
-        now
-    ));
+    assert!(!target_visible(Team::Green, target(&rt, b), &rt.world, now));
     cast(&mut rt, b, t, now);
-    assert!(revealed(&rt.players[&b], now));
+    assert!(revealed(&rt.world.players[&b], now));
     assert!(target_visible(
         Team::Green,
         target(&rt, b),
-        &rt.players,
-        &rt.minions,
-        &rt.structures,
-        &rt.neutrals,
+        &rt.world,
         now + Duration::from_millis(1999)
     ));
     assert!(!target_visible(
         Team::Green,
         target(&rt, b),
-        &rt.players,
-        &rt.minions,
-        &rt.structures,
-        &rt.neutrals,
+        &rt.world,
         now + Duration::from_secs(2)
     ));
-    let p = rt.players.get_mut(&b).unwrap();
+    let p = rt.world.players.get_mut(&b).unwrap();
     p.last_cast_at = [None; 4];
     p.last_cast_at[1] = Some(now);
     assert!(!revealed(p, now));
@@ -273,9 +222,9 @@ fn recipient_payloads_hide_actors_projectiles_events_and_pickup_receipts() {
     let ta = target(&rt, a);
     let tb = target(&rt, b);
     // Launch while visible, then hide target before replication.
-    rt.players.get_mut(&b).unwrap().state.x = -18.5;
+    rt.world.players.get_mut(&b).unwrap().state.x = -18.5;
     cast(&mut rt, a, tb, now);
-    rt.players.get_mut(&b).unwrap().state.x = -22.0;
+    rt.world.players.get_mut(&b).unwrap().state.x = -22.0;
     rt.combat_log.extend(
         now,
         [CombatEvent {
@@ -292,7 +241,8 @@ fn recipient_payloads_hide_actors_projectiles_events_and_pickup_receipts() {
             ..Default::default()
         }],
     );
-    rt.minions
+    rt.world
+        .minions
         .insert(501, minion(501, Team::Blue, [101.125, 99.375]));
     let mut packet = snapshot(&mut rt, a, now);
     let ServerPacket::Snapshot {
@@ -324,16 +274,7 @@ fn recipient_payloads_hide_actors_projectiles_events_and_pickup_receipts() {
             healed_amount: 5.0,
         });
     }
-    filter_snapshot(
-        &mut packet,
-        &rt.players[&a],
-        &rt.players,
-        &rt.minions,
-        &rt.structures,
-        &rt.neutrals,
-        &rt.projectiles,
-        now,
-    );
+    filter_snapshot(&mut packet, &rt.world.players[&a], &rt.world, now);
     let ServerPacket::Snapshot { forest_pickups, .. } = packet else {
         panic!()
     };
@@ -343,7 +284,7 @@ fn recipient_payloads_hide_actors_projectiles_events_and_pickup_receipts() {
         panic!()
     };
     assert_eq!(players.len(), 2);
-    rt.players.get_mut(&a).unwrap().joined = false;
+    rt.world.players.get_mut(&a).unwrap().joined = false;
     let ServerPacket::Snapshot {
         players,
         vision,
@@ -361,27 +302,23 @@ fn recipient_payloads_hide_actors_projectiles_events_and_pickup_receipts() {
 fn launched_homing_hits_after_concealment_without_replication_leak() {
     let (mut rt, a, b, now) = fixture();
     let t = target(&rt, b);
-    rt.players.get_mut(&b).unwrap().state.x = -18.5;
+    rt.world.players.get_mut(&b).unwrap().state.x = -18.5;
     cast(&mut rt, a, t, now);
-    assert_eq!(rt.projectiles.len(), 1);
-    rt.players.get_mut(&b).unwrap().state.x = -22.0;
+    assert_eq!(rt.world.projectiles.len(), 1);
+    rt.world.players.get_mut(&b).unwrap().state.x = -22.0;
     let ServerPacket::Snapshot { projectiles, .. } = snapshot(&mut rt, a, now) else {
         panic!()
     };
     assert!(projectiles.is_empty());
-    let before = rt.players[&b].state.hp;
+    let before = rt.world.players[&b].state.hp;
     let events = simulate_projectiles(
-        &mut rt.players,
-        &mut rt.minions,
-        &mut rt.structures,
-        &mut rt.neutrals,
-        &mut rt.team_buffs,
-        &mut rt.projectiles,
-        &mut rt.game_state,
-        0.5,
-        now + Duration::from_millis(500),
+        &mut rt.world,
+        TickCtx {
+            now: now + Duration::from_millis(500),
+            dt: 0.5,
+        },
     );
-    assert!(rt.players[&b].state.hp < before);
+    assert!(rt.world.players[&b].state.hp < before);
     assert_eq!(events.len(), 1);
     rt.combat_log.extend(now, events);
     let ServerPacket::Snapshot { combat_events, .. } = snapshot(&mut rt, a, now) else {
@@ -396,63 +333,46 @@ fn bots_minions_and_towers_do_not_acquire_or_keep_concealed_heroes() {
         rt.bot_target(Team::Green, [-18.0, -8.0], Lane::Mid, now)
             .is_none()
     );
-    rt.minions
+    rt.world
+        .minions
         .insert(501, minion(501, Team::Green, [-18.0, -8.0]));
-    rt.minions.get_mut(&501).unwrap().aggro_target =
-        Some(MinionAggroTarget::Player(rt.players[&b].state.id));
-    simulate_minions(
-        &mut rt.players,
-        &mut rt.minions,
-        &mut rt.structures,
-        &mut rt.projectiles,
-        &mut rt.next_projectile_id,
-        &mut rt.game_state,
-        0.0,
-        now,
-    );
-    assert_eq!(rt.minions[&501].state.target_id, None);
-    assert_eq!(rt.minions[&501].last_attack_at, None);
-    rt.structures = build_structures(&rt.map_layout);
-    rt.structures.retain(|_, s| s.state.team == Team::Green);
-    for s in rt.structures.values_mut() {
+    rt.world.minions.get_mut(&501).unwrap().aggro_target =
+        Some(MinionAggroTarget::Player(rt.world.players[&b].state.id));
+    simulate_minions(&mut rt.world, TickCtx { now, dt: 0.0 });
+    assert_eq!(rt.world.minions[&501].state.target_id, None);
+    assert_eq!(rt.world.minions[&501].last_attack_at, None);
+    rt.world.structures = build_structures(&rt.world.map_layout);
+    rt.world
+        .structures
+        .retain(|_, s| s.state.team == Team::Green);
+    for s in rt.world.structures.values_mut() {
         s.state.x = -18.0;
         s.state.z = -8.0;
     }
-    simulate_tower_attacks(
-        &mut rt.players,
-        &mut rt.minions,
-        &mut rt.projectiles,
-        &mut rt.structures,
-        &mut rt.next_projectile_id,
-        &rt.game_state,
-        now,
+    simulate_tower_attacks(&mut rt.world, now);
+    assert!(rt.world.projectiles.is_empty());
+    assert!(
+        rt.world
+            .structures
+            .values()
+            .all(|s| s.last_attack_at.is_none())
     );
-    assert!(rt.projectiles.is_empty());
-    assert!(rt.structures.values().all(|s| s.last_attack_at.is_none()));
-    rt.players.get_mut(&a).unwrap().state.x = -20.0;
+    rt.world.players.get_mut(&a).unwrap().state.x = -20.0;
     assert!(
         rt.bot_target(Team::Green, [-20.0, -8.0], Lane::Mid, now)
             .is_some()
     );
-    simulate_tower_attacks(
-        &mut rt.players,
-        &mut rt.minions,
-        &mut rt.projectiles,
-        &mut rt.structures,
-        &mut rt.next_projectile_id,
-        &rt.game_state,
-        now,
-    );
-    assert!(!rt.projectiles.is_empty());
+    simulate_tower_attacks(&mut rt.world, now);
+    assert!(!rt.world.projectiles.is_empty());
 }
 
 #[test]
 fn native_qa_route_is_walkable_and_final_destination_is_outside_green_sight() {
     let (mut rt, a, _, _) = fixture();
-    rt.players.get_mut(&a).unwrap().state.x = -14.0;
-    rt.structures = build_structures(&rt.map_layout);
+    rt.world.players.get_mut(&a).unwrap().state.x = -14.0;
+    rt.world.structures = build_structures(&rt.world.map_layout);
     assert!(!point_visible(
-        &sources(Team::Green, &rt.players, &rt.minions, &rt.structures),
+        &sources(Team::Green, &rt.world),
         [22.0, -8.0],
         false
     ));
@@ -462,31 +382,34 @@ fn native_qa_route_is_walkable_and_final_destination_is_outside_green_sight() {
 #[test]
 fn both_teams_hide_other_brush_and_all_hidden_dynamic_channels() {
     let (mut rt, a, b, now) = fixture();
-    let pa = rt.players.get_mut(&a).unwrap();
+    let pa = rt.world.players.get_mut(&a).unwrap();
     pa.state.x = 22.0;
     pa.state.z = 8.0;
-    rt.structures = build_structures(&rt.map_layout);
-    rt.neutrals = build_neutral_camps(&mut 700);
-    for n in rt.neutrals.values_mut() {
+    rt.world.structures = build_structures(&rt.world.map_layout);
+    rt.world.neutrals = build_neutral_camps(&mut 700);
+    for n in rt.world.neutrals.values_mut() {
         n.state.x = 100.125;
         n.state.z = 99.875;
     }
-    for s in rt.structures.values_mut() {
+    for s in rt.world.structures.values_mut() {
         s.state.x = 100.375;
         s.state.z = 99.625;
     }
     // Keep structures alive but outside the tested actors' source radius.
     for (viewer, hidden) in [(a, b), (b, a)] {
-        let hidden_id = rt.players[&hidden].state.id;
-        rt.minions.clear();
+        let hidden_id = rt.world.players[&hidden].state.id;
+        rt.world.minions.clear();
         let mut m = minion(
             601,
-            rt.players[&viewer].state.team,
-            [rt.players[&viewer].state.x, rt.players[&viewer].state.z],
+            rt.world.players[&viewer].state.team,
+            [
+                rt.world.players[&viewer].state.x,
+                rt.world.players[&viewer].state.z,
+            ],
         );
         m.state.target_id = Some(hidden_id);
         m.state.target_kind = Some(MinionTargetKind::Player);
-        rt.minions.insert(601, m);
+        rt.world.minions.insert(601, m);
         let packet = snapshot(&mut rt, viewer, now);
         let ServerPacket::Snapshot {
             players,
@@ -499,7 +422,7 @@ fn both_teams_hide_other_brush_and_all_hidden_dynamic_channels() {
             panic!()
         };
         assert_eq!(players.len(), 1);
-        assert_eq!(players[0].id, rt.players[&viewer].state.id);
+        assert_eq!(players[0].id, rt.world.players[&viewer].state.id);
         assert_eq!(minions[0].target_id, None);
         assert_eq!(minions[0].target_kind, None);
         // Nearby allied structures reveal this test's far location; mark all structures
@@ -507,12 +430,14 @@ fn both_teams_hide_other_brush_and_all_hidden_dynamic_channels() {
         assert!(!structures.is_empty());
         assert!(!neutrals.is_empty());
     }
-    for s in rt.structures.values_mut() {
+    for s in rt.world.structures.values_mut() {
         s.state.hp = 0.0;
     }
     // Retain only remote hostile records; their destroyed state cannot contribute sight.
-    rt.structures.retain(|_, s| s.state.team == Team::Blue);
-    rt.minions.clear();
+    rt.world
+        .structures
+        .retain(|_, s| s.state.team == Team::Blue);
+    rt.world.minions.clear();
     let packet = snapshot(&mut rt, a, now);
     let ServerPacket::Snapshot {
         structures,
@@ -533,8 +458,8 @@ fn both_teams_hide_other_brush_and_all_hidden_dynamic_channels() {
 #[test]
 fn allied_dead_viewer_keeps_team_sight_and_round_reset_clears_reveal() {
     let (mut rt, a, b, now) = fixture();
-    rt.players.get_mut(&b).unwrap().state.team = Team::Green;
-    let p = rt.players.get_mut(&a).unwrap();
+    rt.world.players.get_mut(&b).unwrap().state.team = Team::Green;
+    let p = rt.world.players.get_mut(&a).unwrap();
     p.state.hp = 0.0;
     p.state.x = shared::vision::brush_layout()[0].center[0];
     p.state.z = shared::vision::brush_layout()[0].center[1];
@@ -551,9 +476,12 @@ fn allied_dead_viewer_keeps_team_sight_and_round_reset_clears_reveal() {
     assert_eq!(vision.local_brush, None);
     assert!(!vision.local_hidden);
     rt.restart_round(now + Duration::from_secs(1));
-    assert!(!revealed(&rt.players[&a], now + Duration::from_secs(1)));
+    assert!(!revealed(
+        &rt.world.players[&a],
+        now + Duration::from_secs(1)
+    ));
     assert_eq!(
-        sources(Team::Green, &rt.players, &rt.minions, &rt.structures)
+        sources(Team::Green, &rt.world)
             .iter()
             .filter(|s| s.radius == HERO_SIGHT_RADIUS)
             .count(),
@@ -566,24 +494,24 @@ fn lethal_nonhero_receipts_survive_removal_only_for_visible_impacts() {
     let (mut rt, a, b, now) = fixture();
     let mut dead_minion = minion(501, Team::Blue, [-18.0, -8.0]);
     dead_minion.state.hp = 0.0;
-    rt.minions.insert(501, dead_minion);
+    rt.world.minions.insert(501, dead_minion);
     let mut camps = build_neutral_camps(&mut 502);
     let mut dead_neutral = camps.remove(&502).unwrap();
     dead_neutral.state.hp = 0.0;
     dead_neutral.dead_until = Some(now + Duration::from_secs(30));
     dead_neutral.state.x = -18.0;
     dead_neutral.state.z = -8.0;
-    rt.neutrals.insert(502, dead_neutral);
-    let mut authored = build_structures(&rt.map_layout);
+    rt.world.neutrals.insert(502, dead_neutral);
+    let mut authored = build_structures(&rt.world.map_layout);
     let mut dead_tower = authored.remove(&1).unwrap();
     dead_tower.state.id = 503;
     dead_tower.state.hp = 0.0;
     dead_tower.state.x = -18.0;
     dead_tower.state.z = -8.0;
-    rt.structures.insert(503, dead_tower);
+    rt.world.structures.insert(503, dead_tower);
     let source = CombatEntity {
         kind: CombatEntityKind::Player,
-        id: rt.players[&a].state.id,
+        id: rt.world.players[&a].state.id,
     };
     for (kind, id) in [
         (CombatEntityKind::Minion, 501),
@@ -627,7 +555,8 @@ fn lethal_nonhero_receipts_survive_removal_only_for_visible_impacts() {
         }],
     );
     // An old lethal receipt cannot reveal a living, now unseen respawn.
-    rt.minions
+    rt.world
+        .minions
         .insert(505, minion(505, Team::Blue, [101.25, 98.5]));
     rt.combat_log.extend(
         now,
@@ -645,7 +574,7 @@ fn lethal_nonhero_receipts_survive_removal_only_for_visible_impacts() {
         }],
     );
     // Heroes retain strict brush visibility even for a lethal impact.
-    let hidden = rt.players.get_mut(&b).unwrap();
+    let hidden = rt.world.players.get_mut(&b).unwrap();
     hidden.state.hp = 0.0;
     rt.combat_log.extend(
         now,

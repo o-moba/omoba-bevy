@@ -35,8 +35,12 @@ impl ServerRuntime {
 
     pub(crate) fn prematch_required(&self) -> bool {
         self.match_started_at.is_none()
-            && !matches!(self.game_state, GameState::Victory { .. })
-            && self.players.values().any(|p| p.joined && p.draft.capable)
+            && !matches!(self.world.game_state, GameState::Victory { .. })
+            && self
+                .world
+                .players
+                .values()
+                .any(|p| p.joined && p.draft.capable)
     }
 
     pub(crate) fn invalidate_prematch_roster(&mut self, now: Instant) {
@@ -55,7 +59,7 @@ impl ServerRuntime {
         self.prematch.phase = Some(PrematchPhase::Draft);
         self.prematch.deadline = None;
         self.prematch.pending.clear();
-        for player in self.players.values_mut().filter(|p| p.joined) {
+        for player in self.world.players.values_mut().filter(|p| p.joined) {
             player.draft.locked = false;
             player.draft.loaded = false;
             player.draft.acknowledged_request_id = player.draft.request_id;
@@ -73,6 +77,7 @@ impl ServerRuntime {
             return false;
         }
         let mut roster: Vec<_> = self
+            .world
             .players
             .values()
             .filter(|p| p.joined)
@@ -87,43 +92,44 @@ impl ServerRuntime {
                 now,
             );
         }
-        let ready = joined_count(&self.players);
+        let ready = joined_count(&self.world.players);
         let needed = if self.match_config.mode == MatchMode::Dev {
             ready.max(1)
         } else {
             self.match_config.roster_size()
         };
         let all = |test: fn(&DraftState) -> bool| {
-            self.players
+            self.world
+                .players
                 .values()
                 .filter(|p| p.joined && !p.state.is_bot && p.draft.capable)
                 .all(|p| test(&p.draft))
         };
         match self.prematch.phase.unwrap_or(PrematchPhase::Draft) {
             PrematchPhase::Draft => {
-                self.game_state = GameState::Forming { ready, needed };
+                self.world.game_state = GameState::Forming { ready, needed };
                 if ready >= needed && all(|d| d.locked) {
                     self.prematch.phase = Some(PrematchPhase::Countdown);
                     self.prematch.deadline = Some(now + Duration::from_millis(COUNTDOWN_MS.into()));
-                    self.game_state = GameState::Starting {
+                    self.world.game_state = GameState::Starting {
                         countdown_ms: COUNTDOWN_MS,
                     };
                 }
             }
             PrematchPhase::Countdown => {
                 let remaining = remaining_ms(self.prematch.deadline, now);
-                self.game_state = GameState::Starting {
+                self.world.game_state = GameState::Starting {
                     countdown_ms: remaining,
                 };
                 if remaining == 0 {
                     self.prematch.phase = Some(PrematchPhase::Loading);
                     self.prematch.deadline =
                         Some(now + Duration::from_millis(LOADING_TIMEOUT_MS.into()));
-                    self.game_state = GameState::Forming { ready, needed };
+                    self.world.game_state = GameState::Forming { ready, needed };
                 }
             }
             PrematchPhase::Loading => {
-                self.game_state = GameState::Forming { ready, needed };
+                self.world.game_state = GameState::Forming { ready, needed };
                 let all_loaded = all(|d| d.loaded);
                 if remaining_ms(self.prematch.deadline, now) == 0 {
                     self.reset_draft_generation(Some(if all_loaded {
@@ -134,7 +140,7 @@ impl ServerRuntime {
                 } else if all_loaded {
                     // No gameplay, income or spawns run until durable start ACK.
                     if self.begin_career_round(now) {
-                        start_match_running(&mut self.game_state, &mut self.neutrals, now);
+                        start_match_running(&mut self.world, now);
                         self.track_round_start(now);
                         self.prematch.phase = None;
                     }
@@ -149,10 +155,10 @@ impl ServerRuntime {
             && request.server_epoch == self.server_epoch
             && request.match_id == self.match_id
             && request.generation == self.prematch.generation
-            && self.players.get(&addr).is_some_and(|p| {
+            && self.world.players.get(&addr).is_some_and(|p| {
                 p.joined && p.draft.capable && p.protocol_compatible && !p.state.is_bot
             })
-            && self.players.get(&addr).is_some_and(|p| {
+            && self.world.players.get(&addr).is_some_and(|p| {
                 p.career_profile.is_none()
                     || self.career.backend.authenticated_session(addr).is_some()
             })
@@ -170,7 +176,7 @@ impl ServerRuntime {
         if !self.draft_request_valid(addr, &request) {
             return;
         }
-        let player = self.players.get_mut(&addr).unwrap();
+        let player = self.world.players.get_mut(&addr).unwrap();
         player.last_seen = now;
         if request.request_id == 0 || request.request_id <= player.draft.request_id {
             return;
@@ -246,15 +252,17 @@ impl ServerRuntime {
         let expected = self.prematch.pending.remove(&addr);
         if expected
             != self
+                .world
                 .players
                 .get(&addr)
                 .map(|p| (p.state.id, request.request_id))
             || !self.draft_request_valid(addr, &request)
-            || self.players[&addr].draft.request_id != request.request_id
+            || self.world.players[&addr].draft.request_id != request.request_id
         {
             return;
         }
-        self.players
+        self.world
+            .players
             .get_mut(&addr)
             .unwrap()
             .draft
@@ -262,7 +270,7 @@ impl ServerRuntime {
         if allowed {
             self.apply_prematch(addr, request, now);
         } else {
-            self.players.get_mut(&addr).unwrap().draft.error =
+            self.world.players.get_mut(&addr).unwrap().draft.error =
                 Some("This avatar is unavailable or requires ownership verification.".into());
         }
     }
@@ -272,7 +280,7 @@ impl ServerRuntime {
         if !self.draft_request_valid(addr, &request) {
             return;
         }
-        let player = self.players.get_mut(&addr).unwrap();
+        let player = self.world.players.get_mut(&addr).unwrap();
         match request.action {
             PrematchAction::Select {
                 character,
@@ -297,7 +305,7 @@ impl ServerRuntime {
                 );
                 player.draft.role = role;
                 player.draft.loaded = false;
-                reset_player_round(player, &self.map_layout, now);
+                reset_player_round(player, &self.world.map_layout, now);
             }
             PrematchAction::Lock { locked }
                 if self.prematch.phase == Some(PrematchPhase::Draft) =>

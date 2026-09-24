@@ -65,11 +65,12 @@ fn every_wave_member_marches_forward_through_departure_and_far_base_approach() {
     let layout = build_map_layout();
     for team in [Team::Green, Team::Blue] {
         for lane in [Lane::Top, Lane::Mid, Lane::Bot] {
-            let mut minions = HashMap::new();
-            spawn_minion_wave_for_team_lane(&layout, &mut minions, &mut 1, team, lane);
-            assert_eq!(minions.len(), MINIONS_PER_WAVE);
+            let mut world = GameWorld::empty();
+            spawn_minion_wave_for_team_lane(&layout, &mut world.minions, &mut 1, team, lane);
+            assert_eq!(world.minions.len(), MINIONS_PER_WAVE);
             let corridor = forward_corridor(&layout, lane, team);
-            let mut traces = minions
+            let mut traces = world
+                .minions
                 .values()
                 .map(|minion| {
                     let start = Vec3f::new(minion.state.x, minion.state.y, minion.state.z);
@@ -79,25 +80,19 @@ fn every_wave_member_marches_forward_through_departure_and_far_base_approach() {
                     (minion.state.id, member_corridor, start, 0.0)
                 })
                 .collect::<Vec<_>>();
-            let mut players = HashMap::new();
-            let mut structures = HashMap::new();
-            let mut state = GameState::Running;
             let started = Instant::now();
             let mut finished = false;
             for step in 1..=3000 {
                 simulate_minions(
-                    &mut players,
-                    &mut minions,
-                    &mut structures,
-                    &mut HashMap::new(),
-                    &mut 1,
-                    &mut state,
-                    0.05,
-                    started + Duration::from_millis(step * 50),
+                    &mut world,
+                    TickCtx {
+                        now: started + Duration::from_millis(step * 50),
+                        dt: 0.05,
+                    },
                 );
                 finished = true;
                 for (id, expected, previous, previous_progress) in &mut traces {
-                    let minion = &minions[&*id];
+                    let minion = &world.minions[&*id];
                     let current = Vec3f::new(minion.state.x, minion.state.y, minion.state.z);
                     let (distance, progress) = corridor_progress(expected, current);
                     // The existing waypoint arrival tolerance is 0.1 units.
@@ -128,7 +123,7 @@ fn every_wave_member_marches_forward_through_departure_and_far_base_approach() {
                 finished,
                 "{team:?}/{lane:?}: wave never reached the far base"
             );
-            for minion in minions.values() {
+            for minion in world.minions.values() {
                 let current = Vec3f::new(minion.state.x, minion.state.y, minion.state.z);
                 assert!(planar_distance(current, *corridor.last().unwrap()) <= 0.11);
             }
@@ -193,19 +188,11 @@ fn spawn_formation_wave_cadence_and_authored_structure_anchors_are_preserved() {
     assert_eq!(MINION_SPEED, 3.1);
     assert_eq!(FIRST_MINION_WAVE_DELAY, Duration::from_secs(10));
     let now = Instant::now();
-    let mut last_wave = now;
-    let mut minions = HashMap::new();
-    let mut next_id = 1;
+    let mut world = GameWorld::empty();
+    world.last_wave_spawn_at = now;
     for (millis, expected_count) in [(59_999, 0), (60_000, 18), (119_999, 18), (120_000, 36)] {
-        spawn_minion_waves_if_due(
-            &layout,
-            &mut minions,
-            &mut next_id,
-            &GameState::Running,
-            now + Duration::from_millis(millis),
-            &mut last_wave,
-        );
-        assert_eq!(minions.len(), expected_count);
+        spawn_minion_waves_if_due(&mut world, now + Duration::from_millis(millis));
+        assert_eq!(world.minions.len(), expected_count);
     }
 
     // Baseline positions from the authored six-point outer lanes at fab5f23.
