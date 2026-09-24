@@ -86,7 +86,7 @@ fn update_match_service(
         return;
     }
     let authenticated = identity.authenticated_for_scope(
-        &session.server_addr_display,
+        session.server_addr(),
         snapshot.meta.server_epoch,
         &session_id.0,
     );
@@ -103,7 +103,7 @@ fn update_match_service(
             session.abandon_join();
             return;
         }
-        if session.server_addr_display == allocation.endpoint
+        if session.server_addr() == allocation.endpoint
             && authenticated
             && let Some(join) = flow.pending_join.take()
         {

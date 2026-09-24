@@ -380,8 +380,9 @@ mod tests {
                 ..default()
             })
             .add_plugins(HelpOverlayPlugin);
-        app.world_mut().resource_mut::<ClientSession>().state =
-            crate::net::ClientConnectionState::Connected;
+        app.world_mut()
+            .resource_mut::<ClientSession>()
+            .set_state_for_test(crate::net::ClientConnectionState::Connected);
         app.update();
         assert!(!app.world().resource::<HelpOverlayVisible>().0);
         assert!(app.world().resource::<HelpAutoShowState>().pending);

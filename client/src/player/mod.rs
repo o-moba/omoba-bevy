@@ -22,9 +22,6 @@ use input::{handle_player_input, move_player_mobile, plan_movement_routes};
 use motion::{animate_jump, apply_gravity, move_player, resolve_player_structure_overlap};
 use respawn_ui::{RespawnCountdown, respawn_countdown_system, setup_respawn_ui};
 
-/// Debug speed-boost toggle, shared by the boost button and local movement.
-#[derive(Resource, Default)]
-pub struct DebugSpeedBoost(pub bool);
 pub const PLAYER_SIZE: f32 = 1.0;
 pub const JUMP_HEIGHT: f32 = 1.5;
 pub const JUMP_DURATION: f32 = 0.6;
@@ -76,7 +73,8 @@ impl Plugin for PlayerPlugin {
         .add_systems(Update, resolve_player_structure_overlap.after(move_player))
         .add_systems(PostUpdate, apply_gravity)
         .init_resource::<RespawnCountdown>()
-        .init_resource::<DebugSpeedBoost>()
+        // Local movement reads the speed boost; `DebugPlugins` also inits it.
+        .init_resource::<crate::debug::DebugToggles>()
         .init_resource::<PlayerAnimationLibrary>()
         .add_systems(Startup, setup_respawn_ui)
         .add_systems(Update, respawn_countdown_system);

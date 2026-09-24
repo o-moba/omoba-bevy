@@ -166,7 +166,7 @@ fn navigation_input_app() -> (App, Entity) {
         .init_resource::<BasicAttackState>()
         .init_resource::<WorldPointerState>()
         .init_resource::<MinimapNavigationState>()
-        .init_resource::<DebugSpeedBoost>()
+        .init_resource::<crate::debug::DebugToggles>()
         .init_resource::<MapLayout>()
         .init_resource::<Time>()
         .insert_resource(PlayerVisualMode::Models3d)
@@ -460,7 +460,7 @@ fn admission_and_disconnect_gate_real_input_context_and_discard_stale_route() {
     assert!(app.world().get::<MovementRoute>(player).is_some());
     app.world_mut()
         .resource_mut::<crate::net::ClientSession>()
-        .state = crate::net::ClientConnectionState::Disconnected;
+        .set_state_for_test(crate::net::ClientConnectionState::Disconnected);
     minimap_order(&mut app, Vec3::new(12.0, 0.5, 0.0));
     app.update();
     assert!(app.world().get::<MovementTarget>(player).is_none());

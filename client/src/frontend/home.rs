@@ -65,7 +65,7 @@ fn signature(career: &CareerClient, session: &ClientSession, card: &ProfileCard)
         matches: profile.map_or(0, |profile| profile.matches_played),
         wins: profile.map_or(0, |profile| profile.wins),
         losses: profile.map_or(0, |profile| profile.losses),
-        connection: session.state,
+        connection: session.state(),
         card: card.clone(),
         public_matchmaking: career.view.match_service.is_some(),
         last_result: career
@@ -104,7 +104,7 @@ pub fn last_match_line(result: &shared::career::MatchResult, profile_id: Option<
 
 /// Shared status line: the home header and the picker header both use it.
 pub(crate) fn connection_line(session: &ClientSession) -> (String, Color) {
-    match session.state {
+    match session.state() {
         ClientConnectionState::Connected => ("Online · ready to play".to_owned(), widgets::PRIMARY),
         ClientConnectionState::Connecting | ClientConnectionState::WaitingForServer => {
             ("Connecting…".to_owned(), widgets::GOLD)
@@ -474,7 +474,7 @@ mod tests {
             ClientConnectionState::Disconnected,
         ] {
             let mut session = ClientSession::default();
-            session.state = state;
+            session.set_state_for_test(state);
             let (line, _) = connection_line(&session);
             assert!(!line.is_empty(), "{state:?} must have a status line");
         }

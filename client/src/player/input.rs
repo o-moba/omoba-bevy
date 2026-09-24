@@ -19,12 +19,13 @@ use bevy::{
 };
 use shared::hero_balance::{DEBUG_SPEED_MULTIPLIER, PLAYER_SPEED};
 
+use super::JUMP_DURATION;
 use super::animation::{PlayerAnimationLibrary, avatar_key};
 use super::motion::{
     Jumping, clip_static_movement, hero_movement_multiplier, resolve_player_collisions,
     structure_revision,
 };
-use super::{DebugSpeedBoost, JUMP_DURATION};
+use crate::debug::DebugToggles;
 
 pub(super) fn handle_player_input(
     mut commands: Commands,
@@ -155,7 +156,7 @@ pub(super) fn move_player_mobile(
         Query<(&Transform, &StructureKind, Option<&CombatStats>), With<NetworkStructure>>,
     )>,
     map: Option<Res<MapLayout>>,
-    boost: Res<DebugSpeedBoost>,
+    debug: Res<DebugToggles>,
     mut pending: ResMut<PendingCast>,
     mut basic: ResMut<BasicAttackState>,
 ) {
@@ -203,7 +204,11 @@ pub(super) fn move_player_mobile(
         let speed = crate::sandbox::movement_speed(
             game.as_deref(),
             PLAYER_SPEED
-                * if boost.0 { DEBUG_SPEED_MULTIPLIER } else { 1.0 }
+                * if debug.speed_boost {
+                    DEBUG_SPEED_MULTIPLIER
+                } else {
+                    1.0
+                }
                 * equipment.map_or(1.0, |e| e.item_bonuses.move_speed_multiplier)
                 * hero_movement_multiplier(class, progression),
         ) * utility.map_or(1.0, |u| u.state.movement_multiplier());

@@ -5,7 +5,7 @@ use crossbeam_channel::{Receiver, Sender};
 use std::collections::{HashMap, VecDeque};
 
 use shared::combat::{CombatEntityKind, CombatEvent, ProjectileStyle};
-use shared::debug::{DUMMY_DISTANCE, DUMMY_MAX_HP, OFFLINE_PRACTICE_MODE};
+use shared::debug::{DUMMY_DISTANCE, DUMMY_MAX_HP, DebugCommand, OFFLINE_PRACTICE_MODE};
 use shared::map::Team;
 use shared::protocol::{JoinRejection, SnapshotMeta};
 use shared::wire::{
@@ -125,6 +125,10 @@ fn hero(
 }
 impl Simulation {
     fn command(&mut self, packet: ClientPacket) {
+        if let Some(command) = DebugCommand::from_packet(&packet) {
+            self.debug(command);
+            return;
+        }
         match packet {
             ClientPacket::Join {
                 character,
@@ -158,19 +162,6 @@ impl Simulation {
                 self.stats.clear();
                 self.god_mode = false;
             }
-            ClientPacket::SetGodMode { enabled } => {
-                if self.players.is_empty() {
-                    return;
-                }
-                self.god_mode = enabled;
-                if enabled {
-                    let p = &mut self.players[0];
-                    p.hp = p.max_hp;
-                    p.mana = p.max_mana;
-                    self.respawn.remove(&LOCAL_ID);
-                }
-            }
-            ClientPacket::Practice { command } => self.practice(command),
             ClientPacket::Transform {
                 x,
                 y,
@@ -282,6 +273,29 @@ impl Simulation {
             }
             // No purchase, auth, signed career, network, or ranked result path exists here.
             _ => {}
+        }
+    }
+    /// Every debug command offline practice accepts (all of them: offline
+    /// is always practice).
+    fn debug(&mut self, command: DebugCommand) {
+        match command {
+            DebugCommand::GodMode(enabled) => {
+                if self.players.is_empty() {
+                    return;
+                }
+                self.god_mode = enabled;
+                if enabled {
+                    let p = &mut self.players[0];
+                    p.hp = p.max_hp;
+                    p.mana = p.max_mana;
+                    self.respawn.remove(&LOCAL_ID);
+                }
+            }
+            // Deliberately a no-op: the offline simulation accepts any finite
+            // client transform (see `Transform` above), so the boosted local
+            // movement already works and there is no speed clamp to raise.
+            DebugCommand::SpeedBoost(_) => {}
+            DebugCommand::Practice(command) => self.practice(command),
         }
     }
     fn valid_target(&self, target: TargetId, range: f32) -> bool {

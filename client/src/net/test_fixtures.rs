@@ -111,6 +111,7 @@ pub(in crate::net) fn snapshot_app() -> (App, crossbeam_channel::Sender<ServerPa
         .init_resource::<CameraState>()
         .init_resource::<MapLayout>()
         .init_resource::<NetworkState>()
+        .init_resource::<crate::debug::DebugToggles>()
         .init_resource::<GameStateSnapshot>()
         .init_resource::<PendingServerSnapshotFrame>()
         .init_resource::<StagedSnapshot>()

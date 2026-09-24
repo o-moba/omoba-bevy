@@ -1,5 +1,5 @@
 use crate::combat::{CombatStats, MAX_HP};
-use crate::debug_console::DebugConsole;
+use crate::debug::DebugConsole;
 use crate::domain::{MovementTarget, Player, VerticalVelocity};
 use crate::maps::MapLayout;
 use crate::net::{GameState, GameStateSnapshot};

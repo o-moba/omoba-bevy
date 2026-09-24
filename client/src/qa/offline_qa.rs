@@ -221,8 +221,7 @@ fn drive(world: &mut World) {
             advance = true;
         }
         15 if age > 2.0 && screen == AppScreen::Home => {
-            qa.restored = world.resource::<ClientSession>().server_addr_display
-                == qa.expected_server
+            qa.restored = world.resource::<ClientSession>().server_addr() == qa.expected_server
                 && !world.resource::<ClientSession>().is_offline()
                 && world
                     .query_filtered::<Entity, With<Player>>()
@@ -247,7 +246,7 @@ fn drive(world: &mut World) {
                 && qa.hit
                 && qa.restored
                 && files.iter().all(|f| qa.directory.join(f).is_file());
-            let report = serde_json::json!({"pass":passed,"moved_metres":qa.moved,"target_damaged":qa.hit,"returned_home_and_restored_online":qa.restored,"screenshots":files,"expected_online_endpoint":qa.expected_server,"restored_online_endpoint":world.resource::<ClientSession>().server_addr_display,"physical_ipad_verified":false,"method":"Native renderer, production UI and local packet handlers, synthetic actions; scroll offset for visual capture; touch gestures tested separately against actual UI layout."});
+            let report = serde_json::json!({"pass":passed,"moved_metres":qa.moved,"target_damaged":qa.hit,"returned_home_and_restored_online":qa.restored,"screenshots":files,"expected_online_endpoint":qa.expected_server,"restored_online_endpoint":world.resource::<ClientSession>().server_addr(),"physical_ipad_verified":false,"method":"Native renderer, production UI and local packet handlers, synthetic actions; scroll offset for visual capture; touch gestures tested separately against actual UI layout."});
             std::fs::write(
                 qa.directory.join("result.json"),
                 serde_json::to_vec_pretty(&report).unwrap(),

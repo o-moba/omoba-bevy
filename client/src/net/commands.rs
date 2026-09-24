@@ -53,16 +53,9 @@ pub enum NetworkCommand {
     },
     #[allow(dead_code)]
     RequestRematch,
-    SetGodMode {
-        enabled: bool,
-    },
-    SetSpeedBoost {
-        enabled: bool,
-    },
-    /// Local practice sandbox request (bots, dummies, 1v1).
-    Practice {
-        command: shared::practice::PracticeCommand,
-    },
+    /// God mode, the speed boost or a practice sandbox request (bots,
+    /// dummies, 1v1); sent as the command's existing packet.
+    Debug(shared::debug::DebugCommand),
     UpgradeSkill {
         slot: u8,
     },
@@ -388,29 +381,11 @@ pub(in crate::net) fn send_network_commands(
                 }
                 let _ = channels.outgoing.try_send(ClientPacket::RequestRematch);
             }
-            NetworkCommand::SetGodMode { enabled } => {
+            NetworkCommand::Debug(command) => {
                 if !client_session.join_confirmed() {
                     continue;
                 }
-                let _ = channels
-                    .outgoing
-                    .try_send(ClientPacket::SetGodMode { enabled: *enabled });
-            }
-            NetworkCommand::Practice { command } => {
-                if !client_session.join_confirmed() {
-                    continue;
-                }
-                let _ = channels
-                    .outgoing
-                    .try_send(ClientPacket::Practice { command: *command });
-            }
-            NetworkCommand::SetSpeedBoost { enabled } => {
-                if !client_session.join_confirmed() {
-                    continue;
-                }
-                let _ = channels
-                    .outgoing
-                    .try_send(ClientPacket::SetSpeedBoost { enabled: *enabled });
+                let _ = channels.outgoing.try_send(command.to_packet());
             }
             NetworkCommand::BuyItem {
                 server_epoch,

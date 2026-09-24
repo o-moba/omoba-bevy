@@ -8,7 +8,8 @@ use bevy::prelude::*;
 use shared::hero_balance::{DEBUG_SPEED_MULTIPLIER, PLAYER_SPEED};
 use std::f32::consts::PI;
 
-use super::{DebugSpeedBoost, GRAVITY, GROUND_EPSILON, JUMP_HEIGHT, PLAYER_SIZE, ground_origin_y};
+use super::{GRAVITY, GROUND_EPSILON, JUMP_HEIGHT, PLAYER_SIZE, ground_origin_y};
+use crate::debug::DebugToggles;
 
 #[derive(Component)]
 pub(super) struct Jumping {
@@ -35,7 +36,7 @@ pub(super) fn move_player(
         Query<&Transform, (With<PlayerBody>, Without<Player>)>,
         Query<(&Transform, &StructureKind, Option<&CombatStats>), With<NetworkStructure>>,
     )>,
-    speed_boost: Res<DebugSpeedBoost>,
+    debug: Res<DebugToggles>,
     map_layout: Option<Res<MapLayout>>,
     game_state: Option<Res<GameStateSnapshot>>,
 ) {
@@ -77,7 +78,7 @@ pub(super) fn move_player(
         let target_pos_flat = Vec3::new(waypoint.x, current_pos.y, waypoint.z);
         let direction = (target_pos_flat - current_pos).normalize_or_zero();
         let distance = current_pos.xz().distance(target_pos_flat.xz());
-        let speed = if speed_boost.0 {
+        let speed = if debug.speed_boost {
             PLAYER_SPEED * DEBUG_SPEED_MULTIPLIER
         } else {
             PLAYER_SPEED
