@@ -425,7 +425,7 @@ fn setup_shop(mut commands: Commands) {
                         });
                     panel.spawn((Text::new(""), ui::text(16.0), TextColor(ui::GOLD), ShopSummary, Name::new("ShopSummary")));
                     panel.spawn((Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(10.0), row_gap: Val::Px(10.0), ..default() }, Name::new("ShopCards")))
-                        .with_children(|cards| { for definition in shop::ITEMS {
+                        .with_children(|cards| { for definition in shop::items() {
                             cards.spawn((Button, Node { width: Val::Px(264.0), height: Val::Px(150.0),
                                 padding: UiRect::all(Val::Px(13.0)), flex_direction: FlexDirection::Column,
                                 row_gap: Val::Px(7.0), border: UiRect::all(Val::Px(1.0)),

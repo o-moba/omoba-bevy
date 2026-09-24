@@ -407,7 +407,7 @@ fn build_panel(
                     number(p,Field::Aggression,&state);number(p,Field::Distance,&state);toggle(p,Toggle::Respawn,&state);
                 }
                 p.spawn(row()).with_children(|r|for i in 0..4{button(r,format!("Cast {}",["Q","W","E","R"][i]),Action::Command(SandboxCommand::ForceCast{actor:state.actor,slot:i as u8,target_id:None}));});
-                heading(p,"Grant equipment");p.spawn(row()).with_children(|r|{for item in shared::shop::ITEMS{button(r,item.name,Action::Item(item.id));}button(r,"Clear inventory",Action::ClearItems);});
+                heading(p,"Grant equipment");p.spawn(row()).with_children(|r|{for item in shared::shop::items(){button(r,item.name,Action::Item(item.id));}button(r,"Clear inventory",Action::ClearItems);});
                 heading(p,"Shipped appearances");p.spawn(row()).with_children(|r|for avatar in shared::avatar_roster().iter().filter(|a|a.passport.is_none()){button(r,&avatar.slug,Action::Avatar(avatar.slug.clone()));});
             },
             Tab::Dummy=>{

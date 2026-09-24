@@ -58,7 +58,7 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
 | 14 | Server per-variant packet handlers, explicit imports instead of crate-root globs | done | #33 |
 | 10 | Client domain module, combat/player split, render backends behind `run_if`, plugin groups, QA behind a cargo feature | in progress: 10a+10d (#35), 10b+10c (this PR); slices in [plans/client-10-15.md](plans/client-10-15.md) | #35, this PR |
 | 11 | One debug tooling family shared by Combat Test, practice and offline | pending | |
-| 12 | Data-driven hero and item catalogs with validation tests | pending | |
+| 12 | Data-driven hero and item catalogs with validation tests | done: 12a-12e (this PR); 12f (optional client cross-checks) open | this PR |
 | 13 | Roster/asset loading and SDK types out of the shared model | pending | |
 | 15 | Client session events and staged snapshot application | pending | |
 | 9b | UI kit follow-ups: scroll unification, modal registry, frontend/social/supporter/sandbox screens, responsive layout, `TestId` in QA | pending (order in [ui-kit.md](ui-kit.md)) | |
@@ -110,8 +110,13 @@ its structure is fresh, then the client). Each row is one to four PRs.
 ### 11: One debug tooling family
 - One `DebugCommand` family in `shared` covering Combat Test sandbox, practice (`PracticeCommand`) and offline; one tools UI page; the offline simulation implements the same commands so the pause-menu page works in all three modes.
 
-### 12: Data-driven catalogs
-- Hero classes/ability kits and items as JSON under `shared/assets/` (or `assets/config/`), loaded once into static tables with validation tests (every class has a kit, every item is recommended exactly once, costs within starter budget); `ItemId`/`HeroClass` stay enums for the wire.
+### 12: Data-driven catalogs (done, this PR)
+- Plan: [plans/steps-11-13.md](plans/steps-11-13.md), "Step 12". Slices 12a-12e landed together; 12f (client cross-checks: `combat_visuals.json` classes cover the catalog, `combat/targeting.rs` reads its attack-rate caps from `hero_balance`) is optional and open.
+- 12a: `ItemId::ALL`; `ItemId::from_id` searches the enum, so wire decoding never touches the catalog; `shop::items()` replaced the direct `ITEMS` uses (client `shop.rs`, `sandbox/ui.rs`, `sandbox/presets.rs`, server `shop.rs` test, `sandbox/tests.rs`); harness `combat_actions.rs` reads the Warrior Q through `ability_for_class_slot`; `DEFAULT_MAX_HP` is the literal `220.0` with a test that it equals `base_hp(Warrior)`.
+- 12b: `shared/assets/catalog/heroes.json` and `items.json` (`schema_version` 1) and `shared/src/catalog.rs`: two `LazyLock` tables from `include_str!`, private `Raw*` structs with `deny_unknown_fields`, validation at load (panics with the file and the entry), conversion into the unchanged `AbilityDefinition`/`ItemDefinition`/`BasicAttackDefinition` (strings leaked once, so the definitions stay `Copy`). A migration test compared every catalog field with the Rust tables bit for bit (`f32::to_bits`) and passed before 12c deleted it together with the tables.
+- 12c: `basic_attack_for_class`, `HeroClass::{display_name, tagline, primary_role, abilities, ability}`, `hero_balance::{base_hp, basic_damage_multiplier, attack_rate_multiplier}`, `shop::{items, item, recommended_items}` and `ProjectileStyle::for_class` read the catalog (no longer `const fn`); the `*_ABILITIES` constants, `ITEMS` and the `ability` helper are gone. `shared::catalog::ensure_loaded()` runs first in server `runtime::run` and client `main`.
+- 12d: the catalog length is `ItemId::ALL.len()`, not `INVENTORY_CAPACITY`; the "all items" test and preset sites take at most `INVENTORY_CAPACITY`; `practice::tests::duel_gold_cap_buys_a_full_inventory` replaces the comment claim.
+- 12e: `scripts/catalog.py` reads the JSON; `combat_test.py` (`--hero` choices), `verify_beta_match.py` (item costs; offensive slots = abilities with `projectile_damage`) and `capture_combat.py` (`STYLES`) use it. `check_combat_balance.py` keeps taking its classes from its captures.
 
 ### 13: Shared I/O isolation
 - Move avatar/sprite roster manifests and env-var reads out of `shared` into `client` (and the SDK types into a small adapter crate or `passport`); `shared` keeps the model only.

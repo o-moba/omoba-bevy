@@ -13,6 +13,11 @@ class CombatTestLauncherTests(unittest.TestCase):
         self.assertEqual(args.hero, 'mage')
         self.assertEqual(args.bind, '127.0.0.1:4040')
 
+    def test_hero_choices_are_the_catalog_classes(self):
+        self.assertEqual(combat_test.arguments(['--hero', 'warden']).hero, 'warden')
+        with self.assertRaises(SystemExit):
+            combat_test.arguments(['--hero', 'necromancer'])
+
     def test_live_service_and_qa_settings_cannot_leak_into_sandbox(self):
         parent = {'PATH': '/bin', 'HOME': '/test', 'OMOBA_DATABASE_URL': 'private',
                   'OMOBA_SERVER_ROLE': 'worker', 'OMOBA_AUTOJOIN': 'old',

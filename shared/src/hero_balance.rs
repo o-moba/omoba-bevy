@@ -1,6 +1,6 @@
 //! Shared, bounded hero growth. Item/debug multipliers compose once after growth.
 use crate::{
-    HeroClass, SkillSlot, ability_for_class_slot, basic_attack_for_class, scaled_cooldown,
+    HeroClass, SkillSlot, ability_for_class_slot, basic_attack_for_class, catalog, scaled_cooldown,
     shop::ItemBonuses,
 };
 use std::time::Duration;
@@ -13,7 +13,8 @@ pub const PLAYER_SPEED: f32 = 5.0;
 /// Debug movement multiplier applied when a client enables the speed-boost toggle.
 pub const DEBUG_SPEED_MULTIPLIER: f32 = 2.6;
 /// Pre-admission Warrior HP: joined heroes resolve their own class baseline.
-pub const DEFAULT_MAX_HP: f32 = base_hp(HeroClass::Warrior);
+/// A literal because `base_hp` reads the catalog; a test pins the two equal.
+pub const DEFAULT_MAX_HP: f32 = 220.0;
 pub const MAX_MANA: f32 = 100.0;
 pub const MANA_REGEN_PER_SECOND: f32 = 8.0;
 /// Homing hero projectiles (basic strikes and skills) travel at this speed.
@@ -43,14 +44,9 @@ pub fn max_hp_for_level(class: HeroClass, level: u32, item_hp: f32) -> f32 {
         + item_hp
 }
 
-pub const fn base_hp(class: HeroClass) -> f32 {
-    match class {
-        HeroClass::Warrior => 220.0,
-        HeroClass::Mage => 180.0,
-        HeroClass::Ranger => 185.0,
-        HeroClass::Cleric => 200.0,
-        HeroClass::Warden => 210.0,
-    }
+/// Level-one maximum HP of `class` (`base_hp` in the hero catalog).
+pub fn base_hp(class: HeroClass) -> f32 {
+    catalog::hero(class).base_hp
 }
 fn growth(level: u32, cap: f32) -> f32 {
     1.0 + (cap - 1.0) * (level.clamp(1, MAX_LEVEL) - 1) as f32 / (MAX_LEVEL - 1) as f32
@@ -58,29 +54,12 @@ fn growth(level: u32, cap: f32) -> f32 {
 pub fn movement_multiplier(_class: HeroClass, level: u32) -> f32 {
     growth(level, 1.24)
 }
+/// Per-class caps (`growth` in the hero catalog); the curve itself is uniform.
 pub fn basic_damage_multiplier(class: HeroClass, level: u32) -> f32 {
-    growth(
-        level,
-        match class {
-            HeroClass::Warrior => 1.8,
-            HeroClass::Mage => 1.6,
-            HeroClass::Ranger => 1.85,
-            HeroClass::Cleric => 1.5,
-            HeroClass::Warden => 1.75,
-        },
-    )
+    growth(level, catalog::hero(class).basic_damage_cap)
 }
 pub fn attack_rate_multiplier(class: HeroClass, level: u32) -> f32 {
-    growth(
-        level,
-        match class {
-            HeroClass::Warrior => 1.6,
-            HeroClass::Mage => 1.5,
-            HeroClass::Ranger => 1.8,
-            HeroClass::Cleric => 1.55,
-            HeroClass::Warden => 1.65,
-        },
-    )
+    growth(level, catalog::hero(class).attack_rate_cap)
 }
 pub fn ability_power_multiplier(_class: HeroClass, level: u32) -> f32 {
     growth(level, 1.35)
@@ -145,6 +124,14 @@ mod tests {
         assert_eq!(
             max_hp_for_level(HeroClass::Mage, 99, 0.0),
             max_hp_for_level(HeroClass::Mage, MAX_LEVEL, 0.0)
+        );
+    }
+
+    #[test]
+    fn default_max_hp_is_the_warrior_base_hp() {
+        assert_eq!(
+            DEFAULT_MAX_HP.to_bits(),
+            base_hp(HeroClass::Warrior).to_bits()
         );
     }
 

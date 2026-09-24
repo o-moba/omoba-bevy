@@ -26,14 +26,9 @@ pub enum ProjectileStyle {
 }
 
 impl ProjectileStyle {
-    pub const fn for_class(class: crate::HeroClass) -> Self {
-        match class {
-            crate::HeroClass::Warrior => Self::Crescent,
-            crate::HeroClass::Mage => Self::Arcane,
-            crate::HeroClass::Ranger => Self::Arrow,
-            crate::HeroClass::Cleric => Self::Holy,
-            crate::HeroClass::Warden => Self::Claw,
-        }
+    /// The class's basic attack and Q style (`projectile_style` in the hero catalog).
+    pub fn for_class(class: crate::HeroClass) -> Self {
+        crate::catalog::hero(class).projectile_style
     }
 }
 

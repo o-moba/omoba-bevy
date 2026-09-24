@@ -105,6 +105,7 @@ use world2d::World2dPlugin;
 
 #[bevy_main]
 pub fn main() {
+    shared::catalog::ensure_loaded();
     if let Some(directory) = std::env::var_os("OMOBA_ANIMATION_QA") {
         animation_qa::run(directory.into());
         return;

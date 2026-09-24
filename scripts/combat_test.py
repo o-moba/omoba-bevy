@@ -13,6 +13,7 @@ import time
 import uuid
 
 from beta_launcher import address, stop
+import catalog
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -23,7 +24,7 @@ def arguments(argv=None):
     mode.add_argument('--connect', type=address, help='join an existing Combat Test host')
     mode.add_argument('--server-only', action='store_true', help='host without opening a client')
     p.add_argument('--bind', type=address, default='127.0.0.1:4040')
-    p.add_argument('--hero', choices=('warrior', 'mage', 'ranger', 'cleric', 'warden'), help='skip the hero picker')
+    p.add_argument('--hero', choices=catalog.hero_ids(), help='skip the hero picker')
     p.add_argument('--avatar', help='shipped avatar slug; choose from the picker if omitted')
     p.add_argument('--preset', help='duel, late-game, dps, animation, or a saved JSON file')
     p.add_argument('--client-binary', type=Path, help='explicit prebuilt client; otherwise build locked sources')

@@ -18,10 +18,11 @@ import sys
 import tempfile
 import time
 
+import catalog
 from capture_verdant import FRAME_HEADER, ScenarioPeer, SnapshotObserver, sha256, verify_beta_ui_profile
 
 IMAGES = ("01-combat-ready.png", "02-projectile-flight.png", "03-confirmed-impact.png")
-STYLES = {"warrior": "crescent", "mage": "arcane", "ranger": "arrow", "cleric": "holy", "warden": "claw"}
+STYLES = catalog.projectile_styles()
 
 
 class PassiveTarget(ScenarioPeer):

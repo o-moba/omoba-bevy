@@ -188,6 +188,7 @@ impl ServerRuntime {
 }
 
 pub(crate) fn run() -> io::Result<()> {
+    shared::catalog::ensure_loaded();
     let map_path = std::env::var_os("OMOBA_MAP_CONFIG").map(std::path::PathBuf::from);
     let map_config = load_map_config(map_path.as_deref())?;
     println!(

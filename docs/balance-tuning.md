@@ -38,8 +38,15 @@ gear advantages, unequal levels or different spacing.
 
 ## Shared growth and combat rules
 
-`shared/src/hero_balance.rs` is the single source of innate growth. For each
-multiplier, `g(level, cap) = 1 + (cap - 1) × (clamp(level, 1, 10) - 1) / 9`.
+`shared/src/hero_balance.rs` is the single source of the innate growth curve
+and the values every class shares. The per-class numbers in the table below
+(starting HP, the Q interval, the level-ten caps) and the basic attacks and
+kits are data in `shared/assets/catalog/heroes.json` (`base_hp`,
+`growth.basic_damage_cap`, `growth.attack_rate_cap`, `basic_attack`,
+`abilities`); item costs and bonuses are in `shared/assets/catalog/items.json`.
+Retune by editing those files; see "Adding content" in
+[ARCHITECTURE.md](ARCHITECTURE.md) for the schema. For each multiplier,
+`g(level, cap) = 1 + (cap - 1) × (clamp(level, 1, 10) - 1) / 9`.
 Items multiply this once; team damage buffs continue to multiply the final
 outgoing damage. Ranges and class abilities keep their existing identities.
 
@@ -225,7 +232,10 @@ and bot games; do not infer human win rate from the deterministic matrix.
 Map-object settings live in `shared/assets/maps/verdant.json` or a server's
 `OMOBA_MAP_CONFIG`, pinned across rematches. See [map customization](map-customization.md).
 Other authoritative world constants remain in `server/src/balance.rs`; class
-kits in `shared/src/lib.rs`; innate progression in `shared/src/hero_balance.rs`.
+kits, base HP, growth caps and basic attacks in
+`shared/assets/catalog/heroes.json`; item costs and bonuses in
+`shared/assets/catalog/items.json`; the shared progression curve in
+`shared/src/hero_balance.rs`.
 
 ## Five classes and the Warden (0.23.0-rc.6)
 
