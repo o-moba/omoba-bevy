@@ -7,6 +7,24 @@ pub(crate) mod neutrals;
 pub(crate) mod projectiles;
 pub(crate) mod towers;
 
+/// Mana regeneration for joined, living heroes, clamped to the hero's pool.
+/// A pool that was never sized (max 0) is given the default one first.
+pub(crate) fn regenerate_mana(players: &mut HashMap<SocketAddr, ConnectedPlayer>, dt: f32) {
+    if dt <= 0.0 {
+        return;
+    }
+    for player in players.values_mut() {
+        if !player.joined || player.state.hp <= 0.0 {
+            continue;
+        }
+        if player.state.max_mana <= 0.0 {
+            player.state.max_mana = MAX_MANA;
+        }
+        player.state.mana =
+            (player.state.mana + MANA_REGEN_PER_SECOND * dt).clamp(0.0, player.state.max_mana);
+    }
+}
+
 /// Recovery is authoritative and only active inside the hero's own fountain.
 pub(crate) fn regenerate_base_hp(world: &mut GameWorld, dt: f32) {
     let GameWorld {

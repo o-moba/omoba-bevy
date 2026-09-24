@@ -19,7 +19,19 @@ impl ServerRuntime {
         self.sandbox.as_mut().map_or((now, dt), |s| s.advance(dt))
     }
 
-    pub(crate) fn simulate_after_mana(&mut self, now: Instant, dt: f32) {
+    /// Advances the world by one simulation step and sends what changed.
+    pub(crate) fn tick(&mut self, now: Instant, dt: f32) {
+        regenerate_mana(&mut self.world.players, dt);
+        // Minion-targeted projectiles resolve ahead of formation, bots and the
+        // rest of the simulation, where the ECS combat systems used to run;
+        // like them, a zero-length step leaves those projectiles alone.
+        if dt > 0.0 {
+            let minion_hits =
+                simulate_projectiles_filtered(&mut self.world, TickCtx { now, dt }, |kind| {
+                    kind == TargetKind::Minion
+                });
+            self.combat_log.extend(now, minion_hits);
+        }
         if self.match_service.is_lobby() {
             self.maintain_roster(now);
             self.send_lobby_snapshots(now);
@@ -81,7 +93,7 @@ impl ServerRuntime {
             self.combat_log.extend(now, tower_events);
         }
         let projectile_events = if sandbox_simulating {
-            simulate_projectiles(world, tick)
+            simulate_projectiles_filtered(world, tick, |kind| kind != TargetKind::Minion)
         } else {
             Vec::new()
         };

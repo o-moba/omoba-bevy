@@ -6,6 +6,12 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Server tick
+- The server no longer runs a Bevy `App`: `runtime::run` is a fixed-step loop calling `ServerRuntime::prepare_tick` and the new `ServerRuntime::tick(now, dt)` (formerly `simulate_after_mana`, now also covering mana regeneration and the minion projectile pass). `ecs.rs`, `gameplay/`, the `Player`/`Transform3D`/`Health`/`Mana`/`TeamMarker` mirror components, `EcsPlayerEntities`, `EcsMinionEntities`, `DamageEvent` and the sync systems are deleted; `GameWorld` is the only copy of the state.
+- One mana regeneration: `sim::regenerate_mana` (joined, living heroes, `dt > 0`, clamped to the pool) replaces the ECS system and the test-only copy in `session.rs`.
+- One projectile path: `sim::projectiles::simulate_projectiles_filtered` flies every target kind through one `step_homing` helper and applies minion hits with `apply_minion_damage`; the tick runs the minion-targeted pass where the ECS systems used to run and the rest where `simulate_projectiles` ran before, so timing is unchanged. Minion impacts are now applied in projectile id order like every other kind, instead of hash order.
+- No wire-visible change. Test loops that drive `ServerRuntime::tick` now also resolve minion-targeted projectiles (they used to skip the ECS pass); no test expectation changed.
+
 ### UI kit
 - New `client/src/ui/` (roadmap step 9 pilot, `docs/ui-kit.md`): `UiKitPlugin`, a `UiPlatform` resource read where systems used to call `platform::ui_profile()`, one theme (`ui/theme.rs` merges `ui_theme` and the `frontend::widgets` palette, both kept as shims), one tap recognizer (`Pressable`, `TapTracker`, `recognize_presses`, `GestureEpoch`, `SyntheticPress`) replacing the pause menu's and career's copies, typed button actions (`UiAction<T>` → `Activated<T>` via `add_ui_action::<T>()`), `ButtonStyle` painting and `TestId` (mirrored into `Name`).
 - The pause menu and the practice sandbox are rebuilt on the kit: `PauseAction`/`PracticeAction` enums and four handlers replace 19 marker components and 10 per-button systems; every QA-visible `Name` is unchanged. Career buttons use `Pressable` and bump the gesture epoch on modal changes. The audio QA harness presses kit buttons through `SyntheticPress`. Behaviour is unchanged except: career taps share the unified gate (landscape + focus) and get mouse emulation in mobile preview builds; the pause header `×` keeps its tile colour on hover instead of turning primary green after the first hover.

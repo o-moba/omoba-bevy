@@ -53,7 +53,7 @@ fn apply(rt: &mut ServerRuntime, a: SocketAddr, c: SandboxConfig) {
 }
 fn advance(rt: &mut ServerRuntime, dt: f32) {
     let (now, dt) = rt.sandbox.as_mut().unwrap().advance(dt);
-    rt.simulate_after_mana(now, dt);
+    rt.tick(now, dt);
 }
 #[test]
 fn sandbox_defaults_valid_and_actor_edit_is_transactional() {

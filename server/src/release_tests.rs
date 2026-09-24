@@ -343,21 +343,21 @@ fn canonical_rematch_resets_every_system_and_reforms_underfilled_release_roster(
     assert_eq!(rt.match_started_at, None);
     rt.handle_packet(addr(55403), join("b", Team::Blue), now);
     assert_eq!(rt.world.players[&addr(55403)].state.level, STARTING_LEVEL);
-    rt.simulate_after_mana(now, 0.01);
+    rt.tick(now, 0.01);
     assert!(matches!(rt.world.game_state, GameState::Starting { .. }));
-    rt.simulate_after_mana(now + Duration::from_secs(3), 3.0);
+    rt.tick(now + Duration::from_secs(3), 3.0);
     assert_eq!(rt.world.game_state, GameState::Running);
     assert!(rt.world.minions.is_empty());
     let started = rt.match_started_at.unwrap();
     for player in rt.world.players.values_mut() {
         player.last_seen = started + FIRST_MINION_WAVE_DELAY;
     }
-    rt.simulate_after_mana(
+    rt.tick(
         started + FIRST_MINION_WAVE_DELAY - Duration::from_millis(1),
         0.0,
     );
     assert!(rt.world.minions.is_empty());
-    rt.simulate_after_mana(started + FIRST_MINION_WAVE_DELAY, 0.0);
+    rt.tick(started + FIRST_MINION_WAVE_DELAY, 0.0);
     assert_eq!(rt.world.minions.len(), MINIONS_PER_WAVE * 6);
     for neutral in rt
         .world
@@ -579,7 +579,7 @@ fn udp_snapshot(
     assembler: &mut shared::transport::SnapshotAssembler,
 ) -> ServerPacket {
     rt.last_snapshot_at = Instant::now() - SNAPSHOT_INTERVAL;
-    rt.simulate_after_mana(Instant::now(), 0.0);
+    rt.tick(Instant::now(), 0.0);
     socket
         .set_read_timeout(Some(Duration::from_secs(1)))
         .unwrap();
@@ -612,8 +612,8 @@ fn live_udp_victory_rematch_uses_real_cast_receiver_and_framed_snapshots() {
     send_udp(&first, &mut rt, join("udp-a", Team::Green));
     send_udp(&second, &mut rt, join("udp-b", Team::Blue));
     let now = Instant::now();
-    rt.simulate_after_mana(now, 0.0);
-    rt.simulate_after_mana(now, 3.0);
+    rt.tick(now, 0.0);
+    rt.tick(now, 3.0);
     assert_eq!(rt.world.game_state, GameState::Running);
     let base = rt
         .world
@@ -668,7 +668,7 @@ fn live_udp_victory_rematch_uses_real_cast_receiver_and_framed_snapshots() {
         },
     );
     assert_eq!(rt.world.projectiles.len(), 1);
-    rt.simulate_after_mana(Instant::now(), 1.0);
+    rt.tick(Instant::now(), 1.0);
     assert_eq!(
         rt.world.game_state,
         GameState::Victory {
@@ -704,7 +704,7 @@ fn live_udp_victory_rematch_uses_real_cast_receiver_and_framed_snapshots() {
     assert_eq!(second_meta.match_id, first_meta.match_id + 1);
     assert!(second_meta.snapshot_tick > first_meta.snapshot_tick);
     assert!(matches!(game_state, GameState::Starting { .. }));
-    rt.simulate_after_mana(Instant::now(), 3.0);
+    rt.tick(Instant::now(), 3.0);
     assert_eq!(rt.world.game_state, GameState::Running);
     assert_clean_round(&rt);
     assert!(structure_is_protected(&rt.world.structures, base.id));

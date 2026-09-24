@@ -254,30 +254,6 @@ impl MinionAggroTarget {
     }
 }
 
-#[derive(Component)]
-pub(crate) struct Player;
-
-#[derive(Component)]
-pub(crate) struct Transform3D {
-    pub(crate) position: Vec3,
-    pub(crate) yaw: f32,
-}
-
-#[derive(Component)]
-pub(crate) struct Health {
-    pub(crate) current: f32,
-    pub(crate) max: f32,
-}
-
-#[derive(Component)]
-pub(crate) struct Mana {
-    pub(crate) current: f32,
-    pub(crate) max: f32,
-}
-
-#[derive(Component)]
-pub(crate) struct TeamMarker(pub(crate) Team);
-
 pub(crate) struct MapLayoutState {
     pub(crate) home: Vec3f,
     pub(crate) away: Vec3f,

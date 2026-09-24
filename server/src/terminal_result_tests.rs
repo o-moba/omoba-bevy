@@ -311,8 +311,7 @@ fn simultaneous_melee_base_kills_use_stable_minion_source_order() {
 }
 
 #[test]
-fn queued_ecs_damage_is_discarded_after_terminal_and_cannot_leak_into_next_round() {
-    use gameplay::combat::{DamageEvent, apply_projectile_minion_damage_system};
+fn minion_projectiles_do_not_land_after_terminal_and_cannot_leak_into_next_round() {
     let (mut runtime, now) = fixture();
     spawn_minion_wave_for_team_lane(
         &runtime.world.map_layout,
@@ -322,32 +321,51 @@ fn queued_ecs_damage_is_discarded_after_terminal_and_cannot_leak_into_next_round
         Lane::Mid,
     );
     let hp = runtime.world.minions[&1].state.hp;
+    let target = &runtime.world.minions[&1].state;
+    let target_pos = Vec3f::new(target.x, target.y + MINION_RADIUS * 0.8, target.z);
+    runtime.world.projectiles.insert(
+        7,
+        Projectile {
+            state: ProjectileState {
+                source_kind: CombatEntityKind::Player,
+                id: 7,
+                owner_id: 99,
+                owner_team: Team::Green,
+                x: target_pos.x,
+                y: target_pos.y,
+                z: target_pos.z,
+                direction: [1.0, 0.0, 0.0],
+                style: ProjectileStyle::Arrow,
+                action_slot: None,
+            },
+            target: TargetId {
+                kind: TargetKind::Minion,
+                id: 1,
+            },
+            velocity: Vec3f::new(0.0, 0.0, 0.0),
+            homing: true,
+            guaranteed_hit: true,
+            damage: 999.0,
+            radius: 0.5,
+            expires_at: now + Duration::from_secs(5),
+        },
+    );
     runtime.world.game_state = GameState::Victory {
         winner: Team::Green,
     };
-    let mut app = App::new();
-    app.add_plugins(GameplayPlugin)
-        .insert_resource(runtime)
-        .insert_resource(TickContext {
-            now: Some(now),
-            dt: 0.01,
-        })
-        .add_systems(Update, apply_projectile_minion_damage_system);
-    app.world_mut().write_message(DamageEvent {
-        target_id: 1,
-        amount: 999.0,
-        attacker_team: Team::Green,
-        source: HitSource::new(CombatEntityKind::Player, 99, ProjectileStyle::Arrow),
-    });
-    app.update();
-    {
-        let mut runtime = app.world_mut().resource_mut::<ServerRuntime>();
+    // A projectile sitting on its target does not land once the round ended.
+    for _ in 0..2 {
+        let events = simulate_projectiles(&mut runtime.world, TickCtx { now, dt: 0.01 });
+        assert!(events.is_empty());
         assert_eq!(runtime.world.minions[&1].state.hp, hp);
-        assert!(runtime.combat_log.snapshot(now).is_empty());
-        runtime.world.game_state = GameState::Running;
     }
-    app.update();
-    let mut runtime = app.world_mut().resource_mut::<ServerRuntime>();
-    assert_eq!(runtime.world.minions[&1].state.hp, hp);
+    assert!(runtime.combat_log.snapshot(now).is_empty());
+    // The rematch reset drops it with the rest of the round's world state, so
+    // nothing lands once the next round runs.
+    runtime.restart_round(now);
+    assert!(runtime.world.projectiles.is_empty());
+    runtime.world.game_state = GameState::Running;
+    let events = simulate_projectiles(&mut runtime.world, TickCtx { now, dt: 0.01 });
+    assert!(events.is_empty());
     assert!(runtime.combat_log.snapshot(now).is_empty());
 }

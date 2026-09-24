@@ -46,6 +46,7 @@ fn mana_regenerates_and_is_clamped() {
 
     world.ensure_connected(addr, now);
     let player = world.players.get_mut(&addr).unwrap();
+    player.joined = true;
     player.state.mana = 10.0;
     player.state.max_mana = MAX_MANA;
 

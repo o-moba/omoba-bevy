@@ -11,12 +11,10 @@ mod career_runtime_tests;
 mod objective_balance_tests;
 use omoba_career_store::career_store;
 mod combat_feedback;
-mod ecs;
 mod entities;
 mod forest_pickups;
 mod formation;
 mod game_world;
-mod gameplay;
 #[cfg(test)]
 mod map_config_tests;
 mod match_allocation;
@@ -55,10 +53,8 @@ mod world;
 
 use balance::*;
 use basic_attack::*;
-use bevy::{app::ScheduleRunnerPlugin, prelude::*};
 use combat_feedback::*;
 use ekza_bevy_sdk::EkzaCharacter as CharacterChoice;
-use gameplay::GameplayPlugin;
 use neutrals::*;
 use progression::*;
 use session::*;
@@ -86,7 +82,6 @@ use std::{
 use utility::*;
 use world::*;
 
-pub(crate) use ecs::*;
 pub(crate) use entities::*;
 pub(crate) use formation::*;
 pub(crate) use game_world::*;

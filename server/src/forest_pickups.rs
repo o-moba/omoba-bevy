@@ -264,15 +264,15 @@ mod tests {
         rt.world.players.get_mut(&addr).unwrap().state.hp = 100.0;
         rt.sandbox.as_mut().unwrap().config.environment.paused = true;
         let (paused_now, dt) = rt.sandbox.as_mut().unwrap().advance(90.0);
-        rt.simulate_after_mana(paused_now, dt);
+        rt.tick(paused_now, dt);
         assert!(rt.world.forest_pickups.snapshot(&rt.world.game_state)[0].available);
         rt.sandbox.as_mut().unwrap().config.environment.paused = false;
         let (unpaused_now, dt) = rt.sandbox.as_mut().unwrap().advance(0.01);
-        rt.simulate_after_mana(unpaused_now, dt);
+        rt.tick(unpaused_now, dt);
         assert!(!rt.world.forest_pickups.snapshot(&rt.world.game_state)[0].available);
         rt.sandbox.as_mut().unwrap().config.environment.paused = true;
         let (paused_now, dt) = rt.sandbox.as_mut().unwrap().advance(90.0);
-        rt.simulate_after_mana(paused_now, dt);
+        rt.tick(paused_now, dt);
         assert!(!rt.world.forest_pickups.snapshot(&rt.world.game_state)[0].available);
         rt.reset_sandbox_duel(paused_now);
         assert!(rt.world.forest_pickups.snapshot(&rt.world.game_state)[0].available);
@@ -305,7 +305,7 @@ mod tests {
         let player = rt.world.players.remove(&original).unwrap();
         rt.world.players.insert(addr, player);
         rt.last_snapshot_at = now - SNAPSHOT_INTERVAL;
-        rt.simulate_after_mana(now, 0.01);
+        rt.tick(now, 0.01);
         let mut buffer = [0; 65536];
         let (size, _) = client.recv_from(&mut buffer).unwrap();
         let packet: ServerPacket = serde_json::from_slice(&buffer[..size]).unwrap();

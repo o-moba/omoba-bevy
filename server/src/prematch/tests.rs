@@ -333,7 +333,7 @@ fn real_udp_peers_negotiate_and_replicate_draft_without_client_fixtures() {
         rt.receive_packets();
     }
     rt.last_snapshot_at = now - Duration::from_secs(1);
-    rt.simulate_after_mana(Instant::now(), 0.01);
+    rt.tick(Instant::now(), 0.01);
     let mut buffer = vec![0u8; 65536];
     let (len, _) = peers[1].recv_from(&mut buffer).unwrap();
     let packet: ServerPacket = serde_json::from_slice(&buffer[..len]).unwrap();
@@ -492,7 +492,7 @@ fn loaded_peers_still_wait_for_durable_career_ack_and_frozen_loadout_is_recorded
     );
     assert!(!rt.combat_log.ledger.is_started());
     let gold = rt.world.players[&address(1)].state.gold;
-    rt.simulate_after_mana(loading, 0.1);
+    rt.tick(loading, 0.1);
     assert_eq!(rt.world.players[&address(1)].state.gold, gold);
     assert!(rt.world.minions.is_empty());
     rt.career.backend.test_ack_start(&allocation.result_id);
