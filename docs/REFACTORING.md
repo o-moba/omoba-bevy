@@ -25,8 +25,8 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
    `cargo build -p server && cargo test --locked -p harness -- --test-threads=1`
    (about five minutes; it is the only check that exercises a real match end
    to end, so never skip it for a server or protocol change). Reference
-   counts at the time of writing: server 282 (+3 ignored), shared 78, client
-   lib 549 (529 with `--no-default-features`, i.e. without the QA
+   counts at the time of writing: server 283 (+3 ignored), shared 88, client
+   lib 557 (537 with `--no-default-features`, i.e. without the QA
    harnesses), harness 22 unit + 24 black-box.
 4. One step per branch, named `refactor/<topic>` (docs-only: `docs/<topic>`),
    cut from the current `origin/main`.
@@ -62,7 +62,7 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
 | 11 | One debug tooling family shared by Combat Test, practice and offline | pending | |
 | 12 | Data-driven hero and item catalogs with validation tests | done: 12a-12e (this PR); 12f (optional client cross-checks) open | this PR |
 | 13 | Roster/asset loading and SDK types out of the shared model | pending | |
-| 15 | Client session events and staged snapshot application | pending | |
+| 15 | Client session events and staged snapshot application | in progress: 15a+15b1 (this PR) | this PR |
 | 9b | UI kit follow-ups: scroll unification, modal registry, frontend/social/supporter/sandbox screens, responsive layout, `TestId` in QA | pending (order in [ui-kit.md](ui-kit.md)) | |
 
 Suggested order after 7: 14 (done), 10 (done), 15, 11, 12, 13, 9b (server first while
@@ -109,8 +109,11 @@ its structure is fresh, then the client). Each row is one to four PRs.
 - 10g (this PR): `make check-no-qa` (part of `make check`) and a CI step run `cargo clippy -p client --lib --no-deps --no-default-features -- -D warnings`. Production items only QA reads are `#[cfg(feature = "qa")]`, items QA and tests read are `#[cfg(any(test, feature = "qa"))]`; nothing uses `allow(dead_code)`. Client lib tests: 549 with the default features, 529 without.
 - Optional follow-ups from the plan: 10h (mobile store builds with `--no-default-features`), 10i (migrate imports off the re-export shims).
 
-### 15: Client session events
-- `SessionEvent` (Connected, Joined, Rejected, Disconnected, RoundReset) and `SnapshotApplied` messages emitted by `net/session.rs` and `net/apply.rs`; other modules subscribe instead of writing into `ClientSession`; `apply_server_snapshot` split into staged passes (players, structures, minions, neutrals, events).
+### 15: Client session events (in progress: 15a + 15b1, this PR)
+- `SessionEvent` and `SnapshotApplied` messages emitted by `net`; other modules react to them instead of `net` writing into their resources; `apply_server_snapshot` split into staged passes. Inventory, design, ordering hazards and slices 15a-15g: [plans/client-10-15.md](plans/client-10-15.md), "Step 15".
+- 15a (this PR): `SessionEvent` (`TransportStarted`, `Connected`, `Joined`, `Rejected`, `JoinExhausted`, `Disconnected`, `Left`, `ServerScopeReset`, `RoundChanged`) in `net/session.rs`, registered by `NetworkingPlugin`, re-exported as `crate::net::SessionEvent`. Every site queues into `ClientSession.outbox` (`pub(in crate::net)`); `flush_session_events` writes the queue at the end of `ApplySnapshot` and chained after `retry_pending_join` in `SessionLifecycle`. `NetworkState.last_round` gives `RoundChanged` the `CombatRoundIdentity` semantics; `ClientSession.announced_join` (reset in `clear_join_attempt`) makes `Joined` an edge. `TeardownReason` is `pub(crate)`. `SessionReactions` is configured after `SessionLifecycle` and has no members yet. No consumers.
+- 15b1 (this PR): `SnapshotApply::{Begin, Session, Resources, Entities, Finish}`, chained and inside `ApplySnapshot`; `StagedSnapshot { data, gate }`; `apply_snapshot_entities` is the old body from the Draft gate on, unchanged except that it reads and sets the gate; `SnapshotApplied { meta, your_id, round, outcome }` with `ApplyOutcome::{Full, Draft, LocalPending}` (no `local` field yet); `snapshot_apply_systems()` is used by the plugin, `net/test_fixtures.rs` and the offline lifecycle test. `SnapshotUiState` stays (three resources) until 15b2, because the entity stage would otherwise need 18 parameters.
+- Next: 15b2 (split `Entities`, one local-hero bundle helper, drop `SnapshotUiState`), 15c (round reset and mobile clear read `RoundChanged`), 15d (`ServerScopeReset` and `Left` consumers in `SessionReactions`), 15e (`ClientSession` accessors); 15f and 15g are optional.
 
 ### 11: One debug tooling family
 - One `DebugCommand` family in `shared` covering Combat Test sandbox, practice (`PracticeCommand`) and offline; one tools UI page; the offline simulation implements the same commands so the pause-menu page works in all three modes.

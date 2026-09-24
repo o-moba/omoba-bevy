@@ -4,6 +4,8 @@ Read-only analysis of `main` after PR #33 (line numbers refer to that tree and d
 
 # Step 15: client session events and staged snapshot application
 
+**Status:** 15a and 15b1 are done (one PR; notes in [progress/2026-09-24-client-session-events.md](../progress/2026-09-24-client-session-events.md)); 15b2 is next. Differences from 15.3: `StagedSnapshot.gate` is an `ApplyOutcome` (no separate `ApplyGate` type), `SnapshotApplied` has no `local` field yet, `SnapshotUiState` stays until 15b2 (the single entity stage still needs it), and `flush_session_events` is the last system of `snapshot_apply_systems()`.
+
 ## 15.1 Who reads or writes session state outside `client/src/net/`
 
 **A. Production code that writes `ClientSession` (only two places, both through `abandon_join()`)**
@@ -154,6 +156,8 @@ It is emitted by the `Finish` stage. Its first real consumers are the optional c
 10. **Test apps must register the message** (`add_message::<SessionEvent>()`) or leave out the flush system. The flush lives outside `update_session_lifecycle`, so tests at `session.rs:1227,1355` keep working. Their outbox just isn't drained.
 
 ## 15.5 Step 15 slices (in order; 543 tests unchanged unless noted)
+
+Status: 15a and 15b1 done (client lib 549 → 557); 15b2-15e open; 15f and 15g optional.
 
 | # | Slice | Size | Notes |
 |---|---|---|---|

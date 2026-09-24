@@ -100,6 +100,38 @@ these together to understand frame order:
    the local transform and the queued `NetworkCommand`s become packets.
 4. `PostUpdate`: grounding, target presentation, UI layout adjustments.
 
+Snapshot application is a chain of `SnapshotApply` stages
+(`client/src/net/mod.rs`, systems from `apply::snapshot_apply_systems()`),
+each a member of `ClientNetPipeline::ApplySnapshot`, so every
+`.after(ClientNetPipeline::ApplySnapshot)` reader still sees the whole
+application, including the Commands of the entity stage:
+- `Begin` moves the frame `ingest` staged into `StagedSnapshot`.
+- `Session` marks the session connected and records the snapshot time.
+- `Resources` writes `GameStateSnapshot`, the round and the prematch
+  loadout, and sets the Draft gate. It runs even when the entity work is
+  skipped.
+- `Entities` reconciles the local hero, remote players, projectiles,
+  structures, minions and neutrals. During Draft it only clears the heroes;
+  while the server lists a local hero that has no team and no committed join,
+  it stops before that hero.
+- `Finish` writes `SnapshotApplied { meta, your_id, round, outcome }`
+  (`outcome`: `Full`, `Draft` or `LocalPending`) and clears the staged frame.
+
+Session lifecycle edges are `SessionEvent` messages: `TransportStarted`,
+`Connected`, `Joined`, `Rejected`, `JoinExhausted`, `Disconnected`, `Left`,
+`ServerScopeReset` and `RoundChanged`. `net` queues each one in
+`ClientSession`'s outbox where the edge happens (in plain functions and in
+the systems at the 16-parameter limit alike). `flush_session_events` writes
+the queue as messages at the end of `ApplySnapshot` and again at the end of
+`SessionLifecycle`, after `retry_pending_join`. Systems that react to an
+event in the frame it is written belong in the `SessionReactions` set,
+which runs after `SessionLifecycle` and before the next frame's ingest.
+Code that needs the current state keeps polling `ClientSession`
+(`join_confirmed()`, `is_connected()`, `join_blocked()`). No module outside
+`net` reads the events or `SnapshotApplied` yet; later slices of roadmap
+step 15 move the round reset, the career/social clearing and the screen
+change on leave onto them.
+
 Gameplay input and local prediction live in two module trees that follow
 the `net` pattern: `mod.rs` holds the plugin and re-exports what other
 modules import, so callers keep `crate::combat::X` and `crate::player::X`.
@@ -367,9 +399,12 @@ Ordered by value over cost. Each step is a separate change with the full
    `ServerRuntime::with_ports`/`for_test`). Step complete.
 8. Client `net.rs` split into transport, session, commands, ingest, apply
    and interpolation (done, verbatim moves under `client/src/net/`);
-   session events instead of cross-module writes (`SessionEvent`,
-   `SnapshotApplied`, splitting `apply_server_snapshot`) are the open
-   follow-up.
+   session events instead of cross-module writes are step 15 (in progress:
+   `SessionEvent` with the outbox and its flush, the empty `SessionReactions`
+   set, and `apply_server_snapshot` split into the `SnapshotApply` stages
+   with `SnapshotApplied` are done; the finer entity split, the consumers
+   and the `ClientSession` accessors are next, see
+   `docs/plans/client-10-15.md`).
 9. One UI kit (theme, widgets, gestures, scroll, actions) and a modal
    registry (pilot done: `client/src/ui/` with theme, tap recognizer, typed
    actions and widgets; the pause menu and the practice sandbox use it;
