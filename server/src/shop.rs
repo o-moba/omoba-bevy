@@ -70,7 +70,7 @@ pub(crate) fn handle_purchase(
         player.state.mana = (player.state.mana + mana_bonus).min(player.state.max_mana);
         if let Some(mut c) = player.sandbox.clone() {
             c.inventory = player.state.inventory.clone();
-            sandbox::apply_actor(player, &c, false, player.last_movement_at);
+            sandbox::apply_actor(player, &c, false, player.timers.last_movement_at);
         }
         println!(
             "MATCH_METRIC event=purchase match={match_id} player={} request={request_id} item={} cost={} gold={}",
@@ -344,7 +344,7 @@ mod tests {
         buy(&mut rt, addr, ItemId::VitalityGem, 9, now);
         let player = rt.world.players.get_mut(&addr).unwrap();
         player.state.hp = 0.0;
-        player.respawn_at = Some(now);
+        player.timers.respawn_at = Some(now);
         handle_respawns(&mut rt.world, now);
         assert_eq!(rt.world.players[&addr].state.hp, 210.0);
         let new_addr = "127.0.0.1:57002".parse().unwrap();
@@ -555,7 +555,7 @@ mod tests {
         assert_eq!(rt.world.players[&addr].state.earned_gold, earned);
         assert_ne!(rt.world.players[&addr].state.gold, STARTING_GOLD + earned);
         rt.world.players.get_mut(&addr).unwrap().state.hp = 0.0;
-        rt.world.players.get_mut(&addr).unwrap().respawn_at = Some(now);
+        rt.world.players.get_mut(&addr).unwrap().timers.respawn_at = Some(now);
         handle_respawns(&mut rt.world, now);
         assert_eq!(rt.world.players[&addr].state.earned_gold, earned);
         let reconnect_at = now + PLAYER_TIMEOUT + Duration::from_millis(1);

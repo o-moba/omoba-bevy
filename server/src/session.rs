@@ -82,13 +82,7 @@ impl GameWorld {
                 protocol_compatible: true,
                 join_error: None,
                 last_seen: now,
-                last_movement_at: now,
-                last_cast_at: [None; 4],
-                last_basic_attack_at: None,
-                dash_ready_at: None,
-                haste_ready_at: None,
-                haste_expires_at: None,
-                respawn_at: None,
+                timers: HeroTimers::new(now),
                 god_mode: false,
                 speed_mult: 1.0,
                 purchase_sequence: 0,
@@ -150,7 +144,7 @@ impl GameWorld {
                 player.join_error = None;
                 player.session_id = Some(session_id);
                 player.last_seen = now;
-                player.last_movement_at = now;
+                player.timers.last_movement_at = now;
                 players.insert(addr, player);
                 return true;
             }
@@ -168,7 +162,7 @@ impl GameWorld {
                 disconnected.player.join_error = None;
                 disconnected.player.session_id = Some(session_id);
                 disconnected.player.last_seen = now;
-                disconnected.player.last_movement_at = now;
+                disconnected.player.timers.last_movement_at = now;
                 players.insert(addr, disconnected.player);
                 return true;
             }
@@ -267,12 +261,11 @@ pub(crate) fn reset_player_round(
     player.state.gold = STARTING_GOLD;
     player.state.earned_gold = 0;
     player.state.utility = Default::default();
-    player.dash_ready_at = None;
-    player.haste_ready_at = None;
-    player.haste_expires_at = None;
+    player.timers.dash_ready_at = None;
+    player.timers.haste_ready_at = None;
+    player.timers.haste_expires_at = None;
     player.state.inventory.clear();
     player.state.item_bonuses = ItemBonuses::NONE;
-    player.state.shop_available = false;
     player.state.last_purchase = None;
     player.purchase_sequence = 0;
     player.gold_income_remainder = 0.0;
@@ -284,20 +277,11 @@ pub(crate) fn reset_player_round(
     player.state.action_sequence = 0;
     player.state.action_kind = PlayerActionKind::None;
     player.state.action_slot = 0;
-    player.last_movement_at = now;
-    player.last_cast_at = [None; 4];
-    player.last_basic_attack_at = None;
-    player.state.basic_attack_cooldown_secs = shared::hero_balance::basic_cooldown(
-        player.state.hero_class,
-        player.state.level,
-        player.state.item_bonuses,
-    )
-    .as_secs_f32();
-    player.state.basic_attack_remaining_secs = 0.0;
-    player.state.skill_cooldown_remaining_secs = [0.0; 4];
-    player.state.skill_recovery_remaining_secs = 0.0;
+    player.timers.last_movement_at = now;
+    player.timers.last_cast_at = [None; 4];
+    player.timers.last_basic_attack_at = None;
     player.state.basic_attack_request_id = 0;
-    player.respawn_at = None;
+    player.timers.respawn_at = None;
     player.sandbox = None;
     player.sandbox_infinite_hp = false;
     player.god_mode = false;
@@ -351,7 +335,7 @@ pub(crate) fn handle_transform_request_with_structures(
     let dz = requested.z - current.z;
     let distance = (dx * dx + dz * dz).sqrt();
     let elapsed = now
-        .duration_since(player.last_movement_at)
+        .duration_since(player.timers.last_movement_at)
         .as_secs_f32()
         .clamp(0.0, MOVEMENT_MAX_DELTA_SECONDS);
     let speed_mult = player.speed_mult.max(0.1)
@@ -383,7 +367,7 @@ pub(crate) fn handle_transform_request_with_structures(
     if yaw.is_finite() {
         player.state.yaw = yaw;
     }
-    player.last_movement_at = now;
+    player.timers.last_movement_at = now;
 }
 
 /// Sweep every live gameplay footprint. Starting overlaps may recover only
@@ -418,7 +402,7 @@ pub(crate) fn handle_respawns(world: &mut GameWorld, now: Instant) {
         if player.sandbox.is_some() && player.state.is_bot {
             continue;
         }
-        let Some(respawn_at) = player.respawn_at else {
+        let Some(respawn_at) = player.timers.respawn_at else {
             continue;
         };
         if now < respawn_at {
@@ -431,15 +415,11 @@ pub(crate) fn handle_respawns(world: &mut GameWorld, now: Instant) {
         player.state.yaw = 0.0;
         player.state.hp = player.state.max_hp;
         player.state.mana = player.state.max_mana;
-        player.respawn_at = None;
-        player.haste_expires_at = None;
-        player.state.utility.haste_active_secs = 0.0;
-        player.last_movement_at = now;
-        player.last_cast_at = [None; 4];
-        player.last_basic_attack_at = None;
-        player.state.basic_attack_remaining_secs = 0.0;
-        player.state.skill_cooldown_remaining_secs = [0.0; 4];
-        player.state.skill_recovery_remaining_secs = 0.0;
+        player.timers.respawn_at = None;
+        player.timers.haste_expires_at = None;
+        player.timers.last_movement_at = now;
+        player.timers.last_cast_at = [None; 4];
+        player.timers.last_basic_attack_at = None;
         // Preserve request high-water through death; delayed strikes from the
         // same round must not become fresh attacks after respawn.
     }

@@ -111,8 +111,7 @@ impl ServerRuntime {
         accrue_passive_gold(&mut world.players, &world.game_state, gold_dt);
         restore_god_mode_players(world);
         handle_respawns(world, now);
-        refresh_basic_attack_cooldowns(&mut world.players, now);
-        refresh_utilities(&mut world.players, now);
+        hero_timers::normalize_hero_timers(world);
 
         let live_player_ids = world
             .players

@@ -40,7 +40,7 @@ fn practice_solo_starts_with_labelled_heroes_without_database_ack_or_ranked_cred
     assert_eq!(rt.world.game_state, GameState::Running);
     assert_eq!(joined_count(&rt.world.players), 4);
     assert_eq!(joined_team_counts(&rt.world.players), (2, 2));
-    let snapshot = build_players_snapshot(&rt.world.players);
+    let snapshot = build_players_snapshot(&rt.world, now);
     assert_eq!(snapshot.iter().filter(|p| p.is_bot).count(), 3);
     let allocation = rt.career_allocation_for_test().unwrap();
     assert_eq!(allocation.participants.len(), 4);
@@ -377,15 +377,13 @@ fn disconnect_replacement_and_reconnect_keep_human_state_without_oversubscribing
         .state
         .inventory
         .push(shared::shop::ItemId::VitalityGem);
-    original.state.utility.dash_remaining_secs = 11.0;
-    original.state.utility.haste_remaining_secs = 16.0;
     original.state.utility.last_request_id = 7;
     original.state.utility.dash_sequence = 3;
-    original.dash_ready_at = Some(now + Duration::from_secs(20));
-    original.haste_ready_at = Some(now + Duration::from_secs(25));
+    original.timers.dash_ready_at = Some(now + Duration::from_secs(20));
+    original.timers.haste_ready_at = Some(now + Duration::from_secs(25));
     let utility = original.state.utility;
-    let dash_ready_at = original.dash_ready_at;
-    let haste_ready_at = original.haste_ready_at;
+    let dash_ready_at = original.timers.dash_ready_at;
+    let haste_ready_at = original.timers.haste_ready_at;
     let later = now + PLAYER_TIMEOUT + Duration::from_millis(1);
     rt.world.players.get_mut(&addr(1)).unwrap().last_seen = later;
     rt.maintain_roster(later);
@@ -432,7 +430,10 @@ fn disconnect_replacement_and_reconnect_keep_human_state_without_oversubscribing
     );
     assert_eq!(restored.state.utility, utility);
     assert_eq!(
-        (restored.dash_ready_at, restored.haste_ready_at),
+        (
+            restored.timers.dash_ready_at,
+            restored.timers.haste_ready_at
+        ),
         (dash_ready_at, haste_ready_at)
     );
     let row = scoreboard
@@ -986,7 +987,7 @@ fn human_kills_of_practice_bots_count_on_the_live_scoreboard() {
     let mut request_id = 0;
     for _ in 0..400 {
         now += Duration::from_millis(50);
-        if rt.world.players[&addr(1)].state.basic_attack_remaining_secs <= 0.0 {
+        if hero_timers::basic_attack_remaining(&rt.world.players[&addr(1)], now) <= 0.0 {
             request_id += 1;
             rt.handle_packet(
                 addr(1),
@@ -1016,7 +1017,7 @@ fn human_kills_of_practice_bots_count_on_the_live_scoreboard() {
     let row = |id: u64| board.players.iter().find(|p| p.player_id == id).unwrap();
     assert_eq!((row(human_id).kills, row(human_id).deaths), (1, 0));
     assert_eq!((row(bot_id).kills, row(bot_id).deaths), (0, 1));
-    let snapshot = build_players_snapshot(&rt.world.players);
+    let snapshot = build_players_snapshot(&rt.world, now);
     assert!(snapshot.iter().any(|p| p.id == human_id && !p.is_bot));
 }
 
@@ -1097,7 +1098,7 @@ fn draft_started_practice_round_credits_human_kills() {
     let mut request_id = 0;
     for _ in 0..400 {
         now += Duration::from_millis(50);
-        if rt.world.players[&addr(1)].state.basic_attack_remaining_secs <= 0.0 {
+        if hero_timers::basic_attack_remaining(&rt.world.players[&addr(1)], now) <= 0.0 {
             request_id += 1;
             rt.handle_packet(
                 addr(1),

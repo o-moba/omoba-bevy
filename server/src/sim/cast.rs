@@ -55,14 +55,14 @@ pub(crate) fn handle_cast_request(
         return;
     }
     if !caster.sandbox.as_ref().is_some_and(|c| c.no_cooldowns)
-        && caster.last_cast_at[skill_slot.index()].is_some_and(|last_cast| {
+        && caster.timers.last_cast_at[skill_slot.index()].is_some_and(|last_cast| {
             now.duration_since(last_cast) < sandbox::effective_ability_cooldown(caster, skill_slot)
         })
     {
         return;
     }
 
-    if sandbox::skill_recovery_remaining(caster, now) > 0.0 {
+    if hero_timers::skill_recovery_remaining(caster, now) > 0.0 {
         return;
     }
     let effect_scale = rank_effect_scale(rank)
@@ -81,8 +81,7 @@ pub(crate) fn handle_cast_request(
         {
             caster_mut.state.mana -= mana_cost;
         }
-        caster_mut.last_cast_at[skill_slot.index()] = Some(now);
-        sandbox::refresh_skill_cooldowns(caster_mut, now);
+        caster_mut.timers.last_cast_at[skill_slot.index()] = Some(now);
         record_player_action(caster_mut, skill_slot);
         if let Some(heal) = def.self_heal {
             caster_mut.state.hp =
@@ -204,8 +203,7 @@ pub(crate) fn handle_cast_request(
     {
         caster_mut.state.mana -= mana_cost;
     }
-    caster_mut.last_cast_at[skill_slot.index()] = Some(now);
-    sandbox::refresh_skill_cooldowns(caster_mut, now);
+    caster_mut.timers.last_cast_at[skill_slot.index()] = Some(now);
     record_player_action(caster_mut, skill_slot);
 
     // Higher invested rank = proportionally more projectile damage; active

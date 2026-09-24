@@ -68,11 +68,11 @@ fn sandbox_defaults_valid_and_actor_edit_is_transactional() {
     c.player.damage_multiplier = 2.0;
     c.player.attack_speed = 3.0;
     rt.world.players.get_mut(&a).unwrap().state.hp = 27.0;
-    rt.world.players.get_mut(&a).unwrap().last_cast_at[0] = Some(now);
+    rt.world.players.get_mut(&a).unwrap().timers.last_cast_at[0] = Some(now);
     apply(&mut rt, a, c.clone());
     let p = &rt.world.players[&a];
     assert_eq!(p.state.hp, 27.0);
-    assert_eq!(p.last_cast_at[0], Some(now));
+    assert_eq!(p.timers.last_cast_at[0], Some(now));
     assert_eq!(p.state.level, 10);
     assert_eq!(p.state.ranks, [3; 4]);
     assert_eq!(p.state.inventory.len(), 6);
@@ -140,13 +140,18 @@ fn sandbox_resources_god_toggle_and_cooldowns_restore() {
     let id = rt.world.players[&a].state.id;
     assert!(apply_player_damage(&mut rt.world.players, id, 10.0, now).is_none());
     rt.world.players.get_mut(&a).unwrap().state.mana = 1.0;
-    rt.world.players.get_mut(&a).unwrap().last_basic_attack_at = Some(now);
+    rt.world
+        .players
+        .get_mut(&a)
+        .unwrap()
+        .timers
+        .last_basic_attack_at = Some(now);
     rt.simulate_sandbox(now, 0.01);
     assert_eq!(
         rt.world.players[&a].state.mana,
         rt.world.players[&a].state.max_mana
     );
-    assert!(rt.world.players[&a].last_basic_attack_at.is_none());
+    assert!(rt.world.players[&a].timers.last_basic_attack_at.is_none());
     c.player.god_mode = false;
     c.player.infinite_resource = false;
     c.player.no_cooldowns = false;
@@ -547,7 +552,12 @@ fn sandbox_simulation_time_controls_real_movement_and_cooldown() {
         rt.sandbox.as_mut().unwrap().config.environment.time_scale = scale;
         let start = rt.world.players[&a].state.x;
         let now = rt.sandbox.as_ref().unwrap().now;
-        rt.world.players.get_mut(&a).unwrap().last_basic_attack_at = Some(now);
+        rt.world
+            .players
+            .get_mut(&a)
+            .unwrap()
+            .timers
+            .last_basic_attack_at = Some(now);
         let (sim, dt) = rt.sandbox.as_mut().unwrap().advance(0.1);
         let seq = rt.world.players[&a].state.utility.dash_sequence;
         rt.handle_packet(
@@ -564,12 +574,10 @@ fn sandbox_simulation_time_controls_real_movement_and_cooldown() {
         let distance = rt.world.players[&a].state.x - start;
         assert!((distance - (PLAYER_SPEED * dt + MOVEMENT_POSITION_TOLERANCE)).abs() < 0.001);
         distances.push(distance);
-        refresh_basic_attack_cooldowns(&mut rt.world.players, sim);
-        let p = &rt.world.players[&a];
+        let view = rt.player_view(a, sim);
         assert!(
-            (p.state.basic_attack_remaining_secs
-                - (p.state.basic_attack_cooldown_secs - dt).max(0.0))
-            .abs()
+            (view.basic_attack_remaining_secs - (view.basic_attack_cooldown_secs - dt).max(0.0))
+                .abs()
                 < 0.001
         );
         rt.sandbox.as_mut().unwrap().config.environment.paused = true;
@@ -612,13 +620,13 @@ fn sandbox_reset_cooldowns_preserves_utility_replay_and_active_haste() {
         77,
         now,
     );
-    assert!(p.state.utility.haste_active_secs > 0.0);
+    assert!(hero_timers::haste_active(p, now) > 0.0);
     rt.simulate_sandbox(now, 0.1);
     assert_eq!(rt.world.players[&a].state.utility.last_request_id, 77);
-    assert!(rt.world.players[&a].state.utility.haste_active_secs > 0.0);
+    assert!(rt.player_view(a, now).utility.haste_active_secs > 0.0);
     command(&mut rt, a, SandboxCommand::ResetDuel);
     assert_eq!(rt.world.players[&a].state.utility.last_request_id, 77);
-    assert_eq!(rt.world.players[&a].state.utility.haste_active_secs, 0.0);
+    assert_eq!(rt.player_view(a, now).utility.haste_active_secs, 0.0);
 }
 
 #[test]
@@ -721,7 +729,7 @@ fn sandbox_duel_restart_preserves_controls_and_restores_environment() {
     let id = rt.world.players[&ENEMY_ADDR].state.id;
     apply_player_damage(&mut rt.world.players, id, 9999.0, now);
     rt.simulate_sandbox(now, 0.1);
-    assert!(rt.world.players[&ENEMY_ADDR].respawn_at.is_none());
+    assert!(rt.world.players[&ENEMY_ADDR].timers.respawn_at.is_none());
     c.enemy.auto_respawn = true;
     apply(&mut rt, a, c);
     rt.simulate_sandbox(now, 0.1);
@@ -869,7 +877,7 @@ fn sandbox_quarter_attack_speed_delays_real_basic_and_q_gates_then_can_be_disabl
     cast(&mut rt, now);
     assert_eq!(rt.world.projectiles.len(), 2);
     assert!(
-        (rt.world.players[&a].state.basic_attack_cooldown_secs - slow_basic.as_secs_f32()).abs()
+        (rt.player_view(a, now).basic_attack_cooldown_secs - slow_basic.as_secs_f32()).abs()
             < 0.00001
     );
     let telemetry = rt

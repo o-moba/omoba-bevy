@@ -75,7 +75,7 @@ impl ForestPickups {
                 .filter(|(_, player)| {
                     let state = &player.state;
                     player.joined
-                        && player.respawn_at.is_none()
+                        && player.timers.respawn_at.is_none()
                         && state.hp.is_finite()
                         && state.max_hp.is_finite()
                         && state.hp > 0.0
@@ -176,7 +176,7 @@ mod tests {
                 "full" => player.state.hp = player.state.max_hp,
                 "outside" => player.state.x += PICKUP_RADIUS + 0.01,
                 "unjoined" => player.joined = false,
-                "respawning" => player.respawn_at = Some(now),
+                "respawning" => player.timers.respawn_at = Some(now),
                 "nan" => player.state.x = f32::NAN,
                 _ => unreachable!(),
             }

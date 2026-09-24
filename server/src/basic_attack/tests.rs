@@ -52,25 +52,25 @@ fn zero_mana_basic_attack_and_q_have_independent_costs_and_clocks() {
     let (mut rt, a, _, target, now) = fixture();
     let attacker = rt.world.players.get_mut(&a).unwrap();
     attacker.state.mana = 0.0;
-    attacker.last_cast_at = [Some(now); 4];
+    attacker.timers.last_cast_at = [Some(now); 4];
     strike(&mut rt, a, target, 1, now);
     assert_eq!(rt.world.projectiles.len(), 1);
     let player = &rt.world.players[&a];
     assert_eq!(player.state.mana, 0.0);
-    assert_eq!(player.last_cast_at, [Some(now); 4]);
+    assert_eq!(player.timers.last_cast_at, [Some(now); 4]);
     assert_eq!(player.state.action_slot, BASIC_ATTACK_ACTION_SLOT);
     assert_eq!(player.state.action_kind, PlayerActionKind::Attack);
     assert_eq!(player.state.ranks, [1; 4]);
     let player = rt.world.players.get_mut(&a).unwrap();
     player.state.mana = MAX_MANA;
-    player.last_cast_at = [None; 4];
+    player.timers.last_cast_at = [None; 4];
     rt.handle_packet(a, ClientPacket::Cast { target, slot: 0 }, now);
     assert_eq!(
         rt.world.projectiles.len(),
         2,
         "Q remains available while basic attack cools down"
     );
-    assert_eq!(rt.world.players[&a].last_basic_attack_at, Some(now));
+    assert_eq!(rt.world.players[&a].timers.last_basic_attack_at, Some(now));
     assert_eq!(rt.world.players[&a].state.mana, MAX_MANA - 10.0);
     strike(&mut rt, a, target, 2, now + Duration::from_millis(899));
     assert_eq!(rt.world.projectiles.len(), 2);
@@ -110,8 +110,12 @@ fn packet_replay_and_wrong_round_cannot_attack_or_poison_fresh_sequence() {
     rt.restart_round(now + Duration::from_secs(6));
     rt.handle_packet(a, old_packet, now + Duration::from_secs(7));
     assert_eq!(rt.world.players[&a].state.basic_attack_request_id, 0);
-    assert!(rt.world.players[&a].last_basic_attack_at.is_none());
-    assert_eq!(rt.world.players[&a].state.basic_attack_remaining_secs, 0.0);
+    assert!(rt.world.players[&a].timers.last_basic_attack_at.is_none());
+    assert_eq!(
+        rt.player_view(a, now + Duration::from_secs(7))
+            .basic_attack_remaining_secs,
+        0.0
+    );
 }
 
 #[test]
@@ -139,7 +143,7 @@ fn rejects_unjoined_dead_friendly_missing_and_out_of_range_targets() {
         strike(&mut rt, a, target, 1, now);
         assert!(rt.world.projectiles.is_empty(), "{condition}");
         assert!(
-            rt.world.players[&a].last_basic_attack_at.is_none(),
+            rt.world.players[&a].timers.last_basic_attack_at.is_none(),
             "{condition}"
         );
         assert_eq!(rt.world.players[&a].state.mana, MAX_MANA, "{condition}");
@@ -251,11 +255,10 @@ fn equipment_changes_basic_deadline_without_rescaling_elapsed_time() {
     let elapsed = Duration::from_millis(400);
     rt.world.players.get_mut(&a).unwrap().state.item_bonuses =
         shared::shop::item_bonuses(&[ItemId::SwiftGrip, ItemId::EmberBlade]);
-    refresh_basic_attack_cooldowns(&mut rt.world.players, now + elapsed);
     let definition = basic_attack_for_class(HeroClass::Warrior);
     let duration = basic_attack_cooldown(definition, rt.world.players[&a].state.item_bonuses);
     assert!(
-        (rt.world.players[&a].state.basic_attack_remaining_secs
+        (rt.player_view(a, now + elapsed).basic_attack_remaining_secs
             - (duration - elapsed).as_secs_f32())
         .abs()
             < 0.00001
@@ -292,12 +295,16 @@ fn accepted_strike_deals_real_projectile_damage_and_death_retains_replay_guard()
     assert!(rt.world.projectiles.is_empty());
     let attacker = rt.world.players.get_mut(&a).unwrap();
     attacker.state.hp = 0.0;
-    attacker.respawn_at = Some(now + Duration::from_secs(1));
-    refresh_basic_attack_cooldowns(&mut rt.world.players, now);
-    assert!(rt.world.players[&a].last_basic_attack_at.is_none());
+    attacker.timers.respawn_at = Some(now + Duration::from_secs(1));
+    hero_timers::normalize_hero_timers(&mut rt.world);
+    assert!(rt.world.players[&a].timers.last_basic_attack_at.is_none());
     handle_respawns(&mut rt.world, now + Duration::from_secs(1));
     assert_eq!(rt.world.players[&a].state.basic_attack_request_id, 7);
-    assert_eq!(rt.world.players[&a].state.basic_attack_remaining_secs, 0.0);
+    assert_eq!(
+        rt.player_view(a, now + Duration::from_secs(1))
+            .basic_attack_remaining_secs,
+        0.0
+    );
     strike(&mut rt, a, target, 7, now + Duration::from_secs(2));
     assert!(rt.world.projectiles.is_empty());
 }
@@ -368,13 +375,11 @@ fn skill_recovery_blocks_cross_slot_bursts_without_spending_and_basics_overlap()
             rt.handle_packet(a, ClientPacket::Cast { target, slot }, now);
         }
         assert_eq!(rt.world.players[&a].state.mana, after_q);
-        assert_eq!(rt.world.players[&a].last_cast_at[1], None);
+        assert_eq!(rt.world.players[&a].timers.last_cast_at[1], None);
         assert_eq!(rt.world.players[&a].state.action_sequence, 1);
-        assert!(rt.world.players[&a].state.skill_recovery_remaining_secs > 0.0);
-        assert_eq!(
-            rt.world.players[&a].state.skill_cooldown_remaining_secs[1],
-            0.0
-        );
+        let view = rt.player_view(a, now);
+        assert!(view.skill_recovery_remaining_secs > 0.0);
+        assert_eq!(view.skill_cooldown_remaining_secs[1], 0.0);
         strike(&mut rt, a, target, 1, now);
         assert_eq!(
             rt.world.projectiles.len(),
@@ -384,9 +389,13 @@ fn skill_recovery_blocks_cross_slot_bursts_without_spending_and_basics_overlap()
         let recovery = Duration::from_secs_f32(shared::hero_balance::skill_recovery_secs(2));
         rt.handle_packet(a, ClientPacket::Cast { target, slot: 1 }, now + recovery);
         let p = &rt.world.players[&a];
-        assert_eq!(p.last_cast_at[1], Some(now + recovery));
+        assert_eq!(p.timers.last_cast_at[1], Some(now + recovery));
         assert!(p.state.hp <= p.state.max_hp && p.state.mana <= p.state.max_mana);
-        assert!(p.state.skill_cooldown_remaining_secs[1] > 0.0);
+        assert!(
+            rt.player_view(a, now + recovery)
+                .skill_cooldown_remaining_secs[1]
+                > 0.0
+        );
     }
 }
 
@@ -438,7 +447,7 @@ fn normal_level_ten_movement_and_item_growth_are_authoritative_and_bounded() {
         );
         let max_hp = p.state.max_hp;
         p.state.hp = 0.0;
-        p.respawn_at = Some(now);
+        p.timers.respawn_at = Some(now);
         handle_respawns(&mut rt.world, now);
         assert_eq!(rt.world.players[&a].state.hp, max_hp);
         assert_eq!(
@@ -461,12 +470,7 @@ fn explicit_sandbox_no_cooldowns_bypasses_inter_skill_recovery() {
         rt.handle_packet(a, ClientPacket::Cast { target, slot }, now);
     }
     assert_eq!(rt.world.players[&a].state.action_sequence, 3);
-    assert_eq!(
-        rt.world.players[&a].state.skill_recovery_remaining_secs,
-        0.0
-    );
-    assert_eq!(
-        rt.world.players[&a].state.skill_cooldown_remaining_secs,
-        [0.0; 4]
-    );
+    let view = rt.player_view(a, now);
+    assert_eq!(view.skill_recovery_remaining_secs, 0.0);
+    assert_eq!(view.skill_cooldown_remaining_secs, [0.0; 4]);
 }

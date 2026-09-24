@@ -86,7 +86,7 @@ pub(crate) fn restore_god_mode_players(world: &mut GameWorld) {
             if player.sandbox.as_ref().is_none_or(|c| c.infinite_resource) {
                 player.state.mana = player.state.max_mana;
             }
-            player.respawn_at = None;
+            player.timers.respawn_at = None;
         }
     }
 }

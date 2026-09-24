@@ -57,7 +57,7 @@ fn snapshot_serializer_rejects_whole_over_limit_payload() {
         meta: Default::default(),
         join_error: None,
         your_id: player.state.id,
-        players: build_players_snapshot(&world.players),
+        players: build_players_snapshot(&world, now),
         scoreboard: None,
         prematch: None,
         projectiles: Vec::new(),

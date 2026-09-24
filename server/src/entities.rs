@@ -156,16 +156,10 @@ pub(crate) struct ConnectedPlayer {
     pub(crate) framed_snapshots: bool,
     pub(crate) protocol_compatible: bool,
     pub(crate) join_error: Option<shared::protocol::JoinRejection>,
+    /// Transport liveness; not a gameplay clock.
     pub(crate) last_seen: Instant,
-    pub(crate) last_movement_at: Instant,
-    /// Per-slot cast timestamps (Q/W/E/R); each ability cools down independently.
-    pub(crate) last_cast_at: [Option<Instant>; 4],
-    /// Independent of Q/W/E/R and never charged against mana.
-    pub(crate) last_basic_attack_at: Option<Instant>,
-    pub(crate) dash_ready_at: Option<Instant>,
-    pub(crate) haste_ready_at: Option<Instant>,
-    pub(crate) haste_expires_at: Option<Instant>,
-    pub(crate) respawn_at: Option<Instant>,
+    /// Authoritative gameplay clocks (`hero_timers`).
+    pub(crate) timers: HeroTimers,
     /// Debug invulnerability toggle (TASK04). Not networked; the requesting
     /// client owns the toggle and the server skips damage while it is set.
     pub(crate) god_mode: bool,
@@ -174,6 +168,45 @@ pub(crate) struct ConnectedPlayer {
     pub(crate) speed_mult: f32,
     pub(crate) purchase_sequence: u64,
     pub(crate) gold_income_remainder: f32,
+}
+
+impl ConnectedPlayer {
+    /// The replicated `PlayerState` as the owning client sees it: the stored
+    /// authoritative state plus the fields derived at replication time (the
+    /// cooldown and utility clocks from `hero_timers`, shop availability).
+    /// The stored `state` keeps those wire fields at their defaults.
+    pub(crate) fn owner_view(
+        &self,
+        now: Instant,
+        map: &MapLayoutState,
+        phase: &GameState,
+    ) -> PlayerState {
+        let mut state = self.state.clone();
+        state.basic_attack_cooldown_secs = hero_timers::basic_attack_cooldown(self);
+        state.basic_attack_remaining_secs = hero_timers::basic_attack_remaining(self, now);
+        state.skill_cooldown_remaining_secs = std::array::from_fn(|i| {
+            hero_timers::skill_cooldown_remaining(self, SkillSlot::ALL[i], now)
+        });
+        state.skill_recovery_remaining_secs = hero_timers::skill_recovery_remaining(self, now);
+        state.utility.dash_remaining_secs = hero_timers::dash_remaining(self, now);
+        state.utility.haste_remaining_secs = hero_timers::haste_remaining(self, now);
+        state.utility.haste_active_secs = hero_timers::haste_active(self, now);
+        state.shop_available = shop_is_available(&state, map, phase);
+        state
+    }
+
+    /// The replicated `PlayerState` as every other client sees it. Redaction
+    /// is a later step; today it equals the owner view and the broadcast
+    /// sends the owner view to every recipient.
+    #[cfg_attr(not(test), expect(dead_code))]
+    pub(crate) fn public_view(
+        &self,
+        now: Instant,
+        map: &MapLayoutState,
+        phase: &GameState,
+    ) -> PlayerState {
+        self.owner_view(now, map, phase)
+    }
 }
 
 pub(crate) struct DisconnectedSession {

@@ -64,7 +64,7 @@ fn dash_uses_match_identity_replay_protection_and_independent_twenty_second_cool
     assert!((rt.world.players[&addr].state.x - DASH_DISTANCE).abs() < 0.001);
     assert_eq!(rt.world.players[&addr].state.utility.dash_sequence, 1);
     assert_eq!(
-        rt.world.players[&addr].state.utility.dash_remaining_secs,
+        rt.player_view(addr, now).utility.dash_remaining_secs,
         DASH_COOLDOWN_SECS
     );
     request(
@@ -110,10 +110,10 @@ fn utilities_require_admission_alive_running_and_valid_direction() {
     request(&mut rt, addr, UtilityAction::Haste, [0.0, 0.0], 1, now);
     rt.world.players.get_mut(&addr).unwrap().state.hp = MAX_HP;
     request(&mut rt, addr, UtilityAction::Haste, [0.0, 0.0], 1, now);
-    assert_eq!(rt.world.players[&addr].state.utility.haste_active_secs, 0.0);
+    assert_eq!(rt.player_view(addr, now).utility.haste_active_secs, 0.0);
     rt.world.game_state = GameState::Lobby;
     request(&mut rt, addr, UtilityAction::Haste, [0.0, 0.0], 2, now);
-    assert_eq!(rt.world.players[&addr].state.utility.haste_active_secs, 0.0);
+    assert_eq!(rt.player_view(addr, now).utility.haste_active_secs, 0.0);
     rt.world.game_state = GameState::Running;
     request(&mut rt, addr, UtilityAction::Dash, [0.0, 0.0], 3, now);
     let p = rt.world.players.get_mut(&addr).unwrap();
@@ -128,7 +128,7 @@ fn utilities_require_admission_alive_running_and_valid_direction() {
         now,
     );
     assert_eq!(p.state.utility.dash_sequence, 0);
-    assert_eq!(p.state.utility.dash_remaining_secs, 0.0);
+    assert_eq!(hero_timers::dash_remaining(p, now), 0.0);
 }
 
 #[test]
@@ -136,8 +136,8 @@ fn haste_lasts_three_seconds_and_cancels_on_death_without_clearing_replay_or_coo
     let (mut rt, addr, now) = fixture();
     request(&mut rt, addr, UtilityAction::Haste, [0.0, 0.0], 1, now);
     let p = &rt.world.players[&addr];
-    assert_eq!(p.state.utility.haste_active_secs, HASTE_DURATION_SECS);
-    assert_eq!(p.state.utility.haste_remaining_secs, HASTE_COOLDOWN_SECS);
+    assert_eq!(hero_timers::haste_active(p, now), HASTE_DURATION_SECS);
+    assert_eq!(hero_timers::haste_remaining(p, now), HASTE_COOLDOWN_SECS);
     assert_eq!(
         utility_movement_multiplier(p, now + Duration::from_millis(2999)),
         1.4
@@ -147,7 +147,7 @@ fn haste_lasts_three_seconds_and_cancels_on_death_without_clearing_replay_or_coo
         1.0
     );
     let p = rt.world.players.get_mut(&addr).unwrap();
-    p.last_movement_at = now;
+    p.timers.last_movement_at = now;
     handle_transform_request(
         p,
         &rt.world.map_layout,
@@ -170,12 +170,15 @@ fn haste_lasts_three_seconds_and_cancels_on_death_without_clearing_replay_or_coo
         utility_movement_multiplier(p, now + Duration::from_secs(1)),
         1.0
     );
-    assert_eq!(p.state.utility.haste_active_secs, 0.0);
+    assert_eq!(
+        hero_timers::haste_active(p, now + Duration::from_secs(1)),
+        0.0
+    );
     assert_eq!(p.state.utility.last_request_id, 1);
-    assert!(p.haste_ready_at.is_some());
+    assert!(p.timers.haste_ready_at.is_some());
     reset_player_round(p, &rt.world.map_layout, now);
     assert_eq!(p.state.utility, UtilityState::default());
-    assert!(p.haste_ready_at.is_none());
+    assert!(p.timers.haste_ready_at.is_none());
 }
 
 #[test]

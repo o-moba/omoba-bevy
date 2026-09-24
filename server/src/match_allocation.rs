@@ -526,8 +526,7 @@ mod runtime_tests {
         rt.poll_career(now);
         rt.tick_match_service(now);
         assert!(rt.match_service.worker().unwrap().terminal_at.is_some());
-        let frozen_players =
-            serde_json::to_value(build_players_snapshot(&rt.world.players)).unwrap();
+        let frozen_players = serde_json::to_value(build_players_snapshot(&rt.world, now)).unwrap();
         let frozen_minions = rt.world.minions.len();
         let frozen_projectiles = rt.world.projectiles.len();
         for millis in [100, 500, 1000] {
@@ -552,7 +551,7 @@ mod runtime_tests {
             assert!(players.iter().all(|p| p.team == Team::Blue));
             assert_eq!(scoreboard.unwrap().players.len(), 10);
             assert_eq!(
-                serde_json::to_value(build_players_snapshot(&rt.world.players)).unwrap(),
+                serde_json::to_value(build_players_snapshot(&rt.world, later)).unwrap(),
                 frozen_players
             );
             assert_eq!(rt.world.minions.len(), frozen_minions);

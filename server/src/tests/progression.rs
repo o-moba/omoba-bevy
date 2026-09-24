@@ -38,7 +38,7 @@ fn respawn_restores_scaled_maximums() {
     grant_player_xp(&mut player.state, first_threshold + second_threshold);
     player.state.hp = 0.0;
     player.state.mana = 0.0;
-    player.respawn_at = Some(now - Duration::from_millis(1));
+    player.timers.respawn_at = Some(now - Duration::from_millis(1));
 
     handle_respawns(&mut world, now);
 

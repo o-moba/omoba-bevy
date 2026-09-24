@@ -3,35 +3,15 @@ use super::*;
 use shared::utility::*;
 
 pub(crate) fn utility_movement_multiplier(player: &ConnectedPlayer, now: Instant) -> f32 {
-    if player.state.hp > 0.0 && player.haste_expires_at.is_some_and(|until| now < until) {
+    if player.state.hp > 0.0
+        && player
+            .timers
+            .haste_expires_at
+            .is_some_and(|until| now < until)
+    {
         HASTE_SPEED_MULTIPLIER
     } else {
         1.0
-    }
-}
-
-fn remaining(deadline: Option<Instant>, now: Instant) -> f32 {
-    deadline.map_or(0.0, |until| {
-        until.saturating_duration_since(now).as_secs_f32()
-    })
-}
-
-fn refresh_utility(player: &mut ConnectedPlayer, now: Instant) {
-    if player.sandbox.as_ref().is_some_and(|c| c.no_cooldowns) {
-        player.dash_ready_at = None;
-        player.haste_ready_at = None;
-    }
-    if player.state.hp <= 0.0 {
-        player.haste_expires_at = None;
-    }
-    player.state.utility.dash_remaining_secs = remaining(player.dash_ready_at, now);
-    player.state.utility.haste_remaining_secs = remaining(player.haste_ready_at, now);
-    player.state.utility.haste_active_secs = remaining(player.haste_expires_at, now);
-}
-
-pub(crate) fn refresh_utilities(players: &mut HashMap<SocketAddr, ConnectedPlayer>, now: Instant) {
-    for player in players.values_mut() {
-        refresh_utility(player, now);
     }
 }
 
@@ -52,13 +32,12 @@ pub(crate) fn handle_utility_request(
     // Failed requests are consumed too; a cooldown/death replay cannot activate later.
     player.state.utility.last_request_id = request_id;
     player.last_seen = now;
-    refresh_utility(player, now);
     if !matches!(phase, GameState::Running) || player.state.hp <= 0.0 {
         return;
     }
     match action {
         UtilityAction::Dash => {
-            if player.state.utility.dash_remaining_secs > 0.0
+            if hero_timers::dash_remaining(player, now) > 0.0
                 || !direction.iter().all(|x| x.is_finite())
             {
                 return;
@@ -78,20 +57,20 @@ pub(crate) fn handle_utility_request(
             player.state.x = to[0];
             player.state.y = PLAYER_GROUND_Y;
             player.state.z = to[1];
-            player.last_movement_at = now;
-            player.dash_ready_at = Some(now + Duration::from_secs_f32(DASH_COOLDOWN_SECS));
+            player.timers.last_movement_at = now;
+            player.timers.dash_ready_at = Some(now + Duration::from_secs_f32(DASH_COOLDOWN_SECS));
             player.state.utility.dash_sequence =
                 player.state.utility.dash_sequence.saturating_add(1);
         }
         UtilityAction::Haste => {
-            if player.state.utility.haste_remaining_secs > 0.0 {
+            if hero_timers::haste_remaining(player, now) > 0.0 {
                 return;
             }
-            player.haste_ready_at = Some(now + Duration::from_secs_f32(HASTE_COOLDOWN_SECS));
-            player.haste_expires_at = Some(now + Duration::from_secs_f32(HASTE_DURATION_SECS));
+            player.timers.haste_ready_at = Some(now + Duration::from_secs_f32(HASTE_COOLDOWN_SECS));
+            player.timers.haste_expires_at =
+                Some(now + Duration::from_secs_f32(HASTE_DURATION_SECS));
         }
     }
-    refresh_utility(player, now);
 }
 
 #[cfg(test)]
