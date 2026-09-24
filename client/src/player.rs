@@ -27,9 +27,7 @@ use crate::team::{CharacterChoice, Team};
 use crate::world::{AvatarAssetCache, PlayerModelCatalog, model_assets_for_choice};
 use crate::world2d::render_xy_to_simulation_xz;
 
-pub const PLAYER_SPEED: f32 = 5.0;
-/// Debug movement multiplier; mirror of `server/src/balance.rs::DEBUG_SPEED_MULTIPLIER`.
-pub const DEBUG_SPEED_MULTIPLIER: f32 = 2.6;
+pub use shared::hero_balance::{DEBUG_SPEED_MULTIPLIER, PLAYER_SPEED};
 
 /// Debug speed-boost toggle, shared by the boost button and local movement.
 #[derive(Resource, Default)]
@@ -39,7 +37,7 @@ pub const JUMP_HEIGHT: f32 = 1.5;
 pub const JUMP_DURATION: f32 = 0.6;
 const GRAVITY: f32 = 20.0;
 const GROUND_EPSILON: f32 = 0.001;
-const RESPAWN_DELAY_SECONDS: f32 = 5.0;
+const RESPAWN_DELAY_SECONDS: f32 = shared::hero_balance::RESPAWN_DELAY_SECS as f32;
 
 /// Entity-origin height that puts a character's feet on the walkable surface
 /// at (x, z): terrain height plus the model's measured foot offset. Entities
@@ -1270,7 +1268,7 @@ fn move_player_mobile(
         desired = clip_static_movement(current, desired);
         transform.translation.x = desired.x;
         transform.translation.z = desired.z;
-        let yaw = (-direction.x).atan2(-direction.z);
+        let yaw = shared::math::hero_yaw_towards(direction.x, direction.z);
         transform.rotation = transform.rotation.slerp(
             Quat::from_rotation_y(yaw),
             (time.delta_secs() * 10.0).min(1.0),
@@ -1529,10 +1527,7 @@ fn move_player(
             transform.translation.z = desired.z;
 
             if direction.length_squared() > 0.001 {
-                // Character models face the entity's -Z (Bevy forward), so
-                // yaw must point -Z along the movement direction; aligning +Z
-                // renders every model walking backwards.
-                let target_y_angle = (-direction.x).atan2(-direction.z);
+                let target_y_angle = shared::math::hero_yaw_towards(direction.x, direction.z);
                 let target_rotation = Quat::from_rotation_y(target_y_angle);
 
                 transform.rotation = transform

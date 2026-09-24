@@ -1,12 +1,7 @@
 use super::*;
 
 pub(crate) fn xp_threshold_for_level(level: u32) -> u32 {
-    if level >= MAX_LEVEL {
-        0
-    } else {
-        let index = level.saturating_sub(STARTING_LEVEL) as usize;
-        LEVEL_XP_THRESHOLDS[index]
-    }
+    shared::hero_balance::xp_threshold_for_level(level)
 }
 
 pub(crate) fn apply_level_up(state: &mut PlayerState) {

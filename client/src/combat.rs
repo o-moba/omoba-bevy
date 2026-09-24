@@ -22,10 +22,7 @@ use shared::{
     scaled_cast_range, scaled_cooldown, scaled_mana_cost,
 };
 
-/// Must match server `server/src/balance.rs` player baselines (display / local defaults).
-pub const MAX_HP: f32 = shared::hero_balance::base_hp(HeroClass::Warrior);
-/// Must match server `server/src/balance.rs` player baselines (display / local defaults).
-pub const MAX_MANA: f32 = 100.0;
+pub use shared::hero_balance::{DEFAULT_MAX_HP as MAX_HP, MAX_MANA};
 
 /// Local per-slot cast cooldown mirror for HUD feedback (the server remains
 /// authoritative; values come from the shared class kit numbers).

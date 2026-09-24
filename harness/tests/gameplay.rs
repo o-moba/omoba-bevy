@@ -25,8 +25,7 @@ use shared::navigation::Disc;
 /// `PLAYER_GROUND_Y` — fixed ground plane height the server snaps players to.
 const GROUND_Y: f32 = 0.5;
 /// Default warrior health follows shared class balance; mana remains independent.
-const MAX_HP: f32 = shared::hero_balance::base_hp(shared::HeroClass::Warrior);
-const MAX_MANA: f32 = 100.0;
+use shared::hero_balance::{DEFAULT_MAX_HP as MAX_HP, MAX_MANA};
 /// Warrior `shield_bash` cast range (`shared::WARRIOR_ABILITIES[0]`) — the
 /// shortest Q range of any kit. We bring players closer than this before
 /// casting so every class's Q connects.

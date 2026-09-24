@@ -6,6 +6,42 @@ use crate::{
 use std::time::Duration;
 
 pub const MAX_LEVEL: u32 = 10;
+pub const STARTING_LEVEL: u32 = 1;
+/// Hero ground speed in world units per second before growth, items and debug
+/// multipliers. The server movement envelope and client prediction share it.
+pub const PLAYER_SPEED: f32 = 5.0;
+/// Debug movement multiplier applied when a client enables the speed-boost toggle.
+pub const DEBUG_SPEED_MULTIPLIER: f32 = 2.6;
+/// Pre-admission Warrior HP: joined heroes resolve their own class baseline.
+pub const DEFAULT_MAX_HP: f32 = base_hp(HeroClass::Warrior);
+pub const MAX_MANA: f32 = 100.0;
+pub const MANA_REGEN_PER_SECOND: f32 = 8.0;
+/// Homing hero projectiles (basic strikes and skills) travel at this speed.
+pub const PROJECTILE_SPEED: f32 = 19.0;
+pub const RESPAWN_DELAY_SECS: u64 = 5;
+pub const LEVEL_UP_HP_BONUS: f32 = 18.0;
+pub const LEVEL_UP_MANA_BONUS: f32 = 12.0;
+/// XP needed to leave each level from `STARTING_LEVEL`; the last level has no
+/// next threshold. Team-shared kill XP depends on roster size.
+pub const LEVEL_XP_THRESHOLDS: [u32; 9] = [90, 150, 180, 220, 260, 300, 340, 380, 420];
+/// Distance at which a practice or offline bot notices and engages a hero.
+pub const BOT_ENGAGE_RANGE: f32 = 15.0;
+
+/// XP required to advance from `level`; zero at the level cap.
+pub fn xp_threshold_for_level(level: u32) -> u32 {
+    if level >= MAX_LEVEL {
+        0
+    } else {
+        LEVEL_XP_THRESHOLDS[level.saturating_sub(STARTING_LEVEL) as usize]
+    }
+}
+
+/// Maximum HP of a hero of `class` at `level` wearing items worth `item_hp`.
+pub fn max_hp_for_level(class: HeroClass, level: u32, item_hp: f32) -> f32 {
+    base_hp(class)
+        + LEVEL_UP_HP_BONUS * level.clamp(STARTING_LEVEL, MAX_LEVEL).saturating_sub(1) as f32
+        + item_hp
+}
 
 pub const fn base_hp(class: HeroClass) -> f32 {
     match class {
@@ -86,6 +122,32 @@ pub fn ability_cooldown(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn xp_thresholds_and_hp_growth_follow_the_level_curve() {
+        assert_eq!(
+            xp_threshold_for_level(STARTING_LEVEL),
+            LEVEL_XP_THRESHOLDS[0]
+        );
+        assert_eq!(xp_threshold_for_level(MAX_LEVEL), 0);
+        assert_eq!(xp_threshold_for_level(MAX_LEVEL + 5), 0);
+        assert_eq!(
+            LEVEL_XP_THRESHOLDS.len() as u32,
+            MAX_LEVEL - STARTING_LEVEL,
+            "one threshold per level-up"
+        );
+        let base = base_hp(HeroClass::Mage);
+        assert_eq!(max_hp_for_level(HeroClass::Mage, 1, 0.0), base);
+        assert_eq!(max_hp_for_level(HeroClass::Mage, 0, 0.0), base);
+        assert_eq!(
+            max_hp_for_level(HeroClass::Mage, 7, 30.0),
+            base + 6.0 * LEVEL_UP_HP_BONUS + 30.0
+        );
+        assert_eq!(
+            max_hp_for_level(HeroClass::Mage, 99, 0.0),
+            max_hp_for_level(HeroClass::Mage, MAX_LEVEL, 0.0)
+        );
+    }
+
     #[test]
     fn all_classes_grow_monotonically_and_cap_even_for_invalid_levels() {
         for class in HeroClass::ALL {

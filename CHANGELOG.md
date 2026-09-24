@@ -6,6 +6,10 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Shared balance and facing
+- Hero speed, debug speed multiplier, mana pool and regeneration, projectile speed, respawn delay, level HP/mana growth, XP thresholds and bot engage range now live once in `shared::hero_balance`; the server, client prediction, offline practice, minimap and harness import them. Offline practice used to regenerate mana at 12/s (server 8/s), fly projectiles at 30 (server 19) and default the first level threshold to 120 (server 90).
+- `shared::math` defines the two model facing conventions (heroes look along -Z, minions and neutrals along +Z); every yaw in the server, client and offline simulation goes through it, and the Combat Test actor no longer runs backwards.
+
 ### Shared wire protocol
 
 - Move the gameplay UDP/JSON packet types (`ClientPacket`, `ServerPacket`, `PlayerState`, `ProjectileState`, `StructureState`, `MinionState`, `NeutralState`, `GameState` and their enums) into `shared::wire`; server, client and harness use that one definition. Bytes on the wire are unchanged and pinned by golden tests taken from the previous server.

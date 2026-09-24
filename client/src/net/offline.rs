@@ -7,20 +7,12 @@ use shared::{SkillSlot, TargetingMode, hero_balance as balance, shop::ItemBonuse
 pub(super) const ADDRESS: &str = "offline-practice";
 const LOCAL_ID: u64 = 1;
 const LEVEL: u32 = 6; // Every class slot is available for character testing.
-/// Distance at which a duel opponent notices and engages the local hero.
-const VISION: f32 = 15.0;
+use balance::{BOT_ENGAGE_RANGE as VISION, LEVEL_UP_HP_BONUS, PROJECTILE_SPEED};
+use shared::math::hero_yaw_towards as yaw_towards;
 const BOT_RESPAWN_SECS: f32 = 3.0;
-const LOCAL_RESPAWN_SECS: f32 = 5.0;
-/// Server growth per level, mirrored for the configured duel opponent.
-const LEVEL_UP_HP_BONUS: f32 = 18.0;
+const LOCAL_RESPAWN_SECS: f32 = balance::RESPAWN_DELAY_SECS as f32;
 const DUMMY_HP: f32 = 600.0;
 const DUMMY_DISTANCE: f32 = 4.5;
-const PROJECTILE_SPEED: f32 = 30.0;
-
-/// Yaw that makes a hero model (authored facing -Z) look along `(dx, dz)`.
-fn yaw_towards(dx: f32, dz: f32) -> f32 {
-    (-dx).atan2(-dz)
-}
 
 /// Spend `level - 1` skill points the way a player would: the ultimate first
 /// once it unlocks, then Q, W and E, never into a locked slot.
@@ -614,7 +606,7 @@ impl Simulation {
             {
                 *timer = (*timer - dt).max(0.0);
             }
-            p.mana = (p.mana + 12.0 * dt).min(p.max_mana);
+            p.mana = (p.mana + balance::MANA_REGEN_PER_SECOND * dt).min(p.max_mana);
             if p.id == LOCAL_ID {
                 if self.god_mode {
                     p.hp = p.max_hp;

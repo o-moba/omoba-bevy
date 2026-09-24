@@ -15,6 +15,7 @@ pub mod jungle;
 pub mod live_score;
 pub mod map;
 pub mod match_service;
+pub mod math;
 pub mod navigation;
 pub mod practice;
 pub mod prematch;
