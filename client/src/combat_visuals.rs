@@ -26,6 +26,7 @@ const CONFIG_PATH: &str = "config/combat_visuals.json";
 /// Render container whose visible drawable descendants represent this network root.
 #[derive(Component, Clone, Copy)]
 pub(crate) struct ProjectilePresentationRoot {
+    #[cfg(any(test, feature = "qa"))]
     pub owner: Entity,
 }
 

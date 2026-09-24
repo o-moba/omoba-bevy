@@ -102,6 +102,7 @@ pub(crate) struct PlayerAnimationBinding {
 }
 
 impl PlayerAnimationBinding {
+    #[cfg(any(test, feature = "qa"))]
     pub(crate) fn is_running(&self) -> bool {
         self.playback.state == HeroAnimationState::Run
     }

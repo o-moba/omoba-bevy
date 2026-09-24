@@ -78,7 +78,9 @@ struct MinimapRoot;
 /// Persistent anchor marker; life state comes only from current neutral entities.
 #[derive(Component, Clone, Copy, Debug)]
 struct MinimapCamp {
+    #[cfg(any(test, feature = "qa"))]
     index: usize,
+    #[cfg(any(test, feature = "qa"))]
     alive: bool,
 }
 #[derive(Component)]
@@ -88,6 +90,7 @@ struct CameraFootprintEdge(usize);
 
 /// Read-only diagnostics for opt-in native QA. These inspect the actual UI
 /// entities and computed transforms; they do not fabricate marker fixtures.
+#[cfg(any(test, feature = "qa"))]
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct MinimapQaScene<'w, 's> {
     state: Res<'w, MinimapUiState>,
@@ -113,6 +116,7 @@ pub(crate) struct MinimapQaScene<'w, 's> {
     >,
 }
 
+#[cfg(any(test, feature = "qa"))]
 impl MinimapQaScene<'_, '_> {
     pub(crate) fn diagnostics(&self) -> serde_json::Value {
         let rendered_rect = |entity| {
@@ -699,7 +703,12 @@ fn update_minimap_icons_system(
             } else {
                 Color::srgb(0.47, 0.50, 0.44)
             }),
-            MinimapCamp { index, alive },
+            MinimapCamp {
+                #[cfg(any(test, feature = "qa"))]
+                index,
+                #[cfg(any(test, feature = "qa"))]
+                alive,
+            },
         );
         if let Some(icon) = state.camp_icons[index] {
             commands.entity(icon).insert(components);

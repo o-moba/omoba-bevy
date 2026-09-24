@@ -144,6 +144,7 @@ impl MapVisualRegistry {
     }
 
     /// Complete override document; omitted entries restore immutable defaults.
+    #[cfg(any(test, feature = "qa"))]
     pub fn replace_json(&mut self, json: &str) -> Result<(), String> {
         let mut replacement = Self::from_json(json)?;
         replacement.revision = self.revision.wrapping_add(1);
@@ -265,6 +266,7 @@ impl MapVisualRegistry {
 pub struct MapPropInstance {
     pub key: String,
     pub archetype: String,
+    #[cfg(feature = "qa")]
     pub role: String,
     pub solid: bool,
     pub desired_model: Option<String>,
@@ -278,6 +280,7 @@ impl MapPropInstance {
         Self {
             key,
             archetype,
+            #[cfg(feature = "qa")]
             role: "live_structure".into(),
             solid: true,
             desired_model: None,
@@ -320,6 +323,7 @@ pub struct MapVisualCache {
 }
 
 impl MapVisualCache {
+    #[cfg(any(test, feature = "qa"))]
     pub fn counts(&self) -> (usize, usize) {
         (self.models.len(), self.materials.len())
     }
@@ -546,6 +550,7 @@ fn import_authored_props(
         let Some(archetype) = value.get("asset_id").and_then(|v| v.as_str()) else {
             continue;
         };
+        #[cfg(feature = "qa")]
         let role = value
             .get("role")
             .and_then(|v| v.as_str())
@@ -559,6 +564,7 @@ fn import_authored_props(
             solid: solid_ids.contains(key.as_str()),
             key,
             archetype: archetype.into(),
+            #[cfg(feature = "qa")]
             role: role.into(),
             desired_model: None,
             active_model: None,

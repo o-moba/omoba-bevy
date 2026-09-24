@@ -88,6 +88,7 @@ struct CombatFeedback {
 }
 #[derive(Component)]
 pub(crate) struct DamageNumber {
+    #[cfg(feature = "qa")]
     pub(crate) event_id: u64,
     position: Vec3,
     age: f32,
@@ -220,6 +221,7 @@ fn collect_hits(
         commands.spawn((
             Name::new("ConfirmedDamageNumber"),
             DamageNumber {
+                #[cfg(feature = "qa")]
                 event_id: event.id,
                 position,
                 age: 0.0,

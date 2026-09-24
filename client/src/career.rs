@@ -196,6 +196,7 @@ impl CareerClient {
     }
     /// Only the explicitly enabled native visual QA plugin calls this fixture
     /// boundary. It bypasses networking and is never an authoritative result.
+    #[cfg(feature = "qa")]
     pub(crate) fn present_visual_fixture(&mut self, view: CareerView, modal: CareerModal) {
         *self = Self::default();
         self.public_profile_id = view

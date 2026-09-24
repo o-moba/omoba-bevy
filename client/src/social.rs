@@ -348,18 +348,22 @@ impl SocialClient {
         self.preedit.clear();
         self.blocked_frame = true;
     }
+    #[cfg(feature = "qa")]
     pub(crate) fn wheel_center(&self) -> Option<Vec2> {
         self.wheel.center
     }
+    #[cfg(feature = "qa")]
     pub(crate) fn qa_send_chat(&mut self, out: &mut MessageWriter<NetworkCommand>) {
         self.chat_open = true;
         self.opened_frame = true;
         self.draft = "QA: Привет 小明 — ready for practice!".into();
         self.send_chat(out);
     }
+    #[cfg(feature = "qa")]
     pub(crate) fn qa_close(&mut self) {
         self.close();
     }
+    #[cfg(feature = "qa")]
     pub(crate) fn qa_diagnostics(&self) -> serde_json::Value {
         serde_json::json!({
             "namespace": self.namespace,

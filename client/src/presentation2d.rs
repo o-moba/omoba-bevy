@@ -891,7 +891,10 @@ fn attach_projectile_visuals(
                     .with_rotation(Quat::from_rotation_z(angle))
                     .with_scale(Vec3::splat(profile.scale)),
                 Visibility::default(),
-                ProjectilePresentationRoot { owner },
+                ProjectilePresentationRoot {
+                    #[cfg(any(test, feature = "qa"))]
+                    owner,
+                },
                 PresentationActorVisual {
                     owner,
                     kind: PresentationActorKind::Projectile,

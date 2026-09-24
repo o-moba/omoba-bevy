@@ -136,6 +136,7 @@ pub(crate) struct ParticleSlot {
     flat: Handle<ColorMaterial>,
 }
 impl ParticleSlot {
+    #[cfg(feature = "qa")]
     pub(crate) fn sample(&self) -> Option<(u64, f32)> {
         self.active.as_ref().map(|p| (p.event_id, p.age))
     }

@@ -27,6 +27,7 @@ pub(crate) struct ShopState {
     pub feedback: String,
 }
 impl ShopState {
+    #[cfg(any(test, feature = "qa"))]
     pub(crate) fn purchase_pending(&self) -> bool {
         self.pending.is_some()
     }

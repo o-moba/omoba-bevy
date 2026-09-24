@@ -32,16 +32,16 @@ use crate::{
     help_overlay::HelpOverlayPlugin, input_context::InputContextPlugin,
     jungle::JungleVisualsPlugin, map_visuals::MapVisualsPlugin, maps::MapsPlugin,
     match_hud::MatchHudPlugin, match_service::MatchServicePlugin, minimap::MinimapPlugin,
-    minions::MinionVisualsPlugin, mobile_controls::MobileControlsPlugin,
-    mobile_ui::MobileUiPlugin, model_scale::ModelScalePlugin, net::NetworkingPlugin,
-    pause_menu::PauseMenuPlugin, persistence::ClientPersistencePlugin, player::PlayerPlugin,
+    minions::MinionVisualsPlugin, mobile_controls::MobileControlsPlugin, mobile_ui::MobileUiPlugin,
+    model_scale::ModelScalePlugin, net::NetworkingPlugin, pause_menu::PauseMenuPlugin,
+    persistence::ClientPersistencePlugin, player::PlayerPlugin,
     practice_sandbox::PracticeSandboxPlugin, presentation2d::Presentation2dPlugin,
     presentation3d::Presentation3dPlugin, projectile_visuals::ProjectileVisualsPlugin,
     reaction_visuals::ReactionVisualsPlugin, sandbox::SandboxPlugin, shop::ShopPlugin,
     social::SocialPlugin, sprite::SpriteVisualsPlugin, supporter::SupporterPlugin,
     supporter_storekit::SupporterStoreKitPlugin, team::TeamSelectPlugin,
-    team_vision::TeamVisionPlugin, ui::UiKitPlugin, verdant3d::Verdant3dPlugin,
-    world::SetupPlugin, world2d::World2dPlugin,
+    team_vision::TeamVisionPlugin, ui::UiKitPlugin, verdant3d::Verdant3dPlugin, world::SetupPlugin,
+    world2d::World2dPlugin,
 };
 
 /// Preferences, the server session, the match service and the career identity.
@@ -136,4 +136,3 @@ impl PluginGroup for UiPlugins {
             .add(SupporterStoreKitPlugin)
     }
 }
-
