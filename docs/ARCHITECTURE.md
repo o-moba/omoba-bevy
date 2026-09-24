@@ -52,7 +52,9 @@ frame order:
    (`client/src/input_context.rs`): modal UI (pause menu, shop, career,
    social, help) runs first and decides whether gameplay input is allowed;
    `Actions` holds movement (`WorldMovementInputSet`), targeting and casting
-   (the combat chain in `client/src/combat.rs`) and mobile controls.
+   (the combat chain in `client/src/combat.rs`, pointer picking in
+   `CombatPointerInputSet`) and mobile controls. Both input sets are
+   defined in `input_context.rs`.
 3. `ClientNetPipeline::SendLocalState` and `SendCommands` after `Actions`:
    the local transform and the queued `NetworkCommand`s become packets.
 4. `PostUpdate`: grounding, target presentation, UI layout adjustments.
@@ -60,6 +62,26 @@ frame order:
 Presentation is chosen once per run by `PlayerVisualMode` (3D models by
 default, 2D sprites with `OMOBA_PLAYER_VISUAL_MODE=sprite2d`). Simulation
 positions are always XZ on the ground plane; 2D rendering maps them to XY.
+Every backend plugin is always added, because some 2D resources
+(`SpriteVisualAssets`, `MapVisualRegistry`) are read in both modes; the
+presentation backends run under `sprite::in_models3d()` /
+`sprite::in_sprite2d()` (`resource_exists_and_equals`, so a missing mode
+runs neither). 2D: sprite proxies, `presentation2d`, `world2d`. 3D:
+`presentation3d`, Verdant, jungle, minions, bosses, decor, the map-visual
+prop chain and river repair, projectile models, and the model/lighting
+systems in `world.rs`. Systems that branch on the mode internally (camera,
+snapshot apply, combat bars, targeting, VFX, minimap, team vision,
+projectile trails, player movement) and the screen-space battlefield mist
+run in both modes. The gated systems keep their own mode checks because
+tests register them directly and flip the mode.
+
+Client-side model types that `net`, gameplay and presentation share live
+in `client/src/domain/`: `RoundId` (`server_epoch` + `match_id`, `None`
+for zero), `Team` with its `shared::map::Team` bridges, `CombatStats` with
+`MAX_HP`, the hero markers `Player`, `PlayerBody`, `VerticalVelocity`,
+`RemotePlayer`, and the movement intents `MovementTarget`/`MovementRoute`.
+The old paths (`crate::team::Team`, `crate::combat::CombatStats`,
+`crate::player::Player`, `crate::net::RemotePlayer`, ...) re-export them.
 
 The offline practice playground (`client/src/net/offline.rs`) is a
 socket-free simulation that speaks the same packets through the same channels
@@ -273,6 +295,8 @@ Ordered by value over cost. Each step is a separate change with the full
    actions and widgets; the pause menu and the practice sandbox use it;
    remaining steps in `docs/ui-kit.md`).
 10. Client domain module, combat/player split, render backends behind
-    `run_if`, plugin groups, QA behind a cargo feature.
+    `run_if`, plugin groups, QA behind a cargo feature (in progress: the
+    domain module and the `in_models3d`/`in_sprite2d` backend gates are
+    done; slices in `docs/plans/client-10-15.md`).
 11. One debug tooling family shared by Combat Test, practice and offline.
 12. Data-driven hero and item catalogs.

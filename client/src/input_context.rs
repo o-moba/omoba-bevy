@@ -14,6 +14,12 @@ pub(crate) enum InputContextSet {
     Actions,
 }
 
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct CombatPointerInputSet;
+
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct WorldMovementInputSet;
+
 #[derive(Resource, Debug, Clone, Copy)]
 pub(crate) struct GameplayInputContext {
     pub modal_open: bool,

@@ -11,7 +11,7 @@ use crate::combat::CombatStats;
 use crate::maps::MapLayout;
 use crate::net::{GameStateSnapshot, PlayerCosmeticAction, RemotePlayer};
 use crate::player::Player;
-use crate::sprite::PlayerVisualMode;
+use crate::sprite::{PlayerVisualMode, in_models3d};
 use crate::team::{Team, TeamSelection};
 
 const MAX_EFFECTS: usize = 192;
@@ -20,8 +20,12 @@ pub struct Presentation3dPlugin;
 
 impl Plugin for Presentation3dPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<CombatPresentation>()
-            .add_systems(PostUpdate, (collect_feedback, draw_feedback).chain());
+        app.init_resource::<CombatPresentation>().add_systems(
+            PostUpdate,
+            (collect_feedback, draw_feedback)
+                .chain()
+                .run_if(in_models3d()),
+        );
     }
 }
 

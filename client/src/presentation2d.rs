@@ -22,7 +22,7 @@ use crate::net::{
     NeutralAiStateTag, PlayerCosmeticAction, RemotePlayer, StructureKind,
 };
 use crate::player::Player;
-use crate::sprite::PlayerVisualMode;
+use crate::sprite::{PlayerVisualMode, in_sprite2d};
 use crate::team::Team;
 use crate::world2d::{
     TRANSIENT_VFX_BUDGET, TRANSIENT_VFX_MAX_LIFETIME, layer, simulation_xz_to_render_xy, y_sorted_z,
@@ -201,9 +201,16 @@ impl Plugin for Presentation2dPlugin {
             .init_resource::<LivePresentationEffects>()
             .add_systems(
                 Startup,
-                load_presentation_assets.after(crate::persistence::load_persistent_client_settings),
+                load_presentation_assets
+                    .after(crate::persistence::load_persistent_client_settings)
+                    .run_if(in_sprite2d()),
             )
-            .add_systems(Update, (emit_combat_effects, animate_effects).chain())
+            .add_systems(
+                Update,
+                (emit_combat_effects, animate_effects)
+                    .chain()
+                    .run_if(in_sprite2d()),
+            )
             // Snapshot owners and interpolation are produced in `Update`.
             // Reconcile presentation proxies afterwards, but before transform
             // propagation, so newly received actors are visible that frame.
@@ -221,7 +228,8 @@ impl Plugin for Presentation2dPlugin {
                     sync_actor_visuals,
                 )
                     .chain()
-                    .before(bevy::transform::TransformSystems::Propagate),
+                    .before(bevy::transform::TransformSystems::Propagate)
+                    .run_if(in_sprite2d()),
             );
     }
 }

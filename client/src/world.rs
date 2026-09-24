@@ -15,7 +15,7 @@ use crate::maps::MapLayout;
 use crate::model_scale::{ModelScaleSource, NormalizeModelScale, model_scale_key};
 use crate::net::{NetworkAvatar, NetworkCharacterChoice, NetworkSpriteCharacter};
 use crate::player::{PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
-use crate::sprite::PlayerVisualMode;
+use crate::sprite::{PlayerVisualMode, in_models3d};
 use crate::team::{CharacterChoice, Team, TeamSelection};
 
 pub const DEFAULT_LIGHT_ILLUMINANCE: f32 = 11_000.0;
@@ -188,9 +188,15 @@ impl Plugin for SetupPlugin {
         )
         .init_resource::<LightingSettings>()
         .init_resource::<AvatarAssetCache>()
-        .add_systems(Update, sync_selected_player_assets)
-        .add_systems(Update, force_vrm_models_double_sided)
-        .add_systems(Update, apply_lighting_settings_system);
+        .add_systems(
+            Update,
+            (
+                sync_selected_player_assets,
+                force_vrm_models_double_sided,
+                apply_lighting_settings_system,
+            )
+                .run_if(in_models3d()),
+        );
         register_local_player_spawn(app);
     }
 }

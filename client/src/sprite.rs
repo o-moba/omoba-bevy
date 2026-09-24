@@ -50,6 +50,18 @@ impl PlayerVisualMode {
     }
 }
 
+/// Run condition for the 3D model backend. A missing `PlayerVisualMode` is
+/// "neither backend", not a panic. Gated systems keep their own mode checks
+/// because tests register them directly and flip the mode.
+pub(crate) fn in_models3d() -> impl FnMut(Option<Res<PlayerVisualMode>>) -> bool {
+    resource_exists_and_equals(PlayerVisualMode::Models3d)
+}
+
+/// Run condition for the 2D sprite backend; see [`in_models3d`].
+pub(crate) fn in_sprite2d() -> impl FnMut(Option<Res<PlayerVisualMode>>) -> bool {
+    resource_exists_and_equals(PlayerVisualMode::Sprite2d)
+}
+
 #[derive(Clone)]
 pub struct SpriteRenderSet {
     image: Handle<Image>,
@@ -125,7 +137,8 @@ impl Plugin for SpriteVisualsPlugin {
             .add_systems(
                 Startup,
                 load_sprite_visual_assets
-                    .after(crate::persistence::load_persistent_client_settings),
+                    .after(crate::persistence::load_persistent_client_settings)
+                    .run_if(in_sprite2d()),
             )
             .add_systems(
                 Update,
@@ -134,7 +147,8 @@ impl Plugin for SpriteVisualsPlugin {
                     attach_sprite_visuals,
                     animate_sprite_visuals,
                 )
-                    .chain(),
+                    .chain()
+                    .run_if(in_sprite2d()),
             );
     }
 }
@@ -1180,5 +1194,122 @@ mod tests {
                 .translation,
             Vec3::new(3.0, 7.0, -4.0)
         );
+    }
+
+    #[test]
+    fn backend_run_conditions_follow_the_mode_and_skip_a_missing_one() {
+        #[derive(Resource, Default)]
+        struct Ran {
+            models3d: u32,
+            sprite2d: u32,
+        }
+        let run = |mode: Option<PlayerVisualMode>| {
+            let mut app = App::new();
+            app.init_resource::<Ran>()
+                .add_systems(
+                    Update,
+                    (|mut ran: ResMut<Ran>| ran.models3d += 1).run_if(in_models3d()),
+                )
+                .add_systems(
+                    Update,
+                    (|mut ran: ResMut<Ran>| ran.sprite2d += 1).run_if(in_sprite2d()),
+                );
+            if let Some(mode) = mode {
+                app.insert_resource(mode);
+            }
+            app.update();
+            let ran = app.world().resource::<Ran>();
+            (ran.models3d, ran.sprite2d)
+        };
+        assert_eq!(run(Some(PlayerVisualMode::Models3d)), (1, 0));
+        assert_eq!(run(Some(PlayerVisualMode::Sprite2d)), (0, 1));
+        assert_eq!(run(None), (0, 0));
+    }
+
+    /// Backend plugins whose every system is gated. A bare app lacks what
+    /// those systems read (AssetServer, mesh and material assets, Time,
+    /// MapLayout), so a gated system that ran would fail parameter validation
+    /// and panic; one that got that far would attach entities.
+    fn add_sprite2d_backend(app: &mut App) {
+        app.add_plugins((
+            SpriteVisualsPlugin,
+            crate::presentation2d::Presentation2dPlugin,
+            crate::world2d::World2dPlugin,
+        ));
+    }
+
+    fn add_models3d_backend(app: &mut App) {
+        app.add_plugins((
+            crate::presentation3d::Presentation3dPlugin,
+            crate::verdant3d::Verdant3dPlugin,
+            crate::jungle::JungleVisualsPlugin,
+            crate::minions::MinionVisualsPlugin,
+            crate::bosses::BossesPlugin,
+            crate::decor::DecorPlugin,
+        ));
+    }
+
+    /// Runs Startup and two frames over a hero, a tower and a minion and
+    /// returns how many entities the backends spawned.
+    fn entities_spawned_by_backends(app: &mut App) -> usize {
+        use crate::net::{
+            MinionBrainState, NetworkMinion, NetworkMinionAction, NetworkMinionBrainState,
+            NetworkMinionKind, NetworkStructure, StructureKind,
+        };
+        use crate::team::Team;
+        let world = app.world_mut();
+        world.spawn((
+            Player,
+            Team::Green,
+            Transform::default(),
+            CombatStats::default(),
+        ));
+        world.spawn((
+            NetworkStructure,
+            StructureKind::Tower,
+            Team::Blue,
+            Transform::default(),
+            CombatStats::default(),
+        ));
+        world.spawn((
+            NetworkMinion,
+            NetworkMinionKind(shared::combat::MinionKind::default()),
+            NetworkMinionAction(0),
+            NetworkMinionBrainState(MinionBrainState::Marching),
+            Team::Blue,
+            Transform::default(),
+            CombatStats::default(),
+        ));
+        let count = |app: &mut App| app.world_mut().query::<Entity>().iter(app.world()).count();
+        let before = count(app);
+        app.update();
+        app.update();
+        count(app) - before
+    }
+
+    #[test]
+    fn models3d_runs_no_sprite2d_backend_system() {
+        let mut app = App::new();
+        add_sprite2d_backend(&mut app);
+        app.insert_resource(PlayerVisualMode::Models3d);
+        assert_eq!(entities_spawned_by_backends(&mut app), 0);
+    }
+
+    #[test]
+    fn sprite2d_runs_no_models3d_backend_system() {
+        let mut app = App::new();
+        app.insert_resource(PlayerVisualMode::Sprite2d);
+        add_models3d_backend(&mut app);
+        assert_eq!(entities_spawned_by_backends(&mut app), 0);
+    }
+
+    #[test]
+    fn missing_visual_mode_runs_neither_backend_and_does_not_panic() {
+        let mut app = App::new();
+        add_sprite2d_backend(&mut app);
+        add_models3d_backend(&mut app);
+        app.world_mut().remove_resource::<PlayerVisualMode>();
+        assert_eq!(entities_spawned_by_backends(&mut app), 0);
+        assert!(!app.world().contains_resource::<PlayerVisualMode>());
     }
 }

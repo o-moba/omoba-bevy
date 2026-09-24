@@ -15,7 +15,7 @@ use crate::camera::MainCamera;
 use crate::creatures3d::{CreatureAssets, ProceduralCreature, spawn_creature};
 use crate::model_scale::{ModelScaleSource, NormalizeModelScale};
 use crate::net::{NetworkNeutral, NeutralAiState, NeutralAiStateTag, NeutralCampType};
-use crate::sprite::PlayerVisualMode;
+use crate::sprite::{PlayerVisualMode, in_models3d};
 
 /// Raid bosses render this many times taller than the normalized player model
 /// (spec D7: 2.5-3.5x for raid presence).
@@ -95,7 +95,9 @@ impl Plugin for BossesPlugin {
         app.init_resource::<BossAnimationLibrary>()
             .add_systems(
                 Startup,
-                load_boss_assets.after(crate::persistence::load_persistent_client_settings),
+                load_boss_assets
+                    .after(crate::persistence::load_persistent_client_settings)
+                    .run_if(in_models3d()),
             )
             .add_systems(
                 Update,
@@ -106,7 +108,8 @@ impl Plugin for BossesPlugin {
                     sync_boss_animation_state,
                     force_boss_models_double_sided,
                     update_boss_nameplates,
-                ),
+                )
+                    .run_if(in_models3d()),
             );
     }
 }

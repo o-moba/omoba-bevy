@@ -27,6 +27,8 @@ use crate::team::{CharacterChoice, Team};
 use crate::world::{AvatarAssetCache, PlayerModelCatalog, model_assets_for_choice};
 use crate::world2d::render_xy_to_simulation_xz;
 
+pub(crate) use crate::domain::{MovementRoute, MovementTarget};
+pub use crate::domain::{Player, PlayerBody, VerticalVelocity};
 pub use shared::hero_balance::{DEBUG_SPEED_MULTIPLIER, PLAYER_SPEED};
 
 /// Debug speed-boost toggle, shared by the boost button and local movement.
@@ -111,15 +113,6 @@ pub(crate) fn register_hero_animation_systems(app: &mut App) {
         );
 }
 
-#[derive(Component)]
-pub struct Player;
-
-#[derive(Component)]
-pub struct PlayerBody;
-
-#[derive(Component, Default)]
-pub struct VerticalVelocity(pub f32);
-
 #[derive(Resource)]
 struct RespawnCountdown {
     end_time: Option<f32>,
@@ -139,19 +132,6 @@ impl Default for RespawnCountdown {
 
 #[derive(Component)]
 struct RespawnCountdownText;
-
-#[derive(Component)]
-pub(crate) struct MovementTarget {
-    pub(crate) target: Vec3,
-}
-
-#[derive(Component, Debug)]
-pub(crate) struct MovementRoute {
-    pub(crate) requested_target: Vec3,
-    pub(crate) structure_revision: u64,
-    pub(crate) destination: Vec3,
-    pub(crate) waypoints: Vec<Vec3>,
-}
 
 #[derive(Component)]
 struct Jumping {

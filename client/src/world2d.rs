@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use crate::map_visuals::MapVisualRegistry;
 use crate::maps::{LANE_WIDTH, MapLayout, RIVER_WIDTH};
-use crate::sprite::PlayerVisualMode;
+use crate::sprite::{PlayerVisualMode, in_sprite2d};
 
 pub const WORLD_TILE_SIZE: f32 = 4.0;
 pub const WORLD_TILE_COLUMNS: usize = 55;
@@ -190,8 +190,13 @@ impl Plugin for World2dPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<World2dCounts>()
             .init_resource::<World2dAssets>()
-            .add_systems(Startup, (load_world2d_assets, setup_world2d).chain())
-            .add_systems(Update, apply_prop_profiles);
+            .add_systems(
+                Startup,
+                (load_world2d_assets, setup_world2d)
+                    .chain()
+                    .run_if(in_sprite2d()),
+            )
+            .add_systems(Update, apply_prop_profiles.run_if(in_sprite2d()));
     }
 }
 
