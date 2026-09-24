@@ -131,7 +131,7 @@ fn spawn_home(
         preview.show_portrait(slug);
     }
     let preview_image = preview.image.clone();
-    let phone = crate::platform::ui_profile() == crate::platform::UiProfile::Mobile;
+    let phone = platform.is_mobile();
     let (status, status_color) = connection_line(&session);
     let profile = career.view.profile.clone();
     let last_match = career
