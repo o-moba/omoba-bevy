@@ -1,40 +1,26 @@
+use std::net::SocketAddr;
+use std::time::{Duration, Instant};
+
 use shared::HeroClass;
 use shared::map::Team;
-use crate::game_world::GameWorld;
-use crate::sim::towers::simulate_tower_attacks;
-use crate::entities::TeamBuffs;
-use crate::balance::SKIRMISHER_ATTACK_RANGE;
-use shared::wire::NeutralAiState;
-use crate::balance::SKIRMISHER_KILL_XP;
-use crate::balance::SKIRMISHER_ATTACK_DAMAGE;
-use crate::game_world::TickCtx;
-use crate::balance::BRUISER_KILL_GOLD;
-use std::time::Instant;
-use crate::world::build_structures;
-use shared::wire::StructureKind;
-use shared::wire::CharacterChoice;
-use crate::balance::BRUISER_MAX_HP;
-use crate::world::spawn_minion_waves_if_due;
-use std::net::SocketAddr;
-use crate::session::handle_join_request;
-use crate::balance::NEUTRAL_RESPAWN_COOLDOWN;
-use crate::balance::SKIRMISHER_MAX_HP;
-use crate::balance::SPITTER_ATTACK_RANGE;
 use shared::shop::STARTING_GOLD;
-use shared::wire::GameState;
-use std::time::Duration;
-use crate::balance::MINION_WAVE_INTERVAL;
-use crate::sim::minions::simulate_minions;
-use crate::balance::SPITTER_KILL_XP;
-use crate::sim::neutrals::apply_neutral_damage;
-use crate::sim::neutrals::simulate_neutrals;
-use crate::balance::TOWER_COOLDOWN;
-use crate::balance::NEUTRAL_LEASH_DISTANCE;
-use crate::neutrals::neutral_template;
-use crate::neutrals::build_neutral_camps;
-use shared::wire::NeutralCampType;
-use crate::balance::SKIRMISHER_KILL_GOLD;
+use shared::wire::{CharacterChoice, GameState, NeutralAiState, NeutralCampType, StructureKind};
+
 use super::*;
+use crate::balance::{
+    BRUISER_KILL_GOLD, BRUISER_MAX_HP, MINION_WAVE_INTERVAL, NEUTRAL_LEASH_DISTANCE,
+    NEUTRAL_RESPAWN_COOLDOWN, SKIRMISHER_ATTACK_DAMAGE, SKIRMISHER_ATTACK_RANGE,
+    SKIRMISHER_KILL_GOLD, SKIRMISHER_KILL_XP, SKIRMISHER_MAX_HP, SPITTER_ATTACK_RANGE,
+    SPITTER_KILL_XP, TOWER_COOLDOWN,
+};
+use crate::entities::TeamBuffs;
+use crate::game_world::{GameWorld, TickCtx};
+use crate::neutrals::{build_neutral_camps, neutral_template};
+use crate::session::handle_join_request;
+use crate::sim::minions::simulate_minions;
+use crate::sim::neutrals::{apply_neutral_damage, simulate_neutrals};
+use crate::sim::towers::simulate_tower_attacks;
+use crate::world::{build_structures, spawn_minion_waves_if_due};
 
 #[test]
 fn neutral_template_matches_balance_constants() {

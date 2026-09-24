@@ -1,16 +1,14 @@
 //! Match-scoped utility requests, using the normal movement collision authority.
-use crate::entities::Structure;
-use crate::session::clip_live_structures;
-use crate::entities::ConnectedPlayer;
-use crate::balance::PLAYER_GROUND_Y;
-use crate::entities::Vec3f;
-use std::time::Instant;
-use crate::hero_timers;
-use crate::entities::MapLayoutState;
-use shared::wire::GameState;
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
 use shared::utility::*;
+use shared::wire::GameState;
+
+use crate::balance::PLAYER_GROUND_Y;
+use crate::entities::{ConnectedPlayer, MapLayoutState, Structure, Vec3f};
+use crate::hero_timers;
+use crate::session::clip_live_structures;
 
 pub(crate) fn utility_movement_multiplier(player: &ConnectedPlayer, now: Instant) -> f32 {
     if player.hero.hp > 0.0

@@ -12,8 +12,10 @@
 //! this contract: it decides *whether* a round is durable or public casual,
 //! which the runtime derives at the call site, while the port only records
 //! and acknowledges what it is handed.
+use std::net::SocketAddr;
+use std::time::Instant;
+
 use shared::career::{CareerRequest, CareerView, MatchResult, ProfileSummary};
-use std::{net::SocketAddr, time::Instant};
 
 pub(crate) trait CareerPort {
     /// Whether durable storage is configured; disabled stores accept nothing

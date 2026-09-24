@@ -1,24 +1,19 @@
-use shared::HeroClass;
-use shared::map::Team;
-use crate::balance::MINION_SPAWN_HEIGHT;
-use crate::game_world::GameWorld;
-use crate::game_world::TickCtx;
-use shared::wire::MinionTargetKind;
-use std::time::Instant;
-use shared::wire::CharacterChoice;
 use std::collections::HashMap;
-use shared::wire::MinionState;
 use std::net::SocketAddr;
-use shared::wire::MinionBrainState;
-use crate::session::handle_join_request;
-use crate::balance::MINION_ATTACK_DAMAGE;
-use crate::entities::Minion;
-use crate::balance::MINION_MAX_HP;
-use crate::balance::MINION_VISION_RANGE;
+use std::time::Instant;
+
+use shared::HeroClass;
 use shared::combat::MinionKind;
-use shared::map::Lane;
+use shared::map::{Lane, Team};
+use shared::wire::{CharacterChoice, MinionBrainState, MinionState, MinionTargetKind};
+
+use crate::balance::{
+    MINION_ATTACK_DAMAGE, MINION_MAX_HP, MINION_SPAWN_HEIGHT, MINION_VISION_RANGE,
+};
+use crate::entities::Minion;
+use crate::game_world::{GameWorld, TickCtx};
+use crate::session::handle_join_request;
 use crate::sim::minions::simulate_minions;
-use super::*;
 
 #[test]
 fn minion_prefers_enemy_minion_over_closer_player() {

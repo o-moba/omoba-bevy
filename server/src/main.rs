@@ -8,8 +8,6 @@ mod career_port;
 mod career_runtime;
 #[cfg(test)]
 mod career_runtime_tests;
-#[cfg(test)]
-mod objective_balance_tests;
 mod combat_feedback;
 mod entities;
 mod forest_pickups;
@@ -25,17 +23,19 @@ mod match_pool;
 mod match_rules;
 mod match_service;
 mod match_stats;
-mod public_transport;
 #[cfg(test)]
 mod minion_path_tests;
 #[cfg(test)]
 mod navigation_tests;
 mod neutrals;
+#[cfg(test)]
+mod objective_balance_tests;
 mod passport_admission;
 #[cfg(test)]
 mod practice_tests;
 mod prematch;
 mod progression;
+mod public_transport;
 #[cfg(test)]
 mod release_tests;
 mod runtime;

@@ -1,69 +1,24 @@
 //! Ability casts and skill upgrades.
 
-use crate::balance::PROJECTILE_SPEED;
 use std::net::SocketAddr;
-
 use std::time::Instant;
 
-use shared::unlocked_slots_for_level;
+use shared::combat::{CombatEntityKind, ProjectileStyle};
+use shared::wire::{GameState, ProjectileState, TargetId, TargetKind};
+use shared::{
+    PlayerActionKind, SkillSlot, TargetingMode, ability_for_class_slot, rank_effect_scale,
+    scaled_cast_range, scaled_mana_cost, unlocked_slots_for_level,
+};
 
+use crate::balance::{
+    AIM_HEIGHT, CAST_SPAWN_HEIGHT, MINION_RADIUS, NEUTRAL_RADIUS, PLAYER_HIT_RADIUS,
+    PROJECTILE_LIFETIME, PROJECTILE_RADIUS, PROJECTILE_SPEED,
+};
+use crate::entities::{ConnectedPlayer, Projectile, Vec3f};
 use crate::game_world::GameWorld;
-
-use crate::balance::NEUTRAL_RADIUS;
-
-use crate::entities::Vec3f;
-
-use crate::balance::MINION_RADIUS;
-
-use shared::wire::GameState;
-
-use crate::entities::Projectile;
-
-use crate::balance::CAST_SPAWN_HEIGHT;
-
-use crate::hero_stats;
-
-use crate::balance::AIM_HEIGHT;
-
-use shared::wire::ProjectileState;
-
-use shared::scaled_mana_cost;
-
-use shared::combat::CombatEntityKind;
-
-use shared::PlayerActionKind;
-
-use shared::ability_for_class_slot;
-
-use shared::SkillSlot;
-
-use crate::hero_timers;
-
-use shared::TargetingMode;
-
-use crate::world::structure_radius;
-
-use crate::vision;
-
-use crate::balance::PROJECTILE_LIFETIME;
-
-use shared::wire::TargetId;
-
-use shared::wire::TargetKind;
-
-use shared::combat::ProjectileStyle;
-
-use shared::rank_effect_scale;
-
-use crate::balance::PLAYER_HIT_RADIUS;
-
-use crate::entities::ConnectedPlayer;
-
 use crate::sim::towers::structure_is_protected;
-
-use shared::scaled_cast_range;
-
-use crate::balance::PROJECTILE_RADIUS;
+use crate::world::structure_radius;
+use crate::{hero_stats, hero_timers, vision};
 
 /// Spends a skill point on the given slot, capped by the class ability's max rank.
 pub(crate) fn apply_skill_upgrade(player: &mut ConnectedPlayer, slot: u8) {

@@ -1,46 +1,18 @@
 //! Homing projectile flight and impact resolution.
 
-use crate::balance::PROJECTILE_SPEED;
-use shared::wire::TargetId;
-
-use shared::wire::TargetKind;
-
-use crate::game_world::TickCtx;
-
-use crate::balance::PLAYER_HIT_RADIUS;
-
-use crate::balance::BASE_TOWER_SIZE;
-
-use crate::sim::minions::apply_minion_damage;
-
-use crate::sim::neutrals::apply_neutral_damage;
-
-use crate::balance::NEUTRAL_RADIUS;
-
-use crate::balance::TOWER_SIZE;
-
-use crate::entities::Vec3f;
-
-use crate::balance::MINION_RADIUS;
-
-use shared::wire::GameState;
-
-use crate::entities::Projectile;
-
-use crate::balance::AIM_HEIGHT;
-
-use crate::game_world::GameWorld;
-
 use shared::combat::CombatEvent;
-
-use crate::combat_feedback::apply_player_damage_typed;
-
-use crate::combat_feedback::HitSource;
-
 use shared::map::Team;
+use shared::wire::{GameState, StructureKind, TargetId, TargetKind};
 
-use shared::wire::StructureKind;
-
+use crate::balance::{
+    AIM_HEIGHT, BASE_TOWER_SIZE, MINION_RADIUS, NEUTRAL_RADIUS, PLAYER_HIT_RADIUS,
+    PROJECTILE_SPEED, TOWER_SIZE,
+};
+use crate::combat_feedback::{HitSource, apply_player_damage_typed};
+use crate::entities::{Projectile, Vec3f};
+use crate::game_world::{GameWorld, TickCtx};
+use crate::sim::minions::apply_minion_damage;
+use crate::sim::neutrals::apply_neutral_damage;
 use crate::sim::towers::apply_structure_damage;
 
 /// Flies every projectile one step and resolves the impacts. The tick still

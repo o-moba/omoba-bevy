@@ -1,112 +1,31 @@
-
-use crate::runtime::ports::Clock;
-use shared::wire::CharacterChoice;
+use std::collections::{HashMap, HashSet};
+use std::io;
+use std::net::{SocketAddr, UdpSocket};
+use std::time::{Duration, Instant};
 
 use shared::HeroClass;
-
-use crate::session::handle_respawns;
-
-use crate::balance::PLAYER_GROUND_Y;
-
-use std::net::SocketAddr;
-
-use crate::sim::regenerate_base_hp;
-
-use crate::formation::joined_count;
-
-use shared::wire::ServerPacket;
-
-use shared::combat::CombatEntity;
-
-use crate::balance::MAX_HP;
-
-use crate::world::structure_collision_radius;
-
-use shared::wire::ClientPacket;
-
-use crate::combat_feedback::HitSource;
-
-use crate::sim::neutrals::simulate_neutrals;
-
-use crate::snapshot::build_players_snapshot;
-
-use crate::balance::PLAYER_SPEED;
-
-use crate::match_rules::MatchMode;
-
-use crate::world::spawn_position_for_team;
-
-use crate::runtime::ports::MemoryTransport;
-
-use crate::shop::award_gold;
-
-use crate::game_world::TickCtx;
-
-use crate::balance::EMPTY_ROSTER_GRACE;
-
-use crate::balance::BASE_HEAL_RADIUS;
-
-use shared::wire::GameState;
-
-use crate::formation::joined_team_counts;
-
-use shared::combat::CombatEntityKind;
-
-use crate::career_backend;
-
-use crate::passport_admission;
-
-use crate::bots;
-
-use crate::hero_timers;
-
-use crate::runtime::PLAYER_TIMEOUT;
-
-use crate::balance::STARTING_LEVEL;
-
-use crate::match_rules::MatchConfig;
-
-use shared::combat::ProjectileStyle;
-
-use std::time::Duration;
-
-use std::collections::HashMap;
-
-use crate::combat_feedback::apply_player_damage;
-
-use std::collections::HashSet;
-
-use crate::match_rules::parse_match_mode;
-
-use std::net::UdpSocket;
-
-use crate::balance::PLAYER_HIT_RADIUS;
-
-use shared::wire::TargetId;
-
-use crate::runtime::ports::ManualClock;
-
-use crate::runtime::ServerRuntime;
-
-use crate::balance::MAX_MANA;
-
+use shared::combat::{CombatEntity, CombatEntityKind, CombatEvent, ProjectileStyle};
 use shared::map::Team;
+use shared::wire::{CharacterChoice, ClientPacket, GameState, ServerPacket, TargetId, TargetKind};
 
-use std::time::Instant;
-
-use crate::snapshot::SNAPSHOT_INTERVAL;
-
-use std::io;
-
+use crate::balance::{
+    BASE_HEAL_FRACTION_PER_SECOND, BASE_HEAL_RADIUS, EMPTY_ROSTER_GRACE, MAX_HP, MAX_MANA,
+    PLAYER_GROUND_Y, PLAYER_HIT_RADIUS, PLAYER_SPEED, RESPAWN_DELAY, STARTING_LEVEL,
+};
+use crate::combat_feedback::{HitSource, apply_player_damage};
+use crate::formation::{joined_count, joined_team_counts};
+use crate::game_world::TickCtx;
+use crate::match_rules::{MatchConfig, MatchMode, parse_match_mode};
+use crate::runtime::ports::{Clock, ManualClock, MemoryTransport};
+use crate::runtime::{PLAYER_TIMEOUT, ServerRuntime};
+use crate::session::handle_respawns;
+use crate::shop::award_gold;
+use crate::sim::neutrals::simulate_neutrals;
 use crate::sim::projectiles::simulate_projectiles;
-
-use shared::combat::CombatEvent;
-
-use shared::wire::TargetKind;
-
-use crate::balance::RESPAWN_DELAY;
-
-use crate::balance::BASE_HEAL_FRACTION_PER_SECOND;
+use crate::sim::regenerate_base_hp;
+use crate::snapshot::{SNAPSHOT_INTERVAL, build_players_snapshot};
+use crate::world::{spawn_position_for_team, structure_collision_radius};
+use crate::{bots, career_backend, hero_timers, passport_admission};
 
 fn runtime(size: u32) -> ServerRuntime {
     let socket = UdpSocket::bind("127.0.0.1:0").unwrap();

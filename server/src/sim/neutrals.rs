@@ -1,63 +1,23 @@
 //! Jungle camp and raid boss AI, damage and rewards.
 
-use crate::entities::TeamBuffBalance;
-use crate::shop::award_gold;
-
-use shared::wire::NeutralCampType;
-
-use shared::combat::CombatEntityKind;
-
-use crate::neutrals::chase_neutral;
-
-use crate::entities::ConnectedPlayer;
-
-use crate::combat_feedback::damage_receipt;
-
-use crate::balance::NEUTRAL_ATTACK_COOLDOWN;
-
-use crate::neutrals::neutral_respawn_cooldown;
-
-use crate::progression::grant_player_xp;
-
-use std::net::SocketAddr;
-
-use crate::entities::TeamBuffs;
-
-use crate::neutrals::reset_neutral_at_anchor;
-
-use shared::wire::NeutralAiState;
-
-use crate::combat_feedback::apply_player_damage;
-
-use crate::neutrals::neutral_template;
-
-use crate::entities::Vec3f;
-
-use crate::neutrals::neutral_aggro_and_leash;
-
-use crate::game_world::TickCtx;
-
-use shared::combat::ProjectileStyle;
-
-use crate::entities::Neutral;
-
 use std::collections::HashMap;
-
+use std::net::SocketAddr;
 use std::time::Instant;
 
-use crate::game_world::GameWorld;
+use shared::combat::{CombatEntityKind, CombatEvent, ProjectileStyle};
+use shared::wire::{GameState, NeutralAiState, NeutralCampType};
 
-use shared::combat::CombatEvent;
-
+use crate::balance::{AIM_HEIGHT, NEUTRAL_ATTACK_COOLDOWN, NEUTRAL_KILL_HEAL_FRACTION};
+use crate::combat_feedback::{HitSource, apply_player_damage, damage_receipt};
+use crate::entities::{ConnectedPlayer, Neutral, TeamBuffBalance, TeamBuffs, Vec3f};
+use crate::game_world::{GameWorld, TickCtx};
 use crate::hero::Hero;
-
-use shared::wire::GameState;
-
-use crate::combat_feedback::HitSource;
-
-use crate::balance::NEUTRAL_KILL_HEAL_FRACTION;
-
-use crate::balance::AIM_HEIGHT;
+use crate::neutrals::{
+    chase_neutral, neutral_aggro_and_leash, neutral_respawn_cooldown, neutral_template,
+    reset_neutral_at_anchor,
+};
+use crate::progression::grant_player_xp;
+use crate::shop::award_gold;
 
 pub(crate) fn apply_neutral_damage(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,

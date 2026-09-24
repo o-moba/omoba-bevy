@@ -76,7 +76,11 @@ the wave clock. Simulation functions and request handlers take
 `&mut GameWorld` plus a `TickCtx { now, dt }` (or just `now`) instead of a
 parameter per map; only the leaf damage helpers (`apply_*_damage`) still take
 individual maps because they run inside loops that hold other fields.
-`main.rs` is the module list plus `fn main`. `runtime::run` is a plain
+`main.rs` is the module list plus `fn main`; it re-exports nothing.
+Modules import what they use (`use crate::entities::ConnectedPlayer;`,
+`use shared::wire::GameState;`, `use std::time::Instant;`); there are no
+crate-root glob re-exports and no `use crate::*;`, and only test modules
+keep `use super::*;` for their parent module. `runtime::run` is a plain
 fixed-step loop (`SIMULATION_STEP_SLEEP`, 10 ms): `prepare_tick`, then
 `tick`, then sleep the remainder of the step. There is no Bevy `App` and no
 ECS mirror on the server; the `GameWorld` maps are the only copy of the
@@ -104,9 +108,20 @@ advances by its own scaled `dt`. A tick is:
 
 1. `ServerRuntime::prepare_tick`: `runtime::dispatch::receive_packets` decodes
    datagrams; public roles verify signed commands first (`public_transport`).
-   `handle_packet` admits identity, then `handle_packet_authorized` applies
-   gameplay commands. The wall-clock `dt` is clamped to 100 ms and, in the
-   Combat Sandbox, replaced by the sandbox's virtual clock.
+   `handle_packet` admits identity (career, social and prematch requests are
+   routed there), then `handle_packet_authorized` runs the ordered
+   pre-checks (allocated roster, join normalisation, the career session
+   gate, career and practice join admission) and one `match` that is the
+   whole dispatcher: `Leave`, the career-flow `RequestRematch`, `Practice`
+   and `Sandbox` first, then a paused sandbox swallowing movement and
+   combat, then one handler per variant in `runtime/handlers/` (`join.rs`,
+   `movement.rs`, `combat.rs`, `utility.rs`, `shop.rs`, `debug.rs`,
+   `session.rs`; each `ServerRuntime::handle_<variant>`). A handler returns
+   `ControlFlow<()>`: `Continue` runs the dispatcher's post-command tail
+   (endpoint touch, sandbox roster, practice bots, prematch, round start,
+   career registration), `Break` skips it. The wall-clock `dt` is clamped to
+   100 ms and, in the Combat Sandbox, replaced by the sandbox's virtual
+   clock.
 2. `ServerRuntime::tick(now, dt)` (`runtime/tick.rs`): mana regeneration
    (`sim::regenerate_mana`), the minion-targeted projectile pass, then
    formation (`formation`), bots, and the `sim` modules (`minions`, `towers`,
@@ -226,9 +241,9 @@ Ordered by value over cost. Each step is a separate change with the full
    and sprite rosters still embed client manifests and read env vars; open).
 5. Server `GameWorld` + tick context instead of many-map parameters; split
    `main.rs` into runtime (dispatch, tick), snapshot, formation, entities,
-   ECS and simulation modules (done; splitting `handle_packet_authorized`
-   into per-command handlers and removing the crate-root glob re-exports are
-   the follow-up).
+   ECS and simulation modules (done); per-variant packet handlers in
+   `runtime/handlers/` and explicit imports instead of the crate-root glob
+   re-exports (done, step 14). Step complete.
 6. One server tick (done: the Bevy `App`, the ECS mirror of players and
    minions, the duplicate mana regeneration and the ECS-only minion
    projectile path are gone; `ServerRuntime::tick` is the whole step);

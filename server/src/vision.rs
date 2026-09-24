@@ -1,19 +1,16 @@
 //! Server-owned sight; no client visibility claims participate in combat or replication.
-use shared::wire::TargetId;
-use shared::map::Team;
-use shared::wire::GameState;
 use std::time::Instant;
-use shared::wire::ServerPacket;
-use shared::wire::StructureKind;
-use crate::game_world::GameWorld;
-use crate::entities::ConnectedPlayer;
-use shared::SkillSlot;
-use shared::wire::MinionTargetKind;
-use shared::ability_for_class_slot;
+
 use shared::combat::CombatEntityKind;
-use shared::TargetingMode;
-use shared::wire::TargetKind;
+use shared::map::Team;
 use shared::vision::*;
+use shared::wire::{
+    GameState, MinionTargetKind, ServerPacket, StructureKind, TargetId, TargetKind,
+};
+use shared::{SkillSlot, TargetingMode, ability_for_class_slot};
+
+use crate::entities::ConnectedPlayer;
+use crate::game_world::GameWorld;
 
 pub(crate) fn sources(team: Team, world: &GameWorld) -> Vec<VisionSource> {
     let GameWorld {

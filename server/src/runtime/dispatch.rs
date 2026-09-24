@@ -1,16 +1,15 @@
 //! Datagram receive loop and client packet dispatch.
 use std::io;
-use crate::passport_admission;
-use crate::public_transport;
-use shared::wire::ClientPacket;
-use crate::session::normalize_session_id;
 use std::net::SocketAddr;
-use crate::snapshot::IPV4_UDP_MAX_PAYLOAD_BYTES;
-use std::time::Instant;
-use crate::bots;
-use std::time::Duration;
-use crate::runtime::ServerRuntime;
 use std::ops::ControlFlow;
+use std::time::{Duration, Instant};
+
+use shared::wire::ClientPacket;
+
+use crate::runtime::ServerRuntime;
+use crate::session::normalize_session_id;
+use crate::snapshot::IPV4_UDP_MAX_PAYLOAD_BYTES;
+use crate::{bots, passport_admission, public_transport};
 
 /// Existing application bound for client -> server request datagrams.
 pub(crate) const MAX_CLIENT_REQUEST_PAYLOAD_BYTES: usize = 8 * 1024;

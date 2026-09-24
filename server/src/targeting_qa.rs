@@ -1,16 +1,14 @@
 //! Opt-in developer capture setup. Only initial join placement and ambient AI
 //! are changed. Player movement, health, mana, strikes and damage stay real.
 
-use crate::match_rules::MatchMode;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 
 use shared::map::Team;
 
 use crate::balance::PLAYER_GROUND_Y;
-
-use std::net::SocketAddr;
-
 use crate::entities::ConnectedPlayer;
+use crate::match_rules::MatchMode;
 
 fn enabled_for(debug: bool, mode: MatchMode, mode_env: Option<&str>, flag: Option<&str>) -> bool {
     debug && matches!(mode, MatchMode::Dev) && mode_env == Some("dev") && flag == Some("1")
@@ -86,8 +84,8 @@ pub(crate) fn place_initial_join(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::match_rules::MatchMode;
-use super::*;
 
     #[test]
     fn requires_all_explicit_development_gates_and_walkable_anchors() {

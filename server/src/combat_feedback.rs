@@ -1,35 +1,19 @@
 //! Damage receipts are produced at HP mutation, then retained briefly for UDP loss.
-use std::collections::HashMap;
-use std::time::Duration;
-use crate::balance::CASTER_MINION_MAX_HP;
-use crate::balance::CASTER_MINION_ATTACK_DAMAGE;
-use crate::entities::Projectile;
-use shared::combat::CombatEntityKind;
-use crate::entities::ConnectedPlayer;
-use shared::combat::MinionKind;
-use shared::wire::ProjectileState;
-use crate::balance::PROJECTILE_SPEED;
-use crate::balance::MINION_ATTACK_COOLDOWN;
-use crate::hero_stats;
-use shared::wire::TargetId;
-use crate::balance::MINION_MAX_HP;
-use crate::balance::CASTER_MINION_ATTACK_RANGE;
-use crate::balance::PROJECTILE_LIFETIME;
-use crate::entities::Vec3f;
+use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
-use shared::combat::ProjectileStyle;
-use crate::balance::RESPAWN_DELAY;
-use crate::balance::MINION_ATTACK_DAMAGE;
-use crate::balance::MINION_RADIUS;
-use crate::entities::Minion;
-use shared::combat::CombatEntity;
-use crate::balance::PROJECTILE_RADIUS;
-use std::time::Instant;
-use crate::balance::AIM_HEIGHT;
-use crate::balance::MINION_ATTACK_RANGE;
-use crate::balance::CASTER_MINION_ATTACK_COOLDOWN;
-use shared::combat::CombatEvent;
-use std::collections::VecDeque;
+use std::time::{Duration, Instant};
+
+use shared::combat::{CombatEntity, CombatEntityKind, CombatEvent, MinionKind, ProjectileStyle};
+use shared::wire::{ProjectileState, TargetId};
+
+use crate::balance::{
+    AIM_HEIGHT, CASTER_MINION_ATTACK_COOLDOWN, CASTER_MINION_ATTACK_DAMAGE,
+    CASTER_MINION_ATTACK_RANGE, CASTER_MINION_MAX_HP, MINION_ATTACK_COOLDOWN, MINION_ATTACK_DAMAGE,
+    MINION_ATTACK_RANGE, MINION_MAX_HP, MINION_RADIUS, PROJECTILE_LIFETIME, PROJECTILE_RADIUS,
+    PROJECTILE_SPEED, RESPAWN_DELAY,
+};
+use crate::entities::{ConnectedPlayer, Minion, Projectile, Vec3f};
+use crate::hero_stats;
 
 #[cfg(test)]
 mod tests;

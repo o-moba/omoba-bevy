@@ -1,46 +1,25 @@
 //! One simulation tick: prepare, simulate, then broadcast.
 
-use crate::shop::accrue_passive_gold;
-
-use shared::wire::TargetKind;
-
-use crate::balance::VICTORY_REMATCH_DELAY;
-
-use crate::formation::tick_match_formation;
-
-use crate::game_world::TickCtx;
-
-use crate::sim::neutrals::simulate_neutrals;
-
-use crate::session::handle_respawns;
-
+use std::collections::HashSet;
 use std::time::Instant;
 
-use crate::sim::regenerate_team_buff_hp;
+use shared::wire::{GameState, TargetKind};
 
-use crate::game_world::GameWorld;
-
-use crate::sim::minions::simulate_minions;
-
-use shared::wire::GameState;
-
-use crate::sim::regenerate_base_hp;
-
-use crate::runtime::ServerRuntime;
-
-use crate::world::spawn_minion_waves_if_due;
-
-use crate::sim::regenerate_mana;
-
-use std::collections::HashSet;
-
-use crate::sim::towers::simulate_tower_attacks;
-
+use crate::balance::VICTORY_REMATCH_DELAY;
+use crate::formation::tick_match_formation;
+use crate::game_world::{GameWorld, TickCtx};
 use crate::hero_timers;
-
+use crate::runtime::ServerRuntime;
+use crate::session::handle_respawns;
+use crate::shop::accrue_passive_gold;
+use crate::sim::minions::simulate_minions;
+use crate::sim::neutrals::simulate_neutrals;
 use crate::sim::projectiles::simulate_projectiles_filtered;
-
-use crate::sim::restore_god_mode_players;
+use crate::sim::towers::simulate_tower_attacks;
+use crate::sim::{
+    regenerate_base_hp, regenerate_mana, regenerate_team_buff_hp, restore_god_mode_players,
+};
+use crate::world::spawn_minion_waves_if_due;
 
 impl ServerRuntime {
     pub(crate) fn prepare_tick(&mut self) -> (Instant, f32) {

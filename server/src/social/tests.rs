@@ -1,11 +1,12 @@
 use std::io;
-use crate::runtime::ServerRuntime;
-use std::time::Duration;
 use std::net::UdpSocket;
-use crate::match_rules::MatchConfig;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
 use shared::wire::ServerPacket;
+
 use super::*;
+use crate::match_rules::MatchConfig;
+use crate::runtime::ServerRuntime;
 
 fn sender(id: u64, team: SocialTeam) -> Sender {
     Sender {

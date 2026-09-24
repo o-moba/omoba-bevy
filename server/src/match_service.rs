@@ -1,17 +1,14 @@
 //! One public lobby schedules independent, immutable game workers.
-use std::time::Instant;
-use std::time::Duration;
-use crate::runtime::ServerRuntime;
-use shared::wire::GameState;
-use shared::wire::ServerPacket;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use crate::match_allocation::{AllocatedHuman, Manifest, Phase, Status, Worker, unix_ms};
-use shared::{
-    career::ProfileSummary,
-    match_service::{MatchAllocation, MatchPreference, MatchServiceView},
-};
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+use shared::career::ProfileSummary;
+use shared::match_service::{MatchAllocation, MatchPreference, MatchServiceView};
+use shared::wire::{GameState, ServerPacket};
+
+use crate::match_allocation::{AllocatedHuman, Manifest, Phase, Status, Worker, unix_ms};
+use crate::runtime::ServerRuntime;
 
 const MAX_WAITING: usize = 128;
 const QUICK_WAIT: Duration = Duration::from_secs(30);
@@ -564,8 +561,9 @@ impl ServerRuntime {
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
-use std::time::Instant;
-use super::*;
+    use std::time::Instant;
+
+    use super::*;
     fn w(id: u64, p: MatchPreference, now: Instant) -> Waiting {
         Waiting {
             profile: ProfileSummary::new(format!("{id:064x}"), "Player".into()),

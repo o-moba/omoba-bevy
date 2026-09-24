@@ -1,24 +1,16 @@
 //! Authoritative per-tick simulation of the game world.
 
-use crate::balance::MANA_REGEN_PER_SECOND;
-use crate::balance::MAX_MANA;
-use crate::game_world::TickCtx;
-
-use crate::entities::ConnectedPlayer;
-
 use std::collections::HashMap;
-
 use std::net::SocketAddr;
 
+use shared::map::Team;
 use shared::wire::GameState;
 
-use crate::balance::BASE_HEAL_RADIUS;
-
-use crate::balance::BASE_HEAL_FRACTION_PER_SECOND;
-
-use crate::game_world::GameWorld;
-
-use shared::map::Team;
+use crate::balance::{
+    BASE_HEAL_FRACTION_PER_SECOND, BASE_HEAL_RADIUS, MANA_REGEN_PER_SECOND, MAX_MANA,
+};
+use crate::entities::ConnectedPlayer;
+use crate::game_world::{GameWorld, TickCtx};
 
 pub(crate) mod cast;
 pub(crate) mod minions;

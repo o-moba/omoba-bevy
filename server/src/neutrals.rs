@@ -1,95 +1,20 @@
-
-use crate::entities::NeutralTemplate;
-
-use crate::balance::BRUISER_MAX_HP;
-
-use crate::balance::WENDIGO_KILL_GOLD;
-
-use crate::balance::SKIRMISHER_ATTACK_DAMAGE;
-
-use crate::balance::SKIRMISHER_MAX_HP;
-
-use crate::balance::MUTATIO_ATTACK_DAMAGE;
-
-use crate::balance::BOSS_RESPAWN_COOLDOWN;
-
-use crate::balance::SPITTER_KILL_GOLD;
-
-use crate::balance::BRUISER_KILL_XP;
-
-use crate::entities::Neutral;
-
-use shared::wire::NeutralCampType;
-
-use crate::balance::WENDIGO_KILL_XP;
-
-use crate::balance::NEUTRAL_SPAWN_HEIGHT;
-
-use crate::balance::SPITTER_KILL_XP;
-
-use crate::balance::BOSS_AGGRO_RADIUS;
-
-use crate::balance::SPITTER_ATTACK_DAMAGE;
-
-use crate::balance::BRUISER_ATTACK_DAMAGE;
-
-use crate::balance::BRUISER_KILL_GOLD;
-
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
-use crate::balance::WENDIGO_MAX_HP;
+use shared::wire::{NeutralAiState, NeutralCampType, NeutralState};
 
-use std::time::Duration;
-
-use crate::balance::SKIRMISHER_ATTACK_RANGE;
-
-use crate::balance::MUTATIO_KILL_XP;
-
-use crate::balance::WENDIGO_ATTACK_RANGE;
-
-use crate::balance::NEUTRAL_LEASH_DISTANCE;
-
-use crate::balance::BOSS_PIT_OUTER_FRAC;
-
-use crate::balance::SKIRMISHER_KILL_XP;
-
-use crate::balance::BOSS_PIT_INNER_FRAC;
-
-use crate::balance::MUTATIO_MAX_HP;
-
-use crate::balance::MUTATIO_ATTACK_RANGE;
-
-use crate::balance::NEUTRAL_AGGRO_RADIUS;
-
-use crate::balance::MUTATIO_KILL_GOLD;
-
-use crate::balance::NEUTRAL_RESPAWN_COOLDOWN;
-
-use crate::balance::BOSS_LEASH_DISTANCE;
-
-use crate::balance::WENDIGO_ATTACK_DAMAGE;
-
-use crate::entities::Vec3f;
-
-use crate::balance::NEUTRAL_CHASE_SPEED;
-
-use shared::wire::NeutralAiState;
-
-use std::time::Instant;
-
-use crate::balance::BOTTOM_BOSS_SPAWN_DELAY;
-
-use crate::balance::TOP_BOSS_SPAWN_DELAY;
-
-use shared::wire::NeutralState;
-
-use crate::balance::SKIRMISHER_KILL_GOLD;
-
-use crate::balance::BRUISER_ATTACK_RANGE;
-
-use crate::balance::SPITTER_ATTACK_RANGE;
-
-use crate::balance::SPITTER_MAX_HP;
+use crate::balance::{
+    BOSS_AGGRO_RADIUS, BOSS_LEASH_DISTANCE, BOSS_PIT_INNER_FRAC, BOSS_PIT_OUTER_FRAC,
+    BOSS_RESPAWN_COOLDOWN, BOTTOM_BOSS_SPAWN_DELAY, BRUISER_ATTACK_DAMAGE, BRUISER_ATTACK_RANGE,
+    BRUISER_KILL_GOLD, BRUISER_KILL_XP, BRUISER_MAX_HP, MUTATIO_ATTACK_DAMAGE,
+    MUTATIO_ATTACK_RANGE, MUTATIO_KILL_GOLD, MUTATIO_KILL_XP, MUTATIO_MAX_HP, NEUTRAL_AGGRO_RADIUS,
+    NEUTRAL_CHASE_SPEED, NEUTRAL_LEASH_DISTANCE, NEUTRAL_RESPAWN_COOLDOWN, NEUTRAL_SPAWN_HEIGHT,
+    SKIRMISHER_ATTACK_DAMAGE, SKIRMISHER_ATTACK_RANGE, SKIRMISHER_KILL_GOLD, SKIRMISHER_KILL_XP,
+    SKIRMISHER_MAX_HP, SPITTER_ATTACK_DAMAGE, SPITTER_ATTACK_RANGE, SPITTER_KILL_GOLD,
+    SPITTER_KILL_XP, SPITTER_MAX_HP, TOP_BOSS_SPAWN_DELAY, WENDIGO_ATTACK_DAMAGE,
+    WENDIGO_ATTACK_RANGE, WENDIGO_KILL_GOLD, WENDIGO_KILL_XP, WENDIGO_MAX_HP,
+};
+use crate::entities::{Neutral, NeutralTemplate, Vec3f};
 
 #[cfg(test)]
 mod tests;

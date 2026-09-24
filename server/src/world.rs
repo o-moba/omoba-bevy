@@ -1,79 +1,24 @@
-
-use shared::wire::MinionBrainState;
-
-use crate::entities::Vec3f;
-
 use std::collections::HashMap;
-
-#[cfg(test)]
-use crate::balance::TOWER_DAMAGE;
-
-use std::time::Duration;
-
-#[cfg(test)]
-use crate::balance::TOWER_MAX_HP;
-
-use crate::balance::PLAYER_SPAWN_OFFSET;
-
-use crate::balance::BASE_TOWER_SIZE;
-
-use shared::map::Team;
-
-use shared::wire::StructureState;
-
-use crate::balance::MINIONS_PER_WAVE;
-
-use crate::balance::MINION_SPAWN_HEIGHT;
-
-use shared::wire::GameState;
-
-use std::time::Instant;
-
-use crate::balance::MINION_RADIUS;
-
-use shared::wire::StructureKind;
-
-use crate::entities::Minion;
-
 use std::io;
-
-use crate::balance::MINION_WAVE_INTERVAL;
-
-use crate::entities::StructureRole;
-
-use shared::wire::MinionState;
-
-#[cfg(test)]
-use crate::balance::BASE_TOWER_MAX_HP;
-
-#[cfg(test)]
-use crate::balance::BASE_TOWER_DAMAGE;
-
-use crate::combat_feedback::minion_stats;
-
-#[cfg(test)]
-use crate::balance::TOWER_COOLDOWN;
-
-#[cfg(test)]
-use crate::balance::BASE_TOWER_RANGE;
-
-use crate::entities::MapLayoutState;
+use std::time::{Duration, Instant};
 
 use shared::combat::MinionKind;
+use shared::map::{Lane, Team};
+use shared::wire::{GameState, MinionBrainState, MinionState, StructureKind, StructureState};
 
-use crate::balance::TOWER_SIZE;
-
-use shared::map::Lane;
-
+use crate::balance::{
+    BASE_TOWER_SIZE, MINION_RADIUS, MINION_SPAWN_HEIGHT, MINION_WAVE_INTERVAL, MINIONS_PER_WAVE,
+    PLAYER_SPAWN_OFFSET, TOWER_SIZE,
+};
+use crate::combat_feedback::minion_stats;
+use crate::entities::{MapLayoutState, Minion, Structure, StructureRole, Vec3f};
 use crate::game_world::GameWorld;
 
 #[cfg(test)]
-use crate::balance::BASE_TOWER_COOLDOWN;
-
-use crate::entities::Structure;
-
-#[cfg(test)]
-use crate::balance::TOWER_RANGE;
+use crate::balance::{
+    BASE_TOWER_COOLDOWN, BASE_TOWER_DAMAGE, BASE_TOWER_MAX_HP, BASE_TOWER_RANGE, TOWER_COOLDOWN,
+    TOWER_DAMAGE, TOWER_MAX_HP, TOWER_RANGE,
+};
 
 #[cfg(test)]
 pub(crate) fn build_structures(_layout: &MapLayoutState) -> HashMap<u64, Structure> {

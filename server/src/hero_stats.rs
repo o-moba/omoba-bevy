@@ -7,23 +7,16 @@
 //! needs. The functions below are the only place the class growth, item
 //! bonuses and modifiers are combined into an effective number.
 
-use crate::balance::LEVEL_UP_MANA_BONUS;
-use crate::balance::PLAYER_SPEED;
-use crate::balance::LEVEL_UP_HP_BONUS;
-use crate::balance::MAX_MANA;
-use std::time::Duration;
-
-use std::time::Instant;
-
-use shared::shop::ItemBonuses;
-
-use crate::utility::utility_movement_multiplier;
+use std::time::{Duration, Instant};
 
 use shared::SkillSlot;
+use shared::shop::ItemBonuses;
 
-use crate::balance::MOVEMENT_POSITION_TOLERANCE;
-
+use crate::balance::{
+    LEVEL_UP_HP_BONUS, LEVEL_UP_MANA_BONUS, MAX_MANA, MOVEMENT_POSITION_TOLERANCE, PLAYER_SPEED,
+};
 use crate::entities::ConnectedPlayer;
+use crate::utility::utility_movement_multiplier;
 
 /// Per-hero overrides on top of class, level and gear. `Default` is normal
 /// play: no multipliers, no mitigation, every rule enforced.

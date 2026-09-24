@@ -1,76 +1,25 @@
 //! The authoritative UDP game server runtime: its ports (transport, clock,
 //! career store), the sub-runtimes and the process entry point.
 
-use crate::career_backend;
-
-
-use crate::targeting_qa;
-
-use crate::career_runtime;
-
-use std::collections::HashMap;
-
-use crate::public_transport;
-
-
-
+use std::collections::{HashMap, HashSet};
+use std::io;
 use std::net::UdpSocket;
-
-use std::time::Instant;
-
-use crate::match_service;
-
-use crate::match_rules::MatchRules;
-
-use crate::runtime::ports::Clock;
-
-use crate::prematch;
-
-
-use crate::game_world::GameWorld;
-
-#[cfg(test)]
-use crate::runtime::ports::ManualClock;
-
-use crate::sandbox;
-
-use crate::match_rules::MatchConfig;
-
+use std::time::{Duration, Instant};
 
 use crate::career_port::CareerPort;
-
-use crate::social;
-
-use crate::match_rules::MatchMode;
-
-use std::collections::HashSet;
-
+use crate::combat_feedback::CombatLog;
+use crate::game_world::GameWorld;
+use crate::match_rules::{MatchConfig, MatchMode, MatchRules};
+use crate::runtime::dispatch::CLIENT_DATAGRAM_RECEIVE_CAPACITY;
+use crate::runtime::ports::{Clock, SystemClock, Transport, UdpTransport};
+use crate::world::load_map_config;
+use crate::{
+    bots, career_backend, career_runtime, match_service, passport_admission, prematch,
+    public_transport, sandbox, social, targeting_qa,
+};
 
 #[cfg(test)]
-use crate::runtime::ports::MemoryTransport;
-
-use crate::combat_feedback::CombatLog;
-
-use crate::bots;
-
-use crate::runtime::ports::SystemClock;
-
-use crate::runtime::ports::UdpTransport;
-
-use std::io;
-
-
-use crate::passport_admission;
-
-use crate::runtime::dispatch::CLIENT_DATAGRAM_RECEIVE_CAPACITY;
-
-use crate::world::load_map_config;
-
-use crate::runtime::ports::Transport;
-
-
-
-use std::time::Duration;
+use crate::runtime::ports::{ManualClock, MemoryTransport};
 
 pub(crate) mod dispatch;
 mod handlers;

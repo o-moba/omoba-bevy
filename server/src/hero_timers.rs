@@ -6,16 +6,12 @@
 //! tick's `now`. `normalize_hero_timers` is the one place that rewrites the
 //! instants from derived conditions (death, sandbox `no_cooldowns`).
 
-use std::time::Instant;
-
-use crate::game_world::GameWorld;
+use std::time::{Duration, Instant};
 
 use shared::SkillSlot;
 
 use crate::entities::ConnectedPlayer;
-
-use std::time::Duration;
-
+use crate::game_world::GameWorld;
 use crate::hero_stats;
 
 /// The instants a hero's gameplay clocks are measured from. Every

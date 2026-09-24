@@ -1,18 +1,17 @@
 //! Ephemeral, recipient-filtered social traffic. No SQL or asset downloads.
-use std::collections::HashMap;
-use shared::wire::ServerPacket;
-use crate::runtime::ServerRuntime;
-use std::time::Duration;
+use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
+use std::time::{Duration, Instant};
+
 use shared::map::Team;
-use shared::wire::GameState;
-use std::time::Instant;
 use shared::social::{
     Entitlements, SocialChannel, SocialCommand, SocialEvent, SocialEventKind, SocialRequest,
     SocialTeam, SocialView, allowed_reactions, normalize_chat_text, reaction_allowed,
     validate_request,
 };
-use std::collections::VecDeque;
+use shared::wire::{GameState, ServerPacket};
+
+use crate::runtime::ServerRuntime;
 
 const MAX_EVENTS: usize = 32;
 const MAX_SENDERS: usize = 512;

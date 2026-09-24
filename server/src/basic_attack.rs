@@ -1,38 +1,26 @@
 //! Individual server-authorized basic strikes. Clients own repeat/chase intent;
 //! the server owns target legality, range, timing, equipment and damage.
-use crate::balance::PROJECTILE_RADIUS;
-use std::time::Instant;
 use std::collections::HashMap;
-use crate::balance::AIM_HEIGHT;
-use crate::vision;
-use crate::entities::Neutral;
+use std::net::SocketAddr;
+use std::time::Instant;
+
+use shared::combat::{CombatEntityKind, ProjectileStyle};
+use shared::map::Team;
+use shared::wire::{GameState, ProjectileState, TargetId, TargetKind};
+use shared::{BASIC_ATTACK_ACTION_SLOT, PlayerActionKind, basic_attack_for_class};
+
+use crate::balance::{
+    AIM_HEIGHT, CAST_SPAWN_HEIGHT, MINION_RADIUS, NEUTRAL_RADIUS, PLAYER_HIT_RADIUS,
+    PROJECTILE_LIFETIME, PROJECTILE_RADIUS, PROJECTILE_SPEED,
+};
+use crate::entities::{ConnectedPlayer, Minion, Neutral, Projectile, Structure, Vec3f};
 use crate::game_world::GameWorld;
 use crate::sim::towers::structure_is_protected;
-use crate::balance::CAST_SPAWN_HEIGHT;
-use crate::entities::ConnectedPlayer;
-use shared::wire::ProjectileState;
-use crate::balance::PROJECTILE_SPEED;
 use crate::world::structure_radius;
-use crate::entities::Structure;
-use crate::entities::Projectile;
-use std::net::SocketAddr;
-use shared::combat::CombatEntityKind;
-use shared::map::Team;
-use crate::balance::MINION_RADIUS;
-use shared::wire::TargetKind;
-use crate::balance::NEUTRAL_RADIUS;
-use crate::hero_stats;
-use shared::wire::TargetId;
-use crate::balance::PLAYER_HIT_RADIUS;
-use crate::balance::PROJECTILE_LIFETIME;
-use shared::PlayerActionKind;
-use crate::entities::Vec3f;
-use shared::combat::ProjectileStyle;
-use shared::wire::GameState;
-use crate::entities::Minion;
+use crate::{hero_stats, vision};
+
 #[cfg(test)]
 use shared::shop::basic_attack_cooldown;
-use shared::{BASIC_ATTACK_ACTION_SLOT, basic_attack_for_class};
 
 pub(crate) fn resolve_hostile_target(
     team: Team,

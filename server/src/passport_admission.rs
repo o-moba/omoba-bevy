@@ -1,13 +1,13 @@
 //! Bounded asynchronous ticket verification, outside the gameplay tick.
-use std::time::Instant;
-use std::time::Duration;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
-use shared::wire::ClientPacket;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use ekza_bevy_sdk::{passport::ProtectedAvatar, store::StoreAvatar};
-use omoba_passport::PassportApi;
 use std::sync::{Arc, Mutex, mpsc};
+use std::time::{Duration, Instant};
+
+use ekza_bevy_sdk::passport::ProtectedAvatar;
+use ekza_bevy_sdk::store::StoreAvatar;
+use omoba_passport::PassportApi;
+use shared::wire::ClientPacket;
 
 const MAX_PENDING: usize = 16;
 /// A known free avatar is trusted this long before the registry is asked again,
@@ -337,17 +337,17 @@ fn verify_admission(
 #[cfg(test)]
 mod tests {
     use shared::wire::ClientPacket;
-use shared::wire::CharacterChoice;
-use std::net::SocketAddr;
-use std::net::UdpSocket;
-use shared::map::Team;
-use crate::match_rules::MatchConfig;
-use shared::HeroClass;
-use std::time::Instant;
-use crate::prematch;
-use crate::runtime::ServerRuntime;
-use std::time::Duration;
-use super::*;
+    use std::net::{SocketAddr, UdpSocket};
+    use std::time::{Duration, Instant};
+
+    use shared::HeroClass;
+    use shared::map::Team;
+    use shared::wire::CharacterChoice;
+
+    use super::*;
+    use crate::match_rules::MatchConfig;
+    use crate::prematch;
+    use crate::runtime::ServerRuntime;
     use ekza_bevy_sdk::passport::{ConsumedTicket, ProjectSupport, Rendition};
 
     fn fixture() -> (ProtectedAvatar, ConsumedTicket) {

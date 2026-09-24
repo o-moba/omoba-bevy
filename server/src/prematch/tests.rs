@@ -1,19 +1,15 @@
-use shared::wire::ClientPacket;
-use crate::match_rules::MatchMode;
-use std::net::SocketAddr;
-use std::net::UdpSocket;
-use shared::map::Team;
-use std::time::Instant;
-use crate::match_rules::MatchConfig;
-use shared::wire::GameState;
+use std::net::{SocketAddr, UdpSocket};
+use std::time::{Duration, Instant};
+
 use shared::HeroClass;
-use shared::wire::ServerPacket;
-use crate::formation::joined_count;
-use crate::career_backend;
-use shared::wire::CharacterChoice;
-use crate::runtime::ServerRuntime;
-use std::time::Duration;
+use shared::map::Team;
+use shared::wire::{CharacterChoice, ClientPacket, GameState, ServerPacket};
+
 use super::*;
+use crate::career_backend;
+use crate::formation::joined_count;
+use crate::match_rules::{MatchConfig, MatchMode};
+use crate::runtime::ServerRuntime;
 fn fixture(mode: MatchMode, size: u32) -> (ServerRuntime, Instant) {
     let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
     socket.set_nonblocking(true).unwrap();

@@ -1,40 +1,27 @@
-use crate::snapshot::serialize_snapshot_datagram;
+use std::collections::HashMap;
+use std::net::{SocketAddr, UdpSocket};
+use std::time::{Duration, Instant};
+
+use shared::HeroClass;
+use shared::combat::{CombatEntity, CombatEntityKind, CombatEvent, MinionKind, ProjectileStyle};
+use shared::map::{Lane, Team};
+use shared::wire::{
+    CharacterChoice, ClientPacket, GameState, ServerPacket, StructureKind, TargetId, TargetKind,
+};
+
+use super::*;
+use crate::balance::MAX_HP;
+use crate::entities::Vec3f;
+use crate::game_world::TickCtx;
+use crate::match_rules::MatchConfig;
 use crate::neutrals::reset_neutral_at_anchor;
 use crate::runtime::ServerRuntime;
-use shared::combat::CombatEvent;
-use shared::combat::MinionKind;
-use std::time::Duration;
-use shared::map::Lane;
-use crate::sim::neutrals::apply_neutral_damage;
-use crate::entities::Vec3f;
-use shared::wire::ClientPacket;
-use shared::wire::CharacterChoice;
-use std::net::SocketAddr;
-use std::net::UdpSocket;
-use shared::combat::CombatEntityKind;
-use shared::map::Team;
-use shared::combat::CombatEntity;
-use shared::wire::TargetKind;
-use crate::sim::neutrals::simulate_neutrals;
+use crate::sim::minions::{apply_minion_damage, simulate_minions};
+use crate::sim::neutrals::{apply_neutral_damage, simulate_neutrals};
 use crate::sim::projectiles::simulate_projectiles;
-use crate::match_rules::MatchConfig;
-use crate::game_world::TickCtx;
-use shared::wire::TargetId;
+use crate::sim::towers::{apply_structure_damage, simulate_tower_attacks};
+use crate::snapshot::{IPV4_UDP_MAX_PAYLOAD_BYTES, serialize_snapshot_datagram};
 use crate::world::spawn_minion_wave_for_team_lane;
-use crate::sim::minions::simulate_minions;
-use shared::combat::ProjectileStyle;
-use shared::wire::StructureKind;
-use crate::sim::towers::apply_structure_damage;
-use shared::wire::GameState;
-use shared::HeroClass;
-use crate::snapshot::IPV4_UDP_MAX_PAYLOAD_BYTES;
-use std::time::Instant;
-use crate::sim::towers::simulate_tower_attacks;
-use std::collections::HashMap;
-use crate::sim::minions::apply_minion_damage;
-use shared::wire::ServerPacket;
-use crate::balance::MAX_HP;
-use super::*;
 
 fn fixture() -> (ServerRuntime, SocketAddr, SocketAddr, Instant) {
     let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
