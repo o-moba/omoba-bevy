@@ -12,6 +12,7 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 - Practice bots fill teams as a five-role composition around human picks; the bot Warden clears camps on its own half before joining mid lane.
 - Add a fifth Warden row to the skill icon atlas (original rows unchanged; provenance in `client/assets/ui/skills/PROVENANCE.md`).
 - Clients older than this release decode `warden` as Warrior; ship client and server together.
+- Keep the Xcode-reformatted project and scheme without a committed team ID (set it in the ignored `mobile/ios/Omoba.local.xcconfig`), and add `make iphone-box` for timestamped unsigned iPhone packages.
 
 ## [0.23.0-rc.5] - 2026-09-23
 
