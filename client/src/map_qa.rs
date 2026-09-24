@@ -628,7 +628,7 @@ fn observe(
     let structures:Vec<_>=scene.structures.iter().map(|(owner,t,id,map,kind,team,stats,protected)|{
         let children:Vec<_>=scene.structure_visuals.iter().filter(|(_,visual)|visual.owner==owner).map(|(entity,_)|geometry(&scene,&meshes,entity)).collect();
         let sprites: Vec<_> = scene.structure_sprites.iter().filter(|(_, visual)|visual.owner == owner).map(|(entity,visual)|serde_json::json!({"entity":format!("{entity:?}"),"owner":format!("{owner:?}"),"sprite_key":visual.sprite_key,"profile_key":visual.profile_key,"visible_drawables":sprites(&scene,entity)})).collect();
-        serde_json::json!({"id":id.0,"lane":map.lane,"tier":map.tier,"sprite_geometry":sprites,"map_key":map.key,"visual_profile":map.visual_profile,"kind":kind,"team":team,"position":t.translation.to_array(),"hp":stats.hp,"max_hp":stats.max_hp,"protected":protected.0,"model_geometry":children})
+        serde_json::json!({"id":id.0,"lane":map.lane,"tier":map.tier,"sprite_geometry":sprites,"map_key":map.key,"visual_profile":map.visual_profile,"kind":shared::wire::StructureKind::from(*kind),"team":team,"position":t.translation.to_array(),"hp":stats.hp,"max_hp":stats.max_hp,"protected":protected.0,"model_geometry":children})
     }).collect();
     if is_3d
         && structures.iter().any(|s| {

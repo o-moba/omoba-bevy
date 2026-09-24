@@ -1,6 +1,7 @@
 //! Socket-free practice, using the normal client snapshot/render/input pipeline.
 //! This deliberately has no career backend, matchmaking, rewards, or persistence.
 use super::*;
+use shared::map::Team;
 use shared::{SkillSlot, TargetingMode, hero_balance as balance, shop::ItemBonuses, utility::*};
 
 pub(super) const ADDRESS: &str = "offline-practice";
@@ -19,13 +20,6 @@ const PROJECTILE_SPEED: f32 = 30.0;
 /// Yaw that makes a hero model (authored facing -Z) look along `(dx, dz)`.
 fn yaw_towards(dx: f32, dz: f32) -> f32 {
     (-dx).atan2(-dz)
-}
-
-fn scoreboard_team(team: Team) -> shared::map::Team {
-    match team {
-        Team::Green => shared::map::Team::Green,
-        Team::Blue => shared::map::Team::Blue,
-    }
 }
 
 /// Spend `level - 1` skill points the way a player would: the ultimate first
@@ -776,7 +770,7 @@ impl Simulation {
                             } else {
                                 format!("Bot {}", p.id)
                             },
-                            team: scoreboard_team(p.team),
+                            team: p.team,
                             hero_class: p.hero_class,
                             kills,
                             deaths,
@@ -794,7 +788,6 @@ impl Simulation {
             neutrals: vec![],
             team_buffs: vec![],
             rematch_in_secs: None,
-            career: default(),
         }
     }
 }
@@ -919,7 +912,6 @@ mod tests {
             }
             assert_eq!(sim.players[1].hp, sim.players[1].max_hp);
             let ServerPacket::Snapshot {
-                career,
                 game_state,
                 match_mode,
                 scoreboard,
@@ -928,7 +920,6 @@ mod tests {
             else {
                 panic!()
             };
-            assert_eq!(career, shared::career::CareerView::default());
             assert_eq!(game_state, GameState::Running);
             assert_eq!(match_mode, "offline_practice");
             let board = scoreboard.expect("offline rounds keep a live scoreboard");

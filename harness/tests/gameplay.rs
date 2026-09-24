@@ -14,7 +14,9 @@ use std::time::{Duration, Instant};
 
 use harness::navigation::BotNavigator;
 use harness::protocol::PlayerState;
-use harness::{Bot, Character, HeroClass, NeutralCampType, ServerProcess, Team};
+use harness::{
+    Bot, Character, HeroClass, NeutralCampType, ServerProcess, SnapshotView, StructureKind, Team,
+};
 use shared::navigation::Disc;
 
 // --- Constants mirrored from server balance (source of truth in
@@ -87,7 +89,11 @@ fn walk_into_cast_range(observer: &mut Bot, mover: &mut Bot, observer_id: u64, m
             .filter(|s| s.hp > 0.0)
             .map(|s| Disc {
                 center: [s.x, s.z],
-                radius: if s.kind == "base_tower" { 3.2 } else { 1.3 },
+                radius: if s.kind == StructureKind::BaseTower {
+                    3.2
+                } else {
+                    1.3
+                },
             })
             .collect();
         for ((route, bot), state) in routes.iter_mut().zip([&*observer, &*mover]).zip([a, b]) {
@@ -121,7 +127,7 @@ fn join_produces_snapshot_with_player() {
         "expected full hp, got {}",
         me.hp
     );
-    assert_eq!(me.team, Some(Team::Green));
+    assert_eq!(me.team, Team::Green);
 }
 
 #[test]
@@ -271,20 +277,20 @@ fn join_replicates_class_and_avatar_and_applies_distinct_kits() {
     // Once mutually visible, both clients must receive the other loadout.
     mage.wait_for_player(
         mage_id,
-        |p| p.hero_class.as_deref() == Some("mage") && p.avatar.as_deref() == Some("agnes"),
+        |p| p.hero_class == HeroClass::Mage && p.avatar.as_deref() == Some("agnes"),
         POLL_TIMEOUT,
     )
     .expect("mage should see its own class + avatar replicated");
     mage.wait_for_player(
         warrior_id,
-        |p| p.hero_class.as_deref() == Some("warrior") && p.avatar.as_deref() == Some("cool-tiger"),
+        |p| p.hero_class == HeroClass::Warrior && p.avatar.as_deref() == Some("cool-tiger"),
         POLL_TIMEOUT,
     )
     .expect("mage should see the warrior's class + avatar");
     warrior
         .wait_for_player(
             mage_id,
-            |p| p.hero_class.as_deref() == Some("mage") && p.avatar.as_deref() == Some("agnes"),
+            |p| p.hero_class == HeroClass::Mage && p.avatar.as_deref() == Some("agnes"),
             POLL_TIMEOUT,
         )
         .expect("warrior should see the mage's class + avatar");
@@ -349,11 +355,11 @@ fn malformed_class_and_avatar_fall_back_without_crashing_the_server() {
 
     let id = bot.my_id(POLL_TIMEOUT);
     let me = bot
-        .wait_for_player(id, |p| p.team == Some(Team::Green), POLL_TIMEOUT)
+        .wait_for_player(id, |p| p.team == Team::Green, POLL_TIMEOUT)
         .expect("server must keep serving snapshots after a hostile join");
     assert_eq!(
-        me.hero_class.as_deref(),
-        Some("warrior"),
+        me.hero_class,
+        HeroClass::Warrior,
         "unknown class must fall back to the default class"
     );
     assert_eq!(me.avatar, None, "unknown avatar slug must be dropped");
@@ -477,7 +483,11 @@ fn bottom_boss_spawns_on_schedule_with_boss_stats() {
                 .filter(|s| s.hp > 0.0)
                 .map(|s| Disc {
                     center: [s.x, s.z],
-                    radius: if s.kind == "base_tower" { 3.2 } else { 1.3 },
+                    radius: if s.kind == StructureKind::BaseTower {
+                        3.2
+                    } else {
+                        1.3
+                    },
                 })
                 .collect();
             if let Some(next) = routes[index].next([me.x, me.z], goal, &structures) {

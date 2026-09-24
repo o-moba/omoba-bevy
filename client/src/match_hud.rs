@@ -711,12 +711,12 @@ mod tests {
     fn team_buff_hud_text_lists_local_team_buffs_with_remaining_time() {
         let buffs = vec![
             TeamBuffState {
-                team: Team::Green,
+                team: Team::Green.into(),
                 kind: TeamBuffKind::WendigoFavor,
                 remaining_secs: 71.3,
             },
             TeamBuffState {
-                team: Team::Blue,
+                team: Team::Blue.into(),
                 kind: TeamBuffKind::MutatioMight,
                 remaining_secs: 45.0,
             },
@@ -744,7 +744,7 @@ mod tests {
     fn team_buff_hud_text_is_empty_without_active_buffs() {
         assert_eq!(team_buff_hud_text(&[], Team::Green), "");
         let enemy_only = vec![TeamBuffState {
-            team: Team::Blue,
+            team: Team::Blue.into(),
             kind: TeamBuffKind::WendigoFavor,
             remaining_secs: 10.0,
         }];
@@ -755,12 +755,12 @@ mod tests {
     fn team_buff_hud_text_stacks_both_buffs_on_separate_lines() {
         let buffs = vec![
             TeamBuffState {
-                team: Team::Green,
+                team: Team::Green.into(),
                 kind: TeamBuffKind::WendigoFavor,
                 remaining_secs: 30.0,
             },
             TeamBuffState {
-                team: Team::Green,
+                team: Team::Green.into(),
                 kind: TeamBuffKind::MutatioMight,
                 remaining_secs: 80.0,
             },

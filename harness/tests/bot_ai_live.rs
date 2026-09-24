@@ -6,7 +6,7 @@
 use std::time::{Duration, Instant};
 
 use harness::{
-    Bot, Character, GameState, HeroClass, ServerProcess, Team,
+    Bot, Character, GameState, HeroClass, ServerProcess, SnapshotView, Team,
     bot_ai::{BotBrain, Lane, WorldView, step_toward},
 };
 

@@ -54,12 +54,17 @@ use ekza_bevy_sdk::EkzaCharacter as CharacterChoice;
 use gameplay::GameplayPlugin;
 use neutrals::*;
 use progression::*;
-use serde::{Deserialize, Serialize};
 use session::*;
 use shared::combat::{CombatEntity, CombatEntityKind, CombatEvent, MinionKind, ProjectileStyle};
+use shared::map::{Lane, Team};
 #[cfg(test)]
 use shared::scaled_cooldown;
 use shared::shop::{ItemBonuses, ItemId, PurchaseReceipt, STARTING_GOLD};
+use shared::wire::{
+    ClientPacket, GameState, MinionBrainState, MinionState, MinionTargetKind, NeutralAiState,
+    NeutralCampType, NeutralState, PlayerState, ProjectileState, ServerPacket, StructureKind,
+    StructureState, TargetId, TargetKind, TeamBuffKind, TeamBuffState, default_character_choice,
+};
 use shared::{
     HeroClass, PlayerActionKind, SkillSlot, TargetingMode, ability_for_class_slot,
     rank_effect_scale, scaled_cast_range, scaled_mana_cost, unlocked_slots_for_level,
@@ -88,345 +93,14 @@ const IPV4_UDP_MAX_PAYLOAD_BYTES: usize = 65_507;
 const _: () = assert!(CLIENT_DATAGRAM_RECEIVE_CAPACITY > IPV4_UDP_MAX_PAYLOAD_BYTES);
 const NETWORK_DIAGNOSTIC_INTERVAL: Duration = Duration::from_secs(1);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum ClientPacket {
-    Sandbox {
-        request: shared::sandbox::SandboxRequest,
-    },
-    /// The player chose to leave the match or the queue. The seat is released
-    /// immediately instead of being held for a reconnect; the endpoint itself
-    /// stays connected for career, friends and the menus.
-    Leave,
-    Social {
-        request: shared::social::SocialRequest,
-    },
-    Career {
-        request: shared::career::CareerRequest,
-    },
-    Hello {
-        protocol_version: u16,
-    },
-    Transform {
-        #[serde(default)]
-        dash_sequence: u64,
-        x: f32,
-        y: f32,
-        z: f32,
-        yaw: f32,
-    },
-    Cast {
-        target: TargetId,
-        /// Hotbar slot index (0=Q .. 3=R); the server resolves the ability
-        /// from the caster's class kit. Defaults to Q for legacy packets.
-        #[serde(default)]
-        slot: u8,
-    },
-    Utility {
-        action: shared::utility::UtilityAction,
-        direction: [f32; 2],
-        server_epoch: u64,
-        match_id: u64,
-        request_id: u64,
-    },
-    BasicAttack {
-        target: TargetId,
-        server_epoch: u64,
-        match_id: u64,
-        request_id: u64,
-    },
-    Join {
-        #[serde(default)]
-        prematch: bool,
-        team: Team,
-        #[serde(default = "default_character_choice")]
-        character: CharacterChoice,
-        /// Selected class; unknown wire values decode as the default class.
-        #[serde(default)]
-        hero_class: HeroClass,
-        /// Cosmetic roster avatar slug; validated against the shipped roster.
-        #[serde(default)]
-        avatar: Option<String>,
-        /// Optional sprite cosmetic; validated against the frozen shared roster.
-        #[serde(default)]
-        sprite_character: Option<String>,
-        #[serde(default)]
-        session_id: Option<String>,
-        #[serde(default)]
-        passport_ticket: Option<String>,
-    },
-    Prematch {
-        request: shared::prematch::PrematchRequest,
-    },
-    Ping,
-    RequestRematch,
-    SetGodMode {
-        enabled: bool,
-    },
-    SetSpeedBoost {
-        enabled: bool,
-    },
-    /// Local practice sandbox (roster, dummies, 1v1). Ignored elsewhere.
-    Practice {
-        command: shared::practice::PracticeCommand,
-    },
-    UpgradeSkill {
-        slot: u8,
-    },
-    BuyItem {
-        item_id: String,
-        request_id: u64,
-        match_id: u64,
-        server_epoch: u64,
-    },
+/// Server-side balance of each replicated boss buff (`shared::wire::TeamBuffKind`).
+trait TeamBuffBalance {
+    fn duration(self) -> Duration;
+    fn damage_multiplier(self) -> f32;
+    fn hp_regen_per_second(self) -> f32;
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-enum Team {
-    Green,
-    Blue,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "snake_case")]
-enum Lane {
-    Top,
-    Mid,
-    Bot,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-enum TargetKind {
-    Player,
-    Minion,
-    Structure,
-    Neutral,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-struct TargetId {
-    kind: TargetKind,
-    id: u64,
-}
-
-fn default_character_choice() -> CharacterChoice {
-    CharacterChoice::Ipfs
-}
-
-/// All ability ranks start at 1 (1-based; rank 1 = base power).
-fn default_skill_ranks() -> [u8; 4] {
-    [1; 4]
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct PlayerState {
-    /// Cosmetic only, authorized from persisted profile grants by the game server.
-    #[serde(default)]
-    supporter_aura: Option<shared::supporter::AuraStyle>,
-    #[serde(default)]
-    is_bot: bool,
-    id: u64,
-    x: f32,
-    y: f32,
-    z: f32,
-    yaw: f32,
-    team: Team,
-    hp: f32,
-    max_hp: f32,
-    mana: f32,
-    max_mana: f32,
-    gold: u32,
-    #[serde(default)]
-    earned_gold: u32,
-    #[serde(default)]
-    utility: shared::utility::UtilityState,
-    #[serde(default)]
-    inventory: Vec<ItemId>,
-    #[serde(default)]
-    item_bonuses: ItemBonuses,
-    #[serde(default)]
-    shop_available: bool,
-    #[serde(default)]
-    last_purchase: Option<PurchaseReceipt>,
-    #[serde(default)]
-    basic_attack_cooldown_secs: f32,
-    #[serde(default)]
-    basic_attack_remaining_secs: f32,
-    /// Authoritative skill clocks, including reconnect and sandbox changes.
-    #[serde(default)]
-    skill_cooldown_remaining_secs: [f32; 4],
-    #[serde(default)]
-    skill_recovery_remaining_secs: f32,
-    /// Replay high-water mark, retained across reconnect and respawn in this round.
-    #[serde(default)]
-    basic_attack_request_id: u64,
-    xp: u32,
-    level: u32,
-    next_level_xp: u32,
-    skill_points: u32,
-    #[serde(default = "default_skill_ranks")]
-    ranks: [u8; 4],
-    #[serde(default = "default_character_choice")]
-    character: CharacterChoice,
-    /// Authoritative class assigned at join time (kit resolution key).
-    #[serde(default)]
-    hero_class: HeroClass,
-    /// Cosmetic roster avatar slug replicated to every client; `None` means
-    /// the legacy `character` model is used.
-    #[serde(default)]
-    avatar: Option<String>,
-    /// Cosmetic sprite id replicated to clients; old packets default safely.
-    #[serde(default)]
-    sprite_character: Option<String>,
-    /// Monotonic cosmetic event id. Advances after an accepted skill or basic attack.
-    #[serde(default)]
-    action_sequence: u64,
-    /// Last accepted cosmetic action; unknown/legacy values are safely inert.
-    #[serde(default)]
-    action_kind: PlayerActionKind,
-    /// Q/W/E/R index, or BASIC_ATTACK_ACTION_SLOT for a basic strike.
-    #[serde(default)]
-    action_slot: u8,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-enum StructureKind {
-    Tower,
-    BaseTower,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct StructureState {
-    #[serde(default)]
-    protected: bool,
-    #[serde(default)]
-    map_key: String,
-    #[serde(default)]
-    visual_profile: String,
-    #[serde(default)]
-    lane: Option<shared::map::Lane>,
-    #[serde(default)]
-    tier: u8,
-    id: u64,
-    kind: StructureKind,
-    team: Team,
-    x: f32,
-    y: f32,
-    z: f32,
-    hp: f32,
-    max_hp: f32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct MinionState {
-    #[serde(default)]
-    kind: MinionKind,
-    #[serde(default)]
-    attack_sequence: u64,
-    id: u64,
-    team: Team,
-    lane: Lane,
-    x: f32,
-    y: f32,
-    z: f32,
-    yaw: f32,
-    hp: f32,
-    max_hp: f32,
-    state: MinionBrainState,
-    target_kind: Option<MinionTargetKind>,
-    target_id: Option<u64>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-enum MinionBrainState {
-    Marching,
-    Chasing,
-    Attacking,
-    Dead,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-enum MinionTargetKind {
-    Player,
-    Minion,
-    Structure,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-enum NeutralCampType {
-    Skirmisher,
-    Bruiser,
-    Spitter,
-    /// Bottom raid boss ("Wendigo", dragon-slot objective).
-    WendigoBoss,
-    /// Top raid boss ("King Mutatio", Baron-slot objective).
-    KingMutatioBoss,
-}
-
-impl NeutralCampType {
-    fn is_boss(self) -> bool {
-        matches!(
-            self,
-            NeutralCampType::WendigoBoss | NeutralCampType::KingMutatioBoss
-        )
-    }
-
-    /// Team buff granted to the killer's team when this neutral dies.
-    fn team_buff_kind(self) -> Option<TeamBuffKind> {
-        match self {
-            NeutralCampType::WendigoBoss => Some(TeamBuffKind::WendigoFavor),
-            NeutralCampType::KingMutatioBoss => Some(TeamBuffKind::MutatioMight),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-enum NeutralAiState {
-    Idle,
-    Aggro,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct NeutralState {
-    id: u64,
-    camp_type: NeutralCampType,
-    x: f32,
-    y: f32,
-    z: f32,
-    yaw: f32,
-    hp: f32,
-    max_hp: f32,
-    ai_state: NeutralAiState,
-}
-
-/// Team-wide buff kinds granted by raid-boss kills (TASK-19).
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-enum TeamBuffKind {
-    /// Bottom boss (Wendigo): +ability damage.
-    WendigoFavor,
-    /// Top boss (King Mutatio): +ability damage and HP regen.
-    MutatioMight,
-}
-
-impl TeamBuffKind {
-    const ALL: [TeamBuffKind; 2] = [TeamBuffKind::WendigoFavor, TeamBuffKind::MutatioMight];
-
-    fn index(self) -> usize {
-        match self {
-            TeamBuffKind::WendigoFavor => 0,
-            TeamBuffKind::MutatioMight => 1,
-        }
-    }
-
+impl TeamBuffBalance for TeamBuffKind {
     fn duration(self) -> Duration {
         match self {
             TeamBuffKind::WendigoFavor => BOTTOM_BOSS_BUFF_DURATION,
@@ -447,14 +121,6 @@ impl TeamBuffKind {
             TeamBuffKind::MutatioMight => TOP_BOSS_BUFF_HP_REGEN_PER_SECOND,
         }
     }
-}
-
-/// Replicated team-buff entry (additive snapshot field, `serde(default)`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct TeamBuffState {
-    team: Team,
-    kind: TeamBuffKind,
-    remaining_secs: f32,
 }
 
 fn team_index(team: Team) -> usize {
@@ -524,80 +190,6 @@ impl TeamBuffs {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ProjectileState {
-    #[serde(default)]
-    source_kind: CombatEntityKind,
-    #[serde(default)]
-    style: ProjectileStyle,
-    #[serde(default)]
-    action_slot: Option<u8>,
-    #[serde(default)]
-    direction: [f32; 3],
-    id: u64,
-    owner_id: u64,
-    owner_team: Team,
-    x: f32,
-    y: f32,
-    z: f32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-// Outbound packets are serialized immediately, never queued as enum values.
-// Keep both envelopes inline to avoid an extra allocation per gameplay snapshot.
-#[allow(clippy::large_enum_variant)]
-enum ServerPacket {
-    Social {
-        server_epoch: u64,
-        match_id: u64,
-        sequence: u64,
-        social: shared::social::SocialView,
-    },
-    Career {
-        server_epoch: u64,
-        sequence: u64,
-        career: shared::career::CareerView,
-    },
-    Snapshot {
-        #[serde(default)]
-        vision: Option<shared::vision::TeamVision>,
-        #[serde(default)]
-        sandbox: Option<shared::sandbox::SandboxSnapshot>,
-        #[serde(default)]
-        match_mode: String,
-        #[serde(default)]
-        geometry_id: String,
-        #[serde(default)]
-        map_profile: String,
-        #[serde(flatten, default)]
-        meta: shared::protocol::SnapshotMeta,
-        #[serde(default)]
-        join_error: Option<shared::protocol::JoinRejection>,
-        your_id: u64,
-        players: Vec<PlayerState>,
-        #[serde(default)]
-        scoreboard: Option<shared::live_score::LiveScoreboard>,
-        #[serde(default)]
-        prematch: Option<shared::prematch::PrematchSnapshot>,
-        projectiles: Vec<ProjectileState>,
-        #[serde(default)]
-        combat_events: Vec<CombatEvent>,
-        structures: Vec<StructureState>,
-        minions: Vec<MinionState>,
-        #[serde(default)]
-        neutrals: Vec<NeutralState>,
-        /// Active boss team buffs (additive field; absent = no buffs).
-        #[serde(default)]
-        team_buffs: Vec<TeamBuffState>,
-        #[serde(default)]
-        forest_pickups: Vec<shared::forest_pickups::ForestPickupState>,
-        game_state: GameState,
-        #[serde(default)]
-        rematch_in_secs: Option<u64>,
-    },
-}
-
 #[derive(Debug)]
 enum SnapshotDatagramError {
     Serialize(serde_json::Error),
@@ -656,26 +248,6 @@ fn validate_snapshot_payload_size(payload_len: usize) -> Result<(), SnapshotData
         });
     }
     Ok(())
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum GameState {
-    #[default]
-    Lobby,
-    /// Release-mode match formation: players joined so far vs. roster size.
-    Forming {
-        ready: u32,
-        needed: u32,
-    },
-    /// Full roster assembled; match starts when the countdown elapses.
-    Starting {
-        countdown_ms: u32,
-    },
-    Running,
-    Victory {
-        winner: Team,
-    },
 }
 
 /// How matches are allowed to start.

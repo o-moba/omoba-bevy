@@ -44,6 +44,36 @@ pub enum Team {
     Blue,
 }
 
+impl From<shared::map::Team> for Team {
+    fn from(team: shared::map::Team) -> Self {
+        match team {
+            shared::map::Team::Green => Team::Green,
+            shared::map::Team::Blue => Team::Blue,
+        }
+    }
+}
+
+impl From<Team> for shared::map::Team {
+    fn from(team: Team) -> Self {
+        match team {
+            Team::Green => shared::map::Team::Green,
+            Team::Blue => shared::map::Team::Blue,
+        }
+    }
+}
+
+impl PartialEq<shared::map::Team> for Team {
+    fn eq(&self, other: &shared::map::Team) -> bool {
+        *self == Team::from(*other)
+    }
+}
+
+impl PartialEq<Team> for shared::map::Team {
+    fn eq(&self, other: &Team) -> bool {
+        Team::from(*self) == *other
+    }
+}
+
 impl Team {
     pub fn as_str(self) -> &'static str {
         match self {

@@ -78,7 +78,7 @@ fn spawn_post_match(
     local_team: Query<&Team, With<crate::player::Player>>,
 ) {
     let winner = match game.state {
-        GameState::Victory { winner } => Some(winner),
+        GameState::Victory { winner } => Some(winner.into()),
         _ => None,
     };
     let headline = outcome_headline(winner, local_team.iter().next().copied());

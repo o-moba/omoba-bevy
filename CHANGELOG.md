@@ -4,6 +4,16 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [Unreleased]
+
+### Shared wire protocol
+
+- Move the gameplay UDP/JSON packet types (`ClientPacket`, `ServerPacket`, `PlayerState`, `ProjectileState`, `StructureState`, `MinionState`, `NeutralState`, `GameState` and their enums) into `shared::wire`; server, client and harness use that one definition. Bytes on the wire are unchanged and pinned by golden tests taken from the previous server.
+- Replace the server and client `Team`/`Lane` copies with `shared::map::{Team, Lane}` and delete the identity converters; the client keeps `team::Team` and `net::StructureKind` as Bevy components with `From` conversions at the network boundary.
+- Drop the client-only `career` field from `Snapshot` (the server never sent it; career data keeps its own datagram).
+- Harness: the protocol mirror is gone (it lacked `warden`, `passport_ticket` and the social/career envelopes); bots log the first undecodable packet instead of dropping it silently.
+- Add `wire` golden and round-trip tests to `shared`, and the review rule that wire types are never copied.
+
 ## [0.23.0-rc.6] - 2026-09-24
 
 - Add the fifth class, Warden (wire id `warden`): a melee jungler with Feral Swipe, Barkskin, Hunter's Mark and Primal Maul, 210 base HP and its own growth, claw projectile style and item order.

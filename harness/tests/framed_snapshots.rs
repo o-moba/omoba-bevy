@@ -1,7 +1,7 @@
 //! Actual release 5v5 traffic through the bounded native snapshot transport.
 //! Build the current server before this test; do not use a stale prebuilt binary.
 
-use harness::{Bot, Character, HeroClass, ServerPacket, ServerProcess, Team};
+use harness::{Bot, Character, HeroClass, ServerPacket, ServerProcess, SnapshotView, Team};
 use serde_json::Value;
 use shared::protocol::{PROTOCOL_VERSION, SnapshotMeta, SnapshotOrder};
 use shared::transport::{MAX_DATAGRAM_BYTES, SnapshotAssembler};
@@ -226,7 +226,6 @@ fn real_release_5v5_snapshots_fit_framed_datagrams_and_keep_complete_ordered_sch
     assert_eq!(typed.minions().len(), 9);
     assert_eq!(typed.scoreboard().unwrap().players.len(), 10);
     let own_team = typed.player(typed.your_id()).unwrap().team;
-    assert!(own_team.is_some());
     assert!(typed.players().iter().all(|actor| actor.team == own_team));
     assert!(
         typed

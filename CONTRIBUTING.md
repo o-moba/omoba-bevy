@@ -31,6 +31,8 @@ AI-assisted work is welcome when you have reviewed it, verified the result and c
 
 Keep changes focused and explain the user-visible result. Include relevant verification and known limits; a mobile preview is not a physical-device test. Follow the existing Rust formatting and Conventional Commit style. Run `make check` before pushing: it is the same gate CI runs on every push and pull request (`cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, `cargo test --workspace --locked`, and the Python tooling tests). The toolchain is pinned in `rust-toolchain.toml`; bump it deliberately in its own change. For gameplay changes also run `make verify-gameplay` (the headless harness) or a multiplayer check. Documentation-only changes need link/content review rather than a full game build.
 
+Wire types live only in `shared/src/protocol/wire.rs`; never copy them into the server, client or harness. Add a field there once (with a `serde(default)` when it is additive) and extend the golden test in that file.
+
 Maintain API and license boundaries: shared reusable logic belongs in the MPL crates; moving AGPL-only server code into another directory does not relicense it. Do not add dependencies or change existing asset licenses silently.
 
 Be respectful of players and contributors. The maintainers decide what enters the official repository and explain significant direction changes. Others may fork or disagree under the licenses; contributing does not require surrendering that freedom or ownership of your work.

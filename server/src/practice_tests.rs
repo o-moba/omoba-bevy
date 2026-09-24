@@ -287,13 +287,7 @@ fn a_deliberate_leave_frees_the_seat_and_lets_the_same_session_pick_again() {
         .find(|p| p.player_id == first_id)
         .unwrap();
     assert_eq!(old.hero_class, first_class);
-    assert_eq!(
-        old.team,
-        match first_team {
-            Team::Green => shared::map::Team::Green,
-            Team::Blue => shared::map::Team::Blue,
-        }
-    );
+    assert_eq!(old.team, first_team);
     assert_eq!(
         (old.connected, old.kills, old.level, old.earned_gold),
         (false, 2, 4, 100)
@@ -304,13 +298,7 @@ fn a_deliberate_leave_frees_the_seat_and_lets_the_same_session_pick_again() {
         .find(|p| p.player_id == new_id)
         .unwrap();
     assert_eq!(new.hero_class, HeroClass::Cleric);
-    assert_eq!(
-        new.team,
-        match new_team {
-            Team::Green => shared::map::Team::Green,
-            Team::Blue => shared::map::Team::Blue,
-        }
-    );
+    assert_eq!(new.team, new_team);
     assert_eq!(
         (new.connected, new.kills, new.level, new.earned_gold),
         (true, 0, STARTING_LEVEL, 1)

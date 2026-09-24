@@ -1,5 +1,6 @@
 //! Private immutable allocation manifest and atomic worker lifecycle receipts.
 use crate::*;
+use serde::{Deserialize, Serialize};
 use shared::{career::valid_profile_id, match_service::MatchPreference};
 use std::{
     fs,
@@ -72,10 +73,7 @@ impl Manifest {
         self.humans
             .iter()
             .find(|h| h.profile_id == profile && h.session_id == session)
-            .map(|h| match h.team {
-                shared::map::Team::Green => Team::Green,
-                shared::map::Team::Blue => Team::Blue,
-            })
+            .map(|h| h.team)
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

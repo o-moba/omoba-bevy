@@ -554,7 +554,7 @@ mod tests {
 
         // The result screen follows the server's verdict.
         app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Victory {
-            winner: crate::team::Team::Green,
+            winner: shared::map::Team::Green,
         };
         settle(&mut app);
         assert_eq!(screen(&app), AppScreen::PostMatch);

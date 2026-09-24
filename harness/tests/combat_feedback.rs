@@ -1,7 +1,8 @@
 //! Real UDP receipts and mixed-wave combat. Hero placement uses the existing
 //! explicit dev targeting fixture; the wave scenario uses normal spawn/movement.
-use harness::{Bot, Character, HeroClass, ServerPacket, ServerProcess, Team};
+use harness::{Bot, Character, HeroClass, ServerPacket, ServerProcess, SnapshotView, Team};
 use shared::combat::{CombatEntityKind, MinionKind, ProjectileStyle};
+use shared::map::Lane;
 use std::{
     collections::{HashMap, HashSet},
     time::{Duration, Instant},
@@ -157,14 +158,14 @@ fn normal_waves_have_two_melee_one_caster_and_caster_damage_arrives_after_releas
         if !checked_wave && packet.minions().len() == 9 && opposing_packet.minions().len() == 9 {
             for (team, packet) in [(Team::Green, &packet), (Team::Blue, &opposing_packet)] {
                 assert!(
-                    packet.minions().iter().all(|m| m.team == Some(team)),
+                    packet.minions().iter().all(|m| m.team == team),
                     "first wave is recipient-owned sight"
                 );
-                for lane in ["top", "mid", "bot"] {
+                for lane in [Lane::Top, Lane::Mid, Lane::Bot] {
                     let group: Vec<_> = packet
                         .minions()
                         .iter()
-                        .filter(|m| m.team == Some(team) && m.lane == lane)
+                        .filter(|m| m.team == team && m.lane == lane)
                         .collect();
                     assert_eq!(group.len(), 3);
                     assert_eq!(

@@ -357,7 +357,7 @@ fn match_transitions_announce_once_without_new_epoch_or_round_history_replay() {
         AudioCue::MatchStart
     ));
     let victory = GameState::Victory {
-        winner: Team::Green,
+        winner: Team::Green.into(),
     };
     assert!(has(
         &cursor.accept((1, 1), &victory, Some(local()), &[]).1,
@@ -394,7 +394,9 @@ fn match_transitions_announce_once_without_new_epoch_or_round_history_replay() {
         &cursor
             .accept(
                 (2, 1),
-                &GameState::Victory { winner: Team::Blue },
+                &GameState::Victory {
+                    winner: Team::Blue.into()
+                },
                 Some(local()),
                 &[]
             )

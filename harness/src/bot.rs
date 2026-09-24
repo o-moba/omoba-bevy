@@ -14,7 +14,7 @@ use std::{
 };
 
 use crate::protocol::{
-    Character, ClientPacket, HeroClass, PlayerState, ServerPacket, TargetId, Team,
+    Character, ClientPacket, HeroClass, PlayerState, ServerPacket, SnapshotView, TargetId, Team,
 };
 
 /// Per-recv socket timeout. Snapshots arrive every ~50ms, so this is short
@@ -37,6 +37,8 @@ pub struct Bot {
     order: shared::protocol::SnapshotOrder,
     framed: bool,
     dash_sequence: u64,
+    /// Decode failures are reported once per bot, then counted silently.
+    decode_errors: u64,
 }
 
 impl Bot {
@@ -62,6 +64,7 @@ impl Bot {
             order: Default::default(),
             framed: false,
             dash_sequence: 0,
+            decode_errors: 0,
         }
     }
 
@@ -79,7 +82,24 @@ impl Bot {
             .assembler
             .push(&self.recv_buf[..len], Instant::now())
             .ok()??;
-        let packet: ServerPacket = serde_json::from_slice(&bytes).ok()?;
+        let packet: ServerPacket = match serde_json::from_slice(&bytes) {
+            Ok(packet) => packet,
+            Err(error) => {
+                self.decode_errors += 1;
+                if self.decode_errors == 1 {
+                    eprintln!(
+                        "bot: dropping undecodable server packet ({error}); \
+                         later decode failures are counted, not logged"
+                    );
+                }
+                return None;
+            }
+        };
+        // Scenarios read gameplay snapshots; social and career envelopes use
+        // their own datagram paths and are not surfaced here.
+        if !matches!(packet, ServerPacket::Snapshot { .. }) {
+            return None;
+        }
         if (self.framed || packet.meta().protocol_version != 0) && !self.order.accept(packet.meta())
         {
             return None;
@@ -116,6 +136,7 @@ impl Bot {
             avatar: None,
             sprite_character: None,
             session_id,
+            passport_ticket: None,
         });
     }
 
@@ -157,6 +178,7 @@ impl Bot {
             avatar: avatar.map(str::to_owned),
             sprite_character: sprite_character.map(str::to_owned),
             session_id: None,
+            passport_ticket: None,
         });
     }
 

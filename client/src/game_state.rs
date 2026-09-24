@@ -187,7 +187,7 @@ fn update_game_state_ui(
             {
                 label.0 = format!(
                     "Match complete\n{} destroyed the enemy base.\nFinalizing your match results…",
-                    winner.as_str()
+                    Team::from(winner).as_str()
                 );
                 return;
             }
@@ -197,7 +197,7 @@ fn update_game_state_ui(
             );
             label.0 = format!(
                 "{result}\n{} destroyed the enemy base.\n\n{next_round}\nStay connected to play again with your hero.\nEscape: settings or exit game.",
-                winner.as_str()
+                Team::from(winner).as_str()
             );
         }
     }
@@ -330,7 +330,7 @@ mod tests {
             .join_flow_committed = true;
         app.world_mut().spawn((Player, Team::Green));
         app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Victory {
-            winner: Team::Green,
+            winner: shared::map::Team::Green,
         };
         app.world_mut()
             .resource_mut::<GameStateSnapshot>()
@@ -377,7 +377,7 @@ mod tests {
         {
             let mut state = app.world_mut().resource_mut::<GameStateSnapshot>();
             state.state = GameState::Victory {
-                winner: Team::Green,
+                winner: shared::map::Team::Green,
             };
             state.meta = shared::protocol::SnapshotMeta::new(9, 2, 20);
         }

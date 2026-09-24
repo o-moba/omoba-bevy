@@ -1,4 +1,6 @@
-//! Shared additive session envelope. Gameplay entity types remain unchanged.
+//! Shared session envelope and, in [`wire`], the gameplay packet types.
+
+pub mod wire;
 
 use serde::{Deserialize, Serialize};
 

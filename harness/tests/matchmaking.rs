@@ -5,7 +5,7 @@
 
 use std::time::{Duration, Instant};
 
-use harness::{Bot, Character, GameState, ServerProcess, Team};
+use harness::{Bot, Character, GameState, ServerProcess, SnapshotView, Team};
 
 const POLL_BUDGET: Duration = Duration::from_secs(10);
 
@@ -103,7 +103,7 @@ fn release_mode_forms_and_starts_a_full_match() {
                 "distant opponent remains outside sight"
             );
             assert_eq!(snapshot.players()[0].id, snapshot.your_id());
-            assert_eq!(snapshot.players()[0].team, Some(Team::Blue));
+            assert_eq!(snapshot.players()[0].team, Team::Blue);
             break;
         }
         assert!(

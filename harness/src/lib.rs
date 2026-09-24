@@ -8,8 +8,8 @@
 //! for Rust-typed gameplay-rule coverage.
 //!
 //! # Layers
-//! - [`protocol`] — a typed, minimal **test mirror** of the server's UDP wire
-//!   format. Must be kept in sync with `server/src/main.rs`.
+//! - [`protocol`] — the shared wire format (`shared::wire`) re-exported with
+//!   the [`SnapshotView`] accessors; the harness never keeps its own copy.
 //! - [`server`] — [`ServerProcess`], an RAII handle that launches the server on
 //!   a unique loopback port and kills it on drop.
 //! - [`bot`] — [`Bot`], a connected client with typed packet senders and
@@ -37,6 +37,7 @@ pub mod server;
 pub use bot::Bot;
 pub use protocol::{
     Character, ClientPacket, GameState, HeroClass, NeutralCampType, NeutralState, PlayerActionKind,
-    PlayerState, ServerPacket, TargetId, TargetKind, Team, TeamBuffKind, TeamBuffState,
+    PlayerState, ServerPacket, SnapshotView, StructureKind, TargetId, TargetKind, Team,
+    TeamBuffKind, TeamBuffState,
 };
 pub use server::ServerProcess;
