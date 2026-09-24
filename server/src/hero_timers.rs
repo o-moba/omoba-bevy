@@ -60,7 +60,7 @@ fn remaining_of(started: Option<Instant>, duration: Duration, now: Instant) -> f
 }
 
 fn no_cooldowns(player: &ConnectedPlayer) -> bool {
-    player.sandbox.as_ref().is_some_and(|c| c.no_cooldowns)
+    player.modifiers.no_cooldowns
 }
 
 /// Dead heroes and sandbox actors without cooldowns report every combat
@@ -71,7 +71,7 @@ fn combat_clocks_suspended(player: &ConnectedPlayer) -> bool {
 
 /// Full basic-attack cooldown for the hero's current class, level and gear.
 pub(crate) fn basic_attack_cooldown(player: &ConnectedPlayer) -> f32 {
-    sandbox::effective_basic_attack_cooldown(player).as_secs_f32()
+    hero_stats::basic_attack_cooldown(player).as_secs_f32()
 }
 
 pub(crate) fn basic_attack_remaining(player: &ConnectedPlayer, now: Instant) -> f32 {
@@ -80,7 +80,7 @@ pub(crate) fn basic_attack_remaining(player: &ConnectedPlayer, now: Instant) -> 
     }
     remaining_of(
         player.timers.last_basic_attack_at,
-        sandbox::effective_basic_attack_cooldown(player),
+        hero_stats::basic_attack_cooldown(player),
         now,
     )
 }
@@ -90,7 +90,7 @@ pub(crate) fn basic_attack_remaining(player: &ConnectedPlayer, now: Instant) -> 
 pub(crate) fn skill_cooldown_left(player: &ConnectedPlayer, slot: SkillSlot, now: Instant) -> f32 {
     remaining_of(
         player.timers.last_cast_at[slot.index()],
-        sandbox::effective_ability_cooldown(player, slot),
+        hero_stats::ability_cooldown(player, slot),
         now,
     )
 }
@@ -111,12 +111,9 @@ pub(crate) fn skill_recovery_remaining(player: &ConnectedPlayer, now: Instant) -
     if combat_clocks_suspended(player) {
         return 0.0;
     }
-    let recovery = Duration::from_secs_f32(shared::hero_balance::skill_recovery_secs(
-        player.hero.progress.level,
-    ));
     remaining_of(
         player.timers.last_cast_at.iter().flatten().max().copied(),
-        recovery,
+        hero_stats::skill_recovery(player),
         now,
     )
 }

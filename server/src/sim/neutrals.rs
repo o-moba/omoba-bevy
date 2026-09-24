@@ -83,7 +83,7 @@ pub(crate) fn award_neutral_kill_to_player(
                 rewards.kill_xp,
             );
             award_gold(player, gold);
-            if player.sandbox.is_none() {
+            if player.modifiers.grant_xp {
                 grant_player_xp(&mut player.hero, xp);
             }
             if !camp_type.is_boss() && player.hero.hp > 0.0 {

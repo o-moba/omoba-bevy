@@ -70,15 +70,27 @@ pub(crate) fn validate_snapshot_payload_size(
     Ok(())
 }
 
-/// Replicated player list: only joined players are visible to clients.
-/// Pre-join endpoints keep receiving snapshots (they are still addressable)
-/// but must not appear in the world as ghost players.
-pub(crate) fn build_players_snapshot(world: &GameWorld, now: Instant) -> Vec<PlayerState> {
+/// Replicated player list for the recipient with hero id `recipient`: their
+/// own entry is the `owner_view`, everyone else (teammates included) the
+/// redacted `public_view`; `None` redacts every entry. Only joined players
+/// are visible to clients. Pre-join endpoints keep receiving snapshots (they
+/// are still addressable) but must not appear in the world as ghost players.
+pub(crate) fn build_players_snapshot(
+    world: &GameWorld,
+    recipient: Option<u64>,
+    now: Instant,
+) -> Vec<PlayerState> {
     let mut snapshot = world
         .players
         .values()
         .filter(|player| player.joined)
-        .map(|player| player.owner_view(now, &world.map_layout, &world.game_state))
+        .map(|player| {
+            if recipient == Some(player.hero.identity.id) {
+                player.owner_view(now, &world.map_layout, &world.game_state)
+            } else {
+                player.public_view(now, &world.map_layout, &world.game_state)
+            }
+        })
         .collect::<Vec<_>>();
     snapshot.sort_unstable_by_key(|player| player.id);
     snapshot
@@ -115,9 +127,6 @@ impl ServerRuntime {
                 .update_earned_gold(player.hero.identity.id, player.economy.earned_gold);
         }
         let scoreboard = self.combat_log.ledger.live_scoreboard();
-        // Every recipient gets the owner view for now; redaction through
-        // `public_view` is a later step.
-        let players_snapshot = build_players_snapshot(world, now);
 
         let mut projectiles_snapshot = world
             .projectiles
@@ -211,7 +220,9 @@ impl ServerRuntime {
                 ),
                 join_error: player.join_error,
                 your_id: player.hero.identity.id,
-                players: players_snapshot.clone(),
+                // The recipient's own entry is the owner view; every other
+                // player is redacted, in the sandbox too.
+                players: build_players_snapshot(world, Some(player.hero.identity.id), now),
                 scoreboard: scoreboard.clone(),
                 prematch: prematch::snapshot(
                     &self.prematch,

@@ -679,8 +679,9 @@ impl ServerRuntime {
                     return;
                 };
                 let dummy = self.world.players.get_mut(&bot).unwrap();
-                dummy.hero.max_hp = DUMMY_MAX_HP;
-                dummy.hero.hp = DUMMY_MAX_HP;
+                dummy.modifiers.base_max_hp = Some(DUMMY_MAX_HP);
+                dummy.hero.max_hp = hero_stats::max_hp(dummy);
+                dummy.hero.hp = dummy.hero.max_hp;
                 place_dummy(dummy, anchor, origin, now);
                 println!(
                     "Practice sandbox: dummy {} at ({:.1}, {:.1})",
@@ -1002,16 +1003,7 @@ impl ServerRuntime {
                 .map(|p| (p.hero.identity.id, [p.hero.x, p.hero.z]))
                 .collect();
             others.sort_unstable_by_key(|(id, _)| *id);
-            let step = PLAYER_SPEED
-                * self.world.players[&addr]
-                    .economy
-                    .item_bonuses
-                    .move_speed_multiplier
-                * shared::hero_balance::movement_multiplier(
-                    self.world.players[&addr].hero.identity.hero_class,
-                    self.world.players[&addr].hero.progress.level,
-                )
-                * dt;
+            let step = hero_stats::move_speed(&self.world.players[&addr]) * dt;
             let accepted = steer_bot_step(id, origin, desired, step, &others, &discs);
             let movement = [accepted[0] - origin[0], accepted[1] - origin[1]];
             if movement[0].hypot(movement[1]) > 0.000_1 {

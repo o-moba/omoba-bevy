@@ -440,7 +440,7 @@ fn normal_level_ten_movement_and_item_growth_are_authoritative_and_bounded() {
             now + Duration::from_millis(200),
         );
         assert!(p.hero.x <= expected * 2.0 + MOVEMENT_POSITION_TOLERANCE + 0.0001);
-        let cooldown = sandbox::effective_basic_attack_cooldown(p);
+        let cooldown = hero_stats::basic_attack_cooldown(p);
         assert!(
             (cooldown.as_secs_f32()
                 - basic_attack_for_class(class).cooldown_secs
@@ -455,7 +455,7 @@ fn normal_level_ten_movement_and_item_growth_are_authoritative_and_bounded() {
         handle_respawns(&mut rt.world, now);
         assert_eq!(rt.world.players[&a].hero.hp, max_hp);
         assert_eq!(
-            sandbox::effective_basic_attack_cooldown(&rt.world.players[&a]),
+            hero_stats::basic_attack_cooldown(&rt.world.players[&a]),
             cooldown
         );
     }
@@ -465,11 +465,11 @@ fn normal_level_ten_movement_and_item_growth_are_authoritative_and_bounded() {
 fn explicit_sandbox_no_cooldowns_bypasses_inter_skill_recovery() {
     let (mut rt, a, _, target, now) = fixture();
     let p = rt.world.players.get_mut(&a).unwrap();
-    p.sandbox = Some(shared::sandbox::ActorConfig {
+    p.modifiers = StatModifiers {
         no_cooldowns: true,
         unlock_all: true,
         ..Default::default()
-    });
+    };
     for slot in [0, 1, 0] {
         rt.handle_packet(a, ClientPacket::Cast { target, slot }, now);
     }

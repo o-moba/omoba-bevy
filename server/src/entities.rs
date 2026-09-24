@@ -142,8 +142,6 @@ impl Vec3f {
 }
 
 pub(crate) struct ConnectedPlayer {
-    pub(crate) sandbox: Option<shared::sandbox::ActorConfig>,
-    pub(crate) sandbox_infinite_hp: bool,
     pub(crate) career_profile: Option<shared::career::ProfileSummary>,
     pub(crate) career_capable: bool,
     pub(crate) draft: prematch::DraftState,
@@ -159,12 +157,9 @@ pub(crate) struct ConnectedPlayer {
     pub(crate) last_seen: Instant,
     /// Authoritative gameplay clocks (`hero_timers`).
     pub(crate) timers: HeroTimers,
-    /// Debug invulnerability toggle (TASK04). Not networked; the requesting
-    /// client owns the toggle and the server skips damage while it is set.
-    pub(crate) god_mode: bool,
-    /// Debug movement multiplier (1.0 = normal). Raises the server's accepted
-    /// movement distance so a boosted client is not clamped as a teleport.
-    pub(crate) speed_mult: f32,
+    /// Development and sandbox overrides on top of class, level and gear
+    /// (`hero_stats`); `Default` is normal play. Not networked.
+    pub(crate) modifiers: StatModifiers,
     /// Authoritative hero core (`hero`).
     pub(crate) hero: Hero,
     /// Authoritative wallet and inventory (`hero`).
@@ -207,7 +202,7 @@ impl ConnectedPlayer {
                 dash_sequence: hero.utility.dash_sequence,
             },
             inventory: economy.inventory.clone(),
-            item_bonuses: economy.item_bonuses,
+            item_bonuses: hero_stats::combat_bonuses(self),
             shop_available: shop_is_available(hero, map, phase),
             last_purchase: economy.last_purchase.clone(),
             basic_attack_cooldown_secs: hero_timers::basic_attack_cooldown(self),
@@ -232,17 +227,32 @@ impl ConnectedPlayer {
         }
     }
 
-    /// The replicated `PlayerState` as every other client sees it. Redaction
-    /// is a later step; today it equals the owner view and the broadcast
-    /// sends the owner view to every recipient.
-    #[cfg_attr(not(test), expect(dead_code))]
+    /// The replicated `PlayerState` as every other client sees it, teammates
+    /// included: the owner view with the private economy blanked (wallet,
+    /// income, inventory, gear bonuses, purchase receipt) and the owner's
+    /// request marks (basic-attack and utility request ids) zeroed. Level,
+    /// XP, ranks and the cooldown copies stay public. Every blanked field is
+    /// `#[serde(default)]` on the wire, so this is protocol-compatible.
     pub(crate) fn public_view(
         &self,
         now: Instant,
         map: &MapLayoutState,
         phase: &GameState,
     ) -> PlayerState {
-        self.owner_view(now, map, phase)
+        let view = self.owner_view(now, map, phase);
+        PlayerState {
+            gold: 0,
+            earned_gold: 0,
+            inventory: Vec::new(),
+            item_bonuses: ItemBonuses::default(),
+            last_purchase: None,
+            basic_attack_request_id: 0,
+            utility: shared::utility::UtilityState {
+                last_request_id: 0,
+                ..view.utility
+            },
+            ..view
+        }
     }
 }
 

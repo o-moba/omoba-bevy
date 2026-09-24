@@ -529,7 +529,7 @@ impl ServerRuntime {
                 .world
                 .players
                 .values()
-                .any(|p| p.joined && (p.god_mode || p.speed_mult != 1.0))
+                .any(|p| p.joined && (p.modifiers.god_mode || p.modifiers.move_speed_mult != 1.0))
         {
             return Err("Development gameplay modifiers are enabled.");
         }
@@ -575,8 +575,8 @@ impl ServerRuntime {
             && approved_default_map(&self.world.map_config)
             && !self.targeting_qa
             && self.world.players.values().filter(|p| p.joined).all(|p| {
-                !p.god_mode
-                    && p.speed_mult == 1.0
+                !p.modifiers.god_mode
+                    && p.modifiers.move_speed_mult == 1.0
                     && (p.hero.identity.is_bot || p.career_profile.is_some())
             });
         if durable && self.career.pending.len() >= MAX_PENDING_RESULTS {

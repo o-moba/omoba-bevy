@@ -75,15 +75,16 @@ pub(crate) fn regenerate_team_buff_hp(world: &mut GameWorld, tick: TickCtx) {
 
 /// Bulletproof debug invulnerability: after all damage for the tick, force god-mode
 /// players back to full HP and cancel any pending respawn, so they never die even if
-/// a damage path is missed (TASK04).
+/// a damage path is missed (TASK04). `infinite_resource` refills the pool the
+/// same way; the development toggle sets both, the sandbox sets each on its own.
 pub(crate) fn restore_god_mode_players(world: &mut GameWorld) {
     for player in world.players.values_mut() {
-        if player.god_mode {
+        if player.modifiers.god_mode {
             player.hero.hp = player.hero.max_hp;
-            if player.sandbox.as_ref().is_none_or(|c| c.infinite_resource) {
-                player.hero.mana = player.hero.max_mana;
-            }
             player.timers.respawn_at = None;
+        }
+        if player.modifiers.infinite_resource {
+            player.hero.mana = player.hero.max_mana;
         }
     }
 }

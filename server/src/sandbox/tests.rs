@@ -77,8 +77,8 @@ fn sandbox_defaults_valid_and_actor_edit_is_transactional() {
     assert_eq!(p.hero.progress.ranks, [3; 4]);
     assert_eq!(p.economy.inventory.len(), 6);
     assert_eq!(p.hero.max_hp, 321.0 + 9.0 * 18.0 + 45.0);
-    assert!(p.economy.item_bonuses.damage_multiplier > 2.0);
-    assert!(p.economy.item_bonuses.attack_speed_multiplier > 3.0);
+    assert!(hero_stats::combat_bonuses(p).damage_multiplier > 2.0);
+    assert!(hero_stats::combat_bonuses(p).attack_speed_multiplier > 3.0);
     c.player.max_hp = f32::NAN;
     assert!(!command(&mut rt, a, SandboxCommand::ApplyConfig { config: c }).accepted);
     assert_eq!(rt.world.players[&a].hero.hp, 27.0);
@@ -313,7 +313,7 @@ fn sandbox_progression_unlock_items_teleport_reset_and_hero_swap() {
     assert_eq!(rt.world.players[&ENEMY_ADDR].hero.progress.level, 10);
     assert_eq!(rt.world.players[&ENEMY_ADDR].hero.progress.ranks, [3; 4]);
     assert_eq!(rt.world.players[&a].economy.inventory.len(), 6);
-    assert!(rt.world.players[&a].sandbox.as_ref().unwrap().unlock_all);
+    assert!(rt.world.players[&a].modifiers.unlock_all);
 }
 #[test]
 fn sandbox_ai_modes_forced_cast_and_all_heroes() {
@@ -507,8 +507,12 @@ fn sandbox_invalid_values_and_foreign_actor_do_not_partially_mutate() {
         c.player.god_mode = true;
         assert!(!command(&mut rt, a, SandboxCommand::ApplyConfig { config: c }).accepted);
         assert_eq!(
-            rt.world.players[&a].sandbox.as_ref().unwrap(),
-            &baseline.player
+            rt.sandbox
+                .as_ref()
+                .unwrap()
+                .actor_config(&rt.world.players[&a])
+                .unwrap(),
+            baseline.player
         );
         assert_eq!(rt.world.players.len(), 1);
     }
@@ -720,7 +724,7 @@ fn sandbox_duel_restart_preserves_controls_and_restores_environment() {
     );
     assert_eq!(rt.world.players[&a].hero.progress.level, 10);
     assert_eq!(rt.world.players[&a].hero.progress.ranks, [3; 4]);
-    assert!(rt.world.players[&a].god_mode);
+    assert!(rt.world.players[&a].modifiers.god_mode);
     assert_eq!(
         rt.world.players[&ENEMY_ADDR].hero.identity.hero_class,
         HeroClass::Ranger
@@ -854,19 +858,19 @@ fn sandbox_quarter_attack_speed_delays_real_basic_and_q_gates_then_can_be_disabl
     let slow_basic = ordinary_basic.mul_f32(4.0);
     let slow_q = ordinary_q.mul_f32(4.0);
     assert!(
-        (effective_basic_attack_cooldown(&rt.world.players[&a]).as_secs_f32()
+        (hero_stats::basic_attack_cooldown(&rt.world.players[&a]).as_secs_f32()
             - slow_basic.as_secs_f32())
         .abs()
             < 0.00001
     );
     assert!(
-        (effective_ability_cooldown(&rt.world.players[&a], SkillSlot::Q).as_secs_f32()
+        (hero_stats::ability_cooldown(&rt.world.players[&a], SkillSlot::Q).as_secs_f32()
             - slow_q.as_secs_f32())
         .abs()
             < 0.00001
     );
     assert_eq!(
-        effective_ability_cooldown(&rt.world.players[&a], SkillSlot::W),
+        hero_stats::ability_cooldown(&rt.world.players[&a], SkillSlot::W),
         ordinary_w
     );
     let basic = |rt: &mut ServerRuntime, request, at| {
@@ -920,11 +924,11 @@ fn sandbox_quarter_attack_speed_delays_real_basic_and_q_gates_then_can_be_disabl
         },
     );
     assert_eq!(
-        effective_basic_attack_cooldown(&rt.world.players[&a]),
+        hero_stats::basic_attack_cooldown(&rt.world.players[&a]),
         ordinary_basic
     );
     assert_eq!(
-        effective_ability_cooldown(&rt.world.players[&a], SkillSlot::Q),
+        hero_stats::ability_cooldown(&rt.world.players[&a], SkillSlot::Q),
         ordinary_q
     );
     let reset_at = rt.sandbox.as_ref().unwrap().now;
@@ -945,17 +949,17 @@ fn sandbox_quarter_attack_speed_delays_real_basic_and_q_gates_then_can_be_disabl
 fn sandbox_low_multiplier_exception_does_not_change_ordinary_item_floors() {
     let (mut rt, a, _) = fixture();
     let player = rt.world.players.get_mut(&a).unwrap();
-    player.sandbox = None;
+    player.modifiers = StatModifiers::default();
     player.economy.item_bonuses.damage_multiplier = 0.0;
     player.economy.item_bonuses.attack_speed_multiplier = 0.25;
     let def = shared::basic_attack_for_class(player.hero.identity.hero_class);
-    assert_eq!(effective_basic_attack_damage(player), def.damage);
+    assert_eq!(hero_stats::basic_attack_damage(player), def.damage);
     assert_eq!(
-        effective_basic_attack_cooldown(player),
+        hero_stats::basic_attack_cooldown(player),
         Duration::from_secs_f32(def.cooldown_secs)
     );
     assert_eq!(
-        effective_ability_cooldown(player, SkillSlot::Q),
+        hero_stats::ability_cooldown(player, SkillSlot::Q),
         shared::scaled_cooldown(
             &player.hero.identity.hero_class.abilities()[0],
             player.hero.progress.ranks[0]

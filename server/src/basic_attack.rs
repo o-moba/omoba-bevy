@@ -84,8 +84,8 @@ pub(crate) fn handle_basic_attack_request(
         return;
     }
     let definition = basic_attack_for_class(attacker.hero.identity.hero_class);
-    let cooldown = sandbox::effective_basic_attack_cooldown(attacker);
-    if !attacker.sandbox.as_ref().is_some_and(|c| c.no_cooldowns)
+    let cooldown = hero_stats::basic_attack_cooldown(attacker);
+    if !attacker.modifiers.no_cooldowns
         && attacker
             .timers
             .last_basic_attack_at
@@ -94,15 +94,15 @@ pub(crate) fn handle_basic_attack_request(
         return;
     }
     let team = attacker.hero.identity.team;
-    let sandbox = attacker.sandbox.is_some();
+    let bypass_vision = attacker.modifiers.bypass_vision;
     let origin = Vec3f::new(
         attacker.hero.x,
         attacker.hero.y + CAST_SPAWN_HEIGHT,
         attacker.hero.z,
     );
-    let damage = sandbox::effective_basic_attack_damage(attacker)
-        * world.team_buffs.damage_multiplier(team, now);
-    if !sandbox && !vision::target_visible(team, target, world, now) {
+    let damage =
+        hero_stats::basic_attack_damage(attacker) * world.team_buffs.damage_multiplier(team, now);
+    if !bypass_vision && !vision::target_visible(team, target, world, now) {
         return;
     }
     let Some((position, radius)) = resolve_hostile_target(

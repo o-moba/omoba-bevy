@@ -92,7 +92,7 @@ fn assert_view(rt: &ServerRuntime, addr: SocketAddr, now: Instant, step: &str, e
             dash_sequence: hero.utility.dash_sequence,
         },
         inventory: economy.inventory.clone(),
-        item_bonuses: economy.item_bonuses,
+        item_bonuses: hero_stats::combat_bonuses(player),
         shop_available: expected.shop,
         last_purchase: economy.last_purchase.clone(),
         basic_attack_cooldown_secs: expected.basic_cooldown,
@@ -120,11 +120,26 @@ fn assert_view(rt: &ServerRuntime, addr: SocketAddr, now: Instant, step: &str, e
         "{step}: player {}",
         hero.identity.id
     );
+    // Everyone else sees the same view with the private economy and the
+    // owner's request marks blanked; nothing else differs.
+    let redacted = PlayerState {
+        gold: 0,
+        earned_gold: 0,
+        inventory: Vec::new(),
+        item_bonuses: ItemBonuses::default(),
+        last_purchase: None,
+        basic_attack_request_id: 0,
+        utility: shared::utility::UtilityState {
+            last_request_id: 0,
+            ..want.utility
+        },
+        ..want
+    };
     assert_eq!(
-        serde_json::to_vec(&view).unwrap(),
-        serde_json::to_vec(&player.public_view(now, &rt.world.map_layout, &rt.world.game_state))
+        serde_json::to_string(&player.public_view(now, &rt.world.map_layout, &rt.world.game_state))
             .unwrap(),
-        "{step}: public view is the owner view until redaction lands"
+        serde_json::to_string(&redacted).unwrap(),
+        "{step}: public view is the redacted owner view"
     );
 }
 
@@ -407,8 +422,14 @@ fn owner_view_reproduces_the_replicated_clocks_for_sandbox_actors() {
         target_id: None,
     };
     let now = advance(&mut rt);
-    let actor = |rt: &ServerRuntime| rt.world.players[&a].sandbox.clone().unwrap();
-    // The sandbox folds the actor's attack speed into its gear bonuses.
+    let actor = |rt: &ServerRuntime| {
+        rt.sandbox
+            .as_ref()
+            .unwrap()
+            .actor_config(&rt.world.players[&a])
+            .unwrap()
+    };
+    // The actor's attack speed scales its gear bonuses (`combat_bonuses`).
     let bonuses = |c: &shared::sandbox::ActorConfig| {
         let mut bonuses = item_bonuses(&c.inventory);
         bonuses.attack_speed_multiplier *= c.attack_speed;

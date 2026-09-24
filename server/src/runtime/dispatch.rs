@@ -509,12 +509,14 @@ impl ServerRuntime {
                     if !player.joined {
                         return;
                     }
-                    if player.god_mode != enabled {
+                    if player.modifiers.god_mode != enabled {
                         println!("Player {} god_mode={}", player.hero.identity.id, enabled);
                     }
-                    player.god_mode = enabled;
-                    if let Some(c) = &mut player.sandbox {
-                        c.god_mode = enabled;
+                    player.modifiers.god_mode = enabled;
+                    // The development toggle is invulnerability plus a full
+                    // pool; a sandbox actor's resources stay its own setting.
+                    if !combat_sandbox {
+                        player.modifiers.infinite_resource = enabled;
                     }
                     if enabled {
                         player.hero.hp = player.hero.max_hp;
@@ -534,13 +536,10 @@ impl ServerRuntime {
                         return;
                     }
                     let mult = if enabled { DEBUG_SPEED_MULTIPLIER } else { 1.0 };
-                    if (player.speed_mult - mult).abs() > f32::EPSILON {
+                    if (player.modifiers.move_speed_mult - mult).abs() > f32::EPSILON {
                         println!("Player {} speed_boost={}", player.hero.identity.id, enabled);
                     }
-                    player.speed_mult = mult;
-                    if let Some(c) = &mut player.sandbox {
-                        c.move_speed = mult;
-                    }
+                    player.modifiers.move_speed_mult = mult;
                 }
             }
             ClientPacket::UpgradeSkill { slot } => {

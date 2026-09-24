@@ -82,8 +82,8 @@ fn measure(
         kind: TargetKind::Player,
         id: initial_a.identity.id,
     };
-    let basic_damage = sandbox::effective_basic_attack_damage(&rt.world.players[&a]);
-    let basic_cd = sandbox::effective_basic_attack_cooldown(&rt.world.players[&a]).as_secs_f32();
+    let basic_damage = hero_stats::basic_attack_damage(&rt.world.players[&a]);
+    let basic_cd = hero_stats::basic_attack_cooldown(&rt.world.players[&a]).as_secs_f32();
     // Measure accepted movement under a deliberately overlong request, removing
     // the documented positional tolerance. Start is an unobstructed lane point.
     handle_transform_request_with_structures(

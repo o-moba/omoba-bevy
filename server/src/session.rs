@@ -33,8 +33,6 @@ impl GameWorld {
             let spawn = spawn_position_for_team(map_layout, Team::Green);
 
             ConnectedPlayer {
-                sandbox: None,
-                sandbox_infinite_hp: false,
                 career_profile: None,
                 career_capable: false,
                 draft: Default::default(),
@@ -45,8 +43,7 @@ impl GameWorld {
                 join_error: None,
                 last_seen: now,
                 timers: HeroTimers::new(now),
-                god_mode: false,
-                speed_mult: 1.0,
+                modifiers: StatModifiers::default(),
                 hero: Hero::new(player_id, spawn),
                 economy: HeroEconomy::starting(),
             }
@@ -216,12 +213,13 @@ pub(crate) fn reset_player_round(
     player.hero.y = PLAYER_GROUND_Y;
     player.hero.z = spawn.z;
     player.hero.yaw = 0.0;
-    player.hero.max_hp = shared::hero_balance::base_hp(player.hero.identity.hero_class);
-    player.hero.hp = player.hero.max_hp;
-    player.hero.mana = MAX_MANA;
-    player.hero.max_mana = MAX_MANA;
+    player.modifiers = StatModifiers::default();
     player.economy = HeroEconomy::starting();
     player.hero.progress = HeroProgress::starting();
+    player.hero.max_hp = hero_stats::max_hp(player);
+    player.hero.hp = player.hero.max_hp;
+    player.hero.max_mana = hero_stats::max_mana(player);
+    player.hero.mana = player.hero.max_mana;
     player.hero.utility = Default::default();
     player.hero.last_action = Default::default();
     player.timers.dash_ready_at = None;
@@ -231,10 +229,6 @@ pub(crate) fn reset_player_round(
     player.timers.last_cast_at = [None; 4];
     player.timers.last_basic_attack_at = None;
     player.timers.respawn_at = None;
-    player.sandbox = None;
-    player.sandbox_infinite_hp = false;
-    player.god_mode = false;
-    player.speed_mult = 1.0;
 }
 
 #[cfg(test)]
@@ -287,15 +281,7 @@ pub(crate) fn handle_transform_request_with_structures(
         .duration_since(player.timers.last_movement_at)
         .as_secs_f32()
         .clamp(0.0, MOVEMENT_MAX_DELTA_SECONDS);
-    let speed_mult = player.speed_mult.max(0.1)
-        * utility_movement_multiplier(player, now)
-        * shared::hero_balance::movement_multiplier(
-            player.hero.identity.hero_class,
-            player.hero.progress.level,
-        );
-    let max_distance =
-        PLAYER_SPEED * speed_mult * player.economy.item_bonuses.move_speed_multiplier * elapsed
-            + MOVEMENT_POSITION_TOLERANCE;
+    let max_distance = hero_stats::movement_envelope(player, now, elapsed);
 
     let accepted = if distance <= max_distance || distance <= 0.000_1 {
         requested
@@ -351,7 +337,7 @@ pub(crate) fn handle_respawns(world: &mut GameWorld, now: Instant) {
         ..
     } = world;
     for player in players.values_mut() {
-        if player.sandbox.is_some() && player.hero.identity.is_bot {
+        if !player.modifiers.respawns {
             continue;
         }
         let Some(respawn_at) = player.timers.respawn_at else {

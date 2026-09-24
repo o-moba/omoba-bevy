@@ -115,14 +115,33 @@ the instants (`basic_attack_remaining`, `skill_cooldown_remaining`,
 `skill_recovery_remaining`, `dash_remaining`, `haste_remaining`,
 `haste_active`), used as gates by the request handlers and by the sandbox
 telemetry, and `normalize_hero_timers`, the one place that clears instants
-from derived conditions (death, sandbox `no_cooldowns`), run once per tick
-after respawns. `PlayerState` is built only by the views:
-`ConnectedPlayer::owner_view(now, map, phase)` maps `hero` and `economy`
-onto the wire struct and fills the cooldown, utility-clock and shop fields at
-the tick's `now`; `public_view` is the hook for redaction and equals the
-owner view today. `snapshot::build_players_snapshot(world, now)` builds every
-replicated player through it. `server/src/tests/player_view.rs` pins the
-mapping and the view's bytes through a hero lifetime.
+from derived conditions (death, `no_cooldowns`), run once per tick after
+respawns. `modifiers: StatModifiers` (`server/src/hero_stats.rs`) is the
+one overlay on top of class, level and gear: multipliers (damage, attack
+speed, move speed), flat armor and resistance, an optional base-HP override,
+and the rule flags (`god_mode`, `infinite_hp`, `infinite_resource`,
+`no_cooldowns`, `unlock_all`, `bypass_vision`, `grant_xp`, `respawns`);
+`Default` is normal play. The development toggles write `god_mode`
+(with `infinite_resource`) and `move_speed_mult`; the Combat Sandbox's
+`apply_actor` converts an `ActorConfig` into modifiers plus the hero's
+loadout once and keeps the config only to echo it in the telemetry. The
+simulation never asks whether a hero is a sandbox actor; it reads the flag
+it needs. `hero_stats` also holds the effective-stat formulas
+(`combat_bonuses`, `basic_attack_damage`, `basic_attack_cooldown`,
+`ability_cooldown`, `skill_recovery`, `move_speed`, `movement_envelope`,
+`max_hp`, `max_mana`, `mitigate`), used by the request handlers, the timers,
+the bots and the sandbox telemetry. `PlayerState` is built only by the
+views: `ConnectedPlayer::owner_view(now, map, phase)` maps `hero` and
+`economy` onto the wire struct and fills the cooldown, utility-clock and
+shop fields at the tick's `now`; `public_view` is the owner view with the
+private economy blanked (gold, earned gold, inventory, item bonuses, the
+purchase receipt) and the owner's request marks zeroed (basic-attack and
+utility request ids). `snapshot::build_players_snapshot(world, recipient,
+now)` builds the recipient's own entry through `owner_view` and every other
+player, teammates included, through `public_view`; the broadcast calls it
+per recipient, in the sandbox too. `server/src/tests/player_view.rs` pins
+the mapping and both views' bytes through a hero lifetime;
+`vision/tests.rs` pins the per-recipient redaction.
 
 Supporting modules: `entities` (the server-side records), `sim/cast.rs`
 (ability casts), `vision` (server-owned sight, takes `&GameWorld`). Unit
@@ -143,6 +162,12 @@ credit.
   and a monotonic `request_id`; transforms carry `dash_sequence`.
 - Snapshots are trimmed to the UDP payload limit by dropping the oldest
   cosmetic combat events, never gameplay state.
+- A player's private economy (gold, earned gold, inventory, item bonuses,
+  purchase receipt) and request marks (basic-attack and utility request ids)
+  are replicated only to that player; every other recipient, teammates
+  included, gets them at their serde defaults. Level, XP, ranks, HP, mana
+  and the cooldown copies are public. The scoreboard's earned gold comes
+  from the round ledger, not from `PlayerState`.
 
 ## Adding content
 
@@ -183,7 +208,11 @@ Ordered by value over cost. Each step is a separate change with the full
    `hero.rs` with `Hero`, `HeroIdentity`, `HeroProgress`, `HeroUtility`,
    `HeroAction` and `HeroEconomy`; `ConnectedPlayer.state` is gone and the
    views are the only place that builds a `PlayerState`); `StatModifiers`
-   (`hero_stats.rs`) and snapshot redaction through `public_view` remain.
+   and the effective-stat formulas in `hero_stats.rs` (done: the sandbox
+   overlay, the debug toggles and the three max-pool computations are one
+   overlay and one set of formulas); snapshot redaction through
+   `public_view` (done: non-owners receive the private economy and request
+   marks blanked). Step complete.
 7. Match rules as one policy object; career, transport and clock behind
    traits.
 8. Client `net.rs` split into transport, session, commands, ingest, apply

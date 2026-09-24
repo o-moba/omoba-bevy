@@ -45,7 +45,7 @@ fn transform_packets_cannot_tunnel_through_trees_but_a_legal_route_arrives() {
     let player = runtime.world.players.get_mut(&address).unwrap();
     player.hero.x = start[0];
     player.hero.z = start[1];
-    player.speed_mult = 100.0; // Even a legal large debug-speed step cannot tunnel.
+    player.modifiers.move_speed_mult = 100.0; // Even a legal large debug-speed step cannot tunnel.
     for _ in 0..12 {
         now += Duration::from_millis(100);
         runtime.handle_packet(
@@ -69,7 +69,7 @@ fn transform_packets_cannot_tunnel_through_trees_but_a_legal_route_arrives() {
     let player = runtime.world.players.get_mut(&address).unwrap();
     player.hero.x = start[0];
     player.hero.z = start[1];
-    player.speed_mult = 1.0;
+    player.modifiers.move_speed_mult = 1.0;
     let route = map.plan_route(start, end, &[]).unwrap();
     let mut steps = 0;
     for waypoint in route {

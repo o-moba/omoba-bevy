@@ -10,9 +10,6 @@ pub(crate) fn apply_skill_upgrade(player: &mut ConnectedPlayer, slot: u8) {
     let s = skill_slot.index();
     if player.hero.progress.skill_points > 0 && player.hero.progress.ranks[s] < def.max_rank {
         player.hero.progress.ranks[s] += 1;
-        if let Some(c) = &mut player.sandbox {
-            c.ranks = player.hero.progress.ranks;
-        }
         player.hero.progress.skill_points -= 1;
         println!(
             "Player {} upgraded {} (slot {}) to rank {}",
@@ -42,20 +39,19 @@ pub(crate) fn handle_cast_request(
     }
     // Authoritative kit resolution: class + slot -> ability definition.
     let def = ability_for_class_slot(caster.hero.identity.hero_class, skill_slot);
-    if !caster.sandbox.as_ref().is_some_and(|c| c.unlock_all)
+    if !caster.modifiers.unlock_all
         && !unlocked_slots_for_level(caster.hero.progress.level)[skill_slot.index()]
     {
         return;
     }
     let rank = caster.hero.progress.ranks[skill_slot.index()].clamp(1, def.max_rank);
     let mana_cost = scaled_mana_cost(def, rank);
-    if !caster.sandbox.as_ref().is_some_and(|c| c.infinite_resource) && caster.hero.mana < mana_cost
-    {
+    if !caster.modifiers.infinite_resource && caster.hero.mana < mana_cost {
         return;
     }
-    if !caster.sandbox.as_ref().is_some_and(|c| c.no_cooldowns)
+    if !caster.modifiers.no_cooldowns
         && caster.timers.last_cast_at[skill_slot.index()].is_some_and(|last_cast| {
-            now.duration_since(last_cast) < sandbox::effective_ability_cooldown(caster, skill_slot)
+            now.duration_since(last_cast) < hero_stats::ability_cooldown(caster, skill_slot)
         })
     {
         return;
@@ -73,11 +69,7 @@ pub(crate) fn handle_cast_request(
         let Some(caster_mut) = world.players.get_mut(&caster_addr) else {
             return;
         };
-        if !caster_mut
-            .sandbox
-            .as_ref()
-            .is_some_and(|c| c.infinite_resource)
-        {
+        if !caster_mut.modifiers.infinite_resource {
             caster_mut.hero.mana -= mana_cost;
         }
         caster_mut.timers.last_cast_at[skill_slot.index()] = Some(now);
@@ -94,7 +86,7 @@ pub(crate) fn handle_cast_request(
     }
 
     let caster_team = caster.hero.identity.team;
-    if caster.sandbox.is_none() && !vision::target_visible(caster_team, target, world, now) {
+    if !caster.modifiers.bypass_vision && !vision::target_visible(caster_team, target, world, now) {
         return;
     }
     let (target_position, target_radius) = match target.kind {
@@ -195,11 +187,7 @@ pub(crate) fn handle_cast_request(
     let Some(caster_mut) = world.players.get_mut(&caster_addr) else {
         return;
     };
-    if !caster_mut
-        .sandbox
-        .as_ref()
-        .is_some_and(|c| c.infinite_resource)
-    {
+    if !caster_mut.modifiers.infinite_resource {
         caster_mut.hero.mana -= mana_cost;
     }
     caster_mut.timers.last_cast_at[skill_slot.index()] = Some(now);
@@ -209,7 +197,7 @@ pub(crate) fn handle_cast_request(
     // boss team buffs multiply the outgoing ability damage authoritatively.
     let rank_damage = def.projectile_damage.unwrap_or(0.0)
         * effect_scale
-        * caster_mut.economy.item_bonuses.damage_multiplier
+        * hero_stats::combat_bonuses(caster_mut).damage_multiplier
         * world.team_buffs.damage_multiplier(caster_team, now);
 
     let projectile_id = world.next_projectile_id;

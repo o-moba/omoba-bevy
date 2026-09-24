@@ -115,9 +115,9 @@ fn every_class_keeps_basic_and_skill_travel_with_confirmed_source_style_and_slot
 fn receipts_use_actual_damage_and_reject_overkill_repeats_protection_and_immunity() {
     let (mut rt, a, b, now) = fixture();
     let player_id = rt.world.players[&b].hero.identity.id;
-    rt.world.players.get_mut(&b).unwrap().god_mode = true;
+    rt.world.players.get_mut(&b).unwrap().modifiers.god_mode = true;
     assert!(apply_player_damage(&mut rt.world.players, player_id, 500.0, now).is_none());
-    rt.world.players.get_mut(&b).unwrap().god_mode = false;
+    rt.world.players.get_mut(&b).unwrap().modifiers.god_mode = false;
     for bad in [0.0, -1.0, f32::NAN, f32::INFINITY] {
         assert!(apply_player_damage(&mut rt.world.players, player_id, bad, now).is_none());
     }
