@@ -355,7 +355,6 @@ fn setup(mut commands: Commands) {
                 });
         });
 }
-#[allow(clippy::too_many_arguments)]
 fn actions(
     mut keys: ResMut<ButtonInput<KeyCode>>,
     session: Res<ClientSession>,
@@ -438,7 +437,6 @@ fn scores(board: Option<&LiveScoreboard>, local: Option<u64>) -> (String, String
         );
     (format!("{} : {}", sum(Team::Green), sum(Team::Blue)), kda)
 }
-#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn update(
     state: Res<ScoreboardState>,
     game: Res<GameStateSnapshot>,

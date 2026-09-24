@@ -317,7 +317,6 @@ pub(crate) fn reset_player_round(
 }
 
 #[cfg(test)]
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_transform_request(
     player: &mut ConnectedPlayer,
     map_layout: &MapLayoutState,
@@ -339,7 +338,6 @@ pub(crate) fn handle_transform_request(
     );
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_transform_request_with_structures(
     player: &mut ConnectedPlayer,
     map_layout: &MapLayoutState,
@@ -460,7 +458,6 @@ pub(crate) fn handle_respawns(
 }
 
 /// Canonical clean-round state, before formation/start arms the clocks.
-#[allow(clippy::too_many_arguments)]
 #[cfg(test)]
 pub(crate) fn reset_match(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,
@@ -489,7 +486,6 @@ pub(crate) fn reset_match(
     );
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn reset_match_with_map(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,
     structures: &mut HashMap<u64, Structure>,

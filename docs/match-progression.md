@@ -34,7 +34,7 @@ supply `OMOBA_DATABASE_URL` to the trusted game server process. Do not put the
 connection string in Git, client builds, screenshots or public distribution.
 Since 0.20.0-rc.1, apply the versioned migration explicitly with the migration-owner
 role before starting runtime services. Runtime connections perform no DDL and reject
-unexpected schema versions. See [migration and transaction details](../server/migrations/postgres/README.md).
+unexpected schema versions. See [migration and transaction details](../career-store/migrations/postgres/README.md).
 
 ```sh
 # Initialize once as the migration owner (or use the Account API migrate command).

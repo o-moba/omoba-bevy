@@ -337,7 +337,6 @@ fn world_cursor(scene: &NavigationScene, target: Vec3) -> Option<Vec2> {
         .ok()
 }
 
-#[allow(clippy::too_many_arguments)]
 fn observe_navigation(
     mut commands: Commands,
     mut qa: ResMut<NavigationQa>,

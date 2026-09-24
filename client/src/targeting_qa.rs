@@ -411,7 +411,6 @@ fn selection_gates(
         "camera":scene.cameras.single().ok().map(|(_,transform)|serde_json::json!({"position":transform.translation().to_array(),"rotation":transform.rotation().to_array()}))})
 }
 
-#[allow(clippy::too_many_arguments)]
 fn observe_targeting(
     mut commands: Commands,
     mut qa: ResMut<TargetingQa>,
@@ -987,7 +986,6 @@ fn observe_targeting(
 
 #[derive(Component)]
 struct Shot(usize);
-#[allow(clippy::too_many_arguments)]
 fn capture(
     commands: &mut Commands,
     qa: &mut TargetingQa,

@@ -11,7 +11,7 @@ mod career_runtime;
 mod career_runtime_tests;
 #[cfg(test)]
 mod objective_balance_tests;
-use server::career_store;
+use omoba_career_store::career_store;
 mod combat_feedback;
 mod forest_pickups;
 mod gameplay;
@@ -22,7 +22,7 @@ mod match_pool;
 mod match_service;
 mod match_stats;
 mod public_transport;
-use server::matchmaking;
+use omoba_career_store::matchmaking;
 #[cfg(test)]
 mod minion_path_tests;
 #[cfg(test)]
@@ -2068,7 +2068,6 @@ fn apply_skill_upgrade(player: &mut ConnectedPlayer, slot: u8) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn handle_cast_request(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,
     projectiles: &mut HashMap<u64, Projectile>,
@@ -2326,7 +2325,6 @@ fn record_player_action(player: &mut ConnectedPlayer, slot: SkillSlot) {
     player.state.action_slot = slot.index() as u8;
 }
 
-#[allow(clippy::too_many_arguments)]
 fn simulate_projectiles(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,
     _minions: &mut HashMap<u64, Minion>,
@@ -4563,7 +4561,6 @@ mod tests {
         players.get(&target_addr).unwrap().state.id
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn cast_slot_with_buffs(
         players: &mut HashMap<SocketAddr, ConnectedPlayer>,
         projectiles: &mut HashMap<u64, Projectile>,
@@ -4593,7 +4590,6 @@ mod tests {
         );
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn cast_slot(
         players: &mut HashMap<SocketAddr, ConnectedPlayer>,
         projectiles: &mut HashMap<u64, Projectile>,

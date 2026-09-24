@@ -43,7 +43,6 @@ impl PublicTransport {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn receive(
         &mut self,
         addr: SocketAddr,

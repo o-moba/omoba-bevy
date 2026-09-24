@@ -35,7 +35,6 @@ pub(crate) fn refresh_utilities(players: &mut HashMap<SocketAddr, ConnectedPlaye
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_utility_request(
     player: &mut ConnectedPlayer,
     map: &MapLayoutState,

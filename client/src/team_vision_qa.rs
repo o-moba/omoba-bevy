@@ -89,7 +89,6 @@ struct VisionQa {
     captures: Vec<serde_json::Value>,
     readbacks: Vec<usize>,
 }
-#[allow(clippy::too_many_arguments)]
 fn prepare(
     qa: Res<VisionQa>,
     session: Res<ClientSession>,
@@ -187,7 +186,6 @@ struct Scene<'w, 's> {
     windows: Query<'w, 's, Entity, With<PrimaryWindow>>,
     minimap: MinimapQaScene<'w, 's>,
 }
-#[allow(clippy::too_many_arguments)]
 fn observe(
     mut commands: Commands,
     mut qa: ResMut<VisionQa>,

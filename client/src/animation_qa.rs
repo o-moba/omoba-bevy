@@ -250,7 +250,6 @@ fn move_heroes(qa: Res<Audit>, mut heroes: Query<(&AuditHero, &mut Transform)>) 
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn capture(
     mut commands: Commands,
     mut qa: ResMut<Audit>,

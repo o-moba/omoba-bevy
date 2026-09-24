@@ -347,7 +347,6 @@ fn load_avatar_thumbnails(
 /// Wallet pairing from the menu: start it, mirror its progress into the status
 /// line, and rebuild the picker when purchased avatars become selectable
 /// (wallet approved, or the store catalogue arrived after the menu was built).
-#[allow(clippy::too_many_arguments)]
 fn wallet_connect_ui_system(
     mut commands: Commands,
     selection: Res<TeamSelection>,
@@ -1402,10 +1401,8 @@ fn spawn_team_button(row: &mut ChildSpawnerCommands, team: Team, name: &str) {
     });
 }
 
-#[allow(clippy::too_many_arguments)]
 /// Small phone labels retain their pale text on a dark selected tile. A gold
 /// outline distinguishes selection without reducing text contrast or tile space.
-#[allow(clippy::type_complexity)]
 fn adapt_mobile_selection_contrast(
     mut commands: Commands,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,

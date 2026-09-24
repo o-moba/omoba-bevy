@@ -30,7 +30,6 @@ impl Plugin for MinionVisualsPlugin {
     }
 }
 
-#[allow(clippy::type_complexity)]
 fn attach_minion_models(
     mut commands: Commands,
     mode: Res<PlayerVisualMode>,

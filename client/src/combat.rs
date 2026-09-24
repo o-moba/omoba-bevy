@@ -813,7 +813,6 @@ fn setup_combat_ui(mut commands: Commands, asset_server: Option<Res<AssetServer>
 /// Reflect the selected class kit + server ranks on the hotbar and light the
 /// upgrade arrows when the local player has a skill point to spend and the
 /// slot is below the shared max rank.
-#[allow(clippy::type_complexity)]
 fn update_skill_bar_system(
     progression: Query<
         (
@@ -1206,7 +1205,6 @@ fn queue_cast_request(
     });
 }
 
-#[allow(clippy::type_complexity)]
 fn cast_spell_system(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     game_state: Option<Res<GameStateSnapshot>>,
@@ -1254,7 +1252,6 @@ fn cast_spell_system(
     );
 }
 
-#[allow(clippy::type_complexity)]
 fn skill_button_system(
     mut interactions: Query<
         (&Interaction, &SkillBarSlot, &mut BackgroundColor),
@@ -1312,7 +1309,6 @@ fn skill_button_system(
     }
 }
 
-#[allow(clippy::type_complexity)]
 fn resolve_pending_cast_system(
     mut commands: Commands,
     team_selection: Res<TeamSelection>,
@@ -1550,7 +1546,6 @@ fn mobile_utility_system(
 
 /// Mobile abilities share the existing PendingCast/try_cast_slot path. The
 /// assistance step changes only target choice, never range, mana or cooldowns.
-#[allow(clippy::type_complexity)]
 fn mobile_cast_system(
     mut mobile: Option<ResMut<crate::mobile_controls::MobileControls>>,
     context: Res<GameplayInputContext>,
@@ -1653,7 +1648,6 @@ fn mobile_cast_system(
     queue_cast_request(intent.slot, class, &target, &mut pending, &mut feedback);
 }
 
-#[allow(clippy::too_many_arguments)]
 fn mobile_assisted_target(
     position: Vec3,
     team: Team,
@@ -2447,7 +2441,6 @@ fn find_target_near_screen(
     best.map(|(entity, target, _)| (entity, target))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn consider_screen_target(
     best: &mut Option<(Entity, TargetId, f32)>,
     pointer_position: Vec2,

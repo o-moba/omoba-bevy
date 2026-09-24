@@ -168,7 +168,7 @@ pub async fn mutate(
             {
                 return Err(invalid());
             }
-            server::career_store::CareerStore::apply_friend_action(
+            omoba_career_store::career_store::CareerStore::apply_friend_action(
                 &mut tx,
                 &s.profile_id,
                 &f.target_profile_id,

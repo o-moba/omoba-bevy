@@ -200,7 +200,6 @@ fn navigate(
     });
     qa.requests.push(serde_json::json!({"kind":"navigation", "destination":destination.to_array(), "snapshot_tick":tick}));
 }
-#[allow(clippy::too_many_arguments)]
 fn observe(
     mut commands: Commands,
     mut qa: ResMut<PickupQa>,

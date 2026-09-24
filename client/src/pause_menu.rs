@@ -987,7 +987,6 @@ impl PauseTapState {
     }
 }
 
-#[allow(clippy::type_complexity)]
 fn collect_pause_button_taps(
     mut state: Local<PauseTapState>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,

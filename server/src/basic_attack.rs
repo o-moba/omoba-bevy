@@ -61,7 +61,6 @@ pub(crate) fn resolve_hostile_target(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_basic_attack_request(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,
     projectiles: &mut HashMap<u64, Projectile>,

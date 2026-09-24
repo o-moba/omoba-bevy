@@ -290,7 +290,6 @@ fn matching_avatar_asset<T: Asset>(
         .is_some_and(|(expected, actual)| expected == actual)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn render_loading(
     mut commands: Commands,
     game: Res<GameStateSnapshot>,

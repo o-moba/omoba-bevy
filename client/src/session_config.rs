@@ -1,5 +1,6 @@
 //! Named timing thresholds for multiplayer session lifecycle (TASK-14).
-//! Values are tuned for local playtest; see `docs/network-client-session.md` and task spec.
+//! Values are tuned for local playtest; the lifecycle is summarized in `docs/features.md`
+//! (client session lifecycle) and `docs/ARCHITECTURE.md` (protocol rules).
 //!
 //! **Failure detection** (client): stale qualifying snapshot ([`T_STALE_SNAPSHOT`]), transport
 //! send/recv error streaks ([`TRANSPORT_CONSECUTIVE_SEND_ERRORS`],

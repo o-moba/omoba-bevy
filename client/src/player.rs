@@ -1177,7 +1177,6 @@ fn handle_player_input(
 
 /// Thumb motion is a direct, analog step through the existing collision and map
 /// clipping path. It never creates a long-lived route or an automatic chase.
-#[allow(clippy::type_complexity)]
 fn move_player_mobile(
     game: Option<Res<GameStateSnapshot>>,
     mut commands: Commands,

@@ -616,7 +616,6 @@ struct CareerTap {
     activated: bool,
 }
 
-#[allow(clippy::type_complexity)]
 fn collect_career_taps(
     profile: Res<CareerUiProfile>,
     career: Res<CareerClient>,
@@ -2117,7 +2116,6 @@ struct RenderKey {
     selection_recovery: bool,
     mode: PlayerVisualMode,
 }
-#[allow(clippy::too_many_arguments)]
 fn render(
     mut commands: Commands,
     career: Res<CareerClient>,

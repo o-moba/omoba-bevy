@@ -449,7 +449,6 @@ fn clamp_2d_camera_center(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn update_camera_2d(
     time: &Time,
     camera: &Camera,

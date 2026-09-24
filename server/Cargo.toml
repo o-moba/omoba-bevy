@@ -15,6 +15,7 @@ ekza-bevy-sdk = { git = "https://github.com/ekza-space/ekza-bevy-sdk", rev = "24
 serde.workspace = true
 serde_json.workspace = true
 shared = { path = "../shared" }
+omoba-career-store = { path = "../career-store" }
 omoba-passport = { path = "../passport" }
 
 [lints]

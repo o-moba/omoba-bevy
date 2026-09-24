@@ -6,6 +6,10 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Crate hygiene
+- New `career-store` crate holds the Postgres career store, its migrations and the queue policy; the game server and the account API link it directly, so the account API no longer depends on the whole game server (Bevy, the Ekza SDK). The server package is binary-only again.
+- Remove the orphan `skills` crate (nothing depended on it and its numbers contradicted `shared`), the unused `PlayerAbilitySnapshot`, 64 redundant clippy allows already covered by the workspace policy, and two references to a documentation page that never shipped.
+
 ### Shared balance and facing
 - Hero speed, debug speed multiplier, mana pool and regeneration, projectile speed, respawn delay, level HP/mana growth, XP thresholds and bot engage range now live once in `shared::hero_balance`; the server, client prediction, offline practice, minimap and harness import them. Offline practice used to regenerate mana at 12/s (server 8/s), fly projectiles at 30 (server 19) and default the first level threshold to 120 (server 90).
 - `shared::math` defines the two model facing conventions (heroes look along -Z, minions and neutrals along +Z); every yaw in the server, client and offline simulation goes through it, and the Combat Test actor no longer runs backwards.

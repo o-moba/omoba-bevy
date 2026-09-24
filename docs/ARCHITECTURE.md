@@ -11,11 +11,12 @@ maintainers are working through. Feature-level documentation lives in
 | Crate | Role | Depends on |
 | --- | --- | --- |
 | `shared` (MPL) | The gameplay model both sides agree on: hero classes and ability kits, hero growth, items, map geometry and navigation, the wire protocol, prematch/draft, social/career/account contracts, sandbox and practice commands. No Bevy, no I/O in the model itself. | serde |
-| `server` (AGPL) | The authoritative simulation and UDP endpoint: match lifecycle, bots, combat, shop, career persistence, public transport signing, allocation workers. | shared, passport, sqlx |
+| `server` (AGPL) | The authoritative simulation and UDP endpoint: match lifecycle, bots, combat, shop, career settlement, public transport signing, allocation workers. Binary only. | shared, passport, career-store |
+| `career-store` (AGPL) | Trusted career persistence (Postgres, migrations) and the bounded queue policy, linked by the server and the account API without the engine. | shared, sqlx |
 | `client` (MPL) | The Bevy game: networking, prediction, presentation (2D sprites and 3D models), UI, mobile input, offline practice, QA harnesses. | shared, passport, bevy, ekza-bevy-sdk |
 | `harness` | Black-box UDP players and gameplay/matchmaking checks that launch the server binary. | shared |
 | `passport` | Ekza passport contract: tickets, device and web accounts, store admission. | shared, ekza-bevy-sdk |
-| `account-api` | Axum/Postgres HTTP service over the career store (portal, devices, supporter billing). | shared, server (career store) |
+| `account-api` | Axum/Postgres HTTP service over the career store (portal, devices, supporter billing). | shared, career-store |
 | `arena-sync` | CLI that pulls Ekza Arena avatars and merges the avatar manifest. | reqwest |
 
 Rules that follow from the map:
@@ -106,7 +107,8 @@ Ordered by value over cost. Each step is a separate change with the full
    (done).
 3. Balance constants and the hero facing convention in one place (done).
 4. Crate hygiene: retire the orphan `skills` crate, move the career store out
-   of the server package, keep I/O out of the shared model.
+   of the server package (done); keep I/O out of the shared model (the avatar
+   and sprite rosters still embed client manifests and read env vars; open).
 5. Server `World` + tick context instead of many-map parameters; split
    `main.rs` into protocol, dispatch, tick, snapshot and simulation modules.
 6. Authoritative hero state separate from replicated views; one ECS story.
