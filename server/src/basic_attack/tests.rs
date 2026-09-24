@@ -23,13 +23,13 @@ fn fixture() -> (ServerRuntime, SocketAddr, SocketAddr, TargetId, Instant) {
             },
             now,
         );
-        let state = &mut runtime.world.players.get_mut(&addr).unwrap().state;
+        let state = &mut runtime.world.players.get_mut(&addr).unwrap().hero;
         state.x = x;
         state.z = 0.0;
     }
     let target = TargetId {
         kind: TargetKind::Player,
-        id: runtime.world.players[&b].state.id,
+        id: runtime.world.players[&b].hero.identity.id,
     };
     (runtime, a, b, target, now)
 }
@@ -51,18 +51,18 @@ fn strike(runtime: &mut ServerRuntime, addr: SocketAddr, target: TargetId, id: u
 fn zero_mana_basic_attack_and_q_have_independent_costs_and_clocks() {
     let (mut rt, a, _, target, now) = fixture();
     let attacker = rt.world.players.get_mut(&a).unwrap();
-    attacker.state.mana = 0.0;
+    attacker.hero.mana = 0.0;
     attacker.timers.last_cast_at = [Some(now); 4];
     strike(&mut rt, a, target, 1, now);
     assert_eq!(rt.world.projectiles.len(), 1);
     let player = &rt.world.players[&a];
-    assert_eq!(player.state.mana, 0.0);
+    assert_eq!(player.hero.mana, 0.0);
     assert_eq!(player.timers.last_cast_at, [Some(now); 4]);
-    assert_eq!(player.state.action_slot, BASIC_ATTACK_ACTION_SLOT);
-    assert_eq!(player.state.action_kind, PlayerActionKind::Attack);
-    assert_eq!(player.state.ranks, [1; 4]);
+    assert_eq!(player.hero.last_action.slot, BASIC_ATTACK_ACTION_SLOT);
+    assert_eq!(player.hero.last_action.kind, PlayerActionKind::Attack);
+    assert_eq!(player.hero.progress.ranks, [1; 4]);
     let player = rt.world.players.get_mut(&a).unwrap();
-    player.state.mana = MAX_MANA;
+    player.hero.mana = MAX_MANA;
     player.timers.last_cast_at = [None; 4];
     rt.handle_packet(a, ClientPacket::Cast { target, slot: 0 }, now);
     assert_eq!(
@@ -71,7 +71,7 @@ fn zero_mana_basic_attack_and_q_have_independent_costs_and_clocks() {
         "Q remains available while basic attack cools down"
     );
     assert_eq!(rt.world.players[&a].timers.last_basic_attack_at, Some(now));
-    assert_eq!(rt.world.players[&a].state.mana, MAX_MANA - 10.0);
+    assert_eq!(rt.world.players[&a].hero.mana, MAX_MANA - 10.0);
     strike(&mut rt, a, target, 2, now + Duration::from_millis(899));
     assert_eq!(rt.world.projectiles.len(), 2);
     strike(&mut rt, a, target, 3, now + Duration::from_millis(901));
@@ -95,7 +95,7 @@ fn packet_replay_and_wrong_round_cannot_attack_or_poison_fresh_sequence() {
             },
             now,
         );
-        assert_eq!(rt.world.players[&a].state.basic_attack_request_id, 0);
+        assert_eq!(rt.world.players[&a].economy.basic_attack_request_id, 0);
     }
     strike(&mut rt, a, target, 1, now);
     // Advance beyond the attack cooldown while keeping both ordinary peers
@@ -109,7 +109,7 @@ fn packet_replay_and_wrong_round_cannot_attack_or_poison_fresh_sequence() {
     let old_packet = packet(&rt, target, 100);
     rt.restart_round(now + Duration::from_secs(6));
     rt.handle_packet(a, old_packet, now + Duration::from_secs(7));
-    assert_eq!(rt.world.players[&a].state.basic_attack_request_id, 0);
+    assert_eq!(rt.world.players[&a].economy.basic_attack_request_id, 0);
     assert!(rt.world.players[&a].timers.last_basic_attack_at.is_none());
     assert_eq!(
         rt.player_view(a, now + Duration::from_secs(7))
@@ -132,11 +132,11 @@ fn rejects_unjoined_dead_friendly_missing_and_out_of_range_targets() {
         let (mut rt, a, b, mut target, now) = fixture();
         match condition {
             "unjoined" => rt.world.players.get_mut(&a).unwrap().joined = false,
-            "dead attacker" => rt.world.players.get_mut(&a).unwrap().state.hp = 0.0,
-            "dead target" => rt.world.players.get_mut(&b).unwrap().state.hp = 0.0,
-            "friendly" => rt.world.players.get_mut(&b).unwrap().state.team = Team::Green,
+            "dead attacker" => rt.world.players.get_mut(&a).unwrap().hero.hp = 0.0,
+            "dead target" => rt.world.players.get_mut(&b).unwrap().hero.hp = 0.0,
+            "friendly" => rt.world.players.get_mut(&b).unwrap().hero.identity.team = Team::Green,
             "missing" => target.id = u64::MAX,
-            "far" => rt.world.players.get_mut(&b).unwrap().state.x = 100.0,
+            "far" => rt.world.players.get_mut(&b).unwrap().hero.x = 100.0,
             "lobby" => rt.world.game_state = GameState::Lobby,
             _ => unreachable!(),
         }
@@ -146,8 +146,11 @@ fn rejects_unjoined_dead_friendly_missing_and_out_of_range_targets() {
             rt.world.players[&a].timers.last_basic_attack_at.is_none(),
             "{condition}"
         );
-        assert_eq!(rt.world.players[&a].state.mana, MAX_MANA, "{condition}");
-        assert_eq!(rt.world.players[&a].state.action_sequence, 0, "{condition}");
+        assert_eq!(rt.world.players[&a].hero.mana, MAX_MANA, "{condition}");
+        assert_eq!(
+            rt.world.players[&a].hero.last_action.sequence, 0,
+            "{condition}"
+        );
     }
 }
 
@@ -163,7 +166,7 @@ fn target_surface_range_and_base_protection_are_authoritative_for_all_kinds() {
         let range = basic_attack_for_class(HeroClass::Warrior).range;
         let radius = match kind {
             TargetKind::Player => {
-                rt.world.players.get_mut(&b).unwrap().state.x = range + PLAYER_HIT_RADIUS - 0.01;
+                rt.world.players.get_mut(&b).unwrap().hero.x = range + PLAYER_HIT_RADIUS - 0.01;
                 PLAYER_HIT_RADIUS
             }
             TargetKind::Minion => {
@@ -220,7 +223,7 @@ fn target_surface_range_and_base_protection_are_authoritative_for_all_kinds() {
             1,
             "surface within {range}+{radius} for {kind:?}"
         );
-        rt.world.players.get_mut(&a).unwrap().state.x = -0.1;
+        rt.world.players.get_mut(&a).unwrap().hero.x = -0.1;
         strike(&mut rt, a, target, 2, now + Duration::from_secs(2));
         assert_eq!(
             rt.world.projectiles.len(),
@@ -253,10 +256,10 @@ fn equipment_changes_basic_deadline_without_rescaling_elapsed_time() {
     let (mut rt, a, _, target, now) = fixture();
     strike(&mut rt, a, target, 1, now);
     let elapsed = Duration::from_millis(400);
-    rt.world.players.get_mut(&a).unwrap().state.item_bonuses =
+    rt.world.players.get_mut(&a).unwrap().economy.item_bonuses =
         shared::shop::item_bonuses(&[ItemId::SwiftGrip, ItemId::EmberBlade]);
     let definition = basic_attack_for_class(HeroClass::Warrior);
-    let duration = basic_attack_cooldown(definition, rt.world.players[&a].state.item_bonuses);
+    let duration = basic_attack_cooldown(definition, rt.world.players[&a].economy.item_bonuses);
     assert!(
         (rt.player_view(a, now + elapsed).basic_attack_remaining_secs
             - (duration - elapsed).as_secs_f32())
@@ -291,15 +294,15 @@ fn accepted_strike_deals_real_projectile_damage_and_death_retains_replay_guard()
             dt: 0.25,
         },
     );
-    assert_eq!(rt.world.players[&b].state.hp, MAX_HP - 12.0);
+    assert_eq!(rt.world.players[&b].hero.hp, MAX_HP - 12.0);
     assert!(rt.world.projectiles.is_empty());
     let attacker = rt.world.players.get_mut(&a).unwrap();
-    attacker.state.hp = 0.0;
+    attacker.hero.hp = 0.0;
     attacker.timers.respawn_at = Some(now + Duration::from_secs(1));
     hero_timers::normalize_hero_timers(&mut rt.world);
     assert!(rt.world.players[&a].timers.last_basic_attack_at.is_none());
     handle_respawns(&mut rt.world, now + Duration::from_secs(1));
-    assert_eq!(rt.world.players[&a].state.basic_attack_request_id, 7);
+    assert_eq!(rt.world.players[&a].economy.basic_attack_request_id, 7);
     assert_eq!(
         rt.player_view(a, now + Duration::from_secs(1))
             .basic_attack_remaining_secs,
@@ -329,9 +332,9 @@ fn actual_udp_receiver_accepts_the_basic_wire_contract_once() {
         Instant::now(),
     );
     let attacker = rt.world.players.get_mut(&addr).unwrap();
-    attacker.state.x = 0.0;
-    attacker.state.z = 0.0;
-    attacker.state.mana = 0.0;
+    attacker.hero.x = 0.0;
+    attacker.hero.z = 0.0;
+    attacker.hero.mana = 0.0;
     let bytes = serde_json::to_vec(
         &serde_json::json!({"type":"basic_attack","target":{"kind":"player","id":target.id},
         "server_epoch":rt.server_epoch,"match_id":rt.match_id,"request_id":1}),
@@ -347,7 +350,7 @@ fn actual_udp_receiver_accepts_the_basic_wire_contract_once() {
         rt.receive_packets();
     }
     assert_eq!(rt.world.projectiles.len(), 1);
-    assert_eq!(rt.world.players[&addr].state.basic_attack_request_id, 1);
+    assert_eq!(rt.world.players[&addr].economy.basic_attack_request_id, 1);
     simulate_projectiles(
         &mut rt.world,
         TickCtx {
@@ -355,7 +358,7 @@ fn actual_udp_receiver_accepts_the_basic_wire_contract_once() {
             dt: 0.25,
         },
     );
-    assert_eq!(rt.world.players[&b].state.hp, MAX_HP - 12.0);
+    assert_eq!(rt.world.players[&b].hero.hp, MAX_HP - 12.0);
 }
 
 #[test]
@@ -363,20 +366,20 @@ fn skill_recovery_blocks_cross_slot_bursts_without_spending_and_basics_overlap()
     for class in HeroClass::ALL {
         let (mut rt, a, _, target, now) = fixture();
         let player = rt.world.players.get_mut(&a).unwrap();
-        player.state.hero_class = class;
-        apply_level_up(&mut player.state); // W legitimately unlocks at two.
-        let mana = player.state.mana;
+        player.hero.identity.hero_class = class;
+        apply_level_up(&mut player.hero); // W legitimately unlocks at two.
+        let mana = player.hero.mana;
         let cost = scaled_mana_cost(ability_for_class_slot(class, SkillSlot::Q), 1);
         rt.handle_packet(a, ClientPacket::Cast { target, slot: 0 }, now);
         assert_eq!(rt.world.projectiles.len(), 1, "{class:?}: first Q");
-        assert!((rt.world.players[&a].state.mana - (mana - cost)).abs() < 0.0001);
-        let after_q = rt.world.players[&a].state.mana;
+        assert!((rt.world.players[&a].hero.mana - (mana - cost)).abs() < 0.0001);
+        let after_q = rt.world.players[&a].hero.mana;
         for slot in [0, 1, 1] {
             rt.handle_packet(a, ClientPacket::Cast { target, slot }, now);
         }
-        assert_eq!(rt.world.players[&a].state.mana, after_q);
+        assert_eq!(rt.world.players[&a].hero.mana, after_q);
         assert_eq!(rt.world.players[&a].timers.last_cast_at[1], None);
-        assert_eq!(rt.world.players[&a].state.action_sequence, 1);
+        assert_eq!(rt.world.players[&a].hero.last_action.sequence, 1);
         let view = rt.player_view(a, now);
         assert!(view.skill_recovery_remaining_secs > 0.0);
         assert_eq!(view.skill_cooldown_remaining_secs[1], 0.0);
@@ -390,7 +393,7 @@ fn skill_recovery_blocks_cross_slot_bursts_without_spending_and_basics_overlap()
         rt.handle_packet(a, ClientPacket::Cast { target, slot: 1 }, now + recovery);
         let p = &rt.world.players[&a];
         assert_eq!(p.timers.last_cast_at[1], Some(now + recovery));
-        assert!(p.state.hp <= p.state.max_hp && p.state.mana <= p.state.max_mana);
+        assert!(p.hero.hp <= p.hero.max_hp && p.hero.mana <= p.hero.max_mana);
         assert!(
             rt.player_view(a, now + recovery)
                 .skill_cooldown_remaining_secs[1]
@@ -404,14 +407,15 @@ fn normal_level_ten_movement_and_item_growth_are_authoritative_and_bounded() {
     for class in HeroClass::ALL {
         let (mut rt, a, _, _, now) = fixture();
         let p = rt.world.players.get_mut(&a).unwrap();
-        p.state.hero_class = class;
+        p.hero.identity.hero_class = class;
         reset_player_round(p, &rt.world.map_layout, now);
-        assert_eq!(p.state.max_hp, shared::hero_balance::base_hp(class));
-        grant_player_xp(&mut p.state, u32::MAX);
-        assert_eq!(p.state.level, 10);
-        p.state.item_bonuses = shared::shop::item_bonuses(&[ItemId::TrailBoots, ItemId::SwiftGrip]);
-        p.state.x = 0.0;
-        p.state.z = 0.0;
+        assert_eq!(p.hero.max_hp, shared::hero_balance::base_hp(class));
+        grant_player_xp(&mut p.hero, u32::MAX);
+        assert_eq!(p.hero.progress.level, 10);
+        p.economy.item_bonuses =
+            shared::shop::item_bonuses(&[ItemId::TrailBoots, ItemId::SwiftGrip]);
+        p.hero.x = 0.0;
+        p.hero.z = 0.0;
         let expected = PLAYER_SPEED * 1.24 * 1.08 * 0.1;
         handle_transform_request(
             p,
@@ -423,7 +427,7 @@ fn normal_level_ten_movement_and_item_growth_are_authoritative_and_bounded() {
             now + Duration::from_millis(100),
         );
         assert!(
-            (p.state.x - expected).abs() < 0.0001,
+            (p.hero.x - expected).abs() < 0.0001,
             "{class:?}: legal movement"
         );
         handle_transform_request(
@@ -435,7 +439,7 @@ fn normal_level_ten_movement_and_item_growth_are_authoritative_and_bounded() {
             0.0,
             now + Duration::from_millis(200),
         );
-        assert!(p.state.x <= expected * 2.0 + MOVEMENT_POSITION_TOLERANCE + 0.0001);
+        assert!(p.hero.x <= expected * 2.0 + MOVEMENT_POSITION_TOLERANCE + 0.0001);
         let cooldown = sandbox::effective_basic_attack_cooldown(p);
         assert!(
             (cooldown.as_secs_f32()
@@ -445,11 +449,11 @@ fn normal_level_ten_movement_and_item_growth_are_authoritative_and_bounded() {
                 .abs()
                 < 0.0001
         );
-        let max_hp = p.state.max_hp;
-        p.state.hp = 0.0;
+        let max_hp = p.hero.max_hp;
+        p.hero.hp = 0.0;
         p.timers.respawn_at = Some(now);
         handle_respawns(&mut rt.world, now);
-        assert_eq!(rt.world.players[&a].state.hp, max_hp);
+        assert_eq!(rt.world.players[&a].hero.hp, max_hp);
         assert_eq!(
             sandbox::effective_basic_attack_cooldown(&rt.world.players[&a]),
             cooldown
@@ -469,7 +473,7 @@ fn explicit_sandbox_no_cooldowns_bypasses_inter_skill_recovery() {
     for slot in [0, 1, 0] {
         rt.handle_packet(a, ClientPacket::Cast { target, slot }, now);
     }
-    assert_eq!(rt.world.players[&a].state.action_sequence, 3);
+    assert_eq!(rt.world.players[&a].hero.last_action.sequence, 3);
     let view = rt.player_view(a, now);
     assert_eq!(view.skill_recovery_remaining_secs, 0.0);
     assert_eq!(view.skill_cooldown_remaining_secs, [0.0; 4]);

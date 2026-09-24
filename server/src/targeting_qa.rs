@@ -37,10 +37,12 @@ pub(crate) fn place_initial_join(
     if !player.joined {
         return;
     }
-    let team = player.state.team;
+    let team = player.hero.identity.team;
     let index = players
         .values()
-        .filter(|p| p.joined && p.state.team == team && p.state.id < player.state.id)
+        .filter(|p| {
+            p.joined && p.hero.identity.team == team && p.hero.identity.id < player.hero.identity.id
+        })
         .count();
     let position = if vision_enabled(MatchMode::Dev) {
         let zone = shared::vision::brush_layout()[0];
@@ -63,12 +65,12 @@ pub(crate) fn place_initial_join(
         return;
     }
     let player = players.get_mut(&addr).unwrap();
-    player.state.x = x;
-    player.state.y = PLAYER_GROUND_Y;
-    player.state.z = z;
+    player.hero.x = x;
+    player.hero.y = PLAYER_GROUND_Y;
+    player.hero.z = z;
     println!(
         "TARGETING_QA initial_join player={} team={team:?} x={x} z={z}; ambient AI disabled; player damage authoritative",
-        player.state.id
+        player.hero.identity.id
     );
 }
 

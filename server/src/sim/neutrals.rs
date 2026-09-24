@@ -20,18 +20,18 @@ pub(crate) fn apply_neutral_damage(
     // Forest Tracker: the attacker's class scales damage against monsters.
     let damage = players
         .values()
-        .find(|player| player.state.id == attacker_player_id)
+        .find(|player| player.hero.identity.id == attacker_player_id)
         .map_or(damage, |player| {
             damage
                 * shared::jungle::neutral_damage_multiplier(
-                    player.state.hero_class,
+                    player.hero.identity.hero_class,
                     neutral.state.camp_type.is_boss(),
                 )
         });
     let before = neutral.state.hp;
     neutral.state.hp = (before - damage).max(0.0);
     if players.values().any(|player| {
-        player.joined && player.state.id == attacker_player_id && player.state.hp > 0.0
+        player.joined && player.hero.identity.id == attacker_player_id && player.hero.hp > 0.0
     }) {
         neutral.target_player_id = Some(attacker_player_id);
         neutral.state.ai_state = NeutralAiState::Aggro;
@@ -44,8 +44,8 @@ pub(crate) fn apply_neutral_damage(
         if let Some(kind) = camp_type.team_buff_kind() {
             let killer_team = players
                 .values()
-                .find(|player| player.state.id == attacker_player_id)
-                .map(|player| player.state.team);
+                .find(|player| player.hero.identity.id == attacker_player_id)
+                .map(|player| player.hero.identity.team);
             if let Some(team) = killer_team {
                 team_buffs.grant(team, kind, now);
                 println!(
@@ -75,31 +75,27 @@ pub(crate) fn award_neutral_kill_to_player(
 ) {
     let rewards = neutral_template(camp_type);
     for player in players.values_mut() {
-        if player.state.id == killer_id {
+        if player.hero.identity.id == killer_id {
             let (gold, xp) = shared::jungle::neutral_kill_rewards(
-                player.state.hero_class,
+                player.hero.identity.hero_class,
                 camp_type.is_boss(),
                 rewards.kill_gold,
                 rewards.kill_xp,
             );
             award_gold(player, gold);
             if player.sandbox.is_none() {
-                grant_player_xp(&mut player.state, xp);
+                grant_player_xp(&mut player.hero, xp);
             }
-            if !camp_type.is_boss() && player.state.hp > 0.0 {
-                player.state.hp = (player.state.hp
-                    + player.state.max_hp * NEUTRAL_KILL_HEAL_FRACTION)
-                    .min(player.state.max_hp);
+            if !camp_type.is_boss() && player.hero.hp > 0.0 {
+                player.hero.hp = (player.hero.hp + player.hero.max_hp * NEUTRAL_KILL_HEAL_FRACTION)
+                    .min(player.hero.max_hp);
             }
             break;
         }
     }
 }
 
-pub(crate) fn neutral_horizontal_distance_sq_from_anchor(
-    anchor: Vec3f,
-    player: &PlayerState,
-) -> f32 {
+pub(crate) fn neutral_horizontal_distance_sq_from_anchor(anchor: Vec3f, player: &Hero) -> f32 {
     let dx = anchor.x - player.x;
     let dz = anchor.z - player.z;
     dx * dx + dz * dz
@@ -142,11 +138,10 @@ pub(crate) fn simulate_neutrals(world: &mut GameWorld, tick: TickCtx) -> Vec<Com
         if neutral.state.ai_state == NeutralAiState::Idle && neutral.target_player_id.is_none() {
             let best = players
                 .values()
-                .filter(|player| player.joined && player.state.hp > 0.0)
+                .filter(|player| player.joined && player.hero.hp > 0.0)
                 .map(|player| {
-                    let hit =
-                        Vec3f::new(player.state.x, player.state.y + AIM_HEIGHT, player.state.z);
-                    (player.state.id, neutral_pos.distance_squared(hit))
+                    let hit = Vec3f::new(player.hero.x, player.hero.y + AIM_HEIGHT, player.hero.z);
+                    (player.hero.identity.id, neutral_pos.distance_squared(hit))
                 })
                 .filter(|(_, dist_sq)| *dist_sq <= aggro_sq)
                 .min_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
@@ -164,23 +159,22 @@ pub(crate) fn simulate_neutrals(world: &mut GameWorld, tick: TickCtx) -> Vec<Com
             continue;
         };
 
-        let Some(target_player) = players
-            .values()
-            .find(|player| player.joined && player.state.id == target_id && player.state.hp > 0.0)
-        else {
+        let Some(target_player) = players.values().find(|player| {
+            player.joined && player.hero.identity.id == target_id && player.hero.hp > 0.0
+        }) else {
             reset_neutral_at_anchor(neutral);
             continue;
         };
 
-        if neutral_horizontal_distance_sq_from_anchor(anchor, &target_player.state) > leash_sq {
+        if neutral_horizontal_distance_sq_from_anchor(anchor, &target_player.hero) > leash_sq {
             reset_neutral_at_anchor(neutral);
             continue;
         }
 
         let target_hit = Vec3f::new(
-            target_player.state.x,
-            target_player.state.y + AIM_HEIGHT,
-            target_player.state.z,
+            target_player.hero.x,
+            target_player.hero.y + AIM_HEIGHT,
+            target_player.hero.z,
         );
         let dist = neutral_pos.distance(target_hit);
 

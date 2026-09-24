@@ -179,7 +179,7 @@ impl ServerRuntime {
             worker.manifest.humans.iter().all(|h| {
                 self.world.players.values().any(|p| {
                     p.joined
-                        && !p.state.is_bot
+                        && !p.hero.identity.is_bot
                         && p.session_id.as_deref() == Some(h.session_id.as_str())
                         && p.career_profile
                             .as_ref()
@@ -349,9 +349,13 @@ mod runtime_tests {
         rt.handle_packet(addr, join, now);
         assert!(rt.world.players[&addr].joined);
         assert!(rt.world.players[&addr].draft.capable);
-        assert_eq!(rt.world.players[&addr].state.team, Team::Blue);
+        assert_eq!(rt.world.players[&addr].hero.identity.team, Team::Blue);
         assert_eq!(
-            rt.world.players.values().filter(|p| p.state.is_bot).count(),
+            rt.world
+                .players
+                .values()
+                .filter(|p| p.hero.identity.is_bot)
+                .count(),
             9
         );
         assert!(matches!(rt.world.game_state, GameState::Forming { .. }));
@@ -369,7 +373,7 @@ mod runtime_tests {
         let (mut rt, addr, join) = fixture();
         let now = Instant::now();
         rt.handle_packet(addr, join.clone(), now);
-        let id = rt.world.players[&addr].state.id;
+        let id = rt.world.players[&addr].hero.identity.id;
         rt.begin_career_round(now);
         let allocation = rt.career_allocation_for_test().unwrap();
         rt.career.backend.test_ack_start(&allocation.result_id);
@@ -405,10 +409,14 @@ mod runtime_tests {
         );
         rt.handle_packet(reconnect, join, now);
         assert!(rt.world.players[&reconnect].joined);
-        assert_eq!(rt.world.players[&reconnect].state.id, id);
-        assert_eq!(rt.world.players[&reconnect].state.team, Team::Blue);
+        assert_eq!(rt.world.players[&reconnect].hero.identity.id, id);
+        assert_eq!(rt.world.players[&reconnect].hero.identity.team, Team::Blue);
         assert_eq!(
-            rt.world.players.values().filter(|p| p.state.is_bot).count(),
+            rt.world
+                .players
+                .values()
+                .filter(|p| p.hero.identity.is_bot)
+                .count(),
             9
         );
     }

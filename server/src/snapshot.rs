@@ -105,12 +105,14 @@ impl ServerRuntime {
         self.snapshot_tick = self.snapshot_tick.saturating_add(1);
         let world = &self.world;
         for player in world.players.values().filter(|p| p.joined) {
+            self.combat_log.ledger.update_player(
+                player.hero.identity.id,
+                player.hero.progress.level,
+                false,
+            );
             self.combat_log
                 .ledger
-                .update_player(player.state.id, player.state.level, false);
-            self.combat_log
-                .ledger
-                .update_earned_gold(player.state.id, player.state.earned_gold);
+                .update_earned_gold(player.hero.identity.id, player.economy.earned_gold);
         }
         let scoreboard = self.combat_log.ledger.live_scoreboard();
         // Every recipient gets the owner view for now; redaction through
@@ -171,7 +173,7 @@ impl ServerRuntime {
                 .players
                 .iter()
                 .filter(|(addr, player)| {
-                    !player.state.is_bot
+                    !player.hero.identity.is_bot
                         && (!self.match_service.is_public()
                             || self.public_transport.validated(**addr, now)
                                 && self.career.backend.gameplay_principal(**addr).is_some_and(
@@ -208,7 +210,7 @@ impl ServerRuntime {
                     self.snapshot_tick,
                 ),
                 join_error: player.join_error,
-                your_id: player.state.id,
+                your_id: player.hero.identity.id,
                 players: players_snapshot.clone(),
                 scoreboard: scoreboard.clone(),
                 prematch: prematch::snapshot(

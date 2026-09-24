@@ -157,7 +157,7 @@ impl ServerRuntime {
                             .and_then(|session| self.world.disconnected_sessions.get(session))
                             .map(|saved| &saved.player)
                     })
-                    .and_then(|player| player.state.avatar.as_deref());
+                    .and_then(|player| player.hero.identity.avatar.as_deref());
                 if retained.is_some_and(|slug| {
                     (slug.starts_with("ekza-")
                         || shared::avatar_definition(slug)
@@ -311,8 +311,8 @@ impl ServerRuntime {
                 }
                 if matches!(world.game_state, GameState::Running)
                     && let Some(player) = world.players.get_mut(&addr)
-                    && player.state.hp > 0.0
-                    && dash_sequence == player.state.utility.dash_sequence
+                    && player.hero.hp > 0.0
+                    && dash_sequence == player.hero.utility.dash_sequence
                 {
                     handle_transform_request_with_structures(
                         player,
@@ -425,7 +425,7 @@ impl ServerRuntime {
                             .players
                             .get(&addr)
                             .filter(|player| player.joined)
-                            .map(|player| player.state.team);
+                            .map(|player| player.hero.identity.team);
                         existing_team.or_else(|| {
                             assign_reserved_release_team(
                                 &world.players,
@@ -510,15 +510,15 @@ impl ServerRuntime {
                         return;
                     }
                     if player.god_mode != enabled {
-                        println!("Player {} god_mode={}", player.state.id, enabled);
+                        println!("Player {} god_mode={}", player.hero.identity.id, enabled);
                     }
                     player.god_mode = enabled;
                     if let Some(c) = &mut player.sandbox {
                         c.god_mode = enabled;
                     }
                     if enabled {
-                        player.state.hp = player.state.max_hp;
-                        player.state.mana = player.state.max_mana;
+                        player.hero.hp = player.hero.max_hp;
+                        player.hero.mana = player.hero.max_mana;
                         player.timers.respawn_at = None;
                     }
                 }
@@ -535,7 +535,7 @@ impl ServerRuntime {
                     }
                     let mult = if enabled { DEBUG_SPEED_MULTIPLIER } else { 1.0 };
                     if (player.speed_mult - mult).abs() > f32::EPSILON {
-                        println!("Player {} speed_boost={}", player.state.id, enabled);
+                        println!("Player {} speed_boost={}", player.hero.identity.id, enabled);
                     }
                     player.speed_mult = mult;
                     if let Some(c) = &mut player.sandbox {

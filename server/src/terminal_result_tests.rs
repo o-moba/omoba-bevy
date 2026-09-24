@@ -201,10 +201,10 @@ fn projectile_batch_keeps_pre_victory_hit_but_blocks_later_hero_and_jungle_damag
     runtime.world.ensure_connected(addr, now);
     let player = runtime.world.players.get_mut(&addr).unwrap();
     player.joined = true;
-    let player_id = player.state.id;
-    let hero_hp = player.state.hp;
-    let hero_pos = Vec3f::new(player.state.x, player.state.y + AIM_HEIGHT, player.state.z);
-    let rewards = (player.state.gold, player.state.xp);
+    let player_id = player.hero.identity.id;
+    let hero_hp = player.hero.hp;
+    let hero_pos = Vec3f::new(player.hero.x, player.hero.y + AIM_HEIGHT, player.hero.z);
+    let rewards = (player.economy.gold, player.hero.progress.xp);
     let neutral_id = *runtime.world.neutrals.keys().min().unwrap();
     let neutral = &runtime.world.neutrals[&neutral_id].state;
     let neutral_hp = neutral.hp;
@@ -244,13 +244,13 @@ fn projectile_batch_keeps_pre_victory_hit_but_blocks_later_hero_and_jungle_damag
     );
     assert_eq!(events[1].target.kind, CombatEntityKind::Structure);
     assert!(events[1].killed);
-    assert_eq!(runtime.world.players[&addr].state.hp, hero_hp - 3.0);
+    assert_eq!(runtime.world.players[&addr].hero.hp, hero_hp - 3.0);
     assert_eq!(runtime.world.neutrals[&neutral_id].state.hp, neutral_hp);
     assert!(runtime.world.neutrals[&neutral_id].dead_until.is_none());
     assert_eq!(
         (
-            runtime.world.players[&addr].state.gold,
-            runtime.world.players[&addr].state.xp
+            runtime.world.players[&addr].economy.gold,
+            runtime.world.players[&addr].hero.progress.xp
         ),
         rewards
     );

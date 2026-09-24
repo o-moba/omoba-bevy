@@ -63,20 +63,23 @@ impl SandboxRuntime {
             let c = p.sandbox.as_ref()?;
             Some(ActorTelemetry {
                 actor,
-                id: p.state.id,
-                position: [p.state.x, p.state.z],
-                hp: p.state.hp,
-                mana: p.state.mana,
+                id: p.hero.identity.id,
+                position: [p.hero.x, p.hero.z],
+                hp: p.hero.hp,
+                mana: p.hero.mana,
                 armor: c.armor,
                 resistance: c.resistance,
                 move_speed: PLAYER_SPEED
                     * p.speed_mult
-                    * p.state.item_bonuses.move_speed_multiplier
-                    * shared::hero_balance::movement_multiplier(p.state.hero_class, p.state.level),
-                attack_speed: p.state.item_bonuses.attack_speed_multiplier
+                    * p.economy.item_bonuses.move_speed_multiplier
+                    * shared::hero_balance::movement_multiplier(
+                        p.hero.identity.hero_class,
+                        p.hero.progress.level,
+                    ),
+                attack_speed: p.economy.item_bonuses.attack_speed_multiplier
                     * shared::hero_balance::attack_rate_multiplier(
-                        p.state.hero_class,
-                        p.state.level,
+                        p.hero.identity.hero_class,
+                        p.hero.progress.level,
                     ),
                 attack_damage: effective_basic_attack_damage(p),
                 cooldowns: std::array::from_fn(|i| {
@@ -89,7 +92,7 @@ impl SandboxRuntime {
                 unlocked: if c.unlock_all {
                     [true; 4]
                 } else {
-                    unlocked_slots_for_level(p.state.level)
+                    unlocked_slots_for_level(p.hero.progress.level)
                 },
             })
         })
@@ -102,11 +105,11 @@ impl SandboxRuntime {
             config,
             ack: players
                 .get(&requester)
-                .and_then(|p| self.acks.get(&p.state.id))
+                .and_then(|p| self.acks.get(&p.hero.identity.id))
                 .cloned(),
             last_request_id: players
                 .get(&requester)
-                .and_then(|p| self.sequences.get(&p.state.id))
+                .and_then(|p| self.sequences.get(&p.hero.identity.id))
                 .copied()
                 .unwrap_or(0),
             actors,
@@ -178,7 +181,7 @@ fn validate_config(c: &SandboxConfig) -> Result<(), String> {
     Ok(())
 }
 pub(crate) fn apply_actor(p: &mut ConnectedPlayer, c: &ActorConfig, reset: bool, now: Instant) {
-    let changed_hero = p.state.hero_class != c.hero;
+    let changed_hero = p.hero.identity.hero_class != c.hero;
     let changed_avatar = p.sandbox.as_ref().is_some_and(|old| old.avatar != c.avatar);
     let moved = p
         .sandbox
@@ -187,46 +190,46 @@ pub(crate) fn apply_actor(p: &mut ConnectedPlayer, c: &ActorConfig, reset: bool,
     p.sandbox = Some(c.clone());
     p.god_mode = c.god_mode;
     p.speed_mult = c.move_speed;
-    p.state.hero_class = c.hero;
+    p.hero.identity.hero_class = c.hero;
     if changed_hero || changed_avatar || c.avatar.is_some() {
-        p.state.avatar = c
+        p.hero.identity.avatar = c
             .avatar
             .clone()
             .or_else(|| bots::bot_avatar(c.hero, 1).map(str::to_owned));
-        p.state.sprite_character = None;
+        p.hero.identity.sprite_character = None;
     }
     if moved {
-        p.state.utility.dash_sequence = p.state.utility.dash_sequence.saturating_add(1);
-        p.state.x = c.position[0];
-        p.state.z = c.position[1];
+        p.hero.utility.dash_sequence = p.hero.utility.dash_sequence.saturating_add(1);
+        p.hero.x = c.position[0];
+        p.hero.z = c.position[1];
         p.timers.last_movement_at = now;
     }
-    p.state.level = c.level;
-    p.state.xp = c.xp;
-    p.state.next_level_xp = xp_threshold_for_level(c.level);
-    p.state.ranks = c.ranks;
-    p.state.skill_points = c.level.saturating_sub(1);
-    p.state.inventory = c.inventory.clone();
+    p.hero.progress.level = c.level;
+    p.hero.progress.xp = c.xp;
+    p.hero.progress.next_level_xp = xp_threshold_for_level(c.level);
+    p.hero.progress.ranks = c.ranks;
+    p.hero.progress.skill_points = c.level.saturating_sub(1);
+    p.economy.inventory = c.inventory.clone();
     let mut bonuses = shared::shop::item_bonuses(&c.inventory);
     bonuses.damage_multiplier *= c.damage_multiplier;
     bonuses.attack_speed_multiplier *= c.attack_speed;
-    p.state.item_bonuses = bonuses;
-    p.state.max_hp = c.max_hp + (c.level - 1) as f32 * LEVEL_UP_HP_BONUS + bonuses.max_hp;
-    p.state.max_mana = MAX_MANA + (c.level - 1) as f32 * LEVEL_UP_MANA_BONUS + bonuses.max_mana;
-    p.state.hp = p.state.hp.min(p.state.max_hp);
-    p.state.mana = p.state.mana.min(p.state.max_mana);
+    p.economy.item_bonuses = bonuses;
+    p.hero.max_hp = c.max_hp + (c.level - 1) as f32 * LEVEL_UP_HP_BONUS + bonuses.max_hp;
+    p.hero.max_mana = MAX_MANA + (c.level - 1) as f32 * LEVEL_UP_MANA_BONUS + bonuses.max_mana;
+    p.hero.hp = p.hero.hp.min(p.hero.max_hp);
+    p.hero.mana = p.hero.mana.min(p.hero.max_mana);
     if reset {
-        p.state.utility.dash_sequence = p.state.utility.dash_sequence.saturating_add(1);
-        p.state.x = c.position[0];
-        p.state.z = c.position[1];
-        p.state.y = PLAYER_GROUND_Y;
-        p.state.hp = p.state.max_hp;
-        p.state.mana = p.state.max_mana;
+        p.hero.utility.dash_sequence = p.hero.utility.dash_sequence.saturating_add(1);
+        p.hero.x = c.position[0];
+        p.hero.z = c.position[1];
+        p.hero.y = PLAYER_GROUND_Y;
+        p.hero.hp = p.hero.max_hp;
+        p.hero.mana = p.hero.max_mana;
         p.timers.respawn_at = None;
         p.timers.haste_expires_at = None;
         p.timers.last_movement_at = now;
         p.timers.clear_cooldowns();
-        p.state.action_kind = PlayerActionKind::None;
+        p.hero.last_action.kind = PlayerActionKind::None;
     }
     if c.no_cooldowns {
         p.timers.clear_cooldowns();
@@ -248,13 +251,13 @@ impl ServerRuntime {
             .world
             .players
             .values_mut()
-            .filter(|p| p.joined && !p.state.is_bot)
+            .filter(|p| p.joined && !p.hero.identity.is_bot)
         {
-            if s.initialized.insert(p.state.id) || p.sandbox.is_none() {
+            if s.initialized.insert(p.hero.identity.id) || p.sandbox.is_none() {
                 let mut c = s.config.player.clone();
-                c.hero = p.state.hero_class;
-                c.avatar = p.state.avatar.clone();
-                if p.state.team == Team::Blue {
+                c.hero = p.hero.identity.hero_class;
+                c.avatar = p.hero.identity.avatar.clone();
+                if p.hero.identity.team == Team::Blue {
                     c.position = [3.0, 0.0];
                 }
                 apply_actor(p, &c, true, s.now);
@@ -287,11 +290,11 @@ impl ServerRuntime {
             .world
             .players
             .get(&addr)
-            .filter(|p| p.joined && !p.state.is_bot && p.protocol_compatible)
+            .filter(|p| p.joined && !p.hero.identity.is_bot && p.protocol_compatible)
         else {
             return;
         };
-        let id = player.state.id;
+        let id = player.hero.identity.id;
         let s = self.sandbox.as_mut().unwrap();
         // UDP retries must repeat the original acknowledgement, never convert
         // a successful non-idempotent command into a false rejection or rerun it.
@@ -341,8 +344,8 @@ impl ServerRuntime {
                 }
                 let old = self.sandbox.as_ref().unwrap().config.clone();
                 let p = self.world.players.get_mut(&addr).unwrap();
-                let reset = p.state.hero_class != config.player.hero;
-                let id = p.state.id;
+                let reset = p.hero.identity.hero_class != config.player.hero;
+                let id = p.hero.identity.id;
                 let moved = p
                     .sandbox
                     .as_ref()
@@ -387,8 +390,8 @@ impl ServerRuntime {
             SandboxCommand::Refill { actor } => {
                 let a = self.sandbox_addr(addr, actor)?;
                 let p = self.world.players.get_mut(&a).unwrap();
-                p.state.hp = p.state.max_hp;
-                p.state.mana = p.state.max_mana;
+                p.hero.hp = p.hero.max_hp;
+                p.hero.mana = p.hero.max_mana;
                 p.timers.respawn_at = None;
             }
             SandboxCommand::ResetCooldowns { actor } => {
@@ -404,11 +407,11 @@ impl ServerRuntime {
                 self.validate_sandbox_destination(position)?;
                 let a = self.sandbox_addr(addr, actor)?;
                 let p = self.world.players.get_mut(&a).unwrap();
-                p.state.utility.dash_sequence = p.state.utility.dash_sequence.saturating_add(1);
-                p.state.x = position[0];
-                p.state.z = position[1];
+                p.hero.utility.dash_sequence = p.hero.utility.dash_sequence.saturating_add(1);
+                p.hero.x = position[0];
+                p.hero.z = position[1];
                 p.timers.last_movement_at = now;
-                let id = p.state.id;
+                let id = p.hero.identity.id;
                 self.world.projectiles.retain(|_, p| {
                     p.state.owner_id != id
                         && p.target
@@ -542,11 +545,11 @@ impl ServerRuntime {
         if !enabled {
             if let Some(p) = self.world.players.remove(&addr) {
                 self.world.projectiles.retain(|_, b| {
-                    b.state.owner_id != p.state.id
+                    b.state.owner_id != p.hero.identity.id
                         && b.target
                             != TargetId {
                                 kind: TargetKind::Player,
-                                id: p.state.id,
+                                id: p.hero.identity.id,
                             }
                 });
             }
@@ -556,7 +559,7 @@ impl ServerRuntime {
         if new {
             self.world.ensure_connected(addr, now);
             let p = self.world.players.get_mut(&addr).unwrap();
-            p.state.is_bot = true;
+            p.hero.identity.is_bot = true;
             handle_join_request_with_sprite(
                 p,
                 Team::Blue,
@@ -569,7 +572,7 @@ impl ServerRuntime {
             );
         }
         if reset {
-            let id = self.world.players[&addr].state.id;
+            let id = self.world.players[&addr].hero.identity.id;
             self.world.projectiles.retain(|_, p| {
                 p.state.owner_id != id
                     && p.target
@@ -589,7 +592,7 @@ impl ServerRuntime {
     fn reset_sandbox_actor(&mut self, addr: SocketAddr, now: Instant) {
         if let Some(p) = self.world.players.get_mut(&addr) {
             if let Some(c) = p.sandbox.clone() {
-                let id = p.state.id;
+                let id = p.hero.identity.id;
                 apply_actor(p, &c, true, now);
                 self.world.projectiles.retain(|_, p| {
                     p.state.owner_id != id
@@ -611,12 +614,12 @@ impl ServerRuntime {
     ) -> Result<(), String> {
         let skill = SkillSlot::from_index(slot).ok_or("Skill slot must be 0..3")?;
         let p = &self.world.players[&addr];
-        let target = if ability_for_class_slot(p.state.hero_class, skill).targeting
+        let target = if ability_for_class_slot(p.hero.identity.hero_class, skill).targeting
             == TargetingMode::SelfTarget
         {
             TargetId {
                 kind: TargetKind::Player,
-                id: p.state.id,
+                id: p.hero.identity.id,
             }
         } else {
             self.world
@@ -624,23 +627,23 @@ impl ServerRuntime {
                 .values()
                 .filter(|t| {
                     t.joined
-                        && t.state.hp > 0.0
-                        && t.state.team != p.state.team
-                        && target_id.is_none_or(|id| id == t.state.id)
+                        && t.hero.hp > 0.0
+                        && t.hero.identity.team != p.hero.identity.team
+                        && target_id.is_none_or(|id| id == t.hero.identity.id)
                 })
                 .min_by(|a, b| {
-                    ((a.state.x - p.state.x).hypot(a.state.z - p.state.z))
-                        .total_cmp(&((b.state.x - p.state.x).hypot(b.state.z - p.state.z)))
+                    ((a.hero.x - p.hero.x).hypot(a.hero.z - p.hero.z))
+                        .total_cmp(&((b.hero.x - p.hero.x).hypot(b.hero.z - p.hero.z)))
                 })
                 .map(|t| TargetId {
                     kind: TargetKind::Player,
-                    id: t.state.id,
+                    id: t.hero.identity.id,
                 })
                 .ok_or("No living hostile target")?
         };
-        let before = p.state.action_sequence;
+        let before = p.hero.last_action.sequence;
         handle_cast_request(&mut self.world, addr, target, slot, now);
-        if self.world.players[&addr].state.action_sequence == before {
+        if self.world.players[&addr].hero.last_action.sequence == before {
             Err("Ability rejected: check range, unlock, health, mana and cooldown".into())
         } else {
             Ok(())
@@ -655,7 +658,7 @@ impl ServerRuntime {
         for p in self.world.players.values_mut() {
             if let Some(c) = &p.sandbox {
                 if c.infinite_resource {
-                    p.state.mana = p.state.max_mana;
+                    p.hero.mana = p.hero.max_mana;
                 }
                 if c.no_cooldowns {
                     p.timers.clear_cooldowns();
@@ -669,7 +672,7 @@ impl ServerRuntime {
             let Some(p) = self.world.players.get(&addr) else {
                 continue;
             };
-            if p.state.hp <= 0.0 {
+            if p.hero.hp <= 0.0 {
                 if addr == DUMMY_ADDR || config.enemy.auto_respawn {
                     if p.timers.respawn_at.is_some_and(|t| now >= t) {
                         self.reset_sandbox_actor(addr, now);
@@ -682,15 +685,20 @@ impl ServerRuntime {
                 }
                 continue;
             }
-            let origin = [p.state.x, p.state.z];
-            let team = p.state.team;
+            let origin = [p.hero.x, p.hero.z];
+            let team = p.hero.identity.team;
             let target = self
                 .world
                 .players
                 .values()
-                .filter(|p| p.joined && !p.state.is_bot && p.state.hp > 0.0 && p.state.team != team)
-                .min_by_key(|p| p.state.id)
-                .map(|p| (p.state.id, [p.state.x, p.state.z]));
+                .filter(|p| {
+                    p.joined
+                        && !p.hero.identity.is_bot
+                        && p.hero.hp > 0.0
+                        && p.hero.identity.team != team
+                })
+                .min_by_key(|p| p.hero.identity.id)
+                .map(|p| (p.hero.identity.id, [p.hero.x, p.hero.z]));
             if addr == DUMMY_ADDR {
                 if config.dummy.moving {
                     let phase = self.sandbox.as_ref().unwrap().elapsed as f32;
@@ -725,17 +733,18 @@ impl ServerRuntime {
                     dt,
                 ),
                 BotBehavior::Attack | BotBehavior::Fight => {
-                    let reach =
-                        shared::basic_attack_for_class(self.world.players[&addr].state.hero_class)
-                            .range
-                            + PLAYER_HIT_RADIUS;
+                    let reach = shared::basic_attack_for_class(
+                        self.world.players[&addr].hero.identity.hero_class,
+                    )
+                    .range
+                        + PLAYER_HIT_RADIUS;
                     let desired = config.enemy.attack_distance.min(reach - 0.1);
                     if distance > desired {
                         self.move_sandbox_actor(addr, position, now, dt);
                     }
                     if distance <= reach {
                         let request = self.world.players[&addr]
-                            .state
+                            .economy
                             .basic_attack_request_id
                             .saturating_add(1);
                         handle_basic_attack_request(
@@ -760,7 +769,7 @@ impl ServerRuntime {
     }
     fn move_sandbox_actor(&mut self, addr: SocketAddr, goal: [f32; 2], now: Instant, dt: f32) {
         let p = &self.world.players[&addr];
-        let origin = [p.state.x, p.state.z];
+        let origin = [p.hero.x, p.hero.z];
         let discs: Vec<_> = self
             .world
             .structures
@@ -785,8 +794,11 @@ impl ServerRuntime {
         let distance = dx.hypot(dz).max(0.001);
         let step = (PLAYER_SPEED
             * p.speed_mult
-            * p.state.item_bonuses.move_speed_multiplier
-            * shared::hero_balance::movement_multiplier(p.state.hero_class, p.state.level)
+            * p.economy.item_bonuses.move_speed_multiplier
+            * shared::hero_balance::movement_multiplier(
+                p.hero.identity.hero_class,
+                p.hero.progress.level,
+            )
             * dt)
             .min(distance);
         handle_transform_request_with_structures(
@@ -814,7 +826,7 @@ fn dummy_actor(c: &DummyConfig) -> ActorConfig {
 
 /// Preserve ordinary item floors while supporting validated sandbox overrides.
 fn combat_bonuses(player: &ConnectedPlayer) -> ItemBonuses {
-    let mut bonuses = player.state.item_bonuses;
+    let mut bonuses = player.economy.item_bonuses;
     if player.sandbox.is_none() {
         bonuses.damage_multiplier = bonuses.damage_multiplier.max(1.0);
         bonuses.attack_speed_multiplier = bonuses.attack_speed_multiplier.max(1.0);
@@ -823,23 +835,23 @@ fn combat_bonuses(player: &ConnectedPlayer) -> ItemBonuses {
 }
 pub(crate) fn effective_basic_attack_damage(player: &ConnectedPlayer) -> f32 {
     shared::hero_balance::basic_damage(
-        player.state.hero_class,
-        player.state.level,
+        player.hero.identity.hero_class,
+        player.hero.progress.level,
         combat_bonuses(player),
     )
 }
 pub(crate) fn effective_basic_attack_cooldown(player: &ConnectedPlayer) -> Duration {
     shared::hero_balance::basic_cooldown(
-        player.state.hero_class,
-        player.state.level,
+        player.hero.identity.hero_class,
+        player.hero.progress.level,
         combat_bonuses(player),
     )
 }
 pub(crate) fn effective_ability_cooldown(player: &ConnectedPlayer, slot: SkillSlot) -> Duration {
     shared::hero_balance::ability_cooldown(
-        player.state.hero_class,
-        player.state.level,
-        player.state.ranks[slot.index()],
+        player.hero.identity.hero_class,
+        player.hero.progress.level,
+        player.hero.progress.ranks[slot.index()],
         slot,
         combat_bonuses(player),
     )
@@ -859,9 +871,9 @@ pub(crate) fn assign_human_team(
     for p in players
         .values()
         .chain(disconnected.values().map(|s| &s.player))
-        .filter(|p| p.joined && !p.state.is_bot)
+        .filter(|p| p.joined && !p.hero.identity.is_bot)
     {
-        match p.state.team {
+        match p.hero.identity.team {
             Team::Green => green += 1,
             Team::Blue => blue += 1,
         }

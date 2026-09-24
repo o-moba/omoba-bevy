@@ -38,44 +38,6 @@ impl GameWorld {
                 career_profile: None,
                 career_capable: false,
                 draft: Default::default(),
-                state: PlayerState {
-                    supporter_aura: None,
-                    is_bot: false,
-                    id: player_id,
-                    x: spawn.x,
-                    y: PLAYER_GROUND_Y,
-                    z: spawn.z,
-                    yaw: 0.0,
-                    team: Team::Green,
-                    hp: MAX_HP,
-                    max_hp: MAX_HP,
-                    mana: MAX_MANA,
-                    max_mana: MAX_MANA,
-                    gold: STARTING_GOLD,
-                    earned_gold: 0,
-                    utility: Default::default(),
-                    inventory: Vec::new(),
-                    item_bonuses: ItemBonuses::NONE,
-                    shop_available: false,
-                    last_purchase: None,
-                    basic_attack_cooldown_secs: 0.0,
-                    basic_attack_remaining_secs: 0.0,
-                    skill_cooldown_remaining_secs: [0.0; 4],
-                    skill_recovery_remaining_secs: 0.0,
-                    basic_attack_request_id: 0,
-                    xp: 0,
-                    level: STARTING_LEVEL,
-                    next_level_xp: xp_threshold_for_level(STARTING_LEVEL),
-                    skill_points: 0,
-                    ranks: [1; 4],
-                    character: default_character_choice(),
-                    hero_class: HeroClass::default(),
-                    avatar: None,
-                    sprite_character: None,
-                    action_sequence: 0,
-                    action_kind: PlayerActionKind::None,
-                    action_slot: 0,
-                },
                 joined: false,
                 session_id: None,
                 framed_snapshots: false,
@@ -85,8 +47,8 @@ impl GameWorld {
                 timers: HeroTimers::new(now),
                 god_mode: false,
                 speed_mult: 1.0,
-                purchase_sequence: 0,
-                gold_income_remainder: 0.0,
+                hero: Hero::new(player_id, spawn),
+                economy: HeroEconomy::starting(),
             }
         });
     }
@@ -136,7 +98,7 @@ impl GameWorld {
             if let Some(mut player) = players.remove(&existing_addr) {
                 println!(
                     "Reclaiming timed-out player {} from {existing_addr} to {addr}",
-                    player.state.id
+                    player.hero.identity.id
                 );
                 player.framed_snapshots = framed_snapshots;
                 player.career_capable |= career_capable;
@@ -154,7 +116,7 @@ impl GameWorld {
             if now.duration_since(disconnected.disconnected_at) <= SESSION_RECLAIM_WINDOW {
                 println!(
                     "Reclaiming disconnected player {} from new endpoint {addr}",
-                    disconnected.player.state.id
+                    disconnected.player.hero.identity.id
                 );
                 disconnected.player.framed_snapshots = framed_snapshots;
                 disconnected.player.career_capable |= career_capable;
@@ -216,18 +178,18 @@ pub(crate) fn handle_join_request_with_sprite(
     if avatar.is_some() && normalized_avatar.is_none() {
         eprintln!(
             "Player {} requested unknown avatar {:?}; falling back to default model",
-            player.state.id, avatar
+            player.hero.identity.id, avatar
         );
     }
     if sprite_character.is_some_and(|requested| requested.trim() != normalized_sprite) {
         eprintln!(
             "Player {} requested unknown sprite {:?}; falling back to {:?}",
-            player.state.id, sprite_character, normalized_sprite
+            player.hero.identity.id, sprite_character, normalized_sprite
         );
     }
     println!(
         "Player {} joined team {:?} as {:?} (class {}, avatar {:?}, sprite {:?})",
-        player.state.id,
+        player.hero.identity.id,
         team,
         character,
         hero_class.id(),
@@ -235,11 +197,11 @@ pub(crate) fn handle_join_request_with_sprite(
         normalized_sprite
     );
     player.joined = true;
-    player.state.team = team;
-    player.state.character = character;
-    player.state.hero_class = hero_class;
-    player.state.avatar = normalized_avatar.map(str::to_owned);
-    player.state.sprite_character = Some(normalized_sprite.to_owned());
+    player.hero.identity.team = team;
+    player.hero.identity.character = character;
+    player.hero.identity.hero_class = hero_class;
+    player.hero.identity.avatar = normalized_avatar.map(str::to_owned);
+    player.hero.identity.sprite_character = Some(normalized_sprite.to_owned());
     reset_player_round(player, map_layout, now);
 }
 
@@ -249,38 +211,25 @@ pub(crate) fn reset_player_round(
     map_layout: &MapLayoutState,
     now: Instant,
 ) {
-    let spawn = spawn_position_for_team(map_layout, player.state.team);
-    player.state.x = spawn.x;
-    player.state.y = PLAYER_GROUND_Y;
-    player.state.z = spawn.z;
-    player.state.yaw = 0.0;
-    player.state.max_hp = shared::hero_balance::base_hp(player.state.hero_class);
-    player.state.hp = player.state.max_hp;
-    player.state.mana = MAX_MANA;
-    player.state.max_mana = MAX_MANA;
-    player.state.gold = STARTING_GOLD;
-    player.state.earned_gold = 0;
-    player.state.utility = Default::default();
+    let spawn = spawn_position_for_team(map_layout, player.hero.identity.team);
+    player.hero.x = spawn.x;
+    player.hero.y = PLAYER_GROUND_Y;
+    player.hero.z = spawn.z;
+    player.hero.yaw = 0.0;
+    player.hero.max_hp = shared::hero_balance::base_hp(player.hero.identity.hero_class);
+    player.hero.hp = player.hero.max_hp;
+    player.hero.mana = MAX_MANA;
+    player.hero.max_mana = MAX_MANA;
+    player.economy = HeroEconomy::starting();
+    player.hero.progress = HeroProgress::starting();
+    player.hero.utility = Default::default();
+    player.hero.last_action = Default::default();
     player.timers.dash_ready_at = None;
     player.timers.haste_ready_at = None;
     player.timers.haste_expires_at = None;
-    player.state.inventory.clear();
-    player.state.item_bonuses = ItemBonuses::NONE;
-    player.state.last_purchase = None;
-    player.purchase_sequence = 0;
-    player.gold_income_remainder = 0.0;
-    player.state.xp = 0;
-    player.state.level = STARTING_LEVEL;
-    player.state.next_level_xp = xp_threshold_for_level(STARTING_LEVEL);
-    player.state.skill_points = 0;
-    player.state.ranks = [1; 4];
-    player.state.action_sequence = 0;
-    player.state.action_kind = PlayerActionKind::None;
-    player.state.action_slot = 0;
     player.timers.last_movement_at = now;
     player.timers.last_cast_at = [None; 4];
     player.timers.last_basic_attack_at = None;
-    player.state.basic_attack_request_id = 0;
     player.timers.respawn_at = None;
     player.sandbox = None;
     player.sandbox_infinite_hp = false;
@@ -330,7 +279,7 @@ pub(crate) fn handle_transform_request_with_structures(
     }
 
     let requested = map_layout.clamp_player_position(Vec3f::new(x, y, z));
-    let current = Vec3f::new(player.state.x, PLAYER_GROUND_Y, player.state.z);
+    let current = Vec3f::new(player.hero.x, PLAYER_GROUND_Y, player.hero.z);
     let dx = requested.x - current.x;
     let dz = requested.z - current.z;
     let distance = (dx * dx + dz * dz).sqrt();
@@ -340,9 +289,12 @@ pub(crate) fn handle_transform_request_with_structures(
         .clamp(0.0, MOVEMENT_MAX_DELTA_SECONDS);
     let speed_mult = player.speed_mult.max(0.1)
         * utility_movement_multiplier(player, now)
-        * shared::hero_balance::movement_multiplier(player.state.hero_class, player.state.level);
+        * shared::hero_balance::movement_multiplier(
+            player.hero.identity.hero_class,
+            player.hero.progress.level,
+        );
     let max_distance =
-        PLAYER_SPEED * speed_mult * player.state.item_bonuses.move_speed_multiplier * elapsed
+        PLAYER_SPEED * speed_mult * player.economy.item_bonuses.move_speed_multiplier * elapsed
             + MOVEMENT_POSITION_TOLERANCE;
 
     let accepted = if distance <= max_distance || distance <= 0.000_1 {
@@ -361,11 +313,11 @@ pub(crate) fn handle_transform_request_with_structures(
     let accepted_xz = shared::navigation::world_navigation()
         .clip_movement([current.x, current.z], [accepted.x, accepted.z]);
     let accepted_xz = clip_live_structures([current.x, current.z], accepted_xz, structures);
-    player.state.x = accepted_xz[0];
-    player.state.y = PLAYER_GROUND_Y;
-    player.state.z = accepted_xz[1];
+    player.hero.x = accepted_xz[0];
+    player.hero.y = PLAYER_GROUND_Y;
+    player.hero.z = accepted_xz[1];
     if yaw.is_finite() {
-        player.state.yaw = yaw;
+        player.hero.yaw = yaw;
     }
     player.timers.last_movement_at = now;
 }
@@ -399,7 +351,7 @@ pub(crate) fn handle_respawns(world: &mut GameWorld, now: Instant) {
         ..
     } = world;
     for player in players.values_mut() {
-        if player.sandbox.is_some() && player.state.is_bot {
+        if player.sandbox.is_some() && player.hero.identity.is_bot {
             continue;
         }
         let Some(respawn_at) = player.timers.respawn_at else {
@@ -408,13 +360,14 @@ pub(crate) fn handle_respawns(world: &mut GameWorld, now: Instant) {
         if now < respawn_at {
             continue;
         }
-        let spawn = spawn_position_for_team_from_base(structures, map_layout, player.state.team);
-        player.state.x = spawn.x;
-        player.state.y = PLAYER_GROUND_Y;
-        player.state.z = spawn.z;
-        player.state.yaw = 0.0;
-        player.state.hp = player.state.max_hp;
-        player.state.mana = player.state.max_mana;
+        let spawn =
+            spawn_position_for_team_from_base(structures, map_layout, player.hero.identity.team);
+        player.hero.x = spawn.x;
+        player.hero.y = PLAYER_GROUND_Y;
+        player.hero.z = spawn.z;
+        player.hero.yaw = 0.0;
+        player.hero.hp = player.hero.max_hp;
+        player.hero.mana = player.hero.max_mana;
         player.timers.respawn_at = None;
         player.timers.haste_expires_at = None;
         player.timers.last_movement_at = now;
@@ -456,7 +409,7 @@ pub(crate) fn assign_reserved_release_team(
         .values()
         .filter(|session| session.player.joined)
     {
-        match session.player.state.team {
+        match session.player.hero.identity.team {
             Team::Green => green += 1,
             Team::Blue => blue += 1,
         }
@@ -477,7 +430,7 @@ impl ServerRuntime {
             .players
             .iter()
             .filter(|(_, player)| {
-                !player.state.is_bot
+                !player.hero.identity.is_bot
                     && now.saturating_duration_since(player.last_seen) > PLAYER_TIMEOUT
             })
             .map(|(addr, _)| *addr)
@@ -494,7 +447,7 @@ impl ServerRuntime {
                     "MATCH_METRIC event=disconnect epoch={} match={} player={} elapsed_ms={}",
                     self.server_epoch,
                     self.match_id,
-                    player.state.id,
+                    player.hero.identity.id,
                     self.elapsed_match_ms(now)
                 );
                 if let Some(session_id) = player.session_id.clone() {
@@ -518,7 +471,7 @@ impl ServerRuntime {
             .world
             .players
             .values()
-            .any(|p| p.joined && !p.state.is_bot)
+            .any(|p| p.joined && !p.hero.identity.is_bot)
         {
             self.empty_since = None;
         } else if !matches!(self.world.game_state, GameState::Lobby)
@@ -555,7 +508,9 @@ impl ServerRuntime {
             return;
         }
         if self.match_config.mode == MatchMode::Practice {
-            self.world.players.retain(|_, player| !player.state.is_bot);
+            self.world
+                .players
+                .retain(|_, player| !player.hero.identity.is_bot);
             self.bots.clear();
         }
         self.reset_career_round();
@@ -618,26 +573,26 @@ impl ServerRuntime {
     pub(crate) fn record_match_metrics(&mut self, now: Instant) {
         let elapsed = self.elapsed_match_ms(now);
         for player in self.world.players.values().filter(|player| player.joined) {
-            let alive = player.state.hp > 0.0;
+            let alive = player.hero.hp > 0.0;
             let previous = self
                 .metrics_players
-                .insert(player.state.id, (player.state.level, alive));
-            if previous.is_none_or(|(level, _)| level != player.state.level) {
+                .insert(player.hero.identity.id, (player.hero.progress.level, alive));
+            if previous.is_none_or(|(level, _)| level != player.hero.progress.level) {
                 println!(
                     "MATCH_METRIC event=progression epoch={} match={} player={} team={:?} level={} xp={} gold={} elapsed_ms={elapsed}",
                     self.server_epoch,
                     self.match_id,
-                    player.state.id,
-                    player.state.team,
-                    player.state.level,
-                    player.state.xp,
-                    player.state.gold
+                    player.hero.identity.id,
+                    player.hero.identity.team,
+                    player.hero.progress.level,
+                    player.hero.progress.xp,
+                    player.economy.gold
                 );
             }
             if previous.is_some_and(|(_, was_alive)| was_alive) && !alive {
                 println!(
                     "MATCH_METRIC event=death epoch={} match={} player={} elapsed_ms={elapsed}",
-                    self.server_epoch, self.match_id, player.state.id
+                    self.server_epoch, self.match_id, player.hero.identity.id
                 );
             }
         }

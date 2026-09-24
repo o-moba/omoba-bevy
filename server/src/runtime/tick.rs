@@ -116,7 +116,7 @@ impl ServerRuntime {
         let live_player_ids = world
             .players
             .values()
-            .map(|player| player.state.id)
+            .map(|player| player.hero.identity.id)
             .collect::<HashSet<_>>();
         let GameWorld {
             projectiles,

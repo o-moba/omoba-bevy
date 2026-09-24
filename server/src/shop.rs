@@ -8,20 +8,16 @@ fn phase_allows_shop(phase: &GameState) -> bool {
     !matches!(phase, GameState::Victory { .. })
 }
 
-fn inside_own_shop(state: &PlayerState, map: &MapLayoutState) -> bool {
-    let base = match state.team {
+fn inside_own_shop(hero: &Hero, map: &MapLayoutState) -> bool {
+    let base = match hero.identity.team {
         Team::Green => map.home,
         Team::Blue => map.away,
     };
-    (state.x - base.x).powi(2) + (state.z - base.z).powi(2) <= SHOP_RADIUS * SHOP_RADIUS
+    (hero.x - base.x).powi(2) + (hero.z - base.z).powi(2) <= SHOP_RADIUS * SHOP_RADIUS
 }
 
-pub(crate) fn shop_is_available(
-    state: &PlayerState,
-    map: &MapLayoutState,
-    phase: &GameState,
-) -> bool {
-    state.hp > 0.0 && phase_allows_shop(phase) && inside_own_shop(state, map)
+pub(crate) fn shop_is_available(hero: &Hero, map: &MapLayoutState, phase: &GameState) -> bool {
+    hero.hp > 0.0 && phase_allows_shop(phase) && inside_own_shop(hero, map)
 }
 
 pub(crate) fn handle_purchase(
@@ -32,23 +28,23 @@ pub(crate) fn handle_purchase(
     request_id: u64,
     match_id: u64,
 ) {
-    if request_id == 0 || request_id <= player.purchase_sequence {
+    if request_id == 0 || request_id <= player.economy.purchase_sequence {
         return;
     }
-    player.purchase_sequence = request_id;
+    player.economy.purchase_sequence = request_id;
     let item_id = ItemId::from_id(raw_item);
     let error = if !player.joined || !phase_allows_shop(phase) {
         Some(PurchaseError::Unavailable)
-    } else if player.state.hp <= 0.0 {
+    } else if player.hero.hp <= 0.0 {
         Some(PurchaseError::Dead)
-    } else if !inside_own_shop(&player.state, map) {
+    } else if !inside_own_shop(&player.hero, map) {
         Some(PurchaseError::OutsideBase)
     } else if let Some(id) = item_id {
-        if player.state.inventory.len() >= INVENTORY_CAPACITY {
+        if player.economy.inventory.len() >= INVENTORY_CAPACITY {
             Some(PurchaseError::InventoryFull)
-        } else if player.state.inventory.contains(&id) {
+        } else if player.economy.inventory.contains(&id) {
             Some(PurchaseError::AlreadyOwned)
-        } else if player.state.gold < item(id).cost {
+        } else if player.economy.gold < item(id).cost {
             Some(PurchaseError::InsufficientGold)
         } else {
             None
@@ -58,29 +54,29 @@ pub(crate) fn handle_purchase(
     };
     if error.is_none() {
         let id = item_id.expect("validated item");
-        let old = player.state.item_bonuses;
-        player.state.gold -= item(id).cost;
-        player.state.inventory.push(id);
-        player.state.item_bonuses = item_bonuses(&player.state.inventory);
-        let hp_bonus = player.state.item_bonuses.max_hp - old.max_hp;
-        let mana_bonus = player.state.item_bonuses.max_mana - old.max_mana;
-        player.state.max_hp += hp_bonus;
-        player.state.hp = (player.state.hp + hp_bonus).min(player.state.max_hp);
-        player.state.max_mana += mana_bonus;
-        player.state.mana = (player.state.mana + mana_bonus).min(player.state.max_mana);
+        let old = player.economy.item_bonuses;
+        player.economy.gold -= item(id).cost;
+        player.economy.inventory.push(id);
+        player.economy.item_bonuses = item_bonuses(&player.economy.inventory);
+        let hp_bonus = player.economy.item_bonuses.max_hp - old.max_hp;
+        let mana_bonus = player.economy.item_bonuses.max_mana - old.max_mana;
+        player.hero.max_hp += hp_bonus;
+        player.hero.hp = (player.hero.hp + hp_bonus).min(player.hero.max_hp);
+        player.hero.max_mana += mana_bonus;
+        player.hero.mana = (player.hero.mana + mana_bonus).min(player.hero.max_mana);
         if let Some(mut c) = player.sandbox.clone() {
-            c.inventory = player.state.inventory.clone();
+            c.inventory = player.economy.inventory.clone();
             sandbox::apply_actor(player, &c, false, player.timers.last_movement_at);
         }
         println!(
             "MATCH_METRIC event=purchase match={match_id} player={} request={request_id} item={} cost={} gold={}",
-            player.state.id,
+            player.hero.identity.id,
             id.id(),
             item(id).cost,
-            player.state.gold
+            player.economy.gold
         );
     }
-    player.state.last_purchase = Some(PurchaseReceipt {
+    player.economy.last_purchase = Some(PurchaseReceipt {
         request_id,
         match_id,
         item_id,
@@ -89,8 +85,8 @@ pub(crate) fn handle_purchase(
 }
 
 pub(crate) fn award_gold(player: &mut ConnectedPlayer, amount: u32) {
-    player.state.gold = player.state.gold.saturating_add(amount);
-    player.state.earned_gold = player.state.earned_gold.saturating_add(amount);
+    player.economy.gold = player.economy.gold.saturating_add(amount);
+    player.economy.earned_gold = player.economy.earned_gold.saturating_add(amount);
 }
 
 pub(crate) fn accrue_passive_gold(
@@ -102,9 +98,9 @@ pub(crate) fn accrue_passive_gold(
         return;
     }
     for player in players.values_mut().filter(|player| player.joined) {
-        player.gold_income_remainder += dt * GOLD_PER_SECOND;
-        let earned = player.gold_income_remainder.floor() as u32;
-        player.gold_income_remainder -= earned as f32;
+        player.economy.gold_income_remainder += dt * GOLD_PER_SECOND;
+        let earned = player.economy.gold_income_remainder.floor() as u32;
+        player.economy.gold_income_remainder -= earned as f32;
         award_gold(player, earned);
     }
 }
@@ -169,15 +165,15 @@ mod tests {
             .send_to(&bytes, rt.socket.local_addr().unwrap())
             .unwrap();
         let deadline = Instant::now() + Duration::from_secs(1);
-        while rt.world.players[&addr].state.last_purchase.is_none() && Instant::now() < deadline {
+        while rt.world.players[&addr].economy.last_purchase.is_none() && Instant::now() < deadline {
             rt.receive_packets();
         }
         rt.receive_packets();
         let player = &rt.world.players[&addr];
-        assert_eq!(player.state.gold, 0);
-        assert_eq!(player.state.inventory, [ItemId::VitalityGem]);
-        assert_eq!((player.state.hp, player.state.max_hp), (210.0, 210.0));
-        assert_eq!(player.state.last_purchase.as_ref().unwrap().error, None);
+        assert_eq!(player.economy.gold, 0);
+        assert_eq!(player.economy.inventory, [ItemId::VitalityGem]);
+        assert_eq!((player.hero.hp, player.hero.max_hp), (210.0, 210.0));
+        assert_eq!(player.economy.last_purchase.as_ref().unwrap().error, None);
     }
 
     #[test]
@@ -200,13 +196,13 @@ mod tests {
             .send_to(&stale, rt.socket.local_addr().unwrap())
             .unwrap();
         rt.receive_packets();
-        assert_eq!(rt.world.players[&addr].purchase_sequence, 0);
-        assert_eq!(rt.world.players[&addr].state.gold, STARTING_GOLD);
-        assert!(rt.world.players[&addr].state.inventory.is_empty());
-        assert!(rt.world.players[&addr].state.last_purchase.is_none());
+        assert_eq!(rt.world.players[&addr].economy.purchase_sequence, 0);
+        assert_eq!(rt.world.players[&addr].economy.gold, STARTING_GOLD);
+        assert!(rt.world.players[&addr].economy.inventory.is_empty());
+        assert!(rt.world.players[&addr].economy.last_purchase.is_none());
         buy(&mut rt, addr, ItemId::EmberBlade, 1, Instant::now());
         assert_eq!(
-            rt.world.players[&addr].state.inventory,
+            rt.world.players[&addr].economy.inventory,
             [ItemId::EmberBlade]
         );
         assert!(
@@ -236,20 +232,20 @@ mod tests {
                         winner: Team::Green,
                     }
                 }
-                PurchaseError::Dead => player.state.hp = 0.0,
+                PurchaseError::Dead => player.hero.hp = 0.0,
                 PurchaseError::OutsideBase => {
-                    player.state.x = rt.world.map_layout.away.x;
-                    player.state.z = rt.world.map_layout.away.z;
+                    player.hero.x = rt.world.map_layout.away.x;
+                    player.hero.z = rt.world.map_layout.away.z;
                 }
-                PurchaseError::InsufficientGold => player.state.gold = 79,
-                PurchaseError::AlreadyOwned => player.state.inventory.push(ItemId::EmberBlade),
+                PurchaseError::InsufficientGold => player.economy.gold = 79,
+                PurchaseError::AlreadyOwned => player.economy.inventory.push(ItemId::EmberBlade),
                 PurchaseError::InventoryFull => {
-                    player.state.inventory =
+                    player.economy.inventory =
                         shared::shop::ITEMS.iter().map(|item| item.id).collect()
                 }
                 PurchaseError::UnknownItem => {}
             }
-            let before = rt.world.players[&addr].state.clone();
+            let before = rt.player_view(addr, now);
             rt.handle_packet(
                 addr,
                 ClientPacket::BuyItem {
@@ -265,7 +261,7 @@ mod tests {
                 },
                 now,
             );
-            let after = &rt.world.players[&addr].state;
+            let after = rt.player_view(addr, now);
             assert_eq!(after.last_purchase.as_ref().unwrap().error, Some(expected));
             assert_eq!(
                 (
@@ -291,7 +287,7 @@ mod tests {
         buy(&mut rt, prejoin, ItemId::EmberBlade, 1, now);
         assert_eq!(
             rt.world.players[&prejoin]
-                .state
+                .economy
                 .last_purchase
                 .as_ref()
                 .unwrap()
@@ -303,12 +299,12 @@ mod tests {
     #[test]
     fn shop_boundary_is_own_base_and_dead_and_victory_are_unavailable() {
         let (rt, addr, _) = fixture();
-        let mut state = rt.world.players[&addr].state.clone();
+        let mut state = rt.world.players[&addr].hero.clone();
         for (team, base) in [
             (Team::Green, rt.world.map_layout.home),
             (Team::Blue, rt.world.map_layout.away),
         ] {
-            state.team = team;
+            state.identity.team = team;
             state.x = base.x + SHOP_RADIUS;
             state.z = base.z;
             assert!(shop_is_available(
@@ -343,10 +339,10 @@ mod tests {
         let (mut rt, addr, now) = fixture();
         buy(&mut rt, addr, ItemId::VitalityGem, 9, now);
         let player = rt.world.players.get_mut(&addr).unwrap();
-        player.state.hp = 0.0;
+        player.hero.hp = 0.0;
         player.timers.respawn_at = Some(now);
         handle_respawns(&mut rt.world, now);
-        assert_eq!(rt.world.players[&addr].state.hp, 210.0);
+        assert_eq!(rt.world.players[&addr].hero.hp, 210.0);
         let new_addr = "127.0.0.1:57002".parse().unwrap();
         rt.handle_packet(
             new_addr,
@@ -354,15 +350,15 @@ mod tests {
             now + PLAYER_TIMEOUT + Duration::from_millis(1),
         );
         let player = &rt.world.players[&new_addr];
-        assert_eq!(player.state.inventory, [ItemId::VitalityGem]);
-        assert_eq!(player.purchase_sequence, 9);
-        assert_eq!(player.state.gold, 0);
+        assert_eq!(player.economy.inventory, [ItemId::VitalityGem]);
+        assert_eq!(player.economy.purchase_sequence, 9);
+        assert_eq!(player.economy.gold, 0);
         let old_round = rt.match_id;
         rt.restart_round(now + PLAYER_TIMEOUT + Duration::from_millis(2));
         let player = &rt.world.players[&new_addr];
-        assert!(player.state.inventory.is_empty() && player.state.last_purchase.is_none());
-        assert_eq!(player.state.item_bonuses, ItemBonuses::NONE);
-        assert_eq!(player.state.gold, STARTING_GOLD);
+        assert!(player.economy.inventory.is_empty() && player.economy.last_purchase.is_none());
+        assert_eq!(player.economy.item_bonuses, ItemBonuses::NONE);
+        assert_eq!(player.economy.gold, STARTING_GOLD);
         rt.handle_packet(
             new_addr,
             ClientPacket::BuyItem {
@@ -373,7 +369,7 @@ mod tests {
             },
             now + PLAYER_TIMEOUT + Duration::from_millis(3),
         );
-        assert_eq!(rt.world.players[&new_addr].purchase_sequence, 0);
+        assert_eq!(rt.world.players[&new_addr].economy.purchase_sequence, 0);
         buy(
             &mut rt,
             new_addr,
@@ -382,7 +378,7 @@ mod tests {
             now + PLAYER_TIMEOUT + Duration::from_millis(4),
         );
         assert_eq!(
-            rt.world.players[&new_addr].state.inventory,
+            rt.world.players[&new_addr].economy.inventory,
             [ItemId::EmberBlade]
         );
     }
@@ -390,7 +386,7 @@ mod tests {
     #[test]
     fn equipment_changes_authoritative_projectile_damage_and_both_cooldown_groups() {
         let (mut rt, addr, now) = fixture();
-        rt.world.players.get_mut(&addr).unwrap().state.gold = 1000;
+        rt.world.players.get_mut(&addr).unwrap().economy.gold = 1000;
         for (index, id) in [
             ItemId::EmberBlade,
             ItemId::GuardianCrest,
@@ -405,17 +401,17 @@ mod tests {
         let enemy_addr = "127.0.0.1:57003".parse().unwrap();
         rt.handle_packet(enemy_addr, join(Team::Blue, "target"), now);
         let (x, z) = (
-            rt.world.players[&addr].state.x,
-            rt.world.players[&addr].state.z,
+            rt.world.players[&addr].hero.x,
+            rt.world.players[&addr].hero.z,
         );
         let enemy = rt.world.players.get_mut(&enemy_addr).unwrap();
-        enemy.state.x = x + 1.0;
-        enemy.state.z = z;
+        enemy.hero.x = x + 1.0;
+        enemy.hero.z = z;
         let target = TargetId {
             kind: TargetKind::Player,
-            id: enemy.state.id,
+            id: enemy.hero.identity.id,
         };
-        rt.world.players.get_mut(&addr).unwrap().state.level = 6;
+        rt.world.players.get_mut(&addr).unwrap().hero.progress.level = 6;
         let mut cast_at = now;
         for slot in [SkillSlot::Q, SkillSlot::E] {
             let def = ability_for_class_slot(HeroClass::Mage, slot);
@@ -423,7 +419,7 @@ mod tests {
                 target,
                 slot: slot.index() as u8,
             };
-            rt.world.players.get_mut(&addr).unwrap().state.mana = 1000.0;
+            rt.world.players.get_mut(&addr).unwrap().hero.mana = 1000.0;
             rt.handle_packet(addr, packet.clone(), cast_at);
             let count = rt.world.projectiles.len();
             let cooldown = sandbox::effective_ability_cooldown(&rt.world.players[&addr], slot);
@@ -452,36 +448,36 @@ mod tests {
                     < 0.001
             );
         }
-        assert_eq!(rt.world.players[&addr].state.max_mana, 120.0);
-        assert_eq!(rt.world.players[&addr].state.max_hp, 195.0);
+        assert_eq!(rt.world.players[&addr].hero.max_mana, 120.0);
+        assert_eq!(rt.world.players[&addr].hero.max_hp, 195.0);
     }
 
     #[test]
     fn boots_change_authoritative_movement_allowance_and_level_growth_keeps_items() {
         let (mut rt, addr, now) = fixture();
-        rt.world.players.get_mut(&addr).unwrap().state.gold = 1000;
+        rt.world.players.get_mut(&addr).unwrap().economy.gold = 1000;
         buy(&mut rt, addr, ItemId::TrailBoots, 1, now);
         buy(&mut rt, addr, ItemId::VitalityGem, 2, now);
         let player = rt.world.players.get_mut(&addr).unwrap();
-        let start = player.state.x;
+        let start = player.hero.x;
         handle_transform_request(
             player,
             &rt.world.map_layout,
             start + 100.0,
             0.5,
-            player.state.z,
+            player.hero.z,
             0.0,
             now + Duration::from_millis(100),
         );
         let expected = PLAYER_SPEED * 1.08 * 0.1 + MOVEMENT_POSITION_TOLERANCE;
-        assert!((player.state.x - start - expected).abs() < 0.001);
-        apply_level_up(&mut player.state);
+        assert!((player.hero.x - start - expected).abs() < 0.001);
+        apply_level_up(&mut player.hero);
         assert_eq!(
-            player.state.max_hp,
+            player.hero.max_hp,
             shared::hero_balance::base_hp(HeroClass::Mage) + 30.0 + LEVEL_UP_HP_BONUS
         );
         assert_eq!(
-            player.state.inventory,
+            player.economy.inventory,
             [ItemId::TrailBoots, ItemId::VitalityGem]
         );
     }
@@ -491,12 +487,12 @@ mod tests {
         let (mut rt, addr, now) = fixture();
         let prejoin = "127.0.0.1:57004".parse().unwrap();
         rt.handle_packet(prejoin, ClientPacket::Ping, now);
-        rt.world.players.get_mut(&addr).unwrap().state.hp = 0.0;
+        rt.world.players.get_mut(&addr).unwrap().hero.hp = 0.0;
         for _ in 0..4 {
             accrue_passive_gold(&mut rt.world.players, &GameState::Running, 0.25);
         }
-        assert_eq!(rt.world.players[&addr].state.gold, STARTING_GOLD + 1);
-        assert_eq!(rt.world.players[&prejoin].state.gold, STARTING_GOLD);
+        assert_eq!(rt.world.players[&addr].economy.gold, STARTING_GOLD + 1);
+        assert_eq!(rt.world.players[&prejoin].economy.gold, STARTING_GOLD);
         for phase in [
             GameState::Lobby,
             GameState::Starting { countdown_ms: 3000 },
@@ -506,7 +502,7 @@ mod tests {
         ] {
             accrue_passive_gold(&mut rt.world.players, &phase, 10.0);
         }
-        assert_eq!(rt.world.players[&addr].state.gold, STARTING_GOLD + 1);
+        assert_eq!(rt.world.players[&addr].economy.gold, STARTING_GOLD + 1);
     }
 
     #[test]
@@ -515,60 +511,66 @@ mod tests {
         buy(&mut rt, addr, ItemId::FocusCharm, 1, now);
         assert_eq!(
             rt.world.players[&addr]
-                .state
+                .economy
                 .last_purchase
                 .as_ref()
                 .unwrap()
                 .error,
             Some(PurchaseError::InsufficientGold)
         );
-        rt.world.players.get_mut(&addr).unwrap().state.gold = 100;
+        rt.world.players.get_mut(&addr).unwrap().economy.gold = 100;
         buy(&mut rt, addr, ItemId::FocusCharm, 1, now);
-        assert_eq!(rt.world.players[&addr].state.gold, 100);
-        assert!(rt.world.players[&addr].state.inventory.is_empty());
+        assert_eq!(rt.world.players[&addr].economy.gold, 100);
+        assert!(rt.world.players[&addr].economy.inventory.is_empty());
         buy(&mut rt, addr, ItemId::FocusCharm, 2, now);
         assert_eq!(
-            rt.world.players[&addr].state.inventory,
+            rt.world.players[&addr].economy.inventory,
             [ItemId::FocusCharm]
         );
         rt.maintain_roster(now + PLAYER_TIMEOUT + Duration::from_millis(1));
         assert!(!rt.world.players.contains_key(&addr));
         assert_eq!(
-            rt.world.disconnected_sessions["shopper"].player.state.gold,
+            rt.world.disconnected_sessions["shopper"]
+                .player
+                .economy
+                .gold,
             0
         );
         accrue_passive_gold(&mut rt.world.players, &GameState::Running, 3.0);
         assert_eq!(
-            rt.world.disconnected_sessions["shopper"].player.state.gold,
+            rt.world.disconnected_sessions["shopper"]
+                .player
+                .economy
+                .gold,
             0
         );
     }
     #[test]
     fn earned_gold_is_income_not_wallet_and_survives_purchase_respawn_and_reconnect() {
         let (mut rt, addr, now) = fixture();
-        assert_eq!(rt.world.players[&addr].state.earned_gold, 0);
+        assert_eq!(rt.world.players[&addr].economy.earned_gold, 0);
         accrue_passive_gold(&mut rt.world.players, &GameState::Running, 10.0);
         award_gold(rt.world.players.get_mut(&addr).unwrap(), 200);
-        let earned = rt.world.players[&addr].state.earned_gold;
+        let earned = rt.world.players[&addr].economy.earned_gold;
         assert_eq!(earned, 210);
         buy(&mut rt, addr, ItemId::TrailBoots, 1, now);
-        assert_eq!(rt.world.players[&addr].state.earned_gold, earned);
-        assert_ne!(rt.world.players[&addr].state.gold, STARTING_GOLD + earned);
-        rt.world.players.get_mut(&addr).unwrap().state.hp = 0.0;
+        assert_eq!(rt.world.players[&addr].economy.earned_gold, earned);
+        assert_ne!(rt.world.players[&addr].economy.gold, STARTING_GOLD + earned);
+        rt.world.players.get_mut(&addr).unwrap().hero.hp = 0.0;
         rt.world.players.get_mut(&addr).unwrap().timers.respawn_at = Some(now);
         handle_respawns(&mut rt.world, now);
-        assert_eq!(rt.world.players[&addr].state.earned_gold, earned);
+        assert_eq!(rt.world.players[&addr].economy.earned_gold, earned);
         let reconnect_at = now + PLAYER_TIMEOUT + Duration::from_millis(1);
         rt.maintain_roster(reconnect_at);
         let other = "127.0.0.1:57999".parse().unwrap();
         rt.handle_packet(other, join(Team::Green, "shopper"), reconnect_at);
-        assert_eq!(rt.world.players[&other].state.earned_gold, earned);
+        assert_eq!(rt.world.players[&other].economy.earned_gold, earned);
         reset_player_round(
             rt.world.players.get_mut(&other).unwrap(),
             &rt.world.map_layout,
             reconnect_at,
         );
-        assert_eq!(rt.world.players[&other].state.earned_gold, 0);
-        assert_eq!(rt.world.players[&other].state.gold, STARTING_GOLD);
+        assert_eq!(rt.world.players[&other].economy.earned_gold, 0);
+        assert_eq!(rt.world.players[&other].economy.gold, STARTING_GOLD);
     }
 }

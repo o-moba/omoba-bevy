@@ -18,7 +18,7 @@ fn joined_roster(count: u32, team_size: u32) -> GameWorld {
             .expect("roster should not be full while building");
         let player = world.players.get_mut(&addr).unwrap();
         player.joined = true;
-        player.state.team = team;
+        player.hero.identity.team = team;
     }
     world
 }
@@ -141,7 +141,7 @@ fn release_team_assignment_always_fills_smaller_team() {
     world.ensure_connected(addr, Instant::now());
     let player = world.players.get_mut(&addr).unwrap();
     player.joined = true;
-    player.state.team = team;
+    player.hero.identity.team = team;
     assert_eq!(joined_team_counts(&world.players), (2, 2));
 }
 

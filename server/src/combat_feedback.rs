@@ -169,20 +169,23 @@ pub(crate) fn apply_player_damage_typed(
         return None;
     }
     let player = players.values_mut().find(|player| {
-        player.joined && player.state.id == target_id && player.state.hp > 0.0 && !player.god_mode
+        player.joined
+            && player.hero.identity.id == target_id
+            && player.hero.hp > 0.0
+            && !player.god_mode
     })?;
-    let before = player.state.hp;
+    let before = player.hero.hp;
     let mitigation = player
         .sandbox
         .as_ref()
         .map_or(0.0, |c| if magical { c.resistance } else { c.armor });
     let damage = damage * 100.0 / (100.0 + mitigation);
-    player.state.hp = if player.sandbox_infinite_hp {
+    player.hero.hp = if player.sandbox_infinite_hp {
         before
     } else {
         (before - damage).max(0.0)
     };
-    if player.state.hp <= 0.0 && player.timers.respawn_at.is_none() {
+    if player.hero.hp <= 0.0 && player.timers.respawn_at.is_none() {
         player.timers.respawn_at = Some(now + RESPAWN_DELAY);
         player.timers.haste_expires_at = None;
     }
@@ -193,9 +196,9 @@ pub(crate) fn apply_player_damage_typed(
         if player.sandbox_infinite_hp {
             before - damage
         } else {
-            player.state.hp
+            player.hero.hp
         },
-        Vec3f::new(player.state.x, player.state.y + AIM_HEIGHT, player.state.z),
+        Vec3f::new(player.hero.x, player.hero.y + AIM_HEIGHT, player.hero.z),
     );
     if player.sandbox_infinite_hp {
         if let Some(event) = &mut receipt {

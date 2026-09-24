@@ -17,12 +17,12 @@ pub(crate) fn resolve_hostile_target(
         TargetKind::Player => {
             let player = players.values().find(|player| {
                 player.joined
-                    && player.state.id == target.id
-                    && player.state.hp > 0.0
-                    && player.state.team != team
+                    && player.hero.identity.id == target.id
+                    && player.hero.hp > 0.0
+                    && player.hero.identity.team != team
             })?;
             Some((
-                Vec3f::new(player.state.x, player.state.y + AIM_HEIGHT, player.state.z),
+                Vec3f::new(player.hero.x, player.hero.y + AIM_HEIGHT, player.hero.z),
                 PLAYER_HIT_RADIUS,
             ))
         }
@@ -71,18 +71,19 @@ pub(crate) fn handle_basic_attack_request(
     let Some(attacker) = world.players.get_mut(&addr) else {
         return;
     };
-    if !attacker.joined || request_id == 0 || request_id <= attacker.state.basic_attack_request_id {
+    if !attacker.joined || request_id == 0 || request_id <= attacker.economy.basic_attack_request_id
+    {
         return;
     }
     // Identity was checked by the packet receiver before this high-water mark.
     // Consume even a rejected strike: it cannot be replayed later after walking
     // into range, recovering from death, or waiting out the cooldown.
-    attacker.state.basic_attack_request_id = request_id;
+    attacker.economy.basic_attack_request_id = request_id;
     attacker.last_seen = now;
-    if !matches!(world.game_state, GameState::Running) || attacker.state.hp <= 0.0 {
+    if !matches!(world.game_state, GameState::Running) || attacker.hero.hp <= 0.0 {
         return;
     }
-    let definition = basic_attack_for_class(attacker.state.hero_class);
+    let definition = basic_attack_for_class(attacker.hero.identity.hero_class);
     let cooldown = sandbox::effective_basic_attack_cooldown(attacker);
     if !attacker.sandbox.as_ref().is_some_and(|c| c.no_cooldowns)
         && attacker
@@ -92,12 +93,12 @@ pub(crate) fn handle_basic_attack_request(
     {
         return;
     }
-    let team = attacker.state.team;
+    let team = attacker.hero.identity.team;
     let sandbox = attacker.sandbox.is_some();
     let origin = Vec3f::new(
-        attacker.state.x,
-        attacker.state.y + CAST_SPAWN_HEIGHT,
-        attacker.state.z,
+        attacker.hero.x,
+        attacker.hero.y + CAST_SPAWN_HEIGHT,
+        attacker.hero.z,
     );
     let damage = sandbox::effective_basic_attack_damage(attacker)
         * world.team_buffs.damage_multiplier(team, now);
@@ -129,9 +130,9 @@ pub(crate) fn handle_basic_attack_request(
     }
     let attacker = world.players.get_mut(&addr).unwrap();
     attacker.timers.last_basic_attack_at = Some(now);
-    attacker.state.action_sequence = attacker.state.action_sequence.wrapping_add(1).max(1);
-    attacker.state.action_kind = PlayerActionKind::Attack;
-    attacker.state.action_slot = BASIC_ATTACK_ACTION_SLOT;
+    attacker.hero.last_action.sequence = attacker.hero.last_action.sequence.wrapping_add(1).max(1);
+    attacker.hero.last_action.kind = PlayerActionKind::Attack;
+    attacker.hero.last_action.slot = BASIC_ATTACK_ACTION_SLOT;
     let id = world.next_projectile_id;
     world.next_projectile_id += 1;
     world.projectiles.insert(
@@ -139,11 +140,11 @@ pub(crate) fn handle_basic_attack_request(
         Projectile {
             state: ProjectileState {
                 source_kind: CombatEntityKind::Player,
-                style: ProjectileStyle::for_class(attacker.state.hero_class),
+                style: ProjectileStyle::for_class(attacker.hero.identity.hero_class),
                 action_slot: Some(BASIC_ATTACK_ACTION_SLOT),
                 direction: [direction.x, direction.y, direction.z],
                 id,
-                owner_id: attacker.state.id,
+                owner_id: attacker.hero.identity.id,
                 owner_team: team,
                 x: origin.x,
                 y: origin.y,

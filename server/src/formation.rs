@@ -106,7 +106,7 @@ pub(crate) fn joined_team_counts(players: &HashMap<SocketAddr, ConnectedPlayer>)
     let mut green = 0;
     let mut blue = 0;
     for player in players.values().filter(|player| player.joined) {
-        match player.state.team {
+        match player.hero.identity.team {
             Team::Green => green += 1,
             Team::Blue => blue += 1,
         }

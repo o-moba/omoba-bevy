@@ -73,28 +73,28 @@ impl ForestPickups {
             let collector = players
                 .iter()
                 .filter(|(_, player)| {
-                    let state = &player.state;
+                    let hero = &player.hero;
                     player.joined
                         && player.timers.respawn_at.is_none()
-                        && state.hp.is_finite()
-                        && state.max_hp.is_finite()
-                        && state.hp > 0.0
-                        && state.hp < state.max_hp
-                        && (state.x - pickup.state.position[0])
-                            .hypot(state.z - pickup.state.position[1])
+                        && hero.hp.is_finite()
+                        && hero.max_hp.is_finite()
+                        && hero.hp > 0.0
+                        && hero.hp < hero.max_hp
+                        && (hero.x - pickup.state.position[0])
+                            .hypot(hero.z - pickup.state.position[1])
                             <= PICKUP_RADIUS
                 })
-                .min_by_key(|(_, player)| player.state.id)
+                .min_by_key(|(_, player)| player.hero.identity.id)
                 .map(|(addr, _)| *addr);
             let Some(player) = collector.and_then(|addr| players.get_mut(&addr)) else {
                 continue;
             };
-            let state = &mut player.state;
-            let healed = (state.max_hp - state.hp).min(state.max_hp * HEAL_FRACTION);
-            state.hp = (state.hp + healed).min(state.max_hp);
+            let hero = &mut player.hero;
+            let healed = (hero.max_hp - hero.hp).min(hero.max_hp * HEAL_FRACTION);
+            hero.hp = (hero.hp + healed).min(hero.max_hp);
             pickup.state.available = false;
             pickup.state.collection_sequence = pickup.state.collection_sequence.saturating_add(1);
-            pickup.state.last_collector_id = Some(state.id);
+            pickup.state.last_collector_id = Some(hero.identity.id);
             pickup.state.healed_amount = healed;
             pickup.respawn_at = Some(now + Duration::from_secs_f32(RESPAWN_SECS));
         }
@@ -115,10 +115,10 @@ mod tests {
         rt.world.ensure_connected(addr, now);
         let player = rt.world.players.get_mut(&addr).unwrap();
         player.joined = true;
-        player.state.x = pickup_layout()[0][0];
-        player.state.z = pickup_layout()[0][1];
-        player.state.max_hp = 200.0;
-        player.state.hp = 100.0;
+        player.hero.x = pickup_layout()[0][0];
+        player.hero.z = pickup_layout()[0][1];
+        player.hero.max_hp = 200.0;
+        player.hero.hp = 100.0;
         rt.world.game_state = GameState::Running;
         (rt, addr, now)
     }
@@ -129,14 +129,14 @@ mod tests {
         rt.world
             .forest_pickups
             .tick(&mut rt.world.players, &rt.world.game_state, now);
-        assert_eq!(rt.world.players[&addr].state.hp, 110.0);
+        assert_eq!(rt.world.players[&addr].hero.hp, 110.0);
         let receipt = &rt.world.forest_pickups.snapshot(&rt.world.game_state)[0];
         assert!(!receipt.available);
         assert_eq!(receipt.collection_sequence, 1);
         assert_eq!(receipt.healed_amount, 10.0);
         assert_eq!(
             receipt.last_collector_id,
-            Some(rt.world.players[&addr].state.id)
+            Some(rt.world.players[&addr].hero.identity.id)
         );
         for seconds in [0, 1, 29] {
             rt.world.forest_pickups.tick(
@@ -144,22 +144,22 @@ mod tests {
                 &rt.world.game_state,
                 now + Duration::from_secs(seconds),
             );
-            assert_eq!(rt.world.players[&addr].state.hp, 110.0);
+            assert_eq!(rt.world.players[&addr].hero.hp, 110.0);
         }
-        rt.world.players.get_mut(&addr).unwrap().state.x += 10.0;
+        rt.world.players.get_mut(&addr).unwrap().hero.x += 10.0;
         rt.world.forest_pickups.tick(
             &mut rt.world.players,
             &rt.world.game_state,
             now + Duration::from_secs(30),
         );
         assert!(rt.world.forest_pickups.snapshot(&rt.world.game_state)[0].available);
-        rt.world.players.get_mut(&addr).unwrap().state.x -= 10.0;
+        rt.world.players.get_mut(&addr).unwrap().hero.x -= 10.0;
         rt.world.forest_pickups.tick(
             &mut rt.world.players,
             &rt.world.game_state,
             now + Duration::from_secs(30),
         );
-        assert_eq!(rt.world.players[&addr].state.hp, 120.0);
+        assert_eq!(rt.world.players[&addr].hero.hp, 120.0);
         assert_eq!(
             rt.world.forest_pickups.snapshot(&rt.world.game_state)[0].collection_sequence,
             2
@@ -172,31 +172,31 @@ mod tests {
             let (mut rt, addr, now) = fixture();
             let player = rt.world.players.get_mut(&addr).unwrap();
             match scenario {
-                "dead" => player.state.hp = 0.0,
-                "full" => player.state.hp = player.state.max_hp,
-                "outside" => player.state.x += PICKUP_RADIUS + 0.01,
+                "dead" => player.hero.hp = 0.0,
+                "full" => player.hero.hp = player.hero.max_hp,
+                "outside" => player.hero.x += PICKUP_RADIUS + 0.01,
                 "unjoined" => player.joined = false,
                 "respawning" => player.timers.respawn_at = Some(now),
-                "nan" => player.state.x = f32::NAN,
+                "nan" => player.hero.x = f32::NAN,
                 _ => unreachable!(),
             }
-            let hp = player.state.hp;
+            let hp = player.hero.hp;
             rt.world
                 .forest_pickups
                 .tick(&mut rt.world.players, &rt.world.game_state, now);
-            assert_eq!(rt.world.players[&addr].state.hp, hp, "{scenario}");
+            assert_eq!(rt.world.players[&addr].hero.hp, hp, "{scenario}");
             assert!(
                 rt.world.forest_pickups.snapshot(&rt.world.game_state)[0].available,
                 "{scenario}"
             );
         }
         let (mut rt, addr, now) = fixture();
-        rt.world.players.get_mut(&addr).unwrap().state.hp = 199.0;
-        rt.world.players.get_mut(&addr).unwrap().state.x += PICKUP_RADIUS;
+        rt.world.players.get_mut(&addr).unwrap().hero.hp = 199.0;
+        rt.world.players.get_mut(&addr).unwrap().hero.x += PICKUP_RADIUS;
         rt.world
             .forest_pickups
             .tick(&mut rt.world.players, &rt.world.game_state, now);
-        assert_eq!(rt.world.players[&addr].state.hp, 200.0);
+        assert_eq!(rt.world.players[&addr].hero.hp, 200.0);
         assert_eq!(
             rt.world.forest_pickups.snapshot(&rt.world.game_state)[0].healed_amount,
             1.0
@@ -208,21 +208,21 @@ mod tests {
         let (mut rt, first, now) = fixture();
         let other = "127.0.0.1:59242".parse().unwrap();
         rt.world.ensure_connected(other, now);
-        let first_state = rt.world.players[&first].state.clone();
+        let first_state = rt.world.players[&first].hero.clone();
         let player = rt.world.players.get_mut(&other).unwrap();
         player.joined = true;
-        player.state.hp = first_state.hp;
-        player.state.max_hp = first_state.max_hp;
-        player.state.x = first_state.x;
-        player.state.z = first_state.z;
+        player.hero.hp = first_state.hp;
+        player.hero.max_hp = first_state.max_hp;
+        player.hero.x = first_state.x;
+        player.hero.z = first_state.z;
         rt.world
             .forest_pickups
             .tick(&mut rt.world.players, &rt.world.game_state, now);
-        assert_eq!(rt.world.players[&first].state.hp, 110.0);
-        assert_eq!(rt.world.players[&other].state.hp, 100.0);
+        assert_eq!(rt.world.players[&first].hero.hp, 110.0);
+        assert_eq!(rt.world.players[&other].hero.hp, 100.0);
         assert_eq!(
             rt.world.forest_pickups.snapshot(&rt.world.game_state)[0].last_collector_id,
-            Some(first_state.id)
+            Some(first_state.identity.id)
         );
     }
 
@@ -238,7 +238,7 @@ mod tests {
             rt.world
                 .forest_pickups
                 .tick(&mut rt.world.players, &phase, now);
-            assert_eq!(rt.world.players[&addr].state.hp, 100.0);
+            assert_eq!(rt.world.players[&addr].hero.hp, 100.0);
             assert!(rt.world.forest_pickups.snapshot(&phase).is_empty());
         }
         rt.world
@@ -261,7 +261,7 @@ mod tests {
         rt.sandbox.as_mut().unwrap().config.player.position = pickup_layout()[0];
         rt.sandbox.as_mut().unwrap().config.player.max_hp = 200.0;
         rt.initialize_sandbox_players();
-        rt.world.players.get_mut(&addr).unwrap().state.hp = 100.0;
+        rt.world.players.get_mut(&addr).unwrap().hero.hp = 100.0;
         rt.sandbox.as_mut().unwrap().config.environment.paused = true;
         let (paused_now, dt) = rt.sandbox.as_mut().unwrap().advance(90.0);
         rt.tick(paused_now, dt);
@@ -281,10 +281,10 @@ mod tests {
             1
         );
         let player = rt.world.players.get_mut(&addr).unwrap();
-        player.state.hp = 100.0;
-        player.state.max_hp = 200.0;
-        player.state.x = pickup_layout()[0][0];
-        player.state.z = pickup_layout()[0][1];
+        player.hero.hp = 100.0;
+        player.hero.max_hp = 200.0;
+        player.hero.x = pickup_layout()[0][0];
+        player.hero.z = pickup_layout()[0][1];
         rt.world
             .forest_pickups
             .tick(&mut rt.world.players, &rt.world.game_state, paused_now);

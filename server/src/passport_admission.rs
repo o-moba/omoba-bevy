@@ -514,17 +514,20 @@ mod tests {
             0
         );
         let deadline = Instant::now() + Duration::from_secs(2);
-        while rt.world.players[&addr].state.avatar.as_deref() != Some(free.slug.as_str())
+        while rt.world.players[&addr].hero.identity.avatar.as_deref() != Some(free.slug.as_str())
             && Instant::now() < deadline
         {
             rt.receive_packets();
             std::thread::sleep(Duration::from_millis(2));
         }
         assert_eq!(
-            rt.world.players[&addr].state.avatar.as_deref(),
+            rt.world.players[&addr].hero.identity.avatar.as_deref(),
             Some(free.slug.as_str())
         );
-        assert_eq!(rt.world.players[&addr].state.hero_class, HeroClass::Cleric);
+        assert_eq!(
+            rt.world.players[&addr].hero.identity.hero_class,
+            HeroClass::Cleric
+        );
         assert_eq!(
             prematch::snapshot(
                 &rt.prematch,
@@ -545,7 +548,7 @@ mod tests {
             Instant::now(),
         );
         assert_eq!(
-            rt.world.players[&addr].state.avatar.as_deref(),
+            rt.world.players[&addr].hero.identity.avatar.as_deref(),
             Some(free.slug.as_str())
         );
         assert!(

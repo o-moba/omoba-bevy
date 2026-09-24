@@ -66,7 +66,7 @@ fn no_cooldowns(player: &ConnectedPlayer) -> bool {
 /// Dead heroes and sandbox actors without cooldowns report every combat
 /// clock as ready.
 fn combat_clocks_suspended(player: &ConnectedPlayer) -> bool {
-    player.state.hp <= 0.0 || no_cooldowns(player)
+    player.hero.hp <= 0.0 || no_cooldowns(player)
 }
 
 /// Full basic-attack cooldown for the hero's current class, level and gear.
@@ -112,7 +112,7 @@ pub(crate) fn skill_recovery_remaining(player: &ConnectedPlayer, now: Instant) -
         return 0.0;
     }
     let recovery = Duration::from_secs_f32(shared::hero_balance::skill_recovery_secs(
-        player.state.level,
+        player.hero.progress.level,
     ));
     remaining_of(
         player.timers.last_cast_at.iter().flatten().max().copied(),
@@ -136,7 +136,7 @@ pub(crate) fn haste_remaining(player: &ConnectedPlayer, now: Instant) -> f32 {
 }
 
 pub(crate) fn haste_active(player: &ConnectedPlayer, now: Instant) -> f32 {
-    if player.state.hp <= 0.0 {
+    if player.hero.hp <= 0.0 {
         return 0.0;
     }
     remaining_until(player.timers.haste_expires_at, now)
@@ -150,7 +150,7 @@ pub(crate) fn haste_active(player: &ConnectedPlayer, now: Instant) -> f32 {
 /// only keeps the stored instants from outliving their meaning.
 pub(crate) fn normalize_hero_timers(world: &mut GameWorld) {
     for player in world.players.values_mut() {
-        let dead = player.state.hp <= 0.0;
+        let dead = player.hero.hp <= 0.0;
         let free = no_cooldowns(player);
         if dead || free {
             player.timers.last_basic_attack_at = None;

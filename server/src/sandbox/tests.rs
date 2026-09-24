@@ -29,7 +29,7 @@ fn command(rt: &mut ServerRuntime, a: SocketAddr, command: SandboxCommand) -> Sa
         .as_ref()
         .unwrap()
         .sequences
-        .get(&rt.world.players[&a].state.id)
+        .get(&rt.world.players[&a].hero.identity.id)
         .copied()
         .unwrap_or(0)
         + 1;
@@ -42,7 +42,7 @@ fn command(rt: &mut ServerRuntime, a: SocketAddr, command: SandboxCommand) -> Sa
             command,
         },
     );
-    rt.sandbox.as_ref().unwrap().acks[&rt.world.players[&a].state.id].clone()
+    rt.sandbox.as_ref().unwrap().acks[&rt.world.players[&a].hero.identity.id].clone()
 }
 fn config(rt: &ServerRuntime) -> SandboxConfig {
     rt.sandbox.as_ref().unwrap().config.clone()
@@ -67,21 +67,21 @@ fn sandbox_defaults_valid_and_actor_edit_is_transactional() {
     c.player.inventory = shared::shop::ITEMS.iter().map(|i| i.id).collect();
     c.player.damage_multiplier = 2.0;
     c.player.attack_speed = 3.0;
-    rt.world.players.get_mut(&a).unwrap().state.hp = 27.0;
+    rt.world.players.get_mut(&a).unwrap().hero.hp = 27.0;
     rt.world.players.get_mut(&a).unwrap().timers.last_cast_at[0] = Some(now);
     apply(&mut rt, a, c.clone());
     let p = &rt.world.players[&a];
-    assert_eq!(p.state.hp, 27.0);
+    assert_eq!(p.hero.hp, 27.0);
     assert_eq!(p.timers.last_cast_at[0], Some(now));
-    assert_eq!(p.state.level, 10);
-    assert_eq!(p.state.ranks, [3; 4]);
-    assert_eq!(p.state.inventory.len(), 6);
-    assert_eq!(p.state.max_hp, 321.0 + 9.0 * 18.0 + 45.0);
-    assert!(p.state.item_bonuses.damage_multiplier > 2.0);
-    assert!(p.state.item_bonuses.attack_speed_multiplier > 3.0);
+    assert_eq!(p.hero.progress.level, 10);
+    assert_eq!(p.hero.progress.ranks, [3; 4]);
+    assert_eq!(p.economy.inventory.len(), 6);
+    assert_eq!(p.hero.max_hp, 321.0 + 9.0 * 18.0 + 45.0);
+    assert!(p.economy.item_bonuses.damage_multiplier > 2.0);
+    assert!(p.economy.item_bonuses.attack_speed_multiplier > 3.0);
     c.player.max_hp = f32::NAN;
     assert!(!command(&mut rt, a, SandboxCommand::ApplyConfig { config: c }).accepted);
-    assert_eq!(rt.world.players[&a].state.hp, 27.0);
+    assert_eq!(rt.world.players[&a].hero.hp, 27.0);
 }
 #[test]
 fn sandbox_epoch_replay_and_mode_gates() {
@@ -96,22 +96,22 @@ fn sandbox_epoch_replay_and_mode_gates() {
         },
     };
     rt.handle_sandbox(a, request.clone());
-    let level = rt.world.players[&a].state.level;
-    let xp = rt.world.players[&a].state.xp;
+    let level = rt.world.players[&a].hero.progress.level;
+    let xp = rt.world.players[&a].hero.progress.xp;
     rt.handle_sandbox(a, request.clone());
-    assert!(rt.sandbox.as_ref().unwrap().acks[&rt.world.players[&a].state.id].accepted);
+    assert!(rt.sandbox.as_ref().unwrap().acks[&rt.world.players[&a].hero.identity.id].accepted);
     assert_eq!(
         (level, xp),
         (
-            rt.world.players[&a].state.level,
-            rt.world.players[&a].state.xp
+            rt.world.players[&a].hero.progress.level,
+            rt.world.players[&a].hero.progress.xp
         )
     );
     let mut stale = request;
     stale.server_epoch += 1;
     stale.request_id = 18;
     rt.handle_sandbox(a, stale);
-    assert!(!rt.sandbox.as_ref().unwrap().acks[&rt.world.players[&a].state.id].accepted);
+    assert!(!rt.sandbox.as_ref().unwrap().acks[&rt.world.players[&a].hero.identity.id].accepted);
     for mode in [MatchMode::Release, MatchMode::Practice] {
         rt.match_config.mode = mode;
         assert!(!rt.sandbox_allowed());
@@ -123,7 +123,7 @@ fn sandbox_epoch_replay_and_mode_gates() {
                 amount: 10000,
             },
         );
-        assert_eq!(rt.world.players[&a].state.level, level);
+        assert_eq!(rt.world.players[&a].hero.progress.level, level);
     }
     rt.match_config.mode = MatchMode::Dev;
     rt.sandbox = None;
@@ -137,9 +137,9 @@ fn sandbox_resources_god_toggle_and_cooldowns_restore() {
     c.player.infinite_resource = true;
     c.player.no_cooldowns = true;
     apply(&mut rt, a, c.clone());
-    let id = rt.world.players[&a].state.id;
+    let id = rt.world.players[&a].hero.identity.id;
     assert!(apply_player_damage(&mut rt.world.players, id, 10.0, now).is_none());
-    rt.world.players.get_mut(&a).unwrap().state.mana = 1.0;
+    rt.world.players.get_mut(&a).unwrap().hero.mana = 1.0;
     rt.world
         .players
         .get_mut(&a)
@@ -148,8 +148,8 @@ fn sandbox_resources_god_toggle_and_cooldowns_restore() {
         .last_basic_attack_at = Some(now);
     rt.simulate_sandbox(now, 0.01);
     assert_eq!(
-        rt.world.players[&a].state.mana,
-        rt.world.players[&a].state.max_mana
+        rt.world.players[&a].hero.mana,
+        rt.world.players[&a].hero.max_mana
     );
     assert!(rt.world.players[&a].timers.last_basic_attack_at.is_none());
     c.player.god_mode = false;
@@ -168,8 +168,8 @@ fn sandbox_resources_god_toggle_and_cooldowns_restore() {
         .accepted
     );
     assert_eq!(
-        rt.world.players[&a].state.hp,
-        rt.world.players[&a].state.max_hp
+        rt.world.players[&a].hero.hp,
+        rt.world.players[&a].hero.max_hp
     );
 }
 #[test]
@@ -186,7 +186,7 @@ fn sandbox_real_basic_and_ability_hits_mitigate_and_accumulate_without_duplicate
     apply(&mut rt, a, c);
     let target = TargetId {
         kind: TargetKind::Player,
-        id: rt.world.players[&DUMMY_ADDR].state.id,
+        id: rt.world.players[&DUMMY_ADDR].hero.identity.id,
     };
     for (request, slot) in [(1, None), (2, Some(0))] {
         if let Some(slot) = slot {
@@ -213,7 +213,7 @@ fn sandbox_real_basic_and_ability_hits_mitigate_and_accumulate_without_duplicate
         assert!(!events[0].killed);
         rt.combat_log.extend(now, events);
     }
-    assert_eq!(rt.world.players[&DUMMY_ADDR].state.hp, 10000.0);
+    assert_eq!(rt.world.players[&DUMMY_ADDR].hero.hp, 10000.0);
     let stats = rt
         .combat_log
         .sandbox_analytics(now + Duration::from_secs(2));
@@ -233,12 +233,12 @@ fn sandbox_finite_dummy_overkill_and_respawn() {
     c.dummy.infinite_hp = false;
     c.dummy.max_hp = 10.0;
     apply(&mut rt, a, c);
-    let id = rt.world.players[&DUMMY_ADDR].state.id;
+    let id = rt.world.players[&DUMMY_ADDR].hero.identity.id;
     let event = apply_player_damage(&mut rt.world.players, id, 500.0, now).unwrap();
     assert_eq!(event.amount, 10.0);
     assert!(event.killed);
     rt.simulate_sandbox(now + RESPAWN_DELAY, 0.01);
-    assert_eq!(rt.world.players[&DUMMY_ADDR].state.hp, 10.0);
+    assert_eq!(rt.world.players[&DUMMY_ADDR].hero.hp, 10.0);
 }
 #[test]
 fn sandbox_progression_unlock_items_teleport_reset_and_hero_swap() {
@@ -287,7 +287,7 @@ fn sandbox_progression_unlock_items_teleport_reset_and_hero_swap() {
         )
         .accepted
     );
-    assert_eq!(rt.world.players[&a].state.level, 10);
+    assert_eq!(rt.world.players[&a].hero.progress.level, 10);
     command(
         &mut rt,
         a,
@@ -296,8 +296,8 @@ fn sandbox_progression_unlock_items_teleport_reset_and_hero_swap() {
             amount: i32::MIN,
         },
     );
-    assert_eq!(rt.world.players[&a].state.level, 1);
-    let seq = rt.world.players[&a].state.utility.dash_sequence;
+    assert_eq!(rt.world.players[&a].hero.progress.level, 1);
+    let seq = rt.world.players[&a].hero.utility.dash_sequence;
     command(
         &mut rt,
         a,
@@ -306,13 +306,13 @@ fn sandbox_progression_unlock_items_teleport_reset_and_hero_swap() {
             position: [-2.0, 1.0],
         },
     );
-    assert_eq!(rt.world.players[&a].state.x, -2.0);
-    assert!(rt.world.players[&a].state.utility.dash_sequence > seq);
+    assert_eq!(rt.world.players[&a].hero.x, -2.0);
+    assert!(rt.world.players[&a].hero.utility.dash_sequence > seq);
     command(&mut rt, a, SandboxCommand::ResetDuel);
-    assert_eq!(rt.world.players[&a].state.x, -3.0);
-    assert_eq!(rt.world.players[&ENEMY_ADDR].state.level, 10);
-    assert_eq!(rt.world.players[&ENEMY_ADDR].state.ranks, [3; 4]);
-    assert_eq!(rt.world.players[&a].state.inventory.len(), 6);
+    assert_eq!(rt.world.players[&a].hero.x, -3.0);
+    assert_eq!(rt.world.players[&ENEMY_ADDR].hero.progress.level, 10);
+    assert_eq!(rt.world.players[&ENEMY_ADDR].hero.progress.ranks, [3; 4]);
+    assert_eq!(rt.world.players[&a].economy.inventory.len(), 6);
     assert!(rt.world.players[&a].sandbox.as_ref().unwrap().unlock_all);
 }
 #[test]
@@ -326,13 +326,13 @@ fn sandbox_ai_modes_forced_cast_and_all_heroes() {
         c.enemy.actor.position = [1.0, 0.0];
         c.player.position = [-1.0, 0.0];
         apply(&mut rt, a, c.clone());
-        let original = rt.world.players[&ENEMY_ADDR].state.x;
+        let original = rt.world.players[&ENEMY_ADDR].hero.x;
         rt.simulate_sandbox(now + Duration::from_secs(1), 0.1);
-        assert_eq!(rt.world.players[&ENEMY_ADDR].state.x, original);
+        assert_eq!(rt.world.players[&ENEMY_ADDR].hero.x, original);
         c.enemy.behavior = BotBehavior::Flee;
         apply(&mut rt, a, c.clone());
         rt.simulate_sandbox(now + Duration::from_secs(2), 0.1);
-        assert!(rt.world.players[&ENEMY_ADDR].state.x > original);
+        assert!(rt.world.players[&ENEMY_ADDR].hero.x > original);
         c.enemy.behavior = BotBehavior::Attack;
         apply(&mut rt, a, c.clone());
         rt.simulate_sandbox(now + Duration::from_secs(3), 0.1);
@@ -357,7 +357,7 @@ fn sandbox_ai_modes_forced_cast_and_all_heroes() {
         c.enemy.actor.infinite_resource = true;
         apply(&mut rt, a, c);
         rt.simulate_sandbox(now + Duration::from_secs(4), 0.1);
-        assert!(rt.world.players[&ENEMY_ADDR].state.action_sequence > 2);
+        assert!(rt.world.players[&ENEMY_ADDR].hero.last_action.sequence > 2);
     }
 }
 #[test]
@@ -442,7 +442,7 @@ fn sandbox_second_human_config_is_independent() {
         },
         now,
     );
-    assert_eq!(rt.world.players[&b].state.team, Team::Blue);
+    assert_eq!(rt.world.players[&b].hero.identity.team, Team::Blue);
     assert_eq!(
         assign_human_team(&rt.world.players, &rt.world.disconnected_sessions),
         None
@@ -450,7 +450,7 @@ fn sandbox_second_human_config_is_independent() {
     let mut c = config(&rt);
     c.player.level = 10;
     apply(&mut rt, a, c);
-    assert_eq!(rt.world.players[&b].state.level, 1);
+    assert_eq!(rt.world.players[&b].hero.progress.level, 1);
     let snap = rt
         .sandbox
         .as_ref()
@@ -462,7 +462,7 @@ fn sandbox_second_human_config_is_independent() {
         rt.world
             .players
             .values()
-            .filter(|p| !p.state.is_bot)
+            .filter(|p| !p.hero.identity.is_bot)
             .count(),
         2
     );
@@ -550,7 +550,7 @@ fn sandbox_simulation_time_controls_real_movement_and_cooldown() {
     for scale in TIME_SCALES {
         let (mut rt, a, wall) = fixture();
         rt.sandbox.as_mut().unwrap().config.environment.time_scale = scale;
-        let start = rt.world.players[&a].state.x;
+        let start = rt.world.players[&a].hero.x;
         let now = rt.sandbox.as_ref().unwrap().now;
         rt.world
             .players
@@ -559,7 +559,7 @@ fn sandbox_simulation_time_controls_real_movement_and_cooldown() {
             .timers
             .last_basic_attack_at = Some(now);
         let (sim, dt) = rt.sandbox.as_mut().unwrap().advance(0.1);
-        let seq = rt.world.players[&a].state.utility.dash_sequence;
+        let seq = rt.world.players[&a].hero.utility.dash_sequence;
         rt.handle_packet(
             a,
             ClientPacket::Transform {
@@ -571,7 +571,7 @@ fn sandbox_simulation_time_controls_real_movement_and_cooldown() {
             },
             wall + Duration::from_millis(100),
         );
-        let distance = rt.world.players[&a].state.x - start;
+        let distance = rt.world.players[&a].hero.x - start;
         assert!((distance - (PLAYER_SPEED * dt + MOVEMENT_POSITION_TOLERANCE)).abs() < 0.001);
         distances.push(distance);
         let view = rt.player_view(a, sim);
@@ -581,7 +581,7 @@ fn sandbox_simulation_time_controls_real_movement_and_cooldown() {
                 < 0.001
         );
         rt.sandbox.as_mut().unwrap().config.environment.paused = true;
-        let position = rt.world.players[&a].state.x;
+        let position = rt.world.players[&a].hero.x;
         rt.handle_packet(
             a,
             ClientPacket::Transform {
@@ -593,7 +593,7 @@ fn sandbox_simulation_time_controls_real_movement_and_cooldown() {
             },
             wall + Duration::from_secs(1),
         );
-        assert_eq!(rt.world.players[&a].state.x, position);
+        assert_eq!(rt.world.players[&a].hero.x, position);
     }
     assert!(distances.windows(2).all(|w| w[1] > w[0]));
 }
@@ -622,10 +622,10 @@ fn sandbox_reset_cooldowns_preserves_utility_replay_and_active_haste() {
     );
     assert!(hero_timers::haste_active(p, now) > 0.0);
     rt.simulate_sandbox(now, 0.1);
-    assert_eq!(rt.world.players[&a].state.utility.last_request_id, 77);
+    assert_eq!(rt.world.players[&a].hero.utility.last_request_id, 77);
     assert!(rt.player_view(a, now).utility.haste_active_secs > 0.0);
     command(&mut rt, a, SandboxCommand::ResetDuel);
-    assert_eq!(rt.world.players[&a].state.utility.last_request_id, 77);
+    assert_eq!(rt.world.players[&a].hero.utility.last_request_id, 77);
     assert_eq!(rt.player_view(a, now).utility.haste_active_secs, 0.0);
 }
 
@@ -674,13 +674,13 @@ fn sandbox_enemy_respawn_policy_and_dummy_motion_are_authoritative() {
     c.dummy.enabled = true;
     c.dummy.moving = true;
     apply(&mut rt, a, c);
-    let id = rt.world.players[&ENEMY_ADDR].state.id;
+    let id = rt.world.players[&ENEMY_ADDR].hero.identity.id;
     apply_player_damage(&mut rt.world.players, id, 9999.0, now);
     rt.sandbox.as_mut().unwrap().elapsed = 1.0;
     rt.simulate_sandbox(now + Duration::from_secs(60), 0.1);
     handle_respawns(&mut rt.world, now + Duration::from_secs(60));
-    assert_eq!(rt.world.players[&ENEMY_ADDR].state.hp, 0.0);
-    assert_ne!(rt.world.players[&DUMMY_ADDR].state.x, 0.0);
+    assert_eq!(rt.world.players[&ENEMY_ADDR].hero.hp, 0.0);
+    assert_ne!(rt.world.players[&DUMMY_ADDR].hero.x, 0.0);
     command(
         &mut rt,
         a,
@@ -688,7 +688,7 @@ fn sandbox_enemy_respawn_policy_and_dummy_motion_are_authoritative() {
             actor: SandboxActor::Enemy,
         },
     );
-    assert!(rt.world.players[&ENEMY_ADDR].state.hp > 0.0);
+    assert!(rt.world.players[&ENEMY_ADDR].hero.hp > 0.0);
 }
 
 #[test]
@@ -718,15 +718,15 @@ fn sandbox_duel_restart_preserves_controls_and_restores_environment() {
             .values()
             .all(|s| s.state.hp == s.state.max_hp)
     );
-    assert_eq!(rt.world.players[&a].state.level, 10);
-    assert_eq!(rt.world.players[&a].state.ranks, [3; 4]);
+    assert_eq!(rt.world.players[&a].hero.progress.level, 10);
+    assert_eq!(rt.world.players[&a].hero.progress.ranks, [3; 4]);
     assert!(rt.world.players[&a].god_mode);
     assert_eq!(
-        rt.world.players[&ENEMY_ADDR].state.hero_class,
+        rt.world.players[&ENEMY_ADDR].hero.identity.hero_class,
         HeroClass::Ranger
     );
-    assert_eq!(rt.world.players[&ENEMY_ADDR].state.level, 6);
-    let id = rt.world.players[&ENEMY_ADDR].state.id;
+    assert_eq!(rt.world.players[&ENEMY_ADDR].hero.progress.level, 6);
+    let id = rt.world.players[&ENEMY_ADDR].hero.identity.id;
     apply_player_damage(&mut rt.world.players, id, 9999.0, now);
     rt.simulate_sandbox(now, 0.1);
     assert!(rt.world.players[&ENEMY_ADDR].timers.respawn_at.is_none());
@@ -734,7 +734,7 @@ fn sandbox_duel_restart_preserves_controls_and_restores_environment() {
     apply(&mut rt, a, c);
     rt.simulate_sandbox(now, 0.1);
     rt.simulate_sandbox(now + RESPAWN_DELAY, 0.1);
-    assert!(rt.world.players[&ENEMY_ADDR].state.hp > 0.0);
+    assert!(rt.world.players[&ENEMY_ADDR].hero.hp > 0.0);
 }
 
 #[test]
@@ -762,7 +762,7 @@ fn sandbox_subunit_damage_applies_to_resolved_basics_abilities_and_telemetry() {
             );
             let target = TargetId {
                 kind: TargetKind::Player,
-                id: rt.world.players[&DUMMY_ADDR].state.id,
+                id: rt.world.players[&DUMMY_ADDR].hero.identity.id,
             };
             let expected_basic =
                 shared::basic_attack_for_class(HeroClass::Mage).damage * item_bonus * multiplier;
@@ -790,7 +790,7 @@ fn sandbox_subunit_damage_applies_to_resolved_basics_abilities_and_telemetry() {
                 } else {
                     expected_basic
                 };
-                let hp_before = rt.world.players[&DUMMY_ADDR].state.hp;
+                let hp_before = rt.world.players[&DUMMY_ADDR].hero.hp;
                 if ability {
                     handle_cast_request(&mut rt.world, a, target, 0, now);
                 } else {
@@ -812,7 +812,7 @@ fn sandbox_subunit_damage_applies_to_resolved_basics_abilities_and_telemetry() {
                     },
                 );
                 assert!(
-                    (hp_before - rt.world.players[&DUMMY_ADDR].state.hp - expected).abs() < 0.002
+                    (hp_before - rt.world.players[&DUMMY_ADDR].hero.hp - expected).abs() < 0.002
                 );
                 if multiplier == 0.0 {
                     assert!(
@@ -842,7 +842,7 @@ fn sandbox_quarter_attack_speed_delays_real_basic_and_q_gates_then_can_be_disabl
     apply(&mut rt, a, c.clone());
     let target = TargetId {
         kind: TargetKind::Player,
-        id: rt.world.players[&DUMMY_ADDR].state.id,
+        id: rt.world.players[&DUMMY_ADDR].hero.identity.id,
     };
     let items = shared::shop::item_bonuses(&c.player.inventory);
     let ordinary_basic =
@@ -946,9 +946,9 @@ fn sandbox_low_multiplier_exception_does_not_change_ordinary_item_floors() {
     let (mut rt, a, _) = fixture();
     let player = rt.world.players.get_mut(&a).unwrap();
     player.sandbox = None;
-    player.state.item_bonuses.damage_multiplier = 0.0;
-    player.state.item_bonuses.attack_speed_multiplier = 0.25;
-    let def = shared::basic_attack_for_class(player.state.hero_class);
+    player.economy.item_bonuses.damage_multiplier = 0.0;
+    player.economy.item_bonuses.attack_speed_multiplier = 0.25;
+    let def = shared::basic_attack_for_class(player.hero.identity.hero_class);
     assert_eq!(effective_basic_attack_damage(player), def.damage);
     assert_eq!(
         effective_basic_attack_cooldown(player),
@@ -957,8 +957,8 @@ fn sandbox_low_multiplier_exception_does_not_change_ordinary_item_floors() {
     assert_eq!(
         effective_ability_cooldown(player, SkillSlot::Q),
         shared::scaled_cooldown(
-            &player.state.hero_class.abilities()[0],
-            player.state.ranks[0]
+            &player.hero.identity.hero_class.abilities()[0],
+            player.hero.progress.ranks[0]
         )
     );
 }
@@ -975,7 +975,7 @@ fn reclaimed_actor_keeps_ack_and_sequence_after_address_change() {
         },
     );
     let player = rt.world.players.remove(&old).unwrap();
-    let id = player.state.id;
+    let id = player.hero.identity.id;
     let new = "127.0.0.1:58242".parse().unwrap();
     rt.world.players.insert(new, player);
     let before = rt

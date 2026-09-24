@@ -32,19 +32,19 @@ fn fixture(
             now,
         );
         let p = rt.world.players.get_mut(&addr).unwrap();
-        while p.state.level < level {
-            let xp = p.state.next_level_xp;
-            grant_player_xp(&mut p.state, xp);
+        while p.hero.progress.level < level {
+            let xp = p.hero.progress.next_level_xp;
+            grant_player_xp(&mut p.hero, xp);
         }
-        p.state.x = x;
-        p.state.z = 0.0;
+        p.hero.x = x;
+        p.hero.z = 0.0;
         for slot in [0, 0, 1, 1, 2, 2, 3, 3] {
             if unlocked_slots_for_level(level)[slot] {
                 apply_skill_upgrade(p, slot as u8);
             }
         }
-        p.state.hp = p.state.max_hp;
-        p.state.mana = p.state.max_mana;
+        p.hero.hp = p.hero.max_hp;
+        p.hero.mana = p.hero.max_mana;
     }
     rt.world.structures.clear();
     rt.world.minions.clear();
@@ -72,15 +72,15 @@ fn measure(
     reply_delay: Option<f32>,
 ) -> serde_json::Value {
     let (mut rt, a, b, start) = fixture(attacker, defender, level);
-    let initial_a = rt.world.players[&a].state.clone();
-    let initial_b = rt.world.players[&b].state.clone();
+    let initial_a = rt.world.players[&a].hero.clone();
+    let initial_b = rt.world.players[&b].hero.clone();
     let target = TargetId {
         kind: TargetKind::Player,
-        id: initial_b.id,
+        id: initial_b.identity.id,
     };
     let reverse = TargetId {
         kind: TargetKind::Player,
-        id: initial_a.id,
+        id: initial_a.identity.id,
     };
     let basic_damage = sandbox::effective_basic_attack_damage(&rt.world.players[&a]);
     let basic_cd = sandbox::effective_basic_attack_cooldown(&rt.world.players[&a]).as_secs_f32();
@@ -96,8 +96,8 @@ fn measure(
         0.0,
         start + Duration::from_millis(100),
     );
-    let move_speed = (rt.world.players[&a].state.x - MOVEMENT_POSITION_TOLERANCE) / 0.1;
-    rt.world.players.get_mut(&a).unwrap().state.x = 0.0;
+    let move_speed = (rt.world.players[&a].hero.x - MOVEMENT_POSITION_TOLERANCE) / 0.1;
+    rt.world.players.get_mut(&a).unwrap().hero.x = 0.0;
     rt.world
         .players
         .get_mut(&a)
@@ -118,10 +118,10 @@ fn measure(
             (a, target, true),
             (b, reverse, reply_delay.is_some_and(|d| elapsed >= d)),
         ] {
-            if !active || rt.world.players[&who].state.hp <= 0.0 {
+            if !active || rt.world.players[&who].hero.hp <= 0.0 {
                 continue;
             }
-            let before = rt.world.players[&who].state.mana;
+            let before = rt.world.players[&who].hero.mana;
             if policy != "q_only" {
                 strike(&mut rt, who, enemy, step + 1, now);
             }
@@ -129,7 +129,7 @@ fn measure(
                 for slot in order {
                     let p = &rt.world.players[&who];
                     let def = ability_for_class_slot(
-                        p.state.hero_class,
+                        p.hero.identity.hero_class,
                         SkillSlot::from_index(slot).unwrap(),
                     );
                     if (policy == "q_only" && slot != 0) || def.projectile_damage.is_none() {
@@ -137,7 +137,7 @@ fn measure(
                     }
                     if who == a
                         && unlocked_slots_for_level(level)[slot as usize]
-                        && before < scaled_mana_cost(def, p.state.ranks[slot as usize])
+                        && before < scaled_mana_cost(def, p.hero.progress.ranks[slot as usize])
                     {
                         starved += 1;
                     }
@@ -148,44 +148,44 @@ fn measure(
                 for slot in [1, 2, 3] {
                     let p = &rt.world.players[&who];
                     let def = ability_for_class_slot(
-                        p.state.hero_class,
+                        p.hero.identity.hero_class,
                         SkillSlot::from_index(slot).unwrap(),
                     );
                     let restore = def
                         .self_mana_restore
-                        .is_some_and(|m| p.state.max_mana - p.state.mana >= m);
+                        .is_some_and(|m| p.hero.max_mana - p.hero.mana >= m);
                     let heal = reply_delay.is_some()
                         && def
                             .self_heal
-                            .is_some_and(|h| p.state.max_hp - p.state.hp >= h);
+                            .is_some_and(|h| p.hero.max_hp - p.hero.hp >= h);
                     if restore || heal {
                         cast(&mut rt, who, enemy, slot, now);
                     }
                 }
             }
             if who == a {
-                spent += (before - rt.world.players[&who].state.mana).max(0.0);
+                spent += (before - rt.world.players[&who].hero.mana).max(0.0);
             }
         }
-        let mana = rt.world.players[&a].state.mana;
+        let mana = rt.world.players[&a].hero.mana;
         tick(&mut rt, dt, now);
-        regen += (rt.world.players[&a].state.mana - mana).max(0.0);
+        regen += (rt.world.players[&a].hero.mana - mana).max(0.0);
         if elapsed <= 1.0 {
-            burst = initial_b.max_hp - rt.world.players[&b].state.hp;
+            burst = initial_b.max_hp - rt.world.players[&b].hero.hp;
         }
-        actions = rt.world.players[&a].state.action_sequence;
-        if rt.world.players[&b].state.hp <= 0.0 || rt.world.players[&a].state.hp <= 0.0 {
+        actions = rt.world.players[&a].hero.last_action.sequence;
+        if rt.world.players[&b].hero.hp <= 0.0 || rt.world.players[&a].hero.hp <= 0.0 {
             ttk = Some(elapsed + dt);
             break;
         }
     }
-    serde_json::json!({"attacker":attacker.id(),"defender":defender.id(),"level":level,"policy":policy,"order":order,"reply_delay":reply_delay,"attacker_hp":initial_a.max_hp,"defender_hp":initial_b.max_hp,"mana":initial_a.max_mana,"ranks":initial_a.ranks,"basic_damage":basic_damage,"basic_interval":basic_cd,"move_speed":move_speed,"ttk":ttk,"attacker_alive":rt.world.players[&a].state.hp>0.0,"defender_alive":rt.world.players[&b].state.hp>0.0,"mana_net_spent":spent,"mana_regenerated":regen,"mana_short_attempts":starved,"damage_first_second":burst,"accepted_actions":actions})
+    serde_json::json!({"attacker":attacker.id(),"defender":defender.id(),"level":level,"policy":policy,"order":order,"reply_delay":reply_delay,"attacker_hp":initial_a.max_hp,"defender_hp":initial_b.max_hp,"mana":initial_a.max_mana,"ranks":initial_a.progress.ranks,"basic_damage":basic_damage,"basic_interval":basic_cd,"move_speed":move_speed,"ttk":ttk,"attacker_alive":rt.world.players[&a].hero.hp>0.0,"defender_alive":rt.world.players[&b].hero.hp>0.0,"mana_net_spent":spent,"mana_regenerated":regen,"mana_short_attempts":starved,"damage_first_second":burst,"accepted_actions":actions})
 }
 fn sustain(class: HeroClass) -> serde_json::Value {
     let (mut rt, a, _, start) = fixture(class, class, 10);
-    let max = rt.world.players[&a].state.max_hp;
-    let mana = rt.world.players[&a].state.max_mana;
-    rt.world.players.get_mut(&a).unwrap().state.hp = max * 0.5;
+    let max = rt.world.players[&a].hero.max_hp;
+    let mana = rt.world.players[&a].hero.max_mana;
+    rt.world.players.get_mut(&a).unwrap().hero.hp = max * 0.5;
     let mut healing = 0.0f32;
     let dt = 1.0 / 120.0;
     for step in 0..3600 {
@@ -193,11 +193,11 @@ fn sustain(class: HeroClass) -> serde_json::Value {
         // Nonlethal damage creates a constant need for sustain; measure only
         // health actually restored, not attempted overheal.
         let p = rt.world.players.get_mut(&a).unwrap();
-        p.state.hp = (p.state.hp - 10.0 * dt).max(1.0);
-        let before = p.state.hp;
+        p.hero.hp = (p.hero.hp - 10.0 * dt).max(1.0);
+        let before = p.hero.hp;
         let target = TargetId {
             kind: TargetKind::Player,
-            id: p.state.id,
+            id: p.hero.identity.id,
         };
         for slot in [1, 2, 3] {
             let def = ability_for_class_slot(class, SkillSlot::from_index(slot).unwrap());
@@ -205,11 +205,11 @@ fn sustain(class: HeroClass) -> serde_json::Value {
                 cast(&mut rt, a, target, slot, now);
             }
         }
-        healing += rt.world.players[&a].state.hp - before;
+        healing += rt.world.players[&a].hero.hp - before;
         regenerate_mana(&mut rt.world.players, dt);
-        assert!(rt.world.players[&a].state.hp <= max && rt.world.players[&a].state.mana <= mana);
+        assert!(rt.world.players[&a].hero.hp <= max && rt.world.players[&a].hero.mana <= mana);
     }
-    serde_json::json!({"class":class.id(),"seconds":30,"external_damage_per_second":10,"hp_restored":healing,"final_hp":rt.world.players[&a].state.hp,"final_mana":rt.world.players[&a].state.mana})
+    serde_json::json!({"class":class.id(),"seconds":30,"external_damage_per_second":10,"hp_restored":healing,"final_hp":rt.world.players[&a].hero.hp,"final_mana":rt.world.players[&a].hero.mana})
 }
 #[test]
 fn measured_balance_matrix() {

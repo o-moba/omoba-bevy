@@ -6,17 +6,17 @@ pub(crate) fn apply_skill_upgrade(player: &mut ConnectedPlayer, slot: u8) {
     let Some(skill_slot) = SkillSlot::from_index(slot) else {
         return;
     };
-    let def = ability_for_class_slot(player.state.hero_class, skill_slot);
+    let def = ability_for_class_slot(player.hero.identity.hero_class, skill_slot);
     let s = skill_slot.index();
-    if player.state.skill_points > 0 && player.state.ranks[s] < def.max_rank {
-        player.state.ranks[s] += 1;
+    if player.hero.progress.skill_points > 0 && player.hero.progress.ranks[s] < def.max_rank {
+        player.hero.progress.ranks[s] += 1;
         if let Some(c) = &mut player.sandbox {
-            c.ranks = player.state.ranks;
+            c.ranks = player.hero.progress.ranks;
         }
-        player.state.skill_points -= 1;
+        player.hero.progress.skill_points -= 1;
         println!(
             "Player {} upgraded {} (slot {}) to rank {}",
-            player.state.id, def.id, s, player.state.ranks[s]
+            player.hero.identity.id, def.id, s, player.hero.progress.ranks[s]
         );
     }
 }
@@ -37,20 +37,19 @@ pub(crate) fn handle_cast_request(
     let Some(caster) = world.players.get(&caster_addr) else {
         return;
     };
-    if !caster.joined || caster.state.hp <= 0.0 {
+    if !caster.joined || caster.hero.hp <= 0.0 {
         return;
     }
     // Authoritative kit resolution: class + slot -> ability definition.
-    let def = ability_for_class_slot(caster.state.hero_class, skill_slot);
+    let def = ability_for_class_slot(caster.hero.identity.hero_class, skill_slot);
     if !caster.sandbox.as_ref().is_some_and(|c| c.unlock_all)
-        && !unlocked_slots_for_level(caster.state.level)[skill_slot.index()]
+        && !unlocked_slots_for_level(caster.hero.progress.level)[skill_slot.index()]
     {
         return;
     }
-    let rank = caster.state.ranks[skill_slot.index()].clamp(1, def.max_rank);
+    let rank = caster.hero.progress.ranks[skill_slot.index()].clamp(1, def.max_rank);
     let mana_cost = scaled_mana_cost(def, rank);
-    if !caster.sandbox.as_ref().is_some_and(|c| c.infinite_resource)
-        && caster.state.mana < mana_cost
+    if !caster.sandbox.as_ref().is_some_and(|c| c.infinite_resource) && caster.hero.mana < mana_cost
     {
         return;
     }
@@ -67,8 +66,8 @@ pub(crate) fn handle_cast_request(
     }
     let effect_scale = rank_effect_scale(rank)
         * shared::hero_balance::ability_power_multiplier(
-            caster.state.hero_class,
-            caster.state.level,
+            caster.hero.identity.hero_class,
+            caster.hero.progress.level,
         );
     if def.targeting == TargetingMode::SelfTarget {
         let Some(caster_mut) = world.players.get_mut(&caster_addr) else {
@@ -79,22 +78,22 @@ pub(crate) fn handle_cast_request(
             .as_ref()
             .is_some_and(|c| c.infinite_resource)
         {
-            caster_mut.state.mana -= mana_cost;
+            caster_mut.hero.mana -= mana_cost;
         }
         caster_mut.timers.last_cast_at[skill_slot.index()] = Some(now);
         record_player_action(caster_mut, skill_slot);
         if let Some(heal) = def.self_heal {
-            caster_mut.state.hp =
-                (caster_mut.state.hp + heal * effect_scale).min(caster_mut.state.max_hp);
+            caster_mut.hero.hp =
+                (caster_mut.hero.hp + heal * effect_scale).min(caster_mut.hero.max_hp);
         }
         if let Some(restore) = def.self_mana_restore {
-            caster_mut.state.mana =
-                (caster_mut.state.mana + restore * effect_scale).min(caster_mut.state.max_mana);
+            caster_mut.hero.mana =
+                (caster_mut.hero.mana + restore * effect_scale).min(caster_mut.hero.max_mana);
         }
         return;
     }
 
-    let caster_team = caster.state.team;
+    let caster_team = caster.hero.identity.team;
     if caster.sandbox.is_none() && !vision::target_visible(caster_team, target, world, now) {
         return;
     }
@@ -102,17 +101,17 @@ pub(crate) fn handle_cast_request(
         TargetKind::Player => {
             let Some(target_player) = world.players.values().find(|player| {
                 player.joined
-                    && player.state.id == target.id
-                    && player.state.hp > 0.0
-                    && player.state.team != caster_team
+                    && player.hero.identity.id == target.id
+                    && player.hero.hp > 0.0
+                    && player.hero.identity.team != caster_team
             }) else {
                 return;
             };
             (
                 Vec3f::new(
-                    target_player.state.x,
-                    target_player.state.y + AIM_HEIGHT,
-                    target_player.state.z,
+                    target_player.hero.x,
+                    target_player.hero.y + AIM_HEIGHT,
+                    target_player.hero.z,
                 ),
                 PLAYER_HIT_RADIUS,
             )
@@ -171,9 +170,9 @@ pub(crate) fn handle_cast_request(
     };
 
     let caster_position = Vec3f::new(
-        caster.state.x,
-        caster.state.y + CAST_SPAWN_HEIGHT,
-        caster.state.z,
+        caster.hero.x,
+        caster.hero.y + CAST_SPAWN_HEIGHT,
+        caster.hero.z,
     );
     let direction = Vec3f::new(
         target_position.x - caster_position.x,
@@ -201,7 +200,7 @@ pub(crate) fn handle_cast_request(
         .as_ref()
         .is_some_and(|c| c.infinite_resource)
     {
-        caster_mut.state.mana -= mana_cost;
+        caster_mut.hero.mana -= mana_cost;
     }
     caster_mut.timers.last_cast_at[skill_slot.index()] = Some(now);
     record_player_action(caster_mut, skill_slot);
@@ -210,7 +209,7 @@ pub(crate) fn handle_cast_request(
     // boss team buffs multiply the outgoing ability damage authoritatively.
     let rank_damage = def.projectile_damage.unwrap_or(0.0)
         * effect_scale
-        * caster_mut.state.item_bonuses.damage_multiplier
+        * caster_mut.economy.item_bonuses.damage_multiplier
         * world.team_buffs.damage_multiplier(caster_team, now);
 
     let projectile_id = world.next_projectile_id;
@@ -221,12 +220,12 @@ pub(crate) fn handle_cast_request(
         Projectile {
             state: ProjectileState {
                 source_kind: CombatEntityKind::Player,
-                style: ProjectileStyle::for_class(caster_mut.state.hero_class),
+                style: ProjectileStyle::for_class(caster_mut.hero.identity.hero_class),
                 action_slot: Some(slot),
                 direction: [direction.x, direction.y, direction.z],
                 id: projectile_id,
-                owner_id: caster_mut.state.id,
-                owner_team: caster_mut.state.team,
+                owner_id: caster_mut.hero.identity.id,
+                owner_team: caster_mut.hero.identity.team,
                 x: caster_position.x,
                 y: caster_position.y,
                 z: caster_position.z,
@@ -247,14 +246,14 @@ pub(crate) fn handle_cast_request(
 }
 
 pub(crate) fn record_player_action(player: &mut ConnectedPlayer, slot: SkillSlot) {
-    player.state.action_sequence = player.state.action_sequence.wrapping_add(1);
-    if player.state.action_sequence == 0 {
-        player.state.action_sequence = 1;
+    player.hero.last_action.sequence = player.hero.last_action.sequence.wrapping_add(1);
+    if player.hero.last_action.sequence == 0 {
+        player.hero.last_action.sequence = 1;
     }
-    player.state.action_kind = if slot == SkillSlot::Q {
+    player.hero.last_action.kind = if slot == SkillSlot::Q {
         PlayerActionKind::Attack
     } else {
         PlayerActionKind::Cast
     };
-    player.state.action_slot = slot.index() as u8;
+    player.hero.last_action.slot = slot.index() as u8;
 }

@@ -11,9 +11,9 @@ pub(crate) fn sources(team: Team, world: &GameWorld) -> Vec<VisionSource> {
     } = world;
     let mut result: Vec<_> = players
         .values()
-        .filter(|p| p.joined && p.state.hp > 0.0 && p.state.team == team)
+        .filter(|p| p.joined && p.hero.hp > 0.0 && p.hero.identity.team == team)
         .map(|p| VisionSource {
-            position: [p.state.x, p.state.z],
+            position: [p.hero.x, p.hero.z],
             radius: HERO_SIGHT_RADIUS,
         })
         .collect();
@@ -52,7 +52,7 @@ pub(crate) fn revealed(player: &ConnectedPlayer, now: Instant) -> bool {
         |at: Instant| now.saturating_duration_since(at).as_secs_f32() < HOSTILE_REVEAL_SECS;
     player.timers.last_basic_attack_at.is_some_and(recent)
         || SkillSlot::ALL.into_iter().any(|slot| {
-            ability_for_class_slot(player.state.hero_class, slot).targeting
+            ability_for_class_slot(player.hero.identity.hero_class, slot).targeting
                 == TargetingMode::UnitTarget
                 && player.timers.last_cast_at[slot.index()].is_some_and(recent)
         })
@@ -65,7 +65,7 @@ pub(crate) fn player_visible(
     player.joined
         && point_visible(
             sight,
-            [player.state.x, player.state.z],
+            [player.hero.x, player.hero.z],
             !revealed(player, now),
         )
 }
@@ -86,8 +86,8 @@ pub(crate) fn target_visible(
     match target.kind {
         TargetKind::Player => players
             .values()
-            .find(|p| p.state.id == target.id)
-            .is_some_and(|p| p.state.team == team || player_visible(&sight, p, now)),
+            .find(|p| p.hero.identity.id == target.id)
+            .is_some_and(|p| p.hero.identity.team == team || player_visible(&sight, p, now)),
         TargetKind::Minion => minions.get(&target.id).is_some_and(|p| {
             p.state.team == team || point_visible(&sight, [p.state.x, p.state.z], false)
         }),
@@ -137,15 +137,15 @@ pub(crate) fn filter_snapshot(
         return;
     }
     let sight = if viewer.joined {
-        sources(viewer.state.team, world)
+        sources(viewer.hero.identity.team, world)
     } else {
         Vec::new()
     };
-    let local_brush = (viewer.joined && viewer.state.hp > 0.0)
-        .then(|| brush_at([viewer.state.x, viewer.state.z]))
+    let local_brush = (viewer.joined && viewer.hero.hp > 0.0)
+        .then(|| brush_at([viewer.hero.x, viewer.hero.z]))
         .flatten();
     let enemy_sight = sources(
-        match viewer.state.team {
+        match viewer.hero.identity.team {
             Team::Green => Team::Blue,
             Team::Blue => Team::Green,
         },
@@ -154,23 +154,25 @@ pub(crate) fn filter_snapshot(
     *vision = Some(TeamVision {
         local_brush,
         local_hidden: local_brush.is_some()
-            && viewer.state.hp > 0.0
+            && viewer.hero.hp > 0.0
             && !player_visible(&enemy_sight, viewer, now),
         sources: sight.clone(),
     });
     players.retain(|p| {
         viewer.joined
-            && (p.team == viewer.state.team
+            && (p.team == viewer.hero.identity.team
                 || live_players
                     .values()
-                    .find(|live| live.state.id == p.id)
+                    .find(|live| live.hero.identity.id == p.id)
                     .is_some_and(|live| player_visible(&sight, live, now)))
     });
     structures.retain(|p| {
-        viewer.joined && (p.team == viewer.state.team || point_visible(&sight, [p.x, p.z], false))
+        viewer.joined
+            && (p.team == viewer.hero.identity.team || point_visible(&sight, [p.x, p.z], false))
     });
     minions.retain(|p| {
-        viewer.joined && (p.team == viewer.state.team || point_visible(&sight, [p.x, p.z], false))
+        viewer.joined
+            && (p.team == viewer.hero.identity.team || point_visible(&sight, [p.x, p.z], false))
     });
     neutrals.retain(|p| point_visible(&sight, [p.x, p.z], false));
     let visible = |kind: CombatEntityKind, id: u64| match kind {
@@ -220,7 +222,7 @@ pub(crate) fn filter_snapshot(
                 event.target.kind == CombatEntityKind::Player
                     && live_players
                         .values()
-                        .find(|p| p.state.id == event.target.id)
+                        .find(|p| p.hero.identity.id == event.target.id)
                         .is_none_or(|p| !revealed(p, now)),
             )
     });

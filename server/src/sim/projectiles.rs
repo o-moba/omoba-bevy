@@ -45,12 +45,12 @@ pub(crate) fn simulate_projectiles_filtered(
         let (target_pos, target_radius) = match projectile.target.kind {
             TargetKind::Player => {
                 let Some(target) = players.values().find(|player| {
-                    player.state.id == projectile.target.id && player.state.hp > 0.0
+                    player.hero.identity.id == projectile.target.id && player.hero.hp > 0.0
                 }) else {
                     return false;
                 };
                 (
-                    Vec3f::new(target.state.x, target.state.y + AIM_HEIGHT, target.state.z),
+                    Vec3f::new(target.hero.x, target.hero.y + AIM_HEIGHT, target.hero.z),
                     PLAYER_HIT_RADIUS,
                 )
             }

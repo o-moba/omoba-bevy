@@ -42,7 +42,7 @@ pub(crate) fn award_minion_kill_rewards(
 ) {
     let mut recipients = players
         .iter()
-        .filter(|(_, player)| player.joined && player.state.team == attacker_team)
+        .filter(|(_, player)| player.joined && player.hero.identity.team == attacker_team)
         .map(|(addr, _)| *addr)
         .collect::<Vec<_>>();
     if recipients.is_empty() {
@@ -50,7 +50,7 @@ pub(crate) fn award_minion_kill_rewards(
     }
 
     // Stable identity order makes integer remainder allocation reproducible.
-    recipients.sort_unstable_by_key(|addr| players[addr].state.id);
+    recipients.sort_unstable_by_key(|addr| players[addr].hero.identity.id);
     let per_player_gold = MINION_KILL_GOLD / recipients.len() as u32;
     let per_player_xp = MINION_KILL_XP / recipients.len() as u32;
     let bonus_gold_receivers = MINION_KILL_GOLD % recipients.len() as u32;
@@ -70,7 +70,7 @@ pub(crate) fn award_minion_kill_rewards(
         }
         award_gold(player, gold);
         if player.sandbox.is_none() {
-            grant_player_xp(&mut player.state, xp);
+            grant_player_xp(&mut player.hero, xp);
         }
     }
 }
@@ -96,7 +96,7 @@ pub(crate) fn simulate_minions(world: &mut GameWorld, tick: TickCtx) -> Vec<Comb
         .values()
         .filter(|p| {
             vision::player_visible(
-                if p.state.team == Team::Green {
+                if p.hero.identity.team == Team::Green {
                     &blue_sight
                 } else {
                     &green_sight
@@ -105,18 +105,20 @@ pub(crate) fn simulate_minions(world: &mut GameWorld, tick: TickCtx) -> Vec<Comb
                 now,
             )
         })
-        .map(|p| p.state.id)
+        .map(|p| p.hero.identity.id)
         .collect();
     let player_targets = players
         .values()
         .filter(|player| {
-            player.joined && player.state.hp > 0.0 && visible_players.contains(&player.state.id)
+            player.joined
+                && player.hero.hp > 0.0
+                && visible_players.contains(&player.hero.identity.id)
         })
         .map(|player| {
             (
-                player.state.id,
-                player.state.team,
-                Vec3f::new(player.state.x, player.state.y + AIM_HEIGHT, player.state.z),
+                player.hero.identity.id,
+                player.hero.identity.team,
+                Vec3f::new(player.hero.x, player.hero.y + AIM_HEIGHT, player.hero.z),
             )
         })
         .collect::<Vec<_>>();

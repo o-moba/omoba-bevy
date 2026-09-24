@@ -78,9 +78,10 @@ fn bot_models_are_distinct_bundled_free_avatars_with_unchanged_sprite_assignment
     let now = Instant::now();
     rt.handle_packet(addr(1), join("visible-bots"), now);
     let mut slugs = HashSet::new();
-    for player in rt.world.players.values().filter(|p| p.state.is_bot) {
+    for player in rt.world.players.values().filter(|p| p.hero.identity.is_bot) {
         let slug = player
-            .state
+            .hero
+            .identity
             .avatar
             .as_deref()
             .expect("practice bots have a real roster model");
@@ -89,7 +90,7 @@ fn bot_models_are_distinct_bundled_free_avatars_with_unchanged_sprite_assignment
         assert!(avatar.passport.is_none() && !slug.starts_with("ekza-"));
         assert_eq!(avatar.license, "CC0");
         assert_eq!(
-            player.state.sprite_character.as_deref(),
+            player.hero.identity.sprite_character.as_deref(),
             Some(shared::normalize_sprite_character_id(None))
         );
         slugs.insert(slug.to_owned());
@@ -134,12 +135,18 @@ fn late_human_replaces_bot_at_safe_spawn_without_inheriting_stats_or_identity() 
         .world
         .players
         .iter()
-        .find(|(_, p)| p.state.is_bot)
+        .find(|(_, p)| p.hero.identity.is_bot)
         .unwrap()
         .0;
-    let bot_id = rt.world.players[&bot_addr].state.id;
-    rt.world.players.get_mut(&bot_addr).unwrap().state.hp = 17.0;
-    rt.world.players.get_mut(&bot_addr).unwrap().state.level = 7;
+    let bot_id = rt.world.players[&bot_addr].hero.identity.id;
+    rt.world.players.get_mut(&bot_addr).unwrap().hero.hp = 17.0;
+    rt.world
+        .players
+        .get_mut(&bot_addr)
+        .unwrap()
+        .hero
+        .progress
+        .level = 7;
     award_gold(rt.world.players.get_mut(&bot_addr).unwrap(), 123);
     let event = CombatEvent {
         source: CombatEntity {
@@ -148,23 +155,23 @@ fn late_human_replaces_bot_at_safe_spawn_without_inheriting_stats_or_identity() 
         },
         target: CombatEntity {
             kind: CombatEntityKind::Player,
-            id: rt.world.players[&addr(1)].state.id,
+            id: rt.world.players[&addr(1)].hero.identity.id,
         },
         amount: 9.0,
         ..Default::default()
     };
     rt.combat_log.extend(now, [event]);
     rt.handle_packet(addr(2), join("second"), now + Duration::from_millis(20));
-    let human = &rt.world.players[&addr(2)].state;
+    let human = &rt.world.players[&addr(2)].hero;
     let spawn = spawn_position_for_team(&rt.world.map_layout, Team::Blue);
-    assert!(!human.is_bot && human.id != bot_id);
-    assert_eq!(human.team, Team::Blue);
+    assert!(!human.identity.is_bot && human.identity.id != bot_id);
+    assert_eq!(human.identity.team, Team::Blue);
     assert_eq!(
-        (human.x, human.z, human.hp, human.level),
+        (human.x, human.z, human.hp, human.progress.level),
         (
             spawn.x,
             spawn.z,
-            shared::hero_balance::base_hp(human.hero_class),
+            shared::hero_balance::base_hp(human.identity.hero_class),
             STARTING_LEVEL
         )
     );
@@ -193,7 +200,7 @@ fn late_human_replaces_bot_at_safe_spawn_without_inheriting_stats_or_identity() 
     assert_eq!(
         roster
             .iter()
-            .find(|p| p.player_id == human.id)
+            .find(|p| p.player_id == human.identity.id)
             .unwrap()
             .stats
             .damage_to_heroes,
@@ -213,20 +220,21 @@ fn a_deliberate_leave_frees_the_seat_and_lets_the_same_session_pick_again() {
     let now = Instant::now();
     rt.handle_packet(addr(1), join("returning"), now);
     assert!(rt.world.players[&addr(1)].joined);
-    let first_class = rt.world.players[&addr(1)].state.hero_class;
-    let first_id = rt.world.players[&addr(1)].state.id;
-    let first_team = rt.world.players[&addr(1)].state.team;
+    let first_class = rt.world.players[&addr(1)].hero.identity.hero_class;
+    let first_id = rt.world.players[&addr(1)].hero.identity.id;
+    let first_team = rt.world.players[&addr(1)].hero.identity.team;
     let match_id = rt.match_id;
     let enemy_id = rt
         .world
         .players
         .values()
-        .find(|p| p.joined && p.state.team != first_team)
+        .find(|p| p.joined && p.hero.identity.team != first_team)
         .unwrap()
-        .state
+        .hero
+        .identity
         .id;
     let player = rt.world.players.get_mut(&addr(1)).unwrap();
-    player.state.level = 4;
+    player.hero.progress.level = 4;
     award_gold(player, 100);
     let kill = CombatEvent {
         source: CombatEntity {
@@ -271,14 +279,14 @@ fn a_deliberate_leave_frees_the_seat_and_lets_the_same_session_pick_again() {
     let back = &rt.world.players[&addr(1)];
     assert!(back.joined);
     assert!(back.join_error.is_none());
-    assert_ne!(back.state.hero_class, first_class);
-    assert_eq!(back.state.hero_class, HeroClass::Cleric);
+    assert_ne!(back.hero.identity.hero_class, first_class);
+    assert_eq!(back.hero.identity.hero_class, HeroClass::Cleric);
     assert_eq!(rt.match_id, match_id, "guest admission stays in this round");
-    let new_id = back.state.id;
-    let new_team = back.state.team;
+    let new_id = back.hero.identity.id;
+    let new_team = back.hero.identity.team;
     assert_ne!(new_id, first_id);
     assert_eq!(
-        (back.state.level, back.state.earned_gold),
+        (back.hero.progress.level, back.economy.earned_gold),
         (STARTING_LEVEL, 0)
     );
 
@@ -329,7 +337,7 @@ fn signed_deliberate_leave_cannot_create_a_second_profile_seat_in_the_same_round
         .backend
         .test_authenticated(addr(1), profile.clone(), "signed-return");
     rt.handle_packet(addr(1), join("signed-return"), now);
-    let old_id = rt.world.players[&addr(1)].state.id;
+    let old_id = rt.world.players[&addr(1)].hero.identity.id;
     let match_id = rt.match_id;
     assert!(rt.world.players[&addr(1)].joined);
 
@@ -338,7 +346,7 @@ fn signed_deliberate_leave_cannot_create_a_second_profile_seat_in_the_same_round
         ClientPacket::Leave,
         now + Duration::from_millis(10),
     );
-    assert_ne!(rt.world.players[&addr(1)].state.id, old_id);
+    assert_ne!(rt.world.players[&addr(1)].hero.identity.id, old_id);
     rt.handle_packet(
         addr(1),
         join("signed-return"),
@@ -368,20 +376,20 @@ fn disconnect_replacement_and_reconnect_keep_human_state_without_oversubscribing
     let now = Instant::now();
     rt.handle_packet(addr(1), join("anchor"), now);
     rt.handle_packet(addr(2), join("reconnect"), now);
-    let original_id = rt.world.players[&addr(2)].state.id;
+    let original_id = rt.world.players[&addr(2)].hero.identity.id;
     let original = rt.world.players.get_mut(&addr(2)).unwrap();
-    original.state.hp = 63.0;
-    original.state.level = 6;
+    original.hero.hp = 63.0;
+    original.hero.progress.level = 6;
     award_gold(original, 101);
     original
-        .state
+        .economy
         .inventory
         .push(shared::shop::ItemId::VitalityGem);
-    original.state.utility.last_request_id = 7;
-    original.state.utility.dash_sequence = 3;
+    original.hero.utility.last_request_id = 7;
+    original.hero.utility.dash_sequence = 3;
     original.timers.dash_ready_at = Some(now + Duration::from_secs(20));
     original.timers.haste_ready_at = Some(now + Duration::from_secs(25));
-    let utility = original.state.utility;
+    let utility = original.hero.utility;
     let dash_ready_at = original.timers.dash_ready_at;
     let haste_ready_at = original.timers.haste_ready_at;
     let later = now + PLAYER_TIMEOUT + Duration::from_millis(1);
@@ -389,17 +397,21 @@ fn disconnect_replacement_and_reconnect_keep_human_state_without_oversubscribing
     rt.maintain_roster(later);
     rt.fill_practice_bots(later);
     assert_eq!(
-        rt.world.players.values().filter(|p| p.state.is_bot).count(),
+        rt.world
+            .players
+            .values()
+            .filter(|p| p.hero.identity.is_bot)
+            .count(),
         1
     );
     let replacement = rt
         .world
         .players
         .values_mut()
-        .find(|p| p.state.is_bot)
+        .find(|p| p.hero.identity.is_bot)
         .unwrap();
-    let replacement_id = replacement.state.id;
-    replacement.state.level = 4;
+    let replacement_id = replacement.hero.identity.id;
+    replacement.hero.progress.level = 4;
     award_gold(replacement, 57);
     rt.handle_packet(addr(3), join("reconnect"), later + Duration::from_millis(1));
     let scoreboard = rt.combat_log.ledger.live_scoreboard().unwrap();
@@ -415,20 +427,23 @@ fn disconnect_replacement_and_reconnect_keep_human_state_without_oversubscribing
     assert_eq!(scoreboard.players.iter().filter(|p| p.connected).count(), 2);
     assert_eq!(
         (
-            rt.world.players[&addr(3)].state.id,
-            rt.world.players[&addr(3)].state.hp
+            rt.world.players[&addr(3)].hero.identity.id,
+            rt.world.players[&addr(3)].hero.hp
         ),
         (original_id, 63.0)
     );
     assert_eq!(joined_count(&rt.world.players), 2);
-    assert!(rt.world.players.values().all(|p| !p.state.is_bot));
+    assert!(rt.world.players.values().all(|p| !p.hero.identity.is_bot));
     let restored = &rt.world.players[&addr(3)];
-    assert_eq!((restored.state.level, restored.state.earned_gold), (6, 101));
     assert_eq!(
-        restored.state.inventory,
+        (restored.hero.progress.level, restored.economy.earned_gold),
+        (6, 101)
+    );
+    assert_eq!(
+        restored.economy.inventory,
         [shared::shop::ItemId::VitalityGem]
     );
-    assert_eq!(restored.state.utility, utility);
+    assert_eq!(restored.hero.utility, utility);
     assert_eq!(
         (
             restored.timers.dash_ready_at,
@@ -446,7 +461,7 @@ fn disconnect_replacement_and_reconnect_keep_human_state_without_oversubscribing
     rt.maintain_roster(expired);
     rt.maintain_roster(expired + EMPTY_ROSTER_GRACE);
     assert_eq!(rt.world.game_state, GameState::Lobby);
-    assert!(rt.world.players.values().all(|p| !p.state.is_bot));
+    assert!(rt.world.players.values().all(|p| !p.hero.identity.is_bot));
 }
 
 #[test]
@@ -454,7 +469,7 @@ fn practice_turnover_rolls_round_before_lifetime_roster_overflow() {
     let mut rt = runtime(1);
     let mut now = Instant::now();
     rt.handle_packet(addr(1), join("anchor"), now);
-    let anchor_id = rt.world.players[&addr(1)].state.id;
+    let anchor_id = rt.world.players[&addr(1)].hero.identity.id;
     for index in 2..42 {
         rt.handle_packet(addr(index), join(&format!("turnover-{index}")), now);
         assert!(
@@ -467,7 +482,7 @@ fn practice_turnover_rolls_round_before_lifetime_roster_overflow() {
         rt.maintain_roster(now);
         rt.fill_practice_bots(now);
         assert_eq!(joined_count(&rt.world.players), 2);
-        assert_eq!(rt.world.players[&addr(1)].state.id, anchor_id);
+        assert_eq!(rt.world.players[&addr(1)].hero.identity.id, anchor_id);
     }
     assert!(rt.match_id > 1);
     assert_eq!(rt.world.game_state, GameState::Running);
@@ -489,7 +504,7 @@ fn maximum_practice_roster_rollover_reserves_identity_for_the_incoming_human() {
     assert!(
         roster
             .iter()
-            .any(|p| p.player_id == rt.world.players[&addr(2)].state.id)
+            .any(|p| p.player_id == rt.world.players[&addr(2)].hero.identity.id)
     );
 }
 
@@ -554,26 +569,26 @@ fn bots_attack_cast_take_real_damage_and_respawn_using_normal_timers() {
         .world
         .players
         .iter()
-        .find(|(_, p)| p.state.is_bot)
+        .find(|(_, p)| p.hero.identity.is_bot)
         .unwrap()
         .0;
     rt.world.structures.clear();
     rt.world.minions.clear();
-    let bot_id = rt.world.players[&bot_addr].state.id;
+    let bot_id = rt.world.players[&bot_addr].hero.identity.id;
     for (address, x) in [(addr(1), -8.0), (bot_addr, -4.0)] {
         let p = rt.world.players.get_mut(&address).unwrap();
-        p.state.x = x;
-        p.state.z = -8.0;
-        p.state.hero_class = HeroClass::Mage;
+        p.hero.x = x;
+        p.hero.z = -8.0;
+        p.hero.identity.hero_class = HeroClass::Mage;
     }
     now += Duration::from_millis(100);
     rt.simulate_bots(now, 0.1);
     assert_eq!(
-        rt.world.players[&addr(1)].state.hp,
-        rt.world.players[&addr(1)].state.max_hp,
+        rt.world.players[&addr(1)].hero.hp,
+        rt.world.players[&addr(1)].hero.max_hp,
         "damage waits for actual projectile travel"
     );
-    assert!(rt.world.players[&bot_addr].state.mana < MAX_MANA);
+    assert!(rt.world.players[&bot_addr].hero.mana < MAX_MANA);
     assert_eq!(rt.world.projectiles.len(), 2, "ordinary basic plus Q");
     assert!(
         rt.world
@@ -595,7 +610,7 @@ fn bots_attack_cast_take_real_damage_and_respawn_using_normal_timers() {
         },
     );
     rt.combat_log.extend(now, receipts);
-    assert!(rt.world.players[&addr(1)].state.hp < rt.world.players[&addr(1)].state.max_hp);
+    assert!(rt.world.players[&addr(1)].hero.hp < rt.world.players[&addr(1)].hero.max_hp);
     assert!(
         rt.combat_log
             .ledger
@@ -608,18 +623,18 @@ fn bots_attack_cast_take_real_damage_and_respawn_using_normal_timers() {
             > 0.0
     );
     apply_player_damage(&mut rt.world.players, bot_id, 999.0, now);
-    assert_eq!(rt.world.players[&bot_addr].state.hp, 0.0);
+    assert_eq!(rt.world.players[&bot_addr].hero.hp, 0.0);
     rt.simulate_bots(now + Duration::from_secs(1), 0.1);
-    assert_eq!(rt.world.players[&bot_addr].state.hp, 0.0);
+    assert_eq!(rt.world.players[&bot_addr].hero.hp, 0.0);
     handle_respawns(&mut rt.world, now + RESPAWN_DELAY);
     let spawn = spawn_position_for_team(&rt.world.map_layout, Team::Blue);
     assert_eq!(
         (
-            rt.world.players[&bot_addr].state.x,
-            rt.world.players[&bot_addr].state.z,
-            rt.world.players[&bot_addr].state.hp
+            rt.world.players[&bot_addr].hero.x,
+            rt.world.players[&bot_addr].hero.z,
+            rt.world.players[&bot_addr].hero.hp
         ),
-        (spawn.x, spawn.z, rt.world.players[&bot_addr].state.max_hp)
+        (spawn.x, spawn.z, rt.world.players[&bot_addr].hero.max_hp)
     );
 }
 
@@ -632,7 +647,7 @@ fn bot_controller_routes_around_real_forest_and_rejects_remote_control() {
         .world
         .players
         .iter()
-        .find(|(_, p)| p.state.is_bot)
+        .find(|(_, p)| p.hero.identity.is_bot)
         .unwrap()
         .0;
     let nav = shared::navigation::world_navigation();
@@ -661,12 +676,13 @@ fn bot_controller_routes_around_real_forest_and_rejects_remote_control() {
         .players
         .get_mut(&bot_addr)
         .unwrap()
-        .state
+        .hero
+        .identity
         .hero_class = HeroClass::Warrior;
     for (address, point) in [(bot_addr, from), (addr(1), to)] {
         let p = rt.world.players.get_mut(&address).unwrap();
-        p.state.x = point[0];
-        p.state.z = point[1];
+        p.hero.x = point[0];
+        p.hero.z = point[1];
     }
     rt.handle_packet(bot_addr, ClientPacket::SetGodMode { enabled: true }, now);
     assert!(!rt.world.players[&bot_addr].god_mode);
@@ -683,22 +699,22 @@ fn bot_controller_routes_around_real_forest_and_rejects_remote_control() {
     );
     assert_eq!(
         [
-            rt.world.players[&bot_addr].state.x,
-            rt.world.players[&bot_addr].state.z
+            rt.world.players[&bot_addr].hero.x,
+            rt.world.players[&bot_addr].hero.z
         ],
         from
     );
     let mut travelled = 0.0;
     for _ in 0..150 {
         let before = [
-            rt.world.players[&bot_addr].state.x,
-            rt.world.players[&bot_addr].state.z,
+            rt.world.players[&bot_addr].hero.x,
+            rt.world.players[&bot_addr].hero.z,
         ];
         now += Duration::from_millis(100);
         rt.simulate_bots(now, 0.1);
         let after = [
-            rt.world.players[&bot_addr].state.x,
-            rt.world.players[&bot_addr].state.z,
+            rt.world.players[&bot_addr].hero.x,
+            rt.world.players[&bot_addr].hero.z,
         ];
         assert!(
             nav.segment_clear(before, after),
@@ -708,17 +724,20 @@ fn bot_controller_routes_around_real_forest_and_rejects_remote_control() {
         assert!(distance <= PLAYER_SPEED * 0.1 + 0.001);
         travelled += distance;
         if (after[0] - to[0]).hypot(after[1] - to[1])
-            <= shared::basic_attack_for_class(rt.world.players[&bot_addr].state.hero_class).range
+            <= shared::basic_attack_for_class(rt.world.players[&bot_addr].hero.identity.hero_class)
+                .range
                 + PLAYER_HIT_RADIUS
         {
             break;
         }
     }
-    let bot = &rt.world.players[&bot_addr].state;
+    let bot = &rt.world.players[&bot_addr].hero;
     assert!(travelled > 1.0);
     assert!(
         (bot.x - to[0]).hypot(bot.z - to[1])
-            <= shared::basic_attack_for_class(bot.hero_class).range + PLAYER_HIT_RADIUS + 0.1
+            <= shared::basic_attack_for_class(bot.identity.hero_class).range
+                + PLAYER_HIT_RADIUS
+                + 0.1
     );
 }
 
@@ -731,14 +750,14 @@ fn bot_pushes_a_real_lane_and_damages_towers_without_crossing_live_structure_dis
         .world
         .players
         .iter()
-        .find(|(_, p)| p.state.is_bot)
+        .find(|(_, p)| p.hero.identity.is_bot)
         .unwrap()
         .0;
     let nav = shared::navigation::world_navigation();
     let mut damaged_tower = false;
     let mut moved = 0.0;
     for _ in 0..900 {
-        let before = rt.world.players[&bot_addr].state.clone();
+        let before = rt.world.players[&bot_addr].hero.clone();
         let discs: Vec<_> = rt
             .world
             .structures
@@ -752,7 +771,7 @@ fn bot_pushes_a_real_lane_and_damages_towers_without_crossing_live_structure_dis
         now += Duration::from_millis(100);
         rt.world.players.get_mut(&addr(1)).unwrap().last_seen = now;
         rt.tick(now, 0.1);
-        let after = &rt.world.players[&bot_addr].state;
+        let after = &rt.world.players[&bot_addr].hero;
         // Respawn is the ordinary explicit teleport, not a movement segment.
         if before.hp > 0.0 && after.hp > 0.0 {
             assert!(
@@ -782,20 +801,20 @@ fn practice_bots_unstack_spawn_without_moving_human_or_exceeding_speed() {
     let mut rt = runtime(5);
     let mut now = Instant::now();
     rt.handle_packet(addr(1), join("crowd-observer"), now);
-    let human_before = rt.world.players[&addr(1)].state.clone();
+    let human_before = rt.world.players[&addr(1)].hero.clone();
     let nav = shared::navigation::world_navigation();
     for _ in 0..120 {
         let previous: HashMap<_, _> = rt
             .world
             .players
             .iter()
-            .map(|(addr, p)| (*addr, [p.state.x, p.state.z]))
+            .map(|(addr, p)| (*addr, [p.hero.x, p.hero.z]))
             .collect();
         now += Duration::from_millis(50);
         rt.simulate_bots(now, 0.05);
         for (address, player) in &rt.world.players {
             let from = previous[address];
-            let to = [player.state.x, player.state.z];
+            let to = [player.hero.x, player.hero.z];
             assert!((to[0] - from[0]).hypot(to[1] - from[1]) <= PLAYER_SPEED * 0.05 + 0.001);
             assert!(nav.segment_clear(from, to));
         }
@@ -804,20 +823,20 @@ fn practice_bots_unstack_spawn_without_moving_human_or_exceeding_speed() {
         .world
         .players
         .values()
-        .filter(|p| p.joined && p.state.hp > 0.0)
+        .filter(|p| p.joined && p.hero.hp > 0.0)
         .collect();
     for (i, a) in alive.iter().enumerate() {
         for b in &alive[i + 1..] {
             assert!(
-                (a.state.x - b.state.x).hypot(a.state.z - b.state.z)
+                (a.hero.x - b.hero.x).hypot(a.hero.z - b.hero.z)
                     >= shared::PLAYER_TARGET_RADIUS * 2.0 - 0.05,
                 "heroes {} and {} remain overlapped",
-                a.state.id,
-                b.state.id
+                a.hero.identity.id,
+                b.hero.identity.id
             );
         }
     }
-    let human = &rt.world.players[&addr(1)].state;
+    let human = &rt.world.players[&addr(1)].hero;
     assert_eq!((human.x, human.z), (human_before.x, human_before.z));
 }
 
@@ -830,7 +849,7 @@ fn release_and_development_never_create_bots() {
         let now = Instant::now();
         rt.handle_packet(addr(1), join("human-only"), now);
         rt.fill_practice_bots(now);
-        assert!(rt.world.players.values().all(|p| !p.state.is_bot));
+        assert!(rt.world.players.values().all(|p| !p.hero.identity.is_bot));
     }
 }
 
@@ -915,9 +934,10 @@ fn live_udp_practice_solo_and_running_late_join_publish_real_bot_replacement() {
         .world
         .players
         .values()
-        .find(|p| p.state.is_bot)
+        .find(|p| p.hero.identity.is_bot)
         .unwrap()
-        .state
+        .hero
+        .identity
         .id;
     assert!(scoreboard.players.iter().any(|p| p.player_id == old_bot));
     let second = UdpSocket::bind("127.0.0.1:0").unwrap();
@@ -969,21 +989,21 @@ fn human_kills_of_practice_bots_count_on_the_live_scoreboard() {
         .world
         .players
         .iter()
-        .find(|(_, p)| p.state.is_bot)
+        .find(|(_, p)| p.hero.identity.is_bot)
         .unwrap()
         .0;
-    let bot_id = rt.world.players[&bot_addr].state.id;
-    let human_id = rt.world.players[&addr(1)].state.id;
+    let bot_id = rt.world.players[&bot_addr].hero.identity.id;
+    let human_id = rt.world.players[&addr(1)].hero.identity.id;
     rt.world.structures.clear();
     rt.world.minions.clear();
     rt.bots.clear();
     for (address, x) in [(addr(1), -8.0), (bot_addr, -5.0)] {
         let p = rt.world.players.get_mut(&address).unwrap();
-        p.state.x = x;
-        p.state.z = -8.0;
+        p.hero.x = x;
+        p.hero.z = -8.0;
     }
     // Attribution is under test, not damage output: leave the bot one hit away.
-    rt.world.players.get_mut(&bot_addr).unwrap().state.hp = 1.0;
+    rt.world.players.get_mut(&bot_addr).unwrap().hero.hp = 1.0;
     let mut request_id = 0;
     for _ in 0..400 {
         now += Duration::from_millis(50);
@@ -1004,11 +1024,11 @@ fn human_kills_of_practice_bots_count_on_the_live_scoreboard() {
             );
         }
         rt.tick(now, 0.05);
-        if rt.world.players[&bot_addr].state.hp <= 0.0 {
+        if rt.world.players[&bot_addr].hero.hp <= 0.0 {
             break;
         }
     }
-    assert_eq!(rt.world.players[&bot_addr].state.hp, 0.0, "the bot died");
+    assert_eq!(rt.world.players[&bot_addr].hero.hp, 0.0, "the bot died");
     let board = rt
         .combat_log
         .ledger
@@ -1080,21 +1100,21 @@ fn draft_started_practice_round_credits_human_kills() {
         .world
         .players
         .iter()
-        .find(|(_, p)| p.state.is_bot)
+        .find(|(_, p)| p.hero.identity.is_bot)
         .unwrap()
         .0;
-    let bot_id = rt.world.players[&bot_addr].state.id;
-    let human_id = rt.world.players[&addr(1)].state.id;
+    let bot_id = rt.world.players[&bot_addr].hero.identity.id;
+    let human_id = rt.world.players[&addr(1)].hero.identity.id;
     rt.world.structures.clear();
     rt.world.minions.clear();
     rt.bots.clear();
     for (address, x) in [(addr(1), -8.0), (bot_addr, -5.0)] {
         let p = rt.world.players.get_mut(&address).unwrap();
-        p.state.x = x;
-        p.state.z = -8.0;
+        p.hero.x = x;
+        p.hero.z = -8.0;
     }
     // Attribution is under test, not damage output: leave the bot one hit away.
-    rt.world.players.get_mut(&bot_addr).unwrap().state.hp = 1.0;
+    rt.world.players.get_mut(&bot_addr).unwrap().hero.hp = 1.0;
     let mut request_id = 0;
     for _ in 0..400 {
         now += Duration::from_millis(50);
@@ -1115,7 +1135,7 @@ fn draft_started_practice_round_credits_human_kills() {
             );
         }
         rt.tick(now, 0.05);
-        if rt.world.players[&bot_addr].state.hp <= 0.0 {
+        if rt.world.players[&bot_addr].hero.hp <= 0.0 {
             break;
         }
     }
@@ -1137,7 +1157,7 @@ fn bots_of(rt: &ServerRuntime) -> Vec<SocketAddr> {
         .world
         .players
         .iter()
-        .filter(|(_, p)| p.state.is_bot)
+        .filter(|(_, p)| p.hero.identity.is_bot)
         .map(|(a, _)| *a)
         .collect();
     bots.sort_unstable();
@@ -1158,9 +1178,9 @@ fn sandbox_dummy_stands_in_front_of_the_human_and_returns_after_respawn() {
         .collect();
     assert_eq!(dummies.len(), 1);
     assert_eq!(bots_of(&rt).len(), 4, "the standard roster stays");
-    let dummy = rt.world.players[&dummies[0]].state.clone();
-    let human = &rt.world.players[&addr(1)].state;
-    assert_eq!(dummy.team, Team::Blue);
+    let dummy = rt.world.players[&dummies[0]].hero.clone();
+    let human = &rt.world.players[&addr(1)].hero;
+    assert_eq!(dummy.identity.team, Team::Blue);
     assert!(dummy.max_hp > MAX_HP * 2.0);
     let distance = (dummy.x - human.x).hypot(dummy.z - human.z);
     assert!(
@@ -1173,18 +1193,18 @@ fn sandbox_dummy_stands_in_front_of_the_human_and_returns_after_respawn() {
         rt.handle_packet(addr(1), ClientPacket::Ping, now);
         rt.tick(now, 0.05);
     }
-    let after = &rt.world.players[&dummies[0]].state;
+    let after = &rt.world.players[&dummies[0]].hero;
     assert_eq!((after.x, after.z), (dummy.x, dummy.z));
     assert!(
         rt.world
             .projectiles
             .values()
-            .all(|p| p.state.owner_id != dummy.id)
+            .all(|p| p.state.owner_id != dummy.identity.id)
     );
     assert_eq!(bots_of(&rt).len(), 4);
     // Killed dummies respawn at base like everyone, then walk back to their spot.
-    apply_player_damage(&mut rt.world.players, dummy.id, 10_000.0, now);
-    assert_eq!(rt.world.players[&dummies[0]].state.hp, 0.0);
+    apply_player_damage(&mut rt.world.players, dummy.identity.id, 10_000.0, now);
+    assert_eq!(rt.world.players[&dummies[0]].hero.hp, 0.0);
     // Respawn lands at base within a tick; the next bot tick walks it back.
     // Pings keep the otherwise silent test human from timing out meanwhile.
     for _ in 0..(RESPAWN_DELAY.as_millis() / 50 + 4) {
@@ -1192,7 +1212,7 @@ fn sandbox_dummy_stands_in_front_of_the_human_and_returns_after_respawn() {
         rt.handle_packet(addr(1), ClientPacket::Ping, now);
         rt.tick(now, 0.05);
     }
-    let back = &rt.world.players[&dummies[0]].state;
+    let back = &rt.world.players[&dummies[0]].hero;
     assert_eq!((back.x, back.z), (dummy.x, dummy.z));
     assert_eq!(back.hp, back.max_hp);
     // Extra dummies recycle the oldest one instead of growing without bound.
@@ -1232,32 +1252,35 @@ fn sandbox_clear_duel_and_roster_replace_the_practice_bots() {
     );
     let bots = bots_of(&rt);
     assert_eq!(bots.len(), 1);
-    let duelist = &rt.world.players[&bots[0]].state;
-    assert_eq!(duelist.team, Team::Blue);
+    let duelist = &rt.world.players[&bots[0]];
+    assert_eq!(duelist.hero.identity.team, Team::Blue);
     assert_eq!(
-        duelist.hero_class,
+        duelist.hero.identity.hero_class,
         HeroClass::Mage,
         "mirrors the human's class"
     );
-    assert_eq!(duelist.level, 7);
-    assert_eq!(duelist.skill_points, 0);
+    assert_eq!(duelist.hero.progress.level, 7);
+    assert_eq!(duelist.hero.progress.skill_points, 0);
     assert_eq!(
-        duelist.ranks,
+        duelist.hero.progress.ranks,
         [3, 3, 1, 3],
         "ultimate, Q and W ranked with 6 points"
     );
-    assert_eq!(duelist.inventory.len(), shared::shop::INVENTORY_CAPACITY);
-    assert_eq!(duelist.hp, duelist.max_hp);
-    assert!(duelist.max_hp > MAX_HP);
+    assert_eq!(
+        duelist.economy.inventory.len(),
+        shared::shop::INVENTORY_CAPACITY
+    );
+    assert_eq!(duelist.hero.hp, duelist.hero.max_hp);
+    assert!(duelist.hero.max_hp > MAX_HP);
     let spawn = spawn_position_for_team(&rt.world.map_layout, Team::Blue);
-    assert!((duelist.x - spawn.x).hypot(duelist.z - spawn.z) < 1.0);
+    assert!((duelist.hero.x - spawn.x).hypot(duelist.hero.z - spawn.z) < 1.0);
     assert_eq!(rt.bots.kind(bots[0]), Some(bots::BotKind::Duelist));
     // It walks mid toward the human instead of idling at base.
     for _ in 0..60 {
         now += Duration::from_millis(50);
         rt.tick(now, 0.05);
     }
-    let moved = &rt.world.players[&bots[0]].state;
+    let moved = &rt.world.players[&bots[0]].hero;
     assert!(
         (moved.x - spawn.x).hypot(moved.z - spawn.z) > 2.0,
         "duelist advanced"
@@ -1284,21 +1307,21 @@ fn all_practice_bots_leave_spawn_and_advance_without_nearby_enemies() {
             .world
             .players
             .iter()
-            .filter(|(_, p)| p.state.is_bot)
-            .map(|(a, p)| (*a, [p.state.x, p.state.z]))
+            .filter(|(_, p)| p.hero.identity.is_bot)
+            .map(|(a, p)| (*a, [p.hero.x, p.hero.z]))
             .collect();
         for _ in 0..400 {
             now += Duration::from_millis(50);
             rt.simulate_bots(now, 0.05);
         }
         for (a, start) in starts {
-            let p = &rt.world.players[&a].state;
+            let p = &rt.world.players[&a].hero;
             let distance = (p.x - start[0]).hypot(p.z - start[1]);
             assert!(
                 distance > 20.0,
                 "bot {} {:?} stalled after {phase}: moved {distance}",
-                p.id,
-                p.team
+                p.identity.id,
+                p.identity.team
             );
         }
         // Ordinary death clears the route and ordinary respawn must allow it
@@ -1307,8 +1330,8 @@ fn all_practice_bots_leave_spawn_and_advance_without_nearby_enemies() {
             .world
             .players
             .values()
-            .filter(|p| p.state.is_bot)
-            .map(|p| p.state.id)
+            .filter(|p| p.hero.identity.is_bot)
+            .map(|p| p.hero.identity.id)
             .collect();
         for id in bots {
             apply_player_damage(&mut rt.world.players, id, 9999.0, now);
@@ -1328,26 +1351,26 @@ fn bot_defends_spawn_then_resumes_lane_when_enemy_is_gone() {
         .world
         .players
         .iter()
-        .filter(|(_, p)| p.state.is_bot && p.state.team == Team::Blue)
-        .min_by_key(|(_, p)| p.state.id)
+        .filter(|(_, p)| p.hero.identity.is_bot && p.hero.identity.team == Team::Blue)
+        .min_by_key(|(_, p)| p.hero.identity.id)
         .unwrap()
         .0;
-    let start = rt.world.players[&bot_addr].state.clone();
+    let start = rt.world.players[&bot_addr].hero.clone();
     let human = rt.world.players.get_mut(&addr(1)).unwrap();
-    human.state.x = start.x + 3.0;
-    human.state.z = start.z;
+    human.hero.x = start.x + 3.0;
+    human.hero.z = start.z;
     rt.simulate_bots(now, 0.05);
     assert!(
         !rt.world.projectiles.is_empty()
-            || rt.world.players[&addr(1)].state.hp < rt.world.players[&addr(1)].state.max_hp,
+            || rt.world.players[&addr(1)].hero.hp < rt.world.players[&addr(1)].hero.max_hp,
         "nearby enemy must trigger defence"
     );
-    rt.world.players.get_mut(&addr(1)).unwrap().state.hp = 0.0;
+    rt.world.players.get_mut(&addr(1)).unwrap().hero.hp = 0.0;
     for _ in 0..400 {
         now += Duration::from_millis(50);
         rt.simulate_bots(now, 0.05);
     }
-    let bot = &rt.world.players[&bot_addr].state;
+    let bot = &rt.world.players[&bot_addr].hero;
     assert!(
         (bot.x - start.x).hypot(bot.z - start.z) > 20.0,
         "bot must resume its lane after the nearby enemy disappears"
@@ -1391,26 +1414,26 @@ fn home_fountain_heals_both_teams_and_bots_but_never_dead_or_outside_players() {
     let now = Instant::now();
     rt.handle_packet(addr(1), join("fountain"), now);
     for p in rt.world.players.values_mut() {
-        p.state.hp = 20.0;
+        p.hero.hp = 20.0;
     }
     regenerate_base_hp(&mut rt.world, 1.0);
     assert!(rt.world.players.values().all(|p| {
-        (p.state.hp - (20.0 + p.state.max_hp * BASE_HEAL_FRACTION_PER_SECOND)).abs() < 0.001
+        (p.hero.hp - (20.0 + p.hero.max_hp * BASE_HEAL_FRACTION_PER_SECOND)).abs() < 0.001
     }));
     regenerate_base_hp(&mut rt.world, 100.0);
     assert!(
         rt.world
             .players
             .values()
-            .all(|p| p.state.hp == p.state.max_hp)
+            .all(|p| p.hero.hp == p.hero.max_hp)
     );
     let human = rt.world.players.get_mut(&addr(1)).unwrap();
-    human.state.hp = 20.0;
-    human.state.x = rt.world.map_layout.away.x;
-    human.state.z = rt.world.map_layout.away.z;
+    human.hero.hp = 20.0;
+    human.hero.x = rt.world.map_layout.away.x;
+    human.hero.z = rt.world.map_layout.away.z;
     regenerate_base_hp(&mut rt.world, 1.0);
     assert_eq!(
-        rt.world.players[&addr(1)].state.hp,
+        rt.world.players[&addr(1)].hero.hp,
         20.0,
         "enemy base cannot heal"
     );
@@ -1422,11 +1445,11 @@ fn home_fountain_heals_both_teams_and_bots_but_never_dead_or_outside_players() {
         GameState::Running,
     ] {
         let p = rt.world.players.get_mut(&addr(1)).unwrap();
-        p.state.x = rt.world.map_layout.home.x + BASE_HEAL_RADIUS + 0.01;
-        p.state.z = rt.world.map_layout.home.z;
+        p.hero.x = rt.world.map_layout.home.x + BASE_HEAL_RADIUS + 0.01;
+        p.hero.z = rt.world.map_layout.home.z;
         rt.world.game_state = phase;
         regenerate_base_hp(&mut rt.world, 1.0);
-        assert_eq!(rt.world.players[&addr(1)].state.hp, 20.0);
+        assert_eq!(rt.world.players[&addr(1)].hero.hp, 20.0);
     }
     for (joined, hp, phase) in [
         (true, 0.0, GameState::Running),
@@ -1441,12 +1464,12 @@ fn home_fountain_heals_both_teams_and_bots_but_never_dead_or_outside_players() {
     ] {
         let p = rt.world.players.get_mut(&addr(1)).unwrap();
         p.joined = joined;
-        p.state.hp = hp;
-        p.state.x = rt.world.map_layout.home.x;
-        p.state.z = rt.world.map_layout.home.z;
+        p.hero.hp = hp;
+        p.hero.x = rt.world.map_layout.home.x;
+        p.hero.z = rt.world.map_layout.home.z;
         rt.world.game_state = phase;
         regenerate_base_hp(&mut rt.world, 1.0);
-        assert_eq!(rt.world.players[&addr(1)].state.hp, hp);
+        assert_eq!(rt.world.players[&addr(1)].hero.hp, hp);
     }
 }
 
@@ -1462,27 +1485,27 @@ fn live_udp_scoreboard_carries_accepted_kills_deaths_assists() {
         },
     );
     send_udp(&client, &mut rt, join("scoreboard-observer"));
-    let human = rt.world.players[&client.local_addr().unwrap()]
-        .state
-        .clone();
+    let human = rt.world.players[&client.local_addr().unwrap()].hero.clone();
     let ally = rt
         .world
         .players
         .values()
-        .find(|p| p.state.is_bot && p.state.team == human.team)
+        .find(|p| p.hero.identity.is_bot && p.hero.identity.team == human.identity.team)
         .unwrap()
-        .state
+        .hero
+        .identity
         .id;
     let enemy = rt
         .world
         .players
         .values()
-        .find(|p| p.state.team != human.team)
+        .find(|p| p.hero.identity.team != human.identity.team)
         .unwrap()
-        .state
+        .hero
+        .identity
         .id;
     let now = Instant::now();
-    for (attacker, damage) in [(ally, 5.0), (human.id, 999.0)] {
+    for (attacker, damage) in [(ally, 5.0), (human.identity.id, 999.0)] {
         let receipt = apply_player_damage(&mut rt.world.players, enemy, damage, now).unwrap();
         rt.combat_log.extend(
             now,
@@ -1504,7 +1527,7 @@ fn live_udp_scoreboard_carries_accepted_kills_deaths_assists() {
     let own = board
         .players
         .iter()
-        .find(|p| p.player_id == human.id)
+        .find(|p| p.player_id == human.identity.id)
         .unwrap();
     assert_eq!((own.kills, own.deaths, own.assists), (1, 0, 0));
     assert_eq!(
@@ -1545,8 +1568,8 @@ fn five_bot_teams_fill_every_role_once_around_the_human_pick() {
             .world
             .players
             .values()
-            .filter(|p| p.joined && p.state.team == team)
-            .map(|p| p.state.hero_class)
+            .filter(|p| p.joined && p.hero.identity.team == team)
+            .map(|p| p.hero.identity.hero_class)
             .collect();
         classes.sort_by_key(|class| class.id());
         classes.dedup();
@@ -1564,7 +1587,7 @@ fn jungle_bots_clear_camps_on_their_own_half_for_warden_rewards() {
         .world
         .players
         .iter()
-        .filter(|(_, p)| p.state.is_bot && p.state.hero_class == HeroClass::Warden)
+        .filter(|(_, p)| p.hero.identity.is_bot && p.hero.identity.hero_class == HeroClass::Warden)
         .map(|(a, _)| *a)
         .collect();
     assert_eq!(wardens.len(), 2, "one jungler per team");
@@ -1577,9 +1600,9 @@ fn jungle_bots_clear_camps_on_their_own_half_for_warden_rewards() {
         simulate_neutrals(&mut rt.world, TickCtx { now, dt: 0.05 });
     }
     for address in wardens {
-        let warden = &rt.world.players[&address].state;
-        let own = spawn_position_for_team(&rt.world.map_layout, warden.team);
-        let enemy_team = match warden.team {
+        let warden = &rt.world.players[&address];
+        let own = spawn_position_for_team(&rt.world.map_layout, warden.hero.identity.team);
+        let enemy_team = match warden.hero.identity.team {
             Team::Green => Team::Blue,
             Team::Blue => Team::Green,
         };
@@ -1593,8 +1616,8 @@ fn jungle_bots_clear_camps_on_their_own_half_for_warden_rewards() {
         assert!(
             cleared_own_half,
             "{:?} jungler cleared nothing",
-            warden.team
+            warden.hero.identity.team
         );
-        assert!(warden.gold > shared::shop::STARTING_GOLD && warden.xp > 0);
+        assert!(warden.economy.gold > shared::shop::STARTING_GOLD && warden.hero.progress.xp > 0);
     }
 }

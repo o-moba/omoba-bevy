@@ -14,14 +14,14 @@ pub(crate) fn regenerate_mana(players: &mut HashMap<SocketAddr, ConnectedPlayer>
         return;
     }
     for player in players.values_mut() {
-        if !player.joined || player.state.hp <= 0.0 {
+        if !player.joined || player.hero.hp <= 0.0 {
             continue;
         }
-        if player.state.max_mana <= 0.0 {
-            player.state.max_mana = MAX_MANA;
+        if player.hero.max_mana <= 0.0 {
+            player.hero.max_mana = MAX_MANA;
         }
-        player.state.mana =
-            (player.state.mana + MANA_REGEN_PER_SECOND * dt).clamp(0.0, player.state.max_mana);
+        player.hero.mana =
+            (player.hero.mana + MANA_REGEN_PER_SECOND * dt).clamp(0.0, player.hero.max_mana);
     }
 }
 
@@ -36,18 +36,15 @@ pub(crate) fn regenerate_base_hp(world: &mut GameWorld, dt: f32) {
     if !matches!(phase, GameState::Running) || !dt.is_finite() || dt <= 0.0 {
         return;
     }
-    for player in players
-        .values_mut()
-        .filter(|p| p.joined && p.state.hp > 0.0)
-    {
-        let base = match player.state.team {
+    for player in players.values_mut().filter(|p| p.joined && p.hero.hp > 0.0) {
+        let base = match player.hero.identity.team {
             Team::Green => map.home,
             Team::Blue => map.away,
         };
-        if (player.state.x - base.x).hypot(player.state.z - base.z) <= BASE_HEAL_RADIUS {
-            player.state.hp = (player.state.hp
-                + player.state.max_hp * BASE_HEAL_FRACTION_PER_SECOND * dt)
-                .min(player.state.max_hp);
+        if (player.hero.x - base.x).hypot(player.hero.z - base.z) <= BASE_HEAL_RADIUS {
+            player.hero.hp = (player.hero.hp
+                + player.hero.max_hp * BASE_HEAL_FRACTION_PER_SECOND * dt)
+                .min(player.hero.max_hp);
         }
     }
 }
@@ -66,12 +63,12 @@ pub(crate) fn regenerate_team_buff_hp(world: &mut GameWorld, tick: TickCtx) {
         return;
     }
     for player in players.values_mut() {
-        if !player.joined || player.state.hp <= 0.0 {
+        if !player.joined || player.hero.hp <= 0.0 {
             continue;
         }
-        let regen = team_buffs.hp_regen_per_second(player.state.team, now);
+        let regen = team_buffs.hp_regen_per_second(player.hero.identity.team, now);
         if regen > 0.0 {
-            player.state.hp = (player.state.hp + regen * dt).min(player.state.max_hp);
+            player.hero.hp = (player.hero.hp + regen * dt).min(player.hero.max_hp);
         }
     }
 }
@@ -82,9 +79,9 @@ pub(crate) fn regenerate_team_buff_hp(world: &mut GameWorld, tick: TickCtx) {
 pub(crate) fn restore_god_mode_players(world: &mut GameWorld) {
     for player in world.players.values_mut() {
         if player.god_mode {
-            player.state.hp = player.state.max_hp;
+            player.hero.hp = player.hero.max_hp;
             if player.sandbox.as_ref().is_none_or(|c| c.infinite_resource) {
-                player.state.mana = player.state.max_mana;
+                player.hero.mana = player.hero.max_mana;
             }
             player.timers.respawn_at = None;
         }

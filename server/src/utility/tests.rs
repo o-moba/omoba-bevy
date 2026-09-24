@@ -21,8 +21,8 @@ fn fixture() -> (ServerRuntime, SocketAddr, Instant) {
         now,
     );
     let p = rt.world.players.get_mut(&addr).unwrap();
-    p.state.x = 0.0;
-    p.state.z = 0.0;
+    p.hero.x = 0.0;
+    p.hero.z = 0.0;
     (rt, addr, now)
 }
 
@@ -59,10 +59,10 @@ fn dash_uses_match_identity_replay_protection_and_independent_twenty_second_cool
         match_id: rt.match_id,
     };
     rt.handle_packet(addr, bad, now);
-    assert_eq!(rt.world.players[&addr].state.utility.last_request_id, 0);
+    assert_eq!(rt.world.players[&addr].hero.utility.last_request_id, 0);
     request(&mut rt, addr, UtilityAction::Dash, [100.0, 0.0], 1, now);
-    assert!((rt.world.players[&addr].state.x - DASH_DISTANCE).abs() < 0.001);
-    assert_eq!(rt.world.players[&addr].state.utility.dash_sequence, 1);
+    assert!((rt.world.players[&addr].hero.x - DASH_DISTANCE).abs() < 0.001);
+    assert_eq!(rt.world.players[&addr].hero.utility.dash_sequence, 1);
     assert_eq!(
         rt.player_view(addr, now).utility.dash_remaining_secs,
         DASH_COOLDOWN_SECS
@@ -84,7 +84,7 @@ fn dash_uses_match_identity_replay_protection_and_independent_twenty_second_cool
         now + Duration::from_secs(21),
     );
     assert_eq!(
-        rt.world.players[&addr].state.utility.dash_sequence, 1,
+        rt.world.players[&addr].hero.utility.dash_sequence, 1,
         "rejected request cannot replay after cooldown"
     );
     request(
@@ -95,8 +95,8 @@ fn dash_uses_match_identity_replay_protection_and_independent_twenty_second_cool
         3,
         now + Duration::from_secs(21),
     );
-    assert_eq!(rt.world.players[&addr].state.utility.dash_sequence, 2);
-    assert!((rt.world.players[&addr].state.x).abs() < 0.001);
+    assert_eq!(rt.world.players[&addr].hero.utility.dash_sequence, 2);
+    assert!((rt.world.players[&addr].hero.x).abs() < 0.001);
 }
 
 #[test]
@@ -104,11 +104,11 @@ fn utilities_require_admission_alive_running_and_valid_direction() {
     let (mut rt, addr, now) = fixture();
     rt.world.players.get_mut(&addr).unwrap().joined = false;
     request(&mut rt, addr, UtilityAction::Haste, [0.0, 0.0], 1, now);
-    assert_eq!(rt.world.players[&addr].state.utility.last_request_id, 0);
+    assert_eq!(rt.world.players[&addr].hero.utility.last_request_id, 0);
     rt.world.players.get_mut(&addr).unwrap().joined = true;
-    rt.world.players.get_mut(&addr).unwrap().state.hp = 0.0;
+    rt.world.players.get_mut(&addr).unwrap().hero.hp = 0.0;
     request(&mut rt, addr, UtilityAction::Haste, [0.0, 0.0], 1, now);
-    rt.world.players.get_mut(&addr).unwrap().state.hp = MAX_HP;
+    rt.world.players.get_mut(&addr).unwrap().hero.hp = MAX_HP;
     request(&mut rt, addr, UtilityAction::Haste, [0.0, 0.0], 1, now);
     assert_eq!(rt.player_view(addr, now).utility.haste_active_secs, 0.0);
     rt.world.game_state = GameState::Lobby;
@@ -127,7 +127,7 @@ fn utilities_require_admission_alive_running_and_valid_direction() {
         4,
         now,
     );
-    assert_eq!(p.state.utility.dash_sequence, 0);
+    assert_eq!(p.hero.utility.dash_sequence, 0);
     assert_eq!(hero_timers::dash_remaining(p, now), 0.0);
 }
 
@@ -157,8 +157,8 @@ fn haste_lasts_three_seconds_and_cancels_on_death_without_clearing_replay_or_coo
         0.0,
         now + Duration::from_millis(100),
     );
-    assert!((p.state.x - (PLAYER_SPEED * 1.4 * 0.1 + MOVEMENT_POSITION_TOLERANCE)).abs() < 0.001);
-    let id = p.state.id;
+    assert!((p.hero.x - (PLAYER_SPEED * 1.4 * 0.1 + MOVEMENT_POSITION_TOLERANCE)).abs() < 0.001);
+    let id = p.hero.identity.id;
     apply_player_damage(
         &mut rt.world.players,
         id,
@@ -174,10 +174,10 @@ fn haste_lasts_three_seconds_and_cancels_on_death_without_clearing_replay_or_coo
         hero_timers::haste_active(p, now + Duration::from_secs(1)),
         0.0
     );
-    assert_eq!(p.state.utility.last_request_id, 1);
+    assert_eq!(p.hero.utility.last_request_id, 1);
     assert!(p.timers.haste_ready_at.is_some());
     reset_player_round(p, &rt.world.map_layout, now);
-    assert_eq!(p.state.utility, UtilityState::default());
+    assert_eq!(p.hero.utility, HeroUtility::default());
     assert!(p.timers.haste_ready_at.is_none());
 }
 
@@ -190,12 +190,12 @@ fn dash_clips_live_structures_and_old_transform_packets_cannot_undo_short_dash()
     structure.state.kind = StructureKind::Tower;
     structure.state.hp = 100.0;
     request(&mut rt, addr, UtilityAction::Dash, [1.0, 0.0], 1, now);
-    let x = rt.world.players[&addr].state.x;
+    let x = rt.world.players[&addr].hero.x;
     assert!(
         x > 0.0 && x < 2.0,
         "expected clipped short displacement: {x}"
     );
-    assert_eq!(rt.world.players[&addr].state.utility.dash_sequence, 1);
+    assert_eq!(rt.world.players[&addr].hero.utility.dash_sequence, 1);
     rt.handle_packet(
         addr,
         ClientPacket::Transform {
@@ -207,7 +207,7 @@ fn dash_clips_live_structures_and_old_transform_packets_cannot_undo_short_dash()
         },
         now + Duration::from_millis(100),
     );
-    assert_eq!(rt.world.players[&addr].state.x, x);
+    assert_eq!(rt.world.players[&addr].hero.x, x);
     rt.handle_packet(
         addr,
         ClientPacket::Transform {
@@ -219,7 +219,7 @@ fn dash_clips_live_structures_and_old_transform_packets_cannot_undo_short_dash()
         },
         now + Duration::from_millis(100),
     );
-    assert!(rt.world.players[&addr].state.x < x);
+    assert!(rt.world.players[&addr].hero.x < x);
 }
 
 #[test]
@@ -242,20 +242,20 @@ fn dash_sweeps_static_obstacles_and_honors_world_bounds() {
         })
         .unwrap();
     let p = rt.world.players.get_mut(&addr).unwrap();
-    p.state.x = from[0];
-    p.state.z = from[1];
+    p.hero.x = from[0];
+    p.hero.z = from[1];
     request(&mut rt, addr, UtilityAction::Dash, [1.0, 0.0], 1, now);
     let p = &rt.world.players[&addr];
-    assert!(p.state.x - from[0] < DASH_DISTANCE);
-    assert!(nav.point_clear([p.state.x, p.state.z]));
-    assert!(nav.segment_clear(from, [p.state.x, p.state.z]));
+    assert!(p.hero.x - from[0] < DASH_DISTANCE);
+    assert!(nav.point_clear([p.hero.x, p.hero.z]));
+    assert!(nav.segment_clear(from, [p.hero.x, p.hero.z]));
     let edge = rt
         .world
         .map_layout
         .clamp_player_position(Vec3f::new(1.0e6, PLAYER_GROUND_Y, 0.0));
     let p = rt.world.players.get_mut(&addr).unwrap();
-    p.state.x = edge.x;
-    p.state.z = edge.z;
+    p.hero.x = edge.x;
+    p.hero.z = edge.z;
     request(
         &mut rt,
         addr,
@@ -264,5 +264,5 @@ fn dash_sweeps_static_obstacles_and_honors_world_bounds() {
         2,
         now + Duration::from_secs(21),
     );
-    assert!(rt.world.players[&addr].state.x <= edge.x);
+    assert!(rt.world.players[&addr].hero.x <= edge.x);
 }

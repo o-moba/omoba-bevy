@@ -229,8 +229,8 @@ fn packet_transform_respects_configured_live_discs_and_death_removes_blocker() {
     assert!(shared::navigation::world_navigation().segment_clear(start, end));
     let player = rt.world.players.get_mut(&address).unwrap();
     player.joined = true;
-    player.state.x = start[0];
-    player.state.z = start[1];
+    player.hero.x = start[0];
+    player.hero.z = start[1];
     player.speed_mult = 100.0;
     for _ in 0..4 {
         now += Duration::from_millis(100);
@@ -245,7 +245,7 @@ fn packet_transform_respects_configured_live_discs_and_death_removes_blocker() {
             },
             now,
         );
-        let p = &rt.world.players[&address].state;
+        let p = &rt.world.players[&address].hero;
         assert!(p.x < center[0] - 1.79);
         assert!(
             p.x > start[0] + 1.0,
@@ -265,7 +265,7 @@ fn packet_transform_respects_configured_live_discs_and_death_removes_blocker() {
         },
         now,
     );
-    assert!((rt.world.players[&address].state.x - end[0]).abs() < 0.001);
+    assert!((rt.world.players[&address].hero.x - end[0]).abs() < 0.001);
 }
 
 #[test]

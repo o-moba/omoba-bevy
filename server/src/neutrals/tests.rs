@@ -72,7 +72,7 @@ fn each_camp_pays_once_and_respawns_exactly_at_forty_seconds_only_when_running()
     let now = Instant::now();
     for id in 9_001..=9_006 {
         let (mut world, addr) = player_fixture(HeroClass::Warrior, now);
-        let killer = world.players[&addr].state.id;
+        let killer = world.players[&addr].hero.identity.id;
         let kind = world.neutrals[&id].state.camp_type;
         let template = neutral_template(kind);
         let mut buffs = TeamBuffs::default();
@@ -88,10 +88,10 @@ fn each_camp_pays_once_and_respawns_exactly_at_forty_seconds_only_when_running()
             );
         }
         assert_eq!(
-            world.players[&addr].state.gold,
+            world.players[&addr].economy.gold,
             STARTING_GOLD + template.kill_gold
         );
-        assert_eq!(world.players[&addr].state.xp, template.kill_xp);
+        assert_eq!(world.players[&addr].hero.progress.xp, template.kill_xp);
         let deadline = now + Duration::from_secs(40);
         assert_eq!(world.neutrals[&id].dead_until, Some(deadline));
         assert!(world.neutrals[&id].target_player_id.is_none());
@@ -139,12 +139,12 @@ fn each_camp_pays_once_and_respawns_exactly_at_forty_seconds_only_when_running()
             deadline,
         );
         assert_eq!(
-            world.players[&addr].state.gold,
+            world.players[&addr].economy.gold,
             STARTING_GOLD + 2 * template.kill_gold
         );
-        assert_eq!(world.players[&addr].state.level, 2);
+        assert_eq!(world.players[&addr].hero.progress.level, 2);
         assert_eq!(
-            world.players[&addr].state.xp,
+            world.players[&addr].hero.progress.xp,
             2 * template.kill_xp - LEVEL_XP_THRESHOLDS[0]
         );
     }
@@ -157,18 +157,18 @@ fn aggro_resets_after_target_death_disconnect_leave_or_leash_escape() {
         let (mut world, addr) = player_fixture(HeroClass::Warrior, now);
         let neutral = world.neutrals.get_mut(&9_001).unwrap();
         let player = world.players.get_mut(&addr).unwrap();
-        player.state.x = neutral.anchor.x + 2.0;
-        player.state.z = neutral.anchor.z;
-        neutral.target_player_id = Some(player.state.id);
+        player.hero.x = neutral.anchor.x + 2.0;
+        player.hero.z = neutral.anchor.z;
+        neutral.target_player_id = Some(player.hero.identity.id);
         neutral.state.ai_state = NeutralAiState::Aggro;
         neutral.state.hp -= 20.0;
         neutral.state.x += 1.0;
         neutral.state.yaw = 1.0;
         neutral.last_attack_at = Some(now);
         match cause {
-            "death" => player.state.hp = 0.0,
+            "death" => player.hero.hp = 0.0,
             "leave" => player.joined = false,
-            "leash" => player.state.x = neutral.anchor.x + NEUTRAL_LEASH_DISTANCE + 0.1,
+            "leash" => player.hero.x = neutral.anchor.x + NEUTRAL_LEASH_DISTANCE + 0.1,
             "disconnect" => {
                 world.players.remove(&addr);
             }
@@ -189,12 +189,12 @@ fn ordinary_last_hit_recovery_is_bounded_once_only_and_never_revives_or_heals_bo
         (NeutralCampType::WendigoBoss, 10.0, 10.0),
     ] {
         let (mut world, addr) = player_fixture(HeroClass::Mage, now);
-        let state = &mut world.players.get_mut(&addr).unwrap().state;
-        state.hp = starting_hp;
+        let player = world.players.get_mut(&addr).unwrap();
+        player.hero.hp = starting_hp;
         // Isolate recovery from the separate HP increase granted by a level-up.
-        state.level = MAX_LEVEL;
-        state.next_level_xp = 0;
-        let killer = state.id;
+        player.hero.progress.level = MAX_LEVEL;
+        player.hero.progress.next_level_xp = 0;
+        let killer = player.hero.identity.id;
         world.neutrals.get_mut(&9_001).unwrap().state.camp_type = kind;
         let mut buffs = TeamBuffs::default();
         for _ in 0..2 {
@@ -207,9 +207,9 @@ fn ordinary_last_hit_recovery_is_bounded_once_only_and_never_revives_or_heals_bo
                 killer,
                 now,
             );
-            assert_eq!(world.players[&addr].state.hp, expected_hp);
+            assert_eq!(world.players[&addr].hero.hp, expected_hp);
             assert_eq!(
-                world.players[&addr].state.gold,
+                world.players[&addr].economy.gold,
                 STARTING_GOLD + neutral_template(kind).kill_gold
             );
         }
@@ -293,9 +293,9 @@ fn fresh_level_one_heroes_can_clear_three_camps_with_basic_attacks_and_unlocked_
         let mut tick = 0_u64;
         for id in [9_001, 9_005, 9_003] {
             let anchor = world.neutrals[&id].anchor;
-            let player = &mut world.players.get_mut(&addr).unwrap().state;
-            player.x = anchor.x + 2.0;
-            player.z = anchor.z;
+            let hero = &mut world.players.get_mut(&addr).unwrap().hero;
+            hero.x = anchor.x + 2.0;
+            hero.z = anchor.z;
             let target = TargetId {
                 kind: TargetKind::Neutral,
                 id,
@@ -304,13 +304,13 @@ fn fresh_level_one_heroes_can_clear_three_camps_with_basic_attacks_and_unlocked_
             while world.neutrals[&id].state.hp > 0.0 && tick - fight_start < 300 {
                 tick += 1;
                 let now = start + Duration::from_millis(100 * tick);
-                let player = &mut world.players.get_mut(&addr).unwrap().state;
-                player.mana = (player.mana + MANA_REGEN_PER_SECOND * 0.1).min(player.max_mana);
+                let hero = &mut world.players.get_mut(&addr).unwrap().hero;
+                hero.mana = (hero.mana + MANA_REGEN_PER_SECOND * 0.1).min(hero.max_mana);
                 handle_basic_attack_request(&mut world, addr, target, tick, now);
                 handle_cast_request(&mut world, addr, target, 0, now);
                 // The second kill unlocks W. Use each class's recovery skill
                 // naturally: mana surge for Mage, a self-heal for the others.
-                let player = &world.players[&addr].state;
+                let player = &world.players[&addr].hero;
                 let needs_recovery = if class == HeroClass::Mage {
                     player.mana < player.max_mana * 0.5
                 } else {
@@ -322,7 +322,7 @@ fn fresh_level_one_heroes_can_clear_three_camps_with_basic_attacks_and_unlocked_
                 simulate_projectiles(&mut world, TickCtx { now, dt: 0.1 });
                 simulate_neutrals(&mut world, TickCtx { now, dt: 0.1 });
                 assert!(
-                    world.players[&addr].state.hp > 0.0,
+                    world.players[&addr].hero.hp > 0.0,
                     "{class:?} died clearing camp {id}"
                 );
             }
@@ -331,15 +331,15 @@ fn fresh_level_one_heroes_can_clear_three_camps_with_basic_attacks_and_unlocked_
                 "{class:?} failed to kill camp {id}"
             );
         }
-        let hero = &world.players[&addr].state;
-        assert_eq!(hero.level, 2, "{class:?}");
-        assert_eq!(hero.xp, 100);
-        assert_eq!(hero.gold, STARTING_GOLD + 115);
+        let player = &world.players[&addr];
+        assert_eq!(player.hero.progress.level, 2, "{class:?}");
+        assert_eq!(player.hero.progress.xp, 100);
+        assert_eq!(player.economy.gold, STARTING_GOLD + 115);
         println!(
             "{class:?} three-camp clear: {:.1} seconds, {:.1}/{:.1} HP",
             tick as f32 * 0.1,
-            hero.hp,
-            hero.max_hp
+            player.hero.hp,
+            player.hero.max_hp
         );
     }
 }
@@ -349,7 +349,7 @@ fn orphan_chip_damage_resets_uncontested_camps_but_living_nearby_players_keep_ag
     let now = Instant::now();
     for cause in ["death", "disconnect", "leave"] {
         let (mut world, addr) = player_fixture(HeroClass::Ranger, now);
-        let killer = world.players[&addr].state.id;
+        let killer = world.players[&addr].hero.identity.id;
         let mut buffs = TeamBuffs::default();
         let anchor = world.neutrals[&9_001].anchor;
         // The first arrow acquires aggro; target loss then fully evades.
@@ -363,7 +363,7 @@ fn orphan_chip_damage_resets_uncontested_camps_but_living_nearby_players_keep_ag
             now,
         );
         match cause {
-            "death" => world.players.get_mut(&addr).unwrap().state.hp = 0.0,
+            "death" => world.players.get_mut(&addr).unwrap().hero.hp = 0.0,
             "leave" => world.players.get_mut(&addr).unwrap().joined = false,
             "disconnect" => {
                 world.players.remove(&addr);
@@ -389,9 +389,9 @@ fn orphan_chip_damage_resets_uncontested_camps_but_living_nearby_players_keep_ag
 
         let (mut other, new_addr) = player_fixture(HeroClass::Warrior, now);
         let mut nearby = other.players.remove(&new_addr).unwrap();
-        nearby.state.id = killer + 1;
-        nearby.state.x = anchor.x + 2.0;
-        nearby.state.z = anchor.z;
+        nearby.hero.identity.id = killer + 1;
+        nearby.hero.x = anchor.x + 2.0;
+        nearby.hero.z = anchor.z;
         world
             .players
             .insert("127.0.0.1:58402".parse().unwrap(), nearby);
@@ -416,8 +416,8 @@ fn orphan_chip_damage_resets_uncontested_camps_but_living_nearby_players_keep_ag
 fn lethal_posthumous_neutral_hit_still_pays_once_and_waits_for_respawn() {
     let now = Instant::now();
     let (mut world, addr) = player_fixture(HeroClass::Ranger, now);
-    let killer = world.players[&addr].state.id;
-    world.players.get_mut(&addr).unwrap().state.hp = 0.0;
+    let killer = world.players[&addr].hero.identity.id;
+    world.players.get_mut(&addr).unwrap().hero.hp = 0.0;
     let mut buffs = TeamBuffs::default();
     for _ in 0..2 {
         apply_neutral_damage(
@@ -432,11 +432,11 @@ fn lethal_posthumous_neutral_hit_still_pays_once_and_waits_for_respawn() {
         simulate_neutrals(&mut world, TickCtx { now, dt: 0.1 });
     }
     assert_eq!(
-        world.players[&addr].state.gold,
+        world.players[&addr].economy.gold,
         STARTING_GOLD + SKIRMISHER_KILL_GOLD
     );
-    assert_eq!(world.players[&addr].state.xp, SKIRMISHER_KILL_XP);
-    assert_eq!(world.players[&addr].state.hp, 0.0);
+    assert_eq!(world.players[&addr].hero.progress.xp, SKIRMISHER_KILL_XP);
+    assert_eq!(world.players[&addr].hero.hp, 0.0);
     assert_eq!(world.neutrals[&9_001].state.hp, 0.0);
     assert_eq!(
         world.neutrals[&9_001].dead_until,
@@ -451,7 +451,7 @@ fn warden_forest_tracker_hits_camps_harder_and_earns_more_from_the_kill() {
     let mut progress = Vec::new();
     for class in [HeroClass::Warrior, HeroClass::Warden] {
         let (mut world, addr) = player_fixture(class, now);
-        let killer = world.players[&addr].state.id;
+        let killer = world.players[&addr].hero.identity.id;
         let mut buffs = TeamBuffs::default();
         let id = 9_003;
         let template = neutral_template(world.neutrals[&id].state.camp_type);
@@ -480,10 +480,10 @@ fn warden_forest_tracker_hits_camps_harder_and_earns_more_from_the_kill() {
             template.kill_gold,
             template.kill_xp,
         );
-        assert_eq!(world.players[&addr].state.gold, STARTING_GOLD + gold);
+        assert_eq!(world.players[&addr].economy.gold, STARTING_GOLD + gold);
         progress.push((
-            world.players[&addr].state.level,
-            world.players[&addr].state.xp,
+            world.players[&addr].hero.progress.level,
+            world.players[&addr].hero.progress.xp,
         ));
         assert_eq!((gold > template.kill_gold), class == HeroClass::Warden);
     }

@@ -58,32 +58,32 @@ fn utc_ms() -> u64 {
 }
 fn participant(player: &ConnectedPlayer) -> ParticipantResult {
     ParticipantResult {
-        is_bot: player.state.is_bot,
-        player_id: player.state.id,
+        is_bot: player.hero.identity.is_bot,
+        player_id: player.hero.identity.id,
         profile_id: player
             .career_profile
             .as_ref()
             .map(|profile| profile.profile_id.clone()),
         nickname: player.career_profile.as_ref().map_or_else(
             || {
-                if player.state.is_bot {
-                    format!("Bot {}", player.state.id)
+                if player.hero.identity.is_bot {
+                    format!("Bot {}", player.hero.identity.id)
                 } else {
-                    format!("Guest {}", player.state.id)
+                    format!("Guest {}", player.hero.identity.id)
                 }
             },
             |profile| profile.nickname.clone(),
         ),
-        team: player.state.team,
-        hero_class: player.state.hero_class,
-        character: serde_json::to_value(player.state.character)
+        team: player.hero.identity.team,
+        hero_class: player.hero.identity.hero_class,
+        character: serde_json::to_value(player.hero.identity.character)
             .ok()
             .and_then(|value| value.as_str().map(str::to_owned))
             .unwrap_or_else(|| "ipfs".into()),
-        avatar: player.state.avatar.clone(),
-        sprite_character: player.state.sprite_character.clone(),
+        avatar: player.hero.identity.avatar.clone(),
+        sprite_character: player.hero.identity.sprite_character.clone(),
         stats: MatchStats {
-            final_level: player.state.level,
+            final_level: player.hero.progress.level,
             ..Default::default()
         },
         disconnected: false,
@@ -220,7 +220,7 @@ impl ServerRuntime {
         let player = self.world.players.get_mut(&addr).unwrap();
         player.career_capable = true;
         player.last_seen = now;
-        let admitted_human = player.joined && !player.state.is_bot;
+        let admitted_human = player.joined && !player.hero.identity.is_bot;
         // Protect an existing profile before a Challenge can clear its auth.
         // Repeat after handle creates a first guest-auth client: this flag is
         // also an identity guard and requires no persistent match allocation.
@@ -246,7 +246,7 @@ impl ServerRuntime {
         if self
             .career
             .blocked_starts
-            .contains(&self.world.players[&addr].state.id)
+            .contains(&self.world.players[&addr].hero.identity.id)
         {
             return false;
         }
@@ -282,7 +282,7 @@ impl ServerRuntime {
                         .map(|saved| &saved.player)
                 })
         });
-        let retained_id = retained.map(|player| player.state.id);
+        let retained_id = retained.map(|player| player.hero.identity.id);
         if let Some(owner) = retained.and_then(|player| player.career_profile.as_ref())
             && authenticated.as_ref().map(|p| &p.profile_id) != Some(&owner.profile_id)
         {
@@ -309,8 +309,8 @@ impl ServerRuntime {
                 .values()
                 .chain(self.world.disconnected_sessions.values().map(|s| &s.player))
                 .any(|player| {
-                    player.state.id != current.state.id
-                        && Some(player.state.id) != retained_id
+                    player.hero.identity.id != current.hero.identity.id
+                        && Some(player.hero.identity.id) != retained_id
                         && player
                             .career_profile
                             .as_ref()
@@ -319,7 +319,7 @@ impl ServerRuntime {
             let conflicting_frozen = !self.combat_log.ledger.is_frozen()
                 && self.combat_log.ledger.snapshot().iter().any(|p| {
                     p.profile_id.as_ref() == Some(&profile.profile_id)
-                        && p.player_id != current.state.id
+                        && p.player_id != current.hero.identity.id
                         && Some(p.player_id) != retained_id
                 });
             if conflicting || conflicting_frozen {
@@ -339,12 +339,9 @@ impl ServerRuntime {
             && !self.combat_log.ledger.is_frozen()
             && self.combat_log.ledger.is_started()
             && self.combat_log.ledger.snapshot().len() >= shared::career::MAX_PARTICIPANTS
-            && !self
-                .combat_log
-                .ledger
-                .snapshot()
-                .iter()
-                .any(|p| p.player_id == current.state.id || Some(p.player_id) == retained_id)
+            && !self.combat_log.ledger.snapshot().iter().any(|p| {
+                p.player_id == current.hero.identity.id || Some(p.player_id) == retained_id
+            })
         {
             self.career_error(addr, "This round has reached its participant limit.");
             return false;
@@ -390,13 +387,15 @@ impl ServerRuntime {
         }
         let player = &self.world.players[&addr];
         if player.joined {
-            self.combat_log
-                .ledger
-                .update_player(player.state.id, player.state.level, false);
+            self.combat_log.ledger.update_player(
+                player.hero.identity.id,
+                player.hero.progress.level,
+                false,
+            );
             self.career.backend.set_playing(addr, true);
             return;
         }
-        let id = player.state.id;
+        let id = player.hero.identity.id;
         if !matches!(
             self.career
                 .queue
@@ -447,7 +446,7 @@ impl ServerRuntime {
         self.career.queue.cancel(player_id);
         if reserved.contains(&player_id) {
             for (addr, player) in &mut self.world.players {
-                if reserved.contains(&player.state.id) {
+                if reserved.contains(&player.hero.identity.id) {
                     player.joined = false;
                     self.career.backend.set_playing(*addr, false);
                 }
@@ -485,7 +484,7 @@ impl ServerRuntime {
                 .world
                 .players
                 .iter_mut()
-                .find(|(_, player)| player.state.id == assigned.waiting.player_id)
+                .find(|(_, player)| player.hero.identity.id == assigned.waiting.player_id)
             else {
                 self.career.queue.release_selection();
                 return;
@@ -500,7 +499,7 @@ impl ServerRuntime {
                 self.cancel_career_entry(id, now);
                 return;
             }
-            player.state.team = assigned.team;
+            player.hero.identity.team = assigned.team;
             player.career_profile = Some(assigned.waiting.profile.clone());
             player.joined = true;
             session::reset_player_round(player, &self.world.map_layout, now);
@@ -576,7 +575,9 @@ impl ServerRuntime {
             && approved_default_map(&self.world.map_config)
             && !self.targeting_qa
             && self.world.players.values().filter(|p| p.joined).all(|p| {
-                !p.god_mode && p.speed_mult == 1.0 && (p.state.is_bot || p.career_profile.is_some())
+                !p.god_mode
+                    && p.speed_mult == 1.0
+                    && (p.hero.identity.is_bot || p.career_profile.is_some())
             });
         if durable && self.career.pending.len() >= MAX_PENDING_RESULTS {
             return false;
@@ -649,7 +650,7 @@ impl ServerRuntime {
                     .result
                     .participants
                     .iter()
-                    .any(|p| p.player_id == player.state.id)
+                    .any(|p| p.player_id == player.hero.identity.id)
                 {
                     round.result.participants.push(participant(player));
                 }
@@ -671,7 +672,7 @@ impl ServerRuntime {
             round.checkpoint_at = now;
             self.career.queue.commit_selection();
             for (addr, player) in &self.world.players {
-                if player.joined && !player.state.is_bot {
+                if player.joined && !player.hero.identity.is_bot {
                     self.career.backend.set_playing(*addr, true);
                 }
             }
@@ -692,7 +693,7 @@ impl ServerRuntime {
                     .result
                     .participants
                     .iter()
-                    .any(|p| p.player_id == player.state.id)
+                    .any(|p| p.player_id == player.hero.identity.id)
             {
                 round.result.participants.push(participant(player));
                 round.result.participants.sort_by_key(|p| p.player_id);
@@ -705,10 +706,12 @@ impl ServerRuntime {
         if let Err(error) = self.combat_log.ledger.register(participant(player)) {
             self.career.errors.insert(addr, error.into());
         }
-        self.combat_log
-            .ledger
-            .update_player(player.state.id, player.state.level, false);
-        if !player.state.is_bot {
+        self.combat_log.ledger.update_player(
+            player.hero.identity.id,
+            player.hero.progress.level,
+            false,
+        );
+        if !player.hero.identity.is_bot {
             self.career.backend.set_playing(addr, true);
         }
     }
@@ -722,17 +725,19 @@ impl ServerRuntime {
         {
             self.combat_log
                 .ledger
-                .update_earned_gold(player.state.id, player.state.earned_gold);
+                .update_earned_gold(player.hero.identity.id, player.economy.earned_gold);
         }
         for player in self.world.players.values().filter(|p| p.joined) {
-            self.combat_log
-                .ledger
-                .update_player(player.state.id, player.state.level, false);
+            self.combat_log.ledger.update_player(
+                player.hero.identity.id,
+                player.hero.progress.level,
+                false,
+            );
         }
         for session in self.world.disconnected_sessions.values() {
             self.combat_log.ledger.update_player(
-                session.player.state.id,
-                session.player.state.level,
+                session.player.hero.identity.id,
+                session.player.hero.progress.level,
                 true,
             );
         }
@@ -851,14 +856,14 @@ impl ServerRuntime {
             return;
         };
         player.last_seen = now;
-        let id = player.state.id;
-        let level = player.state.level;
+        let id = player.hero.identity.id;
+        let level = player.hero.progress.level;
         let was_joined = player.joined;
         let session_id = player.session_id.take();
         if was_joined {
             self.combat_log
                 .ledger
-                .update_earned_gold(id, player.state.earned_gold);
+                .update_earned_gold(id, player.economy.earned_gold);
             player.timers.haste_expires_at = None;
             self.combat_log.ledger.update_player(id, level, true);
         }
@@ -877,13 +882,17 @@ impl ServerRuntime {
                 // resets gameplay progression. Never recycle its old round
                 // identity: delayed damage still belongs to that retired row.
                 // Timeout/session reclaim does not take this path.
-                player.state.id = self.world.next_player_id;
+                player.hero.identity.id = self.world.next_player_id;
                 self.world.next_player_id += 1;
                 if let Some(result) = self.career.last_results.remove(&id) {
-                    self.career.last_results.insert(player.state.id, result);
+                    self.career
+                        .last_results
+                        .insert(player.hero.identity.id, result);
                 }
                 if let Some(result_id) = self.career.dismissed.remove(&id) {
-                    self.career.dismissed.insert(player.state.id, result_id);
+                    self.career
+                        .dismissed
+                        .insert(player.hero.identity.id, result_id);
                 }
             }
         }
@@ -906,18 +915,18 @@ impl ServerRuntime {
         if let Some(player) = self.world.players.get_mut(&addr) {
             self.combat_log
                 .ledger
-                .update_earned_gold(player.state.id, player.state.earned_gold);
+                .update_earned_gold(player.hero.identity.id, player.economy.earned_gold);
             player.timers.haste_expires_at = None;
         }
         if let Some(player) = self.world.players.get(&addr) {
-            let id = player.state.id;
+            let id = player.hero.identity.id;
             self.combat_log
                 .ledger
-                .update_player(id, player.state.level, true);
+                .update_player(id, player.hero.progress.level, true);
             self.cancel_career_entry(id, now);
         }
         if let Some(player) = self.world.players.get(&addr) {
-            self.career.blocked_starts.remove(&player.state.id);
+            self.career.blocked_starts.remove(&player.hero.identity.id);
         }
         self.career.backend.forget(addr);
         self.career.errors.remove(&addr);
@@ -930,12 +939,12 @@ impl ServerRuntime {
             .world
             .players
             .values()
-            .map(|p| p.state.id)
+            .map(|p| p.hero.identity.id)
             .chain(
                 self.world
                     .disconnected_sessions
                     .values()
-                    .map(|s| s.player.state.id),
+                    .map(|s| s.player.hero.identity.id),
             )
             .collect();
         self.career
@@ -950,7 +959,7 @@ impl ServerRuntime {
         self.career.backend.poll();
         let mut invalidated = Vec::new();
         for (addr, player) in &mut self.world.players {
-            player.state.supporter_aura = if player.state.is_bot {
+            player.hero.identity.supporter_aura = if player.hero.identity.is_bot {
                 None
             } else {
                 self.career.backend.supporter_aura(*addr)
@@ -960,17 +969,17 @@ impl ServerRuntime {
             {
                 let queued = !matches!(
                     self.career.queue.view(
-                        player.state.id,
+                        player.hero.identity.id,
                         self.match_config.team_size as usize,
                         now
                     ),
                     QueueView::Idle
                 );
                 if player.joined || queued {
-                    invalidated.push((*addr, player.state.id, player.state.level));
+                    invalidated.push((*addr, player.hero.identity.id, player.hero.progress.level));
                 }
                 player.joined = false;
-                player.state.supporter_aura = None;
+                player.hero.identity.supporter_aura = None;
             }
         }
         for (addr, player_id, level) in invalidated {
@@ -1017,7 +1026,7 @@ impl ServerRuntime {
                 if player.joined && matches!(self.world.game_state, GameState::Running) {
                     continue;
                 }
-                let id = player.state.id;
+                let id = player.hero.identity.id;
                 self.career.blocked_starts.remove(&id);
                 self.career.errors.remove(&addr);
                 self.cancel_career_entry(id, now);
@@ -1071,7 +1080,7 @@ impl ServerRuntime {
             self.career.queue.cancel(participant.player_id);
             self.career.blocked_starts.insert(participant.player_id);
             for (addr, player) in &mut self.world.players {
-                if player.state.id == participant.player_id {
+                if player.hero.identity.id == participant.player_id {
                     player.joined = false;
                     self.career.backend.set_playing(*addr, false);
                     self.career.errors.insert(*addr, format!("{error} Leave queue to clear this attempt, then retry after the other match ends."));
@@ -1089,7 +1098,7 @@ impl ServerRuntime {
             return;
         };
         player.last_seen = now;
-        let id = player.state.id;
+        let id = player.hero.identity.id;
         if player.joined && matches!(self.world.game_state, GameState::Running) {
             return;
         }
@@ -1121,11 +1130,11 @@ impl ServerRuntime {
         player.joined = false;
         let packet = ClientPacket::Join {
             prematch: player.draft.capable,
-            team: player.state.team,
-            character: player.state.character,
-            hero_class: player.state.hero_class,
-            avatar: player.state.avatar.clone(),
-            sprite_character: player.state.sprite_character.clone(),
+            team: player.hero.identity.team,
+            character: player.hero.identity.character,
+            hero_class: player.hero.identity.hero_class,
+            avatar: player.hero.identity.avatar.clone(),
+            sprite_character: player.hero.identity.sprite_character.clone(),
             session_id: player.session_id.clone(),
             passport_ticket: None,
         };
@@ -1149,15 +1158,17 @@ impl ServerRuntime {
             view.queue = if player.joined && matches!(self.world.game_state, GameState::Running) {
                 QueueView::Playing
             } else {
-                self.career
-                    .queue
-                    .view(player.state.id, self.match_config.team_size as usize, now)
+                self.career.queue.view(
+                    player.hero.identity.id,
+                    self.match_config.team_size as usize,
+                    now,
+                )
             };
-            if let Some(result) = self.career.last_results.get(&player.state.id) {
+            if let Some(result) = self.career.last_results.get(&player.hero.identity.id) {
                 view.last_result = Some(result.clone());
             }
             if view.last_result.as_ref().is_some_and(|result| {
-                self.career.dismissed.get(&player.state.id) == Some(&result.result_id)
+                self.career.dismissed.get(&player.hero.identity.id) == Some(&result.result_id)
             }) {
                 view.last_result = None;
             }
