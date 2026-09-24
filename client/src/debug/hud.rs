@@ -1,12 +1,13 @@
 //! Debug toggles (TASK04): a bottom-left God Mode button (server skips damage) and
 //! a Speed Boost button next to it (server raises the movement clamp; the client
-//! moves faster locally). Both are authoritative and re-asserted on (re)connect.
+//! moves faster locally). Both are authoritative and re-asserted on (re)connect
+//! by [`super::resend_debug_toggles`]. The state is [`DebugToggles`].
 
 use bevy::prelude::*;
+use shared::debug::DebugCommand;
 
-use crate::debug_console::DebugConsole;
+use super::{DebugConsole, DebugToggles, resend_debug_toggles};
 use crate::net::{ClientSession, NetworkCommand};
-use crate::player::DebugSpeedBoost;
 
 const BUTTON_LEFT: f32 = 20.0;
 /// Sits on the same bottom line as the skill bar (which is anchored bottom-right).
@@ -26,7 +27,7 @@ pub struct GodModePlugin;
 impl Plugin for GodModePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DebugConsole>()
-            .init_resource::<DebugToggleState>()
+            .init_resource::<DebugToggles>()
             .add_systems(Startup, setup_debug_buttons)
             .add_systems(
                 Update,
@@ -34,20 +35,13 @@ impl Plugin for GodModePlugin {
                     keyboard_debug_toggles,
                     handle_god_mode_button,
                     handle_speed_boost_button,
-                    periodically_assert_debug_toggles,
+                    resend_debug_toggles,
                     sync_debug_button_labels,
                 )
                     .chain()
                     .run_if(debug_controls_enabled),
             );
     }
-}
-
-/// Last requested god mode. The practice sandbox page shares it so the
-/// periodic re-assertion below never overrides a practice toggle.
-#[derive(Resource, Default)]
-pub(crate) struct DebugToggleState {
-    pub(crate) god_mode: bool,
 }
 
 #[derive(Component)]
@@ -134,31 +128,32 @@ fn spawn_toggle_button<B: Component, L: Component>(
 /// on-screen buttons don't receive clicks.
 fn keyboard_debug_toggles(
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut state: ResMut<DebugToggleState>,
-    mut speed: ResMut<DebugSpeedBoost>,
+    mut toggles: ResMut<DebugToggles>,
     client_session: Res<ClientSession>,
     mut command_writer: MessageWriter<NetworkCommand>,
 ) {
     if keyboard.just_pressed(KeyCode::F2) {
-        state.god_mode = !state.god_mode;
-        info!("[debug] god_mode -> {}", state.god_mode);
+        toggles.god_mode = !toggles.god_mode;
+        info!("[debug] god_mode -> {}", toggles.god_mode);
         if client_session.is_connected() {
-            command_writer.write(NetworkCommand::SetGodMode {
-                enabled: state.god_mode,
-            });
+            command_writer.write(NetworkCommand::Debug(DebugCommand::GodMode(
+                toggles.god_mode,
+            )));
         }
     }
     if keyboard.just_pressed(KeyCode::F3) {
-        speed.0 = !speed.0;
-        info!("[debug] speed_boost -> {}", speed.0);
+        toggles.speed_boost = !toggles.speed_boost;
+        info!("[debug] speed_boost -> {}", toggles.speed_boost);
         if client_session.is_connected() {
-            command_writer.write(NetworkCommand::SetSpeedBoost { enabled: speed.0 });
+            command_writer.write(NetworkCommand::Debug(DebugCommand::SpeedBoost(
+                toggles.speed_boost,
+            )));
         }
     }
 }
 
 fn handle_god_mode_button(
-    mut state: ResMut<DebugToggleState>,
+    mut toggles: ResMut<DebugToggles>,
     client_session: Res<ClientSession>,
     mut command_writer: MessageWriter<NetworkCommand>,
     mut button_query: Query<
@@ -168,20 +163,20 @@ fn handle_god_mode_button(
 ) {
     for (interaction, mut color) in &mut button_query {
         if matches!(*interaction, Interaction::Pressed) {
-            state.god_mode = !state.god_mode;
-            info!("[debug] god_mode button -> {}", state.god_mode);
+            toggles.god_mode = !toggles.god_mode;
+            info!("[debug] god_mode button -> {}", toggles.god_mode);
             if client_session.is_connected() {
-                command_writer.write(NetworkCommand::SetGodMode {
-                    enabled: state.god_mode,
-                });
+                command_writer.write(NetworkCommand::Debug(DebugCommand::GodMode(
+                    toggles.god_mode,
+                )));
             }
         }
-        *color = god_color(state.god_mode, *interaction).into();
+        *color = god_color(toggles.god_mode, *interaction).into();
     }
 }
 
 fn handle_speed_boost_button(
-    mut speed: ResMut<DebugSpeedBoost>,
+    mut toggles: ResMut<DebugToggles>,
     client_session: Res<ClientSession>,
     mut command_writer: MessageWriter<NetworkCommand>,
     mut button_query: Query<
@@ -191,65 +186,43 @@ fn handle_speed_boost_button(
 ) {
     for (interaction, mut color) in &mut button_query {
         if matches!(*interaction, Interaction::Pressed) {
-            speed.0 = !speed.0;
+            toggles.speed_boost = !toggles.speed_boost;
             if client_session.is_connected() {
-                command_writer.write(NetworkCommand::SetSpeedBoost { enabled: speed.0 });
+                command_writer.write(NetworkCommand::Debug(DebugCommand::SpeedBoost(
+                    toggles.speed_boost,
+                )));
             }
         }
-        *color = speed_color(speed.0, *interaction).into();
+        *color = speed_color(toggles.speed_boost, *interaction).into();
     }
-}
-
-/// Continuously re-assert the current debug toggle state to the server (~2x/sec).
-/// A single edge-triggered send can be dropped (UDP, connection races, or a fresh
-/// server session resetting the flags); periodic idempotent re-assertion guarantees
-/// the server's `god_mode`/`speed_mult` eventually match the local toggles.
-fn periodically_assert_debug_toggles(
-    time: Res<Time>,
-    mut elapsed: Local<f32>,
-    state: Res<DebugToggleState>,
-    speed: Res<DebugSpeedBoost>,
-    client_session: Res<ClientSession>,
-    mut command_writer: MessageWriter<NetworkCommand>,
-) {
-    if !client_session.is_connected() {
-        return;
-    }
-    *elapsed += time.delta_secs();
-    if *elapsed < 0.5 {
-        return;
-    }
-    *elapsed = 0.0;
-    command_writer.write(NetworkCommand::SetGodMode {
-        enabled: state.god_mode,
-    });
-    command_writer.write(NetworkCommand::SetSpeedBoost { enabled: speed.0 });
 }
 
 fn sync_debug_button_labels(
-    state: Res<DebugToggleState>,
-    speed: Res<DebugSpeedBoost>,
+    toggles: Res<DebugToggles>,
     mut god_label: Query<&mut Text, (With<GodModeButtonLabel>, Without<SpeedBoostButtonLabel>)>,
     mut speed_label: Query<&mut Text, (With<SpeedBoostButtonLabel>, Without<GodModeButtonLabel>)>,
 ) {
-    if state.is_changed() {
-        let next = if state.god_mode {
-            "God Mode: ON"
-        } else {
-            "God Mode: OFF"
-        };
-        for mut text in &mut god_label {
-            if text.0 != next {
-                text.0 = next.to_string();
-            }
+    if !toggles.is_changed() {
+        return;
+    }
+    let god = if toggles.god_mode {
+        "God Mode: ON"
+    } else {
+        "God Mode: OFF"
+    };
+    let speed = if toggles.speed_boost {
+        "Speed: ON"
+    } else {
+        "Speed: OFF"
+    };
+    for mut text in &mut god_label {
+        if text.0 != god {
+            text.0 = god.to_string();
         }
     }
-    if speed.is_changed() {
-        let next = if speed.0 { "Speed: ON" } else { "Speed: OFF" };
-        for mut text in &mut speed_label {
-            if text.0 != next {
-                text.0 = next.to_string();
-            }
+    for mut text in &mut speed_label {
+        if text.0 != speed {
+            text.0 = speed.to_string();
         }
     }
 }
@@ -285,8 +258,7 @@ mod tests {
         console.ui_enabled = false;
         app.insert_resource(console)
             .init_resource::<ButtonInput<KeyCode>>()
-            .init_resource::<DebugToggleState>()
-            .init_resource::<DebugSpeedBoost>()
+            .init_resource::<DebugToggles>()
             .init_resource::<ClientSession>()
             .add_message::<NetworkCommand>()
             .add_systems(Startup, setup_debug_buttons)
@@ -305,8 +277,10 @@ mod tests {
             app.world_mut().query::<&Button>().iter(app.world()).count(),
             0
         );
-        assert!(!app.world().resource::<DebugToggleState>().god_mode);
-        assert!(!app.world().resource::<DebugSpeedBoost>().0);
+        assert_eq!(
+            *app.world().resource::<DebugToggles>(),
+            DebugToggles::default()
+        );
         assert!(
             app.world()
                 .resource::<Messages<NetworkCommand>>()

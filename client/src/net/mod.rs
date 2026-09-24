@@ -28,8 +28,8 @@ pub use session::{
 };
 
 use apply::{
-    StagedSnapshot, mirror_debug_flags_to_network_state, respawn_players_with_new_store_models,
-    respawn_sandbox_models, snapshot_apply_systems,
+    StagedSnapshot, respawn_players_with_new_store_models, respawn_sandbox_models,
+    snapshot_apply_systems,
 };
 use commands::{LocalStateSendTimer, send_local_state, send_network_commands};
 use ingest::{PendingServerSnapshotFrame, ingest_server_snapshot_packets};
@@ -171,10 +171,7 @@ impl Plugin for NetworkingPlugin {
                 Update,
                 send_network_commands.in_set(ClientNetPipeline::SendCommands),
             )
-            .add_systems(
-                Update,
-                (mirror_debug_flags_to_network_state, offline::sync_banner),
-            )
+            .add_systems(Update, offline::sync_banner)
             .add_systems(
                 Update,
                 (

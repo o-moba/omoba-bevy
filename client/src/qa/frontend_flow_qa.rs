@@ -235,7 +235,7 @@ fn drive_flow(
     match qa.step {
         FlowStep::Home => {
             // The promise under test: the menus never talk to the match.
-            if session.join_flow_committed {
+            if session.join_in_flight() {
                 qa.join_committed_on_home = true;
             }
             if !players.is_empty() {
@@ -263,7 +263,7 @@ fn drive_flow(
         FlowStep::HeroSelect => {
             // The lock-in is what commits the join; once it lands, the session
             // owns the flow and this step is done.
-            if session.join_flow_committed {
+            if session.join_in_flight() {
                 qa.step = FlowStep::AwaitMatch;
                 qa.frames = 0;
                 return;
@@ -347,7 +347,7 @@ fn drive_flow(
             }
         }
         FlowStep::SecondSelect => {
-            if session.join_flow_committed {
+            if session.join_in_flight() {
                 qa.step = FlowStep::AwaitSecondMatch;
                 qa.frames = 0;
                 return;

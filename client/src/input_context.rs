@@ -1,7 +1,7 @@
 //! One frame-level input policy, resolved after modal toggles and before world actions.
 use bevy::prelude::*;
 
-use crate::debug_console::DebugConsole;
+use crate::debug::DebugConsole;
 use crate::help_overlay::HelpOverlayVisible;
 use crate::net::{GameState, GameStateSnapshot};
 use crate::pause_menu::PauseMenuState;

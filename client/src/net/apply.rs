@@ -13,11 +13,10 @@ use shared::wire::{MinionState, NeutralState, PlayerState, ProjectileState, Stru
 use crate::bosses::BossVisual;
 use crate::camera::{CameraState, MainCamera, locked_camera_offset_for_team};
 use crate::combat::CombatStats;
+use crate::debug::DebugToggles;
 use crate::domain::RoundId;
 use crate::model_scale::{ModelScaleSource, NormalizeModelScale, model_scale_key};
-use crate::player::{
-    DEBUG_SPEED_MULTIPLIER, DebugSpeedBoost, PLAYER_SIZE, Player, PlayerBody, VerticalVelocity,
-};
+use crate::player::{DEBUG_SPEED_MULTIPLIER, PLAYER_SIZE, Player, PlayerBody, VerticalVelocity};
 use crate::sprite::PlayerVisualMode;
 use crate::team::{Team, TeamSelection};
 use crate::world::{PlayerAssets, PlayerModelResolver};
@@ -114,15 +113,6 @@ fn network_projectile(state: &ProjectileState) -> NetworkProjectile {
         } else {
             Vec3::ZERO
         },
-    }
-}
-
-pub(in crate::net) fn mirror_debug_flags_to_network_state(
-    speed_boost: Res<DebugSpeedBoost>,
-    mut network_state: ResMut<NetworkState>,
-) {
-    if network_state.speed_boost_active != speed_boost.0 {
-        network_state.speed_boost_active = speed_boost.0;
     }
 }
 
@@ -431,6 +421,7 @@ fn apply_snapshot_local_player(
     mut team_selection: ResMut<TeamSelection>,
     visual_mode: Res<PlayerVisualMode>,
     mut utility_vfx: MessageWriter<crate::game_vfx::UtilityVfx>,
+    debug_toggles: Res<DebugToggles>,
 ) {
     let StagedSnapshot { data, gate, local } = &mut *staged;
     let Some(data) = data.as_ref() else {
@@ -529,7 +520,7 @@ fn apply_snapshot_local_player(
                 // While speed-boosting, the local player legitimately leads the last
                 // server-acked position further, so widen the threshold to avoid
                 // rubber-banding the boosted movement.
-                let snap_distance = if network_state.speed_boost_active {
+                let snap_distance = if debug_toggles.speed_boost {
                     LOCAL_SNAP_DISTANCE * DEBUG_SPEED_MULTIPLIER
                 } else {
                     LOCAL_SNAP_DISTANCE

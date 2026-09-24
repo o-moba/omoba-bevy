@@ -60,10 +60,10 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
 | 7 | Server `MatchRules` policy object; career, transport and clock behind traits | done | #31, #32 |
 | 14 | Server per-variant packet handlers, explicit imports instead of crate-root globs | done | #33 |
 | 10 | Client domain module, combat/player split, render backends behind `run_if`, plugin groups, QA behind a cargo feature | done (optional 10h/10i open, see [plans/client-10-15.md](plans/client-10-15.md)) | #35, #36, #37 |
-| 11 | One debug tooling family shared by Combat Test, practice and offline | in progress: 11-0 (#34), 11a–11c (this PR); 11d/11e client half next | #34, this PR |
+| 11 | One debug tooling family shared by Combat Test, practice and offline | in progress: 11-0 (#34), 11a–11c (#42), 11d (this PR); 11e needs owner decision — widens the tools page/re-send | #34, #42, this PR |
 | 12 | Data-driven hero and item catalogs with validation tests | done: 12a-12e; 12f (optional client cross-checks) open | #38 |
 | 13 | Roster/asset loading and SDK types out of the shared model | pending | |
-| 15 | Client session events and staged snapshot application | in progress: 15a+15b1 (#39), 15b2+15c+15d (this PR) | #39, this PR |
+| 15 | Client session events and staged snapshot application | done: 15a+15b1 (#39), 15b2+15c+15d (#41), 15e (this PR); 15f/15g optional | #39, #41, this PR |
 | 9b | UI kit follow-ups: scroll unification, modal registry, frontend/social/supporter/sandbox screens, responsive layout, `TestId` in QA | pending (order in [ui-kit.md](ui-kit.md)) | |
 
 Suggested order after 7: 14 (done), 10 (done), 15, 11, 12, 13, 9b (server first while

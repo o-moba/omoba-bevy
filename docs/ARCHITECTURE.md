@@ -44,7 +44,8 @@ Rules that follow from the map:
 | --- | --- |
 | `NetPlugins` | `ClientPersistencePlugin`, `NetworkingPlugin`, `MatchServicePlugin`, `CareerIdentityPlugin` |
 | `UiPlugins` | `UiKitPlugin`, `MobileControlsPlugin`, `MobileUiPlugin`, `FrontendPlugin` (+ its nine screen and widget plugins), `TeamSelectPlugin`, `GameStateUiPlugin`, `MatchHudPlugin`, `EdgeHudPlugin`, `MinimapPlugin` (+ `MinimapRoutePlugin`), `ShopPlugin`, `HelpOverlayPlugin`, `PauseMenuPlugin`, `SocialPlugin`, `CareerPlugin`, `SupporterPlugin`, `SupporterStoreKitPlugin` |
-| `GameplayPlugins` | `MapsPlugin`, `InputContextPlugin`, `PlayerPlugin`, `CombatPlugin`; the debug tooling until step 11: `SandboxPlugin`, `PracticeSandboxPlugin`, `GodModePlugin`, `DebugConsolePlugin` |
+| `GameplayPlugins` | `MapsPlugin`, `InputContextPlugin`, `PlayerPlugin`, `CombatPlugin` |
+| `DebugPlugins` | `SandboxPlugin` (Combat Test panel), `PracticeSandboxPlugin` (pause-menu practice page), `GodModePlugin` (debug HUD toggles and their re-send), `DebugConsolePlugin` |
 | `PresentationPlugins` | shared: `CameraPlugin`, `SetupPlugin`, `ModelScalePlugin`, `CombatVisualsPlugin`, `CombatFeedbackPlugin`, `GameVfxPlugin`, `ReactionVisualsPlugin`, `TeamVisionPlugin`, `GameAudioPlugin`, `MapVisualsPlugin`; 2D: `SpriteVisualsPlugin`, `Presentation2dPlugin`, `World2dPlugin`; 3D: `Presentation3dPlugin`, `Verdant3dPlugin`, `DecorPlugin`, `JungleVisualsPlugin`, `MinionVisualsPlugin`, `BossesPlugin`, `ProjectileVisualsPlugin`, `BattlefieldAtmospherePlugin` |
 | `QaPlugins` (`qa` feature) | `FrontendQaPlugin` (+ avatar and flow), `VisualQaPlugin` (+ beta UI and navigation), `SocialQaPlugin`, `SupporterQaPlugin`, `TeamVisionQaPlugin`, `AudioQaPlugin`, `OfflineQaPlugin`, `CareerVisualQaPlugin`, `MapQaPlugin`, `CombatQaPlugin`, `ForestPickupQaPlugin`, `TargetingQaPlugin` |
 
@@ -154,8 +155,13 @@ frame's input and `SendCommands`. `net` keeps three outside writes in
 intent), and for `LeaveMatch` the lobby address from
 `MatchServiceClient::take_return_to_lobby` and the `CareerIdentity` signature
 on `CancelQueue`. Code that needs the current state keeps polling
-`ClientSession` (`join_confirmed()`, `is_connected()`, `join_blocked()`), and
-the round pollers in `shop.rs`, `edge_hud.rs`, `sandbox/mod.rs` and
+`ClientSession`. Its fields are private to `net`; outside code reads
+`state()`, `is_connected()`, `is_offline()`, `join_confirmed()`,
+`join_in_flight()` (a join packet was sent), `has_committed_join()`,
+`joined_prematch()`, `join_blocked()`, `join_rejection()`,
+`is_choosing_loadout()` and `server_addr()`, and writes only through
+`abandon_join()`. Tests build sessions with the `*_for_test` constructors
+and setters. The round pollers in `shop.rs`, `edge_hud.rs`, `sandbox/mod.rs` and
 `frontend/draft.rs` keep comparing `GameStateSnapshot.meta`, because they
 also react to the zero ids a teardown leaves.
 
@@ -362,8 +368,10 @@ Developer and practice commands form two families, kept apart on purpose.
   refused), the toggles after it on the simulation clock (`Break` when
   refused or not joined, `Continue` once applied).
 - **Offline** (`client/src/net/offline.rs`) implements the same commands in
-  its own simulation: a ring roster instead of lane bots, god mode as a
-  local flag, the speed boost ignored.
+  its own simulation, through one `Simulation::debug(DebugCommand)` fed by
+  `DebugCommand::from_packet`: a ring roster instead of lane bots, god mode
+  as a local flag, the speed boost an explicit no-op (offline accepts any
+  finite client transform, so there is no clamp to raise).
 - **Bot planners** for every host that levels or equips a hero without a
   player: `shared::progression::skill_upgrade_order` (the ultimate first
   once unlocked, then Q, W, E) and `shared::shop::plan_purchases` (greedy
@@ -376,9 +384,20 @@ Developer and practice commands form two families, kept apart on purpose.
   sequenced and scoped to an epoch, applying a whole `SandboxConfig` to
   fixed actors on a virtual clock, dev and loopback only. Offline cannot
   host it.
-- The client still keeps its own toggle state and sends the packets
-  directly; one `DebugToggles` resource and one tools page driven by
-  `DebugAccess` are roadmap slices 11d and 11e.
+- **Client** (`client/src/debug/`, the `DebugPlugins` group):
+  `DebugToggles { god_mode, speed_boost }` is the one client copy of the
+  toggles. The debug HUD (`hud.rs`: F2/F3 and the two buttons), the
+  pause-menu practice page (`tools_page.rs`), local movement and the
+  local-player snapshot stage (snap threshold while boosting) read it.
+  Every debug command is `NetworkCommand::Debug(DebugCommand)`, encoded
+  with `to_packet()` once the join is confirmed. `resend_debug_toggles`
+  re-sends both toggles every 0.5 s, only while the HUD is enabled
+  (`OMOBA_DEBUG_UI`, not in Combat Test). The practice page shows when
+  `DebugAccess::for_match_mode(match_mode).practice`, and leaving a
+  practice match clears `god_mode`. `console.rs` is the on-screen log.
+  One tools page driven by `DebugAccess` everywhere toggles are allowed
+  (dev without the env var, practice re-send) is slice 11e, a behaviour
+  change that waits for the owner.
 
 ## Protocol rules
 
@@ -481,12 +500,13 @@ Ordered by value over cost. Each step is a separate change with the full
    `ServerRuntime::with_ports`/`for_test`). Step complete.
 8. Client `net.rs` split into transport, session, commands, ingest, apply
    and interpolation (done, verbatim moves under `client/src/net/`);
-   session events instead of cross-module writes are step 15 (in progress:
+   session events instead of cross-module writes are step 15 (done:
    `SessionEvent` with the outbox and its flush, `apply_server_snapshot`
    split into the `SnapshotApply` stages (one per entity kind) with
    `SnapshotApplied`, and the first consumers (the combat and mobile round
    resets on `RoundChanged`; career, social and the front end in
-   `SessionReactions`) are done; the `ClientSession` accessors are next, see
+   `SessionReactions`), and the `ClientSession` accessors. Step complete;
+   the optional slices 15f and 15g are listed in
    `docs/plans/client-10-15.md`).
 9. One UI kit (theme, widgets, gestures, scroll, actions) and a modal
    registry (pilot done: `client/src/ui/` with theme, tap recognizer, typed
@@ -507,8 +527,11 @@ Ordered by value over cost. Each step is a separate change with the full
     (in progress: the toggles refuse worker-allocated rounds; `shared::debug`
     with `DebugCommand` and `DebugAccess`, the server's `debug/` module with
     `handle_debug` and `debug_access`, and the shared bot planners
-    `skill_upgrade_order` and `plan_purchases` are done; the client half,
-    one toggles resource and one tools page, is next).
+    `skill_upgrade_order` and `plan_purchases` are done; so is the client
+    `debug/` module with `DebugToggles`, `NetworkCommand::Debug` and
+    `DebugPlugins`. One tools page driven by `DebugAccess` (11e) widens
+    where the page and the re-send appear and waits for the owner's
+    decision).
 12. Data-driven hero and item catalogs (done: `shared/assets/catalog/`
     `heroes.json` and `items.json`, loaded and validated once by
     `shared::catalog`; the accessors keep their names and signatures, the

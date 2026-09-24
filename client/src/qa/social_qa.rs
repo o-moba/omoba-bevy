@@ -358,7 +358,7 @@ fn capture(
         "focus_request_count": qa.focus_request_count, "canceled_gestures": qa.canceled_gestures,
         "focus_history": qa.focus_history,
         "connected": world.session.is_connected(), "joined": world.session.join_confirmed(),
-        "connection_state": format!("{:?}", world.session.state),
+        "connection_state": format!("{:?}", world.session.state()),
         "match_mode": world.snapshot.match_mode,
         "game_state": format!("{:?}", world.snapshot.state),
         "server_epoch": world.snapshot.meta.server_epoch, "match_id": world.snapshot.meta.match_id,

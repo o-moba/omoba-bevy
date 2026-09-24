@@ -1,5 +1,6 @@
 //! The client's plugin groups. `main` inserts `PlayerVisualMode`, then adds
-//! `NetPlugins`, `UiPlugins`, `GameplayPlugins`, `PresentationPlugins` and,
+//! `NetPlugins`, `UiPlugins`, `GameplayPlugins`, `DebugPlugins`,
+//! `PresentationPlugins` and,
 //! with the `qa` feature, `qa::QaPlugins`, in that order.
 //!
 //! Only the order of `Plugin::build` calls follows from this file; system
@@ -16,30 +17,58 @@
 //!
 //! Nothing else reads the world inside `build`. The debug tooling
 //! (`SandboxPlugin`, `PracticeSandboxPlugin`, `GodModePlugin`,
-//! `DebugConsolePlugin`) sits in `GameplayPlugins` until step 11 gives it its
-//! own group.
+//! `DebugConsolePlugin`) is `DebugPlugins`, right after `GameplayPlugins`
+//! (where it used to be last), so the build order is unchanged.
 
 use bevy::app::{PluginGroup, PluginGroupBuilder};
 
 use crate::{
-    battlefield_atmosphere::BattlefieldAtmospherePlugin, bosses::BossesPlugin,
-    camera::CameraPlugin, career::CareerPlugin, career_identity::CareerIdentityPlugin,
-    combat::CombatPlugin, combat_feedback::CombatFeedbackPlugin,
-    combat_visuals::CombatVisualsPlugin, debug_console::DebugConsolePlugin, decor::DecorPlugin,
-    edge_hud::EdgeHudPlugin, frontend::FrontendPlugin, game_audio::GameAudioPlugin,
-    game_state::GameStateUiPlugin, game_vfx::GameVfxPlugin, god_mode::GodModePlugin,
-    help_overlay::HelpOverlayPlugin, input_context::InputContextPlugin,
-    jungle::JungleVisualsPlugin, map_visuals::MapVisualsPlugin, maps::MapsPlugin,
-    match_hud::MatchHudPlugin, match_service::MatchServicePlugin, minimap::MinimapPlugin,
-    minions::MinionVisualsPlugin, mobile_controls::MobileControlsPlugin, mobile_ui::MobileUiPlugin,
-    model_scale::ModelScalePlugin, net::NetworkingPlugin, pause_menu::PauseMenuPlugin,
-    persistence::ClientPersistencePlugin, player::PlayerPlugin,
-    practice_sandbox::PracticeSandboxPlugin, presentation2d::Presentation2dPlugin,
-    presentation3d::Presentation3dPlugin, projectile_visuals::ProjectileVisualsPlugin,
-    reaction_visuals::ReactionVisualsPlugin, sandbox::SandboxPlugin, shop::ShopPlugin,
-    social::SocialPlugin, sprite::SpriteVisualsPlugin, supporter::SupporterPlugin,
-    supporter_storekit::SupporterStoreKitPlugin, team::TeamSelectPlugin,
-    team_vision::TeamVisionPlugin, ui::UiKitPlugin, verdant3d::Verdant3dPlugin, world::SetupPlugin,
+    battlefield_atmosphere::BattlefieldAtmospherePlugin,
+    bosses::BossesPlugin,
+    camera::CameraPlugin,
+    career::CareerPlugin,
+    career_identity::CareerIdentityPlugin,
+    combat::CombatPlugin,
+    combat_feedback::CombatFeedbackPlugin,
+    combat_visuals::CombatVisualsPlugin,
+    debug::{DebugConsolePlugin, GodModePlugin, PracticeSandboxPlugin},
+    decor::DecorPlugin,
+    edge_hud::EdgeHudPlugin,
+    frontend::FrontendPlugin,
+    game_audio::GameAudioPlugin,
+    game_state::GameStateUiPlugin,
+    game_vfx::GameVfxPlugin,
+    help_overlay::HelpOverlayPlugin,
+    input_context::InputContextPlugin,
+    jungle::JungleVisualsPlugin,
+    map_visuals::MapVisualsPlugin,
+    maps::MapsPlugin,
+    match_hud::MatchHudPlugin,
+    match_service::MatchServicePlugin,
+    minimap::MinimapPlugin,
+    minions::MinionVisualsPlugin,
+    mobile_controls::MobileControlsPlugin,
+    mobile_ui::MobileUiPlugin,
+    model_scale::ModelScalePlugin,
+    net::NetworkingPlugin,
+    pause_menu::PauseMenuPlugin,
+    persistence::ClientPersistencePlugin,
+    player::PlayerPlugin,
+    presentation2d::Presentation2dPlugin,
+    presentation3d::Presentation3dPlugin,
+    projectile_visuals::ProjectileVisualsPlugin,
+    reaction_visuals::ReactionVisualsPlugin,
+    sandbox::SandboxPlugin,
+    shop::ShopPlugin,
+    social::SocialPlugin,
+    sprite::SpriteVisualsPlugin,
+    supporter::SupporterPlugin,
+    supporter_storekit::SupporterStoreKitPlugin,
+    team::TeamSelectPlugin,
+    team_vision::TeamVisionPlugin,
+    ui::UiKitPlugin,
+    verdant3d::Verdant3dPlugin,
+    world::SetupPlugin,
     world2d::World2dPlugin,
 };
 
@@ -56,8 +85,7 @@ impl PluginGroup for NetPlugins {
     }
 }
 
-/// Map layout, input context, the local hero, combat input, and (until step
-/// 11) the debug tooling.
+/// Map layout, input context, the local hero and combat input.
 pub(crate) struct GameplayPlugins;
 
 impl PluginGroup for GameplayPlugins {
@@ -67,6 +95,17 @@ impl PluginGroup for GameplayPlugins {
             .add(InputContextPlugin)
             .add(PlayerPlugin)
             .add(CombatPlugin)
+    }
+}
+
+/// The debug tooling: the Combat Test panel (`sandbox`), the pause-menu
+/// practice page, the debug HUD toggles and the on-screen console
+/// (`crate::debug`).
+pub(crate) struct DebugPlugins;
+
+impl PluginGroup for DebugPlugins {
+    fn build(self) -> PluginGroupBuilder {
+        PluginGroupBuilder::start::<Self>()
             .add(SandboxPlugin)
             .add(PracticeSandboxPlugin)
             .add(GodModePlugin)

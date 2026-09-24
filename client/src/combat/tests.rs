@@ -949,7 +949,7 @@ fn actual_cast_and_upgrade_systems_obey_help_pause_and_debug_context() {
     app.world_mut()
         .resource_mut::<crate::pause_menu::PauseMenuState>()
         .open = false;
-    let mut debug = crate::debug_console::DebugConsole::default();
+    let mut debug = crate::debug::DebugConsole::default();
     debug.ui_enabled = true;
     app.insert_resource(debug);
     app.world_mut()

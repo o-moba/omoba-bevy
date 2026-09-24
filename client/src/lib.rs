@@ -10,7 +10,7 @@ mod combat;
 mod combat_feedback;
 mod combat_visuals;
 mod creatures3d;
-mod debug_console;
+mod debug;
 mod decor;
 mod domain;
 mod edge_hud;
@@ -18,7 +18,6 @@ mod frontend;
 mod game_audio;
 mod game_state;
 mod game_vfx;
-mod god_mode;
 mod help_overlay;
 mod humanoid;
 mod input_bindings;
@@ -42,7 +41,6 @@ mod persistence;
 mod platform;
 mod player;
 mod plugins;
-mod practice_sandbox;
 mod presentation2d;
 mod presentation3d;
 mod projectile_visuals;
@@ -67,7 +65,7 @@ mod world2d;
 
 pub(crate) use combat::targeting;
 
-use plugins::{GameplayPlugins, NetPlugins, PresentationPlugins, UiPlugins};
+use plugins::{DebugPlugins, GameplayPlugins, NetPlugins, PresentationPlugins, UiPlugins};
 use sprite::PlayerVisualMode;
 
 #[bevy_main]
@@ -114,7 +112,13 @@ pub fn main() {
     // The render backend is chosen once, before any plugin builds. After
     // `DefaultPlugins` so an invalid value's warning reaches the log.
     .insert_resource(PlayerVisualMode::from_environment())
-    .add_plugins((NetPlugins, UiPlugins, GameplayPlugins, PresentationPlugins));
+    .add_plugins((
+        NetPlugins,
+        UiPlugins,
+        GameplayPlugins,
+        DebugPlugins,
+        PresentationPlugins,
+    ));
     #[cfg(feature = "qa")]
     app.add_plugins(qa::QaPlugins);
     app.run();

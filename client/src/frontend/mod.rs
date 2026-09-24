@@ -358,7 +358,7 @@ fn retry_connection_from_menus(
     if automation_bypass() {
         return;
     }
-    let offline = session.state == crate::net::ClientConnectionState::Disconnected;
+    let offline = session.state() == crate::net::ClientConnectionState::Disconnected;
     if !screen.get().is_menu() || !offline || session.has_committed_join() {
         *since_last = 0.0;
         return;
@@ -660,7 +660,7 @@ mod tests {
         );
         // ...and the dead join does not: the lock-in must work again.
         let session = app.world().resource::<ClientSession>();
-        assert!(!session.join_flow_committed);
+        assert!(!session.join_in_flight());
         assert!(!session.has_committed_join());
         assert!(!session.join_blocked());
     }
@@ -734,7 +734,7 @@ mod tests {
         // A snapshot still in flight re-lists the player and even a hero: with
         // nothing committed, the menus keep the player.
         let mut stale = ClientSession::admitted_for_test();
-        stale.last_join = None;
+        stale.clear_last_join_for_test();
         *app.world_mut().resource_mut::<ClientSession>() = stale;
         app.world_mut().spawn(Player);
         settle(&mut app);

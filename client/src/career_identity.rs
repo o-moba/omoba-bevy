@@ -571,11 +571,8 @@ fn identity_driver(
     }
     for NicknameChanged(name) in names.read() {
         let request_id = career.rename_request_id();
-        identity.pending_rename = Some((
-            session.server_addr_display.clone(),
-            request_id,
-            name.clone(),
-        ));
+        identity.pending_rename =
+            Some((session.server_addr().to_owned(), request_id, name.clone()));
         if identity.auth_nonce.is_none() {
             // Keep the chosen name for the next authenticated login, not a fake
             // server-side rename while the profile service is unavailable.
@@ -594,7 +591,7 @@ fn identity_driver(
         return;
     }
     let scope = AuthScope {
-        server_addr: session.server_addr_display.clone(),
+        server_addr: session.server_addr().to_owned(),
         server_epoch: snapshot.meta.server_epoch,
         session_id: session_id.0.clone(),
     };
@@ -623,7 +620,7 @@ fn identity_driver(
     }
     if identity.auth_nonce.is_some() {
         if let Some((server_addr, request_id, nickname)) = identity.pending_rename.take()
-            && server_addr == session.server_addr_display
+            && server_addr == session.server_addr()
         {
             requests.write(NetworkCommand::Career(CareerRequest::Rename {
                 request_id,
@@ -848,7 +845,7 @@ mod tests {
             );
 
             let mut session = ClientSession::admitted_for_test();
-            session.server_addr_display = "localhost:4000".into();
+            session.set_server_addr_for_test("localhost:4000");
             let mut career = CareerClient::default();
             career.nickname = "小明".into();
             // A delayed prior login reply must not restore the invalidated nonce.

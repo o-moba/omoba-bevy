@@ -150,7 +150,7 @@ fn update_game_state_ui(
         GameState::Lobby | GameState::Forming { .. } | GameState::Starting { .. } => {
             // Before the local join is committed the select screen is up;
             // keep the lobby overlay hidden so it never obscures that flow.
-            match matchmaking_status_text(&game_state.state, client_session.join_flow_committed) {
+            match matchmaking_status_text(&game_state.state, client_session.join_in_flight()) {
                 Some(text) => {
                     *visibility = Visibility::Visible;
                     *background = BackgroundColor(LOBBY_COLOR);
@@ -258,8 +258,8 @@ mod tests {
         let mut app = spawn_ui_app();
         {
             let mut session = app.world_mut().resource_mut::<ClientSession>();
-            session.state = ClientConnectionState::Connected;
-            session.join_flow_committed = false;
+            session.set_state_for_test(ClientConnectionState::Connected);
+            session.set_join_in_flight_for_test(false);
         }
         app.update();
 
@@ -272,7 +272,7 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<ClientSession>()
-            .join_flow_committed = true;
+            .set_join_in_flight_for_test(true);
         app.update();
         assert_eq!(
             *app.world().entity(overlay).get::<Visibility>().unwrap(),
@@ -324,10 +324,12 @@ mod tests {
     #[test]
     fn victory_is_bounded_and_automatically_returns_to_countdown_then_gameplay() {
         let mut app = spawn_ui_app();
-        app.world_mut().resource_mut::<ClientSession>().state = ClientConnectionState::Connected;
         app.world_mut()
             .resource_mut::<ClientSession>()
-            .join_flow_committed = true;
+            .set_state_for_test(ClientConnectionState::Connected);
+        app.world_mut()
+            .resource_mut::<ClientSession>()
+            .set_join_in_flight_for_test(true);
         app.world_mut().spawn((Player, Team::Green));
         app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Victory {
             winner: shared::map::Team::Green,
@@ -373,7 +375,9 @@ mod tests {
     #[test]
     fn prior_result_does_not_hide_a_new_victory_and_missing_player_is_neutral() {
         let mut app = spawn_ui_app();
-        app.world_mut().resource_mut::<ClientSession>().state = ClientConnectionState::Connected;
+        app.world_mut()
+            .resource_mut::<ClientSession>()
+            .set_state_for_test(ClientConnectionState::Connected);
         {
             let mut state = app.world_mut().resource_mut::<GameStateSnapshot>();
             state.state = GameState::Victory {
@@ -417,7 +421,9 @@ mod tests {
     #[test]
     fn authoritative_queue_wait_is_visible_while_another_match_is_running() {
         let mut app = spawn_ui_app();
-        app.world_mut().resource_mut::<ClientSession>().state = ClientConnectionState::Connected;
+        app.world_mut()
+            .resource_mut::<ClientSession>()
+            .set_state_for_test(ClientConnectionState::Connected);
         app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Running;
         let mut career = crate::career::CareerClient::default();
         career.view.queue = shared::career::QueueView::Waiting {

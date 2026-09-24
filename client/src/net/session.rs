@@ -140,21 +140,21 @@ pub struct ReconnectState {
 /// Session controller: owns lifecycle flags and join idempotency (single ownership vs UI/net).
 #[derive(Resource)]
 pub struct ClientSession {
-    pub state: ClientConnectionState,
+    pub(in crate::net) state: ClientConnectionState,
     /// Wall time when **WaitingForServer** began for the current attempt.
-    pub waiting_since: Option<Instant>,
+    pub(in crate::net) waiting_since: Option<Instant>,
     /// Last time a qualifying snapshot was applied while **Connected**.
-    pub last_qualifying_snapshot_wall: Option<Instant>,
+    pub(in crate::net) last_qualifying_snapshot_wall: Option<Instant>,
     /// While true, incoming snapshots are drained and ignored (no silent re-entry to gameplay).
-    pub discard_incoming_snapshots: bool,
+    pub(in crate::net) discard_incoming_snapshots: bool,
     /// **P4**: after a join packet is sent, suppress duplicate join until teardown.
-    pub join_flow_committed: bool,
+    pub(in crate::net) join_flow_committed: bool,
     /// Server address used for this process (for UI copy).
-    pub server_addr_display: String,
+    pub(in crate::net) server_addr_display: String,
     /// Loadout of the last committed join (auto-rejoin after reconnect).
-    pub last_join: Option<CommittedJoin>,
+    pub(in crate::net) last_join: Option<CommittedJoin>,
     /// Auto-reconnect loop state (active after a teardown of a joined session).
-    pub reconnect: ReconnectState,
+    pub(in crate::net) reconnect: ReconnectState,
     pub(in crate::net) admitted: bool,
     pub(in crate::net) join_last_sent: Option<Instant>,
     pub(in crate::net) join_attempts: u32,
@@ -289,6 +289,59 @@ impl ClientSession {
     #[cfg(test)]
     pub(crate) fn reject_for_test(&mut self, rejection: JoinRejection) {
         self.join_error = Some(rejection);
+    }
+
+    /// Overrides the connection state (test fixtures only).
+    #[cfg(test)]
+    pub(crate) fn set_state_for_test(&mut self, state: ClientConnectionState) {
+        self.state = state;
+    }
+
+    /// Overrides the in-flight join flag (test fixtures only).
+    #[cfg(test)]
+    pub(crate) fn set_join_in_flight_for_test(&mut self, in_flight: bool) {
+        self.join_flow_committed = in_flight;
+    }
+
+    /// Overrides the server address shown in the UI (test fixtures only).
+    #[cfg(test)]
+    pub(crate) fn set_server_addr_for_test(&mut self, addr: impl Into<String>) {
+        self.server_addr_display = addr.into();
+    }
+
+    /// Marks the committed join as a prematch join or not (test fixtures
+    /// only; panics without a committed join).
+    #[cfg(test)]
+    pub(crate) fn set_joined_prematch_for_test(&mut self, prematch: bool) {
+        self.last_join.as_mut().expect("a committed join").prematch = prematch;
+    }
+
+    /// Drops the committed join without touching anything else (test
+    /// fixtures only; production code uses `abandon_join`).
+    #[cfg(test)]
+    pub(crate) fn clear_last_join_for_test(&mut self) {
+        self.last_join = None;
+    }
+
+    /// Connection lifecycle state.
+    pub fn state(&self) -> ClientConnectionState {
+        self.state
+    }
+
+    /// A join packet was sent for the current attempt and duplicates are
+    /// suppressed until teardown (`join_flow_committed`).
+    pub fn join_in_flight(&self) -> bool {
+        self.join_flow_committed
+    }
+
+    /// The server address of this session (for UI copy and signing scope).
+    pub fn server_addr(&self) -> &str {
+        &self.server_addr_display
+    }
+
+    /// The committed join is a prematch (draft) join.
+    pub fn joined_prematch(&self) -> bool {
+        self.last_join.as_ref().is_some_and(|join| join.prematch)
     }
 
     pub fn join_confirmed(&self) -> bool {
@@ -1391,6 +1444,7 @@ mod tests {
             .init_resource::<CameraState>()
             .init_resource::<crate::maps::MapLayout>()
             .init_resource::<crate::frontend::PendingScreen>()
+            .init_resource::<crate::debug::DebugToggles>()
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<StandardMaterial>>()
             .add_message::<SessionUiCommand>()

@@ -7,7 +7,7 @@ use super::motion::SandboxVisualClock;
 use super::respawn_ui::RespawnCountdownText;
 use super::*;
 use crate::combat::CombatStats;
-use crate::debug_console::DebugConsole;
+use crate::debug::DebugConsole;
 use crate::net::{
     GameState, GameStateSnapshot, NetworkAvatar, NetworkCharacterChoice, PlayerCosmeticAction,
     RemotePlayer,
