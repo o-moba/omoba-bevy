@@ -76,22 +76,32 @@ the wave clock. Simulation functions and request handlers take
 `&mut GameWorld` plus a `TickCtx { now, dt }` (or just `now`) instead of a
 parameter per map; only the leaf damage helpers (`apply_*_damage`) still take
 individual maps because they run inside loops that hold other fields.
-`main.rs` is the module list plus `fn main`. A tick is:
+`main.rs` is the module list plus `fn main`. `runtime::run` is a plain
+fixed-step loop (`SIMULATION_STEP_SLEEP`, 10 ms): `prepare_tick`, then
+`tick`, then sleep the remainder of the step. There is no Bevy `App` and no
+ECS mirror on the server; the `GameWorld` maps are the only copy of the
+state. A tick is:
 
-1. `runtime::dispatch::receive_packets` decodes datagrams; public roles verify
-   signed commands first (`public_transport`). `handle_packet` admits
-   identity, then `handle_packet_authorized` applies gameplay commands.
-2. `runtime::tick::simulate_after_mana` advances formation (`formation`),
-   bots, then the `sim` modules (`minions`, `towers`, `projectiles`,
-   `neutrals`, plus regeneration and respawns in `sim/mod.rs` and `session`),
-   records combat receipts into the round ledger, and
-   `snapshot::broadcast_snapshots` builds one snapshot per recipient (vision
-   filtered) and sends it.
+1. `ServerRuntime::prepare_tick`: `runtime::dispatch::receive_packets` decodes
+   datagrams; public roles verify signed commands first (`public_transport`).
+   `handle_packet` admits identity, then `handle_packet_authorized` applies
+   gameplay commands. The wall-clock `dt` is clamped to 100 ms and, in the
+   Combat Sandbox, replaced by the sandbox's virtual clock.
+2. `ServerRuntime::tick(now, dt)` (`runtime/tick.rs`): mana regeneration
+   (`sim::regenerate_mana`), the minion-targeted projectile pass, then
+   formation (`formation`), bots, and the `sim` modules (`minions`, `towers`,
+   the remaining `projectiles`, `neutrals`, plus regeneration and respawns in
+   `sim/mod.rs` and `session`); it records combat receipts into the round
+   ledger, and `snapshot::broadcast_snapshots` builds one snapshot per
+   recipient (vision filtered) and sends it. Projectile flight is one
+   function, `sim::projectiles::simulate_projectiles_filtered`, run twice with
+   a target-kind filter only to keep the minion pass at the point in the
+   frame where the old ECS systems ran; folding it into one pass is the
+   next slice.
 
-Supporting modules: `entities` (the server-side records and ECS mirror
-components), `ecs` (the Bevy resources and systems that run the tick),
-`sim/cast.rs` (ability casts), `vision` (server-owned sight, takes
-`&GameWorld`). Unit tests for these live under `server/src/tests/`.
+Supporting modules: `entities` (the server-side records), `sim/cast.rs`
+(ability casts), `vision` (server-owned sight, takes `&GameWorld`). Unit
+tests for these live under `server/src/tests/`.
 
 Bots are ordinary `ConnectedPlayer`s on unspecified IPv6 addresses; their
 addresses never accept network commands. Practice, development and release
@@ -139,7 +149,12 @@ Ordered by value over cost. Each step is a separate change with the full
    ECS and simulation modules (done; splitting `handle_packet_authorized`
    into per-command handlers and removing the crate-root glob re-exports are
    the follow-up).
-6. Authoritative hero state separate from replicated views; one ECS story.
+6. One server tick (done: the Bevy `App`, the ECS mirror of players and
+   minions, the duplicate mana regeneration and the ECS-only minion
+   projectile path are gone; `ServerRuntime::tick` is the whole step);
+   authoritative hero state separate from replicated views, the
+   `ConnectedPlayer` struct split, `StatModifiers` and snapshot redaction
+   remain.
 7. Match rules as one policy object; career, transport and clock behind
    traits.
 8. Client `net.rs` split into transport, session, commands, ingest, apply

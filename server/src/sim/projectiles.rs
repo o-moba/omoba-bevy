@@ -1,11 +1,27 @@
 //! Homing projectile flight and impact resolution.
 use crate::*;
 
+/// Flies every projectile one step and resolves the impacts. The tick still
+/// runs the minion-targeted and the other projectiles as two filtered passes
+/// at their historical points in the frame; tests exercise the whole path.
+#[cfg(test)]
 pub(crate) fn simulate_projectiles(world: &mut GameWorld, tick: TickCtx) -> Vec<CombatEvent> {
+    simulate_projectiles_filtered(world, tick, |_| true)
+}
+
+/// Flies only the projectiles whose target kind passes `targets`; the others
+/// are left untouched. The tick uses it to keep the minion-targeted pass at
+/// its historical point in the frame, ahead of the rest of the simulation.
+pub(crate) fn simulate_projectiles_filtered(
+    world: &mut GameWorld,
+    tick: TickCtx,
+    targets: impl Fn(TargetKind) -> bool,
+) -> Vec<CombatEvent> {
     let TickCtx { now, dt } = tick;
     let GameWorld {
         players,
         structures,
+        minions,
         neutrals,
         team_buffs,
         projectiles,
@@ -18,64 +34,41 @@ pub(crate) fn simulate_projectiles(world: &mut GameWorld, tick: TickCtx) -> Vec<
     let mut damage_events: Vec<(u64, TargetId, f32, Team, HitSource)> = Vec::new();
 
     projectiles.retain(|_, projectile| {
+        if !targets(projectile.target.kind) {
+            return true;
+        }
         if !projectile.guaranteed_hit && now >= projectile.expires_at {
             return false;
         }
 
-        match projectile.target.kind {
+        // A projectile whose target is gone or dead is dropped without impact.
+        let (target_pos, target_radius) = match projectile.target.kind {
             TargetKind::Player => {
                 let Some(target) = players.values().find(|player| {
                     player.state.id == projectile.target.id && player.state.hp > 0.0
                 }) else {
                     return false;
                 };
-
-                let start = Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z);
-                let target_pos =
-                    Vec3f::new(target.state.x, target.state.y + AIM_HEIGHT, target.state.z);
-                if projectile.homing {
-                    let direction = Vec3f::new(
-                        target_pos.x - start.x,
-                        target_pos.y - start.y,
-                        target_pos.z - start.z,
-                    )
-                    .normalize_or_zero();
-                    if direction.x == 0.0 && direction.y == 0.0 && direction.z == 0.0 {
-                        damage_events.push((
-                            projectile.state.id,
-                            projectile.target,
-                            projectile.damage,
-                            projectile.state.owner_team,
-                            HitSource::projectile(&projectile.state),
-                        ));
-                        return false;
-                    }
-                    projectile.state.direction = [direction.x, direction.y, direction.z];
-                    projectile.velocity = Vec3f::new(
-                        direction.x * PROJECTILE_SPEED,
-                        direction.y * PROJECTILE_SPEED,
-                        direction.z * PROJECTILE_SPEED,
-                    );
-                }
-                let end = start.add_scaled(projectile.velocity, dt);
-                projectile.state.x = end.x;
-                projectile.state.y = end.y;
-                projectile.state.z = end.z;
-
-                let combined_radius = projectile.radius + PLAYER_HIT_RADIUS;
-                if swept_sphere_intersects_target(start, end, target_pos, combined_radius) {
-                    damage_events.push((
-                        projectile.state.id,
-                        projectile.target,
-                        projectile.damage,
-                        projectile.state.owner_team,
-                        HitSource::projectile(&projectile.state),
-                    ));
-                    return false;
-                }
+                (
+                    Vec3f::new(target.state.x, target.state.y + AIM_HEIGHT, target.state.z),
+                    PLAYER_HIT_RADIUS,
+                )
             }
             TargetKind::Minion => {
-                // Projectile-vs-minion collisions are handled by ECS combat systems.
+                let Some(minion) = minions.get(&projectile.target.id) else {
+                    return false;
+                };
+                if minion.state.hp <= 0.0 {
+                    return false;
+                }
+                (
+                    Vec3f::new(
+                        minion.state.x,
+                        minion.state.y + MINION_RADIUS * 0.8,
+                        minion.state.z,
+                    ),
+                    MINION_RADIUS,
+                )
             }
             TargetKind::Structure => {
                 let Some(structure) = structures.get(&projectile.target.id) else {
@@ -84,111 +77,43 @@ pub(crate) fn simulate_projectiles(world: &mut GameWorld, tick: TickCtx) -> Vec<
                 if structure.state.hp <= 0.0 {
                     return false;
                 }
-                let start = Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z);
-                let target_pos =
-                    Vec3f::new(structure.state.x, structure.state.y, structure.state.z);
-                if projectile.homing {
-                    let direction = Vec3f::new(
-                        target_pos.x - start.x,
-                        target_pos.y - start.y,
-                        target_pos.z - start.z,
-                    )
-                    .normalize_or_zero();
-                    if direction.x == 0.0 && direction.y == 0.0 && direction.z == 0.0 {
-                        damage_events.push((
-                            projectile.state.id,
-                            projectile.target,
-                            projectile.damage,
-                            projectile.state.owner_team,
-                            HitSource::projectile(&projectile.state),
-                        ));
-                        return false;
-                    }
-                    projectile.state.direction = [direction.x, direction.y, direction.z];
-                    projectile.velocity = Vec3f::new(
-                        direction.x * PROJECTILE_SPEED,
-                        direction.y * PROJECTILE_SPEED,
-                        direction.z * PROJECTILE_SPEED,
-                    );
-                }
-                let end = start.add_scaled(projectile.velocity, dt);
-                projectile.state.x = end.x;
-                projectile.state.y = end.y;
-                projectile.state.z = end.z;
-
                 let target_radius = match structure.state.kind {
                     StructureKind::Tower => TOWER_SIZE * 0.5,
                     StructureKind::BaseTower => BASE_TOWER_SIZE * 0.5,
                 };
-                let combined_radius = projectile.radius + target_radius;
-                if swept_sphere_intersects_target(start, end, target_pos, combined_radius) {
-                    damage_events.push((
-                        projectile.state.id,
-                        projectile.target,
-                        projectile.damage,
-                        projectile.state.owner_team,
-                        HitSource::projectile(&projectile.state),
-                    ));
-                    return false;
-                }
+                (
+                    Vec3f::new(structure.state.x, structure.state.y, structure.state.z),
+                    target_radius,
+                )
             }
             TargetKind::Neutral => {
-                let Some(target_neutral) = neutrals.get(&projectile.target.id) else {
+                let Some(neutral) = neutrals.get(&projectile.target.id) else {
                     return false;
                 };
-                if target_neutral.dead_until.is_some() || target_neutral.state.hp <= 0.0 {
+                if neutral.dead_until.is_some() || neutral.state.hp <= 0.0 {
                     return false;
                 }
-
-                let start = Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z);
-                let target_pos = Vec3f::new(
-                    target_neutral.state.x,
-                    target_neutral.state.y + NEUTRAL_RADIUS * 0.85,
-                    target_neutral.state.z,
-                );
-                if projectile.homing {
-                    let direction = Vec3f::new(
-                        target_pos.x - start.x,
-                        target_pos.y - start.y,
-                        target_pos.z - start.z,
-                    )
-                    .normalize_or_zero();
-                    if direction.x == 0.0 && direction.y == 0.0 && direction.z == 0.0 {
-                        damage_events.push((
-                            projectile.state.id,
-                            projectile.target,
-                            projectile.damage,
-                            projectile.state.owner_team,
-                            HitSource::projectile(&projectile.state),
-                        ));
-                        return false;
-                    }
-                    projectile.state.direction = [direction.x, direction.y, direction.z];
-                    projectile.velocity = Vec3f::new(
-                        direction.x * PROJECTILE_SPEED,
-                        direction.y * PROJECTILE_SPEED,
-                        direction.z * PROJECTILE_SPEED,
-                    );
-                }
-                let end = start.add_scaled(projectile.velocity, dt);
-                projectile.state.x = end.x;
-                projectile.state.y = end.y;
-                projectile.state.z = end.z;
-
-                let combined_radius = projectile.radius + NEUTRAL_RADIUS;
-                if swept_sphere_intersects_target(start, end, target_pos, combined_radius) {
-                    damage_events.push((
-                        projectile.state.id,
-                        projectile.target,
-                        projectile.damage,
-                        projectile.state.owner_team,
-                        HitSource::projectile(&projectile.state),
-                    ));
-                    return false;
-                }
+                (
+                    Vec3f::new(
+                        neutral.state.x,
+                        neutral.state.y + NEUTRAL_RADIUS * 0.85,
+                        neutral.state.z,
+                    ),
+                    NEUTRAL_RADIUS,
+                )
             }
-        }
+        };
 
+        if step_homing(projectile, target_pos, target_radius, dt) {
+            damage_events.push((
+                projectile.state.id,
+                projectile.target,
+                projectile.damage,
+                projectile.state.owner_team,
+                HitSource::projectile(&projectile.state),
+            ));
+            return false;
+        }
         true
     });
 
@@ -208,6 +133,9 @@ pub(crate) fn simulate_projectiles(world: &mut GameWorld, tick: TickCtx) -> Vec<
                 now,
                 source.action_slot.is_some_and(|slot| slot < 4),
             ),
+            TargetKind::Minion => {
+                apply_minion_damage(players, minions, target.id, damage, attacker_team)
+            }
             TargetKind::Structure => {
                 apply_structure_damage(structures, target.id, damage, attacker_team, game_state)
             }
@@ -220,11 +148,45 @@ pub(crate) fn simulate_projectiles(world: &mut GameWorld, tick: TickCtx) -> Vec<
                 source.entity.id,
                 now,
             ),
-            TargetKind::Minion => None, // Applied in the earlier ECS combat phase.
         };
         receipts.extend(event.map(|event| source.annotate(event)));
     }
     receipts
+}
+
+/// Steers a homing projectile at `target_pos`, advances it by `dt` and reports
+/// whether its swept sphere reached the target. A homing projectile already
+/// sitting on its target counts as a hit.
+fn step_homing(
+    projectile: &mut Projectile,
+    target_pos: Vec3f,
+    target_radius: f32,
+    dt: f32,
+) -> bool {
+    let start = Vec3f::new(projectile.state.x, projectile.state.y, projectile.state.z);
+    if projectile.homing {
+        let direction = Vec3f::new(
+            target_pos.x - start.x,
+            target_pos.y - start.y,
+            target_pos.z - start.z,
+        )
+        .normalize_or_zero();
+        if direction.x == 0.0 && direction.y == 0.0 && direction.z == 0.0 {
+            return true;
+        }
+        projectile.state.direction = [direction.x, direction.y, direction.z];
+        projectile.velocity = Vec3f::new(
+            direction.x * PROJECTILE_SPEED,
+            direction.y * PROJECTILE_SPEED,
+            direction.z * PROJECTILE_SPEED,
+        );
+    }
+    let end = start.add_scaled(projectile.velocity, dt);
+    projectile.state.x = end.x;
+    projectile.state.y = end.y;
+    projectile.state.z = end.z;
+
+    swept_sphere_intersects_target(start, end, target_pos, projectile.radius + target_radius)
 }
 
 pub(crate) fn swept_sphere_intersects_target(

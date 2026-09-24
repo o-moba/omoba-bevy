@@ -376,7 +376,7 @@ fn recent_receipts_are_bounded_repeated_for_loss_and_cleared_on_round_reset() {
 }
 
 #[test]
-fn ecs_projectile_minion_receipts_preserve_nonplayer_identity_and_overkill_once() {
+fn projectile_minion_receipts_preserve_nonplayer_identity_and_overkill_once() {
     let (mut rt, _, _, now) = fixture();
     spawn_minion_wave_for_team_lane(
         &rt.world.map_layout,
@@ -408,32 +408,10 @@ fn ecs_projectile_minion_receipts_preserve_nonplayer_identity_and_overkill_once(
             now,
         );
     }
-    let mut app = App::new();
-    app.add_plugins(GameplayPlugin)
-        .insert_resource(rt)
-        .insert_resource(TickContext {
-            now: Some(now),
-            dt: 0.01,
-        })
-        .add_systems(
-            Update,
-            (
-                gameplay::combat::sync_minions_into_ecs_system,
-                gameplay::combat::collect_projectile_minion_damage_system,
-                gameplay::combat::apply_projectile_minion_damage_system,
-            )
-                .chain(),
-        );
-    app.update();
-    assert_eq!(
-        app.world().resource::<ServerRuntime>().world.minions[&1]
-            .state
-            .hp,
-        3.0
-    );
-    app.world_mut().resource_mut::<TickContext>().dt = 0.3;
-    app.update();
-    let mut rt = app.world_mut().resource_mut::<ServerRuntime>();
+    assert!(projectiles(&mut rt, now, 0.01).is_empty());
+    assert_eq!(rt.world.minions[&1].state.hp, 3.0);
+    let events = projectiles(&mut rt, now, 0.3);
+    rt.combat_log.extend(now, events);
     let events = rt.combat_log.snapshot(now);
     assert_eq!(events.len(), 1);
     assert_eq!(
@@ -453,6 +431,8 @@ fn ecs_projectile_minion_receipts_preserve_nonplayer_identity_and_overkill_once(
     assert_eq!(events[0].style, ProjectileStyle::CasterBolt);
     assert_eq!(events[0].amount, 3.0);
     assert!(events[0].killed);
+    assert_eq!(rt.world.minions[&1].state.hp, 0.0);
+    assert!(rt.world.projectiles.is_empty());
 }
 
 #[test]

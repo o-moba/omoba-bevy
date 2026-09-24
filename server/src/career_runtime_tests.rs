@@ -49,15 +49,15 @@ fn authenticated_join(
     rt.world.players.get_mut(&address).unwrap().career_capable = true;
 }
 fn start(rt: &mut ServerRuntime, now: Instant) {
-    rt.simulate_after_mana(now, 0.0);
-    rt.simulate_after_mana(now, 3.0);
+    rt.tick(now, 0.0);
+    rt.tick(now, 3.0);
     assert!(matches!(
         rt.world.game_state,
         GameState::Starting { countdown_ms: 0 }
     ));
     let allocation = rt.career_allocation_for_test().unwrap();
     rt.career.backend.test_ack_start(&allocation.result_id);
-    rt.simulate_after_mana(now, 0.0);
+    rt.tick(now, 0.0);
     assert_eq!(rt.world.game_state, GameState::Running);
 }
 
@@ -107,14 +107,14 @@ fn release_queue_uses_saved_skill_and_experience_and_waits_for_durable_allocatio
     assert_eq!(joined_count(&rt.world.players), 2);
     assert!(!rt.world.players[&addr(59302)].joined);
     assert!(!rt.world.players[&addr(59303)].joined);
-    rt.simulate_after_mana(now, 0.0);
-    rt.simulate_after_mana(now, 3.0);
+    rt.tick(now, 0.0);
+    rt.tick(now, 3.0);
     let allocation = rt.career_allocation_for_test().unwrap();
     assert!(allocation.rated);
     assert_eq!(allocation.ruleset, career_runtime::RATED_RULESET);
     let before = rt.world.players[&addr(59301)].state.gold;
     for i in 1..=3 {
-        rt.simulate_after_mana(now + Duration::from_millis(i), 0.1);
+        rt.tick(now + Duration::from_millis(i), 0.1);
         assert_eq!(rt.world.game_state, GameState::Starting { countdown_ms: 0 });
         assert_eq!(rt.world.players[&addr(59301)].state.gold, before);
         assert!(!rt.combat_log.ledger.is_started());
@@ -125,7 +125,7 @@ fn release_queue_uses_saved_skill_and_experience_and_waits_for_durable_allocatio
         );
     }
     rt.career.backend.test_ack_start(&allocation.result_id);
-    rt.simulate_after_mana(now + Duration::from_millis(4), 0.0);
+    rt.tick(now + Duration::from_millis(4), 0.0);
     assert_eq!(rt.world.game_state, GameState::Running);
     assert_eq!(rt.combat_log.ledger.snapshot().len(), 2);
     assert_eq!(rt.career.queue.len(), 2);
@@ -301,7 +301,7 @@ fn practice_results_are_explicitly_unrated_and_play_again_preserves_result_for_o
     for player in rt.world.players.values_mut() {
         player.last_seen = later;
     }
-    rt.simulate_after_mana(later, 0.1);
+    rt.tick(later, 0.1);
     assert!(matches!(rt.world.game_state, GameState::Victory { .. }));
     rt.handle_packet(addr(59341), ClientPacket::RequestRematch, later);
     assert_eq!(rt.world.game_state, GameState::Running);
@@ -538,8 +538,8 @@ fn postgres_live_udp_signed_profiles_queue_real_cast_and_durable_history() {
         send(socket, &mut rt, join(&format!("live-signed-{index}")));
     }
     let now = Instant::now();
-    rt.simulate_after_mana(now, 0.0);
-    rt.simulate_after_mana(now, 3.0);
+    rt.tick(now, 0.0);
+    rt.tick(now, 3.0);
     let allocation = rt.career_allocation_for_test().unwrap();
     assert!(allocation.rated);
     assert!(matches!(
@@ -549,7 +549,7 @@ fn postgres_live_udp_signed_profiles_queue_real_cast_and_durable_history() {
     pump_worker(&mut rt, &sockets, |rt| {
         rt.career.backend.started(&allocation.result_id)
     });
-    rt.simulate_after_mana(Instant::now(), 0.0);
+    rt.tick(Instant::now(), 0.0);
     assert_eq!(rt.world.game_state, GameState::Running);
     let (attacker_addr, attacker_id) = rt
         .world
@@ -595,7 +595,7 @@ fn postgres_live_udp_signed_profiles_queue_real_cast_and_durable_history() {
     );
     assert_eq!(rt.world.projectiles.len(), 1);
     std::thread::sleep(Duration::from_millis(300));
-    rt.simulate_after_mana(Instant::now(), 0.3);
+    rt.tick(Instant::now(), 0.3);
     assert_eq!(
         rt.world.game_state,
         GameState::Victory {
@@ -768,8 +768,8 @@ fn permanent_allocation_conflict_releases_roster_and_requires_signed_retry_gestu
     let first = addr(59371);
     authenticated_join(&mut rt, first, 71, 1000, false, now);
     authenticated_join(&mut rt, addr(59372), 72, 1000, false, now);
-    rt.simulate_after_mana(now, 0.0);
-    rt.simulate_after_mana(now, 3.0);
+    rt.tick(now, 0.0);
+    rt.tick(now, 3.0);
     let allocation = rt.career_allocation_for_test().unwrap();
     rt.career.backend.test_reject_start(
         &allocation.result_id,

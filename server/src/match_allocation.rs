@@ -495,7 +495,7 @@ mod runtime_tests {
         let match_id = rt.match_id;
         rt.world.game_state = GameState::Victory { winner: Team::Blue };
         rt.last_snapshot_at = now - SNAPSHOT_INTERVAL;
-        rt.simulate_after_mana(now, 0.0);
+        rt.tick(now, 0.0);
 
         let mut assembler = shared::transport::SnapshotAssembler::default();
         let read_snapshot = |assembler: &mut shared::transport::SnapshotAssembler| {
@@ -533,7 +533,7 @@ mod runtime_tests {
         for millis in [100, 500, 1000] {
             let later = now + Duration::from_millis(millis);
             rt.last_snapshot_at = later - SNAPSHOT_INTERVAL;
-            rt.simulate_after_mana(later, 5.0);
+            rt.tick(later, 5.0);
             let packet = read_snapshot(&mut assembler);
             let ServerPacket::Snapshot {
                 meta,

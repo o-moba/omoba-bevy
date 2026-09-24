@@ -35,7 +35,6 @@ impl RateLimitedDiagnostic {
     }
 }
 
-#[derive(Resource)]
 pub(crate) struct ServerRuntime {
     pub(crate) sandbox: Option<sandbox::SandboxRuntime>,
     pub(crate) match_service: match_service::MatchService,
@@ -180,28 +179,13 @@ pub(crate) fn run() -> io::Result<()> {
         runtime.sandbox = Some(sandbox::SandboxRuntime::new(Instant::now()));
         println!("Combat Sandbox enabled (local, unrated)");
     }
-    App::new()
-        .add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(SIMULATION_STEP_SLEEP)))
-        .add_plugins(GameplayPlugin)
-        .insert_resource(runtime)
-        .init_resource::<TickContext>()
-        .init_resource::<SimulationDeltaSeconds>()
-        .init_resource::<EcsPlayerEntities>()
-        .add_systems(
-            Update,
-            (
-                server_prepare_tick_system,
-                sync_players_into_ecs_system,
-                regenerate_mana_system,
-                sync_players_from_ecs_system,
-                gameplay::combat::sync_minions_into_ecs_system,
-                gameplay::combat::collect_projectile_minion_damage_system,
-                gameplay::combat::apply_projectile_minion_damage_system,
-                server_finalize_tick_system,
-            )
-                .chain(),
-        )
-        .run();
-
-    Ok(())
+    loop {
+        let step_started = Instant::now();
+        let (now, dt) = runtime.prepare_tick();
+        runtime.tick(now, dt);
+        let step_elapsed = step_started.elapsed();
+        if step_elapsed < SIMULATION_STEP_SLEEP {
+            std::thread::sleep(SIMULATION_STEP_SLEEP - step_elapsed);
+        }
+    }
 }

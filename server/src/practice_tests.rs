@@ -750,7 +750,7 @@ fn bot_pushes_a_real_lane_and_damages_towers_without_crossing_live_structure_dis
             .collect();
         now += Duration::from_millis(100);
         rt.world.players.get_mut(&addr(1)).unwrap().last_seen = now;
-        rt.simulate_after_mana(now, 0.1);
+        rt.tick(now, 0.1);
         let after = &rt.world.players[&bot_addr].state;
         // Respawn is the ordinary explicit teleport, not a movement segment.
         if before.hp > 0.0 && after.hp > 0.0 {
@@ -865,7 +865,7 @@ fn read_snapshot(client: &UdpSocket, rt: &mut ServerRuntime) -> ServerPacket {
     let mut assembler = shared::transport::SnapshotAssembler::default();
     let now = Instant::now();
     rt.last_snapshot_at = now - SNAPSHOT_INTERVAL;
-    rt.simulate_after_mana(now, 0.0);
+    rt.tick(now, 0.0);
     let mut buffer = [0_u8; 65_536];
     loop {
         let (size, _) = client.recv_from(&mut buffer).unwrap();
@@ -1002,7 +1002,7 @@ fn human_kills_of_practice_bots_count_on_the_live_scoreboard() {
                 now,
             );
         }
-        rt.simulate_after_mana(now, 0.05);
+        rt.tick(now, 0.05);
         if rt.world.players[&bot_addr].state.hp <= 0.0 {
             break;
         }
@@ -1065,11 +1065,11 @@ fn draft_started_practice_round_credits_human_kills() {
     );
     rt.handle_packet(addr(1), lock, now);
     now += Duration::from_secs(4);
-    rt.simulate_after_mana(now, 0.05);
+    rt.tick(now, 0.05);
     let loaded = prematch(&rt, 2, shared::prematch::PrematchAction::Loaded);
     rt.handle_packet(addr(1), loaded, now);
     now += Duration::from_millis(50);
-    rt.simulate_after_mana(now, 0.05);
+    rt.tick(now, 0.05);
     assert_eq!(
         rt.world.game_state,
         GameState::Running,
@@ -1113,7 +1113,7 @@ fn draft_started_practice_round_credits_human_kills() {
                 now,
             );
         }
-        rt.simulate_after_mana(now, 0.05);
+        rt.tick(now, 0.05);
         if rt.world.players[&bot_addr].state.hp <= 0.0 {
             break;
         }
@@ -1170,7 +1170,7 @@ fn sandbox_dummy_stands_in_front_of_the_human_and_returns_after_respawn() {
     for _ in 0..40 {
         now += Duration::from_millis(50);
         rt.handle_packet(addr(1), ClientPacket::Ping, now);
-        rt.simulate_after_mana(now, 0.05);
+        rt.tick(now, 0.05);
     }
     let after = &rt.world.players[&dummies[0]].state;
     assert_eq!((after.x, after.z), (dummy.x, dummy.z));
@@ -1189,7 +1189,7 @@ fn sandbox_dummy_stands_in_front_of_the_human_and_returns_after_respawn() {
     for _ in 0..(RESPAWN_DELAY.as_millis() / 50 + 4) {
         now += Duration::from_millis(50);
         rt.handle_packet(addr(1), ClientPacket::Ping, now);
-        rt.simulate_after_mana(now, 0.05);
+        rt.tick(now, 0.05);
     }
     let back = &rt.world.players[&dummies[0]].state;
     assert_eq!((back.x, back.z), (dummy.x, dummy.z));
@@ -1215,7 +1215,7 @@ fn sandbox_clear_duel_and_roster_replace_the_practice_bots() {
     rt.handle_packet(addr(1), practice_command(PracticeCommand::ClearBots), now);
     assert!(bots_of(&rt).is_empty());
     now += Duration::from_millis(50);
-    rt.simulate_after_mana(now, 0.05);
+    rt.tick(now, 0.05);
     assert!(
         bots_of(&rt).is_empty(),
         "no automatic refill in the sandbox"
@@ -1254,7 +1254,7 @@ fn sandbox_clear_duel_and_roster_replace_the_practice_bots() {
     // It walks mid toward the human instead of idling at base.
     for _ in 0..60 {
         now += Duration::from_millis(50);
-        rt.simulate_after_mana(now, 0.05);
+        rt.tick(now, 0.05);
     }
     let moved = &rt.world.players[&bots[0]].state;
     assert!(

@@ -188,20 +188,6 @@ impl GameWorld {
 }
 
 #[cfg(test)]
-pub(crate) fn regenerate_mana(players: &mut HashMap<SocketAddr, ConnectedPlayer>, dt: f32) {
-    for player in players.values_mut() {
-        if player.state.hp <= 0.0 {
-            continue;
-        }
-        if player.state.max_mana <= 0.0 {
-            player.state.max_mana = MAX_MANA;
-        }
-        player.state.mana =
-            (player.state.mana + MANA_REGEN_PER_SECOND * dt).clamp(0.0, player.state.max_mana);
-    }
-}
-
-#[cfg(test)]
 pub(crate) fn handle_join_request(
     player: &mut ConnectedPlayer,
     team: Team,
