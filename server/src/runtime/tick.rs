@@ -3,14 +3,14 @@ use crate::*;
 
 impl ServerRuntime {
     pub(crate) fn prepare_tick(&mut self) -> (Instant, f32) {
-        self.poll_career(Instant::now());
+        self.poll_career(self.clock.now());
         self.receive_packets();
-        self.tick_match_service(Instant::now());
+        self.tick_match_service(self.clock.now());
         if self.match_service.is_public() {
-            self.send_lobby_snapshots(Instant::now());
+            self.send_lobby_snapshots(self.clock.now());
         }
 
-        let now = Instant::now();
+        let now = self.clock.now();
         let dt = now
             .duration_since(self.last_simulation_at)
             .as_secs_f32()
@@ -50,7 +50,7 @@ impl ServerRuntime {
         // retirement grace period. Victory gates gameplay below; a durable
         // result ACK must not turn one lossy UDP snapshot into the only signal.
         self.maintain_roster(if self.sandbox.is_some() {
-            Instant::now()
+            self.clock.now()
         } else {
             now
         });

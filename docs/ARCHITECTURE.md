@@ -67,7 +67,7 @@ as the UDP transport, so the rest of the client does not know it is offline.
 
 ## Server tick
 
-`ServerRuntime` (`server/src/runtime/mod.rs`) owns the socket, the
+`ServerRuntime` (`server/src/runtime/mod.rs`) owns its three ports, the
 sub-runtimes (bots, prematch, career, social, sandbox) and one `GameWorld`
 (`server/src/game_world.rs`): the entity maps (players, disconnected
 sessions, projectiles, structures, minions, neutrals), team buffs, forest
@@ -80,7 +80,27 @@ individual maps because they run inside loops that hold other fields.
 fixed-step loop (`SIMULATION_STEP_SLEEP`, 10 ms): `prepare_tick`, then
 `tick`, then sleep the remainder of the step. There is no Bevy `App` and no
 ECS mirror on the server; the `GameWorld` maps are the only copy of the
-state. A tick is:
+state.
+
+The ports (`server/src/runtime/ports.rs`, `server/src/career_port.rs`) are
+the runtime's only I/O: `transport: Box<dyn Transport>` (`recv`, `send_to`,
+`local_addr`; non-blocking, `WouldBlock` ends the receive loop) carries
+every datagram in and out, `clock: Box<dyn Clock>` (`now`) is the tick
+path's time source, and `career.backend: Box<dyn CareerPort>` is the
+account and result store. The process runs `UdpTransport`, `SystemClock`
+and `career_backend::CareerBackend` (the signed-account state machine over
+a bounded job channel to the PostgreSQL worker thread); tests run
+`MemoryTransport` (queued inbound and captured outbound datagrams),
+`ManualClock` (advanced by the test) and `career_backend::MemoryCareer`
+(the same state machine over an in-memory job link that acknowledges
+immediately, on request through the `test_*` hooks, or not at all when
+built disabled). `ServerRuntime::with_ports` is the one constructor;
+`new_with_map`/`new(socket, config)` wrap it with the process ports and
+`for_test` with the memory ones. `prepare_tick`, the receive loop, the
+admission completions, the sandbox's roster and snapshot throttles and the
+constructor read `clock.now()`; the leaf helpers take `now` as a parameter
+and the Combat Sandbox's virtual clock starts from the injected clock and
+advances by its own scaled `dt`. A tick is:
 
 1. `ServerRuntime::prepare_tick`: `runtime::dispatch::receive_packets` decodes
    datagrams; public roles verify signed commands first (`public_transport`).
@@ -225,7 +245,9 @@ Ordered by value over cost. Each step is a separate change with the full
    marks blanked). Step complete.
 7. Match rules as one policy object (done: `match_rules.rs`, `MatchRules`
    derived once from the mode, no `mode ==` outside the startup banner);
-   career, transport and clock behind traits (open).
+   career, transport and clock behind traits (done: `CareerPort`,
+   `Transport`, `Clock` with the process and the in-memory implementations,
+   `ServerRuntime::with_ports`/`for_test`). Step complete.
 8. Client `net.rs` split into transport, session, commands, ingest, apply
    and interpolation (done, verbatim moves under `client/src/net/`);
    session events instead of cross-module writes (`SessionEvent`,

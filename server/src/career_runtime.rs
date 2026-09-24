@@ -20,7 +20,7 @@ struct CareerRound {
 }
 
 pub(crate) struct CareerRuntime {
-    pub(crate) backend: crate::career_backend::CareerBackend,
+    pub(crate) backend: Box<dyn CareerPort>,
     pub(crate) queue: matchmaking::Matchmaker,
     round: Option<CareerRound>,
     pending: VecDeque<MatchResult>,
@@ -33,9 +33,9 @@ pub(crate) struct CareerRuntime {
 }
 
 impl CareerRuntime {
-    pub(crate) fn new(epoch: u64) -> Self {
+    pub(crate) fn new(backend: Box<dyn CareerPort>) -> Self {
         Self {
-            backend: crate::career_backend::CareerBackend::new(epoch),
+            backend,
             queue: matchmaking::Matchmaker::default(),
             round: None,
             pending: VecDeque::new(),
@@ -1204,8 +1204,8 @@ impl ServerRuntime {
             .and_then(|datagrams| {
                 for bytes in datagrams {
                     let sent = self
-                        .socket
-                        .send_to(&bytes, addr)
+                        .transport
+                        .send_to(&bytes, *addr)
                         .map_err(|error| error.to_string())?;
                     if sent != bytes.len() {
                         return Err("Incomplete career datagram send".into());

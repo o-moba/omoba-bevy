@@ -175,3 +175,63 @@ fn pre_join_endpoint_is_hidden_and_inert_until_join() {
     assert_eq!(snapshot.len(), 2);
     assert!(snapshot.iter().any(|player| player.id == ghost_id));
 }
+
+/// The whole runtime without a socket: the join is a datagram on the memory
+/// transport, snapshots come back through it, and the endpoint times out
+/// when the injected clock passes `PLAYER_TIMEOUT`, keeping its session for
+/// a reclaim. The career store is the guest-only one, as in a dev server
+/// without a database.
+#[test]
+fn runtime_on_memory_transport_and_manual_clock_times_out_a_silent_endpoint() {
+    let clock = ManualClock::new(Instant::now());
+    let transport = MemoryTransport::new("127.0.0.1:4000".parse().unwrap());
+    let mut rt = ServerRuntime::for_test(
+        transport.clone(),
+        clock.clone(),
+        career_backend::MemoryCareer::disabled(53100),
+        MatchConfig::dev(),
+    );
+    let player: SocketAddr = "127.0.0.1:53101".parse().unwrap();
+    let packet = ClientPacket::Join {
+        prematch: false,
+        team: Team::Green,
+        character: CharacterChoice::Ipfs,
+        hero_class: HeroClass::Mage,
+        avatar: None,
+        sprite_character: None,
+        session_id: Some("manual-clock".into()),
+        passport_ticket: None,
+    };
+    transport.push_inbound(player, serde_json::to_vec(&packet).unwrap());
+    let (now, dt) = rt.prepare_tick();
+    assert_eq!(now, clock.now());
+    assert_eq!(dt, 0.0);
+    rt.tick(now, dt);
+    assert!(rt.world.players[&player].joined);
+    assert_eq!(rt.world.game_state, GameState::Running);
+    assert!(
+        rt.career_view(player, now)
+            .error
+            .is_some_and(|e| e.contains("not configured"))
+    );
+    assert!(
+        transport.take_outbound().is_empty(),
+        "snapshots are throttled"
+    );
+
+    clock.advance(SNAPSHOT_INTERVAL);
+    let (now, dt) = rt.prepare_tick();
+    assert!((dt - SNAPSHOT_INTERVAL.as_secs_f32()).abs() < EPSILON);
+    rt.tick(now, dt);
+    let sent = transport.take_outbound();
+    assert!(!sent.is_empty());
+    assert!(sent.iter().all(|(to, _)| *to == player));
+
+    clock.advance(PLAYER_TIMEOUT + Duration::from_secs(1));
+    let (now, dt) = rt.prepare_tick();
+    assert_eq!(dt, 0.1, "the wall-clock step is clamped");
+    rt.tick(now, dt);
+    assert!(!rt.world.players.contains_key(&player));
+    assert!(rt.world.disconnected_sessions.contains_key("manual-clock"));
+    assert!(transport.take_outbound().is_empty());
+}

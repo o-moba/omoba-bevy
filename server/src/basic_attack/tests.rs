@@ -342,7 +342,7 @@ fn actual_udp_receiver_accepts_the_basic_wire_contract_once() {
     .unwrap();
     for _ in 0..2 {
         sender
-            .send_to(&bytes, rt.socket.local_addr().unwrap())
+            .send_to(&bytes, rt.transport.local_addr().unwrap())
             .unwrap();
     }
     let deadline = Instant::now() + Duration::from_secs(1);

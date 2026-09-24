@@ -8,9 +8,19 @@ fn runtime(config: MatchConfig, career: bool) -> ServerRuntime {
     socket.set_nonblocking(true).unwrap();
     let mut rt = ServerRuntime::new(socket, config);
     if career {
-        rt.career.backend = career_backend::CareerBackend::test_backend(rt.server_epoch);
+        rt.career.backend = Box::new(career_backend::MemoryCareer::test_backend(rt.server_epoch));
     }
     rt
+}
+/// The same fixture without a socket: a manual clock and an in-memory
+/// career store built for the runtime's epoch.
+fn memory_runtime(config: MatchConfig, career: career_backend::MemoryCareer) -> ServerRuntime {
+    ServerRuntime::for_test(
+        MemoryTransport::new(addr(0)),
+        ManualClock::new(Instant::now()),
+        career,
+        config,
+    )
 }
 fn addr(port: u16) -> SocketAddr {
     format!("127.0.0.1:{port}").parse().unwrap()
@@ -134,9 +144,12 @@ fn release_queue_uses_saved_skill_and_experience_and_waits_for_durable_allocatio
 
 #[test]
 fn tuned_default_label_is_unrated_and_running_roster_rejects_new_players() {
-    let mut rt = runtime(MatchConfig::release(1), true);
+    let mut rt = memory_runtime(
+        MatchConfig::release(1),
+        career_backend::MemoryCareer::test_backend(59310),
+    );
     rt.world.map_config.structures[0].stats.max_hp += 1.0;
-    let now = Instant::now();
+    let now = rt.clock.now();
     authenticated_join(&mut rt, addr(59311), 11, 1000, false, now);
     authenticated_join(&mut rt, addr(59312), 12, 1000, false, now);
     start(&mut rt, now);
@@ -151,6 +164,42 @@ fn tuned_default_label_is_unrated_and_running_roster_rejects_new_players() {
         rt.career_view(addr(59313), now).queue,
         QueueView::Waiting { .. }
     ));
+}
+
+#[test]
+fn immediate_memory_career_acknowledges_start_and_settle_through_poll() {
+    let mut rt = memory_runtime(
+        MatchConfig::release(1),
+        career_backend::MemoryCareer::immediate(59300),
+    );
+    let now = rt.clock.now();
+    authenticated_join(&mut rt, addr(59301), 1, 1000, false, now);
+    authenticated_join(&mut rt, addr(59302), 2, 1000, false, now);
+    rt.tick(now, 0.0);
+    rt.tick(now, 3.0);
+    // The durable start was enqueued and answered at once; the next poll
+    // delivers the acknowledgement and the countdown ends without a hook.
+    let allocation = rt.career_allocation_for_test().unwrap();
+    assert!(matches!(
+        rt.world.game_state,
+        GameState::Starting { countdown_ms: 0 }
+    ));
+    rt.poll_career(now);
+    assert!(rt.career.backend.started(&allocation.result_id));
+    rt.tick(now, 0.0);
+    assert_eq!(rt.world.game_state, GameState::Running);
+    let later = now + Duration::from_secs(30);
+    rt.world.game_state = GameState::Victory {
+        winner: Team::Green,
+    };
+    rt.record_match_metrics(later);
+    let result = rt.career_view(addr(59301), later).last_result.unwrap();
+    assert!(result.rated);
+    assert!(!result.saved);
+    rt.poll_career(later);
+    let saved = rt.career_view(addr(59301), later).last_result.unwrap();
+    assert_eq!(saved.result_id, result.result_id);
+    assert!(saved.saved);
 }
 
 #[test]
@@ -321,7 +370,7 @@ fn send(socket: &UdpSocket, rt: &mut ServerRuntime, packet: ClientPacket) {
     socket
         .send_to(
             &serde_json::to_vec(&packet).unwrap(),
-            rt.socket.local_addr().unwrap(),
+            rt.transport.local_addr().unwrap(),
         )
         .unwrap();
     // Nonblocking receive may observe WouldBlock immediately after send_to,
@@ -330,7 +379,7 @@ fn send(socket: &UdpSocket, rt: &mut ServerRuntime, packet: ClientPacket) {
     let deadline = Instant::now() + Duration::from_secs(2);
     let mut ready = [0_u8; MAX_CLIENT_REQUEST_PAYLOAD_BYTES];
     loop {
-        match rt.socket.peek_from(&mut ready) {
+        match rt.transport.peek(&mut ready) {
             Ok((_, sender)) => {
                 assert_eq!(sender, socket.local_addr().unwrap());
                 rt.receive_packets();
@@ -493,8 +542,11 @@ fn postgres_live_udp_signed_profiles_queue_real_cast_and_durable_history() {
         std::process::id(),
         rt.server_epoch
     ));
-    rt.career.backend =
-        career_backend::CareerBackend::test_with_database(rt.server_epoch, url, outbox);
+    rt.career.backend = Box::new(career_backend::CareerBackend::test_with_database(
+        rt.server_epoch,
+        url,
+        outbox,
+    ));
     let sockets = [
         UdpSocket::bind("127.0.0.1:0").unwrap(),
         UdpSocket::bind("127.0.0.1:0").unwrap(),

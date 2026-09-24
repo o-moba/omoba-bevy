@@ -155,10 +155,10 @@ mod tests {
         })
         .unwrap();
         client
-            .send_to(&bytes, rt.socket.local_addr().unwrap())
+            .send_to(&bytes, rt.transport.local_addr().unwrap())
             .unwrap();
         client
-            .send_to(&bytes, rt.socket.local_addr().unwrap())
+            .send_to(&bytes, rt.transport.local_addr().unwrap())
             .unwrap();
         let deadline = Instant::now() + Duration::from_secs(1);
         while rt.world.players[&addr].economy.last_purchase.is_none() && Instant::now() < deadline {
@@ -189,7 +189,7 @@ mod tests {
         })
         .unwrap();
         client
-            .send_to(&stale, rt.socket.local_addr().unwrap())
+            .send_to(&stale, rt.transport.local_addr().unwrap())
             .unwrap();
         rt.receive_packets();
         assert_eq!(rt.world.players[&addr].economy.purchase_sequence, 0);

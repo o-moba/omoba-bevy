@@ -445,7 +445,7 @@ impl ServerRuntime {
                 rematch_in_secs: None,
             };
             if let Ok(bytes) = serde_json::to_vec(&packet) {
-                let _ = self.socket.send_to(&bytes, addr);
+                let _ = self.transport.send_to(&bytes, *addr);
             }
         }
     }

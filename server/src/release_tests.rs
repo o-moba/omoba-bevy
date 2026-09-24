@@ -561,7 +561,7 @@ fn send_udp(socket: &UdpSocket, rt: &mut ServerRuntime, packet: ClientPacket) {
     socket
         .send_to(
             &serde_json::to_vec(&packet).unwrap(),
-            rt.socket.local_addr().unwrap(),
+            rt.transport.local_addr().unwrap(),
         )
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(1);

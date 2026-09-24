@@ -14,12 +14,8 @@ impl ServerRuntime {
     pub(crate) fn receive_packets(&mut self) {
         for completion in self.passport_admissions.completed() {
             if let ClientPacket::Prematch { request } = completion.packet {
-                self.complete_prematch_admission(
-                    completion.addr,
-                    request,
-                    completion.allowed,
-                    Instant::now(),
-                );
+                let now = self.clock.now();
+                self.complete_prematch_admission(completion.addr, request, completion.allowed, now);
                 continue;
             }
             // Approval cannot change an already admitted loadout. A timed-out
@@ -31,7 +27,8 @@ impl ServerRuntime {
                     .get(&completion.addr)
                     .is_some_and(|player| !player.joined)
             {
-                self.handle_packet_authorized(completion.addr, completion.packet, Instant::now());
+                let now = self.clock.now();
+                self.handle_packet_authorized(completion.addr, completion.packet, now);
             } else if let Some(player) = self
                 .world
                 .players
@@ -41,16 +38,16 @@ impl ServerRuntime {
                 player.join_error = Some(shared::protocol::JoinRejection::AvatarNotAuthorized);
             }
         }
-        let receive_started = Instant::now();
+        let receive_started = self.clock.now();
         for _ in 0..shared::public_transport::MAX_PACKETS_PER_TICK {
-            if receive_started.elapsed()
+            if self.clock.now().saturating_duration_since(receive_started)
                 >= Duration::from_millis(shared::public_transport::RECEIVE_BUDGET_MILLIS)
             {
                 break;
             }
-            match self.socket.recv_from(&mut self.recv_buf) {
+            match self.transport.recv(&mut self.recv_buf) {
                 Ok((len, addr)) => {
-                    let now = Instant::now();
+                    let now = self.clock.now();
                     if len
                         > if self.match_service.is_public() {
                             shared::public_transport::MAX_PUBLIC_DATAGRAM_BYTES
@@ -79,7 +76,7 @@ impl ServerRuntime {
                                 self.handle_packet(addr, packet, now)
                             }
                             public_transport::Decision::Reply(bytes) => {
-                                let _ = self.socket.send_to(&bytes, addr);
+                                let _ = self.transport.send_to(&bytes, addr);
                             }
                             public_transport::Decision::Drop => {}
                         }
