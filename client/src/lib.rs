@@ -66,7 +66,6 @@ mod social_qa;
 mod sprite;
 mod supporter;
 mod supporter_storekit;
-mod targeting;
 mod targeting_qa;
 mod team;
 mod team_vision;
@@ -77,6 +76,8 @@ mod verdant3d;
 mod visual_qa;
 mod world;
 mod world2d;
+
+pub(crate) use combat::targeting;
 
 use bosses::BossesPlugin;
 use camera::CameraPlugin;

@@ -52,12 +52,18 @@ frame order:
    (`client/src/input_context.rs`): modal UI (pause menu, shop, career,
    social, help) runs first and decides whether gameplay input is allowed;
    `Actions` holds movement (`WorldMovementInputSet`), targeting and casting
-   (the combat chain in `client/src/combat.rs`, pointer picking in
+   (the combat chain in `client/src/combat/`, pointer picking in
    `CombatPointerInputSet`) and mobile controls. Both input sets are
    defined in `input_context.rs`.
 3. `ClientNetPipeline::SendLocalState` and `SendCommands` after `Actions`:
    the local transform and the queued `NetworkCommand`s become packets.
 4. `PostUpdate`: grounding, target presentation, UI layout adjustments.
+
+Gameplay input and local prediction live in two module trees that follow
+the `net` pattern: `mod.rs` holds the plugin and re-exports what other
+modules import, so callers keep `crate::combat::X` and `crate::player::X`.
+- `client/src/combat/`: `cooldown` (local cast cooldown mirror), `feedback` (action line), `round_reset` (clear intents on a new round), `selection` (`TargetState`, pointer and nearest-enemy picking), `cast` (`PendingCast`, slot casts, approach), `mobile` (mobile cast and utility), `hotbar` (skill bar UI), `bars` (world HP/mana bars), `marker` (target ring), `targeting` (basic attacks, aim UI, locked target; still reachable as `crate::targeting`).
+- `client/src/player/`: `input` (desktop and mobile movement input, route planning, viewport picking), `motion` (local motion, jump, gravity, collisions), `animation` (hero animation library, binding, playback, sandbox seek; `register_hero_animation_systems`), `respawn_ui` (respawn countdown).
 
 Presentation is chosen once per run by `PlayerVisualMode` (3D models by
 default, 2D sprites with `OMOBA_PLAYER_VISUAL_MODE=sprite2d`). Simulation
@@ -297,6 +303,8 @@ Ordered by value over cost. Each step is a separate change with the full
 10. Client domain module, combat/player split, render backends behind
     `run_if`, plugin groups, QA behind a cargo feature (in progress: the
     domain module and the `in_models3d`/`in_sprite2d` backend gates are
-    done; slices in `docs/plans/client-10-15.md`).
+    done; `combat.rs` and `player.rs` are split into `client/src/combat/`
+    and `client/src/player/`, verbatim moves; plugin groups and the QA
+    feature are next; slices in `docs/plans/client-10-15.md`).
 11. One debug tooling family shared by Combat Test, practice and offline.
 12. Data-driven hero and item catalogs.
