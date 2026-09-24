@@ -75,6 +75,16 @@ class EvidenceNegativeControls(unittest.TestCase):
         proof.observe(sample)
         self.assertEqual(proof.rounds[0]['offensive_slots'], [3])
 
+    def test_offensive_slots_are_the_catalog_damage_abilities(self):
+        proof, sample = self.running()
+        sample['players'][0].update(action_sequence=1, action_slot=1, **{'class': 'warden'})
+        proof.observe(sample)
+        self.assertEqual(proof.rounds[0]['offensive_slots'], [])
+        sample['meta']['snapshot_tick'] += 1
+        sample['players'][0]['action_slot'] = 2
+        proof.observe(sample)
+        self.assertEqual(proof.rounds[0]['offensive_slots'], [2])
+
     def test_rejects_wrong_roster_and_stalled_peer(self):
         for mutation in ('roster', 'duplicate', 'stall', 'identity', 'tick'):
             with self.subTest(mutation=mutation):

@@ -1,10 +1,16 @@
-//! Small, shared item catalog. Purchases and replicated bonuses are server-owned.
-use crate::{AbilityDefinition, BasicAttackDefinition, HeroClass, SkillSlot, scaled_cooldown};
+//! Shop rules and the item model. Item data (names, costs, bonuses) and each
+//! class's recommended order live in `shared/assets/catalog/`; purchases and
+//! replicated bonuses are server-owned.
+use crate::{
+    AbilityDefinition, BasicAttackDefinition, HeroClass, SkillSlot, catalog, scaled_cooldown,
+};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 pub const STARTING_GOLD: u32 = 80;
 pub const GOLD_PER_SECOND: f32 = 1.0;
+/// A rule, not the catalog size: the catalog may hold more items than a hero
+/// can carry.
 pub const INVENTORY_CAPACITY: usize = 6;
 pub const SHOP_RADIUS: f32 = 18.0;
 
@@ -20,6 +26,16 @@ pub enum ItemId {
 }
 
 impl ItemId {
+    /// Every item in catalog order (`shared/assets/catalog/items.json`).
+    pub const ALL: [Self; 6] = [
+        Self::EmberBlade,
+        Self::SwiftGrip,
+        Self::TrailBoots,
+        Self::VitalityGem,
+        Self::FocusCharm,
+        Self::GuardianCrest,
+    ];
+
     pub const fn id(self) -> &'static str {
         match self {
             Self::EmberBlade => "ember_blade",
@@ -31,11 +47,9 @@ impl ItemId {
         }
     }
 
+    /// Wire decoding: driven by the enum, never by the catalog.
     pub fn from_id(id: &str) -> Option<Self> {
-        ITEMS
-            .iter()
-            .find(|item| item.id.id() == id)
-            .map(|item| item.id)
+        Self::ALL.into_iter().find(|item| item.id() == id)
     }
 }
 
@@ -68,6 +82,7 @@ impl Default for ItemBonuses {
     }
 }
 
+/// One shop item, loaded from `shared/assets/catalog/items.json`.
 #[derive(Debug, Clone, Copy)]
 pub struct ItemDefinition {
     pub id: ItemId,
@@ -77,129 +92,25 @@ pub struct ItemDefinition {
     pub bonuses: ItemBonuses,
 }
 
-pub const ITEMS: [ItemDefinition; INVENTORY_CAPACITY] = [
-    ItemDefinition {
-        id: ItemId::EmberBlade,
-        name: "Ember Blade",
-        description: "+12% damage",
-        cost: 80,
-        bonuses: ItemBonuses {
-            damage_multiplier: 1.12,
-            ..ItemBonuses::NONE
-        },
-    },
-    ItemDefinition {
-        id: ItemId::SwiftGrip,
-        name: "Swift Grip",
-        description: "+12% basic attack and Q rate",
-        cost: 80,
-        bonuses: ItemBonuses {
-            attack_speed_multiplier: 1.12,
-            ..ItemBonuses::NONE
-        },
-    },
-    ItemDefinition {
-        id: ItemId::TrailBoots,
-        name: "Trail Boots",
-        description: "+8% movement speed",
-        cost: 80,
-        bonuses: ItemBonuses {
-            move_speed_multiplier: 1.08,
-            ..ItemBonuses::NONE
-        },
-    },
-    ItemDefinition {
-        id: ItemId::VitalityGem,
-        name: "Vitality Gem",
-        description: "+30 maximum HP",
-        cost: 80,
-        bonuses: ItemBonuses {
-            max_hp: 30.0,
-            ..ItemBonuses::NONE
-        },
-    },
-    ItemDefinition {
-        id: ItemId::FocusCharm,
-        name: "Focus Charm",
-        description: "+20 mana / +10% W E R haste",
-        cost: 100,
-        bonuses: ItemBonuses {
-            max_mana: 20.0,
-            spell_haste_multiplier: 1.10,
-            ..ItemBonuses::NONE
-        },
-    },
-    ItemDefinition {
-        id: ItemId::GuardianCrest,
-        name: "Guardian Crest",
-        description: "+15 maximum HP / +6% damage",
-        cost: 120,
-        bonuses: ItemBonuses {
-            max_hp: 15.0,
-            damage_multiplier: 1.06,
-            ..ItemBonuses::NONE
-        },
-    },
-];
-
-pub fn item(id: ItemId) -> &'static ItemDefinition {
-    ITEMS
-        .iter()
-        .find(|item| item.id == id)
-        .expect("every ItemId has a definition")
+/// Every item definition, in `ItemId::ALL` order.
+pub fn items() -> &'static [ItemDefinition] {
+    catalog::items()
 }
 
-/// Preference order only: every class may buy every item.
+pub fn item(id: ItemId) -> &'static ItemDefinition {
+    catalog::item(id)
+}
+
+/// Preference order only: every class may buy every item. Lists every item
+/// exactly once (checked when the catalog loads).
 pub fn recommended_items(class: HeroClass) -> &'static [ItemId] {
-    use ItemId::*;
-    match class {
-        HeroClass::Warrior => &[
-            VitalityGem,
-            EmberBlade,
-            GuardianCrest,
-            TrailBoots,
-            SwiftGrip,
-            FocusCharm,
-        ],
-        HeroClass::Mage => &[
-            EmberBlade,
-            FocusCharm,
-            TrailBoots,
-            VitalityGem,
-            GuardianCrest,
-            SwiftGrip,
-        ],
-        HeroClass::Ranger => &[
-            SwiftGrip,
-            EmberBlade,
-            TrailBoots,
-            VitalityGem,
-            GuardianCrest,
-            FocusCharm,
-        ],
-        HeroClass::Cleric => &[
-            VitalityGem,
-            FocusCharm,
-            TrailBoots,
-            GuardianCrest,
-            SwiftGrip,
-            EmberBlade,
-        ],
-        HeroClass::Warden => &[
-            SwiftGrip,
-            VitalityGem,
-            EmberBlade,
-            TrailBoots,
-            GuardianCrest,
-            FocusCharm,
-        ],
-    }
+    &catalog::hero(class).recommended_items
 }
 
 /// Different items add percentage points. A malformed duplicate never stacks.
 pub fn item_bonuses(inventory: &[ItemId]) -> ItemBonuses {
     let mut result = ItemBonuses::NONE;
-    for def in &ITEMS {
+    for def in items() {
         if inventory.contains(&def.id) {
             result.damage_multiplier += def.bonuses.damage_multiplier - 1.0;
             result.attack_speed_multiplier += def.bonuses.attack_speed_multiplier - 1.0;
@@ -276,9 +187,9 @@ mod tests {
     fn catalog_recommendations_and_starter_budget_are_coherent() {
         for class in HeroClass::ALL {
             let recommended = recommended_items(class);
-            assert_eq!(recommended.len(), INVENTORY_CAPACITY);
+            assert_eq!(recommended.len(), ItemId::ALL.len());
             assert!(item(recommended[0]).cost <= STARTING_GOLD);
-            for def in ITEMS {
+            for def in items() {
                 assert_eq!(recommended.iter().filter(|id| **id == def.id).count(), 1);
                 assert_eq!(ItemId::from_id(def.id.id()), Some(def.id));
             }
@@ -288,7 +199,7 @@ mod tests {
 
     #[test]
     fn bonuses_do_not_stack_duplicates_and_cooldown_rates_have_distinct_slots() {
-        let all: Vec<_> = ITEMS.iter().map(|item| item.id).collect();
+        let all: Vec<_> = items().iter().map(|item| item.id).collect();
         let bonuses = item_bonuses(&all);
         assert!((bonuses.damage_multiplier - 1.18).abs() < 0.0001);
         assert_eq!((bonuses.max_hp, bonuses.max_mana), (45.0, 20.0));

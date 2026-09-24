@@ -16,7 +16,11 @@ pub(super) fn builtin(name: &str) -> Option<SandboxConfig> {
         "late-game" => {
             c.player.level = 10;
             c.player.ranks = [3; 4];
-            c.player.inventory = shared::shop::ITEMS.iter().map(|i| i.id).collect();
+            c.player.inventory = shared::shop::items()
+                .iter()
+                .map(|i| i.id)
+                .take(shared::shop::INVENTORY_CAPACITY)
+                .collect();
             c.enemy.enabled = true;
             c.enemy.actor.level = 10;
             c.enemy.actor.ranks = [3; 4];
@@ -132,7 +136,9 @@ mod tests {
         }
         assert_eq!(
             builtin("late-game").unwrap().player.inventory.len(),
-            shared::shop::INVENTORY_CAPACITY
+            shared::shop::items()
+                .len()
+                .min(shared::shop::INVENTORY_CAPACITY)
         );
         assert!(named_path("../../escape").is_err());
     }

@@ -1,12 +1,14 @@
 //! Shared gameplay model for client/server sync: hero classes with per-class
-//! Q/W/E/R ability kits, rank/unlock mechanics, per-player ability snapshots,
-//! and the cosmetic avatar/sprite rosters (mirrors the client asset manifests).
+//! Q/W/E/R ability kits (data in `shared/assets/catalog/heroes.json`, see
+//! [`catalog`]), rank/unlock mechanics, per-player ability snapshots, and the
+//! cosmetic avatar/sprite rosters (mirrors the client asset manifests).
 
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 use std::time::Duration;
 
 pub mod career;
+pub mod catalog;
 pub mod combat;
 pub mod device_account;
 pub mod forest_pickups;
@@ -132,34 +134,8 @@ pub struct BasicAttackDefinition {
     pub cooldown_secs: f32,
 }
 
-pub const fn basic_attack_for_class(class: HeroClass) -> &'static BasicAttackDefinition {
-    match class {
-        HeroClass::Warrior => &BasicAttackDefinition {
-            range: 4.0,
-            damage: 12.0,
-            cooldown_secs: 0.9,
-        },
-        HeroClass::Mage => &BasicAttackDefinition {
-            range: 14.0,
-            damage: 8.0,
-            cooldown_secs: 1.1,
-        },
-        HeroClass::Ranger => &BasicAttackDefinition {
-            range: 16.0,
-            damage: 10.0,
-            cooldown_secs: 0.85,
-        },
-        HeroClass::Cleric => &BasicAttackDefinition {
-            range: 12.0,
-            damage: 8.0,
-            cooldown_secs: 1.0,
-        },
-        HeroClass::Warden => &BasicAttackDefinition {
-            range: 5.0,
-            damage: 11.0,
-            cooldown_secs: 0.85,
-        },
-    }
+pub fn basic_attack_for_class(class: HeroClass) -> &'static BasicAttackDefinition {
+    &catalog::hero(class).basic_attack
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -171,7 +147,8 @@ pub enum TargetingMode {
     SelfTarget,
 }
 
-/// Static definition for one ability. This is the single source of truth for id, costs, and UX text.
+/// Definition of one ability: id, costs and UX text. The values come from the
+/// class's kit in `shared/assets/catalog/heroes.json`.
 #[derive(Debug, Clone, Copy)]
 pub struct AbilityDefinition {
     pub id: &'static str,
@@ -189,33 +166,6 @@ pub struct AbilityDefinition {
 
 /// Maximum investable rank shared by every ability definition.
 pub const MAX_ABILITY_RANK: u8 = 3;
-
-const fn ability(
-    id: &'static str,
-    name: &'static str,
-    description: &'static str,
-    targeting: TargetingMode,
-    base_mana_cost: f32,
-    base_cooldown_secs: f32,
-    cast_range: f32,
-    projectile_damage: Option<f32>,
-    self_heal: Option<f32>,
-    self_mana_restore: Option<f32>,
-) -> AbilityDefinition {
-    AbilityDefinition {
-        id,
-        name,
-        description,
-        targeting,
-        base_mana_cost,
-        base_cooldown_secs,
-        cast_range,
-        max_rank: MAX_ABILITY_RANK,
-        projectile_damage,
-        self_heal,
-        self_mana_restore,
-    }
-}
 
 /// Playable hero class. Selected before joining; the server resolves the
 /// matching ability kit authoritatively per player.
@@ -256,51 +206,27 @@ impl HeroClass {
         Self::ALL.into_iter().find(|class| class.id() == id)
     }
 
-    pub const fn display_name(self) -> &'static str {
-        match self {
-            Self::Warrior => "Warrior",
-            Self::Mage => "Mage",
-            Self::Ranger => "Ranger",
-            Self::Cleric => "Cleric",
-            Self::Warden => "Warden",
-        }
+    pub fn display_name(self) -> &'static str {
+        catalog::hero(self).display_name
     }
 
     /// One-line kit summary for the class-select UI.
-    pub const fn tagline(self) -> &'static str {
-        match self {
-            Self::Warrior => "Close-range bruiser: heavy hits, self-sustain",
-            Self::Mage => "Long-range nuker: big damage, mana engine",
-            Self::Ranger => "Fast skirmisher: rapid shots, longest reach",
-            Self::Cleric => "Support: modest damage, strong heals",
-            Self::Warden => "Jungler: fast camp clears, bonus forest gold",
-        }
+    pub fn tagline(self) -> &'static str {
+        catalog::hero(self).tagline
     }
 
     /// The draft duty this kit is built for. Every class owns a distinct role,
     /// so one of each fills a five-player team. Players may still pick any role.
-    pub const fn primary_role(self) -> prematch::Role {
-        match self {
-            Self::Warrior => prematch::Role::Solo,
-            Self::Mage => prematch::Role::Mid,
-            Self::Ranger => prematch::Role::Carry,
-            Self::Cleric => prematch::Role::Support,
-            Self::Warden => prematch::Role::Jungle,
-        }
+    pub fn primary_role(self) -> prematch::Role {
+        catalog::hero(self).role
     }
 
     /// The class's Q/W/E/R kit (index = `SkillSlot::index()`).
-    pub const fn abilities(self) -> &'static [AbilityDefinition; 4] {
-        match self {
-            Self::Warrior => &WARRIOR_ABILITIES,
-            Self::Mage => &MAGE_ABILITIES,
-            Self::Ranger => &RANGER_ABILITIES,
-            Self::Cleric => &CLERIC_ABILITIES,
-            Self::Warden => &WARDEN_ABILITIES,
-        }
+    pub fn abilities(self) -> &'static [AbilityDefinition; 4] {
+        &catalog::hero(self).abilities
     }
 
-    pub const fn ability(self, slot: SkillSlot) -> &'static AbilityDefinition {
+    pub fn ability(self, slot: SkillSlot) -> &'static AbilityDefinition {
         &self.abilities()[slot.index()]
     }
 }
@@ -319,263 +245,6 @@ impl<'de> Deserialize<'de> for HeroClass {
         Ok(Self::from_id(&raw).unwrap_or_default())
     }
 }
-
-pub const WARRIOR_ABILITIES: [AbilityDefinition; 4] = [
-    ability(
-        "shield_bash",
-        "Shield Bash",
-        "Slams the selected enemy at close range.",
-        TargetingMode::UnitTarget,
-        10.0,
-        2.0,
-        12.0,
-        Some(24.0),
-        None,
-        None,
-    ),
-    ability(
-        "battle_rally",
-        "Battle Rally",
-        "Steels yourself, restoring health.",
-        TargetingMode::SelfTarget,
-        18.0,
-        6.0,
-        0.0,
-        None,
-        Some(20.0),
-        None,
-    ),
-    ability(
-        "heroic_strike",
-        "Heroic Strike",
-        "A crushing blow with very short reach.",
-        TargetingMode::UnitTarget,
-        22.0,
-        2.8,
-        10.0,
-        Some(38.0),
-        None,
-        None,
-    ),
-    ability(
-        "rampage",
-        "Rampage",
-        "Devastating close-range finisher.",
-        TargetingMode::UnitTarget,
-        40.0,
-        14.0,
-        14.0,
-        Some(60.0),
-        None,
-        None,
-    ),
-];
-
-pub const MAGE_ABILITIES: [AbilityDefinition; 4] = [
-    ability(
-        "arc_bolt",
-        "Arc Bolt",
-        "Homing bolt toward a selected enemy.",
-        TargetingMode::UnitTarget,
-        22.0,
-        2.2,
-        30.0,
-        Some(18.0),
-        None,
-        None,
-    ),
-    ability(
-        "mana_surge",
-        "Mana Surge",
-        "Restores mana instantly; no target required.",
-        TargetingMode::SelfTarget,
-        0.0,
-        8.0,
-        0.0,
-        None,
-        None,
-        Some(35.0),
-    ),
-    ability(
-        "frost_lance",
-        "Frost Lance",
-        "Piercing shard with strong impact damage.",
-        TargetingMode::UnitTarget,
-        28.0,
-        3.0,
-        26.0,
-        Some(34.0),
-        None,
-        None,
-    ),
-    ability(
-        "pyroblast",
-        "Pyroblast",
-        "Massive fireball with the longest reach in the mage kit.",
-        TargetingMode::UnitTarget,
-        50.0,
-        16.0,
-        32.0,
-        Some(72.0),
-        None,
-        None,
-    ),
-];
-
-pub const RANGER_ABILITIES: [AbilityDefinition; 4] = [
-    ability(
-        "quick_shot",
-        "Quick Shot",
-        "Very fast arrow with modest damage.",
-        TargetingMode::UnitTarget,
-        14.0,
-        1.8,
-        24.0,
-        Some(14.0),
-        None,
-        None,
-    ),
-    ability(
-        "field_dressing",
-        "Field Dressing",
-        "Patches wounds on the move.",
-        TargetingMode::SelfTarget,
-        16.0,
-        5.0,
-        0.0,
-        None,
-        Some(14.0),
-        None,
-    ),
-    ability(
-        "piercing_arrow",
-        "Piercing Arrow",
-        "Heavy arrow with extended reach.",
-        TargetingMode::UnitTarget,
-        24.0,
-        2.0,
-        34.0,
-        Some(30.0),
-        None,
-        None,
-    ),
-    ability(
-        "longshot",
-        "Longshot",
-        "Sniper shot across the longest range of any kit.",
-        TargetingMode::UnitTarget,
-        36.0,
-        12.0,
-        40.0,
-        Some(48.0),
-        None,
-        None,
-    ),
-];
-
-pub const CLERIC_ABILITIES: [AbilityDefinition; 4] = [
-    ability(
-        "smite",
-        "Smite",
-        "Radiant bolt against a selected enemy.",
-        TargetingMode::UnitTarget,
-        12.0,
-        2.0,
-        22.0,
-        Some(16.0),
-        None,
-        None,
-    ),
-    ability(
-        "renew",
-        "Renew",
-        "Mends the caster's wounds.",
-        TargetingMode::SelfTarget,
-        20.0,
-        4.0,
-        0.0,
-        None,
-        Some(26.0),
-        None,
-    ),
-    ability(
-        "divine_favor",
-        "Divine Favor",
-        "Channels faith into mana.",
-        TargetingMode::SelfTarget,
-        0.0,
-        9.0,
-        0.0,
-        None,
-        None,
-        Some(24.0),
-    ),
-    ability(
-        "guardians_blessing",
-        "Guardian's Blessing",
-        "Major self-restoration; the strongest heal in the game.",
-        TargetingMode::SelfTarget,
-        30.0,
-        18.0,
-        0.0,
-        None,
-        Some(60.0),
-        None,
-    ),
-];
-
-/// Jungler kit: melee-range bites for camp clears, a self-heal to stay in the
-/// forest between camps, and a finisher. The camp bonus lives in `jungle`.
-pub const WARDEN_ABILITIES: [AbilityDefinition; 4] = [
-    ability(
-        "feral_swipe",
-        "Feral Swipe",
-        "Rakes the selected enemy at close range.",
-        TargetingMode::UnitTarget,
-        12.0,
-        2.2,
-        12.0,
-        Some(22.0),
-        None,
-        None,
-    ),
-    ability(
-        "barkskin",
-        "Barkskin",
-        "Hardens like old wood and mends wounds between camps.",
-        TargetingMode::SelfTarget,
-        16.0,
-        6.0,
-        0.0,
-        None,
-        Some(18.0),
-        None,
-    ),
-    ability(
-        "hunters_mark",
-        "Hunter's Mark",
-        "Thrown spear that pins prey at medium range.",
-        TargetingMode::UnitTarget,
-        22.0,
-        4.0,
-        20.0,
-        Some(28.0),
-        None,
-        None,
-    ),
-    ability(
-        "primal_maul",
-        "Primal Maul",
-        "Savage finisher for monsters and heroes caught out of lane.",
-        TargetingMode::UnitTarget,
-        40.0,
-        14.0,
-        14.0,
-        Some(56.0),
-        None,
-        None,
-    ),
-];
 
 /// Resolves the ability for a class and slot (server-authoritative kit lookup).
 #[inline]

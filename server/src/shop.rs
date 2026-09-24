@@ -259,8 +259,11 @@ mod tests {
                 PurchaseError::InsufficientGold => player.economy.gold = 79,
                 PurchaseError::AlreadyOwned => player.economy.inventory.push(ItemId::EmberBlade),
                 PurchaseError::InventoryFull => {
-                    player.economy.inventory =
-                        shared::shop::ITEMS.iter().map(|item| item.id).collect()
+                    player.economy.inventory = shared::shop::items()
+                        .iter()
+                        .map(|item| item.id)
+                        .take(INVENTORY_CAPACITY)
+                        .collect()
                 }
                 PurchaseError::UnknownItem => {}
             }

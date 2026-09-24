@@ -86,7 +86,11 @@ fn sandbox_defaults_valid_and_actor_edit_is_transactional() {
     c.player.level = 10;
     c.player.ranks = [3; 4];
     c.player.max_hp = 321.0;
-    c.player.inventory = shared::shop::ITEMS.iter().map(|i| i.id).collect();
+    c.player.inventory = shared::shop::items()
+        .iter()
+        .map(|i| i.id)
+        .take(shared::shop::INVENTORY_CAPACITY)
+        .collect();
     c.player.damage_multiplier = 2.0;
     c.player.attack_speed = 3.0;
     rt.world.players.get_mut(&a).unwrap().hero.hp = 27.0;
@@ -274,7 +278,10 @@ fn sandbox_progression_unlock_items_teleport_reset_and_hero_swap() {
     c.enemy.actor.ranks = [3; 4];
     apply(&mut rt, a, c);
     assert_eq!(rt.world.players.len(), 2);
-    for item in shared::shop::ITEMS {
+    for item in shared::shop::items()
+        .iter()
+        .take(shared::shop::INVENTORY_CAPACITY)
+    {
         assert!(
             command(
                 &mut rt,

@@ -16,9 +16,14 @@ import socket
 import subprocess
 import time
 
+import catalog
+
 STARTING_GOLD = 80
-ITEM_COSTS = dict(ember_blade=80, swift_grip=80, trail_boots=80,
-                  vitality_gem=80, focus_charm=100, guardian_crest=120)
+ITEM_COSTS = catalog.item_costs()
+# Q/W/E/R slots whose ability deals damage, per class; without a class only
+# the slots that are offensive for every class count.
+OFFENSIVE_SLOTS = catalog.offensive_slots()
+COMMON_OFFENSIVE_SLOTS = frozenset.intersection(*OFFENSIVE_SLOTS.values())
 BASE_ITEM_BONUSES = dict(damage_multiplier=1.0, attack_speed_multiplier=1.0,
                         move_speed_multiplier=1.0, spell_haste_multiplier=1.0,
                         max_hp=0.0, max_mana=0.0)
@@ -132,9 +137,8 @@ class MatchProof:
                     if not any((p['player_id'], p['request_id']) == key for p in current['purchases']):
                         current['purchases'].append(dict(player_id=player['id'], request_id=receipt['request_id'],
                             item_id=receipt['item_id'], cost=ITEM_COSTS[receipt['item_id']], elapsed_secs=elapsed))
-                offensive = player['action_slot'] == 0 or (
-                    player.get('class') in ('warrior', 'mage', 'ranger', 'warden')
-                    and player['action_slot'] in (2, 3))
+                offensive = player['action_slot'] in OFFENSIVE_SLOTS.get(
+                    player.get('class'), COMMON_OFFENSIVE_SLOTS)
                 if player['action_sequence'] and offensive:
                     if player['action_slot'] not in current['offensive_slots']:
                         current['offensive_slots'].append(player['action_slot'])
