@@ -1,5 +1,48 @@
 //! Regressions for side-lane corner spurs, using real wave spawn and movement.
-use super::*;
+
+use crate::world::build_minion_path;
+
+use crate::balance::FIRST_MINION_WAVE_DELAY;
+
+use crate::balance::MINION_SPEED;
+
+use crate::balance::TARGET_BASE_DISTANCE;
+
+use shared::map::Lane;
+
+use crate::world::build_map_layout;
+
+use crate::world::build_structures;
+
+use crate::world::spawn_minion_wave_for_team_lane;
+
+use crate::game_world::GameWorld;
+
+use std::time::Duration;
+
+use std::collections::HashMap;
+
+use crate::entities::Vec3f;
+
+use crate::balance::MINIONS_PER_WAVE;
+
+use crate::world::spawn_minion_waves_if_due;
+
+use crate::combat_feedback::minion_stats;
+
+use shared::map::Team;
+
+use shared::wire::MinionBrainState;
+
+use std::time::Instant;
+
+use crate::entities::MapLayoutState;
+
+use crate::sim::minions::simulate_minions;
+
+use crate::game_world::TickCtx;
+
+use crate::balance::MINION_SPAWN_HEIGHT;
 
 /// Lane corridors stop at the base entry coordinate. The decorative corner
 /// beyond that entry is not a destination a marching wave needs to visit.

@@ -1,4 +1,9 @@
 //! Private immutable allocation manifest and atomic worker lifecycle receipts.
+use shared::map::Team;
+use std::time::Instant;
+use std::net::SocketAddr;
+use crate::runtime::ServerRuntime;
+use shared::wire::ClientPacket;
 use std::collections::HashSet;
 use crate::session::normalize_session_id;
 use std::io;
@@ -193,7 +198,8 @@ impl ServerRuntime {
 }
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use shared::map::Team;
+use super::*;
     fn fixture() -> Manifest {
         Manifest {
             version: 1,

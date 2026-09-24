@@ -1,5 +1,28 @@
 //! Exercise forest authority through the real decoded-packet handler.
-use super::*;
+
+use crate::balance::PLAYER_SPEED;
+
+use std::net::SocketAddr;
+
+use std::time::Duration;
+
+use std::net::UdpSocket;
+
+use shared::map::Team;
+
+use crate::match_rules::MatchConfig;
+
+use shared::wire::CharacterChoice;
+
+use shared::HeroClass;
+
+use crate::balance::PLAYER_GROUND_Y;
+
+use crate::runtime::ServerRuntime;
+
+use std::time::Instant;
+
+use shared::wire::ClientPacket;
 
 #[test]
 fn transform_packets_cannot_tunnel_through_trees_but_a_legal_route_arrives() {

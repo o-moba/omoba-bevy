@@ -1,4 +1,8 @@
 //! Authoritative base-shop validation, payment and passive income.
+use shared::wire::GameState;
+use shared::shop::ItemId;
+use shared::map::Team;
+use std::net::SocketAddr;
 use shared::shop::PurchaseReceipt;
 use crate::entities::MapLayoutState;
 use std::collections::HashMap;

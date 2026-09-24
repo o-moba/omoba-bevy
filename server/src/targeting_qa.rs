@@ -1,6 +1,7 @@
 //! Opt-in developer capture setup. Only initial join placement and ambient AI
 //! are changed. Player movement, health, mana, strikes and damage stay real.
 
+use crate::match_rules::MatchMode;
 use std::collections::HashMap;
 
 use shared::map::Team;

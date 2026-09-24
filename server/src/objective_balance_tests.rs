@@ -1,5 +1,52 @@
 //! Controlled stationary, no-minion outer-tower safety sample through production authority.
-use super::*;
+
+use shared::map::Lane;
+
+use crate::sim::towers::simulate_tower_attacks;
+
+use std::net::UdpSocket;
+
+use shared::wire::TargetId;
+
+use shared::map::Team;
+
+use crate::sim::cast::handle_cast_request;
+
+use crate::sim::projectiles::simulate_projectiles;
+
+use shared::wire::TargetKind;
+
+use crate::world::build_structures;
+
+use crate::match_rules::MatchConfig;
+
+use crate::world::spawn_minion_wave_for_team_lane;
+
+use crate::game_world::GameWorld;
+
+use shared::wire::CharacterChoice;
+
+use shared::HeroClass;
+
+use crate::runtime::ServerRuntime;
+
+use shared::wire::StructureKind;
+
+use std::time::Instant;
+
+use shared::wire::ClientPacket;
+
+use crate::basic_attack::handle_basic_attack_request;
+
+use crate::game_world::TickCtx;
+
+use std::net::SocketAddr;
+
+use crate::world::build_map_layout;
+
+use crate::balance::MANA_REGEN_PER_SECOND;
+
+use std::time::Duration;
 
 fn siege(
     class: HeroClass,

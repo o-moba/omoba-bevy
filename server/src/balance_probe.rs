@@ -1,6 +1,61 @@
 //! Controlled balance measurements through the ordinary authoritative combat path.
 //! No sandbox/god mode/unlimited mana. See docs/balance-tuning.md for limitations.
-use super::*;
+
+use shared::wire::ClientPacket;
+
+use crate::sim::cast::apply_skill_upgrade;
+
+use shared::unlocked_slots_for_level;
+
+use crate::hero_stats;
+
+use crate::progression::grant_player_xp;
+
+use crate::game_world::TickCtx;
+
+use shared::wire::GameState;
+
+use shared::scaled_mana_cost;
+
+use crate::sim::cast::handle_cast_request;
+
+use crate::match_rules::MatchConfig;
+
+use crate::session::handle_transform_request_with_structures;
+
+use std::time::Duration;
+
+use crate::balance::MOVEMENT_POSITION_TOLERANCE;
+
+use shared::TargetingMode;
+
+use std::net::UdpSocket;
+
+use crate::sim::regenerate_mana;
+
+use shared::wire::TargetId;
+
+use crate::runtime::ServerRuntime;
+
+use shared::map::Team;
+
+use std::time::Instant;
+
+use crate::sim::projectiles::simulate_projectiles;
+
+use shared::wire::TargetKind;
+
+use shared::ability_for_class_slot;
+
+use crate::basic_attack;
+
+use shared::SkillSlot;
+
+use shared::wire::CharacterChoice;
+
+use shared::HeroClass;
+
+use std::net::SocketAddr;
 
 fn fixture(
     attacker: HeroClass,

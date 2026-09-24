@@ -1,5 +1,33 @@
 //! Configuration is exercised through the actual simulation and packet handler.
-use super::*;
+use crate::world::spawn_minion_wave_for_team_lane;
+use shared::wire::TargetKind;
+use shared::map::Team;
+use crate::world::build_map_layout;
+use crate::world::load_map_config;
+use crate::game_world::GameWorld;
+use crate::match_rules::MatchConfig;
+use crate::balance::MINION_ATTACK_DAMAGE;
+use crate::sim::towers::apply_structure_damage;
+use crate::game_world::TickCtx;
+use shared::wire::ClientPacket;
+use shared::wire::GameState;
+use std::time::Duration;
+use std::time::Instant;
+use crate::entities::Structure;
+use crate::world::build_structures;
+use shared::combat::CombatEntityKind;
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use crate::world::build_configured_structures;
+use crate::runtime::ServerRuntime;
+use shared::combat::MinionKind;
+use shared::map::Lane;
+use shared::combat::ProjectileStyle;
+use std::net::UdpSocket;
+use crate::sim::minions::simulate_minions;
+use crate::sim::towers::simulate_tower_attacks;
+use crate::sim::towers::structure_is_protected;
+use crate::world::spawn_position_for_team;
 use shared::map::{MapDefinition, Placement, ResolvedMap};
 
 fn example_definition() -> MapDefinition {

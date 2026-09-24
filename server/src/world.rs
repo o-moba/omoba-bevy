@@ -5,10 +5,12 @@ use crate::entities::Vec3f;
 
 use std::collections::HashMap;
 
+#[cfg(test)]
 use crate::balance::TOWER_DAMAGE;
 
 use std::time::Duration;
 
+#[cfg(test)]
 use crate::balance::TOWER_MAX_HP;
 
 use crate::balance::PLAYER_SPAWN_OFFSET;
@@ -41,14 +43,18 @@ use crate::entities::StructureRole;
 
 use shared::wire::MinionState;
 
+#[cfg(test)]
 use crate::balance::BASE_TOWER_MAX_HP;
 
+#[cfg(test)]
 use crate::balance::BASE_TOWER_DAMAGE;
 
 use crate::combat_feedback::minion_stats;
 
+#[cfg(test)]
 use crate::balance::TOWER_COOLDOWN;
 
+#[cfg(test)]
 use crate::balance::BASE_TOWER_RANGE;
 
 use crate::entities::MapLayoutState;
@@ -61,10 +67,12 @@ use shared::map::Lane;
 
 use crate::game_world::GameWorld;
 
+#[cfg(test)]
 use crate::balance::BASE_TOWER_COOLDOWN;
 
 use crate::entities::Structure;
 
+#[cfg(test)]
 use crate::balance::TOWER_RANGE;
 
 #[cfg(test)]

@@ -8,7 +8,7 @@
 //! (a queue on the same thread, acknowledged by hand or immediately), so
 //! `MemoryCareer` runs the identical account logic without a database.
 use crate::career_port::CareerPort;
-use crate::career_store::CareerStore;
+use omoba_career_store::career_store::CareerStore;
 use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use shared::career::*;

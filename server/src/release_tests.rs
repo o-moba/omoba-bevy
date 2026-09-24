@@ -1,5 +1,114 @@
 //! Release regressions exercise the actual decoded-packet handler and UDP receiver.
-use super::*;
+
+use shared::wire::TargetKind;
+
+use crate::balance::RESPAWN_DELAY;
+
+use crate::neutrals::boss_spawn_delay;
+
+use shared::shop::STARTING_GOLD;
+
+use shared::wire::ProjectileState;
+
+use crate::hero::Hero;
+
+use shared::wire::CharacterChoice;
+
+use shared::HeroClass;
+
+use crate::entities::Projectile;
+
+use crate::session::handle_respawns;
+
+use crate::entities::Vec3f;
+
+use shared::shop::ItemBonuses;
+
+use shared::wire::TeamBuffKind;
+
+use std::net::SocketAddr;
+
+use crate::world::spawn_position_for_team_from_base;
+
+use crate::sim::minions::award_minion_kill_rewards;
+
+use crate::formation::joined_count;
+
+use shared::wire::StructureKind;
+
+use shared::wire::ServerPacket;
+
+use crate::balance::MAX_HP;
+
+use shared::wire::ClientPacket;
+
+use crate::entities::ConnectedPlayer;
+
+use crate::sim::towers::structure_is_protected;
+
+use crate::match_rules::MatchMode;
+
+use crate::hero::HeroEconomy;
+
+use crate::progression::grant_player_xp;
+
+use crate::balance::FIRST_MINION_WAVE_DELAY;
+
+use crate::world::spawn_position_for_team;
+
+use crate::balance::EMPTY_ROSTER_GRACE;
+
+use shared::wire::GameState;
+
+use shared::combat::CombatEntityKind;
+
+use crate::balance::MINION_WAVE_INTERVAL;
+
+use crate::runtime::PLAYER_TIMEOUT;
+
+use crate::balance::STARTING_LEVEL;
+
+use crate::match_rules::MatchConfig;
+
+use crate::progression::xp_threshold_for_level;
+
+use crate::world::spawn_minion_wave_for_team_lane;
+
+use shared::combat::ProjectileStyle;
+
+use std::time::Duration;
+
+use std::collections::HashMap;
+
+use crate::balance::MINIONS_PER_WAVE;
+
+use shared::map::Lane;
+
+use shared::PlayerActionKind;
+
+use crate::balance::LEVEL_UP_HP_BONUS;
+
+use crate::balance::MINION_KILL_GOLD;
+
+use std::net::UdpSocket;
+
+use shared::wire::TargetId;
+
+use crate::runtime::ServerRuntime;
+
+use crate::balance::MAX_MANA;
+
+use crate::entities::DisconnectedSession;
+
+use crate::balance::SESSION_RECLAIM_WINDOW;
+
+use shared::map::Team;
+
+use crate::sim::towers::apply_structure_damage;
+
+use std::time::Instant;
+
+use crate::snapshot::SNAPSHOT_INTERVAL;
 
 fn runtime(config: MatchConfig) -> ServerRuntime {
     let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
