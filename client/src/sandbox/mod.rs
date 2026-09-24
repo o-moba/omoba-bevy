@@ -30,7 +30,7 @@ fn parse_launch(args: impl IntoIterator<Item = String>, enabled: bool) -> Result
             "--hero" => {
                 let value = args
                     .next()
-                    .ok_or("--hero needs warrior, mage, ranger or cleric")?;
+                    .ok_or("--hero needs warrior, mage, ranger, cleric or warden")?;
                 result.hero = Some(
                     shared::HeroClass::from_id(&value)
                         .ok_or_else(|| format!("Unknown hero: {value}"))?,
