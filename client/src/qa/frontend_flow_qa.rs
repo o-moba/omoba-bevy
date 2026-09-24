@@ -1,6 +1,6 @@
 //! Opt-in end-to-end capture of the front-end flow against a real server.
 //!
-//! Unlike [`crate::frontend_qa`], which sets each screen directly, this harness
+//! Unlike [`super::frontend_qa`], which sets each screen directly, this harness
 //! presses the actual buttons (it flips their [`Interaction`] to `Pressed`, the
 //! same signal a click produces) and then lets the session drive the shell. It
 //! exists to prove the ordering the shell promises: nothing is sent to the

@@ -19,13 +19,15 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
 3. Before opening a PR the full gate must be green locally:
    `make check` (= `cargo fmt --all -- --check`,
    `cargo clippy --workspace --all-targets --no-deps -- -D warnings`,
+   `cargo clippy -p client --lib --no-deps --no-default-features -- -D warnings`,
    `cargo test --workspace --locked --exclude harness`, Python script tests)
    plus the black-box harness against the freshly built server:
    `cargo build -p server && cargo test --locked -p harness -- --test-threads=1`
    (about five minutes; it is the only check that exercises a real match end
    to end, so never skip it for a server or protocol change). Reference
    counts at the time of writing: server 282 (+3 ignored), shared 78, client
-   lib 549, harness 22 unit + 24 black-box.
+   lib 549 (529 with `--no-default-features`, i.e. without the QA
+   harnesses), harness 22 unit + 24 black-box.
 4. One step per branch, named `refactor/<topic>` (docs-only: `docs/<topic>`),
    cut from the current `origin/main`.
 5. No wire-visible change unless the step says so explicitly; `shared/` stays
@@ -56,14 +58,14 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
 | 6c | `StatModifiers` + `hero_stats.rs`; non-owner redaction of private economy on the wire (wire-visible, no version bump) | done | #29 |
 | 7 | Server `MatchRules` policy object; career, transport and clock behind traits | done | #31, #32 |
 | 14 | Server per-variant packet handlers, explicit imports instead of crate-root globs | done | #33 |
-| 10 | Client domain module, combat/player split, render backends behind `run_if`, plugin groups, QA behind a cargo feature | in progress: 10a+10d (#35), 10b+10c (this PR); slices in [plans/client-10-15.md](plans/client-10-15.md) | #35, this PR |
+| 10 | Client domain module, combat/player split, render backends behind `run_if`, plugin groups, QA behind a cargo feature | done (optional 10h/10i open, see [plans/client-10-15.md](plans/client-10-15.md)) | #35, #36, #37 |
 | 11 | One debug tooling family shared by Combat Test, practice and offline | pending | |
 | 12 | Data-driven hero and item catalogs with validation tests | done: 12a-12e (this PR); 12f (optional client cross-checks) open | this PR |
 | 13 | Roster/asset loading and SDK types out of the shared model | pending | |
 | 15 | Client session events and staged snapshot application | pending | |
 | 9b | UI kit follow-ups: scroll unification, modal registry, frontend/social/supporter/sandbox screens, responsive layout, `TestId` in QA | pending (order in [ui-kit.md](ui-kit.md)) | |
 
-Suggested order after 7: 14 (done), 10, 15, 11, 12, 13, 9b (server first while
+Suggested order after 7: 14 (done), 10 (done), 15, 11, 12, 13, 9b (server first while
 its structure is fresh, then the client). Each row is one to four PRs.
 
 ## How to continue
@@ -95,14 +97,17 @@ its structure is fresh, then the client). Each row is one to four PRs.
 - `runtime/dispatch.rs` keeps `receive_packets`, `handle_packet` and `handle_packet_authorized`: the pre-checks up to the career and practice join admission are unchanged; `Leave`, the career-flow `RequestRematch`, `Practice`, `Sandbox` and the paused-sandbox gate became the first arms (with guards) of the one `match`, in the old order, so the `unreachable!` arms for `Leave`, `Practice` and `Sandbox` are gone; `Career`/`Social`/`Prematch` keep one `unreachable!` (routed by `handle_packet`, never reach the authorized path). The sandbox's `now` is computed before the `match` (a pure read); the pre-check arms get the wall clock as before.
 - Imports (done): `main.rs` is the module list and `fn main`; the 24 crate-root globs (`use balance::*`, `pub(crate) use entities::*`, `sim::{cast::*, …, *}`, …) and the root `use shared::…`/`use std::…`/`omoba_career_store` lines that fed them are gone; every module names its imports. The 26 `use crate::*;` and the 20 file-level `use super::*;` in direct children of the crate root (which meant the crate root) are gone, and four `tests/*.rs` files lost a `use super::*;` that only carried the root re-exports; 29 `use super::*;` remain, all in test modules whose parent is a real module. The four `use shared::{career,sandbox,utility,vision}::*;` domain globs are untouched.
 
-### 10: Client domain and plugin groups (in progress)
+### 10: Client domain and plugin groups (done, #35, #36 and this PR)
 - `client/src/domain/` for client-side game model types now spread across `combat.rs`, `player.rs`, `targeting.rs`; split `combat.rs` (targeting, casting, feedback) and `player.rs` (prediction vs presentation); 2D/3D render backends registered behind `run_if(PlayerVisualMode == …)`; `PluginGroup`s (`NetPlugins`, `GameplayPlugins`, `PresentationPlugins`, `UiPlugins`, `QaPlugins`); QA modules behind a `qa` cargo feature (default on for dev builds).
 - The file/line inventory and the ordered slices (10a-10i) are in [plans/client-10-15.md](plans/client-10-15.md) (sections 10.1-10.7), together with step 15.
 - 10a (#35): `client/src/domain/{mod,round,team,stats,actors}.rs` with `RoundId` (+ tests), `Team` and its `shared::map::Team` bridges, `CombatStats` + `MAX_HP`/`MAX_MANA`, `Player`/`PlayerBody`/`VerticalVelocity`/`RemotePlayer`, `MovementTarget`/`MovementRoute`; the old paths re-export them. `CombatPointerInputSet`/`WorldMovementInputSet` moved to `input_context.rs` (re-exported from `combat`). `CombatRoundIdentity` and `MobileControls.round_identity` hold `Option<RoundId>` (same semantics; switching them to `RoundChanged` is 15c).
 - 10d (#35): `sprite::in_models3d()`/`in_sprite2d()` (`resource_exists_and_equals`) gate the backend registration sites listed in plan 10.4, except `battlefield_atmosphere.rs` (screen-space mist without a mode guard, shown in both modes). Internal mode guards stay.
-- 10b (this PR): `combat.rs` → `client/src/combat/{mod,cooldown,feedback,round_reset,selection,cast,mobile,hotbar,bars,marker}.rs`, `targeting.rs` → `combat/targeting.rs` (`lib.rs` keeps `pub(crate) use combat::targeting;`), tests in `combat/tests.rs` and `combat/target_presentation_tests.rs`. Verbatim moves; `mod.rs` keeps `CombatPlugin` (registration unchanged) and `configure_target_presentation` and re-exports the surface other modules import, so no file outside `combat/` changed its imports.
-- 10c (this PR): `player.rs` → `client/src/player/{mod,input,motion,respawn_ui,animation}.rs` plus `tests.rs`/`animation_tests.rs`; `mod.rs` keeps `PlayerPlugin`, `DebugSpeedBoost`, the constants and `ground_origin_y`. Same re-export and visibility rules (`pub(super)` for items and fields the sibling files or the test modules use; nothing widened to `pub(crate)`).
-- Next: 10e (plugin groups), 10f/10g (QA feature).
+- 10b (#36): `combat.rs` → `client/src/combat/{mod,cooldown,feedback,round_reset,selection,cast,mobile,hotbar,bars,marker}.rs`, `targeting.rs` → `combat/targeting.rs` (`lib.rs` keeps `pub(crate) use combat::targeting;`), tests in `combat/tests.rs` and `combat/target_presentation_tests.rs`. Verbatim moves; `mod.rs` keeps `CombatPlugin` (registration unchanged) and `configure_target_presentation` and re-exports the surface other modules import, so no file outside `combat/` changed its imports.
+- 10c (#36): `player.rs` → `client/src/player/{mod,input,motion,respawn_ui,animation}.rs` plus `tests.rs`/`animation_tests.rs`; `mod.rs` keeps `PlayerPlugin`, `DebugSpeedBoost`, the constants and `ground_origin_y`. Same re-export and visibility rules (`pub(super)` for items and fields the sibling files or the test modules use; nothing widened to `pub(crate)`).
+- 10e (this PR): `client/src/plugins.rs` with `NetPlugins`, `UiPlugins`, `GameplayPlugins` (including the debug tooling until step 11) and `PresentationPlugins`; `main` adds `DefaultPlugins`, inserts `PlayerVisualMode::from_environment()` once (`SpriteVisualsPlugin` only `init_resource`s it now), then the four groups and `QaPlugins`. `UiKitPlugin` → `MobileControlsPlugin` → `MobileUiPlugin` stay first in `UiPlugins` (the only build-time reads); the QA plugins build last. System registration inside the plugins is unchanged.
+- 10f (this PR): `client/Cargo.toml` `[features] default = ["qa"]`; the harnesses moved to `client/src/qa/` (renames; three intra-QA paths now say `super::`), `qa/mod.rs` owns `QaPlugins`, the supporter capture moved out of `SupporterPlugin` into `qa/supporter.rs` (`SupporterQaPlugin`), `animation_qa::run` in `main` and `sandbox/ui/qa.rs` (kept in place: it drives the panel's private types) are `cfg(feature = "qa")`, and the `OMOBA_QA_SUPPORTER`/`OMOBA_CAREER_QA_OUTPUT` checks in production code are `cfg!(feature = "qa") && …`. `frontend::bypass_for` is automation and unchanged. No script, Makefile target or packaging step changed.
+- 10g (this PR): `make check-no-qa` (part of `make check`) and a CI step run `cargo clippy -p client --lib --no-deps --no-default-features -- -D warnings`. Production items only QA reads are `#[cfg(feature = "qa")]`, items QA and tests read are `#[cfg(any(test, feature = "qa"))]`; nothing uses `allow(dead_code)`. Client lib tests: 549 with the default features, 529 without.
+- Optional follow-ups from the plan: 10h (mobile store builds with `--no-default-features`), 10i (migrate imports off the re-export shims).
 
 ### 15: Client session events
 - `SessionEvent` (Connected, Joined, Rejected, Disconnected, RoundReset) and `SnapshotApplied` messages emitted by `net/session.rs` and `net/apply.rs`; other modules subscribe instead of writing into `ClientSession`; `apply_server_snapshot` split into staged passes (players, structures, minions, neutrals, events).

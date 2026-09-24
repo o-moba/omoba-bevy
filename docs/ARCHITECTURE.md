@@ -13,7 +13,7 @@ maintainers are working through. Feature-level documentation lives in
 | `shared` (MPL) | The gameplay model both sides agree on: hero classes and ability kits, hero growth, items, map geometry and navigation, the wire protocol, prematch/draft, social/career/account contracts, sandbox and practice commands. Per-class and per-item data is JSON in `shared/assets/catalog/`, embedded and validated at startup (`shared::catalog`). No Bevy, no I/O in the model itself. | serde |
 | `server` (AGPL) | The authoritative simulation and UDP endpoint: match lifecycle, bots, combat, shop, career settlement, public transport signing, allocation workers. Binary only. | shared, passport, career-store |
 | `career-store` (AGPL) | Trusted career persistence (Postgres, migrations) and the bounded queue policy, linked by the server and the account API without the engine. | shared, sqlx |
-| `client` (MPL) | The Bevy game: networking, prediction, presentation (2D sprites and 3D models), UI, mobile input, offline practice, QA harnesses. | shared, passport, bevy, ekza-bevy-sdk |
+| `client` (MPL) | The Bevy game: networking, prediction, presentation (2D sprites and 3D models), UI, mobile input, offline practice, QA harnesses (`qa` feature, on by default). | shared, passport, bevy, ekza-bevy-sdk |
 | `harness` | Black-box UDP players and gameplay/matchmaking checks that launch the server binary. | shared |
 | `passport` | Ekza passport contract: tickets, device and web accounts, store admission. | shared, ekza-bevy-sdk |
 | `account-api` | Axum/Postgres HTTP service over the career store (portal, devices, supporter billing). | shared, career-store |
@@ -35,9 +35,47 @@ Rules that follow from the map:
 
 ## Client frame
 
-Plugins are registered in `client/src/lib.rs`. The `Update` schedule is
-ordered by a small number of system sets; read these together to understand
-frame order:
+`client/src/lib.rs` is the module list and `main`. `main` adds
+`DefaultPlugins`, inserts `PlayerVisualMode` once (from
+`OMOBA_PLAYER_VISUAL_MODE`), then adds the plugin groups from
+`client/src/plugins.rs` in this order:
+
+| Group | Plugins |
+| --- | --- |
+| `NetPlugins` | `ClientPersistencePlugin`, `NetworkingPlugin`, `MatchServicePlugin`, `CareerIdentityPlugin` |
+| `UiPlugins` | `UiKitPlugin`, `MobileControlsPlugin`, `MobileUiPlugin`, `FrontendPlugin` (+ its nine screen and widget plugins), `TeamSelectPlugin`, `GameStateUiPlugin`, `MatchHudPlugin`, `EdgeHudPlugin`, `MinimapPlugin` (+ `MinimapRoutePlugin`), `ShopPlugin`, `HelpOverlayPlugin`, `PauseMenuPlugin`, `SocialPlugin`, `CareerPlugin`, `SupporterPlugin`, `SupporterStoreKitPlugin` |
+| `GameplayPlugins` | `MapsPlugin`, `InputContextPlugin`, `PlayerPlugin`, `CombatPlugin`; the debug tooling until step 11: `SandboxPlugin`, `PracticeSandboxPlugin`, `GodModePlugin`, `DebugConsolePlugin` |
+| `PresentationPlugins` | shared: `CameraPlugin`, `SetupPlugin`, `ModelScalePlugin`, `CombatVisualsPlugin`, `CombatFeedbackPlugin`, `GameVfxPlugin`, `ReactionVisualsPlugin`, `TeamVisionPlugin`, `GameAudioPlugin`, `MapVisualsPlugin`; 2D: `SpriteVisualsPlugin`, `Presentation2dPlugin`, `World2dPlugin`; 3D: `Presentation3dPlugin`, `Verdant3dPlugin`, `DecorPlugin`, `JungleVisualsPlugin`, `MinionVisualsPlugin`, `BossesPlugin`, `ProjectileVisualsPlugin`, `BattlefieldAtmospherePlugin` |
+| `QaPlugins` (`qa` feature) | `FrontendQaPlugin` (+ avatar and flow), `VisualQaPlugin` (+ beta UI and navigation), `SocialQaPlugin`, `SupporterQaPlugin`, `TeamVisionQaPlugin`, `AudioQaPlugin`, `OfflineQaPlugin`, `CareerVisualQaPlugin`, `MapQaPlugin`, `CombatQaPlugin`, `ForestPickupQaPlugin`, `TargetingQaPlugin` |
+
+The group order only fixes the order of `Plugin::build`. Three builds read
+what an earlier build inserted, and the order keeps them satisfied:
+`UiKitPlugin` inserts `UiPlatform`, `MobileControlsPlugin` reads it to set
+`MobileControls::enabled`, and `MobileUiPlugin` reads that to decide whether
+to register at all; the QA plugins come last, so their
+`WinitSettings::continuous()` and `ScreenDriverPaused(true)` overwrite the
+production values. Frame order comes from the system sets below, never from
+the group order.
+
+QA harnesses live in `client/src/qa/` behind the `qa` cargo feature. It is on
+by default, so `cargo run -p client`, packaging, the mobile builds and the
+capture scripts compile them as before. Each harness is dormant unless its
+environment variable is set: `OMOBA_ANIMATION_QA` (runs instead of the game),
+`OMOBA_VISUAL_QA_DIR` (with `OMOBA_VISUAL_QA_SCENARIO` = `beta-ui`,
+`navigation`, `targeting`, `combat`, `map`, `forest-pickups` or
+`team-vision`), `OMOBA_FRONTEND_QA_OUTPUT` (with `OMOBA_AVATAR_QA` or
+`OMOBA_FRONTEND_QA_FLOW`), `OMOBA_SOCIAL_QA_OUTPUT`, `OMOBA_AUDIO_QA_OUTPUT`,
+`OMOBA_OFFLINE_SMOKE_DIR`, `OMOBA_CAREER_QA_OUTPUT`,
+`OMOBA_SUPPORTER_QA_DIR`, and `OMOBA_SANDBOX_QA_OUTPUT` (the Combat Test
+panel harness, which stays in `sandbox/ui/qa.rs` because it drives the
+panel's private types). `cargo clippy -p client --lib --no-default-features`
+(`make check-no-qa`, also in CI) keeps the build without them free of
+warnings. Production items that only the harnesses and tests read are
+`#[cfg(any(test, feature = "qa"))]`, and the ones only the harnesses read
+are `#[cfg(feature = "qa")]`.
+
+The `Update` schedule is ordered by a small number of system sets; read
+these together to understand frame order:
 
 1. `ClientNetPipeline` (`client/src/net/mod.rs`): ingest UDP snapshot
    fragments, apply the authoritative snapshot to entities, age utility
@@ -337,11 +375,16 @@ Ordered by value over cost. Each step is a separate change with the full
    actions and widgets; the pause menu and the practice sandbox use it;
    remaining steps in `docs/ui-kit.md`).
 10. Client domain module, combat/player split, render backends behind
-    `run_if`, plugin groups, QA behind a cargo feature (in progress: the
-    domain module and the `in_models3d`/`in_sprite2d` backend gates are
-    done; `combat.rs` and `player.rs` are split into `client/src/combat/`
-    and `client/src/player/`, verbatim moves; plugin groups and the QA
-    feature are next; slices in `docs/plans/client-10-15.md`).
+    `run_if`, plugin groups, QA behind a cargo feature (done: the domain
+    module and the `in_models3d`/`in_sprite2d` backend gates; `combat.rs`
+    and `player.rs` split into `client/src/combat/` and
+    `client/src/player/`, verbatim moves; the `NetPlugins`, `UiPlugins`,
+    `GameplayPlugins`, `PresentationPlugins` and `QaPlugins` groups in
+    `client/src/plugins.rs`; the QA harnesses in `client/src/qa/` behind
+    the default-on `qa` feature, with a no-`qa` clippy in CI). Step
+    complete; the optional slices (store builds without QA, migrating
+    imports off the re-export shims) are listed in
+    `docs/plans/client-10-15.md`.
 11. One debug tooling family shared by Combat Test, practice and offline.
 12. Data-driven hero and item catalogs (done: `shared/assets/catalog/`
     `heroes.json` and `items.json`, loaded and validated once by

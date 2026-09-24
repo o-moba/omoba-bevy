@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone check fmt fmt-check lint test test-scripts
+.PHONY: help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone check fmt fmt-check lint check-no-qa test test-scripts
 
 # ---------------------------------------------------------------------------
 # Match modes (TASK-22)
@@ -32,7 +32,7 @@ help: ## Show commands, common overrides and documentation
 # Quality gate. `make check` is what CI runs (.github/workflows/ci.yml); run it
 # before pushing. The harness suite is separate because it launches servers.
 # ---------------------------------------------------------------------------
-check: fmt-check lint test test-scripts ## Run the full CI gate locally (format, clippy, tests, script tests)
+check: fmt-check lint check-no-qa test test-scripts ## Run the full CI gate locally (format, clippy, tests, script tests)
 
 fmt: ## Format every crate
 	cargo fmt --all
@@ -42,6 +42,9 @@ fmt-check: ## Fail on unformatted code
 
 lint: ## Clippy across the workspace with warnings as errors
 	cargo clippy --workspace --all-targets --no-deps -- -D warnings
+
+check-no-qa: ## Clippy on the client library without the default `qa` feature
+	cargo clippy -p client --lib --no-deps --no-default-features -- -D warnings
 
 test: ## Rust unit and integration tests (harness excluded; see verify-gameplay)
 	cargo test --workspace --locked --exclude harness

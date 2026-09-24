@@ -520,8 +520,16 @@ impl Plugin for CareerIdentityPlugin {
     }
 }
 
+/// A `qa::career_visual_qa` capture (`OMOBA_CAREER_QA_OUTPUT`) leaves the
+/// private identity and the profile service alone. Builds without the `qa`
+/// feature have no such capture, so the variable means nothing there.
+fn career_qa_capture() -> bool {
+    cfg!(feature = "qa")
+        && std::env::var_os("OMOBA_CAREER_QA_OUTPUT").is_some_and(|value| !value.is_empty())
+}
+
 fn load_identity(mut identity: ResMut<CareerIdentity>, mut career: ResMut<CareerClient>) {
-    if std::env::var_os("OMOBA_CAREER_QA_OUTPUT").is_some_and(|value| !value.is_empty()) {
+    if career_qa_capture() {
         return;
     }
     let Some(directory) = identity_directory() else {
@@ -557,9 +565,7 @@ fn identity_driver(
     mut names: MessageReader<NicknameChanged>,
     mut requests: MessageWriter<NetworkCommand>,
 ) {
-    if session.is_offline()
-        || std::env::var_os("OMOBA_CAREER_QA_OUTPUT").is_some_and(|value| !value.is_empty())
-    {
+    if session.is_offline() || career_qa_capture() {
         names.clear();
         return;
     }

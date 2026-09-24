@@ -12,7 +12,9 @@ use crate::sprite::PlayerVisualMode;
 use bevy::prelude::*;
 pub use shared::hero_balance::{DEBUG_SPEED_MULTIPLIER, PLAYER_SPEED};
 
-pub(crate) use animation::{PlayerAnimationBinding, register_hero_animation_systems};
+#[cfg(any(test, feature = "qa"))]
+pub(crate) use animation::PlayerAnimationBinding;
+pub(crate) use animation::register_hero_animation_systems;
 pub(crate) use input::{mobile_screen_direction, viewport_to_simulation_world};
 
 use animation::{PlayerAnimationLibrary, sync_jump_fallback_mode};

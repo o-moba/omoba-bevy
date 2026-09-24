@@ -32,8 +32,10 @@ struct RouteUi {
     destination: Option<Entity>,
 }
 
+/// One pooled route segment; its pool index is read only by
+/// `minimap::MinimapQaScene` (QA and tests).
 #[derive(Component)]
-pub(crate) struct RouteSegment(pub(crate) usize);
+pub(crate) struct RouteSegment(#[cfg(any(test, feature = "qa"))] pub(crate) usize);
 #[derive(Component)]
 pub(crate) struct RouteDestination;
 #[derive(Component)]
@@ -132,14 +134,17 @@ fn update_route(
     // and hides consumed segments. Search already bounds the waypoint count.
     let required = points.len().saturating_sub(1);
     while ui.segments.len() < required {
-        let index = ui.segments.len();
+        #[cfg(any(test, feature = "qa"))]
+        let segment = RouteSegment(ui.segments.len());
+        #[cfg(not(any(test, feature = "qa")))]
+        let segment = RouteSegment();
         ui.segments.push(
             commands
                 .spawn((
                     Node::default(),
                     BackgroundColor(ROUTE_COLOR),
                     ZIndex(6),
-                    RouteSegment(index),
+                    segment,
                     ChildOf(container),
                     Name::new("MinimapMovementRoute"),
                 ))

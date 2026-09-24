@@ -205,6 +205,8 @@ Build-time dependencies (the only reads of the world inside `build`):
 - `main`: `app.insert_resource(PlayerVisualMode::from_environment())` before the groups, removed from `SpriteVisualsPlugin::build`, so the choice is made once and visibly. Then `.add_plugins((NetPlugins, UiPlugins, GameplayPlugins, PresentationPlugins))` and, under the feature, `QaPlugins`.
 - This removes the 15-element tuple workaround (`lib.rs:176`).
 
+> Status (10e): done as listed (`refactor/client-plugin-groups`). The builds that read the world are still exactly the three in 10.1, all inside `UiPlugins` in plan order: `UiKitPlugin` (`contains_resource::<UiPlatform>`), `MobileControlsPlugin` (`get_resource::<UiPlatform>`), `MobileUiPlugin` (`resource::<MobileControls>`, after its own `init_resource`, so it reads a wrong `enabled` rather than panicking if the order breaks). `BetaUiQaPlugin` reads only its own resource. `AvatarPreview`'s `FromWorld` reads `Assets<Image>` (from `DefaultPlugins`). `SpriteVisualsPlugin` now does `init_resource::<PlayerVisualMode>()` (the default, `Models3d`, for apps that add it alone); `main` inserts `from_environment()` after `DefaultPlugins`, so the invalid-value warning still reaches the log. `GameplayPlugins` and `PresentationPlugins` follow the order listed above; `QaPlugins` keeps the harnesses' old relative order, with the supporter capture (10f) between social and team vision.
+
 ## 10.3 Splitting `combat.rs` (3866 lines; tests 2478-3863) and `player.rs` (3155 lines; tests 1882-3146)
 
 **What `combat.rs` does:** round reset, cooldown mirror, action feedback line, skill hotbar UI, target picking, casting with pending approach, mobile cast/utility, world HP/mana bars, target marker. It has no VFX (that lives in `combat_feedback.rs`, `game_vfx.rs`, `presentation*`).
@@ -313,6 +315,8 @@ The existing opposite-mode tests already pin "nothing attaches": `jungle.rs:190`
 4. CI and a Makefile `check-no-qa` target: `cargo clippy -p client --lib --no-deps --no-default-features -- -D warnings`. `--no-default-features` touches only client's own features; Bevy's features come from the dependency entries. This catches `dead_code` in production items that only QA uses; expect a few beyond `MinimapQaScene`. Tests with the feature off would be 523.
 5. Optional last slice: mobile store builds add `--no-default-features` (`xcode_build.py:86` for the release/TestFlight profile, `android/build.py:122`). Check that `mobile/ios/test_xcode_build.py:89` only asserts `--locked`.
 
+> Status (10f, 10g): done (`refactor/client-plugin-groups`). The 14 files plus `frontend_qa/` and `edge_hud_qa.rs` are renames into `client/src/qa/` with their names kept; only `visual_qa.rs`, `frontend_qa.rs` and a doc link in `frontend_flow_qa.rs` changed (`crate::x_qa` → `super::x_qa`). No production code referenced a QA module. The supporter capture (`SupporterQa`, `capture_preview`) moved to `qa/supporter.rs` as `SupporterQaPlugin`. `sandbox/ui/qa.rs` stays in place under `cfg(feature = "qa")` because it uses the panel's private `Action`, `Tab`, `Toggle`, `Field`, `Body` and `keys`. `career_identity.rs` and `SupporterUiState::default` test `cfg!(feature = "qa")` before their env vars. `model_scale::run_model_measurement_analyzer` (`OMOBA_MEASURE_MODELS`) is a tool, not a harness, and stays. The no-`qa` clippy found, besides `MinimapQaScene`: QA-only (`cfg(feature = "qa")`) re-exports `combat::CombatBarAnchor` and `humanoid::RuntimeHumanoidBindingError`, `CareerClient::present_visual_fixture`, `DamageNumber.event_id`, `ParticleSlot::sample`, `HumanoidRuntimeLibrary::semantic_nodes`, `MapPropInstance.role`, `SocialClient::{wheel_center, qa_send_chat, qa_close, qa_diagnostics}`; QA- and test-only (`cfg(any(test, feature = "qa"))`) re-export `player::PlayerAnimationBinding`, `PlayerAnimationBinding::is_running`, `ProjectilePresentationRoot.owner`, `MapVisualRegistry::replace_json`, `MapVisualCache::counts`, `MinimapCamp.{index, alive}`, `RouteSegment.0`, `ShopState::purchase_pending`. Tests with the feature off: 529 (the 20 tests in the QA modules), not 523.
+
 ## 10.6 Domain module: worth doing, but keep it small
 
 Models are split across modules, and today `net` depends on `combat`, `player` and `team` only for these types:
@@ -331,7 +335,7 @@ Leave in place:
 
 ## 10.7 Step 10 slices
 
-> Status: 10a and 10d landed together in #35 (`refactor/client-domain`, progress note `docs/progress/2026-09-24-client-domain.md`); 10b and 10c are one PR (`refactor/client-combat-split`, progress note `docs/progress/2026-09-24-client-combat-player-split.md`); 10e onwards are open.
+> Status: 10a and 10d landed together in #35 (`refactor/client-domain`, progress note `docs/progress/2026-09-24-client-domain.md`); 10b and 10c in #36 (`refactor/client-combat-split`, progress note `docs/progress/2026-09-24-client-combat-player-split.md`); 10e, 10f and 10g are one PR (`refactor/client-plugin-groups`, progress note `docs/progress/2026-09-24-client-plugin-groups.md`). Step 10 is done; 10h and 10i stay optional.
 
 | # | Slice | Size | Risk |
 |---|---|---|---|

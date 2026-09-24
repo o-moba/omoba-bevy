@@ -15,6 +15,7 @@ pub(crate) use crate::input_context::{CombatPointerInputSet, WorldMovementInputS
 use crate::targeting::{BasicAttackState, TargetAimPreview};
 use bevy::prelude::*;
 
+#[cfg(feature = "qa")]
 pub(crate) use bars::CombatBarAnchor;
 pub(crate) use cast::PendingCast;
 pub use cooldown::LocalCastCooldown;
