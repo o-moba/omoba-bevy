@@ -344,7 +344,10 @@ fn attach_visuals(
                 Transform::default().with_scale(Vec3::splat(profile.scale)),
                 Visibility::default(),
                 ChildOf(owner),
-                ProjectilePresentationRoot { owner },
+                ProjectilePresentationRoot {
+                    #[cfg(any(test, feature = "qa"))]
+                    owner,
+                },
                 Name::new("Projectile-Facing"),
             ))
             .id();

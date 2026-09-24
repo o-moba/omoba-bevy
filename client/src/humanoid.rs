@@ -8,10 +8,9 @@ mod embedded;
 mod motion;
 mod retarget;
 
-pub(crate) use binding::{
-    RuntimeHumanoidBindingError, RuntimeHumanoidPlayer, RuntimeHumanoidRequest,
-    bind_runtime_humanoids,
-};
+#[cfg(feature = "qa")]
+pub(crate) use binding::RuntimeHumanoidBindingError;
+pub(crate) use binding::{RuntimeHumanoidPlayer, RuntimeHumanoidRequest, bind_runtime_humanoids};
 pub(crate) use motion::SharedHumanoidMotion;
 
 use bevy::{animation::AnimationTargetId, gltf::Gltf, prelude::*};
@@ -124,6 +123,7 @@ impl HumanoidRuntimeLibrary {
         embedded::remap(&cached.rig, &cached.animated_nodes, &names, clip)
     }
 
+    #[cfg(feature = "qa")]
     pub(crate) fn semantic_nodes(
         &self,
         model: &Handle<Gltf>,

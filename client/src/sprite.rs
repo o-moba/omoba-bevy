@@ -39,7 +39,9 @@ impl PlayerVisualMode {
         }
     }
 
-    fn from_environment() -> Self {
+    /// `OMOBA_PLAYER_VISUAL_MODE`; read once by `main`, which inserts the
+    /// resource before the plugin groups.
+    pub(crate) fn from_environment() -> Self {
         let Ok(raw) = std::env::var("OMOBA_PLAYER_VISUAL_MODE") else {
             return Self::Models3d;
         };
@@ -132,7 +134,9 @@ pub struct SpriteVisualsPlugin;
 
 impl Plugin for SpriteVisualsPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(PlayerVisualMode::from_environment())
+        // `main` inserts the mode from the environment before the groups; an
+        // app that adds this plugin alone gets the default (`Models3d`).
+        app.init_resource::<PlayerVisualMode>()
             .init_resource::<SpriteVisualAssets>()
             .add_systems(
                 Startup,

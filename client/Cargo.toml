@@ -4,6 +4,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+# `qa` compiles the opt-in native QA harnesses (`src/qa/`, env-triggered).
+# On by default so `cargo run`, packaging and the capture scripts are unchanged;
+# `--no-default-features` builds the client without them (checked in CI).
+[features]
+default = ["qa"]
+qa = []
+
 [dependencies]
 ed25519-dalek = "2.2.0"
 getrandom = "0.3.4"
