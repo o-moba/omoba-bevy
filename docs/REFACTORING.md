@@ -53,7 +53,7 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
 | 9 | Client UI kit pilot: theme, gesture, `UiAction`, widgets, `TestId`; pause menu + practice + career migrated | pilot done, rest is step 9b | #24 |
 | 6a | Server one tick loop, one mana regen, one projectile path, ECS mirror removed | done | #25 |
 | 6b | `PlayerState` as a view (`owner_view`/`public_view`), `HeroTimers`, `Hero`/`HeroEconomy` structs | done | #26, #27 |
-| 6c | `StatModifiers` + `hero_stats.rs`; non-owner redaction of private economy on the wire | in progress (branch `refactor/server-hero-stats`) | |
+| 6c | `StatModifiers` + `hero_stats.rs`; non-owner redaction of private economy on the wire (wire-visible, no version bump) | done | #29 |
 | 7 | Server `MatchRules` policy object; career, transport and clock behind traits | next | |
 | 10 | Client domain module, combat/player split, render backends behind `run_if`, plugin groups, QA behind a cargo feature | pending | |
 | 11 | One debug tooling family shared by Combat Test, practice and offline | pending | |
@@ -81,7 +81,7 @@ its structure is fresh, then the client). Each row is one to four PRs.
 
 ## Plans for the open steps
 
-### 6c: StatModifiers and redaction (in progress)
+### 6c: StatModifiers and redaction (done, #29)
 - `server/src/hero_stats.rs`: `StatModifiers { damage_mult, attack_speed_mult, move_speed_mult, armor, resistance, base_max_hp, god_mode, infinite_hp, infinite_resource, no_cooldowns, unlock_all, bypass_vision, grant_xp, respawns }` with `Default` = normal play; the single formulas for combat bonuses, basic damage/cooldown, ability cooldown, skill recovery, move speed, `max_hp`, `max_mana` (moved out of `sandbox.rs`). `sandbox::apply_actor` converts `ActorConfig` into modifiers + loadout once; `sandbox.is_some()` gates become flags; `god_mode`/`speed_mult` fields fold into the modifiers.
 - Redaction: `public_view` blanks `gold`, `earned_gold`, `inventory`, `item_bonuses`, `last_purchase`, `basic_attack_request_id`, `utility.last_request_id` (all `#[serde(default)]`, no protocol bump); `build_players_snapshot` uses `owner_view` for the recipient and `public_view` for everyone else; vision tests pin it. Scoreboard gold comes from `LiveScoreboard`, not `PlayerState`.
 
