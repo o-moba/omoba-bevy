@@ -149,7 +149,6 @@ pub(crate) struct RecognizerState {
 /// Runs first in `InputContextSet::Modal` (`UiSet::Gesture`) for every
 /// [`Pressable`] in the world. `activated` is a one-frame flag; `touch_mode`
 /// follows the platform; `disabled` is left to the owning module.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn recognize_presses(
     mut state: Local<RecognizerState>,
     platform: Option<Res<crate::ui::UiPlatform>>,

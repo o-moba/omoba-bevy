@@ -22,7 +22,7 @@ use shared::{SkillSlot, TargetingMode, hero_balance as balance, shop::ItemBonuse
 pub(super) const ADDRESS: &str = "offline-practice";
 const LOCAL_ID: u64 = 1;
 const LEVEL: u32 = 6; // Every class slot is available for character testing.
-use balance::{BOT_ENGAGE_RANGE as VISION, LEVEL_UP_HP_BONUS, PROJECTILE_SPEED};
+use balance::{BOT_ENGAGE_RANGE as VISION, PROJECTILE_SPEED};
 use shared::math::hero_yaw_towards as yaw_towards;
 const BOT_RESPAWN_SECS: f32 = 3.0;
 const LOCAL_RESPAWN_SECS: f32 = balance::RESPAWN_DELAY_SECS as f32;
@@ -474,9 +474,7 @@ impl Simulation {
                 duelist.inventory = inventory;
                 duelist.item_bonuses = bonuses;
                 duelist.gold = budget - spent;
-                duelist.max_hp = balance::base_hp(class)
-                    + LEVEL_UP_HP_BONUS * (level - 1) as f32
-                    + bonuses.max_hp;
+                duelist.max_hp = balance::max_hp_for_level(class, level, bonuses.max_hp);
                 duelist.hp = duelist.max_hp;
                 duelist.max_mana += bonuses.max_mana;
                 duelist.mana = duelist.max_mana;
@@ -1133,7 +1131,10 @@ mod tests {
         assert_eq!(duelist.level, 7);
         assert_eq!(duelist.ranks, [3, 3, 1, 3]);
         assert_eq!(duelist.inventory.len(), shared::shop::INVENTORY_CAPACITY);
-        assert!(duelist.max_hp > balance::base_hp(HeroClass::Warrior) + 6.0 * LEVEL_UP_HP_BONUS);
+        assert!(
+            duelist.max_hp
+                > balance::base_hp(HeroClass::Warrior) + 6.0 * balance::LEVEL_UP_HP_BONUS
+        );
         let start = (duelist.x, duelist.z);
         let [ax, az] = shared::map::geometry().away;
         assert!(

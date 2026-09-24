@@ -6,8 +6,8 @@ Open Moba is an open-source MOBA and reusable engine project. You may study, mod
 
 | Material | License / scope |
 | --- | --- |
-| Original source in `server/` and `account-api/` | [AGPL-3.0-only](LICENSES/AGPL-3.0-only.txt) |
-| Original source in `client/`, `shared/`, `passport/`, `skills/`, `harness/`, `arena-sync/`; original scripts, mobile scaffolding and configuration elsewhere | [MPL-2.0](LICENSES/MPL-2.0.txt) |
+| Original source in `server/`, `career-store/` and `account-api/` | [AGPL-3.0-only](LICENSES/AGPL-3.0-only.txt) |
+| Original source in `client/`, `shared/`, `passport/`, `harness/`, `arena-sync/`; original scripts, mobile scaffolding and configuration elsewhere | [MPL-2.0](LICENSES/MPL-2.0.txt) |
 | Original standalone project documentation, including this guide and the mission/contribution/brand policy text | [CC-BY-4.0](LICENSES/CC-BY-4.0.txt) |
 | Original Verdant Confluence `.blend`/`.glb` visual assets and rendered stills in `art/verdant-confluence/` and `client/assets/verdant/` | [CC-BY-4.0](LICENSES/CC-BY-4.0.txt) |
 | Sprite, presentation2D and world2D art already dedicated to CC0 | Their existing directory `LICENSE.md` declarations; CC0 is preserved |

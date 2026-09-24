@@ -16,7 +16,7 @@ pub(crate) struct Slot {
 }
 pub(crate) struct Pool {
     // Kernel-owned advisory lock is released on crash as well as normal drop.
-    _lock: fs::File,
+    lock: fs::File,
     pub slots: HashMap<String, Slot>,
     root: PathBuf,
     executable: PathBuf,
@@ -65,7 +65,7 @@ impl Pool {
                 Ok,
             )?;
         let mut pool = Self {
-            _lock: lock,
+            lock,
             slots: HashMap::new(),
             root,
             executable,
@@ -246,6 +246,16 @@ impl Pool {
         });
     }
 }
+impl Drop for Pool {
+    fn drop(&mut self) {
+        // `flock` belongs to the open file description, not to this fd. A child
+        // forked by another thread holds a duplicate of that description until
+        // its `exec` closes it (`O_CLOEXEC`), so closing our fd alone can leave
+        // the root locked for that window. Unlock explicitly: `LOCK_UN` drops
+        // the lock on the description whatever other fds still refer to it.
+        let _ = self.lock.unlock();
+    }
+}
 impl Slot {
     pub fn occupies_port(&self) -> bool {
         self.child.is_some()
@@ -357,7 +367,7 @@ mod tests {
         ));
         fs::create_dir(&root).unwrap();
         Pool {
-            _lock: lock_root(&root).unwrap(),
+            lock: lock_root(&root).unwrap(),
             slots: HashMap::new(),
             root,
             executable: PathBuf::from("/usr/bin/true"),
@@ -387,8 +397,13 @@ mod tests {
         let p = pool();
         let root = p.root.clone();
         assert!(lock_root(&root).is_err());
+        // Stand-in for a child another test thread forked while `p` was alive:
+        // it shares the lock's open file description until its `exec`. The
+        // lock must still be released by the drop, not by the last close.
+        let forked_duplicate = p.lock.try_clone().unwrap();
         drop(p);
         assert!(lock_root(&root).is_ok());
+        drop(forked_duplicate);
     }
     #[test]
     fn capacity_and_readiness_require_a_live_worker_receipt() {

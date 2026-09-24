@@ -208,7 +208,6 @@ pub(crate) fn value_label<M: Component>(
 
 /// `label  [-] value [+]`; the controls are `{id}-Down`, `{id}-Value` and
 /// `{id}-Up`. Returns the row.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn adjust_row<T: UiActionT, M: Component>(
     parent: &mut ChildSpawnerCommands,
     label: &str,

@@ -4266,7 +4266,6 @@ name = "omoba-career-store"
 version = "0.23.0-rc.6"
 dependencies = [
  "getrandom 0.3.4",
- "serde",
  "serde_json",
  "shared",
  "sqlx",
@@ -5134,7 +5133,6 @@ dependencies = [
 name = "server"
 version = "0.23.0-rc.6"
 dependencies = [
- "bevy",
  "ed25519-dalek",
  "ekza-bevy-sdk",
  "getrandom 0.3.4",

@@ -51,7 +51,6 @@ pub enum NetworkCommand {
         /// Selected 2D sprite cosmetic. The renderer mode remains client-local.
         sprite_character: Option<String>,
     },
-    #[allow(dead_code)]
     RequestRematch,
     /// God mode, the speed boost or a practice sandbox request (bots,
     /// dummies, 1v1); sent as the command's existing packet.

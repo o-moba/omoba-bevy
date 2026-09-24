@@ -79,8 +79,9 @@ the closed form there would change behaviour, not just move code.
   the recipient's entry through `owner_view`, everyone else through
   `public_view`; `broadcast_snapshots` calls it per recipient, so the
   sandbox (which skips the vision filter) is redacted too.
-- Client check (read-only): `PlayerEquipment` is built only for the local
-  player (`net/apply.rs` skips `player.id == your_id` for remote entities),
+- Client check (read-only): `PlayerEquipment` is attached to remote heroes
+  too (`net/apply.rs`, remote update and spawn; corrected after the fact by
+  the gate-hardening PR), but only the local `Player` is ever queried for it:
   `targeting.rs` and `mobile_controls.rs` read the local equipment, the
   scoreboard (`edge_hud.rs`) reads `LiveScoreboard`, whose earned gold comes
   from the round ledger. `harness/` tests read only their own player;
