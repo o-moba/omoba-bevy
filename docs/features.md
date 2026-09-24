@@ -318,6 +318,14 @@ follows.
   lock the exact foe without attacking (2026-09-24). Drag to X to cancel. A
   phone tap chases like a desktop order unless the stick is steering; a hero in
   reach turns to face its target when it strikes.
+
+- **Practice sandbox (2026-09-24):** in local bot practice the pause menu's
+  "Practice sandbox" page toggles god mode, spawns stationary target dummies
+  in front of the hero, clears or restores the bot roster, and starts a 1v1
+  against one mid-lane opponent at a chosen level (skills ranked for that
+  level) and gold (spent on items at base). Practice bots shop at base, rank
+  every unlocked skill and cast their whole hostile-target kit. See
+  [bot practice](bot-practice-and-social.md).
   Basic attacks cost no mana and have class/equipment damage and independent
   server-enforced cooldowns. Skills retain their existing balance and use the
   selected target. Protocol 2 rejects incompatible old peers and binds strikes

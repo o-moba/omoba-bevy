@@ -28,6 +28,11 @@ pub(super) struct PrematchRuntime {
 }
 
 impl ServerRuntime {
+    #[cfg(test)]
+    pub(crate) fn prematch_generation_for_test(&self) -> u64 {
+        self.prematch.generation
+    }
+
     pub(crate) fn prematch_required(&self) -> bool {
         self.match_started_at.is_none()
             && !matches!(self.game_state, GameState::Victory { .. })

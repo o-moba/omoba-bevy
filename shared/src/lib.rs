@@ -14,6 +14,7 @@ pub mod live_score;
 pub mod map;
 pub mod match_service;
 pub mod navigation;
+pub mod practice;
 pub mod prematch;
 pub mod protocol;
 pub mod public_transport;

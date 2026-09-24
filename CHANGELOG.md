@@ -6,6 +6,12 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Practice sandbox
+- The pause menu gains a "Practice sandbox" page in local bot practice: god mode for yourself, a stationary target dummy in front of you (up to four, respawning on their spot), "Clear all bots", "Standard bots", and a 1v1 opponent on mid with a chosen level (skills ranked for that level) and gold (spent on items at base).
+- Practice bots now buy their class's recommended items whenever they stand in their base shop, rank every unlocked skill, and cast their whole hostile-target kit instead of only Q.
+- God mode and speed boost are accepted in practice matches (already unrated), not only in development mode.
+- Round statistics register anyone who joins after the roster was drafted before the first hit, and the server logs a hero hit whose participant has no scoreboard row instead of dropping it silently.
+
 ### Practice bots, utility effects and targeting polish
 - Practice bots now face the way they run and the unit they strike; the server used the +Z yaw convention while hero models face -Z, so every bot ran backwards.
 - Dash shows a departure ring, staggered cyan afterimages along the travelled path and an arrival flash with sparks, for the local hero and for remote heroes and bots, which now teleport instead of sliding to the destination.

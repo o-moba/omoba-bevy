@@ -60,6 +60,29 @@ further join. A round's lifetime participant list is bounded to 32 identities;
 repeated arrivals/refills that would exceed it trigger a fresh practice round
 instead of reusing historical identities. Connected humans stay for that reset.
 
+Bots spend earned gold on their class's recommended items whenever they stand
+in their base shop, rank every unlocked skill (ultimate first) and cast their
+whole hostile-target kit.
+
+### Practice sandbox
+
+While a standalone practice match runs, the pause menu shows a **Practice
+sandbox** page. Everything on it is a practice-only server command; release,
+development and publicly allocated matches ignore it.
+
+| Control | Effect |
+| --- | --- |
+| God mode | The server skips damage to your hero (same flag as the debug HUD). |
+| Standard bots (lanes) | Restores the normal roster: both teams filled with lane bots. |
+| Clear all bots | Removes every bot and stops the automatic refill. Minions still spawn. |
+| Spawn target dummy | An enemy hero with 400 HP stands in front of you, never moves or attacks, and walks back to its spot after each respawn. Up to four; the oldest is recycled. |
+| Level / Gold | The 1v1 opponent's hero level (1–10) and shopping budget (0–1000). |
+| Start 1v1 on mid | Clears the bots and sends one opponent of your class down mid at that level, with skills ranked for the level and the budget spent on items at base. |
+
+Sandbox spawns take new participant identities, so the 32-identity round
+limit above still applies; a fresh practice round restores the standard
+roster.
+
 Standalone practice results are local, unsaved match receipts. They give no permanent XP,
 MMR, profile counters or PostgreSQL match history, even when `OMOBA_DATABASE_URL`
 is configured. The account/friends service may still be available independently.

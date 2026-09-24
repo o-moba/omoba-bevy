@@ -655,6 +655,20 @@ impl ServerRuntime {
             }
         }
         if !self.combat_log.ledger.is_started() {
+            // Anyone who joined after the roster was drafted (practice bots
+            // filled while a durable start was pending, a late seat) needs a
+            // row before the first hit, or their kills and deaths vanish.
+            for player in self.players.values().filter(|p| p.joined) {
+                if !round
+                    .result
+                    .participants
+                    .iter()
+                    .any(|p| p.player_id == player.state.id)
+                {
+                    round.result.participants.push(participant(player));
+                }
+            }
+            round.result.participants.sort_by_key(|p| p.player_id);
             if let Err(error) = self
                 .combat_log
                 .ledger
@@ -683,7 +697,23 @@ impl ServerRuntime {
         let Some(player) = self.players.get(&addr).filter(|p| p.joined) else {
             return;
         };
-        if !self.combat_log.ledger.is_started() || self.combat_log.ledger.is_frozen() {
+        if !self.combat_log.ledger.is_started() {
+            // The round is drafted but its statistics have not begun (for
+            // example a durable start acknowledgment is still pending):
+            // queue the seat so `begin_career_round` rosters it.
+            if let Some(round) = self.career.round.as_mut()
+                && !round
+                    .result
+                    .participants
+                    .iter()
+                    .any(|p| p.player_id == player.state.id)
+            {
+                round.result.participants.push(participant(player));
+                round.result.participants.sort_by_key(|p| p.player_id);
+            }
+            return;
+        }
+        if self.combat_log.ledger.is_frozen() {
             return;
         }
         if let Err(error) = self.combat_log.ledger.register(participant(player)) {

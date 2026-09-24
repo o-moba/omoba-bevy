@@ -898,3 +898,323 @@ fn live_udp_practice_solo_and_running_late_join_publish_real_bot_replacement() {
         "LIVE_UDP_PRACTICE solo_running=true bots=1 late_join_same_round=true bot_identity_replaced=true humans=2"
     );
 }
+
+#[test]
+fn human_kills_of_practice_bots_count_on_the_live_scoreboard() {
+    let mut rt = runtime(1);
+    let mut now = Instant::now();
+    rt.handle_packet(addr(1), join("scorer"), now);
+    let bot_addr = *rt.players.iter().find(|(_, p)| p.state.is_bot).unwrap().0;
+    let bot_id = rt.players[&bot_addr].state.id;
+    let human_id = rt.players[&addr(1)].state.id;
+    rt.structures.clear();
+    rt.minions.clear();
+    rt.bots.clear();
+    for (address, x) in [(addr(1), -8.0), (bot_addr, -5.0)] {
+        let p = rt.players.get_mut(&address).unwrap();
+        p.state.x = x;
+        p.state.z = -8.0;
+    }
+    let mut request_id = 0;
+    for _ in 0..400 {
+        now += Duration::from_millis(50);
+        if rt.players[&addr(1)].state.basic_attack_remaining_secs <= 0.0 {
+            request_id += 1;
+            rt.handle_packet(
+                addr(1),
+                ClientPacket::BasicAttack {
+                    target: TargetId {
+                        kind: TargetKind::Player,
+                        id: bot_id,
+                    },
+                    server_epoch: rt.server_epoch,
+                    match_id: rt.match_id,
+                    request_id,
+                },
+                now,
+            );
+        }
+        rt.simulate_after_mana(now, 0.05);
+        if rt.players[&bot_addr].state.hp <= 0.0 {
+            break;
+        }
+    }
+    assert_eq!(rt.players[&bot_addr].state.hp, 0.0, "the bot died");
+    let board = rt
+        .combat_log
+        .ledger
+        .live_scoreboard()
+        .expect("live scoreboard");
+    let row = |id: u64| board.players.iter().find(|p| p.player_id == id).unwrap();
+    assert_eq!((row(human_id).kills, row(human_id).deaths), (1, 0));
+    assert_eq!((row(bot_id).kills, row(bot_id).deaths), (0, 1));
+    let snapshot = build_players_snapshot(&rt.players);
+    assert!(snapshot.iter().any(|p| p.id == human_id && !p.is_bot));
+}
+
+/// The shipped client joins with `prematch: true`, so the round begins from
+/// the draft's loading phase. Kills must still reach the scoreboard there.
+#[test]
+fn draft_started_practice_round_credits_human_kills() {
+    let mut rt = runtime(1);
+    let mut now = Instant::now();
+    let ClientPacket::Join {
+        team,
+        character,
+        hero_class,
+        ..
+    } = join("draft")
+    else {
+        unreachable!()
+    };
+    rt.handle_packet(
+        addr(1),
+        ClientPacket::Join {
+            prematch: true,
+            team,
+            character,
+            hero_class,
+            avatar: None,
+            sprite_character: None,
+            session_id: Some("draft".into()),
+            passport_ticket: None,
+        },
+        now,
+    );
+    let prematch = |rt: &ServerRuntime, id, action| ClientPacket::Prematch {
+        request: shared::prematch::PrematchRequest {
+            server_epoch: rt.server_epoch,
+            match_id: rt.match_id,
+            generation: rt.prematch_generation_for_test(),
+            request_id: id,
+            action,
+        },
+    };
+    let lock = prematch(
+        &rt,
+        1,
+        shared::prematch::PrematchAction::Lock { locked: true },
+    );
+    rt.handle_packet(addr(1), lock, now);
+    now += Duration::from_secs(4);
+    rt.simulate_after_mana(now, 0.05);
+    let loaded = prematch(&rt, 2, shared::prematch::PrematchAction::Loaded);
+    rt.handle_packet(addr(1), loaded, now);
+    now += Duration::from_millis(50);
+    rt.simulate_after_mana(now, 0.05);
+    assert_eq!(rt.game_state, GameState::Running, "draft reached the match");
+    let bot_addr = *rt.players.iter().find(|(_, p)| p.state.is_bot).unwrap().0;
+    let bot_id = rt.players[&bot_addr].state.id;
+    let human_id = rt.players[&addr(1)].state.id;
+    rt.structures.clear();
+    rt.minions.clear();
+    rt.bots.clear();
+    for (address, x) in [(addr(1), -8.0), (bot_addr, -5.0)] {
+        let p = rt.players.get_mut(&address).unwrap();
+        p.state.x = x;
+        p.state.z = -8.0;
+    }
+    let mut request_id = 0;
+    for _ in 0..400 {
+        now += Duration::from_millis(50);
+        if rt.players[&addr(1)].state.basic_attack_remaining_secs <= 0.0 {
+            request_id += 1;
+            rt.handle_packet(
+                addr(1),
+                ClientPacket::BasicAttack {
+                    target: TargetId {
+                        kind: TargetKind::Player,
+                        id: bot_id,
+                    },
+                    server_epoch: rt.server_epoch,
+                    match_id: rt.match_id,
+                    request_id,
+                },
+                now,
+            );
+        }
+        rt.simulate_after_mana(now, 0.05);
+        if rt.players[&bot_addr].state.hp <= 0.0 {
+            break;
+        }
+    }
+    let board = rt
+        .combat_log
+        .ledger
+        .live_scoreboard()
+        .expect("live scoreboard");
+    let row = |id: u64| board.players.iter().find(|p| p.player_id == id).unwrap();
+    assert_eq!((row(human_id).kills, row(bot_id).deaths), (1, 1));
+}
+
+fn practice_command(command: shared::practice::PracticeCommand) -> ClientPacket {
+    ClientPacket::Practice { command }
+}
+
+fn bots_of(rt: &ServerRuntime) -> Vec<SocketAddr> {
+    let mut bots: Vec<_> = rt
+        .players
+        .iter()
+        .filter(|(_, p)| p.state.is_bot)
+        .map(|(a, _)| *a)
+        .collect();
+    bots.sort_unstable();
+    bots
+}
+
+#[test]
+fn sandbox_dummy_stands_in_front_of_the_human_and_returns_after_respawn() {
+    use shared::practice::{MAX_DUMMIES, PracticeCommand};
+    let mut rt = runtime(2);
+    let mut now = Instant::now();
+    rt.handle_packet(addr(1), join("range"), now);
+    assert_eq!(bots_of(&rt).len(), 3);
+    rt.handle_packet(addr(1), practice_command(PracticeCommand::SpawnDummy), now);
+    let dummies: Vec<_> = bots_of(&rt)
+        .into_iter()
+        .filter(|a| matches!(rt.bots.kind(*a), Some(bots::BotKind::Dummy { .. })))
+        .collect();
+    assert_eq!(dummies.len(), 1);
+    assert_eq!(bots_of(&rt).len(), 4, "the standard roster stays");
+    let dummy = rt.players[&dummies[0]].state.clone();
+    let human = &rt.players[&addr(1)].state;
+    assert_eq!(dummy.team, Team::Blue);
+    assert!(dummy.max_hp > MAX_HP * 2.0);
+    let distance = (dummy.x - human.x).hypot(dummy.z - human.z);
+    assert!(
+        (1.0..=5.0).contains(&distance),
+        "dummy stands close in front, got {distance}"
+    );
+    // Ticks neither move it nor make it shoot, and the roster is not trimmed.
+    for _ in 0..40 {
+        now += Duration::from_millis(50);
+        rt.handle_packet(addr(1), ClientPacket::Ping, now);
+        rt.simulate_after_mana(now, 0.05);
+    }
+    let after = &rt.players[&dummies[0]].state;
+    assert_eq!((after.x, after.z), (dummy.x, dummy.z));
+    assert!(
+        rt.projectiles
+            .values()
+            .all(|p| p.state.owner_id != dummy.id)
+    );
+    assert_eq!(bots_of(&rt).len(), 4);
+    // Killed dummies respawn at base like everyone, then walk back to their spot.
+    apply_player_damage(&mut rt.players, dummy.id, 10_000.0, now);
+    assert_eq!(rt.players[&dummies[0]].state.hp, 0.0);
+    // Respawn lands at base within a tick; the next bot tick walks it back.
+    // Pings keep the otherwise silent test human from timing out meanwhile.
+    for _ in 0..(RESPAWN_DELAY.as_millis() / 50 + 4) {
+        now += Duration::from_millis(50);
+        rt.handle_packet(addr(1), ClientPacket::Ping, now);
+        rt.simulate_after_mana(now, 0.05);
+    }
+    let back = &rt.players[&dummies[0]].state;
+    assert_eq!((back.x, back.z), (dummy.x, dummy.z));
+    assert_eq!(back.hp, back.max_hp);
+    // Extra dummies recycle the oldest one instead of growing without bound.
+    for _ in 0..MAX_DUMMIES + 2 {
+        rt.handle_packet(addr(1), practice_command(PracticeCommand::SpawnDummy), now);
+    }
+    let dummies = bots_of(&rt)
+        .into_iter()
+        .filter(|a| matches!(rt.bots.kind(*a), Some(bots::BotKind::Dummy { .. })))
+        .count();
+    assert_eq!(dummies, MAX_DUMMIES);
+}
+
+#[test]
+fn sandbox_clear_duel_and_roster_replace_the_practice_bots() {
+    use shared::practice::PracticeCommand;
+    let mut rt = runtime(3);
+    let mut now = Instant::now();
+    rt.handle_packet(addr(1), join("duelist"), now);
+    assert_eq!(bots_of(&rt).len(), 5);
+    rt.handle_packet(addr(1), practice_command(PracticeCommand::ClearBots), now);
+    assert!(bots_of(&rt).is_empty());
+    now += Duration::from_millis(50);
+    rt.simulate_after_mana(now, 0.05);
+    assert!(
+        bots_of(&rt).is_empty(),
+        "no automatic refill in the sandbox"
+    );
+
+    rt.handle_packet(
+        addr(1),
+        practice_command(PracticeCommand::StartDuel {
+            level: 7,
+            gold: 500,
+        }),
+        now,
+    );
+    let bots = bots_of(&rt);
+    assert_eq!(bots.len(), 1);
+    let duelist = &rt.players[&bots[0]].state;
+    assert_eq!(duelist.team, Team::Blue);
+    assert_eq!(
+        duelist.hero_class,
+        HeroClass::Mage,
+        "mirrors the human's class"
+    );
+    assert_eq!(duelist.level, 7);
+    assert_eq!(duelist.skill_points, 0);
+    assert_eq!(
+        duelist.ranks,
+        [3, 3, 1, 3],
+        "ultimate, Q and W ranked with 6 points"
+    );
+    assert_eq!(duelist.inventory.len(), shared::shop::INVENTORY_CAPACITY);
+    assert_eq!(duelist.hp, duelist.max_hp);
+    assert!(duelist.max_hp > MAX_HP);
+    let spawn = spawn_position_for_team(&rt.map_layout, Team::Blue);
+    assert!((duelist.x - spawn.x).hypot(duelist.z - spawn.z) < 1.0);
+    assert_eq!(rt.bots.kind(bots[0]), Some(bots::BotKind::Duelist));
+    // It walks mid toward the human instead of idling at base.
+    for _ in 0..60 {
+        now += Duration::from_millis(50);
+        rt.simulate_after_mana(now, 0.05);
+    }
+    let moved = &rt.players[&bots[0]].state;
+    assert!(
+        (moved.x - spawn.x).hypot(moved.z - spawn.z) > 2.0,
+        "duelist advanced"
+    );
+    assert_eq!(bots_of(&rt).len(), 1);
+
+    rt.handle_packet(addr(1), practice_command(PracticeCommand::Roster), now);
+    assert_eq!(bots_of(&rt).len(), 5);
+    assert_eq!(joined_team_counts(&rt.players), (3, 3));
+    assert!(
+        bots_of(&rt)
+            .iter()
+            .all(|a| rt.bots.kind(*a) == Some(bots::BotKind::Lane))
+    );
+}
+
+#[test]
+fn sandbox_and_god_mode_are_practice_only_and_never_from_bots() {
+    use shared::practice::PracticeCommand;
+    let mut rt = runtime(2);
+    let now = Instant::now();
+    rt.handle_packet(addr(1), join("god"), now);
+    rt.handle_packet(addr(1), ClientPacket::SetGodMode { enabled: true }, now);
+    assert!(rt.players[&addr(1)].god_mode, "practice accepts god mode");
+    let bot = bots_of(&rt)[0];
+    rt.handle_packet(bot, practice_command(PracticeCommand::ClearBots), now);
+    assert_eq!(bots_of(&rt).len(), 3, "bot addresses cannot issue commands");
+
+    let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let mut dev = ServerRuntime::new(
+        socket,
+        MatchConfig {
+            mode: MatchMode::Dev,
+            team_size: 2,
+        },
+    );
+    dev.handle_packet(addr(2), join("dev"), now);
+    dev.handle_packet(addr(2), practice_command(PracticeCommand::SpawnDummy), now);
+    assert!(
+        bots_of(&dev).is_empty(),
+        "development matches ignore the sandbox"
+    );
+}

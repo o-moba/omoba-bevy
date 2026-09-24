@@ -156,6 +156,10 @@ enum ClientPacket {
     SetSpeedBoost {
         enabled: bool,
     },
+    /// Local practice sandbox (roster, dummies, 1v1). Ignored elsewhere.
+    Practice {
+        command: shared::practice::PracticeCommand,
+    },
     UpgradeSkill {
         slot: u8,
     },
@@ -1447,6 +1451,13 @@ impl ServerRuntime {
             self.career_play_again(addr, now);
             return;
         }
+        if let ClientPacket::Practice { command } = packet {
+            if let Some(player) = self.players.get_mut(&addr) {
+                player.last_seen = now;
+            }
+            self.handle_practice_command(addr, command, now);
+            return;
+        }
         let Self {
             targeting_qa,
             players,
@@ -1694,8 +1705,10 @@ impl ServerRuntime {
                     self.restart_round(now);
                 }
             }
+            ClientPacket::Practice { .. } => unreachable!("handled before gameplay admission"),
             ClientPacket::SetGodMode { enabled } => {
-                if match_config.mode != MatchMode::Dev {
+                // Development and local bot practice only; both are unrated.
+                if !matches!(match_config.mode, MatchMode::Dev | MatchMode::Practice) {
                     return;
                 }
                 ensure_player_connected(players, map_layout, addr, next_player_id, now);
@@ -1716,7 +1729,7 @@ impl ServerRuntime {
                 }
             }
             ClientPacket::SetSpeedBoost { enabled } => {
-                if match_config.mode != MatchMode::Dev {
+                if !matches!(match_config.mode, MatchMode::Dev | MatchMode::Practice) {
                     return;
                 }
                 ensure_player_connected(players, map_layout, addr, next_player_id, now);

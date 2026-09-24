@@ -30,6 +30,8 @@ pub(crate) struct RoundLedger {
     last_event_id: u64,
     started: bool,
     frozen: bool,
+    /// Ids already logged as missing a row; bounded by the players seen.
+    unregistered_reported: std::collections::BTreeSet<u64>,
 }
 
 impl RoundLedger {
@@ -98,6 +100,17 @@ impl RoundLedger {
             },
         );
         Ok(true)
+    }
+
+    /// A hero hit involving a player without a row cannot be credited. Say so
+    /// once per id in the match log instead of silently freezing the score.
+    fn report_unregistered(&mut self, player_id: u64) {
+        if self.unregistered_reported.insert(player_id) {
+            println!(
+                "MATCH_METRIC event=unregistered_participant player={player_id} rows={}",
+                self.participants.len()
+            );
+        }
     }
 
     pub(crate) fn is_started(&self) -> bool {
@@ -188,7 +201,11 @@ impl RoundLedger {
         match event.target.kind {
             CombatEntityKind::Player => {
                 let victim = PlayerId(event.target.id);
+                if event.source.kind == CombatEntityKind::Player && source.is_none() {
+                    self.report_unregistered(event.source.id);
+                }
                 let Some(target) = self.participants.get(&victim) else {
+                    self.report_unregistered(event.target.id);
                     return;
                 };
                 let victim_team = target.result.team;

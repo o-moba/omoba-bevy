@@ -35,14 +35,16 @@ const SCALE_STEP: f32 = 0.04;
 const ILLUMINANCE_STEP: f32 = 2_000.0;
 const AMBIENT_STEP: f32 = 50.0;
 const ANGLE_STEP_DEG: f32 = 5.0;
-const BUTTON_COLOR: Color = crate::ui_theme::TILE;
-const BUTTON_HOVER_COLOR: Color = crate::ui_theme::HOVER;
+pub(crate) const BUTTON_COLOR: Color = crate::ui_theme::TILE;
+pub(crate) const BUTTON_HOVER_COLOR: Color = crate::ui_theme::HOVER;
 
 pub struct PauseMenuPlugin;
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum PauseMenuSet {
     Close,
+    /// Mobile tap collection; button handlers run after it.
+    Taps,
     Visuals,
 }
 
@@ -64,6 +66,7 @@ impl Plugin for PauseMenuPlugin {
                 Update,
                 collect_pause_button_taps
                     .after(close_pause_menu_when_disconnected)
+                    .in_set(PauseMenuSet::Taps)
                     .in_set(crate::input_context::InputContextSet::Modal),
             )
             .add_systems(
@@ -345,6 +348,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                 SettingsOpenButton,
                                 "SettingsButton",
                             );
+                            crate::practice_sandbox::spawn_practice_open_button(main);
                             spawn_menu_button(
                                 main,
                                 "Controls guide",
@@ -545,11 +549,12 @@ fn setup_pause_menu_ui(mut commands: Commands) {
 
                             spawn_menu_button(settings, "Back", SettingsBackButton, "BackButton");
                         });
+                    crate::practice_sandbox::spawn_practice_section(panel);
                 });
         });
 }
 
-fn spawn_menu_button<M: Component>(
+pub(crate) fn spawn_menu_button<M: Component>(
     parent: &mut ChildSpawnerCommands,
     text: &str,
     marker: M,
@@ -591,7 +596,7 @@ fn spawn_menu_button<M: Component>(
         });
 }
 
-fn spawn_adjust_row<Dec: Component, ValueMarker: Component, Inc: Component>(
+pub(crate) fn spawn_adjust_row<Dec: Component, ValueMarker: Component, Inc: Component>(
     parent: &mut ChildSpawnerCommands,
     label: &str,
     value: String,
@@ -773,22 +778,26 @@ fn sync_pause_menu_visibility(
 
 fn sync_pause_menu_sections(
     menu_state: Res<PauseMenuState>,
+    practice: Option<Res<crate::practice_sandbox::PracticeSandboxState>>,
     mut section_queries: ParamSet<(
         Query<(&mut Visibility, &mut Node), With<MainMenuSection>>,
         Query<(&mut Visibility, &mut Node), With<SettingsSection>>,
     )>,
 ) {
-    if !menu_state.is_changed() {
+    let practice_open = practice.as_ref().is_some_and(|p| p.open);
+    if !menu_state.is_changed() && !practice.as_ref().is_some_and(|p| p.is_changed()) {
         return;
     }
 
+    // The main page yields to whichever sub-page is open.
+    let main_hidden = menu_state.in_settings || practice_open;
     if let Ok((mut main_visibility, mut main_node)) = section_queries.p0().single_mut() {
-        *main_visibility = if menu_state.in_settings {
+        *main_visibility = if main_hidden {
             Visibility::Hidden
         } else {
             Visibility::Visible
         };
-        main_node.display = if menu_state.in_settings {
+        main_node.display = if main_hidden {
             Display::None
         } else {
             Display::Flex
@@ -812,13 +821,13 @@ fn sync_pause_menu_sections(
 /// Scrollable mobile menus activate only on a short release within the same
 /// visible button. Desktop mouse Interaction behavior remains unchanged.
 #[derive(Component, Default, Clone, Copy, PartialEq, Eq)]
-struct PauseButtonGesture {
+pub(crate) struct PauseButtonGesture {
     touch_mode: bool,
     activated: bool,
 }
 
 impl PauseButtonGesture {
-    fn effective(&self, interaction: Interaction) -> Interaction {
+    pub(crate) fn effective(&self, interaction: Interaction) -> Interaction {
         if !self.touch_mode {
             return interaction;
         }

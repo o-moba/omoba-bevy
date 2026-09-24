@@ -208,19 +208,50 @@ fn bot_avatar(class: HeroClass, slot: u16) -> Option<&'static str> {
         })
 }
 
+/// Hit points of a practice dummy: enough to test a full rotation before it
+/// falls over and returns to its spot.
+const DUMMY_MAX_HP: f32 = 400.0;
+/// How far in front of the requester (toward the enemy base) a dummy stands.
+const DUMMY_DISTANCE: f32 = 4.5;
+
 #[derive(Default)]
 pub(crate) struct BotControllers {
     controllers: HashMap<SocketAddr, Controller>,
     defer_fill: bool,
+    /// A practice sandbox command replaced the standard roster: no automatic
+    /// refill or trimming until `PracticeCommand::Roster` or a round reset.
+    sandbox: bool,
 }
 
 impl BotControllers {
     pub(crate) fn clear(&mut self) {
         self.controllers.clear();
+        self.sandbox = false;
+    }
+
+    pub(crate) fn kind(&self, addr: SocketAddr) -> Option<BotKind> {
+        self.controllers.get(&addr).map(|c| c.kind)
+    }
+
+    /// Standard roster bots count toward the team size; sandbox spawns never do.
+    fn is_lane_bot(&self, addr: SocketAddr) -> bool {
+        self.kind(addr) == Some(BotKind::Lane)
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum BotKind {
+    /// Standard practice roster: walks its lane and fights what it meets.
+    Lane,
+    /// Sandbox 1v1 opponent: the lane AI with a configured level and budget.
+    Duelist,
+    /// Sandbox target: stands at `anchor`, never moves or attacks, and walks
+    /// back to the anchor after every respawn.
+    Dummy { anchor: [f32; 2] },
+}
+
 struct Controller {
+    kind: BotKind,
     lane: Lane,
     waypoint: usize,
     route: VecDeque<[f32; 2]>,
@@ -269,15 +300,125 @@ pub(crate) fn remove_replaced_bot(
 ) {
     let addr = players
         .iter()
-        .filter(|(_, p)| p.state.is_bot && p.state.team == team)
+        .filter(|(addr, p)| p.state.is_bot && p.state.team == team && bots.is_lane_bot(**addr))
         .min_by_key(|(_, p)| p.state.id)
         .map(|(addr, _)| *addr);
     if let Some(addr) = addr {
-        if let Some(player) = players.remove(&addr) {
-            ledger.update_earned_gold(player.state.id, player.state.earned_gold);
-            ledger.update_player(player.state.id, player.state.level, true);
+        remove_bot(players, bots, ledger, addr);
+    }
+}
+
+/// Retire one bot: its ledger row stays (immutable round history) but it
+/// leaves the simulation, the snapshots and the controller table.
+fn remove_bot(
+    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+    bots: &mut BotControllers,
+    ledger: &mut match_stats::RoundLedger,
+    addr: SocketAddr,
+) {
+    if let Some(player) = players.remove(&addr) {
+        ledger.update_earned_gold(player.state.id, player.state.earned_gold);
+        ledger.update_player(player.state.id, player.state.level, true);
+    }
+    bots.controllers.remove(&addr);
+}
+
+/// Team-size seat count: humans plus standard lane bots. Sandbox dummies and
+/// duelists are extras and never displace or block the roster.
+fn seated_count(
+    players: &HashMap<SocketAddr, ConnectedPlayer>,
+    bots: &BotControllers,
+    team: Team,
+) -> usize {
+    players
+        .iter()
+        .filter(|(addr, p)| {
+            p.joined && p.state.team == team && (!p.state.is_bot || bots.is_lane_bot(**addr))
+        })
+        .count()
+}
+
+/// Spend every skill point the way a player would: the ultimate first once it
+/// unlocks, then Q, W and E, never into a locked slot.
+pub(crate) fn auto_rank_skills(player: &mut ConnectedPlayer) {
+    let unlocked = unlocked_slots_for_level(player.state.level);
+    for slot in [3_u8, 0, 1, 2] {
+        let index = slot as usize;
+        if !unlocked[index] {
+            continue;
         }
-        bots.controllers.remove(&addr);
+        let max_rank = ability_for_class_slot(
+            player.state.hero_class,
+            SkillSlot::from_index(slot).unwrap(),
+        )
+        .max_rank;
+        while player.state.skill_points > 0 && player.state.ranks[index] < max_rank {
+            apply_skill_upgrade(player, slot);
+        }
+    }
+}
+
+/// Buy the class's recommended items in order while gold and inventory allow.
+/// Uses the ordinary purchase path, so the bot must stand in its own base.
+pub(crate) fn auto_shop(
+    player: &mut ConnectedPlayer,
+    map: &MapLayoutState,
+    phase: &GameState,
+    match_id: u64,
+) {
+    if !shop::shop_is_available(&player.state, map, phase) {
+        return;
+    }
+    for item_id in shared::shop::recommended_items(player.state.hero_class) {
+        if player.state.inventory.len() >= shared::shop::INVENTORY_CAPACITY {
+            break;
+        }
+        if player.state.inventory.contains(item_id)
+            || player.state.gold < shared::shop::item(*item_id).cost
+        {
+            continue;
+        }
+        let request = player.purchase_sequence + 1;
+        shop::handle_purchase(player, map, phase, item_id.id(), request, match_id);
+    }
+}
+
+/// Raise a fresh bot to `level` with full resources, the level's skill ranks
+/// and `gold` spent at the base shop.
+fn configure_duelist(
+    player: &mut ConnectedPlayer,
+    level: u32,
+    gold: u32,
+    map: &MapLayoutState,
+    phase: &GameState,
+    match_id: u64,
+) {
+    let level = level.clamp(STARTING_LEVEL, MAX_LEVEL);
+    while player.state.level < level && player.state.next_level_xp > 0 {
+        let needed = player.state.next_level_xp;
+        progression::grant_player_xp(&mut player.state, needed);
+    }
+    player.state.hp = player.state.max_hp;
+    player.state.mana = player.state.max_mana;
+    auto_rank_skills(player);
+    shop::award_gold(player, gold);
+    auto_shop(player, map, phase, match_id);
+}
+
+/// Put a dummy on its anchor, facing `toward`, without a movement envelope
+/// check: this is a placement, not a step.
+fn place_dummy(player: &mut ConnectedPlayer, anchor: [f32; 2], toward: [f32; 2], now: Instant) {
+    player.state.x = anchor[0];
+    player.state.y = PLAYER_GROUND_Y;
+    player.state.z = anchor[1];
+    player.state.yaw = hero_yaw_towards(toward[0] - anchor[0], toward[1] - anchor[1]);
+    player.last_movement_at = now;
+}
+
+fn opposite_team(team: Team) -> Team {
+    match team {
+        Team::Green => Team::Blue,
+        Team::Blue => Team::Green,
     }
 }
 
@@ -347,6 +488,7 @@ impl ServerRuntime {
         }
         if self.match_config.mode != MatchMode::Practice
             || self.bots.defer_fill
+            || self.bots.sandbox
             || matches!(self.game_state, GameState::Victory { .. })
             || !self.players.values().any(|p| p.joined && !p.state.is_bot)
         {
@@ -355,11 +497,7 @@ impl ServerRuntime {
         // Reclaimed humans keep their own identity and gameplay state. Remove
         // their temporary replacement before another simulation or snapshot.
         for team in [Team::Green, Team::Blue] {
-            while self
-                .players
-                .values()
-                .filter(|p| p.joined && p.state.team == team)
-                .count()
+            while seated_count(&self.players, &self.bots, team)
                 > self.match_config.team_size as usize
             {
                 let before = self.players.len();
@@ -387,64 +525,228 @@ impl ServerRuntime {
             return;
         }
         for team in [Team::Green, Team::Blue] {
-            while self
-                .players
-                .values()
-                .filter(|p| p.joined && p.state.team == team)
-                .count()
+            while seated_count(&self.players, &self.bots, team)
                 < self.match_config.team_size as usize
             {
-                let slot = (1..=32_u16)
-                    .find(|slot| {
-                        !self
-                            .players
-                            .contains_key(&SocketAddr::from(([0_u16; 8], *slot)))
-                    })
-                    .unwrap();
-                let addr = SocketAddr::from(([0_u16; 8], slot));
-                ensure_player_connected(
-                    &mut self.players,
-                    &self.map_layout,
-                    addr,
-                    &mut self.next_player_id,
-                    now,
-                );
-                let player = self.players.get_mut(&addr).unwrap();
-                player.state.is_bot = true;
-                let class = [
-                    HeroClass::Warrior,
-                    HeroClass::Ranger,
-                    HeroClass::Mage,
-                    HeroClass::Cleric,
-                ][(slot as usize - 1) % 4];
-                handle_join_request_with_sprite(
-                    player,
-                    team,
-                    default_character_choice(),
-                    class,
-                    bot_avatar(class, slot),
-                    None,
-                    &self.map_layout,
-                    now,
-                );
-                self.bots.controllers.insert(
-                    addr,
-                    Controller {
-                        lane: [Lane::Mid, Lane::Top, Lane::Bot][(slot as usize - 1) % 3],
-                        waypoint: 1,
-                        route: VecDeque::new(),
-                        goal: None,
-                        next_route: now,
-                        next_think: now,
-                        next_retreat: now,
-                        retreat_until: None,
-                        target: None,
-                        holding_range: false,
-                    },
-                );
-                self.register_career_participant(addr);
+                if self.spawn_bot(team, None, BotKind::Lane, now).is_none() {
+                    break;
+                }
             }
         }
+    }
+
+    /// Create one joined bot on `team`. `class` defaults to the slot's roster
+    /// class; lane bots rotate lanes by slot, sandbox bots take mid.
+    fn spawn_bot(
+        &mut self,
+        team: Team,
+        class: Option<HeroClass>,
+        kind: BotKind,
+        now: Instant,
+    ) -> Option<SocketAddr> {
+        let slot = (1..=32_u16).find(|slot| {
+            !self
+                .players
+                .contains_key(&SocketAddr::from(([0_u16; 8], *slot)))
+        })?;
+        let addr = SocketAddr::from(([0_u16; 8], slot));
+        ensure_player_connected(
+            &mut self.players,
+            &self.map_layout,
+            addr,
+            &mut self.next_player_id,
+            now,
+        );
+        let player = self.players.get_mut(&addr).unwrap();
+        player.state.is_bot = true;
+        let class = class.unwrap_or(
+            [
+                HeroClass::Warrior,
+                HeroClass::Ranger,
+                HeroClass::Mage,
+                HeroClass::Cleric,
+            ][(slot as usize - 1) % 4],
+        );
+        handle_join_request_with_sprite(
+            player,
+            team,
+            default_character_choice(),
+            class,
+            bot_avatar(class, slot),
+            None,
+            &self.map_layout,
+            now,
+        );
+        let lane = if kind == BotKind::Lane {
+            [Lane::Mid, Lane::Top, Lane::Bot][(slot as usize - 1) % 3]
+        } else {
+            Lane::Mid
+        };
+        self.bots.controllers.insert(
+            addr,
+            Controller {
+                kind,
+                lane,
+                waypoint: 1,
+                route: VecDeque::new(),
+                goal: None,
+                next_route: now,
+                next_think: now,
+                next_retreat: now,
+                retreat_until: None,
+                target: None,
+                holding_range: false,
+            },
+        );
+        self.register_career_participant(addr);
+        Some(addr)
+    }
+
+    fn remove_all_bots(&mut self) {
+        let addresses: Vec<_> = self
+            .players
+            .iter()
+            .filter(|(_, p)| p.state.is_bot)
+            .map(|(addr, _)| *addr)
+            .collect();
+        for addr in addresses {
+            remove_bot(
+                &mut self.players,
+                &mut self.bots,
+                &mut self.combat_log.ledger,
+                addr,
+            );
+        }
+    }
+
+    /// Practice-only sandbox: standard roster, no bots, a stationary dummy or
+    /// a configured 1v1 opponent. Ignored outside a local practice match and
+    /// from anything but a joined human.
+    pub(crate) fn handle_practice_command(
+        &mut self,
+        addr: SocketAddr,
+        command: shared::practice::PracticeCommand,
+        now: Instant,
+    ) {
+        use shared::practice::{MAX_DUMMIES, PracticeCommand};
+        if self.match_config.mode != MatchMode::Practice || self.match_service.worker().is_some() {
+            return;
+        }
+        let Some(human) = self
+            .players
+            .get(&addr)
+            .filter(|p| p.joined && !p.state.is_bot)
+        else {
+            return;
+        };
+        let requester = human.state.id;
+        let team = human.state.team;
+        let class = human.state.hero_class;
+        let origin = [human.state.x, human.state.z];
+        match command {
+            PracticeCommand::Roster => {
+                self.remove_all_bots();
+                self.bots.sandbox = false;
+                self.fill_practice_bots(now);
+                println!("Practice sandbox: standard roster restored by player {requester}");
+            }
+            PracticeCommand::ClearBots => {
+                self.remove_all_bots();
+                self.bots.sandbox = true;
+                println!("Practice sandbox: bots cleared by player {requester}");
+            }
+            PracticeCommand::SpawnDummy => {
+                if !matches!(self.game_state, GameState::Running) {
+                    return;
+                }
+                let mut dummies: Vec<_> = self
+                    .players
+                    .iter()
+                    .filter(|(a, _)| matches!(self.bots.kind(**a), Some(BotKind::Dummy { .. })))
+                    .map(|(a, p)| (p.state.id, *a))
+                    .collect();
+                dummies.sort_unstable();
+                if dummies.len() >= MAX_DUMMIES {
+                    remove_bot(
+                        &mut self.players,
+                        &mut self.bots,
+                        &mut self.combat_log.ledger,
+                        dummies[0].1,
+                    );
+                }
+                let anchor = self.dummy_anchor(origin, team);
+                let Some(bot) = self.spawn_bot(
+                    opposite_team(team),
+                    Some(HeroClass::Warrior),
+                    BotKind::Dummy { anchor },
+                    now,
+                ) else {
+                    return;
+                };
+                let dummy = self.players.get_mut(&bot).unwrap();
+                dummy.state.max_hp = DUMMY_MAX_HP;
+                dummy.state.hp = DUMMY_MAX_HP;
+                place_dummy(dummy, anchor, origin, now);
+                println!(
+                    "Practice sandbox: dummy {} at ({:.1}, {:.1})",
+                    dummy.state.id, anchor[0], anchor[1]
+                );
+            }
+            PracticeCommand::StartDuel { level, gold } => {
+                if !matches!(self.game_state, GameState::Running) {
+                    return;
+                }
+                self.remove_all_bots();
+                self.bots.sandbox = true;
+                let Some(bot) =
+                    self.spawn_bot(opposite_team(team), Some(class), BotKind::Duelist, now)
+                else {
+                    return;
+                };
+                let match_id = self.match_id;
+                let duelist = self.players.get_mut(&bot).unwrap();
+                configure_duelist(
+                    duelist,
+                    level,
+                    gold,
+                    &self.map_layout,
+                    &self.game_state,
+                    match_id,
+                );
+                println!(
+                    "Practice sandbox: duelist {} level {} ranks {:?} items {:?} gold left {}",
+                    duelist.state.id,
+                    duelist.state.level,
+                    duelist.state.ranks,
+                    duelist.state.inventory,
+                    duelist.state.gold
+                );
+            }
+        }
+    }
+
+    /// A clear spot in front of the requester, toward the enemy base; falls
+    /// back to closer spots and finally the requester's own position.
+    fn dummy_anchor(&self, origin: [f32; 2], team: Team) -> [f32; 2] {
+        let own = spawn_position_for_team(&self.map_layout, team);
+        let enemy = spawn_position_for_team(&self.map_layout, opposite_team(team));
+        let dir = Vec3f::new(enemy.x - own.x, 0.0, enemy.z - own.z).normalize_or_zero();
+        let nav = shared::navigation::world_navigation();
+        for distance in [DUMMY_DISTANCE, DUMMY_DISTANCE * 0.6, 2.0] {
+            let candidate = self.map_layout.clamp_player_position(Vec3f::new(
+                origin[0] + dir.x * distance,
+                PLAYER_GROUND_Y,
+                origin[1] + dir.z * distance,
+            ));
+            let clipped = nav.clip_movement(origin, [candidate.x, candidate.z]);
+            let clipped = clip_live_structures(origin, clipped, &self.structures);
+            if nav.point_clear(clipped)
+                && (clipped[0] - origin[0]).hypot(clipped[1] - origin[1]) > 1.0
+            {
+                return clipped;
+            }
+        }
+        origin
     }
 
     pub(crate) fn simulate_bots(&mut self, now: Instant, dt: f32) {
@@ -475,6 +777,23 @@ impl ServerRuntime {
             let Some(player) = self.players.get(&addr) else {
                 continue;
             };
+            if let BotKind::Dummy { anchor } = controller.kind {
+                // Never thinks, moves or attacks. After a respawn at base it
+                // is put back on its anchor so target practice continues.
+                if player.state.hp > 0.0
+                    && (player.state.x - anchor[0]).hypot(player.state.z - anchor[1]) > 0.5
+                {
+                    let toward = self
+                        .players
+                        .values()
+                        .find(|p| p.joined && !p.state.is_bot)
+                        .map_or(anchor, |p| [p.state.x, p.state.z]);
+                    let dummy = self.players.get_mut(&addr).unwrap();
+                    place_dummy(dummy, anchor, toward, now);
+                }
+                self.bots.controllers.insert(addr, controller);
+                continue;
+            }
             if player.state.hp <= 0.0 {
                 controller.route.clear();
                 controller.goal = None;
@@ -496,7 +815,14 @@ impl ServerRuntime {
             let retreating = controller.retreat_until.is_some_and(|until| now < until);
             if now >= controller.next_think {
                 controller.next_think = now + THINK_INTERVAL;
-                apply_skill_upgrade(self.players.get_mut(&addr).unwrap(), 0);
+                {
+                    let match_id = self.match_id;
+                    let bot = self.players.get_mut(&addr).unwrap();
+                    auto_rank_skills(bot);
+                    // Standing in the base shop (spawn, respawn or a retreat)
+                    // spends earned gold the way a player would.
+                    auto_shop(bot, &self.map_layout, &self.game_state, match_id);
+                }
                 let previous_target = controller.target;
                 controller.target = if retreating {
                     None
@@ -528,20 +854,35 @@ impl ServerRuntime {
                     controller.next_route = now;
                 }
                 if let Some(target) = controller.target {
-                    handle_cast_request(
-                        &mut self.players,
-                        &mut self.projectiles,
-                        &mut self.minions,
-                        &mut self.structures,
-                        &mut self.neutrals,
-                        &self.team_buffs,
-                        addr,
-                        target,
-                        0,
-                        &mut self.next_projectile_id,
-                        &self.game_state,
-                        now,
-                    );
+                    // Every unlocked hostile-target skill; the cast path
+                    // enforces range, mana and cooldown for each slot.
+                    for slot in 0..4 {
+                        let p = &self.players[&addr];
+                        if !unlocked_slots_for_level(p.state.level)[slot as usize]
+                            || ability_for_class_slot(
+                                p.state.hero_class,
+                                SkillSlot::from_index(slot).unwrap(),
+                            )
+                            .targeting
+                                != TargetingMode::UnitTarget
+                        {
+                            continue;
+                        }
+                        handle_cast_request(
+                            &mut self.players,
+                            &mut self.projectiles,
+                            &mut self.minions,
+                            &mut self.structures,
+                            &mut self.neutrals,
+                            &self.team_buffs,
+                            addr,
+                            target,
+                            slot,
+                            &mut self.next_projectile_id,
+                            &self.game_state,
+                            now,
+                        );
+                    }
                 }
                 if low_health {
                     for slot in 0..4 {

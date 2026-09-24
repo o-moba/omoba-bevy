@@ -43,9 +43,11 @@ impl Plugin for GodModePlugin {
     }
 }
 
+/// Last requested god mode. The practice sandbox page shares it so the
+/// periodic re-assertion below never overrides a practice toggle.
 #[derive(Resource, Default)]
-struct DebugToggleState {
-    god_mode: bool,
+pub(crate) struct DebugToggleState {
+    pub(crate) god_mode: bool,
 }
 
 #[derive(Component)]

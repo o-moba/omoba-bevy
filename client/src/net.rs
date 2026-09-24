@@ -542,6 +542,10 @@ pub enum NetworkCommand {
     SetSpeedBoost {
         enabled: bool,
     },
+    /// Local practice sandbox request (bots, dummies, 1v1).
+    Practice {
+        command: shared::practice::PracticeCommand,
+    },
     UpgradeSkill {
         slot: u8,
     },
@@ -621,6 +625,10 @@ enum ClientPacket {
     },
     SetSpeedBoost {
         enabled: bool,
+    },
+    /// Local practice sandbox request (bots, dummies, 1v1).
+    Practice {
+        command: shared::practice::PracticeCommand,
     },
     UpgradeSkill {
         slot: u8,
@@ -2045,6 +2053,14 @@ fn send_network_commands(
                 let _ = channels
                     .outgoing
                     .try_send(ClientPacket::SetGodMode { enabled: *enabled });
+            }
+            NetworkCommand::Practice { command } => {
+                if !client_session.join_confirmed() {
+                    continue;
+                }
+                let _ = channels
+                    .outgoing
+                    .try_send(ClientPacket::Practice { command: *command });
             }
             NetworkCommand::SetSpeedBoost { enabled } => {
                 if !client_session.join_confirmed() {

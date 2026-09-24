@@ -48,6 +48,7 @@ mod pause_menu;
 mod persistence;
 mod platform;
 mod player;
+mod practice_sandbox;
 mod presentation2d;
 mod presentation3d;
 mod projectile_visuals;
@@ -155,6 +156,7 @@ pub fn main() {
         HelpOverlayPlugin,
         DebugConsolePlugin,
         PauseMenuPlugin,
+        practice_sandbox::PracticeSandboxPlugin,
         GodModePlugin,
         ModelScalePlugin,
         MinionVisualsPlugin,
