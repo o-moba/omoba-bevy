@@ -48,7 +48,7 @@ fn snapshot(rt: &mut ServerRuntime, addr: SocketAddr, now: Instant) -> ServerPac
         meta: Default::default(),
         join_error: None,
         your_id: rt.world.players[&addr].state.id,
-        players: build_players_snapshot(&rt.world.players),
+        players: build_players_snapshot(&rt.world, now),
         scoreboard: rt.combat_log.ledger.live_scoreboard(),
         prematch: None,
         projectiles: rt
@@ -184,8 +184,8 @@ fn unseen_basic_and_cast_reject_without_resources_or_reveal_but_same_brush_accep
     cast(&mut rt, a, t, now);
     assert!(rt.world.projectiles.is_empty());
     assert_eq!(rt.world.players[&a].state.mana, mana);
-    assert_eq!(rt.world.players[&a].last_basic_attack_at, None);
-    assert_eq!(rt.world.players[&a].last_cast_at, [None; 4]);
+    assert_eq!(rt.world.players[&a].timers.last_basic_attack_at, None);
+    assert_eq!(rt.world.players[&a].timers.last_cast_at, [None; 4]);
     assert!(!revealed(&rt.world.players[&a], now));
     rt.world.players.get_mut(&a).unwrap().state.x = -20.0;
     cast(&mut rt, a, t, now);
@@ -212,8 +212,8 @@ fn hostile_action_reveal_expires_and_self_cast_does_not_reveal() {
         now + Duration::from_secs(2)
     ));
     let p = rt.world.players.get_mut(&b).unwrap();
-    p.last_cast_at = [None; 4];
-    p.last_cast_at[1] = Some(now);
+    p.timers.last_cast_at = [None; 4];
+    p.timers.last_cast_at[1] = Some(now);
     assert!(!revealed(p, now));
 }
 #[test]
@@ -463,7 +463,7 @@ fn allied_dead_viewer_keeps_team_sight_and_round_reset_clears_reveal() {
     p.state.hp = 0.0;
     p.state.x = shared::vision::brush_layout()[0].center[0];
     p.state.z = shared::vision::brush_layout()[0].center[1];
-    p.last_basic_attack_at = Some(now);
+    p.timers.last_basic_attack_at = Some(now);
     let ServerPacket::Snapshot {
         players, vision, ..
     } = snapshot(&mut rt, a, now)

@@ -50,11 +50,11 @@ pub(crate) fn sources(team: Team, world: &GameWorld) -> Vec<VisionSource> {
 pub(crate) fn revealed(player: &ConnectedPlayer, now: Instant) -> bool {
     let recent =
         |at: Instant| now.saturating_duration_since(at).as_secs_f32() < HOSTILE_REVEAL_SECS;
-    player.last_basic_attack_at.is_some_and(recent)
+    player.timers.last_basic_attack_at.is_some_and(recent)
         || SkillSlot::ALL.into_iter().any(|slot| {
             ability_for_class_slot(player.state.hero_class, slot).targeting
                 == TargetingMode::UnitTarget
-                && player.last_cast_at[slot.index()].is_some_and(recent)
+                && player.timers.last_cast_at[slot.index()].is_some_and(recent)
         })
 }
 pub(crate) fn player_visible(

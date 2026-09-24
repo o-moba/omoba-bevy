@@ -182,10 +182,9 @@ pub(crate) fn apply_player_damage_typed(
     } else {
         (before - damage).max(0.0)
     };
-    if player.state.hp <= 0.0 && player.respawn_at.is_none() {
-        player.respawn_at = Some(now + RESPAWN_DELAY);
-        player.haste_expires_at = None;
-        player.state.utility.haste_active_secs = 0.0;
+    if player.state.hp <= 0.0 && player.timers.respawn_at.is_none() {
+        player.timers.respawn_at = Some(now + RESPAWN_DELAY);
+        player.timers.haste_expires_at = None;
     }
     let mut receipt = damage_receipt(
         CombatEntityKind::Player,

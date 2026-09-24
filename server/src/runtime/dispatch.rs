@@ -519,7 +519,7 @@ impl ServerRuntime {
                     if enabled {
                         player.state.hp = player.state.max_hp;
                         player.state.mana = player.state.max_mana;
-                        player.respawn_at = None;
+                        player.timers.respawn_at = None;
                     }
                 }
             }

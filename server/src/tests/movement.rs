@@ -147,7 +147,7 @@ fn movement_authority_keeps_players_inside_map_bounds() {
         let player = world.players.get_mut(&addr).unwrap();
         player.state.x = world.map_layout.max_x - 0.1;
         player.state.z = world.map_layout.max_z - 0.1;
-        player.last_movement_at = now;
+        player.timers.last_movement_at = now;
     }
 
     handle_transform_request(

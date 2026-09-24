@@ -99,6 +99,25 @@ state. A tick is:
    frame where the old ECS systems ran; folding it into one pass is the
    next slice.
 
+Hero clocks and views: `ConnectedPlayer.state` is the wire `PlayerState`
+and holds only authoritative state; the replicated cooldown, utility-clock
+and shop fields stay at their defaults there. The instants a hero's clocks
+are measured from live in `ConnectedPlayer.timers: HeroTimers`
+(`server/src/hero_timers.rs`: last movement, per-slot casts, last basic
+strike, dash and haste readiness, haste expiry, respawn). The same module
+holds the pure reads over them (`basic_attack_remaining`,
+`skill_cooldown_remaining`, `skill_recovery_remaining`, `dash_remaining`,
+`haste_remaining`, `haste_active`), used as gates by the request handlers
+and by the sandbox telemetry, and `normalize_hero_timers`, the one place
+that clears instants from derived conditions (death, sandbox
+`no_cooldowns`), run once per tick after respawns. What a client receives is
+a view: `ConnectedPlayer::owner_view(now, map, phase)` is the stored state
+plus the derived fields computed at the tick's `now`; `public_view` is the
+hook for redaction and equals the owner view today.
+`snapshot::build_players_snapshot(world, now)` builds every replicated
+player through it. `server/src/tests/player_view.rs` pins the view's bytes
+through a hero lifetime.
+
 Supporting modules: `entities` (the server-side records), `sim/cast.rs`
 (ability casts), `vision` (server-owned sight, takes `&GameWorld`). Unit
 tests for these live under `server/src/tests/`.
@@ -152,9 +171,11 @@ Ordered by value over cost. Each step is a separate change with the full
 6. One server tick (done: the Bevy `App`, the ECS mirror of players and
    minions, the duplicate mana regeneration and the ECS-only minion
    projectile path are gone; `ServerRuntime::tick` is the whole step);
-   authoritative hero state separate from replicated views, the
-   `ConnectedPlayer` struct split, `StatModifiers` and snapshot redaction
-   remain.
+   replicated `PlayerState` as a view over authoritative state and
+   `HeroTimers` (done: `hero_timers.rs`, `owner_view`/`public_view`, no
+   per-tick copies); the rest of the `ConnectedPlayer` split
+   (`HeroEconomy`, a `Hero` core), `StatModifiers` and snapshot redaction
+   through `public_view` remain.
 7. Match rules as one policy object; career, transport and clock behind
    traits.
 8. Client `net.rs` split into transport, session, commands, ingest, apply

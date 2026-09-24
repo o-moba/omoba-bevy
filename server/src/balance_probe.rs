@@ -98,7 +98,12 @@ fn measure(
     );
     let move_speed = (rt.world.players[&a].state.x - MOVEMENT_POSITION_TOLERANCE) / 0.1;
     rt.world.players.get_mut(&a).unwrap().state.x = 0.0;
-    rt.world.players.get_mut(&a).unwrap().last_movement_at = start;
+    rt.world
+        .players
+        .get_mut(&a)
+        .unwrap()
+        .timers
+        .last_movement_at = start;
     let dt = 1.0 / 120.0;
     let mut ttk = None;
     let mut spent = 0.0f32;

@@ -73,19 +73,24 @@ pub(crate) fn validate_snapshot_payload_size(
 /// Replicated player list: only joined players are visible to clients.
 /// Pre-join endpoints keep receiving snapshots (they are still addressable)
 /// but must not appear in the world as ghost players.
-pub(crate) fn build_players_snapshot(
-    players: &HashMap<SocketAddr, ConnectedPlayer>,
-) -> Vec<PlayerState> {
-    let mut snapshot = players
+pub(crate) fn build_players_snapshot(world: &GameWorld, now: Instant) -> Vec<PlayerState> {
+    let mut snapshot = world
+        .players
         .values()
         .filter(|player| player.joined)
-        .map(|player| player.state.clone())
+        .map(|player| player.owner_view(now, &world.map_layout, &world.game_state))
         .collect::<Vec<_>>();
     snapshot.sort_unstable_by_key(|player| player.id);
     snapshot
 }
 
 impl ServerRuntime {
+    /// The replicated view of one player at `now`, as the broadcast builds it.
+    #[cfg(test)]
+    pub(crate) fn player_view(&self, addr: SocketAddr, now: Instant) -> PlayerState {
+        self.world.players[&addr].owner_view(now, &self.world.map_layout, &self.world.game_state)
+    }
+
     /// Builds one vision-filtered snapshot per human recipient and sends it,
     /// at most once per `SNAPSHOT_INTERVAL`.
     pub(crate) fn broadcast_snapshots(&mut self, now: Instant, career_flow: bool) {
@@ -108,10 +113,9 @@ impl ServerRuntime {
                 .update_earned_gold(player.state.id, player.state.earned_gold);
         }
         let scoreboard = self.combat_log.ledger.live_scoreboard();
-        let mut players_snapshot = build_players_snapshot(&world.players);
-        for state in &mut players_snapshot {
-            state.shop_available = shop_is_available(state, &world.map_layout, &world.game_state);
-        }
+        // Every recipient gets the owner view for now; redaction through
+        // `public_view` is a later step.
+        let players_snapshot = build_players_snapshot(world, now);
 
         let mut projectiles_snapshot = world
             .projectiles

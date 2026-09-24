@@ -80,16 +80,10 @@ impl SandboxRuntime {
                     ),
                 attack_damage: effective_basic_attack_damage(p),
                 cooldowns: std::array::from_fn(|i| {
-                    let d = effective_ability_cooldown(p, SkillSlot::from_index(i as u8).unwrap());
                     if c.no_cooldowns {
                         0.0
                     } else {
-                        p.last_cast_at[i]
-                            .map(|at| {
-                                d.saturating_sub(self.now.saturating_duration_since(at))
-                                    .as_secs_f32()
-                            })
-                            .unwrap_or(0.0)
+                        hero_timers::skill_cooldown_left(p, SkillSlot::ALL[i], self.now)
                     }
                 }),
                 unlocked: if c.unlock_all {
@@ -183,17 +177,6 @@ fn validate_config(c: &SandboxConfig) -> Result<(), String> {
     }
     Ok(())
 }
-fn clear_cooldowns(p: &mut ConnectedPlayer) {
-    p.last_cast_at = [None; 4];
-    p.last_basic_attack_at = None;
-    p.dash_ready_at = None;
-    p.haste_ready_at = None;
-    p.state.utility.dash_remaining_secs = 0.0;
-    p.state.utility.haste_remaining_secs = 0.0;
-    p.state.basic_attack_remaining_secs = 0.0;
-    p.state.skill_cooldown_remaining_secs = [0.0; 4];
-    p.state.skill_recovery_remaining_secs = 0.0;
-}
 pub(crate) fn apply_actor(p: &mut ConnectedPlayer, c: &ActorConfig, reset: bool, now: Instant) {
     let changed_hero = p.state.hero_class != c.hero;
     let changed_avatar = p.sandbox.as_ref().is_some_and(|old| old.avatar != c.avatar);
@@ -216,7 +199,7 @@ pub(crate) fn apply_actor(p: &mut ConnectedPlayer, c: &ActorConfig, reset: bool,
         p.state.utility.dash_sequence = p.state.utility.dash_sequence.saturating_add(1);
         p.state.x = c.position[0];
         p.state.z = c.position[1];
-        p.last_movement_at = now;
+        p.timers.last_movement_at = now;
     }
     p.state.level = c.level;
     p.state.xp = c.xp;
@@ -239,17 +222,15 @@ pub(crate) fn apply_actor(p: &mut ConnectedPlayer, c: &ActorConfig, reset: bool,
         p.state.y = PLAYER_GROUND_Y;
         p.state.hp = p.state.max_hp;
         p.state.mana = p.state.max_mana;
-        p.respawn_at = None;
-        p.haste_expires_at = None;
-        p.state.utility.haste_active_secs = 0.0;
-        p.last_movement_at = now;
-        clear_cooldowns(p);
+        p.timers.respawn_at = None;
+        p.timers.haste_expires_at = None;
+        p.timers.last_movement_at = now;
+        p.timers.clear_cooldowns();
         p.state.action_kind = PlayerActionKind::None;
     }
     if c.no_cooldowns {
-        clear_cooldowns(p);
+        p.timers.clear_cooldowns();
     }
-    refresh_skill_cooldowns(p, now);
 }
 impl ServerRuntime {
     pub(crate) fn sandbox_allowed(&self) -> bool {
@@ -408,11 +389,16 @@ impl ServerRuntime {
                 let p = self.world.players.get_mut(&a).unwrap();
                 p.state.hp = p.state.max_hp;
                 p.state.mana = p.state.max_mana;
-                p.respawn_at = None;
+                p.timers.respawn_at = None;
             }
             SandboxCommand::ResetCooldowns { actor } => {
                 let a = self.sandbox_addr(addr, actor)?;
-                clear_cooldowns(self.world.players.get_mut(&a).unwrap());
+                self.world
+                    .players
+                    .get_mut(&a)
+                    .unwrap()
+                    .timers
+                    .clear_cooldowns();
             }
             SandboxCommand::Teleport { actor, position } => {
                 self.validate_sandbox_destination(position)?;
@@ -421,7 +407,7 @@ impl ServerRuntime {
                 p.state.utility.dash_sequence = p.state.utility.dash_sequence.saturating_add(1);
                 p.state.x = position[0];
                 p.state.z = position[1];
-                p.last_movement_at = now;
+                p.timers.last_movement_at = now;
                 let id = p.state.id;
                 self.world.projectiles.retain(|_, p| {
                     p.state.owner_id != id
@@ -672,7 +658,7 @@ impl ServerRuntime {
                     p.state.mana = p.state.max_mana;
                 }
                 if c.no_cooldowns {
-                    clear_cooldowns(p);
+                    p.timers.clear_cooldowns();
                 }
             }
         }
@@ -685,14 +671,14 @@ impl ServerRuntime {
             };
             if p.state.hp <= 0.0 {
                 if addr == DUMMY_ADDR || config.enemy.auto_respawn {
-                    if p.respawn_at.is_some_and(|t| now >= t) {
+                    if p.timers.respawn_at.is_some_and(|t| now >= t) {
                         self.reset_sandbox_actor(addr, now);
-                    } else if p.respawn_at.is_none() {
-                        self.world.players.get_mut(&addr).unwrap().respawn_at =
+                    } else if p.timers.respawn_at.is_none() {
+                        self.world.players.get_mut(&addr).unwrap().timers.respawn_at =
                             Some(now + RESPAWN_DELAY);
                     }
                 } else {
-                    self.world.players.get_mut(&addr).unwrap().respawn_at = None;
+                    self.world.players.get_mut(&addr).unwrap().timers.respawn_at = None;
                 }
                 continue;
             }
@@ -857,37 +843,6 @@ pub(crate) fn effective_ability_cooldown(player: &ConnectedPlayer, slot: SkillSl
         slot,
         combat_bonuses(player),
     )
-}
-pub(crate) fn skill_recovery_remaining(player: &ConnectedPlayer, now: Instant) -> f32 {
-    if player.state.hp <= 0.0 || player.sandbox.as_ref().is_some_and(|c| c.no_cooldowns) {
-        return 0.0;
-    }
-    let recovery = Duration::from_secs_f32(shared::hero_balance::skill_recovery_secs(
-        player.state.level,
-    ));
-    player
-        .last_cast_at
-        .iter()
-        .flatten()
-        .max()
-        .map_or(0.0, |last| {
-            recovery
-                .saturating_sub(now.saturating_duration_since(*last))
-                .as_secs_f32()
-        })
-}
-pub(crate) fn refresh_skill_cooldowns(player: &mut ConnectedPlayer, now: Instant) {
-    player.state.skill_recovery_remaining_secs = skill_recovery_remaining(player, now);
-    player.state.skill_cooldown_remaining_secs = std::array::from_fn(|i| {
-        if player.state.hp <= 0.0 || player.sandbox.as_ref().is_some_and(|c| c.no_cooldowns) {
-            return 0.0;
-        }
-        player.last_cast_at[i].map_or(0.0, |last| {
-            effective_ability_cooldown(player, SkillSlot::ALL[i])
-                .saturating_sub(now.saturating_duration_since(last))
-                .as_secs_f32()
-        })
-    });
 }
 
 #[cfg(test)]

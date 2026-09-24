@@ -388,7 +388,7 @@ fn place_dummy(player: &mut ConnectedPlayer, anchor: [f32; 2], toward: [f32; 2],
     player.state.y = PLAYER_GROUND_Y;
     player.state.z = anchor[1];
     player.state.yaw = hero_yaw_towards(toward[0] - anchor[0], toward[1] - anchor[1]);
-    player.last_movement_at = now;
+    player.timers.last_movement_at = now;
 }
 
 fn opposite_team(team: Team) -> Team {

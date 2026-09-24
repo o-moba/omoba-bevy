@@ -86,6 +86,7 @@ pub(crate) fn handle_basic_attack_request(
     let cooldown = sandbox::effective_basic_attack_cooldown(attacker);
     if !attacker.sandbox.as_ref().is_some_and(|c| c.no_cooldowns)
         && attacker
+            .timers
             .last_basic_attack_at
             .is_some_and(|last| now.saturating_duration_since(last) < cooldown)
     {
@@ -127,9 +128,7 @@ pub(crate) fn handle_basic_attack_request(
         return;
     }
     let attacker = world.players.get_mut(&addr).unwrap();
-    attacker.last_basic_attack_at = Some(now);
-    attacker.state.basic_attack_cooldown_secs = cooldown.as_secs_f32();
-    attacker.state.basic_attack_remaining_secs = cooldown.as_secs_f32();
+    attacker.timers.last_basic_attack_at = Some(now);
     attacker.state.action_sequence = attacker.state.action_sequence.wrapping_add(1).max(1);
     attacker.state.action_kind = PlayerActionKind::Attack;
     attacker.state.action_slot = BASIC_ATTACK_ACTION_SLOT;
@@ -163,28 +162,6 @@ pub(crate) fn handle_basic_attack_request(
             expires_at: now + PROJECTILE_LIFETIME,
         },
     );
-}
-
-pub(crate) fn refresh_basic_attack_cooldowns(
-    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
-    now: Instant,
-) {
-    for player in players.values_mut() {
-        sandbox::refresh_skill_cooldowns(player, now);
-        if player.state.hp <= 0.0 || player.sandbox.as_ref().is_some_and(|c| c.no_cooldowns) {
-            player.last_basic_attack_at = None;
-        }
-        let duration = sandbox::effective_basic_attack_cooldown(player);
-        player.state.basic_attack_cooldown_secs = duration.as_secs_f32();
-        player.state.basic_attack_remaining_secs = player
-            .last_basic_attack_at
-            .map(|last| {
-                duration
-                    .saturating_sub(now.saturating_duration_since(last))
-                    .as_secs_f32()
-            })
-            .unwrap_or(0.0);
-    }
 }
 
 #[cfg(test)]

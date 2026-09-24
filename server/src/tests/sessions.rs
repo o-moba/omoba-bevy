@@ -105,7 +105,7 @@ fn pre_join_endpoint_is_hidden_and_inert_until_join() {
     // A heartbeat-only endpoint (Ping before Join) must not be replicated.
     world.ensure_connected(ghost_addr, now);
     assert!(!world.players.get(&ghost_addr).unwrap().joined);
-    assert!(build_players_snapshot(&world.players).is_empty());
+    assert!(build_players_snapshot(&world, now).is_empty());
 
     // It cannot move...
     let before = world.players.get(&ghost_addr).unwrap().state.clone();
@@ -168,7 +168,7 @@ fn pre_join_endpoint_is_hidden_and_inert_until_join() {
         now,
     );
     let ghost_id = world.players.get(&ghost_addr).unwrap().state.id;
-    let snapshot = build_players_snapshot(&world.players);
+    let snapshot = build_players_snapshot(&world, now);
     assert_eq!(snapshot.len(), 2);
     assert!(snapshot.iter().any(|player| player.id == ghost_id));
 }

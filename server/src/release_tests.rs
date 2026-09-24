@@ -39,8 +39,8 @@ fn progress(player: &mut ConnectedPlayer, now: Instant, dead: bool) {
     player.state.action_sequence = 73;
     player.state.action_kind = PlayerActionKind::Cast;
     player.state.action_slot = 1;
-    player.last_cast_at = [Some(now); 4];
-    player.respawn_at = dead.then_some(now + RESPAWN_DELAY);
+    player.timers.last_cast_at = [Some(now); 4];
+    player.timers.respawn_at = dead.then_some(now + RESPAWN_DELAY);
 }
 
 fn assert_gameplay_same(
@@ -53,8 +53,8 @@ fn assert_gameplay_same(
         serde_json::to_value(before).unwrap(),
         serde_json::to_value(&after.state).unwrap()
     );
-    assert_eq!(casts, after.last_cast_at);
-    assert_eq!(respawn, after.respawn_at);
+    assert_eq!(casts, after.timers.last_cast_at);
+    assert_eq!(respawn, after.timers.respawn_at);
 }
 
 #[test]
@@ -67,8 +67,8 @@ fn handler_duplicate_and_reclaim_preserve_wounded_and_dead_full_state() {
         let player = rt.world.players.get_mut(&addr(55101)).unwrap();
         progress(player, now, dead);
         let before = player.state.clone();
-        let casts = player.last_cast_at;
-        let respawn = player.respawn_at;
+        let casts = player.timers.last_cast_at;
+        let respawn = player.timers.respawn_at;
         let mut duplicate = join("changed-session", Team::Blue);
         if let ClientPacket::Join {
             character,
@@ -165,7 +165,7 @@ fn handler_release_rejects_debug_and_bad_protocol_while_explicit_dev_accepts_deb
         assert_eq!(player.god_mode, config.mode == MatchMode::Dev);
         if config.mode == MatchMode::Release {
             assert_eq!(player.state.hp, 0.0);
-            assert!(player.respawn_at.is_some());
+            assert!(player.timers.respawn_at.is_some());
             assert_eq!(player.speed_mult, 1.0);
         } else {
             assert_eq!(player.state.hp, player.state.max_hp);
@@ -282,8 +282,8 @@ fn assert_clean_round(rt: &ServerRuntime) {
         assert_eq!(player.state.action_sequence, 0);
         assert_eq!(player.state.action_kind, PlayerActionKind::None);
         assert_eq!(player.state.action_slot, 0);
-        assert_eq!(player.last_cast_at, [None; 4]);
-        assert_eq!(player.respawn_at, None);
+        assert_eq!(player.timers.last_cast_at, [None; 4]);
+        assert_eq!(player.timers.respawn_at, None);
         assert_eq!(player.speed_mult, 1.0);
         assert!(!player.god_mode);
         let spawn = spawn_position_for_team(&rt.world.map_layout, player.state.team);
@@ -641,7 +641,7 @@ fn live_udp_victory_rematch_uses_real_cast_receiver_and_framed_snapshots() {
     player.state.x = base.x - 2.0;
     player.state.z = base.z;
     player.state.mana = player.state.max_mana;
-    player.last_cast_at = [None; 4];
+    player.timers.last_cast_at = [None; 4];
     let camp = rt
         .world
         .neutrals
@@ -726,15 +726,20 @@ fn shared_xp_level_up_preserves_death_until_the_scheduled_respawn() {
     for player in rt.world.players.values_mut() {
         player.state.xp = player.state.next_level_xp - 1;
         player.state.hp = 0.0;
-        player.respawn_at = Some(respawn_at);
+        player.timers.respawn_at = Some(respawn_at);
     }
     rt.world.players.get_mut(&addr(55801)).unwrap().state.hp = 40.0;
-    rt.world.players.get_mut(&addr(55801)).unwrap().respawn_at = None;
+    rt.world
+        .players
+        .get_mut(&addr(55801))
+        .unwrap()
+        .timers
+        .respawn_at = None;
     award_minion_kill_rewards(&mut rt.world.players, Team::Green);
     let dead = &rt.world.players[&addr(55800)];
     assert_eq!(dead.state.level, 2);
     assert_eq!(dead.state.hp, 0.0);
-    assert_eq!(dead.respawn_at, Some(respawn_at));
+    assert_eq!(dead.timers.respawn_at, Some(respawn_at));
     let alive = &rt.world.players[&addr(55801)];
     assert_eq!(alive.state.level, 2);
     assert_eq!(alive.state.hp, 40.0 + LEVEL_UP_HP_BONUS);
@@ -744,7 +749,7 @@ fn shared_xp_level_up_preserves_death_until_the_scheduled_respawn() {
     let dead = &rt.world.players[&addr(55800)];
     assert_eq!(dead.state.hp, MAX_HP + LEVEL_UP_HP_BONUS);
     assert_eq!(dead.state.hp, dead.state.max_hp);
-    assert_eq!(dead.respawn_at, None);
+    assert_eq!(dead.timers.respawn_at, None);
     let spawn =
         spawn_position_for_team_from_base(&rt.world.structures, &rt.world.map_layout, Team::Green);
     assert_eq!((dead.state.x, dead.state.z), (spawn.x, spawn.z));

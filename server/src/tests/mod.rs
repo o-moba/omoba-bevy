@@ -6,6 +6,7 @@ mod formation;
 mod minions;
 mod movement;
 mod neutrals;
+mod player_view;
 mod progression;
 mod sessions;
 mod snapshot;

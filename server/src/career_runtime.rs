@@ -859,8 +859,7 @@ impl ServerRuntime {
             self.combat_log
                 .ledger
                 .update_earned_gold(id, player.state.earned_gold);
-            player.haste_expires_at = None;
-            player.state.utility.haste_active_secs = 0.0;
+            player.timers.haste_expires_at = None;
             self.combat_log.ledger.update_player(id, level, true);
         }
         self.cancel_career_entry(id, now);
@@ -908,8 +907,7 @@ impl ServerRuntime {
             self.combat_log
                 .ledger
                 .update_earned_gold(player.state.id, player.state.earned_gold);
-            player.haste_expires_at = None;
-            player.state.utility.haste_active_secs = 0.0;
+            player.timers.haste_expires_at = None;
         }
         if let Some(player) = self.world.players.get(&addr) {
             let id = player.state.id;
