@@ -16,6 +16,7 @@ use crate::audio_settings::AudioSettings;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::camera::CameraSettings;
 use crate::model_scale::{
     DEFAULT_MODEL_TARGET_HEIGHT, MAX_MODEL_TARGET_HEIGHT, MIN_MODEL_TARGET_HEIGHT,
     ModelScaleSettings,
@@ -58,6 +59,7 @@ impl Plugin for ClientPersistencePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FileGameServerAddr>()
             .init_resource::<AudioSettings>()
+            .init_resource::<CameraSettings>()
             .init_resource::<ResolvedServerAddressForPrefs>()
             .init_resource::<ClientSessionId>()
             .init_resource::<ClientPreferencesInitialSavePending>()
@@ -98,6 +100,9 @@ struct ClientPreferencesFile {
     light_yaw_deg: Option<f32>,
     #[serde(default)]
     audio: AudioSettings,
+    /// Follow-camera distance multiplier; absent in files written before it existed.
+    #[serde(default)]
+    camera_zoom: Option<f32>,
 }
 
 fn default_schema_version() -> u32 {
@@ -226,6 +231,7 @@ pub(crate) fn load_persistent_client_settings(
     mut initial_save_pending: ResMut<ClientPreferencesInitialSavePending>,
     mut gate: ResMut<ClientPrefsSaveGate>,
     mut audio: ResMut<AudioSettings>,
+    mut camera: ResMut<CameraSettings>,
 ) {
     gate.suppress_saves = 3;
     file_addr.0 = None;
@@ -260,6 +266,9 @@ pub(crate) fn load_persistent_client_settings(
     // queue the migrated schema so the one-time default migration is persisted.
     initial_save_pending.0 = disk.schema_version < SCHEMA_VERSION;
     *audio = disk.audio.sanitized();
+    if let Some(zoom) = disk.camera_zoom {
+        *camera = CameraSettings { zoom }.sanitized();
+    }
 
     if let Some(addr_raw) = disk.game_server_addr.as_deref() {
         if let Some(addr) = validate_game_server_addr(addr_raw) {
@@ -320,6 +329,7 @@ fn build_file_from_state(
     game_server_addr: &str,
     client_session_id: &str,
     audio: &AudioSettings,
+    camera: &CameraSettings,
 ) -> ClientPreferencesFile {
     ClientPreferencesFile {
         schema_version: SCHEMA_VERSION,
@@ -332,6 +342,7 @@ fn build_file_from_state(
         light_pitch_deg: Some(lighting.light_pitch_deg),
         light_yaw_deg: Some(lighting.light_yaw_deg),
         audio: audio.sanitized(),
+        camera_zoom: Some(camera.sanitized().zoom),
     }
 }
 
@@ -343,6 +354,7 @@ pub(crate) fn save_client_preferences_to_disk(
     game_server_addr: &str,
     client_session_id: &str,
     audio: &AudioSettings,
+    camera: &CameraSettings,
 ) -> io::Result<()> {
     let Some(path) = preferences_path() else {
         return Err(io::Error::new(
@@ -356,7 +368,15 @@ pub(crate) fn save_client_preferences_to_disk(
     });
     let session_id =
         validate_client_session_id(client_session_id).unwrap_or_else(generate_client_session_id);
-    let prefs = build_file_from_state(lighting, model, character, &addr, &session_id, audio);
+    let prefs = build_file_from_state(
+        lighting,
+        model,
+        character,
+        &addr,
+        &session_id,
+        audio,
+        camera,
+    );
     write_preferences_file(&path, &prefs)
 }
 
@@ -369,6 +389,7 @@ fn save_client_preferences_on_change(
     resolved_addr: Res<ResolvedServerAddressForPrefs>,
     client_session_id: Res<ClientSessionId>,
     audio: Res<AudioSettings>,
+    camera: Res<CameraSettings>,
 ) {
     if gate.suppress_saves > 0 {
         gate.suppress_saves -= 1;
@@ -380,7 +401,8 @@ fn save_client_preferences_on_change(
         || team.is_changed()
         || resolved_addr.is_changed()
         || client_session_id.is_changed()
-        || audio.is_changed();
+        || audio.is_changed()
+        || camera.is_changed();
     if !changed && !initial_save_pending.0 {
         return;
     }
@@ -397,16 +419,19 @@ fn save_client_preferences_on_change(
         },
         client_session_id.0.as_str(),
         audio.as_ref(),
+        camera.as_ref(),
     ) {
         warn!("Failed to save client preferences: {e}");
     }
     initial_save_pending.0 = false;
 }
 
-/// Resets graphics settings to defaults, persists, and re-opens save gate briefly.
+/// Resets graphics settings (lighting, model scale, camera distance) to
+/// defaults, persists, and re-opens save gate briefly.
 pub(crate) fn reset_graphics_to_defaults(
     lighting: &mut LightingSettings,
     model: &mut ModelScaleSettings,
+    camera: &mut CameraSettings,
     gate: &mut ClientPrefsSaveGate,
     character: CharacterChoice,
     game_server_addr: &str,
@@ -415,6 +440,7 @@ pub(crate) fn reset_graphics_to_defaults(
 ) {
     *lighting = LightingSettings::default();
     *model = ModelScaleSettings::default();
+    *camera = CameraSettings::default();
     gate.suppress_saves = 1;
     if let Err(e) = save_client_preferences_to_disk(
         lighting,
@@ -423,6 +449,7 @@ pub(crate) fn reset_graphics_to_defaults(
         game_server_addr,
         client_session_id,
         audio,
+        camera,
     ) {
         warn!("Failed to save preferences after reset: {e}");
     }
@@ -446,6 +473,36 @@ mod tests {
     }
 
     #[test]
+    fn camera_distance_round_trips_and_older_files_keep_the_default() {
+        let file = build_file_from_state(
+            &LightingSettings::default(),
+            &ModelScaleSettings::default(),
+            CharacterChoice::Paco,
+            "game.local:5000",
+            "camera-test-install",
+            &AudioSettings::default(),
+            &CameraSettings { zoom: 0.8 },
+        );
+        let restored: ClientPreferencesFile =
+            serde_json::from_slice(&serde_json::to_vec(&file).unwrap()).unwrap();
+        assert_eq!(restored.camera_zoom, Some(0.8));
+        // Out-of-range values are clamped on the way to disk.
+        let clamped = build_file_from_state(
+            &LightingSettings::default(),
+            &ModelScaleSettings::default(),
+            CharacterChoice::Paco,
+            "game.local:5000",
+            "camera-test-install",
+            &AudioSettings::default(),
+            &CameraSettings { zoom: 9.0 },
+        );
+        assert_eq!(clamped.camera_zoom, Some(crate::camera::CAMERA_MAX_ZOOM));
+        let legacy: ClientPreferencesFile =
+            serde_json::from_str(r#"{"schema_version":5,"audio":{}}"#).unwrap();
+        assert_eq!(legacy.camera_zoom, None);
+    }
+
+    #[test]
     fn saved_audio_round_trip_keeps_independent_buses_mute_and_existing_preferences() {
         let audio = AudioSettings {
             master: 0.55,
@@ -461,6 +518,7 @@ mod tests {
             "game.local:5000",
             "audio-test-install",
             &audio,
+            &CameraSettings::default(),
         );
         let bytes = serde_json::to_vec(&file).unwrap();
         let restored: ClientPreferencesFile = serde_json::from_slice(&bytes).unwrap();
@@ -484,6 +542,7 @@ mod tests {
             "game.local:5000",
             "audio-test-install",
             &restored.audio,
+            &CameraSettings::default(),
         );
         assert_eq!(reset.audio, audio);
         let invalid = build_file_from_state(
@@ -497,6 +556,7 @@ mod tests {
                 effects: -5.0,
                 ..audio
             },
+            &CameraSettings::default(),
         );
         let value = serde_json::to_value(invalid).unwrap();
         assert!(value["audio"]["master"].is_number());
@@ -652,6 +712,7 @@ mod tests {
                 DEFAULT_GAME_SERVER_ADDR,
                 "scale-migration-test",
                 &AudioSettings::default(),
+                &CameraSettings::default(),
             );
             let round_trip: ClientPreferencesFile =
                 serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();

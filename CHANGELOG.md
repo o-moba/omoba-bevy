@@ -6,6 +6,14 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Practice bots, utility effects and targeting polish
+- Practice bots now face the way they run and the unit they strike; the server used the +Z yaw convention while hero models face -Z, so every bot ran backwards.
+- Dash shows a departure ring, staggered cyan afterimages along the travelled path and an arrival flash with sparks, for the local hero and for remote heroes and bots, which now teleport instead of sliding to the destination.
+- Haste leaves an amber double speed trail behind the hero and pulses under it while the buff lasts, so the speed boost is readable even standing still.
+- Settings gain a Camera > Distance row (55%–225%, 10% steps) that is remembered across restarts and stays in sync with wheel zoom; Reset graphics restores it.
+- A hero in melee reach turns to face its target when it strikes instead of swinging with its back to the enemy; the stick and an explicit move order keep facing authority.
+- On phones, dragging ATTACK onto a unit only locks it as the target; approaching and striking still require tapping or holding ATTACK.
+
 ## [0.22.0-rc.1] - 2026-09-22
 
 ### Public multiplayer MVP

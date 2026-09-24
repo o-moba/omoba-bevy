@@ -380,6 +380,8 @@ impl Plugin for NetworkingPlugin {
         configure_network_pipeline(app);
         app.add_message::<NetworkCommand>()
             .add_message::<SessionUiCommand>()
+            // Snapshot application announces accepted dashes to the VFX layer.
+            .add_message::<crate::game_vfx::UtilityVfx>()
             .init_resource::<NetworkState>()
             .init_resource::<GameStateSnapshot>()
             .init_resource::<PendingServerSnapshotFrame>()
@@ -1335,6 +1337,18 @@ impl RemotePlayerInterpolation {
         while self.poses.len() > 8 {
             self.poses.pop_front();
         }
+    }
+
+    /// Latest authoritative sample, independent of the render delay.
+    fn latest_translation(&self) -> Option<Vec3> {
+        self.poses.back().map(|pose| pose.translation)
+    }
+
+    /// An accepted dash is an instant relocation: drop the history so the hero
+    /// reappears at the destination instead of sliding there over two ticks.
+    fn teleport(&mut self, translation: Vec3, rotation: Quat, received: Instant) {
+        self.poses.clear();
+        self.push(translation, rotation, received);
     }
 
     fn sample(&mut self, now: Instant) -> RemotePose {
@@ -2313,7 +2327,10 @@ fn apply_server_snapshot(
         Query<&mut Transform>,
         Query<&mut Transform, With<MainCamera>>,
     )>,
-    mut remote_query: Query<&mut RemotePlayerInterpolation, With<RemotePlayer>>,
+    mut remote_query: Query<
+        (&mut RemotePlayerInterpolation, Option<&PlayerUtility>),
+        With<RemotePlayer>,
+    >,
     projectile_query: Query<&NetworkProjectile>,
     structure_query: Query<&NetworkStructure>,
     minion_query: Query<&NetworkMinion>,
@@ -2323,6 +2340,7 @@ fn apply_server_snapshot(
     player_assets: Res<PlayerAssets>,
     mut models: PlayerModelResolver,
     mut ui_state: SnapshotUiState,
+    mut utility_vfx: MessageWriter<crate::game_vfx::UtilityVfx>,
 ) {
     let SnapshotUiState {
         game_state_snapshot,
@@ -2492,6 +2510,13 @@ fn apply_server_snapshot(
                 } else {
                     LOCAL_SNAP_DISTANCE
                 };
+                if dash_accepted {
+                    utility_vfx.write(crate::game_vfx::UtilityVfx::Dash {
+                        from: local_transform.translation,
+                        to: server_translation,
+                        seed: local_player_state.utility.dash_sequence,
+                    });
+                }
                 if dash_accepted
                     || local_transform
                         .translation
@@ -2662,12 +2687,23 @@ fn apply_server_snapshot(
         seen_remote_ids.insert(player.id);
 
         if let Some(entity) = network_state.remote_players.get(&player.id).copied() {
-            if let Ok(mut interpolation) = remote_query.get_mut(entity) {
-                interpolation.push(
-                    Vec3::new(player.x, player.y, player.z),
-                    Quat::from_rotation_y(player.yaw),
-                    snapshot_wall_time,
-                );
+            if let Ok((mut interpolation, utility)) = remote_query.get_mut(entity) {
+                let translation = Vec3::new(player.x, player.y, player.z);
+                let rotation = Quat::from_rotation_y(player.yaw);
+                let dashed =
+                    utility.is_some_and(|u| player.utility.dash_sequence > u.state.dash_sequence);
+                if dashed {
+                    if let Some(from) = interpolation.latest_translation() {
+                        utility_vfx.write(crate::game_vfx::UtilityVfx::Dash {
+                            from,
+                            to: translation,
+                            seed: player.id << 16 | player.utility.dash_sequence,
+                        });
+                    }
+                    interpolation.teleport(translation, rotation, snapshot_wall_time);
+                } else {
+                    interpolation.push(translation, rotation, snapshot_wall_time);
+                }
             }
             commands.entity(entity).insert((
                 NetworkPlayerId(player.id),
@@ -4198,6 +4234,7 @@ mod tests {
             .init_resource::<super::NetIncomingDisconnected>()
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<StandardMaterial>>()
+            .add_message::<crate::game_vfx::UtilityVfx>()
             .add_systems(
                 Update,
                 (

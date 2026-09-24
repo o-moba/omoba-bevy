@@ -266,7 +266,7 @@ SHOP: Press P at your base. Spend earned gold on items that suit your class.\n\n
 OBJECTIVE: Follow your minions. Clear every tower in one lane, then destroy the enemy base.\n\
 SURVIVE: Let minions take tower fire. If defeated, wait for your respawn.\n\
 READ THE FIELD: Your hero has a double ring; allies have squares; enemies have triangles.\n\n\
-CAMERA: Y toggles hero follow; Space returns to your hero. Wheel zooms.\n\
+CAMERA: Y toggles hero follow; Space returns to your hero. Wheel zooms; Settings > Camera remembers the distance.\n\
 Left-click the minimap to scout. Alt + right mouse orbits the 3D view.\n\
 Need this guide again? In a match, press {help_key}. Escape opens the game menu."
     )

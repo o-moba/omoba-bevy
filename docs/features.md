@@ -315,7 +315,9 @@ follows.
   right click on ground/minimap cancels attacks and moves. S/Backspace stop
   movement and attacks and clear the lock. Phone has a separate large ATTACK button plus Q/W/E/R. Tap
   attacks once; stationary hold repeats; drag extends a reticle to preview and
-  lock the exact foe. Drag to X to cancel. Phone basic attacks never chase.
+  lock the exact foe without attacking (2026-09-24). Drag to X to cancel. A
+  phone tap chases like a desktop order unless the stick is steering; a hero in
+  reach turns to face its target when it strikes.
   Basic attacks cost no mana and have class/equipment damage and independent
   server-enforced cooldowns. Skills retain their existing balance and use the
   selected target. Protocol 2 rejects incompatible old peers and binds strikes

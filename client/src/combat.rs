@@ -214,6 +214,7 @@ impl Plugin for CombatPlugin {
                     mobile_utility_system,
                     crate::targeting::mobile_basic_attack,
                     crate::targeting::resolve_basic_attack,
+                    crate::targeting::face_attack_target,
                     resolve_pending_cast_system,
                     skill_upgrade_input_system,
                     update_skill_bar_system,

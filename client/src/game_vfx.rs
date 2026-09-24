@@ -3,6 +3,8 @@
 use crate::{
     camera::MainCamera,
     maps::MapLayout,
+    net::{PlayerUtility, RemotePlayer},
+    player::Player,
     sprite::PlayerVisualMode,
     world2d::{layer, simulation_xz_to_render_xy},
 };
@@ -14,8 +16,18 @@ use bevy::{
 };
 use shared::combat::ProjectileStyle;
 
-const PARTICLE_BUDGET: usize = 128;
+/// Hits, dash afterimages and haste streaks share one pool; the trail emitter
+/// is distance-paced so a full team of hasted heroes stays well inside it.
+const PARTICLE_BUDGET: usize = 192;
 const BUTTERFLY_BUDGET: usize = 20;
+/// World distance a hasted hero travels between two speed streaks.
+const HASTE_STREAK_SPACING: f32 = 0.42;
+/// Seconds between ground pulses under a hasted hero.
+const HASTE_PULSE_PERIOD: f32 = 0.55;
+const DASH_COLOR: Color = Color::srgb(0.55, 0.9, 1.0);
+const DASH_CORE_COLOR: Color = Color::srgb(0.92, 0.98, 1.0);
+const HASTE_COLOR: Color = Color::srgb(1.0, 0.78, 0.28);
+const HASTE_CORE_COLOR: Color = Color::srgb(1.0, 0.93, 0.7);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BurstKind {
@@ -46,11 +58,28 @@ pub(crate) struct ImpactBurst {
 }
 #[derive(Message)]
 pub(crate) struct ClearCombatVfx;
+/// Utility action presentation. Positions are simulation coordinates (XZ on
+/// the ground plane) in both render modes, exactly like [`ImpactBurst`].
+#[derive(Message, Clone, Copy, Debug, PartialEq)]
+pub(crate) enum UtilityVfx {
+    /// An accepted dash moved a hero from `from` to `to`.
+    Dash { from: Vec3, to: Vec3, seed: u64 },
+    /// One speed streak left behind a hasted hero travelling along `direction`.
+    HasteStreak {
+        position: Vec3,
+        direction: Vec2,
+        seed: u64,
+    },
+    /// A ground pulse under a hasted hero (buff start and while it lasts).
+    HastePulse { position: Vec3, seed: u64 },
+}
 #[derive(Clone, Copy)]
 enum Shape {
     Glow,
     Ring,
     Slash,
+    /// Elongated glow oriented along `Particle::angle`; speed lines and afterimages.
+    Streak,
 }
 #[derive(Clone)]
 struct Particle {
@@ -78,6 +107,7 @@ impl Particle {
                 Shape::Glow => (1. - t).max(0.01),
                 Shape::Ring => 0.4 + t * 1.6,
                 Shape::Slash => 0.75 + t * 0.5,
+                Shape::Streak => 1. - t * 0.45,
             };
         let sweep = if matches!(self.shape, Shape::Slash) {
             t * 1.1
@@ -126,6 +156,7 @@ struct VfxAssets {
     glow: Handle<Mesh>,
     ring: Handle<Mesh>,
     slash: Handle<Mesh>,
+    streak: Handle<Mesh>,
     wing: Handle<Mesh>,
 }
 impl VfxAssets {
@@ -134,6 +165,7 @@ impl VfxAssets {
             Shape::Glow => &self.glow,
             Shape::Ring => &self.ring,
             Shape::Slash => &self.slash,
+            Shape::Streak => &self.streak,
         }
         .clone()
     }
@@ -143,7 +175,12 @@ impl Plugin for GameVfxPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ImpactBurst>()
             .add_message::<ClearCombatVfx>()
+            .add_message::<UtilityVfx>()
             .add_systems(Startup, setup)
+            .add_systems(
+                Update,
+                emit_haste_trails.after(crate::net::ClientNetPipeline::InterpolateRemotePlayers),
+            )
             .add_systems(
                 PostUpdate,
                 (animate_particles, animate_butterflies)
@@ -254,6 +291,7 @@ fn setup(
         glow: meshes.add(Rectangle::new(1., 1.)),
         ring: meshes.add(Annulus::new(0.43, 0.5)),
         slash: meshes.add(slash_mesh()),
+        streak: meshes.add(Rectangle::new(1.7, 0.36)),
         wing: meshes.add(wing_mesh()),
     };
     for _ in 0..PARTICLE_BUDGET {
@@ -417,12 +455,285 @@ fn burst_particles(burst: &ImpactBurst) -> Vec<Particle> {
     }
     particles
 }
+/// Deterministic per-particle jitter in `[-1, 1]` from a seed and an index.
+fn jitter(seed: u64, index: u64, salt: u64) -> f32 {
+    let mut h = seed
+        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        .wrapping_add(index.wrapping_mul(0xBF58_476D_1CE4_E5B9))
+        .wrapping_add(salt.wrapping_mul(0x94D0_49BB_1331_11EB));
+    h ^= h >> 31;
+    h = h.wrapping_mul(0xD6E8_FEB8_6659_FD93);
+    h ^= h >> 32;
+    (h % 20_001) as f32 / 10_000. - 1.
+}
+/// Dash: a ring collapses at the origin, cyan afterimages trace the travelled
+/// path with a short stagger, and the arrival pops with a flash, an expanding
+/// ring and radial sparks. A fully blocked dash still flashes in place.
+fn dash_particles(from: Vec3, to: Vec3, seed: u64) -> Vec<Particle> {
+    if !from.is_finite() || !to.is_finite() {
+        return Vec::new();
+    }
+    let delta = (to - from).with_y(0.);
+    let length = delta.length();
+    let direction = if length > 0.05 {
+        delta / length
+    } else {
+        Vec3::X
+    };
+    let angle = direction.z.atan2(direction.x);
+    let side = Vec3::new(-direction.z, 0., direction.x);
+    let base = Particle {
+        event_id: seed,
+        origin: from + Vec3::Y * 0.8,
+        velocity: Vec3::ZERO,
+        age: 0.,
+        lifetime: 0.35,
+        size: 1.,
+        angle,
+        color: DASH_COLOR,
+        shape: Shape::Glow,
+    };
+    let mut particles = vec![
+        Particle {
+            shape: Shape::Ring,
+            size: 2.2,
+            lifetime: 0.4,
+            ..base.clone()
+        },
+        Particle {
+            size: 2.,
+            lifetime: 0.28,
+            color: DASH_CORE_COLOR,
+            ..base.clone()
+        },
+    ];
+    let afterimages = ((length / 0.6).round() as usize).clamp(0, 8);
+    for i in 0..afterimages {
+        let along = (i as f32 + 0.5) / afterimages as f32;
+        let offset = side * jitter(seed, i as u64, 1) * 0.18;
+        particles.push(Particle {
+            origin: from + direction * (length * along) + Vec3::Y * 0.85 + offset,
+            velocity: direction * 1.6 + Vec3::Y * 0.25,
+            age: -0.018 * i as f32,
+            lifetime: 0.42,
+            size: 1.6,
+            shape: Shape::Streak,
+            ..base.clone()
+        });
+        if i % 2 == 0 {
+            particles.push(Particle {
+                origin: from + direction * (length * along) + Vec3::Y * 0.35,
+                velocity: side * jitter(seed, i as u64, 2) * 1.8 + Vec3::Y * 1.4,
+                age: -0.018 * i as f32,
+                lifetime: 0.55,
+                size: 0.32,
+                color: DASH_CORE_COLOR,
+                ..base.clone()
+            });
+        }
+    }
+    let arrival = to + Vec3::Y * 0.8;
+    let delay = -0.04;
+    particles.push(Particle {
+        origin: arrival,
+        age: delay,
+        lifetime: 0.3,
+        size: 3.2,
+        color: DASH_CORE_COLOR,
+        ..base.clone()
+    });
+    particles.push(Particle {
+        origin: arrival,
+        age: delay,
+        lifetime: 0.55,
+        size: 2.8,
+        shape: Shape::Ring,
+        ..base.clone()
+    });
+    for i in 0..8u64 {
+        let phase = i as f32 * std::f32::consts::TAU / 8. + jitter(seed, i, 3) * 0.3;
+        particles.push(Particle {
+            origin: arrival - Vec3::Y * 0.3,
+            velocity: Vec3::new(
+                phase.cos() * 3.2,
+                1.6 + jitter(seed, i, 4) * 0.5,
+                phase.sin() * 3.2,
+            ),
+            age: delay,
+            lifetime: 0.6,
+            size: 0.36,
+            ..base.clone()
+        });
+    }
+    particles
+}
+/// One amber speed line trailing a hasted hero, plus an occasional ember.
+fn haste_streak_particles(position: Vec3, direction: Vec2, seed: u64) -> Vec<Particle> {
+    if !position.is_finite() || !direction.is_finite() {
+        return Vec::new();
+    }
+    let dir = direction.normalize_or(Vec2::X);
+    let back = Vec3::new(-dir.x, 0., -dir.y);
+    let side = Vec3::new(-dir.y, 0., dir.x) * if seed.is_multiple_of(2) { 0.28 } else { -0.28 };
+    let base = Particle {
+        event_id: seed,
+        origin: position + Vec3::Y * 0.55 + back * 0.35 + side,
+        velocity: back * 1.4 + Vec3::Y * 0.2,
+        age: 0.,
+        lifetime: 0.42,
+        size: 1.25,
+        angle: dir.y.atan2(dir.x),
+        color: HASTE_COLOR,
+        shape: Shape::Streak,
+    };
+    let mut particles = vec![base.clone()];
+    if seed.is_multiple_of(3) {
+        particles.push(Particle {
+            origin: position + Vec3::Y * 0.2 + side * 1.5,
+            velocity: back * 0.6 + Vec3::Y * (1.2 + jitter(seed, 0, 5) * 0.4),
+            lifetime: 0.5,
+            size: 0.28,
+            color: HASTE_CORE_COLOR,
+            shape: Shape::Glow,
+            ..base
+        });
+    }
+    particles
+}
+/// A ring pulse under a hasted hero with a few rising embers; visible even
+/// while the hero stands still so the buff itself reads, not only the trail.
+fn haste_pulse_particles(position: Vec3, seed: u64) -> Vec<Particle> {
+    if !position.is_finite() {
+        return Vec::new();
+    }
+    let base = Particle {
+        event_id: seed,
+        origin: position + Vec3::Y * 0.35,
+        velocity: Vec3::ZERO,
+        age: 0.,
+        lifetime: 0.5,
+        size: 1.7,
+        angle: 0.,
+        color: HASTE_COLOR,
+        shape: Shape::Ring,
+    };
+    let mut particles = vec![base.clone()];
+    for i in 0..3u64 {
+        let phase = i as f32 * std::f32::consts::TAU / 3. + jitter(seed, i, 6) * 0.5;
+        particles.push(Particle {
+            origin: position + Vec3::new(phase.cos() * 0.45, 0.1, phase.sin() * 0.45),
+            velocity: Vec3::Y * (1.1 + jitter(seed, i, 7) * 0.3),
+            lifetime: 0.6,
+            size: 0.26,
+            color: HASTE_CORE_COLOR,
+            shape: Shape::Glow,
+            ..base.clone()
+        });
+    }
+    particles
+}
+fn utility_particles(vfx: &UtilityVfx) -> Vec<Particle> {
+    match *vfx {
+        UtilityVfx::Dash { from, to, seed } => dash_particles(from, to, seed),
+        UtilityVfx::HasteStreak {
+            position,
+            direction,
+            seed,
+        } => haste_streak_particles(position, direction, seed),
+        UtilityVfx::HastePulse { position, seed } => haste_pulse_particles(position, seed),
+    }
+}
+/// Per-hero haste trail bookkeeping; heroes are keyed by entity and forgotten
+/// once they despawn or the buff ends.
+#[derive(Default)]
+pub(crate) struct HasteTrail {
+    last_position: Vec3,
+    travelled: f32,
+    pulse_in: f32,
+    emitted: u64,
+}
+/// Follow every hasted hero (local, remote and bot) and pace streaks by
+/// distance travelled, so a stationary hero only pulses and a sprinting one
+/// leaves a continuous double trail regardless of frame rate.
+pub(crate) fn emit_haste_trails(
+    time: Res<Time>,
+    heroes: Query<
+        (
+            Entity,
+            &Transform,
+            &PlayerUtility,
+            Option<&crate::combat::CombatStats>,
+        ),
+        Or<(With<Player>, With<RemotePlayer>)>,
+    >,
+    mut trails: Local<std::collections::HashMap<Entity, HasteTrail>>,
+    mut out: MessageWriter<UtilityVfx>,
+) {
+    let mut seen = Vec::new();
+    for (entity, transform, utility, stats) in &heroes {
+        let hasted = utility.state.haste_active_secs > 0.0 && stats.is_none_or(|s| s.is_alive());
+        if !hasted {
+            trails.remove(&entity);
+            continue;
+        }
+        seen.push(entity);
+        let position = transform.translation;
+        let trail = trails.entry(entity).or_insert_with(|| HasteTrail {
+            last_position: position,
+            travelled: 0.,
+            // Pulse immediately so the buff start is unmistakable.
+            pulse_in: 0.,
+            emitted: 0,
+        });
+        let step = (position - trail.last_position).with_y(0.);
+        let distance = step.length();
+        // A teleport (dash while hasted, respawn) must not draw a streak fence.
+        if distance > 6.0 {
+            trail.last_position = position;
+            trail.travelled = 0.;
+            continue;
+        }
+        let seed_base = entity.to_bits() << 32;
+        if distance > 1e-4 {
+            let direction = step.xz() / distance;
+            trail.travelled += distance;
+            let mut emitted_this_frame = 0;
+            while trail.travelled >= HASTE_STREAK_SPACING && emitted_this_frame < 4 {
+                trail.travelled -= HASTE_STREAK_SPACING;
+                emitted_this_frame += 1;
+                trail.emitted += 1;
+                // Place the streak where the hero was when it crossed the spacing mark.
+                let behind = position - step * (trail.travelled / distance).clamp(0., 1.);
+                out.write(UtilityVfx::HasteStreak {
+                    position: behind,
+                    direction,
+                    seed: seed_base | trail.emitted,
+                });
+            }
+            if emitted_this_frame == 4 {
+                trail.travelled = 0.;
+            }
+        }
+        trail.pulse_in -= time.delta_secs();
+        if trail.pulse_in <= 0. {
+            trail.pulse_in = HASTE_PULSE_PERIOD;
+            trail.emitted += 1;
+            out.write(UtilityVfx::HastePulse {
+                position,
+                seed: seed_base | trail.emitted,
+            });
+        }
+        trail.last_position = position;
+    }
+    trails.retain(|entity, _| seen.contains(entity));
+}
 fn animate_particles(
     mut commands: Commands,
     time: Res<Time>,
     mode: Res<PlayerVisualMode>,
     assets: Res<VfxAssets>,
     mut bursts: MessageReader<ImpactBurst>,
+    mut utilities: MessageReader<UtilityVfx>,
     mut resets: MessageReader<ClearCombatVfx>,
     cameras: Query<&GlobalTransform, (With<MainCamera>, Without<ParticleSlot>)>,
     mut slots: Query<(
@@ -453,45 +764,51 @@ fn animate_particles(
             }
         }
     }
-    for burst in bursts.read().take(96) {
-        for p in burst_particles(burst) {
-            let Some((entity, mut slot, _, _, _, _)) =
-                slots.iter_mut().find(|(_, slot, ..)| slot.active.is_none())
-            else {
-                break;
-            };
-            let mesh = assets.mesh(p.shape);
-            // Ring/slash meshes need a solid tint; particles use the radial texture.
-            let texture = matches!(p.shape, Shape::Glow).then(|| assets.glow_texture.clone());
-            if let Some(m) = materials.get_mut(&slot.material) {
-                m.base_color = p.color;
-                m.base_color_texture = texture.clone();
-                m.alpha_mode = if matches!(p.shape, Shape::Glow) {
-                    AlphaMode::Add
-                } else {
-                    AlphaMode::Blend
-                };
-            }
-            if let Some(m) = flats.get_mut(&slot.flat) {
-                m.color = p.color;
-                m.texture = texture;
-            }
-            if flat {
-                commands
-                    .entity(entity)
-                    .remove::<(Mesh3d, MeshMaterial3d<StandardMaterial>)>()
-                    .insert((Mesh2d(mesh), MeshMaterial2d(slot.flat.clone())));
+    let incoming = bursts
+        .read()
+        .take(96)
+        .flat_map(burst_particles)
+        .chain(utilities.read().take(96).flat_map(utility_particles))
+        .collect::<Vec<_>>();
+    for p in incoming {
+        let Some((entity, mut slot, _, _, _, _)) =
+            slots.iter_mut().find(|(_, slot, ..)| slot.active.is_none())
+        else {
+            break;
+        };
+        let mesh = assets.mesh(p.shape);
+        // Ring/slash meshes need a solid tint; glows and streaks use the radial texture.
+        let textured = matches!(p.shape, Shape::Glow | Shape::Streak);
+        let texture = textured.then(|| assets.glow_texture.clone());
+        if let Some(m) = materials.get_mut(&slot.material) {
+            m.base_color = p.color;
+            m.base_color_texture = texture.clone();
+            m.alpha_mode = if textured {
+                AlphaMode::Add
             } else {
-                commands
-                    .entity(entity)
-                    .remove::<(Mesh2d, MeshMaterial2d<ColorMaterial>)>()
-                    .insert((Mesh3d(mesh), MeshMaterial3d(slot.material.clone())));
-            }
-            slot.active = Some(p);
+                AlphaMode::Blend
+            };
         }
+        if let Some(m) = flats.get_mut(&slot.flat) {
+            m.color = p.color;
+            m.texture = texture;
+        }
+        if flat {
+            commands
+                .entity(entity)
+                .remove::<(Mesh3d, MeshMaterial3d<StandardMaterial>)>()
+                .insert((Mesh2d(mesh), MeshMaterial2d(slot.flat.clone())));
+        } else {
+            commands
+                .entity(entity)
+                .remove::<(Mesh2d, MeshMaterial2d<ColorMaterial>)>()
+                .insert((Mesh3d(mesh), MeshMaterial3d(slot.material.clone())));
+        }
+        slot.active = Some(p);
     }
     for (_, slot, mut transform, mut global, mut visibility, mut inherited) in &mut slots {
-        let Some(p) = &slot.active else {
+        // Staggered particles (negative age) hold their slot but stay hidden.
+        let Some(p) = slot.active.as_ref().filter(|p| p.age >= 0.) else {
             *visibility = Visibility::Hidden;
             *inherited = InheritedVisibility::HIDDEN;
             continue;

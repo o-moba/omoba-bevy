@@ -67,6 +67,44 @@ mod motion_tests {
 /// Fixed candidate order gives every bot a consistent passing side. Stationary
 /// combatants only move when actually overlapping, so avoidance cannot make an
 /// otherwise settled attack stance oscillate.
+/// Yaw that makes a hero model face the world-space direction `(dx, dz)`.
+///
+/// Hero models face their local -Z (Bevy forward) and the client renders
+/// `state.yaw` with `Quat::from_rotation_y(yaw)`, exactly like the local
+/// player computes its own yaw in `client/src/player.rs`. Using
+/// `dx.atan2(dz)` here would align +Z with the movement and every bot would
+/// run backwards.
+pub(crate) fn hero_yaw_towards(dx: f32, dz: f32) -> f32 {
+    (-dx).atan2(-dz)
+}
+
+#[cfg(test)]
+mod yaw_tests {
+    use super::hero_yaw_towards;
+
+    fn forward(yaw: f32) -> [f32; 2] {
+        // Local -Z rotated by `Quat::from_rotation_y(yaw)`.
+        [-yaw.sin(), -yaw.cos()]
+    }
+
+    #[test]
+    fn bot_models_face_their_movement_direction() {
+        for (dx, dz) in [
+            (1.0, 0.0),
+            (0.0, 1.0),
+            (-1.0, 0.0),
+            (0.0, -1.0),
+            (0.6, -0.8),
+        ] {
+            let facing = forward(hero_yaw_towards(dx, dz));
+            assert!(
+                (facing[0] - dx).abs() < 1e-5 && (facing[1] - dz).abs() < 1e-5,
+                "yaw for ({dx}, {dz}) faces {facing:?}"
+            );
+        }
+    }
+}
+
 fn steer_bot_step(
     id: u64,
     origin: [f32; 2],
@@ -563,7 +601,7 @@ impl ServerRuntime {
                 in_range = distance <= reach + radius - margin;
                 controller.holding_range = in_range;
                 if in_range {
-                    self.players.get_mut(&addr).unwrap().state.yaw = dx.atan2(dz);
+                    self.players.get_mut(&addr).unwrap().state.yaw = hero_yaw_towards(dx, dz);
                     let request = self.players[&addr]
                         .state
                         .basic_attack_request_id
@@ -644,7 +682,7 @@ impl ServerRuntime {
                 let yaw = if in_range {
                     player.state.yaw
                 } else {
-                    movement[0].atan2(movement[1])
+                    hero_yaw_towards(movement[0], movement[1])
                 };
                 handle_transform_request_with_structures(
                     player,

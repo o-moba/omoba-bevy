@@ -7,6 +7,7 @@ use bevy::{
 };
 
 use crate::audio_settings::AudioSettings;
+use crate::camera::{CAMERA_ZOOM_STEP, CameraSettings};
 use crate::model_scale::{
     DEFAULT_MODEL_TARGET_HEIGHT, MAX_MODEL_TARGET_HEIGHT, MIN_MODEL_TARGET_HEIGHT,
     ModelScaleSettings,
@@ -72,6 +73,8 @@ impl Plugin for PauseMenuPlugin {
                     sync_pause_menu_visibility,
                     sync_pause_menu_sections,
                     handle_model_scale_buttons,
+                    handle_camera_zoom_buttons,
+                    update_camera_zoom_label.after(handle_camera_zoom_buttons),
                     handle_lighting_buttons,
                     handle_audio_buttons,
                     update_audio_labels.after(handle_audio_buttons),
@@ -125,6 +128,15 @@ struct ExitButton;
 
 #[derive(Component)]
 struct ResumeButton;
+
+#[derive(Component)]
+struct CameraZoomDecreaseButton;
+
+#[derive(Component)]
+struct CameraZoomIncreaseButton;
+
+#[derive(Component)]
+struct CameraZoomValueLabel;
 
 #[derive(Component)]
 struct ScaleDecreaseButton;
@@ -480,6 +492,28 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                 YawValueLabel,
                                 YawIncreaseButton,
                                 "PauseMenuYawControls",
+                            );
+
+                            settings.spawn((
+                                Text::new("Camera"),
+                                TextFont {
+                                    font_size: 18.0,
+                                    ..default()
+                                },
+                                TextColor(crate::ui_theme::GOLD),
+                                Name::new("PauseMenuCameraTitle"),
+                            ));
+
+                            // 100% is the default follow view; lower values bring
+                            // the camera closer so hero silhouettes read larger.
+                            spawn_adjust_row(
+                                settings,
+                                "Distance",
+                                CameraSettings::default().percent_label(),
+                                CameraZoomDecreaseButton,
+                                CameraZoomValueLabel,
+                                CameraZoomIncreaseButton,
+                                "PauseMenuCameraZoomControls",
                             );
 
                             settings.spawn((
@@ -1061,6 +1095,60 @@ fn handle_model_scale_buttons(
     }
 }
 
+fn handle_camera_zoom_buttons(
+    mut camera_settings: ResMut<CameraSettings>,
+    mut button_query: Query<
+        (
+            &Interaction,
+            &PauseButtonGesture,
+            Option<&CameraZoomDecreaseButton>,
+            Option<&CameraZoomIncreaseButton>,
+            &mut BackgroundColor,
+        ),
+        (
+            Or<(Changed<Interaction>, Changed<PauseButtonGesture>)>,
+            With<Button>,
+        ),
+    >,
+) {
+    for (interaction, gesture, is_closer, is_farther, mut color) in &mut button_query {
+        if is_closer.is_none() && is_farther.is_none() {
+            continue;
+        }
+
+        match gesture.effective(*interaction) {
+            Interaction::Pressed => {
+                if is_closer.is_some() {
+                    camera_settings.adjust(-CAMERA_ZOOM_STEP);
+                } else {
+                    camera_settings.adjust(CAMERA_ZOOM_STEP);
+                }
+                *color = BUTTON_HOVER_COLOR.into();
+            }
+            Interaction::Hovered => {
+                *color = BUTTON_HOVER_COLOR.into();
+            }
+            Interaction::None => {
+                *color = BUTTON_COLOR.into();
+            }
+        }
+    }
+}
+
+/// Also follows wheel zoom, since the camera writes it back into the setting.
+fn update_camera_zoom_label(
+    camera_settings: Res<CameraSettings>,
+    mut label_query: Query<&mut Text, With<CameraZoomValueLabel>>,
+) {
+    if !camera_settings.is_changed() {
+        return;
+    }
+
+    if let Ok(mut text) = label_query.single_mut() {
+        text.0 = camera_settings.percent_label();
+    }
+}
+
 fn handle_lighting_buttons(
     mut lighting_settings: ResMut<LightingSettings>,
     mut button_query: Query<
@@ -1318,6 +1406,7 @@ fn sync_settings_server_addr_label(
 fn handle_reset_graphics_defaults_button(
     mut lighting: ResMut<LightingSettings>,
     mut model: ResMut<ModelScaleSettings>,
+    mut camera: ResMut<CameraSettings>,
     mut prefs_gate: ResMut<ClientPrefsSaveGate>,
     resolved_addr: Res<ResolvedServerAddressForPrefs>,
     client_session_id: Res<ClientSessionId>,
@@ -1347,6 +1436,7 @@ fn handle_reset_graphics_defaults_button(
                 reset_graphics_to_defaults(
                     lighting.as_mut(),
                     model.as_mut(),
+                    camera.as_mut(),
                     prefs_gate.as_mut(),
                     team.character,
                     addr,

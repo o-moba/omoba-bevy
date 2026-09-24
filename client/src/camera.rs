@@ -20,6 +20,8 @@ pub const CAMERA_HEIGHT: f32 = 23.8;
 pub const CAMERA_MIN_ZOOM: f32 = 0.55;
 pub const CAMERA_MAX_ZOOM: f32 = 2.25;
 const CAMERA_ZOOM_SPEED: f32 = 0.1;
+/// Settings-menu step for the follow distance (one wheel notch).
+pub const CAMERA_ZOOM_STEP: f32 = 0.1;
 /// World-units-per-logical-pixel baseline for the genuine 2D camera.
 ///
 /// At `0.16` the 217-unit arena nearly fit across a 1280px viewport and
@@ -37,12 +39,83 @@ pub struct CameraPlugin;
 
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<CameraState>().add_systems(
-            Update,
-            (toggle_camera_lock, update_cursor_grab, update_camera)
-                .chain()
-                .in_set(InputContextSet::Actions),
-        );
+        app.init_resource::<CameraState>()
+            .init_resource::<CameraSettings>()
+            .add_systems(
+                Update,
+                (
+                    toggle_camera_lock,
+                    update_cursor_grab,
+                    apply_camera_settings,
+                    update_camera,
+                    store_camera_zoom,
+                )
+                    .chain()
+                    .in_set(InputContextSet::Actions),
+            );
+    }
+}
+
+/// Persisted follow distance, as a multiplier of the default camera offset.
+///
+/// `CameraState::zoom` is the live value the wheel edits every frame; this
+/// resource is the remembered choice that the settings menu shows and the
+/// preferences file stores. The two are kept equal by
+/// [`apply_camera_settings`] and [`store_camera_zoom`], so a wheel notch and a
+/// settings tap are the same adjustment.
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
+pub struct CameraSettings {
+    pub zoom: f32,
+}
+
+impl Default for CameraSettings {
+    fn default() -> Self {
+        Self { zoom: 1.0 }
+    }
+}
+
+impl CameraSettings {
+    /// Clamp into the supported zoom range; NaN/infinite values fall back to
+    /// the default so a damaged preferences file cannot hide the arena.
+    pub fn sanitized(self) -> Self {
+        Self {
+            zoom: if self.zoom.is_finite() {
+                self.zoom.clamp(CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM)
+            } else {
+                Self::default().zoom
+            },
+        }
+    }
+
+    /// Step the distance by `delta` (negative brings the camera closer) and
+    /// round to whole percent so repeated taps land on stable labels.
+    pub fn adjust(&mut self, delta: f32) {
+        let next = (self.sanitized().zoom + delta) * 100.0;
+        self.zoom = (next.round() / 100.0).clamp(CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM);
+    }
+
+    /// Distance as shown in the settings menu (`100%` is the default view).
+    pub fn percent_label(self) -> String {
+        format!("{:.0}%", self.sanitized().zoom * 100.0)
+    }
+}
+
+/// A loaded or menu-edited distance drives the live camera.
+fn apply_camera_settings(settings: Res<CameraSettings>, mut cam_state: ResMut<CameraState>) {
+    if !settings.is_changed() {
+        return;
+    }
+    let zoom = settings.sanitized().zoom;
+    if (cam_state.zoom - zoom).abs() > 1e-4 {
+        cam_state.zoom = zoom;
+    }
+}
+
+/// Wheel zoom becomes the remembered setting, so it survives a restart and the
+/// settings menu shows what the player is actually looking through.
+fn store_camera_zoom(cam_state: Res<CameraState>, mut settings: ResMut<CameraSettings>) {
+    if (cam_state.zoom - settings.zoom).abs() > 1e-4 {
+        settings.zoom = cam_state.zoom;
     }
 }
 
@@ -442,6 +515,34 @@ fn update_camera_2d(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn camera_settings_clamp_round_and_follow_the_wheel() {
+        let mut settings = CameraSettings { zoom: f32::NAN }.sanitized();
+        assert_eq!(settings, CameraSettings::default());
+        settings.adjust(-CAMERA_ZOOM_STEP * 40.0);
+        assert_eq!(settings.zoom, CAMERA_MIN_ZOOM);
+        settings.adjust(CAMERA_ZOOM_STEP * 40.0);
+        assert_eq!(settings.zoom, CAMERA_MAX_ZOOM);
+        settings = CameraSettings::default();
+        settings.adjust(CAMERA_ZOOM_STEP);
+        assert_eq!(settings.percent_label(), "110%");
+        settings.adjust(-CAMERA_ZOOM_STEP * 3.0);
+        assert_eq!(settings.percent_label(), "80%");
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<CameraState>()
+            .init_resource::<CameraSettings>()
+            .add_systems(Update, (apply_camera_settings, store_camera_zoom).chain());
+        app.world_mut().resource_mut::<CameraSettings>().zoom = 0.7;
+        app.update();
+        assert!((app.world().resource::<CameraState>().zoom - 0.7).abs() < 1e-5);
+        // A wheel notch edits the live state; the setting follows it.
+        app.world_mut().resource_mut::<CameraState>().zoom = 1.3;
+        app.update();
+        assert!((app.world().resource::<CameraSettings>().zoom - 1.3).abs() < 1e-5);
+    }
 
     #[test]
     fn zoom_limits_are_ordered_and_usable() {

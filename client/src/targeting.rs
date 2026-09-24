@@ -30,6 +30,16 @@ pub(crate) struct BasicAttackState {
     prediction_after_request_id: Option<u64>,
     chasing: bool,
     stop_chase: bool,
+    /// Where the hero should look this frame while it holds a target in reach;
+    /// applied by [`face_attack_target`] so the resolver's read-only queries
+    /// never conflict with a transform write.
+    facing: Option<FacingRequest>,
+}
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct FacingRequest {
+    target: Vec3,
+    /// Snap on the strike itself; ease between strikes.
+    snap: bool,
 }
 impl BasicAttackState {
     pub fn cancel(&mut self) {
@@ -204,7 +214,44 @@ pub(crate) fn clear_invalid_selection(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Turn a hero toward `target` on the ground plane. Hero models face their
+/// local -Z (Bevy forward), the same convention as movement in `player.rs`;
+/// `blend` of 1.0 snaps, smaller values ease over several frames.
+pub(crate) fn face_target(transform: &mut Transform, target: Vec3, blend: f32) {
+    let to_target = (target - transform.translation).xz();
+    if to_target.length_squared() <= 1e-4 || !to_target.is_finite() {
+        return;
+    }
+    let yaw = (-to_target.x).atan2(-to_target.y);
+    let desired = Quat::from_rotation_y(yaw);
+    transform.rotation = if blend >= 1.0 {
+        desired
+    } else {
+        transform.rotation.slerp(desired, blend.max(0.0))
+    };
+}
+
+/// Runs right after [`resolve_basic_attack`]: turns the local hero toward the
+/// target it is striking. Hero models face their local -Z, matching movement.
+pub(crate) fn face_attack_target(
+    time: Res<Time>,
+    basic: Res<BasicAttackState>,
+    mut local: Query<&mut Transform, With<Player>>,
+) {
+    let Some(request) = basic.facing else {
+        return;
+    };
+    if let Ok(mut transform) = local.single_mut() {
+        let blend = if request.snap {
+            1.0
+        } else {
+            (time.delta_secs() * 14.0).min(1.0)
+        };
+        face_target(&mut transform, request.target, blend);
+    }
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub(crate) fn resolve_basic_attack(
     mut commands: Commands,
     context: Res<GameplayInputContext>,
@@ -216,6 +263,7 @@ pub(crate) fn resolve_basic_attack(
             &Team,
             Option<&NetworkHeroClass>,
             Option<&PlayerEquipment>,
+            Has<MovementTarget>,
         ),
         With<Player>,
     >,
@@ -228,7 +276,8 @@ pub(crate) fn resolve_basic_attack(
     mut outgoing: MessageWriter<NetworkCommand>,
     mut feedback: ResMut<ActionFeedback>,
 ) {
-    let Ok((player, transform, stats, team, class, equipment)) = local.single() else {
+    basic.facing = None;
+    let Ok((player, transform, stats, team, class, equipment, moving)) = local.single() else {
         basic.cancel();
         return;
     };
@@ -299,13 +348,25 @@ pub(crate) fn resolve_basic_attack(
         }
         return;
     }
+    let was_chasing = basic.chasing;
     if basic.chasing {
         commands
             .entity(player)
             .remove::<(MovementTarget, MovementRoute)>();
         basic.chasing = false;
     }
-    if basic.remaining_secs > 0.0 {
+    // Standing in reach, the hero turns to its target instead of striking over
+    // its shoulder. Movement keeps facing authority: the stick on phones and a
+    // pending move order on desktop (the chase's own order was just cleared).
+    let facing_target = !steering && (was_chasing || !moving);
+    let striking = basic.remaining_secs <= 0.0;
+    if facing_target {
+        basic.facing = Some(FacingRequest {
+            target: position.translation,
+            snap: striking,
+        });
+    }
+    if !striking {
         return;
     }
     outgoing.write(NetworkCommand::BasicAttack {
@@ -656,7 +717,13 @@ pub(crate) fn mobile_basic_attack(
     if let Some((entity, id)) = pick {
         target.selected_entity = Some(entity);
         target.selected_target = Some(id);
-        basic.start(entity, id, false);
+        if aim.is_some() && category.is_none() {
+            // Dragging ATTACK onto a unit only locks it: no approach, no strike.
+            // A plain tap (or hold) afterwards attacks the locked target.
+            basic.cancel();
+        } else {
+            basic.start(entity, id, false);
+        }
     } else {
         basic.cancel();
         if category.is_some() {
@@ -937,7 +1004,10 @@ mod tests {
             .init_resource::<ButtonInput<KeyCode>>()
             .add_message::<NetworkCommand>()
             .insert_resource(mobile)
-            .add_systems(Update, (tick_basic_attack, resolve_basic_attack).chain());
+            .add_systems(
+                Update,
+                (tick_basic_attack, resolve_basic_attack, face_attack_target).chain(),
+            );
         let player = app
             .world_mut()
             .spawn((
@@ -993,6 +1063,45 @@ mod tests {
                 duration_secs: duration,
                 remaining_secs: remaining,
             });
+    }
+
+    #[test]
+    fn striking_in_reach_turns_the_hero_toward_its_target() {
+        // Warrior reach is 4.0; the enemy stands 1.0 unit along +X while the
+        // hero faces -Z (its model forward). Strike: it must snap toward +X.
+        let (mut app, player, enemy) = attack_app(shared::HeroClass::Warrior, vec![], false);
+        order(&mut app, enemy);
+        app.update();
+        assert_eq!(commands(&mut app).len(), 1, "strike sent from reach");
+        let forward = *app.world().get::<Transform>(player).unwrap().forward();
+        assert!(
+            (forward - Vec3::X).length() < 1e-3,
+            "hero faces its target on the strike, got {forward:?}"
+        );
+        // Between strikes the enemy circles; the hero eases toward it.
+        app.world_mut()
+            .get_mut::<Transform>(enemy)
+            .unwrap()
+            .translation = Vec3::new(0.0, 0.0, -1.0);
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_millis(16));
+        app.update();
+        let forward = *app.world().get::<Transform>(player).unwrap().forward();
+        assert!(
+            forward.x > 0.5 && forward.z < -0.1,
+            "eased partway, got {forward:?}"
+        );
+        // The stick keeps facing authority on phones.
+        let (mut app, player, enemy) = attack_app(shared::HeroClass::Warrior, vec![], true);
+        app.world_mut().resource_mut::<MobileControls>().movement = Vec2::Y;
+        order(&mut app, enemy);
+        app.update();
+        let forward = *app.world().get::<Transform>(player).unwrap().forward();
+        assert!(
+            (forward - Vec3::NEG_Z).length() < 1e-3,
+            "steering hero keeps its movement facing, got {forward:?}"
+        );
     }
 
     #[test]
@@ -1354,8 +1463,26 @@ mod tests {
             app.update();
             let sent = commands(&mut app);
             if reject == 0 {
+                // A drag release only locks the previewed foe; it never strikes
+                // or approaches on its own. The next plain tap attacks it.
+                assert!(sent.is_empty(), "drag lock must not attack: {sent:?}");
+                assert_eq!(
+                    app.world().resource::<TargetState>().selected_target,
+                    Some(selected)
+                );
+                assert!(app.world().resource::<BasicAttackState>().order.is_none());
+                app.world_mut()
+                    .resource_mut::<MobileControls>()
+                    .attacks
+                    .push(MobileAttackIntent {
+                        gesture: 9,
+                        aim: None,
+                    });
+                app.update();
+                let sent = commands(&mut app);
                 assert!(
-                    matches!(sent.as_slice(),[NetworkCommand::BasicAttack{target}] if *target==selected)
+                    matches!(sent.as_slice(),[NetworkCommand::BasicAttack{target}] if *target==selected),
+                    "tap after lock strikes the locked target: {sent:?}"
                 );
             } else {
                 assert!(sent.is_empty());
