@@ -1040,7 +1040,6 @@ fn setup_mobile_controls(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn draw_mobile_controls(
     mobile: Res<MobileControls>,
     game: Option<Res<crate::net::GameStateSnapshot>>,

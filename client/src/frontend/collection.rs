@@ -197,7 +197,6 @@ fn refresh_connection_labels(mut labels: Query<(&Name, &mut Text)>) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn refresh_collection_catalogue(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
@@ -471,7 +470,6 @@ fn spawn_avatar_tile(
     });
 }
 
-#[allow(clippy::too_many_arguments)]
 fn collection_actions(
     mut preview: ResMut<AvatarPreview>,
     mut card: ResMut<ProfileCard>,
@@ -617,7 +615,6 @@ fn surface_rect(node: &ComputedNode, transform: &UiGlobalTransform, window_scale
 
 /// The first pointer owns the gesture until release/cancel, including outside
 /// the preview. Unrelated touches never steal it or turn the avatar.
-#[allow(clippy::too_many_arguments)]
 fn drag_to_rotate(
     mut preview: ResMut<AvatarPreview>,
     mut drag: ResMut<CollectionDrag>,

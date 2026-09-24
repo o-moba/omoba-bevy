@@ -226,7 +226,6 @@ fn setup_quick_buy(mut commands: Commands) {
             }
         });
 }
-#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn update_quick_buy(
     mut commands: Commands,
     state: Res<ShopState>,

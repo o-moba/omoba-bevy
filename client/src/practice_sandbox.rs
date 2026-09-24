@@ -299,7 +299,6 @@ fn sync_practice_availability(
     }
 }
 
-#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn handle_practice_buttons(
     menu: Res<PauseMenuState>,
     snapshot: Option<Res<GameStateSnapshot>>,

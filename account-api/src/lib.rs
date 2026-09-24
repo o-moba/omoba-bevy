@@ -16,9 +16,9 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{any, get},
 };
+use omoba_career_store::career_store::CareerStore;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
-use server::career_store::CareerStore;
 use sqlx::{PgPool, Row, postgres::PgPoolOptions};
 use std::{
     net::SocketAddr,

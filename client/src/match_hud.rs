@@ -404,7 +404,6 @@ fn spawn_stat_bar<F: Component>(
     });
 }
 
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn update_match_hud(
     game_state: Option<Res<GameStateSnapshot>>,
     team_selection: Res<TeamSelection>,

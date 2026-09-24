@@ -6,7 +6,7 @@ fn main() {
         .enable_all()
         .build()
         .expect("runtime");
-    match runtime.block_on(server::career_store::CareerStore::connect(&url)) {
+    match runtime.block_on(omoba_career_store::career_store::CareerStore::connect(&url)) {
         Ok(_) => println!("Career schema version 3 ready."),
         Err(error) => {
             eprintln!("Career migration failed: {error}");

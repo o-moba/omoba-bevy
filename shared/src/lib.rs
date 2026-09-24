@@ -190,7 +190,6 @@ pub struct AbilityDefinition {
 /// Maximum investable rank shared by every ability definition.
 pub const MAX_ABILITY_RANK: u8 = 3;
 
-#[allow(clippy::too_many_arguments)]
 const fn ability(
     id: &'static str,
     name: &'static str,
@@ -618,50 +617,6 @@ pub fn unlocked_slots_for_level(level: u32) -> [bool; 4] {
 
 /// Hero level at which each slot unlocks (Q/W/E/R order).
 pub const SLOT_UNLOCK_LEVELS: [u32; 4] = [1, 2, 4, 6];
-
-/// Network + UI snapshot for the local hotbar (recomputed on the server each tick).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct PlayerAbilitySnapshot {
-    #[serde(default)]
-    pub cooldown_remaining: [f32; 4],
-    #[serde(default = "default_ranks")]
-    pub ranks: [u8; 4],
-    #[serde(default = "default_unlocked")]
-    pub unlocked: [bool; 4],
-    #[serde(default)]
-    pub rank_upgrade_available: [bool; 4],
-}
-
-fn default_ranks() -> [u8; 4] {
-    [1, 1, 1, 1]
-}
-
-fn default_unlocked() -> [bool; 4] {
-    [true, false, false, false]
-}
-
-impl Default for PlayerAbilitySnapshot {
-    fn default() -> Self {
-        let level = 1;
-        Self {
-            cooldown_remaining: [0.0; 4],
-            ranks: default_ranks(),
-            unlocked: unlocked_slots_for_level(level),
-            rank_upgrade_available: [false; 4],
-        }
-    }
-}
-
-impl PlayerAbilitySnapshot {
-    pub fn fresh_for_level(level: u32) -> Self {
-        Self {
-            cooldown_remaining: [0.0; 4],
-            ranks: default_ranks(),
-            unlocked: unlocked_slots_for_level(level),
-            rank_upgrade_available: [false; 4],
-        }
-    }
-}
 
 // --- Avatar roster (cosmetic; mirrors client/assets/avatars/manifest.json) ---
 

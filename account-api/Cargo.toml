@@ -15,7 +15,7 @@ serde_json.workspace = true
 ed25519-dalek = "2.2.0"
 getrandom = "0.3.4"
 shared = { path = "../shared" }
-server = { path = "../server" }
+omoba-career-store = { path = "../career-store" }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

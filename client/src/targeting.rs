@@ -253,7 +253,6 @@ pub(crate) fn face_attack_target(
     }
 }
 
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub(crate) fn resolve_basic_attack(
     mut commands: Commands,
     context: Res<GameplayInputContext>,
@@ -443,7 +442,6 @@ pub(crate) fn direction_score(origin: Vec2, direction: Vec2, point: Vec2) -> Opt
     Some(across + along * 0.001)
 }
 
-#[allow(clippy::too_many_arguments)]
 /// How far the phone's attack button looks for a target when nothing is locked.
 /// Wider than the attack itself: a melee hero must find the enemy standing two
 /// steps away and walk up to it, which is what the button means on a phone.
@@ -557,7 +555,6 @@ fn pick_mobile(
     best.map(|(e, id, p, _)| (e, id, p))
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn mobile_basic_attack(
     mut mobile: Option<ResMut<MobileControls>>,
     context: Res<GameplayInputContext>,

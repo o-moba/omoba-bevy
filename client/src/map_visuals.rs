@@ -596,7 +596,6 @@ fn initialize_props(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn reconcile_props(
     mut commands: Commands,
     registry: Res<MapVisualRegistry>,

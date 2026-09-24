@@ -274,7 +274,6 @@ fn spawn_shape(
     );
 }
 
-#[allow(clippy::too_many_arguments)]
 fn attach_visuals(
     mut commands: Commands,
     mode: Res<PlayerVisualMode>,

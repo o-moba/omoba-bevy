@@ -62,7 +62,6 @@ pub(super) fn configure(app: &mut App) {
         );
 }
 
-#[allow(clippy::too_many_arguments)]
 fn drive(
     qa: Res<BetaUiQa>,
     mut state: ResMut<EdgeQa>,

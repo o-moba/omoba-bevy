@@ -1,0 +1,20 @@
+[package]
+name = "omoba-career-store"
+version.workspace = true
+edition.workspace = true
+license = "AGPL-3.0-only"
+description = "Trusted career persistence and queue policy shared by the game server and the account API"
+
+[dependencies]
+sqlx = { version = "0.8.6", default-features = false, features = ["postgres", "runtime-tokio-rustls", "json"] }
+tokio = { version = "1.49.0", features = ["time"] }
+serde.workspace = true
+serde_json.workspace = true
+shared = { path = "../shared" }
+
+[dev-dependencies]
+tokio = { version = "1.49.0", features = ["rt", "time", "sync", "macros"] }
+getrandom = "0.3.4"
+
+[lints]
+workspace = true

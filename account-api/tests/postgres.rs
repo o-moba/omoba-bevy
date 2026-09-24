@@ -15,7 +15,7 @@ async fn legacy_v1_handles_migrate_atomically_without_changing_identity() {
     sqlx::raw_sql(&format!("CREATE SCHEMA {schema}; SET LOCAL search_path TO {schema}, public; CREATE TABLE career_schema_version(version INTEGER PRIMARY KEY);"))
         .execute(&mut *tx).await.unwrap();
     sqlx::raw_sql(include_str!(
-        "../../server/migrations/postgres/001_career.sql"
+        "../../career-store/migrations/postgres/001_career.sql"
     ))
     .execute(&mut *tx)
     .await
@@ -23,7 +23,7 @@ async fn legacy_v1_handles_migrate_atomically_without_changing_identity() {
     sqlx::raw_sql("INSERT INTO career_schema_version VALUES(1); INSERT INTO career_profiles(profile_id,nickname,rating) VALUES(repeat('a',64),'Лиса',1234),(repeat('b',64),'лиса',1100),(repeat('c',64),'Player',1000); INSERT INTO career_keys(public_key,profile_id) VALUES(repeat('d',64),repeat('a',64)); INSERT INTO career_friendships(low_id,high_id,requested_by,accepted) VALUES(repeat('a',64),repeat('b',64),repeat('a',64),true);")
         .execute(&mut *tx).await.unwrap();
     sqlx::raw_sql(include_str!(
-        "../../server/migrations/postgres/002_player_handles.sql"
+        "../../career-store/migrations/postgres/002_player_handles.sql"
     ))
     .execute(&mut *tx)
     .await

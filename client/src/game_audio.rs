@@ -184,7 +184,6 @@ struct AudioWorld<'w, 's> {
     >,
 }
 
-#[allow(clippy::too_many_arguments)]
 fn update_audio(
     mut commands: Commands,
     time: Res<Time<Real>>,

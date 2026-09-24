@@ -4250,15 +4250,27 @@ dependencies = [
  "axum",
  "ed25519-dalek",
  "getrandom 0.3.4",
+ "omoba-career-store",
  "reqwest",
  "ring",
  "serde",
  "serde_json",
- "server",
  "shared",
  "sqlx",
  "tokio",
  "tower",
+]
+
+[[package]]
+name = "omoba-career-store"
+version = "0.23.0-rc.6"
+dependencies = [
+ "getrandom 0.3.4",
+ "serde",
+ "serde_json",
+ "shared",
+ "sqlx",
+ "tokio",
 ]
 
 [[package]]
@@ -5126,6 +5138,7 @@ dependencies = [
  "ed25519-dalek",
  "ekza-bevy-sdk",
  "getrandom 0.3.4",
+ "omoba-career-store",
  "omoba-passport",
  "serde",
  "serde_json",
@@ -5205,10 +5218,6 @@ name = "simd-adler32"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d66dc143e6b11c1eddc06d5c423cfc97062865baf299914ab64caa38182078fe"
-
-[[package]]
-name = "skills"
-version = "0.23.0-rc.6"
 
 [[package]]
 name = "skrifa"

@@ -68,7 +68,6 @@ pub(crate) fn player_visible(
             !revealed(player, now),
         )
 }
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn target_visible(
     team: Team,
     target: TargetId,
@@ -96,7 +95,6 @@ pub(crate) fn target_visible(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn filter_snapshot(
     packet: &mut ServerPacket,
     viewer: &ConnectedPlayer,

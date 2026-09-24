@@ -525,7 +525,6 @@ pub(super) fn roster_row(
         });
 }
 
-#[allow(clippy::too_many_arguments)]
 fn render_draft(
     mut commands: Commands,
     game: Res<GameStateSnapshot>,

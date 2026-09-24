@@ -817,7 +817,6 @@ fn attach_neutral_visuals(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn attach_projectile_visuals(
     mut commands: Commands,
     mode: Res<PlayerVisualMode>,

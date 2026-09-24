@@ -1232,7 +1232,6 @@ fn render_chat_log(
     });
 }
 
-#[allow(clippy::too_many_arguments)]
 fn render(
     mut commands: Commands,
     social: Res<SocialClient>,
@@ -1507,7 +1506,6 @@ fn render(
             });
     }
 }
-#[allow(clippy::too_many_arguments)]
 fn render_bubbles(
     mut commands: Commands,
     social: Res<SocialClient>,

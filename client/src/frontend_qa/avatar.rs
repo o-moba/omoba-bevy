@@ -110,7 +110,6 @@ fn setup(mut commands: Commands, mut next: ResMut<NextState<AppScreen>>) {
     ));
 }
 
-#[allow(clippy::too_many_arguments)]
 fn input(
     mut qa: ResMut<AvatarQa>,
     mut windows: Query<(Entity, &mut Window), With<PrimaryWindow>>,
@@ -213,7 +212,6 @@ fn abort(qa: &mut AvatarQa, reason: &str, exit: &mut MessageWriter<AppExit>) {
     exit.write(AppExit::error());
 }
 
-#[allow(clippy::too_many_arguments)]
 fn capture(
     mut commands: Commands,
     mut qa: ResMut<AvatarQa>,

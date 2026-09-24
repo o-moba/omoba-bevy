@@ -264,7 +264,6 @@ fn fail(qa: &mut FrontendQa, reason: &str, exit: &mut MessageWriter<AppExit>) {
     exit.write(AppExit::error());
 }
 
-#[allow(clippy::too_many_arguments)]
 fn observe(
     mut commands: Commands,
     mut qa: ResMut<FrontendQa>,

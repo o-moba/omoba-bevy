@@ -766,7 +766,6 @@ pub(crate) fn logical_ui_rect(
     rect
 }
 
-#[allow(clippy::type_complexity)]
 fn scroll_phone_panels(
     mobile: Res<MobileControls>,
     window: Query<(Entity, &Window), With<PrimaryWindow>>,

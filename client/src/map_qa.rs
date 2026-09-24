@@ -440,7 +440,6 @@ fn sprites(scene: &Scene, root: Entity) -> usize {
         })
         .count()
 }
-#[allow(clippy::too_many_arguments)]
 fn observe(
     mut commands: Commands,
     mut qa: ResMut<MapQa>,
