@@ -69,7 +69,7 @@ pub(crate) fn award_minion_kill_rewards(
             xp += 1;
         }
         award_gold(player, gold);
-        if player.sandbox.is_none() {
+        if player.modifiers.grant_xp {
             grant_player_xp(&mut player.hero, xp);
         }
     }

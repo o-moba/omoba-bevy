@@ -16,6 +16,7 @@ mod forest_pickups;
 mod formation;
 mod game_world;
 mod hero;
+mod hero_stats;
 mod hero_timers;
 #[cfg(test)]
 mod map_config_tests;
@@ -88,6 +89,7 @@ pub(crate) use entities::*;
 pub(crate) use formation::*;
 pub(crate) use game_world::*;
 pub(crate) use hero::*;
+pub(crate) use hero_stats::StatModifiers;
 pub(crate) use hero_timers::HeroTimers;
 pub(crate) use runtime::dispatch::*;
 pub(crate) use runtime::*;

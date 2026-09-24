@@ -40,7 +40,7 @@ fn practice_solo_starts_with_labelled_heroes_without_database_ack_or_ranked_cred
     assert_eq!(rt.world.game_state, GameState::Running);
     assert_eq!(joined_count(&rt.world.players), 4);
     assert_eq!(joined_team_counts(&rt.world.players), (2, 2));
-    let snapshot = build_players_snapshot(&rt.world, now);
+    let snapshot = build_players_snapshot(&rt.world, None, now);
     assert_eq!(snapshot.iter().filter(|p| p.is_bot).count(), 3);
     let allocation = rt.career_allocation_for_test().unwrap();
     assert_eq!(allocation.participants.len(), 4);
@@ -685,7 +685,7 @@ fn bot_controller_routes_around_real_forest_and_rejects_remote_control() {
         p.hero.z = point[1];
     }
     rt.handle_packet(bot_addr, ClientPacket::SetGodMode { enabled: true }, now);
-    assert!(!rt.world.players[&bot_addr].god_mode);
+    assert!(!rt.world.players[&bot_addr].modifiers.god_mode);
     rt.handle_packet(
         bot_addr,
         ClientPacket::Transform {
@@ -1037,7 +1037,7 @@ fn human_kills_of_practice_bots_count_on_the_live_scoreboard() {
     let row = |id: u64| board.players.iter().find(|p| p.player_id == id).unwrap();
     assert_eq!((row(human_id).kills, row(human_id).deaths), (1, 0));
     assert_eq!((row(bot_id).kills, row(bot_id).deaths), (0, 1));
-    let snapshot = build_players_snapshot(&rt.world, now);
+    let snapshot = build_players_snapshot(&rt.world, None, now);
     assert!(snapshot.iter().any(|p| p.id == human_id && !p.is_bot));
 }
 
@@ -1385,7 +1385,7 @@ fn sandbox_and_god_mode_are_practice_only_and_never_from_bots() {
     rt.handle_packet(addr(1), join("god"), now);
     rt.handle_packet(addr(1), ClientPacket::SetGodMode { enabled: true }, now);
     assert!(
-        rt.world.players[&addr(1)].god_mode,
+        rt.world.players[&addr(1)].modifiers.god_mode,
         "practice accepts god mode"
     );
     let bot = bots_of(&rt)[0];

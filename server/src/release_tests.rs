@@ -160,14 +160,14 @@ fn handler_release_rejects_debug_and_bad_protocol_while_explicit_dev_accepts_deb
             now,
         );
         let player = &rt.world.players[&addr(55301)];
-        assert_eq!(player.god_mode, config.mode == MatchMode::Dev);
+        assert_eq!(player.modifiers.god_mode, config.mode == MatchMode::Dev);
         if config.mode == MatchMode::Release {
             assert_eq!(player.hero.hp, 0.0);
             assert!(player.timers.respawn_at.is_some());
-            assert_eq!(player.speed_mult, 1.0);
+            assert_eq!(player.modifiers.move_speed_mult, 1.0);
         } else {
             assert_eq!(player.hero.hp, player.hero.max_hp);
-            assert!(player.speed_mult > 1.0);
+            assert!(player.modifiers.move_speed_mult > 1.0);
         }
         rt.handle_packet(
             addr(55302),
@@ -282,8 +282,8 @@ fn assert_clean_round(rt: &ServerRuntime) {
         assert_eq!(player.hero.last_action.slot, 0);
         assert_eq!(player.timers.last_cast_at, [None; 4]);
         assert_eq!(player.timers.respawn_at, None);
-        assert_eq!(player.speed_mult, 1.0);
-        assert!(!player.god_mode);
+        assert_eq!(player.modifiers.move_speed_mult, 1.0);
+        assert!(!player.modifiers.god_mode);
         let spawn = spawn_position_for_team(&rt.world.map_layout, player.hero.identity.team);
         assert_eq!(
             (player.hero.x, player.hero.z, player.hero.yaw),

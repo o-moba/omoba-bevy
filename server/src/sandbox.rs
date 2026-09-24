@@ -16,6 +16,10 @@ pub(crate) struct SandboxRuntime {
     acks: HashMap<u64, SandboxAck>,
     sequences: HashMap<u64, u64>,
     initialized: HashSet<u64>,
+    /// The `ActorConfig` last applied to each hero (by hero id), kept only to
+    /// echo it back in the telemetry and to seed the next edit or reset; the
+    /// simulation reads `ConnectedPlayer.modifiers` and the hero's loadout.
+    actors: HashMap<u64, ActorConfig>,
 }
 impl SandboxRuntime {
     pub fn new(now: Instant) -> Self {
@@ -28,6 +32,91 @@ impl SandboxRuntime {
             acks: HashMap::new(),
             sequences: HashMap::new(),
             initialized: HashSet::new(),
+            actors: HashMap::new(),
+        }
+    }
+    /// The actor's configuration as the telemetry echoes it: the applied
+    /// config with the values the hero has owned since (ranks, inventory,
+    /// the god-mode and speed toggles) read back from the hero.
+    pub(crate) fn actor_config(&self, p: &ConnectedPlayer) -> Option<ActorConfig> {
+        let mut c = self.actors.get(&p.hero.identity.id)?.clone();
+        c.ranks = p.hero.progress.ranks;
+        c.inventory = p.economy.inventory.clone();
+        c.god_mode = p.modifiers.god_mode;
+        c.move_speed = p.modifiers.move_speed_mult;
+        Some(c)
+    }
+    /// Converts `c` into the hero's `StatModifiers` and loadout (class,
+    /// avatar, level, XP, ranks, inventory, pools) once; `reset` also puts
+    /// the actor back on its configured spot with full pools and clear
+    /// clocks. The config itself is only remembered for the telemetry.
+    pub(crate) fn apply_actor(
+        &mut self,
+        p: &mut ConnectedPlayer,
+        c: &ActorConfig,
+        reset: bool,
+        now: Instant,
+    ) {
+        let old = self.actors.get(&p.hero.identity.id);
+        let changed_hero = p.hero.identity.hero_class != c.hero;
+        let changed_avatar = old.is_some_and(|old| old.avatar != c.avatar);
+        let moved = old.is_some_and(|old| old.position != c.position);
+        self.actors.insert(p.hero.identity.id, c.clone());
+        p.modifiers = StatModifiers {
+            damage_mult: c.damage_multiplier,
+            attack_speed_mult: c.attack_speed,
+            move_speed_mult: c.move_speed,
+            armor: c.armor,
+            resistance: c.resistance,
+            base_max_hp: Some(c.max_hp),
+            god_mode: c.god_mode,
+            // The dummy's infinite HP is a `DummyConfig` setting, applied
+            // after the actor sync.
+            infinite_hp: p.modifiers.infinite_hp,
+            infinite_resource: c.infinite_resource,
+            no_cooldowns: c.no_cooldowns,
+            unlock_all: c.unlock_all,
+            bypass_vision: true,
+            grant_xp: false,
+            respawns: !p.hero.identity.is_bot,
+        };
+        p.hero.identity.hero_class = c.hero;
+        if changed_hero || changed_avatar || c.avatar.is_some() {
+            p.hero.identity.avatar = c
+                .avatar
+                .clone()
+                .or_else(|| bots::bot_avatar(c.hero, 1).map(str::to_owned));
+            p.hero.identity.sprite_character = None;
+        }
+        if moved {
+            p.hero.utility.dash_sequence = p.hero.utility.dash_sequence.saturating_add(1);
+            p.hero.x = c.position[0];
+            p.hero.z = c.position[1];
+            p.timers.last_movement_at = now;
+        }
+        p.hero.progress.level = c.level;
+        p.hero.progress.xp = c.xp;
+        p.hero.progress.next_level_xp = xp_threshold_for_level(c.level);
+        p.hero.progress.ranks = c.ranks;
+        p.hero.progress.skill_points = c.level.saturating_sub(1);
+        p.economy.inventory = c.inventory.clone();
+        p.economy.item_bonuses = shared::shop::item_bonuses(&c.inventory);
+        hero_stats::resize_pools(p);
+        if reset {
+            p.hero.utility.dash_sequence = p.hero.utility.dash_sequence.saturating_add(1);
+            p.hero.x = c.position[0];
+            p.hero.z = c.position[1];
+            p.hero.y = PLAYER_GROUND_Y;
+            p.hero.hp = p.hero.max_hp;
+            p.hero.mana = p.hero.max_mana;
+            p.timers.respawn_at = None;
+            p.timers.haste_expires_at = None;
+            p.timers.last_movement_at = now;
+            p.timers.clear_cooldowns();
+            p.hero.last_action.kind = PlayerActionKind::None;
+        }
+        if c.no_cooldowns {
+            p.timers.clear_cooldowns();
         }
     }
     pub fn advance(&mut self, wall_dt: f32) -> (Instant, f32) {
@@ -60,36 +149,28 @@ impl SandboxRuntime {
         .into_iter()
         .filter_map(|(actor, addr)| {
             let p = players.get(&addr)?;
-            let c = p.sandbox.as_ref()?;
+            if !self.actors.contains_key(&p.hero.identity.id) {
+                return None;
+            }
             Some(ActorTelemetry {
                 actor,
                 id: p.hero.identity.id,
                 position: [p.hero.x, p.hero.z],
                 hp: p.hero.hp,
                 mana: p.hero.mana,
-                armor: c.armor,
-                resistance: c.resistance,
-                move_speed: PLAYER_SPEED
-                    * p.speed_mult
-                    * p.economy.item_bonuses.move_speed_multiplier
-                    * shared::hero_balance::movement_multiplier(
-                        p.hero.identity.hero_class,
-                        p.hero.progress.level,
-                    ),
-                attack_speed: p.economy.item_bonuses.attack_speed_multiplier
-                    * shared::hero_balance::attack_rate_multiplier(
-                        p.hero.identity.hero_class,
-                        p.hero.progress.level,
-                    ),
-                attack_damage: effective_basic_attack_damage(p),
+                armor: p.modifiers.armor,
+                resistance: p.modifiers.resistance,
+                move_speed: hero_stats::move_speed(p),
+                attack_speed: hero_stats::attack_speed(p),
+                attack_damage: hero_stats::basic_attack_damage(p),
                 cooldowns: std::array::from_fn(|i| {
-                    if c.no_cooldowns {
+                    if p.modifiers.no_cooldowns {
                         0.0
                     } else {
                         hero_timers::skill_cooldown_left(p, SkillSlot::ALL[i], self.now)
                     }
                 }),
-                unlocked: if c.unlock_all {
+                unlocked: if p.modifiers.unlock_all {
                     [true; 4]
                 } else {
                     unlocked_slots_for_level(p.hero.progress.level)
@@ -98,8 +179,8 @@ impl SandboxRuntime {
         })
         .collect();
         let mut config = self.config.clone();
-        if let Some(c) = players.get(&requester).and_then(|p| p.sandbox.as_ref()) {
-            config.player = c.clone();
+        if let Some(c) = players.get(&requester).and_then(|p| self.actor_config(p)) {
+            config.player = c;
         }
         SandboxSnapshot {
             config,
@@ -180,61 +261,6 @@ fn validate_config(c: &SandboxConfig) -> Result<(), String> {
     }
     Ok(())
 }
-pub(crate) fn apply_actor(p: &mut ConnectedPlayer, c: &ActorConfig, reset: bool, now: Instant) {
-    let changed_hero = p.hero.identity.hero_class != c.hero;
-    let changed_avatar = p.sandbox.as_ref().is_some_and(|old| old.avatar != c.avatar);
-    let moved = p
-        .sandbox
-        .as_ref()
-        .is_some_and(|old| old.position != c.position);
-    p.sandbox = Some(c.clone());
-    p.god_mode = c.god_mode;
-    p.speed_mult = c.move_speed;
-    p.hero.identity.hero_class = c.hero;
-    if changed_hero || changed_avatar || c.avatar.is_some() {
-        p.hero.identity.avatar = c
-            .avatar
-            .clone()
-            .or_else(|| bots::bot_avatar(c.hero, 1).map(str::to_owned));
-        p.hero.identity.sprite_character = None;
-    }
-    if moved {
-        p.hero.utility.dash_sequence = p.hero.utility.dash_sequence.saturating_add(1);
-        p.hero.x = c.position[0];
-        p.hero.z = c.position[1];
-        p.timers.last_movement_at = now;
-    }
-    p.hero.progress.level = c.level;
-    p.hero.progress.xp = c.xp;
-    p.hero.progress.next_level_xp = xp_threshold_for_level(c.level);
-    p.hero.progress.ranks = c.ranks;
-    p.hero.progress.skill_points = c.level.saturating_sub(1);
-    p.economy.inventory = c.inventory.clone();
-    let mut bonuses = shared::shop::item_bonuses(&c.inventory);
-    bonuses.damage_multiplier *= c.damage_multiplier;
-    bonuses.attack_speed_multiplier *= c.attack_speed;
-    p.economy.item_bonuses = bonuses;
-    p.hero.max_hp = c.max_hp + (c.level - 1) as f32 * LEVEL_UP_HP_BONUS + bonuses.max_hp;
-    p.hero.max_mana = MAX_MANA + (c.level - 1) as f32 * LEVEL_UP_MANA_BONUS + bonuses.max_mana;
-    p.hero.hp = p.hero.hp.min(p.hero.max_hp);
-    p.hero.mana = p.hero.mana.min(p.hero.max_mana);
-    if reset {
-        p.hero.utility.dash_sequence = p.hero.utility.dash_sequence.saturating_add(1);
-        p.hero.x = c.position[0];
-        p.hero.z = c.position[1];
-        p.hero.y = PLAYER_GROUND_Y;
-        p.hero.hp = p.hero.max_hp;
-        p.hero.mana = p.hero.max_mana;
-        p.timers.respawn_at = None;
-        p.timers.haste_expires_at = None;
-        p.timers.last_movement_at = now;
-        p.timers.clear_cooldowns();
-        p.hero.last_action.kind = PlayerActionKind::None;
-    }
-    if c.no_cooldowns {
-        p.timers.clear_cooldowns();
-    }
-}
 impl ServerRuntime {
     pub(crate) fn sandbox_allowed(&self) -> bool {
         self.sandbox.is_some()
@@ -253,14 +279,17 @@ impl ServerRuntime {
             .values_mut()
             .filter(|p| p.joined && !p.hero.identity.is_bot)
         {
-            if s.initialized.insert(p.hero.identity.id) || p.sandbox.is_none() {
+            if s.initialized.insert(p.hero.identity.id)
+                || !s.actors.contains_key(&p.hero.identity.id)
+            {
                 let mut c = s.config.player.clone();
                 c.hero = p.hero.identity.hero_class;
                 c.avatar = p.hero.identity.avatar.clone();
                 if p.hero.identity.team == Team::Blue {
                     c.position = [3.0, 0.0];
                 }
-                apply_actor(p, &c, true, s.now);
+                let now = s.now;
+                s.apply_actor(p, &c, true, now);
             }
         }
         self.combat_log.enable_sandbox(s.now);
@@ -342,15 +371,16 @@ impl ServerRuntime {
                 ] {
                     self.validate_sandbox_destination(position)?;
                 }
-                let old = self.sandbox.as_ref().unwrap().config.clone();
+                let s = self.sandbox.as_mut().unwrap();
+                let old = s.config.clone();
                 let p = self.world.players.get_mut(&addr).unwrap();
                 let reset = p.hero.identity.hero_class != config.player.hero;
                 let id = p.hero.identity.id;
-                let moved = p
-                    .sandbox
-                    .as_ref()
+                let moved = s
+                    .actors
+                    .get(&id)
                     .is_some_and(|c| c.position != config.player.position);
-                apply_actor(p, &config.player, reset, now);
+                s.apply_actor(p, &config.player, reset, now);
                 if reset || moved {
                     self.world.projectiles.retain(|_, p| {
                         p.state.owner_id != id
@@ -372,7 +402,7 @@ impl ServerRuntime {
                 let c = dummy_actor(&config.dummy);
                 self.sync_sandbox_actor(DUMMY_ADDR, config.dummy.enabled, &c, false, now);
                 if let Some(p) = self.world.players.get_mut(&DUMMY_ADDR) {
-                    p.sandbox_infinite_hp = config.dummy.infinite_hp;
+                    p.modifiers.infinite_hp = config.dummy.infinite_hp;
                 }
                 if !config.environment.minions {
                     self.world.minions.clear();
@@ -428,8 +458,9 @@ impl ServerRuntime {
             SandboxCommand::ResetDuel => self.reset_sandbox_duel(now),
             SandboxCommand::AddXp { actor, amount } => {
                 let a = self.sandbox_addr(addr, actor)?;
-                let p = &self.world.players[&a];
-                let mut c = p.sandbox.clone().ok_or("Actor has no sandbox config")?;
+                let s = self.sandbox.as_mut().unwrap();
+                let p = self.world.players.get_mut(&a).unwrap();
+                let mut c = s.actor_config(p).ok_or("Actor has no sandbox config")?;
                 let total: u32 = (1..c.level).map(xp_threshold_for_level).sum::<u32>() + c.xp;
                 let mut left = (total as i64 + amount as i64).max(0).min(u32::MAX as i64) as u32;
                 c.level = 1;
@@ -438,18 +469,17 @@ impl ServerRuntime {
                     c.level += 1;
                 }
                 c.xp = if c.level == MAX_LEVEL { 0 } else { left };
-                apply_actor(self.world.players.get_mut(&a).unwrap(), &c, false, now);
+                s.apply_actor(p, &c, false, now);
                 self.save_actor_config(actor, c);
             }
             SandboxCommand::GrantItem { actor, item } => {
                 let a = self.sandbox_addr(addr, actor)?;
-                let mut c = self.world.players[&a]
-                    .sandbox
-                    .clone()
-                    .ok_or("Actor has no sandbox config")?;
+                let s = self.sandbox.as_mut().unwrap();
+                let p = self.world.players.get_mut(&a).unwrap();
+                let mut c = s.actor_config(p).ok_or("Actor has no sandbox config")?;
                 c.inventory.push(item);
                 validate_actor(&c)?;
-                apply_actor(self.world.players.get_mut(&a).unwrap(), &c, false, now);
+                s.apply_actor(p, &c, false, now);
                 self.save_actor_config(actor, c);
             }
             SandboxCommand::ResetAnalytics => self.combat_log.reset_sandbox(now),
@@ -544,6 +574,11 @@ impl ServerRuntime {
     ) {
         if !enabled {
             if let Some(p) = self.world.players.remove(&addr) {
+                self.sandbox
+                    .as_mut()
+                    .unwrap()
+                    .actors
+                    .remove(&p.hero.identity.id);
                 self.world.projectiles.retain(|_, b| {
                     b.state.owner_id != p.hero.identity.id
                         && b.target
@@ -582,7 +617,7 @@ impl ServerRuntime {
                         }
             });
         }
-        apply_actor(
+        self.sandbox.as_mut().unwrap().apply_actor(
             self.world.players.get_mut(&addr).unwrap(),
             c,
             new || reset,
@@ -590,10 +625,11 @@ impl ServerRuntime {
         );
     }
     fn reset_sandbox_actor(&mut self, addr: SocketAddr, now: Instant) {
+        let s = self.sandbox.as_mut().unwrap();
         if let Some(p) = self.world.players.get_mut(&addr) {
-            if let Some(c) = p.sandbox.clone() {
+            if let Some(c) = s.actor_config(p) {
                 let id = p.hero.identity.id;
-                apply_actor(p, &c, true, now);
+                s.apply_actor(p, &c, true, now);
                 self.world.projectiles.retain(|_, p| {
                     p.state.owner_id != id
                         && p.target
@@ -656,13 +692,11 @@ impl ServerRuntime {
         self.initialize_sandbox_players();
         let config = self.sandbox.as_ref().unwrap().config.clone();
         for p in self.world.players.values_mut() {
-            if let Some(c) = &p.sandbox {
-                if c.infinite_resource {
-                    p.hero.mana = p.hero.max_mana;
-                }
-                if c.no_cooldowns {
-                    p.timers.clear_cooldowns();
-                }
+            if p.modifiers.infinite_resource {
+                p.hero.mana = p.hero.max_mana;
+            }
+            if p.modifiers.no_cooldowns {
+                p.timers.clear_cooldowns();
             }
         }
         if dt <= 0.0 {
@@ -792,15 +826,7 @@ impl ServerRuntime {
         let dx = next[0] - origin[0];
         let dz = next[1] - origin[1];
         let distance = dx.hypot(dz).max(0.001);
-        let step = (PLAYER_SPEED
-            * p.speed_mult
-            * p.economy.item_bonuses.move_speed_multiplier
-            * shared::hero_balance::movement_multiplier(
-                p.hero.identity.hero_class,
-                p.hero.progress.level,
-            )
-            * dt)
-            .min(distance);
+        let step = (hero_stats::move_speed(p) * dt).min(distance);
         handle_transform_request_with_structures(
             self.world.players.get_mut(&addr).unwrap(),
             &self.world.map_layout,
@@ -822,39 +848,6 @@ fn dummy_actor(c: &DummyConfig) -> ActorConfig {
         position: c.position,
         ..Default::default()
     }
-}
-
-/// Preserve ordinary item floors while supporting validated sandbox overrides.
-fn combat_bonuses(player: &ConnectedPlayer) -> ItemBonuses {
-    let mut bonuses = player.economy.item_bonuses;
-    if player.sandbox.is_none() {
-        bonuses.damage_multiplier = bonuses.damage_multiplier.max(1.0);
-        bonuses.attack_speed_multiplier = bonuses.attack_speed_multiplier.max(1.0);
-    }
-    bonuses
-}
-pub(crate) fn effective_basic_attack_damage(player: &ConnectedPlayer) -> f32 {
-    shared::hero_balance::basic_damage(
-        player.hero.identity.hero_class,
-        player.hero.progress.level,
-        combat_bonuses(player),
-    )
-}
-pub(crate) fn effective_basic_attack_cooldown(player: &ConnectedPlayer) -> Duration {
-    shared::hero_balance::basic_cooldown(
-        player.hero.identity.hero_class,
-        player.hero.progress.level,
-        combat_bonuses(player),
-    )
-}
-pub(crate) fn effective_ability_cooldown(player: &ConnectedPlayer, slot: SkillSlot) -> Duration {
-    shared::hero_balance::ability_cooldown(
-        player.hero.identity.hero_class,
-        player.hero.progress.level,
-        player.hero.progress.ranks[slot.index()],
-        slot,
-        combat_bonuses(player),
-    )
 }
 
 #[cfg(test)]

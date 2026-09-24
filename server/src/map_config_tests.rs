@@ -231,7 +231,7 @@ fn packet_transform_respects_configured_live_discs_and_death_removes_blocker() {
     player.joined = true;
     player.hero.x = start[0];
     player.hero.z = start[1];
-    player.speed_mult = 100.0;
+    player.modifiers.move_speed_mult = 100.0;
     for _ in 0..4 {
         now += Duration::from_millis(100);
         rt.handle_packet(

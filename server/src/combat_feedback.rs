@@ -172,15 +172,11 @@ pub(crate) fn apply_player_damage_typed(
         player.joined
             && player.hero.identity.id == target_id
             && player.hero.hp > 0.0
-            && !player.god_mode
+            && !player.modifiers.god_mode
     })?;
     let before = player.hero.hp;
-    let mitigation = player
-        .sandbox
-        .as_ref()
-        .map_or(0.0, |c| if magical { c.resistance } else { c.armor });
-    let damage = damage * 100.0 / (100.0 + mitigation);
-    player.hero.hp = if player.sandbox_infinite_hp {
+    let damage = hero_stats::mitigate(player, damage, magical);
+    player.hero.hp = if player.modifiers.infinite_hp {
         before
     } else {
         (before - damage).max(0.0)
@@ -193,14 +189,14 @@ pub(crate) fn apply_player_damage_typed(
         CombatEntityKind::Player,
         target_id,
         before,
-        if player.sandbox_infinite_hp {
+        if player.modifiers.infinite_hp {
             before - damage
         } else {
             player.hero.hp
         },
         Vec3f::new(player.hero.x, player.hero.y + AIM_HEIGHT, player.hero.z),
     );
-    if player.sandbox_infinite_hp {
+    if player.modifiers.infinite_hp {
         if let Some(event) = &mut receipt {
             event.killed = false;
         }

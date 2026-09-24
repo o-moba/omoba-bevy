@@ -64,10 +64,6 @@ pub(crate) fn handle_purchase(
         player.hero.hp = (player.hero.hp + hp_bonus).min(player.hero.max_hp);
         player.hero.max_mana += mana_bonus;
         player.hero.mana = (player.hero.mana + mana_bonus).min(player.hero.max_mana);
-        if let Some(mut c) = player.sandbox.clone() {
-            c.inventory = player.economy.inventory.clone();
-            sandbox::apply_actor(player, &c, false, player.timers.last_movement_at);
-        }
         println!(
             "MATCH_METRIC event=purchase match={match_id} player={} request={request_id} item={} cost={} gold={}",
             player.hero.identity.id,
@@ -422,7 +418,7 @@ mod tests {
             rt.world.players.get_mut(&addr).unwrap().hero.mana = 1000.0;
             rt.handle_packet(addr, packet.clone(), cast_at);
             let count = rt.world.projectiles.len();
-            let cooldown = sandbox::effective_ability_cooldown(&rt.world.players[&addr], slot);
+            let cooldown = hero_stats::ability_cooldown(&rt.world.players[&addr], slot);
             let later = cast_at + cooldown + Duration::from_millis(1);
             assert!(later < cast_at + scaled_cooldown(def, 1));
             rt.handle_packet(addr, packet, later);

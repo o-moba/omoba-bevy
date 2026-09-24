@@ -48,7 +48,11 @@ fn snapshot(rt: &mut ServerRuntime, addr: SocketAddr, now: Instant) -> ServerPac
         meta: Default::default(),
         join_error: None,
         your_id: rt.world.players[&addr].hero.identity.id,
-        players: build_players_snapshot(&rt.world, now),
+        players: build_players_snapshot(
+            &rt.world,
+            Some(rt.world.players[&addr].hero.identity.id),
+            now,
+        ),
         scoreboard: rt.combat_log.ledger.live_scoreboard(),
         prematch: None,
         projectiles: rt
@@ -598,4 +602,149 @@ fn lethal_nonhero_receipts_survive_removal_only_for_visible_impacts() {
     };
     assert_eq!(combat_events.len(), 3);
     assert!(!serde_json::to_string(&packet).unwrap().contains("101.25"));
+}
+
+/// Gives `addr` a private economy and request marks worth redacting.
+fn enrich(rt: &mut ServerRuntime, addr: SocketAddr) {
+    let p = rt.world.players.get_mut(&addr).unwrap();
+    p.economy.gold = 345;
+    p.economy.earned_gold = 265;
+    p.economy.inventory = vec![ItemId::EmberBlade, ItemId::TrailBoots];
+    p.economy.item_bonuses = shared::shop::item_bonuses(&p.economy.inventory);
+    p.economy.last_purchase = Some(PurchaseReceipt {
+        request_id: 4,
+        match_id: rt.match_id,
+        item_id: Some(ItemId::TrailBoots),
+        error: None,
+    });
+    p.economy.basic_attack_request_id = 9;
+    p.hero.utility.last_request_id = 6;
+    p.hero.utility.dash_sequence = 2;
+    p.hero.progress.level = 4;
+    p.hero.progress.xp = 33;
+    p.hero.progress.ranks = [2, 1, 2, 1];
+    p.hero.hp = 123.0;
+}
+
+#[test]
+fn visible_enemy_is_replicated_with_its_private_economy_blanked() {
+    let (mut rt, a, b, now) = fixture();
+    // Out of the brush, inside green sight.
+    rt.world.players.get_mut(&b).unwrap().hero.x = -18.5;
+    enrich(&mut rt, b);
+    let packet = snapshot(&mut rt, a, now);
+    let ServerPacket::Snapshot { players, .. } = &packet else {
+        panic!()
+    };
+    let live = &rt.world.players[&b];
+    let enemy = players
+        .iter()
+        .find(|p| p.id == live.hero.identity.id)
+        .expect("visible enemy is replicated");
+    assert_eq!(enemy.gold, 0);
+    assert_eq!(enemy.earned_gold, 0);
+    assert!(enemy.inventory.is_empty());
+    assert_eq!(enemy.item_bonuses, ItemBonuses::default());
+    assert_eq!(enemy.last_purchase, None);
+    assert_eq!(enemy.basic_attack_request_id, 0);
+    assert_eq!(enemy.utility.last_request_id, 0);
+    // Everything public is intact.
+    assert_eq!(
+        (enemy.x, enemy.y, enemy.z),
+        (live.hero.x, live.hero.y, live.hero.z)
+    );
+    assert_eq!((enemy.hp, enemy.max_hp), (live.hero.hp, live.hero.max_hp));
+    assert_eq!((enemy.level, enemy.xp), (4, 33));
+    assert_eq!(enemy.ranks, [2, 1, 2, 1]);
+    assert_eq!(enemy.utility.dash_sequence, 2);
+    assert_eq!(
+        serde_json::to_vec(enemy).unwrap(),
+        serde_json::to_vec(&live.public_view(now, &rt.world.map_layout, &rt.world.game_state))
+            .unwrap()
+    );
+    // The redaction is the only difference from the owner view.
+    let owner = live.owner_view(now, &rt.world.map_layout, &rt.world.game_state);
+    assert_eq!(owner.gold, 345);
+    assert_eq!(owner.inventory.len(), 2);
+    let restored = PlayerState {
+        gold: owner.gold,
+        earned_gold: owner.earned_gold,
+        inventory: owner.inventory.clone(),
+        item_bonuses: owner.item_bonuses,
+        last_purchase: owner.last_purchase.clone(),
+        basic_attack_request_id: owner.basic_attack_request_id,
+        utility: owner.utility,
+        ..enemy.clone()
+    };
+    assert_eq!(
+        serde_json::to_vec(&restored).unwrap(),
+        serde_json::to_vec(&owner).unwrap()
+    );
+}
+
+#[test]
+fn recipient_gets_its_own_owner_view_and_teammates_are_redacted() {
+    let (mut rt, a, _b, now) = fixture();
+    let c: SocketAddr = "127.0.0.1:58903".parse().unwrap();
+    rt.world.ensure_connected(c, now);
+    let mate = rt.world.players.get_mut(&c).unwrap();
+    mate.joined = true;
+    mate.hero.identity.team = Team::Green;
+    mate.hero.x = -16.0;
+    mate.hero.z = -8.0;
+    enrich(&mut rt, a);
+    enrich(&mut rt, c);
+    let packet = snapshot(&mut rt, a, now);
+    let ServerPacket::Snapshot { players, .. } = &packet else {
+        panic!()
+    };
+    let own_live = &rt.world.players[&a];
+    let own = players
+        .iter()
+        .find(|p| p.id == own_live.hero.identity.id)
+        .unwrap();
+    assert_eq!(own.gold, 345);
+    assert_eq!(own.basic_attack_request_id, 9);
+    assert_eq!(own.utility.last_request_id, 6);
+    assert_eq!(
+        serde_json::to_vec(own).unwrap(),
+        serde_json::to_vec(&own_live.owner_view(now, &rt.world.map_layout, &rt.world.game_state))
+            .unwrap(),
+        "the recipient's own entry is the owner view"
+    );
+    let mate_live = &rt.world.players[&c];
+    let mate = players
+        .iter()
+        .find(|p| p.id == mate_live.hero.identity.id)
+        .expect("teammates are always replicated");
+    assert_eq!(mate.team, Team::Green);
+    assert_eq!(mate.gold, 0);
+    assert_eq!(mate.earned_gold, 0);
+    assert!(mate.inventory.is_empty());
+    assert_eq!(mate.last_purchase, None);
+    assert_eq!(mate.basic_attack_request_id, 0);
+    assert_eq!(mate.utility.last_request_id, 0);
+    assert_eq!((mate.level, mate.ranks), (4, [2, 1, 2, 1]));
+    assert_eq!(
+        serde_json::to_vec(mate).unwrap(),
+        serde_json::to_vec(&mate_live.public_view(now, &rt.world.map_layout, &rt.world.game_state))
+            .unwrap(),
+        "a teammate is a non-owner"
+    );
+    // The sandbox broadcast skips the vision filter but builds the player
+    // list the same way, so it is redacted too.
+    let sandboxed = build_players_snapshot(&rt.world, Some(own_live.hero.identity.id), now);
+    let mate = sandboxed
+        .iter()
+        .find(|p| p.id == mate_live.hero.identity.id)
+        .unwrap();
+    assert_eq!((mate.gold, mate.inventory.len()), (0, 0));
+    assert_eq!(
+        sandboxed
+            .iter()
+            .find(|p| p.id == own_live.hero.identity.id)
+            .unwrap()
+            .gold,
+        345
+    );
 }
