@@ -12,7 +12,7 @@ use super::components::{GameStateSnapshot, NetworkPlayerId, NetworkState};
 use super::ingest::{PendingServerSnapshotFrame, ingest_server_snapshot_packets};
 use super::session::{
     ClientConnectionState, ClientSession, CommittedJoin, NetIncomingDisconnected, SessionEvent,
-    retry_pending_join,
+    TeardownQueries, TeardownReason, perform_network_teardown, retry_pending_join,
 };
 use super::transport::{NetworkChannels, decode_server_packet};
 use super::{ClientNetPipeline, configure_network_pipeline};
@@ -130,6 +130,55 @@ pub(in crate::net) fn snapshot_app() -> (App, crossbeam_channel::Sender<ServerPa
     configure_network_pipeline(&mut app);
     crate::world::register_local_player_spawn(&mut app);
     (app, incoming)
+}
+
+/// Session events flushed since the last call (the flush at the end of
+/// `ApplySnapshot` runs every frame, staged snapshot or not).
+pub(in crate::net) fn drain_session_events(app: &mut App) -> Vec<SessionEvent> {
+    app.world_mut()
+        .resource_mut::<Messages<SessionEvent>>()
+        .drain()
+        .collect()
+}
+
+pub(in crate::net) fn drain_snapshot_applied(app: &mut App) -> Vec<SnapshotApplied> {
+    app.world_mut()
+        .resource_mut::<Messages<SnapshotApplied>>()
+        .drain()
+        .collect()
+}
+
+/// Runs the production teardown outside the lifecycle system, as a transport
+/// failure would.
+pub(in crate::net) fn tear_down(app: &mut App, reason: TeardownReason) {
+    use bevy::ecs::system::RunSystemOnce;
+    app.world_mut()
+        .run_system_once(
+            move |mut commands: Commands,
+                  mut session: ResMut<ClientSession>,
+                  mut network: ResMut<NetworkState>,
+                  mut snapshot: ResMut<GameStateSnapshot>,
+                  mut team: ResMut<TeamSelection>,
+                  mut camera: ResMut<crate::camera::CameraState>,
+                  queries: TeardownQueries| {
+                perform_network_teardown(
+                    reason,
+                    &mut commands,
+                    &mut session,
+                    &mut network,
+                    &mut snapshot,
+                    &mut team,
+                    &mut camera,
+                    &queries.remote_query,
+                    &queries.projectile_query,
+                    &queries.structure_query,
+                    &queries.minion_query,
+                    &queries.neutral_query,
+                    &queries.player_query,
+                );
+            },
+        )
+        .unwrap();
 }
 
 /// Recipient-shaped packets exercise the ordinary ingest/apply pipeline;

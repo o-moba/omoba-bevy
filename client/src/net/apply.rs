@@ -169,6 +169,13 @@ pub enum ApplyOutcome {
 /// stage (and their Commands) ran. Session and world resources are already
 /// updated when it is read.
 #[derive(Message, Clone, Debug)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "no reader yet: the camera slice (15f) and QA frame loops are the first"
+    )
+)]
 pub struct SnapshotApplied {
     pub meta: SnapshotMeta,
     pub your_id: u64,
@@ -1434,6 +1441,123 @@ mod tests {
             assert_eq!(stats.hp, 400.0 - tick as f32);
             assert_eq!(stats.max_hp, 400.0);
         }
+    }
+
+    // Early-return gates of the entity stage (roadmap step 15b1, hazard 2).
+
+    #[test]
+    fn draft_snapshot_clears_heroes_and_leaves_world_entities_untouched() {
+        use crate::combat::CombatStats;
+        use crate::net::session::CommittedJoin;
+        let (mut app, incoming) = snapshot_app();
+        // A prematch join: the world fallback leaves the hero to the draft.
+        app.world_mut().resource_mut::<ClientSession>().last_join = Some(CommittedJoin {
+            prematch: true,
+            ..CommittedJoin::for_test()
+        });
+        incoming.send(admission_snapshot(1, 1, true, None)).unwrap();
+        app.update();
+        assert_eq!(
+            drain_snapshot_applied(&mut app)
+                .iter()
+                .map(|applied| applied.outcome)
+                .collect::<Vec<_>>(),
+            vec![ApplyOutcome::Full]
+        );
+        let before = app.world().resource::<NetworkState>();
+        let (structures, minions) = (before.structures.clone(), before.minions.clone());
+        let (projectiles, neutrals) = (before.projectiles.clone(), before.neutrals.clone());
+        assert!(!before.remote_players.is_empty());
+        assert!(!structures.is_empty() && !minions.is_empty());
+        let structure = structures[&1];
+        let structure_x = app
+            .world()
+            .get::<Transform>(structure)
+            .unwrap()
+            .translation
+            .x;
+        let structure_hp = app.world().get::<CombatStats>(structure).unwrap().hp;
+
+        // Every structure moved and damaged, every minion gone: Draft ignores it.
+        let mut draft = serde_json::to_value(admission_snapshot(1, 2, true, None)).unwrap();
+        draft["prematch"] = json!({"generation": 1, "phase": "draft", "remaining_ms": 1000,
+            "needed": 10, "players": [], "last_request_id": 0, "error": null});
+        for structure in draft["structures"].as_array_mut().unwrap() {
+            structure["x"] = json!(999.0);
+            structure["hp"] = json!(1.0);
+        }
+        draft["minions"] = json!([]);
+        incoming
+            .send(serde_json::from_value(draft).unwrap())
+            .unwrap();
+        app.update();
+
+        let after = app.world().resource::<NetworkState>();
+        assert!(
+            after.remote_players.is_empty(),
+            "draft clears remote heroes"
+        );
+        assert_eq!(after.structures, structures);
+        assert_eq!(after.minions, minions);
+        assert_eq!(after.projectiles, projectiles);
+        assert_eq!(after.neutrals, neutrals);
+        for entity in minions.values().chain(structures.values()) {
+            assert!(app.world().get_entity(*entity).is_ok());
+        }
+        assert_eq!(
+            app.world()
+                .get::<Transform>(structure)
+                .unwrap()
+                .translation
+                .x,
+            structure_x
+        );
+        assert_eq!(
+            app.world().get::<CombatStats>(structure).unwrap().hp,
+            structure_hp
+        );
+        let local_heroes = app
+            .world_mut()
+            .query_filtered::<Entity, With<Player>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(local_heroes, 0, "draft clears the local hero");
+        // Resources are written even though the entity work is skipped.
+        let game = app.world().resource::<GameStateSnapshot>();
+        assert!(game.prematch.is_some());
+        assert_eq!(game.meta.snapshot_tick, 2);
+        let applied = drain_snapshot_applied(&mut app);
+        assert_eq!(applied.len(), 1);
+        assert_eq!(applied[0].outcome, ApplyOutcome::Draft);
+        assert_eq!(applied[0].your_id, 1);
+        assert_eq!(applied[0].meta.snapshot_tick, 2);
+        assert_eq!(applied[0].round, RoundId::from_meta(&applied[0].meta));
+    }
+
+    #[test]
+    fn listed_local_hero_without_team_or_join_spawns_no_remote_or_world_entity() {
+        let (mut app, incoming) = snapshot_app();
+        app.world_mut().resource_mut::<TeamSelection>().team = None;
+        incoming.send(admission_snapshot(1, 1, true, None)).unwrap();
+        app.update();
+
+        let state = app.world().resource::<NetworkState>();
+        assert!(state.remote_players.is_empty());
+        assert!(state.projectiles.is_empty() && state.structures.is_empty());
+        assert!(state.minions.is_empty() && state.neutrals.is_empty());
+        let heroes = app
+            .world_mut()
+            .query_filtered::<Entity, Or<(With<Player>, With<RemotePlayer>)>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(heroes, 0);
+        // Session and resources run before the entity stage and still apply.
+        assert_eq!(app.world().resource::<GameStateSnapshot>().your_id, 1);
+        let session = app.world().resource::<ClientSession>();
+        assert!(session.last_qualifying_snapshot_wall.is_some());
+        let applied = drain_snapshot_applied(&mut app);
+        assert_eq!(applied.len(), 1);
+        assert_eq!(applied[0].outcome, ApplyOutcome::LocalPending);
     }
 
     #[test]

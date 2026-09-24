@@ -1063,6 +1063,188 @@ mod tests {
         assert!(outgoing.try_recv().is_err(), "admission ends retries");
     }
 
+    // Session events (roadmap step 15a): emitted through the outbox, written
+    // as messages by the flush at the end of `ApplySnapshot`.
+
+    #[test]
+    fn first_admitted_snapshot_announces_connected_before_joined_once() {
+        let (mut app, incoming) = snapshot_app();
+        app.world_mut().resource_mut::<ClientSession>().state =
+            ClientConnectionState::WaitingForServer;
+        incoming.send(admission_snapshot(1, 1, true, None)).unwrap();
+        app.update();
+        assert_eq!(
+            drain_session_events(&mut app),
+            vec![SessionEvent::Connected, SessionEvent::Joined { your_id: 1 }]
+        );
+        incoming.send(admission_snapshot(1, 2, true, None)).unwrap();
+        app.update();
+        assert_eq!(drain_session_events(&mut app), Vec::new(), "edges only");
+    }
+
+    #[test]
+    fn teardown_of_a_committed_join_announces_a_reconnecting_disconnect() {
+        let (mut app, incoming) = snapshot_app();
+        app.world_mut().resource_mut::<ClientSession>().last_join = Some(CommittedJoin::for_test());
+        incoming.send(admission_snapshot(1, 1, true, None)).unwrap();
+        app.update();
+        drain_session_events(&mut app);
+        tear_down(&mut app, TeardownReason::TransportFailure);
+        app.update();
+        assert_eq!(
+            drain_session_events(&mut app),
+            vec![SessionEvent::Disconnected {
+                reason: TeardownReason::TransportFailure,
+                reconnecting: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn reconnect_to_the_same_round_is_no_round_change_but_a_new_match_is() {
+        let (mut app, incoming) = snapshot_app();
+        app.world_mut().resource_mut::<ClientSession>().last_join = Some(CommittedJoin::for_test());
+        incoming.send(admission_snapshot(1, 1, true, None)).unwrap();
+        app.update();
+        tear_down(&mut app, TeardownReason::TransportFailure);
+        // What a reconnect's transport swap does to the session, on the same
+        // channels (`spawn_network_transport` would start a UDP thread).
+        {
+            let mut session = app.world_mut().resource_mut::<ClientSession>();
+            session.discard_incoming_snapshots = false;
+            session.state = ClientConnectionState::WaitingForServer;
+        }
+        app.update();
+        drain_session_events(&mut app);
+        incoming.send(admission_snapshot(1, 2, true, None)).unwrap();
+        app.update();
+        assert_eq!(
+            drain_session_events(&mut app),
+            vec![SessionEvent::Connected, SessionEvent::Joined { your_id: 1 }],
+            "the same round after a teardown is not a round change"
+        );
+        incoming.send(admission_snapshot(2, 1, true, None)).unwrap();
+        app.update();
+        let round = |match_id| RoundId {
+            server_epoch: 1,
+            match_id,
+        };
+        assert_eq!(
+            drain_session_events(&mut app),
+            vec![SessionEvent::RoundChanged {
+                previous: round(1),
+                current: round(2),
+            }]
+        );
+    }
+
+    #[test]
+    fn map_geometry_mismatch_announces_one_rejection() {
+        let (mut app, incoming) = snapshot_app();
+        let mut snapshot = serde_json::to_value(admission_snapshot(1, 1, true, None)).unwrap();
+        snapshot["geometry_id"] = serde_json::json!("another-map");
+        for tick in 1..=2 {
+            snapshot["snapshot_tick"] = serde_json::json!(tick);
+            incoming
+                .send(serde_json::from_value(snapshot.clone()).unwrap())
+                .unwrap();
+            app.update();
+            let expected = if tick == 1 {
+                vec![SessionEvent::Rejected(JoinRejection::MapGeometryMismatch)]
+            } else {
+                Vec::new()
+            };
+            assert_eq!(drain_session_events(&mut app), expected);
+        }
+        assert_eq!(
+            app.world().resource::<ClientSession>().join_rejection(),
+            Some(JoinRejection::MapGeometryMismatch)
+        );
+    }
+
+    #[test]
+    fn protocol_mismatch_teardown_announces_no_reconnect_then_the_rejection() {
+        let (outgoing, _outgoing_rx) = crossbeam_channel::unbounded();
+        let (_incoming_tx, incoming) = crossbeam_channel::unbounded();
+        let (signals_tx, signals) = crossbeam_channel::unbounded();
+        let mut app = App::new();
+        app.insert_resource(NetworkChannels {
+            gameplay_signer: Default::default(),
+            outgoing,
+            incoming,
+            signals,
+        })
+        .insert_resource(ClientSession::admitted_for_test())
+        .init_resource::<NetIncomingDisconnected>()
+        .init_resource::<PendingServerSnapshotFrame>()
+        .init_resource::<NetworkState>()
+        .init_resource::<GameStateSnapshot>()
+        .init_resource::<TeamSelection>()
+        .init_resource::<CameraState>()
+        .add_message::<SessionUiCommand>()
+        .add_message::<SessionEvent>()
+        .add_systems(
+            Update,
+            (update_session_lifecycle, flush_session_events).chain(),
+        );
+        signals_tx.send(NetThreadSignal::ProtocolMismatch).unwrap();
+        app.update();
+        assert_eq!(
+            drain_session_events(&mut app),
+            vec![
+                SessionEvent::Disconnected {
+                    reason: TeardownReason::ProtocolMismatch,
+                    reconnecting: false,
+                },
+                SessionEvent::Rejected(JoinRejection::ProtocolMismatch),
+            ]
+        );
+        assert!(!app.world().resource::<ClientSession>().reconnect.active);
+    }
+
+    #[test]
+    fn connect_and_leave_announce_scope_reset_transport_and_left() {
+        let server = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let address = server.local_addr().unwrap().to_string();
+        let mut app = App::new();
+        app.insert_resource(ClientSession {
+            state: ClientConnectionState::Connected,
+            server_addr_display: "127.0.0.1:9".into(),
+            ..default()
+        })
+        .init_resource::<NetIncomingDisconnected>()
+        .init_resource::<PendingServerSnapshotFrame>()
+        .init_resource::<NetworkState>()
+        .init_resource::<GameStateSnapshot>()
+        .init_resource::<TeamSelection>()
+        .init_resource::<CameraState>()
+        .add_message::<SessionUiCommand>()
+        .add_message::<SessionEvent>()
+        .add_systems(
+            Update,
+            (update_session_lifecycle, flush_session_events).chain(),
+        );
+        app.world_mut()
+            .write_message(SessionUiCommand::ConnectTo(address.clone()));
+        app.update();
+        assert_eq!(
+            drain_session_events(&mut app),
+            vec![
+                SessionEvent::ServerScopeReset,
+                SessionEvent::TransportStarted {
+                    addr: address.clone(),
+                    offline: false,
+                },
+            ]
+        );
+        app.world_mut().write_message(SessionUiCommand::LeaveMatch);
+        app.update();
+        assert_eq!(
+            drain_session_events(&mut app),
+            vec![SessionEvent::Left { returning_to: None }]
+        );
+    }
+
     #[test]
     fn teardown_shows_select_only_without_committed_join() {
         assert!(teardown_shows_select(false));

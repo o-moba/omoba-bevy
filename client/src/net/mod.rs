@@ -19,7 +19,7 @@ pub use shared::wire::{
 
 use bevy::prelude::*;
 
-pub use apply::{ApplyOutcome, SnapshotApplied};
+pub use apply::SnapshotApplied;
 pub use commands::NetworkCommand;
 pub use components::*;
 pub(crate) use interpolate::NetworkGroundingSet;
