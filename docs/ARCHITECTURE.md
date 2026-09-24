@@ -10,13 +10,13 @@ maintainers are working through. Feature-level documentation lives in
 
 | Crate | Role | Depends on |
 | --- | --- | --- |
-| `shared` (MPL) | The gameplay model both sides agree on: hero classes and ability kits, hero growth, items, map geometry and navigation, the wire protocol, prematch/draft, social/career/account contracts, sandbox and practice commands. Per-class and per-item data is JSON in `shared/assets/catalog/`, embedded and validated at startup (`shared::catalog`). No Bevy, no I/O in the model itself. | serde |
-| `server` (AGPL) | The authoritative simulation and UDP endpoint: match lifecycle, bots, combat, shop, career settlement, public transport signing, allocation workers. Binary only. | shared, passport, career-store |
+| `shared` (MPL) | The gameplay model both sides agree on: hero classes and ability kits, hero growth, items, map geometry and navigation, the wire protocol, prematch/draft, social/career/account contracts, sandbox and practice commands. Per-class and per-item data is JSON in `shared/assets/catalog/`, embedded and validated at startup (`shared::catalog`). No Bevy. The one I/O is the avatar roster (`avatar_roster()` reads the live `avatars/manifest.json` from `OMOBA_AVATAR_MANIFEST`, the asset root or the working directory, falling back to the embedded copy; step 13 moves it out). | serde, serde_json, ekza-bevy-sdk (no default features: passport and character types, no Bevy) |
+| `server` (AGPL) | The authoritative simulation and UDP endpoint: match lifecycle, bots, combat, shop, career settlement, public transport signing, allocation workers. Binary only. No Bevy since step 6a; `sqlx` is a dev-dependency (the PostgreSQL fixtures), production reaches the database through career-store. | shared, passport, career-store, ekza-bevy-sdk (no default features), tokio, ed25519-dalek |
 | `career-store` (AGPL) | Trusted career persistence (Postgres, migrations) and the bounded queue policy, linked by the server and the account API without the engine. | shared, sqlx |
 | `client` (MPL) | The Bevy game: networking, prediction, presentation (2D sprites and 3D models), UI, mobile input, offline practice, QA harnesses (`qa` feature, on by default). | shared, passport, bevy, ekza-bevy-sdk |
 | `harness` | Black-box UDP players and gameplay/matchmaking checks that launch the server binary. | shared |
-| `passport` | Ekza passport contract: tickets, device and web accounts, store admission. | shared, ekza-bevy-sdk |
-| `account-api` | Axum/Postgres HTTP service over the career store (portal, devices, supporter billing). | shared, career-store |
+| `passport` | Ekza passport contract: tickets, device and web accounts, store admission. | shared, ekza-bevy-sdk (`http`), reqwest |
+| `account-api` | Axum/Postgres HTTP service over the career store (portal, devices, supporter billing). | shared, career-store, axum, sqlx |
 | `arena-sync` | CLI that pulls Ekza Arena avatars and merges the avatar manifest. | reqwest |
 
 Rules that follow from the map:
@@ -209,8 +209,10 @@ Modules import what they use (`use crate::entities::ConnectedPlayer;`,
 `use shared::wire::GameState;`, `use std::time::Instant;`); there are no
 crate-root glob re-exports and no `use crate::*;`, and only test modules
 keep `use super::*;` for their parent module. `runtime::run` is a plain
-fixed-step loop (`SIMULATION_STEP_SLEEP`, 10 ms): `prepare_tick`, then
-`tick`, then sleep the remainder of the step. There is no Bevy `App` and no
+paced loop (`SIMULATION_STEP_SLEEP`, 10 ms): `prepare_tick`, then
+`tick`, then sleep the remainder of the step. It is not a fixed timestep:
+`prepare_tick` passes the real elapsed time as `dt` (capped at 100 ms), so a slow step makes
+the next `dt` longer (the Combat Sandbox can scale or pause it). There is no Bevy `App` and no
 ECS mirror on the server; the `GameWorld` maps are the only copy of the
 state.
 

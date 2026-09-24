@@ -7,7 +7,7 @@ use bevy::prelude::KeyCode;
 pub const SKILL_CAST_KEYS: [KeyCode; 4] =
     [KeyCode::KeyQ, KeyCode::KeyW, KeyCode::KeyE, KeyCode::KeyR];
 
-/// Reserved for future skill-upgrade UI; keep in sync with `upgrade_key_display()`.
+/// Upgrades the first eligible skill (`combat/hotbar.rs`); keep in sync with `upgrade_key_display()`.
 pub const SKILL_UPGRADE_KEY: KeyCode = KeyCode::KeyU;
 
 pub const HELP_TOGGLE_KEY: KeyCode = KeyCode::F1;

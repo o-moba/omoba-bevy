@@ -112,7 +112,7 @@ impl PlayerAnimationBinding {
 pub(super) enum HeroAnimationState {
     Idle,
     Run,
-    /// Reserved for an explicit future debuff locomotion policy.
+    /// Previewed from the sandbox; gameplay does not select it yet (reserved for a debuff locomotion policy).
     Walk,
     Attack,
     Cast,
