@@ -53,6 +53,10 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Quality gate
+- Add GitHub Actions CI (format, clippy with warnings as errors, workspace tests, the headless harness, Python tooling tests), pin the toolchain in `rust-toolchain.toml`, and add `make check` / `fmt` / `lint` / `test` / `test-scripts`.
+- Fix the clippy findings the pinned toolchain reports and let the asset-gate script test skip when its historical fixture is absent.
+
 ### Offline practice
 - Offline practice heroes now face the way they run (their yaw pointed the model backwards), and the round keeps a live scoreboard so K/D/A counts kills and deaths.
 - The pause menu's "Practice sandbox" page works offline too: god mode, target dummies, clearing or restoring the circling heroes, and a 1v1 opponent of your class that walks mid, strikes and casts its unlocked kit at the chosen level with the chosen gold spent on items. Dying offline respawns you at base after five seconds.

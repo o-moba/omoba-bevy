@@ -114,7 +114,7 @@ impl Field {
             return Err("Enter a finite number".into());
         }
         if matches!(self, Self::Level | Self::Rank(_))
-            && (value.fract() != 0.0 || value < 0.0 || value > 100.0)
+            && (value.fract() != 0.0 || !(0.0..=100.0).contains(&value))
         {
             return Err("Enter a whole level or rank".into());
         }

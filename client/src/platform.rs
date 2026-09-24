@@ -84,36 +84,6 @@ pub fn preferences_file_path(
         .map(|directory| directory.join(filename))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn preferences_override_and_private_storage_are_separate_from_assets() {
-        let private = PathBuf::from("/data/user/0/space.ekza.omoba.beta/files/omoba-bevy");
-        assert_eq!(
-            preferences_file_path(None, Some(private.clone()), "prefs.json"),
-            Some(private.join("prefs.json"))
-        );
-        assert_eq!(
-            preferences_file_path(Some("  /tmp/Omoba QA  "), Some(private), "prefs.json"),
-            Some(PathBuf::from("/tmp/Omoba QA/prefs.json"))
-        );
-    }
-
-    #[test]
-    fn blank_override_uses_private_storage_and_missing_storage_stays_unavailable() {
-        let private = PathBuf::from("/app/Library/Application Support/omoba-bevy");
-        assert_eq!(
-            preferences_file_path(Some(" \t"), Some(private.clone()), "prefs.json"),
-            Some(private.join("prefs.json"))
-        );
-        // Never fall back into the installed bundle when an OS directory is missing.
-        assert_eq!(preferences_file_path(Some(""), None, "prefs.json"), None);
-        assert_eq!(preferences_file_path(None, None, "prefs.json"), None);
-    }
-}
-
 /// The game owns native browser presentation; the SDK still validates the URL.
 pub fn open_external_url(raw: &str) -> Result<(), String> {
     let url = ekza_bevy_sdk::passport::pairing::safe_url_with_query(raw)?;
@@ -142,4 +112,34 @@ pub fn browser_approval_hint() -> &'static str {
         }
     }
     "Confirm in your browser, then return to Omoba"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preferences_override_and_private_storage_are_separate_from_assets() {
+        let private = PathBuf::from("/data/user/0/space.ekza.omoba.beta/files/omoba-bevy");
+        assert_eq!(
+            preferences_file_path(None, Some(private.clone()), "prefs.json"),
+            Some(private.join("prefs.json"))
+        );
+        assert_eq!(
+            preferences_file_path(Some("  /tmp/Omoba QA  "), Some(private), "prefs.json"),
+            Some(PathBuf::from("/tmp/Omoba QA/prefs.json"))
+        );
+    }
+
+    #[test]
+    fn blank_override_uses_private_storage_and_missing_storage_stays_unavailable() {
+        let private = PathBuf::from("/app/Library/Application Support/omoba-bevy");
+        assert_eq!(
+            preferences_file_path(Some(" \t"), Some(private.clone()), "prefs.json"),
+            Some(private.join("prefs.json"))
+        );
+        // Never fall back into the installed bundle when an OS directory is missing.
+        assert_eq!(preferences_file_path(Some(""), None, "prefs.json"), None);
+        assert_eq!(preferences_file_path(None, None, "prefs.json"), None);
+    }
 }

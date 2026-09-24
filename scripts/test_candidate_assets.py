@@ -35,6 +35,11 @@ class CandidateAssetGateTests(unittest.TestCase):
         cls.legal_notices = package_native.collect_legal_notices(ROOT)
         cls.denied_bytes = {}
         archive = os.environ.get("OMOBA_DENIED_ASSET_ROOT")
+        if not archive and cls.reviewed_policy["denied_files"]:
+            raise unittest.SkipTest(
+                "Denied historical fixture unavailable; set OMOBA_DENIED_ASSET_ROOT "
+                "to prior assets to run the asset gate tests"
+            )
         for relative, record in cls.reviewed_policy["denied_files"].items():
             if archive:
                 data = (Path(archive) / relative).read_bytes()

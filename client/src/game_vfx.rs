@@ -1297,9 +1297,11 @@ mod tests {
                 InheritedVisibility::VISIBLE,
             ))
             .id();
-        let mut game = GameStateSnapshot::default();
-        game.state = GameState::Running;
-        game.your_id = 7;
+        let mut game = GameStateSnapshot {
+            state: GameState::Running,
+            your_id: 7,
+            ..Default::default()
+        };
         game.forest_pickups
             .push(shared::forest_pickups::ForestPickupState {
                 id: 1,
@@ -1364,8 +1366,10 @@ mod tests {
     }
     #[test]
     fn pickup_visibility_follows_authority_and_drift_stays_collectible() {
-        let mut game = crate::net::GameStateSnapshot::default();
-        game.state = crate::net::GameState::Running;
+        let mut game = crate::net::GameStateSnapshot {
+            state: crate::net::GameState::Running,
+            ..Default::default()
+        };
         game.forest_pickups
             .push(shared::forest_pickups::ForestPickupState {
                 id: 1,

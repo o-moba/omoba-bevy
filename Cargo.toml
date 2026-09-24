@@ -13,6 +13,9 @@ license = "MPL-2.0"
 # workspace-wide so `clippy -D warnings` gates real issues only.
 [workspace.lints.clippy]
 collapsible_if = "allow"
+# Wire and UI action enums carry one payload per request; boxing the largest
+# variant buys nothing on the wire and hides the shape of the message.
+large_enum_variant = "allow"
 too_many_arguments = "allow"
 type_complexity = "allow"
 

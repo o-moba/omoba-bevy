@@ -1748,7 +1748,7 @@ fn respawn_countdown_system(
     }
     let end_time = state
         .end_time
-        .get_or_insert_with(|| display_time + RESPAWN_DELAY_SECONDS);
+        .get_or_insert(display_time + RESPAWN_DELAY_SECONDS);
     let remaining = (*end_time - display_time).ceil().max(0.0) as i32;
 
     *visibility = Visibility::Visible;
@@ -2771,17 +2771,19 @@ mod animation_tests {
         library
             .sets
             .insert(AvatarKey::Roster("agnes".into()), set.clone());
-        let mut game = GameStateSnapshot::default();
-        game.meta = shared::protocol::SnapshotMeta::new(77, 1, 1);
-        game.sandbox = Some(shared::sandbox::SandboxSnapshot {
-            config: Default::default(),
-            ack: None,
-            last_request_id: 0,
-            actors: Vec::new(),
-            analytics: Default::default(),
-            simulation_secs: 0.0,
-            frame: 0,
-        });
+        let game = GameStateSnapshot {
+            meta: shared::protocol::SnapshotMeta::new(77, 1, 1),
+            sandbox: Some(shared::sandbox::SandboxSnapshot {
+                config: Default::default(),
+                ack: None,
+                last_request_id: 0,
+                actors: Vec::new(),
+                analytics: Default::default(),
+                simulation_secs: 0.0,
+                frame: 0,
+            }),
+            ..Default::default()
+        };
         let mut app = App::new();
         app.insert_resource(Time::<()>::default())
             .insert_resource(library)

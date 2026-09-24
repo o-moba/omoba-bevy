@@ -1692,6 +1692,24 @@ fn autojoin_from_env(
     }
 }
 
+fn sync_practice_picker(
+    session: Res<ClientSession>,
+    mut labels: Query<&mut Text, With<JoinActionLabel>>,
+) {
+    let label = if session.is_offline() {
+        "Start practice"
+    } else if crate::sandbox::requested() {
+        "Enter Combat Test"
+    } else {
+        "Find match"
+    };
+    for mut text in &mut labels {
+        if text.0 != label {
+            text.0 = label.into();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1838,23 +1856,5 @@ mod tests {
                 .iter(app.world())
                 .any(|(name, button)| name.as_str() == "RendererStatus" && button.is_none())
         );
-    }
-}
-
-fn sync_practice_picker(
-    session: Res<ClientSession>,
-    mut labels: Query<&mut Text, With<JoinActionLabel>>,
-) {
-    let label = if session.is_offline() {
-        "Start practice"
-    } else if crate::sandbox::requested() {
-        "Enter Combat Test"
-    } else {
-        "Find match"
-    };
-    for mut text in &mut labels {
-        if text.0 != label {
-            text.0 = label.into();
-        }
     }
 }

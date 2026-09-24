@@ -458,7 +458,7 @@ mod tests {
             position: outside,
             radius: 32.,
         };
-        assert!(fog_alpha(&[source.clone()], brush.center) > 80);
+        assert!(fog_alpha(std::slice::from_ref(&source), brush.center) > 80);
         assert_eq!(fog_alpha(&[source], outside), 0);
         let inside = VisionSource {
             position: brush.center,
@@ -472,7 +472,7 @@ mod tests {
             radius: 32.,
         };
         let alphas: Vec<_> = (30..=35)
-            .map(|x| fog_alpha(&[source.clone()], [x as f32, 0.]))
+            .map(|x| fog_alpha(std::slice::from_ref(&source), [x as f32, 0.]))
             .collect();
         assert!(alphas.windows(2).all(|p| p[0] <= p[1]));
     }

@@ -162,7 +162,6 @@ pub struct SandboxRequest {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
-#[allow(clippy::large_enum_variant)] // one config per request; boxing buys nothing on the wire
 pub enum SandboxCommand {
     ApplyConfig {
         config: SandboxConfig,

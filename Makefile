@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone
+.PHONY: help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone check fmt fmt-check lint test test-scripts
 
 # ---------------------------------------------------------------------------
 # Match modes (TASK-22)
@@ -27,6 +27,27 @@ IPHONE_OUTPUT ?= builds/iphone
 # Bare make is discovery only; game and toolchain processes start explicitly.
 help: ## Show commands, common overrides and documentation
 	@awk 'BEGIN { FS = ":.*## "; print "Open Moba - play, create, build together\n" } /^[a-zA-Z0-9_-]+:.*## / { printf "  make %-19s %s\n", $$1, $$2 } END { print "\nOverrides:"; print "  make practice LOCAL_SERVER_ADDR=127.0.0.1:4010"; print "  make practice-server LOCAL_SERVER_ADDR=0.0.0.0:4000"; print "  make game GAME_SERVER_ADDR=192.168.1.10:4000"; print "  make bots BOTS=4 BOTS_SERVER=127.0.0.1:4000"; print "  make iphone IPHONE_OUTPUT=builds/iphone"; print "\nDocs: README.md, RUNBOOK.md, mobile/ios/README.md"; print "TestFlight: mobile/ios/TESTFLIGHT.md (separate signing/upload steps)"; print "SDK: https://github.com/ekza-space/ekza-bevy-sdk" }' $(MAKEFILE_LIST)
+
+# ---------------------------------------------------------------------------
+# Quality gate. `make check` is what CI runs (.github/workflows/ci.yml); run it
+# before pushing. The harness suite is separate because it launches servers.
+# ---------------------------------------------------------------------------
+check: fmt-check lint test test-scripts ## Run the full CI gate locally (format, clippy, tests, script tests)
+
+fmt: ## Format every crate
+	cargo fmt --all
+
+fmt-check: ## Fail on unformatted code
+	cargo fmt --all -- --check
+
+lint: ## Clippy across the workspace with warnings as errors
+	cargo clippy --workspace --all-targets --no-deps -- -D warnings
+
+test: ## Rust unit and integration tests (harness excluded; see verify-gameplay)
+	cargo test --workspace --locked --exclude harness
+
+test-scripts: ## Python launcher, packaging and asset-gate tests
+	python3 -m unittest discover -s scripts -p 'test_*.py'
 
 # Physical iOS package; install the Rust iOS target and select Xcode first.
 # Optional signing with existing credentials is documented in mobile/ios/README.md.

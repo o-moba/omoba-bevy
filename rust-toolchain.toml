@@ -1,0 +1,5 @@
+# Pinned so local builds, CI and packaged releases lint and compile identically.
+# Bump deliberately: edition 2024 and the clippy set in CI depend on it.
+[toolchain]
+channel = "1.94.1"
+components = ["rustfmt", "clippy"]
