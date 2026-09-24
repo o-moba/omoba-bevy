@@ -235,8 +235,13 @@ fn normal_waves_have_two_melee_one_caster_and_caster_damage_arrives_after_releas
 
 #[test]
 fn legacy_snapshots_have_inert_combat_defaults() {
-    let packet: ServerPacket =
-        serde_json::from_str(r#"{"type":"snapshot","your_id":1,"minions":[{"id":2}]}"#).unwrap();
+    // A snapshot from before combat receipts, projectiles, minion kinds and
+    // attack sequences existed: the fields of that era are all present, the
+    // additive ones are absent and must decode to their inert defaults.
+    let legacy = r#"{"type":"snapshot","your_id":1,"players":[],"minions":[
+        {"id":2,"team":"green","lane":"mid","x":0.0,"y":0.0,"z":0.0,"yaw":0.0,"hp":10.0,"max_hp":10.0}
+    ]}"#;
+    let packet: ServerPacket = serde_json::from_str(legacy).unwrap();
     assert!(packet.combat_events().is_empty());
     assert!(packet.projectiles().is_empty());
     assert_eq!(packet.minions()[0].kind, MinionKind::Melee);

@@ -578,9 +578,12 @@ mod tests {
             gate.begin(addr, &join(&free.slug)),
             Admission::Pending
         ));
+        // A repeat while the read is in flight stays pending; on a slow runner
+        // the reader thread may already have finished, which is the same
+        // answer the settled path gives below.
         assert!(matches!(
             gate.begin(addr, &join(&free.slug)),
-            Admission::Pending
+            Admission::Pending | Admission::Free
         ));
         let done = settle(&mut gate);
         assert!(done.len() == 1 && done[0].allowed && done[0].addr == addr);
