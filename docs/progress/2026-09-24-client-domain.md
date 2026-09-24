@@ -108,9 +108,9 @@ Only unused resources differ: in 2D the client no longer creates
   panic, and the tests also assert that no entity was spawned. A check with
   both conditions forced to `true` made all four tests fail. The existing
   opposite-mode tests still pass through the gated plugins:
-  `jungle::…sprite_jungle_keeps_authoritative_roots…`,
-  `minions::…` (Sprite2d `test_app`) and
-  `verdant3d::…sprite2d_never_loads_or_spawns_the_verdant_scene`.
+  `jungle::tests::sprite_jungle_keeps_authoritative_roots_without_allocating_3d_assets`,
+  `minions::tests::sprite2d_minions_do_not_allocate_or_attach_procedural_3d_assets`
+  and `verdant3d::tests::sprite2d_never_loads_or_spawns_the_verdant_scene`.
 - Shared: 78, unchanged.
 
 ## Checks
