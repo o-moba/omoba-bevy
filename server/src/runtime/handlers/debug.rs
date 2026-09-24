@@ -11,7 +11,17 @@ use crate::balance::DEBUG_SPEED_MULTIPLIER;
 use crate::runtime::ServerRuntime;
 
 impl ServerRuntime {
-    /// Development and local bot practice only; both are unrated.
+    /// God mode and the speed boost: the mode must allow debug commands, and
+    /// the round must not be a worker allocation. Worker rounds decide their
+    /// durable ruleset once at round start (`begin_career_round`), so a toggle
+    /// flipped afterwards would otherwise ride into a saved result.
+    fn debug_toggles_allowed(&self) -> bool {
+        self.rules.debug_commands && self.match_service.worker().is_none()
+    }
+
+    /// Development and local bot practice only; both are unrated. A
+    /// worker-allocated round saves a durable result, so the toggles are
+    /// refused there even when its rules are Practice.
     pub(in crate::runtime) fn handle_set_god_mode(
         &mut self,
         addr: SocketAddr,
@@ -19,7 +29,7 @@ impl ServerRuntime {
         now: Instant,
     ) -> ControlFlow<()> {
         let combat_sandbox = self.sandbox_allowed();
-        if !self.rules.debug_commands {
+        if !self.debug_toggles_allowed() {
             return ControlFlow::Break(());
         }
         let world = &mut self.world;
@@ -53,7 +63,7 @@ impl ServerRuntime {
         enabled: bool,
         now: Instant,
     ) -> ControlFlow<()> {
-        if !self.rules.debug_commands {
+        if !self.debug_toggles_allowed() {
             return ControlFlow::Break(());
         }
         let world = &mut self.world;
