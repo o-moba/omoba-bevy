@@ -1,7 +1,6 @@
-//! The client's plugin groups. `main` adds them in the order
-//! `NetPlugins`, `UiPlugins`, `GameplayPlugins`, `PresentationPlugins`, then
-//! `QaPlugins` (`qa` feature) and inserts `PlayerVisualMode` before any of
-//! them.
+//! The client's plugin groups. `main` inserts `PlayerVisualMode`, then adds
+//! `NetPlugins`, `UiPlugins`, `GameplayPlugins`, `PresentationPlugins` and,
+//! with the `qa` feature, `qa::QaPlugins`, in that order.
 //!
 //! Only the order of `Plugin::build` calls follows from this file; system
 //! ordering is declared inside the plugins and is unchanged. Build-time
