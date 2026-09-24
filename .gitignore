@@ -38,6 +38,7 @@ AGENTS.md
 CLAUDE.md
 # docs/tasks: ignore by default; whitelist canonical markdown so deliverables stay versioned.
 docs/*
+!docs/ARCHITECTURE.md
 !docs/features.md
 !docs/bot-practice-and-social.md
 !docs/game-audio.md
