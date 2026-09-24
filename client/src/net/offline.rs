@@ -1,7 +1,21 @@
 //! Socket-free practice, using the normal client snapshot/render/input pipeline.
 //! This deliberately has no career backend, matchmaking, rewards, or persistence.
-use super::*;
+use bevy::prelude::*;
+use crossbeam_channel::{Receiver, Sender};
+use std::collections::{HashMap, VecDeque};
+
+use shared::combat::{CombatEntityKind, CombatEvent, ProjectileStyle};
 use shared::map::Team;
+use shared::protocol::{JoinRejection, SnapshotMeta};
+use shared::wire::{
+    ClientPacket, GameState, PlayerState, ProjectileState, ServerPacket, TargetId, TargetKind,
+};
+use shared::{HeroClass, PlayerActionKind};
+
+use crate::maps::MapLayout;
+
+use super::session::ClientSession;
+use super::transport::NetThreadSignal;
 use shared::{SkillSlot, TargetingMode, hero_balance as balance, shop::ItemBonuses, utility::*};
 
 pub(super) const ADDRESS: &str = "offline-practice";
@@ -827,6 +841,8 @@ pub(super) fn sync_banner(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::net::transport::{NetworkChannels, spawn_network_transport};
+    use crate::persistence::ResolvedServerAddressForPrefs;
     fn joined(class: HeroClass) -> Simulation {
         let mut sim = Simulation::default();
         sim.command(ClientPacket::Join {

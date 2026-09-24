@@ -36,9 +36,18 @@ Plugins are registered in `client/src/lib.rs`. The `Update` schedule is
 ordered by a small number of system sets; read these together to understand
 frame order:
 
-1. `ClientNetPipeline` (`client/src/net.rs`): ingest UDP snapshot fragments,
-   apply the authoritative snapshot to entities, age utility timers,
-   interpolate remote entities and players.
+1. `ClientNetPipeline` (`client/src/net/mod.rs`): ingest UDP snapshot
+   fragments, apply the authoritative snapshot to entities, age utility
+   timers, interpolate remote entities and players. The `net` module is
+   split by stage: `transport` (UDP thread, framing, decode, channels),
+   `session` (`ClientSession`, join retries, teardown, reconnect),
+   `commands` (`NetworkCommand` to packets), `ingest` (drain the channel,
+   stage one snapshot per frame), `apply` (snapshot to ECS), `interpolate`
+   (remote poses, grounding), `components` (replicated components and
+   `GameStateSnapshot`), `status_ui` (connection panel), `offline`
+   (practice simulation) and `public_transport` (signed public datagrams).
+   `mod.rs` re-exports the public surface, so other modules keep importing
+   `crate::net::X`.
 2. `InputContextSet::{Social, Modal, Resolve, Actions}`
    (`client/src/input_context.rs`): modal UI (pause menu, shop, career,
    social, help) runs first and decides whether gameplay input is allowed;
@@ -134,7 +143,10 @@ Ordered by value over cost. Each step is a separate change with the full
 7. Match rules as one policy object; career, transport and clock behind
    traits.
 8. Client `net.rs` split into transport, session, commands, ingest, apply
-   and interpolation; session events instead of cross-module writes.
+   and interpolation (done, verbatim moves under `client/src/net/`);
+   session events instead of cross-module writes (`SessionEvent`,
+   `SnapshotApplied`, splitting `apply_server_snapshot`) are the open
+   follow-up.
 9. One UI kit (theme, widgets, gestures, scroll, actions) and a modal
    registry.
 10. Client domain module, combat/player split, render backends behind
