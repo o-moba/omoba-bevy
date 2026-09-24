@@ -1,5 +1,4 @@
-use crate::domain::RoundId;
-use crate::net::{GameStateSnapshot, NetworkCommand};
+use crate::net::{NetworkCommand, SessionEvent};
 use crate::player::MovementTarget;
 use crate::targeting::BasicAttackState;
 use bevy::prelude::*;
@@ -9,14 +8,15 @@ use super::cooldown::LocalCastCooldown;
 use super::feedback::ActionFeedback;
 use super::selection::TargetState;
 
-/// Keep valid identity across a transient disconnect (whose snapshot is empty).
-#[derive(Resource, Default)]
-pub(super) struct CombatRoundIdentity(Option<RoundId>);
-
+/// Drops the previous round's intents, cooldowns and queued gameplay commands
+/// on [`SessionEvent::RoundChanged`]. `net` owns the round tracking: zero ids
+/// are skipped and a reconnect to the same round (after the teardown gap) is
+/// not a change. Runs after `ClientNetPipeline::ApplySnapshot`, whose flush
+/// writes the event, and before input, so nothing from the old round is sent
+/// in the frame the new one is applied.
 pub(super) fn reset_round_input_state(
     mut commands: Commands,
-    snapshot: Res<GameStateSnapshot>,
-    mut previous: ResMut<CombatRoundIdentity>,
+    mut session_events: MessageReader<SessionEvent>,
     mut target: ResMut<TargetState>,
     orders: (ResMut<PendingCast>, ResMut<BasicAttackState>),
     mut cooldowns: ResMut<LocalCastCooldown>,
@@ -25,12 +25,11 @@ pub(super) fn reset_round_input_state(
     mut queued: ResMut<Messages<NetworkCommand>>,
 ) {
     let (mut pending, mut basic) = orders;
-    let Some(identity) = RoundId::from_meta(&snapshot.meta) else {
-        return;
-    };
-    let changed = previous.0.is_some_and(|last| last != identity);
-    previous.0 = Some(identity);
-    if !changed {
+    let mut round_changed = false;
+    for event in session_events.read() {
+        round_changed |= matches!(event, SessionEvent::RoundChanged { .. });
+    }
+    if !round_changed {
         return;
     }
     target.selected_entity = None;

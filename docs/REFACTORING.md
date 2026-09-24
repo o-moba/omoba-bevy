@@ -6,6 +6,7 @@ this file alone: what is done, what is next, how each step is delivered, and
 where the detailed plans live. Update it in the same pull request as the
 step it describes.
 
+Architecture report (before vs after, current architecture, verified improvement list O1–O30 and Q1–Q9): [ARCHITECTURE_REPORT.md](ARCHITECTURE_REPORT.md).
 Roadmap source: the "Roadmap" section of [ARCHITECTURE.md](ARCHITECTURE.md).
 Per-step notes: [progress/](progress/) (one dated note per merged step).
 Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
@@ -25,8 +26,8 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
    `cargo build -p server && cargo test --locked -p harness -- --test-threads=1`
    (about five minutes; it is the only check that exercises a real match end
    to end, so never skip it for a server or protocol change). Reference
-   counts at the time of writing: server 282 (+3 ignored), shared 78, client
-   lib 549 (529 with `--no-default-features`, i.e. without the QA
+   counts at the time of writing: server 283 (+3 ignored), shared 88, client
+   lib 561 (541 with `--no-default-features`, i.e. without the QA
    harnesses), harness 22 unit + 24 black-box.
 4. One step per branch, named `refactor/<topic>` (docs-only: `docs/<topic>`),
    cut from the current `origin/main`.
@@ -62,7 +63,7 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
 | 11 | One debug tooling family shared by Combat Test, practice and offline | in progress: 11-0 (#34), 11a–11c (this PR); 11d/11e client half next | #34, this PR |
 | 12 | Data-driven hero and item catalogs with validation tests | done: 12a-12e; 12f (optional client cross-checks) open | #38 |
 | 13 | Roster/asset loading and SDK types out of the shared model | pending | |
-| 15 | Client session events and staged snapshot application | pending | |
+| 15 | Client session events and staged snapshot application | in progress: 15a+15b1 (#39), 15b2+15c+15d (this PR) | #39, this PR |
 | 9b | UI kit follow-ups: scroll unification, modal registry, frontend/social/supporter/sandbox screens, responsive layout, `TestId` in QA | pending (order in [ui-kit.md](ui-kit.md)) | |
 
 Suggested order after 7: 14 (done), 10 (done), 15, 11, 12, 13, 9b (server first while
@@ -109,8 +110,14 @@ its structure is fresh, then the client). Each row is one to four PRs.
 - 10g (this PR): `make check-no-qa` (part of `make check`) and a CI step run `cargo clippy -p client --lib --no-deps --no-default-features -- -D warnings`. Production items only QA reads are `#[cfg(feature = "qa")]`, items QA and tests read are `#[cfg(any(test, feature = "qa"))]`; nothing uses `allow(dead_code)`. Client lib tests: 549 with the default features, 529 without.
 - Optional follow-ups from the plan: 10h (mobile store builds with `--no-default-features`), 10i (migrate imports off the re-export shims).
 
-### 15: Client session events
-- `SessionEvent` (Connected, Joined, Rejected, Disconnected, RoundReset) and `SnapshotApplied` messages emitted by `net/session.rs` and `net/apply.rs`; other modules subscribe instead of writing into `ClientSession`; `apply_server_snapshot` split into staged passes (players, structures, minions, neutrals, events).
+### 15: Client session events (in progress: 15a + 15b1 in #39, 15b2 + 15c + 15d in this PR)
+- `SessionEvent` and `SnapshotApplied` messages emitted by `net`; other modules react to them instead of `net` writing into their resources; `apply_server_snapshot` split into staged passes. Inventory, design, ordering hazards and slices 15a-15g: [plans/client-10-15.md](plans/client-10-15.md), "Step 15".
+- 15a (#39): `SessionEvent` (`TransportStarted`, `Connected`, `Joined`, `Rejected`, `JoinExhausted`, `Disconnected`, `Left`, `ServerScopeReset`, `RoundChanged`) in `net/session.rs`, registered by `NetworkingPlugin`, re-exported as `crate::net::SessionEvent`. Every site queues into `ClientSession.outbox` (`pub(in crate::net)`); `flush_session_events` writes the queue at the end of `ApplySnapshot` and chained after `retry_pending_join` in `SessionLifecycle`. `NetworkState.last_round` gives `RoundChanged` the `CombatRoundIdentity` semantics; `ClientSession.announced_join` (reset in `clear_join_attempt`) makes `Joined` an edge. `TeardownReason` is `pub(crate)`. `SessionReactions` is configured after `SessionLifecycle` and has no members yet. No consumers.
+- 15b1 (#39): `SnapshotApply::{Begin, Session, Resources, Entities, Finish}`, chained and inside `ApplySnapshot`; `StagedSnapshot { data, gate }`; `apply_snapshot_entities` is the old body from the Draft gate on, unchanged except that it reads and sets the gate; `SnapshotApplied { meta, your_id, round, outcome }` with `ApplyOutcome::{Full, Draft, LocalPending}` (no `local` field yet); `snapshot_apply_systems()` is used by the plugin, `net/test_fixtures.rs` and the offline lifecycle test. `SnapshotUiState` stays (three resources) until 15b2, because the entity stage would otherwise need 18 parameters.
+- 15b2 (this PR): `Entities` is split into `LocalPlayer`, `RemotePlayers`, `Projectiles`, `Structures`, `Minions`, `Neutrals` (chained between `Resources` and `Finish`). `LocalPlayer` runs the Draft despawn or closes the gate (`LocalPending`); the other five run under `world_stages_open` (`gate == Full`). Per-stage filtered queries replace the `Transform` `ParamSet` (hero `With<Player>, Without<MainCamera>`, camera `With<MainCamera>, Without<Player>`, `With<NetworkProjectile>`, ...). One `local_hero_components` bundle replaces the three spawn copies; `SnapshotUiState` is gone; `SnapshotApplied.local: LocalHeroApply::{Unchanged, Updated { entity, corrected, dashed }, Spawned { entity, position, team }, Cleared}`.
+- 15c (this PR): `combat/round_reset.rs` and `read_mobile_controls` read `SessionEvent::RoundChanged` (after `ApplySnapshot`, whose flush writes it, and before input); `CombatRoundIdentity` and `MobileControls.round_identity` are deleted. The teardown-gap assertion is `net::apply::tests::teardown_gap_keeps_the_last_round_so_only_the_next_round_is_a_change`. `shop.rs`, `edge_hud.rs`, `sandbox/mod.rs` and `frontend/draft.rs` keep polling (they also react to the teardown's zero ids).
+- 15d (this PR): `SessionReactions` members: `career::clear_account_on_scope_reset` and `social::clear_on_scope_reset` (`ServerScopeReset`), `frontend::return_home_on_leave` (`Left` → `PendingScreen(Home)`). `update_session_lifecycle` lost its `CareerClient`, `SocialClient` and `PendingScreen` writes; `TeamSelection.team = None`, `take_return_to_lobby()` and the `CancelQueue` signing stay in `net` (hazards 8, 9). `scope_reset_clears_career_and_social_in_its_frame_so_the_next_view_survives` pins the same-frame clearing (hazard 7).
+- Next: 15e (`ClientSession` accessors); 15f (camera through `SnapshotApplied`, its first reader, which also drops its `expect(dead_code)`) and 15g are optional.
 
 ### 11: One debug tooling family (in progress: 11-0 #34, 11a-11c this PR)
 - Plan: [plans/steps-11-13.md](plans/steps-11-13.md), "Step 11". The Combat Test protocol stays its own family (acknowledged, sequenced, epoch-scoped, dev-only); no new `ClientPacket` variant.

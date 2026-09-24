@@ -6,6 +6,7 @@ use crate::{
     mobile_controls::{MobileControls, MobileControlsSet},
     net::{
         ClientSession, GameState, GameStateSnapshot, NetworkBot, NetworkCommand, NetworkPlayerId,
+        SessionEvent, SessionReactions,
     },
     player::{MovementRoute, MovementTarget, Player},
     reaction_visuals::{self, ReactionVisuals},
@@ -417,6 +418,7 @@ impl Plugin for SocialPlugin {
                     .before(InputContextSet::Resolve),
             )
             .add_systems(Update, render.after(InputContextSet::Actions))
+            .add_systems(Update, clear_on_scope_reset.in_set(SessionReactions))
             .add_systems(PostUpdate, scroll_chat.before(bevy::ui::UiSystems::Layout));
         configure_social_bubbles(app);
     }
@@ -431,6 +433,22 @@ fn configure_social_bubbles(app: &mut App) {
             .before(bevy::ui::UiSystems::Layout)
             .before(bevy::transform::TransformSystems::Propagate),
     );
+}
+/// Chat, reactions and the namespace belong to the previous server once the
+/// session announces [`SessionEvent::ServerScopeReset`]. Runs in
+/// `SessionReactions`, in the frame of the reset, so the next frame's ingest
+/// binds and fills the new server's view on a cleared client.
+pub(crate) fn clear_on_scope_reset(
+    mut session_events: MessageReader<SessionEvent>,
+    mut social: ResMut<SocialClient>,
+) {
+    let mut scope_reset = false;
+    for event in session_events.read() {
+        scope_reset |= *event == SessionEvent::ServerScopeReset;
+    }
+    if scope_reset {
+        social.clear();
+    }
 }
 #[derive(Component, Clone)]
 enum SocialAction {

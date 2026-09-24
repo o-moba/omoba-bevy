@@ -14,9 +14,8 @@ use shared::{SkillSlot, ability_for_class_slot, scaled_mana_cost};
 
 use crate::{
     combat::{CombatStats, LocalCastCooldown},
-    domain::RoundId,
     input_context::{GameplayInputContext, InputContextSet},
-    net::{NetworkHeroClass, PlayerProgression},
+    net::{NetworkHeroClass, PlayerProgression, SessionEvent},
     player::Player,
     team::TeamSelection,
 };
@@ -126,7 +125,6 @@ pub(crate) struct MobileControls {
     captures: HashMap<u64, Capture>,
     upgrade_enabled: [bool; 4],
     layout_changed: bool,
-    round_identity: Option<RoundId>,
     next_attack_gesture: u64,
     attack_canceled_this_frame: bool,
     skill_released_this_frame: bool,
@@ -156,7 +154,6 @@ impl Default for MobileControls {
             captures: HashMap::new(),
             upgrade_enabled: [false; 4],
             layout_changed: false,
-            round_identity: None,
             next_attack_gesture: 0,
             attack_canceled_this_frame: false,
             skill_released_this_frame: false,
@@ -643,20 +640,19 @@ fn read_mobile_controls(
     context: Res<GameplayInputContext>,
     local: Query<(&CombatStats, Option<&PlayerProgression>), With<Player>>,
     mut mobile: ResMut<MobileControls>,
-    snapshot: Option<Res<crate::net::GameStateSnapshot>>,
+    mut session_events: MessageReader<SessionEvent>,
 ) {
     mobile.begin_input_frame();
-    if let Some(snapshot) = snapshot {
-        if let Some(identity) = RoundId::from_meta(&snapshot.meta) {
-            if mobile
-                .round_identity
-                .is_some_and(|previous| previous != identity)
-            {
-                mobile.clear();
-                mobile.layout_changed = true;
-            }
-            mobile.round_identity = Some(identity);
-        }
+    // A new round (`net` skips zero ids and same-round reconnects) releases
+    // every held finger, like a layout change. The event is written at the
+    // end of `ApplySnapshot`, before this input stage.
+    let mut round_changed = false;
+    for event in session_events.read() {
+        round_changed |= matches!(event, SessionEvent::RoundChanged { .. });
+    }
+    if round_changed {
+        mobile.clear();
+        mobile.layout_changed = true;
     }
     let alive = local.single().is_ok_and(|(stats, _)| stats.is_alive());
     if !mobile.enabled
@@ -1886,8 +1882,8 @@ mod tests {
                 .init_resource::<ButtonInput<MouseButton>>()
                 .init_resource::<GameplayInputContext>()
                 .insert_resource(controls())
-                .insert_resource(crate::net::GameStateSnapshot::default())
                 .add_message::<TouchInput>()
+                .add_message::<SessionEvent>()
                 .add_systems(Update, read_mobile_controls);
             let window = app
                 .world_mut()
@@ -1928,17 +1924,17 @@ mod tests {
                 2 => app.world_mut().resource_mut::<MobileControls>().focused = false,
                 3 => app.world_mut().resource_mut::<MobileControls>().landscape = false,
                 _ => {
-                    app.world_mut()
-                        .resource_mut::<MobileControls>()
-                        .round_identity = Some(RoundId {
-                        server_epoch: 1,
-                        match_id: 1,
+                    use crate::domain::RoundId;
+                    app.world_mut().write_message(SessionEvent::RoundChanged {
+                        previous: RoundId {
+                            server_epoch: 1,
+                            match_id: 1,
+                        },
+                        current: RoundId {
+                            server_epoch: 1,
+                            match_id: 2,
+                        },
                     });
-                    let mut snapshot = app
-                        .world_mut()
-                        .resource_mut::<crate::net::GameStateSnapshot>();
-                    snapshot.meta.server_epoch = 1;
-                    snapshot.meta.match_id = 2;
                 }
             }
             app.update();

@@ -36,7 +36,7 @@ use hotbar::{
 };
 use marker::update_target_marker_system;
 use mobile::{mobile_cast_system, mobile_utility_system};
-use round_reset::{CombatRoundIdentity, reset_round_input_state};
+use round_reset::reset_round_input_state;
 use selection::select_target_system;
 
 pub struct CombatPlugin;
@@ -50,7 +50,6 @@ impl Plugin for CombatPlugin {
             .init_resource::<WorldPointerState>()
             .init_resource::<PendingCast>()
             .init_resource::<ActionFeedback>()
-            .init_resource::<CombatRoundIdentity>()
             .add_systems(
                 Update,
                 reset_round_input_state
