@@ -20,18 +20,24 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
    `make check` (= `cargo fmt --all -- --check`,
    `cargo clippy --workspace --all-targets --no-deps -- -D warnings`,
    `cargo test --workspace --locked --exclude harness`, Python script tests)
-   plus `cargo test -p harness --no-run`. Reference counts at the time of
-   writing: server 276 (+3 ignored), shared 78, client lib 543.
+   plus the black-box harness against the freshly built server:
+   `cargo build -p server && cargo test --locked -p harness -- --test-threads=1`
+   (about five minutes; it is the only check that exercises a real match end
+   to end, so never skip it for a server or protocol change). Reference
+   counts at the time of writing: server 278 (+3 ignored), shared 78, client
+   lib 543, harness 22 unit + 24 black-box.
 4. One step per branch, named `refactor/<topic>` (docs-only: `docs/<topic>`),
    cut from the current `origin/main`.
 5. No wire-visible change unless the step says so explicitly; `shared/` stays
    untouched in server-only and client-only steps. Snapshot bytes are pinned by
    `server/src/tests/player_view.rs` and the golden JSON tests in
    `shared/src/protocol/wire.rs`.
-6. Each PR updates: the roadmap line in `ARCHITECTURE.md`, a `CHANGELOG.md`
+6. After merging, look at the CI run on `main` (Actions tab) and treat a red
+   run as work now, even if the local gate was green.
+7. Each PR updates: the roadmap line in `ARCHITECTURE.md`, a `CHANGELOG.md`
    entry under `## [Unreleased]`, a `docs/progress/<date>-<topic>.md` note,
    and the table below.
-7. Keep diffs mechanical where they are large (renames, moves); behaviour
+8. Keep diffs mechanical where they are large (renames, moves); behaviour
    changes go in their own small PR with a test that pins them.
 
 ## Status
