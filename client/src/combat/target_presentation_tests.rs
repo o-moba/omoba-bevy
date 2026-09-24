@@ -1,7 +1,14 @@
 //! Presentation regression: positions are sampled before UI layout and after
 //! late movement/grounding, even while propagated globals still hold last frame.
+use super::marker::TargetMarker;
 use super::*;
+use crate::camera::MainCamera;
+use crate::net::{NetworkPlayerId, RemotePlayer, TargetId, TargetKind};
+use crate::player::Player;
+use crate::sprite::PlayerVisualMode;
 use crate::targeting::{LockedTargetIndicator, LockedTargetLabel};
+use crate::team::Team;
+use bevy::camera::primitives::Aabb;
 use bevy::camera::{ComputedCameraValues, RenderTargetInfo};
 
 fn fixture(mode: PlayerVisualMode) -> (App, Entity, Entity, Entity, Entity) {

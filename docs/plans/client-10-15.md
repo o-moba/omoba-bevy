@@ -241,6 +241,8 @@ Build-time dependencies (the only reads of the world inside `build`):
 
 Markers `Player`, `PlayerBody`, `VerticalVelocity` (114-121) move to `domain`.
 
+> Status (10b, 10c): done as tabled (`refactor/client-combat-split`), items re-located by name. `CombatStats`, the two input sets, the markers and `MovementTarget`/`MovementRoute` had already moved in 10a, so `combat/mod.rs` and `player/mod.rs` re-export them (the movement intents stay in `domain`, not in `input.rs`). `animation.rs` is 951 lines and `combat/tests.rs` 1395; both stay single files. `sync_jump_fallback_mode` is in `animation.rs` (inside the tabled range) although `PlayerPlugin` registers it at the head of the movement chain. Nothing was widened to `pub(crate)`; besides items and fields used across files or by the test modules, six component/resource types became `pub(super)` because `pub(super)` systems name them in their signatures (`CombatVisualAssets`, `CombatBars`, `CombatBarRoot`, `SkillBarSlot`, `SkillUpgradeButton`, `SkillNameLabel`).
+
 ## 10.4 2D vs 3D
 
 **Why run_if and not conditional plugins.** Every plugin must still be added, because 2D resources are read in both modes:
@@ -329,7 +331,7 @@ Leave in place:
 
 ## 10.7 Step 10 slices
 
-> Status: 10a and 10d are in one PR (`refactor/client-domain`, progress note `docs/progress/2026-09-24-client-domain.md`); 10b onwards are open.
+> Status: 10a and 10d landed together in #35 (`refactor/client-domain`, progress note `docs/progress/2026-09-24-client-domain.md`); 10b and 10c are one PR (`refactor/client-combat-split`, progress note `docs/progress/2026-09-24-client-combat-player-split.md`); 10e onwards are open.
 
 | # | Slice | Size | Risk |
 |---|---|---|---|
