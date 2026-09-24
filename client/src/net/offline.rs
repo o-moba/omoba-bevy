@@ -5,6 +5,7 @@ use crossbeam_channel::{Receiver, Sender};
 use std::collections::{HashMap, VecDeque};
 
 use shared::combat::{CombatEntityKind, CombatEvent, ProjectileStyle};
+use shared::debug::{DUMMY_DISTANCE, DUMMY_MAX_HP, OFFLINE_PRACTICE_MODE};
 use shared::map::Team;
 use shared::protocol::{JoinRejection, SnapshotMeta};
 use shared::wire::{
@@ -25,39 +26,6 @@ use balance::{BOT_ENGAGE_RANGE as VISION, LEVEL_UP_HP_BONUS, PROJECTILE_SPEED};
 use shared::math::hero_yaw_towards as yaw_towards;
 const BOT_RESPAWN_SECS: f32 = 3.0;
 const LOCAL_RESPAWN_SECS: f32 = balance::RESPAWN_DELAY_SECS as f32;
-const DUMMY_HP: f32 = 600.0;
-const DUMMY_DISTANCE: f32 = 4.5;
-
-/// Spend `level - 1` skill points the way a player would: the ultimate first
-/// once it unlocks, then Q, W and E, never into a locked slot.
-fn ranks_for_level(class: HeroClass, level: u32) -> [u8; 4] {
-    let unlocked = shared::unlocked_slots_for_level(level);
-    let mut ranks = [1_u8; 4];
-    let mut points = level.saturating_sub(1);
-    for slot in [3_usize, 0, 1, 2] {
-        let max_rank =
-            shared::ability_for_class_slot(class, SkillSlot::from_index(slot as u8).unwrap())
-                .max_rank;
-        while points > 0 && unlocked[slot] && ranks[slot] < max_rank {
-            ranks[slot] += 1;
-            points -= 1;
-        }
-    }
-    ranks
-}
-
-/// Buy the class's recommended items in order while the budget allows.
-fn shop_with(class: HeroClass, mut gold: u32) -> (Vec<shared::shop::ItemId>, u32) {
-    let mut inventory = Vec::new();
-    for item in shared::shop::recommended_items(class) {
-        let cost = shared::shop::item(*item).cost;
-        if inventory.len() < shared::shop::INVENTORY_CAPACITY && gold >= cost {
-            gold -= cost;
-            inventory.push(*item);
-        }
-    }
-    (inventory, gold)
-}
 
 pub(super) fn shipped_avatar(slug: Option<&str>) -> bool {
     slug.is_none_or(|s| {
@@ -451,8 +419,8 @@ impl Simulation {
                     anchor[1],
                     Team::Blue,
                 );
-                dummy.max_hp = DUMMY_HP;
-                dummy.hp = DUMMY_HP;
+                dummy.max_hp = DUMMY_MAX_HP;
+                dummy.hp = DUMMY_MAX_HP;
                 dummy.yaw = yaw_towards(origin[0] - anchor[0], origin[1] - anchor[1]);
                 self.players.push(dummy);
                 self.bots.insert(
@@ -472,14 +440,26 @@ impl Simulation {
                 let id = self.alloc_id();
                 let mut duelist = hero(id, class, None, x - 6.0, z - 6.0, Team::Blue);
                 // The budget tops up the ordinary starting wallet, like a bot
-                // that earned `gold` before shopping at its base.
-                let (inventory, left) = shop_with(class, shared::shop::STARTING_GOLD + gold);
+                // that earned `gold` before shopping at its base. Ranks and
+                // items follow the same shared plans as the server's duelist.
+                let budget = shared::shop::STARTING_GOLD + gold;
+                let inventory = shared::shop::plan_purchases(class, budget, &[]);
+                let spent: u32 = inventory
+                    .iter()
+                    .map(|item| shared::shop::item(*item).cost)
+                    .sum();
                 let bonuses = shared::shop::item_bonuses(&inventory);
+                let mut ranks = [1_u8; 4];
+                let order =
+                    shared::progression::skill_upgrade_order(class, level, ranks, level - 1);
+                for slot in order {
+                    ranks[slot as usize] += 1;
+                }
                 duelist.level = level;
-                duelist.ranks = ranks_for_level(class, level);
+                duelist.ranks = ranks;
                 duelist.inventory = inventory;
                 duelist.item_bonuses = bonuses;
-                duelist.gold = left;
+                duelist.gold = budget - spent;
                 duelist.max_hp = balance::base_hp(class)
                     + LEVEL_UP_HP_BONUS * (level - 1) as f32
                     + bonuses.max_hp;
@@ -502,6 +482,8 @@ impl Simulation {
                     },
                 );
             }
+            // A newer client's command: nothing to do.
+            PracticeCommand::Unsupported => {}
         }
     }
     /// One duelist decision per tick: engage the local hero in sight, else
@@ -749,7 +731,7 @@ impl Simulation {
             meta: SnapshotMeta::new(u64::MAX, 1, self.tick),
             geometry_id: shared::map::GEOMETRY_ID.into(),
             map_profile: "verdant".into(),
-            match_mode: "offline_practice".into(),
+            match_mode: OFFLINE_PRACTICE_MODE.into(),
             join_error: self.error,
             your_id: LOCAL_ID,
             players: self.players.clone(),
@@ -1092,7 +1074,7 @@ mod tests {
             (1.0..=DUMMY_DISTANCE + 0.01).contains(&distance),
             "dummy at {distance}"
         );
-        assert_eq!(dummy.max_hp, DUMMY_HP);
+        assert_eq!(dummy.max_hp, DUMMY_MAX_HP);
         let anchor = (dummy.x, dummy.z);
         run(&mut sim, 2.0);
         let dummy = sim.players.last().unwrap();

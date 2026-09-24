@@ -455,20 +455,6 @@ mod tests {
         }
     }
 
-    /// Greedy shopping in recommended order, the way bots, the offline duel
-    /// and the harness buy (roadmap step 11c moves it into `shop`).
-    fn plan_purchases(class: HeroClass, mut gold: u32) -> Vec<ItemId> {
-        let mut bought = Vec::new();
-        for id in crate::shop::recommended_items(class) {
-            let cost = crate::shop::item(*id).cost;
-            if bought.len() < INVENTORY_CAPACITY && gold >= cost {
-                gold -= cost;
-                bought.push(*id);
-            }
-        }
-        bought
-    }
-
     #[test]
     fn shipped_catalogs_load() {
         ensure_loaded();
@@ -680,7 +666,7 @@ mod tests {
                 "{class:?} cannot afford its first item"
             );
             assert_eq!(
-                plan_purchases(class, STARTING_GOLD + DUEL_MAX_GOLD).len(),
+                crate::shop::plan_purchases(class, STARTING_GOLD + DUEL_MAX_GOLD, &[]).len(),
                 INVENTORY_CAPACITY,
                 "{class:?}"
             );

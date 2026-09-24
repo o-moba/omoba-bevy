@@ -9,6 +9,7 @@ mod career_runtime;
 #[cfg(test)]
 mod career_runtime_tests;
 mod combat_feedback;
+mod debug;
 mod entities;
 mod forest_pickups;
 mod formation;

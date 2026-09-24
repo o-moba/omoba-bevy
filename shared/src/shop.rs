@@ -107,6 +107,30 @@ pub fn recommended_items(class: HeroClass) -> &'static [ItemId] {
     &catalog::hero(class).recommended_items
 }
 
+/// Greedy shopping in the class's recommended order, the way bots, the
+/// offline duel and the harness buy: skip what `owned` already holds or
+/// `gold` cannot pay for, and take the rest while the inventory has room.
+/// Buying the returned items one at a time, starting from `owned` and `gold`,
+/// never fails a purchase check (given an `owned` without duplicates).
+pub fn plan_purchases(class: HeroClass, gold: u32, owned: &[ItemId]) -> Vec<ItemId> {
+    let mut gold = gold;
+    let mut carried = owned.len();
+    let mut plan = Vec::new();
+    for id in recommended_items(class) {
+        if carried >= INVENTORY_CAPACITY {
+            break;
+        }
+        let cost = item(*id).cost;
+        if owned.contains(id) || gold < cost {
+            continue;
+        }
+        gold -= cost;
+        carried += 1;
+        plan.push(*id);
+    }
+    plan
+}
+
 /// Different items add percentage points. A malformed duplicate never stacks.
 pub fn item_bonuses(inventory: &[ItemId]) -> ItemBonuses {
     let mut result = ItemBonuses::NONE;
@@ -195,6 +219,49 @@ mod tests {
             }
         }
         assert_eq!(ItemId::from_id("free_gold"), None);
+    }
+
+    #[test]
+    fn purchase_plans_follow_the_recommended_order_within_budget_and_room() {
+        use ItemId::*;
+        assert_eq!(
+            plan_purchases(HeroClass::Ranger, STARTING_GOLD, &[]),
+            vec![SwiftGrip]
+        );
+        assert_eq!(
+            plan_purchases(HeroClass::Ranger, STARTING_GOLD, &[SwiftGrip]),
+            vec![EmberBlade]
+        );
+        assert!(plan_purchases(HeroClass::Ranger, STARTING_GOLD - 1, &[]).is_empty());
+        for class in HeroClass::ALL {
+            let recommended = recommended_items(class);
+            // Enough gold buys the whole order, up to the inventory size.
+            let everything = plan_purchases(class, u32::MAX, &[]);
+            assert_eq!(everything, recommended[..INVENTORY_CAPACITY].to_vec());
+            // Owned items are skipped, and a full inventory buys nothing.
+            let owned = &recommended[..2];
+            let rest = plan_purchases(class, u32::MAX, owned);
+            assert_eq!(rest.len(), INVENTORY_CAPACITY - owned.len());
+            assert!(rest.iter().all(|id| !owned.contains(id)));
+            assert!(plan_purchases(class, u32::MAX, &everything).is_empty());
+            // A dear item is passed over for a cheaper one further down.
+            let first = item(recommended[0]).cost;
+            let cheaper = recommended
+                .iter()
+                .find(|id| item(**id).cost < first)
+                .copied();
+            if let Some(cheaper) = cheaper {
+                assert_eq!(plan_purchases(class, first - 1, &[])[0], cheaper);
+            }
+            // The plan never spends more than the budget.
+            for gold in [0, 79, 80, 250, 1_000] {
+                let spent: u32 = plan_purchases(class, gold, &[])
+                    .iter()
+                    .map(|id| item(*id).cost)
+                    .sum();
+                assert!(spent <= gold, "{class:?} spent {spent} of {gold}");
+            }
+        }
     }
 
     #[test]
