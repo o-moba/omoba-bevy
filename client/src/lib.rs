@@ -3,6 +3,7 @@ use bevy::{asset::AssetPlugin, prelude::*};
 mod animation_qa;
 mod audio_qa;
 mod audio_settings;
+mod battlefield_atmosphere;
 mod beta_ui_qa;
 mod bosses;
 mod camera;
@@ -17,6 +18,7 @@ mod creatures3d;
 mod debug_console;
 mod decor;
 mod edge_hud;
+mod forest_pickup_qa;
 mod frontend;
 mod frontend_flow_qa;
 mod frontend_qa;
@@ -43,6 +45,7 @@ mod model_scale;
 mod navigation;
 mod navigation_qa;
 mod net;
+mod offline_qa;
 mod passport;
 mod pause_menu;
 mod persistence;
@@ -52,6 +55,7 @@ mod presentation2d;
 mod presentation3d;
 mod projectile_visuals;
 mod reaction_visuals;
+mod sandbox;
 mod session_config;
 mod shop;
 mod skill_icons;
@@ -63,6 +67,8 @@ mod supporter_storekit;
 mod targeting;
 mod targeting_qa;
 mod team;
+mod team_vision;
+mod team_vision_qa;
 mod ui_theme;
 mod verdant3d;
 mod visual_qa;
@@ -97,6 +103,10 @@ use world2d::World2dPlugin;
 pub fn main() {
     if let Some(directory) = std::env::var_os("OMOBA_ANIMATION_QA") {
         animation_qa::run(directory.into());
+        return;
+    }
+    if let Err(error) = sandbox::validate_launch() {
+        eprintln!("Combat Test: {error}");
         return;
     }
     passport::initialize();
@@ -145,6 +155,7 @@ pub fn main() {
         TeamSelectPlugin,
         GameStateUiPlugin,
     ))
+    .add_plugins(sandbox::SandboxPlugin)
     .add_plugins(edge_hud::EdgeHudPlugin)
     .add_plugins(match_service::MatchServicePlugin)
     .add_plugins((FrontendPlugin, frontend_qa::FrontendQaPlugin))
@@ -185,12 +196,17 @@ pub fn main() {
     .add_plugins(supporter_storekit::SupporterStoreKitPlugin)
     .add_plugins(game_audio::GameAudioPlugin)
     .add_plugins(game_vfx::GameVfxPlugin)
+    .add_plugins(battlefield_atmosphere::BattlefieldAtmospherePlugin)
+    .add_plugins(team_vision::TeamVisionPlugin)
+    .add_plugins(team_vision_qa::TeamVisionQaPlugin)
     .add_plugins(audio_qa::AudioQaPlugin)
+    .add_plugins(offline_qa::OfflineQaPlugin)
     .add_plugins(career_identity::CareerIdentityPlugin)
     .add_plugins(career_visual_qa::CareerVisualQaPlugin)
     .add_plugins(map_visuals::MapVisualsPlugin)
     .add_plugins(map_qa::MapQaPlugin)
     .add_plugins(combat_qa::CombatQaPlugin)
+    .add_plugins(forest_pickup_qa::ForestPickupQaPlugin)
     .add_plugins(targeting_qa::TargetingQaPlugin)
     .run();
 }

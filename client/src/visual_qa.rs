@@ -67,9 +67,13 @@ impl Plugin for VisualQaPlugin {
             app.add_plugins(crate::navigation_qa::NavigationQaPlugin);
             return;
         }
-        if std::env::var("OMOBA_VISUAL_QA_SCENARIO")
-            .is_ok_and(|value| value == "targeting" || value == "combat" || value == "map")
-        {
+        if std::env::var("OMOBA_VISUAL_QA_SCENARIO").is_ok_and(|value| {
+            value == "targeting"
+                || value == "combat"
+                || value == "map"
+                || value == "forest-pickups"
+                || value == "team-vision"
+        }) {
             return; // Dedicated production-input scenario registered by the client.
         }
         let max_seconds = bounded_timeout(std::env::var("OMOBA_VISUAL_QA_TIMEOUT").ok().as_deref());
@@ -182,8 +186,7 @@ fn views() -> [View; 5] {
 fn jungle_views() -> [View; 4] {
     let forest = std::env::var("OMOBA_VISUAL_QA_SCENARIO").as_deref() == Ok("forest-vfx");
     let anchors = if forest {
-        let forest = MapLayout::default().decorative_jungle_block_centers();
-        std::array::from_fn(|i| forest[i % forest.len()] + Vec2::X * 3.)
+        shared::forest_pickups::pickup_layout().map(Vec2::from_array)
     } else {
         MapLayout::default().camp_centers()
     };

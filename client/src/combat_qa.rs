@@ -165,7 +165,9 @@ fn focus_capture_window(
 fn prepare(
     qa: Res<CombatQa>,
     session: Res<ClientSession>,
-    selection: Res<TeamSelection>,
+    mut selection: ResMut<TeamSelection>,
+    mut outgoing: MessageWriter<NetworkCommand>,
+    mut joined: Local<bool>,
     help: Res<HelpOverlayVisible>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
     mut buttons: Query<(&Name, &mut Interaction), With<Button>>,
@@ -181,18 +183,22 @@ fn prepare(
     if qa.stage != 0 {
         return;
     }
-    let class_button = format!("ClassButton-{}", qa.class.id());
+    if session.is_connected() && !session.join_confirmed() && !*joined {
+        *joined = true;
+        selection.team = Some(Team::Green);
+        selection.hero_class = qa.class;
+        selection.character = crate::team::CharacterChoice::Cube;
+        selection.avatar = Some("agnes".into());
+        outgoing.write(NetworkCommand::Join {
+            team: Team::Green,
+            character: crate::team::CharacterChoice::Cube,
+            hero_class: qa.class,
+            avatar: Some("agnes".into()),
+            sprite_character: None,
+        });
+    }
     for (name, mut interaction) in &mut buttons {
-        if (session.is_connected()
-            && !session.join_confirmed()
-            && name.as_str()
-                == if selection.hero_class == qa.class {
-                    "TeamGreenButton"
-                } else {
-                    class_button.as_str()
-                })
-            || (session.join_confirmed() && help.0 && name.as_str() == "HelpDismissButton")
-        {
+        if session.join_confirmed() && help.0 && name.as_str() == "HelpDismissButton" {
             *interaction = Interaction::Pressed;
         }
     }
@@ -410,7 +416,7 @@ fn observe(
         .collect();
     let visible_burst = particles
         .iter()
-        .any(|p| p["age"].as_f64().is_some_and(|age| age >= 0.06));
+        .any(|p| p["age"].as_f64().is_some_and(|age| age >= 0.16));
     let frame = serde_json::json!({"window_focused":scene.window_focus.single().ok().map(|w| w.focused), "gameplay_allowed":scene.context.gameplay_allowed(), "help_open":help.0,"snapshot_tick":snapshot.meta.snapshot_tick,"server_epoch":snapshot.meta.server_epoch,"match_id":snapshot.meta.match_id,
         "mobile_controls":mobile.enabled,"visual_mode":format!("{:?}", *mode),"player_position":position.translation.to_array(),
         "particles":particles,"projectiles":projectiles,"combat_events":events,"damage_numbers":numbers,"minions":minions,"nodes":nodes});
@@ -478,7 +484,14 @@ fn observe(
             }
             qa.stage = 2;
         }
-        2 if !projectiles.is_empty() => {
+        2 if projectiles.iter().any(|p| {
+            p["position"].as_array().is_some_and(|v| {
+                let x = v[0].as_f64().unwrap_or(0.0) as f32;
+                let z = v[2].as_f64().unwrap_or(0.0) as f32;
+                Vec2::new(x, z).distance(position.translation.xz()) > 2.0
+            })
+        }) =>
+        {
             capture(&mut commands, &mut qa, 1, frame);
             qa.stage = 3;
         }

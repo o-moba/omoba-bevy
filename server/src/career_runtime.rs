@@ -121,6 +121,7 @@ fn approved_default_map(map: &shared::map::ResolvedMap) -> bool {
                     && actual.stats.max_hp == expected.stats.max_hp
                     && actual.stats.attack_range == expected.stats.attack_range
                     && actual.stats.attack_damage == expected.stats.attack_damage
+                    && actual.stats.hero_damage_multiplier == expected.stats.hero_damage_multiplier
                     && actual.stats.attack_cooldown_ms == expected.stats.attack_cooldown_ms
             })
         })
@@ -532,6 +533,9 @@ impl ServerRuntime {
     }
 
     fn rating_eligibility(&self, roster: &[ParticipantResult]) -> Result<(), &'static str> {
+        if self.sandbox.is_some() {
+            return Err("Combat Sandbox is never eligible for career credit.");
+        }
         if self.match_config.mode == MatchMode::Practice {
             return Err("Bot practice: local result only; no permanent career credit.");
         }
@@ -1201,4 +1205,12 @@ impl ServerRuntime {
             }
         }
     }
+}
+
+#[test]
+fn changed_hero_tower_damage_is_not_an_approved_default_map() {
+    let mut map = shared::map::ResolvedMap::default();
+    assert!(approved_default_map(&map));
+    map.structures[0].stats.hero_damage_multiplier = 1.0;
+    assert!(!approved_default_map(&map));
 }

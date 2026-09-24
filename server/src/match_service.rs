@@ -414,6 +414,8 @@ impl ServerRuntime {
                 continue;
             }
             let packet = ServerPacket::Snapshot {
+                vision: None,
+                sandbox: None,
                 match_mode: if self.match_service.is_lobby() {
                     "lobby"
                 } else {
@@ -438,6 +440,7 @@ impl ServerRuntime {
                 minions: Vec::new(),
                 neutrals: Vec::new(),
                 team_buffs: Vec::new(),
+                forest_pickups: Vec::new(),
                 game_state: GameState::Lobby,
                 rematch_in_secs: None,
             };

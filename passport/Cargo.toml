@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-ekza-bevy-sdk = { git = "https://github.com/ekza-space/ekza-bevy-sdk", rev = "42c39e4bf5aea2e3a051f86ba27cbf6e2c46d377", default-features = false, features = ["http"] }
+ekza-bevy-sdk = { git = "https://github.com/ekza-space/ekza-bevy-sdk", rev = "247ddbf6dbfc9bac95b52b74ce3a0a1321466a24", default-features = false, features = ["http"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde.workspace = true
 serde_json.workspace = true

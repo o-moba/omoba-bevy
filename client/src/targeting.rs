@@ -130,13 +130,16 @@ impl TargetValidity<'_, '_> {
 
 pub(crate) fn tick_basic_attack(
     time: Res<Time>,
+    game: Option<Res<crate::net::GameStateSnapshot>>,
     mut basic: ResMut<BasicAttackState>,
     authoritative: Query<
         &PlayerBasicAttackCooldown,
         (With<Player>, Changed<PlayerBasicAttackCooldown>),
     >,
 ) {
-    basic.remaining_secs = (basic.remaining_secs - time.delta_secs()).max(0.0);
+    basic.remaining_secs = (basic.remaining_secs
+        - time.delta_secs() * crate::sandbox::time_scale(game.as_deref()))
+    .max(0.0);
     if let Ok(server) = authoritative.single() {
         if server.last_request_id < basic.acknowledged_request_id {
             return;
@@ -216,6 +219,7 @@ pub(crate) fn resolve_basic_attack(
             &Team,
             Option<&NetworkHeroClass>,
             Option<&PlayerEquipment>,
+            Option<&crate::net::PlayerProgression>,
         ),
         With<Player>,
     >,
@@ -228,7 +232,7 @@ pub(crate) fn resolve_basic_attack(
     mut outgoing: MessageWriter<NetworkCommand>,
     mut feedback: ResMut<ActionFeedback>,
 ) {
-    let Ok((player, transform, stats, team, class, equipment)) = local.single() else {
+    let Ok((player, transform, stats, team, class, equipment, progression)) = local.single() else {
         basic.cancel();
         return;
     };
@@ -311,7 +315,9 @@ pub(crate) fn resolve_basic_attack(
     outgoing.write(NetworkCommand::BasicAttack {
         target: order.target,
     });
-    basic.duration_secs = shared::shop::basic_attack_cooldown(definition, bonuses).as_secs_f32();
+    basic.duration_secs =
+        shared::hero_balance::basic_cooldown(class, progression.map_or(1, |p| p.level), bonuses)
+            .as_secs_f32();
     basic.remaining_secs = basic.duration_secs;
     // Snapshot acknowledgment is a baseline, not a packet resend token. If a
     // datagram is lost the next local deadline may request a fresh strike; the
@@ -918,6 +924,33 @@ pub(crate) fn draw_targeting_ui(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn level_ten_attack_prediction_composes_growth_and_items_once() {
+        for class in shared::HeroClass::ALL {
+            let (mut app, hero, enemy) =
+                attack_app(class, vec![shared::shop::ItemId::SwiftGrip], false);
+            app.world_mut()
+                .entity_mut(hero)
+                .insert(crate::net::PlayerProgression {
+                    level: 10,
+                    ..default()
+                });
+            order(&mut app, enemy);
+            app.update();
+            assert_eq!(commands(&mut app).len(), 1);
+            let duration = app.world().resource::<BasicAttackState>().duration_secs;
+            let base = shared::basic_attack_for_class(class).cooldown_secs;
+            let rate = match class {
+                shared::HeroClass::Warrior => 1.6,
+                shared::HeroClass::Mage => 1.5,
+                shared::HeroClass::Ranger => 1.8,
+                shared::HeroClass::Cleric => 1.55,
+                shared::HeroClass::Warden => 1.65,
+            };
+            assert!((duration - base / (rate * 1.12)).abs() < 0.0001);
+        }
+    }
+
     fn attack_app(
         class: shared::HeroClass,
         inventory: Vec<shared::shop::ItemId>,

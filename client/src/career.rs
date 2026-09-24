@@ -406,11 +406,13 @@ impl Plugin for CareerPlugin {
             .init_resource::<crate::career_identity::CareerIdentity>()
             .insert_resource(CareerUiProfile(crate::platform::ui_profile()))
             .add_message::<NicknameChanged>()
+            .add_message::<bevy::input::touch::TouchInput>()
             .add_systems(
                 Update,
                 (
                     web::poll,
                     devices::poll,
+                    collect_career_taps,
                     actions,
                     dismiss_with_escape,
                     nickname_input,
@@ -608,8 +610,77 @@ fn save_name(career: &mut CareerClient, changed: &mut MessageWriter<NicknameChan
         Err(error) => career.form_error = Some(error.into()),
     }
 }
+#[derive(Component, Default, Clone, Copy, PartialEq, Eq)]
+struct CareerTap {
+    touch_mode: bool,
+    activated: bool,
+}
+
+#[allow(clippy::type_complexity)]
+fn collect_career_taps(
+    profile: Res<CareerUiProfile>,
+    career: Res<CareerClient>,
+    mut state: Local<crate::pause_menu::PauseTapState>,
+    mut last: Local<Option<CareerModal>>,
+    window: Query<(Entity, &Window), With<PrimaryWindow>>,
+    mut events: MessageReader<bevy::input::touch::TouchInput>,
+    mut buttons: Query<(
+        Entity,
+        &mut CareerTap,
+        &ComputedNode,
+        &UiGlobalTransform,
+        Option<&InheritedVisibility>,
+        Option<&bevy::ui::CalculatedClip>,
+    )>,
+) {
+    let touch_mode = profile.0 == UiProfile::Mobile;
+    for (_, mut tap, ..) in &mut buttons {
+        tap.set_if_neq(CareerTap {
+            touch_mode,
+            activated: false,
+        });
+    }
+    let Ok((window_id, window)) = window.single() else {
+        events.clear();
+        *state = default();
+        return;
+    };
+    if !touch_mode || !window.focused {
+        events.clear();
+        *state = default();
+        return;
+    }
+    if *last != Some(career.modal) {
+        *state = default();
+        *last = Some(career.modal);
+    }
+    let visible: Vec<_> = buttons
+        .iter()
+        .filter(|(_, _, node, _, visible, _)| {
+            visible.is_none_or(|v| v.get()) && node.size().min_element() > 0.0
+        })
+        .map(|(entity, _, node, transform, _, clip)| {
+            (
+                entity,
+                crate::mobile_ui::logical_ui_rect(node, transform, clip, window.scale_factor()),
+            )
+        })
+        .filter(|(_, rect)| rect.width() > 0.0 && rect.height() > 0.0)
+        .collect();
+    for event in events.read().filter(|e| e.window == window_id) {
+        if let Some(entity) = state.event(event.id, event.phase, event.position, &visible)
+            && let Ok((_, mut tap, ..)) = buttons.get_mut(entity)
+        {
+            tap.activated = true;
+        }
+    }
+}
+
 fn actions(
-    buttons: Query<(&Interaction, &Action), (With<Button>, Changed<Interaction>)>,
+    buttons: Query<
+        (&Interaction, &Action, Option<&CareerTap>),
+        (With<Button>, Or<(Changed<Interaction>, Changed<CareerTap>)>),
+    >,
     mut career: ResMut<CareerClient>,
     mut requests: MessageWriter<NetworkCommand>,
     mut changed: MessageWriter<NicknameChanged>,
@@ -627,8 +698,14 @@ fn actions(
         return;
     }
     career.expire_request(Instant::now());
-    for (interaction, action) in &buttons {
-        if *interaction != Interaction::Pressed {
+    for (interaction, action, tap) in &buttons {
+        if !tap.map_or(*interaction == Interaction::Pressed, |tap| {
+            if tap.touch_mode {
+                tap.activated
+            } else {
+                *interaction == Interaction::Pressed
+            }
+        }) {
             continue;
         }
         web::act(action, &mut career, &identity, &mut web_worker);
@@ -969,6 +1046,7 @@ fn button(parent: &mut ChildSpawnerCommands, value: &str, action: Action, name: 
     parent
         .spawn((
             Button,
+            CareerTap::default(),
             menu,
             Node {
                 min_height: Val::Px(if input { 52.0 } else { 44.0 }),
@@ -1005,6 +1083,7 @@ fn row_node() -> Node {
         align_items: AlignItems::Center,
         column_gap: Val::Px(8.0),
         flex_wrap: FlexWrap::Wrap,
+        flex_shrink: 0.0,
         ..default()
     }
 }
@@ -1012,6 +1091,7 @@ fn column_node() -> Node {
     Node {
         flex_direction: FlexDirection::Column,
         row_gap: Val::Px(8.0),
+        flex_shrink: 0.0,
         ..default()
     }
 }
@@ -2335,6 +2415,7 @@ fn render(
                         .spawn((
                             Node {
                                 flex_grow: 1.0,
+                                flex_shrink: 1.0,
                                 flex_basis: Val::Px(0.0),
                                 min_height: Val::Px(0.0),
                                 overflow: Overflow::scroll_y(),
@@ -2342,6 +2423,7 @@ fn render(
                             },
                             scroll_position,
                             CareerScroll,
+                            crate::mobile_ui::TouchScrollPanel,
                             Name::new("CareerBody"),
                         ))
                         .with_children(|body| {
@@ -2427,6 +2509,56 @@ fn scroll_desktop(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn career_touch_actions_wait_for_release_and_cancel_after_scroll() {
+        use bevy::input::touch::{TouchInput, TouchPhase};
+        let mut app = App::new();
+        app.init_resource::<CareerClient>()
+            .insert_resource(CareerUiProfile(UiProfile::Mobile))
+            .add_message::<TouchInput>()
+            .add_systems(Update, collect_career_taps);
+        let mut window = Window::default();
+        window.resolution.set_scale_factor_override(Some(2.0));
+        let window = app.world_mut().spawn((window, PrimaryWindow)).id();
+        let button = app
+            .world_mut()
+            .spawn((
+                CareerTap::default(),
+                ComputedNode {
+                    size: Vec2::new(160.0, 88.0),
+                    inverse_scale_factor: 0.5,
+                    ..default()
+                },
+                UiGlobalTransform::from(bevy::math::Affine2::from_translation(Vec2::splat(400.0))),
+            ))
+            .id();
+        let e = |id, phase, position| TouchInput {
+            id,
+            phase,
+            position,
+            window,
+            force: None,
+        };
+        app.world_mut()
+            .write_message(e(1, TouchPhase::Started, Vec2::splat(200.0)));
+        app.update();
+        assert!(!app.world().get::<CareerTap>(button).unwrap().activated);
+        app.world_mut()
+            .write_message(e(1, TouchPhase::Moved, Vec2::new(200.0, 140.0)));
+        app.world_mut()
+            .write_message(e(1, TouchPhase::Ended, Vec2::splat(200.0)));
+        app.update();
+        assert!(!app.world().get::<CareerTap>(button).unwrap().activated);
+        app.world_mut()
+            .write_message(e(2, TouchPhase::Started, Vec2::splat(200.0)));
+        app.world_mut()
+            .write_message(e(2, TouchPhase::Ended, Vec2::splat(201.0)));
+        app.update();
+        assert!(app.world().get::<CareerTap>(button).unwrap().activated);
+        app.update();
+        assert!(!app.world().get::<CareerTap>(button).unwrap().activated);
+    }
+
     fn result() -> MatchResult {
         MatchResult {
             result_id: "r1".into(),

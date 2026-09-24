@@ -510,6 +510,8 @@ fn cosmetic_history_yields_space_to_gameplay_and_keeps_newest_receipts() {
     let mut player = rt.players[&a].state.clone();
     player.avatar = Some(String::new());
     let mut packet = ServerPacket::Snapshot {
+        vision: None,
+        sandbox: None,
         match_mode: "dev".into(),
         geometry_id: shared::map::GEOMETRY_ID.to_owned(),
         map_profile: "verdant_default".to_owned(),
@@ -525,6 +527,7 @@ fn cosmetic_history_yields_space_to_gameplay_and_keeps_newest_receipts() {
         minions: vec![],
         neutrals: vec![],
         team_buffs: vec![],
+        forest_pickups: vec![],
         game_state: GameState::Running,
         rematch_in_secs: None,
     };

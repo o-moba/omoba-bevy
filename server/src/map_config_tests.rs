@@ -38,6 +38,7 @@ fn default_and_example_preserve_ids_stats_and_reachable_placement() {
         assert_eq!(s.state.hp, if id <= 6 { 240.0 } else { 650.0 });
         assert_eq!(s.attack_range, if id <= 6 { 20.0 } else { 24.0 });
         assert_eq!(s.attack_damage, if id <= 6 { 14.0 } else { 18.0 });
+        assert_eq!(s.hero_damage_multiplier, 2.0);
         assert_eq!(
             s.attack_cooldown,
             Duration::from_millis(if id <= 6 { 900 } else { 850 })
@@ -45,6 +46,13 @@ fn default_and_example_preserve_ids_stats_and_reachable_placement() {
     }
     let config = example();
     assert_eq!(config.structures.len(), 10);
+    assert!(
+        config
+            .structures
+            .iter()
+            .all(|s| s.stats.hero_damage_multiplier == 1.0),
+        "legacy custom profiles retain hero damage"
+    );
     let configured = build_configured_structures(&config);
     assert_eq!(configured[&3].state.hp, 300.0);
     assert_eq!(configured[&9].state.hp, 420.0);

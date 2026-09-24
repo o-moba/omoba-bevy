@@ -13,7 +13,6 @@
 
 use ekza_bevy_sdk::{
     cache::AssetCache,
-    registry::DEFAULT_REGISTRY_URL,
     store::{AvatarStore, StoreAvatar},
 };
 use std::{
@@ -178,8 +177,7 @@ pub fn thumbnail_asset_path(file: &str) -> String {
 /// menu; otherwise the refresh runs in the background.
 pub fn initialize(root: PathBuf, wait_for_catalogue: bool) {
     let created = RUNTIME.get_or_init(|| {
-        let registry =
-            std::env::var(REGISTRY_URL_ENV).unwrap_or_else(|_| DEFAULT_REGISTRY_URL.to_owned());
+        let registry = crate::community::registry_url();
         match AvatarStore::new(root, &registry, crate::selector()) {
             Ok(store) => Some(Runtime {
                 store,

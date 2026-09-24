@@ -47,7 +47,11 @@ impl PassportApi {
     pub fn from_env() -> Result<Self, String> {
         let base = std::env::var(PASSPORT_URL_ENV)
             .or_else(|_| std::env::var(ekza_bevy_sdk::passport::client::PASSPORT_URL_ENV))
-            .unwrap_or_else(|_| ekza_bevy_sdk::registry::DEFAULT_PASSPORT_URL.to_owned());
+            .unwrap_or_else(|_| {
+                option_env!("OMOBA_DEFAULT_PASSPORT_URL")
+                    .unwrap_or(ekza_bevy_sdk::registry::DEFAULT_PASSPORT_URL)
+                    .to_owned()
+            });
         Self::new(&base)
     }
 

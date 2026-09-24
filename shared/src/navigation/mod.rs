@@ -371,3 +371,41 @@ impl NavigationMap {
         search::plan(self, start, self.bounds.clamp(destination), dynamic)
     }
 }
+
+/// Physical base footprint; separate from its combat target radius.
+pub const BASE_COLLISION_RADIUS: f32 = 3.2;
+
+/// Authoritative swept structure collision, shared with local movement prediction.
+/// Starting overlaps may escape outward, but never move deeper into a footprint.
+pub fn clip_discs(from: Point, to: Point, discs: &[Disc]) -> Point {
+    let delta = [to[0] - from[0], to[1] - from[1]];
+    let length_sq = delta[0] * delta[0] + delta[1] * delta[1];
+    if length_sq <= 0.000_000_1 {
+        return to;
+    }
+    let mut fraction = 1.0_f32;
+    for disc in discs {
+        let radius = disc.radius + HERO_RADIUS;
+        let offset = [from[0] - disc.center[0], from[1] - disc.center[1]];
+        let dot = offset[0] * delta[0] + offset[1] * delta[1];
+        let c = offset[0] * offset[0] + offset[1] * offset[1] - radius * radius;
+        if c < 0.0 {
+            if dot < 0.0 {
+                return from;
+            }
+            continue;
+        }
+        if dot >= 0.0 {
+            continue;
+        }
+        let discriminant = dot * dot - length_sq * c;
+        if discriminant < 0.0 {
+            continue;
+        }
+        let contact = (-dot - discriminant.sqrt()) / length_sq;
+        if (0.0..=fraction).contains(&contact) {
+            fraction = (contact - 0.001 / length_sq.sqrt()).max(0.0);
+        }
+    }
+    [from[0] + delta[0] * fraction, from[1] + delta[1] * fraction]
+}

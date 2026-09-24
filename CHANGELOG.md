@@ -4,7 +4,78 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [0.23.0-rc.6] - 2026-09-24
+
+- Add the fifth class, Warden (wire id `warden`): a melee jungler with Feral Swipe, Barkskin, Hunter's Mark and Primal Maul, 210 base HP and its own growth, claw projectile style and item order.
+- Add the server-authoritative Warden passive Forest Tracker: +35% damage to jungle camps (+15% to bosses), +40% gold and +25% XP per ordinary camp kill.
+- Give each class a primary draft role (Warrior Solo, Mage Mid, Ranger Carry, Cleric Support, Warden Jungle); picking a class in the draft proposes its role without overriding a deliberate choice.
+- Practice bots fill teams as a five-role composition around human picks; the bot Warden clears camps on its own half before joining mid lane.
+- Add a fifth Warden row to the skill icon atlas (original rows unchanged; provenance in `client/assets/ui/skills/PROVENANCE.md`).
+- Clients older than this release decode `warden` as Warrior; ship client and server together.
+
+## [0.23.0-rc.5] - 2026-09-23
+
+- Add Offline practice from Home: choose a bundled hero/avatar and test 3D movement, class attacks, all four skills and dash/haste without starting or reaching a server.
+- Practice starts at level six with recovering targets and mana; it never awards online progress, match history or rating. Leaving restores the saved online endpoint.
+- Keep a touch-sized close button and navigation footer visible in Game menu; scroll settings and main actions in short windows and prevent drag gestures from activating Controls guide.
+- Validate actual menu layout and touch scrolling at phone/iPad viewport and DPI sizes, plus native offline rendering.
+
+## [0.23.0-rc.4] - 2026-09-23
+
+- Add server-authoritative shared team vision and ten symmetric, walkable brush patches in the 3D battlefield.
+- Conceal enemy heroes in brush until an allied observer enters the same patch or the enemy performs an accepted hostile targeted action; the latter reveals them for two seconds within ordinary team sight.
+- Filter hidden actors, projectiles, combat events and pickup receipts per recipient, reject fresh hidden-target attacks, and apply visibility to bot, minion and tower targeting.
+- Preserve visible killing-hit effects for dead minions, neutrals and structures while still filtering hidden impacts.
+- Add soft live battlefield/minimap fog, swaying gameplay grass and a local concealed/revealed indicator, with native desktop/mobile preview verification.
+- Document sight distances, already-launched homing behavior and bounded rendering in `docs/team-vision.md`.
+
+## [0.23.0-rc.3] - 2026-09-23
+
+- Add readable magic orbs, orbiting sparks, bounded projectile particle trails and larger confirmed-hit bursts; replace the Warrior's segmented yellow projectile with a steel blade.
+- Add six shared healing butterfly flocks: server-authoritative 5% maximum-HP collection, single contested winner, 30-second respawn and replicated availability.
+- Add a noninteractive soft oval battlefield vignette, with glowing animated butterfly presentation in both 3D and Sprite2d.
+- Add native pickup lifecycle captures and document rendering budgets and gameplay rules in `docs/forest-combat-vfx.md`.
+
+## [0.23.0-rc.2] - 2026-09-23
+
+- Rebalance starting health and Q cadence across all four classes, add bounded level-based movement, basic damage/rate and skill growth, and prevent same-tick cross-slot skill volleys.
+- Reconcile authoritative skill cooldowns on the client, buffer the next skill through recovery, and match player/bot movement to the shared progression curve.
+- Preserve early tower safety with a built-in hero-target damage multiplier while retaining minion siege cadence and custom-map defaults.
+- Add repeatable before/after combat matrices, finite-mana/sustain samples, objective safety measurements and research-backed tuning notes in `docs/balance-tuning.md`.
+
+## [0.23.0-rc.1] - 2026-09-23
+
+- Add an opt-in local Combat Test launcher and unified developer panel with direct hero selection, actor progression/stat/equipment controls and reset/teleport.
+- Add authoritative training dummy measurements, configurable enemy AI, direct two-client duels, reusable test presets, real minion controls and simulation pause/speed/frame stepping.
+- Add actual animation graph inspection and combat geometry/state overlays while keeping network clocks live. Sandbox commands are isolated from practice, release and rated matches.
+- See `docs/combat-test.md` for launch commands, controls, damage semantics and developer extension instructions.
+
 ## [Unreleased]
+
+- Refresh the staged Rust executable timestamp so incremental Xcode device builds re-sign the current executable.
+
+## [0.22.0-rc.5] - 2026-09-23
+
+- Keep avatar collection controls stable during account/catalogue updates and expose wallet approval status and retry actions.
+- Open Ekza account and wallet approval pages through the native iOS browser bridge.
+- Add explicit Debug-only local Studio configuration and a LAN rehearsal launcher using the existing isolated test database.
+- Pin the Ekza SDK fix for opt-in private-host HTTP development; release SDK builds retain HTTPS requirements.
+
+## [0.22.0-rc.4] - 2026-09-23
+
+- Add server-authoritative own-base healing at 12% maximum HP per second inside the shop zone.
+- Repair mobile settings/results drag scrolling, preserve nonshrinking result cards, and keep settings Back outside the scroll body.
+- Make mobile career actions activate on short release, cancel them on a drag, and verify live scoreboard delivery through UDP and client ingest.
+
+## [0.22.0-rc.3] - 2026-09-23
+
+- Align practice bot routes with authoritative base footprints so every lane advances after spawn and respawn.
+- Align local structure movement with server sweeps and retain route clearance while sliding around buildings to prevent prediction drift.
+
+## [0.22.0-rc.2] - 2026-09-22
+
+- Add a versioned Xcode iOS application project and shared Archive scheme for the existing Rust game, including bundled assets, icons, privacy manifest and matching debug symbols.
+- Keep signing and TestFlight distribution in Xcode; provide ignored local team/build/server settings without storing personal credentials.
 
 ## [0.22.0-rc.1] - 2026-09-22
 

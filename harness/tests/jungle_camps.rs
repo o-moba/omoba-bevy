@@ -76,7 +76,10 @@ fn both_teams_farm_real_camps_and_observe_same_id_respawn_after_forty_seconds() 
     let mut finished = [false; 2];
     let mut first_gold = [0; 2];
     let mut request_id = [0_u64; 2];
-    let mut saw_six = [false; 2];
+    let mut saw_camp = [false; 2];
+    let bounds = shared::map::geometry().bounds;
+    let public_camps = shared::jungle::camp_layout(bounds.max[0] - bounds.min[0]);
+    assert_eq!(public_camps.len(), 6);
     let mut lane_rewards: [LaneRewards; 2] = Default::default();
     let start = Instant::now();
     while !finished.into_iter().all(|done| done) && start.elapsed() < Duration::from_secs(85) {
@@ -100,24 +103,43 @@ fn both_teams_farm_real_camps_and_observe_same_id_respawn_after_forty_seconds() 
                     .iter()
                     .filter(|n| !n.camp_type.is_boss())
                     .collect();
-                if ordinary.len() != 6 {
-                    continue;
-                }
-                saw_six[index] = true;
+                // Camp anchors are public map knowledge; live creatures are only
+                // received after an allied source reaches their sight radius.
                 let mob = ordinary
                     .into_iter()
                     .filter(|n| n.camp_type == NeutralCampType::Spitter)
                     .min_by(|a, b| {
                         ((a.x - me.x).hypot(a.z - me.z))
                             .total_cmp(&((b.x - me.x).hypot(b.z - me.z)))
-                    })
-                    .expect("each side has a spitter");
+                    });
+                let Some(mob) = mob else {
+                    let anchor = public_camps
+                        .iter()
+                        .filter(|(_, kind)| *kind == shared::jungle::JungleCampKind::Spitter)
+                        .min_by(|(a, _), (b, _)| {
+                            (a[0] - me.x)
+                                .hypot(a[1] - me.z)
+                                .total_cmp(&(b[0] - me.x).hypot(b[1] - me.z))
+                        })
+                        .unwrap()
+                        .0;
+                    walk(bot, &mut navigators[index], me, anchor);
+                    continue;
+                };
+                saw_camp[index] = true;
                 target_ids[index] = Some(mob.id);
                 anchors[index] = [mob.x, mob.z];
                 first_gold[index] = me.gold;
             }
             let target = target_ids[index].unwrap();
             let mob = packet.neutrals().iter().find(|n| n.id == target);
+            if mob.is_none() {
+                assert!(
+                    (anchors[index][0] - me.x).hypot(anchors[index][1] - me.z)
+                        < shared::vision::HERO_SIGHT_RADIUS,
+                    "absence only proves camp death while its anchor remains in our sight"
+                );
+            }
             if first_death[index].is_none() && mob.is_none() {
                 assert_eq!(
                     lane_rewards[index].jungle_xp(me),
@@ -184,28 +206,14 @@ fn both_teams_farm_real_camps_and_observe_same_id_respawn_after_forty_seconds() 
             let mob = mob.expect("living target");
             let distance = (mob.x - me.x).hypot(mob.z - me.z);
             if distance > 9.0 {
-                // Normal 4m/s source movement follows the same forest route map.
-                if let Some(next) = navigators[index].next([me.x, me.z], anchors[index], &[]) {
-                    let dx = next[0] - me.x;
-                    let dz = next[1] - me.z;
-                    let length = dx.hypot(dz);
-                    let step = length.min(0.20);
-                    if length > 0.001 {
-                        bot.send_transform(
-                            me.x + dx / length * step,
-                            0.5,
-                            me.z + dz / length * step,
-                            dx.atan2(dz),
-                        );
-                    }
-                }
+                walk(bot, &mut navigators[index], me, anchors[index]);
             } else {
                 strike(bot, &packet, target, &mut request_id[index]);
                 bot.send_raw(serde_json::to_string(&serde_json::json!({"type":"cast","target":{"kind":"neutral","id":target},"slot":0})).unwrap().as_bytes());
             }
         }
     }
-    assert!(saw_six.into_iter().all(|seen| seen));
+    assert!(saw_camp.into_iter().all(|seen| seen));
     assert_ne!(
         target_ids[0], target_ids[1],
         "each side farms its mirrored camp"
@@ -220,4 +228,28 @@ fn strike(bot: &Bot, packet: &ServerPacket, id: u64, request: &mut u64) {
     *request += 1;
     let meta = packet.meta();
     bot.send_raw(serde_json::to_string(&serde_json::json!({"type":"basic_attack","target":{"kind":"neutral","id":id},"server_epoch":meta.server_epoch,"match_id":meta.match_id,"request_id":request})).unwrap().as_bytes());
+}
+
+fn walk(
+    bot: &Bot,
+    navigator: &mut harness::navigation::BotNavigator,
+    me: &harness::PlayerState,
+    anchor: [f32; 2],
+) {
+    // Normal 4m/s movement follows the shared forest routes, including before
+    // the camp itself has entered this recipient's snapshot.
+    if let Some(next) = navigator.next([me.x, me.z], anchor, &[]) {
+        let dx = next[0] - me.x;
+        let dz = next[1] - me.z;
+        let length = dx.hypot(dz);
+        let step = length.min(0.20);
+        if length > 0.001 {
+            bot.send_transform(
+                me.x + dx / length * step,
+                0.5,
+                me.z + dz / length * step,
+                dx.atan2(dz),
+            );
+        }
+    }
 }

@@ -58,13 +58,13 @@ fn distinct_sprite_ids_round_trip_and_invalid_or_omitted_values_default() {
             TIMEOUT,
         )
         .expect("teapot identity should replicate");
-    let jelly_state = teapot
+    let jelly_state = jelly
         .wait_for_player(
             jelly_id,
             |player| player.sprite_character.is_some(),
             TIMEOUT,
         )
-        .expect("remote jelly identity should replicate");
+        .expect("jelly own identity should replicate");
     let invalid_state = teapot
         .wait_for_player(
             invalid_id,
@@ -79,7 +79,7 @@ fn distinct_sprite_ids_round_trip_and_invalid_or_omitted_values_default() {
             TIMEOUT,
         )
         .expect("new sprite identity should replicate");
-    let omitted_state = teapot
+    let omitted_state = omitted
         .wait_for_player(
             omitted_id,
             |player| player.sprite_character.is_some(),

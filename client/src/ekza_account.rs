@@ -121,7 +121,13 @@ pub fn connect_account() {
         state.sign_out();
         return;
     }
-    if state.flow.as_ref().is_some_and(AccountFlow::in_progress) {
+    if let Some(flow) = state.flow.as_ref().filter(|flow| flow.in_progress()) {
+        if let PairingState::AwaitingApproval {
+            verification_url, ..
+        } = flow.state()
+        {
+            state.error = crate::platform::open_external_url(&verification_url).err();
+        }
         return;
     }
     state.generation = state.generation.wrapping_add(1);
@@ -159,7 +165,7 @@ pub fn poll_account() -> bool {
             verification_url, ..
         }) => {
             if state.opened.as_ref() != Some(&verification_url) {
-                let _ = omoba_passport::open_in_browser(&verification_url);
+                state.error = crate::platform::open_external_url(&verification_url).err();
                 state.opened = Some(verification_url);
             }
         }
@@ -195,6 +201,18 @@ pub fn poll_account() -> bool {
     false
 }
 
+pub fn account_button_label() -> &'static str {
+    let state = STATE.lock().unwrap();
+    if state.session.is_some() {
+        return "Sign out of Ekza";
+    }
+    match state.flow.as_ref().map(AccountFlow::state) {
+        Some(PairingState::Starting) => "Connecting Ekza…",
+        Some(PairingState::AwaitingApproval { .. }) => "Open Ekza approval",
+        _ => "Connect Ekza",
+    }
+}
+
 pub fn account_status_line() -> String {
     let state = STATE.lock().unwrap();
     if let Some(error) = &state.error {
@@ -212,10 +230,11 @@ pub fn account_status_line() -> String {
             user_code,
             verification_url,
             ..
-        }) => format!("Confirm in your browser · code {user_code} · {verification_url}"),
-        Some(PairingState::Failed(_)) => {
-            "Ekza account is unavailable · connect again to retry".into()
-        }
+        }) => format!(
+            "{} · code {user_code} · {verification_url}",
+            crate::platform::browser_approval_hint()
+        ),
+        Some(PairingState::Failed(error)) => format!("{error} · connect again to retry"),
         _ if state.worker => "Restoring Ekza connection…".into(),
         _ => "Connect your Ekza account to see your own library · no wallet needed".into(),
     }
@@ -284,6 +303,8 @@ mod tests {
                         }
                         Err(error) => panic!("account fixture: {error}"),
                     };
+                    // Accepted sockets can inherit O_NONBLOCK on macOS.
+                    stream.set_nonblocking(false).unwrap();
                     stream
                         .set_read_timeout(Some(Duration::from_secs(2)))
                         .unwrap();

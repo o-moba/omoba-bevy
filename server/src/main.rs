@@ -1,14 +1,19 @@
 #![allow(clippy::items_after_test_module)]
 
 mod balance;
+#[cfg(test)]
+mod balance_probe;
 mod basic_attack;
 mod bots;
 mod career_backend;
 mod career_runtime;
 #[cfg(test)]
 mod career_runtime_tests;
+#[cfg(test)]
+mod objective_balance_tests;
 use server::career_store;
 mod combat_feedback;
+mod forest_pickups;
 mod gameplay;
 #[cfg(test)]
 mod map_config_tests;
@@ -30,6 +35,7 @@ mod prematch;
 mod progression;
 #[cfg(test)]
 mod release_tests;
+mod sandbox;
 mod session;
 mod shop;
 mod social;
@@ -37,6 +43,7 @@ mod targeting_qa;
 #[cfg(test)]
 mod terminal_result_tests;
 mod utility;
+mod vision;
 mod world;
 
 use balance::*;
@@ -52,7 +59,7 @@ use session::*;
 use shared::combat::{CombatEntity, CombatEntityKind, CombatEvent, MinionKind, ProjectileStyle};
 #[cfg(test)]
 use shared::scaled_cooldown;
-use shared::shop::{ItemBonuses, ItemId, PurchaseReceipt, STARTING_GOLD, item_cooldown};
+use shared::shop::{ItemBonuses, ItemId, PurchaseReceipt, STARTING_GOLD};
 use shared::{
     HeroClass, PlayerActionKind, SkillSlot, TargetingMode, ability_for_class_slot,
     rank_effect_scale, scaled_cast_range, scaled_mana_cost, unlocked_slots_for_level,
@@ -84,6 +91,9 @@ const NETWORK_DIAGNOSTIC_INTERVAL: Duration = Duration::from_secs(1);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ClientPacket {
+    Sandbox {
+        request: shared::sandbox::SandboxRequest,
+    },
     /// The player chose to leave the match or the queue. The seat is released
     /// immediately instead of being held for a reconnect; the endpoint itself
     /// stays connected for career, friends and the menus.
@@ -240,6 +250,11 @@ struct PlayerState {
     basic_attack_cooldown_secs: f32,
     #[serde(default)]
     basic_attack_remaining_secs: f32,
+    /// Authoritative skill clocks, including reconnect and sandbox changes.
+    #[serde(default)]
+    skill_cooldown_remaining_secs: [f32; 4],
+    #[serde(default)]
+    skill_recovery_remaining_secs: f32,
     /// Replay high-water mark, retained across reconnect and respawn in this round.
     #[serde(default)]
     basic_attack_request_id: u64,
@@ -542,6 +557,10 @@ enum ServerPacket {
     },
     Snapshot {
         #[serde(default)]
+        vision: Option<shared::vision::TeamVision>,
+        #[serde(default)]
+        sandbox: Option<shared::sandbox::SandboxSnapshot>,
+        #[serde(default)]
         match_mode: String,
         #[serde(default)]
         geometry_id: String,
@@ -567,6 +586,8 @@ enum ServerPacket {
         /// Active boss team buffs (additive field; absent = no buffs).
         #[serde(default)]
         team_buffs: Vec<TeamBuffState>,
+        #[serde(default)]
+        forest_pickups: Vec<shared::forest_pickups::ForestPickupState>,
         game_state: GameState,
         #[serde(default)]
         rematch_in_secs: Option<u64>,
@@ -928,6 +949,8 @@ impl Vec3f {
 }
 
 struct ConnectedPlayer {
+    sandbox: Option<shared::sandbox::ActorConfig>,
+    sandbox_infinite_hp: bool,
     state: PlayerState,
     career_profile: Option<shared::career::ProfileSummary>,
     career_capable: bool,
@@ -982,6 +1005,7 @@ struct Structure {
     last_attack_at: Option<Instant>,
     attack_range: f32,
     attack_damage: f32,
+    hero_damage_multiplier: f32,
     attack_cooldown: Duration,
 }
 
@@ -1101,6 +1125,7 @@ impl RateLimitedDiagnostic {
 
 #[derive(Resource)]
 struct ServerRuntime {
+    sandbox: Option<sandbox::SandboxRuntime>,
     match_service: match_service::MatchService,
     public_transport: public_transport::PublicTransport,
     prematch: prematch::PrematchRuntime,
@@ -1124,6 +1149,7 @@ struct ServerRuntime {
     next_minion_id: u64,
     neutrals: HashMap<u64, Neutral>,
     team_buffs: TeamBuffs,
+    forest_pickups: forest_pickups::ForestPickups,
     recv_buf: Vec<u8>,
     invalid_request_diagnostic: RateLimitedDiagnostic,
     snapshot_send_diagnostic: RateLimitedDiagnostic,
@@ -1166,6 +1192,7 @@ impl ServerRuntime {
             .as_nanos() as u64
             | 1;
         Self {
+            sandbox: None,
             match_service: match_service::MatchService::default(),
             public_transport: public_transport::PublicTransport::default(),
             prematch: prematch::PrematchRuntime::default(),
@@ -1189,6 +1216,7 @@ impl ServerRuntime {
             next_minion_id: 1,
             neutrals,
             team_buffs: TeamBuffs::default(),
+            forest_pickups: forest_pickups::ForestPickups::default(),
             recv_buf: vec![0_u8; CLIENT_DATAGRAM_RECEIVE_CAPACITY],
             invalid_request_diagnostic: RateLimitedDiagnostic::default(),
             snapshot_send_diagnostic: RateLimitedDiagnostic::default(),
@@ -1447,6 +1475,34 @@ impl ServerRuntime {
             self.career_play_again(addr, now);
             return;
         }
+        if let ClientPacket::Sandbox { request } = packet {
+            self.initialize_sandbox_players();
+            self.handle_sandbox(addr, request);
+            if let Some(p) = self.players.get_mut(&addr) {
+                p.last_seen = now;
+            }
+            return;
+        }
+        let wall_now = now;
+        let now = self.sandbox.as_ref().map_or(now, |s| s.now);
+        if self
+            .sandbox
+            .as_ref()
+            .is_some_and(|s| s.config.environment.paused)
+            && matches!(
+                packet,
+                ClientPacket::Transform { .. }
+                    | ClientPacket::Cast { .. }
+                    | ClientPacket::BasicAttack { .. }
+                    | ClientPacket::Utility { .. }
+            )
+        {
+            if let Some(p) = self.players.get_mut(&addr) {
+                p.last_seen = wall_now;
+            }
+            return;
+        }
+        let combat_sandbox = self.sandbox_allowed();
         let Self {
             targeting_qa,
             players,
@@ -1466,6 +1522,7 @@ impl ServerRuntime {
             ..
         } = self;
         match packet {
+            ClientPacket::Sandbox { .. } => unreachable!("handled above"),
             ClientPacket::Career { .. } | ClientPacket::Social { .. } => {
                 unreachable!("handled before gameplay admission")
             }
@@ -1609,6 +1666,9 @@ impl ServerRuntime {
                 // (rejoining players keep their original team).
                 let assigned_team = allocated_team.or_else(|| match match_config.mode {
                     MatchMode::Practice => bots::assign_human_team(players, match_config.team_size),
+                    MatchMode::Dev if combat_sandbox => {
+                        sandbox::assign_human_team(players, disconnected_sessions)
+                    }
                     MatchMode::Dev if prematch => assign_reserved_release_team(
                         players,
                         disconnected_sessions,
@@ -1708,6 +1768,9 @@ impl ServerRuntime {
                         println!("Player {} god_mode={}", player.state.id, enabled);
                     }
                     player.god_mode = enabled;
+                    if let Some(c) = &mut player.sandbox {
+                        c.god_mode = enabled;
+                    }
                     if enabled {
                         player.state.hp = player.state.max_hp;
                         player.state.mana = player.state.max_mana;
@@ -1730,6 +1793,9 @@ impl ServerRuntime {
                         println!("Player {} speed_boost={}", player.state.id, enabled);
                     }
                     player.speed_mult = mult;
+                    if let Some(c) = &mut player.sandbox {
+                        c.move_speed = mult;
+                    }
                 }
             }
             ClientPacket::UpgradeSkill { slot } => {
@@ -1760,6 +1826,10 @@ impl ServerRuntime {
                 }
             }
         }
+        if let Some(p) = self.players.get_mut(&addr) {
+            p.last_seen = wall_now;
+        }
+        self.initialize_sandbox_players();
         self.fill_practice_bots(now);
         self.tick_prematch(now);
         self.track_round_start(now);
@@ -1780,7 +1850,7 @@ impl ServerRuntime {
             .as_secs_f32()
             .clamp(0.0, 0.1);
         self.last_simulation_at = now;
-        (now, dt)
+        self.sandbox.as_mut().map_or((now, dt), |s| s.advance(dt))
     }
 
     fn simulate_after_mana(&mut self, now: Instant, dt: f32) {
@@ -1801,7 +1871,11 @@ impl ServerRuntime {
         // Completed workers keep repeating Victory snapshots throughout their
         // retirement grace period. Victory gates gameplay below; a durable
         // result ACK must not turn one lossy UDP snapshot into the only signal.
-        self.maintain_roster(now);
+        self.maintain_roster(if self.sandbox.is_some() {
+            Instant::now()
+        } else {
+            now
+        });
         self.fill_practice_bots(now);
         // Formation's final interval belongs to the countdown, not earned income.
         let gold_dt = if matches!(self.game_state, GameState::Running) {
@@ -1829,6 +1903,12 @@ impl ServerRuntime {
         }
         self.track_round_start(now);
         self.simulate_bots(now, dt);
+        self.simulate_sandbox(now, dt);
+        let sandbox_minions_running = self
+            .sandbox
+            .as_ref()
+            .is_none_or(|s| s.config.environment.minions && !s.config.environment.minions_paused);
+        let sandbox_simulating = self.sandbox.is_none() || dt > 0.0;
         let career_flow = self.career_flow_active();
         let Self {
             socket,
@@ -1845,6 +1925,7 @@ impl ServerRuntime {
             next_minion_id,
             neutrals,
             team_buffs,
+            forest_pickups,
             last_wave_spawn_at,
             last_snapshot_at,
             snapshot_send_diagnostic,
@@ -1854,7 +1935,7 @@ impl ServerRuntime {
             ..
         } = self;
 
-        if !self.targeting_qa {
+        if !self.targeting_qa && sandbox_minions_running && sandbox_simulating {
             spawn_minion_waves_if_due(
                 map_layout,
                 minions,
@@ -1876,6 +1957,8 @@ impl ServerRuntime {
                     now,
                 ),
             );
+        }
+        if !self.targeting_qa && sandbox_simulating {
             let tower_events = simulate_tower_attacks(
                 players,
                 minions,
@@ -1887,25 +1970,33 @@ impl ServerRuntime {
             );
             combat_log.extend(now, tower_events);
         }
-        let projectile_events = simulate_projectiles(
-            players,
-            minions,
-            structures,
-            neutrals,
-            team_buffs,
-            projectiles,
-            game_state,
-            dt,
-            now,
-        );
+        let projectile_events = if sandbox_simulating {
+            simulate_projectiles(
+                players,
+                minions,
+                structures,
+                neutrals,
+                team_buffs,
+                projectiles,
+                game_state,
+                dt,
+                now,
+            )
+        } else {
+            Vec::new()
+        };
         combat_log.extend(now, projectile_events);
-        if !self.targeting_qa {
+        if !self.targeting_qa && sandbox_simulating {
             combat_log.extend(
                 now,
                 simulate_neutrals(players, neutrals, game_state, dt, now),
             );
         }
+        if sandbox_simulating {
+            forest_pickups.tick(players, game_state, now);
+        }
         regenerate_team_buff_hp(players, team_buffs, game_state, dt, now);
+        regenerate_base_hp(players, map_layout, game_state, dt);
         accrue_passive_gold(players, game_state, gold_dt);
         restore_god_mode_players(players);
         handle_respawns(players, structures, map_layout, game_state, now);
@@ -1931,7 +2022,12 @@ impl ServerRuntime {
 
         minions.retain(|_, minion| minion.state.hp > 0.0);
 
-        if now.duration_since(*last_snapshot_at) >= SNAPSHOT_INTERVAL {
+        let snapshot_now = if self.sandbox.is_some() {
+            Instant::now()
+        } else {
+            now
+        };
+        if snapshot_now.saturating_duration_since(*last_snapshot_at) >= SNAPSHOT_INTERVAL {
             *snapshot_tick = snapshot_tick.saturating_add(1);
             for player in players.values().filter(|p| p.joined) {
                 combat_log
@@ -2010,7 +2106,12 @@ impl ServerRuntime {
                                 ))
                 })
             {
-                let packet = ServerPacket::Snapshot {
+                let mut packet = ServerPacket::Snapshot {
+                    vision: None,
+                    sandbox: self
+                        .sandbox
+                        .as_ref()
+                        .map(|s| s.snapshot(*addr, players, combat_log)),
                     match_mode: self.match_config.mode_id().into(),
                     geometry_id: map_config.geometry_id.clone(),
                     map_profile: map_config.map_profile.clone(),
@@ -2036,9 +2137,23 @@ impl ServerRuntime {
                     minions: minions_snapshot.clone(),
                     neutrals: neutrals_snapshot.clone(),
                     team_buffs: team_buffs_snapshot.clone(),
+                    forest_pickups: forest_pickups.snapshot(game_state),
                     game_state: game_state.clone(),
                     rematch_in_secs,
                 };
+
+                if self.sandbox.is_none() {
+                    vision::filter_snapshot(
+                        &mut packet,
+                        player,
+                        players,
+                        minions,
+                        structures,
+                        neutrals,
+                        projectiles,
+                        now,
+                    );
+                }
 
                 let payloads = if player.framed_snapshots {
                     serialize_snapshot_datagram(&packet)
@@ -2090,7 +2205,7 @@ impl ServerRuntime {
                 }
             }
 
-            *last_snapshot_at = now;
+            *last_snapshot_at = snapshot_now;
         }
         self.record_match_metrics(now);
         self.checkpoint_career_round(now);
@@ -2306,6 +2421,20 @@ fn main() -> io::Result<()> {
 
     let mut runtime = ServerRuntime::new_with_map(socket, match_config, map_config);
     runtime.match_service = match_service;
+    if std::env::var("OMOBA_COMBAT_SANDBOX").as_deref() == Ok("1") {
+        if match_config.mode != MatchMode::Dev
+            || runtime.match_service.is_public()
+            || runtime.match_service.worker().is_some()
+            || !runtime.socket.local_addr()?.ip().is_loopback()
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Combat Sandbox requires MATCH_MODE=dev and a loopback SERVER_ADDR",
+            ));
+        }
+        runtime.sandbox = Some(sandbox::SandboxRuntime::new(Instant::now()));
+        println!("Combat Sandbox enabled (local, unrated)");
+    }
     App::new()
         .add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(SIMULATION_STEP_SLEEP)))
         .add_plugins(GameplayPlugin)
@@ -2341,6 +2470,9 @@ fn apply_skill_upgrade(player: &mut ConnectedPlayer, slot: u8) {
     let s = skill_slot.index();
     if player.state.skill_points > 0 && player.state.ranks[s] < def.max_rank {
         player.state.ranks[s] += 1;
+        if let Some(c) = &mut player.sandbox {
+            c.ranks = player.state.ranks;
+        }
         player.state.skill_points -= 1;
         println!(
             "Player {} upgraded {} (slot {}) to rank {}",
@@ -2378,28 +2510,47 @@ fn handle_cast_request(
     }
     // Authoritative kit resolution: class + slot -> ability definition.
     let def = ability_for_class_slot(caster.state.hero_class, skill_slot);
-    if !unlocked_slots_for_level(caster.state.level)[skill_slot.index()] {
+    if !caster.sandbox.as_ref().is_some_and(|c| c.unlock_all)
+        && !unlocked_slots_for_level(caster.state.level)[skill_slot.index()]
+    {
         return;
     }
     let rank = caster.state.ranks[skill_slot.index()].clamp(1, def.max_rank);
     let mana_cost = scaled_mana_cost(def, rank);
-    if caster.state.mana < mana_cost {
+    if !caster.sandbox.as_ref().is_some_and(|c| c.infinite_resource)
+        && caster.state.mana < mana_cost
+    {
         return;
     }
-    if caster.last_cast_at[skill_slot.index()].is_some_and(|last_cast| {
-        now.duration_since(last_cast)
-            < item_cooldown(def, rank, skill_slot, caster.state.item_bonuses)
-    }) {
+    if !caster.sandbox.as_ref().is_some_and(|c| c.no_cooldowns)
+        && caster.last_cast_at[skill_slot.index()].is_some_and(|last_cast| {
+            now.duration_since(last_cast) < sandbox::effective_ability_cooldown(caster, skill_slot)
+        })
+    {
         return;
     }
 
-    let effect_scale = rank_effect_scale(rank);
+    if sandbox::skill_recovery_remaining(caster, now) > 0.0 {
+        return;
+    }
+    let effect_scale = rank_effect_scale(rank)
+        * shared::hero_balance::ability_power_multiplier(
+            caster.state.hero_class,
+            caster.state.level,
+        );
     if def.targeting == TargetingMode::SelfTarget {
         let Some(caster_mut) = players.get_mut(&caster_addr) else {
             return;
         };
-        caster_mut.state.mana -= mana_cost;
+        if !caster_mut
+            .sandbox
+            .as_ref()
+            .is_some_and(|c| c.infinite_resource)
+        {
+            caster_mut.state.mana -= mana_cost;
+        }
         caster_mut.last_cast_at[skill_slot.index()] = Some(now);
+        sandbox::refresh_skill_cooldowns(caster_mut, now);
         record_player_action(caster_mut, skill_slot);
         if let Some(heal) = def.self_heal {
             caster_mut.state.hp =
@@ -2413,6 +2564,19 @@ fn handle_cast_request(
     }
 
     let caster_team = caster.state.team;
+    if caster.sandbox.is_none()
+        && !vision::target_visible(
+            caster_team,
+            target,
+            players,
+            minions,
+            structures,
+            neutrals,
+            now,
+        )
+    {
+        return;
+    }
     let (target_position, target_radius) = match target.kind {
         TargetKind::Player => {
             let Some(target_player) = players.values().find(|player| {
@@ -2511,8 +2675,15 @@ fn handle_cast_request(
     let Some(caster_mut) = players.get_mut(&caster_addr) else {
         return;
     };
-    caster_mut.state.mana -= mana_cost;
+    if !caster_mut
+        .sandbox
+        .as_ref()
+        .is_some_and(|c| c.infinite_resource)
+    {
+        caster_mut.state.mana -= mana_cost;
+    }
     caster_mut.last_cast_at[skill_slot.index()] = Some(now);
+    sandbox::refresh_skill_cooldowns(caster_mut, now);
     record_player_action(caster_mut, skill_slot);
 
     // Higher invested rank = proportionally more projectile damage; active
@@ -2769,7 +2940,13 @@ fn simulate_projectiles(
             break;
         }
         let event = match target.kind {
-            TargetKind::Player => apply_player_damage(players, target.id, damage, now),
+            TargetKind::Player => apply_player_damage_typed(
+                players,
+                target.id,
+                damage,
+                now,
+                source.action_slot.is_some_and(|slot| slot < 4),
+            ),
             TargetKind::Structure => {
                 apply_structure_damage(structures, target.id, damage, attacker_team, game_state)
             }
@@ -2874,6 +3051,17 @@ fn apply_neutral_damage(
     if neutral.dead_until.is_some() || neutral.state.hp <= 0.0 {
         return None;
     }
+    // Forest Tracker: the attacker's class scales damage against monsters.
+    let damage = players
+        .values()
+        .find(|player| player.state.id == attacker_player_id)
+        .map_or(damage, |player| {
+            damage
+                * shared::jungle::neutral_damage_multiplier(
+                    player.state.hero_class,
+                    neutral.state.camp_type.is_boss(),
+                )
+        });
     let before = neutral.state.hp;
     neutral.state.hp = (before - damage).max(0.0);
     if players.values().any(|player| {
@@ -2914,6 +3102,32 @@ fn apply_neutral_damage(
     )
 }
 
+/// Recovery is authoritative and only active inside the hero's own fountain.
+fn regenerate_base_hp(
+    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+    map: &MapLayoutState,
+    phase: &GameState,
+    dt: f32,
+) {
+    if !matches!(phase, GameState::Running) || !dt.is_finite() || dt <= 0.0 {
+        return;
+    }
+    for player in players
+        .values_mut()
+        .filter(|p| p.joined && p.state.hp > 0.0)
+    {
+        let base = match player.state.team {
+            Team::Green => map.home,
+            Team::Blue => map.away,
+        };
+        if (player.state.x - base.x).hypot(player.state.z - base.z) <= BASE_HEAL_RADIUS {
+            player.state.hp = (player.state.hp
+                + player.state.max_hp * BASE_HEAL_FRACTION_PER_SECOND * dt)
+                .min(player.state.max_hp);
+        }
+    }
+}
+
 /// Applies boss-buff HP regeneration to every alive player of a buffed team,
 /// clamped to max HP. Runs each simulation tick (piggybacks the regen cadence).
 fn regenerate_team_buff_hp(
@@ -2945,8 +3159,16 @@ fn award_neutral_kill_to_player(
     let rewards = neutral_template(camp_type);
     for player in players.values_mut() {
         if player.state.id == killer_id {
-            award_gold(player, rewards.kill_gold);
-            grant_player_xp(&mut player.state, rewards.kill_xp);
+            let (gold, xp) = shared::jungle::neutral_kill_rewards(
+                player.state.hero_class,
+                camp_type.is_boss(),
+                rewards.kill_gold,
+                rewards.kill_xp,
+            );
+            award_gold(player, gold);
+            if player.sandbox.is_none() {
+                grant_player_xp(&mut player.state, xp);
+            }
             if !camp_type.is_boss() && player.state.hp > 0.0 {
                 player.state.hp = (player.state.hp
                     + player.state.max_hp * NEUTRAL_KILL_HEAL_FRACTION)
@@ -3176,7 +3398,9 @@ fn restore_god_mode_players(players: &mut HashMap<SocketAddr, ConnectedPlayer>) 
     for player in players.values_mut() {
         if player.god_mode {
             player.state.hp = player.state.max_hp;
-            player.state.mana = player.state.max_mana;
+            if player.sandbox.as_ref().is_none_or(|c| c.infinite_resource) {
+                player.state.mana = player.state.max_mana;
+            }
             player.respawn_at = None;
         }
     }
@@ -3215,7 +3439,9 @@ fn award_minion_kill_rewards(
             xp += 1;
         }
         award_gold(player, gold);
-        grant_player_xp(&mut player.state, xp);
+        if player.sandbox.is_none() {
+            grant_player_xp(&mut player.state, xp);
+        }
     }
 }
 
@@ -3233,9 +3459,28 @@ fn simulate_minions(
         return Vec::new();
     }
 
+    let green_sight = vision::sources(Team::Green, players, minions, structures);
+    let blue_sight = vision::sources(Team::Blue, players, minions, structures);
+    let visible_players: HashSet<u64> = players
+        .values()
+        .filter(|p| {
+            vision::player_visible(
+                if p.state.team == Team::Green {
+                    &blue_sight
+                } else {
+                    &green_sight
+                },
+                p,
+                now,
+            )
+        })
+        .map(|p| p.state.id)
+        .collect();
     let player_targets = players
         .values()
-        .filter(|player| player.joined && player.state.hp > 0.0)
+        .filter(|player| {
+            player.joined && player.state.hp > 0.0 && visible_players.contains(&player.state.id)
+        })
         .map(|player| {
             (
                 player.state.id,
@@ -3555,6 +3800,8 @@ fn simulate_tower_attacks(
     if !matches!(game_state, GameState::Running) {
         return Vec::new();
     }
+    let green_sight = vision::sources(Team::Green, players, minions, structures);
+    let blue_sight = vision::sources(Team::Blue, players, minions, structures);
     let mut towers_to_fire: Vec<(u64, Team, Vec3f, u64, Vec3f, f32, f32)> = Vec::new();
     let mut minion_damage_events: Vec<(u64, f32, Team, HitSource)> = Vec::new();
 
@@ -3606,7 +3853,17 @@ fn simulate_tower_attacks(
 
         let mut best_target: Option<(u64, Vec3f, f32)> = None;
         for player in players.values() {
-            if !player.joined || player.state.hp <= 0.0 || player.state.team == structure.state.team
+            if !vision::player_visible(
+                if structure.state.team == Team::Green {
+                    &green_sight
+                } else {
+                    &blue_sight
+                },
+                player,
+                now,
+            ) || !player.joined
+                || player.state.hp <= 0.0
+                || player.state.team == structure.state.team
             {
                 continue;
             }
@@ -3626,7 +3883,7 @@ fn simulate_tower_attacks(
                 tower_position,
                 target_id,
                 target_pos,
-                structure.attack_damage,
+                structure.attack_damage * structure.hero_damage_multiplier,
                 match structure.state.kind {
                     StructureKind::Tower => TOWER_SHOT_HEIGHT,
                     StructureKind::BaseTower => BASE_TOWER_SHOT_HEIGHT,
@@ -3714,6 +3971,8 @@ mod tests {
 
     fn empty_snapshot() -> ServerPacket {
         ServerPacket::Snapshot {
+            vision: None,
+            sandbox: None,
             match_mode: "dev".into(),
             geometry_id: shared::map::GEOMETRY_ID.to_owned(),
             map_profile: "verdant_default".to_owned(),
@@ -3729,6 +3988,7 @@ mod tests {
             minions: Vec::new(),
             neutrals: Vec::new(),
             team_buffs: Vec::new(),
+            forest_pickups: Vec::new(),
             game_state: GameState::Running,
             rematch_in_secs: None,
         }
@@ -3760,6 +4020,8 @@ mod tests {
         player.state.avatar = Some("x".repeat(IPV4_UDP_MAX_PAYLOAD_BYTES));
 
         let packet = ServerPacket::Snapshot {
+            vision: None,
+            sandbox: None,
             match_mode: "dev".into(),
             geometry_id: shared::map::GEOMETRY_ID.to_owned(),
             map_profile: "verdant_default".to_owned(),
@@ -3775,6 +4037,7 @@ mod tests {
             minions: Vec::new(),
             neutrals: Vec::new(),
             team_buffs: Vec::new(),
+            forest_pickups: Vec::new(),
             game_state: GameState::Running,
             rematch_in_secs: None,
         };
@@ -5028,7 +5291,15 @@ mod tests {
         );
         let state = &players.get(&caster).unwrap().state;
         assert!(
-            (state.hp - (40.0 + w.self_heal.unwrap())).abs() < EPSILON,
+            (state.hp
+                - (40.0
+                    + w.self_heal.unwrap()
+                        * shared::hero_balance::ability_power_multiplier(
+                            state.hero_class,
+                            state.level
+                        )))
+            .abs()
+                < EPSILON,
             "unlocked W must heal by the kit amount"
         );
         assert!((state.mana - (state.max_mana - w.base_mana_cost)).abs() < EPSILON);

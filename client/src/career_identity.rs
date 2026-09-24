@@ -557,7 +557,7 @@ fn identity_driver(
     mut names: MessageReader<NicknameChanged>,
     mut requests: MessageWriter<NetworkCommand>,
 ) {
-    if std::env::var_os("OMOBA_CAREER_QA_OUTPUT").is_some_and(|value| !value.is_empty()) {
+    if session.is_offline() || std::env::var_os("OMOBA_CAREER_QA_OUTPUT").is_some_and(|value| !value.is_empty()) {
         names.clear();
         return;
     }

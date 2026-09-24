@@ -9,6 +9,8 @@ use std::time::Duration;
 pub mod career;
 pub mod combat;
 pub mod device_account;
+pub mod forest_pickups;
+pub mod hero_balance;
 pub mod jungle;
 pub mod live_score;
 pub mod map;
@@ -17,11 +19,13 @@ pub mod navigation;
 pub mod prematch;
 pub mod protocol;
 pub mod public_transport;
+pub mod sandbox;
 pub mod shop;
 pub mod social;
 pub mod supporter;
 pub mod transport;
 pub mod utility;
+pub mod vision;
 pub mod web_account;
 
 /// Resolve packaged assets before the development checkout. Launchers can
@@ -107,6 +111,8 @@ pub const BASIC_ATTACK_ACTION_SLOT: u8 = u8::MAX;
 /// Shared target surfaces for authoritative attack reach and client approach.
 /// These are the existing simulation radii, independent of visual model scale.
 pub const PLAYER_TARGET_RADIUS: f32 = 0.62;
+/// Projectile hit volume shared by authoritative combat and debug visualization.
+pub const PROJECTILE_COLLISION_RADIUS: f32 = 0.22;
 pub const MINION_TARGET_RADIUS: f32 = 0.55;
 pub const NEUTRAL_TARGET_RADIUS: f32 = 0.62;
 pub const TOWER_TARGET_RADIUS: f32 = 1.3;
@@ -142,6 +148,11 @@ pub const fn basic_attack_for_class(class: HeroClass) -> &'static BasicAttackDef
             range: 12.0,
             damage: 8.0,
             cooldown_secs: 1.0,
+        },
+        HeroClass::Warden => &BasicAttackDefinition {
+            range: 5.0,
+            damage: 11.0,
+            cooldown_secs: 0.85,
         },
     }
 }
@@ -214,10 +225,17 @@ pub enum HeroClass {
     Mage,
     Ranger,
     Cleric,
+    Warden,
 }
 
 impl HeroClass {
-    pub const ALL: [Self; 4] = [Self::Warrior, Self::Mage, Self::Ranger, Self::Cleric];
+    pub const ALL: [Self; 5] = [
+        Self::Warrior,
+        Self::Mage,
+        Self::Ranger,
+        Self::Cleric,
+        Self::Warden,
+    ];
 
     /// Stable wire/UI identifier (snake_case).
     pub const fn id(self) -> &'static str {
@@ -226,6 +244,7 @@ impl HeroClass {
             Self::Mage => "mage",
             Self::Ranger => "ranger",
             Self::Cleric => "cleric",
+            Self::Warden => "warden",
         }
     }
 
@@ -239,6 +258,7 @@ impl HeroClass {
             Self::Mage => "Mage",
             Self::Ranger => "Ranger",
             Self::Cleric => "Cleric",
+            Self::Warden => "Warden",
         }
     }
 
@@ -249,6 +269,19 @@ impl HeroClass {
             Self::Mage => "Long-range nuker: big damage, mana engine",
             Self::Ranger => "Fast skirmisher: rapid shots, longest reach",
             Self::Cleric => "Support: modest damage, strong heals",
+            Self::Warden => "Jungler: fast camp clears, bonus forest gold",
+        }
+    }
+
+    /// The draft duty this kit is built for. Every class owns a distinct role,
+    /// so one of each fills a five-player team. Players may still pick any role.
+    pub const fn primary_role(self) -> prematch::Role {
+        match self {
+            Self::Warrior => prematch::Role::Solo,
+            Self::Mage => prematch::Role::Mid,
+            Self::Ranger => prematch::Role::Carry,
+            Self::Cleric => prematch::Role::Support,
+            Self::Warden => prematch::Role::Jungle,
         }
     }
 
@@ -259,6 +292,7 @@ impl HeroClass {
             Self::Mage => &MAGE_ABILITIES,
             Self::Ranger => &RANGER_ABILITIES,
             Self::Cleric => &CLERIC_ABILITIES,
+            Self::Warden => &WARDEN_ABILITIES,
         }
     }
 
@@ -289,7 +323,7 @@ pub const WARRIOR_ABILITIES: [AbilityDefinition; 4] = [
         "Slams the selected enemy at close range.",
         TargetingMode::UnitTarget,
         10.0,
-        0.5,
+        2.0,
         12.0,
         Some(24.0),
         None,
@@ -313,7 +347,7 @@ pub const WARRIOR_ABILITIES: [AbilityDefinition; 4] = [
         "A crushing blow with very short reach.",
         TargetingMode::UnitTarget,
         22.0,
-        2.5,
+        2.8,
         10.0,
         Some(38.0),
         None,
@@ -340,7 +374,7 @@ pub const MAGE_ABILITIES: [AbilityDefinition; 4] = [
         "Homing bolt toward a selected enemy.",
         TargetingMode::UnitTarget,
         22.0,
-        0.4,
+        2.2,
         30.0,
         Some(18.0),
         None,
@@ -391,7 +425,7 @@ pub const RANGER_ABILITIES: [AbilityDefinition; 4] = [
         "Very fast arrow with modest damage.",
         TargetingMode::UnitTarget,
         14.0,
-        0.25,
+        1.8,
         24.0,
         Some(14.0),
         None,
@@ -442,7 +476,7 @@ pub const CLERIC_ABILITIES: [AbilityDefinition; 4] = [
         "Radiant bolt against a selected enemy.",
         TargetingMode::UnitTarget,
         12.0,
-        0.6,
+        2.0,
         22.0,
         Some(16.0),
         None,
@@ -482,6 +516,59 @@ pub const CLERIC_ABILITIES: [AbilityDefinition; 4] = [
         0.0,
         None,
         Some(60.0),
+        None,
+    ),
+];
+
+/// Jungler kit: melee-range bites for camp clears, a self-heal to stay in the
+/// forest between camps, and a finisher. The camp bonus lives in `jungle`.
+pub const WARDEN_ABILITIES: [AbilityDefinition; 4] = [
+    ability(
+        "feral_swipe",
+        "Feral Swipe",
+        "Rakes the selected enemy at close range.",
+        TargetingMode::UnitTarget,
+        12.0,
+        2.2,
+        12.0,
+        Some(22.0),
+        None,
+        None,
+    ),
+    ability(
+        "barkskin",
+        "Barkskin",
+        "Hardens like old wood and mends wounds between camps.",
+        TargetingMode::SelfTarget,
+        16.0,
+        6.0,
+        0.0,
+        None,
+        Some(18.0),
+        None,
+    ),
+    ability(
+        "hunters_mark",
+        "Hunter's Mark",
+        "Thrown spear that pins prey at medium range.",
+        TargetingMode::UnitTarget,
+        22.0,
+        4.0,
+        20.0,
+        Some(28.0),
+        None,
+        None,
+    ),
+    ability(
+        "primal_maul",
+        "Primal Maul",
+        "Savage finisher for monsters and heroes caught out of lane.",
+        TargetingMode::UnitTarget,
+        40.0,
+        14.0,
+        14.0,
+        Some(56.0),
+        None,
         None,
     ),
 ];
@@ -937,7 +1024,20 @@ mod tests {
                 }
             }
         }
-        assert_eq!(ids.len(), 16, "expected 16 distinct ability definitions");
+        assert_eq!(
+            ids.len(),
+            HeroClass::ALL.len() * 4,
+            "expected four distinct ability definitions per class"
+        );
+    }
+
+    #[test]
+    fn five_classes_fill_five_distinct_roles() {
+        let roles: Vec<_> = HeroClass::ALL.map(HeroClass::primary_role).into();
+        for role in prematch::Role::ALL {
+            assert_eq!(roles.iter().filter(|r| **r == role).count(), 1, "{role:?}");
+        }
+        assert_eq!(HeroClass::from_id("warden"), Some(HeroClass::Warden));
     }
 
     #[test]
@@ -947,7 +1047,11 @@ mod tests {
                 .iter()
                 .map(|class| class.ability(slot).id)
                 .collect();
-            assert_eq!(ids.len(), 4, "slot {slot:?} must differ across classes");
+            assert_eq!(
+                ids.len(),
+                HeroClass::ALL.len(),
+                "slot {slot:?} must differ across classes"
+            );
         }
         // Every class has a usable Q at level 1 (UnitTarget damage opener).
         for class in HeroClass::ALL {

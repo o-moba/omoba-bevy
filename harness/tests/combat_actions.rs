@@ -13,7 +13,7 @@ fn distance(a: &harness::PlayerState, b: &harness::PlayerState) -> f32 {
     ((a.x - b.x).powi(2) + (a.z - b.z).powi(2)).sqrt()
 }
 
-fn walk_into_range(observer: &mut Bot, caster: &Bot, observer_id: u64, caster_id: u64) {
+fn walk_into_range(observer: &mut Bot, caster: &mut Bot, observer_id: u64, caster_id: u64) {
     observer.set_speed_boost(true);
     caster.set_speed_boost(true);
     let mut routes: [BotNavigator; 2] = Default::default();
@@ -24,12 +24,20 @@ fn walk_into_range(observer: &mut Bot, caster: &Bot, observer_id: u64, caster_id
         let Some(snapshot) = observer.recv_snapshot(deadline.min(Instant::now() + TIMEOUT)) else {
             continue;
         };
-        let (Some(observer_state), Some(caster_state)) =
-            (snapshot.player(observer_id), snapshot.player(caster_id))
+        let Some(caster_snapshot) = caster.recv_snapshot(deadline.min(Instant::now() + TIMEOUT))
         else {
             continue;
         };
-        if distance(observer_state, caster_state) < 8.0 {
+        let (Some(observer_state), Some(caster_state)) = (
+            snapshot.player(observer_id),
+            caster_snapshot.player(caster_id),
+        ) else {
+            continue;
+        };
+        if distance(observer_state, caster_state) < 8.0
+            && snapshot.player(caster_id).is_some()
+            && caster_snapshot.player(observer_id).is_some()
+        {
             return;
         }
         // The server clips live structure discs as well as authored terrain.
@@ -38,6 +46,7 @@ fn walk_into_range(observer: &mut Bot, caster: &Bot, observer_id: u64, caster_id
         let structures: Vec<_> = snapshot
             .structures()
             .iter()
+            .chain(caster_snapshot.structures().iter())
             .filter(|s| s.hp > 0.0)
             .map(|s| Disc {
                 center: [s.x, s.z],
@@ -46,7 +55,7 @@ fn walk_into_range(observer: &mut Bot, caster: &Bot, observer_id: u64, caster_id
             .collect();
         for ((route, bot), state) in routes
             .iter_mut()
-            .zip([&*observer, caster])
+            .zip([&*observer, &*caster])
             .zip([observer_state, caster_state])
         {
             if let Some(next) = route.next([state.x, state.z], [0.0, 0.0], &structures) {
@@ -72,14 +81,13 @@ fn two_clients_observe_sequential_accepted_casts_once_and_defaults_are_inert() {
 
     let observer_id = observer.my_id(TIMEOUT);
     let caster_id = caster.my_id(TIMEOUT);
+    walk_into_range(&mut observer, &mut caster, observer_id, caster_id);
     let baseline = observer
         .wait_for_player(caster_id, |_| true, TIMEOUT)
         .expect("remote caster should replicate");
     assert_eq!(baseline.action_sequence, 0);
     assert_eq!(baseline.action_kind, PlayerActionKind::None);
     assert_eq!(baseline.action_slot, 0);
-
-    walk_into_range(&mut observer, &caster, observer_id, caster_id);
 
     caster.cast(TargetId::player(observer_id));
     let first_remote = observer
@@ -102,7 +110,10 @@ fn two_clients_observe_sequential_accepted_casts_once_and_defaults_are_inert() {
         .expect("snapshot after rejected cast");
     assert_eq!(rejected.action_sequence, first_sequence);
 
-    std::thread::sleep(Duration::from_millis(450));
+    // Use the kit's authoritative cooldown instead of an obsolete 450ms assumption.
+    std::thread::sleep(
+        shared::scaled_cooldown(&shared::WARRIOR_ABILITIES[0], 1) + Duration::from_millis(100),
+    );
     caster.cast(TargetId::player(observer_id));
     let second_remote = observer
         .wait_for_player(caster_id, |p| p.action_sequence != first_sequence, TIMEOUT)

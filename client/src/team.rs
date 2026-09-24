@@ -150,7 +150,7 @@ impl Plugin for TeamSelectPlugin {
                     .after(team_select_ui_system)
                     .run_if(in_state(AppScreen::HeroSelect)),
             )
-            .add_systems(Update, autojoin_from_env);
+            .add_systems(Update, (autojoin_from_env, sync_practice_picker));
     }
 }
 
@@ -164,6 +164,9 @@ pub struct HeroSelectBackButton;
 /// Connection status inside the picker header.
 #[derive(Component)]
 struct HeroSelectStatus;
+
+#[derive(Component)]
+struct JoinActionLabel;
 
 #[derive(Component)]
 struct TeamSelectButton {
@@ -732,7 +735,15 @@ pub fn spawn_team_select_ui(
 
             spawn_ekza_row(parent);
 
-            spawn_section_title(parent, "03  FIND YOUR TEAM", "TeamSelectTitle");
+            spawn_section_title(
+                parent,
+                if crate::sandbox::requested() {
+                    "03  ENTER COMBAT TEST"
+                } else {
+                    "03  FIND YOUR TEAM"
+                },
+                "TeamSelectTitle",
+            );
 
             parent
                 .spawn((
@@ -1346,7 +1357,12 @@ fn spawn_team_button(row: &mut ChildSpawnerCommands, team: Team, name: &str) {
     ))
     .with_children(|button| {
         button.spawn((
-            Text::new("Find match"),
+            JoinActionLabel,
+            Text::new(if crate::sandbox::requested() {
+                "Enter Combat Test"
+            } else {
+                "Find match"
+            }),
             TextFont {
                 font_size: 22.0,
                 ..default()
@@ -1447,6 +1463,9 @@ fn team_select_ui_system(
         .any(|interaction| *interaction == Interaction::Pressed)
         && let Some(screen) = screen.as_deref_mut()
     {
+        if client_session.is_offline() {
+            session_ui_writer.write(SessionUiCommand::LeaveMatch);
+        }
         screen.set(AppScreen::Home);
         return;
     }
@@ -1486,6 +1505,16 @@ fn team_select_ui_system(
         let is_selected = selection.avatar.as_deref() == Some(button.slug.as_str());
         match *interaction {
             Interaction::Pressed => {
+                if client_session.is_offline()
+                    && !shared::avatar_roster()
+                        .iter()
+                        .any(|a| a.slug == button.slug && a.passport.is_none())
+                {
+                    if let Some(notice) = notice.as_deref_mut() {
+                        notice.0=Some("Offline practice uses the included avatars. Choose an avatar from the first group.".into());
+                    }
+                    continue;
+                }
                 selection.avatar = Some(button.slug.clone());
                 avatar_changed = true;
             }
@@ -1564,12 +1593,22 @@ fn team_select_ui_system(
                     selection.avatar,
                     selection.character
                 );
-                command_writer.write(NetworkCommand::JoinPrematch {
-                    character: selection.character,
-                    hero_class: selection.hero_class,
-                    avatar: selection.avatar.clone(),
-                    sprite_character: Some(selection.sprite_character.clone()),
-                });
+                if crate::sandbox::requested() || client_session.is_offline() {
+                    command_writer.write(NetworkCommand::Join {
+                        team: button.team,
+                        character: selection.character,
+                        hero_class: selection.hero_class,
+                        avatar: selection.avatar.clone(),
+                        sprite_character: Some(selection.sprite_character.clone()),
+                    });
+                } else {
+                    command_writer.write(NetworkCommand::JoinPrematch {
+                        character: selection.character,
+                        hero_class: selection.hero_class,
+                        avatar: selection.avatar.clone(),
+                        sprite_character: Some(selection.sprite_character.clone()),
+                    });
+                }
                 if let Ok(overlay) = overlay_query.single() {
                     commands
                         .entity(overlay)
@@ -1578,7 +1617,11 @@ fn team_select_ui_system(
                 }
                 // The hero is locked: matchmaking owns the screen from here.
                 if let Some(screen) = screen.as_deref_mut() {
-                    screen.set(AppScreen::Searching);
+                    screen.set(if crate::sandbox::requested() {
+                        AppScreen::InMatch
+                    } else {
+                        AppScreen::Searching
+                    });
                 }
             }
             Interaction::Hovered => {
@@ -1795,5 +1838,23 @@ mod tests {
                 .iter(app.world())
                 .any(|(name, button)| name.as_str() == "RendererStatus" && button.is_none())
         );
+    }
+}
+
+fn sync_practice_picker(
+    session: Res<ClientSession>,
+    mut labels: Query<&mut Text, With<JoinActionLabel>>,
+) {
+    let label = if session.is_offline() {
+        "Start practice"
+    } else if crate::sandbox::requested() {
+        "Enter Combat Test"
+    } else {
+        "Find match"
+    };
+    for mut text in &mut labels {
+        if text.0 != label {
+            text.0 = label.into();
+        }
     }
 }

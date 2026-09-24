@@ -13,8 +13,11 @@ use ekza_bevy_sdk::{
 
 /// Registry origin: the same operator override the client store uses.
 pub fn registry_url() -> String {
-    std::env::var(crate::store::REGISTRY_URL_ENV)
-        .unwrap_or_else(|_| DEFAULT_REGISTRY_URL.to_owned())
+    std::env::var(crate::store::REGISTRY_URL_ENV).unwrap_or_else(|_| {
+        option_env!("OMOBA_DEFAULT_REGISTRY_URL")
+            .unwrap_or(DEFAULT_REGISTRY_URL)
+            .to_owned()
+    })
 }
 
 /// Avatars approved for Omoba that are explicitly free. One blocking request.

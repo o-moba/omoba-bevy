@@ -88,6 +88,7 @@ client/assets/avatars/passport-manifest.json
 !client/assets/map-props/
 !docs/map-customization.md
 !docs/balance-tuning.md
+!docs/team-vision.md
 
 # Local career receipts and device identity are runtime data, never source.
 .omoba/
@@ -135,3 +136,9 @@ node_modules/
 # Engine-owned shared humanoid motion (not baked into avatar models).
 !client/assets/animations/
 !client/assets/animations/**
+
+# Personal Xcode signing and local build overrides.
+/mobile/ios/Omoba.local.xcconfig
+
+# Private local Ekza rehearsal configuration and logs
+.ekza-lan/

@@ -31,6 +31,8 @@ pub(crate) fn ensure_player_connected(
         let spawn = spawn_position_for_team(map_layout, Team::Green);
 
         ConnectedPlayer {
+            sandbox: None,
+            sandbox_infinite_hp: false,
             career_profile: None,
             career_capable: false,
             draft: Default::default(),
@@ -56,6 +58,8 @@ pub(crate) fn ensure_player_connected(
                 last_purchase: None,
                 basic_attack_cooldown_secs: 0.0,
                 basic_attack_remaining_secs: 0.0,
+                skill_cooldown_remaining_secs: [0.0; 4],
+                skill_recovery_remaining_secs: 0.0,
                 basic_attack_request_id: 0,
                 xp: 0,
                 level: STARTING_LEVEL,
@@ -268,8 +272,8 @@ pub(crate) fn reset_player_round(
     player.state.y = PLAYER_GROUND_Y;
     player.state.z = spawn.z;
     player.state.yaw = 0.0;
-    player.state.hp = MAX_HP;
-    player.state.max_hp = MAX_HP;
+    player.state.max_hp = shared::hero_balance::base_hp(player.state.hero_class);
+    player.state.hp = player.state.max_hp;
     player.state.mana = MAX_MANA;
     player.state.max_mana = MAX_MANA;
     player.state.gold = STARTING_GOLD;
@@ -295,14 +299,19 @@ pub(crate) fn reset_player_round(
     player.last_movement_at = now;
     player.last_cast_at = [None; 4];
     player.last_basic_attack_at = None;
-    player.state.basic_attack_cooldown_secs = shared::shop::basic_attack_cooldown(
-        shared::basic_attack_for_class(player.state.hero_class),
+    player.state.basic_attack_cooldown_secs = shared::hero_balance::basic_cooldown(
+        player.state.hero_class,
+        player.state.level,
         player.state.item_bonuses,
     )
     .as_secs_f32();
     player.state.basic_attack_remaining_secs = 0.0;
+    player.state.skill_cooldown_remaining_secs = [0.0; 4];
+    player.state.skill_recovery_remaining_secs = 0.0;
     player.state.basic_attack_request_id = 0;
     player.respawn_at = None;
+    player.sandbox = None;
+    player.sandbox_infinite_hp = false;
     player.god_mode = false;
     player.speed_mult = 1.0;
 }
@@ -359,7 +368,9 @@ pub(crate) fn handle_transform_request_with_structures(
         .duration_since(player.last_movement_at)
         .as_secs_f32()
         .clamp(0.0, MOVEMENT_MAX_DELTA_SECONDS);
-    let speed_mult = player.speed_mult.max(1.0) * utility_movement_multiplier(player, now);
+    let speed_mult = player.speed_mult.max(0.1)
+        * utility_movement_multiplier(player, now)
+        * shared::hero_balance::movement_multiplier(player.state.hero_class, player.state.level);
     let max_distance =
         PLAYER_SPEED * speed_mult * player.state.item_bonuses.move_speed_multiplier * elapsed
             + MOVEMENT_POSITION_TOLERANCE;
@@ -396,39 +407,15 @@ pub(crate) fn clip_live_structures(
     to: [f32; 2],
     structures: &HashMap<u64, Structure>,
 ) -> [f32; 2] {
-    let delta = [to[0] - from[0], to[1] - from[1]];
-    let length_sq = delta[0] * delta[0] + delta[1] * delta[1];
-    if length_sq <= 0.000_000_1 {
-        return to;
-    }
-    let mut fraction = 1.0_f32;
-    for structure in structures.values().filter(|s| s.state.hp > 0.0) {
-        let radius = match structure.state.kind {
-            StructureKind::Tower => shared::TOWER_TARGET_RADIUS,
-            StructureKind::BaseTower => 3.2,
-        } + shared::navigation::HERO_RADIUS;
-        let offset = [from[0] - structure.state.x, from[1] - structure.state.z];
-        let dot = offset[0] * delta[0] + offset[1] * delta[1];
-        let c = offset[0] * offset[0] + offset[1] * offset[1] - radius * radius;
-        if c < 0.0 {
-            if dot < 0.0 {
-                return from;
-            }
-            continue;
-        }
-        if dot >= 0.0 {
-            continue;
-        }
-        let discriminant = dot * dot - length_sq * c;
-        if discriminant < 0.0 {
-            continue;
-        }
-        let contact = (-dot - discriminant.sqrt()) / length_sq;
-        if (0.0..=fraction).contains(&contact) {
-            fraction = (contact - 0.001 / length_sq.sqrt()).max(0.0);
-        }
-    }
-    [from[0] + delta[0] * fraction, from[1] + delta[1] * fraction]
+    let discs: Vec<_> = structures
+        .values()
+        .filter(|s| s.state.hp > 0.0)
+        .map(|s| shared::navigation::Disc {
+            center: [s.state.x, s.state.z],
+            radius: structure_collision_radius(s.state.kind),
+        })
+        .collect();
+    shared::navigation::clip_discs(from, to, &discs)
 }
 
 pub(crate) fn handle_respawns(
@@ -442,6 +429,9 @@ pub(crate) fn handle_respawns(
         return;
     }
     for player in players.values_mut() {
+        if player.sandbox.is_some() && player.state.is_bot {
+            continue;
+        }
         let Some(respawn_at) = player.respawn_at else {
             continue;
         };
@@ -462,6 +452,8 @@ pub(crate) fn handle_respawns(
         player.last_cast_at = [None; 4];
         player.last_basic_attack_at = None;
         player.state.basic_attack_remaining_secs = 0.0;
+        player.state.skill_cooldown_remaining_secs = [0.0; 4];
+        player.state.skill_recovery_remaining_secs = 0.0;
         // Preserve request high-water through death; delayed strikes from the
         // same round must not become fresh attacks after respawn.
     }
@@ -619,6 +611,11 @@ impl ServerRuntime {
     }
 
     pub(crate) fn restart_round(&mut self, now: Instant) {
+        if self.sandbox_allowed() {
+            let now = self.sandbox.as_ref().unwrap().now;
+            self.reset_sandbox_duel(now);
+            return;
+        }
         self.finish_career_round(shared::career::MatchOutcome::Abandoned, None, now);
         if let crate::match_service::MatchService::Worker(worker) = &mut self.match_service {
             worker.aborted = true;
@@ -653,6 +650,7 @@ impl ServerRuntime {
         // Only currently connected admitted identities participate in a rematch.
         self.disconnected_sessions.clear();
         self.match_id = self.match_id.saturating_add(1);
+        self.forest_pickups = forest_pickups::ForestPickups::default();
         self.combat_log = CombatLog::default();
         self.match_started_at = None;
         self.victory_at = None;
