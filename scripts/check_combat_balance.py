@@ -5,7 +5,23 @@ import json
 import math
 import statistics as stats
 
-CLASSES = ('warrior', 'mage', 'ranger', 'cleric')
+def classes_of(data):
+    """Hero classes in capture order. The frozen baseline predates Warden, so
+    the targets apply to the baseline's classes and later classes are only
+    checked for shape and repeatability."""
+    return tuple(dict.fromkeys(row['attacker'] for row in data['matrix']))
+
+
+def check_shape(data):
+    classes = classes_of(data)
+    expected = {(level, a, b) for level in (1, 5, 10) for a in classes for b in classes}
+    assert len(data['matrix']) == 3 * len(classes) ** 2, 'matrix size'
+    assert {(r['level'], r['attacker'], r['defender']) for r in data['matrix']} == expected
+    assert all(r['ttk'] is not None and math.isfinite(r['ttk']) for r in data['matrix'])
+    assert {(r['level'], r['attacker'], r['policy']) for r in data['supplements']
+            if r['policy'] in ('basic_only', 'q_only')} == {
+                (l, c, p) for l in (1, 10) for c in classes for p in ('basic_only', 'q_only')}
+    return classes
 
 
 def read(path):
@@ -20,15 +36,12 @@ def key(row):
 
 def validate(baseline, candidate, repeat):
     assert baseline['setup'] == candidate['setup'] == repeat['setup'], 'scenario drift'
-    expected = {(level, a, b) for level in (1, 5, 10) for a in CLASSES for b in CLASSES}
-    for data in (baseline, candidate, repeat):
-        assert len(data['matrix']) == 48
-        assert {(r['level'], r['attacker'], r['defender']) for r in data['matrix']} == expected
-        assert all(r['ttk'] is not None and math.isfinite(r['ttk']) for r in data['matrix'])
-        assert {(r['level'], r['attacker'], r['policy']) for r in data['supplements']
-                if r['policy'] in ('basic_only', 'q_only')} == {
-                    (l, c, p) for l in (1, 10) for c in CLASSES for p in ('basic_only', 'q_only')}
-    levels = {l: [r['ttk'] for r in candidate['matrix'] if r['level'] == l] for l in (1, 5, 10)}
+    CLASSES = check_shape(baseline)
+    current = check_shape(candidate)
+    assert check_shape(repeat) == current, 'candidate and repeat cover different classes'
+    assert set(CLASSES) <= set(current), 'a baseline class is missing from the capture'
+    targeted = [r for r in candidate['matrix'] if r['attacker'] in CLASSES and r['defender'] in CLASSES]
+    levels = {l: [r['ttk'] for r in targeted if r['level'] == l] for l in (1, 5, 10)}
     assert min(levels[1]) >= 6, ('early minimum', min(levels[1]))
     assert 8 <= stats.median(levels[1]) <= 14, ('early median', stats.median(levels[1]))
     assert stats.median(levels[1]) > stats.median(r['ttk'] for r in baseline['matrix'] if r['level'] == 1)
@@ -55,12 +68,16 @@ def validate(baseline, candidate, repeat):
             for field in ('attacker_hp', 'defender_hp', 'mana', 'ranks', 'basic_damage',
                           'basic_interval', 'move_speed', 'attacker_alive', 'defender_alive'):
                 assert row[field] == other[field], (k, field)
-    assert len(candidate['sustain']) == 4
+    assert len(candidate['sustain']) == len(current)
     for row in candidate['sustain']:
         hero = next(r for r in candidate['matrix'] if r['attacker'] == row['class'] and r['level'] == 10)
         assert row['seconds'] == 30 and 0 < row['final_hp'] <= hero['attacker_hp']
         assert 0 <= row['final_mana'] <= hero['mana'] and row['hp_restored'] >= 0
-    print('PASS: 48 primary encounters; early/late targets; class growth; repeatability; sustain bounds.')
+    extra = [c for c in current if c not in CLASSES]
+    print(f'PASS: {len(targeted)} targeted encounters; early/late targets; class growth; '
+          f'repeatability of all {len(candidate["matrix"])}; sustain bounds.')
+    if extra:
+        print('Not covered by the frozen targets (shape and repeatability only): ' + ', '.join(extra))
     print('\n| Level | Baseline mean | Current mean | Current median | Current min–max |')
     print('|---|---:|---:|---:|---:|')
     for level, values in levels.items():
@@ -69,10 +86,11 @@ def validate(baseline, candidate, repeat):
               f'{stats.median(values):.2f}s | {min(values):.2f}–{max(values):.2f}s |')
     print('\nCurrent ordered matrix (rows = attacker; columns = defender):')
     for level in levels:
-        print(f'\nLevel {level}\n\n| Attacker | Warrior | Mage | Ranger | Cleric |\n|---|---:|---:|---:|---:|')
-        for c in CLASSES:
+        header = ' | '.join(c.capitalize() for c in current)
+        print(f'\nLevel {level}\n\n| Attacker | {header} |\n|---|' + '---:|' * len(current))
+        for c in current:
             values = [next(r['ttk'] for r in candidate['matrix'] if
-                           (r['level'], r['attacker'], r['defender']) == (level, c, d)) for d in CLASSES]
+                           (r['level'], r['attacker'], r['defender']) == (level, c, d)) for d in current]
             print(f'| {c} | ' + ' | '.join(f'{v:.2f}s' for v in values) + ' |')
 
 

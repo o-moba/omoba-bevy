@@ -133,7 +133,7 @@ class MatchProof:
                         current['purchases'].append(dict(player_id=player['id'], request_id=receipt['request_id'],
                             item_id=receipt['item_id'], cost=ITEM_COSTS[receipt['item_id']], elapsed_secs=elapsed))
                 offensive = player['action_slot'] == 0 or (
-                    player.get('class') in ('warrior', 'mage', 'ranger')
+                    player.get('class') in ('warrior', 'mage', 'ranger', 'warden')
                     and player['action_slot'] in (2, 3))
                 if player['action_sequence'] and offensive:
                     if player['action_slot'] not in current['offensive_slots']:

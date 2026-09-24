@@ -390,6 +390,31 @@ mod runtime_tests {
         rt.career.backend.test_ack_start(&allocation.result_id);
         assert!(rt.begin_career_round(now));
     }
+
+    #[test]
+    fn allocated_practice_refuses_debug_toggles_after_the_durable_start() {
+        let (mut rt, addr, join) = fixture();
+        let now = Instant::now();
+        rt.handle_packet(addr, join, now);
+        assert!(!rt.begin_career_round(now));
+        let allocation = rt.career_allocation_for_test().unwrap();
+        assert_eq!(allocation.ruleset, "public-casual-v1");
+        rt.career.backend.test_ack_start(&allocation.result_id);
+        assert!(rt.begin_career_round(now));
+        assert!(
+            rt.rules.debug_commands,
+            "worker practice keeps Practice rules"
+        );
+
+        rt.handle_packet(addr, ClientPacket::SetGodMode { enabled: true }, now);
+        rt.handle_packet(addr, ClientPacket::SetSpeedBoost { enabled: true }, now);
+        let player = &rt.world.players[&addr];
+        assert!(
+            !player.modifiers.god_mode && !player.modifiers.infinite_resource,
+            "god mode must not ride into a durable public-casual result"
+        );
+        assert_eq!(player.modifiers.move_speed_mult, 1.0);
+    }
     #[test]
     fn strangers_cannot_enter_and_original_identity_reclaims_its_frozen_seat() {
         let (mut rt, addr, join) = fixture();
