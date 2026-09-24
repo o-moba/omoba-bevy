@@ -29,6 +29,9 @@ pub mod utility;
 pub mod vision;
 pub mod web_account;
 
+/// Gameplay wire protocol: the only definition of the UDP/JSON packet types.
+pub use protocol::wire;
+
 /// Resolve packaged assets before the development checkout. Launchers can
 /// pin this path without requiring a source-tree working directory.
 pub fn client_asset_root() -> std::path::PathBuf {

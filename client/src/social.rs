@@ -1984,7 +1984,7 @@ mod tests {
     #[test]
     fn chat_is_available_after_match_but_not_before_admission() {
         let victory = GameState::Victory {
-            winner: crate::team::Team::Green,
+            winner: shared::map::Team::Green,
         };
         assert!(chat_allowed(true, &GameState::Running));
         assert!(chat_allowed(true, &victory));

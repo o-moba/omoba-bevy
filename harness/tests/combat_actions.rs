@@ -3,7 +3,10 @@
 use std::time::{Duration, Instant};
 
 use harness::navigation::BotNavigator;
-use harness::{Bot, Character, PlayerActionKind, ServerPacket, ServerProcess, TargetId, Team};
+use harness::{
+    Bot, Character, PlayerActionKind, ServerPacket, ServerProcess, SnapshotView, StructureKind,
+    TargetId, Team,
+};
 use shared::navigation::Disc;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
@@ -50,7 +53,11 @@ fn walk_into_range(observer: &mut Bot, caster: &mut Bot, observer_id: u64, caste
             .filter(|s| s.hp > 0.0)
             .map(|s| Disc {
                 center: [s.x, s.z],
-                radius: if s.kind == "base_tower" { 3.2 } else { 1.3 },
+                radius: if s.kind == StructureKind::BaseTower {
+                    3.2
+                } else {
+                    1.3
+                },
             })
             .collect();
         for ((route, bot), state) in routes
@@ -132,7 +139,7 @@ fn two_clients_observe_sequential_accepted_casts_once_and_defaults_are_inert() {
 
 #[test]
 fn legacy_and_unknown_action_fields_decode_safely() {
-    let legacy = br#"{"type":"snapshot","your_id":7,"players":[{"id":7}]}"#;
+    let legacy = br#"{"type":"snapshot","your_id":7,"players":[{"id":7,"x":0.0,"y":0.0,"z":0.0,"yaw":0.0}]}"#;
     let packet: ServerPacket =
         serde_json::from_slice(legacy).expect("legacy snapshot should decode");
     let player = packet.player(7).expect("legacy player");
@@ -140,7 +147,7 @@ fn legacy_and_unknown_action_fields_decode_safely() {
     assert_eq!(player.action_kind, PlayerActionKind::None);
     assert_eq!(player.action_slot, 0);
 
-    let future = br#"{"type":"snapshot","your_id":7,"players":[{"id":7,"action_sequence":9,"action_kind":"future_action","action_slot":99}]}"#;
+    let future = br#"{"type":"snapshot","your_id":7,"players":[{"id":7,"x":0.0,"y":0.0,"z":0.0,"yaw":0.0,"action_sequence":9,"action_kind":"future_action","action_slot":99}]}"#;
     let packet: ServerPacket =
         serde_json::from_slice(future).expect("unknown future action should decode");
     let player = packet.player(7).expect("future player");

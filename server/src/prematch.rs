@@ -353,10 +353,7 @@ pub(super) fn snapshot(
                 },
                 |v| v.nickname.clone(),
             ),
-            team: match p.state.team {
-                Team::Green => shared::map::Team::Green,
-                Team::Blue => shared::map::Team::Blue,
-            },
+            team: p.state.team,
             character: p.state.character,
             hero_class: p.state.hero_class,
             avatar: p.state.avatar.clone(),

@@ -41,18 +41,9 @@ pub(crate) fn build_configured_structures(
         .structures
         .iter()
         .map(|item| {
-            let team = match item.team {
-                shared::map::Team::Green => Team::Green,
-                shared::map::Team::Blue => Team::Blue,
-            };
+            let team = item.team;
             let (kind, role, y) = match item.lane {
-                Some(lane) => (
-                    StructureKind::Tower,
-                    StructureRole::LaneTower {
-                        lane: server_lane(lane),
-                    },
-                    3.0,
-                ),
+                Some(lane) => (StructureKind::Tower, StructureRole::LaneTower { lane }, 3.0),
                 None => (StructureKind::BaseTower, StructureRole::BaseTower, 4.0),
             };
             (
@@ -85,21 +76,6 @@ pub(crate) fn build_configured_structures(
         .collect()
 }
 
-fn server_lane(lane: shared::map::Lane) -> Lane {
-    match lane {
-        shared::map::Lane::Top => Lane::Top,
-        shared::map::Lane::Mid => Lane::Mid,
-        shared::map::Lane::Bot => Lane::Bot,
-    }
-}
-fn shared_lane(lane: Lane) -> shared::map::Lane {
-    match lane {
-        Lane::Top => shared::map::Lane::Top,
-        Lane::Mid => shared::map::Lane::Mid,
-        Lane::Bot => shared::map::Lane::Bot,
-    }
-}
-
 #[cfg(test)]
 pub(crate) fn add_structure(
     structures: &mut HashMap<u64, Structure>,
@@ -128,7 +104,7 @@ pub(crate) fn add_structure(
                 map_key: format!("test_{id}"),
                 visual_profile: String::new(),
                 lane: match role {
-                    StructureRole::LaneTower { lane } => Some(shared_lane(lane)),
+                    StructureRole::LaneTower { lane } => Some(lane),
                     StructureRole::BaseTower => None,
                 },
                 tier: 0,
@@ -208,14 +184,14 @@ pub(crate) fn spawn_position_for_team_from_base(
 
 #[cfg(test)]
 pub(crate) fn lane_control_points(_layout: &MapLayoutState, lane: Lane) -> Vec<Vec3f> {
-    shared::map::lane_points(shared_lane(lane))
+    shared::map::lane_points(lane)
         .into_iter()
         .map(|point| Vec3f::new(point[0], 0.0, point[1]))
         .collect()
 }
 
 pub(crate) fn build_minion_path(_layout: &MapLayoutState, lane: Lane, team: Team) -> Vec<Vec3f> {
-    let mut points: Vec<Vec3f> = shared::map::minion_lane_points(shared_lane(lane))
+    let mut points: Vec<Vec3f> = shared::map::minion_lane_points(lane)
         .into_iter()
         .map(|point| Vec3f::new(point[0], 0.0, point[1]))
         .collect();

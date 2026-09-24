@@ -15,13 +15,13 @@
 #[cfg(test)]
 use shared::scaled_cooldown;
 use shared::{
-    HeroClass as SharedClass, SkillSlot, TargetingMode, ability_for_class_slot, scaled_mana_cost,
-    unlocked_slots_for_level,
+    SkillSlot, TargetingMode, ability_for_class_slot, scaled_mana_cost, unlocked_slots_for_level,
 };
 use std::time::Instant;
 
 use crate::protocol::{
-    HeroClass, MinionState, PlayerState, ServerPacket, StructureState, TargetId, TargetKind, Team,
+    HeroClass, MinionState, PlayerState, ServerPacket, SnapshotView, StructureState, TargetId,
+    TargetKind, Team,
 };
 
 // --- Map geometry mirror (server/src/balance.rs + world.rs) ---------------
@@ -121,13 +121,7 @@ pub fn lane_waypoints(lane: Lane, team: Team) -> Vec<(f32, f32)> {
 
 /// Server-authoritative Q cast range for a class (shared ability kit).
 pub fn q_cast_range(class: HeroClass) -> f32 {
-    let shared_class = match class {
-        HeroClass::Warrior => SharedClass::Warrior,
-        HeroClass::Mage => SharedClass::Mage,
-        HeroClass::Ranger => SharedClass::Ranger,
-        HeroClass::Cleric => SharedClass::Cleric,
-    };
-    ability_for_class_slot(shared_class, SkillSlot::Q).cast_range
+    ability_for_class_slot(class, SkillSlot::Q).cast_range
 }
 
 // --- World view ------------------------------------------------------------
@@ -170,7 +164,7 @@ impl Default for WorldView {
 impl WorldView {
     /// Builds the enemy view for a bot on `my_team` with player id `my_id`.
     pub fn from_snapshot(snapshot: &ServerPacket, my_id: u64, my_team: Team) -> Self {
-        let is_enemy_team = |team: &Option<Team>| team.is_some_and(|t| t != my_team);
+        let is_enemy_team = |team: &Team| *team != my_team;
         let mut view = WorldView::default();
         if let Some(me) = snapshot.player(my_id) {
             view.health_fraction = if me.max_hp > 0.0 {
@@ -189,7 +183,7 @@ impl WorldView {
                 max_hp,
                 ..
             } = player;
-            if *team == Some(my_team) && *max_hp > 0.0 && *hp >= *max_hp * MIN_SIEGE_HEALTH {
+            if *team == my_team && *max_hp > 0.0 && *hp >= *max_hp * MIN_SIEGE_HEALTH {
                 view.friendly_siegers.push(EnemyRef {
                     kind: TargetKind::Player,
                     id: *id,
@@ -210,7 +204,7 @@ impl WorldView {
             let MinionState {
                 id, team, x, z, hp, ..
             } = minion;
-            if *team == Some(my_team) && *hp > 0.0 {
+            if *team == my_team && *hp > 0.0 {
                 view.friendly_minions.push(EnemyRef {
                     kind: TargetKind::Minion,
                     id: *id,
@@ -330,11 +324,8 @@ fn segment_circle_entry(
     (0.0..=1.0).contains(&entry).then_some(entry)
 }
 
-fn authoritative_class(me: &PlayerState) -> SharedClass {
+fn authoritative_class(me: &PlayerState) -> HeroClass {
     me.hero_class
-        .as_deref()
-        .and_then(SharedClass::from_id)
-        .unwrap_or_default()
 }
 
 /// Spend one point, prioritizing Q then W/E/R, only on an unlocked legal rank.
@@ -439,7 +430,7 @@ pub fn choose_rally_lane(snapshot: &ServerPacket, team: Team) -> Lane {
                     .structures()
                     .iter()
                     .filter(|s| {
-                        s.team.is_some_and(|other| other != team)
+                        s.team != team
                             && distance((s.x, s.z), enemy_base) > 1.0
                             && if (s.x - s.z).abs() < 1.0 {
                                 lane == Lane::Mid
@@ -811,6 +802,49 @@ mod tests {
         assert!((x - 0.2).abs() < 1e-5 && z.abs() < 1e-5);
     }
 
+    /// Hand-built packets list only the fields under test; the wire format
+    /// requires the rest, so fill them the way an idle server would.
+    fn snapshot_fixture(mut raw: serde_json::Value) -> ServerPacket {
+        let fill = |entries: &mut serde_json::Value, defaults: &[(&str, serde_json::Value)]| {
+            for entry in entries.as_array_mut().into_iter().flatten() {
+                for (key, value) in defaults {
+                    if entry.get(key).is_none() {
+                        let value = if *key == "max_hp" {
+                            entry["hp"].clone()
+                        } else {
+                            value.clone()
+                        };
+                        entry[*key] = value;
+                    }
+                }
+            }
+        };
+        let zero = serde_json::json!(0.0);
+        fill(
+            &mut raw["players"],
+            &[("y", zero.clone()), ("yaw", zero.clone())],
+        );
+        fill(
+            &mut raw["minions"],
+            &[
+                ("y", zero.clone()),
+                ("yaw", zero.clone()),
+                ("max_hp", zero.clone()),
+                ("lane", serde_json::json!("mid")),
+                ("state", serde_json::json!("marching")),
+            ],
+        );
+        fill(
+            &mut raw["structures"],
+            &[
+                ("y", zero.clone()),
+                ("max_hp", zero),
+                ("kind", serde_json::json!("tower")),
+            ],
+        );
+        serde_json::from_value(raw).unwrap()
+    }
+
     #[test]
     fn world_view_filters_enemies_and_dead_entities() {
         // Constructed via the struct directly (no live snapshot needed):
@@ -837,7 +871,7 @@ mod tests {
             ],
             "game_state": { "type": "running" }
         });
-        let snapshot: ServerPacket = serde_json::from_value(raw).unwrap();
+        let snapshot = snapshot_fixture(raw);
         let view = WorldView::from_snapshot(&snapshot, 1, Team::Green);
         assert_eq!(
             view.friendly_siegers
@@ -864,7 +898,7 @@ mod tests {
         );
     }
     fn hero(class: &str, level: u32) -> PlayerState {
-        serde_json::from_value(serde_json::json!({"id":1,"hp":50.0,"max_hp":100.0,
+        serde_json::from_value(serde_json::json!({"id":1,"x":0.0,"y":0.0,"z":0.0,"yaw":0.0,"hp":50.0,"max_hp":100.0,
             "mana":100.0,"max_mana":100.0,"level":level,"hero_class":class,"skill_points":3,"ranks":[1,1,1,1]})).unwrap()
     }
 
@@ -878,11 +912,11 @@ mod tests {
             {"id":6,"x":96.0,"z":40.0,"team":"blue","hp":240.0},
             {"id":8,"x":base.0,"z":base.1,"team":"blue","hp":650.0}
         ]});
-        let snapshot: ServerPacket = serde_json::from_value(raw.clone()).unwrap();
+        let snapshot = snapshot_fixture(raw.clone());
         assert_eq!(choose_rally_lane(&snapshot, Team::Green), Lane::Mid);
         let mut opened = raw;
         opened["structures"].as_array_mut().unwrap().remove(2);
-        let snapshot: ServerPacket = serde_json::from_value(opened).unwrap();
+        let snapshot = snapshot_fixture(opened);
         assert_eq!(
             choose_rally_lane(&snapshot, Team::Green),
             Lane::Bot,
@@ -985,7 +1019,7 @@ mod tests {
 
     #[test]
     fn upgrades_respect_authoritative_points_unlocks_and_caps() {
-        for class in SharedClass::ALL {
+        for class in HeroClass::ALL {
             let mut me = hero(class.id(), 1);
             assert_eq!(choose_skill_upgrade(&me), Some(0));
             me.ranks[0] = class.abilities()[0].max_rank;
@@ -1020,10 +1054,7 @@ mod tests {
         me.mana = 100.0;
         let last = [None, Some(now), None, None];
         assert_eq!(choose_self_sustain(&me, &last, now), None);
-        let cooldown = scaled_cooldown(
-            ability_for_class_slot(SharedClass::Warrior, SkillSlot::W),
-            1,
-        );
+        let cooldown = scaled_cooldown(ability_for_class_slot(HeroClass::Warrior, SkillSlot::W), 1);
         assert_eq!(choose_self_sustain(&me, &last, now + cooldown), Some(1));
         me.hp = 0.0;
         assert_eq!(choose_self_sustain(&me, &[None; 4], now), None);

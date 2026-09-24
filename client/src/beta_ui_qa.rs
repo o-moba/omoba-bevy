@@ -19,7 +19,7 @@ use bevy::{
 use crate::{
     help_overlay::HelpOverlayVisible,
     net::{ClientSession, GameState, GameStateSnapshot},
-    team::{Team, TeamSelectRoot},
+    team::TeamSelectRoot,
     verdant3d::VerdantEnvironment,
 };
 
@@ -264,7 +264,7 @@ fn prepare_result_fixture(
     // Applied after each real network snapshot, exclusively in this opt-in
     // renderer scenario. The authoritative server and actors remain unchanged.
     game.state = GameState::Victory {
-        winner: Team::Green,
+        winner: shared::map::Team::Green,
     };
     game.rematch_in_secs = Some(10);
     if !qa.fixture_label {

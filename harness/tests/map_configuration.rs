@@ -1,6 +1,8 @@
 //! Real UDP map configuration receipts from the public release formation phase.
 //! No teleports, damage, fog bypass or synthetic state.
-use harness::{Bot, Character, GameState, ServerPacket, ServerProcess, Team};
+use harness::{
+    Bot, Character, GameState, ServerPacket, ServerProcess, SnapshotView, StructureKind, Team,
+};
 use shared::map::{DEFAULT_JSON, MapDefinition, ResolvedMap};
 use std::{
     path::PathBuf,
@@ -59,23 +61,17 @@ fn assert_receipt(packet: &ServerPacket, expected: &ResolvedMap) {
         assert!(observed.insert(actual.id), "duplicate live structure id");
         assert_eq!(actual.map_key, structure.key);
         assert_eq!(actual.visual_profile, structure.visual_profile);
-        assert_eq!(
-            actual.team,
-            Some(match structure.team {
-                shared::map::Team::Green => Team::Green,
-                shared::map::Team::Blue => Team::Blue,
-            })
-        );
+        assert_eq!(actual.team, structure.team);
         let is_tower = structure.lane.is_some();
-        assert_eq!(actual.kind, if is_tower { "tower" } else { "base_tower" });
         assert_eq!(
-            actual.lane,
-            structure.lane.map(|lane| serde_json::to_value(lane)
-                .unwrap()
-                .as_str()
-                .unwrap()
-                .to_owned())
+            actual.kind,
+            if is_tower {
+                StructureKind::Tower
+            } else {
+                StructureKind::BaseTower
+            }
         );
+        assert_eq!(actual.lane, structure.lane);
         assert_eq!(actual.tier, structure.tier);
         assert!((actual.x - structure.position[0]).abs() < 0.0001);
         assert!((actual.z - structure.position[1]).abs() < 0.0001);
@@ -104,7 +100,7 @@ fn default_map_is_eight_exact_authoritative_objects_over_udp() {
         packet
             .structures()
             .iter()
-            .filter(|s| s.kind == "tower")
+            .filter(|s| s.kind == StructureKind::Tower)
             .count(),
         6
     );
@@ -112,7 +108,7 @@ fn default_map_is_eight_exact_authoritative_objects_over_udp() {
         packet
             .structures()
             .iter()
-            .filter(|s| s.kind == "tower")
+            .filter(|s| s.kind == StructureKind::Tower)
             .all(|s| s.max_hp == 240.0)
     );
 }

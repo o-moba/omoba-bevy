@@ -56,18 +56,6 @@ fn utc_ms() -> u64 {
         .as_millis()
         .min(u64::MAX as u128) as u64
 }
-fn career_team(team: Team) -> shared::map::Team {
-    match team {
-        Team::Green => shared::map::Team::Green,
-        Team::Blue => shared::map::Team::Blue,
-    }
-}
-fn gameplay_team(team: shared::map::Team) -> Team {
-    match team {
-        shared::map::Team::Green => Team::Green,
-        shared::map::Team::Blue => Team::Blue,
-    }
-}
 fn participant(player: &ConnectedPlayer) -> ParticipantResult {
     ParticipantResult {
         is_bot: player.state.is_bot,
@@ -86,7 +74,7 @@ fn participant(player: &ConnectedPlayer) -> ParticipantResult {
             },
             |profile| profile.nickname.clone(),
         ),
-        team: career_team(player.state.team),
+        team: player.state.team,
         hero_class: player.state.hero_class,
         character: serde_json::to_value(player.state.character)
             .ok()
@@ -520,7 +508,7 @@ impl ServerRuntime {
                 self.cancel_career_entry(id, now);
                 return;
             }
-            player.state.team = gameplay_team(assigned.team);
+            player.state.team = assigned.team;
             player.career_profile = Some(assigned.waiting.profile.clone());
             player.joined = true;
             session::reset_player_round(player, &self.map_layout, now);
@@ -778,7 +766,7 @@ impl ServerRuntime {
         let round = self.career.round.as_mut().unwrap();
         round.finalized = true;
         round.result.outcome = outcome;
-        round.result.winner = winner.map(career_team);
+        round.result.winner = winner;
         round.result.ended_at_ms = utc_ms().max(round.result.started_at_ms);
         round.result.duration_ms = now
             .saturating_duration_since(round.started_at)

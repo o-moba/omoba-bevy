@@ -1,522 +1,157 @@
-//! Test mirror of the server's UDP/JSON wire protocol.
+//! The server's UDP/JSON wire protocol, as the harness speaks it.
 //!
-//! These types are a **deliberate, minimal mirror** of the structures the
-//! authoritative server (`server/src/main.rs`) serializes over UDP. They are
-//! NOT shared with the server crate on purpose: the harness must exercise the
-//! server purely through its public wire format, exactly like a real client.
+//! These are the **shared** definitions from `shared::wire`, re-exported so
+//! scenarios keep short names. The harness exercises the server purely through
+//! its public wire format, exactly like a real client, and that format now has
+//! one definition for server, client and harness: never copy a wire type here.
 //!
-//! If the server protocol changes, this file must be updated to match. The
-//! source of truth lives in:
-//!   - `server/src/main.rs` — `enum ClientPacket`, `enum ServerPacket`,
-//!     `struct PlayerState`, `enum Team`, `struct TargetId`, `enum TargetKind`.
-//!
-//! Wire conventions copied from the server:
+//! Wire conventions:
 //!   - Packets use `#[serde(tag = "type", rename_all = "snake_case")]`
 //!     (internally tagged: `{"type":"join", ...}`).
 //!   - Plain enums use `#[serde(rename_all = "snake_case")]`
 //!     (e.g. `Team::Green` -> `"green"`).
-//!
-//! Only the fields the harness asserts on are modeled here. `#[serde(default)]`
-//! is used liberally so the harness tolerates the server adding or omitting
-//! fields without breaking deserialization (internally tagged enums already
-//! ignore unknown fields).
 
-use serde::{Deserialize, Serialize};
+pub use shared::map::Team;
+pub use shared::wire::{
+    ClientPacket, GameState, MinionState, NeutralCampType, NeutralState, PlayerState,
+    ProjectileState, ServerPacket, StructureKind, StructureState, TargetId, TargetKind,
+    TeamBuffKind, TeamBuffState,
+};
+pub use shared::{HeroClass, PlayerActionKind};
 
-/// Team selection. Mirrors `server::Team`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Team {
-    Green,
-    Blue,
-}
+/// Playable character selection sent in a `Join`. The wire type is
+/// `ekza_bevy_sdk::EkzaCharacter` (`rename_all = "snake_case"`), so an invalid
+/// character is a compile-time error rather than a silently rejected packet.
+pub use shared::wire::CharacterChoice as Character;
 
-/// Kind of entity a cast can target. Mirrors `server::TargetKind`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TargetKind {
-    Player,
-    Minion,
-    Structure,
-    Neutral,
-}
+static LOBBY: GameState = GameState::Lobby;
 
-/// Playable character selection sent in a `Join`.
-///
-/// Mirrors `ekza_bevy_sdk::EkzaCharacter` (`rename_all = "snake_case"`,
-/// variants `EkzaCharacter::ALL`). Modeling it as an enum — instead of a raw
-/// string — turns an invalid character into a compile-time error rather than a
-/// runtime packet the server silently rejects.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Character {
-    Ipfs,
-    Toka,
-    Wang,
-    Cube,
-}
-
-/// Hero class selection sent in a `Join`. Mirrors `shared::HeroClass` wire
-/// format (snake_case string; the server decodes unknown values as Warrior).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HeroClass {
-    Warrior,
-    Mage,
-    Ranger,
-    Cleric,
-}
-
-/// Cosmetic action kind mirrored from `shared::PlayerActionKind`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PlayerActionKind {
-    Attack,
-    Cast,
-    #[default]
-    #[serde(other)]
-    None,
-}
-
-/// A cast target reference. Mirrors `server::TargetId`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TargetId {
-    pub kind: TargetKind,
-    pub id: u64,
-}
-
-impl TargetId {
-    /// Convenience constructor for targeting an enemy player by id.
-    pub fn player(id: u64) -> Self {
-        Self {
-            kind: TargetKind::Player,
-            id,
-        }
-    }
-}
-
-/// Outbound client -> server packets.
-///
-/// Mirror of `server::ClientPacket`. The harness only ever *sends* these, so
-/// the type derives `Serialize` only. This is a curated mirror: it models the
-/// variants and field names the harness needs, matching the server's
-/// `#[serde(tag = "type", rename_all = "snake_case")]` wire shape (it is not an
-/// exhaustive copy of every server variant).
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ClientPacket {
-    Hello {
-        protocol_version: u16,
-    },
-    Transform {
-        dash_sequence: u64,
-        x: f32,
-        y: f32,
-        z: f32,
-        yaw: f32,
-    },
-    Utility {
-        action: shared::utility::UtilityAction,
-        direction: [f32; 2],
-        server_epoch: u64,
-        match_id: u64,
-        request_id: u64,
-    },
-    Cast {
-        target: TargetId,
-        slot: u8,
-    },
-    Join {
-        prematch: bool,
-        team: Team,
-        character: Character,
-        hero_class: HeroClass,
-        avatar: Option<String>,
-        #[serde(default)]
-        sprite_character: Option<String>,
-        session_id: Option<String>,
-    },
-    Prematch {
-        request: shared::prematch::PrematchRequest,
-    },
-    Ping,
-    SetGodMode {
-        enabled: bool,
-    },
-    SetSpeedBoost {
-        enabled: bool,
-    },
-    UpgradeSkill {
-        slot: u8,
-    },
-    BuyItem {
-        item_id: String,
-        request_id: u64,
-        match_id: u64,
-        server_epoch: u64,
-    },
-}
-
-/// A single player's networked state. Minimal mirror of `server::PlayerState`.
-///
-/// Fields the harness does not assert on (e.g. `y`, `yaw`, `next_level_xp`)
-/// are omitted; `#[serde(default)]` keeps deserialization resilient.
-#[derive(Debug, Clone, Deserialize)]
-pub struct PlayerState {
-    pub id: u64,
-    #[serde(default)]
-    pub x: f32,
-    #[serde(default)]
-    pub z: f32,
-    #[serde(default)]
-    pub team: Option<Team>,
-    #[serde(default)]
-    pub hp: f32,
-    #[serde(default)]
-    pub max_hp: f32,
-    #[serde(default)]
-    pub mana: f32,
-    #[serde(default)]
-    pub max_mana: f32,
-    #[serde(default)]
-    pub gold: u32,
-    #[serde(default)]
-    pub utility: shared::utility::UtilityState,
-    #[serde(default)]
-    pub inventory: Vec<shared::shop::ItemId>,
-    #[serde(default)]
-    pub item_bonuses: shared::shop::ItemBonuses,
-    #[serde(default)]
-    pub shop_available: bool,
-    #[serde(default)]
-    pub last_purchase: Option<shared::shop::PurchaseReceipt>,
-    #[serde(default)]
-    pub xp: u32,
-    #[serde(default)]
-    pub level: u32,
-    #[serde(default)]
-    pub skill_points: u32,
-    /// Per-slot ability ranks (Q/W/E/R). Base rank is 1.
-    #[serde(default = "default_ranks")]
-    pub ranks: [u8; 4],
-    /// Authoritative hero class id (snake_case, e.g. `"mage"`). Read as a raw
-    /// string so the mirror never lags behind new server-side classes.
-    #[serde(default)]
-    pub hero_class: Option<String>,
-    /// Replicated cosmetic avatar slug (roster avatar) or `None` for the
-    /// legacy character model.
-    #[serde(default)]
-    pub avatar: Option<String>,
-    /// Replicated 2D sprite character id.
-    #[serde(default)]
-    pub sprite_character: Option<String>,
-    /// Advances exactly once for each accepted authoritative cast.
-    #[serde(default)]
-    pub action_sequence: u64,
-    #[serde(default)]
-    pub action_kind: PlayerActionKind,
-    #[serde(default)]
-    pub action_slot: u8,
-}
-
-fn default_ranks() -> [u8; 4] {
-    [1; 4]
-}
-
-/// Jungle neutral / raid-boss camp type. Mirrors `server::NeutralCampType`
-/// (snake_case wire names, e.g. `"wendigo_boss"`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum NeutralCampType {
-    Skirmisher,
-    Bruiser,
-    Spitter,
-    WendigoBoss,
-    KingMutatioBoss,
-}
-
-impl NeutralCampType {
-    /// True for the TASK-19 raid bosses.
-    pub fn is_boss(self) -> bool {
-        matches!(
-            self,
-            NeutralCampType::WendigoBoss | NeutralCampType::KingMutatioBoss
-        )
-    }
-}
-
-/// One replicated jungle neutral. Minimal mirror of `server::NeutralState`.
-#[derive(Debug, Clone, Deserialize)]
-pub struct NeutralState {
-    pub id: u64,
-    pub camp_type: NeutralCampType,
-    #[serde(default)]
-    pub x: f32,
-    #[serde(default)]
-    pub z: f32,
-    #[serde(default)]
-    pub hp: f32,
-    #[serde(default)]
-    pub max_hp: f32,
-}
-
-/// Boss team-buff kind. Mirrors `server::TeamBuffKind` (snake_case).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TeamBuffKind {
-    WendigoFavor,
-    MutatioMight,
-}
-
-/// One active team buff. Mirrors `server::TeamBuffState`.
-#[derive(Debug, Clone, Deserialize)]
-pub struct TeamBuffState {
-    pub team: Team,
-    pub kind: TeamBuffKind,
-    #[serde(default)]
-    pub remaining_secs: f32,
-}
-
-/// One replicated lane minion. Mirrors `server::MinionState` (only the
-/// fields the harness targets on; unknown fields are ignored).
-#[derive(Debug, Clone, Deserialize)]
-pub struct MinionState {
-    #[serde(default)]
-    pub kind: shared::combat::MinionKind,
-    #[serde(default)]
-    pub attack_sequence: u64,
-    #[serde(default)]
-    pub lane: String,
-
-    pub id: u64,
-    #[serde(default)]
-    pub team: Option<Team>,
-    #[serde(default)]
-    pub x: f32,
-    #[serde(default)]
-    pub z: f32,
-    #[serde(default)]
-    pub hp: f32,
-}
-
-/// Authoritative projectile presentation, without any client damage authority.
-#[derive(Debug, Clone, Deserialize)]
-pub struct ProjectileState {
-    pub id: u64,
-    pub owner_id: u64,
-    #[serde(default)]
-    pub source_kind: shared::combat::CombatEntityKind,
-    #[serde(default)]
-    pub style: shared::combat::ProjectileStyle,
-    #[serde(default)]
-    pub action_slot: Option<u8>,
-    #[serde(default)]
-    pub direction: [f32; 3],
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-}
-
-/// One replicated structure (tower). Mirrors `server::StructureState`
-/// (targeting fields only).
-#[derive(Debug, Clone, Deserialize)]
-pub struct StructureState {
-    #[serde(default)]
-    pub lane: Option<String>,
-    #[serde(default)]
-    pub tier: u8,
-    #[serde(default)]
-    pub map_key: String,
-    #[serde(default)]
-    pub visual_profile: String,
-    #[serde(default)]
-    pub max_hp: f32,
-    #[serde(default)]
-    pub y: f32,
-    #[serde(default)]
-    pub kind: String,
-    #[serde(default)]
-    pub protected: bool,
-    pub id: u64,
-    #[serde(default)]
-    pub team: Option<Team>,
-    #[serde(default)]
-    pub x: f32,
-    #[serde(default)]
-    pub z: f32,
-    #[serde(default)]
-    pub hp: f32,
-}
-
-/// Match phase. Mirrors `server::GameState` (internally tagged, snake_case).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum GameState {
-    #[default]
-    Lobby,
-    /// Release-mode matchmaking: players joined so far vs. roster size.
-    Forming {
-        ready: u32,
-        needed: u32,
-    },
-    /// Full roster found; match starts when the countdown elapses.
-    Starting {
-        countdown_ms: u32,
-    },
-    Running,
-    Victory {
-        winner: Team,
-    },
-}
-
-/// Inbound server -> client packets. Mirror of `server::ServerPacket`.
-///
-/// Only the `Snapshot` variant exists today. Extra snapshot fields the harness
-/// does not use (projectiles, structures, minions, ...) are intentionally not
-/// modeled and are ignored during deserialization.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ServerPacket {
-    Snapshot {
-        #[serde(flatten, default)]
-        meta: shared::protocol::SnapshotMeta,
-        #[serde(default)]
-        geometry_id: String,
-        #[serde(default)]
-        map_profile: String,
-        #[serde(default)]
-        join_error: Option<shared::protocol::JoinRejection>,
-        your_id: u64,
-        #[serde(default)]
-        combat_events: Vec<shared::combat::CombatEvent>,
-        #[serde(default)]
-        projectiles: Vec<ProjectileState>,
-        #[serde(default)]
-        players: Vec<PlayerState>,
-        #[serde(default)]
-        scoreboard: Option<shared::live_score::LiveScoreboard>,
-        #[serde(default)]
-        prematch: Option<shared::prematch::PrematchSnapshot>,
-        /// Alive (non-respawn-gated) jungle neutrals, including raid bosses.
-        #[serde(default)]
-        neutrals: Vec<NeutralState>,
-        /// Active boss team buffs (additive `serde(default)` field).
-        #[serde(default)]
-        team_buffs: Vec<TeamBuffState>,
-        /// Match phase (Lobby/Forming/Starting/Running/Victory).
-        #[serde(default)]
-        game_state: GameState,
-        /// Lane minions (bot AI targeting).
-        #[serde(default)]
-        minions: Vec<MinionState>,
-        /// Structures/towers (bot AI targeting).
-        #[serde(default)]
-        structures: Vec<StructureState>,
-    },
-}
-
-impl ServerPacket {
-    pub fn prematch(&self) -> Option<&shared::prematch::PrematchSnapshot> {
-        match self {
-            Self::Snapshot { prematch, .. } => prematch.as_ref(),
-        }
-    }
-    pub fn scoreboard(&self) -> Option<&shared::live_score::LiveScoreboard> {
-        match self {
-            Self::Snapshot { scoreboard, .. } => scoreboard.as_ref(),
-        }
-    }
-    pub fn geometry_id(&self) -> &str {
-        match self {
-            Self::Snapshot { geometry_id, .. } => geometry_id,
-        }
-    }
-    pub fn map_profile(&self) -> &str {
-        match self {
-            Self::Snapshot { map_profile, .. } => map_profile,
-        }
-    }
-
-    pub fn combat_events(&self) -> &[shared::combat::CombatEvent] {
-        match self {
-            Self::Snapshot { combat_events, .. } => combat_events,
-        }
-    }
-    pub fn projectiles(&self) -> &[ProjectileState] {
-        match self {
-            Self::Snapshot { projectiles, .. } => projectiles,
-        }
-    }
-
-    pub fn meta(&self) -> shared::protocol::SnapshotMeta {
-        match self {
-            Self::Snapshot { meta, .. } => *meta,
-        }
-    }
-    pub fn join_error(&self) -> Option<shared::protocol::JoinRejection> {
-        match self {
-            Self::Snapshot { join_error, .. } => *join_error,
-        }
-    }
-
-    /// Returns the receiving client's own player id from a snapshot.
-    pub fn your_id(&self) -> u64 {
-        match self {
-            ServerPacket::Snapshot { your_id, .. } => *your_id,
-        }
-    }
-
-    /// Borrows the players carried by a snapshot.
-    pub fn players(&self) -> &[PlayerState] {
-        match self {
-            ServerPacket::Snapshot { players, .. } => players,
-        }
-    }
-
+/// Snapshot accessors for scenarios. The harness only consumes `Snapshot`
+/// packets; on a `Social` or `Career` envelope every accessor is empty.
+pub trait SnapshotView {
+    fn prematch(&self) -> Option<&shared::prematch::PrematchSnapshot>;
+    fn scoreboard(&self) -> Option<&shared::live_score::LiveScoreboard>;
+    fn geometry_id(&self) -> &str;
+    fn map_profile(&self) -> &str;
+    fn combat_events(&self) -> &[shared::combat::CombatEvent];
+    fn projectiles(&self) -> &[ProjectileState];
+    fn meta(&self) -> shared::protocol::SnapshotMeta;
+    fn join_error(&self) -> Option<shared::protocol::JoinRejection>;
+    /// The receiving client's own player id from a snapshot.
+    fn your_id(&self) -> u64;
+    /// The players carried by a snapshot.
+    fn players(&self) -> &[PlayerState];
     /// Finds a player by id within a snapshot.
-    pub fn player(&self, id: u64) -> Option<&PlayerState> {
+    fn player(&self, id: u64) -> Option<&PlayerState> {
         self.players().iter().find(|player| player.id == id)
     }
-
-    /// Borrows the neutrals carried by a snapshot.
-    pub fn neutrals(&self) -> &[NeutralState] {
-        match self {
-            ServerPacket::Snapshot { neutrals, .. } => neutrals,
-        }
-    }
-
+    /// The neutrals carried by a snapshot.
+    fn neutrals(&self) -> &[NeutralState];
     /// Finds the first neutral of a camp type within a snapshot.
-    pub fn neutral_of_type(&self, camp_type: NeutralCampType) -> Option<&NeutralState> {
+    fn neutral_of_type(&self, camp_type: NeutralCampType) -> Option<&NeutralState> {
         self.neutrals()
             .iter()
             .find(|neutral| neutral.camp_type == camp_type)
     }
+    /// The active team buffs carried by a snapshot.
+    fn team_buffs(&self) -> &[TeamBuffState];
+    /// The match phase carried by a snapshot.
+    fn game_state(&self) -> &GameState;
+    /// The lane minions carried by a snapshot.
+    fn minions(&self) -> &[MinionState];
+    /// The structures carried by a snapshot.
+    fn structures(&self) -> &[StructureState];
+}
 
-    /// Borrows the active team buffs carried by a snapshot.
-    pub fn team_buffs(&self) -> &[TeamBuffState] {
+impl SnapshotView for ServerPacket {
+    fn prematch(&self) -> Option<&shared::prematch::PrematchSnapshot> {
         match self {
-            ServerPacket::Snapshot { team_buffs, .. } => team_buffs,
+            Self::Snapshot { prematch, .. } => prematch.as_ref(),
+            _ => None,
         }
     }
-
-    /// Borrows the match phase carried by a snapshot.
-    pub fn game_state(&self) -> &GameState {
+    fn scoreboard(&self) -> Option<&shared::live_score::LiveScoreboard> {
         match self {
-            ServerPacket::Snapshot { game_state, .. } => game_state,
+            Self::Snapshot { scoreboard, .. } => scoreboard.as_ref(),
+            _ => None,
         }
     }
-
-    /// Borrows the lane minions carried by a snapshot.
-    pub fn minions(&self) -> &[MinionState] {
+    fn geometry_id(&self) -> &str {
         match self {
-            ServerPacket::Snapshot { minions, .. } => minions,
+            Self::Snapshot { geometry_id, .. } => geometry_id,
+            _ => "",
         }
     }
-
-    /// Borrows the structures carried by a snapshot.
-    pub fn structures(&self) -> &[StructureState] {
+    fn map_profile(&self) -> &str {
         match self {
-            ServerPacket::Snapshot { structures, .. } => structures,
+            Self::Snapshot { map_profile, .. } => map_profile,
+            _ => "",
+        }
+    }
+    fn combat_events(&self) -> &[shared::combat::CombatEvent] {
+        match self {
+            Self::Snapshot { combat_events, .. } => combat_events,
+            _ => &[],
+        }
+    }
+    fn projectiles(&self) -> &[ProjectileState] {
+        match self {
+            Self::Snapshot { projectiles, .. } => projectiles,
+            _ => &[],
+        }
+    }
+    fn meta(&self) -> shared::protocol::SnapshotMeta {
+        match self {
+            Self::Snapshot { meta, .. } => *meta,
+            _ => shared::protocol::SnapshotMeta::default(),
+        }
+    }
+    fn join_error(&self) -> Option<shared::protocol::JoinRejection> {
+        match self {
+            Self::Snapshot { join_error, .. } => *join_error,
+            _ => None,
+        }
+    }
+    fn your_id(&self) -> u64 {
+        match self {
+            Self::Snapshot { your_id, .. } => *your_id,
+            _ => 0,
+        }
+    }
+    fn players(&self) -> &[PlayerState] {
+        match self {
+            Self::Snapshot { players, .. } => players,
+            _ => &[],
+        }
+    }
+    fn neutrals(&self) -> &[NeutralState] {
+        match self {
+            Self::Snapshot { neutrals, .. } => neutrals,
+            _ => &[],
+        }
+    }
+    fn team_buffs(&self) -> &[TeamBuffState] {
+        match self {
+            Self::Snapshot { team_buffs, .. } => team_buffs,
+            _ => &[],
+        }
+    }
+    fn game_state(&self) -> &GameState {
+        match self {
+            Self::Snapshot { game_state, .. } => game_state,
+            _ => &LOBBY,
+        }
+    }
+    fn minions(&self) -> &[MinionState] {
+        match self {
+            Self::Snapshot { minions, .. } => minions,
+            _ => &[],
+        }
+    }
+    fn structures(&self) -> &[StructureState] {
+        match self {
+            Self::Snapshot { structures, .. } => structures,
+            _ => &[],
         }
     }
 }

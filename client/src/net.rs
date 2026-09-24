@@ -2,14 +2,22 @@ mod offline;
 mod public_transport;
 
 use shared::combat::{CombatEntityKind, CombatEvent, MinionKind, ProjectileStyle};
+pub use shared::map::Lane;
 use shared::protocol::{JoinRejection, PROTOCOL_VERSION, SnapshotMeta, SnapshotOrder};
 use shared::transport::{SnapshotAssembler, TransportError};
+use shared::wire::{
+    ClientPacket, MinionState, NeutralState, PlayerState, ProjectileState, ServerPacket,
+    StructureState,
+};
+pub use shared::wire::{
+    GameState, MinionBrainState, NeutralAiState, NeutralCampType, TargetId, TargetKind,
+    TeamBuffKind, TeamBuffState,
+};
 
 use bevy::ecs::query::Or;
 use bevy::prelude::*;
 use bevy::scene::SceneRoot;
 use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
-use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     io,
@@ -21,7 +29,7 @@ use std::{
 
 use crate::bosses::BossVisual;
 use crate::camera::{CameraState, MainCamera, locked_camera_offset_for_team};
-use crate::combat::{CombatStats, MAX_HP, MAX_MANA};
+use crate::combat::CombatStats;
 use crate::maps::MapLayout;
 use crate::model_scale::{ModelScaleSource, NormalizeModelScale, model_scale_key};
 use crate::persistence::{ClientSessionId, FileGameServerAddr, ResolvedServerAddressForPrefs};
@@ -51,8 +59,6 @@ const _: () = assert!(SERVER_DATAGRAM_RECEIVE_CAPACITY > IPV4_UDP_MAX_PAYLOAD_BY
 const DECODE_ERROR_LOG_INTERVAL: Duration = Duration::from_secs(1);
 const MINION_RADIUS: f32 = 0.55;
 const LOCAL_SNAP_DISTANCE: f32 = 4.0;
-const DEFAULT_PLAYER_LEVEL: u32 = 1;
-const DEFAULT_NEXT_LEVEL_XP: u32 = 120;
 
 /// High-level client session / transport state (TASK-14 frozen connection states).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -577,427 +583,6 @@ pub enum NetworkCommand {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum ClientPacket {
-    Sandbox {
-        request: shared::sandbox::SandboxRequest,
-    },
-    /// Deliberate leave: the server releases the seat or the queue entry now
-    /// instead of holding it for a reconnect.
-    Leave,
-    Prematch {
-        request: shared::prematch::PrematchRequest,
-    },
-    Social {
-        request: shared::social::SocialRequest,
-    },
-    Career {
-        request: shared::career::CareerRequest,
-    },
-    Hello {
-        protocol_version: u16,
-    },
-    Transform {
-        #[serde(default)]
-        dash_sequence: u64,
-        x: f32,
-        y: f32,
-        z: f32,
-        yaw: f32,
-    },
-    Cast {
-        target: TargetId,
-        #[serde(default)]
-        slot: u8,
-    },
-    Utility {
-        action: shared::utility::UtilityAction,
-        direction: [f32; 2],
-        server_epoch: u64,
-        match_id: u64,
-        request_id: u64,
-    },
-    BasicAttack {
-        target: TargetId,
-        server_epoch: u64,
-        match_id: u64,
-        request_id: u64,
-    },
-    Join {
-        #[serde(default)]
-        prematch: bool,
-        team: Team,
-        #[serde(default = "default_character_choice")]
-        character: CharacterChoice,
-        #[serde(default)]
-        hero_class: HeroClass,
-        #[serde(default)]
-        avatar: Option<String>,
-        #[serde(default)]
-        sprite_character: Option<String>,
-        #[serde(default)]
-        session_id: Option<String>,
-        #[serde(default)]
-        passport_ticket: Option<String>,
-    },
-    Ping,
-    RequestRematch,
-    SetGodMode {
-        enabled: bool,
-    },
-    SetSpeedBoost {
-        enabled: bool,
-    },
-    /// Local practice sandbox request (bots, dummies, 1v1).
-    Practice {
-        command: shared::practice::PracticeCommand,
-    },
-    UpgradeSkill {
-        slot: u8,
-    },
-    BuyItem {
-        server_epoch: u64,
-        item_id: String,
-        request_id: u64,
-        match_id: u64,
-    },
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum TargetKind {
-    Player,
-    Minion,
-    Structure,
-    Neutral,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub struct TargetId {
-    pub kind: TargetKind,
-    pub id: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct PlayerState {
-    /// Cosmetic only, authorized from persisted profile grants by the game server.
-    #[serde(default)]
-    supporter_aura: Option<shared::supporter::AuraStyle>,
-    id: u64,
-    #[serde(default)]
-    is_bot: bool,
-    x: f32,
-    y: f32,
-    z: f32,
-    yaw: f32,
-    #[serde(default = "default_team")]
-    team: Team,
-    #[serde(default = "default_hp")]
-    hp: f32,
-    #[serde(default = "default_max_hp")]
-    max_hp: f32,
-    #[serde(default = "default_mana")]
-    mana: f32,
-    #[serde(default = "default_max_mana")]
-    max_mana: f32,
-    #[serde(default)]
-    gold: u32,
-    #[serde(default)]
-    utility: shared::utility::UtilityState,
-    #[serde(default)]
-    inventory: Vec<shared::shop::ItemId>,
-    #[serde(default)]
-    item_bonuses: shared::shop::ItemBonuses,
-    #[serde(default)]
-    shop_available: bool,
-    #[serde(default)]
-    last_purchase: Option<shared::shop::PurchaseReceipt>,
-    #[serde(default)]
-    basic_attack_cooldown_secs: f32,
-    #[serde(default)]
-    basic_attack_remaining_secs: f32,
-    #[serde(default)]
-    basic_attack_request_id: u64,
-    #[serde(default)]
-    skill_recovery_remaining_secs: f32,
-    #[serde(default)]
-    skill_cooldown_remaining_secs: [f32; 4],
-    #[serde(default)]
-    xp: u32,
-    #[serde(default = "default_player_level")]
-    level: u32,
-    #[serde(default = "default_next_level_xp")]
-    next_level_xp: u32,
-    #[serde(default)]
-    skill_points: u32,
-    #[serde(default = "default_skill_ranks")]
-    ranks: [u8; 4],
-    #[serde(default = "default_character_choice")]
-    character: CharacterChoice,
-    /// Authoritative class the server resolved for this player.
-    #[serde(default)]
-    hero_class: HeroClass,
-    /// Cosmetic roster avatar slug; `None` falls back to `character`.
-    #[serde(default)]
-    avatar: Option<String>,
-    /// Cosmetic sprite id; absent legacy snapshots use the manifest default.
-    #[serde(default)]
-    sprite_character: Option<String>,
-    #[serde(default)]
-    action_sequence: u64,
-    #[serde(default)]
-    action_kind: PlayerActionKind,
-    #[serde(default)]
-    action_slot: u8,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum Lane {
-    Top,
-    Mid,
-    Bot,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ProjectileState {
-    #[serde(default)]
-    source_kind: CombatEntityKind,
-    #[serde(default)]
-    style: ProjectileStyle,
-    #[serde(default)]
-    action_slot: Option<u8>,
-    #[serde(default)]
-    direction: [f32; 3],
-    id: u64,
-    owner_id: u64,
-    #[serde(default = "default_team")]
-    owner_team: Team,
-    x: f32,
-    y: f32,
-    z: f32,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Component)]
-#[serde(rename_all = "snake_case")]
-pub enum StructureKind {
-    Tower,
-    BaseTower,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct StructureState {
-    #[serde(default)]
-    lane: Option<Lane>,
-    #[serde(default)]
-    tier: u8,
-    #[serde(default)]
-    map_key: String,
-    #[serde(default)]
-    visual_profile: String,
-    #[serde(default)]
-    protected: bool,
-    id: u64,
-    kind: StructureKind,
-    team: Team,
-    x: f32,
-    y: f32,
-    z: f32,
-    hp: f32,
-    max_hp: f32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct MinionState {
-    #[serde(default)]
-    kind: MinionKind,
-    #[serde(default)]
-    attack_sequence: u64,
-    id: u64,
-    team: Team,
-    lane: Lane,
-    x: f32,
-    y: f32,
-    z: f32,
-    yaw: f32,
-    hp: f32,
-    max_hp: f32,
-    #[serde(default = "default_minion_brain_state")]
-    state: MinionBrainState,
-    #[serde(default)]
-    target_kind: Option<MinionTargetKind>,
-    #[serde(default)]
-    target_id: Option<u64>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum MinionBrainState {
-    Marching,
-    Chasing,
-    Attacking,
-    Dead,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-enum MinionTargetKind {
-    Player,
-    Minion,
-    Structure,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "snake_case")]
-pub enum NeutralCampType {
-    Skirmisher,
-    Bruiser,
-    Spitter,
-    /// Bottom raid boss ("Wendigo").
-    WendigoBoss,
-    /// Top raid boss ("King Mutatio").
-    KingMutatioBoss,
-}
-
-impl From<shared::jungle::JungleCampKind> for NeutralCampType {
-    fn from(kind: shared::jungle::JungleCampKind) -> Self {
-        match kind {
-            shared::jungle::JungleCampKind::Skirmisher => Self::Skirmisher,
-            shared::jungle::JungleCampKind::Bruiser => Self::Bruiser,
-            shared::jungle::JungleCampKind::Spitter => Self::Spitter,
-        }
-    }
-}
-
-impl NeutralCampType {
-    pub fn is_boss(self) -> bool {
-        matches!(
-            self,
-            NeutralCampType::WendigoBoss | NeutralCampType::KingMutatioBoss
-        )
-    }
-}
-
-/// Team-wide boss buff kinds replicated from the server (TASK-19).
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum TeamBuffKind {
-    /// Bottom boss (Wendigo): +ability damage.
-    WendigoFavor,
-    /// Top boss (King Mutatio): +ability damage and HP regen.
-    MutatioMight,
-}
-
-/// One active team buff from the snapshot (`serde(default)` additive field).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TeamBuffState {
-    pub team: Team,
-    pub kind: TeamBuffKind,
-    #[serde(default)]
-    pub remaining_secs: f32,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum NeutralAiState {
-    Idle,
-    Aggro,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct NeutralState {
-    id: u64,
-    camp_type: NeutralCampType,
-    x: f32,
-    y: f32,
-    z: f32,
-    yaw: f32,
-    hp: f32,
-    max_hp: f32,
-    ai_state: NeutralAiState,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-// Keep the protocol's explicit flat fields; a lint alone does not warrant a wire DTO refactor.
-#[allow(clippy::large_enum_variant)]
-enum ServerPacket {
-    Social {
-        server_epoch: u64,
-        match_id: u64,
-        sequence: u64,
-        social: shared::social::SocialView,
-    },
-    Career {
-        server_epoch: u64,
-        sequence: u64,
-        career: shared::career::CareerView,
-    },
-    Snapshot {
-        #[serde(default)]
-        sandbox: Option<shared::sandbox::SandboxSnapshot>,
-        #[serde(default)]
-        forest_pickups: Vec<shared::forest_pickups::ForestPickupState>,
-        #[serde(default)]
-        vision: Option<shared::vision::TeamVision>,
-        #[serde(flatten, default)]
-        meta: SnapshotMeta,
-        #[serde(default)]
-        geometry_id: String,
-        #[serde(default)]
-        map_profile: String,
-        #[serde(default)]
-        match_mode: String,
-        #[serde(default)]
-        join_error: Option<JoinRejection>,
-        your_id: u64,
-        players: Vec<PlayerState>,
-        #[serde(default)]
-        scoreboard: Option<shared::live_score::LiveScoreboard>,
-        #[serde(default)]
-        prematch: Option<shared::prematch::PrematchSnapshot>,
-        #[serde(default)]
-        projectiles: Vec<ProjectileState>,
-        #[serde(default)]
-        structures: Vec<StructureState>,
-        #[serde(default)]
-        minions: Vec<MinionState>,
-        #[serde(default)]
-        neutrals: Vec<NeutralState>,
-        #[serde(default)]
-        team_buffs: Vec<TeamBuffState>,
-        #[serde(default)]
-        combat_events: Vec<CombatEvent>,
-        #[serde(default)]
-        game_state: GameState,
-        #[serde(default)]
-        rematch_in_secs: Option<u64>,
-        #[serde(default)]
-        career: shared::career::CareerView,
-    },
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum GameState {
-    #[default]
-    Lobby,
-    /// Release-mode matchmaking: players joined so far vs. roster size.
-    Forming {
-        ready: u32,
-        needed: u32,
-    },
-    /// Full roster found; the match starts when the countdown elapses.
-    Starting {
-        countdown_ms: u32,
-    },
-    Running,
-    Victory {
-        winner: Team,
-    },
-}
-
 #[derive(Resource, Default, Clone)]
 pub struct GameStateSnapshot {
     pub sandbox: Option<shared::sandbox::SandboxSnapshot>,
@@ -1352,6 +937,32 @@ pub struct NetworkStructure;
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct NetworkStructureProtected(pub bool);
 
+/// ECS tag for a replicated structure, like [`crate::team::Team`]. The wire
+/// enum is `shared::wire::StructureKind`; convert only at the network boundary.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum StructureKind {
+    Tower,
+    BaseTower,
+}
+
+impl From<shared::wire::StructureKind> for StructureKind {
+    fn from(kind: shared::wire::StructureKind) -> Self {
+        match kind {
+            shared::wire::StructureKind::Tower => Self::Tower,
+            shared::wire::StructureKind::BaseTower => Self::BaseTower,
+        }
+    }
+}
+
+impl From<StructureKind> for shared::wire::StructureKind {
+    fn from(kind: StructureKind) -> Self {
+        match kind {
+            StructureKind::Tower => Self::Tower,
+            StructureKind::BaseTower => Self::BaseTower,
+        }
+    }
+}
+
 #[derive(Component)]
 pub struct NetworkMinion;
 
@@ -1485,7 +1096,7 @@ fn network_projectile(state: &ProjectileState) -> NetworkProjectile {
     NetworkProjectile {
         id: state.id,
         owner_id: state.owner_id,
-        owner_team: state.owner_team,
+        owner_team: state.owner_team.into(),
         source_kind: state.source_kind,
         style: state.style,
         action_slot: state.action_slot,
@@ -2275,7 +1886,7 @@ fn send_join_attempt(
     };
     let result = channels.outgoing.try_send(ClientPacket::Join {
         prematch: join.prematch,
-        team: join.team,
+        team: join.team.into(),
         character: join.character,
         hero_class: join.hero_class,
         avatar: join.avatar,
@@ -2399,7 +2010,6 @@ fn ingest_server_snapshot_packets(
                     combat_events,
                     game_state,
                     rematch_in_secs,
-                    career,
                 } => {
                     if meta.protocol_version != PROTOCOL_VERSION {
                         client_session.join_error = Some(JoinRejection::ProtocolMismatch);
@@ -2423,9 +2033,6 @@ fn ingest_server_snapshot_packets(
                     }
                     if let Some(career_client) = career_client.as_mut() {
                         career_client.local_player_id = Some(your_id);
-                        if career != shared::career::CareerView::default() {
-                            career_client.apply_view(career);
-                        }
                     }
                     client_session.join_error = join_error;
                     client_session.admitted =
@@ -2571,10 +2178,7 @@ fn apply_server_snapshot(
             join.hero_class = own.hero_class;
             join.avatar = own.avatar.clone();
             join.sprite_character = own.sprite_character.clone();
-            join.team = match own.team {
-                shared::map::Team::Green => Team::Green,
-                shared::map::Team::Blue => Team::Blue,
-            };
+            join.team = own.team.into();
         }
     }
     // Spawn the final roster only once frozen; redraft discards old models.
@@ -2631,7 +2235,7 @@ fn apply_server_snapshot(
         // Otherwise we'd oscillate between the locally selected character and the server default.
         if let Some(local_player_state) = local_player_state {
             commands.entity(local_entity).insert((
-                local_player_state.team,
+                Team::from(local_player_state.team),
                 player_state_to_combat_stats(local_player_state),
                 NetworkCharacterChoice(local_player_state.character),
                 NetworkAvatar(local_player_state.avatar.clone()),
@@ -2650,7 +2254,7 @@ fn apply_server_snapshot(
             if action_query.get(local_entity).ok().flatten().copied() != Some(next_action) {
                 commands.entity(local_entity).insert(next_action);
             }
-            network_state.local_team = Some(local_player_state.team);
+            network_state.local_team = Some(local_player_state.team.into());
 
             let server_translation = Vec3::new(
                 local_player_state.x,
@@ -2700,12 +2304,13 @@ fn apply_server_snapshot(
         if selected_team_for_spawn.is_none() && !client_session.has_committed_join() {
             return;
         }
-        if team_selection.team != Some(local_player_state.team) {
+        let assigned_team = Team::from(local_player_state.team);
+        if team_selection.team != Some(assigned_team) {
             info!(
                 "Server assigned team {} (matchmaking)",
-                local_player_state.team.as_str()
+                assigned_team.as_str()
             );
-            team_selection.team = Some(local_player_state.team);
+            team_selection.team = Some(assigned_team);
         }
         let spawn = Vec3::new(
             local_player_state.x,
@@ -2728,7 +2333,7 @@ fn apply_server_snapshot(
                     Player,
                     PlayerBody,
                     VerticalVelocity::default(),
-                    local_player_state.team,
+                    Team::from(local_player_state.team),
                     (
                         NetworkPlayerId(your_id),
                         NetworkCharacterChoice(local_player_state.character),
@@ -2762,7 +2367,7 @@ fn apply_server_snapshot(
                 Player,
                 PlayerBody,
                 VerticalVelocity::default(),
-                local_player_state.team,
+                Team::from(local_player_state.team),
                 NormalizeModelScale::for_player_model(),
                 (
                     NetworkPlayerId(your_id),
@@ -2802,7 +2407,7 @@ fn apply_server_snapshot(
                     Player,
                     PlayerBody,
                     VerticalVelocity::default(),
-                    local_player_state.team,
+                    Team::from(local_player_state.team),
                     (
                         NetworkPlayerId(your_id),
                         NetworkCharacterChoice(local_player_state.character),
@@ -2825,7 +2430,7 @@ fn apply_server_snapshot(
                 .id()
         };
 
-        network_state.local_team = Some(local_player_state.team);
+        network_state.local_team = Some(local_player_state.team.into());
         accept_dash_ack(&mut network_state.local_dash_ack, meta, local_player_state);
         if let Ok(mut camera_transform) = transform_sets.p1().single_mut() {
             cam_state.locked = true;
@@ -2836,7 +2441,7 @@ fn apply_server_snapshot(
             } else {
                 let zoom = cam_state.zoom;
                 camera_transform.translation =
-                    spawn + locked_camera_offset_for_team(zoom, local_player_state.team);
+                    spawn + locked_camera_offset_for_team(zoom, local_player_state.team.into());
                 let look_target = Vec3::new(spawn.x, PLAYER_SIZE * 0.5, spawn.z);
                 *camera_transform = camera_transform.looking_at(look_target, Vec3::Y);
             }
@@ -2875,7 +2480,7 @@ fn apply_server_snapshot(
             commands.entity(entity).insert((
                 NetworkPlayerId(player.id),
                 NetworkBot(player.is_bot),
-                player.team,
+                Team::from(player.team),
                 NetworkCharacterChoice(player.character),
                 NetworkAvatar(player.avatar.clone()),
                 NetworkSpriteCharacter(player.sprite_character.clone()),
@@ -2911,7 +2516,7 @@ fn apply_server_snapshot(
             Visibility::default(),
             RemotePlayer,
             PlayerBody,
-            player.team,
+            Team::from(player.team),
             NetworkPlayerId(player.id),
             NetworkCharacterChoice(player.character),
             NetworkAvatar(player.avatar.clone()),
@@ -3032,8 +2637,8 @@ fn apply_server_snapshot(
                 transform.translation = Vec3::new(structure.x, structure.y, structure.z);
             }
             commands.entity(entity).insert((
-                structure.kind,
-                structure.team,
+                StructureKind::from(structure.kind),
+                Team::from(structure.team),
                 NetworkStructureId(structure.id),
                 NetworkStructureProtected(structure.protected),
                 NetworkMapStructure::from(structure),
@@ -3049,8 +2654,8 @@ fn apply_server_snapshot(
             NetworkStructureId(structure.id),
             NetworkStructureProtected(structure.protected),
             NetworkMapStructure::from(structure),
-            structure.kind,
-            structure.team,
+            StructureKind::from(structure.kind),
+            Team::from(structure.team),
             structure_state_to_combat_stats(structure),
             Name::new(format!("Structure-{}", structure.id)),
         ));
@@ -3096,7 +2701,7 @@ fn apply_server_snapshot(
             }
             commands.entity(entity).insert((
                 NetworkMinionId(minion.id),
-                minion.team,
+                Team::from(minion.team),
                 minion_state_to_combat_stats(minion),
                 NetworkMinionBrainState(minion.state),
                 NetworkMinionKind(minion.kind),
@@ -3121,7 +2726,7 @@ fn apply_server_snapshot(
                 elapsed: UPDATE_INTERVAL_SECONDS,
                 duration: UPDATE_INTERVAL_SECONDS.max(0.001),
             },
-            minion.team,
+            Team::from(minion.team),
             minion_state_to_combat_stats(minion),
             Name::new(format!("Minion-{}-{:?}", minion.id, minion.lane)),
         ));
@@ -3991,46 +3596,6 @@ fn neutral_state_to_combat_stats(neutral: &NeutralState) -> CombatStats {
         mana: 0.0,
         max_mana: 1.0,
     }
-}
-
-fn default_hp() -> f32 {
-    MAX_HP
-}
-
-fn default_team() -> Team {
-    Team::Green
-}
-
-fn default_character_choice() -> CharacterChoice {
-    CharacterChoice::Ipfs
-}
-
-fn default_player_level() -> u32 {
-    DEFAULT_PLAYER_LEVEL
-}
-
-fn default_next_level_xp() -> u32 {
-    DEFAULT_NEXT_LEVEL_XP
-}
-
-fn default_skill_ranks() -> [u8; 4] {
-    [1; 4]
-}
-
-fn default_max_hp() -> f32 {
-    MAX_HP
-}
-
-fn default_mana() -> f32 {
-    MAX_MANA
-}
-
-fn default_max_mana() -> f32 {
-    MAX_MANA
-}
-
-fn default_minion_brain_state() -> MinionBrainState {
-    MinionBrainState::Marching
 }
 
 #[cfg(test)]
@@ -5581,7 +5146,7 @@ mod connection_ui_tests {
                     ..
                 } => {
                     assert_eq!(session_id.as_deref(), Some("offline-online-lifecycle-test"));
-                    assert_eq!(team, Team::Green);
+                    assert_eq!(team, shared::map::Team::Green);
                     assert_eq!(
                         hero_class,
                         HeroClass::Mage,

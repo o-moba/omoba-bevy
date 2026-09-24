@@ -22,7 +22,7 @@ use std::{
 };
 
 use harness::{
-    Bot, Character, GameState, HeroClass, Team,
+    Bot, Character, GameState, HeroClass, SnapshotView, StructureKind, Team,
     bot_ai::{
         BotBrain, Lane, WorldView, choose_offensive_skill, choose_rally_lane, choose_self_sustain,
         choose_shop_item, choose_skill_upgrade, class_for_bot, step_toward,
@@ -235,7 +235,7 @@ fn main() {
             let me = snapshot.player(my_id).cloned();
             if let Some(me) = &me {
                 runner.my_id = Some(my_id);
-                runner.my_team = me.team;
+                runner.my_team = Some(me.team);
                 runner.position = Some((me.x, me.z));
 
                 // Death / respawn tracking: on revival, rejoin the lane from
@@ -340,7 +340,11 @@ fn main() {
                         .filter(|s| s.hp > 0.0)
                         .map(|s| shared::navigation::Disc {
                             center: [s.x, s.z],
-                            radius: if s.kind == "base_tower" { 3.2 } else { 1.3 },
+                            radius: if s.kind == StructureKind::BaseTower {
+                                3.2
+                            } else {
+                                1.3
+                            },
                         })
                         .collect();
                     if let Some(target) = decision.move_target.and_then(|target| {

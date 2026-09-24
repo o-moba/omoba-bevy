@@ -1,5 +1,7 @@
 //! Real local UDP farming/respawn. No placement, invulnerability or clock fixture.
-use harness::{Bot, Character, HeroClass, NeutralCampType, ServerPacket, ServerProcess, Team};
+use harness::{
+    Bot, Character, HeroClass, NeutralCampType, ServerPacket, ServerProcess, SnapshotView, Team,
+};
 use shared::combat::CombatEntityKind;
 use std::{
     collections::{HashMap, HashSet},
@@ -18,9 +20,7 @@ struct LaneRewards {
 impl LaneRewards {
     fn observe(&mut self, packet: &ServerPacket, own_team: Team) {
         for minion in packet.minions() {
-            if let Some(team) = minion.team {
-                self.teams.insert(minion.id, team);
-            }
+            self.teams.insert(minion.id, minion.team);
         }
         for event in packet
             .combat_events()
