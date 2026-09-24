@@ -4,7 +4,7 @@
 //!
 //! **Failure detection** (client): stale qualifying snapshot ([`T_STALE_SNAPSHOT`]), transport
 //! send/recv error streaks ([`TRANSPORT_CONSECUTIVE_SEND_ERRORS`],
-//! [`TRANSPORT_CONSECUTIVE_RECV_ERRORS`]), UDP thread signals ([`crate::net::NetThreadSignal`]),
+//! [`TRANSPORT_CONSECUTIVE_RECV_ERRORS`]), UDP thread signals ([`crate::net::transport::NetThreadSignal`]),
 //! snapshot channel disconnect ([`crate::net::NetIncomingDisconnected`]), and bounded wait in
 //! **WaitingForServer** ([`T_WAIT_MAX`]).
 //!

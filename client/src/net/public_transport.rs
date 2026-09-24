@@ -1,6 +1,10 @@
 //! Public role detection, return-path proof and signing on the UDP I/O thread.
-use super::*;
 use ed25519_dalek::Signer;
+use shared::protocol::PROTOCOL_VERSION;
+use shared::wire::ClientPacket;
+use std::{io, net::UdpSocket};
+
+use super::transport::{SharedGameplaySigner, send_packet};
 use shared::public_transport::{
     MAX_COMMAND_BYTES, MAX_PUBLIC_DATAGRAM_BYTES, PROBE_PADDING_BYTES, PublicClientDatagram,
     PublicServerDatagram, SignedCommand, decode_hex, hex,
@@ -177,6 +181,10 @@ mod tests {
     use super::*;
     use ed25519_dalek::{Signature, SigningKey};
     use shared::public_transport::GameplayPrincipal;
+    use std::{
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
     #[test]
     fn real_udp_challenge_echo_and_signed_command_use_saved_identity_namespace() {
         let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
