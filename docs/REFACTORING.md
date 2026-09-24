@@ -6,6 +6,7 @@ this file alone: what is done, what is next, how each step is delivered, and
 where the detailed plans live. Update it in the same pull request as the
 step it describes.
 
+Architecture report (before vs after, current architecture, verified improvement list O1–O30 and Q1–Q9): [ARCHITECTURE_REPORT.md](ARCHITECTURE_REPORT.md).
 Roadmap source: the "Roadmap" section of [ARCHITECTURE.md](ARCHITECTURE.md).
 Per-step notes: [progress/](progress/) (one dated note per merged step).
 Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
