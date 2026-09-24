@@ -410,7 +410,7 @@ impl ServerRuntime {
         packet: &ClientPacket,
         now: Instant,
     ) -> bool {
-        if self.match_config.mode != MatchMode::Practice || self.match_service.worker().is_some() {
+        if !self.rules.fills_with_bots || self.match_service.worker().is_some() {
             return true;
         }
         let ClientPacket::Join { session_id, .. } = packet else {
@@ -432,10 +432,9 @@ impl ServerRuntime {
             .as_ref()
             .and_then(|session| self.world.disconnected_sessions.get(session));
         let available = retained.map_or_else(
-            || assign_human_team(&self.world.players, self.match_config.team_size).is_some(),
+            || assign_human_team(&self.world.players, self.rules.team_size).is_some(),
             |p| {
-                human_count(&self.world.players, p.player.hero.identity.team)
-                    < self.match_config.team_size
+                human_count(&self.world.players, p.player.hero.identity.team) < self.rules.team_size
             },
         );
         if !available {
@@ -472,7 +471,7 @@ impl ServerRuntime {
         {
             return;
         }
-        if self.match_config.mode != MatchMode::Practice
+        if !self.rules.fills_with_bots
             || self.bots.defer_fill
             || self.bots.sandbox
             || matches!(self.world.game_state, GameState::Victory { .. })
@@ -488,7 +487,7 @@ impl ServerRuntime {
         // their temporary replacement before another simulation or snapshot.
         for team in [Team::Green, Team::Blue] {
             while seated_count(&self.world.players, &self.bots, team)
-                > self.match_config.team_size as usize
+                > self.rules.team_size as usize
             {
                 let before = self.world.players.len();
                 remove_replaced_bot(
@@ -503,7 +502,7 @@ impl ServerRuntime {
             }
         }
         let missing = self
-            .match_config
+            .rules
             .roster_size()
             .saturating_sub(joined_count(&self.world.players)) as usize;
         if self.combat_log.ledger.is_started()
@@ -516,7 +515,7 @@ impl ServerRuntime {
         }
         for team in [Team::Green, Team::Blue] {
             while seated_count(&self.world.players, &self.bots, team)
-                < self.match_config.team_size as usize
+                < self.rules.team_size as usize
             {
                 if self.spawn_bot(team, None, BotKind::Lane, now).is_none() {
                     break;
@@ -622,7 +621,7 @@ impl ServerRuntime {
         now: Instant,
     ) {
         use shared::practice::{MAX_DUMMIES, PracticeCommand};
-        if self.match_config.mode != MatchMode::Practice || self.match_service.worker().is_some() {
+        if !self.rules.fills_with_bots || self.match_service.worker().is_some() {
             return;
         }
         let Some(human) = self
@@ -746,7 +745,7 @@ impl ServerRuntime {
     }
 
     pub(crate) fn simulate_bots(&mut self, now: Instant, dt: f32) {
-        if self.match_config.mode != MatchMode::Practice
+        if !self.rules.fills_with_bots
             || !matches!(self.world.game_state, GameState::Running)
             || dt <= 0.0
         {

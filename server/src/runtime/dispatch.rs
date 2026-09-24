@@ -278,7 +278,7 @@ impl ServerRuntime {
         }
         let combat_sandbox = self.sandbox_allowed();
         let targeting_qa = self.targeting_qa;
-        let match_config = self.match_config;
+        let rules = self.rules;
         let match_id = self.match_id;
         let server_epoch = self.server_epoch;
         let world = &mut self.world;
@@ -401,26 +401,27 @@ impl ServerRuntime {
                     self.fill_practice_bots(now);
                     return;
                 }
-                // Team resolution: dev mode honors the client's
-                // choice; release mode balances teams server-side
-                // (rejoining players keep their original team).
-                let assigned_team = allocated_team.or_else(|| match match_config.mode {
-                    MatchMode::Practice => {
-                        bots::assign_human_team(&world.players, match_config.team_size)
+                // Team resolution: `ClientChoice` (dev) honors the client's
+                // choice; `Balanced` (release) balances teams server-side
+                // (rejoining players keep their original team);
+                // `PracticeSeat` takes a bot's seat.
+                let assigned_team = allocated_team.or_else(|| match rules.team_assignment {
+                    TeamAssignment::PracticeSeat => {
+                        bots::assign_human_team(&world.players, rules.team_size)
                     }
-                    MatchMode::Dev if combat_sandbox => {
+                    TeamAssignment::ClientChoice if combat_sandbox => {
                         sandbox::assign_human_team(&world.players, &world.disconnected_sessions)
                     }
-                    MatchMode::Dev if prematch => assign_reserved_release_team(
+                    TeamAssignment::ClientChoice if prematch => assign_reserved_release_team(
                         &world.players,
                         &world.disconnected_sessions,
-                        match_config.team_size,
+                        rules.team_size,
                     ),
-                    MatchMode::Dev => (joined_count(&world.players)
+                    TeamAssignment::ClientChoice => (joined_count(&world.players)
                         + (world.disconnected_sessions.len() as u32)
-                        < match_config.roster_size())
+                        < rules.roster_size())
                     .then_some(team),
-                    MatchMode::Release => {
+                    TeamAssignment::Balanced => {
                         let existing_team = world
                             .players
                             .get(&addr)
@@ -430,7 +431,7 @@ impl ServerRuntime {
                             assign_reserved_release_team(
                                 &world.players,
                                 &world.disconnected_sessions,
-                                match_config.team_size,
+                                rules.team_size,
                             )
                         })
                     }
@@ -438,13 +439,13 @@ impl ServerRuntime {
                 let Some(assigned_team) = assigned_team else {
                     println!(
                         "Matchmaking: match is full ({} players) - join from {addr} rejected",
-                        match_config.roster_size()
+                        rules.roster_size()
                     );
                     world.players.get_mut(&addr).unwrap().join_error =
                         Some(shared::protocol::JoinRejection::MatchFull);
                     return;
                 };
-                if match_config.mode == MatchMode::Practice {
+                if rules.fills_with_bots {
                     bots::remove_replaced_bot(
                         &mut world.players,
                         &mut self.bots,
@@ -474,10 +475,10 @@ impl ServerRuntime {
                 {
                     world.game_state = GameState::Forming {
                         ready: joined_count(&world.players),
-                        needed: match_config.roster_size(),
+                        needed: rules.roster_size(),
                     };
                 } else {
-                    advance_formation_on_join(world, match_config, now);
+                    advance_formation_on_join(world, rules, now);
                 }
             }
             ClientPacket::Ping => {
@@ -500,7 +501,7 @@ impl ServerRuntime {
             ClientPacket::Practice { .. } => unreachable!("handled before gameplay admission"),
             ClientPacket::SetGodMode { enabled } => {
                 // Development and local bot practice only; both are unrated.
-                if !matches!(match_config.mode, MatchMode::Dev | MatchMode::Practice) {
+                if !rules.debug_commands {
                     return;
                 }
                 world.ensure_connected(addr, now);
@@ -526,7 +527,7 @@ impl ServerRuntime {
                 }
             }
             ClientPacket::SetSpeedBoost { enabled } => {
-                if !matches!(match_config.mode, MatchMode::Dev | MatchMode::Practice) {
+                if !rules.debug_commands {
                     return;
                 }
                 world.ensure_connected(addr, now);

@@ -194,9 +194,7 @@ impl ServerRuntime {
         self.career.round.as_ref().map(|round| round.result.clone())
     }
     pub(crate) fn career_queue_enabled(&self) -> bool {
-        !self.match_service.is_public()
-            && self.match_config.mode == MatchMode::Release
-            && self.career.backend.enabled()
+        !self.match_service.is_public() && self.rules.career_credit && self.career.backend.enabled()
     }
     pub(crate) fn career_flow_active(&self) -> bool {
         self.career.backend.enabled()
@@ -334,7 +332,7 @@ impl ServerRuntime {
                 return false;
             }
         }
-        if self.match_config.mode != MatchMode::Practice
+        if self.rules.career_flow
             && !self.career_queue_enabled()
             && !self.combat_log.ledger.is_frozen()
             && self.combat_log.ledger.is_started()
@@ -399,7 +397,7 @@ impl ServerRuntime {
         if !matches!(
             self.career
                 .queue
-                .view(id, self.match_config.team_size as usize, now),
+                .view(id, self.rules.team_size as usize, now),
             QueueView::Idle
         ) {
             return;
@@ -475,7 +473,7 @@ impl ServerRuntime {
         let Ok(Some(selection)) = self
             .career
             .queue
-            .reserve_match(self.match_config.team_size as usize)
+            .reserve_match(self.rules.team_size as usize)
         else {
             return;
         };
@@ -507,7 +505,7 @@ impl ServerRuntime {
         }
         self.world.game_state = GameState::Forming {
             ready: selection.participants.len() as u32,
-            needed: self.match_config.roster_size(),
+            needed: self.rules.roster_size(),
         };
     }
 
@@ -515,7 +513,7 @@ impl ServerRuntime {
         if self.sandbox.is_some() {
             return Err("Combat Sandbox is never eligible for career credit.");
         }
-        if self.match_config.mode == MatchMode::Practice {
+        if self.rules.local_results {
             return Err("Bot practice: local result only; no permanent career credit.");
         }
         if roster.iter().any(|participant| participant.is_bot) {
@@ -536,7 +534,7 @@ impl ServerRuntime {
         if !approved_default_map(&self.world.map_config) {
             return Err("Custom map or gameplay tuning.");
         }
-        if roster.len() != self.match_config.roster_size() as usize
+        if roster.len() != self.rules.roster_size() as usize
             || roster.iter().any(|p| p.profile_id.is_none())
         {
             return Err("The full authenticated roster was not present.");
@@ -545,7 +543,7 @@ impl ServerRuntime {
             .iter()
             .filter(|p| p.team == shared::map::Team::Green)
             .count();
-        if green != self.match_config.team_size as usize {
+        if green != self.rules.team_size as usize {
             return Err("Teams are not balanced.");
         }
         if self.career.queue.selection().is_none() && self.match_service.worker().is_none() {
@@ -568,7 +566,7 @@ impl ServerRuntime {
         if !self.allocated_humans_ready() {
             return false;
         }
-        let practice = self.match_config.mode == MatchMode::Practice;
+        let practice = self.rules.local_results;
         let durable = !practice || self.match_service.worker().is_some();
         let public_casual = practice
             && self.match_service.worker().is_some()
@@ -778,7 +776,7 @@ impl ServerRuntime {
         if outcome != MatchOutcome::Completed {
             round.result.rated = false;
             round.result.winner = None;
-            if self.match_config.mode != MatchMode::Practice {
+            if !self.rules.local_results {
                 round.result.unrated_reason = Some("The match did not finish normally.".into());
             }
         }
@@ -798,7 +796,7 @@ impl ServerRuntime {
     }
 
     pub(crate) fn checkpoint_career_round(&mut self, now: Instant) {
-        if self.match_config.mode == MatchMode::Practice && self.match_service.worker().is_none() {
+        if self.rules.local_results && self.match_service.worker().is_none() {
             self.update_career_totals();
             return;
         }
@@ -838,7 +836,7 @@ impl ServerRuntime {
         let career_flow = self.career_flow_active();
         self.career.round = None;
         self.career.queue.release_selection();
-        if career_flow && self.match_config.mode != MatchMode::Practice {
+        if career_flow && self.rules.career_flow {
             for (addr, player) in &mut self.world.players {
                 player.joined = false;
                 self.career.backend.set_playing(*addr, false);
@@ -970,7 +968,7 @@ impl ServerRuntime {
                 let queued = !matches!(
                     self.career.queue.view(
                         player.hero.identity.id,
-                        self.match_config.team_size as usize,
+                        self.rules.team_size as usize,
                         now
                     ),
                     QueueView::Idle
@@ -1106,10 +1104,7 @@ impl ServerRuntime {
             self.record_match_metrics(now);
         }
         if let Some(result) = self.career.last_results.get(&id) {
-            if self.match_config.mode != MatchMode::Practice
-                && self.career.backend.enabled()
-                && !result.saved
-            {
+            if self.rules.career_flow && self.career.backend.enabled() && !result.saved {
                 self.career_error(
                     addr,
                     "Saving the result. Play again after storage acknowledges it.",
@@ -1158,11 +1153,9 @@ impl ServerRuntime {
             view.queue = if player.joined && matches!(self.world.game_state, GameState::Running) {
                 QueueView::Playing
             } else {
-                self.career.queue.view(
-                    player.hero.identity.id,
-                    self.match_config.team_size as usize,
-                    now,
-                )
+                self.career
+                    .queue
+                    .view(player.hero.identity.id, self.rules.team_size as usize, now)
             };
             if let Some(result) = self.career.last_results.get(&player.hero.identity.id) {
                 view.last_result = Some(result.clone());

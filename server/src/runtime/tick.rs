@@ -70,7 +70,7 @@ impl ServerRuntime {
         }
         self.advance_career_queue(now);
         if !self.tick_prematch(now) {
-            tick_match_formation(&mut self.world, self.match_config, dt, now);
+            tick_match_formation(&mut self.world, self.rules, dt, now);
         }
         self.track_round_start(now);
         self.simulate_bots(now, dt);

@@ -113,7 +113,7 @@ fn sandbox_epoch_replay_and_mode_gates() {
     rt.handle_sandbox(a, stale);
     assert!(!rt.sandbox.as_ref().unwrap().acks[&rt.world.players[&a].hero.identity.id].accepted);
     for mode in [MatchMode::Release, MatchMode::Practice] {
-        rt.match_config.mode = mode;
+        rt.rules = MatchRules::for_mode(mode, rt.rules.team_size);
         assert!(!rt.sandbox_allowed());
         command(
             &mut rt,
@@ -125,7 +125,7 @@ fn sandbox_epoch_replay_and_mode_gates() {
         );
         assert_eq!(rt.world.players[&a].hero.progress.level, level);
     }
-    rt.match_config.mode = MatchMode::Dev;
+    rt.rules = MatchRules::for_mode(MatchMode::Dev, rt.rules.team_size);
     rt.sandbox = None;
     assert!(!rt.sandbox_allowed());
 }

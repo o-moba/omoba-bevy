@@ -54,7 +54,7 @@ pub(crate) struct ServerRuntime {
     pub(crate) last_snapshot_at: Instant,
     pub(crate) last_bootstrap_at: Instant,
     pub(crate) last_simulation_at: Instant,
-    pub(crate) match_config: MatchConfig,
+    pub(crate) rules: MatchRules,
     pub(crate) targeting_qa: bool,
     pub(crate) server_epoch: u64,
     pub(crate) match_id: u64,
@@ -100,7 +100,7 @@ impl ServerRuntime {
             last_snapshot_at: Instant::now(),
             last_bootstrap_at: Instant::now(),
             last_simulation_at: Instant::now(),
-            match_config,
+            rules: MatchRules::from(match_config),
             targeting_qa: targeting_qa::enabled(match_config.mode),
             server_epoch,
             match_id: 1,
@@ -166,7 +166,7 @@ pub(crate) fn run() -> io::Result<()> {
     let mut runtime = ServerRuntime::new_with_map(socket, match_config, map_config);
     runtime.match_service = match_service;
     if std::env::var("OMOBA_COMBAT_SANDBOX").as_deref() == Ok("1") {
-        if match_config.mode != MatchMode::Dev
+        if !runtime.rules.combat_sandbox_allowed
             || runtime.match_service.is_public()
             || runtime.match_service.worker().is_some()
             || !runtime.socket.local_addr()?.ip().is_loopback()
