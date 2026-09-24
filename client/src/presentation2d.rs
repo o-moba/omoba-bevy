@@ -826,6 +826,7 @@ fn attach_projectile_visuals(
     mut layouts: Option<ResMut<Assets<TextureAtlasLayout>>>,
     mut cache: ResMut<ProjectileSpriteCache>,
     roots: Query<(Entity, &Transform, &NetworkProjectile), Without<PresentationActorRoot>>,
+    existing: Query<(), With<ProjectileSpriteVisual>>,
     owners: Query<(
         &NetworkPlayerId,
         Option<&NetworkHeroClass>,
@@ -838,7 +839,13 @@ fn attach_projectile_visuals(
     }
     let defaults = CombatVisualRegistry::default();
     let registry = registry.as_deref().unwrap_or(&defaults);
+    let mut capacity =
+        crate::projectile_visuals::MAX_VISUALS.saturating_sub(existing.iter().count());
     for (owner, transform, projectile) in &roots {
+        if capacity == 0 {
+            break;
+        }
+        capacity -= 1;
         let identity = matches!(
             projectile.source_kind,
             CombatEntityKind::Player | CombatEntityKind::Unknown
@@ -979,20 +986,14 @@ fn spawn_projectile_shape_2d(
             }
         }
         ProjectileShape::Arcane => {
-            part(
-                Vec2::splat(0.65),
-                Vec2::ZERO,
-                std::f32::consts::FRAC_PI_4,
-                tint,
-            );
-            part(Vec2::new(0.48, 0.10), Vec2::new(-0.6, 0.25), 0.0, tint);
-            part(Vec2::new(0.48, 0.10), Vec2::new(-0.6, -0.25), 0.0, tint);
-            part(
-                Vec2::splat(0.23),
-                Vec2::new(0.12, 0.0),
-                std::f32::consts::FRAC_PI_4,
-                Color::WHITE,
-            );
+            // Seven touching strips approximate a round orb without a texture
+            // dependency; pooled orbit particles supply the animated halo.
+            for band in -3..=3 {
+                let y = band as f32 * 0.13;
+                let width = 2.0 * (0.47_f32.powi(2) - y * y).sqrt();
+                part(Vec2::new(width, 0.14), Vec2::new(0.0, y), 0.0, tint);
+            }
+            part(Vec2::splat(0.20), Vec2::new(0.10, 0.08), 0.0, Color::WHITE);
         }
         ProjectileShape::Holy => {
             part(
@@ -1005,15 +1006,19 @@ fn spawn_projectile_shape_2d(
             part(Vec2::new(1.0, 0.12), Vec2::ZERO, 0.0, Color::WHITE);
         }
         ProjectileShape::Crescent => {
-            for index in 0..9 {
-                let angle = -1.2 + index as f32 * 2.4 / 8.0;
-                part(
-                    Vec2::new(0.13, 0.30),
-                    Vec2::new(angle.cos() * 0.70 - 0.25, angle.sin() * 0.9),
-                    angle,
-                    tint,
-                );
-            }
+            part(
+                Vec2::new(1.30, 0.19),
+                Vec2::ZERO,
+                0.0,
+                Color::srgb(0.90, 0.97, 1.0),
+            );
+            part(
+                Vec2::splat(0.20),
+                Vec2::new(0.64, 0.0),
+                std::f32::consts::FRAC_PI_4,
+                Color::WHITE,
+            );
+            part(Vec2::new(0.15, 0.65), Vec2::new(-0.48, 0.0), 0.0, tint);
         }
         ProjectileShape::Bolt => {
             part(Vec2::new(1.2, 0.25), Vec2::ZERO, 0.0, tint);
@@ -1109,22 +1114,30 @@ fn update_actor_frames(
 
 fn sync_actor_visuals(
     mut commands: Commands,
-    owners: Query<&Transform, Without<PresentationActorVisual>>,
+    owners: Query<(&Transform, Option<&Visibility>), Without<PresentationActorVisual>>,
     mut visuals: Query<(
         Entity,
         &mut PresentationActorVisual,
         &mut Transform,
         &mut Sprite,
+        &mut Visibility,
     )>,
 ) {
-    for (entity, mut visual, mut transform, mut sprite) in &mut visuals {
-        let Ok(owner) = owners.get(visual.owner) else {
+    for (entity, mut visual, mut transform, mut sprite, mut visible) in &mut visuals {
+        let Ok((owner, owner_visibility)) = owners.get(visual.owner) else {
             commands
                 .entity(entity)
                 .despawn_related::<Children>()
                 .despawn();
             continue;
         };
+        if visual.kind == PresentationActorKind::Projectile {
+            *visible = if owner_visibility == Some(&Visibility::Hidden) {
+                Visibility::Hidden
+            } else {
+                Visibility::Inherited
+            };
+        }
         let xy = simulation_xz_to_render_xy(owner.translation);
         let anchor = Vec2::new(
             (0.5 - visual.pivot[0]) * visual.world_height,
@@ -1357,6 +1370,87 @@ mod tests {
         );
     }
 
+    #[test]
+    fn projectile_proxy_budget_reuses_capacity_after_owner_cleanup() {
+        let mut app = App::new();
+        app.insert_resource(PlayerVisualMode::Sprite2d)
+            .init_resource::<CombatVisualRegistry>()
+            .init_resource::<ProjectileSpriteCache>()
+            .add_systems(
+                Update,
+                (attach_projectile_visuals, sync_actor_visuals).chain(),
+            );
+        let budget = crate::projectile_visuals::MAX_VISUALS;
+        let owners: Vec<_> = (0..budget + 20)
+            .map(|i| {
+                app.world_mut()
+                    .spawn((
+                        Transform::default(),
+                        projectile_fixture(ProjectileStyle::Arcane, i as u64),
+                    ))
+                    .id()
+            })
+            .collect();
+        for _ in 0..3 {
+            app.update();
+        }
+        assert_eq!(
+            app.world_mut()
+                .query::<&ProjectileSpriteVisual>()
+                .iter(app.world())
+                .count(),
+            budget
+        );
+        assert!(app.world_mut().query::<&Sprite>().iter(app.world()).count() <= budget * 10);
+        let owner = app
+            .world_mut()
+            .query::<&ProjectilePresentationRoot>()
+            .iter(app.world())
+            .next()
+            .unwrap()
+            .owner;
+        app.world_mut().entity_mut(owner).insert(Visibility::Hidden);
+        app.update();
+        let proxy = app
+            .world_mut()
+            .query::<(Entity, &ProjectilePresentationRoot)>()
+            .iter(app.world())
+            .find(|(_, p)| p.owner == owner)
+            .unwrap()
+            .0;
+        assert_eq!(
+            *app.world().get::<Visibility>(proxy).unwrap(),
+            Visibility::Hidden
+        );
+        app.world_mut()
+            .entity_mut(owner)
+            .insert(Visibility::Inherited);
+        app.update();
+        assert_eq!(
+            *app.world().get::<Visibility>(proxy).unwrap(),
+            Visibility::Inherited
+        );
+        app.world_mut().entity_mut(owner).despawn();
+        app.update();
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .query::<&ProjectileSpriteVisual>()
+                .iter(app.world())
+                .count(),
+            budget
+        );
+        for owner in owners {
+            if let Ok(entity) = app.world_mut().get_entity_mut(owner) {
+                entity.despawn();
+            }
+        }
+        app.update();
+        assert_eq!(
+            app.world_mut().query::<&Sprite>().iter(app.world()).count(),
+            0
+        );
+    }
     #[test]
     fn configured_sprite_uses_cached_atlas_animates_and_falls_back_for_missing_or_wrong_image() {
         let registry = CombatVisualRegistry::from_json(

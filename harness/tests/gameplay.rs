@@ -22,8 +22,9 @@ use shared::navigation::Disc;
 
 /// `PLAYER_GROUND_Y` — fixed ground plane height the server snaps players to.
 const GROUND_Y: f32 = 0.5;
-/// `MAX_HP` — full player health.
-const MAX_HP: f32 = 100.0;
+/// Default warrior health follows shared class balance; mana remains independent.
+const MAX_HP: f32 = shared::hero_balance::base_hp(shared::HeroClass::Warrior);
+const MAX_MANA: f32 = 100.0;
 /// Warrior `shield_bash` cast range (`shared::WARRIOR_ABILITIES[0]`) — the
 /// shortest Q range of any kit. We bring players closer than this before
 /// casting so every class's Q connects.
@@ -46,7 +47,7 @@ fn xz_distance(a: &PlayerState, b: &PlayerState) -> f32 {
 /// Brings two enemy bots from their far apart spawns to within cast range by
 /// following routes toward the map origin (with the debug speed boost so it
 /// is quick). Authoritative positions and live structures come from snapshots.
-fn walk_into_cast_range(observer: &mut Bot, mover: &Bot, observer_id: u64, mover_id: u64) {
+fn walk_into_cast_range(observer: &mut Bot, mover: &mut Bot, observer_id: u64, mover_id: u64) {
     observer.set_speed_boost(true);
     mover.set_speed_boost(true);
 
@@ -66,22 +67,30 @@ fn walk_into_cast_range(observer: &mut Bot, mover: &Bot, observer_id: u64, mover
         else {
             continue;
         };
-        let (Some(a), Some(b)) = (packet.player(observer_id), packet.player(mover_id)) else {
+        let Some(mover_packet) = mover.recv_snapshot(deadline.min(Instant::now() + POLL_TIMEOUT))
+        else {
             continue;
         };
-        if xz_distance(a, b) <= target_gap {
+        let (Some(a), Some(b)) = (packet.player(observer_id), mover_packet.player(mover_id)) else {
+            continue;
+        };
+        if xz_distance(a, b) <= target_gap
+            && packet.player(mover_id).is_some()
+            && mover_packet.player(observer_id).is_some()
+        {
             break;
         }
         let structures: Vec<_> = packet
             .structures()
             .iter()
+            .chain(mover_packet.structures().iter())
             .filter(|s| s.hp > 0.0)
             .map(|s| Disc {
                 center: [s.x, s.z],
                 radius: if s.kind == "base_tower" { 3.2 } else { 1.3 },
             })
             .collect();
-        for ((route, bot), state) in routes.iter_mut().zip([&*observer, mover]).zip([a, b]) {
+        for ((route, bot), state) in routes.iter_mut().zip([&*observer, &*mover]).zip([a, b]) {
             if let Some(next) = route.next([state.x, state.z], [0.0, 0.0], &structures) {
                 bot.send_transform(
                     next[0],
@@ -92,18 +101,6 @@ fn walk_into_cast_range(observer: &mut Bot, mover: &Bot, observer_id: u64, mover
             }
         }
     }
-}
-
-/// Polls snapshots until a second player (id != `self_id`) appears and returns
-/// its id. Panics on timeout.
-fn poll_other_player_id(bot: &mut Bot, self_id: u64) -> u64 {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while let Some(packet) = bot.recv_snapshot(deadline) {
-        if let Some(other) = packet.players().iter().find(|p| p.id != self_id) {
-            return other.id;
-        }
-    }
-    panic!("a second player never appeared in a snapshot");
 }
 
 #[test]
@@ -131,18 +128,16 @@ fn join_produces_snapshot_with_player() {
 fn god_mode_keeps_player_alive_under_damage() {
     let server = ServerProcess::spawn();
     let mut victim = Bot::connect(server.addr()); // A (green)
-    let attacker = Bot::connect(server.addr()); // B (blue)
+    let mut attacker = Bot::connect(server.addr()); // B (blue)
 
     victim.join(Team::Green, Character::Ipfs);
     attacker.join(Team::Blue, Character::Ipfs);
 
     let victim_id = victim.my_id(POLL_TIMEOUT);
 
-    // Learn the attacker's id from the victim's snapshot: it lists all players,
-    // so the non-victim id is the attacker. Poll until both have joined.
-    let attacker_id = poll_other_player_id(&mut victim, victim_id);
+    let attacker_id = attacker.my_id(POLL_TIMEOUT);
 
-    walk_into_cast_range(&mut victim, &attacker, victim_id, attacker_id);
+    walk_into_cast_range(&mut victim, &mut attacker, victim_id, attacker_id);
 
     // --- Phase 1: god mode ON -> attacker casts for ~2s -> hp must hold. ---
     victim.set_god_mode(true);
@@ -270,10 +265,10 @@ fn join_replicates_class_and_avatar_and_applies_distinct_kits() {
     );
 
     let mage_id = mage.my_id(POLL_TIMEOUT);
-    let warrior_id = poll_other_player_id(&mut mage, mage_id);
-    assert_eq!(warrior.my_id(POLL_TIMEOUT), warrior_id);
+    let warrior_id = warrior.my_id(POLL_TIMEOUT);
+    walk_into_cast_range(&mut mage, &mut warrior, mage_id, warrior_id);
 
-    // The server must replicate BOTH loadouts to BOTH clients.
+    // Once mutually visible, both clients must receive the other loadout.
     mage.wait_for_player(
         mage_id,
         |p| p.hero_class.as_deref() == Some("mage") && p.avatar.as_deref() == Some("agnes"),
@@ -296,11 +291,10 @@ fn join_replicates_class_and_avatar_and_applies_distinct_kits() {
 
     // The server applies each player's own kit: a single Q cast drains the
     // class-specific mana cost (mage arc_bolt 22 vs warrior shield_bash 10).
-    walk_into_cast_range(&mut mage, &warrior, mage_id, warrior_id);
     let mage_min = cast_once_and_min_mana(&mut mage, mage_id, warrior_id, 0);
     let warrior_min = cast_once_and_min_mana(&mut warrior, warrior_id, mage_id, 0);
 
-    let split = MAX_HP - (MAGE_Q_MANA_COST + WARRIOR_Q_MANA_COST) / 2.0; // 84
+    let split = MAX_MANA - (MAGE_Q_MANA_COST + WARRIOR_Q_MANA_COST) / 2.0; // 84
     assert!(
         mage_min < split,
         "mage Q should drain ~{MAGE_Q_MANA_COST} mana, min observed {mage_min}"
@@ -310,7 +304,7 @@ fn join_replicates_class_and_avatar_and_applies_distinct_kits() {
         "warrior Q should drain only ~{WARRIOR_Q_MANA_COST} mana, min observed {warrior_min}"
     );
     assert!(
-        warrior_min < MAX_HP - WARRIOR_Q_MANA_COST * 0.5,
+        warrior_min < MAX_MANA - WARRIOR_Q_MANA_COST * 0.5,
         "warrior Q cast should still visibly drain mana, min observed {warrior_min}"
     );
 }
@@ -319,14 +313,14 @@ fn join_replicates_class_and_avatar_and_applies_distinct_kits() {
 fn locked_slots_are_rejected_authoritatively() {
     let server = ServerProcess::spawn();
     let mut caster = Bot::connect(server.addr());
-    let victim = Bot::connect(server.addr());
+    let mut victim = Bot::connect(server.addr());
 
     caster.join_with_loadout(Team::Green, Character::Ipfs, HeroClass::Warrior, None);
     victim.join_with_loadout(Team::Blue, Character::Wang, HeroClass::Warrior, None);
 
     let caster_id = caster.my_id(POLL_TIMEOUT);
-    let victim_id = poll_other_player_id(&mut caster, caster_id);
-    walk_into_cast_range(&mut caster, &victim, caster_id, victim_id);
+    let victim_id = victim.my_id(POLL_TIMEOUT);
+    walk_into_cast_range(&mut caster, &mut victim, caster_id, victim_id);
 
     // R (slot 3) unlocks at level 6; at level 1 the cast must be a full no-op.
     let min_mana = cast_once_and_min_mana(&mut caster, caster_id, victim_id, 3);
@@ -417,70 +411,137 @@ const WENDIGO_MAX_HP: f32 = 900.0;
 #[test]
 fn bottom_boss_spawns_on_schedule_with_boss_stats() {
     let server = ServerProcess::spawn();
-    let mut bot = Bot::connect(server.addr());
-
-    bot.join(harness::Team::Green, Character::Ipfs);
-    let _id = bot.my_id(POLL_TIMEOUT);
-    // Match starts when the join is processed; the first snapshot arrives
-    // within ~100 ms of that, so this reference is accurate to well under 1 s.
-    let match_start = Instant::now();
-
-    // Early window: the six camps are up, no boss, no team buffs.
-    let early_deadline = match_start + Duration::from_secs(5);
-    let mut saw_camps = false;
-    while Instant::now() < early_deadline {
-        bot.ping();
-        let Some(packet) = bot.recv_snapshot(Instant::now() + POLL_TIMEOUT) else {
-            continue;
-        };
-        assert!(
-            packet.neutrals().iter().all(|n| !n.camp_type.is_boss()),
-            "no boss may exist right after match start"
+    let bounds = shared::map::geometry().bounds;
+    let map_size = bounds.max[0] - bounds.min[0];
+    let bottom_pit = [map_size * 0.22, -map_size * 0.34];
+    let top_pit = [-bottom_pit[0], -bottom_pit[1]];
+    let anchors: Vec<_> = shared::jungle::camp_layout(map_size)
+        .into_iter()
+        .map(|(point, _)| point)
+        .chain([bottom_pit, top_pit])
+        .collect();
+    // Fog requires real sight at each camp and both pits. Ordinary admitted
+    // scouts walk there; god mode only keeps these passive observers alive.
+    let mut scouts: Vec<_> = anchors
+        .iter()
+        .map(|_| Bot::connect_framed(server.addr()))
+        .collect();
+    let mut routes: Vec<BotNavigator> = anchors.iter().map(|_| Default::default()).collect();
+    for (index, bot) in scouts.iter().enumerate() {
+        bot.join(
+            if index % 2 == 0 {
+                Team::Green
+            } else {
+                Team::Blue
+            },
+            Character::Ipfs,
         );
-        assert!(
-            packet.team_buffs().is_empty(),
-            "no team buff may be active without a boss kill"
-        );
-        if packet.neutrals().len() == 6 {
-            saw_camps = true;
-        }
+        bot.set_speed_boost(true);
+        bot.set_god_mode(true);
     }
-    assert!(
-        saw_camps,
-        "the six jungle camps should replicate from the start"
-    );
-
-    // Up to shortly before the delay: still no boss.
-    let gated_until = match_start + Duration::from_secs(BOTTOM_BOSS_SPAWN_DELAY_SECS - 10);
-    while Instant::now() < gated_until {
-        bot.ping();
-        if let Some(packet) = bot.recv_snapshot(Instant::now() + POLL_TIMEOUT) {
+    let match_start = Instant::now();
+    let ids: Vec<_> = scouts
+        .iter_mut()
+        .map(|bot| bot.my_id(POLL_TIMEOUT))
+        .collect();
+    let mut seen_camps = std::collections::HashSet::new();
+    let mut pit_in_sight = [false; 2];
+    let mut last_diagnostic = [0_u64; 8];
+    let mut wendigo: Option<harness::NeutralState> = None;
+    let deadline = match_start + Duration::from_secs(BOTTOM_BOSS_SPAWN_DELAY_SECS + 15);
+    while Instant::now() < deadline && wendigo.is_none() {
+        for index in 0..scouts.len() {
+            let bot = &mut scouts[index];
+            bot.ping();
+            let Some(packet) = bot.recv_snapshot(Instant::now() + POLL_TIMEOUT) else {
+                continue;
+            };
+            let me = packet
+                .player(ids[index])
+                .expect("admitted scout must remain in its own snapshot");
+            assert!(me.hp > 0.0, "passive scout must remain alive");
+            assert!(
+                matches!(packet.game_state(), harness::GameState::Running),
+                "boss timing requires running match, got {:?}",
+                packet.game_state()
+            );
+            let anchor = anchors[index];
+            let length = anchor[0].hypot(anchor[1]);
+            let goal = [
+                anchor[0] * (1.0 - 15.0 / length),
+                anchor[1] * (1.0 - 15.0 / length),
+            ];
+            let structures: Vec<_> = packet
+                .structures()
+                .iter()
+                .filter(|s| s.hp > 0.0)
+                .map(|s| Disc {
+                    center: [s.x, s.z],
+                    radius: if s.kind == "base_tower" { 3.2 } else { 1.3 },
+                })
+                .collect();
+            if let Some(next) = routes[index].next([me.x, me.z], goal, &structures) {
+                bot.send_transform(
+                    next[0],
+                    GROUND_Y,
+                    next[1],
+                    (next[0] - me.x).atan2(next[1] - me.z),
+                );
+            }
+            let elapsed = match_start.elapsed();
+            if elapsed.as_secs() / 10 > last_diagnostic[index] {
+                last_diagnostic[index] = elapsed.as_secs() / 10;
+                eprintln!(
+                    "boss scout {index}: t={:.1}s position=({:.1},{:.1}) anchor_distance={:.1} neutrals={:?}",
+                    elapsed.as_secs_f32(),
+                    me.x,
+                    me.z,
+                    (me.x - anchor[0]).hypot(me.z - anchor[1]),
+                    packet
+                        .neutrals()
+                        .iter()
+                        .map(|n| n.camp_type)
+                        .collect::<Vec<_>>()
+                );
+            }
+            if index >= 6
+                && (me.x - anchor[0]).hypot(me.z - anchor[1]) <= shared::vision::HERO_SIGHT_RADIUS
+            {
+                pit_in_sight[index - 6] = true;
+            }
+            for neutral in packet.neutrals() {
+                if !neutral.camp_type.is_boss() && elapsed < Duration::from_secs(50) {
+                    seen_camps.insert(neutral.id);
+                }
+                if neutral.camp_type == NeutralCampType::WendigoBoss {
+                    assert!(
+                        elapsed >= Duration::from_secs(BOTTOM_BOSS_SPAWN_DELAY_SECS - 5),
+                        "bottom boss spawned too early"
+                    );
+                    wendigo = Some(neutral.clone());
+                }
+            }
             assert!(
                 packet
-                    .neutral_of_type(NeutralCampType::WendigoBoss)
+                    .neutral_of_type(NeutralCampType::KingMutatioBoss)
                     .is_none(),
-                "bottom boss appeared before its spawn delay"
+                "top boss appeared before its later spawn delay"
             );
-        }
-    }
-
-    // The bottom boss must appear around the 60 s mark (top boss still gated).
-    let appear_deadline = match_start + Duration::from_secs(BOTTOM_BOSS_SPAWN_DELAY_SECS + 15);
-    let mut wendigo: Option<harness::NeutralState> = None;
-    while Instant::now() < appear_deadline {
-        bot.ping();
-        let Some(packet) = bot.recv_snapshot(Instant::now() + POLL_TIMEOUT) else {
-            continue;
-        };
-        assert!(
-            packet
-                .neutral_of_type(NeutralCampType::KingMutatioBoss)
-                .is_none(),
-            "top boss must not spawn before its own (later) delay"
-        );
-        if let Some(boss) = packet.neutral_of_type(NeutralCampType::WendigoBoss) {
-            wendigo = Some(boss.clone());
-            break;
+            assert!(
+                packet.team_buffs().is_empty(),
+                "no buffs without a boss kill"
+            );
+            if elapsed >= Duration::from_secs(50) {
+                assert_eq!(
+                    seen_camps.len(),
+                    6,
+                    "all six starting camps must have been observed through actual sight before boss spawn"
+                );
+                assert!(
+                    pit_in_sight.into_iter().all(|seen| seen),
+                    "both pits must be under observation before checking spawn timing"
+                );
+            }
         }
     }
     let wendigo = wendigo.expect("bottom boss did not appear within its spawn window");

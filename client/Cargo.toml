@@ -20,7 +20,7 @@ winit.workspace = true
 # Bevy's default_platform enables GameActivity, which is mutually exclusive with it.
 [target.'cfg(not(target_os = "android"))'.dependencies]
 bevy = { workspace = true, features = ["jpeg"] }
-ekza-bevy-sdk = { git = "https://github.com/ekza-space/ekza-bevy-sdk", rev = "42c39e4bf5aea2e3a051f86ba27cbf6e2c46d377" }
+ekza-bevy-sdk = { git = "https://github.com/ekza-space/ekza-bevy-sdk", rev = "247ddbf6dbfc9bac95b52b74ce3a0a1321466a24" }
 
 [target.'cfg(target_os = "android")'.dependencies]
 bevy = { version = "0.18.0", default-features = false, features = [
@@ -30,7 +30,7 @@ bevy = { version = "0.18.0", default-features = false, features = [
 ] }
 # Identity and validation are platform-independent. The legacy empty model catalog
 # is provided locally on Android, avoiding the SDK's desktop-only download stack.
-ekza-bevy-sdk = { git = "https://github.com/ekza-space/ekza-bevy-sdk", rev = "42c39e4bf5aea2e3a051f86ba27cbf6e2c46d377", default-features = false }
+ekza-bevy-sdk = { git = "https://github.com/ekza-space/ekza-bevy-sdk", rev = "247ddbf6dbfc9bac95b52b74ce3a0a1321466a24", default-features = false }
 
 [lints]
 workspace = true

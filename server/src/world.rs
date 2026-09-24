@@ -77,6 +77,7 @@ pub(crate) fn build_configured_structures(
                     last_attack_at: None,
                     attack_range: item.stats.attack_range,
                     attack_damage: item.stats.attack_damage,
+                    hero_damage_multiplier: item.stats.hero_damage_multiplier,
                     attack_cooldown: Duration::from_millis(item.stats.attack_cooldown_ms),
                 },
             )
@@ -144,6 +145,7 @@ pub(crate) fn add_structure(
             last_attack_at: None,
             attack_range,
             attack_damage,
+            hero_damage_multiplier: 2.0,
             attack_cooldown,
         },
     );
@@ -319,5 +321,13 @@ pub(crate) fn structure_radius(kind: StructureKind) -> f32 {
     match kind {
         StructureKind::Tower => TOWER_SIZE * 0.5,
         StructureKind::BaseTower => BASE_TOWER_SIZE * 0.5,
+    }
+}
+
+/// Movement footprint, not attack-target reach.
+pub(crate) fn structure_collision_radius(kind: StructureKind) -> f32 {
+    match kind {
+        StructureKind::Tower => shared::TOWER_TARGET_RADIUS,
+        StructureKind::BaseTower => shared::navigation::BASE_COLLISION_RADIUS,
     }
 }

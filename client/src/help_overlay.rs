@@ -60,7 +60,7 @@ fn auto_show_help_on_first_match_start(
         && session
             .as_ref()
             .is_none_or(|session| session.join_confirmed());
-    if running && !state.was_running && state.pending {
+    if running && !state.was_running && state.pending && !crate::sandbox::requested() {
         visible.0 = true;
         state.pending = false;
     }

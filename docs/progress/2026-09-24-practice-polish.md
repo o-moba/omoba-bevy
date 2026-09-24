@@ -59,7 +59,7 @@ menu; and a K/D/A that did not grow when killing bots.
   from bot addresses.
 - **Bot kinds** (`server/src/bots.rs`): `Lane` (the roster), `Duelist` (the
   lane AI at a configured level and budget) and `Dummy { anchor }` (never
-  thinks, moves or attacks; 400 HP; after a base respawn it is placed back on
+  thinks, moves or attacks; 600 HP; after a base respawn it is placed back on
   its anchor facing the human). Only lane bots count toward the team size, so
   dummies never displace the roster; `BotControllers::sandbox` stops the
   automatic refill after "Clear bots" or a duel until "Standard bots" or a
@@ -85,3 +85,26 @@ menu; and a K/D/A that did not grow when killing bots.
   `MATCH_METRIC event=unregistered_participant` once per id when a hero hit
   involves a player without a row. If the counter still stays flat, that log
   line on the practice server names the missing participant.
+
+## Offline practice (after merging main)
+
+`main` meanwhile gained a socket-free offline practice (`client/src/net/offline.rs`,
+the "Offline practice" home button) and the server-backed Combat Test. The
+playtest complaints were about that offline playground, so the same fixes now
+live there:
+
+- **Facing.** The circling heroes computed `atan2(cos, -sin)` for a path whose
+  velocity is `(cos, -sin)`; models look along -Z, so they ran backwards. The
+  simulation now derives yaw from the step it takes (`yaw_towards`).
+- **K/D/A.** The offline snapshot sent `scoreboard: None`, so the HUD showed
+  dashes forever. The simulation keeps kills and deaths per id from its own
+  damage receipts and publishes a `LiveScoreboard` every tick.
+- **Sandbox.** `ClientPacket::Practice` and `SetGodMode` are handled by the
+  simulation: ring roster, clear bots, stationary 600 HP dummies in front of the
+  hero, and a `Duelist` of the local class that walks the authored mid road in
+  reverse, engages within 15 m, strikes on the shared basic-attack cadence and
+  casts unlocked hostile-target skills on the shared cooldown/mana rules. Its
+  level, ranks (`ranks_for_level`), items (starting wallet plus the budget,
+  recommended order) and HP growth mirror the server's duelist. The local hero
+  can now die offline and respawns at base after five seconds; god mode keeps
+  it at full health. The pause-menu page shows for `offline_practice` as well.

@@ -1,6 +1,22 @@
 # Feature Inventory
 
-## Public multiplayer MVP (0.22.0-rc.1)
+## Five classes and the Warden jungler (0.23.0-rc.6)
+
+A fifth class, **Warden**, completes one class per draft duty: Warrior → Solo (top), Mage → Mid, Ranger → Carry (bot), Cleric → Support (bot), Warden → Jungle. Choosing a class in the draft proposes its role; a deliberately chosen role is kept. Warden is a melee jungler (210 HP, Feral Swipe / Barkskin / Hunter's Mark / Primal Maul) whose server-authoritative passive **Forest Tracker** deals +35% damage to jungle camps (+15% on bosses) and earns +40% gold and +25% XP per camp kill; boss rewards are unchanged because their value is the team buff. Practice bots now fill a team as that composition, skipping classes a human already took; the bot Warden clears its own half's camps and falls back to mid lane when every camp is down. The skill atlas gains a fifth Warden row in the same painted style. See [the balance note](balance-tuning.md#five-classes-and-the-warden-0230-rc6).
+
+## Offline character practice (0.23.0-rc.5)
+
+Home → Offline practice → choose a bundled avatar/class → Start practice. The 3D client runs a small in-process practice simulation through its normal snapshot/render/input pipeline, with no socket listener or external server. Level six unlocks every skill; four enemy practice heroes include a stationary melee target and moving animation examples, and defeated targets recover after three seconds. Mana regenerates for repeated tests. Basic attacks, class skills and dash/haste use shared definitions. Practice is not full bot matchmaking: there are no lane waves, ranked results, inventory purchases or progression rewards. Leave practice in Game menu restores the saved online server; bundled characters work without Ekza login. Game menu has a fixed × header and fixed navigation footer, with independently scrollable content.
+
+## Combat particles and healing butterflies (0.23.0-rc.3)
+
+Magic orbs have orbiting sparks and fading tails; confirmed hits produce short radial bursts. Six symmetric forest flocks glow and flap, grant one injured living collector up to 5% maximum HP, then respawn after 30 seconds. Availability and HP belong to the server. A soft oval vignette frames the battlefield below the HUD in 3D and Sprite2d. See [rules, rendering limits and native capture instructions](forest-combat-vfx.md).
+
+## Measured combat pacing and growth (0.23.0-rc.2)
+
+Starting durability and Q intervals now leave an early response window; levels increase movement, basic attack speed/damage and skill power. All four skills share a short recovery interval, while basic attacks keep an independent clock. The client buffers the next skill and restores server cooldowns across reconnect. Default towers scale damage against heroes without shortening minion siege windows. The 48-encounter production-path benchmark measures a level-one median of 10.53s and level-ten mean of 4.24s; these are controlled stationary targets, not competitive win rates. See [formulas, research, limitations and reproduction](balance-tuning.md).
+
+## Public multiplayer MVP (0.22.0-rc.2)
 
 The public lobby offers Quick match (30-second bot fallback), Wait for players (ten humans only), and Play with bots. Independent worker processes own immutable ten-player rosters, automatic teams, shared draft/countdown/loading and a durable start barrier. New humans cannot replace bots after a match starts; existing participants can reconnect. PostgreSQL saves history and progression for approved allocated bot games, with competitive rating reserved for eligible bot-free PvP. Signed gameplay packets, bounded admission and isolated durable outboxes protect the public match boundary. See [launch, recovery and capacity instructions](public-mvp.md).
 
@@ -10,15 +26,14 @@ All 15 shipped playable 3D avatars use the engine's shared Run motion during nor
 
 Validated VRM0/VRM1 skinned humanoids receive runtime clips adapted to their bone map and rest pose, including models with no embedded clips. Original skin bytes remain unchanged. This is skeletal compatibility for a documented subset, not complete VRM materials/face/hair support. Approved Studio models gain runtime Run through normal verified loading; accepting externally published clipless models still requires a versioned profile rollout. See [architecture, import and limits](humanoid-motion.md).
 
-Canonical version: `0.22.0-rc.1`
+Canonical version: `0.23.0-rc.3`
 
 ## Team draft and shared loading
 
 Normal Find match assigns a team and map side automatically. Each assigned team
 can inspect accepted avatar/class choices, choose an intended Solo, Jungle, Mid,
 Carry or Support role, and lock or unlock its choice. Duplicate and composition
-warnings inform the team without banning the overlap needed with four classes
-and five-player teams. The roster scrolls for larger configured teams.
+warnings inform the team without banning duplicate classes or roles. The roster scrolls for larger configured teams.
 
 All required human players lock before the shared three-second countdown. The
 loading screen retains the frozen roster and shows actual readiness. A client
@@ -149,7 +164,7 @@ it can lock distant visible enemies without increasing damage range. Release
 revalidates the exact preview rather than substituting another enemy. Desktop
 mouse targeting remains separate.
 
-All four classes have four illustrated skills. A stationary phone hold opens
+All five classes have four illustrated skills. A stationary phone hold opens
 ability name, description, rank/unlock level, mana cost and cooldown; releasing
 inspection never fires a skill. A quick tap casts, and a deliberate drag aims.
 Desktop slots reuse the same presentation-only art while retaining shortcuts and
@@ -288,6 +303,7 @@ follows.
   killed monsters respawn after 40 seconds. Ordinary camp kills restore 20%
   maximum HP to the living last hitter. Distinct 3D creatures and persistent
   camp markers expose living/depleted locations in desktop and phone UI.
+  The Warden class clears camps faster and earns more from them.
   See [the implementation and verification record](progress/2026-09-11-jungle-camps.md).
 
 - **Local source launch:** `make play` builds locked sources and runs local 3D
@@ -319,8 +335,8 @@ follows.
   phone tap chases like a desktop order unless the stick is steering; a hero in
   reach turns to face its target when it strikes.
 
-- **Practice sandbox (2026-09-24):** in local bot practice the pause menu's
-  "Practice sandbox" page toggles god mode, spawns stationary target dummies
+- **Practice sandbox (2026-09-24):** in local bot practice and in the offline
+  practice playground the pause menu's "Practice sandbox" page toggles god mode, spawns stationary target dummies
   in front of the hero, clears or restores the bot roster, and starts a 1v1
   against one mid-lane opponent at a chosen level (skills ranked for that
   level) and gold (spent on items at base). Practice bots shop at base, rank
@@ -740,3 +756,68 @@ out removes the local credential and invalidates pending background work;
 Studio Account revokes access server-side. Public approved community models
 remain free after logout. Catalogue identity, metadata, live entitlement changes
 and scrolling stay intact when an account is restored or signed out.
+
+## Xcode iOS archive workflow
+
+Open `mobile/ios/Omoba.xcodeproj`, select the shared Omoba scheme and a physical
+iOS destination, then use Product → Archive. A build phase compiles the current
+locked Rust source and stages tracked assets plus matching symbols. Xcode owns
+signing and Organizer distribution. Local signing/team overrides remain ignored.
+See [TestFlight instructions](../mobile/ios/TESTFLIGHT.md); local unsigned archive
+validation does not assert Apple upload acceptance.
+
+The Rust staging phase refreshes the executable modification time even when Cargo
+reuses its cached binary, allowing Xcode to invalidate its previous signing output.
+
+## Structure movement consistency
+
+Practice bot planning uses the physical structure footprint enforced by movement
+authority, separate from combat target reach. Local structure movement uses the
+same swept collision primitive and keeps planning clearance when sliding around
+buildings, so ordinary 20 Hz position samples do not cut through a structure.
+
+On iOS, winit may emit `RedrawRequested` informational messages and `AboutToWait`
+event-order warnings. These concern the native window loop, not UDP sync errors.
+Warnings remain visible; the movement fix does not change the native event loop.
+
+## Base recovery and mobile result panels
+
+During a running match, living joined heroes and bots recover 12% of maximum HP
+per second inside their own base's shop zone. The server caps recovery at maximum
+HP; opponents' bases, dead players and completed matches do not grant healing.
+
+Settings scroll within a bounded body with a fixed Back action. Results use
+nonshrinking cards inside their scroll area and fixed header/footer navigation.
+Mobile drags use logical window coordinates, respect display/UI scaling and
+clipping, and retain pointer ownership until release/cancel. Career buttons
+activate on short release; scrolling cannot trigger a button underneath the finger.
+
+Live K/D/A and team kills are read from the authoritative snapshot scoreboard.
+Older running server binaries that omit that field show unavailable statistics;
+restart the server from current source as well as rebuilding the client.
+
+## Ekza connection and LAN Studio testing (0.22.0-rc.5)
+
+Avatar collection account/catalogue messages update existing labels without replacing held controls. Wallet pairing has visible progress and approval-page retry. iOS opens approval links using UIKit on the main queue; scoped Ekza account sessions still restore from private storage.
+
+An explicit Debug-only local Studio configuration and `scripts/ekza_lan.py` connect the game, account service and approved catalogue to the same local Registry. The SDK's exact private-host development exception is ignored by release builds. See [LAN walkthrough](ekza-lan.md) for the real author → curator → game-owner → player flow. No wallet is required for approved free avatars.
+
+## Combat Test sandbox
+
+The explicit local development launcher `python3 scripts/combat_test.py` opens a hero picker or directly enters a configured scenario without matchmaking. Its Dev Panel exposes authoritative progression, skill ranks/unlocks, health/mana, combat multipliers, all shipped items, reset and teleport; configurable enemy AI, damage dummy analytics, direct loopback 1v1, minion controls and simulation pause/speed/frame stepping share the real game rules. Native animation previews and geometry/state overlays support combat debugging. Named JSON presets survive ordinary rebuilds. Ordinary release/practice and career ratings reject sandbox mutation. See [Combat Test](combat-test.md) for complete launch/control/measurement semantics.
+
+
+## Team vision and gameplay brush (0.23.0-rc.4)
+
+The 3D battlefield uses server-owned shared radial sight from living allied heroes,
+minions and structures. Unseen enemy actors are omitted from each recipient's
+snapshot, including indirect projectile/event channels; the public scoreboard stays
+available. Fresh target-locked attacks and bot/minion/tower acquisition require
+visibility. Already-launched homing attacks can still land after concealment.
+
+Ten mirrored, walkable tall-grass patches provide hero concealment. Entering the
+same patch grants detection; an accepted hostile targeted attack reveals its caster
+for two seconds within enemy radial sight. Soft fog follows the team sources on the
+battlefield and minimap, and an in-brush label reports concealed/revealed status.
+See [team vision rules and verification](team-vision.md). Terrain line of sight,
+wards and true invisibility are outside this iteration; 2D presentation is paused.

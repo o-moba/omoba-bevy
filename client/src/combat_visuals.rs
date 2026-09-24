@@ -16,10 +16,11 @@ const BUILT_INS: &str = r#"{"schema_version":1,"profiles":{
 "mage_arcane":{"shape":"arcane","color":[0.68,0.42,1,1]},
 "cleric_holy":{"shape":"holy","color":[1,0.84,0.35,1]},
 "warrior_crescent":{"shape":"crescent","color":[1,0.63,0.3,1]},
+"warden_claw":{"shape":"crescent","color":[0.55,0.95,0.4,1],"scale":0.9},
 "caster_bolt":{"shape":"arcane","color":[0.4,0.95,1,1],"scale":0.7},
 "tower_bolt":{"shape":"bolt","color":[1,0.43,0.24,1],"scale":1.4}},
-"defaults":{"standard":"standard","arrow":"ranger_arrow","arcane":"mage_arcane","holy":"cleric_holy","crescent":"warrior_crescent","caster_bolt":"caster_bolt","tower_bolt":"tower_bolt"},
-"classes":{"ranger":{"default":"ranger_arrow"},"mage":{"default":"mage_arcane"},"cleric":{"default":"cleric_holy"},"warrior":{"default":"warrior_crescent"}}}"#;
+"defaults":{"standard":"standard","arrow":"ranger_arrow","arcane":"mage_arcane","holy":"cleric_holy","crescent":"warrior_crescent","claw":"warden_claw","caster_bolt":"caster_bolt","tower_bolt":"tower_bolt"},
+"classes":{"ranger":{"default":"ranger_arrow"},"mage":{"default":"mage_arcane"},"cleric":{"default":"cleric_holy"},"warrior":{"default":"warrior_crescent"},"warden":{"default":"warden_claw"}}}"#;
 const CONFIG_PATH: &str = "config/combat_visuals.json";
 
 /// Render container whose visible drawable descendants represent this network root.
@@ -222,6 +223,7 @@ fn style_key(style: ProjectileStyle) -> &'static str {
         ProjectileStyle::Arcane => "arcane",
         ProjectileStyle::Holy => "holy",
         ProjectileStyle::Crescent => "crescent",
+        ProjectileStyle::Claw => "claw",
         ProjectileStyle::CasterBolt => "caster_bolt",
         ProjectileStyle::TowerBolt => "tower_bolt",
     }
@@ -381,6 +383,7 @@ impl CombatVisualRegistry {
                 "arcane",
                 "holy",
                 "crescent",
+                "claw",
                 "caster_bolt",
                 "tower_bolt",
             ]

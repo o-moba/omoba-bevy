@@ -63,11 +63,11 @@ struct SpeedBoostButton;
 struct SpeedBoostButtonLabel;
 
 fn debug_controls_enabled(console: Res<DebugConsole>) -> bool {
-    console.ui_enabled
+    console.ui_enabled && !crate::sandbox::requested()
 }
 
 fn setup_debug_buttons(mut commands: Commands, console: Res<DebugConsole>) {
-    if !console.ui_enabled {
+    if !console.ui_enabled || crate::sandbox::requested() {
         return;
     }
     spawn_toggle_button(

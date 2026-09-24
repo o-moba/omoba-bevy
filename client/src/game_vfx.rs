@@ -1,5 +1,5 @@
-//! Bounded, cosmetic-only particles. Hits arrive only from the accepted server
-//! event cursor; ambient butterflies never become simulation entities.
+//! Bounded combat particles and presentation of authoritative healing butterflies.
+//! Neither trails nor pickup presentation can award damage or healing.
 use crate::{
     camera::MainCamera,
     maps::MapLayout,
@@ -16,10 +16,8 @@ use bevy::{
 };
 use shared::combat::ProjectileStyle;
 
-/// Hits, dash afterimages and haste streaks share one pool; the trail emitter
-/// is distance-paced so a full team of hasted heroes stays well inside it.
-const PARTICLE_BUDGET: usize = 192;
-const BUTTERFLY_BUDGET: usize = 20;
+const PARTICLE_BUDGET: usize = 256;
+const BUTTERFLY_BUDGET: usize = shared::forest_pickups::FOREST_PICKUP_COUNT * 3;
 /// World distance a hasted hero travels between two speed streaks.
 const HASTE_STREAK_SPACING: f32 = 0.42;
 /// Seconds between ground pulses under a hasted hero.
@@ -73,6 +71,8 @@ pub(crate) enum UtilityVfx {
     /// A ground pulse under a hasted hero (buff start and while it lasts).
     HastePulse { position: Vec3, seed: u64 },
 }
+#[derive(Message)]
+struct FlightParticles(Vec<Particle>);
 #[derive(Clone, Copy)]
 enum Shape {
     Glow,
@@ -144,12 +144,27 @@ impl ParticleSlot {
 pub(crate) struct VfxPresentation;
 #[derive(Component)]
 pub(crate) struct ButterflyWing {
+    pub(crate) pickup_id: u64,
     anchor: Vec3,
     phase: f32,
     side: f32,
     material: Handle<StandardMaterial>,
     flat: Handle<ColorMaterial>,
 }
+#[derive(Component)]
+struct ButterflyGlow {
+    pickup_id: u64,
+    anchor: Vec3,
+    phase: f32,
+    material: Handle<StandardMaterial>,
+    flat: Handle<ColorMaterial>,
+}
+#[derive(Resource, Default)]
+struct PickupReceipts {
+    identity: Option<(u64, u64)>,
+    sequences: std::collections::HashMap<u64, u64>,
+}
+
 #[derive(Resource)]
 struct VfxAssets {
     glow_texture: Handle<Image>,
@@ -173,9 +188,11 @@ impl VfxAssets {
 pub(crate) struct GameVfxPlugin;
 impl Plugin for GameVfxPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<ImpactBurst>()
+        app.init_resource::<PickupReceipts>()
+            .add_message::<ImpactBurst>()
             .add_message::<ClearCombatVfx>()
             .add_message::<UtilityVfx>()
+            .add_message::<FlightParticles>()
             .add_systems(Startup, setup)
             .add_systems(
                 Update,
@@ -183,7 +200,16 @@ impl Plugin for GameVfxPlugin {
             )
             .add_systems(
                 PostUpdate,
-                (animate_particles, animate_butterflies)
+                (
+                    (
+                        pickup_feedback,
+                        emit_projectile_particles,
+                        animate_particles,
+                    )
+                        .chain(),
+                    animate_butterflies,
+                    animate_butterfly_glows,
+                )
                     .in_set(VfxPresentation)
                     .after(bevy::transform::TransformSystems::Propagate)
                     .after(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate)
@@ -211,7 +237,7 @@ fn texture(wing: bool) -> Image {
                 pixels.extend_from_slice(&[value, value, value, 255]);
             } else {
                 let r = Vec2::new(u * 2. - 1., v * 2. - 1.).length();
-                let alpha = (1. - r).max(0.).powi(3);
+                let alpha = (1. - r).max(0.).powf(1.6);
                 pixels.extend_from_slice(&[255, 255, 255, (alpha * 255.) as u8]);
             }
         }
@@ -325,7 +351,7 @@ fn setup(
             e.insert((Mesh3d(assets.glow.clone()), MeshMaterial3d(material)));
         }
     }
-    let colors = [Color::srgb(1., 0.65, 0.18), Color::srgb(0.3, 0.72, 1.)];
+    let colors = [Color::srgb(0.55, 1., 0.78), Color::srgb(1., 0.88, 0.42)];
     let wing_materials = colors.map(|color| {
         materials.add(StandardMaterial {
             base_color: color,
@@ -343,29 +369,59 @@ fn setup(
             ..default()
         })
     });
-    let anchors = map.decorative_jungle_block_centers();
-    for (i, anchor) in anchors
-        .iter()
-        .cycle()
-        .take(if anchors.is_empty() {
-            0
-        } else {
-            BUTTERFLY_BUDGET
-        })
-        .enumerate()
-    {
+    let anchors = shared::forest_pickups::pickup_layout();
+    let glow_material = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.22, 1.0, 0.60, 0.42),
+        base_color_texture: Some(glow.clone()),
+        unlit: true,
+        alpha_mode: AlphaMode::Add,
+        cull_mode: None,
+        ..default()
+    });
+    let glow_flat = flat_materials.add(ColorMaterial {
+        color: Color::srgba(0.22, 1.0, 0.60, 0.35),
+        texture: Some(glow.clone()),
+        ..default()
+    });
+    for i in 0..BUTTERFLY_BUDGET {
+        let pickup_id = (i / 3 + 1) as u64;
+        let anchor = Vec2::from_array(anchors[i / 3]);
         let phase = i as f32 * 2.399;
-        let offset = Vec2::new(phase.cos(), phase.sin()) * 3.0;
-        let anchor = *anchor + offset;
         let base = Vec3::new(
             anchor.x,
             map.terrain_height_3d(anchor.x, anchor.y),
             anchor.y,
         );
+        let mut halo = commands.spawn((
+            Name::new("Healing butterfly glow"),
+            ButterflyGlow {
+                pickup_id,
+                anchor: base,
+                phase,
+                material: glow_material.clone(),
+                flat: glow_flat.clone(),
+            },
+            Transform::default(),
+            Visibility::Hidden,
+            bevy::light::NotShadowCaster,
+            bevy::light::NotShadowReceiver,
+        ));
+        if *mode == PlayerVisualMode::Sprite2d {
+            halo.insert((
+                Mesh2d(assets.glow.clone()),
+                MeshMaterial2d(glow_flat.clone()),
+            ));
+        } else {
+            halo.insert((
+                Mesh3d(assets.glow.clone()),
+                MeshMaterial3d(glow_material.clone()),
+            ));
+        }
         for side in [-1., 1.] {
             let mut e = commands.spawn((
                 Name::new("Forest butterfly wing"),
                 ButterflyWing {
+                    pickup_id,
                     anchor: base,
                     phase,
                     side,
@@ -423,15 +479,15 @@ fn burst_particles(burst: &ImpactBurst) -> Vec<Particle> {
         first.clone(),
         Particle {
             shape: Shape::Glow,
-            size: size * 1.4,
+            size: size * 2.0,
             lifetime: lifetime * 0.65,
             ..first.clone()
         },
     ];
     let count = match burst.kind {
-        BurstKind::Magic => 6,
+        BurstKind::Magic => 10,
         BurstKind::Melee => 4,
-        BurstKind::Ranged => 2,
+        BurstKind::Ranged => 6,
     };
     for i in 0..count {
         let phase =
@@ -439,7 +495,7 @@ fn burst_particles(burst: &ImpactBurst) -> Vec<Particle> {
         let speed = if burst.kind == BurstKind::Melee {
             3.8
         } else {
-            2.2
+            3.6
         };
         particles.push(Particle {
             velocity: Vec3::new(
@@ -447,7 +503,7 @@ fn burst_particles(burst: &ImpactBurst) -> Vec<Particle> {
                 0.4 + (i % 3) as f32 * 0.6,
                 phase.sin() * speed,
             ),
-            size: size * 0.36,
+            size: size * 0.85,
             shape: Shape::Glow,
             lifetime: lifetime * 1.4,
             ..first.clone()
@@ -734,6 +790,7 @@ fn animate_particles(
     assets: Res<VfxAssets>,
     mut bursts: MessageReader<ImpactBurst>,
     mut utilities: MessageReader<UtilityVfx>,
+    mut flight: MessageReader<FlightParticles>,
     mut resets: MessageReader<ClearCombatVfx>,
     cameras: Query<&GlobalTransform, (With<MainCamera>, Without<ParticleSlot>)>,
     mut slots: Query<(
@@ -764,13 +821,42 @@ fn animate_particles(
             }
         }
     }
-    let incoming = bursts
+    // Confirmed impacts get first access; decorative flight particles cannot starve hits.
+    let mut impacts = Vec::new();
+    for burst in bursts.read() {
+        if impacts.len() < 96 * 12 {
+            impacts.extend(burst_particles(burst));
+        }
+    }
+    // Utility effects are confirmed server actions too (dash acknowledgment,
+    // replicated haste), so they queue behind hits rather than with trails.
+    let utility: Vec<_> = utilities
         .read()
         .take(96)
-        .flat_map(burst_particles)
-        .chain(utilities.read().take(96).flat_map(utility_particles))
-        .collect::<Vec<_>>();
-    for p in incoming {
+        .flat_map(utility_particles)
+        .collect();
+    let mut trails = Vec::new();
+    for batch in flight.read() {
+        trails.extend(
+            batch
+                .0
+                .iter()
+                .take(48usize.saturating_sub(trails.len()))
+                .cloned(),
+        );
+    }
+    let mut trail_count = slots
+        .iter()
+        .filter(|(_, slot, ..)| slot.active.as_ref().is_some_and(|p| p.event_id == 0))
+        .count();
+    for p in impacts.into_iter().chain(utility).chain(trails) {
+        // Reserve half the pool for combat confirmations, even during sustained fire.
+        if p.event_id == 0 {
+            if trail_count >= PARTICLE_BUDGET / 2 {
+                break;
+            }
+            trail_count += 1;
+        }
         let Some((entity, mut slot, _, _, _, _)) =
             slots.iter_mut().find(|(_, slot, ..)| slot.active.is_none())
         else {
@@ -778,16 +864,12 @@ fn animate_particles(
         };
         let mesh = assets.mesh(p.shape);
         // Ring/slash meshes need a solid tint; glows and streaks use the radial texture.
-        let textured = matches!(p.shape, Shape::Glow | Shape::Streak);
-        let texture = textured.then(|| assets.glow_texture.clone());
+        let texture =
+            matches!(p.shape, Shape::Glow | Shape::Streak).then(|| assets.glow_texture.clone());
         if let Some(m) = materials.get_mut(&slot.material) {
             m.base_color = p.color;
             m.base_color_texture = texture.clone();
-            m.alpha_mode = if textured {
-                AlphaMode::Add
-            } else {
-                AlphaMode::Blend
-            };
+            m.alpha_mode = AlphaMode::Blend;
         }
         if let Some(m) = flats.get_mut(&slot.flat) {
             m.color = p.color;
@@ -819,10 +901,10 @@ fn animate_particles(
         *inherited = InheritedVisibility::VISIBLE;
         let opacity = (1. - p.age / p.lifetime).max(0.);
         if let Some(m) = materials.get_mut(&slot.material) {
-            m.base_color = p.color.with_alpha(opacity);
+            m.base_color = p.color.with_alpha(p.color.alpha() * opacity);
         }
         if let Some(m) = flats.get_mut(&slot.flat) {
-            m.color = p.color.with_alpha(opacity);
+            m.color = p.color.with_alpha(p.color.alpha() * opacity);
         }
     }
 }
@@ -830,12 +912,13 @@ fn butterfly_position(anchor: Vec3, phase: f32, seconds: f64) -> Vec3 {
     let t = (seconds * 0.7).rem_euclid(std::f64::consts::TAU * 10.) as f32;
     anchor
         + Vec3::new(
-            (t + phase).sin() * 0.9,
-            0.7 + (t * 1.8 + phase).sin() * 0.23,
-            (t * 0.8 + phase).cos() * 0.75,
+            (t + phase).sin() * 0.68,
+            1.35 + (t * 1.8 + phase).sin() * 0.30,
+            (t * 0.8 + phase).cos() * 0.62,
         )
 }
 fn animate_butterflies(
+    game: Option<Res<crate::net::GameStateSnapshot>>,
     mut commands: Commands,
     assets: Res<VfxAssets>,
     time: Res<Time>,
@@ -872,19 +955,22 @@ fn animate_butterflies(
                     ));
             }
         }
-        let point = butterfly_position(wing.anchor, wing.phase, time.elapsed_secs_f64());
+        let anchor = pickup_anchor(game.as_deref(), wing.pickup_id, wing.anchor);
+        let point = butterfly_position(anchor, wing.phase, time.elapsed_secs_f64());
         let position = if flat {
             simulation_xz_to_render_xy(point).extend(layer::VFX - 1.)
         } else {
             point
         };
-        let visible = camera.is_some_and(|(cam, pose)| {
-            cam.world_to_viewport(pose, position).is_ok_and(|p| {
-                cam.logical_viewport_size().is_some_and(|s| {
-                    p.x >= -40. && p.y >= -40. && p.x <= s.x + 40. && p.y <= s.y + 40.
+        let available = pickup_available(game.as_deref(), wing.pickup_id);
+        let visible = available
+            && camera.is_some_and(|(cam, pose)| {
+                cam.world_to_viewport(pose, position).is_ok_and(|p| {
+                    cam.logical_viewport_size().is_some_and(|s| {
+                        p.x >= -40. && p.y >= -40. && p.x <= s.x + 40. && p.y <= s.y + 40.
+                    })
                 })
-            })
-        });
+            });
         *visibility = if visible {
             Visibility::Visible
         } else {
@@ -899,7 +985,8 @@ fn animate_butterflies(
             continue;
         }
         let flap = (time.elapsed_secs() * 12. + wing.phase).sin() * 0.9;
-        *transform = Transform::from_translation(position).with_scale(Vec3::new(wing.side, 1., 1.));
+        *transform =
+            Transform::from_translation(position).with_scale(Vec3::new(wing.side * 2.2, 2.2, 2.2));
         if flat {
             transform.scale.x *= 0.2 + flap.cos() * 0.8;
             transform.rotation = Quat::from_rotation_z(wing.phase * 0.3);
@@ -911,9 +998,399 @@ fn animate_butterflies(
         *global = GlobalTransform::from(*transform);
     }
 }
+/// Short tails sample authoritative positions; no stationary projectile invents a hit.
+fn emit_projectile_particles(
+    time: Res<Time>,
+    mode: Res<PlayerVisualMode>,
+    game: Option<Res<crate::net::GameStateSnapshot>>,
+    cameras: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
+    registry: Option<Res<crate::combat_visuals::CombatVisualRegistry>>,
+    owners: Query<(
+        &crate::net::NetworkPlayerId,
+        Option<&crate::net::NetworkHeroClass>,
+        Option<&crate::net::NetworkAvatar>,
+        Option<&crate::net::NetworkSpriteCharacter>,
+    )>,
+    projectiles: Query<(
+        &Transform,
+        &crate::net::NetworkProjectile,
+        &InheritedVisibility,
+    )>,
+    mut clock: Local<(Option<(u64, u64)>, f32)>,
+    mut output: MessageWriter<FlightParticles>,
+) {
+    if game
+        .as_ref()
+        .is_some_and(|g| !matches!(g.state, crate::net::GameState::Running))
+    {
+        return;
+    }
+    let identity = game
+        .as_ref()
+        .map(|g| (g.meta.server_epoch, g.meta.match_id));
+    if clock.0 != identity {
+        clock.0 = identity;
+        clock.1 = 0.0;
+    }
+    clock.1 += time.delta_secs().min(0.1);
+    if clock.1 < 0.045 {
+        return;
+    }
+    clock.1 = 0.0;
+    let Ok((camera, pose)) = cameras.single() else {
+        return;
+    };
+    let Some(viewport) = camera.logical_viewport_size() else {
+        return;
+    };
+    let flat = *mode == PlayerVisualMode::Sprite2d;
+    let mut particles = Vec::new();
+    for (transform, projectile, inherited) in &projectiles {
+        if !inherited.get() || !transform.translation.is_finite() {
+            continue;
+        }
+        let p = transform.translation;
+        let render = if flat {
+            simulation_xz_to_render_xy(p).extend(layer::VFX)
+        } else {
+            p
+        };
+        if !camera.world_to_viewport(pose, render).is_ok_and(|p| {
+            p.x >= -10.0 && p.y >= -10.0 && p.x <= viewport.x + 10.0 && p.y <= viewport.y + 10.0
+        }) {
+            continue;
+        }
+        let magic = matches!(
+            projectile.style,
+            ProjectileStyle::Arcane | ProjectileStyle::Holy
+        );
+        let owner = matches!(
+            projectile.source_kind,
+            shared::combat::CombatEntityKind::Player | shared::combat::CombatEntityKind::Unknown
+        )
+        .then(|| owners.iter().find(|(id, ..)| id.0 == projectile.owner_id))
+        .flatten();
+        let profile = registry.as_ref().map(|r| {
+            r.resolve(
+                owner.and_then(|(_, c, _, _)| c.map(|c| c.0)),
+                projectile.style,
+                projectile.action_slot,
+                owner.and_then(|(_, _, a, _)| a.and_then(|a| a.0.as_deref())),
+                owner.and_then(|(_, _, _, s)| s.and_then(|s| s.0.as_deref())),
+            )
+        });
+        let color = profile
+            .map_or(Color::srgb(0.65, 0.8, 1.0), |p| p.color())
+            .with_alpha(0.85);
+        let scale = profile.map_or(1.0, |p| p.scale).clamp(0.2, 2.0);
+        let direction = projectile.direction.normalize_or_zero();
+        let base = Particle {
+            event_id: 0,
+            origin: p,
+            velocity: -direction * 1.0,
+            age: 0.0,
+            lifetime: 0.26,
+            size: (if magic { 1.5 } else { 0.65 }) * scale,
+            angle: 0.0,
+            color,
+            shape: Shape::Glow,
+        };
+        particles.push(base.clone());
+        if magic {
+            let phase = time.elapsed_secs() * 9.0 + projectile.id as f32 % 100.0;
+            for angle in [phase, phase + std::f32::consts::PI] {
+                particles.push(Particle {
+                    origin: p + if flat {
+                        Vec3::new(angle.cos() * 0.50, 0.0, angle.sin() * 0.50)
+                    } else {
+                        Vec3::new(angle.cos() * 0.50, angle.sin() * 0.42, 0.0)
+                    },
+                    size: 0.45,
+                    lifetime: 0.16,
+                    color: Color::srgba(0.90, 0.85, 1.0, 0.9),
+                    ..base.clone()
+                });
+            }
+        }
+        if particles.len() >= 45 {
+            break;
+        }
+    }
+    if !particles.is_empty() {
+        output.write(FlightParticles(particles));
+    }
+}
+
+fn pickup_available(game: Option<&crate::net::GameStateSnapshot>, id: u64) -> bool {
+    game.is_some_and(|g| {
+        matches!(g.state, crate::net::GameState::Running)
+            && g.forest_pickups.iter().any(|p| p.id == id && p.available)
+    })
+}
+fn pickup_anchor(game: Option<&crate::net::GameStateSnapshot>, id: u64, fallback: Vec3) -> Vec3 {
+    game.and_then(|g| g.forest_pickups.iter().find(|p| p.id == id))
+        .filter(|p| p.position.iter().all(|v| v.is_finite()))
+        .map_or(fallback, |p| {
+            Vec3::new(p.position[0], fallback.y, p.position[1])
+        })
+}
+fn animate_butterfly_glows(
+    mut commands: Commands,
+    game: Option<Res<crate::net::GameStateSnapshot>>,
+    time: Res<Time>,
+    mode: Res<PlayerVisualMode>,
+    assets: Res<VfxAssets>,
+    cameras: Query<(&Camera, &GlobalTransform), (With<MainCamera>, Without<ButterflyGlow>)>,
+    mut glows: Query<(
+        Entity,
+        &ButterflyGlow,
+        &mut Transform,
+        &mut GlobalTransform,
+        &mut Visibility,
+        &mut InheritedVisibility,
+    )>,
+) {
+    let flat = *mode == PlayerVisualMode::Sprite2d;
+    let camera = cameras.single().ok();
+    for (entity, glow, mut pose, mut global, mut visible, mut inherited) in &mut glows {
+        if mode.is_changed() {
+            if flat {
+                commands
+                    .entity(entity)
+                    .remove::<(Mesh3d, MeshMaterial3d<StandardMaterial>)>()
+                    .insert((
+                        Mesh2d(assets.glow.clone()),
+                        MeshMaterial2d(glow.flat.clone()),
+                    ));
+            } else {
+                commands
+                    .entity(entity)
+                    .remove::<(Mesh2d, MeshMaterial2d<ColorMaterial>)>()
+                    .insert((
+                        Mesh3d(assets.glow.clone()),
+                        MeshMaterial3d(glow.material.clone()),
+                    ));
+            }
+        }
+        let anchor = pickup_anchor(game.as_deref(), glow.pickup_id, glow.anchor);
+        let point = butterfly_position(anchor, glow.phase, time.elapsed_secs_f64());
+        let position = if flat {
+            simulation_xz_to_render_xy(point).extend(layer::VFX - 1.2)
+        } else {
+            point - Vec3::Y * 0.04
+        };
+        let on_screen = camera.is_some_and(|(cam, transform)| {
+            cam.world_to_viewport(transform, position).is_ok_and(|p| {
+                cam.logical_viewport_size().is_some_and(|s| {
+                    p.x >= -40.0 && p.y >= -40.0 && p.x <= s.x + 40.0 && p.y <= s.y + 40.0
+                })
+            })
+        });
+        let show = pickup_available(game.as_deref(), glow.pickup_id) && on_screen;
+        *visible = if show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        *inherited = if show {
+            InheritedVisibility::VISIBLE
+        } else {
+            InheritedVisibility::HIDDEN
+        };
+        let facing = if flat {
+            Quat::IDENTITY
+        } else {
+            camera.map_or(Quat::IDENTITY, |(_, p)| p.to_scale_rotation_translation().1)
+        };
+        *pose = Transform::from_translation(position)
+            .with_rotation(facing)
+            .with_scale(Vec3::splat(
+                2.0 + 0.20 * (time.elapsed_secs() * 3.0 + glow.phase).sin(),
+            ));
+        *global = GlobalTransform::from(*pose);
+    }
+}
+fn pickup_feedback(
+    game: Option<Res<crate::net::GameStateSnapshot>>,
+    mut receipts: ResMut<PickupReceipts>,
+    actors: Query<(
+        &crate::net::NetworkPlayerId,
+        &Transform,
+        Option<&InheritedVisibility>,
+        &crate::combat::CombatStats,
+    )>,
+    mut bursts: MessageWriter<ImpactBurst>,
+    mut feedback: Option<ResMut<crate::combat::ActionFeedback>>,
+) {
+    let Some(game) = game.filter(|g| matches!(g.state, crate::net::GameState::Running)) else {
+        *receipts = PickupReceipts::default();
+        return;
+    };
+    let identity = (game.meta.server_epoch, game.meta.match_id);
+    let fresh = receipts.identity != Some(identity);
+    if fresh {
+        receipts.identity = Some(identity);
+        receipts.sequences.clear();
+    }
+    for pickup in game
+        .forest_pickups
+        .iter()
+        .filter(|p| (1..=shared::forest_pickups::FOREST_PICKUP_COUNT as u64).contains(&p.id))
+    {
+        let previous = receipts.sequences.get(&pickup.id).copied();
+        receipts.sequences.insert(
+            pickup.id,
+            previous.unwrap_or(0).max(pickup.collection_sequence),
+        );
+        if fresh
+            || previous.is_none_or(|old| pickup.collection_sequence <= old)
+            || !pickup.healed_amount.is_finite()
+            || pickup.healed_amount <= 0.0
+        {
+            continue;
+        }
+        let Some((_, pose, visibility, stats)) = actors
+            .iter()
+            .find(|(id, _, _, _)| Some(id.0) == pickup.last_collector_id)
+        else {
+            continue;
+        };
+        if !stats.is_alive() || visibility.is_some_and(|v| !v.get()) {
+            continue;
+        }
+        bursts.write(ImpactBurst {
+            position: pose.translation,
+            direction: Vec2::Y,
+            color: Color::srgb(0.35, 1.0, 0.65),
+            scale: 1.3,
+            lifetime: 0.65,
+            kind: BurstKind::Magic,
+            seed: u64::MAX - pickup.id,
+        });
+        if pickup.last_collector_id == Some(game.your_id) {
+            if let Some(feedback) = feedback.as_deref_mut() {
+                feedback.push_line(format!(
+                    "Forest butterfly · +{:.0} HP",
+                    pickup.healed_amount
+                ));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn pickup_receipts_seed_once_ignore_rollbacks_and_respect_hidden_collectors() {
+        use crate::net::{GameState, GameStateSnapshot, NetworkPlayerId};
+        let mut app = App::new();
+        app.init_resource::<PickupReceipts>()
+            .add_message::<ImpactBurst>()
+            .add_systems(Update, pickup_feedback);
+        let actor = app
+            .world_mut()
+            .spawn((
+                NetworkPlayerId(7),
+                Transform::default(),
+                crate::combat::CombatStats::default(),
+                InheritedVisibility::VISIBLE,
+            ))
+            .id();
+        let mut game = GameStateSnapshot::default();
+        game.state = GameState::Running;
+        game.your_id = 7;
+        game.forest_pickups
+            .push(shared::forest_pickups::ForestPickupState {
+                id: 1,
+                position: [-66.0, 45.0],
+                available: false,
+                collection_sequence: 8,
+                last_collector_id: Some(7),
+                healed_amount: 40.0,
+            });
+        app.insert_resource(game);
+        app.update(); // Connecting after a collection must not replay it.
+        assert_eq!(app.world().resource::<Messages<ImpactBurst>>().len(), 0);
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .forest_pickups[0]
+            .collection_sequence = 9;
+        app.update();
+        assert_eq!(app.world().resource::<Messages<ImpactBurst>>().len(), 1);
+        app.world_mut()
+            .resource_mut::<Messages<ImpactBurst>>()
+            .clear();
+        for sequence in [9, 8, 9] {
+            app.world_mut()
+                .resource_mut::<GameStateSnapshot>()
+                .forest_pickups[0]
+                .collection_sequence = sequence;
+            app.update();
+            assert_eq!(app.world().resource::<Messages<ImpactBurst>>().len(), 0);
+        }
+        app.world_mut()
+            .entity_mut(actor)
+            .insert(InheritedVisibility::HIDDEN);
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .forest_pickups[0]
+            .collection_sequence = 10;
+        app.update();
+        assert_eq!(app.world().resource::<Messages<ImpactBurst>>().len(), 0);
+        app.world_mut()
+            .entity_mut(actor)
+            .insert(InheritedVisibility::VISIBLE);
+        app.update(); // Becoming visible cannot replay a hidden receipt.
+        assert_eq!(app.world().resource::<Messages<ImpactBurst>>().len(), 0);
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .meta
+            .match_id += 1;
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .forest_pickups[0]
+            .collection_sequence = 11;
+        app.update();
+        assert_eq!(app.world().resource::<Messages<ImpactBurst>>().len(), 0);
+        app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Lobby;
+        app.update();
+        assert!(
+            app.world()
+                .resource::<PickupReceipts>()
+                .sequences
+                .is_empty()
+        );
+    }
+    #[test]
+    fn pickup_visibility_follows_authority_and_drift_stays_collectible() {
+        let mut game = crate::net::GameStateSnapshot::default();
+        game.state = crate::net::GameState::Running;
+        game.forest_pickups
+            .push(shared::forest_pickups::ForestPickupState {
+                id: 1,
+                position: [-66.0, 45.0],
+                available: true,
+                collection_sequence: 0,
+                last_collector_id: None,
+                healed_amount: 0.0,
+            });
+        assert!(pickup_available(Some(&game), 1));
+        assert!(!pickup_available(Some(&game), 2));
+        assert!(!pickup_available(None, 1));
+        let anchor = pickup_anchor(Some(&game), 1, Vec3::Y);
+        assert_eq!(anchor, Vec3::new(-66.0, 1.0, 45.0));
+        for frame in 0..100 {
+            let point = butterfly_position(anchor, 0.7, frame as f64 * 0.1);
+            assert!(point.xz().distance(anchor.xz()) < shared::forest_pickups::PICKUP_RADIUS);
+            assert!(point.y > anchor.y + 1.0);
+        }
+        game.forest_pickups[0].available = false;
+        assert!(!pickup_available(Some(&game), 1));
+        game.forest_pickups[0].available = true;
+        game.state = crate::net::GameState::Lobby;
+        assert!(!pickup_available(Some(&game), 1));
+    }
     fn test_burst() -> ImpactBurst {
         ImpactBurst {
             position: Vec3::ZERO,
@@ -968,7 +1445,7 @@ mod tests {
                 .iter(app.world())
                 .filter(|s| s.active.is_some())
                 .count(),
-            8
+            12
         );
         assert_eq!(
             app.world_mut()
@@ -988,6 +1465,55 @@ mod tests {
                 p.age = 10.;
             }
         }
+        app.update();
+        assert!(
+            app.world_mut()
+                .query::<&ParticleSlot>()
+                .iter(app.world())
+                .all(|s| s.active.is_none())
+        );
+    }
+    #[test]
+    fn sustained_trails_leave_reserved_capacity_and_never_replay_dropped_bursts() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<ColorMaterial>>()
+            .init_resource::<PlayerVisualMode>()
+            .init_resource::<MapLayout>()
+            .add_plugins(GameVfxPlugin);
+        app.update();
+        let mut trail = burst_particles(&test_burst())[1].clone();
+        trail.event_id = 0;
+        trail.lifetime = 100.0;
+        for _ in 0..10 {
+            app.world_mut()
+                .write_message(FlightParticles(vec![trail.clone(); 100]));
+            app.update();
+        }
+        let count = app
+            .world_mut()
+            .query::<&ParticleSlot>()
+            .iter(app.world())
+            .filter(|s| s.active.as_ref().is_some_and(|p| p.event_id == 0))
+            .count();
+        assert_eq!(count, PARTICLE_BUDGET / 2);
+        for _ in 0..200 {
+            app.world_mut().write_message(test_burst());
+        }
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .query::<&ParticleSlot>()
+                .iter(app.world())
+                .filter(|s| s.active.as_ref().is_some_and(|p| p.event_id == 1))
+                .count(),
+            PARTICLE_BUDGET / 2
+        );
+        app.world_mut().write_message(ClearCombatVfx);
+        app.update();
         app.update();
         assert!(
             app.world_mut()
@@ -1030,7 +1556,7 @@ mod tests {
                 seed: 42,
             };
             let particles = burst_particles(&burst);
-            assert!(particles.len() <= 8);
+            assert!(particles.len() <= 12);
             for p in particles {
                 assert!(p.lifetime <= 1.7);
                 for flat in [false, true] {
@@ -1046,8 +1572,8 @@ mod tests {
             for frame in 0..1000 {
                 let t = frame as f64 / 60.;
                 let p = butterfly_position(Vec3::ZERO, i as f32, t);
-                assert!(p.is_finite() && p.y > 0.4 && p.y < 1.);
-                assert!(p.length() < 1.7);
+                assert!(p.is_finite() && p.y >= 1.05 && p.y <= 1.66);
+                assert!(p.xz().length() < shared::forest_pickups::PICKUP_RADIUS);
                 assert!(p.distance(butterfly_position(Vec3::ZERO, i as f32, t + 1. / 60.)) < 0.03);
             }
         }

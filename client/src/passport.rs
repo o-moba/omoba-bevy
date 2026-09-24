@@ -14,6 +14,7 @@ static TICKETS: OnceLock<Mutex<HashMap<(String, String), TicketResult>>> = OnceL
 
 /// In-game wallet pairing, if one was started from the menu.
 static PAIRING: Mutex<Option<PairingFlow>> = Mutex::new(None);
+static WALLET_ERROR: Mutex<Option<String>> = Mutex::new(None);
 static BROWSER_OPENED: Mutex<Option<String>> = Mutex::new(None);
 
 /// What the menu shows about the wallet connection.
@@ -39,14 +40,22 @@ pub fn connect() {
         return;
     }
     let mut pairing = PAIRING.lock().unwrap();
-    if pairing.as_ref().is_some_and(PairingFlow::in_progress) {
+    if let Some(flow) = pairing.as_ref().filter(|flow| flow.in_progress()) {
+        if let PairingState::AwaitingApproval {
+            verification_url, ..
+        } = flow.state()
+        {
+            *WALLET_ERROR.lock().unwrap() =
+                crate::platform::open_external_url(&verification_url).err();
+        }
         return;
     }
+    *WALLET_ERROR.lock().unwrap() = None;
     *BROWSER_OPENED.lock().unwrap() = None;
     *pairing = match PassportApi::from_env() {
         Ok(api) => Some(PairingFlow::start(api.client().clone())),
         Err(error) => {
-            eprintln!("Wallet connection unavailable: {error}");
+            *WALLET_ERROR.lock().unwrap() = Some(format!("Wallet connection unavailable: {error}"));
             None
         }
     };
@@ -66,8 +75,8 @@ pub fn poll_wallet() -> bool {
             // Open the approval page once; the link stays on screen either way.
             let mut opened = BROWSER_OPENED.lock().unwrap();
             if opened.as_deref() != Some(verification_url.as_str()) {
-                if let Err(error) = omoba_passport::open_in_browser(&verification_url) {
-                    eprintln!("{error}: {verification_url}");
+                if let Err(error) = crate::platform::open_external_url(&verification_url) {
+                    *WALLET_ERROR.lock().unwrap() = Some(error);
                 }
                 *opened = Some(verification_url);
             }
@@ -110,14 +119,31 @@ pub fn wallet_view() -> WalletView {
 }
 
 /// One line for the menu, under "Choose Avatar".
-pub fn wallet_status_line() -> String {
+pub fn wallet_button_label() -> &'static str {
     match wallet_view() {
-        WalletView::Disconnected => "Default avatars are free for everyone".into(),
+        WalletView::Starting => "Connecting wallet…",
+        WalletView::AwaitingApproval { .. } => "Open wallet approval",
+        WalletView::Connected => "Wallet connected",
+        _ => "Connect wallet (optional)",
+    }
+}
+
+pub fn wallet_status_line() -> String {
+    if let Some(error) = WALLET_ERROR.lock().unwrap().as_ref() {
+        return error.clone();
+    }
+    match wallet_view() {
+        WalletView::Disconnected => {
+            "Optional wallet connection for owned avatars · no purchase is made here".into()
+        }
         WalletView::Starting => "Contacting Ekza…".into(),
         WalletView::AwaitingApproval {
             user_code,
             verification_url,
-        } => format!("Approve in your browser · code {user_code} · {verification_url}"),
+        } => format!(
+            "{} · code {user_code} · {verification_url}",
+            crate::platform::browser_approval_hint()
+        ),
         WalletView::Connected => {
             "Wallet connected · your Ekza avatars are listed below the defaults".into()
         }
@@ -128,7 +154,8 @@ pub fn wallet_status_line() -> String {
 #[path = "ekza_account.rs"]
 mod ekza_account;
 pub use ekza_account::{
-    account_connected, account_status_line, connect_account, library_avatars, poll_account,
+    account_button_label, account_connected, account_status_line, connect_account, library_avatars,
+    poll_account,
 };
 
 pub enum TicketPoll {
@@ -374,10 +401,9 @@ pub fn avatar_catalogue() -> AvatarCatalogue {
     }
 }
 
-fn catalogue_revision(entries: &[AvatarCatalogueEntry], status: &store::CatalogueStatus) -> u64 {
+fn catalogue_revision(entries: &[AvatarCatalogueEntry], _status: &store::CatalogueStatus) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hash = std::collections::hash_map::DefaultHasher::new();
-    status.hash(&mut hash);
     for entry in entries {
         entry.avatar.slug.hash(&mut hash);
         entry.avatar.display_name.hash(&mut hash);
@@ -416,6 +442,18 @@ pub fn avatar_display_name(slug: Option<&str>) -> String {
 #[cfg(test)]
 mod catalogue_tests {
     use super::*;
+
+    #[test]
+    fn loading_and_empty_status_do_not_invalidate_avatar_controls() {
+        let entries = vec![AvatarCatalogueEntry {
+            avatar: shared::avatar_roster()[0].clone(),
+            source: AvatarCatalogueSource::Default,
+        }];
+        assert_eq!(
+            catalogue_revision(&entries, &store::CatalogueStatus::Loading { cached: 0 }),
+            catalogue_revision(&entries, &store::CatalogueStatus::Empty)
+        );
+    }
 
     #[test]
     fn same_slug_metadata_changes_invalidate_the_catalogue_snapshot() {

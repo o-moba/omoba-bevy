@@ -532,6 +532,7 @@ mod runtime_tests {
                 meta,
                 game_state,
                 players,
+                scoreboard,
                 ..
             } = packet
             else {
@@ -540,7 +541,9 @@ mod runtime_tests {
             assert_eq!(game_state, GameState::Victory { winner: Team::Blue });
             assert_eq!(meta.server_epoch, epoch);
             assert_eq!(meta.match_id, match_id);
-            assert_eq!(players.len(), 10);
+            assert_eq!(players.len(), 5, "victory retains team fog");
+            assert!(players.iter().all(|p| p.team == Team::Blue));
+            assert_eq!(scoreboard.unwrap().players.len(), 10);
             assert_eq!(
                 serde_json::to_value(build_players_snapshot(&rt.players)).unwrap(),
                 frozen_players

@@ -1,6 +1,7 @@
 //! Phone layouts and a shell-free address entry for controlled native playtests.
 use bevy::{
     input::keyboard::{Key, KeyboardInput},
+    input::touch::{TouchInput, TouchPhase},
     prelude::*,
     window::PrimaryWindow,
 };
@@ -602,7 +603,7 @@ fn adapt_phone_layout(
                 node.overflow = Overflow::scroll_y();
                 commands
                     .entity(entity)
-                    .insert_if_new(ScrollPosition::default());
+                    .insert_if_new((ScrollPosition::default(), TouchScrollPanel));
             }
             "ShopPanel" => {
                 // Center inside the asymmetric safe area while the backdrop
@@ -627,7 +628,7 @@ fn adapt_phone_layout(
                 node.overflow = Overflow::scroll_y();
                 commands
                     .entity(entity)
-                    .insert_if_new(ScrollPosition::default());
+                    .insert_if_new((ScrollPosition::default(), TouchScrollPanel));
             }
             "ShopFooter" => node.display = Display::None,
             "ShopCloseButton" => {
@@ -635,21 +636,19 @@ fn adapt_phone_layout(
                 node.padding = UiRect::axes(Val::Px(10.0), Val::Px(5.0));
             }
             "PauseMenuPanel" => {
+                node.top = Val::Px((top - bottom) * 0.5);
                 node.width = Val::Px(width.min(650.0));
-                // The main menu grows with its four full-size actions. A
-                // fixed 270px panel clipped Exit after Controls guide was added.
+                // Bound both bodies so short windows scroll between the fixed
+                // header/close control and footer.
                 node.height = if pause.as_ref().is_some_and(|pause| pause.in_settings) {
                     Val::Px(height)
                 } else {
-                    Val::Auto
+                    Val::Px(height.min(360.0))
                 };
                 node.max_height = Val::Px(height);
                 node.padding = UiRect::all(Val::Px(10.0));
                 node.row_gap = Val::Px(6.0);
-                node.overflow = Overflow::scroll_y();
-                commands
-                    .entity(entity)
-                    .insert_if_new(ScrollPosition::default());
+                node.overflow = Overflow::clip();
             }
             "PauseMenuMainSection" => node.row_gap = Val::Px(10.0),
             "GameStateCard" => {
@@ -735,76 +734,219 @@ fn adapt_phone_layout(
                 .replace("Target locked · Attack / Q W E R", "Target locked · ATTACK / skills"),
             "ShopFooter" => text.0 = "Buy at your base. Items survive respawn and reset next round.".into(),
             name if name.starts_with("ShopDescription-") => text.0 = text.0.replace("maximum HP", "max HP"),
-            "HelpBody" => text.0 = "YOUR FIRST MATCH\n\nMOVE: Drag the left stick. Release to stop.\nATTACK: Tap the large right button; hold to repeat. No mana needed.\nTARGET: Drag ATTACK to extend the reticle. Release on a highlighted foe to lock. Drag to X to cancel.\nFARM: The small minion and tower buttons target only that category.\nUTILITY: Dash moves in your stick direction; drag it to aim. Haste boosts movement briefly.\nSKILLS: Q/W/E/R surround ATTACK. Tap to use the locked target, or drag to aim.\nGROW: Abilities unlock as you level. Tap RANK, then a glowing skill to spend a point.\nWIN: Follow your minions, clear all towers in one lane, then destroy the enemy base.\nRECOVER: Return to your base to shop. If defeated, wait to respawn.\nLOOK: Tap the minimap to scout. Move the stick to follow your hero again.\n\nThe match continues while menus are open. Stay connected for the next round.".into(),
+            "HelpBody" => text.0 = "YOUR FIRST MATCH\n\nMOVE: Drag the left stick. Release to stop.\nATTACK: Tap the large right button; hold to repeat. No mana needed.\nTARGET: Drag ATTACK to extend the reticle. Release on a highlighted foe to lock. Drag to X to cancel.\nFARM: The small minion and tower buttons target only that category.\nUTILITY: Dash moves in your stick direction; drag it to aim. Haste boosts movement briefly.\nSKILLS: Q/W/E/R surround ATTACK. Tap to use the locked target, or drag to aim.\nGROW: Abilities unlock as you level. Tap RANK, then a glowing skill to spend a point.\nWIN: Follow your minions, clear all towers in one lane, then destroy the enemy base.\nRECOVER: Return to your base to heal and shop. If defeated, wait to respawn.\nLOOK: Tap the minimap to scout. Move the stick to follow your hero again.\n\nThe match continues while menus are open. Stay connected for the next round.".into(),
             "GameStateLabel" => text.0 = text.0.replace("Escape: settings or exit game.", "MENU: settings or exit game."),
             _ => {}
         }
     }
 }
 
+/// Explicit ownership prevents a hidden or underlying panel from stealing drags.
+#[derive(Component)]
+pub(crate) struct TouchScrollPanel;
+
 #[derive(Default)]
 struct ScrollTouch {
-    id: Option<u64>,
-    entity: Option<Entity>,
-    previous: Vec2,
+    held: Option<(u64, Entity, Vec2, Vec2, bool)>,
 }
 
+pub(crate) fn logical_ui_rect(
+    node: &ComputedNode,
+    transform: &UiGlobalTransform,
+    clip: Option<&bevy::ui::CalculatedClip>,
+    dpi: f32,
+) -> Rect {
+    let mut rect = Rect::from_center_size(
+        transform.translation / dpi,
+        node.size() * transform.to_scale_angle_translation().0.abs() / dpi,
+    );
+    if let Some(clip) = clip {
+        rect = rect.intersect(Rect::from_corners(clip.clip.min / dpi, clip.clip.max / dpi));
+    }
+    rect
+}
+
+#[allow(clippy::type_complexity)]
 fn scroll_phone_panels(
     mobile: Res<MobileControls>,
-    touches: Res<Touches>,
+    window: Query<(Entity, &Window), With<PrimaryWindow>>,
+    mut events: MessageReader<TouchInput>,
     mut drag: Local<ScrollTouch>,
-    mut panels: Query<(
-        Entity,
-        &ComputedNode,
-        &UiGlobalTransform,
-        &mut ScrollPosition,
-        Option<&InheritedVisibility>,
-    )>,
+    career: Option<Res<crate::career::CareerClient>>,
+    pause: Option<Res<crate::pause_menu::PauseMenuState>>,
+    mut panels: Query<
+        (
+            Entity,
+            &Name,
+            &ComputedNode,
+            &UiGlobalTransform,
+            &mut ScrollPosition,
+            Option<&InheritedVisibility>,
+            Option<&bevy::ui::CalculatedClip>,
+        ),
+        With<TouchScrollPanel>,
+    >,
 ) {
-    if !mobile.enabled {
+    let Ok((window_id, window)) = window.single() else {
+        events.clear();
+        drag.held = None;
+        return;
+    };
+    if !mobile.enabled || !mobile.focused || !mobile.landscape || !window.focused {
+        events.clear();
+        drag.held = None;
         return;
     }
-    if let Some(id) = drag.id {
-        if let Some(touch) = touches.get_pressed(id) {
-            if let Some(entity) = drag.entity
-                && let Ok((_, node, _, mut scroll, visible)) = panels.get_mut(entity)
-            {
-                if visible.is_none_or(|visible| visible.get()) {
-                    let max = ((node.content_size().y - node.size().y)
-                        * node.inverse_scale_factor())
-                    .max(0.0);
-                    scroll.y = (scroll.y + drag.previous.y - touch.position().y).clamp(0.0, max);
-                }
+    let allowed = |name: &str| {
+        if career.as_ref().is_some_and(|c| c.modal_open()) {
+            name == "CareerBody"
+        } else if pause.as_ref().is_some_and(|p| p.open) {
+            if pause.as_ref().is_some_and(|p| p.in_settings) {
+                name == "PauseMenuSettingsSection"
+            } else {
+                name == "PauseMenuMainSection"
             }
-            drag.previous = touch.position();
         } else {
-            *drag = ScrollTouch::default();
+            name == "HelpBody" || name == "ShopCards"
         }
-        return;
-    }
-    for touch in touches.iter_just_pressed() {
-        for (entity, node, transform, _, visible) in &mut panels {
-            if visible.is_some_and(|visible| !visible.get()) {
+    };
+    for event in events.read().filter(|e| e.window == window_id) {
+        if event.phase == TouchPhase::Started && drag.held.is_none() {
+            let candidate = panels
+                .iter()
+                .filter(|(_, name, node, _, _, visible, _)| {
+                    allowed(name.as_str())
+                        && visible.is_none_or(|v| v.get())
+                        && node.size().min_element() > 0.0
+                        && node.content_size().y > node.size().y
+                })
+                .filter(|(_, _, node, transform, _, _, clip)| {
+                    logical_ui_rect(node, transform, *clip, window.scale_factor())
+                        .contains(event.position)
+                })
+                .min_by(|a, b| {
+                    (a.2.size().x * a.2.size().y).total_cmp(&(b.2.size().x * b.2.size().y))
+                })
+                .map(|p| p.0);
+            if let Some(entity) = candidate {
+                drag.held = Some((event.id, entity, event.position, event.position, false));
+            }
+            continue;
+        }
+        let Some((id, entity, start, previous, moved)) =
+            drag.held.as_mut().filter(|(id, ..)| *id == event.id)
+        else {
+            continue;
+        };
+        let _ = id;
+        if let Ok((_, name, node, _, mut scroll, visible, _)) = panels.get_mut(*entity) {
+            if !allowed(name.as_str()) || visible.is_some_and(|v| !v.get()) {
+                drag.held = None;
                 continue;
             }
-            let size = node.size() * node.inverse_scale_factor();
-            let rect =
-                Rect::from_center_size(transform.translation * node.inverse_scale_factor(), size);
-            if rect.contains(touch.position()) {
-                *drag = ScrollTouch {
-                    id: Some(touch.id()),
-                    entity: Some(entity),
-                    previous: touch.position(),
-                };
-                return;
+            let was_moved = *moved;
+            *moved |= start.distance(event.position) > 10.0;
+            if *moved && matches!(event.phase, TouchPhase::Moved | TouchPhase::Ended) {
+                let delta = if was_moved { previous.y } else { start.y } - event.position.y;
+                let max = ((node.content_size().y - node.size().y) * node.inverse_scale_factor())
+                    .max(0.0);
+                // ScrollPosition is in UI units; TouchInput is in logical window pixels.
+                scroll.y = (scroll.y + delta * window.scale_factor() * node.inverse_scale_factor())
+                    .clamp(0.0, max);
             }
+            *previous = event.position;
+        } else {
+            drag.held = None;
+            continue;
+        }
+        if matches!(event.phase, TouchPhase::Ended | TouchPhase::Canceled) {
+            drag.held = None;
         }
     }
 }
 
 #[cfg(test)]
+pub(crate) fn add_pause_layout_test_systems(app: &mut App) {
+    app.add_systems(
+        PostUpdate,
+        (adapt_phone_layout, scroll_phone_panels).before(bevy::ui::UiSystems::Layout),
+    );
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn touch_scroll_uses_window_pixels_and_owns_drag_through_release() {
+        for (dpi, ui_scale) in [(1.0, 1.0), (2.0, 1.0), (2.0, 0.75)] {
+            let mut app = App::new();
+            let mut mobile = MobileControls::default();
+            mobile.enabled = true;
+            mobile.focused = true;
+            mobile.landscape = true;
+            app.insert_resource(mobile)
+                .insert_resource(crate::pause_menu::PauseMenuState {
+                    open: true,
+                    in_settings: true,
+                })
+                .add_message::<TouchInput>()
+                .add_systems(Update, scroll_phone_panels);
+            let mut window = Window::default();
+            window.resolution.set_scale_factor_override(Some(dpi));
+            let window = app.world_mut().spawn((window, PrimaryWindow)).id();
+            let combined = dpi * ui_scale;
+            let panel = app
+                .world_mut()
+                .spawn((
+                    TouchScrollPanel,
+                    Name::new("PauseMenuSettingsSection"),
+                    ComputedNode {
+                        size: Vec2::new(400.0, 200.0) * combined,
+                        content_size: Vec2::new(400.0, 800.0) * combined,
+                        inverse_scale_factor: 1.0 / combined,
+                        ..default()
+                    },
+                    UiGlobalTransform::from(bevy::math::Affine2::from_translation(
+                        Vec2::new(500.0, 400.0) * dpi,
+                    )),
+                    ScrollPosition::default(),
+                ))
+                .id();
+            let event = |id, phase, position| TouchInput {
+                id,
+                phase,
+                position,
+                window,
+                force: None,
+            };
+            // Batched events are normal on a busy mobile frame. An unrelated
+            // second finger cannot steal this panel's captured pointer.
+            for e in [
+                event(1, TouchPhase::Started, Vec2::new(500.0, 440.0)),
+                event(2, TouchPhase::Moved, Vec2::new(500.0, 200.0)),
+                event(1, TouchPhase::Moved, Vec2::new(500.0, 340.0)),
+                event(1, TouchPhase::Ended, Vec2::new(500.0, 340.0)),
+            ] {
+                app.world_mut().write_message(e);
+            }
+            app.update();
+            assert!(
+                (app.world().get::<ScrollPosition>(panel).unwrap().y - 100.0 / ui_scale).abs()
+                    < 0.01
+            );
+            // Short taps don't scroll. Closed menus cannot retain ownership.
+            app.world_mut()
+                .write_message(event(3, TouchPhase::Started, Vec2::new(500.0, 400.0)));
+            app.world_mut()
+                .write_message(event(3, TouchPhase::Ended, Vec2::new(500.0, 397.0)));
+            app.update();
+            assert!(
+                (app.world().get::<ScrollPosition>(panel).unwrap().y - 100.0 / ui_scale).abs()
+                    < 0.01
+            );
+        }
+    }
 
     #[test]
     fn desktop_does_not_install_phone_forms_or_change_keyboard_ime() {

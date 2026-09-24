@@ -12,6 +12,7 @@ pub(crate) const COMBAT_EVENT_RETENTION: Duration = Duration::from_secs(1);
 pub(crate) struct CombatLog {
     pub(crate) ledger: crate::match_stats::RoundLedger,
     next_id: u64,
+    sandbox: Option<(Instant, shared::sandbox::DamageAnalytics)>,
     recent: VecDeque<(Instant, CombatEvent)>,
 }
 
@@ -22,6 +23,37 @@ impl CombatLog {
             self.next_id = self.next_id.saturating_add(1);
             event.id = self.next_id;
             self.ledger.record(now, &event);
+            if let Some((_, stats)) = &mut self.sandbox {
+                if event.target.kind == CombatEntityKind::Player {
+                    stats.damage += event.amount as f64;
+                    stats.hits += 1;
+                    stats.last_hit = event.amount;
+                    let index = stats.breakdown.iter().position(|b| {
+                        b.source_kind == event.source.kind
+                            && b.source_id == event.source.id
+                            && b.target_id == event.target.id
+                            && b.slot == event.action_slot
+                    });
+                    if let Some(index) = index {
+                        let b = &mut stats.breakdown[index];
+                        b.hits += 1;
+                        b.damage += event.amount as f64;
+                        b.last_hit = event.amount;
+                        b.last_event_id = event.id;
+                    } else if stats.breakdown.len() < 1024 {
+                        stats.breakdown.push(shared::sandbox::DamageBreakdown {
+                            source_kind: event.source.kind,
+                            last_event_id: event.id,
+                            source_id: event.source.id,
+                            target_id: event.target.id,
+                            slot: event.action_slot,
+                            hits: 1,
+                            damage: event.amount as f64,
+                            last_hit: event.amount,
+                        });
+                    }
+                }
+            }
             self.recent.push_back((now, event));
             while self.recent.len() > COMBAT_EVENT_CAPACITY {
                 self.recent.pop_front();
@@ -29,6 +61,25 @@ impl CombatLog {
         }
     }
 
+    pub(crate) fn enable_sandbox(&mut self, now: Instant) {
+        if self.sandbox.is_none() {
+            self.reset_sandbox(now);
+        }
+    }
+    pub(crate) fn reset_sandbox(&mut self, now: Instant) {
+        self.sandbox = Some((now, Default::default()));
+    }
+    pub(crate) fn sandbox_analytics(&self, now: Instant) -> shared::sandbox::DamageAnalytics {
+        self.sandbox
+            .as_ref()
+            .map(|(start, stats)| {
+                let mut stats = stats.clone();
+                stats.elapsed_secs = now.saturating_duration_since(*start).as_secs_f64();
+                stats.dps = stats.damage / stats.elapsed_secs.max(1.0 / 60.0);
+                stats
+            })
+            .unwrap_or_default()
+    }
     fn prune(&mut self, now: Instant) {
         while self
             .recent
@@ -105,6 +156,15 @@ pub(crate) fn apply_player_damage(
     damage: f32,
     now: Instant,
 ) -> Option<CombatEvent> {
+    apply_player_damage_typed(players, target_id, damage, now, false)
+}
+pub(crate) fn apply_player_damage_typed(
+    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+    target_id: u64,
+    damage: f32,
+    now: Instant,
+    magical: bool,
+) -> Option<CombatEvent> {
     if !damage.is_finite() || damage <= 0.0 {
         return None;
     }
@@ -112,19 +172,38 @@ pub(crate) fn apply_player_damage(
         player.joined && player.state.id == target_id && player.state.hp > 0.0 && !player.god_mode
     })?;
     let before = player.state.hp;
-    player.state.hp = (before - damage).max(0.0);
+    let mitigation = player
+        .sandbox
+        .as_ref()
+        .map_or(0.0, |c| if magical { c.resistance } else { c.armor });
+    let damage = damage * 100.0 / (100.0 + mitigation);
+    player.state.hp = if player.sandbox_infinite_hp {
+        before
+    } else {
+        (before - damage).max(0.0)
+    };
     if player.state.hp <= 0.0 && player.respawn_at.is_none() {
         player.respawn_at = Some(now + RESPAWN_DELAY);
         player.haste_expires_at = None;
         player.state.utility.haste_active_secs = 0.0;
     }
-    damage_receipt(
+    let mut receipt = damage_receipt(
         CombatEntityKind::Player,
         target_id,
         before,
-        player.state.hp,
+        if player.sandbox_infinite_hp {
+            before - damage
+        } else {
+            player.state.hp
+        },
         Vec3f::new(player.state.x, player.state.y + AIM_HEIGHT, player.state.z),
-    )
+    );
+    if player.sandbox_infinite_hp {
+        if let Some(event) = &mut receipt {
+            event.killed = false;
+        }
+    }
+    receipt
 }
 
 pub(crate) fn minion_stats(kind: MinionKind) -> (f32, f32, f32, Duration) {

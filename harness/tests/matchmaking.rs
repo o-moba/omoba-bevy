@@ -78,22 +78,37 @@ fn release_mode_forms_and_starts_a_full_match() {
         let snapshot = second
             .recv_snapshot(Instant::now() + Duration::from_millis(300))
             .expect("snapshot while running");
-        let players = snapshot.players();
-        if players.len() == 2 {
-            let greens = players
+        let Some(scoreboard) = snapshot.scoreboard() else {
+            continue;
+        };
+        if scoreboard.players.len() == 2 {
+            let greens = scoreboard
+                .players
                 .iter()
-                .filter(|p| p.team == Some(Team::Green))
+                .filter(|p| p.team == shared::map::Team::Green)
                 .count();
-            let blues = players
+            let blues = scoreboard
+                .players
                 .iter()
-                .filter(|p| p.team == Some(Team::Blue))
+                .filter(|p| p.team == shared::map::Team::Blue)
                 .count();
-            assert_eq!((greens, blues), (1, 1), "teams must balance to 1v1");
+            assert_eq!(
+                (greens, blues),
+                (1, 1),
+                "public roster confirms balanced1v1"
+            );
+            assert_eq!(
+                snapshot.players().len(),
+                1,
+                "distant opponent remains outside sight"
+            );
+            assert_eq!(snapshot.players()[0].id, snapshot.your_id());
+            assert_eq!(snapshot.players()[0].team, Some(Team::Blue));
             break;
         }
         assert!(
             Instant::now() < deadline,
-            "timed out waiting for both players in a snapshot"
+            "timed out waiting for both players in the public scoreboard"
         );
     }
 }

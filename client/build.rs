@@ -20,6 +20,7 @@ fn output(args: &[&str]) -> String {
 
 fn main() {
     println!("cargo:rerun-if-changed=../mobile/ios/SupporterStoreKit.swift");
+    println!("cargo:rerun-if-changed=../mobile/ios/BrowserBridge.swift");
     println!("cargo:rerun-if-env-changed=IPHONEOS_DEPLOYMENT_TARGET");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("ios") {
         return;
@@ -63,6 +64,7 @@ fn main() {
         ])
         .arg(out.join("swift-module-cache"))
         .arg("../mobile/ios/SupporterStoreKit.swift")
+        .arg("../mobile/ios/BrowserBridge.swift")
         .arg("-o")
         .arg(&library)
         .output()
@@ -85,5 +87,6 @@ fn main() {
     println!("cargo:rustc-link-lib=static=OmobaStoreKit");
     println!("cargo:rustc-link-lib=framework=StoreKit");
     println!("cargo:rustc-link-lib=framework=Foundation");
+    println!("cargo:rustc-link-lib=framework=UIKit");
     println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
 }

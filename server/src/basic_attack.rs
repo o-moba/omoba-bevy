@@ -1,7 +1,8 @@
 //! Individual server-authorized basic strikes. Clients own repeat/chase intent;
 //! the server owns target legality, range, timing, equipment and damage.
 use crate::*;
-use shared::shop::{basic_attack_cooldown, basic_attack_damage};
+#[cfg(test)]
+use shared::shop::basic_attack_cooldown;
 use shared::{BASIC_ATTACK_ACTION_SLOT, basic_attack_for_class};
 
 pub(crate) fn resolve_hostile_target(
@@ -90,21 +91,28 @@ pub(crate) fn handle_basic_attack_request(
         return;
     }
     let definition = basic_attack_for_class(attacker.state.hero_class);
-    let cooldown = basic_attack_cooldown(definition, attacker.state.item_bonuses);
-    if attacker
-        .last_basic_attack_at
-        .is_some_and(|last| now.saturating_duration_since(last) < cooldown)
+    let cooldown = sandbox::effective_basic_attack_cooldown(attacker);
+    if !attacker.sandbox.as_ref().is_some_and(|c| c.no_cooldowns)
+        && attacker
+            .last_basic_attack_at
+            .is_some_and(|last| now.saturating_duration_since(last) < cooldown)
     {
         return;
     }
     let team = attacker.state.team;
+    let sandbox = attacker.sandbox.is_some();
     let origin = Vec3f::new(
         attacker.state.x,
         attacker.state.y + CAST_SPAWN_HEIGHT,
         attacker.state.z,
     );
-    let damage = basic_attack_damage(definition, attacker.state.item_bonuses)
-        * team_buffs.damage_multiplier(team, now);
+    let damage =
+        sandbox::effective_basic_attack_damage(attacker) * team_buffs.damage_multiplier(team, now);
+    if !sandbox
+        && !vision::target_visible(team, target, players, minions, structures, neutrals, now)
+    {
+        return;
+    }
     let Some((position, radius)) =
         resolve_hostile_target(team, target, players, minions, structures, neutrals)
     else {
@@ -167,13 +175,11 @@ pub(crate) fn refresh_basic_attack_cooldowns(
     now: Instant,
 ) {
     for player in players.values_mut() {
-        if player.state.hp <= 0.0 {
+        sandbox::refresh_skill_cooldowns(player, now);
+        if player.state.hp <= 0.0 || player.sandbox.as_ref().is_some_and(|c| c.no_cooldowns) {
             player.last_basic_attack_at = None;
         }
-        let duration = basic_attack_cooldown(
-            basic_attack_for_class(player.state.hero_class),
-            player.state.item_bonuses,
-        );
+        let duration = sandbox::effective_basic_attack_cooldown(player);
         player.state.basic_attack_cooldown_secs = duration.as_secs_f32();
         player.state.basic_attack_remaining_secs = player
             .last_basic_attack_at

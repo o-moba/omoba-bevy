@@ -133,14 +133,22 @@ fn real_release_5v5_snapshots_fit_framed_datagrams_and_keep_complete_ordered_sch
         let actual_frames = frames.remove(&(epoch, tick)).unwrap();
         frames.retain(|(_, old_tick), _| *old_tick > tick);
         if snapshot["game_state"]["type"] == "running"
-            && array(&snapshot, "players").len() == 10
-            && array(&snapshot, "structures").len() == 8
-            && array(&snapshot, "minions").len() == 18
+            && array(&snapshot, "players").len() == 5
+            && array(&snapshot, "structures").len() == 4
+            && array(&snapshot, "minions").len() == 9
         {
             break (payload, snapshot, actual_frames);
         }
     };
-    assert!(payload.len() > OLD_CLIENT_BOUNDARY);
+    assert!(
+        payload.len() > OLD_CLIENT_BOUNDARY,
+        "filtered populated snapshot is {} bytes",
+        payload.len()
+    );
+    assert_eq!(array(&snapshot["scoreboard"], "players").len(), 10);
+    let vision: shared::vision::TeamVision =
+        serde_json::from_value(snapshot["vision"].clone()).expect("authoritative team sight");
+    assert!(!vision.sources.is_empty());
     assert_eq!(
         keys(&snapshot),
         keys(&legacy),
@@ -156,9 +164,16 @@ fn real_release_5v5_snapshots_fit_framed_datagrams_and_keep_complete_ordered_sch
         *teams.entry(player["team"].as_str().unwrap()).or_insert(0) += 1;
     }
     assert_eq!(teams.get("green"), Some(&5));
-    assert_eq!(teams.get("blue"), Some(&5));
-    assert_eq!(array(&snapshot, "minions").last().unwrap()["id"], 18);
-    assert_eq!(array(&snapshot, "structures").last().unwrap()["id"], 8);
+    assert_eq!(teams.get("blue"), None);
+    for field in ["structures", "minions"] {
+        assert!(
+            array(&snapshot, field)
+                .iter()
+                .all(|actor| actor["team"] == "green")
+        );
+    }
+    assert_eq!(array(&snapshot, "minions").last().unwrap()["id"], 15);
+    assert_eq!(array(&snapshot, "structures").last().unwrap()["id"], 7);
     for field in ["neutrals", "projectiles", "team_buffs"] {
         let _ = array(&snapshot, field);
     }
@@ -201,20 +216,31 @@ fn real_release_5v5_snapshots_fit_framed_datagrams_and_keep_complete_ordered_sch
         }
         if let Some(packet) = bots[0].recv_snapshot(Instant::now() + Duration::from_millis(250))
             && packet.meta().snapshot_tick >= last_meta.unwrap().snapshot_tick
-            && packet.minions().len() == 18
+            && packet.minions().len() == 9
         {
             break packet;
         }
     };
-    assert_eq!(typed.players().len(), 10);
-    assert_eq!(typed.structures().len(), 8);
-    assert_eq!(typed.minions().len(), 18);
+    assert_eq!(typed.players().len(), 5);
+    assert_eq!(typed.structures().len(), 4);
+    assert_eq!(typed.minions().len(), 9);
+    assert_eq!(typed.scoreboard().unwrap().players.len(), 10);
+    let own_team = typed.player(typed.your_id()).unwrap().team;
+    assert!(own_team.is_some());
+    assert!(typed.players().iter().all(|actor| actor.team == own_team));
+    assert!(
+        typed
+            .structures()
+            .iter()
+            .all(|actor| actor.team == own_team)
+    );
+    assert!(typed.minions().iter().all(|actor| actor.team == own_team));
     eprintln!(
         "FRAMED_5V5_MEASUREMENT {}",
         serde_json::json!({
             "reconstructed_bytes":payload.len(), "maximum_datagram_bytes":maximum_datagram,
             "populated_fragment_count":actual_frames.len(), "completed_ordered_snapshots":completed,
-            "players":10,"structures":8,"minions":18,"server_epoch":last_meta.unwrap().server_epoch,
+            "players":5,"structures":4,"minions":9,"public_roster":10,"team_vision":true,"server_epoch":last_meta.unwrap().server_epoch,
             "match_id":last_meta.unwrap().match_id,"snapshot_tick":last_meta.unwrap().snapshot_tick,
             "transport":"loopback; remote/Wi-Fi unverified",
         })

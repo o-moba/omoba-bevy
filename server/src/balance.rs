@@ -1,8 +1,8 @@
 //! Authoritative numeric tuning for the gameplay slice (server simulation).
 //!
 //! Adjust slice pacing and threat here instead of scattering literals across `main.rs`.
-//! The client mirrors **display-only** baselines (`MAX_HP`, `MAX_MANA`) in
-//! `client/src/combat.rs`; keep those in sync when you change player baselines.
+//! Class starting HP and bounded level multipliers live in `shared::hero_balance`.
+//! Resource growth and world pacing remain server-owned.
 //!
 //! **Skill power:** Per-class ability numbers (mana, cooldown, range, damage,
 //! heals, rank scaling) live in the `shared` crate (`shared::HeroClass` kits);
@@ -14,16 +14,20 @@
 use std::time::Duration;
 
 // --- Player baselines & regeneration ---
-pub const MAX_HP: f32 = 100.0;
+/// Default pre-admission Warrior HP; joined heroes resolve their own class baseline.
+pub const MAX_HP: f32 = shared::hero_balance::base_hp(shared::HeroClass::Warrior);
 pub const MAX_MANA: f32 = 100.0;
 pub const MANA_REGEN_PER_SECOND: f32 = 8.0;
+/// Own-base fountain restores 12% of maximum HP per second within the shop zone.
+pub const BASE_HEAL_FRACTION_PER_SECOND: f32 = 0.12;
+pub const BASE_HEAL_RADIUS: f32 = shared::shop::SHOP_RADIUS;
 
 // --- Projectile simulation (ability numbers live in the shared class kits) ---
 pub const PROJECTILE_SPEED: f32 = 19.0;
 /// Skill slots tracked by progression (`skill_points`); matches the shared Q/W/E/R kits.
 #[allow(dead_code)]
 pub const SKILL_SLOT_COUNT: usize = 4;
-pub const PROJECTILE_RADIUS: f32 = 0.22;
+pub const PROJECTILE_RADIUS: f32 = shared::PROJECTILE_COLLISION_RADIUS;
 pub const PROJECTILE_LIFETIME: Duration = Duration::from_secs(3);
 pub const PLAYER_HIT_RADIUS: f32 = shared::PLAYER_TARGET_RADIUS;
 pub const CAST_SPAWN_HEIGHT: f32 = 0.85;
@@ -82,7 +86,7 @@ pub const SESSION_RECLAIM_WINDOW: Duration = Duration::from_secs(30);
 /// Debug movement multiplier applied when a client enables the speed-boost toggle.
 pub const DEBUG_SPEED_MULTIPLIER: f32 = 2.6;
 pub const STARTING_LEVEL: u32 = 1;
-pub const MAX_LEVEL: u32 = 10;
+pub const MAX_LEVEL: u32 = shared::hero_balance::MAX_LEVEL;
 pub const LEVEL_UP_HP_BONUS: f32 = 18.0;
 pub const LEVEL_UP_MANA_BONUS: f32 = 12.0;
 // Team-shared kill XP depends on roster size. The full-roster deterministic

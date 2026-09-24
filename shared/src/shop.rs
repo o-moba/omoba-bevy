@@ -185,6 +185,14 @@ pub fn recommended_items(class: HeroClass) -> &'static [ItemId] {
             SwiftGrip,
             EmberBlade,
         ],
+        HeroClass::Warden => &[
+            SwiftGrip,
+            VitalityGem,
+            EmberBlade,
+            TrailBoots,
+            GuardianCrest,
+            FocusCharm,
+        ],
     }
 }
 

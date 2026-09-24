@@ -356,3 +356,116 @@ fn actual_udp_receiver_accepts_the_basic_wire_contract_once() {
     );
     assert_eq!(rt.players[&b].state.hp, MAX_HP - 12.0);
 }
+
+#[test]
+fn skill_recovery_blocks_cross_slot_bursts_without_spending_and_basics_overlap() {
+    for class in HeroClass::ALL {
+        let (mut rt, a, _, target, now) = fixture();
+        let player = rt.players.get_mut(&a).unwrap();
+        player.state.hero_class = class;
+        apply_level_up(&mut player.state); // W legitimately unlocks at two.
+        let mana = player.state.mana;
+        let cost = scaled_mana_cost(ability_for_class_slot(class, SkillSlot::Q), 1);
+        rt.handle_packet(a, ClientPacket::Cast { target, slot: 0 }, now);
+        assert_eq!(rt.projectiles.len(), 1, "{class:?}: first Q");
+        assert!((rt.players[&a].state.mana - (mana - cost)).abs() < 0.0001);
+        let after_q = rt.players[&a].state.mana;
+        for slot in [0, 1, 1] {
+            rt.handle_packet(a, ClientPacket::Cast { target, slot }, now);
+        }
+        assert_eq!(rt.players[&a].state.mana, after_q);
+        assert_eq!(rt.players[&a].last_cast_at[1], None);
+        assert_eq!(rt.players[&a].state.action_sequence, 1);
+        assert!(rt.players[&a].state.skill_recovery_remaining_secs > 0.0);
+        assert_eq!(rt.players[&a].state.skill_cooldown_remaining_secs[1], 0.0);
+        strike(&mut rt, a, target, 1, now);
+        assert_eq!(rt.projectiles.len(), 2, "{class:?}: basic overlaps skill");
+        let recovery = Duration::from_secs_f32(shared::hero_balance::skill_recovery_secs(2));
+        rt.handle_packet(a, ClientPacket::Cast { target, slot: 1 }, now + recovery);
+        let p = &rt.players[&a];
+        assert_eq!(p.last_cast_at[1], Some(now + recovery));
+        assert!(p.state.hp <= p.state.max_hp && p.state.mana <= p.state.max_mana);
+        assert!(p.state.skill_cooldown_remaining_secs[1] > 0.0);
+    }
+}
+
+#[test]
+fn normal_level_ten_movement_and_item_growth_are_authoritative_and_bounded() {
+    for class in HeroClass::ALL {
+        let (mut rt, a, _, _, now) = fixture();
+        let p = rt.players.get_mut(&a).unwrap();
+        p.state.hero_class = class;
+        reset_player_round(p, &rt.map_layout, now);
+        assert_eq!(p.state.max_hp, shared::hero_balance::base_hp(class));
+        grant_player_xp(&mut p.state, u32::MAX);
+        assert_eq!(p.state.level, 10);
+        p.state.item_bonuses = shared::shop::item_bonuses(&[ItemId::TrailBoots, ItemId::SwiftGrip]);
+        p.state.x = 0.0;
+        p.state.z = 0.0;
+        let expected = PLAYER_SPEED * 1.24 * 1.08 * 0.1;
+        handle_transform_request(
+            p,
+            &rt.map_layout,
+            expected,
+            PLAYER_GROUND_Y,
+            0.0,
+            0.0,
+            now + Duration::from_millis(100),
+        );
+        assert!(
+            (p.state.x - expected).abs() < 0.0001,
+            "{class:?}: legal movement"
+        );
+        handle_transform_request(
+            p,
+            &rt.map_layout,
+            20.0,
+            PLAYER_GROUND_Y,
+            0.0,
+            0.0,
+            now + Duration::from_millis(200),
+        );
+        assert!(p.state.x <= expected * 2.0 + MOVEMENT_POSITION_TOLERANCE + 0.0001);
+        let cooldown = sandbox::effective_basic_attack_cooldown(p);
+        assert!(
+            (cooldown.as_secs_f32()
+                - basic_attack_for_class(class).cooldown_secs
+                    / shared::hero_balance::attack_rate_multiplier(class, 10)
+                    / 1.12)
+                .abs()
+                < 0.0001
+        );
+        let max_hp = p.state.max_hp;
+        p.state.hp = 0.0;
+        p.respawn_at = Some(now);
+        handle_respawns(
+            &mut rt.players,
+            &rt.structures,
+            &rt.map_layout,
+            &GameState::Running,
+            now,
+        );
+        assert_eq!(rt.players[&a].state.hp, max_hp);
+        assert_eq!(
+            sandbox::effective_basic_attack_cooldown(&rt.players[&a]),
+            cooldown
+        );
+    }
+}
+
+#[test]
+fn explicit_sandbox_no_cooldowns_bypasses_inter_skill_recovery() {
+    let (mut rt, a, _, target, now) = fixture();
+    let p = rt.players.get_mut(&a).unwrap();
+    p.sandbox = Some(shared::sandbox::ActorConfig {
+        no_cooldowns: true,
+        unlock_all: true,
+        ..Default::default()
+    });
+    for slot in [0, 1, 0] {
+        rt.handle_packet(a, ClientPacket::Cast { target, slot }, now);
+    }
+    assert_eq!(rt.players[&a].state.action_sequence, 3);
+    assert_eq!(rt.players[&a].state.skill_recovery_remaining_secs, 0.0);
+    assert_eq!(rt.players[&a].state.skill_cooldown_remaining_secs, [0.0; 4]);
+}

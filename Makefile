@@ -36,6 +36,9 @@ iphone-check: ## Check physical iPhone build prerequisites (Xcode + Rust target)
 iphone: ## Build an unsigned physical iPhone package into builds/iphone
 	python3 mobile/ios/build_device.py --output "$(IPHONE_OUTPUT)"
 
+iphone-box: ## Build an unsigned physical iPhone package into a timestamped builds/iphone-* folder
+	python3 mobile/ios/build_device.py --output "builds/iphone-$$(date +%Y%m%d-%H%M%S)"
+
 # Run the game server in RELEASE match mode (matches form to 5v5 before starting).
 server: ## Game server with full-roster matchmaking by default
 	cargo run -p server

@@ -19,11 +19,11 @@ use crate::targeting::{BasicAttackState, TargetAimPreview};
 use crate::team::{Team, TeamSelection};
 use shared::{
     HeroClass, MAX_ABILITY_RANK, SkillSlot, TargetingMode, ability_for_class_slot,
-    scaled_cast_range, scaled_cooldown, scaled_mana_cost, unlocked_slots_for_level,
+    scaled_cast_range, scaled_cooldown, scaled_mana_cost,
 };
 
 /// Must match server `server/src/balance.rs` player baselines (display / local defaults).
-pub const MAX_HP: f32 = 100.0;
+pub const MAX_HP: f32 = shared::hero_balance::base_hp(HeroClass::Warrior);
 /// Must match server `server/src/balance.rs` player baselines (display / local defaults).
 pub const MAX_MANA: f32 = 100.0;
 
@@ -35,6 +35,9 @@ pub struct LocalCastCooldown {
     /// Total duration last applied to each active cooldown. Lets an equipment
     /// or rank update change the deadline without rescaling elapsed time.
     total_secs: [f32; 4],
+    recovery_secs: f32,
+    pending_slot: Option<usize>,
+    prediction_grace_secs: f32,
 }
 
 impl LocalCastCooldown {
@@ -112,8 +115,7 @@ fn reset_round_input_state(
     target.selected_target = None;
     pending.cancel();
     *basic = default();
-    cooldowns.remaining_secs = [0.0; 4];
-    cooldowns.total_secs = [0.0; 4];
+    *cooldowns = LocalCastCooldown::default();
     feedback.text.clear();
     feedback.remaining = 0.0;
     for entity in &moving {
@@ -435,10 +437,19 @@ struct SkillNameLabel {
     slot: usize,
 }
 
-fn tick_local_cast_cooldown(time: Res<Time>, mut cd: ResMut<LocalCastCooldown>) {
+fn tick_local_cast_cooldown(
+    time: Res<Time>,
+    game: Option<Res<GameStateSnapshot>>,
+    mut cd: ResMut<LocalCastCooldown>,
+) {
+    let elapsed = time.delta_secs() * crate::sandbox::time_scale(game.as_deref());
+    cd.recovery_secs = (cd.recovery_secs - elapsed).max(0.0);
+    cd.prediction_grace_secs = (cd.prediction_grace_secs - elapsed).max(0.0);
     for remaining in cd.remaining_secs.iter_mut() {
         if *remaining > 0.0 {
-            *remaining = (*remaining - time.delta_secs()).max(0.0);
+            *remaining = (*remaining
+                - time.delta_secs() * crate::sandbox::time_scale(game.as_deref()))
+            .max(0.0);
         }
     }
 }
@@ -447,30 +458,57 @@ fn tick_local_cast_cooldown(time: Res<Time>, mut cd: ResMut<LocalCastCooldown>) 
 /// Reducing haste after elapsed time must subtract the duration difference,
 /// rather than multiplying the remaining time (which incorrectly rescales history).
 fn sync_authoritative_cooldown_durations(
+    game: Option<Res<GameStateSnapshot>>,
     player: Query<
         (
             &PlayerProgression,
             &NetworkHeroClass,
             &crate::net::PlayerEquipment,
+            Option<Ref<crate::net::PlayerSkillCooldowns>>,
         ),
         With<Player>,
     >,
     mut cooldowns: ResMut<LocalCastCooldown>,
 ) {
-    let Ok((progression, class, equipment)) = player.single() else {
+    let Ok((progression, class, equipment, authoritative)) = player.single() else {
         return;
     };
+    let sandbox_actor = game
+        .as_ref()
+        .and_then(|g| g.sandbox.as_ref())
+        .and_then(|s| {
+            s.actors
+                .iter()
+                .find(|a| a.actor == shared::sandbox::SandboxActor::Player)
+        });
+    if let Some(snapshot) = authoritative.as_ref().filter(|s| s.is_changed()) {
+        // Ignore a pre-cast snapshot briefly while waiting for the accepted slot.
+        // A rejection still corrects the optimistic UI after this bounded grace.
+        let pending = cooldowns.pending_slot.is_some_and(|slot| {
+            cooldowns.prediction_grace_secs > 0.0 && snapshot.remaining_secs[slot] == 0.0
+        });
+        if !pending {
+            cooldowns.remaining_secs = snapshot.remaining_secs;
+            cooldowns.recovery_secs = snapshot.recovery_secs;
+            cooldowns.pending_slot = None;
+        }
+    }
+    if let Some(actor) = sandbox_actor {
+        cooldowns.remaining_secs = actor.cooldowns;
+    }
     for slot in SkillSlot::ALL {
         let index = slot.index();
-        let definition = ability_for_class_slot(class.0, slot);
-        let duration = shared::shop::item_cooldown(
-            definition,
+        let duration = effective_cast_duration(
+            class.0,
+            progression.level,
             progression.ranks[index],
             slot,
             equipment.item_bonuses,
-        )
-        .as_secs_f32();
-        if cooldowns.remaining_secs[index] > 0.0
+            sandbox_actor.is_some(),
+        );
+        if authoritative.is_none()
+            && sandbox_actor.is_none()
+            && cooldowns.remaining_secs[index] > 0.0
             && cooldowns.total_secs[index] > 0.0
             && cooldowns.total_secs[index] != duration
         {
@@ -479,6 +517,21 @@ fn sync_authoritative_cooldown_durations(
         }
         cooldowns.total_secs[index] = duration;
     }
+}
+
+pub(crate) fn effective_cast_duration(
+    class: HeroClass,
+    level: u32,
+    rank: u8,
+    slot: SkillSlot,
+    mut bonuses: shared::shop::ItemBonuses,
+    sandbox: bool,
+) -> f32 {
+    if !sandbox {
+        bonuses.attack_speed_multiplier = bonuses.attack_speed_multiplier.max(1.0);
+        bonuses.spell_haste_multiplier = bonuses.spell_haste_multiplier.max(1.0);
+    }
+    shared::hero_balance::ability_cooldown(class, level, rank, slot, bonuses).as_secs_f32()
 }
 
 /// The class whose kit drives the local HUD: server-replicated when available,
@@ -497,8 +550,8 @@ fn local_hero_class(
 struct CombatBarRoot;
 
 #[derive(Component)]
-struct CombatBarAnchor {
-    target: Entity,
+pub(crate) struct CombatBarAnchor {
+    pub(crate) target: Entity,
     y_offset: f32,
 }
 
@@ -813,7 +866,7 @@ fn update_skill_bar_system(
             Display::None
         };
         let rank = prog.ranks[icon.slot].max(1);
-        let available = unlocked_slots_for_level(prog.level.max(1))[icon.slot]
+        let available = prog.unlocked()[icon.slot]
             && cooldowns.remaining_secs[icon.slot] <= 0.0
             && local
                 .is_none_or(|(_, _, stats, _)| stats.mana >= scaled_mana_cost(definition, rank));
@@ -839,7 +892,7 @@ fn update_skill_bar_system(
         let slot = SkillSlot::from_index(label.slot as u8).expect("hotbar slot");
         let definition = ability_for_class_slot(class, slot);
         let cost = scaled_mana_cost(definition, rank);
-        let status = if !unlocked_slots_for_level(prog.level.max(1))[label.slot] {
+        let status = if !prog.unlocked()[label.slot] {
             format!("Locked Lv {}", shared::SLOT_UNLOCK_LEVELS[label.slot])
         } else if cooldowns.remaining_secs[label.slot] > 0.0 {
             format!("{:.1}s", cooldowns.remaining_secs[label.slot])
@@ -881,9 +934,8 @@ fn update_skill_bar_system(
 
     for (button, interaction, mut color, mut node) in &mut upgrade_buttons {
         let rank = prog.ranks.get(button.slot).copied().unwrap_or(1).max(1);
-        let can_upgrade = prog.skill_points > 0
-            && rank < MAX_ABILITY_RANK
-            && unlocked_slots_for_level(prog.level.max(1))[button.slot];
+        let can_upgrade =
+            prog.skill_points > 0 && rank < MAX_ABILITY_RANK && prog.unlocked()[button.slot];
         // Arrow only shows when a point can actually be spent on this slot.
         let display = if can_upgrade {
             Display::Flex
@@ -921,7 +973,7 @@ fn skill_upgrade_input_system(
     let Some(prog) = progression.iter().next() else {
         return;
     };
-    let unlocked = unlocked_slots_for_level(prog.level.max(1));
+    let unlocked = prog.unlocked();
     let eligible = |slot: usize| {
         prog.skill_points > 0 && unlocked[slot] && prog.ranks[slot] < MAX_ABILITY_RANK
     };
@@ -1058,7 +1110,7 @@ fn try_cast_slot(
         return false;
     }
     let def = ability_for_class_slot(class, slot);
-    if !unlocked_slots_for_level(prog.level.max(1))[slot.index()] {
+    if !prog.unlocked()[slot.index()] {
         let message = format!(
             "{} is locked until level {}.",
             def.name,
@@ -1066,6 +1118,9 @@ fn try_cast_slot(
         );
         feedback.push_line(message.clone());
         info!("{message}");
+        return false;
+    }
+    if cast_cd.recovery_secs > 0.0 {
         return false;
     }
     if cast_cd.remaining_secs[slot.index()] > 0.0 {
@@ -1286,6 +1341,7 @@ fn resolve_pending_cast_system(
     equipment: Query<&crate::net::PlayerEquipment, With<Player>>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     validity: crate::targeting::TargetValidity,
+    game: Option<Res<GameStateSnapshot>>,
 ) {
     let touch_mode = mobile.as_ref().is_some_and(|mobile| mobile.enabled);
     if !context.gameplay_allowed() {
@@ -1312,7 +1368,7 @@ fn resolve_pending_cast_system(
     let rank = prog.ranks[slot.index()].clamp(1, definition.max_rank);
     let rejection = if !stats.is_alive() {
         Some("Wait for respawn.".to_string())
-    } else if !unlocked_slots_for_level(prog.level.max(1))[slot.index()] {
+    } else if !prog.unlocked()[slot.index()] {
         Some(format!(
             "{} unlocks at level {}.",
             definition.name,
@@ -1356,6 +1412,10 @@ fn resolve_pending_cast_system(
         return;
     }
 
+    // Buffer the latest skill through the short shared recovery window.
+    if cast_cd.recovery_secs > 0.0 {
+        return;
+    }
     if definition.targeting == TargetingMode::UnitTarget {
         let (Some(target_entity), Some(_target)) = (request.target_entity, request.target) else {
             pending_cast.cancel();
@@ -1415,9 +1475,29 @@ fn resolve_pending_cast_system(
             .single()
             .map(|equipment| equipment.item_bonuses)
             .unwrap_or_default();
-        cast_cd.remaining_secs[slot.index()] =
-            shared::shop::item_cooldown(definition, rank, slot, bonuses).as_secs_f32();
+        cast_cd.remaining_secs[slot.index()] = effective_cast_duration(
+            class,
+            prog.level,
+            rank,
+            slot,
+            bonuses,
+            game.as_ref().is_some_and(|g| g.sandbox.is_some()),
+        );
         cast_cd.total_secs[slot.index()] = cast_cd.remaining_secs[slot.index()];
+        let no_cooldowns = game
+            .as_ref()
+            .and_then(|g| g.sandbox.as_ref())
+            .is_some_and(|s| s.config.player.no_cooldowns);
+        if no_cooldowns {
+            cast_cd.remaining_secs[slot.index()] = 0.0;
+        }
+        cast_cd.recovery_secs = if no_cooldowns {
+            0.0
+        } else {
+            shared::hero_balance::skill_recovery_secs(prog.level)
+        };
+        cast_cd.pending_slot = Some(slot.index());
+        cast_cd.prediction_grace_secs = 0.3;
     }
     pending_cast.cancel();
 }
@@ -1518,7 +1598,7 @@ fn mobile_cast_system(
         if slot < 4
             && prog.skill_points > 0
             && prog.ranks[slot] < MAX_ABILITY_RANK
-            && unlocked_slots_for_level(prog.level.max(1))[slot]
+            && prog.unlocked()[slot]
         {
             commands.write(NetworkCommand::UpgradeSkill { slot: slot as u8 });
         }
@@ -2408,6 +2488,168 @@ fn screen_pick_distance(pointer: Vec2, actor_center: Vec2, radius_px: f32) -> Op
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn balanced_skill_recovery_buffers_next_slot_and_uses_level_cooldowns() {
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<TeamSelection>()
+            .init_resource::<PendingCast>()
+            .init_resource::<LocalCastCooldown>()
+            .init_resource::<ActionFeedback>()
+            .init_resource::<GameplayInputContext>()
+            .add_message::<NetworkCommand>()
+            .add_systems(
+                Update,
+                (tick_local_cast_cooldown, resolve_pending_cast_system).chain(),
+            );
+        app.world_mut().spawn((
+            Player,
+            Transform::default(),
+            CombatStats::default(),
+            PlayerProgression {
+                level: 10,
+                ..default()
+            },
+            NetworkPlayerId(1),
+            Team::Green,
+            NetworkHeroClass(HeroClass::Warrior),
+        ));
+        let enemy = app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(2.0, 0.0, 0.0),
+                CombatStats::default(),
+                Team::Blue,
+                NetworkPlayerId(2),
+            ))
+            .id();
+        app.world_mut().resource_mut::<PendingCast>().request = Some(PendingCastRequest {
+            slot: 0,
+            target_entity: Some(enemy),
+            target: Some(TargetId {
+                kind: TargetKind::Player,
+                id: 2,
+            }),
+            approach_announced: false,
+        });
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .count(),
+            1
+        );
+        let cd = app.world().resource::<LocalCastCooldown>();
+        assert!((cd.remaining_secs[0] - 1.25).abs() < 0.001); // 2s / 1.6 growth
+        assert!((cd.recovery_secs - 0.3).abs() < 0.001);
+        app.world_mut().resource_mut::<PendingCast>().request = Some(PendingCastRequest {
+            slot: 1,
+            target_entity: None,
+            target: None,
+            approach_announced: false,
+        });
+        app.update();
+        assert!(app.world().resource::<PendingCast>().request.is_some());
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .count(),
+            0
+        );
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_millis(310));
+        app.update();
+        assert!(app.world().resource::<PendingCast>().request.is_none());
+        let sent: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<NetworkCommand>>()
+            .drain()
+            .collect();
+        assert!(matches!(
+            sent.as_slice(),
+            [NetworkCommand::Cast { slot: 1, .. }]
+        ));
+    }
+
+    #[test]
+    fn authoritative_skill_deadlines_restore_after_reconnect_and_age_between_snapshots() {
+        use crate::net::{PlayerEquipment, PlayerSkillCooldowns};
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<LocalCastCooldown>()
+            .add_systems(
+                Update,
+                (
+                    tick_local_cast_cooldown,
+                    sync_authoritative_cooldown_durations,
+                )
+                    .chain(),
+            );
+        let hero = app
+            .world_mut()
+            .spawn((
+                Player,
+                PlayerProgression {
+                    level: 10,
+                    ..default()
+                },
+                NetworkHeroClass(HeroClass::Warrior),
+                PlayerEquipment::default(),
+                PlayerSkillCooldowns {
+                    remaining_secs: [0.8, 2.0, 0.0, 10.0],
+                    recovery_secs: 0.2,
+                },
+            ))
+            .id();
+        app.update();
+        assert_eq!(
+            app.world().resource::<LocalCastCooldown>().remaining_secs,
+            [0.8, 2.0, 0.0, 10.0]
+        );
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_millis(100));
+        app.update();
+        assert!(
+            (app.world().resource::<LocalCastCooldown>().remaining_secs[0] - 0.7).abs() < 0.001
+        );
+        assert!((app.world().resource::<LocalCastCooldown>().recovery_secs - 0.1).abs() < 0.001);
+        // A fresh reset/respawn snapshot removes old deadlines immediately.
+        app.world_mut()
+            .entity_mut(hero)
+            .insert(PlayerSkillCooldowns::default());
+        app.update();
+        assert_eq!(
+            app.world().resource::<LocalCastCooldown>().remaining_secs,
+            [0.0; 4]
+        );
+        assert_eq!(
+            app.world().resource::<LocalCastCooldown>().recovery_secs,
+            0.0
+        );
+    }
+
+    #[test]
+    fn sandbox_slow_attack_rate_matches_authoritative_q_duration() {
+        let bonuses = shared::shop::ItemBonuses {
+            attack_speed_multiplier: 0.25,
+            ..default()
+        };
+        let normal =
+            effective_cast_duration(HeroClass::Warrior, 1, 1, SkillSlot::Q, bonuses, false);
+        assert_eq!(
+            effective_cast_duration(HeroClass::Warrior, 1, 1, SkillSlot::Q, bonuses, true),
+            normal * 4.0
+        );
+        assert_eq!(
+            effective_cast_duration(HeroClass::Warrior, 1, 1, SkillSlot::W, bonuses, true),
+            effective_cast_duration(HeroClass::Warrior, 1, 1, SkillSlot::W, bonuses, false)
+        );
+    }
 
     #[test]
     fn utility_intents_obey_snapshot_cooldowns_and_clear_on_modal_death_or_focus_loss() {

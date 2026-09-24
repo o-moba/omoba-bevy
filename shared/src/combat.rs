@@ -17,6 +17,7 @@ pub enum ProjectileStyle {
     Arcane,
     Holy,
     Crescent,
+    Claw,
     CasterBolt,
     TowerBolt,
     #[default]
@@ -31,6 +32,7 @@ impl ProjectileStyle {
             crate::HeroClass::Mage => Self::Arcane,
             crate::HeroClass::Ranger => Self::Arrow,
             crate::HeroClass::Cleric => Self::Holy,
+            crate::HeroClass::Warden => Self::Claw,
         }
     }
 }

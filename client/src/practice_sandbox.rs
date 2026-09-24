@@ -260,8 +260,12 @@ fn god_mode_label(enabled: bool) -> &'static str {
     if enabled { "ON" } else { "OFF" }
 }
 
+/// Server bot practice and the socket-free offline practice both accept the
+/// sandbox commands; every other match mode hides the page.
 fn is_practice(snapshot: Option<&GameStateSnapshot>, session: &ClientSession) -> bool {
-    session.join_confirmed() && snapshot.is_some_and(|s| s.match_mode == "practice")
+    session.join_confirmed()
+        && snapshot
+            .is_some_and(|s| matches!(s.match_mode.as_str(), "practice" | "offline_practice"))
 }
 
 /// The main-page entry exists only in a practice match; leaving one also

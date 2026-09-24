@@ -6,6 +6,16 @@ use std::collections::VecDeque;
 const THINK_INTERVAL: Duration = Duration::from_millis(250);
 const ROUTE_INTERVAL: Duration = Duration::from_millis(800);
 const VISION: f32 = 15.0;
+/// A five-player team, one class per duty. Bots take the first entry whose
+/// class is not on their team yet (humans pick first); the lane is the fallback
+/// when the Warden has no living camp to clear.
+const BOT_COMPOSITION: [(HeroClass, Lane, bool); 5] = [
+    (HeroClass::Mage, Lane::Mid, false),
+    (HeroClass::Warrior, Lane::Top, false),
+    (HeroClass::Ranger, Lane::Bot, false),
+    (HeroClass::Warden, Lane::Mid, true),
+    (HeroClass::Cleric, Lane::Bot, false),
+];
 const HERO_SPACING: f32 = shared::PLAYER_TARGET_RADIUS * 2.0 + 0.08;
 
 /// Sweep a bot's whole step against living heroes. Existing spawn/respawn
@@ -189,7 +199,7 @@ fn steer_bot_step(
     best
 }
 
-fn bot_avatar(class: HeroClass, slot: u16) -> Option<&'static str> {
+pub(crate) fn bot_avatar(class: HeroClass, slot: u16) -> Option<&'static str> {
     // Fixed bundled models only; runtime-synced/paid cosmetics are never selected.
     // Each class alternates two free appearances without changing its sprite kit.
     let preferred = match class {
@@ -197,6 +207,7 @@ fn bot_avatar(class: HeroClass, slot: u16) -> Option<&'static str> {
         HeroClass::Ranger => ["megan-the-fox", "cyberpal"],
         HeroClass::Mage => ["agnes", "stitch-witch"],
         HeroClass::Cleric => ["anna", "mega-angel"],
+        HeroClass::Warden => ["cool-tiger", "lady-koi"],
     };
     let variant = ((slot.saturating_sub(1) / 4) % 2) as usize;
     [preferred[variant], preferred[1 - variant], "agnes", "anna"]
@@ -210,7 +221,7 @@ fn bot_avatar(class: HeroClass, slot: u16) -> Option<&'static str> {
 
 /// Hit points of a practice dummy: enough to test a full rotation before it
 /// falls over and returns to its spot.
-const DUMMY_MAX_HP: f32 = 400.0;
+const DUMMY_MAX_HP: f32 = 600.0;
 /// How far in front of the requester (toward the enemy base) a dummy stands.
 const DUMMY_DISTANCE: f32 = 4.5;
 
@@ -253,6 +264,8 @@ pub(crate) enum BotKind {
 struct Controller {
     kind: BotKind,
     lane: Lane,
+    /// Clears jungle camps before following `lane`.
+    jungle: bool,
     waypoint: usize,
     route: VecDeque<[f32; 2]>,
     goal: Option<[f32; 2]>,
@@ -535,8 +548,8 @@ impl ServerRuntime {
         }
     }
 
-    /// Create one joined bot on `team`. `class` defaults to the slot's roster
-    /// class; lane bots rotate lanes by slot, sandbox bots take mid.
+    /// Create one joined bot on `team`. `class` defaults to the next roster
+    /// composition class; sandbox bots take mid.
     fn spawn_bot(
         &mut self,
         team: Team,
@@ -557,16 +570,26 @@ impl ServerRuntime {
             &mut self.next_player_id,
             now,
         );
+        // Roster bots complete the Mid/Solo/Carry/Jungle/Support composition;
+        // sandbox bots take the requested class and hold mid without jungling.
+        let teammates: Vec<_> = self
+            .players
+            .values()
+            .filter(|p| p.joined && p.state.team == team)
+            .map(|p| p.state.hero_class)
+            .collect();
+        let (composition_class, composition_lane, composition_jungle) = BOT_COMPOSITION
+            .into_iter()
+            .find(|(class, ..)| !teammates.contains(class))
+            .unwrap_or(BOT_COMPOSITION[teammates.len() % BOT_COMPOSITION.len()]);
+        let class = class.unwrap_or(composition_class);
+        let (lane, jungle) = if kind == BotKind::Lane {
+            (composition_lane, composition_jungle)
+        } else {
+            (Lane::Mid, false)
+        };
         let player = self.players.get_mut(&addr).unwrap();
         player.state.is_bot = true;
-        let class = class.unwrap_or(
-            [
-                HeroClass::Warrior,
-                HeroClass::Ranger,
-                HeroClass::Mage,
-                HeroClass::Cleric,
-            ][(slot as usize - 1) % 4],
-        );
         handle_join_request_with_sprite(
             player,
             team,
@@ -577,16 +600,12 @@ impl ServerRuntime {
             &self.map_layout,
             now,
         );
-        let lane = if kind == BotKind::Lane {
-            [Lane::Mid, Lane::Top, Lane::Bot][(slot as usize - 1) % 3]
-        } else {
-            Lane::Mid
-        };
         self.bots.controllers.insert(
             addr,
             Controller {
                 kind,
                 lane,
+                jungle,
                 waypoint: 1,
                 route: VecDeque::new(),
                 goal: None,
@@ -764,7 +783,7 @@ impl ServerRuntime {
             .filter(|s| s.state.hp > 0.0)
             .map(|s| shared::navigation::Disc {
                 center: [s.state.x, s.state.z],
-                radius: structure_radius(s.state.kind),
+                radius: structure_collision_radius(s.state.kind),
             })
             .collect();
         for addr in addresses {
@@ -834,6 +853,15 @@ impl ServerRuntime {
                         .target
                         .filter(|target| {
                             target.kind != TargetKind::Structure
+                                && vision::target_visible(
+                                    team,
+                                    *target,
+                                    &self.players,
+                                    &self.minions,
+                                    &self.structures,
+                                    &self.neutrals,
+                                    now,
+                                )
                                 && basic_attack::resolve_hostile_target(
                                     team,
                                     *target,
@@ -846,7 +874,13 @@ impl ServerRuntime {
                                     (p.x - origin[0]).hypot(p.z - origin[1]) <= VISION + 2.0
                                 })
                         })
-                        .or_else(|| self.bot_target(team, origin, controller.lane))
+                        .or_else(|| {
+                            if controller.jungle {
+                                self.jungle_target(team, origin, controller.lane, now)
+                            } else {
+                                self.bot_target(team, origin, controller.lane, now)
+                            }
+                        })
                 };
                 if controller.target != previous_target {
                     controller.holding_range = false;
@@ -916,17 +950,30 @@ impl ServerRuntime {
                     }
                 }
             }
-            let target = controller.target.and_then(|target| {
-                basic_attack::resolve_hostile_target(
-                    team,
-                    target,
-                    &self.players,
-                    &self.minions,
-                    &self.structures,
-                    &self.neutrals,
-                )
-                .map(|(position, radius)| (target, position, radius))
-            });
+            let target = controller
+                .target
+                .filter(|target| {
+                    vision::target_visible(
+                        team,
+                        *target,
+                        &self.players,
+                        &self.minions,
+                        &self.structures,
+                        &self.neutrals,
+                        now,
+                    )
+                })
+                .and_then(|target| {
+                    basic_attack::resolve_hostile_target(
+                        team,
+                        target,
+                        &self.players,
+                        &self.minions,
+                        &self.structures,
+                        &self.neutrals,
+                    )
+                    .map(|(position, radius)| (target, position, radius))
+                });
             let reach = shared::basic_attack_for_class(self.players[&addr].state.hero_class).range;
             let mut in_range = false;
             let destination = if retreating {
@@ -967,6 +1014,12 @@ impl ServerRuntime {
                     position.x - dx / distance.max(0.001) * approach,
                     position.z - dz / distance.max(0.001) * approach,
                 ]
+            } else if let Some((_, camp)) = controller
+                .jungle
+                .then(|| self.jungle_camp(team, origin))
+                .flatten()
+            {
+                camp
             } else {
                 let path = build_minion_path(&self.map_layout, controller.lane, team);
                 while controller.waypoint + 1 < path.len()
@@ -1014,8 +1067,13 @@ impl ServerRuntime {
                 .map(|p| (p.state.id, [p.state.x, p.state.z]))
                 .collect();
             others.sort_unstable_by_key(|(id, _)| *id);
-            let step =
-                PLAYER_SPEED * self.players[&addr].state.item_bonuses.move_speed_multiplier * dt;
+            let step = PLAYER_SPEED
+                * self.players[&addr].state.item_bonuses.move_speed_multiplier
+                * shared::hero_balance::movement_multiplier(
+                    self.players[&addr].state.hero_class,
+                    self.players[&addr].state.level,
+                )
+                * dt;
             let accepted = steer_bot_step(id, origin, desired, step, &others, &discs);
             let movement = [accepted[0] - origin[0], accepted[1] - origin[1]];
             if movement[0].hypot(movement[1]) > 0.000_1 {
@@ -1040,7 +1098,86 @@ impl ServerRuntime {
         }
     }
 
-    fn bot_target(&self, team: Team, origin: [f32; 2], lane: Lane) -> Option<TargetId> {
+    /// Nearest living ordinary camp, preferring the bot's own half of the map.
+    /// Camp spots are public map knowledge, like a human jungler's timers.
+    fn jungle_camp(&self, team: Team, origin: [f32; 2]) -> Option<(u64, [f32; 2])> {
+        let (own, enemy) = match team {
+            Team::Green => (self.map_layout.home, self.map_layout.away),
+            Team::Blue => (self.map_layout.away, self.map_layout.home),
+        };
+        self.neutrals
+            .values()
+            .filter(|n| !n.state.camp_type.is_boss() && n.dead_until.is_none() && n.state.hp > 0.0)
+            .map(|n| {
+                let at = [n.anchor.x, n.anchor.z];
+                let enemy_half =
+                    (at[0] - own.x).hypot(at[1] - own.z) > (at[0] - enemy.x).hypot(at[1] - enemy.z);
+                let distance = (at[0] - origin[0]).hypot(at[1] - origin[1]);
+                (enemy_half, distance, n.state.id, at)
+            })
+            .min_by(|a, b| {
+                a.0.cmp(&b.0)
+                    .then_with(|| a.1.total_cmp(&b.1))
+                    .then_with(|| a.2.cmp(&b.2))
+            })
+            .map(|(_, _, id, at)| (id, at))
+    }
+
+    /// Jungler priorities: a visible enemy hero, then the chosen camp once in
+    /// sight. With every camp down it farms and pushes its fallback lane.
+    fn jungle_target(
+        &self,
+        team: Team,
+        origin: [f32; 2],
+        lane: Lane,
+        now: Instant,
+    ) -> Option<TargetId> {
+        let visible = |target| {
+            vision::target_visible(
+                team,
+                target,
+                &self.players,
+                &self.minions,
+                &self.structures,
+                &self.neutrals,
+                now,
+            )
+        };
+        let hero = self
+            .players
+            .values()
+            .filter(|p| p.joined && p.state.hp > 0.0 && p.state.team != team)
+            .map(|p| {
+                (
+                    (p.state.x - origin[0]).hypot(p.state.z - origin[1]),
+                    TargetId {
+                        kind: TargetKind::Player,
+                        id: p.state.id,
+                    },
+                )
+            })
+            .filter(|(d, target)| *d <= VISION && visible(*target))
+            .min_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.id.cmp(&b.1.id)));
+        if let Some((_, target)) = hero {
+            return Some(target);
+        }
+        let Some((id, at)) = self.jungle_camp(team, origin) else {
+            return self.bot_target(team, origin, lane, now);
+        };
+        let camp = TargetId {
+            kind: TargetKind::Neutral,
+            id,
+        };
+        ((at[0] - origin[0]).hypot(at[1] - origin[1]) <= VISION && visible(camp)).then_some(camp)
+    }
+
+    pub(crate) fn bot_target(
+        &self,
+        team: Team,
+        origin: [f32; 2],
+        lane: Lane,
+        now: Instant,
+    ) -> Option<TargetId> {
         let distance = |x: f32, z: f32| (x - origin[0]).hypot(z - origin[1]);
         // Fight nearby lane units before diving a structure. Stable ID tie breaks
         // keep behavior independent of HashMap iteration order.
@@ -1074,7 +1211,18 @@ impl ServerRuntime {
         );
         if let Some((_, target)) = units
             .into_iter()
-            .filter(|(d, _)| *d <= VISION)
+            .filter(|(d, target)| {
+                *d <= VISION
+                    && vision::target_visible(
+                        team,
+                        *target,
+                        &self.players,
+                        &self.minions,
+                        &self.structures,
+                        &self.neutrals,
+                        now,
+                    )
+            })
             .min_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.id.cmp(&b.1.id)))
         {
             return Some(target);
@@ -1090,7 +1238,21 @@ impl ServerRuntime {
                         StructureRole::LaneTower { lane: tower_lane } => tower_lane == lane,
                     }
             })
-            .filter(|s| distance(s.state.x, s.state.z) <= VISION + s.attack_range)
+            .filter(|s| {
+                distance(s.state.x, s.state.z) <= VISION + s.attack_range
+                    && vision::target_visible(
+                        team,
+                        TargetId {
+                            kind: TargetKind::Structure,
+                            id: s.state.id,
+                        },
+                        &self.players,
+                        &self.minions,
+                        &self.structures,
+                        &self.neutrals,
+                        now,
+                    )
+            })
             .min_by(|a, b| {
                 distance(a.state.x, a.state.z)
                     .total_cmp(&distance(b.state.x, b.state.z))

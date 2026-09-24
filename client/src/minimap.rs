@@ -1,5 +1,5 @@
-//! Tactical overlay. Detection affects enemy hero markers only; world rendering
-//! and network snapshots do not yet implement fog of war.
+//! Tactical overlay. Current servers replicate only team-visible dynamic actors;
+//! legacy snapshots retain the local radial minimap fallback.
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
@@ -167,7 +167,7 @@ impl MinimapQaScene<'_, '_> {
         camera_edges.sort_by_key(|edge| edge["edge"].as_u64());
         serde_json::json!({
             "source": "computed Bevy minimap UI nodes in logical pixels",
-            "visibility_policy": "shared radial enemy hero minimap detection; no world or network fog",
+            "visibility_policy": "authoritative team-visible snapshot; legacy radial fallback",
             "container_rect": self.state.container.and_then(rendered_rect).map(rect_json),
             "hero_markers": {"local": local, "allied": allied, "enemy": enemy},
             "marker_rects": markers,
@@ -441,6 +441,7 @@ fn update_minimap_icons_system(
     thumbnails: Res<AvatarThumbnails>,
     sprites: Res<SpriteVisualAssets>,
     mode: Res<PlayerVisualMode>,
+    game: Option<Res<crate::net::GameStateSnapshot>>,
 ) {
     let Some(container) = state.container else {
         return;
@@ -473,13 +474,17 @@ fn update_minimap_icons_system(
     }
     let mut seen = HashSet::new();
     for (entity, transform, team, stats, local, avatar, sprite, class) in &heroes {
-        if !hero_marker_visible(
-            local_team,
-            *team,
-            stats.is_alive(),
-            transform.translation.xz(),
-            &observers,
-        ) {
+        let authoritative = game.as_ref().is_some_and(|g| g.vision.is_some());
+        if (authoritative && !stats.is_alive())
+            || (!authoritative
+                && !hero_marker_visible(
+                    local_team,
+                    *team,
+                    stats.is_alive(),
+                    transform.translation.xz(),
+                    &observers,
+                ))
+        {
             continue;
         }
         seen.insert(entity);
@@ -530,6 +535,7 @@ fn update_minimap_icons_system(
                     Some(shared::HeroClass::Mage) => "M",
                     Some(shared::HeroClass::Cleric) => "C",
                     Some(shared::HeroClass::Ranger) => "R",
+                    Some(shared::HeroClass::Warden) => "J",
                     _ => "W",
                 }
                 .to_owned()
@@ -663,6 +669,10 @@ fn update_minimap_icons_system(
         }
     }
     for (index, (anchor, kind)) in camps.into_iter().enumerate() {
+        let known = game
+            .as_ref()
+            .and_then(|g| g.vision.as_ref())
+            .is_none_or(|v| shared::vision::point_visible(&v.sources, anchor, false));
         let alive = living[index];
         let color = match kind {
             shared::jungle::JungleCampKind::Skirmisher => Color::srgb(0.46, 0.96, 0.40),
@@ -677,7 +687,9 @@ fn update_minimap_icons_system(
         node.border_radius = BorderRadius::all(Val::Px(5.0));
         let components = (
             node,
-            BackgroundColor(if alive {
+            BackgroundColor(if !known {
+                Color::srgb(0.22, 0.25, 0.25)
+            } else if alive {
                 color
             } else {
                 Color::srgb(0.07, 0.10, 0.09)

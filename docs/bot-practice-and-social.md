@@ -66,16 +66,17 @@ whole hostile-target kit.
 
 ### Practice sandbox
 
-While a standalone practice match runs, the pause menu shows a **Practice
-sandbox** page. Everything on it is a practice-only server command; release,
-development and publicly allocated matches ignore it.
+While a standalone practice match or the offline practice playground runs,
+the pause menu shows a **Practice sandbox** page. Everything on it is a
+practice-only command (handled by the practice server, or by the offline
+simulation); release, development and publicly allocated matches ignore it.
 
 | Control | Effect |
 | --- | --- |
 | God mode | The server skips damage to your hero (same flag as the debug HUD). |
 | Standard bots (lanes) | Restores the normal roster: both teams filled with lane bots. |
 | Clear all bots | Removes every bot and stops the automatic refill. Minions still spawn. |
-| Spawn target dummy | An enemy hero with 400 HP stands in front of you, never moves or attacks, and walks back to its spot after each respawn. Up to four; the oldest is recycled. |
+| Spawn target dummy | An enemy hero with 600 HP stands in front of you, never moves or attacks, and walks back to its spot after each respawn. Up to four; the oldest is recycled. |
 | Level / Gold | The 1v1 opponent's hero level (1–10) and shopping budget (0–1000). |
 | Start 1v1 on mid | Clears the bots and sends one opponent of your class down mid at that level, with skills ranked for the level and the budget spent on items at base. |
 

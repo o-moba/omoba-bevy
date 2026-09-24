@@ -1,6 +1,6 @@
 //! Ordinary jungle camp anchors shared by simulation and map presentation.
 //! Each pair has the same creature and rewards under a half-turn of the map.
-use crate::navigation::Point;
+use crate::{HeroClass, navigation::Point};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JungleCampKind {
@@ -24,10 +24,57 @@ pub fn camp_layout(map_size: f32) -> [(Point, JungleCampKind); 6] {
     ]
 }
 
+/// Warden passive "Forest Tracker": damage multiplier against jungle camps.
+pub const WARDEN_CAMP_DAMAGE_MULTIPLIER: f32 = 1.35;
+/// Bosses are team objectives, so the jungler only gets a small edge there.
+pub const WARDEN_BOSS_DAMAGE_MULTIPLIER: f32 = 1.15;
+/// Extra gold and XP a Warden earns per ordinary camp kill.
+pub const WARDEN_CAMP_GOLD_MULTIPLIER: f32 = 1.4;
+pub const WARDEN_CAMP_XP_MULTIPLIER: f32 = 1.25;
+
+/// Outgoing damage multiplier for a hero hitting a neutral monster.
+pub fn neutral_damage_multiplier(class: HeroClass, boss: bool) -> f32 {
+    match (class, boss) {
+        (HeroClass::Warden, false) => WARDEN_CAMP_DAMAGE_MULTIPLIER,
+        (HeroClass::Warden, true) => WARDEN_BOSS_DAMAGE_MULTIPLIER,
+        _ => 1.0,
+    }
+}
+
+/// Gold and XP a hero of `class` earns for the final blow on a neutral.
+/// Boss rewards stay flat: their value is the team buff.
+pub fn neutral_kill_rewards(class: HeroClass, boss: bool, gold: u32, xp: u32) -> (u32, u32) {
+    if class != HeroClass::Warden || boss {
+        return (gold, xp);
+    }
+    (
+        (gold as f32 * WARDEN_CAMP_GOLD_MULTIPLIER).round() as u32,
+        (xp as f32 * WARDEN_CAMP_XP_MULTIPLIER).round() as u32,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::navigation::world_navigation;
+
+    #[test]
+    fn only_the_warden_farms_camps_faster_and_bosses_stay_team_objectives() {
+        for class in HeroClass::ALL {
+            let warden = class == HeroClass::Warden;
+            assert_eq!(neutral_damage_multiplier(class, false) > 1.0, warden);
+            assert!(
+                neutral_damage_multiplier(class, true) <= neutral_damage_multiplier(class, false)
+            );
+            assert_eq!(neutral_kill_rewards(class, true, 150, 200), (150, 200));
+            let (gold, xp) = neutral_kill_rewards(class, false, 52, 85);
+            assert_eq!((gold > 52, xp > 85), (warden, warden));
+        }
+        assert_eq!(
+            neutral_kill_rewards(HeroClass::Warden, false, 52, 85),
+            (73, 106)
+        );
+    }
 
     #[test]
     fn mirrored_camps_have_equal_types_and_reachable_clear_fighting_space() {

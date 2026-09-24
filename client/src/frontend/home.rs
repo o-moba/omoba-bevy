@@ -29,6 +29,7 @@ enum HomeAction {
     Play,
     HumansOnly,
     BotPractice,
+    OfflinePractice,
     Card,
     Collection,
     History,
@@ -314,6 +315,8 @@ fn spawn_home(
                         HomeAction::Play,
                         "HomePlay",
                     );
+                    widgets::button(column, "Offline practice", ButtonKind::Secondary, HomeAction::OfflinePractice, "HomeOfflinePractice");
+                    column.spawn(widgets::label("No internet needed · No rating or rewards", 12.0, widgets::MUTED));
                     if career.view.match_service.is_some() {
                         widgets::button(column, "Wait for players", ButtonKind::Secondary, HomeAction::HumansOnly, "HomeHumansOnly");
                         widgets::button(column, "Play with bots", ButtonKind::Secondary, HomeAction::BotPractice, "HomeBotPractice");
@@ -391,6 +394,8 @@ fn home_actions(
     mut next: ResMut<NextState<AppScreen>>,
     mut career: ResMut<CareerClient>,
     mut requests: MessageWriter<NetworkCommand>,
+    mut session_ui: MessageWriter<crate::net::SessionUiCommand>,
+    session: Res<ClientSession>,
     mut matchmaking: ResMut<crate::match_service::MatchServiceClient>,
     buttons: Query<(&Interaction, &HomeAction), Changed<Interaction>>,
 ) {
@@ -399,7 +404,16 @@ fn home_actions(
             continue;
         }
         match action {
+            HomeAction::OfflinePractice => {
+                session_ui.write(crate::net::SessionUiCommand::StartOffline);
+                next.set(AppScreen::HeroSelect);
+            }
             HomeAction::Play | HomeAction::HumansOnly | HomeAction::BotPractice => {
+                // Backing out of the practice picker restores the saved server first.
+                if session.is_offline() {
+                    session_ui.write(crate::net::SessionUiCommand::LeaveMatch);
+                }
+
                 matchmaking.preference = match action {
                     HomeAction::HumansOnly => shared::match_service::MatchPreference::HumansOnly,
                     HomeAction::BotPractice => shared::match_service::MatchPreference::BotPractice,

@@ -12,8 +12,8 @@ use crate::net::StructureKind;
 pub(crate) fn structure_collision_radius(kind: StructureKind) -> f32 {
     HERO_RADIUS
         + match kind {
-            StructureKind::Tower => 1.3,
-            StructureKind::BaseTower => 3.2,
+            StructureKind::Tower => shared::TOWER_TARGET_RADIUS,
+            StructureKind::BaseTower => shared::navigation::BASE_COLLISION_RADIUS,
         }
 }
 

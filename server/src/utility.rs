@@ -17,6 +17,10 @@ fn remaining(deadline: Option<Instant>, now: Instant) -> f32 {
 }
 
 fn refresh_utility(player: &mut ConnectedPlayer, now: Instant) {
+    if player.sandbox.as_ref().is_some_and(|c| c.no_cooldowns) {
+        player.dash_ready_at = None;
+        player.haste_ready_at = None;
+    }
     if player.state.hp <= 0.0 {
         player.haste_expires_at = None;
     }

@@ -73,6 +73,16 @@ struct Choice {
     sprite_character: Option<String>,
     role: Role,
 }
+impl Choice {
+    /// Proposes the kit's duty unless the player already chose a different
+    /// role on purpose.
+    fn pick_class(&mut self, class: HeroClass) {
+        if self.role == self.hero_class.primary_role() {
+            self.role = class.primary_role();
+        }
+        self.hero_class = class;
+    }
+}
 impl From<&DraftPlayer> for Choice {
     fn from(player: &DraftPlayer) -> Self {
         Self {
@@ -231,7 +241,7 @@ fn draft_actions(
             }
             DraftAction::Class(class) => {
                 if let Some(choice) = &mut state.choice {
-                    choice.hero_class = *class;
+                    choice.pick_class(*class);
                 }
                 state.notice = None;
             }
@@ -695,7 +705,7 @@ fn render_draft(
                                     class.display_name(),
                                     DraftAction::Class(class),
                                     &format!("DraftClass-{}", class.id()),
-                                    (picker_width - 12.0) / 4.0,
+                                    (picker_width - 16.0) / 5.0,
                                     false,
                                     choice.is_some_and(|c| c.hero_class == class),
                                 );
@@ -1180,6 +1190,25 @@ mod tests {
                 }
             })
             .collect()
+    }
+
+    #[test]
+    fn picking_a_class_proposes_its_role_but_keeps_a_deliberate_one() {
+        let mut choice = Choice {
+            character: CharacterChoice::default(),
+            hero_class: HeroClass::Mage,
+            avatar: None,
+            sprite_character: None,
+            role: Role::Mid,
+        };
+        choice.pick_class(HeroClass::Warden);
+        assert_eq!(choice.role, Role::Jungle);
+        choice.role = Role::Support;
+        choice.pick_class(HeroClass::Warrior);
+        assert_eq!(
+            (choice.hero_class, choice.role),
+            (HeroClass::Warrior, Role::Support)
+        );
     }
 
     #[test]

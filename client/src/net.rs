@@ -1,3 +1,4 @@
+mod offline;
 mod public_transport;
 
 use shared::combat::{CombatEntityKind, CombatEvent, MinionKind, ProjectileStyle};
@@ -80,6 +81,8 @@ pub enum NetThreadSignal {
 pub enum SessionUiCommand {
     /// User explicitly resumes waiting for snapshots after **Disconnected** (P2 manual recovery).
     Retry,
+    /// Replace remote I/O with an in-process, unrated character practice.
+    StartOffline,
     /// Validated address chosen in the pre-join UI. Never transfers an active match.
     ConnectTo(String),
     /// Switch to a trusted lobby allocation without overwriting the saved lobby.
@@ -157,6 +160,7 @@ pub struct ClientSession {
     career_server_epoch: u64,
     career_packet_sequence: u64,
     ephemeral_endpoint: bool,
+    offline_return_addr: Option<String>,
 }
 
 impl Default for ClientSession {
@@ -179,6 +183,7 @@ impl Default for ClientSession {
             career_server_epoch: 0,
             career_packet_sequence: 0,
             ephemeral_endpoint: false,
+            offline_return_addr: None,
         }
     }
 }
@@ -227,6 +232,10 @@ fn should_attempt_reconnect(
 }
 
 impl ClientSession {
+    pub(crate) fn is_offline(&self) -> bool {
+        self.offline_return_addr.is_some()
+    }
+
     #[cfg(test)]
     pub(crate) fn admitted_for_test() -> Self {
         Self {
@@ -396,6 +405,7 @@ impl Plugin for NetworkingPlugin {
                 (
                     start_networking.after(crate::persistence::load_persistent_client_settings),
                     setup_connection_status_ui,
+                    offline::setup_banner,
                 ),
             )
             .add_systems(
@@ -406,14 +416,23 @@ impl Plugin for NetworkingPlugin {
                 Update,
                 send_network_commands.in_set(ClientNetPipeline::SendCommands),
             )
-            .add_systems(Update, mirror_debug_flags_to_network_state)
             .add_systems(
                 Update,
-                respawn_players_with_new_store_models.before(ClientNetPipeline::ApplySnapshot),
+                (mirror_debug_flags_to_network_state, offline::sync_banner),
             )
             .add_systems(
                 Update,
-                ingest_server_snapshot_packets.in_set(ClientNetPipeline::IngestSnapshot),
+                (
+                    respawn_players_with_new_store_models,
+                    respawn_sandbox_models,
+                )
+                    .before(ClientNetPipeline::ApplySnapshot),
+            )
+            .add_systems(
+                Update,
+                (offline::step, ingest_server_snapshot_packets)
+                    .chain()
+                    .in_set(ClientNetPipeline::IngestSnapshot),
             )
             .add_systems(
                 Update,
@@ -500,6 +519,7 @@ fn ground_networked_entities(
 
 #[derive(Message, Clone, Debug)]
 pub enum NetworkCommand {
+    Sandbox(shared::sandbox::SandboxRequest),
     /// Profile/history requests are valid before arena admission as well.
     Career(shared::career::CareerRequest),
     Social {
@@ -560,6 +580,9 @@ pub enum NetworkCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ClientPacket {
+    Sandbox {
+        request: shared::sandbox::SandboxRequest,
+    },
     /// Deliberate leave: the server releases the seat or the queue entry now
     /// instead of holding it for a reconnect.
     Leave,
@@ -696,6 +719,10 @@ struct PlayerState {
     basic_attack_remaining_secs: f32,
     #[serde(default)]
     basic_attack_request_id: u64,
+    #[serde(default)]
+    skill_recovery_remaining_secs: f32,
+    #[serde(default)]
+    skill_cooldown_remaining_secs: [f32; 4],
     #[serde(default)]
     xp: u32,
     #[serde(default = "default_player_level")]
@@ -908,6 +935,12 @@ enum ServerPacket {
         career: shared::career::CareerView,
     },
     Snapshot {
+        #[serde(default)]
+        sandbox: Option<shared::sandbox::SandboxSnapshot>,
+        #[serde(default)]
+        forest_pickups: Vec<shared::forest_pickups::ForestPickupState>,
+        #[serde(default)]
+        vision: Option<shared::vision::TeamVision>,
         #[serde(flatten, default)]
         meta: SnapshotMeta,
         #[serde(default)]
@@ -967,6 +1000,9 @@ pub enum GameState {
 
 #[derive(Resource, Default, Clone)]
 pub struct GameStateSnapshot {
+    pub sandbox: Option<shared::sandbox::SandboxSnapshot>,
+    pub forest_pickups: Vec<shared::forest_pickups::ForestPickupState>,
+    pub vision: Option<shared::vision::TeamVision>,
     pub your_id: u64,
     pub prematch: Option<shared::prematch::PrematchSnapshot>,
     pub match_mode: String,
@@ -1019,6 +1055,31 @@ fn respawn_players_with_new_store_models(
     }
 }
 
+// Replace the loaded scene as well as its cosmetic component when a developer
+// changes appearance. The ordinary next snapshot reconstructs the actor.
+fn respawn_sandbox_models(
+    mut commands: Commands,
+    game: Res<GameStateSnapshot>,
+    mut state: ResMut<NetworkState>,
+    players: Query<(Entity, &NetworkPlayerId, &NetworkAvatar)>,
+    mut seen: Local<HashMap<u64, Option<String>>>,
+) {
+    if game.sandbox.is_none() {
+        seen.clear();
+        return;
+    }
+    seen.retain(|id, _| players.iter().any(|(_, current, _)| current.0 == *id));
+    for (entity, id, avatar) in &players {
+        let changed = seen
+            .insert(id.0, avatar.0.clone())
+            .is_some_and(|old| old != avatar.0);
+        if changed {
+            state.remote_players.remove(&id.0);
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
 #[derive(Resource, Default)]
 struct NetworkState {
     local_id: Option<u64>,
@@ -1041,6 +1102,9 @@ struct PendingServerSnapshotFrame {
 }
 
 struct PendingSnapshotData {
+    vision: Option<shared::vision::TeamVision>,
+    forest_pickups: Vec<shared::forest_pickups::ForestPickupState>,
+    sandbox: Option<shared::sandbox::SandboxSnapshot>,
     prematch: Option<shared::prematch::PrematchSnapshot>,
     match_mode: String,
     geometry_id: String,
@@ -1090,8 +1154,12 @@ impl From<&PlayerState> for PlayerUtility {
 
 /// Keep authoritative remaining durations moving between snapshots, including
 /// packet loss or a paused virtual clock. Each new snapshot replaces this estimate.
-fn age_utility_timers(time: Res<Time<Real>>, mut players: Query<&mut PlayerUtility>) {
-    let elapsed = time.delta_secs();
+fn age_utility_timers(
+    time: Res<Time<Real>>,
+    game: Option<Res<GameStateSnapshot>>,
+    mut players: Query<&mut PlayerUtility>,
+) {
+    let elapsed = time.delta_secs() * crate::sandbox::time_scale(game.as_deref());
     for mut utility in &mut players {
         let state = &mut utility.state;
         state.dash_remaining_secs = (state.dash_remaining_secs - elapsed).max(0.0);
@@ -1145,6 +1213,29 @@ impl From<&PlayerState> for PlayerBasicAttackCooldown {
     }
 }
 
+/// Server skill deadlines, including the shared interval between different slots.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct PlayerSkillCooldowns {
+    pub remaining_secs: [f32; 4],
+    pub recovery_secs: f32,
+}
+
+impl From<&PlayerState> for PlayerSkillCooldowns {
+    fn from(player: &PlayerState) -> Self {
+        let finite = |value: f32| {
+            if value.is_finite() {
+                value.max(0.0)
+            } else {
+                0.0
+            }
+        };
+        Self {
+            remaining_secs: player.skill_cooldown_remaining_secs.map(finite),
+            recovery_secs: finite(player.skill_recovery_remaining_secs),
+        }
+    }
+}
+
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkCharacterChoice(pub CharacterChoice);
 
@@ -1191,6 +1282,7 @@ pub struct PlayerEquipment {
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct PlayerProgression {
+    pub sandbox_unlocked: Option<[bool; 4]>,
     pub level: u32,
     pub xp: u32,
     pub next_level_xp: u32,
@@ -1199,9 +1291,17 @@ pub struct PlayerProgression {
     pub ranks: [u8; 4],
 }
 
+impl PlayerProgression {
+    pub fn unlocked(&self) -> [bool; 4] {
+        self.sandbox_unlocked
+            .unwrap_or_else(|| shared::unlocked_slots_for_level(self.level.max(1)))
+    }
+}
+
 impl Default for PlayerProgression {
     fn default() -> Self {
         Self {
+            sandbox_unlocked: None,
             level: 1,
             xp: 0,
             next_level_xp: 0,
@@ -1413,7 +1513,13 @@ fn start_networking(
             "Ignoring invalid GAME_SERVER_ADDR/file value {preferred_addr:?}; falling back to {server_addr}"
         );
     }
-    spawn_network_transport(&mut commands, &mut client_session, server_addr);
+    if std::env::var("OMOBA_OFFLINE_PRACTICE").is_ok_and(|v| v == "1") {
+        client_session.offline_return_addr = Some(server_addr);
+        client_session.ephemeral_endpoint = true;
+        spawn_network_transport(&mut commands, &mut client_session, offline::ADDRESS.into());
+    } else {
+        spawn_network_transport(&mut commands, &mut client_session, server_addr);
+    }
 }
 
 fn validated_server_addr_or_default(raw: &str) -> String {
@@ -1440,15 +1546,24 @@ fn spawn_network_transport(
     let gameplay_signer: SharedGameplaySigner = Arc::default();
     let signer_for_thread = gameplay_signer.clone();
     let addr_for_thread = server_addr;
-    thread::spawn(move || {
-        run_udp_client(
-            addr_for_thread,
+    if client_session.is_offline() {
+        commands.insert_resource(offline::LocalPractice::new(
             outgoing_rx,
             incoming_tx,
             signal_tx,
-            signer_for_thread,
-        );
-    });
+        ));
+    } else {
+        commands.remove_resource::<offline::LocalPractice>();
+        thread::spawn(move || {
+            run_udp_client(
+                addr_for_thread,
+                outgoing_rx,
+                incoming_tx,
+                signal_tx,
+                signer_for_thread,
+            );
+        });
+    }
 
     client_session.state = ClientConnectionState::WaitingForServer;
     client_session.waiting_since = Some(Instant::now());
@@ -1830,6 +1945,16 @@ fn send_network_commands(
         });
     }
     for command in command_events.read() {
+        if client_session.is_offline()
+            && matches!(
+                command,
+                NetworkCommand::Career(_)
+                    | NetworkCommand::Social { .. }
+                    | NetworkCommand::BuyItem { .. }
+            )
+        {
+            continue;
+        }
         if let (Some(service), Some(career)) = (match_service.as_mut(), career_client.as_ref())
             && service.intercept_join(&career.view, &client_session.server_addr_display, command)
         {
@@ -2040,6 +2165,13 @@ fn send_network_commands(
                 });
                 send_join_attempt(&channels, &mut client_session, &client_session_id);
             }
+            NetworkCommand::Sandbox(request) => {
+                if client_session.join_confirmed() {
+                    let _ = channels.outgoing.try_send(ClientPacket::Sandbox {
+                        request: request.clone(),
+                    });
+                }
+            }
             NetworkCommand::RequestRematch => {
                 if !client_session.join_confirmed() {
                     continue;
@@ -2123,7 +2255,9 @@ fn send_join_attempt(
         session.join_exhausted = true;
         return;
     }
-    let passport_ticket =
+    let passport_ticket = if session.is_offline() {
+        None
+    } else {
         match crate::passport::ticket_for_slug(join.avatar.as_deref(), &session_id.0) {
             crate::passport::TicketPoll::Free => None,
             crate::passport::TicketPoll::Ready(ticket) => Some(ticket),
@@ -2137,7 +2271,8 @@ fn send_join_attempt(
                 session.join_exhausted = true;
                 return;
             }
-        };
+        }
+    };
     let result = channels.outgoing.try_send(ClientPacket::Join {
         prematch: join.prematch,
         team: join.team,
@@ -2244,6 +2379,9 @@ fn ingest_server_snapshot_packets(
                     }
                 }
                 ServerPacket::Snapshot {
+                    sandbox,
+                    forest_pickups,
+                    vision,
                     geometry_id,
                     map_profile,
                     match_mode,
@@ -2297,6 +2435,9 @@ fn ingest_server_snapshot_packets(
                         client_session.join_exhausted = false;
                     }
                     latest_snapshot = Some(PendingSnapshotData {
+                        sandbox,
+                        forest_pickups,
+                        vision,
                         match_mode,
                         geometry_id,
                         map_profile,
@@ -2368,6 +2509,9 @@ fn apply_server_snapshot(
         return;
     };
     let PendingSnapshotData {
+        sandbox,
+        forest_pickups,
+        vision,
         match_mode,
         geometry_id,
         map_profile,
@@ -2406,6 +2550,9 @@ fn apply_server_snapshot(
     game_state_snapshot.team_buffs = team_buffs;
     game_state_snapshot.combat_events = combat_events;
     game_state_snapshot.scoreboard = scoreboard;
+    game_state_snapshot.sandbox = sandbox;
+    game_state_snapshot.forest_pickups = forest_pickups;
+    game_state_snapshot.vision = vision;
 
     // Reconnect uses the accepted draft loadout, never a stale pre-search choice.
     if let Some(own) = game_state_snapshot
@@ -2495,6 +2642,7 @@ fn apply_server_snapshot(
                 player_state_to_equipment(local_player_state),
                 (
                     PlayerBasicAttackCooldown::from(local_player_state),
+                    PlayerSkillCooldowns::from(local_player_state),
                     PlayerUtility::from(local_player_state),
                 ),
             ));
@@ -2595,6 +2743,7 @@ fn apply_server_snapshot(
                     player_state_to_equipment(local_player_state),
                     (
                         PlayerBasicAttackCooldown::from(local_player_state),
+                        PlayerSkillCooldowns::from(local_player_state),
                         PlayerUtility::from(local_player_state),
                     ),
                     Name::new("Player"),
@@ -2629,6 +2778,7 @@ fn apply_server_snapshot(
                 player_state_to_equipment(local_player_state),
                 (
                     PlayerBasicAttackCooldown::from(local_player_state),
+                    PlayerSkillCooldowns::from(local_player_state),
                     PlayerUtility::from(local_player_state),
                 ),
                 Name::new("Player"),
@@ -2667,6 +2817,7 @@ fn apply_server_snapshot(
                     player_state_to_equipment(local_player_state),
                     (
                         PlayerBasicAttackCooldown::from(local_player_state),
+                        PlayerSkillCooldowns::from(local_player_state),
                         PlayerUtility::from(local_player_state),
                     ),
                     Name::new("Player"),
@@ -2735,6 +2886,7 @@ fn apply_server_snapshot(
                 player_state_to_equipment(player),
                 (
                     PlayerBasicAttackCooldown::from(player),
+                    PlayerSkillCooldowns::from(player),
                     PlayerUtility::from(player),
                 ),
             ));
@@ -2777,6 +2929,7 @@ fn apply_server_snapshot(
             player_state_to_equipment(player),
             (
                 PlayerBasicAttackCooldown::from(player),
+                PlayerSkillCooldowns::from(player),
                 PlayerUtility::from(player),
             ),
         ));
@@ -3456,6 +3609,51 @@ fn update_session_lifecycle(
     let mut retried_this_frame = false;
     for event in session_ui.read() {
         match event {
+            SessionUiCommand::StartOffline => {
+                if client_session.has_committed_join() || client_session.is_offline() {
+                    continue;
+                }
+                if let Some(channels) = channels.as_ref() {
+                    let _ = channels.outgoing.try_send(ClientPacket::Leave);
+                }
+                client_session.offline_return_addr =
+                    Some(client_session.server_addr_display.clone());
+                client_session.ephemeral_endpoint = true;
+                client_session.abandon_join();
+                team_selection.team = None;
+                // Practice only uses avatars bundled with the app; no wallet or download.
+                if !offline::shipped_avatar(team_selection.avatar.as_deref()) {
+                    team_selection.avatar = None;
+                }
+                despawn_tracked_net_entities(
+                    &mut commands,
+                    &mut network_state,
+                    remote_query,
+                    projectile_query,
+                    structure_query,
+                    minion_query,
+                    neutral_query,
+                );
+                despawn_local_players(&mut commands, player_query);
+                *game_state_snapshot = GameStateSnapshot::default();
+                commands.insert_resource(PendingServerSnapshotFrame::default());
+                if let Some(service) = match_service.as_mut() {
+                    service.take_return_to_lobby();
+                }
+                if let Some(career) = career.as_mut() {
+                    career.clear_account();
+                }
+                if let Some(social) = social.as_mut() {
+                    social.clear();
+                }
+                spawn_network_transport(
+                    &mut commands,
+                    &mut client_session,
+                    offline::ADDRESS.into(),
+                );
+                incoming_dead.0 = false;
+                retried_this_frame = true;
+            }
             SessionUiCommand::ConnectTo(raw) => {
                 if client_session.join_flow_committed || client_session.last_join.is_some() {
                     continue;
@@ -3475,6 +3673,7 @@ fn update_session_lifecycle(
                     // authenticates this account against its configured backend.
                     career.clear_account();
                 }
+                client_session.offline_return_addr = None;
                 client_session.ephemeral_endpoint = false;
                 commands.remove_resource::<NetworkChannels>();
                 spawn_network_transport(&mut commands, &mut client_session, address);
@@ -3527,9 +3726,11 @@ fn update_session_lifecycle(
                 {
                     let _ = channels.outgoing.try_send(ClientPacket::Career { request });
                 }
-                let return_to_lobby = match_service
-                    .as_mut()
-                    .and_then(|service| service.take_return_to_lobby());
+                let return_to_lobby = client_session.offline_return_addr.take().or_else(|| {
+                    match_service
+                        .as_mut()
+                        .and_then(|service| service.take_return_to_lobby())
+                });
                 // The server releases the seat (or the queue entry) on `Leave`;
                 // the connection itself stays up for the menus and the career.
                 if let Some(channels) = channels.as_ref() {
@@ -3756,6 +3957,7 @@ fn player_state_to_equipment(player: &PlayerState) -> PlayerEquipment {
 
 fn player_state_to_progression(player: &PlayerState) -> PlayerProgression {
     PlayerProgression {
+        sandbox_unlocked: None,
         level: player.level.max(1),
         xp: player.xp,
         next_level_xp: player.next_level_xp,
@@ -4262,6 +4464,265 @@ mod tests {
         super::configure_network_pipeline(&mut app);
         crate::world::register_local_player_spawn(&mut app);
         (app, incoming)
+    }
+
+    /// Recipient-shaped packets exercise the ordinary ingest/apply pipeline;
+    /// omission is the server visibility contract, not a client hiding flag.
+    fn team_vision_snapshot(tick: u64, enemy_visible: bool, local_dead: bool) -> ServerPacket {
+        let mut value = serde_json::to_value(admission_snapshot(1, tick, true, None)).unwrap();
+        let mut heroes = value["players"].as_array().unwrap()[..3].to_vec();
+        for hero in &mut heroes {
+            hero["avatar"] = serde_json::Value::Null;
+        }
+        if local_dead {
+            heroes[0]["hp"] = json!(0.0);
+        }
+        heroes.retain(|hero| hero["id"] != 2 || enemy_visible);
+        value["players"] = json!(heroes);
+        for field in ["structures", "minions", "neutrals", "projectiles"] {
+            value[field] = json!([]);
+        }
+        value["vision"] = json!({
+            "sources": [{"position": [tick as f32, -6.0], "radius": 32.0}],
+            "local_brush": if tick % 2 == 0 { Some(1) } else { None },
+            "local_hidden": tick % 2 == 0
+        });
+        serde_json::from_value(value).unwrap()
+    }
+
+    fn network_hero_entity(app: &mut App, id: u64) -> Entity {
+        app.world_mut()
+            .query::<(Entity, &super::NetworkPlayerId)>()
+            .iter(app.world())
+            .find_map(|(entity, player)| (player.0 == id).then_some(entity))
+            .unwrap()
+    }
+
+    #[test]
+    fn team_vision_omission_despawns_visual_tree_and_reacquires_once() {
+        let (mut app, incoming) = snapshot_app();
+        incoming.send(team_vision_snapshot(1, true, false)).unwrap();
+        app.update();
+        let local = network_hero_entity(&mut app, 1);
+        let ally = network_hero_entity(&mut app, 3);
+        let mut previous_enemy = network_hero_entity(&mut app, 2);
+        for hidden_tick in [2, 4, 6] {
+            let attached_visual = app
+                .world_mut()
+                .spawn((
+                    Name::new("test attached actor visual"),
+                    Mesh3d::default(),
+                    Transform::default(),
+                ))
+                .id();
+            let attached_trail = app.world_mut().spawn(Name::new("test nested trail")).id();
+            app.world_mut()
+                .entity_mut(attached_visual)
+                .add_child(attached_trail);
+            app.world_mut()
+                .entity_mut(previous_enemy)
+                .add_child(attached_visual);
+            incoming
+                .send(team_vision_snapshot(hidden_tick, false, false))
+                .unwrap();
+            app.update();
+            for gone in [previous_enemy, attached_visual, attached_trail] {
+                assert!(
+                    app.world().get_entity(gone).is_err(),
+                    "hidden actor tree remains: {gone:?}"
+                );
+            }
+            assert!(
+                !app.world()
+                    .resource::<super::NetworkState>()
+                    .remote_players
+                    .contains_key(&2)
+            );
+            assert_eq!(
+                network_hero_entity(&mut app, 1),
+                local,
+                "local actor must survive enemy omission"
+            );
+            assert_eq!(
+                network_hero_entity(&mut app, 3),
+                ally,
+                "shared-sight ally must survive enemy omission"
+            );
+            incoming
+                .send(team_vision_snapshot(hidden_tick + 1, true, false))
+                .unwrap();
+            app.update();
+            let reacquired = network_hero_entity(&mut app, 2);
+            assert_ne!(
+                reacquired, previous_enemy,
+                "reacquisition must not revive a stale entity handle"
+            );
+            let enemies = app
+                .world_mut()
+                .query::<&super::NetworkPlayerId>()
+                .iter(app.world())
+                .filter(|id| id.0 == 2)
+                .count();
+            assert_eq!(enemies, 1, "repeated reacquisition duplicated the actor");
+            assert_eq!(
+                app.world().resource::<super::NetworkState>().remote_players[&2],
+                reacquired
+            );
+            previous_enemy = reacquired;
+        }
+    }
+
+    #[test]
+    fn team_vision_wire_updates_preserve_living_ally_after_local_death() {
+        let (mut app, incoming) = snapshot_app();
+        incoming.send(team_vision_snapshot(1, true, false)).unwrap();
+        app.update();
+        let local = network_hero_entity(&mut app, 1);
+        let ally = network_hero_entity(&mut app, 3);
+        for tick in 2..=3 {
+            incoming
+                .send(team_vision_snapshot(tick, false, true))
+                .unwrap();
+            app.update();
+            assert_eq!(network_hero_entity(&mut app, 1), local);
+            assert_eq!(network_hero_entity(&mut app, 3), ally);
+            assert_eq!(
+                app.world()
+                    .get::<crate::combat::CombatStats>(local)
+                    .unwrap()
+                    .hp,
+                0.0
+            );
+            assert!(
+                app.world()
+                    .get::<crate::combat::CombatStats>(ally)
+                    .unwrap()
+                    .hp
+                    > 0.0
+            );
+            let vision = app
+                .world()
+                .resource::<super::GameStateSnapshot>()
+                .vision
+                .as_ref()
+                .unwrap();
+            assert_eq!(
+                vision.sources.len(),
+                1,
+                "client must preserve server-authorized shared sources after local death"
+            );
+            assert_eq!(vision.sources[0].position, [tick as f32, -6.0]);
+            assert_eq!(
+                vision.local_brush,
+                if tick % 2 == 0 { Some(1) } else { None }
+            );
+            assert_eq!(vision.local_hidden, tick % 2 == 0);
+        }
+    }
+
+    #[test]
+    fn team_vision_snapshot_none_and_session_teardown_clear_authoritative_state() {
+        use bevy::ecs::system::RunSystemOnce;
+        let (mut app, incoming) = snapshot_app();
+        incoming.send(team_vision_snapshot(1, true, false)).unwrap();
+        app.update();
+        assert!(
+            app.world()
+                .resource::<super::GameStateSnapshot>()
+                .vision
+                .is_some()
+        );
+        let mut omitted = serde_json::to_value(team_vision_snapshot(2, false, false)).unwrap();
+        omitted.as_object_mut().unwrap().remove("vision");
+        incoming
+            .send(serde_json::from_value(omitted).unwrap())
+            .unwrap();
+        app.update();
+        assert!(
+            app.world()
+                .resource::<super::GameStateSnapshot>()
+                .vision
+                .is_none(),
+            "legacy/no-vision packet must not retain stale sources"
+        );
+        incoming.send(team_vision_snapshot(3, true, false)).unwrap();
+        app.update();
+        let local = network_hero_entity(&mut app, 1);
+        let enemy = network_hero_entity(&mut app, 2);
+        let attached = app.world_mut().spawn(Name::new("session visual")).id();
+        app.world_mut().entity_mut(enemy).add_child(attached);
+        app.world_mut()
+            .run_system_once(
+                |mut commands: Commands,
+                 mut session: ResMut<super::ClientSession>,
+                 mut network: ResMut<super::NetworkState>,
+                 mut snapshot: ResMut<super::GameStateSnapshot>,
+                 mut team: ResMut<TeamSelection>,
+                 mut camera: ResMut<crate::camera::CameraState>,
+                 queries: super::TeardownQueries| {
+                    super::perform_network_teardown(
+                        super::TeardownReason::TransportFailure,
+                        &mut commands,
+                        &mut session,
+                        &mut network,
+                        &mut snapshot,
+                        &mut team,
+                        &mut camera,
+                        &queries.remote_query,
+                        &queries.projectile_query,
+                        &queries.structure_query,
+                        &queries.minion_query,
+                        &queries.neutral_query,
+                        &queries.player_query,
+                    );
+                },
+            )
+            .unwrap();
+        assert!(
+            app.world()
+                .resource::<super::GameStateSnapshot>()
+                .vision
+                .is_none()
+        );
+        assert!(
+            app.world()
+                .resource::<super::NetworkState>()
+                .remote_players
+                .is_empty()
+        );
+        assert_eq!(
+            app.world().resource::<super::ClientSession>().state,
+            ClientConnectionState::Disconnected
+        );
+        for gone in [local, enemy, attached] {
+            assert!(
+                app.world().get_entity(gone).is_err(),
+                "teardown left actor or attached visual {gone:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn wire_scoreboard_updates_reach_the_hud_resource_and_local_identity() {
+        let (mut app, incoming) = snapshot_app();
+        for tick in 1..=2 {
+            let mut value = serde_json::to_value(admission_snapshot(1, tick, true, None)).unwrap();
+            value["scoreboard"] = json!({"players":[{"player_id":1,"nickname":"Player","team":"green","hero_class":"mage",
+                "kills":tick-1,"deaths":0,"assists":tick,"earned_gold":15,"level":1,"connected":true}]});
+            super::forward_complete_server_datagram(
+                &serde_json::to_vec(&value).unwrap(),
+                &incoming,
+            )
+            .unwrap();
+            app.update();
+            let game = app.world().resource::<super::GameStateSnapshot>();
+            let own = &game.scoreboard.as_ref().unwrap().players[0];
+            assert_eq!(
+                (own.kills, own.deaths, own.assists),
+                ((tick - 1) as u32, 0, tick as u32)
+            );
+            assert_eq!(own.player_id, game.your_id);
+        }
     }
 
     #[test]
@@ -4955,6 +5416,196 @@ mod tests {
 mod connection_ui_tests {
     use super::*;
     use crate::sprite::SpriteVisualAssets;
+
+    #[test]
+    fn offline_leave_restores_saved_endpoint_and_next_join_uses_real_udp_transport() {
+        use crate::world::{AvatarAssetCache, PlayerModelCatalog};
+        use bevy::{asset::AssetApp, ecs::system::RunSystemOnce};
+
+        let server = UdpSocket::bind("127.0.0.1:0").unwrap();
+        server
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let saved_address = server.local_addr().unwrap().to_string();
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+            .init_asset::<Scene>()
+            .init_asset::<bevy::gltf::Gltf>()
+            .insert_resource(ClientSession {
+                server_addr_display: saved_address.clone(),
+                ..default()
+            })
+            .insert_resource(ResolvedServerAddressForPrefs(saved_address.clone()))
+            .insert_resource(ClientSessionId("offline-online-lifecycle-test".into()))
+            .insert_resource(PlayerVisualMode::Models3d)
+            .insert_resource(PlayerAssets {
+                scene: None,
+                gltf: None,
+                mesh: default(),
+                material: default(),
+            })
+            .init_resource::<PlayerModelCatalog>()
+            .init_resource::<AvatarAssetCache>()
+            .init_resource::<NetIncomingDisconnected>()
+            .init_resource::<PendingServerSnapshotFrame>()
+            .init_resource::<NetworkState>()
+            .init_resource::<GameStateSnapshot>()
+            .init_resource::<TeamSelection>()
+            .init_resource::<CameraState>()
+            .init_resource::<crate::maps::MapLayout>()
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .add_message::<SessionUiCommand>()
+            .add_message::<crate::game_vfx::UtilityVfx>()
+            .add_systems(
+                Update,
+                (
+                    update_session_lifecycle,
+                    offline::step,
+                    ingest_server_snapshot_packets,
+                    apply_server_snapshot,
+                )
+                    .chain(),
+            );
+
+        app.world_mut()
+            .write_message(SessionUiCommand::StartOffline);
+        app.update();
+        assert!(app.world().resource::<ClientSession>().is_offline());
+        assert!(app.world().contains_resource::<offline::LocalPractice>());
+        assert_eq!(
+            app.world().resource::<ResolvedServerAddressForPrefs>().0,
+            saved_address
+        );
+
+        fn send_test_join(app: &mut App, hero_class: HeroClass) {
+            app.world_mut()
+                .run_system_once(
+                    move |channels: Res<NetworkChannels>,
+                          mut session: ResMut<ClientSession>,
+                          identity: Res<ClientSessionId>,
+                          mut selection: ResMut<TeamSelection>| {
+                        selection.team = Some(Team::Green);
+                        session.last_join = Some(CommittedJoin {
+                            hero_class,
+                            ..CommittedJoin::for_test()
+                        });
+                        send_join_attempt(&channels, &mut session, &identity);
+                    },
+                )
+                .unwrap();
+        }
+        send_test_join(&mut app, HeroClass::Warrior);
+        app.update();
+        assert!(app.world().resource::<ClientSession>().join_confirmed());
+        assert_eq!(
+            app.world().resource::<GameStateSnapshot>().match_mode,
+            "offline_practice"
+        );
+        let local = app
+            .world_mut()
+            .query_filtered::<Entity, With<Player>>()
+            .single(app.world())
+            .unwrap();
+        let targets: Vec<_> = app
+            .world()
+            .resource::<NetworkState>()
+            .remote_players
+            .values()
+            .copied()
+            .collect();
+        assert!(
+            !targets.is_empty(),
+            "the real local snapshot must spawn practice targets"
+        );
+        let visual = app
+            .world_mut()
+            .spawn(Name::new("practice target child"))
+            .id();
+        app.world_mut().entity_mut(targets[0]).add_child(visual);
+
+        app.world_mut().write_message(SessionUiCommand::LeaveMatch);
+        app.update();
+        assert!(!app.world().contains_resource::<offline::LocalPractice>());
+        assert!(app.world().get_entity(local).is_err());
+        assert!(app.world().get_entity(visual).is_err());
+        assert!(
+            targets
+                .iter()
+                .all(|entity| app.world().get_entity(*entity).is_err())
+        );
+        assert!(
+            app.world()
+                .resource::<NetworkState>()
+                .remote_players
+                .is_empty()
+        );
+        assert!(!app.world().resource::<ClientSession>().is_offline());
+        assert!(!app.world().resource::<ClientSession>().ephemeral_endpoint);
+        assert!(!app.world().resource::<ClientSession>().has_committed_join());
+        assert_eq!(
+            app.world().resource::<ClientSession>().server_addr_display,
+            saved_address
+        );
+        assert_eq!(
+            app.world().resource::<ResolvedServerAddressForPrefs>().0,
+            saved_address
+        );
+        assert_eq!(
+            app.world().resource::<crate::frontend::PendingScreen>().0,
+            Some(crate::frontend::AppScreen::Home)
+        );
+
+        send_test_join(&mut app, HeroClass::Mage);
+        let mut packet = [0_u8; 4096];
+        let mut received_join = false;
+        for _ in 0..4 {
+            let (length, _) = server
+                .recv_from(&mut packet)
+                .expect("the restored production UDP transport must reach the saved endpoint");
+            if matches!(
+                serde_json::from_slice::<shared::public_transport::PublicClientDatagram>(
+                    &packet[..length]
+                ),
+                Ok(shared::public_transport::PublicClientDatagram::TransportProbe { .. })
+            ) {
+                continue;
+            }
+            match serde_json::from_slice::<ClientPacket>(&packet[..length]).unwrap() {
+                ClientPacket::Hello { .. } => {}
+                ClientPacket::Join {
+                    session_id,
+                    team,
+                    hero_class,
+                    passport_ticket,
+                    ..
+                } => {
+                    assert_eq!(session_id.as_deref(), Some("offline-online-lifecycle-test"));
+                    assert_eq!(team, Team::Green);
+                    assert_eq!(
+                        hero_class,
+                        HeroClass::Mage,
+                        "must be the new online join, not a queued offline join"
+                    );
+                    assert!(passport_ticket.is_none());
+                    received_join = true;
+                    break;
+                }
+                other => {
+                    panic!("offline packets must not leak to the restored endpoint: {other:?}")
+                }
+            }
+        }
+        assert!(
+            received_join,
+            "online Join was not received by the UDP fixture"
+        );
+        assert!(!app.world().contains_resource::<offline::LocalPractice>());
+        assert_eq!(
+            app.world().resource::<ResolvedServerAddressForPrefs>().0,
+            saved_address
+        );
+    }
 
     #[test]
     fn allocated_handoff_retry_and_leave_preserve_saved_lobby_and_clear_old_scene() {

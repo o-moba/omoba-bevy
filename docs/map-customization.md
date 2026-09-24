@@ -55,7 +55,12 @@ A map file has `format_version: 1`, `geometry_id`, `map_profile`, reusable
   the physical outer-to-inner order along the lane. The final position must be
   within three metres of the route minions walk. Decorative dead-end road spurs
   are rejected even when their `t` falls inside the team's numeric bounds.
-- `profile` selects gameplay numbers. Optional `overrides` replace individual
+- `profile` selects gameplay numbers. A profile may set `hero_damage_multiplier`
+  (finite 0–10, default 1 when omitted). It multiplies damage only against heroes;
+  minions still receive `attack_damage`. The built-in map uses 2 to preserve tower
+  threat alongside increased hero HP, while existing custom profiles retain 1.
+  This profile-only field is included when validating the approved default map.
+- Optional `overrides` replace individual
   fields: `max_hp`, `attack_range`, `attack_damage`, `attack_cooldown_ms`.
 - `visual_profile` names a client presentation archetype. Missing cosmetic data
   keeps a built-in visual; it cannot change the gameplay profile.

@@ -78,9 +78,13 @@ fn resolve_input_context(
     career: Option<Res<crate::career::CareerClient>>,
     social: Option<Res<crate::social::SocialClient>>,
     supporter: Option<Res<crate::supporter::SupporterUiState>>,
-    scoreboard: Option<Res<crate::edge_hud::ScoreboardState>>,
+    test_and_score: (
+        Option<Res<crate::edge_hud::ScoreboardState>>,
+        Option<Res<crate::sandbox::SandboxClient>>,
+    ),
     screen: Option<Res<State<crate::frontend::AppScreen>>>,
 ) {
+    let (scoreboard, sandbox) = test_and_score;
     context.running = game
         .as_ref()
         .is_some_and(|game| matches!(game.state, GameState::Running))
@@ -90,7 +94,8 @@ fn resolve_input_context(
     // Every front-end screen is modal: the world keeps simulating behind it,
     // but nothing the player does on a menu may reach gameplay.
     let front_end_open = screen.as_ref().is_some_and(|screen| screen.get().is_menu());
-    context.modal_open = front_end_open
+    context.modal_open = sandbox.as_ref().is_some_and(|s| s.blocks_world())
+        || front_end_open
         || scoreboard.is_some_and(|s| s.open)
         || mobile
             .as_ref()

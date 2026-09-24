@@ -68,6 +68,10 @@ pub(crate) fn handle_purchase(
         player.state.hp = (player.state.hp + hp_bonus).min(player.state.max_hp);
         player.state.max_mana += mana_bonus;
         player.state.mana = (player.state.mana + mana_bonus).min(player.state.max_mana);
+        if let Some(mut c) = player.sandbox.clone() {
+            c.inventory = player.state.inventory.clone();
+            sandbox::apply_actor(player, &c, false, player.last_movement_at);
+        }
         println!(
             "MATCH_METRIC event=purchase match={match_id} player={} request={request_id} item={} cost={} gold={}",
             player.state.id,
@@ -172,7 +176,7 @@ mod tests {
         let player = &rt.players[&addr];
         assert_eq!(player.state.gold, 0);
         assert_eq!(player.state.inventory, [ItemId::VitalityGem]);
-        assert_eq!((player.state.hp, player.state.max_hp), (130.0, 130.0));
+        assert_eq!((player.state.hp, player.state.max_hp), (210.0, 210.0));
         assert_eq!(player.state.last_purchase.as_ref().unwrap().error, None);
     }
 
@@ -345,7 +349,7 @@ mod tests {
             &rt.game_state,
             now,
         );
-        assert_eq!(rt.players[&addr].state.hp, 130.0);
+        assert_eq!(rt.players[&addr].state.hp, 210.0);
         let new_addr = "127.0.0.1:57002".parse().unwrap();
         rt.handle_packet(
             new_addr,
@@ -409,6 +413,7 @@ mod tests {
             id: enemy.state.id,
         };
         rt.players.get_mut(&addr).unwrap().state.level = 6;
+        let mut cast_at = now;
         for slot in [SkillSlot::Q, SkillSlot::E] {
             let def = ability_for_class_slot(HeroClass::Mage, slot);
             let packet = ClientPacket::Cast {
@@ -416,12 +421,13 @@ mod tests {
                 slot: slot.index() as u8,
             };
             rt.players.get_mut(&addr).unwrap().state.mana = 1000.0;
-            rt.handle_packet(addr, packet.clone(), now);
+            rt.handle_packet(addr, packet.clone(), cast_at);
             let count = rt.projectiles.len();
-            let cooldown = item_cooldown(def, 1, slot, rt.players[&addr].state.item_bonuses);
-            let later = now + cooldown + Duration::from_millis(1);
-            assert!(later < now + scaled_cooldown(def, 1));
+            let cooldown = sandbox::effective_ability_cooldown(&rt.players[&addr], slot);
+            let later = cast_at + cooldown + Duration::from_millis(1);
+            assert!(later < cast_at + scaled_cooldown(def, 1));
             rt.handle_packet(addr, packet, later);
+            cast_at = later + Duration::from_secs(1);
             assert_eq!(
                 rt.projectiles.len(),
                 count + 1,
@@ -434,10 +440,17 @@ mod tests {
             } else {
                 ability_for_class_slot(HeroClass::Mage, SkillSlot::E)
             };
-            assert!((projectile.damage - expected.projectile_damage.unwrap() * 1.18).abs() < 0.001);
+            assert!(
+                (projectile.damage
+                    - expected.projectile_damage.unwrap()
+                        * 1.18
+                        * shared::hero_balance::ability_power_multiplier(HeroClass::Mage, 6))
+                .abs()
+                    < 0.001
+            );
         }
         assert_eq!(rt.players[&addr].state.max_mana, 120.0);
-        assert_eq!(rt.players[&addr].state.max_hp, 115.0);
+        assert_eq!(rt.players[&addr].state.max_hp, 195.0);
     }
 
     #[test]
@@ -460,7 +473,10 @@ mod tests {
         let expected = PLAYER_SPEED * 1.08 * 0.1 + MOVEMENT_POSITION_TOLERANCE;
         assert!((player.state.x - start - expected).abs() < 0.001);
         apply_level_up(&mut player.state);
-        assert_eq!(player.state.max_hp, MAX_HP + 30.0 + LEVEL_UP_HP_BONUS);
+        assert_eq!(
+            player.state.max_hp,
+            shared::hero_balance::base_hp(HeroClass::Mage) + 30.0 + LEVEL_UP_HP_BONUS
+        );
         assert_eq!(
             player.state.inventory,
             [ItemId::TrailBoots, ItemId::VitalityGem]
