@@ -540,6 +540,12 @@ fn empty_roster_finalizes_abandoned_before_reset_without_ranked_winner() {
 fn postgres_live_udp_signed_profiles_queue_real_cast_and_durable_history() {
     use ed25519_dalek::Signer;
     let Ok(url) = std::env::var("OMOBA_TEST_DATABASE_URL") else {
+        // `scripts/postgres_tests.py` (`make test-postgres`, the `postgres` CI
+        // job) sets this flag, so a lost URL there is a failure, not a skip.
+        assert!(
+            std::env::var_os("OMOBA_REQUIRE_TEST_DATABASE").is_none(),
+            "OMOBA_REQUIRE_TEST_DATABASE is set but OMOBA_TEST_DATABASE_URL is not"
+        );
         eprintln!("SKIP postgres_live_udp: OMOBA_TEST_DATABASE_URL is not configured");
         return;
     };

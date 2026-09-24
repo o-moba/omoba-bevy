@@ -127,7 +127,10 @@ this is not a frozen multi-page snapshot.
 
 Real integration tests are in `career_store_tests.rs`, ignored by default. Set
 `OMOBA_TEST_DATABASE_URL` to a dedicated PostgreSQL test database and run
-`cargo test -p server career_store -- --ignored`. Each test creates its own schema
+`cargo test -p omoba-career-store -- --ignored`, or `make test-postgres` to
+prepare the database (migrations, runtime roles) and run every PostgreSQL-backed
+test in career-store, account-api and server, as the `postgres` CI job does.
+Each career-store test creates its own schema
 and removes that schema after success. No SQLite or mock adapter substitutes for
 these checks; database availability, actual run results and deployment durability
 must be reported separately.

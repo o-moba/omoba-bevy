@@ -1,5 +1,6 @@
 //! Real PostgreSQL integration fixtures. No fallback/in-memory database is used.
-//! Run with OMOBA_TEST_DATABASE_URL=... cargo test -p server career_store -- --ignored.
+//! Run with OMOBA_TEST_DATABASE_URL=... cargo test -p omoba-career-store -- --ignored,
+//! or `make test-postgres` for every PostgreSQL-backed test.
 use super::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 

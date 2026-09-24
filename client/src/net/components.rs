@@ -207,7 +207,6 @@ pub struct NetworkProjectile {
     pub style: ProjectileStyle,
     pub action_slot: Option<u8>,
     pub direction: Vec3,
-    #[allow(dead_code)] // Consumed by the optional 2D presentation plugin.
     pub owner_team: Team,
 }
 

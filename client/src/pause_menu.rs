@@ -733,7 +733,6 @@ fn apply_pause_navigation(
 }
 
 /// Graphics steppers and the reset button.
-#[allow(clippy::too_many_arguments)]
 fn apply_pause_settings(
     mut activated: MessageReader<Activated<PauseAction>>,
     mut lighting: ResMut<LightingSettings>,

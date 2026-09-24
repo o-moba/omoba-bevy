@@ -8,7 +8,6 @@ description = "Trusted career persistence and queue policy shared by the game se
 [dependencies]
 sqlx = { version = "0.8.6", default-features = false, features = ["postgres", "runtime-tokio-rustls", "json"] }
 tokio = { version = "1.49.0", features = ["time"] }
-serde.workspace = true
 serde_json.workspace = true
 shared = { path = "../shared" }
 

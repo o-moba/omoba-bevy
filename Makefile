@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone check fmt fmt-check lint check-no-qa test test-scripts
+.PHONY: help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone check fmt fmt-check lint check-no-qa test test-scripts test-postgres
 
 # ---------------------------------------------------------------------------
 # Match modes (TASK-22)
@@ -51,6 +51,14 @@ test: ## Rust unit and integration tests (harness excluded; see verify-gameplay)
 
 test-scripts: ## Python launcher, packaging and asset-gate tests
 	python3 -m unittest discover -s scripts -p 'test_*.py'
+
+# Not part of `check`: needs a disposable PostgreSQL database, for example
+#   OMOBA_TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1/omoba_test make test-postgres
+# Migrates it, creates the restricted runtime roles from account-api/ops/grants.sql
+# and runs career-store, account-api and server tests with --include-ignored.
+# CI runs the same script in the `postgres` job.
+test-postgres: ## PostgreSQL-backed tests (set OMOBA_TEST_DATABASE_URL to a disposable database)
+	python3 scripts/postgres_tests.py
 
 # Physical iOS package; install the Rust iOS target and select Xcode first.
 # Optional signing with existing credentials is documented in mobile/ios/README.md.

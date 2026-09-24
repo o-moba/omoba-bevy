@@ -55,7 +55,7 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 ### Hero stats and redaction
 - New `server/src/hero_stats.rs`: `StatModifiers` (`ConnectedPlayer.modifiers`) is the one overlay on top of class, level and gear: `damage_mult`, `attack_speed_mult`, `move_speed_mult`, `armor`, `resistance`, `base_max_hp` and the rule flags `god_mode`, `infinite_hp`, `infinite_resource`, `no_cooldowns`, `unlock_all`, `bypass_vision`, `grant_xp`, `respawns`; `Default` is normal play. It replaces `ConnectedPlayer.sandbox` (the stored `ActorConfig`), `sandbox_infinite_hp`, `god_mode` and `speed_mult`, and every `sandbox.is_some()` gate in the simulation (vision bypass, XP skip, respawn skip, cooldown and resource checks) now reads the flag it needs. The effective-stat formulas live there once: `combat_bonuses`, `basic_attack_damage`, `basic_attack_cooldown`, `ability_cooldown`, `skill_recovery`, `move_speed`, `movement_envelope`, `max_hp`, `max_mana`, `mitigate`; `sandbox::effective_*` and the duplicated movement, attack-speed and max-pool arithmetic in `session.rs`, `bots.rs` and `sandbox.rs` are gone.
 - `sandbox::SandboxRuntime::apply_actor` converts an `ActorConfig` into modifiers plus the hero's loadout once and keeps the config (by hero id) only to echo it in the telemetry, with the values the hero has owned since (ranks, inventory, the god-mode and speed toggles) read back from the hero; the hand-copies from `apply_skill_upgrade`, the debug toggles and the shop's re-apply on purchase are gone. The practice dummy's flat HP is `base_max_hp`. No sandbox telemetry or owner-view change; a sandbox purchase no longer resets the actor's unspent skill points.
-- Wire-visible: `public_view` now blanks the private economy for everyone but the owner. Non-owners, teammates included, receive `gold`, `earned_gold`, `inventory`, `item_bonuses`, `last_purchase`, `basic_attack_request_id` and `utility.last_request_id` at their serde defaults; level, XP, ranks, HP, mana and the cooldown copies stay public. `snapshot::build_players_snapshot(world, recipient, now)` builds the recipient's own entry through `owner_view` and the rest through `public_view`, in the sandbox too. No protocol version bump (every blanked field is `#[serde(default)]`); the client reads another player's economy nowhere (equipment is attached to the local player only, the scoreboard's earned gold comes from the ledger).
+- Wire-visible: `public_view` now blanks the private economy for everyone but the owner. Non-owners, teammates included, receive `gold`, `earned_gold`, `inventory`, `item_bonuses`, `last_purchase`, `basic_attack_request_id` and `utility.last_request_id` at their serde defaults; level, XP, ranks, HP, mana and the cooldown copies stay public. `snapshot::build_players_snapshot(world, recipient, now)` builds the recipient's own entry through `owner_view` and the rest through `public_view`, in the sandbox too. No protocol version bump (every blanked field is `#[serde(default)]`); the client reads another player's economy nowhere (remote heroes do carry a `PlayerEquipment`, built from the blanked fields, but every reader of it queries the local `Player`; the scoreboard's earned gold comes from the ledger).
 
 ### Hero state
 - New `server/src/hero.rs`: the authoritative hero lives in server-owned structs. `Hero` holds `identity: HeroIdentity` (id, `is_bot`, team, class, character, avatar, sprite, supporter aura; set at join or reconnect, never by the simulation), position, yaw, HP and mana, `progress: HeroProgress` (XP, level, next-level XP, skill points, ranks), `utility: HeroUtility` (`last_request_id`, `dash_sequence`) and `last_action: HeroAction` (sequence, kind, slot). `HeroEconomy` holds gold, earned gold, inventory, item bonuses, the last purchase receipt, the basic-attack request mark and the former loose `purchase_sequence` and `gold_income_remainder`. `ConnectedPlayer { hero, economy, timers, .. }` replaces `ConnectedPlayer.state`; the wire `PlayerState` is no longer stored anywhere on the server.
@@ -99,6 +99,29 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 - Drop the client-only `career` field from `Snapshot` (the server never sent it; career data keeps its own datagram).
 - Harness: the protocol mirror is gone (it lacked `warden`, `passport_ticket` and the social/career envelopes); bots log the first undecodable packet instead of dropping it silently.
 - Add `wire` golden and round-trip tests to `shared`, and the review rule that wire types are never copied.
+
+### Quality gate
+- Add GitHub Actions CI (format, clippy with warnings as errors, workspace tests, the headless harness, Python tooling tests), pin the toolchain in `rust-toolchain.toml`, and add `make check` / `fmt` / `lint` / `test` / `test-scripts`.
+- Fix the clippy findings the pinned toolchain reports and let the asset-gate script test skip when its historical fixture is absent.
+
+### Offline practice
+- Offline practice heroes now face the way they run (their yaw pointed the model backwards), and the round keeps a live scoreboard so K/D/A counts kills and deaths.
+- The pause menu's "Practice sandbox" page works offline too: god mode, target dummies, clearing or restoring the circling heroes, and a 1v1 opponent of your class that walks mid, strikes and casts its unlocked kit at the chosen level with the chosen gold spent on items. Dying offline respawns you at base after five seconds.
+
+### Practice sandbox
+- The pause menu gains a "Practice sandbox" page in local bot practice: god mode for yourself, a stationary target dummy in front of you (up to four, respawning on their spot), "Clear all bots", "Standard bots", and a 1v1 opponent on mid with a chosen level (skills ranked for that level) and gold (spent on items at base).
+- Practice bots now buy their class's recommended items whenever they stand in their base shop, rank every unlocked skill, and cast their whole hostile-target kit instead of only Q.
+- God mode and speed boost are accepted in practice matches (already unrated), not only in development mode.
+- Round statistics register anyone who joins after the roster was drafted before the first hit, and the server logs a hero hit whose participant has no scoreboard row instead of dropping it silently.
+
+### Practice bots, utility effects and targeting polish
+- Practice bots now face the way they run and the unit they strike; the server used the +Z yaw convention while hero models face -Z, so every bot ran backwards.
+- Dash shows a departure ring, staggered cyan afterimages along the travelled path and an arrival flash with sparks, for the local hero and for remote heroes and bots, which now teleport instead of sliding to the destination.
+- Haste leaves an amber double speed trail behind the hero and pulses under it while the buff lasts, so the speed boost is readable even standing still.
+- Settings gain a Camera > Distance row (55%–225%, 10% steps) that is remembered across restarts and stays in sync with wheel zoom; Reset graphics restores it.
+- A hero in melee reach turns to face its target when it strikes instead of swinging with its back to the enemy; the stick and an explicit move order keep facing authority.
+- On phones, dragging ATTACK onto a unit only locks it as the target; approaching and striking still require tapping or holding ATTACK.
+- Refresh the staged Rust executable timestamp so incremental Xcode device builds re-sign the current executable.
 
 ## [0.23.0-rc.6] - 2026-09-24
 
@@ -146,31 +169,6 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 - Add authoritative training dummy measurements, configurable enemy AI, direct two-client duels, reusable test presets, real minion controls and simulation pause/speed/frame stepping.
 - Add actual animation graph inspection and combat geometry/state overlays while keeping network clocks live. Sandbox commands are isolated from practice, release and rated matches.
 - See `docs/combat-test.md` for launch commands, controls, damage semantics and developer extension instructions.
-
-## [Unreleased]
-
-### Quality gate
-- Add GitHub Actions CI (format, clippy with warnings as errors, workspace tests, the headless harness, Python tooling tests), pin the toolchain in `rust-toolchain.toml`, and add `make check` / `fmt` / `lint` / `test` / `test-scripts`.
-- Fix the clippy findings the pinned toolchain reports and let the asset-gate script test skip when its historical fixture is absent.
-
-### Offline practice
-- Offline practice heroes now face the way they run (their yaw pointed the model backwards), and the round keeps a live scoreboard so K/D/A counts kills and deaths.
-- The pause menu's "Practice sandbox" page works offline too: god mode, target dummies, clearing or restoring the circling heroes, and a 1v1 opponent of your class that walks mid, strikes and casts its unlocked kit at the chosen level with the chosen gold spent on items. Dying offline respawns you at base after five seconds.
-
-### Practice sandbox
-- The pause menu gains a "Practice sandbox" page in local bot practice: god mode for yourself, a stationary target dummy in front of you (up to four, respawning on their spot), "Clear all bots", "Standard bots", and a 1v1 opponent on mid with a chosen level (skills ranked for that level) and gold (spent on items at base).
-- Practice bots now buy their class's recommended items whenever they stand in their base shop, rank every unlocked skill, and cast their whole hostile-target kit instead of only Q.
-- God mode and speed boost are accepted in practice matches (already unrated), not only in development mode.
-- Round statistics register anyone who joins after the roster was drafted before the first hit, and the server logs a hero hit whose participant has no scoreboard row instead of dropping it silently.
-
-### Practice bots, utility effects and targeting polish
-- Practice bots now face the way they run and the unit they strike; the server used the +Z yaw convention while hero models face -Z, so every bot ran backwards.
-- Dash shows a departure ring, staggered cyan afterimages along the travelled path and an arrival flash with sparks, for the local hero and for remote heroes and bots, which now teleport instead of sliding to the destination.
-- Haste leaves an amber double speed trail behind the hero and pulses under it while the buff lasts, so the speed boost is readable even standing still.
-- Settings gain a Camera > Distance row (55%–225%, 10% steps) that is remembered across restarts and stays in sync with wheel zoom; Reset graphics restores it.
-- A hero in melee reach turns to face its target when it strikes instead of swinging with its back to the enemy; the stick and an explicit move order keep facing authority.
-- On phones, dragging ATTACK onto a unit only locks it as the target; approaching and striking still require tapping or holding ATTACK.
-- Refresh the staged Rust executable timestamp so incremental Xcode device builds re-sign the current executable.
 
 ## [0.22.0-rc.5] - 2026-09-23
 

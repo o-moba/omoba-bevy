@@ -619,7 +619,7 @@ pub fn step_toward(from: (f32, f32), target: (f32, f32), dt: f32) -> (f32, f32, 
     let dx = target.0 - from.0;
     let dz = target.1 - from.1;
     let dist = (dx * dx + dz * dz).sqrt();
-    let yaw = (-dx).atan2(-dz);
+    let yaw = shared::math::hero_yaw_towards(dx, dz);
     if dist <= f32::EPSILON {
         return (from.0, from.1, yaw);
     }

@@ -51,7 +51,6 @@ pub enum NetworkCommand {
         /// Selected 2D sprite cosmetic. The renderer mode remains client-local.
         sprite_character: Option<String>,
     },
-    #[allow(dead_code)]
     RequestRematch,
     SetGodMode {
         enabled: bool,

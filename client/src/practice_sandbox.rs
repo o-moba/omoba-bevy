@@ -260,7 +260,6 @@ fn sync_practice_availability(
 
 /// The main-page entry (`PauseAction::OpenPractice`) and the page's own
 /// controls; everything is ignored outside an open menu in a practice match.
-#[allow(clippy::too_many_arguments)]
 fn apply_practice_actions(
     mut opened: MessageReader<Activated<PauseAction>>,
     mut activated: MessageReader<Activated<PracticeAction>>,

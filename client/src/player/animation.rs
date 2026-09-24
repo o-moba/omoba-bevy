@@ -113,7 +113,6 @@ pub(super) enum HeroAnimationState {
     Idle,
     Run,
     /// Reserved for an explicit future debuff locomotion policy.
-    #[allow(dead_code)]
     Walk,
     Attack,
     Cast,

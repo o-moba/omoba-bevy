@@ -385,7 +385,7 @@ fn main() {
                     let phase = elapsed * 0.4 + index as f32 * 0.7;
                     let wx = x + phase.cos() * 0.15;
                     let wz = z + phase.sin() * 0.15;
-                    let yaw = (-phase.sin()).atan2(-phase.cos());
+                    let yaw = shared::math::hero_yaw_towards(phase.sin(), phase.cos());
                     runner.bot.send_transform(wx, 0.5, wz, yaw);
                 }
             }
