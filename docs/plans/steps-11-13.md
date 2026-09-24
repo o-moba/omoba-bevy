@@ -2,6 +2,8 @@
 
 Read-only analysis of `main` at 4efbd8b (after PR #33); line numbers drift as slices land. Slices and status are tracked in [REFACTORING.md](../REFACTORING.md). Finding 1 below (debug toggles in worker-allocated rounds) and findings 2-4 (scripts missing Warden) were fixed in a separate PR.
 
+**Step 11 status:** 11-0 (#34) and 11a-11c (#42) are done; 11d is done together with step 15's 15e (notes in [progress/2026-09-24-client-debug-session.md](../progress/2026-09-24-client-debug-session.md)). 11e changes behaviour (the tools page in dev without `OMOBA_DEBUG_UI`, the re-send in practice) and waits for the owner's decision; 11f is optional. 11d differences from the design: the practice page clears `DebugToggles::god_mode` on the edge out of a practice match (not every frame outside one), so a HUD toggle in a dev match survives; `DebugToggles` is initialised by `PlayerPlugin` (local movement reads it) as well as by the debug plugins; the client test count went 561 → 562 for the test that pins the reset.
+
 ## Found while planning (bugs outside the slices)
 
 1. **Debug toggles work in rounds that save a durable result (server).** A player can turn on god mode or the speed boost after a worker-allocated practice round has started, and the round still saves as `public-casual-v1`.

@@ -32,7 +32,7 @@ struct SearchingCancel;
 /// One status line for the screen. The career queue is authoritative when the
 /// server runs ranked matchmaking; otherwise the match formation counters are.
 pub fn status_text(queue: &QueueView, game: &GameState, session: &ClientSession) -> String {
-    if session.state != crate::net::ClientConnectionState::Connected {
+    if session.state() != crate::net::ClientConnectionState::Connected {
         return super::home::connection_line(session).0;
     }
     if let Some(rejection) = session.join_rejection() {
@@ -141,7 +141,7 @@ fn refresh_status(
     session: Res<ClientSession>,
     mut status: Query<&mut Text, With<SearchingStatus>>,
 ) {
-    let text = if session.state != crate::net::ClientConnectionState::Connected {
+    let text = if session.state() != crate::net::ClientConnectionState::Connected {
         super::home::connection_line(&session).0
     } else if let Some(error) = career
         .view
@@ -169,7 +169,7 @@ mod tests {
     #[test]
     fn formation_counters_are_shown_when_the_career_queue_is_idle() {
         let mut session = ClientSession::default();
-        session.state = crate::net::ClientConnectionState::Connected;
+        session.set_state_for_test(crate::net::ClientConnectionState::Connected);
         let text = status_text(
             &QueueView::Idle,
             &GameState::Forming {
@@ -184,7 +184,7 @@ mod tests {
     #[test]
     fn a_rejection_replaces_the_queue_copy() {
         let mut session = ClientSession::default();
-        session.state = crate::net::ClientConnectionState::Connected;
+        session.set_state_for_test(crate::net::ClientConnectionState::Connected);
         session.reject_for_test(shared::protocol::JoinRejection::MatchFull);
         let text = status_text(&QueueView::Idle, &GameState::Lobby, &session);
         assert_eq!(text, shared::protocol::JoinRejection::MatchFull.message());

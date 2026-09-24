@@ -64,10 +64,10 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
 | 7 | Server `MatchRules` policy object; career, transport and clock behind traits | done | #31, #32 |
 | 14 | Server per-variant packet handlers, explicit imports instead of crate-root globs | done | #33 |
 | 10 | Client domain module, combat/player split, render backends behind `run_if`, plugin groups, QA behind a cargo feature | done (optional 10h/10i open, see [plans/client-10-15.md](plans/client-10-15.md)) | #35, #36, #37 |
-| 11 | One debug tooling family shared by Combat Test, practice and offline | pending | |
-| 12 | Data-driven hero and item catalogs with validation tests | done: 12a-12e (#38); 12f (optional client cross-checks) open | #38 |
+| 11 | One debug tooling family shared by Combat Test, practice and offline | in progress: 11-0 (#34), 11a–11c (#42), 11d (#43); 11e needs owner decision — widens the tools page/re-send | #34, #42, #43 |
+| 12 | Data-driven hero and item catalogs with validation tests | done: 12a-12e; 12f (optional client cross-checks) open | #38 |
 | 13 | Roster/asset loading and SDK types out of the shared model | pending | |
-| 15 | Client session events and staged snapshot application | in progress: 15a+15b1 (#39), 15b2+15c+15d (#41) | #39, #41 |
+| 15 | Client session events and staged snapshot application | done: 15a+15b1 (#39), 15b2+15c+15d (#41), 15e (#43); 15f/15g optional | #39, #41, #43 |
 | 9b | UI kit follow-ups: scroll unification, modal registry, frontend/social/supporter/sandbox screens, responsive layout, `TestId` in QA | pending (order in [ui-kit.md](ui-kit.md)) | |
 
 Suggested order after 7: 14 (done), 10 (done), 15, 11, 12, 13, 9b (server first while
@@ -146,8 +146,13 @@ Still open from §8.2: O2 (CI as a required gate: branch protection, auto-merge,
 - 15d (#41): `SessionReactions` members: `career::clear_account_on_scope_reset` and `social::clear_on_scope_reset` (`ServerScopeReset`), `frontend::return_home_on_leave` (`Left` → `PendingScreen(Home)`). `update_session_lifecycle` lost its `CareerClient`, `SocialClient` and `PendingScreen` writes; `TeamSelection.team = None`, `take_return_to_lobby()` and the `CancelQueue` signing stay in `net` (hazards 8, 9). `scope_reset_clears_career_and_social_in_its_frame_so_the_next_view_survives` pins the same-frame clearing (hazard 7).
 - Next: 15e (`ClientSession` accessors); 15f (camera through `SnapshotApplied`, its first reader, which also drops its `expect(dead_code)`) and 15g are optional.
 
-### 11: One debug tooling family
-- One `DebugCommand` family in `shared` covering Combat Test sandbox, practice (`PracticeCommand`) and offline; one tools UI page; the offline simulation implements the same commands so the pause-menu page works in all three modes.
+### 11: One debug tooling family (in progress: 11-0 #34, 11a-11c this PR)
+- Plan: [plans/steps-11-13.md](plans/steps-11-13.md), "Step 11". The Combat Test protocol stays its own family (acknowledged, sequenced, epoch-scoped, dev-only); no new `ClientPacket` variant.
+- 11-0 (#34): `SetGodMode`/`SetSpeedBoost` refuse worker-allocated rounds (`match_allocation::tests::allocated_practice_refuses_debug_toggles_after_the_durable_start`).
+- 11a (this PR): `shared/src/debug.rs` with `DebugCommand { GodMode, SpeedBoost, Practice }` (no serde; `to_packet`/`from_packet` over the existing packets, pinned against the golden and fixture strings), `DebugAccess { toggles, practice }` with `for_match_mode` and `allows`, and the constants `DUMMY_MAX_HP`, `DUMMY_DISTANCE`, `OFFLINE_PRACTICE_MODE` (the copies in `server/src/bots.rs` and `client/src/net/offline.rs` are gone). `PracticeCommand` gained `#[serde(other)] Unsupported`: an unknown `kind` decodes and is ignored instead of failing the packet.
+- 11b (this PR): `server/src/debug/{mod,toggles,practice}.rs`. `ServerRuntime::debug_access()` (`rules.debug_commands`/`rules.fills_with_bots`, each without a worker; `debug::tests::match_mode_access_equals_the_server_access_without_a_worker` pins it to `for_match_mode(rules.mode_id())`) and `handle_debug(addr, DebugCommand, now)`. The practice orchestration (`handle_practice_command`, `dummy_anchor`, `configure_duelist`, `opposite_team`) moved out of `bots.rs`; `spawn_bot`, `remove_bot`, `remove_all_bots` and `place_dummy` stay there as `pub(crate)`. `runtime/handlers/debug.rs` became `handlers/tools.rs` with only `handle_sandbox_packet`. The dispatcher arms keep their positions, clocks and `ControlFlow` (`Practice` before the pause gate on the wall clock, `Break`; the toggles after it on the sandbox clock, `Continue` once applied) and convert the packet with `DebugCommand::from_packet`.
+- 11c (this PR): `shared::progression::skill_upgrade_order` and `shared::shop::plan_purchases`; server `auto_rank_skills`/`auto_shop` (still one `apply_skill_upgrade`/`handle_purchase` per step), harness `choose_shop_item` and the offline duel (its `ranks_for_level`/`shop_with` are gone) use them. A temporary equivalence test compared old and new over every class × level 1-10 × budget 0-1000 (plus every rank vector, owned-item subset and eligibility flag) and passed before the old code was deleted.
+- Next: 11d (client `debug/` module: `DebugToggles`, `NetworkCommand::Debug`, `DebugPlugins`, offline `Simulation::debug`), 11e (one tools page driven by `DebugAccess`; behaviour change, needs the maintainer's OK), optional 11f (`Snapshot.debug_access`).
 
 ### 12: Data-driven catalogs (done, #38)
 - Plan: [plans/steps-11-13.md](plans/steps-11-13.md), "Step 12". Slices 12a-12e landed together; 12f (client cross-checks: `combat_visuals.json` classes cover the catalog, `combat/targeting.rs` reads its attack-rate caps from `hero_balance`) is optional and open.

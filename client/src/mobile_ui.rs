@@ -257,12 +257,12 @@ fn phone_menu_actions(
         match action {
             PhoneAction::Menu => pause.open = !pause.open,
             PhoneAction::Help => help.0 = !help.0,
-            PhoneAction::Server if !session.join_flow_committed && session.last_join.is_none() => {
+            PhoneAction::Server if !session.join_in_flight() && !session.has_committed_join() => {
                 entry.open = true;
-                entry.address = if session.server_addr_display == "127.0.0.1:4000" {
+                entry.address = if session.server_addr() == "127.0.0.1:4000" {
                     String::new()
                 } else {
-                    session.server_addr_display.clone()
+                    session.server_addr().to_owned()
                 };
                 entry.error.clear();
             }
@@ -357,9 +357,9 @@ fn sync_phone_ui(
     ui_scale: Option<Res<UiScale>>,
 ) {
     let scale = ui_scale.as_ref().map_or(1.0, |scale| scale.0.max(0.1));
-    if mobile.enabled && !entry.initialized && !session.server_addr_display.is_empty() {
+    if mobile.enabled && !entry.initialized && !session.server_addr().is_empty() {
         entry.initialized = true;
-        if session.server_addr_display == "127.0.0.1:4000" {
+        if session.server_addr() == "127.0.0.1:4000" {
             entry.open = true;
         }
     }
@@ -403,7 +403,7 @@ fn sync_phone_ui(
             node.border_radius = BorderRadius::all(Val::Px(8.0 / scale));
         }
         if matches!(action, PhoneAction::Server) {
-            node.display = if !session.join_flow_committed && session.last_join.is_none() {
+            node.display = if !session.join_in_flight() && !session.has_committed_join() {
                 Display::Flex
             } else {
                 Display::None

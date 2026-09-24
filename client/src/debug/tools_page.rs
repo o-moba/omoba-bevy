@@ -1,11 +1,16 @@
-//! Practice sandbox page of the pause menu. Only a local bot practice match
-//! (`match_mode == "practice"`) shows it; every action is a server command,
-//! so the local client never fakes bots, levels or invulnerability.
+//! Practice sandbox page of the pause menu. Only a bot practice match
+//! (`match_mode` `"practice"` or
+//! [`OFFLINE_PRACTICE_MODE`](shared::debug::OFFLINE_PRACTICE_MODE), i.e.
+//! `DebugAccess::for_match_mode(..).practice`) shows it; every action is a
+//! server command, so the local client never fakes bots, levels or
+//! invulnerability. The god mode line reads and writes [`DebugToggles`].
 use bevy::prelude::*;
+use shared::debug::{DebugAccess, DebugCommand};
 use shared::practice::{
     DUEL_GOLD_STEP, DUEL_MAX_GOLD, DUEL_MAX_LEVEL, DUEL_MIN_LEVEL, PracticeCommand,
 };
 
+use super::DebugToggles;
 use crate::combat::ActionFeedback;
 use crate::net::{ClientSession, GameStateSnapshot, NetworkCommand};
 use crate::pause_menu::{PauseAction, PauseMenuSet, PauseMenuState};
@@ -16,6 +21,7 @@ pub(crate) struct PracticeSandboxPlugin;
 impl Plugin for PracticeSandboxPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PracticeSandboxState>()
+            .init_resource::<DebugToggles>()
             .add_ui_action::<PracticeAction>()
             .add_systems(
                 Update,
@@ -32,12 +38,11 @@ impl Plugin for PracticeSandboxPlugin {
     }
 }
 
-/// Menu-side sandbox choices. `god_mode` mirrors what was last requested;
-/// the server owns the actual flag and re-applies it per match.
+/// Menu-side sandbox choices. God mode is not here: it is
+/// [`DebugToggles::god_mode`], shared with the HUD.
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct PracticeSandboxState {
     pub(crate) open: bool,
-    pub(crate) god_mode: bool,
     pub(crate) duel_level: u32,
     pub(crate) duel_gold: u32,
 }
@@ -46,7 +51,6 @@ impl Default for PracticeSandboxState {
     fn default() -> Self {
         Self {
             open: false,
-            god_mode: false,
             duel_level: 5,
             duel_gold: 500,
         }
@@ -142,7 +146,7 @@ pub(crate) fn spawn_practice_section(panel: &mut ChildSpawnerCommands) {
             widgets::toggle_row(
                 section,
                 "God mode",
-                god_mode_label(defaults.god_mode),
+                god_mode_label(DebugToggles::default().god_mode),
                 PracticeLabel::GodMode,
                 PracticeAction::GodMode,
                 "PauseMenuPracticeGodMode",
@@ -223,17 +227,19 @@ fn god_mode_label(enabled: bool) -> &'static str {
 /// sandbox commands; every other match mode hides the page.
 fn is_practice(snapshot: Option<&GameStateSnapshot>, session: &ClientSession) -> bool {
     session.join_confirmed()
-        && snapshot
-            .is_some_and(|s| matches!(s.match_mode.as_str(), "practice" | "offline_practice"))
+        && snapshot.is_some_and(|s| DebugAccess::for_match_mode(&s.match_mode).practice)
 }
 
 /// The main-page entry exists only in a practice match; leaving one also
 /// closes the page and forgets the requested god mode (the new match starts
-/// without it on the server too).
+/// without it on the server too). God mode is cleared on the edge out of a
+/// practice match only, so a HUD toggle outside practice (dev) is kept.
 fn sync_practice_availability(
     snapshot: Option<Res<GameStateSnapshot>>,
     session: Res<ClientSession>,
+    mut was_practice: Local<bool>,
     mut state: ResMut<PracticeSandboxState>,
+    mut toggles: ResMut<DebugToggles>,
     mut buttons: Query<(&mut Node, &mut Visibility), With<PracticeOpenButton>>,
 ) {
     let practice = is_practice(snapshot.as_deref(), &session);
@@ -252,10 +258,13 @@ fn sync_practice_availability(
             };
         }
     }
-    if !practice && (state.open || state.god_mode) {
+    if !practice && state.open {
         state.open = false;
-        state.god_mode = false;
     }
+    if !practice && *was_practice && toggles.god_mode {
+        toggles.god_mode = false;
+    }
+    *was_practice = practice;
 }
 
 /// The main-page entry (`PauseAction::OpenPractice`) and the page's own
@@ -267,7 +276,7 @@ fn apply_practice_actions(
     snapshot: Option<Res<GameStateSnapshot>>,
     session: Res<ClientSession>,
     mut state: ResMut<PracticeSandboxState>,
-    mut debug: Option<ResMut<crate::god_mode::DebugToggleState>>,
+    mut toggles: ResMut<DebugToggles>,
     mut feedback: Option<ResMut<ActionFeedback>>,
     mut commands: MessageWriter<NetworkCommand>,
 ) {
@@ -289,41 +298,38 @@ fn apply_practice_actions(
         match action {
             PracticeAction::Back => state.open = false,
             PracticeAction::GodMode => {
-                state.god_mode = !state.god_mode;
-                if let Some(debug) = debug.as_deref_mut() {
-                    debug.god_mode = state.god_mode;
-                }
-                commands.write(NetworkCommand::SetGodMode {
-                    enabled: state.god_mode,
-                });
-                say(if state.god_mode {
+                toggles.god_mode = !toggles.god_mode;
+                commands.write(NetworkCommand::Debug(DebugCommand::GodMode(
+                    toggles.god_mode,
+                )));
+                say(if toggles.god_mode {
                     "God mode on: the server skips damage to you."
                 } else {
                     "God mode off."
                 });
             }
             PracticeAction::Roster => {
-                commands.write(NetworkCommand::Practice {
-                    command: PracticeCommand::Roster,
-                });
+                commands.write(NetworkCommand::Debug(DebugCommand::Practice(
+                    PracticeCommand::Roster,
+                )));
                 say("Standard practice bots restored.");
             }
             PracticeAction::ClearBots => {
-                commands.write(NetworkCommand::Practice {
-                    command: PracticeCommand::ClearBots,
-                });
+                commands.write(NetworkCommand::Debug(DebugCommand::Practice(
+                    PracticeCommand::ClearBots,
+                )));
                 say("All bots removed.");
             }
             PracticeAction::SpawnDummy => {
-                commands.write(NetworkCommand::Practice {
-                    command: PracticeCommand::SpawnDummy,
-                });
+                commands.write(NetworkCommand::Debug(DebugCommand::Practice(
+                    PracticeCommand::SpawnDummy,
+                )));
                 say("Target dummy placed in front of you.");
             }
             PracticeAction::StartDuel => {
-                commands.write(NetworkCommand::Practice {
-                    command: state.duel_command(),
-                });
+                commands.write(NetworkCommand::Debug(DebugCommand::Practice(
+                    state.duel_command(),
+                )));
                 say("1v1: an opponent is coming down mid.");
             }
             PracticeAction::LevelDown => state.adjust_level(-1),
@@ -360,14 +366,15 @@ fn sync_practice_section(
 
 fn update_practice_labels(
     state: Res<PracticeSandboxState>,
+    toggles: Res<DebugToggles>,
     mut labels: Query<(&PracticeLabel, &mut Text)>,
 ) {
-    if !state.is_changed() {
+    if !state.is_changed() && !toggles.is_changed() {
         return;
     }
     for (label, mut text) in &mut labels {
         text.0 = match label {
-            PracticeLabel::GodMode => god_mode_label(state.god_mode).to_owned(),
+            PracticeLabel::GodMode => god_mode_label(toggles.god_mode).to_owned(),
             PracticeLabel::Level => state.duel_level.to_string(),
             PracticeLabel::Gold => state.duel_gold.to_string(),
         };
@@ -412,6 +419,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<PauseMenuState>()
             .init_resource::<PracticeSandboxState>()
+            .init_resource::<DebugToggles>()
             .init_resource::<ClientSession>()
             .init_resource::<GameStateSnapshot>()
             .add_message::<NetworkCommand>()
@@ -488,9 +496,9 @@ mod tests {
             .collect();
         assert!(matches!(
             sent.as_slice(),
-            [NetworkCommand::Practice {
-                command: PracticeCommand::SpawnDummy
-            }]
+            [NetworkCommand::Debug(DebugCommand::Practice(
+                PracticeCommand::SpawnDummy
+            ))]
         ));
         // Closing the menu leaves the page; a release match hides the entry again.
         app.world_mut().resource_mut::<PauseMenuState>().open = false;
@@ -504,5 +512,68 @@ mod tests {
             app.world().get::<Node>(open_button).unwrap().display,
             Display::None
         );
+    }
+
+    /// The page's god mode line is `DebugToggles::god_mode`: toggling it sends
+    /// the command, and leaving a practice match clears it. A toggle made
+    /// outside practice (the HUD in a dev match) is not cleared.
+    #[test]
+    fn leaving_practice_clears_god_mode_but_a_dev_toggle_survives() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(PauseMenuState {
+                open: true,
+                ..default()
+            })
+            .init_resource::<PracticeSandboxState>()
+            .init_resource::<DebugToggles>()
+            .insert_resource(ClientSession::admitted_for_test())
+            .init_resource::<GameStateSnapshot>()
+            .add_message::<NetworkCommand>()
+            .add_message::<Activated<PauseAction>>()
+            .add_message::<Activated<PracticeAction>>()
+            .add_systems(
+                Update,
+                (sync_practice_availability, apply_practice_actions).chain(),
+            );
+        let set_mode = |app: &mut App, mode: &str| {
+            app.world_mut()
+                .resource_mut::<GameStateSnapshot>()
+                .match_mode = mode.into();
+        };
+        let god_mode = |app: &App| app.world().resource::<DebugToggles>().god_mode;
+
+        // Dev: the HUD's god mode is kept; the page is not available.
+        set_mode(&mut app, "dev");
+        app.world_mut().resource_mut::<DebugToggles>().god_mode = true;
+        app.update();
+        app.update();
+        assert!(god_mode(&app));
+        app.world_mut().resource_mut::<DebugToggles>().god_mode = false;
+
+        // Offline practice: the page's toggle turns it on and sends it.
+        set_mode(&mut app, shared::debug::OFFLINE_PRACTICE_MODE);
+        app.update();
+        let source = app.world_mut().spawn_empty().id();
+        app.world_mut().write_message(Activated {
+            action: PracticeAction::GodMode,
+            source,
+        });
+        app.update();
+        assert!(god_mode(&app));
+        let sent: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<NetworkCommand>>()
+            .drain()
+            .collect();
+        assert!(matches!(
+            sent.as_slice(),
+            [NetworkCommand::Debug(DebugCommand::GodMode(true))]
+        ));
+
+        // Leaving the practice match forgets it.
+        set_mode(&mut app, "release");
+        app.update();
+        assert!(!god_mode(&app));
     }
 }

@@ -770,7 +770,7 @@ fn capture_qa(
         "primary_controls_fit":primary_controls_fit, "jungle_mobs":jungle_mobs,
         "local_position":world.local.single().ok().map(|(pose, _)| pose.translation.to_array()),
         "player_positions":world.actors.iter().map(|pose| pose.translation.to_array()).collect::<Vec<_>>(),
-        "connection_state":format!("{:?}",session.state), "game_state":format!("{:?}",game.state),
+        "connection_state":format!("{:?}",session.state()), "game_state":format!("{:?}",game.state),
     });
     let diagnostic = qa.started.elapsed().as_secs() as u32 / 5;
     if diagnostic > qa.last_diagnostic {

@@ -2146,7 +2146,7 @@ fn render(
         && career.view.error.is_some()
         && session
             .as_ref()
-            .is_some_and(|session| session.join_flow_committed && !session.join_confirmed());
+            .is_some_and(|session| session.join_in_flight() && !session.join_confirmed());
     // The front end has its own navigation; the in-match career bar would
     // otherwise float over the menus.
     let front_end_menu = screen.as_ref().is_some_and(|screen| screen.get().is_menu());
@@ -3219,7 +3219,7 @@ mod tests {
             } else {
                 crate::net::ClientSession::default()
             };
-            session.join_flow_committed = true;
+            session.set_join_in_flight_for_test(true);
             app.insert_resource(session);
             app.world_mut().resource_mut::<CareerClient>().view.error = Some("start failed".into());
             app.update();

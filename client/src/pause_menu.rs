@@ -361,7 +361,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                 PauseAction::OpenSettings,
                                 "SettingsButton",
                             );
-                            crate::practice_sandbox::spawn_practice_open_button(main);
+                            crate::debug::tools_page::spawn_practice_open_button(main);
                             widgets::button(
                                 main,
                                 "Controls guide",
@@ -553,7 +553,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                 "BackButton",
                             );
                         });
-                    crate::practice_sandbox::spawn_practice_section(panel);
+                    crate::debug::tools_page::spawn_practice_section(panel);
                 });
         });
 }
@@ -566,7 +566,7 @@ fn close_pause_menu_when_disconnected(
 ) {
     // Shell settings must remain usable before a server connects. A lost
     // gameplay connection still closes the in-match menu as before.
-    if client_session.state != ClientConnectionState::Disconnected
+    if client_session.state() != ClientConnectionState::Disconnected
         || screen.as_ref().is_some_and(|screen| screen.get().is_menu())
     {
         return;
@@ -607,7 +607,7 @@ pub(crate) fn toggle_pause_menu(
 /// release on the new page never activates a button of the old one.
 fn bump_gesture_epoch_on_navigation(
     menu: Res<PauseMenuState>,
-    practice: Option<Res<crate::practice_sandbox::PracticeSandboxState>>,
+    practice: Option<Res<crate::debug::tools_page::PracticeSandboxState>>,
     mut epoch: ResMut<GestureEpoch>,
     mut previous: Local<Option<(bool, bool, bool)>>,
 ) {
@@ -632,7 +632,7 @@ fn gate_buttons_behind_server_entry(
         &mut Pressable,
         Or<(
             With<UiAction<PauseAction>>,
-            With<UiAction<crate::practice_sandbox::PracticeAction>>,
+            With<UiAction<crate::debug::tools_page::PracticeAction>>,
         )>,
     >,
 ) {
@@ -668,7 +668,7 @@ fn sync_pause_menu_visibility(
 
 fn sync_pause_menu_sections(
     menu_state: Res<PauseMenuState>,
-    practice: Option<Res<crate::practice_sandbox::PracticeSandboxState>>,
+    practice: Option<Res<crate::debug::tools_page::PracticeSandboxState>>,
     mut section_queries: ParamSet<(
         Query<(&mut Visibility, &mut Node), Or<(With<MainMenuSection>, With<MainMenuFooter>)>>,
         Query<(&mut Visibility, &mut Node), Or<(With<SettingsSection>, With<SettingsFooter>)>>,
@@ -1310,7 +1310,7 @@ mod tests {
         ] {
             let mut app = App::new();
             let mut session = ClientSession::default();
-            session.state = ClientConnectionState::Disconnected;
+            session.set_state_for_test(ClientConnectionState::Disconnected);
             app.insert_resource(session)
                 .insert_resource(State::new(screen))
                 .insert_resource(PauseMenuState {

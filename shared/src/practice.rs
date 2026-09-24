@@ -1,5 +1,6 @@
 //! Practice-only sandbox commands. The local bot practice server accepts
 //! them from a joined human; release and dev matches ignore them entirely.
+//! Part of the debug command family (`crate::debug`), which re-exports them.
 use serde::{Deserialize, Serialize};
 
 /// Highest hero level the duel opponent may be configured to (mirrors the
@@ -26,6 +27,11 @@ pub enum PracticeCommand {
     /// Clear the bots and send one enemy lane bot down mid at `level`, with
     /// its skills ranked for that level and `gold` spent on items at base.
     StartDuel { level: u32, gold: u32 },
+    /// A kind this build does not know, such as a newer client's command.
+    /// It decodes instead of failing the whole packet, so new kinds are
+    /// additive; every host ignores it. Never sent.
+    #[serde(other)]
+    Unsupported,
 }
 
 impl PracticeCommand {

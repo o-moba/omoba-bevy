@@ -339,16 +339,16 @@ pub fn choose_skill_upgrade(me: &PlayerState) -> Option<u8> {
     })
 }
 
-/// Buy only where the authoritative snapshot permits it, honoring class preference.
+/// Buy only where the authoritative snapshot permits it, honoring class
+/// preference: the next item of the shared purchase plan (the one server
+/// bots and the offline duel follow), or nothing when the inventory is full.
 pub fn choose_shop_item(me: &PlayerState) -> Option<shared::shop::ItemId> {
-    if !me.shop_available || me.hp <= 0.0 || me.inventory.len() >= shared::shop::INVENTORY_CAPACITY
-    {
+    if !me.shop_available || me.hp <= 0.0 {
         return None;
     }
-    shared::shop::recommended_items(authoritative_class(me))
-        .iter()
+    shared::shop::plan_purchases(authoritative_class(me), me.gold, &me.inventory)
+        .first()
         .copied()
-        .find(|id| !me.inventory.contains(id) && shared::shop::item(*id).cost <= me.gold)
 }
 
 /// Shared-kit affordability/unlock/cooldown checks before any outbound cast.

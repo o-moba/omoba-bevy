@@ -1551,13 +1551,13 @@ fn team_select_ui_system(
     for (interaction, button, mut color) in interaction_sets.p0().iter_mut() {
         match *interaction {
             Interaction::Pressed => {
-                if client_session.join_flow_committed {
+                if client_session.join_in_flight() {
                     continue;
                 }
                 // Dead transport: a Join written now would be silently lost and
                 // the overlay would be gone with no way back. Trigger the same
                 // recovery as the Retry button and keep the select screen up.
-                if client_session.state == ClientConnectionState::Disconnected {
+                if client_session.state() == ClientConnectionState::Disconnected {
                     info!(
                         "[omoba:cli] event=join_deferred reason=disconnected \
                          msg=\"Reconnecting to server; try finding a match once connected.\""
@@ -1636,7 +1636,7 @@ fn autojoin_from_env(
         *done = true;
         return;
     };
-    if selection.team.is_some() || client_session.join_flow_committed {
+    if selection.team.is_some() || client_session.join_in_flight() {
         *done = true;
         return;
     }
