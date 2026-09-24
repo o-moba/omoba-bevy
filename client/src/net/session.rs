@@ -8,6 +8,7 @@ use shared::protocol::{JoinRejection, SnapshotOrder};
 use shared::wire::ClientPacket;
 
 use crate::camera::CameraState;
+use crate::domain::RoundId;
 use crate::persistence::{ClientSessionId, FileGameServerAddr};
 use crate::player::Player;
 use crate::session_config::{
@@ -50,6 +51,46 @@ pub enum SessionUiCommand {
     /// Leave the current match or queue and return to the front end. The
     /// server is told to release the seat; the connection stays up.
     LeaveMatch,
+}
+
+/// A lifecycle edge of the session, announced once when it happens.
+///
+/// `net` queues these in `ClientSession.outbox` wherever the edge is taken
+/// (plain functions and systems at the 16-parameter limit alike) and
+/// `flush_session_events` writes them as messages at the end of
+/// `ClientNetPipeline::ApplySnapshot` and again at the end of
+/// `ClientNetPipeline::SessionLifecycle`. Readers that react in the same frame
+/// belong in [`super::SessionReactions`]. Level-based readers (`join_confirmed`,
+/// `is_connected`, ...) stay the source of truth for "what is the state now".
+#[derive(Message, Clone, Debug, PartialEq)]
+pub enum SessionEvent {
+    /// A new transport (UDP thread or in-process practice) replaced the old one.
+    TransportStarted { addr: String, offline: bool },
+    /// The first qualifying snapshot of a connect attempt was applied.
+    Connected,
+    /// The server lists this client in a snapshot of a connected session
+    /// (`join_confirmed()` became true), once per join attempt.
+    Joined { your_id: u64 },
+    /// The server (or the client's own admission check) refused the join; sent
+    /// when the rejection changes to a new value.
+    Rejected(JoinRejection),
+    /// The join retry budget is spent (or the join could not be sent).
+    JoinExhausted,
+    /// The session was torn down; `reconnecting` says whether the committed
+    /// join is kept and the auto-reconnect loop will retry it.
+    Disconnected {
+        reason: TeardownReason,
+        reconnecting: bool,
+    },
+    /// The player left the match or the queue; `returning_to` is the lobby
+    /// address the client reconnects to, if any.
+    Left { returning_to: Option<String> },
+    /// Career and social views belong to the previous server and are stale.
+    ServerScopeReset,
+    /// A snapshot of a different round than the last one was applied. Rounds
+    /// with a zero epoch or match id are skipped and a reconnect to the same
+    /// round is not a change (the `CombatRoundIdentity` semantics).
+    RoundChanged { previous: RoundId, current: RoundId },
 }
 
 /// Set by [`ingest_server_snapshot_packets`] when the UDP thread dropped the snapshot sender
@@ -121,6 +162,10 @@ pub struct ClientSession {
     pub(in crate::net) career_packet_sequence: u64,
     pub(in crate::net) ephemeral_endpoint: bool,
     pub(in crate::net) offline_return_addr: Option<String>,
+    /// `SessionEvent::Joined` was sent for the current join attempt.
+    pub(in crate::net) announced_join: bool,
+    /// Lifecycle edges queued for `flush_session_events`.
+    pub(in crate::net) outbox: Vec<SessionEvent>,
 }
 
 impl Default for ClientSession {
@@ -144,14 +189,16 @@ impl Default for ClientSession {
             career_packet_sequence: 0,
             ephemeral_endpoint: false,
             offline_return_addr: None,
+            announced_join: false,
+            outbox: Vec::new(),
         }
     }
 }
 
 /// Why a network teardown happened; logged so surprise disconnects are
 /// diagnosable from the client log.
-#[derive(Debug, Clone, Copy)]
-pub(in crate::net) enum TeardownReason {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum TeardownReason {
     StaleSnapshot { elapsed_secs: f32 },
     TransportFailure,
     ServerWaitTimeout,
@@ -286,6 +333,37 @@ impl ClientSession {
         self.join_attempts = 0;
         self.join_error = None;
         self.join_exhausted = false;
+        self.announced_join = false;
+    }
+
+    /// Records the join rejection and announces it when it changes to a new
+    /// `Some` value (a repeated rejection in every snapshot is one event).
+    pub(in crate::net) fn set_join_error(&mut self, error: Option<JoinRejection>) {
+        if let Some(rejection) = error
+            && self.join_error != error
+        {
+            self.outbox.push(SessionEvent::Rejected(rejection));
+        }
+        self.join_error = error;
+    }
+
+    /// Marks the join retry budget as spent, announcing the edge once.
+    fn exhaust_join(&mut self) {
+        if !self.join_exhausted {
+            self.outbox.push(SessionEvent::JoinExhausted);
+        }
+        self.join_exhausted = true;
+    }
+
+    /// Stops the auto-reconnect loop. A teardown announced in the same frame
+    /// no longer reconnects, so its queued event says so.
+    fn stop_reconnecting(&mut self) {
+        self.reconnect = ReconnectState::default();
+        for event in &mut self.outbox {
+            if let SessionEvent::Disconnected { reconnecting, .. } = event {
+                *reconnecting = false;
+            }
+        }
     }
 
     fn join_retry_due(&self, now: Instant) -> bool {
@@ -347,6 +425,22 @@ pub(in crate::net) fn retry_pending_join(
     }
 }
 
+/// Writes the queued [`SessionEvent`]s as messages. Runs at the end of
+/// `ClientNetPipeline::ApplySnapshot` (snapshot edges, transport starts from
+/// `Startup`) and chained after `retry_pending_join` in
+/// `ClientNetPipeline::SessionLifecycle` (lifecycle commands, teardowns and the
+/// join attempts sent from `SendCommands`).
+pub(in crate::net) fn flush_session_events(
+    mut session: ResMut<ClientSession>,
+    mut events: MessageWriter<SessionEvent>,
+) {
+    if session.outbox.is_empty() {
+        return;
+    }
+    // Draining the queue is bookkeeping, not a session change.
+    events.write_batch(session.bypass_change_detection().outbox.drain(..));
+}
+
 pub(in crate::net) const MAX_JOIN_ATTEMPTS: u32 = 15;
 
 pub(in crate::net) fn send_join_attempt(
@@ -358,7 +452,7 @@ pub(in crate::net) fn send_join_attempt(
         return;
     };
     if session.join_attempts >= MAX_JOIN_ATTEMPTS {
-        session.join_exhausted = true;
+        session.exhaust_join();
         return;
     }
     let passport_ticket = if session.is_offline() {
@@ -373,7 +467,7 @@ pub(in crate::net) fn send_join_attempt(
             }
             crate::passport::TicketPoll::Denied(error) => {
                 warn!("Purchased avatar admission unavailable: {error}");
-                session.join_error = Some(JoinRejection::AvatarNotAuthorized);
+                session.set_join_error(Some(JoinRejection::AvatarNotAuthorized));
                 session.join_exhausted = true;
                 return;
             }
@@ -393,7 +487,7 @@ pub(in crate::net) fn send_join_attempt(
     session.join_attempts += 1;
     session.join_flow_committed = true;
     if result.is_err() {
-        session.join_exhausted = true;
+        session.exhaust_join();
     }
 }
 
@@ -519,6 +613,11 @@ pub(in crate::net) fn perform_network_teardown(
     client_session.join_flow_committed = false;
     client_session.waiting_since = None;
     client_session.last_qualifying_snapshot_wall = None;
+    let reconnecting = client_session.reconnect.active;
+    client_session.outbox.push(SessionEvent::Disconnected {
+        reason,
+        reconnecting,
+    });
 }
 
 /// Entity queries a network teardown needs, grouped (Bevy caps system
@@ -592,6 +691,7 @@ pub(in crate::net) fn update_session_lifecycle(
                 if let Some(service) = match_service.as_mut() {
                     service.take_return_to_lobby();
                 }
+                client_session.outbox.push(SessionEvent::ServerScopeReset);
                 if let Some(career) = career.as_mut() {
                     career.clear_account();
                 }
@@ -613,6 +713,9 @@ pub(in crate::net) fn update_session_lifecycle(
                 let Some(address) = crate::persistence::validate_game_server_addr(raw) else {
                     continue;
                 };
+                if address != client_session.server_addr_display {
+                    client_session.outbox.push(SessionEvent::ServerScopeReset);
+                }
                 if address != client_session.server_addr_display
                     && let Some(social) = social.as_mut()
                 {
@@ -649,6 +752,7 @@ pub(in crate::net) fn update_session_lifecycle(
                 despawn_local_players(&mut commands, player_query);
                 *game_state_snapshot = GameStateSnapshot::default();
                 commands.insert_resource(PendingServerSnapshotFrame::default());
+                client_session.outbox.push(SessionEvent::ServerScopeReset);
                 if let Some(career) = career.as_mut() {
                     career.clear_account();
                 }
@@ -689,6 +793,9 @@ pub(in crate::net) fn update_session_lifecycle(
                     let _ = channels.outgoing.try_send(ClientPacket::Leave);
                 }
                 client_session.abandon_join();
+                client_session.outbox.push(SessionEvent::Left {
+                    returning_to: return_to_lobby.clone(),
+                });
                 // Snapshots already in flight may still list this player; with
                 // no team selected they cannot respawn the local hero.
                 team_selection.team = None;
@@ -709,6 +816,7 @@ pub(in crate::net) fn update_session_lifecycle(
                     );
                     *game_state_snapshot = GameStateSnapshot::default();
                     commands.insert_resource(PendingServerSnapshotFrame::default());
+                    client_session.outbox.push(SessionEvent::ServerScopeReset);
                     if let Some(career) = career.as_mut() {
                         career.clear_account();
                     }
@@ -810,8 +918,8 @@ pub(in crate::net) fn update_session_lifecycle(
                 }
                 // Retrying the same incompatible release cannot recover a
                 // joined session. Preserve the actionable message until Retry.
-                client_session.join_error = Some(JoinRejection::ProtocolMismatch);
-                client_session.reconnect = ReconnectState::default();
+                client_session.set_join_error(Some(JoinRejection::ProtocolMismatch));
+                client_session.stop_reconnecting();
             }
             NetThreadSignal::TransportFailure => {
                 if client_session.state != ClientConnectionState::Disconnected {
@@ -891,7 +999,7 @@ pub(in crate::net) fn update_session_lifecycle(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::net::apply::apply_server_snapshot;
+    use crate::net::apply::{SnapshotApplied, StagedSnapshot, snapshot_apply_systems};
     use crate::net::ingest::ingest_server_snapshot_packets;
     use crate::net::status_ui::{
         ConnectionRetryButton, ConnectionStatusLabel, setup_connection_status_ui,
@@ -1031,6 +1139,7 @@ mod tests {
             .init_resource::<AvatarAssetCache>()
             .init_resource::<NetIncomingDisconnected>()
             .init_resource::<PendingServerSnapshotFrame>()
+            .init_resource::<StagedSnapshot>()
             .init_resource::<NetworkState>()
             .init_resource::<GameStateSnapshot>()
             .init_resource::<TeamSelection>()
@@ -1040,13 +1149,15 @@ mod tests {
             .init_resource::<Assets<StandardMaterial>>()
             .add_message::<SessionUiCommand>()
             .add_message::<crate::game_vfx::UtilityVfx>()
+            .add_message::<SessionEvent>()
+            .add_message::<SnapshotApplied>()
             .add_systems(
                 Update,
                 (
                     update_session_lifecycle,
                     offline::step,
                     ingest_server_snapshot_packets,
-                    apply_server_snapshot,
+                    snapshot_apply_systems(),
                 )
                     .chain(),
             );

@@ -19,16 +19,17 @@ pub use shared::wire::{
 
 use bevy::prelude::*;
 
+pub use apply::{ApplyOutcome, SnapshotApplied};
 pub use commands::NetworkCommand;
 pub use components::*;
 pub(crate) use interpolate::NetworkGroundingSet;
 pub use session::{
-    ClientConnectionState, ClientSession, NetIncomingDisconnected, SessionUiCommand,
+    ClientConnectionState, ClientSession, NetIncomingDisconnected, SessionEvent, SessionUiCommand,
 };
 
 use apply::{
-    apply_server_snapshot, mirror_debug_flags_to_network_state,
-    respawn_players_with_new_store_models, respawn_sandbox_models,
+    StagedSnapshot, mirror_debug_flags_to_network_state, respawn_players_with_new_store_models,
+    respawn_sandbox_models, snapshot_apply_systems,
 };
 use commands::{LocalStateSendTimer, send_local_state, send_network_commands};
 use ingest::{PendingServerSnapshotFrame, ingest_server_snapshot_packets};
@@ -36,7 +37,9 @@ use interpolate::{
     age_utility_timers, ground_networked_entities, interpolate_remote_players,
     interpolate_snapshot_entities,
 };
-use session::{retry_pending_join, start_networking, update_session_lifecycle};
+use session::{
+    flush_session_events, retry_pending_join, start_networking, update_session_lifecycle,
+};
 use status_ui::{
     handle_connection_retry_button, setup_connection_status_ui, sync_connection_status_ui,
 };
@@ -60,6 +63,29 @@ pub(crate) enum ClientNetPipeline {
     SyncConnectionUi,
 }
 
+/// Stages of snapshot application, chained inside
+/// [`ClientNetPipeline::ApplySnapshot`] (see `apply::snapshot_apply_systems`).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum SnapshotApply {
+    /// Moves the frame ingest staged into `StagedSnapshot`.
+    Begin,
+    /// Connection state, the `Connected` and `Joined` edges.
+    Session,
+    /// `GameStateSnapshot`, the round (`RoundChanged`), the prematch loadout
+    /// and the Draft gate. Runs even when the entity work is skipped.
+    Resources,
+    /// Local hero, remote players, projectiles, structures, minions, neutrals.
+    Entities,
+    /// Writes `SnapshotApplied` and clears the staged frame.
+    Finish,
+}
+
+/// Systems that react to [`SessionEvent`]s in the frame they are written:
+/// after the session lifecycle (and its event flush), before the next frame's
+/// ingest can apply a view the reaction would clear.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct SessionReactions;
+
 /// Shared production scheduling contract, also used by the isolated ECS regression.
 pub(crate) fn configure_network_pipeline(app: &mut App) {
     app.configure_sets(
@@ -79,7 +105,20 @@ pub(crate) fn configure_network_pipeline(app: &mut App) {
             ClientNetPipeline::SessionRetryInput.after(ClientNetPipeline::SendCommands),
             ClientNetPipeline::SessionLifecycle.after(ClientNetPipeline::SessionRetryInput),
             ClientNetPipeline::SyncConnectionUi.after(ClientNetPipeline::SessionLifecycle),
+            SessionReactions.after(ClientNetPipeline::SessionLifecycle),
         ),
+    );
+    app.configure_sets(
+        Update,
+        (
+            SnapshotApply::Begin,
+            SnapshotApply::Session,
+            SnapshotApply::Resources,
+            SnapshotApply::Entities,
+            SnapshotApply::Finish,
+        )
+            .chain()
+            .in_set(ClientNetPipeline::ApplySnapshot),
     );
 }
 
@@ -88,11 +127,14 @@ impl Plugin for NetworkingPlugin {
         configure_network_pipeline(app);
         app.add_message::<NetworkCommand>()
             .add_message::<SessionUiCommand>()
+            .add_message::<SessionEvent>()
+            .add_message::<SnapshotApplied>()
             // Snapshot application announces accepted dashes to the VFX layer.
             .add_message::<crate::game_vfx::UtilityVfx>()
             .init_resource::<NetworkState>()
             .init_resource::<GameStateSnapshot>()
             .init_resource::<PendingServerSnapshotFrame>()
+            .init_resource::<StagedSnapshot>()
             .init_resource::<ClientSession>()
             .init_resource::<NetIncomingDisconnected>()
             .insert_resource(LocalStateSendTimer(Timer::from_seconds(
@@ -133,10 +175,7 @@ impl Plugin for NetworkingPlugin {
                     .chain()
                     .in_set(ClientNetPipeline::IngestSnapshot),
             )
-            .add_systems(
-                Update,
-                apply_server_snapshot.in_set(ClientNetPipeline::ApplySnapshot),
-            )
+            .add_systems(Update, snapshot_apply_systems())
             .add_systems(
                 Update,
                 age_utility_timers.in_set(ClientNetPipeline::AgeUtilityTimers),
@@ -155,7 +194,11 @@ impl Plugin for NetworkingPlugin {
             )
             .add_systems(
                 Update,
-                (update_session_lifecycle, retry_pending_join)
+                (
+                    update_session_lifecycle,
+                    retry_pending_join,
+                    flush_session_events,
+                )
                     .chain()
                     .in_set(ClientNetPipeline::SessionLifecycle),
             )

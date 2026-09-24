@@ -143,11 +143,11 @@ pub(in crate::net) fn ingest_server_snapshot_packets(
                     rematch_in_secs,
                 } => {
                     if meta.protocol_version != PROTOCOL_VERSION {
-                        client_session.join_error = Some(JoinRejection::ProtocolMismatch);
+                        client_session.set_join_error(Some(JoinRejection::ProtocolMismatch));
                         continue;
                     }
                     if !geometry_id.is_empty() && geometry_id != shared::map::GEOMETRY_ID {
-                        client_session.join_error = Some(JoinRejection::MapGeometryMismatch);
+                        client_session.set_join_error(Some(JoinRejection::MapGeometryMismatch));
                         client_session.admitted = false;
                         latest_snapshot = None;
                         continue;
@@ -165,7 +165,7 @@ pub(in crate::net) fn ingest_server_snapshot_packets(
                     if let Some(career_client) = career_client.as_mut() {
                         career_client.local_player_id = Some(your_id);
                     }
-                    client_session.join_error = join_error;
+                    client_session.set_join_error(join_error);
                     client_session.admitted =
                         join_error.is_none() && players.iter().any(|player| player.id == your_id);
                     if client_session.admitted {

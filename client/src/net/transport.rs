@@ -19,7 +19,7 @@ use crate::session_config::{
     T_RETRY, TRANSPORT_CONSECUTIVE_RECV_ERRORS, TRANSPORT_CONSECUTIVE_SEND_ERRORS,
 };
 
-use super::session::{ClientConnectionState, ClientSession};
+use super::session::{ClientConnectionState, ClientSession, SessionEvent};
 use super::{offline, public_transport};
 
 /// Bound both allocation-free candidate iteration and repeated socket creation.
@@ -100,6 +100,11 @@ pub(in crate::net) fn spawn_network_transport(
     client_session.discard_incoming_snapshots = false;
     client_session.join_flow_committed = false;
     client_session.last_qualifying_snapshot_wall = None;
+    let started = SessionEvent::TransportStarted {
+        addr: client_session.server_addr_display.clone(),
+        offline: client_session.is_offline(),
+    };
+    client_session.outbox.push(started);
 
     commands.insert_resource(NetworkChannels {
         gameplay_signer,

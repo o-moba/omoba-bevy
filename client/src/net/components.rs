@@ -47,6 +47,9 @@ pub(in crate::net) struct NetworkState {
     /// threshold while boosting without exceeding the 16-param system limit.
     pub(in crate::net) speed_boost_active: bool,
     pub(in crate::net) local_dash_ack: Option<(u64, u64, u64, u64)>,
+    /// Round of the last applied snapshot that had one; never reset, so a
+    /// reconnect to the same round is not a `SessionEvent::RoundChanged`.
+    pub(in crate::net) last_round: Option<crate::domain::RoundId>,
 }
 
 #[derive(Component, Clone, Copy, Debug)]

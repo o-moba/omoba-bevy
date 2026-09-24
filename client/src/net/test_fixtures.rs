@@ -7,11 +7,11 @@ use shared::wire::{ClientPacket, ServerPacket};
 
 use crate::team::TeamSelection;
 
-use super::apply::apply_server_snapshot;
+use super::apply::{SnapshotApplied, StagedSnapshot, snapshot_apply_systems};
 use super::components::{GameStateSnapshot, NetworkPlayerId, NetworkState};
 use super::ingest::{PendingServerSnapshotFrame, ingest_server_snapshot_packets};
 use super::session::{
-    ClientConnectionState, ClientSession, CommittedJoin, NetIncomingDisconnected,
+    ClientConnectionState, ClientSession, CommittedJoin, NetIncomingDisconnected, SessionEvent,
     retry_pending_join,
 };
 use super::transport::{NetworkChannels, decode_server_packet};
@@ -113,15 +113,18 @@ pub(in crate::net) fn snapshot_app() -> (App, crossbeam_channel::Sender<ServerPa
         .init_resource::<NetworkState>()
         .init_resource::<GameStateSnapshot>()
         .init_resource::<PendingServerSnapshotFrame>()
+        .init_resource::<StagedSnapshot>()
         .init_resource::<NetIncomingDisconnected>()
         .init_resource::<Assets<Mesh>>()
         .init_resource::<Assets<StandardMaterial>>()
         .add_message::<crate::game_vfx::UtilityVfx>()
+        .add_message::<SessionEvent>()
+        .add_message::<SnapshotApplied>()
         .add_systems(
             Update,
             (
                 ingest_server_snapshot_packets.in_set(ClientNetPipeline::IngestSnapshot),
-                apply_server_snapshot.in_set(ClientNetPipeline::ApplySnapshot),
+                snapshot_apply_systems(),
             ),
         );
     configure_network_pipeline(&mut app);

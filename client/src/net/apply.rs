@@ -1,6 +1,8 @@
 //! Applies the staged server snapshot to the ECS world (spawn, reconcile, despawn).
 
 use bevy::ecs::query::Or;
+use bevy::ecs::schedule::ScheduleConfigs;
+use bevy::ecs::system::ScheduleSystem;
 use bevy::prelude::*;
 use bevy::scene::SceneRoot;
 use std::collections::{HashMap, HashSet};
@@ -11,6 +13,7 @@ use shared::wire::{MinionState, NeutralState, PlayerState, ProjectileState, Stru
 use crate::bosses::BossVisual;
 use crate::camera::{CameraState, MainCamera, locked_camera_offset_for_team};
 use crate::combat::CombatStats;
+use crate::domain::RoundId;
 use crate::model_scale::{ModelScaleSource, NormalizeModelScale, model_scale_key};
 use crate::player::{
     DEBUG_SPEED_MULTIPLIER, DebugSpeedBoost, PLAYER_SIZE, Player, PlayerBody, VerticalVelocity,
@@ -19,11 +22,11 @@ use crate::sprite::PlayerVisualMode;
 use crate::team::{Team, TeamSelection};
 use crate::world::{PlayerAssets, PlayerModelResolver};
 
-use super::UPDATE_INTERVAL_SECONDS;
 use super::components::*;
 use super::ingest::{PendingServerSnapshotFrame, PendingSnapshotData};
 use super::interpolate::{NetEntityInterpolation, RemotePlayerInterpolation};
-use super::session::{ClientConnectionState, ClientSession};
+use super::session::{ClientConnectionState, ClientSession, SessionEvent, flush_session_events};
+use super::{ClientNetPipeline, SnapshotApply, UPDATE_INTERVAL_SECONDS};
 
 const LOCAL_SNAP_DISTANCE: f32 = 4.0;
 
@@ -137,94 +140,138 @@ fn choose_authoritative_local_player<T: Copy + Eq>(
     chosen
 }
 
-/// Grouped UI-side resources for [`apply_server_snapshot`] (Bevy caps system
-/// functions at 16 parameters).
-#[derive(bevy::ecs::system::SystemParam)]
-pub(in crate::net) struct SnapshotUiState<'w> {
-    game_state_snapshot: ResMut<'w, GameStateSnapshot>,
-    cam_state: ResMut<'w, CameraState>,
-    team_selection: ResMut<'w, TeamSelection>,
-    visual_mode: Res<'w, PlayerVisualMode>,
+/// The frame being applied this update: moved out of
+/// [`PendingServerSnapshotFrame`] by `SnapshotApply::Begin`, read (and its
+/// fields taken) by the later stages, cleared by `SnapshotApply::Finish`.
+#[derive(Resource, Default)]
+pub(in crate::net) struct StagedSnapshot {
+    data: Option<PendingSnapshotData>,
+    /// Which entity work still runs; `Finish` reports it as the outcome.
+    gate: ApplyOutcome,
 }
 
-pub(in crate::net) fn apply_server_snapshot(
-    mut commands: Commands,
+/// How far snapshot application got for one snapshot.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ApplyOutcome {
+    /// Every stage ran.
+    #[default]
+    Full,
+    /// Prematch Draft: the heroes were despawned and no other world entity
+    /// (projectile, structure, minion, neutral) was touched.
+    Draft,
+    /// The server lists the local hero, but no hero exists, no team is
+    /// selected and no join is committed: the local spawn, remote players and
+    /// world entities were skipped.
+    LocalPending,
+}
+
+/// Written by `SnapshotApply::Finish` once per applied snapshot, after every
+/// stage (and their Commands) ran. Session and world resources are already
+/// updated when it is read.
+#[derive(Message, Clone, Debug)]
+pub struct SnapshotApplied {
+    pub meta: SnapshotMeta,
+    pub your_id: u64,
+    pub round: Option<RoundId>,
+    pub outcome: ApplyOutcome,
+}
+
+/// Snapshot application as chained stages, each a member of
+/// `ClientNetPipeline::ApplySnapshot` (so every `.after(ApplySnapshot)`
+/// reader still sees the whole application), followed by the session-event
+/// flush. Used by the plugin and by the test apps that apply snapshots.
+pub(in crate::net) fn snapshot_apply_systems() -> ScheduleConfigs<ScheduleSystem> {
+    (
+        begin_snapshot_apply.in_set(SnapshotApply::Begin),
+        apply_snapshot_session
+            .run_if(snapshot_staged)
+            .in_set(SnapshotApply::Session),
+        apply_snapshot_resources
+            .run_if(snapshot_staged)
+            .in_set(SnapshotApply::Resources),
+        apply_snapshot_entities
+            .run_if(snapshot_staged)
+            .in_set(SnapshotApply::Entities),
+        finish_snapshot_apply
+            .run_if(snapshot_staged)
+            .in_set(SnapshotApply::Finish),
+        flush_session_events,
+    )
+        .chain()
+        .in_set(ClientNetPipeline::ApplySnapshot)
+}
+
+fn snapshot_staged(staged: Res<StagedSnapshot>) -> bool {
+    staged.data.is_some()
+}
+
+fn begin_snapshot_apply(
     mut pending: ResMut<PendingServerSnapshotFrame>,
-    mut client_session: ResMut<ClientSession>,
-    mut network_state: ResMut<NetworkState>,
-    mut transform_sets: ParamSet<(
-        Query<&mut Transform>,
-        Query<&mut Transform, With<MainCamera>>,
-    )>,
-    mut remote_query: Query<
-        (&mut RemotePlayerInterpolation, Option<&PlayerUtility>),
-        With<RemotePlayer>,
-    >,
-    projectile_query: Query<&NetworkProjectile>,
-    structure_query: Query<&NetworkStructure>,
-    minion_query: Query<&NetworkMinion>,
-    neutral_query: Query<&NetworkNeutral>,
-    local_player_query: Query<(Entity, Option<&NetworkPlayerId>), With<Player>>,
-    action_query: Query<Option<&PlayerCosmeticAction>>,
-    player_assets: Res<PlayerAssets>,
-    mut models: PlayerModelResolver,
-    mut ui_state: SnapshotUiState,
-    mut utility_vfx: MessageWriter<crate::game_vfx::UtilityVfx>,
+    mut staged: ResMut<StagedSnapshot>,
 ) {
-    let SnapshotUiState {
-        game_state_snapshot,
-        cam_state,
-        team_selection,
-        visual_mode,
-    } = &mut ui_state;
-    let Some(data) = pending.frame.take() else {
+    staged.data = pending.frame.take();
+    staged.gate = ApplyOutcome::Full;
+}
+
+fn apply_snapshot_session(staged: Res<StagedSnapshot>, mut client_session: ResMut<ClientSession>) {
+    let Some(data) = staged.data.as_ref() else {
         return;
     };
-    let PendingSnapshotData {
-        sandbox,
-        forest_pickups,
-        vision,
-        match_mode,
-        geometry_id,
-        map_profile,
-        meta,
-        wall_time: snapshot_wall_time,
-        your_id,
-        players,
-        scoreboard,
-        projectiles,
-        structures,
-        minions,
-        neutrals,
-        team_buffs,
-        combat_events,
-        game_state,
-        rematch_in_secs,
-        selected_team_for_spawn,
-        prematch,
-    } = data;
-
     if client_session.state != ClientConnectionState::Connected {
         client_session.state = ClientConnectionState::Connected;
         client_session.waiting_since = None;
+        client_session.outbox.push(SessionEvent::Connected);
     }
-    client_session.last_qualifying_snapshot_wall = Some(snapshot_wall_time);
+    client_session.last_qualifying_snapshot_wall = Some(data.wall_time);
+    if client_session.join_confirmed() && !client_session.announced_join {
+        client_session.announced_join = true;
+        client_session.outbox.push(SessionEvent::Joined {
+            your_id: data.your_id,
+        });
+    }
+}
+
+fn apply_snapshot_resources(
+    mut staged: ResMut<StagedSnapshot>,
+    mut client_session: ResMut<ClientSession>,
+    mut network_state: ResMut<NetworkState>,
+    mut game_state_snapshot: ResMut<GameStateSnapshot>,
+    mut team_selection: ResMut<TeamSelection>,
+) {
+    let StagedSnapshot { data, gate } = &mut *staged;
+    let Some(data) = data.as_mut() else {
+        return;
+    };
+    let your_id = data.your_id;
+    let meta = data.meta;
 
     network_state.local_id = Some(your_id);
     game_state_snapshot.your_id = your_id;
-    game_state_snapshot.prematch = prematch;
-    game_state_snapshot.match_mode = match_mode;
-    game_state_snapshot.geometry_id = geometry_id;
-    game_state_snapshot.map_profile = map_profile;
+    game_state_snapshot.prematch = data.prematch.take();
+    game_state_snapshot.match_mode = std::mem::take(&mut data.match_mode);
+    game_state_snapshot.geometry_id = std::mem::take(&mut data.geometry_id);
+    game_state_snapshot.map_profile = std::mem::take(&mut data.map_profile);
     game_state_snapshot.meta = meta;
-    game_state_snapshot.state = game_state;
-    game_state_snapshot.rematch_in_secs = rematch_in_secs;
-    game_state_snapshot.team_buffs = team_buffs;
-    game_state_snapshot.combat_events = combat_events;
-    game_state_snapshot.scoreboard = scoreboard;
-    game_state_snapshot.sandbox = sandbox;
-    game_state_snapshot.forest_pickups = forest_pickups;
-    game_state_snapshot.vision = vision;
+    game_state_snapshot.state = std::mem::take(&mut data.game_state);
+    game_state_snapshot.rematch_in_secs = data.rematch_in_secs;
+    game_state_snapshot.team_buffs = std::mem::take(&mut data.team_buffs);
+    game_state_snapshot.combat_events = std::mem::take(&mut data.combat_events);
+    game_state_snapshot.scoreboard = data.scoreboard.take();
+    game_state_snapshot.sandbox = data.sandbox.take();
+    game_state_snapshot.forest_pickups = std::mem::take(&mut data.forest_pickups);
+    game_state_snapshot.vision = data.vision.take();
+
+    // Zero ids have no round; a reconnect to the same round is no change.
+    if let Some(current) = RoundId::from_meta(&meta) {
+        if let Some(previous) = network_state.last_round
+            && previous != current
+        {
+            client_session
+                .outbox
+                .push(SessionEvent::RoundChanged { previous, current });
+        }
+        network_state.last_round = Some(current);
+    }
 
     // Reconnect uses the accepted draft loadout, never a stale pre-search choice.
     if let Some(own) = game_state_snapshot
@@ -246,12 +293,88 @@ pub(in crate::net) fn apply_server_snapshot(
             join.team = own.team.into();
         }
     }
-    // Spawn the final roster only once frozen; redraft discards old models.
+    // The Draft roster is not final: the entity stage only clears the heroes.
     if game_state_snapshot
         .prematch
         .as_ref()
         .is_some_and(|p| p.phase == shared::prematch::PrematchPhase::Draft)
     {
+        *gate = ApplyOutcome::Draft;
+    }
+}
+
+fn finish_snapshot_apply(
+    mut staged: ResMut<StagedSnapshot>,
+    mut applied: MessageWriter<SnapshotApplied>,
+) {
+    let Some(data) = staged.data.take() else {
+        return;
+    };
+    let outcome = std::mem::take(&mut staged.gate);
+    applied.write(SnapshotApplied {
+        meta: data.meta,
+        your_id: data.your_id,
+        round: RoundId::from_meta(&data.meta),
+        outcome,
+    });
+}
+
+/// Grouped UI-side resources for [`apply_snapshot_entities`] (Bevy caps
+/// system functions at 16 parameters).
+#[derive(bevy::ecs::system::SystemParam)]
+pub(in crate::net) struct SnapshotUiState<'w> {
+    cam_state: ResMut<'w, CameraState>,
+    team_selection: ResMut<'w, TeamSelection>,
+    visual_mode: Res<'w, PlayerVisualMode>,
+}
+
+/// Local hero, remote players, projectiles, structures, minions and neutrals
+/// (roadmap step 15b2 splits it further).
+fn apply_snapshot_entities(
+    mut commands: Commands,
+    mut staged: ResMut<StagedSnapshot>,
+    client_session: Res<ClientSession>,
+    mut network_state: ResMut<NetworkState>,
+    mut transform_sets: ParamSet<(
+        Query<&mut Transform>,
+        Query<&mut Transform, With<MainCamera>>,
+    )>,
+    mut remote_query: Query<
+        (&mut RemotePlayerInterpolation, Option<&PlayerUtility>),
+        With<RemotePlayer>,
+    >,
+    projectile_query: Query<&NetworkProjectile>,
+    structure_query: Query<&NetworkStructure>,
+    minion_query: Query<&NetworkMinion>,
+    neutral_query: Query<&NetworkNeutral>,
+    local_player_query: Query<(Entity, Option<&NetworkPlayerId>), With<Player>>,
+    action_query: Query<Option<&PlayerCosmeticAction>>,
+    player_assets: Res<PlayerAssets>,
+    mut models: PlayerModelResolver,
+    mut ui_state: SnapshotUiState,
+    mut utility_vfx: MessageWriter<crate::game_vfx::UtilityVfx>,
+) {
+    let SnapshotUiState {
+        cam_state,
+        team_selection,
+        visual_mode,
+    } = &mut ui_state;
+    let StagedSnapshot { data, gate } = &mut *staged;
+    let Some(data) = data.as_mut() else {
+        return;
+    };
+    let meta = data.meta;
+    let snapshot_wall_time = data.wall_time;
+    let your_id = data.your_id;
+    let selected_team_for_spawn = data.selected_team_for_spawn;
+    let players = std::mem::take(&mut data.players);
+    let projectiles = std::mem::take(&mut data.projectiles);
+    let structures = std::mem::take(&mut data.structures);
+    let minions = std::mem::take(&mut data.minions);
+    let neutrals = std::mem::take(&mut data.neutrals);
+
+    // Spawn the final roster only once frozen; redraft discards old models.
+    if *gate == ApplyOutcome::Draft {
         for (entity, _) in &local_player_query {
             commands
                 .entity(entity)
@@ -367,6 +490,7 @@ pub(in crate::net) fn apply_server_snapshot(
         // the server's join ack. The server may have assigned a different
         // team than requested (release-mode balancing) - adopt it as truth.
         if selected_team_for_spawn.is_none() && !client_session.has_committed_join() {
+            *gate = ApplyOutcome::LocalPending;
             return;
         }
         let assigned_team = Team::from(local_player_state.team);
