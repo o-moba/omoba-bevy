@@ -1,13 +1,10 @@
 //! Lifetime round accounting from accepted HP-loss receipts, independent of
 //! connected endpoints and the short, repeated cosmetic event stream.
-use shared::{
-    career::{MAX_PARTICIPANTS, MatchStats, ParticipantResult},
-    combat::{CombatEntityKind, CombatEvent},
-};
-use std::{
-    collections::BTreeMap,
-    time::{Duration, Instant},
-};
+use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
+
+use shared::career::{MAX_PARTICIPANTS, MatchStats, ParticipantResult};
+use shared::combat::{CombatEntityKind, CombatEvent};
 
 const ASSIST_WINDOW: Duration = Duration::from_secs(10);
 
@@ -292,8 +289,11 @@ impl RoundLedger {
 
 #[cfg(test)]
 mod tests {
+    use shared::HeroClass;
+    use shared::combat::CombatEntity;
+    use shared::map::Team;
+
     use super::*;
-    use shared::{HeroClass, combat::CombatEntity, map::Team};
 
     fn participant(id: u64, team: Team) -> ParticipantResult {
         ParticipantResult {

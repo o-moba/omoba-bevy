@@ -1,7 +1,27 @@
 //! Practice-only server controllers. Actors use ordinary hero movement, attacks,
 //! resources and receipts; internal addresses are never network endpoints.
-use crate::*;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
+use std::net::SocketAddr;
+use std::time::{Duration, Instant};
+
+use shared::map::{Lane, Team};
+use shared::wire::{ClientPacket, GameState, TargetId, TargetKind, default_character_choice};
+use shared::{
+    HeroClass, SkillSlot, TargetingMode, ability_for_class_slot, unlocked_slots_for_level,
+};
+
+use crate::balance::{MAX_LEVEL, PLAYER_GROUND_Y, STARTING_LEVEL};
+use crate::entities::{ConnectedPlayer, MapLayoutState, StructureRole, Vec3f};
+use crate::formation::joined_count;
+use crate::runtime::ServerRuntime;
+use crate::session::{
+    clip_live_structures, handle_join_request_with_sprite,
+    handle_transform_request_with_structures, normalize_session_id,
+};
+use crate::sim::cast::{apply_skill_upgrade, handle_cast_request};
+use crate::sim::towers::structure_is_protected;
+use crate::world::{build_minion_path, spawn_position_for_team, structure_collision_radius};
+use crate::{basic_attack, hero_stats, match_stats, progression, shop, vision};
 
 const THINK_INTERVAL: Duration = Duration::from_millis(250);
 const ROUTE_INTERVAL: Duration = Duration::from_millis(800);

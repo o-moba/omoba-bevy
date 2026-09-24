@@ -1,8 +1,16 @@
 //! Authoritative base-shop validation, payment and passive income.
-use super::*;
+use std::collections::HashMap;
+use std::net::SocketAddr;
+
+use shared::map::Team;
 use shared::shop::{
-    GOLD_PER_SECOND, INVENTORY_CAPACITY, PurchaseError, SHOP_RADIUS, item, item_bonuses,
+    GOLD_PER_SECOND, INVENTORY_CAPACITY, ItemId, PurchaseError, PurchaseReceipt, SHOP_RADIUS, item,
+    item_bonuses,
 };
+use shared::wire::GameState;
+
+use crate::entities::{ConnectedPlayer, MapLayoutState};
+use crate::hero::Hero;
 
 fn phase_allows_shop(phase: &GameState) -> bool {
     !matches!(phase, GameState::Victory { .. })
@@ -103,7 +111,22 @@ pub(crate) fn accrue_passive_gold(
 
 #[cfg(test)]
 mod tests {
+    use shared::SkillSlot;
+    use std::net::{SocketAddr, UdpSocket};
+    use std::time::{Duration, Instant};
+
+    use shared::map::Team;
+    use shared::shop::{ItemBonuses, ItemId, STARTING_GOLD};
+    use shared::wire::{CharacterChoice, ClientPacket, GameState, TargetId, TargetKind};
+    use shared::{HeroClass, ability_for_class_slot, scaled_cooldown};
+
     use super::*;
+    use crate::balance::{LEVEL_UP_HP_BONUS, MOVEMENT_POSITION_TOLERANCE, PLAYER_SPEED};
+    use crate::hero_stats;
+    use crate::match_rules::MatchConfig;
+    use crate::progression::apply_level_up;
+    use crate::runtime::{PLAYER_TIMEOUT, ServerRuntime};
+    use crate::session::{handle_respawns, handle_transform_request, reset_player_round};
 
     fn join(team: Team, session: &str) -> ClientPacket {
         ClientPacket::Join {

@@ -1,9 +1,26 @@
 //! Individual server-authorized basic strikes. Clients own repeat/chase intent;
 //! the server owns target legality, range, timing, equipment and damage.
-use crate::*;
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::time::Instant;
+
+use shared::combat::{CombatEntityKind, ProjectileStyle};
+use shared::map::Team;
+use shared::wire::{GameState, ProjectileState, TargetId, TargetKind};
+use shared::{BASIC_ATTACK_ACTION_SLOT, PlayerActionKind, basic_attack_for_class};
+
+use crate::balance::{
+    AIM_HEIGHT, CAST_SPAWN_HEIGHT, MINION_RADIUS, NEUTRAL_RADIUS, PLAYER_HIT_RADIUS,
+    PROJECTILE_LIFETIME, PROJECTILE_RADIUS, PROJECTILE_SPEED,
+};
+use crate::entities::{ConnectedPlayer, Minion, Neutral, Projectile, Structure, Vec3f};
+use crate::game_world::GameWorld;
+use crate::sim::towers::structure_is_protected;
+use crate::world::structure_radius;
+use crate::{hero_stats, vision};
+
 #[cfg(test)]
 use shared::shop::basic_attack_cooldown;
-use shared::{BASIC_ATTACK_ACTION_SLOT, basic_attack_for_class};
 
 pub(crate) fn resolve_hostile_target(
     team: Team,

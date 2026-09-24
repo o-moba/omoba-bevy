@@ -1,5 +1,24 @@
 //! Ability casts and skill upgrades.
-use crate::*;
+
+use std::net::SocketAddr;
+use std::time::Instant;
+
+use shared::combat::{CombatEntityKind, ProjectileStyle};
+use shared::wire::{GameState, ProjectileState, TargetId, TargetKind};
+use shared::{
+    PlayerActionKind, SkillSlot, TargetingMode, ability_for_class_slot, rank_effect_scale,
+    scaled_cast_range, scaled_mana_cost, unlocked_slots_for_level,
+};
+
+use crate::balance::{
+    AIM_HEIGHT, CAST_SPAWN_HEIGHT, MINION_RADIUS, NEUTRAL_RADIUS, PLAYER_HIT_RADIUS,
+    PROJECTILE_LIFETIME, PROJECTILE_RADIUS, PROJECTILE_SPEED,
+};
+use crate::entities::{ConnectedPlayer, Projectile, Vec3f};
+use crate::game_world::GameWorld;
+use crate::sim::towers::structure_is_protected;
+use crate::world::structure_radius;
+use crate::{hero_stats, hero_timers, vision};
 
 /// Spends a skill point on the given slot, capped by the class ability's max rank.
 pub(crate) fn apply_skill_upgrade(player: &mut ConnectedPlayer, slot: u8) {

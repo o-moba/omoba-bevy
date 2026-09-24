@@ -1,4 +1,20 @@
+use std::net::SocketAddr;
+use std::time::{Duration, Instant};
+
+use shared::HeroClass;
+use shared::map::Team;
+use shared::wire::{CharacterChoice, ClientPacket, GameState, TargetId, TargetKind};
+
 use super::*;
+use crate::balance::{PLAYER_GROUND_Y, SESSION_RECLAIM_WINDOW};
+use crate::career_backend;
+use crate::entities::DisconnectedSession;
+use crate::game_world::GameWorld;
+use crate::match_rules::MatchConfig;
+use crate::runtime::ports::{Clock, ManualClock, MemoryTransport};
+use crate::runtime::{PLAYER_TIMEOUT, ServerRuntime};
+use crate::session::{handle_join_request, handle_transform_request};
+use crate::snapshot::{SNAPSHOT_INTERVAL, build_players_snapshot};
 
 #[test]
 fn session_id_reclaims_timed_out_player_from_new_endpoint() {

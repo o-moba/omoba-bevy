@@ -1,5 +1,23 @@
 //! Jungle camp and raid boss AI, damage and rewards.
-use crate::*;
+
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::time::Instant;
+
+use shared::combat::{CombatEntityKind, CombatEvent, ProjectileStyle};
+use shared::wire::{GameState, NeutralAiState, NeutralCampType};
+
+use crate::balance::{AIM_HEIGHT, NEUTRAL_ATTACK_COOLDOWN, NEUTRAL_KILL_HEAL_FRACTION};
+use crate::combat_feedback::{HitSource, apply_player_damage, damage_receipt};
+use crate::entities::{ConnectedPlayer, Neutral, TeamBuffBalance, TeamBuffs, Vec3f};
+use crate::game_world::{GameWorld, TickCtx};
+use crate::hero::Hero;
+use crate::neutrals::{
+    chase_neutral, neutral_aggro_and_leash, neutral_respawn_cooldown, neutral_template,
+    reset_neutral_at_anchor,
+};
+use crate::progression::grant_player_xp;
+use crate::shop::award_gold;
 
 pub(crate) fn apply_neutral_damage(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,

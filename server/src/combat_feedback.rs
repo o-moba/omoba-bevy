@@ -1,6 +1,19 @@
 //! Damage receipts are produced at HP mutation, then retained briefly for UDP loss.
-use crate::*;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
+use std::net::SocketAddr;
+use std::time::{Duration, Instant};
+
+use shared::combat::{CombatEntity, CombatEntityKind, CombatEvent, MinionKind, ProjectileStyle};
+use shared::wire::{ProjectileState, TargetId};
+
+use crate::balance::{
+    AIM_HEIGHT, CASTER_MINION_ATTACK_COOLDOWN, CASTER_MINION_ATTACK_DAMAGE,
+    CASTER_MINION_ATTACK_RANGE, CASTER_MINION_MAX_HP, MINION_ATTACK_COOLDOWN, MINION_ATTACK_DAMAGE,
+    MINION_ATTACK_RANGE, MINION_MAX_HP, MINION_RADIUS, PROJECTILE_LIFETIME, PROJECTILE_RADIUS,
+    PROJECTILE_SPEED, RESPAWN_DELAY,
+};
+use crate::entities::{ConnectedPlayer, Minion, Projectile, Vec3f};
+use crate::hero_stats;
 
 #[cfg(test)]
 mod tests;

@@ -1,4 +1,25 @@
+use std::net::SocketAddr;
+use std::time::{Duration, Instant};
+
+use shared::combat::MinionKind;
+use shared::map::{Lane, Team};
+use shared::wire::{
+    CharacterChoice, MinionBrainState, MinionState, StructureKind, TargetId, TargetKind,
+};
+use shared::{
+    HeroClass, PlayerActionKind, SkillSlot, TargetingMode, ability_for_class_slot,
+    rank_effect_scale, scaled_cooldown, scaled_mana_cost,
+};
+
 use super::*;
+use crate::balance::{MAX_MANA, MINION_MAX_HP, MINION_SPAWN_HEIGHT, PLAYER_HIT_RADIUS};
+use crate::entities::{Minion, StructureRole, Vec3f};
+use crate::game_world::GameWorld;
+use crate::neutrals::build_neutral_camps;
+use crate::progression::grant_player_xp;
+use crate::session::handle_join_request;
+use crate::sim::cast::{apply_skill_upgrade, handle_cast_request};
+use crate::world::add_structure;
 
 #[test]
 fn cast_drains_mana_respects_cooldown_and_blocks_empty_mana() {

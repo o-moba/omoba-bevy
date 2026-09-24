@@ -1,12 +1,11 @@
 //! Bounded same-host worker pool. Children outlive a lobby restart; manifests do not.
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
+use std::{fs, io};
+
 use crate::match_allocation::{self, Manifest, Phase, Status};
-use std::{
-    collections::HashMap,
-    fs, io,
-    net::SocketAddr,
-    path::PathBuf,
-    process::{Child, Command, Stdio},
-};
 
 pub(crate) struct Slot {
     pub manifest: Manifest,
@@ -342,9 +341,10 @@ fn archive(root: &std::path::Path, directory: &std::path::Path, id: &str) {
 
 #[cfg(test)]
 mod tests {
+    use shared::match_service::MatchPreference;
+
     use super::*;
     use crate::match_allocation::AllocatedHuman;
-    use shared::match_service::MatchPreference;
     fn pool() -> Pool {
         let mut random = [0; 16];
         getrandom::fill(&mut random).unwrap();

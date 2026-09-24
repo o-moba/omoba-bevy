@@ -1,4 +1,29 @@
+use std::net::{SocketAddr, UdpSocket};
+use std::time::{Duration, Instant};
+
+use shared::HeroClass;
+use shared::combat::{CombatEntity, CombatEntityKind, CombatEvent, MinionKind};
+use shared::map::{Lane, Team};
+use shared::shop::{ItemBonuses, ItemId, PurchaseReceipt};
+use shared::wire::{
+    CharacterChoice, ClientPacket, GameState, MinionBrainState, MinionState, MinionTargetKind,
+    PlayerState, ServerPacket, TargetId, TargetKind,
+};
+
 use super::*;
+use crate::balance::MINION_SPAWN_HEIGHT;
+use crate::basic_attack::handle_basic_attack_request;
+use crate::entities::{Minion, MinionAggroTarget, Vec3f};
+use crate::game_world::TickCtx;
+use crate::match_rules::MatchConfig;
+use crate::neutrals::build_neutral_camps;
+use crate::runtime::ServerRuntime;
+use crate::sim::cast::handle_cast_request;
+use crate::sim::minions::simulate_minions;
+use crate::sim::projectiles::simulate_projectiles;
+use crate::sim::towers::simulate_tower_attacks;
+use crate::snapshot::build_players_snapshot;
+use crate::world::build_structures;
 
 fn fixture() -> (ServerRuntime, SocketAddr, SocketAddr, Instant) {
     let socket = UdpSocket::bind("127.0.0.1:0").unwrap();

@@ -7,23 +7,21 @@
 //! which owns every SQL and outbox operation); `MemoryLink` is the test link
 //! (a queue on the same thread, acknowledged by hand or immediately), so
 //! `MemoryCareer` runs the identical account logic without a database.
-use crate::career_port::CareerPort;
-use crate::career_store::CareerStore;
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::fs;
+use std::io::Write;
+use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::time::{Duration, Instant};
+
 use ed25519_dalek::{Signature, VerifyingKey};
+use omoba_career_store::career_store::CareerStore;
 use serde::{Deserialize, Serialize};
 use shared::career::*;
-use std::{
-    collections::{BTreeMap, HashMap, HashSet, VecDeque},
-    fs,
-    io::Write,
-    net::SocketAddr,
-    path::{Path, PathBuf},
-    sync::{
-        Mutex,
-        mpsc::{self, Receiver, SyncSender},
-    },
-    time::{Duration, Instant},
-};
+
+use crate::career_port::CareerPort;
 
 const MAX_CLIENTS: usize = 512;
 const MAX_JOBS: usize = 256;
@@ -1503,8 +1501,9 @@ fn worker(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use ed25519_dalek::{Signer, SigningKey};
+
+    use super::*;
     #[test]
     fn supporter_is_denied_for_free_expired_disabled_stale_and_unauthenticated_profiles() {
         use shared::supporter::{AuraStyle, SupporterStatus};

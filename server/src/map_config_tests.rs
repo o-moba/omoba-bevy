@@ -1,6 +1,23 @@
 //! Configuration is exercised through the actual simulation and packet handler.
-use super::*;
-use shared::map::{MapDefinition, Placement, ResolvedMap};
+use std::collections::HashMap;
+use std::net::{SocketAddr, UdpSocket};
+use std::time::{Duration, Instant};
+
+use shared::combat::{CombatEntityKind, MinionKind, ProjectileStyle};
+use shared::map::{Lane, MapDefinition, Placement, ResolvedMap, Team};
+use shared::wire::{ClientPacket, GameState, TargetKind};
+
+use crate::balance::MINION_ATTACK_DAMAGE;
+use crate::entities::Structure;
+use crate::game_world::{GameWorld, TickCtx};
+use crate::match_rules::MatchConfig;
+use crate::runtime::ServerRuntime;
+use crate::sim::minions::simulate_minions;
+use crate::sim::towers::{apply_structure_damage, simulate_tower_attacks, structure_is_protected};
+use crate::world::{
+    build_configured_structures, build_map_layout, build_structures, load_map_config,
+    spawn_minion_wave_for_team_lane, spawn_position_for_team,
+};
 
 fn example_definition() -> MapDefinition {
     MapDefinition::from_json(include_str!("../../examples/maps/two-tier.json")).unwrap()

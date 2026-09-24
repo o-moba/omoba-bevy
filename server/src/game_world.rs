@@ -1,7 +1,20 @@
 //! The authoritative entity state of one match: every map keyed by id, the
 //! id allocators and the round clocks. Simulation and request handlers take
 //! `&mut GameWorld` instead of long parameter lists of the individual maps.
-use crate::*;
+
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::time::Instant;
+
+use shared::wire::GameState;
+
+use crate::entities::{
+    ConnectedPlayer, DisconnectedSession, MapLayoutState, Minion, Neutral, Projectile, Structure,
+    TeamBuffs,
+};
+use crate::forest_pickups;
+use crate::neutrals::{build_boss_neutrals, build_neutral_camps};
+use crate::world::{build_configured_structures, build_map_layout};
 
 /// Per-tick time context shared by the simulation functions.
 #[derive(Clone, Copy)]

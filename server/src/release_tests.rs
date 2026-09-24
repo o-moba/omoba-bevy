@@ -1,5 +1,37 @@
 //! Release regressions exercise the actual decoded-packet handler and UDP receiver.
-use super::*;
+
+use std::collections::HashMap;
+use std::net::{SocketAddr, UdpSocket};
+use std::time::{Duration, Instant};
+
+use shared::combat::{CombatEntityKind, ProjectileStyle};
+use shared::map::{Lane, Team};
+use shared::shop::{ItemBonuses, STARTING_GOLD};
+use shared::wire::{
+    CharacterChoice, ClientPacket, GameState, ProjectileState, ServerPacket, StructureKind,
+    TargetId, TargetKind, TeamBuffKind,
+};
+use shared::{HeroClass, PlayerActionKind};
+
+use crate::balance::{
+    EMPTY_ROSTER_GRACE, FIRST_MINION_WAVE_DELAY, LEVEL_UP_HP_BONUS, MAX_HP, MAX_MANA,
+    MINION_KILL_GOLD, MINION_WAVE_INTERVAL, MINIONS_PER_WAVE, RESPAWN_DELAY,
+    SESSION_RECLAIM_WINDOW, STARTING_LEVEL,
+};
+use crate::entities::{ConnectedPlayer, DisconnectedSession, Projectile, Vec3f};
+use crate::formation::joined_count;
+use crate::hero::{Hero, HeroEconomy};
+use crate::match_rules::{MatchConfig, MatchMode};
+use crate::neutrals::boss_spawn_delay;
+use crate::progression::{grant_player_xp, xp_threshold_for_level};
+use crate::runtime::{PLAYER_TIMEOUT, ServerRuntime};
+use crate::session::handle_respawns;
+use crate::sim::minions::award_minion_kill_rewards;
+use crate::sim::towers::{apply_structure_damage, structure_is_protected};
+use crate::snapshot::SNAPSHOT_INTERVAL;
+use crate::world::{
+    spawn_minion_wave_for_team_lane, spawn_position_for_team, spawn_position_for_team_from_base,
+};
 
 fn runtime(config: MatchConfig) -> ServerRuntime {
     let socket = UdpSocket::bind("127.0.0.1:0").unwrap();

@@ -1,6 +1,30 @@
 //! Local-only authoritative combat lab, using ordinary actors and hit resolution.
-use crate::*;
+use std::collections::{HashMap, HashSet};
+use std::net::SocketAddr;
+use std::time::{Duration, Instant};
+
+use shared::combat::CombatEntityKind;
+use shared::map::{Lane, Team};
 use shared::sandbox::*;
+use shared::wire::{GameState, TargetId, TargetKind, default_character_choice};
+use shared::{
+    PlayerActionKind, SkillSlot, TargetingMode, ability_for_class_slot, unlocked_slots_for_level,
+};
+
+use crate::balance::{MAX_LEVEL, PLAYER_GROUND_Y, PLAYER_HIT_RADIUS, RESPAWN_DELAY};
+use crate::basic_attack::handle_basic_attack_request;
+use crate::combat_feedback::CombatLog;
+use crate::entities::{ConnectedPlayer, DisconnectedSession, TeamBuffs};
+use crate::hero_stats::StatModifiers;
+use crate::neutrals::{build_boss_neutrals, build_neutral_camps, schedule_boss_spawns};
+use crate::progression::xp_threshold_for_level;
+use crate::runtime::ServerRuntime;
+use crate::session::{handle_join_request_with_sprite, handle_transform_request_with_structures};
+use crate::sim::cast::handle_cast_request;
+use crate::world::{
+    build_configured_structures, spawn_minion_wave_for_team_lane, structure_collision_radius,
+};
+use crate::{bots, hero_stats, hero_timers};
 
 const ENEMY_ADDR: SocketAddr =
     SocketAddr::new(std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED), 40001);

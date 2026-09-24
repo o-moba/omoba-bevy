@@ -1,8 +1,28 @@
 //! The authoritative UDP game server runtime: its ports (transport, clock,
 //! career store), the sub-runtimes and the process entry point.
-use crate::*;
+
+use std::collections::{HashMap, HashSet};
+use std::io;
+use std::net::UdpSocket;
+use std::time::{Duration, Instant};
+
+use crate::career_port::CareerPort;
+use crate::combat_feedback::CombatLog;
+use crate::game_world::GameWorld;
+use crate::match_rules::{MatchConfig, MatchMode, MatchRules};
+use crate::runtime::dispatch::CLIENT_DATAGRAM_RECEIVE_CAPACITY;
+use crate::runtime::ports::{Clock, SystemClock, Transport, UdpTransport};
+use crate::world::load_map_config;
+use crate::{
+    bots, career_backend, career_runtime, match_service, passport_admission, prematch,
+    public_transport, sandbox, social, targeting_qa,
+};
+
+#[cfg(test)]
+use crate::runtime::ports::{ManualClock, MemoryTransport};
 
 pub(crate) mod dispatch;
+mod handlers;
 pub(crate) mod ports;
 pub(crate) mod tick;
 

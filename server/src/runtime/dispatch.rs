@@ -1,5 +1,15 @@
 //! Datagram receive loop and client packet dispatch.
-use crate::*;
+use std::io;
+use std::net::SocketAddr;
+use std::ops::ControlFlow;
+use std::time::{Duration, Instant};
+
+use shared::wire::ClientPacket;
+
+use crate::runtime::ServerRuntime;
+use crate::session::normalize_session_id;
+use crate::snapshot::IPV4_UDP_MAX_PAYLOAD_BYTES;
+use crate::{bots, passport_admission, public_transport};
 
 /// Existing application bound for client -> server request datagrams.
 pub(crate) const MAX_CLIENT_REQUEST_PAYLOAD_BYTES: usize = 8 * 1024;
@@ -222,78 +232,37 @@ impl ServerRuntime {
                 return;
             }
         }
-        if matches!(packet, ClientPacket::Leave) {
-            // Public transport authenticated this command independently of the
-            // account-action throttle. It is also the reliable local-exit path
-            // when an immediately preceding CancelQueue datagram was dropped.
-            if self.match_service.is_lobby()
-                && self.career.backend.authenticated_session(addr).is_some()
-                && let Some(profile) = self.career.backend.profile(addr)
-            {
-                self.match_service.cancel(&profile.profile_id);
-            }
-            self.leave_match(addr, now);
-            return;
-        }
-        if matches!(packet, ClientPacket::RequestRematch) && self.career_flow_active() {
-            self.career_play_again(addr, now);
-            return;
-        }
-        if let ClientPacket::Practice { command } = packet {
-            if let Some(player) = self.world.players.get_mut(&addr) {
-                player.last_seen = now;
-            }
-            self.handle_practice_command(addr, command, now);
-            return;
-        }
-        if let ClientPacket::Sandbox { request } = packet {
-            self.initialize_sandbox_players();
-            self.handle_sandbox(addr, request);
-            if let Some(p) = self.world.players.get_mut(&addr) {
-                p.last_seen = now;
-            }
-            return;
-        }
         let wall_now = now;
         let now = self.sandbox.as_ref().map_or(now, |s| s.now);
-        if self
-            .sandbox
-            .as_ref()
-            .is_some_and(|s| s.config.environment.paused)
-            && matches!(
-                packet,
-                ClientPacket::Transform { .. }
-                    | ClientPacket::Cast { .. }
-                    | ClientPacket::BasicAttack { .. }
-                    | ClientPacket::Utility { .. }
-            )
-        {
-            if let Some(p) = self.world.players.get_mut(&addr) {
-                p.last_seen = wall_now;
+        // Arm order is the pre-check order: Leave, the career rematch,
+        // Practice and Sandbox run first on the wall clock and return before
+        // the tail; then a paused sandbox swallows movement and combat; then
+        // the per-variant handlers run on the (sandbox) simulation clock.
+        let flow = match packet {
+            ClientPacket::Leave => self.handle_leave(addr, wall_now),
+            ClientPacket::RequestRematch if self.career_flow_active() => {
+                self.handle_career_rematch(addr, wall_now)
             }
-            return;
-        }
-        let combat_sandbox = self.sandbox_allowed();
-        let targeting_qa = self.targeting_qa;
-        let rules = self.rules;
-        let match_id = self.match_id;
-        let server_epoch = self.server_epoch;
-        let world = &mut self.world;
-        match packet {
-            ClientPacket::Sandbox { .. } => unreachable!("handled above"),
-            ClientPacket::Career { .. } | ClientPacket::Social { .. } => {
-                unreachable!("handled before gameplay admission")
+            ClientPacket::Practice { command } => self.handle_practice(addr, command, wall_now),
+            ClientPacket::Sandbox { request } => {
+                self.handle_sandbox_packet(addr, request, wall_now)
             }
-            ClientPacket::Prematch { .. } => unreachable!("handled before gameplay admission"),
-            ClientPacket::Leave => unreachable!("handled before the gameplay match"),
+            ClientPacket::Transform { .. }
+            | ClientPacket::Cast { .. }
+            | ClientPacket::BasicAttack { .. }
+            | ClientPacket::Utility { .. }
+                if self
+                    .sandbox
+                    .as_ref()
+                    .is_some_and(|s| s.config.environment.paused) =>
+            {
+                if let Some(p) = self.world.players.get_mut(&addr) {
+                    p.last_seen = wall_now;
+                }
+                ControlFlow::Break(())
+            }
             ClientPacket::Hello { protocol_version } => {
-                world.ensure_connected(addr, now);
-                let player = world.players.get_mut(&addr).unwrap();
-                player.last_seen = now;
-                player.framed_snapshots = true;
-                player.protocol_compatible = protocol_version == shared::protocol::PROTOCOL_VERSION;
-                player.join_error = (!player.protocol_compatible)
-                    .then_some(shared::protocol::JoinRejection::ProtocolMismatch);
+                self.handle_hello(addr, protocol_version, now)
             }
             ClientPacket::Transform {
                 x,
@@ -301,69 +270,29 @@ impl ServerRuntime {
                 z,
                 yaw,
                 dash_sequence,
-            } => {
-                world.ensure_connected(addr, now);
-                if let Some(player) = world.players.get_mut(&addr) {
-                    player.last_seen = now;
-                }
-                if matches!(world.game_state, GameState::Running)
-                    && let Some(player) = world.players.get_mut(&addr)
-                    && player.hero.hp > 0.0
-                    && dash_sequence == player.hero.utility.dash_sequence
-                {
-                    handle_transform_request_with_structures(
-                        player,
-                        &world.map_layout,
-                        &world.structures,
-                        x,
-                        y,
-                        z,
-                        yaw,
-                        now,
-                    );
-                }
-            }
-            ClientPacket::Cast { target, slot } => {
-                world.ensure_connected(addr, now);
-                if let Some(player) = world.players.get_mut(&addr) {
-                    player.last_seen = now;
-                }
-                handle_cast_request(world, addr, target, slot, now);
-            }
+            } => self.handle_transform(addr, x, y, z, yaw, dash_sequence, now),
+            ClientPacket::Cast { target, slot } => self.handle_cast(addr, target, slot, now),
             ClientPacket::Utility {
                 action,
                 direction,
-                server_epoch: requested_epoch,
-                match_id: requested_match,
+                server_epoch,
+                match_id,
                 request_id,
-            } => {
-                if requested_epoch != server_epoch || requested_match != match_id {
-                    return;
-                }
-                if let Some(player) = world.players.get_mut(&addr) {
-                    handle_utility_request(
-                        player,
-                        &world.map_layout,
-                        &world.structures,
-                        &world.game_state,
-                        action,
-                        direction,
-                        request_id,
-                        now,
-                    );
-                }
-            }
+            } => self.handle_utility(
+                addr,
+                action,
+                direction,
+                server_epoch,
+                match_id,
+                request_id,
+                now,
+            ),
             ClientPacket::BasicAttack {
                 target,
-                server_epoch: requested_epoch,
-                match_id: requested_match,
+                server_epoch,
+                match_id,
                 request_id,
-            } => {
-                if requested_epoch != server_epoch || requested_match != match_id {
-                    return;
-                }
-                handle_basic_attack_request(world, addr, target, request_id, now);
-            }
+            } => self.handle_basic_attack(addr, target, server_epoch, match_id, request_id, now),
             ClientPacket::Join {
                 prematch,
                 team,
@@ -373,205 +302,39 @@ impl ServerRuntime {
                 sprite_character,
                 session_id,
                 passport_ticket: _,
-            } => {
-                world.ensure_connected(addr, now);
-                let player = world.players.get_mut(&addr).unwrap();
-                player.last_seen = now;
-                if !player.protocol_compatible {
-                    return;
-                }
-                // A joined endpoint cannot rewrite its identity or loadout through Join.
-                if player.joined {
-                    player.join_error = None;
-                    return;
-                }
-                let session_id = normalize_session_id(session_id);
-                if !world.ensure_player_for_join(addr, session_id, now) {
-                    world.players.get_mut(&addr).unwrap().join_error =
-                        Some(shared::protocol::JoinRejection::SessionActive);
-                    return;
-                }
-                // A reclaim is already joined: retain all authoritative round state.
-                if let Some(player) = world.players.get_mut(&addr).filter(|player| player.joined) {
-                    player.join_error = None;
-                    self.register_career_participant(addr);
-                    self.fill_practice_bots(now);
-                    return;
-                }
-                // Team resolution: `ClientChoice` (dev) honors the client's
-                // choice; `Balanced` (release) balances teams server-side
-                // (rejoining players keep their original team);
-                // `PracticeSeat` takes a bot's seat.
-                let assigned_team = allocated_team.or_else(|| match rules.team_assignment {
-                    TeamAssignment::PracticeSeat => {
-                        bots::assign_human_team(&world.players, rules.team_size)
-                    }
-                    TeamAssignment::ClientChoice if combat_sandbox => {
-                        sandbox::assign_human_team(&world.players, &world.disconnected_sessions)
-                    }
-                    TeamAssignment::ClientChoice if prematch => assign_reserved_release_team(
-                        &world.players,
-                        &world.disconnected_sessions,
-                        rules.team_size,
-                    ),
-                    TeamAssignment::ClientChoice => (joined_count(&world.players)
-                        + (world.disconnected_sessions.len() as u32)
-                        < rules.roster_size())
-                    .then_some(team),
-                    TeamAssignment::Balanced => {
-                        let existing_team = world
-                            .players
-                            .get(&addr)
-                            .filter(|player| player.joined)
-                            .map(|player| player.hero.identity.team);
-                        existing_team.or_else(|| {
-                            assign_reserved_release_team(
-                                &world.players,
-                                &world.disconnected_sessions,
-                                rules.team_size,
-                            )
-                        })
-                    }
-                });
-                let Some(assigned_team) = assigned_team else {
-                    println!(
-                        "Matchmaking: match is full ({} players) - join from {addr} rejected",
-                        rules.roster_size()
-                    );
-                    world.players.get_mut(&addr).unwrap().join_error =
-                        Some(shared::protocol::JoinRejection::MatchFull);
-                    return;
-                };
-                if rules.fills_with_bots {
-                    bots::remove_replaced_bot(
-                        &mut world.players,
-                        &mut self.bots,
-                        &mut self.combat_log.ledger,
-                        assigned_team,
-                    );
-                }
-                if let Some(player) = world.players.get_mut(&addr) {
-                    player.join_error = None;
-                    player.draft.capable = prematch;
-                    handle_join_request_with_sprite(
-                        player,
-                        assigned_team,
-                        character,
-                        hero_class,
-                        avatar.as_deref(),
-                        sprite_character.as_deref(),
-                        &world.map_layout,
-                        now,
-                    );
-                }
-                if targeting_qa {
-                    targeting_qa::place_initial_join(&mut world.players, addr);
-                }
-                if world.players.values().any(|p| p.joined && p.draft.capable)
-                    && self.match_started_at.is_none()
-                {
-                    world.game_state = GameState::Forming {
-                        ready: joined_count(&world.players),
-                        needed: rules.roster_size(),
-                    };
-                } else {
-                    advance_formation_on_join(world, rules, now);
-                }
-            }
-            ClientPacket::Ping => {
-                world.ensure_connected(addr, now);
-                if let Some(player) = world.players.get_mut(&addr) {
-                    player.last_seen = now;
-                }
-            }
-            ClientPacket::RequestRematch => {
-                world.ensure_connected(addr, now);
-                let mut joined = false;
-                if let Some(player) = world.players.get_mut(&addr) {
-                    player.last_seen = now;
-                    joined = player.joined;
-                }
-                if joined && matches!(world.game_state, GameState::Victory { .. }) {
-                    self.restart_round(now);
-                }
-            }
-            ClientPacket::Practice { .. } => unreachable!("handled before gameplay admission"),
-            ClientPacket::SetGodMode { enabled } => {
-                // Development and local bot practice only; both are unrated.
-                if !rules.debug_commands {
-                    return;
-                }
-                world.ensure_connected(addr, now);
-                if let Some(player) = world.players.get_mut(&addr) {
-                    player.last_seen = now;
-                    if !player.joined {
-                        return;
-                    }
-                    if player.modifiers.god_mode != enabled {
-                        println!("Player {} god_mode={}", player.hero.identity.id, enabled);
-                    }
-                    player.modifiers.god_mode = enabled;
-                    // The development toggle is invulnerability plus a full
-                    // pool; a sandbox actor's resources stay its own setting.
-                    if !combat_sandbox {
-                        player.modifiers.infinite_resource = enabled;
-                    }
-                    if enabled {
-                        player.hero.hp = player.hero.max_hp;
-                        player.hero.mana = player.hero.max_mana;
-                        player.timers.respawn_at = None;
-                    }
-                }
-            }
+            } => self.handle_join(
+                addr,
+                allocated_team,
+                prematch,
+                team,
+                character,
+                hero_class,
+                avatar,
+                sprite_character,
+                session_id,
+                now,
+            ),
+            ClientPacket::Ping => self.handle_ping(addr, now),
+            ClientPacket::RequestRematch => self.handle_request_rematch(addr, now),
+            ClientPacket::SetGodMode { enabled } => self.handle_set_god_mode(addr, enabled, now),
             ClientPacket::SetSpeedBoost { enabled } => {
-                if !rules.debug_commands {
-                    return;
-                }
-                world.ensure_connected(addr, now);
-                if let Some(player) = world.players.get_mut(&addr) {
-                    player.last_seen = now;
-                    if !player.joined {
-                        return;
-                    }
-                    let mult = if enabled { DEBUG_SPEED_MULTIPLIER } else { 1.0 };
-                    if (player.modifiers.move_speed_mult - mult).abs() > f32::EPSILON {
-                        println!("Player {} speed_boost={}", player.hero.identity.id, enabled);
-                    }
-                    player.modifiers.move_speed_mult = mult;
-                }
+                self.handle_set_speed_boost(addr, enabled, now)
             }
-            ClientPacket::UpgradeSkill { slot } => {
-                world.ensure_connected(addr, now);
-                if let Some(player) = world.players.get_mut(&addr) {
-                    player.last_seen = now;
-                    if player.joined {
-                        apply_skill_upgrade(player, slot);
-                    }
-                }
-            }
+            ClientPacket::UpgradeSkill { slot } => self.handle_upgrade_skill(addr, slot, now),
             ClientPacket::BuyItem {
                 item_id,
                 request_id,
-                match_id: requested_match,
-                server_epoch: requested_epoch,
-            } => {
-                if requested_match != match_id || requested_epoch != server_epoch {
-                    // A delayed datagram must not consume the new round's sequence.
-                    return;
-                }
-                world.ensure_connected(addr, now);
-                if let Some(player) = world.players.get_mut(&addr) {
-                    player.last_seen = now;
-                    handle_purchase(
-                        player,
-                        &world.map_layout,
-                        &world.game_state,
-                        &item_id,
-                        request_id,
-                        match_id,
-                    );
-                }
+                match_id,
+                server_epoch,
+            } => self.handle_buy_item(addr, item_id, request_id, match_id, server_epoch, now),
+            ClientPacket::Career { .. }
+            | ClientPacket::Social { .. }
+            | ClientPacket::Prematch { .. } => {
+                unreachable!("handled by handle_packet before gameplay admission")
             }
+        };
+        if flow.is_break() {
+            return;
         }
         if let Some(p) = self.world.players.get_mut(&addr) {
             p.last_seen = wall_now;

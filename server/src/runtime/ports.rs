@@ -5,17 +5,16 @@
 //! a whole runtime without a socket and with time it advances by hand. The
 //! process uses `UdpTransport` and `SystemClock`; tests use
 //! `MemoryTransport` and `ManualClock` through `ServerRuntime::for_test`.
+use std::io;
+use std::net::{SocketAddr, UdpSocket};
+use std::time::Instant;
+
 #[cfg(test)]
-use std::{
-    collections::VecDeque,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
-use std::{
-    io,
-    net::{SocketAddr, UdpSocket},
-    time::Instant,
-};
+use std::collections::VecDeque;
+#[cfg(test)]
+use std::sync::{Arc, Mutex};
+#[cfg(test)]
+use std::time::Duration;
 
 /// Non-blocking datagram I/O. `recv` returns `WouldBlock` when nothing is
 /// queued, which ends the dispatcher's receive loop for the tick.

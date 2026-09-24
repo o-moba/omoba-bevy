@@ -1,5 +1,28 @@
 //! Lane minion AI, marching and combat.
-use crate::*;
+
+use std::collections::{HashMap, HashSet};
+use std::net::SocketAddr;
+
+use shared::combat::{CombatEntityKind, CombatEvent, MinionKind, ProjectileStyle};
+use shared::map::Team;
+use shared::wire::{
+    GameState, MinionBrainState, MinionTargetKind, StructureKind, TargetId, TargetKind,
+};
+
+use crate::balance::{
+    AIM_HEIGHT, MINION_KILL_GOLD, MINION_KILL_XP, MINION_RADIUS, MINION_SPEED, MINION_VISION_RANGE,
+    PLAYER_HIT_RADIUS,
+};
+use crate::combat_feedback::{
+    HitSource, apply_player_damage, damage_receipt, minion_stats, spawn_caster_projectile,
+};
+use crate::entities::{ConnectedPlayer, Minion, MinionAggroTarget, StructureRole, Vec3f};
+use crate::game_world::{GameWorld, TickCtx};
+use crate::progression::grant_player_xp;
+use crate::shop::award_gold;
+use crate::sim::towers::{apply_structure_damage, structure_is_protected};
+use crate::vision;
+use crate::world::structure_radius;
 
 pub(crate) fn apply_minion_damage(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,

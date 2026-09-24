@@ -6,7 +6,17 @@
 //! simulation asks "is this a sandbox actor" any more; it asks the flag it
 //! needs. The functions below are the only place the class growth, item
 //! bonuses and modifiers are combined into an effective number.
-use crate::*;
+
+use std::time::{Duration, Instant};
+
+use shared::SkillSlot;
+use shared::shop::ItemBonuses;
+
+use crate::balance::{
+    LEVEL_UP_HP_BONUS, LEVEL_UP_MANA_BONUS, MAX_MANA, MOVEMENT_POSITION_TOLERANCE, PLAYER_SPEED,
+};
+use crate::entities::ConnectedPlayer;
+use crate::utility::utility_movement_multiplier;
 
 /// Per-hero overrides on top of class, level and gear. `Default` is normal
 /// play: no multipliers, no mitigation, every rule enforced.

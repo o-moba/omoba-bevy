@@ -1,7 +1,10 @@
 //! Actual worker/PostgreSQL failure-path tests. Never substitutes a mock DB.
-use super::*;
-use shared::{HeroClass, map::Team};
 use std::thread::JoinHandle;
+
+use shared::HeroClass;
+use shared::map::Team;
+
+use super::*;
 
 struct OwnedWorker {
     jobs: Option<SyncSender<Job>>,

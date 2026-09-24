@@ -1,12 +1,19 @@
 //! Private immutable allocation manifest and atomic worker lifecycle receipts.
-use crate::*;
+use std::collections::HashSet;
+use std::io::Write;
+use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
+use std::time::Instant;
+use std::{fs, io};
+
 use serde::{Deserialize, Serialize};
-use shared::{career::valid_profile_id, match_service::MatchPreference};
-use std::{
-    fs,
-    io::Write,
-    path::{Path, PathBuf},
-};
+use shared::career::valid_profile_id;
+use shared::map::Team;
+use shared::match_service::MatchPreference;
+use shared::wire::ClientPacket;
+
+use crate::runtime::ServerRuntime;
+use crate::session::normalize_session_id;
 
 pub(crate) fn unix_ms() -> u64 {
     std::time::SystemTime::now()
@@ -192,6 +199,7 @@ impl ServerRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shared::map::Team;
     fn fixture() -> Manifest {
         Manifest {
             version: 1,
@@ -226,7 +234,19 @@ mod tests {
 
 #[cfg(test)]
 mod runtime_tests {
+    use shared::wire::GameState;
+    use std::net::{SocketAddr, UdpSocket};
+    use std::time::{Duration, Instant};
+
+    use shared::HeroClass;
+    use shared::map::Team;
+    use shared::wire::{ClientPacket, ServerPacket, default_character_choice};
+
     use super::*;
+    use crate::entities::DisconnectedSession;
+    use crate::match_rules::{MatchConfig, MatchMode};
+    use crate::runtime::{PLAYER_TIMEOUT, ServerRuntime};
+    use crate::snapshot::{SNAPSHOT_INTERVAL, build_players_snapshot};
     fn fixture() -> (ServerRuntime, SocketAddr, ClientPacket) {
         let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
         socket.set_nonblocking(true).unwrap();

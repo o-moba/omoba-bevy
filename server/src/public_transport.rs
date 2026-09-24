@@ -1,10 +1,16 @@
 //! Bounded return-path admission and authenticated public command dispatch.
-use super::*;
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::time::{Duration, Instant};
+
 use ed25519_dalek::{Signature, VerifyingKey};
 use shared::public_transport::{
     GameplayPrincipal, MAX_COMMAND_BYTES, MAX_PUBLIC_DATAGRAM_BYTES, PublicClientDatagram,
     PublicServerDatagram, decode_hex, hex,
 };
+use shared::wire::ClientPacket;
+
+use crate::bots;
 
 const MAX_ENDPOINTS: usize = 512;
 const CHALLENGE_TTL: Duration = Duration::from_secs(5);
@@ -241,6 +247,10 @@ impl PublicTransport {
 
 #[cfg(test)]
 mod tests {
+    use shared::wire::ClientPacket;
+    use std::net::SocketAddr;
+    use std::time::Instant;
+
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
     use shared::public_transport::{PROBE_PADDING_BYTES, SignedCommand};

@@ -1,7 +1,25 @@
 //! Runtime/UDP integration with explicit authenticated worker fixtures. Crypto
 //! verification still runs for signed account commands; worker I/O is controlled.
-use super::*;
+use std::io;
+use std::net::{SocketAddr, UdpSocket};
+use std::time::{Duration, Instant};
+
+use omoba_career_store::career_store;
+use shared::HeroClass;
 use shared::career::{CareerAction, CareerRequest, MatchOutcome, ProfileSummary, QueueView};
+use shared::combat::{CombatEntity, CombatEntityKind, CombatEvent};
+use shared::map::Team;
+use shared::wire::{
+    CharacterChoice, ClientPacket, GameState, ServerPacket, StructureKind, TargetId, TargetKind,
+};
+
+use crate::balance::{EMPTY_ROSTER_GRACE, VICTORY_REMATCH_DELAY};
+use crate::formation::joined_count;
+use crate::match_rules::{MatchConfig, MatchMode};
+use crate::runtime::dispatch::MAX_CLIENT_REQUEST_PAYLOAD_BYTES;
+use crate::runtime::ports::{ManualClock, MemoryTransport};
+use crate::runtime::{PLAYER_TIMEOUT, ServerRuntime};
+use crate::{career_backend, career_runtime};
 
 fn runtime(config: MatchConfig, career: bool) -> ServerRuntime {
     let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
