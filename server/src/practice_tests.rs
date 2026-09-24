@@ -11,7 +11,7 @@ fn runtime(size: u32) -> ServerRuntime {
         },
     );
     // Enabled but never acknowledges allocation: practice must still run.
-    rt.career.backend = career_backend::CareerBackend::test_backend(rt.server_epoch);
+    rt.career.backend = Box::new(career_backend::MemoryCareer::test_backend(rt.server_epoch));
     rt
 }
 
@@ -31,12 +31,31 @@ fn join(session: &str) -> ClientPacket {
     }
 }
 
+/// A socket-free practice runtime on a manual clock: the join arrives as a
+/// datagram through the memory transport and the career store is enabled
+/// but never acknowledges on its own.
+fn memory_runtime(size: u32) -> (ServerRuntime, ManualClock, MemoryTransport) {
+    let clock = ManualClock::new(Instant::now());
+    let transport = MemoryTransport::new(addr(0));
+    let rt = ServerRuntime::for_test(
+        transport.clone(),
+        clock.clone(),
+        career_backend::MemoryCareer::test_backend(7),
+        MatchConfig {
+            mode: MatchMode::Practice,
+            team_size: size,
+        },
+    );
+    (rt, clock, transport)
+}
+
 #[test]
 fn practice_solo_starts_with_labelled_heroes_without_database_ack_or_ranked_credit() {
     assert_eq!(parse_match_mode(Some("practice")), MatchMode::Practice);
-    let mut rt = runtime(2);
-    let now = Instant::now();
-    rt.handle_packet(addr(1), join("solo"), now);
+    let (mut rt, clock, transport) = memory_runtime(2);
+    let now = clock.now();
+    transport.push_inbound(addr(1), serde_json::to_vec(&join("solo")).unwrap());
+    assert_eq!(rt.prepare_tick().0, now);
     assert_eq!(rt.world.game_state, GameState::Running);
     assert_eq!(joined_count(&rt.world.players), 4);
     assert_eq!(joined_team_counts(&rt.world.players), (2, 2));
@@ -857,13 +876,13 @@ fn send_udp(client: &UdpSocket, rt: &mut ServerRuntime, packet: ClientPacket) {
     client
         .send_to(
             &serde_json::to_vec(&packet).unwrap(),
-            rt.socket.local_addr().unwrap(),
+            rt.transport.local_addr().unwrap(),
         )
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(2);
     let mut buffer = [0_u8; 4096];
     loop {
-        match rt.socket.peek_from(&mut buffer) {
+        match rt.transport.peek(&mut buffer) {
             Ok((_, sender)) => {
                 assert_eq!(sender, client.local_addr().unwrap());
                 rt.receive_packets();

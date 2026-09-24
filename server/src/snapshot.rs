@@ -107,7 +107,7 @@ impl ServerRuntime {
     /// at most once per `SNAPSHOT_INTERVAL`.
     pub(crate) fn broadcast_snapshots(&mut self, now: Instant, career_flow: bool) {
         let snapshot_now = if self.sandbox.is_some() {
-            Instant::now()
+            self.clock.now()
         } else {
             now
         };
@@ -265,7 +265,7 @@ impl ServerRuntime {
             match payloads {
                 Ok(payloads) => {
                     for payload in payloads {
-                        let result = self.socket.send_to(&payload, addr).and_then(|sent| {
+                        let result = self.transport.send_to(&payload, addr).and_then(|sent| {
                             if sent == payload.len() {
                                 Ok(())
                             } else {

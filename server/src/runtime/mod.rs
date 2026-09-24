@@ -1,8 +1,9 @@
-//! The authoritative UDP game server runtime: socket, sub-runtimes and the
-//! process entry point.
+//! The authoritative UDP game server runtime: its ports (transport, clock,
+//! career store), the sub-runtimes and the process entry point.
 use crate::*;
 
 pub(crate) mod dispatch;
+pub(crate) mod ports;
 pub(crate) mod tick;
 
 pub(crate) const DEFAULT_BIND_ADDR: &str = "0.0.0.0:4000";
@@ -45,7 +46,11 @@ pub(crate) struct ServerRuntime {
     pub(crate) career: career_runtime::CareerRuntime,
     pub(crate) combat_log: CombatLog,
     pub(crate) passport_admissions: passport_admission::PassportAdmissions,
-    pub(crate) socket: UdpSocket,
+    /// Datagram I/O; `UdpTransport` in the process, `MemoryTransport` in tests.
+    pub(crate) transport: Box<dyn Transport>,
+    /// The tick path's time source; `SystemClock` in the process,
+    /// `ManualClock` in tests. Leaf helpers take `now` as a parameter.
+    pub(crate) clock: Box<dyn Clock>,
     pub(crate) world: GameWorld,
     pub(crate) victory_at: Option<Instant>,
     pub(crate) recv_buf: Vec<u8>,
@@ -65,7 +70,18 @@ pub(crate) struct ServerRuntime {
     pub(crate) metrics_objectives: HashSet<u64>,
 }
 
+/// The process start time as the epoch: odd, so a zero epoch never occurs.
+fn fresh_server_epoch() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64
+        | 1
+}
+
 impl ServerRuntime {
+    /// A runtime over a bound non-blocking socket, the system clock and the
+    /// career store configured by the environment (the process shape).
     #[cfg(test)]
     pub(crate) fn new(socket: UdpSocket, match_config: MatchConfig) -> Self {
         Self::new_with_map(socket, match_config, shared::map::ResolvedMap::default())
@@ -76,11 +92,48 @@ impl ServerRuntime {
         match_config: MatchConfig,
         map_config: shared::map::ResolvedMap,
     ) -> Self {
-        let server_epoch = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos() as u64
-            | 1;
+        let server_epoch = fresh_server_epoch();
+        Self::with_ports(
+            Box::new(UdpTransport(socket)),
+            Box::new(SystemClock),
+            server_epoch,
+            Box::new(career_backend::CareerBackend::new(server_epoch)),
+            match_config,
+            map_config,
+        )
+    }
+
+    /// A socket-free runtime on a manual clock and an in-memory career
+    /// store; the runtime's epoch is the store's.
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        transport: MemoryTransport,
+        clock: ManualClock,
+        career: career_backend::MemoryCareer,
+        match_config: MatchConfig,
+    ) -> Self {
+        let server_epoch = career.epoch();
+        Self::with_ports(
+            Box::new(transport),
+            Box::new(clock),
+            server_epoch,
+            Box::new(career),
+            match_config,
+            shared::map::ResolvedMap::default(),
+        )
+    }
+
+    /// The one constructor: every other shape is a choice of ports. `career`
+    /// must have been built for `server_epoch` (challenges carry it).
+    pub(crate) fn with_ports(
+        transport: Box<dyn Transport>,
+        clock: Box<dyn Clock>,
+        server_epoch: u64,
+        career: Box<dyn CareerPort>,
+        match_config: MatchConfig,
+        map_config: shared::map::ResolvedMap,
+    ) -> Self {
+        let now = clock.now();
         Self {
             sandbox: None,
             match_service: match_service::MatchService::default(),
@@ -88,18 +141,19 @@ impl ServerRuntime {
             prematch: prematch::PrematchRuntime::default(),
             bots: bots::BotControllers::default(),
             social: social::SocialRuntime::default(),
-            career: career_runtime::CareerRuntime::new(server_epoch),
+            career: career_runtime::CareerRuntime::new(career),
             combat_log: CombatLog::default(),
             passport_admissions: passport_admission::PassportAdmissions::default(),
-            socket,
-            world: GameWorld::new(map_config, Instant::now()),
+            transport,
+            clock,
+            world: GameWorld::new(map_config, now),
             victory_at: None,
             recv_buf: vec![0_u8; CLIENT_DATAGRAM_RECEIVE_CAPACITY],
             invalid_request_diagnostic: RateLimitedDiagnostic::default(),
             snapshot_send_diagnostic: RateLimitedDiagnostic::default(),
-            last_snapshot_at: Instant::now(),
-            last_bootstrap_at: Instant::now(),
-            last_simulation_at: Instant::now(),
+            last_snapshot_at: now,
+            last_bootstrap_at: now,
+            last_simulation_at: now,
             rules: MatchRules::from(match_config),
             targeting_qa: targeting_qa::enabled(match_config.mode),
             server_epoch,
@@ -169,14 +223,14 @@ pub(crate) fn run() -> io::Result<()> {
         if !runtime.rules.combat_sandbox_allowed
             || runtime.match_service.is_public()
             || runtime.match_service.worker().is_some()
-            || !runtime.socket.local_addr()?.ip().is_loopback()
+            || !runtime.transport.local_addr()?.ip().is_loopback()
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Combat Sandbox requires MATCH_MODE=dev and a loopback SERVER_ADDR",
             ));
         }
-        runtime.sandbox = Some(sandbox::SandboxRuntime::new(Instant::now()));
+        runtime.sandbox = Some(sandbox::SandboxRuntime::new(runtime.clock.now()));
         println!("Combat Sandbox enabled (local, unrated)");
     }
     loop {

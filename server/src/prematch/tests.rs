@@ -308,7 +308,7 @@ fn real_udp_peers_negotiate_and_replicate_draft_without_client_fixtures() {
         .collect();
     for (i, peer) in peers.iter().enumerate() {
         let bytes=serde_json::to_vec(&serde_json::json!({"type":"join","prematch":true,"team":"blue","character":"cube","session_id":format!("wire-{i}")})).unwrap();
-        peer.send_to(&bytes, rt.socket.local_addr().unwrap())
+        peer.send_to(&bytes, rt.transport.local_addr().unwrap())
             .unwrap();
     }
     let deadline = Instant::now() + Duration::from_secs(1);
@@ -328,7 +328,7 @@ fn real_udp_peers_negotiate_and_replicate_draft_without_client_fixtures() {
     peers[0]
         .send_to(
             &serde_json::to_vec(&ClientPacket::Prematch { request: req }).unwrap(),
-            rt.socket.local_addr().unwrap(),
+            rt.transport.local_addr().unwrap(),
         )
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(1);
@@ -371,7 +371,7 @@ fn real_udp_peers_negotiate_and_replicate_draft_without_client_fixtures() {
         };
         peer.send_to(
             &serde_json::to_vec(&packet).unwrap(),
-            rt.socket.local_addr().unwrap(),
+            rt.transport.local_addr().unwrap(),
         )
         .unwrap();
         let deadline = Instant::now() + Duration::from_secs(1);
@@ -394,7 +394,7 @@ fn real_udp_peers_negotiate_and_replicate_draft_without_client_fixtures() {
     returning
         .send_to(
             br#"{"type":"join","prematch":true,"team":"green","session_id":"wire-1"}"#,
-            rt.socket.local_addr().unwrap(),
+            rt.transport.local_addr().unwrap(),
         )
         .unwrap();
     let c = returning.local_addr().unwrap();
@@ -425,7 +425,7 @@ fn real_udp_peers_negotiate_and_replicate_draft_without_client_fixtures() {
     running_rejoin
         .send_to(
             br#"{"type":"join","prematch":true,"team":"blue","session_id":"wire-0"}"#,
-            rt.socket.local_addr().unwrap(),
+            rt.transport.local_addr().unwrap(),
         )
         .unwrap();
     let d = running_rejoin.local_addr().unwrap();
@@ -454,7 +454,7 @@ fn real_udp_peers_negotiate_and_replicate_draft_without_client_fixtures() {
 #[test]
 fn loaded_peers_still_wait_for_durable_career_ack_and_frozen_loadout_is_recorded() {
     let (mut rt, now) = fixture(MatchMode::Release, 1);
-    rt.career.backend = career_backend::CareerBackend::test_backend(rt.server_epoch);
+    rt.career.backend = Box::new(career_backend::MemoryCareer::test_backend(rt.server_epoch));
     for i in 1..=2 {
         let session = format!("auth-{i}");
         rt.career.backend.test_authenticated(
@@ -634,7 +634,7 @@ fn incapable_legacy_peer_is_ready_without_being_silently_required_to_ack() {
 #[test]
 fn durable_allocation_timeout_is_bounded_and_retires_the_pending_roster() {
     let (mut rt, now) = fixture(MatchMode::Dev, 1);
-    rt.career.backend = career_backend::CareerBackend::test_backend(rt.server_epoch);
+    rt.career.backend = Box::new(career_backend::MemoryCareer::test_backend(rt.server_epoch));
     join(&mut rt, address(1), "service-timeout", now, true);
     send(
         &mut rt,

@@ -317,7 +317,7 @@ impl ServerRuntime {
             match result {
                 Ok(datagrams) => {
                     for datagram in datagrams {
-                        if let Err(error) = self.socket.send_to(&datagram, addr) {
+                        if let Err(error) = self.transport.send_to(&datagram, *addr) {
                             if self.snapshot_send_diagnostic.record(now).is_some() {
                                 eprintln!("Social send failed: {error}");
                             }

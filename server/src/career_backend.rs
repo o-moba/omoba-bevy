@@ -1,4 +1,13 @@
 //! Signed account boundary and bounded off-tick PostgreSQL worker.
+//!
+//! `CareerBackend<L>` is the game-thread state machine (challenges, signed
+//! sessions, replay protection, pending records) behind the `CareerPort`
+//! trait; it exchanges `Job`s and `Reply`s with a `JobLink`. `WorkerLink`
+//! is the production link (a bounded channel pair to the `worker` thread,
+//! which owns every SQL and outbox operation); `MemoryLink` is the test link
+//! (a queue on the same thread, acknowledged by hand or immediately), so
+//! `MemoryCareer` runs the identical account logic without a database.
+use crate::career_port::CareerPort;
 use crate::career_store::CareerStore;
 use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
@@ -82,7 +91,7 @@ impl Default for Client {
     }
 }
 
-enum Job {
+pub(crate) enum Job {
     RefreshAccess {
         addr: SocketAddr,
         nonce: String,
@@ -103,7 +112,7 @@ enum Job {
     Record(Box<PendingRecord>),
     Presence(Vec<(String, Option<String>)>),
 }
-enum Reply {
+pub(crate) enum Reply {
     RecoveryChecked,
     RefreshAccess {
         addr: SocketAddr,
@@ -132,20 +141,20 @@ enum Reply {
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
-enum RecordKind {
+pub(crate) enum RecordKind {
     Start,
     Checkpoint,
     Settle,
     Rejected,
 }
 #[derive(Clone, Serialize, Deserialize)]
-struct PendingRecord {
-    kind: RecordKind,
-    result: MatchResult,
+pub(crate) struct PendingRecord {
+    pub(crate) kind: RecordKind,
+    pub(crate) result: MatchResult,
     #[serde(default)]
-    recovery_allocation: Option<MatchResult>,
+    pub(crate) recovery_allocation: Option<MatchResult>,
     #[serde(default)]
-    recovered_live: bool,
+    pub(crate) recovered_live: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -155,11 +164,180 @@ enum RecoveryScope {
     Epoch(u64),
 }
 
-pub struct CareerBackend {
-    epoch: u64,
-    recovery_checked: Option<Instant>,
+/// The exchange between the game-thread state machine and whatever performs
+/// the store I/O. `try_send` never blocks and returns whether the job was
+/// accepted; a saturated or disabled link refuses it (the caller reports
+/// "busy" or retries later).
+pub(crate) trait JobLink {
+    fn enabled(&self) -> bool;
+    fn try_send(&mut self, job: Job) -> bool;
+    fn try_recv(&mut self) -> Option<Reply>;
+}
+
+/// Bounded channels to the `worker` thread; `tx` is `None` when no database
+/// URL is configured, which is the disabled (guest-only) store.
+pub(crate) struct WorkerLink {
     tx: Option<SyncSender<Job>>,
     rx: Mutex<Receiver<Reply>>,
+}
+impl JobLink for WorkerLink {
+    fn enabled(&self) -> bool {
+        self.tx.is_some()
+    }
+    fn try_send(&mut self, job: Job) -> bool {
+        self.tx.as_ref().is_some_and(|tx| tx.try_send(job).is_ok())
+    }
+    fn try_recv(&mut self) -> Option<Reply> {
+        self.rx
+            .lock()
+            .expect("career reply receiver")
+            .try_recv()
+            .ok()
+    }
+}
+
+/// Same-thread link for tests: jobs are captured (bounded like the worker
+/// channel) and replies are whatever the test or the auto-acknowledger
+/// queued. With `auto_ack` every job is answered at once the way a healthy
+/// worker would (login creates a profile, a start is started, a settle is
+/// saved, an access refresh keeps the key active); without it nothing is
+/// acknowledged until a `test_ack_*` hook does it, which is what the old
+/// `test_backend()` fixture did. A disabled link is the guest-only server
+/// without a database URL.
+#[cfg(test)]
+pub(crate) struct MemoryLink {
+    pub(crate) jobs: VecDeque<Job>,
+    pub(crate) replies: VecDeque<Reply>,
+    pub(crate) enabled: bool,
+    pub(crate) auto_ack: bool,
+    /// Profiles by public key, created on first login.
+    pub(crate) profiles: HashMap<String, ProfileSummary>,
+}
+#[cfg(test)]
+impl MemoryLink {
+    fn new(enabled: bool, auto_ack: bool) -> Self {
+        Self {
+            jobs: VecDeque::new(),
+            replies: VecDeque::new(),
+            enabled,
+            auto_ack,
+            profiles: HashMap::new(),
+        }
+    }
+    fn profile_view(&self, profile: ProfileSummary) -> CareerView {
+        CareerView {
+            supporter: Some(Default::default()),
+            profile: Some(profile),
+            ..Default::default()
+        }
+    }
+    fn acknowledge(&mut self, job: Job) {
+        match job {
+            Job::Login { addr, challenge } => {
+                let profile = self
+                    .profiles
+                    .entry(challenge.public_key.clone())
+                    .or_insert_with(|| {
+                        ProfileSummary::new(
+                            hex(&decode::<32>(&challenge.public_key).unwrap_or([0; 32])),
+                            challenge.nickname.clone(),
+                        )
+                    })
+                    .clone();
+                let result = Ok(self.profile_view(profile));
+                self.replies.push_back(Reply::Login {
+                    addr,
+                    challenge,
+                    result,
+                });
+            }
+            Job::RefreshAccess { addr, nonce, .. } => {
+                self.replies.push_back(Reply::RefreshAccess {
+                    addr,
+                    nonce,
+                    key_active: Some(true),
+                    supporter: Some(Default::default()),
+                });
+            }
+            Job::Action {
+                addr,
+                nonce,
+                public_key,
+                action,
+                ..
+            } => {
+                let request_id = action_id(&action);
+                let result = match (&action, self.profiles.get(&public_key)) {
+                    (
+                        CareerAction::Profile { .. } | CareerAction::SupporterStatus { .. },
+                        Some(profile),
+                    ) => Ok(self.profile_view(profile.clone())),
+                    _ => Err("The in-memory career store does not serve this request.".into()),
+                };
+                self.replies.push_back(Reply::Action {
+                    addr,
+                    nonce,
+                    result,
+                    request_id,
+                });
+            }
+            Job::Record(record) => match record.kind {
+                RecordKind::Start => {
+                    self.replies
+                        .push_back(Reply::Started(record.result.result_id.clone()));
+                }
+                RecordKind::Settle => {
+                    let mut result = record.result;
+                    result.saved = true;
+                    let profiles = result
+                        .participants
+                        .iter()
+                        .filter_map(|p| {
+                            let id = p.profile_id.as_ref()?;
+                            self.profiles
+                                .values()
+                                .find(|profile| &profile.profile_id == id)
+                                .cloned()
+                        })
+                        .collect();
+                    self.replies.push_back(Reply::Settled { result, profiles });
+                }
+                RecordKind::Checkpoint | RecordKind::Rejected => {}
+            },
+            Job::Presence(_) => {}
+        }
+    }
+}
+#[cfg(test)]
+impl JobLink for MemoryLink {
+    fn enabled(&self) -> bool {
+        self.enabled
+    }
+    fn try_send(&mut self, job: Job) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        if self.auto_ack {
+            self.acknowledge(job);
+            return true;
+        }
+        if self.jobs.len() >= MAX_JOBS {
+            return false;
+        }
+        self.jobs.push_back(job);
+        true
+    }
+    fn try_recv(&mut self) -> Option<Reply> {
+        self.replies.pop_front()
+    }
+}
+
+/// The signed-account state machine over a job link. `CareerBackend` (the
+/// default link) is the production store; `MemoryCareer` is the test store.
+pub(crate) struct CareerBackend<L: JobLink = WorkerLink> {
+    epoch: u64,
+    recovery_checked: Option<Instant>,
+    pub(crate) link: L,
     clients: HashMap<SocketAddr, Client>,
     starts: HashMap<String, Result<(), String>>,
     settled: Vec<MatchResult>,
@@ -170,8 +348,49 @@ pub struct CareerBackend {
     matches: HashMap<String, String>,
     pending_ids: HashSet<String>,
     rejected: HashMap<String, String>,
-    #[cfg(test)]
-    _test_jobs: Option<Mutex<Receiver<Job>>>,
+}
+#[cfg(test)]
+pub(crate) type MemoryCareer = CareerBackend<MemoryLink>;
+
+impl<L: JobLink> CareerBackend<L> {
+    fn over(epoch: u64, link: L) -> Self {
+        Self {
+            epoch,
+            recovery_checked: None,
+            link,
+            clients: HashMap::new(),
+            starts: HashMap::new(),
+            settled: Vec::new(),
+            cancelled: Vec::new(),
+            social: Vec::new(),
+            match_requests: Vec::new(),
+            last_presence: Instant::now(),
+            matches: HashMap::new(),
+            pending_ids: HashSet::new(),
+            rejected: HashMap::new(),
+        }
+    }
+}
+#[cfg(test)]
+impl MemoryCareer {
+    /// Enabled and acknowledging every job at once, without a thread.
+    pub fn immediate(epoch: u64) -> Self {
+        Self::over(epoch, MemoryLink::new(true, true))
+    }
+    /// Enabled but never acknowledging on its own: allocation stays pending
+    /// until a `test_ack_*` hook answers, and every job is kept for
+    /// inspection in `link.jobs`.
+    pub fn test_backend(epoch: u64) -> Self {
+        Self::over(epoch, MemoryLink::new(true, false))
+    }
+    /// No storage, as a server without `OMOBA_DATABASE_URL`: guests only,
+    /// records refused, the view says so.
+    pub fn disabled(epoch: u64) -> Self {
+        Self::over(epoch, MemoryLink::new(false, false))
+    }
+    pub fn epoch(&self) -> u64 {
+        self.epoch
+    }
 }
 impl CareerBackend {
     pub fn new(epoch: u64) -> Self {
@@ -217,62 +436,51 @@ impl CareerBackend {
                 .expect("career worker starts");
             tx
         });
-        Self {
+        Self::over(
             epoch,
-            recovery_checked: None,
-            tx,
-            rx: Mutex::new(rx),
-            clients: HashMap::new(),
-            starts: HashMap::new(),
-            settled: Vec::new(),
-            cancelled: Vec::new(),
-            social: Vec::new(),
-            match_requests: Vec::new(),
-            last_presence: Instant::now(),
-            matches: HashMap::new(),
-            pending_ids: HashSet::new(),
-            rejected: HashMap::new(),
-            #[cfg(test)]
-            _test_jobs: None,
-        }
+            WorkerLink {
+                tx,
+                rx: Mutex::new(rx),
+            },
+        )
     }
     #[cfg(test)]
     pub fn test_with_database(epoch: u64, url: String, outbox: PathBuf) -> Self {
         Self::with_config(epoch, Some(url), outbox)
     }
-    #[cfg(test)]
-    pub fn test_ack_settle(&mut self, result: MatchResult) {
-        self.settled.push(result);
-    }
-    #[cfg(test)]
-    pub fn test_backend(epoch: u64) -> Self {
-        let (tx, jobs) = mpsc::sync_channel(MAX_JOBS);
-        let (_, rx) = mpsc::sync_channel(MAX_JOBS);
-        Self {
-            epoch,
-            recovery_checked: None,
-            tx: Some(tx),
-            rx: Mutex::new(rx),
-            clients: HashMap::new(),
-            starts: HashMap::new(),
-            settled: Vec::new(),
-            cancelled: Vec::new(),
-            last_presence: Instant::now(),
-            social: Vec::new(),
-            match_requests: Vec::new(),
-            matches: HashMap::new(),
-            pending_ids: HashSet::new(),
-            rejected: HashMap::new(),
-            _test_jobs: Some(Mutex::new(jobs)),
+}
+
+impl<L: JobLink> CareerBackend<L> {
+    fn record(&mut self, kind: RecordKind, result: MatchResult) -> bool {
+        if self.rejected.contains_key(&result.result_id) {
+            return false;
         }
+        if !self.pending_ids.contains(&result.result_id) && self.pending_ids.len() >= 32 {
+            return false;
+        }
+        let accepted = self.link.try_send(Job::Record(Box::new(PendingRecord {
+            kind,
+            result: result.clone(),
+            recovery_allocation: None,
+            recovered_live: false,
+        })));
+        if accepted {
+            self.pending_ids.insert(result.result_id.clone());
+        }
+        if accepted && matches!(kind, RecordKind::Start) {
+            for p in &result.participants {
+                if let Some(id) = &p.profile_id {
+                    self.matches.insert(id.clone(), result.result_id.clone());
+                }
+            }
+        }
+        accepted
     }
+}
+
+impl<L: JobLink> CareerPort for CareerBackend<L> {
     #[cfg(test)]
-    pub fn test_authenticated(
-        &mut self,
-        addr: SocketAddr,
-        profile: ProfileSummary,
-        session_id: &str,
-    ) {
+    fn test_authenticated(&mut self, addr: SocketAddr, profile: ProfileSummary, session_id: &str) {
         let challenge = AuthChallenge {
             public_key: hex(ed25519_dalek::SigningKey::from_bytes(&[7; 32])
                 .verifying_key()
@@ -298,20 +506,28 @@ impl CareerBackend {
         );
     }
     #[cfg(test)]
-    pub fn test_reject_start(&mut self, id: &str, error: &str) {
+    fn test_ack_start(&mut self, id: &str) {
+        self.starts.insert(id.into(), Ok(()));
+    }
+    #[cfg(test)]
+    fn test_ack_settle(&mut self, result: MatchResult) {
+        self.settled.push(result);
+    }
+    #[cfg(test)]
+    fn test_reject_start(&mut self, id: &str, error: &str) {
         self.rejected.insert(id.into(), error.into());
     }
     #[cfg(test)]
-    pub fn test_ack_start(&mut self, id: &str) {
-        self.starts.insert(id.into(), Ok(()));
+    fn test_is_playing(&self, addr: SocketAddr) -> bool {
+        self.clients.get(&addr).is_some_and(|client| client.playing)
     }
-    pub fn enabled(&self) -> bool {
-        self.tx.is_some()
+    fn enabled(&self) -> bool {
+        self.link.enabled()
     }
-    pub fn new_result_id(&self) -> String {
+    fn new_result_id(&self) -> String {
         random_id::<16>()
     }
-    pub fn profile(&self, addr: SocketAddr) -> Option<ProfileSummary> {
+    fn profile(&self, addr: SocketAddr) -> Option<ProfileSummary> {
         let client = self.clients.get(&addr)?;
         (client.profile_ready
             && client.auth.is_some()
@@ -322,7 +538,7 @@ impl CareerBackend {
         .flatten()
     }
     /// Cosmetic authorization expires locally even if the DB worker stops responding.
-    pub fn supporter_aura(&self, addr: SocketAddr) -> Option<shared::supporter::AuraStyle> {
+    fn supporter_aura(&self, addr: SocketAddr) -> Option<shared::supporter::AuraStyle> {
         let client = self.clients.get(&addr)?;
         client.auth.as_ref()?;
         if client.key_checked?.elapsed() >= COSMETIC_CACHE_TTL {
@@ -334,14 +550,14 @@ impl CareerBackend {
         let status = client.view.supporter.as_ref()?;
         authorized_supporter_aura(status, unix_seconds())
     }
-    pub fn authenticated_session(&self, addr: SocketAddr) -> Option<String> {
+    fn authenticated_session(&self, addr: SocketAddr) -> Option<String> {
         let client = self.clients.get(&addr)?;
         if client.key_checked?.elapsed() >= COSMETIC_CACHE_TTL {
             return None;
         }
         Some(client.auth.as_ref()?.session_id.clone())
     }
-    pub fn view(&self, addr: SocketAddr) -> CareerView {
+    fn view(&self, addr: SocketAddr) -> CareerView {
         let mut view = self.clients.get(&addr).map(|c|c.view.clone()).unwrap_or_else(|| CareerView {error:(!self.enabled()).then(||"Career storage is not configured on this server. Guest matches are unranked.".into()),..Default::default()});
         view.storage_enabled = self.enabled();
         if let Some(status) = &mut view.supporter {
@@ -356,32 +572,28 @@ impl CareerBackend {
         }
         view
     }
-    pub fn forget(&mut self, addr: SocketAddr) {
+    fn forget(&mut self, addr: SocketAddr) {
         self.clients.remove(&addr);
     }
-    pub fn touch(&mut self, addr: SocketAddr) {
+    fn touch(&mut self, addr: SocketAddr) {
         if let Some(c) = self.clients.get_mut(&addr) {
             c.touched = Instant::now();
         }
     }
-    pub fn set_playing(&mut self, addr: SocketAddr, playing: bool) {
+    fn set_playing(&mut self, addr: SocketAddr, playing: bool) {
         if let Some(c) = self.clients.get_mut(&addr) {
             c.playing = playing;
         }
     }
-    #[cfg(test)]
-    pub fn test_is_playing(&self, addr: SocketAddr) -> bool {
-        self.clients.get(&addr).is_some_and(|client| client.playing)
-    }
-    pub fn recovery_confirmed_since(&self, since: Instant) -> bool {
+    fn recovery_confirmed_since(&self, since: Instant) -> bool {
         self.recovery_checked.is_some_and(|at| at >= since)
     }
-    pub fn take_match_requests(
+    fn take_match_requests(
         &mut self,
     ) -> Vec<(SocketAddr, u64, shared::match_service::MatchPreference)> {
         std::mem::take(&mut self.match_requests)
     }
-    pub fn gameplay_principal(
+    fn gameplay_principal(
         &self,
         addr: SocketAddr,
     ) -> Option<shared::public_transport::GameplayPrincipal> {
@@ -399,68 +611,40 @@ impl CareerBackend {
             session_nonce: auth.nonce.clone(),
         })
     }
-    pub fn take_cancelled(&mut self) -> Vec<SocketAddr> {
+    fn take_cancelled(&mut self) -> Vec<SocketAddr> {
         std::mem::take(&mut self.cancelled)
     }
 
     /// Ephemeral authenticated messages stay on the game thread, outside SQL.
-    pub fn take_social(&mut self) -> Vec<(SocketAddr, shared::social::SocialRequest)> {
+    fn take_social(&mut self) -> Vec<(SocketAddr, shared::social::SocialRequest)> {
         std::mem::take(&mut self.social)
     }
-    pub fn take_settled(&mut self) -> Vec<MatchResult> {
+    fn take_settled(&mut self) -> Vec<MatchResult> {
         std::mem::take(&mut self.settled)
     }
-    pub fn started(&self, id: &str) -> bool {
+    fn started(&self, id: &str) -> bool {
         matches!(self.starts.get(id), Some(Ok(())))
     }
-    pub fn start_rejected(&self, id: &str) -> Option<String> {
+    fn start_rejected(&self, id: &str) -> Option<String> {
         self.rejected.get(id).cloned()
     }
-    pub fn forget_start(&mut self, id: &str) {
+    fn forget_start(&mut self, id: &str) {
         self.starts.remove(id);
         self.rejected.remove(id);
     }
-    pub fn start_error(&self, id: &str) -> Option<String> {
+    fn start_error(&self, id: &str) -> Option<String> {
         self.starts.get(id).and_then(|v| v.as_ref().err()).cloned()
     }
-    pub fn start(&mut self, result: MatchResult) -> bool {
+    fn start(&mut self, result: MatchResult) -> bool {
         self.record(RecordKind::Start, result)
     }
-    pub fn checkpoint(&mut self, result: MatchResult) -> bool {
+    fn checkpoint(&mut self, result: MatchResult) -> bool {
         self.record(RecordKind::Checkpoint, result)
     }
-    pub fn settle(&mut self, result: MatchResult) -> bool {
+    fn settle(&mut self, result: MatchResult) -> bool {
         self.record(RecordKind::Settle, result)
     }
-    fn record(&mut self, kind: RecordKind, result: MatchResult) -> bool {
-        if self.rejected.contains_key(&result.result_id) {
-            return false;
-        }
-        if !self.pending_ids.contains(&result.result_id) && self.pending_ids.len() >= 32 {
-            return false;
-        }
-        let accepted = self.tx.as_ref().is_some_and(|tx| {
-            tx.try_send(Job::Record(Box::new(PendingRecord {
-                kind,
-                result: result.clone(),
-                recovery_allocation: None,
-                recovered_live: false,
-            })))
-            .is_ok()
-        });
-        if accepted {
-            self.pending_ids.insert(result.result_id.clone());
-        }
-        if accepted && matches!(kind, RecordKind::Start) {
-            for p in &result.participants {
-                if let Some(id) = &p.profile_id {
-                    self.matches.insert(id.clone(), result.result_id.clone());
-                }
-            }
-        }
-        accepted
-    }
-    pub fn handle(&mut self, addr: SocketAddr, request: CareerRequest) {
+    fn handle(&mut self, addr: SocketAddr, request: CareerRequest) {
         if !self.enabled() {
             return;
         }
@@ -540,13 +724,7 @@ impl CareerBackend {
                     return;
                 }
                 c.view.loading = true;
-                if self
-                    .tx
-                    .as_ref()
-                    .unwrap()
-                    .try_send(Job::Login { addr, challenge })
-                    .is_err()
-                {
+                if !self.link.try_send(Job::Login { addr, challenge }) {
                     c.view.error = Some("Account service is busy. Retry shortly.".into());
                     c.view.loading = false;
                 }
@@ -605,19 +783,14 @@ impl CareerBackend {
                     return;
                 };
                 let request_id = action_id(&action);
-                if self
-                    .tx
-                    .as_ref()
-                    .unwrap()
-                    .try_send(Job::Action {
-                        addr,
-                        nonce: session_nonce,
-                        profile_id: profile.profile_id.clone(),
-                        public_key: auth.public_key.clone(),
-                        action,
-                    })
-                    .is_err()
-                {
+                let job = Job::Action {
+                    addr,
+                    nonce: session_nonce,
+                    profile_id: profile.profile_id.clone(),
+                    public_key: auth.public_key.clone(),
+                    action,
+                };
+                if !self.link.try_send(job) {
                     c.view.error = Some("Account service is busy. Retry shortly.".into());
                     c.view.response_id = request_id;
                 }
@@ -627,10 +800,9 @@ impl CareerBackend {
             }
         }
     }
-    pub fn poll(&mut self) {
+    fn poll(&mut self) {
         loop {
-            let reply = { self.rx.lock().expect("career reply receiver").try_recv() };
-            let Ok(reply) = reply else {
+            let Some(reply) = self.link.try_recv() else {
                 break;
             };
             match reply {
@@ -753,7 +925,7 @@ impl CareerBackend {
                         if let (Some(profile), Some(auth)) = (&c.view.profile, &c.auth) {
                             if self.matches.get(&profile.profile_id) == Some(&id) {
                                 c.profile_ready = false;
-                                let _ = self.tx.as_ref().unwrap().try_send(Job::Action {
+                                self.link.try_send(Job::Action {
                                     addr: *addr,
                                     nonce: auth.nonce.clone(),
                                     profile_id: profile.profile_id.clone(),
@@ -832,11 +1004,11 @@ impl CareerBackend {
                     })
                 })
                 .collect();
-            if let Some(tx) = &self.tx {
-                let _ = tx.try_send(Job::Presence(presence));
+            if self.link.enabled() {
+                self.link.try_send(Job::Presence(presence));
                 for (addr, c) in &self.clients {
                     if let (Some(profile), Some(auth)) = (&c.view.profile, &c.auth) {
-                        let _ = tx.try_send(Job::RefreshAccess {
+                        self.link.try_send(Job::RefreshAccess {
                             addr: *addr,
                             nonce: auth.nonce.clone(),
                             public_key: auth.public_key.clone(),
@@ -845,7 +1017,7 @@ impl CareerBackend {
                     }
                     if !c.profile_ready {
                         if let (Some(profile), Some(auth)) = (&c.view.profile, &c.auth) {
-                            let _ = tx.try_send(Job::Action {
+                            self.link.try_send(Job::Action {
                                 addr: *addr,
                                 nonce: auth.nonce.clone(),
                                 profile_id: profile.profile_id.clone(),
@@ -1353,7 +1525,7 @@ mod tests {
         status.equipped_aura = None;
         assert_eq!(authorized_supporter_aura(&status, 100), None);
         let addr = "127.0.0.1:30020".parse().unwrap();
-        let mut backend = CareerBackend::test_backend(9);
+        let mut backend = MemoryCareer::test_backend(9);
         backend.test_authenticated(
             addr,
             ProfileSummary::new("a".repeat(64), "Tester".into()),
@@ -1380,22 +1552,18 @@ mod tests {
     #[test]
     fn revoked_key_refresh_clears_cached_authority_and_cannot_resurrect_via_profile_ready() {
         let addr = "127.0.0.1:30021".parse().unwrap();
-        let mut backend = CareerBackend::test_backend(9);
+        let mut backend = MemoryCareer::test_backend(9);
         backend.test_authenticated(
             addr,
             ProfileSummary::new("a".repeat(64), "Tester".into()),
             "session",
         );
-        let (sender, receiver) = mpsc::sync_channel(2);
-        backend.rx = Mutex::new(receiver);
-        sender
-            .send(Reply::RefreshAccess {
-                addr,
-                nonce: "b".repeat(64),
-                key_active: Some(false),
-                supporter: None,
-            })
-            .unwrap();
+        backend.link.replies.push_back(Reply::RefreshAccess {
+            addr,
+            nonce: "b".repeat(64),
+            key_active: Some(false),
+            supporter: None,
+        });
         backend.poll();
         assert!(backend.authenticated_session(addr).is_none());
         assert!(backend.profile(addr).is_none());
@@ -1407,7 +1575,7 @@ mod tests {
     #[test]
     fn missing_key_refresh_never_extends_authority_during_a_database_outage() {
         let addr = "127.0.0.1:30022".parse().unwrap();
-        let mut backend = CareerBackend::test_backend(9);
+        let mut backend = MemoryCareer::test_backend(9);
         backend.test_authenticated(
             addr,
             ProfileSummary::new("a".repeat(64), "Tester".into()),
@@ -1415,16 +1583,12 @@ mod tests {
         );
         let expired = Instant::now() - COSMETIC_CACHE_TTL;
         backend.clients.get_mut(&addr).unwrap().key_checked = Some(expired);
-        let (sender, receiver) = mpsc::sync_channel(2);
-        backend.rx = Mutex::new(receiver);
-        sender
-            .send(Reply::RefreshAccess {
-                addr,
-                nonce: "b".repeat(64),
-                key_active: None,
-                supporter: None,
-            })
-            .unwrap();
+        backend.link.replies.push_back(Reply::RefreshAccess {
+            addr,
+            nonce: "b".repeat(64),
+            key_active: None,
+            supporter: None,
+        });
         backend.poll();
         assert_eq!(backend.clients[&addr].key_checked, Some(expired));
         assert!(backend.clients[&addr].auth.is_none());
@@ -1435,7 +1599,7 @@ mod tests {
     #[test]
     fn unsigned_cosmetic_equip_never_reaches_persisted_preferences() {
         let addr = "127.0.0.1:30023".parse().unwrap();
-        let mut backend = CareerBackend::test_backend(9);
+        let mut backend = MemoryCareer::test_backend(9);
         backend.test_authenticated(
             addr,
             ProfileSummary::new("a".repeat(64), "Tester".into()),
@@ -1448,16 +1612,7 @@ mod tests {
                 aura: Some(shared::supporter::AuraStyle::Solar),
             },
         );
-        assert!(
-            backend
-                ._test_jobs
-                .as_ref()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .try_recv()
-                .is_err()
-        );
+        assert!(backend.link.jobs.is_empty());
         assert_eq!(backend.supporter_aura(addr), None);
         assert!(
             backend
@@ -1496,7 +1651,7 @@ mod tests {
     #[test]
     fn forged_and_replayed_account_actions_cannot_cancel_queue() {
         let addr = "127.0.0.1:30001".parse().unwrap();
-        let mut backend = CareerBackend::test_backend(9);
+        let mut backend = MemoryCareer::test_backend(9);
         backend.test_authenticated(
             addr,
             ProfileSummary::new("a".repeat(64), "Player".into()),
@@ -1539,7 +1694,7 @@ mod tests {
     #[test]
     fn social_signatures_bind_message_and_session_without_sending_sql_jobs() {
         let addr = "127.0.0.1:30003".parse().unwrap();
-        let mut backend = CareerBackend::test_backend(9);
+        let mut backend = MemoryCareer::test_backend(9);
         backend.test_authenticated(
             addr,
             ProfileSummary::new("a".repeat(64), "Player".into()),
@@ -1603,39 +1758,28 @@ mod tests {
         backend.clients.get_mut(&addr).unwrap().last_request = None;
         backend.handle(addr, sign(CareerAction::Social { request: wrong }, 2));
         assert!(backend.take_social().is_empty());
-        assert!(
-            backend
-                ._test_jobs
-                .as_ref()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .try_recv()
-                .is_err()
-        );
+        assert!(backend.link.jobs.is_empty());
     }
 
     #[test]
     fn late_duplicate_login_ack_cannot_reset_sequence() {
         let addr = "127.0.0.1:30002".parse().unwrap();
-        let mut backend = CareerBackend::test_backend(9);
+        let mut backend = MemoryCareer::test_backend(9);
         backend.test_authenticated(
             addr,
             ProfileSummary::new("a".repeat(64), "Player".into()),
             "session",
         );
-        let (tx, rx) = mpsc::sync_channel(2);
-        backend.rx = Mutex::new(rx);
         let c = backend.clients.get_mut(&addr).unwrap();
         let challenge = c.auth.clone().unwrap();
         c.challenge = Some((challenge.clone(), Instant::now()));
         c.sequence = 42;
-        tx.send(Reply::Login {
+        let login = Reply::Login {
             addr,
             challenge,
             result: Ok(c.view.clone()),
-        })
-        .unwrap();
+        };
+        backend.link.replies.push_back(login);
         backend.poll();
         assert_eq!(backend.clients[&addr].sequence, 42);
     }

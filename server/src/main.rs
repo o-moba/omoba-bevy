@@ -4,6 +4,7 @@ mod balance_probe;
 mod basic_attack;
 mod bots;
 mod career_backend;
+mod career_port;
 mod career_runtime;
 #[cfg(test)]
 mod career_runtime_tests;
@@ -86,6 +87,7 @@ use std::{
 use utility::*;
 use world::*;
 
+pub(crate) use career_port::CareerPort;
 pub(crate) use entities::*;
 pub(crate) use formation::*;
 pub(crate) use game_world::*;
@@ -94,6 +96,7 @@ pub(crate) use hero_stats::StatModifiers;
 pub(crate) use hero_timers::HeroTimers;
 pub(crate) use match_rules::*;
 pub(crate) use runtime::dispatch::*;
+pub(crate) use runtime::ports::*;
 pub(crate) use runtime::*;
 pub(crate) use sim::{cast::*, minions::*, neutrals::*, projectiles::*, towers::*, *};
 pub(crate) use snapshot::*;

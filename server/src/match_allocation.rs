@@ -237,7 +237,9 @@ mod runtime_tests {
                 team_size: 5,
             },
         );
-        rt.career.backend = crate::career_backend::CareerBackend::test_backend(rt.server_epoch);
+        rt.career.backend = Box::new(crate::career_backend::MemoryCareer::test_backend(
+            rt.server_epoch,
+        ));
         let addr = "127.0.0.1:60200".parse().unwrap();
         let profile = shared::career::ProfileSummary::new("a".repeat(64), "Alice".into());
         rt.career
