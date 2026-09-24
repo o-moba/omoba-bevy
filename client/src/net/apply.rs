@@ -591,7 +591,11 @@ fn apply_snapshot_local_player(
         let hero = local_hero_components(local_player_state, your_id);
         let entity = if *visual_mode == PlayerVisualMode::Sprite2d {
             commands
-                .spawn((Transform::from_translation(spawn), Visibility::default(), hero))
+                .spawn((
+                    Transform::from_translation(spawn),
+                    Visibility::default(),
+                    hero,
+                ))
                 .id()
         } else if let Some(scene_handle) = local_scene {
             let mut entity_commands = commands.spawn((
@@ -1682,7 +1686,10 @@ mod tests {
         assert_eq!(apply(&mut app, 2, |_| {}).1, updated(false, false));
         let moved = |value: &mut serde_json::Value| value["players"][0]["x"] = json!(20.0);
         assert_eq!(apply(&mut app, 3, moved).1, updated(true, false));
-        assert_eq!(app.world().get::<Transform>(hero).unwrap().translation.x, 20.0);
+        assert_eq!(
+            app.world().get::<Transform>(hero).unwrap().translation.x,
+            20.0
+        );
 
         app.world_mut()
             .resource_mut::<Messages<UtilityVfx>>()
@@ -1724,6 +1731,60 @@ mod tests {
             apply(&mut app, 7, draft),
             (ApplyOutcome::Draft, LocalHeroApply::Unchanged),
             "nothing left to clear"
+        );
+    }
+
+    // Round changes for the reactions after `ApplySnapshot` (roadmap step 15c):
+    // the teardown gap the combat round reset used to ride out itself.
+
+    #[test]
+    fn teardown_gap_keeps_the_last_round_so_only_the_next_round_is_a_change() {
+        use crate::net::session::CommittedJoin;
+        let (mut app, incoming) = snapshot_app();
+        app.world_mut().resource_mut::<ClientSession>().last_join = Some(CommittedJoin::for_test());
+        incoming.send(admission_snapshot(1, 1, true, None)).unwrap();
+        app.update();
+        drain_session_events(&mut app);
+        let round = |match_id| RoundId {
+            server_epoch: 1,
+            match_id,
+        };
+
+        tear_down(&mut app, TeardownReason::TransportFailure);
+        app.update();
+        // The gap: pollers of `GameStateSnapshot` see zero ids, `net` keeps
+        // the round and announces no change.
+        let meta = app.world().resource::<GameStateSnapshot>().meta;
+        assert_eq!(RoundId::from_meta(&meta), None);
+        assert_eq!(
+            app.world().resource::<NetworkState>().last_round,
+            Some(round(1))
+        );
+        assert!(
+            !drain_session_events(&mut app)
+                .iter()
+                .any(|event| matches!(event, SessionEvent::RoundChanged { .. }))
+        );
+
+        // The reconnect lands straight in the next round (the transport swap
+        // on the same channels, as in the session tests).
+        {
+            let mut session = app.world_mut().resource_mut::<ClientSession>();
+            session.discard_incoming_snapshots = false;
+            session.state = ClientConnectionState::WaitingForServer;
+        }
+        incoming.send(admission_snapshot(2, 1, true, None)).unwrap();
+        app.update();
+        assert_eq!(
+            drain_session_events(&mut app),
+            vec![
+                SessionEvent::Connected,
+                SessionEvent::Joined { your_id: 1 },
+                SessionEvent::RoundChanged {
+                    previous: round(1),
+                    current: round(2),
+                },
+            ]
         );
     }
 

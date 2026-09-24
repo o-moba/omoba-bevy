@@ -1260,21 +1260,18 @@ fn target_selection_keys_obey_modal_context_at_the_ecs_boundary() {
 }
 
 #[test]
-fn round_identity_clears_old_intents_cooldowns_and_queued_casts_but_reconnect_does_not() {
+fn round_change_event_clears_old_intents_cooldowns_and_queued_casts_but_reconnect_events_do_not() {
+    use crate::domain::RoundId;
+    use crate::net::SessionEvent;
     let mut app = App::new();
     app.add_message::<NetworkCommand>()
-        .init_resource::<CombatRoundIdentity>()
+        .add_message::<SessionEvent>()
         .init_resource::<TargetState>()
         .init_resource::<BasicAttackState>()
         .init_resource::<TargetAimPreview>()
         .init_resource::<PendingCast>()
         .init_resource::<LocalCastCooldown>()
         .init_resource::<ActionFeedback>()
-        .insert_resource(GameStateSnapshot {
-            meta: shared::protocol::SnapshotMeta::new(10, 1, 50),
-            state: GameState::Running,
-            ..default()
-        })
         .add_systems(Update, reset_round_input_state);
     app.update();
     let actor = app
@@ -1295,16 +1292,24 @@ fn round_identity_clears_old_intents_cooldowns_and_queued_casts_but_reconnect_do
         target: None,
         approach_announced: true,
     });
-    app.world_mut().resource_mut::<GameStateSnapshot>().meta = default(); // teardown gap
+    // A reconnect to the same round after a teardown: `net` announces no
+    // `RoundChanged` for it (pinned in `net::apply`), so nothing resets.
+    app.world_mut()
+        .write_message(SessionEvent::TransportStarted {
+            addr: "127.0.0.1:4000".into(),
+            offline: false,
+        });
     app.update();
-    app.world_mut().resource_mut::<GameStateSnapshot>().meta =
-        shared::protocol::SnapshotMeta::new(10, 1, 55);
+    app.world_mut().write_message(SessionEvent::Connected);
+    app.world_mut()
+        .write_message(SessionEvent::Joined { your_id: 1 });
     app.update();
     assert_eq!(
         app.world().resource::<LocalCastCooldown>().remaining_secs[3],
         40.0
     );
     assert!(app.world().entity(actor).contains::<MovementTarget>());
+    assert!(app.world().resource::<PendingCast>().request.is_some());
     app.world_mut()
         .resource_mut::<Messages<NetworkCommand>>()
         .write(NetworkCommand::Cast {
@@ -1314,8 +1319,16 @@ fn round_identity_clears_old_intents_cooldowns_and_queued_casts_but_reconnect_do
             },
             slot: 3,
         });
-    app.world_mut().resource_mut::<GameStateSnapshot>().meta =
-        shared::protocol::SnapshotMeta::new(10, 2, 2); // zero snapshot was dropped
+    app.world_mut().write_message(SessionEvent::RoundChanged {
+        previous: RoundId {
+            server_epoch: 10,
+            match_id: 1,
+        },
+        current: RoundId {
+            server_epoch: 10,
+            match_id: 2,
+        },
+    });
     app.update();
     assert_eq!(
         app.world().resource::<LocalCastCooldown>().remaining_secs,

@@ -104,18 +104,30 @@ Snapshot application is a chain of `SnapshotApply` stages
 (`client/src/net/mod.rs`, systems from `apply::snapshot_apply_systems()`),
 each a member of `ClientNetPipeline::ApplySnapshot`, so every
 `.after(ClientNetPipeline::ApplySnapshot)` reader still sees the whole
-application, including the Commands of the entity stage:
+application, including the Commands of every stage (Bevy applies them at a
+sync point after each stage, so a later stage sees what an earlier one
+spawned):
 - `Begin` moves the frame `ingest` staged into `StagedSnapshot`.
 - `Session` marks the session connected and records the snapshot time.
 - `Resources` writes `GameStateSnapshot`, the round and the prematch
-  loadout, and sets the Draft gate. It runs even when the entity work is
-  skipped.
-- `Entities` reconciles the local hero, remote players, projectiles,
-  structures, minions and neutrals. During Draft it only clears the heroes;
-  while the server lists a local hero that has no team and no committed join,
-  it stops before that hero.
-- `Finish` writes `SnapshotApplied { meta, your_id, round, outcome }`
-  (`outcome`: `Full`, `Draft` or `LocalPending`) and clears the staged frame.
+  loadout, and sets the Draft gate. It runs even when the entity stages
+  are skipped.
+- `LocalPlayer` (queries: `Player` ids, the hero `Transform` `With<Player>,
+  Without<MainCamera>`, the camera `Transform` `With<MainCamera>,
+  Without<Player>`): during Draft it despawns every hero, local and remote;
+  otherwise it keeps one local `Player`, applies the server's state (dash
+  acknowledgement, position snap) or spawns the hero and locks the camera.
+  A listed local hero without a team or a committed join closes the gate
+  (`LocalPending`) instead.
+- `RemotePlayers`, `Projectiles`, `Structures`, `Minions`, `Neutrals` run only
+  while the gate is open (`Full`), each with its own filtered queries
+  (`With<RemotePlayer>`, `With<NetworkProjectile>`, ...). Dash VFX are written
+  local first, then remote.
+- `Finish` writes `SnapshotApplied { meta, your_id, round, outcome, local }`
+  (`outcome`: `Full`, `Draft` or `LocalPending`; `local`: `Unchanged`,
+  `Updated { entity, corrected, dashed }`, `Spawned { entity, position,
+  team }` or `Cleared`) and clears the staged frame. Nothing outside the
+  tests reads it yet.
 
 Session lifecycle edges are `SessionEvent` messages: `TransportStarted`,
 `Connected`, `Joined`, `Rejected`, `JoinExhausted`, `Disconnected`, `Left`,
@@ -123,19 +135,34 @@ Session lifecycle edges are `SessionEvent` messages: `TransportStarted`,
 `ClientSession`'s outbox where the edge happens (in plain functions and in
 the systems at the 16-parameter limit alike). `flush_session_events` writes
 the queue as messages at the end of `ApplySnapshot` and again at the end of
-`SessionLifecycle`, after `retry_pending_join`. Systems that react to an
-event in the frame it is written belong in the `SessionReactions` set,
-which runs after `SessionLifecycle` and before the next frame's ingest.
-Code that needs the current state keeps polling `ClientSession`
-(`join_confirmed()`, `is_connected()`, `join_blocked()`). No module outside
-`net` reads the events or `SnapshotApplied` yet; later slices of roadmap
-step 15 move the round reset, the career/social clearing and the screen
-change on leave onto them.
+`SessionLifecycle`, after `retry_pending_join`. Readers:
+
+| Event | Reader | Where it runs |
+| --- | --- | --- |
+| `RoundChanged` | `combat::round_reset::reset_round_input_state` (drops targets, pending casts, cooldowns, queued gameplay commands, move orders) | after `ApplySnapshot`, before `InputContextSet::Modal` |
+| `RoundChanged` | `mobile_controls::read_mobile_controls` (releases held fingers) | `MobileControlsSet::Input`, after `InputContextSet::Resolve` |
+| `ServerScopeReset` | `career::clear_account_on_scope_reset`, `social::clear_on_scope_reset` | `SessionReactions` |
+| `Left` | `frontend::return_home_on_leave` (`PendingScreen(Home)`) | `SessionReactions` |
+
+`SessionReactions` runs after `SessionLifecycle`, so a reaction sees the
+event in the frame it is written and finishes before the next frame's ingest
+(a career view that arrives right after a scope reset lands on a cleared
+client). `RoundChanged` is flushed at the end of `ApplySnapshot`, so its
+readers sit right after that set and clear the old round before this
+frame's input and `SendCommands`. `net` keeps three outside writes in
+`update_session_lifecycle` on purpose: `TeamSelection.team = None` (join
+intent), and for `LeaveMatch` the lobby address from
+`MatchServiceClient::take_return_to_lobby` and the `CareerIdentity` signature
+on `CancelQueue`. Code that needs the current state keeps polling
+`ClientSession` (`join_confirmed()`, `is_connected()`, `join_blocked()`), and
+the round pollers in `shop.rs`, `edge_hud.rs`, `sandbox/mod.rs` and
+`frontend/draft.rs` keep comparing `GameStateSnapshot.meta`, because they
+also react to the zero ids a teardown leaves.
 
 Gameplay input and local prediction live in two module trees that follow
 the `net` pattern: `mod.rs` holds the plugin and re-exports what other
 modules import, so callers keep `crate::combat::X` and `crate::player::X`.
-- `client/src/combat/`: `cooldown` (local cast cooldown mirror), `feedback` (action line), `round_reset` (clear intents on a new round), `selection` (`TargetState`, pointer and nearest-enemy picking), `cast` (`PendingCast`, slot casts, approach), `mobile` (mobile cast and utility), `hotbar` (skill bar UI), `bars` (world HP/mana bars), `marker` (target ring), `targeting` (basic attacks, aim UI, locked target; still reachable as `crate::targeting`).
+- `client/src/combat/`: `cooldown` (local cast cooldown mirror), `feedback` (action line), `round_reset` (clear intents on `SessionEvent::RoundChanged`), `selection` (`TargetState`, pointer and nearest-enemy picking), `cast` (`PendingCast`, slot casts, approach), `mobile` (mobile cast and utility), `hotbar` (skill bar UI), `bars` (world HP/mana bars), `marker` (target ring), `targeting` (basic attacks, aim UI, locked target; still reachable as `crate::targeting`).
 - `client/src/player/`: `input` (desktop and mobile movement input, route planning, viewport picking), `motion` (local motion, jump, gravity, collisions), `animation` (hero animation library, binding, playback, sandbox seek; `register_hero_animation_systems`), `respawn_ui` (respawn countdown).
 
 Presentation is chosen once per run by `PlayerVisualMode` (3D models by
@@ -400,10 +427,11 @@ Ordered by value over cost. Each step is a separate change with the full
 8. Client `net.rs` split into transport, session, commands, ingest, apply
    and interpolation (done, verbatim moves under `client/src/net/`);
    session events instead of cross-module writes are step 15 (in progress:
-   `SessionEvent` with the outbox and its flush, the empty `SessionReactions`
-   set, and `apply_server_snapshot` split into the `SnapshotApply` stages
-   with `SnapshotApplied` are done; the finer entity split, the consumers
-   and the `ClientSession` accessors are next, see
+   `SessionEvent` with the outbox and its flush, `apply_server_snapshot`
+   split into the `SnapshotApply` stages (one per entity kind) with
+   `SnapshotApplied`, and the first consumers (the combat and mobile round
+   resets on `RoundChanged`; career, social and the front end in
+   `SessionReactions`) are done; the `ClientSession` accessors are next, see
    `docs/plans/client-10-15.md`).
 9. One UI kit (theme, widgets, gestures, scroll, actions) and a modal
    registry (pilot done: `client/src/ui/` with theme, tap recognizer, typed

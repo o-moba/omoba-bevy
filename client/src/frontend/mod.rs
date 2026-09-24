@@ -22,7 +22,7 @@ pub mod widgets;
 
 use bevy::prelude::*;
 
-use crate::net::{ClientSession, GameState, GameStateSnapshot};
+use crate::net::{ClientSession, GameState, GameStateSnapshot, SessionEvent, SessionReactions};
 use crate::player::Player;
 
 /// The screen the player is looking at. Menus and the match are mutually
@@ -57,8 +57,9 @@ impl AppScreen {
     }
 }
 
-/// Screen change requested from code that cannot hold `NextState` (network
-/// teardown deep inside `net.rs`, for example).
+/// Screen change requested from code that cannot hold `NextState` (the
+/// reaction to leaving a match, for example); applied at the start of the
+/// next frame's `FrontendSet`.
 #[derive(Resource, Default)]
 pub struct PendingScreen(pub Option<AppScreen>);
 
@@ -93,6 +94,7 @@ impl Plugin for FrontendPlugin {
                     .after(crate::net::ClientNetPipeline::ApplySnapshot)
                     .before(crate::input_context::InputContextSet::Resolve),
             )
+            .add_systems(Update, return_home_on_leave.in_set(SessionReactions))
             .add_plugins((
                 widgets::FrontendWidgetsPlugin,
                 home::HomeScreenPlugin,
@@ -151,6 +153,22 @@ fn apply_pending_screen(
 ) {
     if let Some(screen) = pending.0.take() {
         next.set(screen);
+    }
+}
+
+/// Leaving the match or the queue ([`SessionEvent::Left`]) returns the shell
+/// to Home. Runs in `SessionReactions`, after the lifecycle that queued the
+/// event; `apply_pending_screen` picks the request up next frame.
+pub(crate) fn return_home_on_leave(
+    mut session_events: MessageReader<SessionEvent>,
+    mut pending: ResMut<PendingScreen>,
+) {
+    let mut left = false;
+    for event in session_events.read() {
+        left |= matches!(event, SessionEvent::Left { .. });
+    }
+    if left {
+        pending.0 = Some(AppScreen::Home);
     }
 }
 
@@ -486,6 +504,27 @@ mod tests {
         assert_eq!(
             *app.world().resource::<State<AppScreen>>().get(),
             AppScreen::HeroSelect
+        );
+    }
+
+    #[test]
+    fn leaving_requests_home_and_other_session_events_do_not() {
+        let mut app = App::new();
+        app.init_resource::<PendingScreen>()
+            .add_message::<SessionEvent>()
+            .add_systems(Update, return_home_on_leave);
+        app.world_mut().write_message(SessionEvent::Connected);
+        app.world_mut()
+            .write_message(SessionEvent::ServerScopeReset);
+        app.update();
+        assert!(app.world().resource::<PendingScreen>().0.is_none());
+        app.world_mut().write_message(SessionEvent::Left {
+            returning_to: Some("127.0.0.1:4000".into()),
+        });
+        app.update();
+        assert_eq!(
+            app.world().resource::<PendingScreen>().0,
+            Some(AppScreen::Home)
         );
     }
 
