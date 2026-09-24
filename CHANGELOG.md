@@ -4,6 +4,15 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [0.23.0-rc.6] - 2026-09-24
+
+- Add the fifth class, Warden (wire id `warden`): a melee jungler with Feral Swipe, Barkskin, Hunter's Mark and Primal Maul, 210 base HP and its own growth, claw projectile style and item order.
+- Add the server-authoritative Warden passive Forest Tracker: +35% damage to jungle camps (+15% to bosses), +40% gold and +25% XP per ordinary camp kill.
+- Give each class a primary draft role (Warrior Solo, Mage Mid, Ranger Carry, Cleric Support, Warden Jungle); picking a class in the draft proposes its role without overriding a deliberate choice.
+- Practice bots fill teams as a five-role composition around human picks; the bot Warden clears camps on its own half before joining mid lane.
+- Add a fifth Warden row to the skill icon atlas (original rows unchanged; provenance in `client/assets/ui/skills/PROVENANCE.md`).
+- Clients older than this release decode `warden` as Warrior; ship client and server together.
+
 ## [0.23.0-rc.5] - 2026-09-23
 
 - Add Offline practice from Home: choose a bundled hero/avatar and test 3D movement, class attacks, all four skills and dash/haste without starting or reaching a server.

@@ -2,7 +2,7 @@
 use bevy::prelude::*;
 
 pub(crate) const ATLAS_PATH: &str = "ui/skills/skills-atlas.png";
-const ABILITIES: [&str; 16] = [
+const ABILITIES: [&str; 20] = [
     "shield_bash",
     "battle_rally",
     "heroic_strike",
@@ -19,32 +19,39 @@ const ABILITIES: [&str; 16] = [
     "renew",
     "divine_favor",
     "guardians_blessing",
+    "feral_swipe",
+    "barkskin",
+    "hunters_mark",
+    "primal_maul",
 ];
+const COLUMNS: usize = 4;
+const ROWS: usize = ABILITIES.len() / COLUMNS;
 
 /// Pixel rectangles support any atlas resolution, including odd-sized source art.
 pub(crate) fn icon_rect(ability: &str, size: Vec2) -> Option<Rect> {
     let index = ABILITIES.iter().position(|id| *id == ability)?;
-    let cell = size / 4.0;
-    let min = Vec2::new((index % 4) as f32, (index / 4) as f32) * cell;
+    let cell = size / Vec2::new(COLUMNS as f32, ROWS as f32);
+    let min = Vec2::new((index % COLUMNS) as f32, (index / COLUMNS) as f32) * cell;
     Some(Rect::from_corners(min, min + cell))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    const ATLAS_SIZE: Vec2 = Vec2::new(1254.0, 1568.0);
     #[test]
     fn every_gameplay_ability_has_a_distinct_art_cell() {
         let mut cells = Vec::new();
         for class in shared::HeroClass::ALL {
             for slot in shared::SkillSlot::ALL {
                 let id = shared::ability_for_class_slot(class, slot).id;
-                let rect = icon_rect(id, Vec2::splat(1254.0)).expect(id);
+                let rect = icon_rect(id, ATLAS_SIZE).expect(id);
                 assert!(!cells.contains(&rect));
-                assert!(rect.max.cmple(Vec2::splat(1254.0)).all());
+                assert!(rect.max.cmple(ATLAS_SIZE).all());
                 cells.push(rect);
             }
         }
-        assert_eq!(cells.len(), 16);
+        assert_eq!(cells.len(), shared::HeroClass::ALL.len() * 4);
         assert!(icon_rect("community_future_ability", Vec2::ONE).is_none());
     }
 }

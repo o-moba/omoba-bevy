@@ -1,5 +1,9 @@
 # Feature Inventory
 
+## Five classes and the Warden jungler (0.23.0-rc.6)
+
+A fifth class, **Warden**, completes one class per draft duty: Warrior → Solo (top), Mage → Mid, Ranger → Carry (bot), Cleric → Support (bot), Warden → Jungle. Choosing a class in the draft proposes its role; a deliberately chosen role is kept. Warden is a melee jungler (210 HP, Feral Swipe / Barkskin / Hunter's Mark / Primal Maul) whose server-authoritative passive **Forest Tracker** deals +35% damage to jungle camps (+15% on bosses) and earns +40% gold and +25% XP per camp kill; boss rewards are unchanged because their value is the team buff. Practice bots now fill a team as that composition, skipping classes a human already took; the bot Warden clears its own half's camps and falls back to mid lane when every camp is down. The skill atlas gains a fifth Warden row in the same painted style. See [the balance note](balance-tuning.md#five-classes-and-the-warden-0230-rc6).
+
 ## Offline character practice (0.23.0-rc.5)
 
 Home → Offline practice → choose a bundled avatar/class → Start practice. The 3D client runs a small in-process practice simulation through its normal snapshot/render/input pipeline, with no socket listener or external server. Level six unlocks every skill; four enemy practice heroes include a stationary melee target and moving animation examples, and defeated targets recover after three seconds. Mana regenerates for repeated tests. Basic attacks, class skills and dash/haste use shared definitions. Practice is not full bot matchmaking: there are no lane waves, ranked results, inventory purchases or progression rewards. Leave practice in Game menu restores the saved online server; bundled characters work without Ekza login. Game menu has a fixed × header and fixed navigation footer, with independently scrollable content.
@@ -29,8 +33,7 @@ Canonical version: `0.23.0-rc.3`
 Normal Find match assigns a team and map side automatically. Each assigned team
 can inspect accepted avatar/class choices, choose an intended Solo, Jungle, Mid,
 Carry or Support role, and lock or unlock its choice. Duplicate and composition
-warnings inform the team without banning the overlap needed with four classes
-and five-player teams. The roster scrolls for larger configured teams.
+warnings inform the team without banning duplicate classes or roles. The roster scrolls for larger configured teams.
 
 All required human players lock before the shared three-second countdown. The
 loading screen retains the frozen roster and shows actual readiness. A client
@@ -161,7 +164,7 @@ it can lock distant visible enemies without increasing damage range. Release
 revalidates the exact preview rather than substituting another enemy. Desktop
 mouse targeting remains separate.
 
-All four classes have four illustrated skills. A stationary phone hold opens
+All five classes have four illustrated skills. A stationary phone hold opens
 ability name, description, rank/unlock level, mana cost and cooldown; releasing
 inspection never fires a skill. A quick tap casts, and a deliberate drag aims.
 Desktop slots reuse the same presentation-only art while retaining shortcuts and
@@ -300,6 +303,7 @@ follows.
   killed monsters respawn after 40 seconds. Ordinary camp kills restore 20%
   maximum HP to the living last hitter. Distinct 3D creatures and persistent
   camp markers expose living/depleted locations in desktop and phone UI.
+  The Warden class clears camps faster and earns more from them.
   See [the implementation and verification record](progress/2026-09-11-jungle-camps.md).
 
 - **Local source launch:** `make play` builds locked sources and runs local 3D

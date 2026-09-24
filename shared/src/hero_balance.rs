@@ -13,6 +13,7 @@ pub const fn base_hp(class: HeroClass) -> f32 {
         HeroClass::Mage => 180.0,
         HeroClass::Ranger => 185.0,
         HeroClass::Cleric => 200.0,
+        HeroClass::Warden => 210.0,
     }
 }
 fn growth(level: u32, cap: f32) -> f32 {
@@ -29,6 +30,7 @@ pub fn basic_damage_multiplier(class: HeroClass, level: u32) -> f32 {
             HeroClass::Mage => 1.6,
             HeroClass::Ranger => 1.85,
             HeroClass::Cleric => 1.5,
+            HeroClass::Warden => 1.75,
         },
     )
 }
@@ -40,6 +42,7 @@ pub fn attack_rate_multiplier(class: HeroClass, level: u32) -> f32 {
             HeroClass::Mage => 1.5,
             HeroClass::Ranger => 1.8,
             HeroClass::Cleric => 1.55,
+            HeroClass::Warden => 1.65,
         },
     )
 }

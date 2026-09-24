@@ -493,3 +493,33 @@ fn lethal_posthumous_neutral_hit_still_pays_once_and_waits_for_respawn() {
         Some(now + NEUTRAL_RESPAWN_COOLDOWN)
     );
 }
+
+#[test]
+fn warden_forest_tracker_hits_camps_harder_and_earns_more_from_the_kill() {
+    let now = Instant::now();
+    let mut dealt = Vec::new();
+    let mut progress = Vec::new();
+    for class in [HeroClass::Warrior, HeroClass::Warden] {
+        let (mut players, addr) = player_fixture(class, now);
+        let killer = players[&addr].state.id;
+        let mut camps = camps();
+        let mut buffs = TeamBuffs::default();
+        let id = 9_003;
+        let template = neutral_template(camps[&id].state.camp_type);
+        apply_neutral_damage(&mut players, &mut camps, &mut buffs, id, 10.0, killer, now);
+        dealt.push(template.max_hp - camps[&id].state.hp);
+        apply_neutral_damage(&mut players, &mut camps, &mut buffs, id, 999.0, killer, now);
+        let (gold, _) = shared::jungle::neutral_kill_rewards(
+            class,
+            false,
+            template.kill_gold,
+            template.kill_xp,
+        );
+        assert_eq!(players[&addr].state.gold, STARTING_GOLD + gold);
+        progress.push((players[&addr].state.level, players[&addr].state.xp));
+        assert_eq!((gold > template.kill_gold), class == HeroClass::Warden);
+    }
+    assert!(progress[1] > progress[0], "Warden gains more camp XP");
+    assert_eq!(dealt[0], 10.0);
+    assert!((dealt[1] - 10.0 * shared::jungle::WARDEN_CAMP_DAMAGE_MULTIPLIER).abs() < 0.001);
+}

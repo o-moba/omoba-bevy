@@ -460,7 +460,7 @@ mod tests {
     fn every_class_can_move_cast_attack_and_recover_targets_without_io() {
         for class in HeroClass::ALL {
             let mut sim = joined(class);
-            assert_eq!(sim.players.len(), 5);
+            assert_eq!(sim.players.len(), 1 + HeroClass::ALL.len());
             assert_eq!(sim.players[0].avatar.as_deref(), Some("agnes"));
             let (x, y, z) = (sim.players[1].x, sim.players[1].y, sim.players[1].z - 2.0);
             sim.command(ClientPacket::Transform {

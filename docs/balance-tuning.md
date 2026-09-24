@@ -226,3 +226,29 @@ Map-object settings live in `shared/assets/maps/verdant.json` or a server's
 `OMOBA_MAP_CONFIG`, pinned across rematches. See [map customization](map-customization.md).
 Other authoritative world constants remain in `server/src/balance.rs`; class
 kits in `shared/src/lib.rs`; innate progression in `shared/src/hero_balance.rs`.
+
+## Five classes and the Warden (0.23.0-rc.6)
+
+The Warden fills the Jungle duty. Its duel strength sits deliberately just below
+the Warrior: its value is farming the forest, not winning an equal lane fight.
+Same stationary probe (`OMOBA_BALANCE_REPORT=<file> cargo test -p server
+measured_balance_matrix`), mean TTK in seconds as attacker against all five
+classes:
+
+| Attacker | Level 1 | Level 10 |
+|----------|--------:|---------:|
+| Warrior  | 7.23 | 2.46 |
+| Mage     | 12.25 | 3.30 |
+| Ranger   | 9.72 | 2.86 |
+| Cleric   | 11.73 | 8.42 |
+| Warden   | 8.08 | 3.19 |
+
+All 75 rows per level keep the design bounds: level-one minimum 6.12s and median
+9.51s, level-ten minimum 2.38s.
+
+Jungle economy per clear of one team's three camps (40s respawn): any class
+earns 115 gold and 190 XP; the Warden earns 161 gold and 238 XP and kills each
+camp about 26% faster. One lane wave pays 54 gold and 270 XP per minute, so the
+forest is now the Warden's best income without making it a better lane for
+other classes. Boss rewards are flat for everyone; the Warden only hits bosses
+15% harder. These numbers are beta tuning, not measured human win rates.

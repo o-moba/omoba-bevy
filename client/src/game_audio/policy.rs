@@ -103,7 +103,9 @@ impl AudioCue {
             ProjectileStyle::Holy => Self::Holy,
             ProjectileStyle::CasterBolt => Self::Caster,
             ProjectileStyle::TowerBolt => Self::Tower,
-            ProjectileStyle::Standard | ProjectileStyle::Crescent => Self::Melee,
+            ProjectileStyle::Standard | ProjectileStyle::Crescent | ProjectileStyle::Claw => {
+                Self::Melee
+            }
         }
     }
 }

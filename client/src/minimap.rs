@@ -535,6 +535,7 @@ fn update_minimap_icons_system(
                     Some(shared::HeroClass::Mage) => "M",
                     Some(shared::HeroClass::Cleric) => "C",
                     Some(shared::HeroClass::Ranger) => "R",
+                    Some(shared::HeroClass::Warden) => "J",
                     _ => "W",
                 }
                 .to_owned()

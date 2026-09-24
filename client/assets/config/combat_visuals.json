@@ -6,11 +6,12 @@
     "mage_arcane": {"shape":"arcane","color":[0.48,0.18,1.0,1.0],"scale":1.2,"trail":{"seconds":0.25,"width":0.168,"samples":10},"impact":{"color":[0.65,0.24,1.0,1.0],"scale":1.5,"lifetime":0.55}},
     "cleric_holy": {"shape":"holy","color":[1.0,0.84,0.35,1.0],"scale":1.0,"trail":{"seconds":0.22,"width":0.126,"samples":9},"impact":{"color":[1.0,0.9,0.55,1.0],"scale":1.05,"lifetime":0.42}},
     "warrior_crescent": {"shape":"crescent","color":[0.7,0.9,1.0,1.0],"scale":1.0,"trail":{"seconds":0.1,"width":0.14,"samples":5},"impact":{"color":[1.0,0.72,0.42,1.0],"scale":1.05,"lifetime":0.42}},
+    "warden_claw": {"shape":"crescent","color":[0.55,0.95,0.4,1.0],"scale":0.9,"trail":{"seconds":0.1,"width":0.12,"samples":5},"impact":{"color":[0.6,1.0,0.45,1.0],"scale":1.0,"lifetime":0.4}},
     "caster_bolt": {"shape":"arcane","color":[0.4,0.95,1.0,1.0],"scale":0.7,"trail":{"seconds":0.18,"width":0.07,"samples":7}},
     "tower_bolt": {"shape":"bolt","color":[1.0,0.43,0.24,1.0],"scale":1.4,"trail":{"seconds":0.2,"width":0.14,"samples":8}}
   },
-  "defaults": {"standard":"standard","arrow":"ranger_arrow","arcane":"mage_arcane","holy":"cleric_holy","crescent":"warrior_crescent","caster_bolt":"caster_bolt","tower_bolt":"tower_bolt"},
-  "classes": {"ranger":{"default":"ranger_arrow"},"mage":{"default":"mage_arcane"},"cleric":{"default":"cleric_holy"},"warrior":{"default":"warrior_crescent"}},
+  "defaults": {"standard":"standard","arrow":"ranger_arrow","arcane":"mage_arcane","holy":"cleric_holy","crescent":"warrior_crescent","claw":"warden_claw","caster_bolt":"caster_bolt","tower_bolt":"tower_bolt"},
+  "classes": {"ranger":{"default":"ranger_arrow"},"mage":{"default":"mage_arcane"},"cleric":{"default":"cleric_holy"},"warrior":{"default":"warrior_crescent"},"warden":{"default":"warden_claw"}},
   "avatar_overrides": {},
   "sprite_overrides": {},
   "animation_aliases": {}

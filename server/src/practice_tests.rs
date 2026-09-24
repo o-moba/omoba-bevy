@@ -646,6 +646,8 @@ fn bot_controller_routes_around_real_forest_and_rejects_remote_control() {
         })
         .unwrap();
     rt.structures.clear();
+    // A melee bot must walk around the trunk; long reach could shoot from `from`.
+    rt.players.get_mut(&bot_addr).unwrap().state.hero_class = HeroClass::Warrior;
     for (address, point) in [(bot_addr, from), (addr(1), to)] {
         let p = rt.players.get_mut(&address).unwrap();
         p.state.x = point[0];
@@ -1145,4 +1147,75 @@ fn live_udp_scoreboard_carries_accepted_kills_deaths_assists() {
             .sum::<u32>(),
         1
     );
+}
+
+#[test]
+fn five_bot_teams_fill_every_role_once_around_the_human_pick() {
+    let mut rt = runtime(5);
+    rt.handle_packet(addr(1), join("role-fill"), Instant::now());
+    for team in [Team::Green, Team::Blue] {
+        let mut classes: Vec<_> = rt
+            .players
+            .values()
+            .filter(|p| p.joined && p.state.team == team)
+            .map(|p| p.state.hero_class)
+            .collect();
+        classes.sort_by_key(|class| class.id());
+        classes.dedup();
+        assert_eq!(classes.len(), 5, "{team:?} repeats a class");
+    }
+}
+
+#[test]
+fn jungle_bots_clear_camps_on_their_own_half_for_warden_rewards() {
+    let mut rt = runtime(5);
+    let mut now = Instant::now();
+    rt.handle_packet(addr(1), join("jungle-observer"), now);
+    rt.minions.clear();
+    let wardens: Vec<_> = rt
+        .players
+        .iter()
+        .filter(|(_, p)| p.state.is_bot && p.state.hero_class == HeroClass::Warden)
+        .map(|(a, _)| *a)
+        .collect();
+    assert_eq!(wardens.len(), 2, "one jungler per team");
+    for _ in 0..(45 * 20) {
+        now += Duration::from_millis(50);
+        rt.minions.clear();
+        rt.simulate_bots(now, 0.05);
+        let receipts = simulate_projectiles(
+            &mut rt.players,
+            &mut rt.minions,
+            &mut rt.structures,
+            &mut rt.neutrals,
+            &mut rt.team_buffs,
+            &mut rt.projectiles,
+            &mut rt.game_state,
+            0.05,
+            now,
+        );
+        rt.combat_log.extend(now, receipts);
+        simulate_neutrals(&mut rt.players, &mut rt.neutrals, &rt.game_state, 0.05, now);
+    }
+    for address in wardens {
+        let warden = &rt.players[&address].state;
+        let own = spawn_position_for_team(&rt.map_layout, warden.team);
+        let enemy_team = match warden.team {
+            Team::Green => Team::Blue,
+            Team::Blue => Team::Green,
+        };
+        let enemy = spawn_position_for_team(&rt.map_layout, enemy_team);
+        let cleared_own_half = rt.neutrals.values().any(|n| {
+            !n.state.camp_type.is_boss()
+                && n.dead_until.is_some()
+                && (n.anchor.x - own.x).hypot(n.anchor.z - own.z)
+                    < (n.anchor.x - enemy.x).hypot(n.anchor.z - enemy.z)
+        });
+        assert!(
+            cleared_own_half,
+            "{:?} jungler cleared nothing",
+            warden.team
+        );
+        assert!(warden.gold > shared::shop::STARTING_GOLD && warden.xp > 0);
+    }
 }

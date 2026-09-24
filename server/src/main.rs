@@ -3051,6 +3051,17 @@ fn apply_neutral_damage(
     if neutral.dead_until.is_some() || neutral.state.hp <= 0.0 {
         return None;
     }
+    // Forest Tracker: the attacker's class scales damage against monsters.
+    let damage = players
+        .values()
+        .find(|player| player.state.id == attacker_player_id)
+        .map_or(damage, |player| {
+            damage
+                * shared::jungle::neutral_damage_multiplier(
+                    player.state.hero_class,
+                    neutral.state.camp_type.is_boss(),
+                )
+        });
     let before = neutral.state.hp;
     neutral.state.hp = (before - damage).max(0.0);
     if players.values().any(|player| {
@@ -3148,9 +3159,15 @@ fn award_neutral_kill_to_player(
     let rewards = neutral_template(camp_type);
     for player in players.values_mut() {
         if player.state.id == killer_id {
-            award_gold(player, rewards.kill_gold);
+            let (gold, xp) = shared::jungle::neutral_kill_rewards(
+                player.state.hero_class,
+                camp_type.is_boss(),
+                rewards.kill_gold,
+                rewards.kill_xp,
+            );
+            award_gold(player, gold);
             if player.sandbox.is_none() {
-                grant_player_xp(&mut player.state, rewards.kill_xp);
+                grant_player_xp(&mut player.state, xp);
             }
             if !camp_type.is_boss() && player.state.hp > 0.0 {
                 player.state.hp = (player.state.hp

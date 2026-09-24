@@ -945,6 +945,7 @@ mod tests {
                 shared::HeroClass::Mage => 1.5,
                 shared::HeroClass::Ranger => 1.8,
                 shared::HeroClass::Cleric => 1.55,
+                shared::HeroClass::Warden => 1.65,
             };
             assert!((duration - base / (rate * 1.12)).abs() < 0.0001);
         }
