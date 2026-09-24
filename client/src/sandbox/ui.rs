@@ -1,3 +1,4 @@
+#[cfg(feature = "qa")]
 mod qa;
 use super::*;
 use crate::frontend::widgets::{self as w, ButtonKind};
@@ -275,6 +276,7 @@ struct Body;
 struct Overlay;
 
 pub(super) fn install(app: &mut App) {
+    #[cfg(feature = "qa")]
     qa::install(app);
     app.add_systems(
         Update,

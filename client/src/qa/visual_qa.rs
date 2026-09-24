@@ -60,11 +60,11 @@ impl Plugin for VisualQaPlugin {
             return;
         };
         if std::env::var("OMOBA_VISUAL_QA_SCENARIO").is_ok_and(|value| value == "beta-ui") {
-            app.add_plugins(crate::beta_ui_qa::BetaUiQaPlugin);
+            app.add_plugins(super::beta_ui_qa::BetaUiQaPlugin);
             return;
         }
         if std::env::var("OMOBA_VISUAL_QA_SCENARIO").is_ok_and(|value| value == "navigation") {
-            app.add_plugins(crate::navigation_qa::NavigationQaPlugin);
+            app.add_plugins(super::navigation_qa::NavigationQaPlugin);
             return;
         }
         if std::env::var("OMOBA_VISUAL_QA_SCENARIO").is_ok_and(|value| {
