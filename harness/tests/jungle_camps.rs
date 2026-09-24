@@ -53,6 +53,19 @@ impl LaneRewards {
             .checked_sub(self.rewarded.len() as u32 * 90)
             .expect("observed lane kills cannot exceed awarded XP")
     }
+
+    /// Every observed lane kill is subtracted above; a kill whose receipt this
+    /// bot never saw (team sight ended in the same tick, or a buffered
+    /// snapshot was drained while catching up) still paid the same 90, so the
+    /// jungle share is what is left after whole minion rewards. A wrong camp
+    /// reward changes the remainder and cannot hide inside a multiple of 90.
+    fn assert_jungle_xp(&self, player: &harness::PlayerState, expected: u32, what: &str) {
+        let paid = self.jungle_xp(player);
+        assert!(
+            paid >= expected && (paid - expected).is_multiple_of(90),
+            "{what}: jungle xp {paid} is not {expected} plus whole lane rewards"
+        );
+    }
 }
 
 #[test]
@@ -141,10 +154,10 @@ fn both_teams_farm_real_camps_and_observe_same_id_respawn_after_forty_seconds() 
                 );
             }
             if first_death[index].is_none() && mob.is_none() {
-                assert_eq!(
-                    lane_rewards[index].jungle_xp(me),
+                lane_rewards[index].assert_jungle_xp(
+                    me,
                     55,
-                    "one last hit grants exactly Spitter XP after accounted lane rewards"
+                    "one last hit grants exactly Spitter XP after accounted lane rewards",
                 );
                 assert!(me.gold >= first_gold[index] + 35);
                 first_death[index] = Some(Instant::now());
@@ -157,10 +170,10 @@ fn both_teams_farm_real_camps_and_observe_same_id_respawn_after_forty_seconds() 
             }
             if let Some(dead_at) = first_death[index] {
                 if !respawned[index] {
-                    assert_eq!(
-                        lane_rewards[index].jungle_xp(me),
+                    lane_rewards[index].assert_jungle_xp(
+                        me,
                         55,
-                        "absent camp cannot pay repeated rewards, even while lanes award XP"
+                        "absent camp cannot pay repeated rewards, even while lanes award XP",
                     );
                     if let Some(mob) = mob {
                         assert!(
@@ -180,10 +193,10 @@ fn both_teams_farm_real_camps_and_observe_same_id_respawn_after_forty_seconds() 
                         continue;
                     }
                 } else if mob.is_none() {
-                    assert_eq!(
-                        lane_rewards[index].jungle_xp(me),
+                    lane_rewards[index].assert_jungle_xp(
+                        me,
                         110,
-                        "two Spitters grant exactly 110 jungle XP independently of lane kills"
+                        "two Spitters grant exactly 110 jungle XP independently of lane kills",
                     );
                     assert!(
                         me.level >= 2,

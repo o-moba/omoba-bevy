@@ -803,6 +803,11 @@ mod tests {
     /// requires the rest, so fill them the way an idle server would.
     fn snapshot_fixture(mut raw: serde_json::Value) -> ServerPacket {
         let fill = |entries: &mut serde_json::Value, defaults: &[(&str, serde_json::Value)]| {
+            // Indexing a missing key inserts `null`; the wire format wants an
+            // empty list there (and `players` has no serde default).
+            if entries.is_null() {
+                *entries = serde_json::json!([]);
+            }
             for entry in entries.as_array_mut().into_iter().flatten() {
                 for (key, value) in defaults {
                     if entry.get(key).is_none() {
