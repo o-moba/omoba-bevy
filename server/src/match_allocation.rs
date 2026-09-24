@@ -405,6 +405,11 @@ mod runtime_tests {
             rt.rules.debug_commands,
             "worker practice keeps Practice rules"
         );
+        assert_eq!(
+            rt.debug_access(),
+            shared::debug::DebugAccess::default(),
+            "a worker round refuses the whole debug family"
+        );
 
         rt.handle_packet(addr, ClientPacket::SetGodMode { enabled: true }, now);
         rt.handle_packet(addr, ClientPacket::SetSpeedBoost { enabled: true }, now);

@@ -1344,6 +1344,31 @@ fn sandbox_clear_duel_and_roster_replace_the_practice_bots() {
 }
 
 #[test]
+fn an_unknown_practice_kind_from_a_newer_client_is_ignored() {
+    let (mut rt, _clock, transport) = memory_runtime(2);
+    transport.push_inbound(addr(1), serde_json::to_vec(&join("newer")).unwrap());
+    rt.prepare_tick();
+    let roster = bots_of(&rt);
+    assert_eq!(roster.len(), 3);
+    // It decodes (as `PracticeCommand::Unsupported`) instead of failing the
+    // datagram, and changes nothing.
+    transport.push_inbound(
+        addr(1),
+        br#"{"type":"practice","command":{"kind":"spawn_turret","hp":900}}"#.to_vec(),
+    );
+    rt.prepare_tick();
+    assert_eq!(bots_of(&rt), roster);
+    assert!(!rt.bots.sandbox, "the standard roster still refills");
+    // The same datagram path still runs a known kind.
+    transport.push_inbound(
+        addr(1),
+        br#"{"type":"practice","command":{"kind":"clear_bots"}}"#.to_vec(),
+    );
+    rt.prepare_tick();
+    assert!(bots_of(&rt).is_empty());
+}
+
+#[test]
 fn all_practice_bots_leave_spawn_and_advance_without_nearby_enemies() {
     let mut rt = runtime(5);
     let mut now = Instant::now();

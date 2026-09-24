@@ -10,7 +10,7 @@ maintainers are working through. Feature-level documentation lives in
 
 | Crate | Role | Depends on |
 | --- | --- | --- |
-| `shared` (MPL) | The gameplay model both sides agree on: hero classes and ability kits, hero growth, items, map geometry and navigation, the wire protocol, prematch/draft, social/career/account contracts, sandbox and practice commands. Per-class and per-item data is JSON in `shared/assets/catalog/`, embedded and validated at startup (`shared::catalog`). No Bevy, no I/O in the model itself. | serde |
+| `shared` (MPL) | The gameplay model both sides agree on: hero classes and ability kits, hero growth, items, map geometry and navigation, the wire protocol, prematch/draft, social/career/account contracts, the debug command family (`shared::debug`) and the Combat Test sandbox protocol, and the pure bot planners (`shared::progression`, `shop::plan_purchases`). Per-class and per-item data is JSON in `shared/assets/catalog/`, embedded and validated at startup (`shared::catalog`). No Bevy, no I/O in the model itself. | serde |
 | `server` (AGPL) | The authoritative simulation and UDP endpoint: match lifecycle, bots, combat, shop, career settlement, public transport signing, allocation workers. Binary only. | shared, passport, career-store |
 | `career-store` (AGPL) | Trusted career persistence (Postgres, migrations) and the bounded queue policy, linked by the server and the account API without the engine. | shared, sqlx |
 | `client` (MPL) | The Bevy game: networking, prediction, presentation (2D sprites and 3D models), UI, mobile input, offline practice, QA harnesses (`qa` feature, on by default). | shared, passport, bevy, ekza-bevy-sdk |
@@ -243,13 +243,16 @@ advances by its own scaled `dt`. A tick is:
    whole dispatcher: `Leave`, the career-flow `RequestRematch`, `Practice`
    and `Sandbox` first, then a paused sandbox swallowing movement and
    combat, then one handler per variant in `runtime/handlers/` (`join.rs`,
-   `movement.rs`, `combat.rs`, `utility.rs`, `shop.rs`, `debug.rs`,
-   `session.rs`; each `ServerRuntime::handle_<variant>`). A handler returns
-   `ControlFlow<()>`: `Continue` runs the dispatcher's post-command tail
-   (endpoint touch, sandbox roster, practice bots, prematch, round start,
-   career registration), `Break` skips it. The wall-clock `dt` is clamped to
-   100 ms and, in the Combat Sandbox, replaced by the sandbox's virtual
-   clock.
+   `movement.rs`, `combat.rs`, `utility.rs`, `shop.rs`, `session.rs`, and
+   `tools.rs` for the Combat Test `Sandbox`; each
+   `ServerRuntime::handle_<variant>`). The debug packets (`Practice`,
+   `SetGodMode`, `SetSpeedBoost`) keep their arms and become a
+   `DebugCommand` for `ServerRuntime::handle_debug` (see "Debug commands"
+   below). A handler returns `ControlFlow<()>`: `Continue` runs the
+   dispatcher's post-command tail (endpoint touch, sandbox roster, practice
+   bots, prematch, round start, career registration), `Break` skips it.
+   The wall-clock `dt` is clamped to 100 ms and, in the Combat Sandbox,
+   replaced by the sandbox's virtual clock.
 2. `ServerRuntime::tick(now, dt)` (`runtime/tick.rs`): mana regeneration
    (`sim::regenerate_mana`), the minion-targeted projectile pass, then
    formation (`formation`), bots, and the `sim` modules (`minions`, `towers`,
@@ -324,6 +327,58 @@ code read the field they need; a rule that combines with a runtime
 condition (a worker allocation, the sandbox being enabled, a
 prematch-capable join) keeps that condition at the site. The table of
 values per mode is pinned by `match_rules::tests::rules_table_per_mode`.
+
+## Debug commands
+
+Developer and practice commands form two families, kept apart on purpose.
+
+- **The debug command family** (`shared/src/debug.rs`):
+  `DebugCommand { GodMode(bool), SpeedBoost(bool), Practice(PracticeCommand) }`
+  is an in-process type without serde derives. `to_packet` and
+  `from_packet` map it onto the `SetGodMode`, `SetSpeedBoost` and `Practice`
+  packets, which stay its wire encoding forever: `ClientPacket` rejects
+  unknown tags, so a new `{"type":"debug"}` would be dropped by an old
+  server. `PracticeCommand` decodes an unknown `kind` as `Unsupported`,
+  which every host ignores, so new practice commands are additive.
+  `DebugAccess { toggles, practice }` says what a match accepts;
+  `DebugAccess::for_match_mode` derives it from the snapshot's `match_mode`
+  (`dev`: the toggles; `practice` and `offline_practice`: both; anything
+  else: neither). `DUMMY_MAX_HP`, `DUMMY_DISTANCE` and
+  `OFFLINE_PRACTICE_MODE` live here too; `shared::practice` keeps the
+  command type and the duel limits and is re-exported from `shared::debug`.
+- **Server** (`server/src/debug/`): `ServerRuntime::debug_access()` is
+  `toggles: rules.debug_commands`, `practice: rules.fills_with_bots`, both
+  only without a worker allocation (a worker round fixes its durable
+  ruleset at round start). A test pins it to
+  `DebugAccess::for_match_mode(rules.mode_id())` for every mode.
+  `ServerRuntime::handle_debug(addr, command, now)` is the one entry point:
+  `toggles.rs` writes `god_mode` (plus `infinite_resource` outside Combat
+  Test) and `move_speed_mult`; `practice.rs` restores the roster, clears the
+  bots, spawns a dummy or starts a duel, on top of the roster primitives in
+  `bots.rs` (`spawn_bot`, `remove_bot`, `remove_all_bots`, `place_dummy`).
+  The dispatcher converts the packet with `DebugCommand::from_packet` in the
+  arms the packets always had: `Practice` before the paused-sandbox gate on
+  the wall clock (always `Break`, and it touches the endpoint even when
+  refused), the toggles after it on the simulation clock (`Break` when
+  refused or not joined, `Continue` once applied).
+- **Offline** (`client/src/net/offline.rs`) implements the same commands in
+  its own simulation: a ring roster instead of lane bots, god mode as a
+  local flag, the speed boost ignored.
+- **Bot planners** for every host that levels or equips a hero without a
+  player: `shared::progression::skill_upgrade_order` (the ultimate first
+  once unlocked, then Q, W, E) and `shared::shop::plan_purchases` (greedy
+  in the class's recommended order). Server lane bots and the practice
+  duelist apply them through the ordinary upgrade and purchase paths
+  (`bots::auto_rank_skills`, `bots::auto_shop`); the offline duel and the
+  harness bots (`bot_ai::choose_shop_item`) use the same plans.
+- **Combat Test** (`shared::sandbox`, `server/src/sandbox.rs`,
+  `runtime/handlers/tools.rs`) is its own protocol: acknowledged,
+  sequenced and scoped to an epoch, applying a whole `SandboxConfig` to
+  fixed actors on a virtual clock, dev and loopback only. Offline cannot
+  host it.
+- The client still keeps its own toggle state and sends the packets
+  directly; one `DebugToggles` resource and one tools page driven by
+  `DebugAccess` are roadmap slices 11d and 11e.
 
 ## Protocol rules
 
@@ -448,7 +503,12 @@ Ordered by value over cost. Each step is a separate change with the full
     complete; the optional slices (store builds without QA, migrating
     imports off the re-export shims) are listed in
     `docs/plans/client-10-15.md`.
-11. One debug tooling family shared by Combat Test, practice and offline.
+11. One debug tooling family shared by Combat Test, practice and offline
+    (in progress: the toggles refuse worker-allocated rounds; `shared::debug`
+    with `DebugCommand` and `DebugAccess`, the server's `debug/` module with
+    `handle_debug` and `debug_access`, and the shared bot planners
+    `skill_upgrade_order` and `plan_purchases` are done; the client half,
+    one toggles resource and one tools page, is next).
 12. Data-driven hero and item catalogs (done: `shared/assets/catalog/`
     `heroes.json` and `items.json`, loaded and validated once by
     `shared::catalog`; the accessors keep their names and signatures, the

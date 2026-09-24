@@ -4,6 +4,7 @@ use std::net::SocketAddr;
 use std::ops::ControlFlow;
 use std::time::{Duration, Instant};
 
+use shared::debug::DebugCommand;
 use shared::wire::ClientPacket;
 
 use crate::runtime::ServerRuntime;
@@ -243,7 +244,7 @@ impl ServerRuntime {
             ClientPacket::RequestRematch if self.career_flow_active() => {
                 self.handle_career_rematch(addr, wall_now)
             }
-            ClientPacket::Practice { command } => self.handle_practice(addr, command, wall_now),
+            ClientPacket::Practice { .. } => self.dispatch_debug(addr, &packet, wall_now),
             ClientPacket::Sandbox { request } => {
                 self.handle_sandbox_packet(addr, request, wall_now)
             }
@@ -316,9 +317,8 @@ impl ServerRuntime {
             ),
             ClientPacket::Ping => self.handle_ping(addr, now),
             ClientPacket::RequestRematch => self.handle_request_rematch(addr, now),
-            ClientPacket::SetGodMode { enabled } => self.handle_set_god_mode(addr, enabled, now),
-            ClientPacket::SetSpeedBoost { enabled } => {
-                self.handle_set_speed_boost(addr, enabled, now)
+            ClientPacket::SetGodMode { .. } | ClientPacket::SetSpeedBoost { .. } => {
+                self.dispatch_debug(addr, &packet, now)
             }
             ClientPacket::UpgradeSkill { slot } => self.handle_upgrade_skill(addr, slot, now),
             ClientPacket::BuyItem {
@@ -344,5 +344,19 @@ impl ServerRuntime {
         self.tick_prematch(now);
         self.track_round_start(now);
         self.register_career_participant(addr);
+    }
+
+    /// A debug-family packet (`SetGodMode`, `SetSpeedBoost`, `Practice`) as
+    /// its `DebugCommand`, run by `handle_debug` on the clock of the arm that
+    /// calls it. Any other packet carries no debug command and is dropped.
+    fn dispatch_debug(
+        &mut self,
+        addr: SocketAddr,
+        packet: &ClientPacket,
+        now: Instant,
+    ) -> ControlFlow<()> {
+        DebugCommand::from_packet(packet).map_or(ControlFlow::Break(()), |command| {
+            self.handle_debug(addr, command, now)
+        })
     }
 }
