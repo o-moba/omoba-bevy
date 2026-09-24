@@ -149,8 +149,18 @@ tests for these live under `server/src/tests/`.
 
 Bots are ordinary `ConnectedPlayer`s on unspecified IPv6 addresses; their
 addresses never accept network commands. Practice, development and release
-modes differ in team assignment, bot filling, debug commands and career
-credit.
+modes differ in team assignment, match start, bot filling, debug commands
+and career credit; `match_rules::MatchRules` is the one place that turns the
+mode into decisions. `MatchConfig` is the parsed input (`OMOBA_MATCH_MODE`,
+`OMOBA_TEAM_SIZE` or the worker manifest); `MatchRules::for_mode` derives
+one plain value per decision (`team_assignment`, `start`, `prematch_roster`,
+`fills_with_bots`, `debug_commands`, `combat_sandbox_allowed`,
+`career_credit`, `local_results`, `career_flow`) and `ServerRuntime.rules`
+holds it. The dispatcher, formation, bots, prematch, sandbox and career
+code read the field they need; a rule that combines with a runtime
+condition (a worker allocation, the sandbox being enabled, a
+prematch-capable join) keeps that condition at the site. The table of
+values per mode is pinned by `match_rules::tests::rules_table_per_mode`.
 
 ## Protocol rules
 
@@ -213,8 +223,9 @@ Ordered by value over cost. Each step is a separate change with the full
    overlay and one set of formulas); snapshot redaction through
    `public_view` (done: non-owners receive the private economy and request
    marks blanked). Step complete.
-7. Match rules as one policy object; career, transport and clock behind
-   traits.
+7. Match rules as one policy object (done: `match_rules.rs`, `MatchRules`
+   derived once from the mode, no `mode ==` outside the startup banner);
+   career, transport and clock behind traits (open).
 8. Client `net.rs` split into transport, session, commands, ingest, apply
    and interpolation (done, verbatim moves under `client/src/net/`);
    session events instead of cross-module writes (`SessionEvent`,
