@@ -55,8 +55,8 @@ fn select(role: Role, class: HeroClass) -> PrematchAction {
 fn view(rt: &ServerRuntime, addr: SocketAddr, now: Instant) -> PrematchSnapshot {
     snapshot(
         &rt.prematch,
-        &rt.players,
-        &rt.players[&addr],
+        &rt.world.players,
+        &rt.world.players[&addr],
         rt.match_config,
         now,
     )
@@ -68,20 +68,20 @@ fn automatic_teams_and_opt_in_draft_work_in_all_modes_legacy_remains_inert() {
         let (mut rt, now) = fixture(mode, 2);
         join(&mut rt, address(1), "one", now, true);
         join(&mut rt, address(2), "two", now, true);
-        assert_eq!(rt.players[&address(1)].state.team, Team::Green);
-        assert_eq!(rt.players[&address(2)].state.team, Team::Blue);
+        assert_eq!(rt.world.players[&address(1)].state.team, Team::Green);
+        assert_eq!(rt.world.players[&address(2)].state.team, Team::Blue);
         assert_eq!(view(&rt, address(1), now).phase, PrematchPhase::Draft);
         assert!(rt.match_started_at.is_none());
     }
     let (mut rt, now) = fixture(MatchMode::Dev, 2);
     join(&mut rt, address(1), "old", now, false);
-    assert_eq!(rt.players[&address(1)].state.team, Team::Blue);
-    assert_eq!(rt.game_state, GameState::Running);
+    assert_eq!(rt.world.players[&address(1)].state.team, Team::Blue);
+    assert_eq!(rt.world.game_state, GameState::Running);
     assert!(
         snapshot(
             &rt.prematch,
-            &rt.players,
-            &rt.players[&address(1)],
+            &rt.world.players,
+            &rt.world.players[&address(1)],
             rt.match_config,
             now
         )
@@ -113,7 +113,7 @@ fn two_peers_share_selection_countdown_and_wait_for_every_asset_ack() {
     let row = peer
         .players
         .iter()
-        .find(|p| p.player_id == rt.players[&address(1)].state.id)
+        .find(|p| p.player_id == rt.world.players[&address(1)].state.id)
         .unwrap();
     assert_eq!(row.role, Role::Jungle);
     assert_eq!(row.hero_class, HeroClass::Mage);
@@ -157,9 +157,12 @@ fn two_peers_share_selection_countdown_and_wait_for_every_asset_ack() {
         PrematchAction::Loaded,
         now + Duration::from_secs(3),
     );
-    assert!(matches!(rt.game_state, GameState::Running));
+    assert!(matches!(rt.world.game_state, GameState::Running));
     assert!(rt.match_started_at.is_some());
-    assert_eq!(rt.players[&address(1)].state.hero_class, HeroClass::Mage);
+    assert_eq!(
+        rt.world.players[&address(1)].state.hero_class,
+        HeroClass::Mage
+    );
     send(
         &mut rt,
         address(1),
@@ -167,7 +170,10 @@ fn two_peers_share_selection_countdown_and_wait_for_every_asset_ack() {
         select(Role::Solo, HeroClass::Warrior),
         now + Duration::from_secs(3),
     );
-    assert_eq!(rt.players[&address(1)].state.hero_class, HeroClass::Mage);
+    assert_eq!(
+        rt.world.players[&address(1)].state.hero_class,
+        HeroClass::Mage
+    );
 }
 #[test]
 fn stale_namespace_sequence_generation_and_unknown_avatar_preserve_choice() {
@@ -188,7 +194,10 @@ fn stale_namespace_sequence_generation_and_unknown_avatar_preserve_choice() {
         select(Role::Solo, HeroClass::Warrior),
         now,
     );
-    assert_eq!(rt.players[&address(1)].state.hero_class, HeroClass::Mage);
+    assert_eq!(
+        rt.world.players[&address(1)].state.hero_class,
+        HeroClass::Mage
+    );
     for (epoch, mat, requested_generation) in [
         (rt.server_epoch + 1, rt.match_id, generation),
         (rt.server_epoch, rt.match_id + 1, generation),
@@ -208,13 +217,16 @@ fn stale_namespace_sequence_generation_and_unknown_avatar_preserve_choice() {
             now,
         );
     }
-    assert_eq!(rt.players[&address(1)].draft.request_id, 1);
+    assert_eq!(rt.world.players[&address(1)].draft.request_id, 1);
     let mut action = select(Role::Solo, HeroClass::Warrior);
     if let PrematchAction::Select { avatar, .. } = &mut action {
         *avatar = Some("unregistered-invalid-model".into());
     }
     send(&mut rt, address(1), 2, action, now);
-    assert_eq!(rt.players[&address(1)].state.hero_class, HeroClass::Mage);
+    assert_eq!(
+        rt.world.players[&address(1)].state.hero_class,
+        HeroClass::Mage
+    );
     assert!(view(&rt, address(1), now).error.is_some());
 }
 #[test]
@@ -222,7 +234,7 @@ fn dropout_cancels_countdown_and_reconnect_preserves_identity_but_requires_lock_
     let (mut rt, now) = fixture(MatchMode::Release, 1);
     join(&mut rt, address(1), "one", now, true);
     join(&mut rt, address(2), "two", now, true);
-    let identity = rt.players[&address(2)].state.id;
+    let identity = rt.world.players[&address(2)].state.id;
     for i in 1..=2 {
         send(
             &mut rt,
@@ -233,7 +245,7 @@ fn dropout_cancels_countdown_and_reconnect_preserves_identity_but_requires_lock_
         );
     }
     let generation = rt.prematch.generation;
-    rt.players.get_mut(&address(1)).unwrap().last_seen = now + Duration::from_secs(6);
+    rt.world.players.get_mut(&address(1)).unwrap().last_seen = now + Duration::from_secs(6);
     rt.maintain_roster(now + Duration::from_secs(6));
     rt.tick_prematch(now + Duration::from_secs(6));
     assert_eq!(
@@ -249,9 +261,9 @@ fn dropout_cancels_countdown_and_reconnect_preserves_identity_but_requires_lock_
         true,
     );
     rt.tick_prematch(now + Duration::from_secs(6));
-    assert_eq!(rt.players[&address(3)].state.id, identity);
-    assert!(!rt.players[&address(1)].draft.locked);
-    assert!(!rt.players[&address(3)].draft.locked);
+    assert_eq!(rt.world.players[&address(3)].state.id, identity);
+    assert!(!rt.world.players[&address(1)].draft.locked);
+    assert!(!rt.world.players[&address(3)].draft.locked);
 }
 #[test]
 fn practice_bots_auto_ready_and_loading_timeout_returns_to_draft() {
@@ -279,7 +291,7 @@ fn practice_bots_auto_ready_and_loading_timeout_returns_to_draft() {
     assert_eq!(state.phase, PrematchPhase::Draft);
     assert!(state.generation > generation);
     assert!(state.error.unwrap().contains("timed out"));
-    assert!(!rt.players[&address(1)].draft.locked);
+    assert!(!rt.world.players[&address(1)].draft.locked);
 }
 #[test]
 fn real_udp_peers_negotiate_and_replicate_draft_without_client_fixtures() {
@@ -297,10 +309,10 @@ fn real_udp_peers_negotiate_and_replicate_draft_without_client_fixtures() {
             .unwrap();
     }
     let deadline = Instant::now() + Duration::from_secs(1);
-    while joined_count(&rt.players) < 2 && Instant::now() < deadline {
+    while joined_count(&rt.world.players) < 2 && Instant::now() < deadline {
         rt.receive_packets();
     }
-    assert_eq!(joined_count(&rt.players), 2);
+    assert_eq!(joined_count(&rt.world.players), 2);
     let a = peers[0].local_addr().unwrap();
     let b = peers[1].local_addr().unwrap();
     let req = PrematchRequest {
@@ -317,7 +329,7 @@ fn real_udp_peers_negotiate_and_replicate_draft_without_client_fixtures() {
         )
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(1);
-    while rt.players[&a].draft.request_id < 1 && Instant::now() < deadline {
+    while rt.world.players[&a].draft.request_id < 1 && Instant::now() < deadline {
         rt.receive_packets();
     }
     rt.last_snapshot_at = now - Duration::from_secs(1);
@@ -333,12 +345,12 @@ fn real_udp_peers_negotiate_and_replicate_draft_without_client_fixtures() {
     else {
         panic!("authoritative draft snapshot missing")
     };
-    assert_eq!(your_id, rt.players[&b].state.id);
+    assert_eq!(your_id, rt.world.players[&b].state.id);
     assert!(
         draft
             .players
             .iter()
-            .any(|p| p.player_id == rt.players[&a].state.id
+            .any(|p| p.player_id == rt.world.players[&a].state.id
                 && p.role == Role::Support
                 && p.hero_class == HeroClass::Cleric)
     );
@@ -360,17 +372,17 @@ fn real_udp_peers_negotiate_and_replicate_draft_without_client_fixtures() {
         )
         .unwrap();
         let deadline = Instant::now() + Duration::from_secs(1);
-        while rt.players[&addr].draft.request_id < id && Instant::now() < deadline {
+        while rt.world.players[&addr].draft.request_id < id && Instant::now() < deadline {
             rt.receive_packets();
         }
-        assert_eq!(rt.players[&addr].draft.request_id, id);
+        assert_eq!(rt.world.players[&addr].draft.request_id, id);
     }
     wire(&mut rt, &peers[0], 2, PrematchAction::Lock { locked: true });
     wire(&mut rt, &peers[1], 1, PrematchAction::Lock { locked: true });
     assert_eq!(view(&rt, a, now).phase, PrematchPhase::Countdown);
     let old_generation = rt.prematch.generation;
-    let returning_id = rt.players[&b].state.id;
-    rt.players.get_mut(&b).unwrap().last_seen = Instant::now() - Duration::from_secs(6);
+    let returning_id = rt.world.players[&b].state.id;
+    rt.world.players.get_mut(&b).unwrap().last_seen = Instant::now() - Duration::from_secs(6);
     rt.maintain_roster(Instant::now());
     rt.tick_prematch(Instant::now());
     assert!(rt.prematch.generation > old_generation);
@@ -384,11 +396,11 @@ fn real_udp_peers_negotiate_and_replicate_draft_without_client_fixtures() {
         .unwrap();
     let c = returning.local_addr().unwrap();
     let deadline = Instant::now() + Duration::from_secs(1);
-    while !rt.players.get(&c).is_some_and(|p| p.joined) && Instant::now() < deadline {
+    while !rt.world.players.get(&c).is_some_and(|p| p.joined) && Instant::now() < deadline {
         rt.receive_packets();
     }
     rt.tick_prematch(Instant::now());
-    assert_eq!(rt.players[&c].state.id, returning_id);
+    assert_eq!(rt.world.players[&c].state.id, returning_id);
     wire(&mut rt, &peers[0], 3, PrematchAction::Lock { locked: true });
     wire(
         &mut rt,
@@ -401,10 +413,10 @@ fn real_udp_peers_negotiate_and_replicate_draft_without_client_fixtures() {
     wire(&mut rt, &peers[0], 4, PrematchAction::Loaded);
     assert!(rt.match_started_at.is_none());
     wire(&mut rt, &returning, 3, PrematchAction::Loaded);
-    assert_eq!(rt.game_state, GameState::Running);
+    assert_eq!(rt.world.game_state, GameState::Running);
     assert!(rt.match_started_at.is_some());
-    let first_id = rt.players[&a].state.id;
-    rt.players.get_mut(&a).unwrap().last_seen = Instant::now() - Duration::from_secs(6);
+    let first_id = rt.world.players[&a].state.id;
+    rt.world.players.get_mut(&a).unwrap().last_seen = Instant::now() - Duration::from_secs(6);
     rt.maintain_roster(Instant::now());
     let running_rejoin = UdpSocket::bind("127.0.0.1:0").unwrap();
     running_rejoin
@@ -415,17 +427,17 @@ fn real_udp_peers_negotiate_and_replicate_draft_without_client_fixtures() {
         .unwrap();
     let d = running_rejoin.local_addr().unwrap();
     let deadline = Instant::now() + Duration::from_secs(1);
-    while !rt.players.get(&d).is_some_and(|p| p.joined) && Instant::now() < deadline {
+    while !rt.world.players.get(&d).is_some_and(|p| p.joined) && Instant::now() < deadline {
         rt.receive_packets();
     }
-    assert_eq!(rt.players[&d].state.id, first_id);
-    assert_eq!(rt.players[&d].state.hero_class, HeroClass::Cleric);
-    assert_eq!(rt.game_state, GameState::Running);
+    assert_eq!(rt.world.players[&d].state.id, first_id);
+    assert_eq!(rt.world.players[&d].state.hero_class, HeroClass::Cleric);
+    assert_eq!(rt.world.game_state, GameState::Running);
     assert!(
         snapshot(
             &rt.prematch,
-            &rt.players,
-            &rt.players[&d],
+            &rt.world.players,
+            &rt.world.players[&d],
             rt.match_config,
             Instant::now()
         )
@@ -475,17 +487,17 @@ fn loaded_peers_still_wait_for_durable_career_ack_and_frozen_loadout_is_recorded
         allocation
             .participants
             .iter()
-            .any(|p| p.player_id == rt.players[&address(1)].state.id
+            .any(|p| p.player_id == rt.world.players[&address(1)].state.id
                 && p.hero_class == HeroClass::Cleric)
     );
     assert!(!rt.combat_log.ledger.is_started());
-    let gold = rt.players[&address(1)].state.gold;
+    let gold = rt.world.players[&address(1)].state.gold;
     rt.simulate_after_mana(loading, 0.1);
-    assert_eq!(rt.players[&address(1)].state.gold, gold);
-    assert!(rt.minions.is_empty());
+    assert_eq!(rt.world.players[&address(1)].state.gold, gold);
+    assert!(rt.world.minions.is_empty());
     rt.career.backend.test_ack_start(&allocation.result_id);
     rt.tick_prematch(loading + Duration::from_millis(1));
-    assert_eq!(rt.game_state, GameState::Running);
+    assert_eq!(rt.world.game_state, GameState::Running);
     assert!(rt.match_started_at.is_some());
 }
 
@@ -515,7 +527,7 @@ fn running_reconnect_bypasses_draft_and_preserves_class_role_identity() {
         PrematchAction::Loaded,
         now + Duration::from_secs(3),
     );
-    let identity = rt.players[&address(1)].state.id;
+    let identity = rt.world.players[&address(1)].state.id;
     join(
         &mut rt,
         address(2),
@@ -523,15 +535,18 @@ fn running_reconnect_bypasses_draft_and_preserves_class_role_identity() {
         now + Duration::from_secs(9),
         true,
     );
-    assert_eq!(rt.players[&address(2)].state.id, identity);
-    assert_eq!(rt.players[&address(2)].state.hero_class, HeroClass::Mage);
-    assert_eq!(rt.players[&address(2)].draft.role, Role::Jungle);
-    assert_eq!(rt.game_state, GameState::Running);
+    assert_eq!(rt.world.players[&address(2)].state.id, identity);
+    assert_eq!(
+        rt.world.players[&address(2)].state.hero_class,
+        HeroClass::Mage
+    );
+    assert_eq!(rt.world.players[&address(2)].draft.role, Role::Jungle);
+    assert_eq!(rt.world.game_state, GameState::Running);
     assert!(
         snapshot(
             &rt.prematch,
-            &rt.players,
-            &rt.players[&address(2)],
+            &rt.world.players,
+            &rt.world.players[&address(2)],
             rt.match_config,
             now
         )
@@ -577,7 +592,8 @@ fn loading_leave_rejoin_invalidates_ready_even_if_same_endpoint_and_identity_ret
     assert!(rt.prematch.generation > generation);
     assert_eq!(view(&rt, address(1), now).phase, PrematchPhase::Draft);
     assert!(
-        rt.players
+        rt.world
+            .players
             .values()
             .filter(|p| p.joined)
             .all(|p| !p.draft.loaded && !p.draft.locked)
@@ -592,7 +608,7 @@ fn incapable_legacy_peer_is_ready_without_being_silently_required_to_ack() {
     let legacy = view(&rt, address(1), now)
         .players
         .into_iter()
-        .find(|p| p.player_id == rt.players[&address(2)].state.id)
+        .find(|p| p.player_id == rt.world.players[&address(2)].state.id)
         .unwrap();
     assert!(legacy.locked && legacy.loaded);
     send(
@@ -610,7 +626,7 @@ fn incapable_legacy_peer_is_ready_without_being_silently_required_to_ack() {
         PrematchAction::Loaded,
         now + Duration::from_secs(3),
     );
-    assert_eq!(rt.game_state, GameState::Running);
+    assert_eq!(rt.world.game_state, GameState::Running);
 }
 
 #[test]
@@ -635,7 +651,7 @@ fn durable_allocation_timeout_is_bounded_and_retires_the_pending_roster() {
     assert_eq!(state.phase, PrematchPhase::Draft);
     assert!(state.error.unwrap().contains("Match start took too long"));
     assert!(rt.career_allocation_for_test().is_none());
-    assert!(!rt.players[&address(1)].draft.loaded);
+    assert!(!rt.world.players[&address(1)].draft.loaded);
     assert!(!rt.combat_log.ledger.is_started());
 }
 
@@ -654,11 +670,19 @@ fn late_avatar_authorization_cannot_modify_a_new_roster_generation() {
     // covered independently by passport_admission's draft selection test.
     rt.prematch
         .pending
-        .insert(address(1), (rt.players[&address(1)].state.id, 1));
-    rt.players.get_mut(&address(1)).unwrap().draft.request_id = 1;
+        .insert(address(1), (rt.world.players[&address(1)].state.id, 1));
+    rt.world
+        .players
+        .get_mut(&address(1))
+        .unwrap()
+        .draft
+        .request_id = 1;
     join(&mut rt, address(2), "two", now, true);
     assert!(rt.prematch.generation > request.generation);
     assert_eq!(view(&rt, address(1), now).last_request_id, 1);
     rt.complete_prematch_admission(address(1), request, true, now);
-    assert_eq!(rt.players[&address(1)].state.hero_class, HeroClass::Warrior);
+    assert_eq!(
+        rt.world.players[&address(1)].state.hero_class,
+        HeroClass::Warrior
+    );
 }

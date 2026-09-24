@@ -406,7 +406,7 @@ impl ServerRuntime {
         }
         self.last_bootstrap_at = now;
         self.snapshot_tick = self.snapshot_tick.saturating_add(1);
-        for (addr, player) in &self.players {
+        for (addr, player) in &self.world.players {
             if !self.public_transport.validated(*addr, now)
                 || (!self.match_service.is_lobby()
                     && self.career.backend.gameplay_principal(*addr).is_some())
@@ -422,8 +422,8 @@ impl ServerRuntime {
                     self.match_config.mode_id()
                 }
                 .into(),
-                geometry_id: self.map_config.geometry_id.clone(),
-                map_profile: self.map_config.map_profile.clone(),
+                geometry_id: self.world.map_config.geometry_id.clone(),
+                map_profile: self.world.map_config.map_profile.clone(),
                 meta: shared::protocol::SnapshotMeta::new(
                     self.server_epoch,
                     self.match_id,
@@ -474,15 +474,15 @@ impl ServerRuntime {
             } else {
                 Phase::Settling
             }
-        } else if matches!(self.game_state, GameState::Running) {
+        } else if matches!(self.world.game_state, GameState::Running) {
             Phase::Running
-        } else if matches!(self.game_state, GameState::Victory { .. }) {
+        } else if matches!(self.world.game_state, GameState::Victory { .. }) {
             if terminal {
                 Phase::Finished
             } else {
                 Phase::Settling
             }
-        } else if self.players.values().any(|p| p.joined) {
+        } else if self.world.players.values().any(|p| p.joined) {
             Phase::Forming
         } else {
             Phase::Ready

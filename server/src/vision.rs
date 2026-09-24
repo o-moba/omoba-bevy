@@ -2,12 +2,13 @@
 use crate::*;
 use shared::vision::*;
 
-pub(crate) fn sources(
-    team: Team,
-    players: &HashMap<SocketAddr, ConnectedPlayer>,
-    minions: &HashMap<u64, Minion>,
-    structures: &HashMap<u64, Structure>,
-) -> Vec<VisionSource> {
+pub(crate) fn sources(team: Team, world: &GameWorld) -> Vec<VisionSource> {
+    let GameWorld {
+        players,
+        minions,
+        structures,
+        ..
+    } = world;
     let mut result: Vec<_> = players
         .values()
         .filter(|p| p.joined && p.state.hp > 0.0 && p.state.team == team)
@@ -71,13 +72,17 @@ pub(crate) fn player_visible(
 pub(crate) fn target_visible(
     team: Team,
     target: TargetId,
-    players: &HashMap<SocketAddr, ConnectedPlayer>,
-    minions: &HashMap<u64, Minion>,
-    structures: &HashMap<u64, Structure>,
-    neutrals: &HashMap<u64, Neutral>,
+    world: &GameWorld,
     now: Instant,
 ) -> bool {
-    let sight = sources(team, players, minions, structures);
+    let GameWorld {
+        players,
+        minions,
+        structures,
+        neutrals,
+        ..
+    } = world;
+    let sight = sources(team, world);
     match target.kind {
         TargetKind::Player => players
             .values()
@@ -98,13 +103,17 @@ pub(crate) fn target_visible(
 pub(crate) fn filter_snapshot(
     packet: &mut ServerPacket,
     viewer: &ConnectedPlayer,
-    live_players: &HashMap<SocketAddr, ConnectedPlayer>,
-    live_minions: &HashMap<u64, Minion>,
-    live_structures: &HashMap<u64, Structure>,
-    live_neutrals: &HashMap<u64, Neutral>,
-    live_projectiles: &HashMap<u64, Projectile>,
+    world: &GameWorld,
     now: Instant,
 ) {
+    let GameWorld {
+        players: live_players,
+        minions: live_minions,
+        structures: live_structures,
+        neutrals: live_neutrals,
+        projectiles: live_projectiles,
+        ..
+    } = world;
     let ServerPacket::Snapshot {
         vision,
         players,
@@ -128,12 +137,7 @@ pub(crate) fn filter_snapshot(
         return;
     }
     let sight = if viewer.joined {
-        sources(
-            viewer.state.team,
-            live_players,
-            live_minions,
-            live_structures,
-        )
+        sources(viewer.state.team, world)
     } else {
         Vec::new()
     };
@@ -145,9 +149,7 @@ pub(crate) fn filter_snapshot(
             Team::Green => Team::Blue,
             Team::Blue => Team::Green,
         },
-        live_players,
-        live_minions,
-        live_structures,
+        world,
     );
     *vision = Some(TeamVision {
         local_brush,

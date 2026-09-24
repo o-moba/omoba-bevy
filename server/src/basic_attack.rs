@@ -62,20 +62,13 @@ pub(crate) fn resolve_hostile_target(
 }
 
 pub(crate) fn handle_basic_attack_request(
-    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
-    projectiles: &mut HashMap<u64, Projectile>,
-    minions: &HashMap<u64, Minion>,
-    structures: &HashMap<u64, Structure>,
-    neutrals: &HashMap<u64, Neutral>,
-    team_buffs: &TeamBuffs,
+    world: &mut GameWorld,
     addr: SocketAddr,
     target: TargetId,
     request_id: u64,
-    next_projectile_id: &mut u64,
-    game_state: &GameState,
     now: Instant,
 ) {
-    let Some(attacker) = players.get_mut(&addr) else {
+    let Some(attacker) = world.players.get_mut(&addr) else {
         return;
     };
     if !attacker.joined || request_id == 0 || request_id <= attacker.state.basic_attack_request_id {
@@ -86,7 +79,7 @@ pub(crate) fn handle_basic_attack_request(
     // into range, recovering from death, or waiting out the cooldown.
     attacker.state.basic_attack_request_id = request_id;
     attacker.last_seen = now;
-    if !matches!(game_state, GameState::Running) || attacker.state.hp <= 0.0 {
+    if !matches!(world.game_state, GameState::Running) || attacker.state.hp <= 0.0 {
         return;
     }
     let definition = basic_attack_for_class(attacker.state.hero_class);
@@ -105,16 +98,19 @@ pub(crate) fn handle_basic_attack_request(
         attacker.state.y + CAST_SPAWN_HEIGHT,
         attacker.state.z,
     );
-    let damage =
-        sandbox::effective_basic_attack_damage(attacker) * team_buffs.damage_multiplier(team, now);
-    if !sandbox
-        && !vision::target_visible(team, target, players, minions, structures, neutrals, now)
-    {
+    let damage = sandbox::effective_basic_attack_damage(attacker)
+        * world.team_buffs.damage_multiplier(team, now);
+    if !sandbox && !vision::target_visible(team, target, world, now) {
         return;
     }
-    let Some((position, radius)) =
-        resolve_hostile_target(team, target, players, minions, structures, neutrals)
-    else {
+    let Some((position, radius)) = resolve_hostile_target(
+        team,
+        target,
+        &world.players,
+        &world.minions,
+        &world.structures,
+        &world.neutrals,
+    ) else {
         return;
     };
     let distance = ((position.x - origin.x).powi(2) + (position.z - origin.z).powi(2)).sqrt();
@@ -130,16 +126,16 @@ pub(crate) fn handle_basic_attack_request(
     if direction.x == 0.0 && direction.y == 0.0 && direction.z == 0.0 {
         return;
     }
-    let attacker = players.get_mut(&addr).unwrap();
+    let attacker = world.players.get_mut(&addr).unwrap();
     attacker.last_basic_attack_at = Some(now);
     attacker.state.basic_attack_cooldown_secs = cooldown.as_secs_f32();
     attacker.state.basic_attack_remaining_secs = cooldown.as_secs_f32();
     attacker.state.action_sequence = attacker.state.action_sequence.wrapping_add(1).max(1);
     attacker.state.action_kind = PlayerActionKind::Attack;
     attacker.state.action_slot = BASIC_ATTACK_ACTION_SLOT;
-    let id = *next_projectile_id;
-    *next_projectile_id += 1;
-    projectiles.insert(
+    let id = world.next_projectile_id;
+    world.next_projectile_id += 1;
+    world.projectiles.insert(
         id,
         Projectile {
             state: ProjectileState {

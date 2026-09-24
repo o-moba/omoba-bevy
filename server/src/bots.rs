@@ -411,11 +411,12 @@ impl ServerRuntime {
         let ClientPacket::Join { session_id, .. } = packet else {
             return true;
         };
-        if self.players.get(&addr).is_some_and(|p| p.joined) {
+        if self.world.players.get(&addr).is_some_and(|p| p.joined) {
             return true;
         }
         let session = normalize_session_id(session_id.clone());
         if !self
+            .world
             .players
             .get(&addr)
             .is_some_and(|p| p.protocol_compatible)
@@ -424,13 +425,13 @@ impl ServerRuntime {
         }
         let retained = session
             .as_ref()
-            .and_then(|session| self.disconnected_sessions.get(session));
+            .and_then(|session| self.world.disconnected_sessions.get(session));
         let available = retained.map_or_else(
-            || assign_human_team(&self.players, self.match_config.team_size).is_some(),
-            |p| human_count(&self.players, p.player.state.team) < self.match_config.team_size,
+            || assign_human_team(&self.world.players, self.match_config.team_size).is_some(),
+            |p| human_count(&self.world.players, p.player.state.team) < self.match_config.team_size,
         );
         if !available {
-            self.players.get_mut(&addr).unwrap().join_error =
+            self.world.players.get_mut(&addr).unwrap().join_error =
                 Some(shared::protocol::JoinRejection::MatchFull);
             return false;
         }
@@ -439,11 +440,12 @@ impl ServerRuntime {
         let existing = roster.iter().any(|p| {
             Some(p.player_id) == retained_id
                 || self
+                    .world
                     .players
                     .get(&addr)
                     .is_some_and(|a| a.state.id == p.player_id)
         });
-        if matches!(self.game_state, GameState::Victory { .. })
+        if matches!(self.world.game_state, GameState::Victory { .. })
             || (!existing && roster.len() >= shared::career::MAX_PARTICIPANTS)
         {
             // Admit the new human before refilling. A 16v16 arena otherwise
@@ -465,25 +467,29 @@ impl ServerRuntime {
         if self.match_config.mode != MatchMode::Practice
             || self.bots.defer_fill
             || self.bots.sandbox
-            || matches!(self.game_state, GameState::Victory { .. })
-            || !self.players.values().any(|p| p.joined && !p.state.is_bot)
+            || matches!(self.world.game_state, GameState::Victory { .. })
+            || !self
+                .world
+                .players
+                .values()
+                .any(|p| p.joined && !p.state.is_bot)
         {
             return;
         }
         // Reclaimed humans keep their own identity and gameplay state. Remove
         // their temporary replacement before another simulation or snapshot.
         for team in [Team::Green, Team::Blue] {
-            while seated_count(&self.players, &self.bots, team)
+            while seated_count(&self.world.players, &self.bots, team)
                 > self.match_config.team_size as usize
             {
-                let before = self.players.len();
+                let before = self.world.players.len();
                 remove_replaced_bot(
-                    &mut self.players,
+                    &mut self.world.players,
                     &mut self.bots,
                     &mut self.combat_log.ledger,
                     team,
                 );
-                if self.players.len() == before {
+                if self.world.players.len() == before {
                     break;
                 }
             }
@@ -491,7 +497,7 @@ impl ServerRuntime {
         let missing = self
             .match_config
             .roster_size()
-            .saturating_sub(joined_count(&self.players)) as usize;
+            .saturating_sub(joined_count(&self.world.players)) as usize;
         if self.combat_log.ledger.is_started()
             && self.combat_log.ledger.snapshot().len() + missing > shared::career::MAX_PARTICIPANTS
         {
@@ -501,7 +507,7 @@ impl ServerRuntime {
             return;
         }
         for team in [Team::Green, Team::Blue] {
-            while seated_count(&self.players, &self.bots, team)
+            while seated_count(&self.world.players, &self.bots, team)
                 < self.match_config.team_size as usize
             {
                 if self.spawn_bot(team, None, BotKind::Lane, now).is_none() {
@@ -522,20 +528,16 @@ impl ServerRuntime {
     ) -> Option<SocketAddr> {
         let slot = (1..=32_u16).find(|slot| {
             !self
+                .world
                 .players
                 .contains_key(&SocketAddr::from(([0_u16; 8], *slot)))
         })?;
         let addr = SocketAddr::from(([0_u16; 8], slot));
-        ensure_player_connected(
-            &mut self.players,
-            &self.map_layout,
-            addr,
-            &mut self.next_player_id,
-            now,
-        );
+        self.world.ensure_connected(addr, now);
         // Roster bots complete the Mid/Solo/Carry/Jungle/Support composition;
         // sandbox bots take the requested class and hold mid without jungling.
         let teammates: Vec<_> = self
+            .world
             .players
             .values()
             .filter(|p| p.joined && p.state.team == team)
@@ -551,7 +553,7 @@ impl ServerRuntime {
         } else {
             (Lane::Mid, false)
         };
-        let player = self.players.get_mut(&addr).unwrap();
+        let player = self.world.players.get_mut(&addr).unwrap();
         player.state.is_bot = true;
         handle_join_request_with_sprite(
             player,
@@ -560,7 +562,7 @@ impl ServerRuntime {
             class,
             bot_avatar(class, slot),
             None,
-            &self.map_layout,
+            &self.world.map_layout,
             now,
         );
         self.bots.controllers.insert(
@@ -586,6 +588,7 @@ impl ServerRuntime {
 
     fn remove_all_bots(&mut self) {
         let addresses: Vec<_> = self
+            .world
             .players
             .iter()
             .filter(|(_, p)| p.state.is_bot)
@@ -593,7 +596,7 @@ impl ServerRuntime {
             .collect();
         for addr in addresses {
             remove_bot(
-                &mut self.players,
+                &mut self.world.players,
                 &mut self.bots,
                 &mut self.combat_log.ledger,
                 addr,
@@ -615,6 +618,7 @@ impl ServerRuntime {
             return;
         }
         let Some(human) = self
+            .world
             .players
             .get(&addr)
             .filter(|p| p.joined && !p.state.is_bot)
@@ -638,10 +642,11 @@ impl ServerRuntime {
                 println!("Practice sandbox: bots cleared by player {requester}");
             }
             PracticeCommand::SpawnDummy => {
-                if !matches!(self.game_state, GameState::Running) {
+                if !matches!(self.world.game_state, GameState::Running) {
                     return;
                 }
                 let mut dummies: Vec<_> = self
+                    .world
                     .players
                     .iter()
                     .filter(|(a, _)| matches!(self.bots.kind(**a), Some(BotKind::Dummy { .. })))
@@ -650,7 +655,7 @@ impl ServerRuntime {
                 dummies.sort_unstable();
                 if dummies.len() >= MAX_DUMMIES {
                     remove_bot(
-                        &mut self.players,
+                        &mut self.world.players,
                         &mut self.bots,
                         &mut self.combat_log.ledger,
                         dummies[0].1,
@@ -665,7 +670,7 @@ impl ServerRuntime {
                 ) else {
                     return;
                 };
-                let dummy = self.players.get_mut(&bot).unwrap();
+                let dummy = self.world.players.get_mut(&bot).unwrap();
                 dummy.state.max_hp = DUMMY_MAX_HP;
                 dummy.state.hp = DUMMY_MAX_HP;
                 place_dummy(dummy, anchor, origin, now);
@@ -675,7 +680,7 @@ impl ServerRuntime {
                 );
             }
             PracticeCommand::StartDuel { level, gold } => {
-                if !matches!(self.game_state, GameState::Running) {
+                if !matches!(self.world.game_state, GameState::Running) {
                     return;
                 }
                 self.remove_all_bots();
@@ -686,13 +691,13 @@ impl ServerRuntime {
                     return;
                 };
                 let match_id = self.match_id;
-                let duelist = self.players.get_mut(&bot).unwrap();
+                let duelist = self.world.players.get_mut(&bot).unwrap();
                 configure_duelist(
                     duelist,
                     level,
                     gold,
-                    &self.map_layout,
-                    &self.game_state,
+                    &self.world.map_layout,
+                    &self.world.game_state,
                     match_id,
                 );
                 println!(
@@ -710,18 +715,18 @@ impl ServerRuntime {
     /// A clear spot in front of the requester, toward the enemy base; falls
     /// back to closer spots and finally the requester's own position.
     fn dummy_anchor(&self, origin: [f32; 2], team: Team) -> [f32; 2] {
-        let own = spawn_position_for_team(&self.map_layout, team);
-        let enemy = spawn_position_for_team(&self.map_layout, opposite_team(team));
+        let own = spawn_position_for_team(&self.world.map_layout, team);
+        let enemy = spawn_position_for_team(&self.world.map_layout, opposite_team(team));
         let dir = Vec3f::new(enemy.x - own.x, 0.0, enemy.z - own.z).normalize_or_zero();
         let nav = shared::navigation::world_navigation();
         for distance in [DUMMY_DISTANCE, DUMMY_DISTANCE * 0.6, 2.0] {
-            let candidate = self.map_layout.clamp_player_position(Vec3f::new(
+            let candidate = self.world.map_layout.clamp_player_position(Vec3f::new(
                 origin[0] + dir.x * distance,
                 PLAYER_GROUND_Y,
                 origin[1] + dir.z * distance,
             ));
             let clipped = nav.clip_movement(origin, [candidate.x, candidate.z]);
-            let clipped = clip_live_structures(origin, clipped, &self.structures);
+            let clipped = clip_live_structures(origin, clipped, &self.world.structures);
             if nav.point_clear(clipped)
                 && (clipped[0] - origin[0]).hypot(clipped[1] - origin[1]) > 1.0
             {
@@ -733,7 +738,7 @@ impl ServerRuntime {
 
     pub(crate) fn simulate_bots(&mut self, now: Instant, dt: f32) {
         if self.match_config.mode != MatchMode::Practice
-            || !matches!(self.game_state, GameState::Running)
+            || !matches!(self.world.game_state, GameState::Running)
             || dt <= 0.0
         {
             return;
@@ -741,6 +746,7 @@ impl ServerRuntime {
         let mut addresses: Vec<_> = self.bots.controllers.keys().copied().collect();
         addresses.sort_unstable();
         let discs: Vec<_> = self
+            .world
             .structures
             .values()
             .filter(|s| s.state.hp > 0.0)
@@ -750,13 +756,13 @@ impl ServerRuntime {
             })
             .collect();
         for addr in addresses {
-            if !matches!(self.game_state, GameState::Running) {
+            if !matches!(self.world.game_state, GameState::Running) {
                 break;
             }
             let Some(mut controller) = self.bots.controllers.remove(&addr) else {
                 continue;
             };
-            let Some(player) = self.players.get(&addr) else {
+            let Some(player) = self.world.players.get(&addr) else {
                 continue;
             };
             if let BotKind::Dummy { anchor } = controller.kind {
@@ -766,11 +772,12 @@ impl ServerRuntime {
                     && (player.state.x - anchor[0]).hypot(player.state.z - anchor[1]) > 0.5
                 {
                     let toward = self
+                        .world
                         .players
                         .values()
                         .find(|p| p.joined && !p.state.is_bot)
                         .map_or(anchor, |p| [p.state.x, p.state.z]);
-                    let dummy = self.players.get_mut(&addr).unwrap();
+                    let dummy = self.world.players.get_mut(&addr).unwrap();
                     place_dummy(dummy, anchor, toward, now);
                 }
                 self.bots.controllers.insert(addr, controller);
@@ -799,11 +806,16 @@ impl ServerRuntime {
                 controller.next_think = now + THINK_INTERVAL;
                 {
                     let match_id = self.match_id;
-                    let bot = self.players.get_mut(&addr).unwrap();
+                    let bot = self.world.players.get_mut(&addr).unwrap();
                     auto_rank_skills(bot);
                     // Standing in the base shop (spawn, respawn or a retreat)
                     // spends earned gold the way a player would.
-                    auto_shop(bot, &self.map_layout, &self.game_state, match_id);
+                    auto_shop(
+                        bot,
+                        &self.world.map_layout,
+                        &self.world.game_state,
+                        match_id,
+                    );
                 }
                 let previous_target = controller.target;
                 controller.target = if retreating {
@@ -816,22 +828,14 @@ impl ServerRuntime {
                         .target
                         .filter(|target| {
                             target.kind != TargetKind::Structure
-                                && vision::target_visible(
-                                    team,
-                                    *target,
-                                    &self.players,
-                                    &self.minions,
-                                    &self.structures,
-                                    &self.neutrals,
-                                    now,
-                                )
+                                && vision::target_visible(team, *target, &self.world, now)
                                 && basic_attack::resolve_hostile_target(
                                     team,
                                     *target,
-                                    &self.players,
-                                    &self.minions,
-                                    &self.structures,
-                                    &self.neutrals,
+                                    &self.world.players,
+                                    &self.world.minions,
+                                    &self.world.structures,
+                                    &self.world.neutrals,
                                 )
                                 .is_some_and(|(p, _)| {
                                     (p.x - origin[0]).hypot(p.z - origin[1]) <= VISION + 2.0
@@ -854,7 +858,7 @@ impl ServerRuntime {
                     // Every unlocked hostile-target skill; the cast path
                     // enforces range, mana and cooldown for each slot.
                     for slot in 0..4 {
-                        let p = &self.players[&addr];
+                        let p = &self.world.players[&addr];
                         if !unlocked_slots_for_level(p.state.level)[slot as usize]
                             || ability_for_class_slot(
                                 p.state.hero_class,
@@ -865,25 +869,12 @@ impl ServerRuntime {
                         {
                             continue;
                         }
-                        handle_cast_request(
-                            &mut self.players,
-                            &mut self.projectiles,
-                            &mut self.minions,
-                            &mut self.structures,
-                            &mut self.neutrals,
-                            &self.team_buffs,
-                            addr,
-                            target,
-                            slot,
-                            &mut self.next_projectile_id,
-                            &self.game_state,
-                            now,
-                        );
+                        handle_cast_request(&mut self.world, addr, target, slot, now);
                     }
                 }
                 if low_health {
                     for slot in 0..4 {
-                        let p = &self.players[&addr];
+                        let p = &self.world.players[&addr];
                         if ability_for_class_slot(
                             p.state.hero_class,
                             SkillSlot::from_index(slot).unwrap(),
@@ -895,52 +886,30 @@ impl ServerRuntime {
                                 kind: TargetKind::Player,
                                 id: p.state.id,
                             };
-                            handle_cast_request(
-                                &mut self.players,
-                                &mut self.projectiles,
-                                &mut self.minions,
-                                &mut self.structures,
-                                &mut self.neutrals,
-                                &self.team_buffs,
-                                addr,
-                                target,
-                                slot,
-                                &mut self.next_projectile_id,
-                                &self.game_state,
-                                now,
-                            );
+                            handle_cast_request(&mut self.world, addr, target, slot, now);
                         }
                     }
                 }
             }
             let target = controller
                 .target
-                .filter(|target| {
-                    vision::target_visible(
-                        team,
-                        *target,
-                        &self.players,
-                        &self.minions,
-                        &self.structures,
-                        &self.neutrals,
-                        now,
-                    )
-                })
+                .filter(|target| vision::target_visible(team, *target, &self.world, now))
                 .and_then(|target| {
                     basic_attack::resolve_hostile_target(
                         team,
                         target,
-                        &self.players,
-                        &self.minions,
-                        &self.structures,
-                        &self.neutrals,
+                        &self.world.players,
+                        &self.world.minions,
+                        &self.world.structures,
+                        &self.world.neutrals,
                     )
                     .map(|(position, radius)| (target, position, radius))
                 });
-            let reach = shared::basic_attack_for_class(self.players[&addr].state.hero_class).range;
+            let reach =
+                shared::basic_attack_for_class(self.world.players[&addr].state.hero_class).range;
             let mut in_range = false;
             let destination = if retreating {
-                let spawn = spawn_position_for_team(&self.map_layout, team);
+                let spawn = spawn_position_for_team(&self.world.map_layout, team);
                 [spawn.x, spawn.z]
             } else if let Some((target, position, radius)) = target {
                 let dx = position.x - origin[0];
@@ -952,23 +921,16 @@ impl ServerRuntime {
                 in_range = distance <= reach + radius - margin;
                 controller.holding_range = in_range;
                 if in_range {
-                    self.players.get_mut(&addr).unwrap().state.yaw = hero_yaw_towards(dx, dz);
-                    let request = self.players[&addr]
+                    self.world.players.get_mut(&addr).unwrap().state.yaw = hero_yaw_towards(dx, dz);
+                    let request = self.world.players[&addr]
                         .state
                         .basic_attack_request_id
                         .saturating_add(1);
                     basic_attack::handle_basic_attack_request(
-                        &mut self.players,
-                        &mut self.projectiles,
-                        &self.minions,
-                        &self.structures,
-                        &self.neutrals,
-                        &self.team_buffs,
+                        &mut self.world,
                         addr,
                         target,
                         request,
-                        &mut self.next_projectile_id,
-                        &self.game_state,
                         now,
                     );
                 }
@@ -984,7 +946,7 @@ impl ServerRuntime {
             {
                 camp
             } else {
-                let path = build_minion_path(&self.map_layout, controller.lane, team);
+                let path = build_minion_path(&self.world.map_layout, controller.lane, team);
                 while controller.waypoint + 1 < path.len()
                     && (path[controller.waypoint].x - origin[0])
                         .hypot(path[controller.waypoint].z - origin[1])
@@ -1022,8 +984,9 @@ impl ServerRuntime {
                 controller.route.clear();
                 controller.goal = None;
             }
-            let id = self.players[&addr].state.id;
+            let id = self.world.players[&addr].state.id;
             let mut others: Vec<_> = self
+                .world
                 .players
                 .values()
                 .filter(|p| p.joined && p.state.hp > 0.0 && p.state.id != id)
@@ -1031,16 +994,19 @@ impl ServerRuntime {
                 .collect();
             others.sort_unstable_by_key(|(id, _)| *id);
             let step = PLAYER_SPEED
-                * self.players[&addr].state.item_bonuses.move_speed_multiplier
+                * self.world.players[&addr]
+                    .state
+                    .item_bonuses
+                    .move_speed_multiplier
                 * shared::hero_balance::movement_multiplier(
-                    self.players[&addr].state.hero_class,
-                    self.players[&addr].state.level,
+                    self.world.players[&addr].state.hero_class,
+                    self.world.players[&addr].state.level,
                 )
                 * dt;
             let accepted = steer_bot_step(id, origin, desired, step, &others, &discs);
             let movement = [accepted[0] - origin[0], accepted[1] - origin[1]];
             if movement[0].hypot(movement[1]) > 0.000_1 {
-                let player = self.players.get_mut(&addr).unwrap();
+                let player = self.world.players.get_mut(&addr).unwrap();
                 let yaw = if in_range {
                     player.state.yaw
                 } else {
@@ -1048,8 +1014,8 @@ impl ServerRuntime {
                 };
                 handle_transform_request_with_structures(
                     player,
-                    &self.map_layout,
-                    &self.structures,
+                    &self.world.map_layout,
+                    &self.world.structures,
                     accepted[0],
                     PLAYER_GROUND_Y,
                     accepted[1],
@@ -1065,10 +1031,11 @@ impl ServerRuntime {
     /// Camp spots are public map knowledge, like a human jungler's timers.
     fn jungle_camp(&self, team: Team, origin: [f32; 2]) -> Option<(u64, [f32; 2])> {
         let (own, enemy) = match team {
-            Team::Green => (self.map_layout.home, self.map_layout.away),
-            Team::Blue => (self.map_layout.away, self.map_layout.home),
+            Team::Green => (self.world.map_layout.home, self.world.map_layout.away),
+            Team::Blue => (self.world.map_layout.away, self.world.map_layout.home),
         };
-        self.neutrals
+        self.world
+            .neutrals
             .values()
             .filter(|n| !n.state.camp_type.is_boss() && n.dead_until.is_none() && n.state.hp > 0.0)
             .map(|n| {
@@ -1095,18 +1062,9 @@ impl ServerRuntime {
         lane: Lane,
         now: Instant,
     ) -> Option<TargetId> {
-        let visible = |target| {
-            vision::target_visible(
-                team,
-                target,
-                &self.players,
-                &self.minions,
-                &self.structures,
-                &self.neutrals,
-                now,
-            )
-        };
+        let visible = |target| vision::target_visible(team, target, &self.world, now);
         let hero = self
+            .world
             .players
             .values()
             .filter(|p| p.joined && p.state.hp > 0.0 && p.state.team != team)
@@ -1145,6 +1103,7 @@ impl ServerRuntime {
         // Fight nearby lane units before diving a structure. Stable ID tie breaks
         // keep behavior independent of HashMap iteration order.
         let mut units: Vec<_> = self
+            .world
             .players
             .values()
             .filter(|p| p.joined && p.state.hp > 0.0 && p.state.team != team)
@@ -1159,7 +1118,8 @@ impl ServerRuntime {
             })
             .collect();
         units.extend(
-            self.minions
+            self.world
+                .minions
                 .values()
                 .filter(|p| p.state.hp > 0.0 && p.state.team != team)
                 .map(|p| {
@@ -1175,27 +1135,19 @@ impl ServerRuntime {
         if let Some((_, target)) = units
             .into_iter()
             .filter(|(d, target)| {
-                *d <= VISION
-                    && vision::target_visible(
-                        team,
-                        *target,
-                        &self.players,
-                        &self.minions,
-                        &self.structures,
-                        &self.neutrals,
-                        now,
-                    )
+                *d <= VISION && vision::target_visible(team, *target, &self.world, now)
             })
             .min_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.id.cmp(&b.1.id)))
         {
             return Some(target);
         }
-        self.structures
+        self.world
+            .structures
             .values()
             .filter(|s| {
                 s.state.hp > 0.0
                     && s.state.team != team
-                    && !structure_is_protected(&self.structures, s.state.id)
+                    && !structure_is_protected(&self.world.structures, s.state.id)
                     && match s.role {
                         StructureRole::BaseTower => true,
                         StructureRole::LaneTower { lane: tower_lane } => tower_lane == lane,
@@ -1209,10 +1161,7 @@ impl ServerRuntime {
                             kind: TargetKind::Structure,
                             id: s.state.id,
                         },
-                        &self.players,
-                        &self.minions,
-                        &self.structures,
-                        &self.neutrals,
+                        &self.world,
                         now,
                     )
             })

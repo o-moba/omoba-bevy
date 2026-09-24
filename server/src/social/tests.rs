@@ -294,11 +294,16 @@ fn real_udp_filters_team_messages_and_preserves_fragmented_social_payloads() {
         }
     }
     let deadline = Instant::now() + Duration::from_secs(2);
-    while runtime.players.values().filter(|p| p.joined).count() < 3 && Instant::now() < deadline {
+    while runtime.world.players.values().filter(|p| p.joined).count() < 3
+        && Instant::now() < deadline
+    {
         runtime.receive_packets();
         std::thread::sleep(Duration::from_millis(2));
     }
-    assert_eq!(runtime.players.values().filter(|p| p.joined).count(), 3);
+    assert_eq!(
+        runtime.world.players.values().filter(|p| p.joined).count(),
+        3
+    );
     // Explicit opt-in preserves the world-only protocol of older clients.
     for (index, peer) in peers.iter().enumerate() {
         peer.send(&serde_json::to_vec(&serde_json::json!({"type":"social","request":{
@@ -350,11 +355,12 @@ fn real_udp_filters_team_messages_and_preserves_fragmented_social_payloads() {
         }
         let view = received.expect("real Social datagram");
         assert_eq!(view.events.len(), if index == 2 { 1 } else { 2 });
-        assert!(
-            view.events
-                .iter()
-                .all(|e| e.player_id == runtime.players[&peers[0].local_addr().unwrap()].state.id)
-        );
+        assert!(view.events.iter().all(|e| {
+            e.player_id
+                == runtime.world.players[&peers[0].local_addr().unwrap()]
+                    .state
+                    .id
+        }));
     }
     assert!(now.elapsed() < Duration::from_secs(10));
 }

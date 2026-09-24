@@ -163,10 +163,12 @@ impl ServerRuntime {
         }
         // No new gameplay identity can enter a frozen roster, even with a valid manifest.
         session_id.as_ref().is_some_and(|s| {
-            self.players
+            self.world
+                .players
                 .values()
                 .any(|p| p.joined && p.session_id.as_ref() == Some(s))
                 || self
+                    .world
                     .disconnected_sessions
                     .get(s)
                     .is_some_and(|p| p.player.joined)
@@ -175,7 +177,7 @@ impl ServerRuntime {
     pub(crate) fn allocated_humans_ready(&self) -> bool {
         self.match_service.worker().is_none_or(|worker| {
             worker.manifest.humans.iter().all(|h| {
-                self.players.values().any(|p| {
+                self.world.players.values().any(|p| {
                     p.joined
                         && !p.state.is_bot
                         && p.session_id.as_deref() == Some(h.session_id.as_str())
@@ -345,11 +347,14 @@ mod runtime_tests {
         let (mut rt, addr, join) = fixture();
         let now = Instant::now();
         rt.handle_packet(addr, join, now);
-        assert!(rt.players[&addr].joined);
-        assert!(rt.players[&addr].draft.capable);
-        assert_eq!(rt.players[&addr].state.team, Team::Blue);
-        assert_eq!(rt.players.values().filter(|p| p.state.is_bot).count(), 9);
-        assert!(matches!(rt.game_state, GameState::Forming { .. }));
+        assert!(rt.world.players[&addr].joined);
+        assert!(rt.world.players[&addr].draft.capable);
+        assert_eq!(rt.world.players[&addr].state.team, Team::Blue);
+        assert_eq!(
+            rt.world.players.values().filter(|p| p.state.is_bot).count(),
+            9
+        );
+        assert!(matches!(rt.world.game_state, GameState::Forming { .. }));
         assert!(!rt.begin_career_round(now));
         let allocation = rt.career_allocation_for_test().unwrap();
         assert_eq!(allocation.ruleset, "public-casual-v1");
@@ -364,12 +369,12 @@ mod runtime_tests {
         let (mut rt, addr, join) = fixture();
         let now = Instant::now();
         rt.handle_packet(addr, join.clone(), now);
-        let id = rt.players[&addr].state.id;
+        let id = rt.world.players[&addr].state.id;
         rt.begin_career_round(now);
         let allocation = rt.career_allocation_for_test().unwrap();
         rt.career.backend.test_ack_start(&allocation.result_id);
         assert!(rt.begin_career_round(now));
-        rt.game_state = GameState::Running;
+        rt.world.game_state = GameState::Running;
         rt.match_started_at = Some(now);
         let outsider: SocketAddr = "127.0.0.1:60201".parse().unwrap();
         rt.career.backend.test_authenticated(
@@ -382,9 +387,9 @@ mod runtime_tests {
             *session_id = Some("other-seat".into());
         }
         rt.handle_packet(outsider, foreign, now);
-        assert!(!rt.players[&outsider].joined);
-        let original = rt.players.remove(&addr).unwrap();
-        rt.disconnected_sessions.insert(
+        assert!(!rt.world.players[&outsider].joined);
+        let original = rt.world.players.remove(&addr).unwrap();
+        rt.world.disconnected_sessions.insert(
             "seat-a".into(),
             DisconnectedSession {
                 player: original,
@@ -399,10 +404,13 @@ mod runtime_tests {
             "seat-a",
         );
         rt.handle_packet(reconnect, join, now);
-        assert!(rt.players[&reconnect].joined);
-        assert_eq!(rt.players[&reconnect].state.id, id);
-        assert_eq!(rt.players[&reconnect].state.team, Team::Blue);
-        assert_eq!(rt.players.values().filter(|p| p.state.is_bot).count(), 9);
+        assert!(rt.world.players[&reconnect].joined);
+        assert_eq!(rt.world.players[&reconnect].state.id, id);
+        assert_eq!(rt.world.players[&reconnect].state.team, Team::Blue);
+        assert_eq!(
+            rt.world.players.values().filter(|p| p.state.is_bot).count(),
+            9
+        );
     }
     #[test]
     fn empty_allocated_worker_preserves_the_full_reconnect_window() {
@@ -413,13 +421,13 @@ mod runtime_tests {
         let result = rt.career_allocation_for_test().unwrap();
         rt.career.backend.test_ack_start(&result.result_id);
         assert!(rt.begin_career_round(now));
-        rt.game_state = GameState::Running;
+        rt.world.game_state = GameState::Running;
         rt.match_started_at = Some(now);
         rt.maintain_roster(now + PLAYER_TIMEOUT + Duration::from_secs(1));
         rt.maintain_roster(now + PLAYER_TIMEOUT + Duration::from_secs(20));
-        assert!(rt.disconnected_sessions.contains_key("seat-a"));
+        assert!(rt.world.disconnected_sessions.contains_key("seat-a"));
         assert!(!rt.match_service.worker().unwrap().aborted);
-        assert_eq!(rt.game_state, GameState::Running);
+        assert_eq!(rt.world.game_state, GameState::Running);
     }
     #[test]
     fn saved_worker_repeats_victory_udp_snapshots_after_first_frame_is_lost() {
@@ -481,11 +489,11 @@ mod runtime_tests {
         let allocation = rt.career_allocation_for_test().unwrap();
         rt.career.backend.test_ack_start(&allocation.result_id);
         assert!(rt.begin_career_round(now));
-        rt.game_state = GameState::Running;
+        rt.world.game_state = GameState::Running;
         rt.match_started_at = Some(now);
         let epoch = rt.server_epoch;
         let match_id = rt.match_id;
-        rt.game_state = GameState::Victory { winner: Team::Blue };
+        rt.world.game_state = GameState::Victory { winner: Team::Blue };
         rt.last_snapshot_at = now - SNAPSHOT_INTERVAL;
         rt.simulate_after_mana(now, 0.0);
 
@@ -518,9 +526,10 @@ mod runtime_tests {
         rt.poll_career(now);
         rt.tick_match_service(now);
         assert!(rt.match_service.worker().unwrap().terminal_at.is_some());
-        let frozen_players = serde_json::to_value(build_players_snapshot(&rt.players)).unwrap();
-        let frozen_minions = rt.minions.len();
-        let frozen_projectiles = rt.projectiles.len();
+        let frozen_players =
+            serde_json::to_value(build_players_snapshot(&rt.world.players)).unwrap();
+        let frozen_minions = rt.world.minions.len();
+        let frozen_projectiles = rt.world.projectiles.len();
         for millis in [100, 500, 1000] {
             let later = now + Duration::from_millis(millis);
             rt.last_snapshot_at = later - SNAPSHOT_INTERVAL;
@@ -543,11 +552,11 @@ mod runtime_tests {
             assert!(players.iter().all(|p| p.team == Team::Blue));
             assert_eq!(scoreboard.unwrap().players.len(), 10);
             assert_eq!(
-                serde_json::to_value(build_players_snapshot(&rt.players)).unwrap(),
+                serde_json::to_value(build_players_snapshot(&rt.world.players)).unwrap(),
                 frozen_players
             );
-            assert_eq!(rt.minions.len(), frozen_minions);
-            assert_eq!(rt.projectiles.len(), frozen_projectiles);
+            assert_eq!(rt.world.minions.len(), frozen_minions);
+            assert_eq!(rt.world.projectiles.len(), frozen_projectiles);
             assert_eq!(
                 rt.career_allocation_for_test().unwrap().outcome,
                 shared::career::MatchOutcome::Completed

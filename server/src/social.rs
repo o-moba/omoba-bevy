@@ -219,7 +219,7 @@ fn social_team(team: Team) -> SocialTeam {
 
 impl ServerRuntime {
     fn social_sender(&self, addr: SocketAddr) -> Option<Sender> {
-        let player = self.players.get(&addr)?;
+        let player = self.world.players.get(&addr)?;
         if !player.joined || player.state.is_bot || !player.protocol_compatible {
             return None;
         }
@@ -242,7 +242,7 @@ impl ServerRuntime {
             team: social_team(player.state.team),
             session,
             rate_key,
-            alive: player.state.hp > 0.0 && matches!(self.game_state, GameState::Running),
+            alive: player.state.hp > 0.0 && matches!(self.world.game_state, GameState::Running),
             requires_signature: profile.is_some()
                 || self.career.backend.authenticated_session(addr).is_some(),
             // Free starter pack works offline. Operator/Passport grants must be
@@ -264,12 +264,12 @@ impl ServerRuntime {
             return;
         };
         if !matches!(
-            self.game_state,
+            self.world.game_state,
             GameState::Running | GameState::Victory { .. }
         ) {
             return;
         }
-        if let Some(player) = self.players.get_mut(&addr) {
+        if let Some(player) = self.world.players.get_mut(&addr) {
             player.last_seen = now;
         }
         self.social.submit(sender, request, verified, now);
@@ -287,7 +287,7 @@ impl ServerRuntime {
         }
         self.social.last_sent = Some(now);
         self.social.sequence = self.social.sequence.saturating_add(1);
-        for (addr, player) in &self.players {
+        for (addr, player) in &self.world.players {
             // Legacy framed clients have no Social packet decoder. Only a
             // scoped request opts a joined actor into this separate stream.
             if !player.framed_snapshots || !self.social.receipts.contains_key(&player.state.id) {

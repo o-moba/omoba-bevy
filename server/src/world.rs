@@ -204,21 +204,20 @@ pub(crate) fn build_minion_path(_layout: &MapLayoutState, lane: Lane, team: Team
     points
 }
 
-pub(crate) fn spawn_minion_waves_if_due(
-    map_layout: &MapLayoutState,
-    minions: &mut HashMap<u64, Minion>,
-    next_minion_id: &mut u64,
-    game_state: &GameState,
-    now: Instant,
-    last_wave_spawn_at: &mut Instant,
-) {
-    if !matches!(game_state, GameState::Running) {
+pub(crate) fn spawn_minion_waves_if_due(world: &mut GameWorld, now: Instant) {
+    if !matches!(world.game_state, GameState::Running) {
         return;
     }
-    if now.duration_since(*last_wave_spawn_at) < MINION_WAVE_INTERVAL {
+    if now.duration_since(world.last_wave_spawn_at) < MINION_WAVE_INTERVAL {
         return;
     }
-    *last_wave_spawn_at = now;
+    world.last_wave_spawn_at = now;
+    let GameWorld {
+        map_layout,
+        minions,
+        next_minion_id,
+        ..
+    } = world;
 
     for lane in [Lane::Top, Lane::Mid, Lane::Bot] {
         spawn_minion_wave_for_team_lane(map_layout, minions, next_minion_id, Team::Green, lane);
