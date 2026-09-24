@@ -144,16 +144,15 @@ pub(crate) fn simulate_tower_attacks(world: &mut GameWorld, now: Instant) -> Vec
                 player,
                 now,
             ) || !player.joined
-                || player.state.hp <= 0.0
-                || player.state.team == structure.state.team
+                || player.hero.hp <= 0.0
+                || player.hero.identity.team == structure.state.team
             {
                 continue;
             }
-            let target_pos =
-                Vec3f::new(player.state.x, player.state.y + AIM_HEIGHT, player.state.z);
+            let target_pos = Vec3f::new(player.hero.x, player.hero.y + AIM_HEIGHT, player.hero.z);
             let dist_sq = tower_position.distance_squared(target_pos);
             if dist_sq <= range_sq && best_target.is_none_or(|(_, _, best)| dist_sq < best) {
-                best_target = Some((player.state.id, target_pos, dist_sq));
+                best_target = Some((player.hero.identity.id, target_pos, dist_sq));
             }
         }
 

@@ -9,7 +9,7 @@ fn session_id_reclaims_timed_out_player_from_new_endpoint() {
     let session_id = "stable-player-1".to_string();
 
     world.ensure_player_for_join(old_addr, Some(session_id.clone()), now);
-    let original_id = world.players.get(&old_addr).unwrap().state.id;
+    let original_id = world.players.get(&old_addr).unwrap().hero.identity.id;
     world.players.get_mut(&old_addr).unwrap().last_seen =
         now - PLAYER_TIMEOUT - Duration::from_secs(1);
 
@@ -17,7 +17,7 @@ fn session_id_reclaims_timed_out_player_from_new_endpoint() {
 
     assert!(!world.players.contains_key(&old_addr));
     let reclaimed = world.players.get(&new_addr).unwrap();
-    assert_eq!(reclaimed.state.id, original_id);
+    assert_eq!(reclaimed.hero.identity.id, original_id);
     assert_eq!(reclaimed.session_id.as_deref(), Some(session_id.as_str()));
 }
 
@@ -31,7 +31,7 @@ fn active_session_id_cannot_be_stolen_by_another_endpoint() {
 
     assert!(world.ensure_player_for_join(old_addr, Some(session_id.clone()), now));
     world.ensure_connected(new_addr, now + Duration::from_millis(1));
-    let placeholder_id = world.players.get(&new_addr).unwrap().state.id;
+    let placeholder_id = world.players.get(&new_addr).unwrap().hero.identity.id;
     assert!(!world.ensure_player_for_join(
         new_addr,
         Some(session_id),
@@ -40,7 +40,7 @@ fn active_session_id_cannot_be_stolen_by_another_endpoint() {
 
     assert!(world.players.contains_key(&old_addr));
     let placeholder = world.players.get(&new_addr).unwrap();
-    assert_eq!(placeholder.state.id, placeholder_id);
+    assert_eq!(placeholder.hero.identity.id, placeholder_id);
     assert!(placeholder.session_id.is_none());
 }
 
@@ -53,19 +53,19 @@ fn connected_placeholder_can_reclaim_timed_out_session_id() {
     let session_id = "placeholder-reclaim-1".to_string();
 
     assert!(world.ensure_player_for_join(old_addr, Some(session_id.clone()), now));
-    let original_id = world.players.get(&old_addr).unwrap().state.id;
+    let original_id = world.players.get(&old_addr).unwrap().hero.identity.id;
     world.players.get_mut(&old_addr).unwrap().last_seen =
         now - PLAYER_TIMEOUT - Duration::from_secs(1);
 
     world.ensure_connected(new_addr, now + Duration::from_millis(1));
-    let placeholder_id = world.players.get(&new_addr).unwrap().state.id;
+    let placeholder_id = world.players.get(&new_addr).unwrap().hero.identity.id;
     assert_ne!(placeholder_id, original_id);
 
     assert!(world.ensure_player_for_join(new_addr, Some(session_id.clone()), now));
 
     assert!(!world.players.contains_key(&old_addr));
     let reclaimed = world.players.get(&new_addr).unwrap();
-    assert_eq!(reclaimed.state.id, original_id);
+    assert_eq!(reclaimed.hero.identity.id, original_id);
     assert_eq!(reclaimed.session_id.as_deref(), Some(session_id.as_str()));
 }
 
@@ -80,7 +80,7 @@ fn stale_disconnected_session_gets_new_player_id() {
     world.ensure_connected(old_addr, now);
     let mut old_player = world.players.remove(&old_addr).unwrap();
     old_player.session_id = Some(session_id.clone());
-    let original_id = old_player.state.id;
+    let original_id = old_player.hero.identity.id;
     world.disconnected_sessions.insert(
         session_id.clone(),
         DisconnectedSession {
@@ -91,7 +91,10 @@ fn stale_disconnected_session_gets_new_player_id() {
 
     assert!(world.ensure_player_for_join(new_addr, Some(session_id), now));
 
-    assert_ne!(world.players.get(&new_addr).unwrap().state.id, original_id);
+    assert_ne!(
+        world.players.get(&new_addr).unwrap().hero.identity.id,
+        original_id
+    );
     assert!(world.disconnected_sessions.is_empty());
 }
 
@@ -108,7 +111,7 @@ fn pre_join_endpoint_is_hidden_and_inert_until_join() {
     assert!(build_players_snapshot(&world, now).is_empty());
 
     // It cannot move...
-    let before = world.players.get(&ghost_addr).unwrap().state.clone();
+    let before = world.players.get(&ghost_addr).unwrap().hero.clone();
     handle_transform_request(
         world.players.get_mut(&ghost_addr).unwrap(),
         &world.map_layout,
@@ -118,7 +121,7 @@ fn pre_join_endpoint_is_hidden_and_inert_until_join() {
         1.0,
         now + Duration::from_secs(1),
     );
-    let after = world.players.get(&ghost_addr).unwrap().state.clone();
+    let after = world.players.get(&ghost_addr).unwrap().hero.clone();
     assert!((after.x - before.x).abs() < EPSILON);
     assert!((after.yaw - before.yaw).abs() < EPSILON);
 
@@ -135,15 +138,15 @@ fn pre_join_endpoint_is_hidden_and_inert_until_join() {
     );
     let ghost_pos = {
         let ghost = world.players.get(&ghost_addr).unwrap();
-        (ghost.state.x, ghost.state.z)
+        (ghost.hero.x, ghost.hero.z)
     };
     {
         let enemy = world.players.get_mut(&enemy_addr).unwrap();
-        enemy.state.x = ghost_pos.0 + 2.0;
-        enemy.state.z = ghost_pos.1;
+        enemy.hero.x = ghost_pos.0 + 2.0;
+        enemy.hero.z = ghost_pos.1;
     }
-    let enemy_id = world.players.get(&enemy_addr).unwrap().state.id;
-    let mana_before = world.players.get(&ghost_addr).unwrap().state.mana;
+    let enemy_id = world.players.get(&enemy_addr).unwrap().hero.identity.id;
+    let mana_before = world.players.get(&ghost_addr).unwrap().hero.mana;
     cast_slot(
         &mut world,
         ghost_addr,
@@ -155,7 +158,7 @@ fn pre_join_endpoint_is_hidden_and_inert_until_join() {
         now,
     );
     assert!(world.projectiles.is_empty());
-    assert!((world.players.get(&ghost_addr).unwrap().state.mana - mana_before).abs() < EPSILON);
+    assert!((world.players.get(&ghost_addr).unwrap().hero.mana - mana_before).abs() < EPSILON);
 
     // Joining flips the flag and the player becomes visible in snapshots.
     handle_join_request(
@@ -167,7 +170,7 @@ fn pre_join_endpoint_is_hidden_and_inert_until_join() {
         &world.map_layout,
         now,
     );
-    let ghost_id = world.players.get(&ghost_addr).unwrap().state.id;
+    let ghost_id = world.players.get(&ghost_addr).unwrap().hero.identity.id;
     let snapshot = build_players_snapshot(&world, now);
     assert_eq!(snapshot.len(), 2);
     assert!(snapshot.iter().any(|player| player.id == ghost_id));

@@ -112,11 +112,11 @@ fn release_queue_uses_saved_skill_and_experience_and_waits_for_durable_allocatio
     let allocation = rt.career_allocation_for_test().unwrap();
     assert!(allocation.rated);
     assert_eq!(allocation.ruleset, career_runtime::RATED_RULESET);
-    let before = rt.world.players[&addr(59301)].state.gold;
+    let before = rt.world.players[&addr(59301)].economy.gold;
     for i in 1..=3 {
         rt.tick(now + Duration::from_millis(i), 0.1);
         assert_eq!(rt.world.game_state, GameState::Starting { countdown_ms: 0 });
-        assert_eq!(rt.world.players[&addr(59301)].state.gold, before);
+        assert_eq!(rt.world.players[&addr(59301)].economy.gold, before);
         assert!(!rt.combat_log.ledger.is_started());
         assert!(rt.world.minions.is_empty());
         assert_eq!(
@@ -160,9 +160,15 @@ fn frozen_result_contains_offline_totals_and_survives_round_reset_until_ack() {
     authenticated_join(&mut rt, addr(59321), 21, 1000, false, now);
     authenticated_join(&mut rt, addr(59322), 22, 1000, false, now);
     start(&mut rt, now);
-    let id = rt.world.players[&addr(59321)].state.id;
-    let other_id = rt.world.players[&addr(59322)].state.id;
-    rt.world.players.get_mut(&addr(59321)).unwrap().state.level = 5;
+    let id = rt.world.players[&addr(59321)].hero.identity.id;
+    let other_id = rt.world.players[&addr(59322)].hero.identity.id;
+    rt.world
+        .players
+        .get_mut(&addr(59321))
+        .unwrap()
+        .hero
+        .progress
+        .level = 5;
     rt.combat_log.extend(
         now,
         [CombatEvent {
@@ -231,8 +237,8 @@ fn authenticated_reclaim_requires_profile_and_signed_session_preserving_round_id
     authenticated_join(&mut rt, addr(59331), 31, 1000, false, now);
     authenticated_join(&mut rt, addr(59332), 32, 1000, false, now);
     start(&mut rt, now);
-    let id = rt.world.players[&addr(59331)].state.id;
-    rt.world.players.get_mut(&addr(59331)).unwrap().state.hp = 17.0;
+    let id = rt.world.players[&addr(59331)].hero.identity.id;
+    rt.world.players.get_mut(&addr(59331)).unwrap().hero.hp = 17.0;
     let later = now + PLAYER_TIMEOUT + Duration::from_secs(1);
     rt.world.players.get_mut(&addr(59332)).unwrap().last_seen = later;
     rt.maintain_roster(later);
@@ -258,8 +264,8 @@ fn authenticated_reclaim_requires_profile_and_signed_session_preserving_round_id
         .backend
         .test_authenticated(addr(59335), profile(31, 1000, false), "session-31");
     rt.handle_packet(addr(59335), join("session-31"), later);
-    assert_eq!(rt.world.players[&addr(59335)].state.id, id);
-    assert_eq!(rt.world.players[&addr(59335)].state.hp, 17.0);
+    assert_eq!(rt.world.players[&addr(59335)].hero.identity.id, id);
+    assert_eq!(rt.world.players[&addr(59335)].hero.hp, 17.0);
     assert_eq!(rt.combat_log.ledger.snapshot().len(), 2);
     assert!(
         !rt.combat_log
@@ -359,7 +365,7 @@ fn live_udp_signed_cancellation_and_result_packet_order_use_real_receiver() {
         },
     );
     send(&socket, &mut rt, join("signed-queue"));
-    let id = rt.world.players[&address].state.id;
+    let id = rt.world.players[&address].hero.identity.id;
     assert_eq!(rt.career.queue.len(), 1);
     // A forged unsigned cancellation cannot mutate even a correctly addressed queue entry.
     send(
@@ -405,7 +411,7 @@ fn live_udp_signed_cancellation_and_result_packet_order_use_real_receiver() {
         QueueView::Idle
     );
     assert!(!rt.world.players[&address].joined);
-    assert_eq!(rt.world.players[&address].state.id, id);
+    assert_eq!(rt.world.players[&address].hero.identity.id, id);
     socket
         .set_read_timeout(Some(Duration::from_secs(1)))
         .unwrap();
@@ -440,7 +446,7 @@ fn empty_roster_finalizes_abandoned_before_reset_without_ranked_winner() {
     let mut rt = runtime(MatchConfig::dev(), false);
     let now = Instant::now();
     rt.handle_packet(addr(59361), join("alone"), now);
-    let id = rt.world.players[&addr(59361)].state.id;
+    let id = rt.world.players[&addr(59361)].hero.identity.id;
     let later = now + PLAYER_TIMEOUT + Duration::from_secs(1);
     rt.maintain_roster(later);
     let ended = later + EMPTY_ROSTER_GRACE;
@@ -449,7 +455,13 @@ fn empty_roster_finalizes_abandoned_before_reset_without_ranked_winner() {
     assert_eq!(rt.world.game_state, GameState::Lobby);
     // Retained final DTO is available by the old participant's retained identity.
     rt.world.ensure_connected(addr(59362), ended);
-    rt.world.players.get_mut(&addr(59362)).unwrap().state.id = id;
+    rt.world
+        .players
+        .get_mut(&addr(59362))
+        .unwrap()
+        .hero
+        .identity
+        .id = id;
     let result = rt.career_view(addr(59362), ended).last_result.unwrap();
     assert_eq!(result.outcome, MatchOutcome::Abandoned);
     assert_eq!(result.winner, None);
@@ -555,8 +567,8 @@ fn postgres_live_udp_signed_profiles_queue_real_cast_and_durable_history() {
         .world
         .players
         .iter()
-        .find(|(_, p)| p.joined && p.state.team == Team::Green)
-        .map(|(addr, p)| (*addr, p.state.id))
+        .find(|(_, p)| p.joined && p.hero.identity.team == Team::Green)
+        .map(|(addr, p)| (*addr, p.hero.identity.id))
         .unwrap();
     let attacker_index = sockets
         .iter()
@@ -580,8 +592,8 @@ fn postgres_live_udp_signed_profiles_queue_real_cast_and_durable_history() {
     }
     rt.world.structures.get_mut(&base.id).unwrap().state.hp = 1.0;
     let attacker = rt.world.players.get_mut(&attacker_addr).unwrap();
-    attacker.state.x = base.x - 2.0;
-    attacker.state.z = base.z;
+    attacker.hero.x = base.x - 2.0;
+    attacker.hero.z = base.z;
     send(
         &sockets[attacker_index],
         &mut rt,

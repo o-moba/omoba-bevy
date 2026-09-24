@@ -249,7 +249,7 @@ pub(crate) fn is_bot_address(addr: SocketAddr) -> bool {
 fn human_count(players: &HashMap<SocketAddr, ConnectedPlayer>, team: Team) -> u32 {
     players
         .values()
-        .filter(|p| p.joined && !p.state.is_bot && p.state.team == team)
+        .filter(|p| p.joined && !p.hero.identity.is_bot && p.hero.identity.team == team)
         .count() as u32
 }
 
@@ -276,8 +276,10 @@ pub(crate) fn remove_replaced_bot(
 ) {
     let addr = players
         .iter()
-        .filter(|(addr, p)| p.state.is_bot && p.state.team == team && bots.is_lane_bot(**addr))
-        .min_by_key(|(_, p)| p.state.id)
+        .filter(|(addr, p)| {
+            p.hero.identity.is_bot && p.hero.identity.team == team && bots.is_lane_bot(**addr)
+        })
+        .min_by_key(|(_, p)| p.hero.identity.id)
         .map(|(addr, _)| *addr);
     if let Some(addr) = addr {
         remove_bot(players, bots, ledger, addr);
@@ -293,8 +295,8 @@ fn remove_bot(
     addr: SocketAddr,
 ) {
     if let Some(player) = players.remove(&addr) {
-        ledger.update_earned_gold(player.state.id, player.state.earned_gold);
-        ledger.update_player(player.state.id, player.state.level, true);
+        ledger.update_earned_gold(player.hero.identity.id, player.economy.earned_gold);
+        ledger.update_player(player.hero.identity.id, player.hero.progress.level, true);
     }
     bots.controllers.remove(&addr);
 }
@@ -309,7 +311,9 @@ fn seated_count(
     players
         .iter()
         .filter(|(addr, p)| {
-            p.joined && p.state.team == team && (!p.state.is_bot || bots.is_lane_bot(**addr))
+            p.joined
+                && p.hero.identity.team == team
+                && (!p.hero.identity.is_bot || bots.is_lane_bot(**addr))
         })
         .count()
 }
@@ -317,18 +321,19 @@ fn seated_count(
 /// Spend every skill point the way a player would: the ultimate first once it
 /// unlocks, then Q, W and E, never into a locked slot.
 pub(crate) fn auto_rank_skills(player: &mut ConnectedPlayer) {
-    let unlocked = unlocked_slots_for_level(player.state.level);
+    let unlocked = unlocked_slots_for_level(player.hero.progress.level);
     for slot in [3_u8, 0, 1, 2] {
         let index = slot as usize;
         if !unlocked[index] {
             continue;
         }
         let max_rank = ability_for_class_slot(
-            player.state.hero_class,
+            player.hero.identity.hero_class,
             SkillSlot::from_index(slot).unwrap(),
         )
         .max_rank;
-        while player.state.skill_points > 0 && player.state.ranks[index] < max_rank {
+        while player.hero.progress.skill_points > 0 && player.hero.progress.ranks[index] < max_rank
+        {
             apply_skill_upgrade(player, slot);
         }
     }
@@ -342,19 +347,19 @@ pub(crate) fn auto_shop(
     phase: &GameState,
     match_id: u64,
 ) {
-    if !shop::shop_is_available(&player.state, map, phase) {
+    if !shop::shop_is_available(&player.hero, map, phase) {
         return;
     }
-    for item_id in shared::shop::recommended_items(player.state.hero_class) {
-        if player.state.inventory.len() >= shared::shop::INVENTORY_CAPACITY {
+    for item_id in shared::shop::recommended_items(player.hero.identity.hero_class) {
+        if player.economy.inventory.len() >= shared::shop::INVENTORY_CAPACITY {
             break;
         }
-        if player.state.inventory.contains(item_id)
-            || player.state.gold < shared::shop::item(*item_id).cost
+        if player.economy.inventory.contains(item_id)
+            || player.economy.gold < shared::shop::item(*item_id).cost
         {
             continue;
         }
-        let request = player.purchase_sequence + 1;
+        let request = player.economy.purchase_sequence + 1;
         shop::handle_purchase(player, map, phase, item_id.id(), request, match_id);
     }
 }
@@ -370,12 +375,12 @@ fn configure_duelist(
     match_id: u64,
 ) {
     let level = level.clamp(STARTING_LEVEL, MAX_LEVEL);
-    while player.state.level < level && player.state.next_level_xp > 0 {
-        let needed = player.state.next_level_xp;
-        progression::grant_player_xp(&mut player.state, needed);
+    while player.hero.progress.level < level && player.hero.progress.next_level_xp > 0 {
+        let needed = player.hero.progress.next_level_xp;
+        progression::grant_player_xp(&mut player.hero, needed);
     }
-    player.state.hp = player.state.max_hp;
-    player.state.mana = player.state.max_mana;
+    player.hero.hp = player.hero.max_hp;
+    player.hero.mana = player.hero.max_mana;
     auto_rank_skills(player);
     shop::award_gold(player, gold);
     auto_shop(player, map, phase, match_id);
@@ -384,10 +389,10 @@ fn configure_duelist(
 /// Put a dummy on its anchor, facing `toward`, without a movement envelope
 /// check: this is a placement, not a step.
 fn place_dummy(player: &mut ConnectedPlayer, anchor: [f32; 2], toward: [f32; 2], now: Instant) {
-    player.state.x = anchor[0];
-    player.state.y = PLAYER_GROUND_Y;
-    player.state.z = anchor[1];
-    player.state.yaw = hero_yaw_towards(toward[0] - anchor[0], toward[1] - anchor[1]);
+    player.hero.x = anchor[0];
+    player.hero.y = PLAYER_GROUND_Y;
+    player.hero.z = anchor[1];
+    player.hero.yaw = hero_yaw_towards(toward[0] - anchor[0], toward[1] - anchor[1]);
     player.timers.last_movement_at = now;
 }
 
@@ -428,14 +433,17 @@ impl ServerRuntime {
             .and_then(|session| self.world.disconnected_sessions.get(session));
         let available = retained.map_or_else(
             || assign_human_team(&self.world.players, self.match_config.team_size).is_some(),
-            |p| human_count(&self.world.players, p.player.state.team) < self.match_config.team_size,
+            |p| {
+                human_count(&self.world.players, p.player.hero.identity.team)
+                    < self.match_config.team_size
+            },
         );
         if !available {
             self.world.players.get_mut(&addr).unwrap().join_error =
                 Some(shared::protocol::JoinRejection::MatchFull);
             return false;
         }
-        let retained_id = retained.map(|p| p.player.state.id);
+        let retained_id = retained.map(|p| p.player.hero.identity.id);
         let roster = self.combat_log.ledger.snapshot();
         let existing = roster.iter().any(|p| {
             Some(p.player_id) == retained_id
@@ -443,7 +451,7 @@ impl ServerRuntime {
                     .world
                     .players
                     .get(&addr)
-                    .is_some_and(|a| a.state.id == p.player_id)
+                    .is_some_and(|a| a.hero.identity.id == p.player_id)
         });
         if matches!(self.world.game_state, GameState::Victory { .. })
             || (!existing && roster.len() >= shared::career::MAX_PARTICIPANTS)
@@ -472,7 +480,7 @@ impl ServerRuntime {
                 .world
                 .players
                 .values()
-                .any(|p| p.joined && !p.state.is_bot)
+                .any(|p| p.joined && !p.hero.identity.is_bot)
         {
             return;
         }
@@ -540,8 +548,8 @@ impl ServerRuntime {
             .world
             .players
             .values()
-            .filter(|p| p.joined && p.state.team == team)
-            .map(|p| p.state.hero_class)
+            .filter(|p| p.joined && p.hero.identity.team == team)
+            .map(|p| p.hero.identity.hero_class)
             .collect();
         let (composition_class, composition_lane, composition_jungle) = BOT_COMPOSITION
             .into_iter()
@@ -554,7 +562,7 @@ impl ServerRuntime {
             (Lane::Mid, false)
         };
         let player = self.world.players.get_mut(&addr).unwrap();
-        player.state.is_bot = true;
+        player.hero.identity.is_bot = true;
         handle_join_request_with_sprite(
             player,
             team,
@@ -591,7 +599,7 @@ impl ServerRuntime {
             .world
             .players
             .iter()
-            .filter(|(_, p)| p.state.is_bot)
+            .filter(|(_, p)| p.hero.identity.is_bot)
             .map(|(addr, _)| *addr)
             .collect();
         for addr in addresses {
@@ -621,14 +629,14 @@ impl ServerRuntime {
             .world
             .players
             .get(&addr)
-            .filter(|p| p.joined && !p.state.is_bot)
+            .filter(|p| p.joined && !p.hero.identity.is_bot)
         else {
             return;
         };
-        let requester = human.state.id;
-        let team = human.state.team;
-        let class = human.state.hero_class;
-        let origin = [human.state.x, human.state.z];
+        let requester = human.hero.identity.id;
+        let team = human.hero.identity.team;
+        let class = human.hero.identity.hero_class;
+        let origin = [human.hero.x, human.hero.z];
         match command {
             PracticeCommand::Roster => {
                 self.remove_all_bots();
@@ -650,7 +658,7 @@ impl ServerRuntime {
                     .players
                     .iter()
                     .filter(|(a, _)| matches!(self.bots.kind(**a), Some(BotKind::Dummy { .. })))
-                    .map(|(a, p)| (p.state.id, *a))
+                    .map(|(a, p)| (p.hero.identity.id, *a))
                     .collect();
                 dummies.sort_unstable();
                 if dummies.len() >= MAX_DUMMIES {
@@ -671,12 +679,12 @@ impl ServerRuntime {
                     return;
                 };
                 let dummy = self.world.players.get_mut(&bot).unwrap();
-                dummy.state.max_hp = DUMMY_MAX_HP;
-                dummy.state.hp = DUMMY_MAX_HP;
+                dummy.hero.max_hp = DUMMY_MAX_HP;
+                dummy.hero.hp = DUMMY_MAX_HP;
                 place_dummy(dummy, anchor, origin, now);
                 println!(
                     "Practice sandbox: dummy {} at ({:.1}, {:.1})",
-                    dummy.state.id, anchor[0], anchor[1]
+                    dummy.hero.identity.id, anchor[0], anchor[1]
                 );
             }
             PracticeCommand::StartDuel { level, gold } => {
@@ -702,11 +710,11 @@ impl ServerRuntime {
                 );
                 println!(
                     "Practice sandbox: duelist {} level {} ranks {:?} items {:?} gold left {}",
-                    duelist.state.id,
-                    duelist.state.level,
-                    duelist.state.ranks,
-                    duelist.state.inventory,
-                    duelist.state.gold
+                    duelist.hero.identity.id,
+                    duelist.hero.progress.level,
+                    duelist.hero.progress.ranks,
+                    duelist.economy.inventory,
+                    duelist.economy.gold
                 );
             }
         }
@@ -768,22 +776,22 @@ impl ServerRuntime {
             if let BotKind::Dummy { anchor } = controller.kind {
                 // Never thinks, moves or attacks. After a respawn at base it
                 // is put back on its anchor so target practice continues.
-                if player.state.hp > 0.0
-                    && (player.state.x - anchor[0]).hypot(player.state.z - anchor[1]) > 0.5
+                if player.hero.hp > 0.0
+                    && (player.hero.x - anchor[0]).hypot(player.hero.z - anchor[1]) > 0.5
                 {
                     let toward = self
                         .world
                         .players
                         .values()
-                        .find(|p| p.joined && !p.state.is_bot)
-                        .map_or(anchor, |p| [p.state.x, p.state.z]);
+                        .find(|p| p.joined && !p.hero.identity.is_bot)
+                        .map_or(anchor, |p| [p.hero.x, p.hero.z]);
                     let dummy = self.world.players.get_mut(&addr).unwrap();
                     place_dummy(dummy, anchor, toward, now);
                 }
                 self.bots.controllers.insert(addr, controller);
                 continue;
             }
-            if player.state.hp <= 0.0 {
+            if player.hero.hp <= 0.0 {
                 controller.route.clear();
                 controller.goal = None;
                 controller.waypoint = 1;
@@ -792,9 +800,9 @@ impl ServerRuntime {
                 self.bots.controllers.insert(addr, controller);
                 continue;
             }
-            let team = player.state.team;
-            let origin = [player.state.x, player.state.z];
-            let low_health = player.state.hp < player.state.max_hp * 0.28;
+            let team = player.hero.identity.team;
+            let origin = [player.hero.x, player.hero.z];
+            let low_health = player.hero.hp < player.hero.max_hp * 0.28;
             if low_health && now >= controller.next_retreat {
                 controller.retreat_until = Some(now + Duration::from_secs(6));
                 controller.next_retreat = now + Duration::from_secs(18);
@@ -859,9 +867,9 @@ impl ServerRuntime {
                     // enforces range, mana and cooldown for each slot.
                     for slot in 0..4 {
                         let p = &self.world.players[&addr];
-                        if !unlocked_slots_for_level(p.state.level)[slot as usize]
+                        if !unlocked_slots_for_level(p.hero.progress.level)[slot as usize]
                             || ability_for_class_slot(
-                                p.state.hero_class,
+                                p.hero.identity.hero_class,
                                 SkillSlot::from_index(slot).unwrap(),
                             )
                             .targeting
@@ -876,7 +884,7 @@ impl ServerRuntime {
                     for slot in 0..4 {
                         let p = &self.world.players[&addr];
                         if ability_for_class_slot(
-                            p.state.hero_class,
+                            p.hero.identity.hero_class,
                             SkillSlot::from_index(slot).unwrap(),
                         )
                         .targeting
@@ -884,7 +892,7 @@ impl ServerRuntime {
                         {
                             let target = TargetId {
                                 kind: TargetKind::Player,
-                                id: p.state.id,
+                                id: p.hero.identity.id,
                             };
                             handle_cast_request(&mut self.world, addr, target, slot, now);
                         }
@@ -906,7 +914,8 @@ impl ServerRuntime {
                     .map(|(position, radius)| (target, position, radius))
                 });
             let reach =
-                shared::basic_attack_for_class(self.world.players[&addr].state.hero_class).range;
+                shared::basic_attack_for_class(self.world.players[&addr].hero.identity.hero_class)
+                    .range;
             let mut in_range = false;
             let destination = if retreating {
                 let spawn = spawn_position_for_team(&self.world.map_layout, team);
@@ -921,9 +930,9 @@ impl ServerRuntime {
                 in_range = distance <= reach + radius - margin;
                 controller.holding_range = in_range;
                 if in_range {
-                    self.world.players.get_mut(&addr).unwrap().state.yaw = hero_yaw_towards(dx, dz);
+                    self.world.players.get_mut(&addr).unwrap().hero.yaw = hero_yaw_towards(dx, dz);
                     let request = self.world.players[&addr]
-                        .state
+                        .economy
                         .basic_attack_request_id
                         .saturating_add(1);
                     basic_attack::handle_basic_attack_request(
@@ -984,23 +993,23 @@ impl ServerRuntime {
                 controller.route.clear();
                 controller.goal = None;
             }
-            let id = self.world.players[&addr].state.id;
+            let id = self.world.players[&addr].hero.identity.id;
             let mut others: Vec<_> = self
                 .world
                 .players
                 .values()
-                .filter(|p| p.joined && p.state.hp > 0.0 && p.state.id != id)
-                .map(|p| (p.state.id, [p.state.x, p.state.z]))
+                .filter(|p| p.joined && p.hero.hp > 0.0 && p.hero.identity.id != id)
+                .map(|p| (p.hero.identity.id, [p.hero.x, p.hero.z]))
                 .collect();
             others.sort_unstable_by_key(|(id, _)| *id);
             let step = PLAYER_SPEED
                 * self.world.players[&addr]
-                    .state
+                    .economy
                     .item_bonuses
                     .move_speed_multiplier
                 * shared::hero_balance::movement_multiplier(
-                    self.world.players[&addr].state.hero_class,
-                    self.world.players[&addr].state.level,
+                    self.world.players[&addr].hero.identity.hero_class,
+                    self.world.players[&addr].hero.progress.level,
                 )
                 * dt;
             let accepted = steer_bot_step(id, origin, desired, step, &others, &discs);
@@ -1008,7 +1017,7 @@ impl ServerRuntime {
             if movement[0].hypot(movement[1]) > 0.000_1 {
                 let player = self.world.players.get_mut(&addr).unwrap();
                 let yaw = if in_range {
-                    player.state.yaw
+                    player.hero.yaw
                 } else {
                     hero_yaw_towards(movement[0], movement[1])
                 };
@@ -1067,13 +1076,13 @@ impl ServerRuntime {
             .world
             .players
             .values()
-            .filter(|p| p.joined && p.state.hp > 0.0 && p.state.team != team)
+            .filter(|p| p.joined && p.hero.hp > 0.0 && p.hero.identity.team != team)
             .map(|p| {
                 (
-                    (p.state.x - origin[0]).hypot(p.state.z - origin[1]),
+                    (p.hero.x - origin[0]).hypot(p.hero.z - origin[1]),
                     TargetId {
                         kind: TargetKind::Player,
-                        id: p.state.id,
+                        id: p.hero.identity.id,
                     },
                 )
             })
@@ -1106,13 +1115,13 @@ impl ServerRuntime {
             .world
             .players
             .values()
-            .filter(|p| p.joined && p.state.hp > 0.0 && p.state.team != team)
+            .filter(|p| p.joined && p.hero.hp > 0.0 && p.hero.identity.team != team)
             .map(|p| {
                 (
-                    distance(p.state.x, p.state.z),
+                    distance(p.hero.x, p.hero.z),
                     TargetId {
                         kind: TargetKind::Player,
-                        id: p.state.id,
+                        id: p.hero.identity.id,
                     },
                 )
             })

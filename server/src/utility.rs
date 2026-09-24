@@ -3,7 +3,7 @@ use super::*;
 use shared::utility::*;
 
 pub(crate) fn utility_movement_multiplier(player: &ConnectedPlayer, now: Instant) -> f32 {
-    if player.state.hp > 0.0
+    if player.hero.hp > 0.0
         && player
             .timers
             .haste_expires_at
@@ -25,14 +25,14 @@ pub(crate) fn handle_utility_request(
     request_id: u64,
     now: Instant,
 ) {
-    if !player.joined || request_id == 0 || request_id <= player.state.utility.last_request_id {
+    if !player.joined || request_id == 0 || request_id <= player.hero.utility.last_request_id {
         return;
     }
     // The packet receiver validates epoch/match before consuming the request.
     // Failed requests are consumed too; a cooldown/death replay cannot activate later.
-    player.state.utility.last_request_id = request_id;
+    player.hero.utility.last_request_id = request_id;
     player.last_seen = now;
-    if !matches!(phase, GameState::Running) || player.state.hp <= 0.0 {
+    if !matches!(phase, GameState::Running) || player.hero.hp <= 0.0 {
         return;
     }
     match action {
@@ -46,7 +46,7 @@ pub(crate) fn handle_utility_request(
             if !length.is_finite() || length <= 0.0001 {
                 return;
             }
-            let from = [player.state.x, player.state.z];
+            let from = [player.hero.x, player.hero.z];
             let to = map.clamp_player_position(Vec3f::new(
                 from[0] + direction[0] / length * DASH_DISTANCE,
                 PLAYER_GROUND_Y,
@@ -54,13 +54,12 @@ pub(crate) fn handle_utility_request(
             ));
             let to = shared::navigation::world_navigation().clip_movement(from, [to.x, to.z]);
             let to = clip_live_structures(from, to, structures);
-            player.state.x = to[0];
-            player.state.y = PLAYER_GROUND_Y;
-            player.state.z = to[1];
+            player.hero.x = to[0];
+            player.hero.y = PLAYER_GROUND_Y;
+            player.hero.z = to[1];
             player.timers.last_movement_at = now;
             player.timers.dash_ready_at = Some(now + Duration::from_secs_f32(DASH_COOLDOWN_SECS));
-            player.state.utility.dash_sequence =
-                player.state.utility.dash_sequence.saturating_add(1);
+            player.hero.utility.dash_sequence = player.hero.utility.dash_sequence.saturating_add(1);
         }
         UtilityAction::Haste => {
             if hero_timers::haste_remaining(player, now) > 0.0 {

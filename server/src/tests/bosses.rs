@@ -169,9 +169,21 @@ fn boss_kill_grants_team_buff_and_respawns_on_boss_cooldown() {
     let now = Instant::now();
     world.ensure_connected(killer_addr, now);
     world.ensure_connected(enemy_addr, now);
-    world.players.get_mut(&killer_addr).unwrap().state.team = Team::Green;
-    world.players.get_mut(&enemy_addr).unwrap().state.team = Team::Blue;
-    let killer_id = world.players.get(&killer_addr).unwrap().state.id;
+    world
+        .players
+        .get_mut(&killer_addr)
+        .unwrap()
+        .hero
+        .identity
+        .team = Team::Green;
+    world
+        .players
+        .get_mut(&enemy_addr)
+        .unwrap()
+        .hero
+        .identity
+        .team = Team::Blue;
+    let killer_id = world.players.get(&killer_addr).unwrap().hero.identity.id;
 
     world.neutrals = build_camps_and_bosses();
     schedule_boss_spawns(&mut world.neutrals, now);
@@ -199,7 +211,7 @@ fn boss_kill_grants_team_buff_and_respawns_on_boss_cooldown() {
 
     // Killer got the individual reward; the whole killing team got the buff.
     let killer = world.players.get(&killer_addr).unwrap();
-    assert_eq!(killer.state.gold, STARTING_GOLD + WENDIGO_KILL_GOLD);
+    assert_eq!(killer.economy.gold, STARTING_GOLD + WENDIGO_KILL_GOLD);
     assert!(team_buffs.is_active(Team::Green, TeamBuffKind::WendigoFavor, kill_at));
     assert!(!team_buffs.is_active(Team::Blue, TeamBuffKind::WendigoFavor, kill_at));
     assert!(
@@ -254,7 +266,7 @@ fn camp_kills_do_not_grant_team_buffs() {
     let addr: SocketAddr = "127.0.0.1:47003".parse().unwrap();
     let now = Instant::now();
     world.ensure_connected(addr, now);
-    let killer_id = world.players.get(&addr).unwrap().state.id;
+    let killer_id = world.players.get(&addr).unwrap().hero.identity.id;
 
     let mut next_neutral_id = 9_001;
     world.neutrals = build_neutral_camps(&mut next_neutral_id);
@@ -344,7 +356,7 @@ fn team_buff_multiplies_cast_damage_for_buffed_team_only() {
         q.cast_range * 0.5,
         now,
     );
-    let caster_id = world.players.get(&caster_addr).unwrap().state.id;
+    let caster_id = world.players.get(&caster_addr).unwrap().hero.identity.id;
     let base_damage = q.projectile_damage.unwrap();
 
     // Buff the caster's team (Green): outgoing damage is multiplied.
@@ -443,12 +455,30 @@ fn top_buff_regenerates_hp_for_alive_buffed_players_only() {
         // Buff regen only applies to joined players.
         world.players.get_mut(&addr).unwrap().joined = true;
     }
-    world.players.get_mut(&green_addr).unwrap().state.team = Team::Green;
-    world.players.get_mut(&blue_addr).unwrap().state.team = Team::Blue;
-    world.players.get_mut(&dead_addr).unwrap().state.team = Team::Green;
-    world.players.get_mut(&green_addr).unwrap().state.hp = 50.0;
-    world.players.get_mut(&blue_addr).unwrap().state.hp = 50.0;
-    world.players.get_mut(&dead_addr).unwrap().state.hp = 0.0;
+    world
+        .players
+        .get_mut(&green_addr)
+        .unwrap()
+        .hero
+        .identity
+        .team = Team::Green;
+    world
+        .players
+        .get_mut(&blue_addr)
+        .unwrap()
+        .hero
+        .identity
+        .team = Team::Blue;
+    world
+        .players
+        .get_mut(&dead_addr)
+        .unwrap()
+        .hero
+        .identity
+        .team = Team::Green;
+    world.players.get_mut(&green_addr).unwrap().hero.hp = 50.0;
+    world.players.get_mut(&blue_addr).unwrap().hero.hp = 50.0;
+    world.players.get_mut(&dead_addr).unwrap().hero.hp = 0.0;
 
     world
         .team_buffs
@@ -456,17 +486,17 @@ fn top_buff_regenerates_hp_for_alive_buffed_players_only() {
 
     regenerate_team_buff_hp(&mut world, TickCtx { now, dt: 1.0 });
     let expected = 50.0 + TOP_BOSS_BUFF_HP_REGEN_PER_SECOND;
-    assert!((world.players.get(&green_addr).unwrap().state.hp - expected).abs() < EPSILON);
-    assert!((world.players.get(&blue_addr).unwrap().state.hp - 50.0).abs() < EPSILON);
-    assert!(world.players.get(&dead_addr).unwrap().state.hp == 0.0);
+    assert!((world.players.get(&green_addr).unwrap().hero.hp - expected).abs() < EPSILON);
+    assert!((world.players.get(&blue_addr).unwrap().hero.hp - 50.0).abs() < EPSILON);
+    assert!(world.players.get(&dead_addr).unwrap().hero.hp == 0.0);
 
     // Regen clamps to max HP.
     regenerate_team_buff_hp(&mut world, TickCtx { now, dt: 10_000.0 });
     let green = world.players.get(&green_addr).unwrap();
-    assert!((green.state.hp - green.state.max_hp).abs() < EPSILON);
+    assert!((green.hero.hp - green.hero.max_hp).abs() < EPSILON);
 
     // No regen after the buff expires.
-    world.players.get_mut(&green_addr).unwrap().state.hp = 50.0;
+    world.players.get_mut(&green_addr).unwrap().hero.hp = 50.0;
     let expired = now + TOP_BOSS_BUFF_DURATION;
     regenerate_team_buff_hp(
         &mut world,
@@ -475,7 +505,7 @@ fn top_buff_regenerates_hp_for_alive_buffed_players_only() {
             dt: 1.0,
         },
     );
-    assert!((world.players.get(&green_addr).unwrap().state.hp - 50.0).abs() < EPSILON);
+    assert!((world.players.get(&green_addr).unwrap().hero.hp - 50.0).abs() < EPSILON);
 }
 
 #[test]
@@ -558,7 +588,7 @@ fn boss_leash_reset_uses_boss_distance_and_restores_full_hp() {
     let now = Instant::now();
     world.ensure_connected(addr, now);
     world.players.get_mut(&addr).unwrap().joined = true;
-    let player_id = world.players.get(&addr).unwrap().state.id;
+    let player_id = world.players.get(&addr).unwrap().hero.identity.id;
 
     world.neutrals = build_camps_and_bosses();
     schedule_boss_spawns(&mut world.neutrals, now);
@@ -583,8 +613,8 @@ fn boss_leash_reset_uses_boss_distance_and_restores_full_hp() {
     }
     {
         let player = world.players.get_mut(&addr).unwrap();
-        player.state.x = anchor.x + NEUTRAL_LEASH_DISTANCE + 2.0;
-        player.state.z = anchor.z;
+        player.hero.x = anchor.x + NEUTRAL_LEASH_DISTANCE + 2.0;
+        player.hero.z = anchor.z;
     }
     const {
         assert!(NEUTRAL_LEASH_DISTANCE + 2.0 < BOSS_LEASH_DISTANCE);
@@ -605,7 +635,7 @@ fn boss_leash_reset_uses_boss_distance_and_restores_full_hp() {
     // Past the boss leash the boss resets to its pit at full HP.
     {
         let player = world.players.get_mut(&addr).unwrap();
-        player.state.x = anchor.x + BOSS_LEASH_DISTANCE + 2.0;
+        player.hero.x = anchor.x + BOSS_LEASH_DISTANCE + 2.0;
     }
     simulate_neutrals(
         &mut world,

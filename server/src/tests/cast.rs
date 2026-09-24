@@ -19,17 +19,17 @@ fn cast_drains_mana_respects_cooldown_and_blocks_empty_mana() {
         kind: TargetKind::Player,
         id: b_id,
     };
-    let a_mana_before = world.players.get(&addr_a).unwrap().state.mana;
+    let a_mana_before = world.players.get(&addr_a).unwrap().hero.mana;
 
     cast_slot(&mut world, addr_a, target, 0, now);
     assert_eq!(world.projectiles.len(), 1);
     {
-        let action = &world.players.get(&addr_a).unwrap().state;
-        assert_eq!(action.action_sequence, 1);
-        assert_eq!(action.action_kind, PlayerActionKind::Attack);
-        assert_eq!(action.action_slot, 0);
+        let action = world.players.get(&addr_a).unwrap().hero.last_action;
+        assert_eq!(action.sequence, 1);
+        assert_eq!(action.kind, PlayerActionKind::Attack);
+        assert_eq!(action.slot, 0);
     }
-    let mana_after_first = world.players.get(&addr_a).unwrap().state.mana;
+    let mana_after_first = world.players.get(&addr_a).unwrap().hero.mana;
     assert!((mana_after_first - (a_mana_before - scaled_mana_cost(q, 1))).abs() < EPSILON);
 
     cast_slot(&mut world, addr_a, target, 0, now);
@@ -39,7 +39,13 @@ fn cast_drains_mana_respects_cooldown_and_blocks_empty_mana() {
         "second cast at same instant must be cooldown-blocked"
     );
     assert_eq!(
-        world.players.get(&addr_a).unwrap().state.action_sequence,
+        world
+            .players
+            .get(&addr_a)
+            .unwrap()
+            .hero
+            .last_action
+            .sequence,
         1,
         "rejected casts must not advance cosmetic action state"
     );
@@ -51,16 +57,34 @@ fn cast_drains_mana_respects_cooldown_and_blocks_empty_mana() {
         2,
         "cast after cooldown should spawn another projectile"
     );
-    assert_eq!(world.players.get(&addr_a).unwrap().state.action_sequence, 2);
+    assert_eq!(
+        world
+            .players
+            .get(&addr_a)
+            .unwrap()
+            .hero
+            .last_action
+            .sequence,
+        2
+    );
 
-    world.players.get_mut(&addr_a).unwrap().state.mana = 0.0;
+    world.players.get_mut(&addr_a).unwrap().hero.mana = 0.0;
     cast_slot(&mut world, addr_a, target, 0, later + scaled_cooldown(q, 1));
     assert_eq!(
         world.projectiles.len(),
         2,
         "zero mana must not create a projectile"
     );
-    assert_eq!(world.players.get(&addr_a).unwrap().state.action_sequence, 2);
+    assert_eq!(
+        world
+            .players
+            .get(&addr_a)
+            .unwrap()
+            .hero
+            .last_action
+            .sequence,
+        2
+    );
 }
 
 #[test]
@@ -81,9 +105,9 @@ fn join_applies_class_and_normalizes_avatar() {
         now,
     );
     {
-        let state = &world.players.get(&addr).unwrap().state;
-        assert_eq!(state.hero_class, HeroClass::Cleric);
-        assert_eq!(state.avatar.as_deref(), Some(valid_slug.as_str()));
+        let state = &world.players.get(&addr).unwrap().hero;
+        assert_eq!(state.identity.hero_class, HeroClass::Cleric);
+        assert_eq!(state.identity.avatar.as_deref(), Some(valid_slug.as_str()));
     }
 
     // Unknown or malicious avatar slugs on a fresh admission fall back safely.
@@ -98,9 +122,9 @@ fn join_applies_class_and_normalizes_avatar() {
         &world.map_layout,
         now,
     );
-    let state = &world.players.get(&addr).unwrap().state;
-    assert_eq!(state.hero_class, HeroClass::Mage);
-    assert_eq!(state.avatar, None);
+    let state = &world.players.get(&addr).unwrap().hero;
+    assert_eq!(state.identity.hero_class, HeroClass::Mage);
+    assert_eq!(state.identity.avatar, None);
 }
 
 #[test]
@@ -130,7 +154,7 @@ fn class_kits_apply_distinct_authoritative_numbers() {
         assert_eq!(world.projectiles.len(), 1);
         let projectile = world.projectiles.values().next().unwrap();
         assert!((projectile.damage - q.projectile_damage.unwrap()).abs() < EPSILON);
-        let mana_spent = MAX_MANA - world.players.get(&caster).unwrap().state.mana;
+        let mana_spent = MAX_MANA - world.players.get(&caster).unwrap().hero.mana;
         assert!((mana_spent - q.base_mana_cost).abs() < EPSILON);
         results.push((projectile.damage, mana_spent));
     }
@@ -153,51 +177,54 @@ fn self_target_abilities_apply_heal_and_respect_unlock_gates() {
     setup_caster_and_target(&mut world, caster, other, HeroClass::Cleric, 5.0, now);
     let self_target = TargetId {
         kind: TargetKind::Player,
-        id: world.players.get(&caster).unwrap().state.id,
+        id: world.players.get(&caster).unwrap().hero.identity.id,
     };
     let w = ability_for_class_slot(HeroClass::Cleric, SkillSlot::W);
     assert_eq!(w.targeting, TargetingMode::SelfTarget);
 
     // Level 1: W is locked -> cast must be a complete no-op.
     {
-        let state = &mut world.players.get_mut(&caster).unwrap().state;
+        let state = &mut world.players.get_mut(&caster).unwrap().hero;
         state.hp = 40.0;
     }
     cast_slot(&mut world, caster, self_target, 1, now);
     {
-        let state = &world.players.get(&caster).unwrap().state;
-        assert!((state.hp - 40.0).abs() < EPSILON, "locked W must not heal");
-        assert!((state.mana - MAX_MANA).abs() < EPSILON);
+        let player = world.players.get(&caster).unwrap();
+        let hero = &player.hero;
+        assert!((hero.hp - 40.0).abs() < EPSILON, "locked W must not heal");
+        assert!((hero.mana - MAX_MANA).abs() < EPSILON);
         assert!(world.projectiles.is_empty());
-        assert_eq!(state.action_sequence, 0);
+        assert_eq!(player.hero.last_action.sequence, 0);
     }
 
     // Level 2 unlocks W: heal appears, mana is drained, still no projectile.
     {
-        let state = &mut world.players.get_mut(&caster).unwrap().state;
-        grant_player_xp(state, state.next_level_xp);
-        assert_eq!(state.level, 2);
-        state.hp = 40.0;
-        state.mana = state.max_mana;
+        let player = world.players.get_mut(&caster).unwrap();
+        let needed = player.hero.progress.next_level_xp;
+        grant_player_xp(&mut player.hero, needed);
+        assert_eq!(player.hero.progress.level, 2);
+        player.hero.hp = 40.0;
+        player.hero.mana = player.hero.max_mana;
     }
     cast_slot(&mut world, caster, self_target, 1, now);
-    let state = &world.players.get(&caster).unwrap().state;
+    let player = world.players.get(&caster).unwrap();
+    let hero = &player.hero;
     assert!(
-        (state.hp
+        (hero.hp
             - (40.0
                 + w.self_heal.unwrap()
                     * shared::hero_balance::ability_power_multiplier(
-                        state.hero_class,
-                        state.level
+                        hero.identity.hero_class,
+                        player.hero.progress.level
                     )))
         .abs()
             < EPSILON,
         "unlocked W must heal by the kit amount"
     );
-    assert!((state.mana - (state.max_mana - w.base_mana_cost)).abs() < EPSILON);
-    assert_eq!(state.action_sequence, 1);
-    assert_eq!(state.action_kind, PlayerActionKind::Cast);
-    assert_eq!(state.action_slot, 1);
+    assert!((hero.mana - (hero.max_mana - w.base_mana_cost)).abs() < EPSILON);
+    assert_eq!(player.hero.last_action.sequence, 1);
+    assert_eq!(player.hero.last_action.kind, PlayerActionKind::Cast);
+    assert_eq!(player.hero.last_action.slot, 1);
     assert!(
         world.projectiles.is_empty(),
         "self ability must not spawn a projectile"
@@ -223,13 +250,13 @@ fn rank_scaling_boosts_damage_and_upgrades_cap_at_max_rank() {
     // Upgrades consume points and cap at the shared max rank (3).
     {
         let player = world.players.get_mut(&caster).unwrap();
-        player.state.skill_points = 5;
+        player.hero.progress.skill_points = 5;
         for _ in 0..5 {
             apply_skill_upgrade(player, 0);
         }
-        assert_eq!(player.state.ranks[0], q.max_rank);
+        assert_eq!(player.hero.progress.ranks[0], q.max_rank);
         assert_eq!(
-            player.state.skill_points,
+            player.hero.progress.skill_points,
             5 - u32::from(q.max_rank - 1),
             "only rank-raising upgrades may consume points"
         );
@@ -252,7 +279,7 @@ fn rank_scaling_boosts_damage_and_upgrades_cap_at_max_rank() {
         .expect("rank-3 cast fires");
     let expected = q.projectile_damage.unwrap() * rank_effect_scale(q.max_rank);
     assert!((projectile.damage - expected).abs() < EPSILON);
-    let mana_spent = MAX_MANA - world.players.get(&caster).unwrap().state.mana;
+    let mana_spent = MAX_MANA - world.players.get(&caster).unwrap().hero.mana;
     assert!((mana_spent - scaled_mana_cost(q, q.max_rank)).abs() < EPSILON);
 }
 
@@ -289,13 +316,13 @@ fn cast_range_validation_covers_target_types_and_rejects_far_targets() {
     );
     {
         let caster = world.players.get_mut(&caster_addr).unwrap();
-        caster.state.x = 0.0;
-        caster.state.z = 0.0;
+        caster.hero.x = 0.0;
+        caster.hero.z = 0.0;
     }
     {
         let target = world.players.get_mut(&target_addr).unwrap();
-        target.state.x = cast_range * 0.5;
-        target.state.z = 0.0;
+        target.hero.x = cast_range * 0.5;
+        target.hero.z = 0.0;
     }
 
     world.minions.insert(
@@ -343,7 +370,7 @@ fn cast_range_validation_covers_target_types_and_rejects_far_targets() {
         neutral.state.z = cast_range * 0.5;
     }
 
-    let target_player_id = world.players.get(&target_addr).unwrap().state.id;
+    let target_player_id = world.players.get(&target_addr).unwrap().hero.identity.id;
     let targets = [
         TargetId {
             kind: TargetKind::Player,
@@ -364,7 +391,7 @@ fn cast_range_validation_covers_target_types_and_rejects_far_targets() {
     ];
 
     for (index, target) in targets.into_iter().enumerate() {
-        world.players.get_mut(&caster_addr).unwrap().state.mana = MAX_MANA;
+        world.players.get_mut(&caster_addr).unwrap().hero.mana = MAX_MANA;
         handle_cast_request(
             &mut world,
             caster_addr,
@@ -377,10 +404,10 @@ fn cast_range_validation_covers_target_types_and_rejects_far_targets() {
 
     {
         let target = world.players.get_mut(&target_addr).unwrap();
-        target.state.x = cast_range + PLAYER_HIT_RADIUS + 10.0;
-        target.state.z = 0.0;
+        target.hero.x = cast_range + PLAYER_HIT_RADIUS + 10.0;
+        target.hero.z = 0.0;
     }
-    let mana_before = world.players.get(&caster_addr).unwrap().state.mana;
+    let mana_before = world.players.get(&caster_addr).unwrap().hero.mana;
     let projectile_count = world.projectiles.len();
     handle_cast_request(
         &mut world,
@@ -394,5 +421,5 @@ fn cast_range_validation_covers_target_types_and_rejects_far_targets() {
     );
 
     assert_eq!(world.projectiles.len(), projectile_count);
-    assert!((world.players.get(&caster_addr).unwrap().state.mana - mana_before).abs() < EPSILON);
+    assert!((world.players.get(&caster_addr).unwrap().hero.mana - mana_before).abs() < EPSILON);
 }

@@ -430,7 +430,7 @@ impl ServerRuntime {
                     self.snapshot_tick,
                 ),
                 join_error: None,
-                your_id: player.state.id,
+                your_id: player.hero.identity.id,
                 players: Vec::new(),
                 scoreboard: None,
                 prematch: None,

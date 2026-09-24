@@ -99,24 +99,30 @@ state. A tick is:
    frame where the old ECS systems ran; folding it into one pass is the
    next slice.
 
-Hero clocks and views: `ConnectedPlayer.state` is the wire `PlayerState`
-and holds only authoritative state; the replicated cooldown, utility-clock
-and shop fields stay at their defaults there. The instants a hero's clocks
-are measured from live in `ConnectedPlayer.timers: HeroTimers`
+Hero state and views: the server never stores the wire `PlayerState`.
+`ConnectedPlayer` (`entities.rs`) holds `hero: Hero` (`server/src/hero.rs`:
+`HeroIdentity` for id, bot flag, team, class, character, avatar, sprite and
+supporter aura, set at join and never by the simulation; position, yaw, HP
+and mana; `HeroProgress` for XP, level, skill points and ranks;
+`HeroUtility` for the utility request marks; `HeroAction`, the last accepted
+cosmetic action), `economy: HeroEconomy` (gold, earned gold, inventory, item
+bonuses, last purchase receipt, the basic-attack and purchase request marks
+and the passive-income remainder) and `timers: HeroTimers`
 (`server/src/hero_timers.rs`: last movement, per-slot casts, last basic
-strike, dash and haste readiness, haste expiry, respawn). The same module
-holds the pure reads over them (`basic_attack_remaining`,
-`skill_cooldown_remaining`, `skill_recovery_remaining`, `dash_remaining`,
-`haste_remaining`, `haste_active`), used as gates by the request handlers
-and by the sandbox telemetry, and `normalize_hero_timers`, the one place
-that clears instants from derived conditions (death, sandbox
-`no_cooldowns`), run once per tick after respawns. What a client receives is
-a view: `ConnectedPlayer::owner_view(now, map, phase)` is the stored state
-plus the derived fields computed at the tick's `now`; `public_view` is the
-hook for redaction and equals the owner view today.
-`snapshot::build_players_snapshot(world, now)` builds every replicated
-player through it. `server/src/tests/player_view.rs` pins the view's bytes
-through a hero lifetime.
+strike, dash and haste readiness, haste expiry, respawn), next to the
+transport and admission fields. `hero_timers` also holds the pure reads over
+the instants (`basic_attack_remaining`, `skill_cooldown_remaining`,
+`skill_recovery_remaining`, `dash_remaining`, `haste_remaining`,
+`haste_active`), used as gates by the request handlers and by the sandbox
+telemetry, and `normalize_hero_timers`, the one place that clears instants
+from derived conditions (death, sandbox `no_cooldowns`), run once per tick
+after respawns. `PlayerState` is built only by the views:
+`ConnectedPlayer::owner_view(now, map, phase)` maps `hero` and `economy`
+onto the wire struct and fills the cooldown, utility-clock and shop fields at
+the tick's `now`; `public_view` is the hook for redaction and equals the
+owner view today. `snapshot::build_players_snapshot(world, now)` builds every
+replicated player through it. `server/src/tests/player_view.rs` pins the
+mapping and the view's bytes through a hero lifetime.
 
 Supporting modules: `entities` (the server-side records), `sim/cast.rs`
 (ability casts), `vision` (server-owned sight, takes `&GameWorld`). Unit
@@ -173,9 +179,11 @@ Ordered by value over cost. Each step is a separate change with the full
    projectile path are gone; `ServerRuntime::tick` is the whole step);
    replicated `PlayerState` as a view over authoritative state and
    `HeroTimers` (done: `hero_timers.rs`, `owner_view`/`public_view`, no
-   per-tick copies); the rest of the `ConnectedPlayer` split
-   (`HeroEconomy`, a `Hero` core), `StatModifiers` and snapshot redaction
-   through `public_view` remain.
+   per-tick copies); authoritative hero state in server-owned structs (done:
+   `hero.rs` with `Hero`, `HeroIdentity`, `HeroProgress`, `HeroUtility`,
+   `HeroAction` and `HeroEconomy`; `ConnectedPlayer.state` is gone and the
+   views are the only place that builds a `PlayerState`); `StatModifiers`
+   (`hero_stats.rs`) and snapshot redaction through `public_view` remain.
 7. Match rules as one policy object; career, transport and clock behind
    traits.
 8. Client `net.rs` split into transport, session, commands, ingest, apply

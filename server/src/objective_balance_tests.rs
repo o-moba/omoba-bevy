@@ -26,13 +26,13 @@ fn siege(
         now,
     );
     let player = rt.world.players.get_mut(&addr).unwrap();
-    player.state.x = 0.0;
-    player.state.z = 0.0;
+    player.hero.x = 0.0;
+    player.hero.z = 0.0;
     if let Some(hp) = hp {
-        player.state.hp = hp;
-        player.state.max_hp = hp;
+        player.hero.hp = hp;
+        player.hero.max_hp = hp;
     }
-    let starting_hp = player.state.hp;
+    let starting_hp = player.hero.hp;
     let tower_id = *rt
         .world
         .structures
@@ -58,7 +58,7 @@ fn siege(
         let at = now + Duration::from_secs_f32(tick as f32 * dt);
         let p = rt.world.players.get_mut(&addr).unwrap();
         if tick > 0 {
-            p.state.mana = (p.state.mana + MANA_REGEN_PER_SECOND * dt).min(p.state.max_mana);
+            p.hero.mana = (p.hero.mana + MANA_REGEN_PER_SECOND * dt).min(p.hero.max_mana);
         }
         if fire_hero {
             handle_basic_attack_request(&mut rt.world, addr, target, tick + 1, at);
@@ -66,13 +66,13 @@ fn siege(
         }
         simulate_tower_attacks(&mut rt.world, at);
         simulate_projectiles(&mut rt.world, TickCtx { now: at, dt });
-        if rt.world.players[&addr].state.hp <= 0.0 || rt.world.structures[&tower_id].state.hp <= 0.0
+        if rt.world.players[&addr].hero.hp <= 0.0 || rt.world.structures[&tower_id].state.hp <= 0.0
         {
             elapsed = tick as f32 * dt;
             break;
         }
     }
-    serde_json::json!({"class":class,"hero_hp":starting_hp,"tower_damage":tower_damage,"offensive_policy":if fire_hero {"basic_then_q_every_tick"} else {"passive"},"seconds":elapsed,"hero_remaining_hp":rt.world.players[&addr].state.hp,"tower_remaining_hp":rt.world.structures[&tower_id].state.hp,"tower_destroyed":rt.world.structures[&tower_id].state.hp<=0.0})
+    serde_json::json!({"class":class,"hero_hp":starting_hp,"tower_damage":tower_damage,"offensive_policy":if fire_hero {"basic_then_q_every_tick"} else {"passive"},"seconds":elapsed,"hero_remaining_hp":rt.world.players[&addr].hero.hp,"tower_remaining_hp":rt.world.structures[&tower_id].state.hp,"tower_destroyed":rt.world.structures[&tower_id].state.hp<=0.0})
 }
 
 #[test]

@@ -26,33 +26,31 @@ fn join(session: &str, team: Team) -> ClientPacket {
 
 fn progress(player: &mut ConnectedPlayer, now: Instant, dead: bool) {
     for _ in 0..5 {
-        grant_player_xp(&mut player.state, 180);
+        grant_player_xp(&mut player.hero, 180);
     }
-    player.state.hp = if dead { 0.0 } else { 31.0 };
-    player.state.mana = 17.0;
-    player.state.gold = 311;
-    player.state.x = 11.0;
-    player.state.z = -12.0;
-    player.state.yaw = 1.2;
-    player.state.ranks = [3, 2, 1, 1];
-    player.state.skill_points = 2;
-    player.state.action_sequence = 73;
-    player.state.action_kind = PlayerActionKind::Cast;
-    player.state.action_slot = 1;
+    player.hero.hp = if dead { 0.0 } else { 31.0 };
+    player.hero.mana = 17.0;
+    player.economy.gold = 311;
+    player.hero.x = 11.0;
+    player.hero.z = -12.0;
+    player.hero.yaw = 1.2;
+    player.hero.progress.ranks = [3, 2, 1, 1];
+    player.hero.progress.skill_points = 2;
+    player.hero.last_action.sequence = 73;
+    player.hero.last_action.kind = PlayerActionKind::Cast;
+    player.hero.last_action.slot = 1;
     player.timers.last_cast_at = [Some(now); 4];
     player.timers.respawn_at = dead.then_some(now + RESPAWN_DELAY);
 }
 
 fn assert_gameplay_same(
-    before: &PlayerState,
+    before: &(Hero, HeroEconomy),
     casts: [Option<Instant>; 4],
     respawn: Option<Instant>,
     after: &ConnectedPlayer,
 ) {
-    assert_eq!(
-        serde_json::to_value(before).unwrap(),
-        serde_json::to_value(&after.state).unwrap()
-    );
+    assert_eq!(before.0, after.hero);
+    assert_eq!(before.1, after.economy);
     assert_eq!(casts, after.timers.last_cast_at);
     assert_eq!(respawn, after.timers.respawn_at);
 }
@@ -66,7 +64,7 @@ fn handler_duplicate_and_reclaim_preserve_wounded_and_dead_full_state() {
         rt.handle_packet(addr(55102), join("opponent", Team::Blue), now);
         let player = rt.world.players.get_mut(&addr(55101)).unwrap();
         progress(player, now, dead);
-        let before = player.state.clone();
+        let before = (player.hero.clone(), player.economy.clone());
         let casts = player.timers.last_cast_at;
         let respawn = player.timers.respawn_at;
         let mut duplicate = join("changed-session", Team::Blue);
@@ -119,7 +117,7 @@ fn handler_capacity_counts_reservations_and_expired_claim_is_fresh() {
     let now = Instant::now();
     rt.handle_packet(addr(55201), join("a", Team::Blue), now);
     rt.handle_packet(addr(55202), join("b", Team::Blue), now);
-    let old_id = rt.world.players[&addr(55201)].state.id;
+    let old_id = rt.world.players[&addr(55201)].hero.identity.id;
     let later = now + PLAYER_TIMEOUT + Duration::from_secs(1);
     rt.world.players.get_mut(&addr(55202)).unwrap().last_seen = later;
     rt.handle_packet(addr(55203), join("replacement", Team::Blue), later);
@@ -129,7 +127,7 @@ fn handler_capacity_counts_reservations_and_expired_claim_is_fresh() {
         Some(shared::protocol::JoinRejection::MatchFull)
     );
     rt.handle_packet(addr(55204), join("a", Team::Blue), later);
-    assert_eq!(rt.world.players[&addr(55204)].state.id, old_id);
+    assert_eq!(rt.world.players[&addr(55204)].hero.identity.id, old_id);
     assert_eq!(joined_count(&rt.world.players), 2);
     let expired = later + PLAYER_TIMEOUT + SESSION_RECLAIM_WINDOW + Duration::from_secs(1);
     rt.world.players.get_mut(&addr(55202)).unwrap().last_seen = expired;
@@ -144,7 +142,7 @@ fn handler_capacity_counts_reservations_and_expired_claim_is_fresh() {
         !rt.world
             .players
             .values()
-            .any(|player| player.state.id == old_id)
+            .any(|player| player.hero.identity.id == old_id)
     );
 }
 
@@ -164,11 +162,11 @@ fn handler_release_rejects_debug_and_bad_protocol_while_explicit_dev_accepts_deb
         let player = &rt.world.players[&addr(55301)];
         assert_eq!(player.god_mode, config.mode == MatchMode::Dev);
         if config.mode == MatchMode::Release {
-            assert_eq!(player.state.hp, 0.0);
+            assert_eq!(player.hero.hp, 0.0);
             assert!(player.timers.respawn_at.is_some());
             assert_eq!(player.speed_mult, 1.0);
         } else {
-            assert_eq!(player.state.hp, player.state.max_hp);
+            assert_eq!(player.hero.hp, player.hero.max_hp);
             assert!(player.speed_mult > 1.0);
         }
         rt.handle_packet(
@@ -257,38 +255,38 @@ fn contaminate_round(rt: &mut ServerRuntime, now: Instant) {
 
 fn assert_clean_round(rt: &ServerRuntime) {
     for player in rt.world.players.values().filter(|player| player.joined) {
-        assert_eq!((player.state.hp, player.state.max_hp), (MAX_HP, MAX_HP));
+        assert_eq!((player.hero.hp, player.hero.max_hp), (MAX_HP, MAX_HP));
         assert_eq!(
-            (player.state.mana, player.state.max_mana),
+            (player.hero.mana, player.hero.max_mana),
             (MAX_MANA, MAX_MANA)
         );
         assert_eq!(
             (
-                player.state.xp,
-                player.state.level,
-                player.state.next_level_xp
+                player.hero.progress.xp,
+                player.hero.progress.level,
+                player.hero.progress.next_level_xp
             ),
             (0, STARTING_LEVEL, xp_threshold_for_level(STARTING_LEVEL))
         );
         assert_eq!(
-            (player.state.gold, player.state.skill_points),
+            (player.economy.gold, player.hero.progress.skill_points),
             (STARTING_GOLD, 0)
         );
-        assert!(player.state.inventory.is_empty());
-        assert_eq!(player.state.item_bonuses, ItemBonuses::NONE);
-        assert!(player.state.last_purchase.is_none());
-        assert_eq!(player.purchase_sequence, 0);
-        assert_eq!(player.state.ranks, [1; 4]);
-        assert_eq!(player.state.action_sequence, 0);
-        assert_eq!(player.state.action_kind, PlayerActionKind::None);
-        assert_eq!(player.state.action_slot, 0);
+        assert!(player.economy.inventory.is_empty());
+        assert_eq!(player.economy.item_bonuses, ItemBonuses::NONE);
+        assert!(player.economy.last_purchase.is_none());
+        assert_eq!(player.economy.purchase_sequence, 0);
+        assert_eq!(player.hero.progress.ranks, [1; 4]);
+        assert_eq!(player.hero.last_action.sequence, 0);
+        assert_eq!(player.hero.last_action.kind, PlayerActionKind::None);
+        assert_eq!(player.hero.last_action.slot, 0);
         assert_eq!(player.timers.last_cast_at, [None; 4]);
         assert_eq!(player.timers.respawn_at, None);
         assert_eq!(player.speed_mult, 1.0);
         assert!(!player.god_mode);
-        let spawn = spawn_position_for_team(&rt.world.map_layout, player.state.team);
+        let spawn = spawn_position_for_team(&rt.world.map_layout, player.hero.identity.team);
         assert_eq!(
-            (player.state.x, player.state.z, player.state.yaw),
+            (player.hero.x, player.hero.z, player.hero.yaw),
             (spawn.x, spawn.z, 0.0)
         );
     }
@@ -342,7 +340,10 @@ fn canonical_rematch_resets_every_system_and_reforms_underfilled_release_roster(
     );
     assert_eq!(rt.match_started_at, None);
     rt.handle_packet(addr(55403), join("b", Team::Blue), now);
-    assert_eq!(rt.world.players[&addr(55403)].state.level, STARTING_LEVEL);
+    assert_eq!(
+        rt.world.players[&addr(55403)].hero.progress.level,
+        STARTING_LEVEL
+    );
     rt.tick(now, 0.01);
     assert!(matches!(rt.world.game_state, GameState::Starting { .. }));
     rt.tick(now + Duration::from_secs(3), 3.0);
@@ -377,7 +378,7 @@ fn empty_roster_grace_clears_reservations_and_next_group_gets_clean_match() {
     let mut rt = runtime(MatchConfig::dev());
     let now = Instant::now();
     rt.handle_packet(addr(55501), join("old", Team::Green), now);
-    let old_id = rt.world.players[&addr(55501)].state.id;
+    let old_id = rt.world.players[&addr(55501)].hero.identity.id;
     contaminate_round(&mut rt, now);
     rt.world.game_state = GameState::Running;
     rt.victory_at = None;
@@ -400,8 +401,8 @@ fn empty_roster_grace_clears_reservations_and_next_group_gets_clean_match() {
         join("old", Team::Blue),
         empty_at + EMPTY_ROSTER_GRACE,
     );
-    assert_ne!(rt.world.players[&addr(55502)].state.id, old_id);
-    assert_eq!(rt.world.players[&addr(55502)].state.level, 1);
+    assert_ne!(rt.world.players[&addr(55502)].hero.identity.id, old_id);
+    assert_eq!(rt.world.players[&addr(55502)].hero.progress.level, 1);
     assert_eq!(rt.world.game_state, GameState::Running);
     assert_clean_round(&rt);
 }
@@ -436,8 +437,8 @@ fn siege_blocks_cast_and_damage_until_own_lane_falls_and_resets() {
         .state
         .id;
     let player = rt.world.players.get_mut(&addr(55601)).unwrap();
-    player.state.x = base.x - 2.0;
-    player.state.z = base.z;
+    player.hero.x = base.x - 2.0;
+    player.hero.z = base.z;
     rt.handle_packet(
         addr(55601),
         ClientPacket::Cast {
@@ -450,7 +451,7 @@ fn siege_blocks_cast_and_damage_until_own_lane_falls_and_resets() {
         now,
     );
     assert!(rt.world.projectiles.is_empty());
-    assert_eq!(rt.world.players[&addr(55601)].state.mana, MAX_MANA);
+    assert_eq!(rt.world.players[&addr(55601)].hero.mana, MAX_MANA);
     apply_structure_damage(
         &mut rt.world.structures,
         base.id,
@@ -511,7 +512,7 @@ fn full_roster_progression_baseline_is_reproducible_and_conserves_rewards() {
                     .world
                     .players
                     .values()
-                    .filter(|p| p.state.level >= level)
+                    .filter(|p| p.hero.progress.level >= level)
                     .count();
                 if count > 0 {
                     milestones.entry((level, "first")).or_insert(wave);
@@ -523,12 +524,16 @@ fn full_roster_progression_baseline_is_reproducible_and_conserves_rewards() {
             let expected_gold = u32::from(team_size) * STARTING_GOLD
                 + wave as u32 * MINIONS_PER_WAVE as u32 * 3 * MINION_KILL_GOLD;
             assert_eq!(
-                rt.world.players.values().map(|p| p.state.gold).sum::<u32>(),
+                rt.world
+                    .players
+                    .values()
+                    .map(|p| p.economy.gold)
+                    .sum::<u32>(),
                 expected_gold
             );
             for p in rt.world.players.values() {
-                assert_eq!(p.state.skill_points, p.state.level - 1);
-                assert_eq!(p.state.ranks, [1; 4]);
+                assert_eq!(p.hero.progress.skill_points, p.hero.progress.level - 1);
+                assert_eq!(p.hero.progress.ranks, [1; 4]);
             }
         }
         if team_size == 5 {
@@ -638,9 +643,9 @@ fn live_udp_victory_rematch_uses_real_cast_receiver_and_framed_snapshots() {
     rt.world.structures.get_mut(&base.id).unwrap().state.hp = 1.0;
     let player = rt.world.players.get_mut(&first_addr).unwrap();
     progress(player, now, false);
-    player.state.x = base.x - 2.0;
-    player.state.z = base.z;
-    player.state.mana = player.state.max_mana;
+    player.hero.x = base.x - 2.0;
+    player.hero.z = base.z;
+    player.hero.mana = player.hero.max_mana;
     player.timers.last_cast_at = [None; 4];
     let camp = rt
         .world
@@ -653,7 +658,10 @@ fn live_udp_victory_rematch_uses_real_cast_receiver_and_framed_snapshots() {
     rt.world
         .team_buffs
         .grant(Team::Green, TeamBuffKind::WendigoFavor, now);
-    let before = rt.world.players[&first_addr].state.clone();
+    let before = (
+        rt.world.players[&first_addr].hero.clone(),
+        rt.world.players[&first_addr].economy.clone(),
+    );
     send_udp(&first, &mut rt, join("udp-changed", Team::Blue));
     assert_gameplay_same(&before, [None; 4], None, &rt.world.players[&first_addr]);
     send_udp(
@@ -724,11 +732,11 @@ fn shared_xp_level_up_preserves_death_until_the_scheduled_respawn() {
     rt.handle_packet(addr(55801), join("alive", Team::Green), now);
     let respawn_at = now + RESPAWN_DELAY;
     for player in rt.world.players.values_mut() {
-        player.state.xp = player.state.next_level_xp - 1;
-        player.state.hp = 0.0;
+        player.hero.progress.xp = player.hero.progress.next_level_xp - 1;
+        player.hero.hp = 0.0;
         player.timers.respawn_at = Some(respawn_at);
     }
-    rt.world.players.get_mut(&addr(55801)).unwrap().state.hp = 40.0;
+    rt.world.players.get_mut(&addr(55801)).unwrap().hero.hp = 40.0;
     rt.world
         .players
         .get_mut(&addr(55801))
@@ -737,20 +745,20 @@ fn shared_xp_level_up_preserves_death_until_the_scheduled_respawn() {
         .respawn_at = None;
     award_minion_kill_rewards(&mut rt.world.players, Team::Green);
     let dead = &rt.world.players[&addr(55800)];
-    assert_eq!(dead.state.level, 2);
-    assert_eq!(dead.state.hp, 0.0);
+    assert_eq!(dead.hero.progress.level, 2);
+    assert_eq!(dead.hero.hp, 0.0);
     assert_eq!(dead.timers.respawn_at, Some(respawn_at));
     let alive = &rt.world.players[&addr(55801)];
-    assert_eq!(alive.state.level, 2);
-    assert_eq!(alive.state.hp, 40.0 + LEVEL_UP_HP_BONUS);
+    assert_eq!(alive.hero.progress.level, 2);
+    assert_eq!(alive.hero.hp, 40.0 + LEVEL_UP_HP_BONUS);
     handle_respawns(&mut rt.world, respawn_at - Duration::from_millis(1));
-    assert_eq!(rt.world.players[&addr(55800)].state.hp, 0.0);
+    assert_eq!(rt.world.players[&addr(55800)].hero.hp, 0.0);
     handle_respawns(&mut rt.world, respawn_at);
     let dead = &rt.world.players[&addr(55800)];
-    assert_eq!(dead.state.hp, MAX_HP + LEVEL_UP_HP_BONUS);
-    assert_eq!(dead.state.hp, dead.state.max_hp);
+    assert_eq!(dead.hero.hp, MAX_HP + LEVEL_UP_HP_BONUS);
+    assert_eq!(dead.hero.hp, dead.hero.max_hp);
     assert_eq!(dead.timers.respawn_at, None);
     let spawn =
         spawn_position_for_team_from_base(&rt.world.structures, &rt.world.map_layout, Team::Green);
-    assert_eq!((dead.state.x, dead.state.z), (spawn.x, spawn.z));
+    assert_eq!((dead.hero.x, dead.hero.z), (spawn.x, spawn.z));
 }

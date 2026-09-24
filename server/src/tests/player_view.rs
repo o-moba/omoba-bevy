@@ -1,10 +1,10 @@
 //! Characterization of the replicated `PlayerState` view.
 //!
-//! The stored `ConnectedPlayer::state` keeps the cooldown, utility-clock and
-//! shop fields at their defaults; `owner_view` fills them from the hero
-//! timers at the tick's `now`. These tests pin the exact numbers the old
-//! per-tick refreshers wrote, byte for byte, through one hero lifetime and
-//! through the sandbox's `apply_actor`.
+//! The server stores `Hero`, `HeroEconomy` and `HeroTimers`; `owner_view`
+//! maps them onto the wire struct and fills the cooldown, utility-clock and
+//! shop fields at the tick's `now`. These tests pin that mapping and the
+//! exact numbers the old per-tick refreshers wrote, byte for byte, through
+//! one hero lifetime and through the sandbox's `apply_actor`.
 use super::*;
 use shared::hero_balance::{ability_cooldown, basic_cooldown, skill_recovery_secs};
 use shared::shop::item_bonuses;
@@ -62,25 +62,63 @@ fn secs(value: f32) -> Duration {
     Duration::from_secs_f32(value)
 }
 
-/// The view must be the stored state plus exactly the expected derived
-/// fields, compared as the bytes that go on the wire.
+/// The view must be the authoritative hero and economy plus exactly the
+/// expected derived fields, compared as the bytes that go on the wire. The
+/// `want` literal is the hand-written field map, independent of `owner_view`.
 fn assert_view(rt: &ServerRuntime, addr: SocketAddr, now: Instant, step: &str, expected: Expected) {
     let player = &rt.world.players[&addr];
-    let mut want = player.state.clone();
-    want.basic_attack_cooldown_secs = expected.basic_cooldown;
-    want.basic_attack_remaining_secs = expected.basic_remaining;
-    want.skill_cooldown_remaining_secs = expected.skill_remaining;
-    want.skill_recovery_remaining_secs = expected.recovery;
-    want.utility.dash_remaining_secs = expected.dash;
-    want.utility.haste_remaining_secs = expected.haste_cooldown;
-    want.utility.haste_active_secs = expected.haste_active;
-    want.shop_available = expected.shop;
+    let hero = &player.hero;
+    let economy = &player.economy;
+    let want = PlayerState {
+        supporter_aura: hero.identity.supporter_aura,
+        is_bot: hero.identity.is_bot,
+        id: hero.identity.id,
+        x: hero.x,
+        y: hero.y,
+        z: hero.z,
+        yaw: hero.yaw,
+        team: hero.identity.team,
+        hp: hero.hp,
+        max_hp: hero.max_hp,
+        mana: hero.mana,
+        max_mana: hero.max_mana,
+        gold: economy.gold,
+        earned_gold: economy.earned_gold,
+        utility: shared::utility::UtilityState {
+            dash_remaining_secs: expected.dash,
+            haste_remaining_secs: expected.haste_cooldown,
+            haste_active_secs: expected.haste_active,
+            last_request_id: hero.utility.last_request_id,
+            dash_sequence: hero.utility.dash_sequence,
+        },
+        inventory: economy.inventory.clone(),
+        item_bonuses: economy.item_bonuses,
+        shop_available: expected.shop,
+        last_purchase: economy.last_purchase.clone(),
+        basic_attack_cooldown_secs: expected.basic_cooldown,
+        basic_attack_remaining_secs: expected.basic_remaining,
+        skill_cooldown_remaining_secs: expected.skill_remaining,
+        skill_recovery_remaining_secs: expected.recovery,
+        basic_attack_request_id: economy.basic_attack_request_id,
+        xp: hero.progress.xp,
+        level: hero.progress.level,
+        next_level_xp: hero.progress.next_level_xp,
+        skill_points: hero.progress.skill_points,
+        ranks: hero.progress.ranks,
+        character: hero.identity.character,
+        hero_class: hero.identity.hero_class,
+        avatar: hero.identity.avatar.clone(),
+        sprite_character: hero.identity.sprite_character.clone(),
+        action_sequence: hero.last_action.sequence,
+        action_kind: hero.last_action.kind,
+        action_slot: hero.last_action.slot,
+    };
     let view = rt.player_view(addr, now);
     assert_eq!(
         serde_json::to_string(&view).unwrap(),
         serde_json::to_string(&want).unwrap(),
         "{step}: player {}",
-        player.state.id
+        hero.identity.id
     );
     assert_eq!(
         serde_json::to_vec(&view).unwrap(),
@@ -88,18 +126,6 @@ fn assert_view(rt: &ServerRuntime, addr: SocketAddr, now: Instant, step: &str, e
             .unwrap(),
         "{step}: public view is the owner view until redaction lands"
     );
-    // The stored struct never carries the derived fields.
-    assert_eq!(player.state.basic_attack_cooldown_secs, 0.0, "{step}");
-    assert_eq!(player.state.basic_attack_remaining_secs, 0.0, "{step}");
-    assert_eq!(
-        player.state.skill_cooldown_remaining_secs, [0.0; 4],
-        "{step}"
-    );
-    assert_eq!(player.state.skill_recovery_remaining_secs, 0.0, "{step}");
-    assert_eq!(player.state.utility.dash_remaining_secs, 0.0, "{step}");
-    assert_eq!(player.state.utility.haste_remaining_secs, 0.0, "{step}");
-    assert_eq!(player.state.utility.haste_active_secs, 0.0, "{step}");
-    assert!(!player.state.shop_available, "{step}");
 }
 
 #[derive(Clone, Copy)]
@@ -148,7 +174,7 @@ fn owner_view_reproduces_the_replicated_clocks_through_a_hero_lifetime() {
     let (mut rt, a, b, t0) = fixture();
     let target = TargetId {
         kind: TargetKind::Player,
-        id: rt.world.players[&b].state.id,
+        id: rt.world.players[&b].hero.identity.id,
     };
     let none = ItemBonuses::NONE;
     let warrior_l1 = basic_cooldown(HeroClass::Warrior, 1, none).as_secs_f32();
@@ -169,16 +195,19 @@ fn owner_view_reproduces_the_replicated_clocks_through_a_hero_lifetime() {
         now,
     );
     tick(&mut rt, now);
-    assert_eq!(rt.world.players[&a].state.inventory, [ItemId::VitalityGem]);
+    assert_eq!(
+        rt.world.players[&a].economy.inventory,
+        [ItemId::VitalityGem]
+    );
     let gear = item_bonuses(&[ItemId::VitalityGem]);
     let geared_l1 = basic_cooldown(HeroClass::Warrior, 1, gear).as_secs_f32();
     assert_view(&rt, a, now, "purchase", Expected::idle(geared_l1, true));
 
     // Skill upgrade with a granted point: level 2, Q rank 2.
-    apply_level_up(&mut rt.world.players.get_mut(&a).unwrap().state);
+    apply_level_up(&mut rt.world.players.get_mut(&a).unwrap().hero);
     rt.handle_packet(a, ClientPacket::UpgradeSkill { slot: 0 }, now);
     tick(&mut rt, now);
-    assert_eq!(rt.world.players[&a].state.ranks[0], 2);
+    assert_eq!(rt.world.players[&a].hero.progress.ranks[0], 2);
     let basic = basic_cooldown(HeroClass::Warrior, 2, gear);
     let q = ability_cooldown(HeroClass::Warrior, 2, 2, SkillSlot::Q, gear);
     let recovery = secs(skill_recovery_secs(2));
@@ -191,9 +220,9 @@ fn owner_view_reproduces_the_replicated_clocks_through_a_hero_lifetime() {
     );
 
     for (addr, x) in [(a, 0.0), (b, 2.0)] {
-        let state = &mut rt.world.players.get_mut(&addr).unwrap().state;
-        state.x = x;
-        state.z = 0.0;
+        let hero = &mut rt.world.players.get_mut(&addr).unwrap().hero;
+        hero.x = x;
+        hero.z = 0.0;
     }
     tick(&mut rt, now);
     assert_view(
@@ -262,7 +291,7 @@ fn owner_view_reproduces_the_replicated_clocks_through_a_hero_lifetime() {
 
     // Dash, then haste 500 ms later, read 1.5 s after that.
     utility(&mut rt, a, UtilityAction::Dash, 1, now);
-    assert_eq!(rt.world.players[&a].state.utility.dash_sequence, 1);
+    assert_eq!(rt.world.players[&a].hero.utility.dash_sequence, 1);
     let dash_at = now;
     now += Duration::from_millis(500);
     tick(&mut rt, now);
@@ -299,10 +328,10 @@ fn owner_view_reproduces_the_replicated_clocks_through_a_hero_lifetime() {
     assert_eq!(rt.player_view(a, now).utility.haste_active_secs, 1.5);
 
     // Death: combat clocks and haste read zero, utility cooldowns keep running.
-    let id = rt.world.players[&a].state.id;
+    let id = rt.world.players[&a].hero.identity.id;
     assert!(apply_player_damage(&mut rt.world.players, id, 10_000.0, now).is_some());
     tick(&mut rt, now);
-    assert_eq!(rt.world.players[&a].state.hp, 0.0);
+    assert_eq!(rt.world.players[&a].hero.hp, 0.0);
     assert_view(
         &rt,
         a,
@@ -318,7 +347,7 @@ fn owner_view_reproduces_the_replicated_clocks_through_a_hero_lifetime() {
     // Respawn at the base: cast and strike clocks cleared, utilities still cooling.
     now += RESPAWN_DELAY + Duration::from_millis(1);
     tick(&mut rt, now);
-    assert!(rt.world.players[&a].state.hp > 0.0);
+    assert!(rt.world.players[&a].hero.hp > 0.0);
     assert!(left(secs(DASH_COOLDOWN_SECS), dash_at, now) > 0.0);
     assert_view(
         &rt,
@@ -390,7 +419,7 @@ fn owner_view_reproduces_the_replicated_clocks_for_sandbox_actors() {
         basic_cooldown(c.hero, c.level, bonuses(&c)).as_secs_f32()
     };
     let inside_shop = shop_is_available(
-        &rt.world.players[&a].state,
+        &rt.world.players[&a].hero,
         &rt.world.map_layout,
         &rt.world.game_state,
     );

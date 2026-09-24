@@ -220,7 +220,7 @@ fn social_team(team: Team) -> SocialTeam {
 impl ServerRuntime {
     fn social_sender(&self, addr: SocketAddr) -> Option<Sender> {
         let player = self.world.players.get(&addr)?;
-        if !player.joined || player.state.is_bot || !player.protocol_compatible {
+        if !player.joined || player.hero.identity.is_bot || !player.protocol_compatible {
             return None;
         }
         let session = player.session_id.clone()?;
@@ -234,15 +234,15 @@ impl ServerRuntime {
             |p| format!("profile:{}", p.profile_id),
         );
         Some(Sender {
-            id: player.state.id,
+            id: player.hero.identity.id,
             nickname: profile.as_ref().map_or_else(
-                || format!("Guest {}", player.state.id),
+                || format!("Guest {}", player.hero.identity.id),
                 |p| p.nickname.clone(),
             ),
-            team: social_team(player.state.team),
+            team: social_team(player.hero.identity.team),
             session,
             rate_key,
-            alive: player.state.hp > 0.0 && matches!(self.world.game_state, GameState::Running),
+            alive: player.hero.hp > 0.0 && matches!(self.world.game_state, GameState::Running),
             requires_signature: profile.is_some()
                 || self.career.backend.authenticated_session(addr).is_some(),
             // Free starter pack works offline. Operator/Passport grants must be
@@ -290,7 +290,9 @@ impl ServerRuntime {
         for (addr, player) in &self.world.players {
             // Legacy framed clients have no Social packet decoder. Only a
             // scoped request opts a joined actor into this separate stream.
-            if !player.framed_snapshots || !self.social.receipts.contains_key(&player.state.id) {
+            if !player.framed_snapshots
+                || !self.social.receipts.contains_key(&player.hero.identity.id)
+            {
                 continue;
             }
             let Some(sender) = self.social_sender(*addr) else {

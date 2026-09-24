@@ -81,7 +81,7 @@ impl ServerRuntime {
             .players
             .values()
             .filter(|p| p.joined)
-            .map(|p| p.state.id)
+            .map(|p| p.hero.identity.id)
             .collect();
         roster.sort_unstable();
         if roster != self.prematch.roster {
@@ -102,7 +102,7 @@ impl ServerRuntime {
             self.world
                 .players
                 .values()
-                .filter(|p| p.joined && !p.state.is_bot && p.draft.capable)
+                .filter(|p| p.joined && !p.hero.identity.is_bot && p.draft.capable)
                 .all(|p| test(&p.draft))
         };
         match self.prematch.phase.unwrap_or(PrematchPhase::Draft) {
@@ -156,7 +156,7 @@ impl ServerRuntime {
             && request.match_id == self.match_id
             && request.generation == self.prematch.generation
             && self.world.players.get(&addr).is_some_and(|p| {
-                p.joined && p.draft.capable && p.protocol_compatible && !p.state.is_bot
+                p.joined && p.draft.capable && p.protocol_compatible && !p.hero.identity.is_bot
             })
             && self.world.players.get(&addr).is_some_and(|p| {
                 p.career_profile.is_none()
@@ -201,7 +201,7 @@ impl ServerRuntime {
         if let PrematchAction::Select { avatar, .. } = &request.action {
             // Re-selecting the already admitted exact avatar (e.g. changing an
             // intended role) needs no second single-use ownership ticket.
-            if avatar.as_deref().map(str::trim) == player.state.avatar.as_deref() {
+            if avatar.as_deref().map(str::trim) == player.hero.identity.avatar.as_deref() {
                 self.apply_prematch(addr, request, now);
                 return;
             }
@@ -211,7 +211,7 @@ impl ServerRuntime {
                 );
                 return;
             }
-            let identity = player.state.id;
+            let identity = player.hero.identity.id;
             let session = player.session_id.clone();
             let packet = ClientPacket::Prematch {
                 request: request.clone(),
@@ -255,7 +255,7 @@ impl ServerRuntime {
                 .world
                 .players
                 .get(&addr)
-                .map(|p| (p.state.id, request.request_id))
+                .map(|p| (p.hero.identity.id, request.request_id))
             || !self.draft_request_valid(addr, &request)
             || self.world.players[&addr].draft.request_id != request.request_id
         {
@@ -297,10 +297,10 @@ impl ServerRuntime {
                     );
                     return;
                 }
-                player.state.character = character;
-                player.state.hero_class = hero_class;
-                player.state.avatar = normalized.map(str::to_owned);
-                player.state.sprite_character = Some(
+                player.hero.identity.character = character;
+                player.hero.identity.hero_class = hero_class;
+                player.hero.identity.avatar = normalized.map(str::to_owned);
+                player.hero.identity.sprite_character = Some(
                     shared::normalize_sprite_character_id(sprite_character.as_deref()).to_owned(),
                 );
                 player.draft.role = role;
@@ -350,26 +350,30 @@ pub(super) fn snapshot(
         .values()
         .filter(|p| p.joined)
         .map(|p| DraftPlayer {
-            player_id: p.state.id,
+            player_id: p.hero.identity.id,
             nickname: p.career_profile.as_ref().map_or_else(
                 || {
                     format!(
                         "{} {}",
-                        if p.state.is_bot { "Bot" } else { "Guest" },
-                        p.state.id
+                        if p.hero.identity.is_bot {
+                            "Bot"
+                        } else {
+                            "Guest"
+                        },
+                        p.hero.identity.id
                     )
                 },
                 |v| v.nickname.clone(),
             ),
-            team: p.state.team,
-            character: p.state.character,
-            hero_class: p.state.hero_class,
-            avatar: p.state.avatar.clone(),
-            sprite_character: p.state.sprite_character.clone(),
+            team: p.hero.identity.team,
+            character: p.hero.identity.character,
+            hero_class: p.hero.identity.hero_class,
+            avatar: p.hero.identity.avatar.clone(),
+            sprite_character: p.hero.identity.sprite_character.clone(),
             role: p.draft.role,
-            is_bot: p.state.is_bot,
-            locked: p.state.is_bot || !p.draft.capable || p.draft.locked,
-            loaded: p.state.is_bot || !p.draft.capable || p.draft.loaded,
+            is_bot: p.hero.identity.is_bot,
+            locked: p.hero.identity.is_bot || !p.draft.capable || p.draft.locked,
+            loaded: p.hero.identity.is_bot || !p.draft.capable || p.draft.loaded,
         })
         .collect();
     roster.sort_by_key(|p| p.player_id);

@@ -46,7 +46,7 @@ fn snapshot_serializer_rejects_whole_over_limit_payload() {
     world.ensure_connected(addr, now);
     let player = world.players.get_mut(&addr).unwrap();
     player.joined = true;
-    player.state.avatar = Some("x".repeat(IPV4_UDP_MAX_PAYLOAD_BYTES));
+    player.hero.identity.avatar = Some("x".repeat(IPV4_UDP_MAX_PAYLOAD_BYTES));
 
     let packet = ServerPacket::Snapshot {
         vision: None,
@@ -56,7 +56,7 @@ fn snapshot_serializer_rejects_whole_over_limit_payload() {
         map_profile: "verdant_default".to_owned(),
         meta: Default::default(),
         join_error: None,
-        your_id: player.state.id,
+        your_id: player.hero.identity.id,
         players: build_players_snapshot(&world, now),
         scoreboard: None,
         prematch: None,

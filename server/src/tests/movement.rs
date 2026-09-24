@@ -1,6 +1,6 @@
 use super::*;
 
-fn horizontal_distance(a: &PlayerState, b: &PlayerState) -> f32 {
+fn horizontal_distance(a: &Hero, b: &Hero) -> f32 {
     let dx = a.x - b.x;
     let dz = a.z - b.z;
     (dx * dx + dz * dz).sqrt()
@@ -47,16 +47,16 @@ fn mana_regenerates_and_is_clamped() {
     world.ensure_connected(addr, now);
     let player = world.players.get_mut(&addr).unwrap();
     player.joined = true;
-    player.state.mana = 10.0;
-    player.state.max_mana = MAX_MANA;
+    player.hero.mana = 10.0;
+    player.hero.max_mana = MAX_MANA;
 
     regenerate_mana(&mut world.players, 2.5);
     let expected = 10.0 + MANA_REGEN_PER_SECOND * 2.5;
-    let current = world.players.get(&addr).unwrap().state.mana;
+    let current = world.players.get(&addr).unwrap().hero.mana;
     assert!((current - expected).abs() < EPSILON);
 
     regenerate_mana(&mut world.players, 100.0);
-    let clamped = world.players.get(&addr).unwrap().state.mana;
+    let clamped = world.players.get(&addr).unwrap().hero.mana;
     assert!((clamped - MAX_MANA).abs() < EPSILON);
 }
 
@@ -76,7 +76,7 @@ fn movement_authority_clamps_teleports_and_accepts_normal_steps() {
         &world.map_layout,
         now,
     );
-    let start = world.players.get(&addr).unwrap().state.clone();
+    let start = world.players.get(&addr).unwrap().hero.clone();
     let normal_at = now + Duration::from_millis(100);
     let normal_x = start.x + PLAYER_SPEED * 0.1;
     handle_transform_request(
@@ -89,13 +89,13 @@ fn movement_authority_clamps_teleports_and_accepts_normal_steps() {
         normal_at,
     );
 
-    let after_normal = world.players.get(&addr).unwrap().state.clone();
+    let after_normal = world.players.get(&addr).unwrap().hero.clone();
     assert!((after_normal.x - normal_x).abs() < EPSILON);
     assert!((after_normal.y - PLAYER_GROUND_Y).abs() < EPSILON);
     assert!((after_normal.yaw - 0.25).abs() < EPSILON);
 
     let teleport_at = normal_at + Duration::from_millis(50);
-    let before_teleport = world.players.get(&addr).unwrap().state.clone();
+    let before_teleport = world.players.get(&addr).unwrap().hero.clone();
     handle_transform_request(
         world.players.get_mut(&addr).unwrap(),
         &world.map_layout,
@@ -106,7 +106,7 @@ fn movement_authority_clamps_teleports_and_accepts_normal_steps() {
         teleport_at,
     );
 
-    let after_teleport = world.players.get(&addr).unwrap().state.clone();
+    let after_teleport = world.players.get(&addr).unwrap().hero.clone();
     let accepted_distance = horizontal_distance(&before_teleport, &after_teleport);
     let max_distance = PLAYER_SPEED * 0.05 + MOVEMENT_POSITION_TOLERANCE + EPSILON;
     assert!(accepted_distance <= max_distance);
@@ -122,7 +122,7 @@ fn movement_authority_clamps_teleports_and_accepts_normal_steps() {
         1.0,
         teleport_at + Duration::from_millis(50),
     );
-    let after_invalid = world.players.get(&addr).unwrap().state.clone();
+    let after_invalid = world.players.get(&addr).unwrap().hero.clone();
     assert!((after_invalid.x - before_invalid.x).abs() < EPSILON);
     assert!((after_invalid.z - before_invalid.z).abs() < EPSILON);
 }
@@ -145,8 +145,8 @@ fn movement_authority_keeps_players_inside_map_bounds() {
     );
     {
         let player = world.players.get_mut(&addr).unwrap();
-        player.state.x = world.map_layout.max_x - 0.1;
-        player.state.z = world.map_layout.max_z - 0.1;
+        player.hero.x = world.map_layout.max_x - 0.1;
+        player.hero.z = world.map_layout.max_z - 0.1;
         player.timers.last_movement_at = now;
     }
 
@@ -161,8 +161,8 @@ fn movement_authority_keeps_players_inside_map_bounds() {
     );
 
     let player = world.players.get(&addr).unwrap();
-    assert!(player.state.x <= world.map_layout.max_x);
-    assert!(player.state.z <= world.map_layout.max_z);
-    assert!(player.state.x >= world.map_layout.min_x);
-    assert!(player.state.z >= world.map_layout.min_z);
+    assert!(player.hero.x <= world.map_layout.max_x);
+    assert!(player.hero.z <= world.map_layout.max_z);
+    assert!(player.hero.x >= world.map_layout.min_x);
+    assert!(player.hero.z >= world.map_layout.min_z);
 }

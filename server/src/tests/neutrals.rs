@@ -53,7 +53,7 @@ fn neutral_kills_award_rewards_and_respawn_on_cooldown() {
     let now = Instant::now();
 
     world.ensure_connected(addr, now);
-    let killer_id = world.players.get(&addr).unwrap().state.id;
+    let killer_id = world.players.get(&addr).unwrap().hero.identity.id;
 
     let mut next_neutral_id = 9_001;
     world.neutrals = build_neutral_camps(&mut next_neutral_id);
@@ -74,8 +74,8 @@ fn neutral_kills_award_rewards_and_respawn_on_cooldown() {
     );
 
     let killer = world.players.get(&addr).unwrap();
-    assert_eq!(killer.state.gold, STARTING_GOLD + template.kill_gold);
-    assert_eq!(killer.state.xp, template.kill_xp);
+    assert_eq!(killer.economy.gold, STARTING_GOLD + template.kill_gold);
+    assert_eq!(killer.hero.progress.xp, template.kill_xp);
 
     let neutral = world.neutrals.get(&neutral_id).unwrap();
     assert_eq!(neutral.state.hp, 0.0);
@@ -106,7 +106,7 @@ fn neutral_leash_reset_restores_anchor_and_full_hp() {
     let now = Instant::now();
 
     world.ensure_connected(addr, now);
-    let player_id = world.players.get(&addr).unwrap().state.id;
+    let player_id = world.players.get(&addr).unwrap().hero.identity.id;
 
     let mut next_neutral_id = 9_001;
     world.neutrals = build_neutral_camps(&mut next_neutral_id);
@@ -124,8 +124,8 @@ fn neutral_leash_reset_restores_anchor_and_full_hp() {
 
     {
         let player = world.players.get_mut(&addr).unwrap();
-        player.state.x = anchor.x + NEUTRAL_LEASH_DISTANCE + 2.0;
-        player.state.z = anchor.z;
+        player.hero.x = anchor.x + NEUTRAL_LEASH_DISTANCE + 2.0;
+        player.hero.z = anchor.z;
     }
 
     simulate_neutrals(&mut world, TickCtx { now, dt: 0.1 });
@@ -162,8 +162,8 @@ fn neutrals_do_not_break_minion_waves_or_tower_attacks() {
     let focus_anchor = world.neutrals.get(&focus_neutral_id).unwrap().anchor;
     {
         let player = world.players.get_mut(&addr).unwrap();
-        player.state.x = focus_anchor.x;
-        player.state.z = focus_anchor.z;
+        player.hero.x = focus_anchor.x;
+        player.hero.z = focus_anchor.z;
     }
     simulate_neutrals(&mut world, TickCtx { now, dt: 0.1 });
     assert_eq!(

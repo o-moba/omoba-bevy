@@ -24,8 +24,8 @@ fn fixture() -> (ServerRuntime, SocketAddr, SocketAddr, Instant) {
             now,
         );
         let player = rt.world.players.get_mut(&addr).unwrap();
-        player.state.x = x;
-        player.state.z = 0.0;
+        player.hero.x = x;
+        player.hero.z = 0.0;
     }
     (rt, a, b, now)
 }
@@ -39,10 +39,16 @@ fn every_class_keeps_basic_and_skill_travel_with_confirmed_source_style_and_slot
     for class in HeroClass::ALL {
         for slot in [None, Some(0)] {
             let (mut rt, a, b, now) = fixture();
-            rt.world.players.get_mut(&a).unwrap().state.hero_class = class;
+            rt.world
+                .players
+                .get_mut(&a)
+                .unwrap()
+                .hero
+                .identity
+                .hero_class = class;
             let target = TargetId {
                 kind: TargetKind::Player,
-                id: rt.world.players[&b].state.id,
+                id: rt.world.players[&b].hero.identity.id,
             };
             let packet = if let Some(slot) = slot {
                 ClientPacket::Cast { target, slot }
@@ -70,10 +76,10 @@ fn every_class_keeps_basic_and_skill_travel_with_confirmed_source_style_and_slot
             assert!(projectile.state.direction.iter().all(|v| v.is_finite()));
             assert!(projectile.state.direction[0] > 0.99);
             let expected_damage = projectile.damage;
-            assert_eq!(rt.world.players[&b].state.hp, MAX_HP);
+            assert_eq!(rt.world.players[&b].hero.hp, MAX_HP);
             assert!(projectiles(&mut rt, now + Duration::from_millis(10), 0.01).is_empty());
             assert_eq!(
-                rt.world.players[&b].state.hp, MAX_HP,
+                rt.world.players[&b].hero.hp, MAX_HP,
                 "even Warrior retains travel"
             );
             let events = projectiles(&mut rt, now + Duration::from_millis(250), 0.24);
@@ -83,7 +89,7 @@ fn every_class_keeps_basic_and_skill_travel_with_confirmed_source_style_and_slot
                 event.source,
                 CombatEntity {
                     kind: CombatEntityKind::Player,
-                    id: rt.world.players[&a].state.id
+                    id: rt.world.players[&a].hero.identity.id
                 }
             );
             assert_eq!(
@@ -108,14 +114,14 @@ fn every_class_keeps_basic_and_skill_travel_with_confirmed_source_style_and_slot
 #[test]
 fn receipts_use_actual_damage_and_reject_overkill_repeats_protection_and_immunity() {
     let (mut rt, a, b, now) = fixture();
-    let player_id = rt.world.players[&b].state.id;
+    let player_id = rt.world.players[&b].hero.identity.id;
     rt.world.players.get_mut(&b).unwrap().god_mode = true;
     assert!(apply_player_damage(&mut rt.world.players, player_id, 500.0, now).is_none());
     rt.world.players.get_mut(&b).unwrap().god_mode = false;
     for bad in [0.0, -1.0, f32::NAN, f32::INFINITY] {
         assert!(apply_player_damage(&mut rt.world.players, player_id, bad, now).is_none());
     }
-    rt.world.players.get_mut(&b).unwrap().state.hp = 3.0;
+    rt.world.players.get_mut(&b).unwrap().hero.hp = 3.0;
     let event = apply_player_damage(&mut rt.world.players, player_id, 500.0, now).unwrap();
     assert_eq!(event.amount, 3.0);
     assert!(event.killed);
@@ -203,8 +209,8 @@ fn receipts_use_actual_damage_and_reject_overkill_repeats_protection_and_immunit
         (CombatEntityKind::Minion, 1.0, true)
     );
     let rewards = (
-        rt.world.players[&a].state.gold,
-        rt.world.players[&a].state.xp,
+        rt.world.players[&a].economy.gold,
+        rt.world.players[&a].hero.progress.xp,
     );
     assert!(
         apply_minion_damage(
@@ -219,14 +225,14 @@ fn receipts_use_actual_damage_and_reject_overkill_repeats_protection_and_immunit
     assert_eq!(
         rewards,
         (
-            rt.world.players[&a].state.gold,
-            rt.world.players[&a].state.xp
+            rt.world.players[&a].economy.gold,
+            rt.world.players[&a].hero.progress.xp
         )
     );
 
     let id = *rt.world.neutrals.keys().min().unwrap();
     rt.world.neutrals.get_mut(&id).unwrap().state.hp = 4.0;
-    let attacker = rt.world.players[&a].state.id;
+    let attacker = rt.world.players[&a].hero.identity.id;
     let event = apply_neutral_damage(
         &mut rt.world.players,
         &mut rt.world.neutrals,
@@ -258,7 +264,7 @@ fn receipts_use_actual_damage_and_reject_overkill_repeats_protection_and_immunit
 #[test]
 fn mixed_waves_are_symmetric_and_caster_uses_range_cooldown_and_real_impact() {
     let (mut rt, a, b, now) = fixture();
-    rt.world.players.get_mut(&b).unwrap().state.x = 40.0;
+    rt.world.players.get_mut(&b).unwrap().hero.x = 40.0;
     for team in [Team::Green, Team::Blue] {
         for lane in [Lane::Top, Lane::Mid, Lane::Bot] {
             let mut wave = HashMap::new();
@@ -322,7 +328,7 @@ fn mixed_waves_are_symmetric_and_caster_uses_range_cooldown_and_real_impact() {
             .source_kind,
         CombatEntityKind::Minion
     );
-    assert_eq!(rt.world.players[&a].state.hp, MAX_HP);
+    assert_eq!(rt.world.players[&a].hero.hp, MAX_HP);
     assert!(projectiles(&mut rt, now + Duration::from_millis(10), 0.01).is_empty());
     let events = projectiles(&mut rt, now + Duration::from_millis(400), 0.39);
     assert_eq!(events.len(), 1);
@@ -345,7 +351,7 @@ fn mixed_waves_are_symmetric_and_caster_uses_range_cooldown_and_real_impact() {
 #[test]
 fn recent_receipts_are_bounded_repeated_for_loss_and_cleared_on_round_reset() {
     let (mut rt, _, b, now) = fixture();
-    let id = rt.world.players[&b].state.id;
+    let id = rt.world.players[&b].hero.identity.id;
     let event = apply_player_damage(&mut rt.world.players, id, 1.0, now).unwrap();
     for _ in 0..120 {
         rt.combat_log.extend(now, [event.clone()]);
@@ -438,7 +444,7 @@ fn projectile_minion_receipts_preserve_nonplayer_identity_and_overkill_once() {
 #[test]
 fn ambient_melee_and_tower_sources_are_recorded_at_their_actual_damage_sinks() {
     let (mut rt, a, b, now) = fixture();
-    rt.world.players.get_mut(&b).unwrap().state.x = 100.0;
+    rt.world.players.get_mut(&b).unwrap().hero.x = 100.0;
     spawn_minion_wave_for_team_lane(
         &rt.world.map_layout,
         &mut rt.world.minions,
@@ -477,7 +483,7 @@ fn ambient_melee_and_tower_sources_are_recorded_at_their_actual_damage_sinks() {
             id: neutral_id
         }
     );
-    assert_eq!(events[0].target.id, rt.world.players[&a].state.id);
+    assert_eq!(events[0].target.id, rt.world.players[&a].hero.identity.id);
 
     let tower_id = rt
         .world
@@ -507,8 +513,8 @@ fn ambient_melee_and_tower_sources_are_recorded_at_their_actual_damage_sinks() {
 
 #[test]
 fn cosmetic_history_yields_space_to_gameplay_and_keeps_newest_receipts() {
-    let (rt, a, _, _) = fixture();
-    let mut player = rt.world.players[&a].state.clone();
+    let (rt, a, _, now) = fixture();
+    let mut player = rt.player_view(a, now);
     player.avatar = Some(String::new());
     let mut packet = ServerPacket::Snapshot {
         vision: None,

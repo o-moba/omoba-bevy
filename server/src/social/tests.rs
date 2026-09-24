@@ -358,7 +358,8 @@ fn real_udp_filters_team_messages_and_preserves_fragmented_social_payloads() {
         assert!(view.events.iter().all(|e| {
             e.player_id
                 == runtime.world.players[&peers[0].local_addr().unwrap()]
-                    .state
+                    .hero
+                    .identity
                     .id
         }));
     }

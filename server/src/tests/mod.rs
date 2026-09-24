@@ -45,14 +45,14 @@ pub(super) fn setup_caster_and_target(
     );
     let caster_pos = {
         let caster = world.players.get(&caster_addr).unwrap();
-        (caster.state.x, caster.state.z)
+        (caster.hero.x, caster.hero.z)
     };
     {
         let target = world.players.get_mut(&target_addr).unwrap();
-        target.state.x = caster_pos.0 + gap;
-        target.state.z = caster_pos.1;
+        target.hero.x = caster_pos.0 + gap;
+        target.hero.z = caster_pos.1;
     }
-    world.players.get(&target_addr).unwrap().state.id
+    world.players.get(&target_addr).unwrap().hero.identity.id
 }
 
 /// Casts `slot` from `caster_addr` at `target` in a running world.

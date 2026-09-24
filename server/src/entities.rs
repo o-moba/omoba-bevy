@@ -144,7 +144,6 @@ impl Vec3f {
 pub(crate) struct ConnectedPlayer {
     pub(crate) sandbox: Option<shared::sandbox::ActorConfig>,
     pub(crate) sandbox_infinite_hp: bool,
-    pub(crate) state: PlayerState,
     pub(crate) career_profile: Option<shared::career::ProfileSummary>,
     pub(crate) career_capable: bool,
     pub(crate) draft: prematch::DraftState,
@@ -166,33 +165,71 @@ pub(crate) struct ConnectedPlayer {
     /// Debug movement multiplier (1.0 = normal). Raises the server's accepted
     /// movement distance so a boosted client is not clamped as a teleport.
     pub(crate) speed_mult: f32,
-    pub(crate) purchase_sequence: u64,
-    pub(crate) gold_income_remainder: f32,
+    /// Authoritative hero core (`hero`).
+    pub(crate) hero: Hero,
+    /// Authoritative wallet and inventory (`hero`).
+    pub(crate) economy: HeroEconomy,
 }
 
 impl ConnectedPlayer {
-    /// The replicated `PlayerState` as the owning client sees it: the stored
-    /// authoritative state plus the fields derived at replication time (the
-    /// cooldown and utility clocks from `hero_timers`, shop availability).
-    /// The stored `state` keeps those wire fields at their defaults.
+    /// The replicated `PlayerState` as the owning client sees it: the
+    /// authoritative `hero` and `economy` plus the fields derived at
+    /// replication time (the cooldown and utility clocks from `hero_timers`,
+    /// shop availability). This and `public_view` are the only places that
+    /// build a `PlayerState`.
     pub(crate) fn owner_view(
         &self,
         now: Instant,
         map: &MapLayoutState,
         phase: &GameState,
     ) -> PlayerState {
-        let mut state = self.state.clone();
-        state.basic_attack_cooldown_secs = hero_timers::basic_attack_cooldown(self);
-        state.basic_attack_remaining_secs = hero_timers::basic_attack_remaining(self, now);
-        state.skill_cooldown_remaining_secs = std::array::from_fn(|i| {
-            hero_timers::skill_cooldown_remaining(self, SkillSlot::ALL[i], now)
-        });
-        state.skill_recovery_remaining_secs = hero_timers::skill_recovery_remaining(self, now);
-        state.utility.dash_remaining_secs = hero_timers::dash_remaining(self, now);
-        state.utility.haste_remaining_secs = hero_timers::haste_remaining(self, now);
-        state.utility.haste_active_secs = hero_timers::haste_active(self, now);
-        state.shop_available = shop_is_available(&state, map, phase);
-        state
+        let Self { hero, economy, .. } = self;
+        PlayerState {
+            supporter_aura: hero.identity.supporter_aura,
+            is_bot: hero.identity.is_bot,
+            id: hero.identity.id,
+            x: hero.x,
+            y: hero.y,
+            z: hero.z,
+            yaw: hero.yaw,
+            team: hero.identity.team,
+            hp: hero.hp,
+            max_hp: hero.max_hp,
+            mana: hero.mana,
+            max_mana: hero.max_mana,
+            gold: economy.gold,
+            earned_gold: economy.earned_gold,
+            utility: shared::utility::UtilityState {
+                dash_remaining_secs: hero_timers::dash_remaining(self, now),
+                haste_remaining_secs: hero_timers::haste_remaining(self, now),
+                haste_active_secs: hero_timers::haste_active(self, now),
+                last_request_id: hero.utility.last_request_id,
+                dash_sequence: hero.utility.dash_sequence,
+            },
+            inventory: economy.inventory.clone(),
+            item_bonuses: economy.item_bonuses,
+            shop_available: shop_is_available(hero, map, phase),
+            last_purchase: economy.last_purchase.clone(),
+            basic_attack_cooldown_secs: hero_timers::basic_attack_cooldown(self),
+            basic_attack_remaining_secs: hero_timers::basic_attack_remaining(self, now),
+            skill_cooldown_remaining_secs: std::array::from_fn(|i| {
+                hero_timers::skill_cooldown_remaining(self, SkillSlot::ALL[i], now)
+            }),
+            skill_recovery_remaining_secs: hero_timers::skill_recovery_remaining(self, now),
+            basic_attack_request_id: economy.basic_attack_request_id,
+            xp: hero.progress.xp,
+            level: hero.progress.level,
+            next_level_xp: hero.progress.next_level_xp,
+            skill_points: hero.progress.skill_points,
+            ranks: hero.progress.ranks,
+            character: hero.identity.character,
+            hero_class: hero.identity.hero_class,
+            avatar: hero.identity.avatar.clone(),
+            sprite_character: hero.identity.sprite_character.clone(),
+            action_sequence: hero.last_action.sequence,
+            action_kind: hero.last_action.kind,
+            action_slot: hero.last_action.slot,
+        }
     }
 
     /// The replicated `PlayerState` as every other client sees it. Redaction

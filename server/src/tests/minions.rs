@@ -18,8 +18,8 @@ fn minion_prefers_enemy_minion_over_closer_player() {
     {
         // Enemy player right next to the acting green minion at the origin.
         let p = world.players.get_mut(&enemy_addr).unwrap();
-        p.state.x = 1.0;
-        p.state.z = 0.0;
+        p.hero.x = 1.0;
+        p.hero.z = 0.0;
     }
 
     let make_minion = |id: u64, team: Team, x: f32| Minion {

@@ -8,20 +8,20 @@ fn progression_levels_up_and_scales_stats() {
 
     world.ensure_connected(addr, now);
     let player = world.players.get_mut(&addr).unwrap();
-    let first_threshold = player.state.next_level_xp;
+    let first_threshold = player.hero.progress.next_level_xp;
     let second_threshold = xp_threshold_for_level(STARTING_LEVEL + 1);
 
-    grant_player_xp(&mut player.state, first_threshold + second_threshold + 17);
+    grant_player_xp(&mut player.hero, first_threshold + second_threshold + 17);
 
-    assert_eq!(player.state.level, STARTING_LEVEL + 2);
-    assert_eq!(player.state.skill_points, 2);
-    assert_eq!(player.state.xp, 17);
+    assert_eq!(player.hero.progress.level, STARTING_LEVEL + 2);
+    assert_eq!(player.hero.progress.skill_points, 2);
+    assert_eq!(player.hero.progress.xp, 17);
     assert_eq!(
-        player.state.next_level_xp,
+        player.hero.progress.next_level_xp,
         xp_threshold_for_level(STARTING_LEVEL + 2)
     );
-    assert!((player.state.max_hp - (MAX_HP + LEVEL_UP_HP_BONUS * 2.0)).abs() < EPSILON);
-    assert!((player.state.max_mana - (MAX_MANA + LEVEL_UP_MANA_BONUS * 2.0)).abs() < EPSILON);
+    assert!((player.hero.max_hp - (MAX_HP + LEVEL_UP_HP_BONUS * 2.0)).abs() < EPSILON);
+    assert!((player.hero.max_mana - (MAX_MANA + LEVEL_UP_MANA_BONUS * 2.0)).abs() < EPSILON);
 }
 
 #[test]
@@ -33,19 +33,19 @@ fn respawn_restores_scaled_maximums() {
 
     world.ensure_connected(addr, now);
     let player = world.players.get_mut(&addr).unwrap();
-    let first_threshold = player.state.next_level_xp;
+    let first_threshold = player.hero.progress.next_level_xp;
     let second_threshold = xp_threshold_for_level(STARTING_LEVEL + 1);
-    grant_player_xp(&mut player.state, first_threshold + second_threshold);
-    player.state.hp = 0.0;
-    player.state.mana = 0.0;
+    grant_player_xp(&mut player.hero, first_threshold + second_threshold);
+    player.hero.hp = 0.0;
+    player.hero.mana = 0.0;
     player.timers.respawn_at = Some(now - Duration::from_millis(1));
 
     handle_respawns(&mut world, now);
 
     let player = world.players.get(&addr).unwrap();
-    assert_eq!(player.state.level, STARTING_LEVEL + 2);
-    assert!(player.state.max_hp > MAX_HP);
-    assert!(player.state.max_mana > MAX_MANA);
-    assert!((player.state.hp - player.state.max_hp).abs() < EPSILON);
-    assert!((player.state.mana - player.state.max_mana).abs() < EPSILON);
+    assert_eq!(player.hero.progress.level, STARTING_LEVEL + 2);
+    assert!(player.hero.max_hp > MAX_HP);
+    assert!(player.hero.max_mana > MAX_MANA);
+    assert!((player.hero.hp - player.hero.max_hp).abs() < EPSILON);
+    assert!((player.hero.mana - player.hero.max_mana).abs() < EPSILON);
 }
