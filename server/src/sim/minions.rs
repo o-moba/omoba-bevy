@@ -1,5 +1,82 @@
 //! Lane minion AI, marching and combat.
-use crate::*;
+
+use shared::wire::TargetKind;
+
+use crate::entities::Vec3f;
+
+use shared::wire::MinionBrainState;
+
+use crate::balance::MINION_KILL_GOLD;
+
+use shared::wire::GameState;
+
+use crate::combat_feedback::minion_stats;
+
+use crate::balance::PLAYER_HIT_RADIUS;
+
+use crate::balance::MINION_KILL_XP;
+
+use std::collections::HashMap;
+
+use crate::entities::StructureRole;
+
+use crate::game_world::GameWorld;
+
+use shared::combat::CombatEvent;
+
+use crate::balance::MINION_RADIUS;
+
+use shared::wire::MinionTargetKind;
+
+use crate::entities::MinionAggroTarget;
+
+use crate::combat_feedback::HitSource;
+
+use crate::combat_feedback::spawn_caster_projectile;
+
+use crate::balance::AIM_HEIGHT;
+
+use crate::world::structure_radius;
+
+use crate::shop::award_gold;
+
+use crate::sim::towers::apply_structure_damage;
+
+use shared::combat::CombatEntityKind;
+
+use crate::combat_feedback::apply_player_damage;
+
+use shared::wire::TargetId;
+
+use std::collections::HashSet;
+
+use crate::entities::Minion;
+
+use crate::game_world::TickCtx;
+
+use shared::combat::ProjectileStyle;
+
+use shared::map::Team;
+
+use shared::combat::MinionKind;
+
+use crate::entities::ConnectedPlayer;
+
+use crate::sim::towers::structure_is_protected;
+
+use crate::combat_feedback::damage_receipt;
+
+use crate::balance::MINION_VISION_RANGE;
+
+use crate::vision;
+
+use crate::progression::grant_player_xp;
+
+use std::net::SocketAddr;
+
+use shared::wire::StructureKind;
+
+use crate::balance::MINION_SPEED;
 
 pub(crate) fn apply_minion_damage(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,

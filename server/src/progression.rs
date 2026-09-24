@@ -1,4 +1,11 @@
-use super::*;
+
+use crate::balance::LEVEL_UP_MANA_BONUS;
+
+use crate::hero::Hero;
+
+use crate::balance::LEVEL_UP_HP_BONUS;
+
+use crate::balance::MAX_LEVEL;
 
 pub(crate) fn xp_threshold_for_level(level: u32) -> u32 {
     shared::hero_balance::xp_threshold_for_level(level)

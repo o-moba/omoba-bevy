@@ -1,5 +1,32 @@
 //! Snapshot assembly, UDP payload validation and per-recipient broadcast.
-use crate::*;
+
+use std::io;
+use crate::sim::towers::structure_is_protected;
+
+use shared::wire::PlayerState;
+
+use crate::vision;
+
+#[cfg(test)]
+use std::net::SocketAddr;
+
+use crate::balance::VICTORY_REMATCH_DELAY;
+
+use shared::wire::GameState;
+
+use std::time::Duration;
+
+use crate::runtime::ServerRuntime;
+
+use std::time::Instant;
+
+use crate::prematch;
+
+use std::fmt;
+
+use crate::game_world::GameWorld;
+
+use shared::wire::ServerPacket;
 
 pub(crate) const SNAPSHOT_INTERVAL: Duration = Duration::from_millis(50);
 

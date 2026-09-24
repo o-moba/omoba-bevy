@@ -3,7 +3,33 @@
 //! The wire `PlayerState` is never stored: `ConnectedPlayer::owner_view` and
 //! `public_view` (`entities.rs`) build it from these structs, `HeroTimers`
 //! and the tick's `now`.
-use crate::*;
+
+use crate::progression::xp_threshold_for_level;
+use crate::balance::MAX_MANA;
+use crate::balance::STARTING_LEVEL;
+use crate::balance::MAX_HP;
+
+use shared::shop::STARTING_GOLD;
+
+use crate::entities::Vec3f;
+
+use shared::shop::ItemBonuses;
+
+use shared::PlayerActionKind;
+
+use shared::map::Team;
+
+use shared::wire::default_character_choice;
+
+use shared::wire::CharacterChoice;
+
+use shared::HeroClass;
+
+use shared::shop::ItemId;
+
+use crate::balance::PLAYER_GROUND_Y;
+
+use shared::shop::PurchaseReceipt;
 
 /// Wallet, income and inventory. Reconnects keep it (it lives inside the
 /// retained `ConnectedPlayer`); `reset_player_round` clears it.

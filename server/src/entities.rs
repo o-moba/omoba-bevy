@@ -1,6 +1,65 @@
 //! Server-side entity records: connected players, projectiles, structures,
 //! minions, neutrals, team buffs and the ECS mirror components.
-use crate::*;
+
+use shared::wire::StructureState;
+
+use crate::balance::BOTTOM_BOSS_BUFF_DAMAGE_MULT;
+
+use shared::map::Lane;
+
+use shared::wire::TargetId;
+
+use crate::hero_timers::HeroTimers;
+
+use crate::balance::TOP_BOSS_BUFF_DAMAGE_MULT;
+
+use crate::balance::PLAYER_GROUND_Y;
+
+use crate::hero_timers;
+
+use shared::wire::PlayerState;
+
+use shared::wire::TeamBuffState;
+
+use crate::balance::BOTTOM_BOSS_BUFF_DURATION;
+
+use crate::balance::TOP_BOSS_BUFF_HP_REGEN_PER_SECOND;
+
+use crate::hero::HeroEconomy;
+
+use crate::prematch;
+
+use shared::wire::MinionTargetKind;
+
+use shared::wire::GameState;
+
+use std::time::Duration;
+
+use shared::wire::MinionState;
+
+use crate::hero_stats;
+
+use crate::hero_stats::StatModifiers;
+
+use shared::wire::NeutralState;
+
+use crate::shop::shop_is_available;
+
+use shared::wire::ProjectileState;
+
+use std::time::Instant;
+
+use shared::shop::ItemBonuses;
+
+use crate::balance::TOP_BOSS_BUFF_DURATION;
+
+use shared::wire::TeamBuffKind;
+
+use crate::hero::Hero;
+
+use shared::SkillSlot;
+
+use shared::map::Team;
 
 /// Server-side balance of each replicated boss buff (`shared::wire::TeamBuffKind`).
 pub(crate) trait TeamBuffBalance {

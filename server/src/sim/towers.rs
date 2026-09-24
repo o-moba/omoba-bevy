@@ -1,5 +1,57 @@
 //! Structure protection, damage and tower fire.
-use crate::*;
+
+use crate::balance::PROJECTILE_SPEED;
+use crate::entities::Vec3f;
+
+use shared::wire::GameState;
+
+use crate::entities::Projectile;
+
+use crate::balance::AIM_HEIGHT;
+
+use shared::wire::ProjectileState;
+
+use std::time::Instant;
+
+use shared::combat::CombatEntityKind;
+
+use crate::game_world::GameWorld;
+
+use crate::balance::BASE_TOWER_SHOT_HEIGHT;
+
+use shared::combat::CombatEvent;
+
+use crate::combat_feedback::HitSource;
+
+use shared::map::Team;
+
+use crate::vision;
+
+use crate::balance::PROJECTILE_LIFETIME;
+
+use shared::map::Lane;
+
+use shared::wire::TargetId;
+
+use shared::wire::TargetKind;
+
+use shared::combat::ProjectileStyle;
+
+use crate::combat_feedback::damage_receipt;
+
+use crate::balance::PROJECTILE_RADIUS;
+
+use std::collections::HashMap;
+
+use crate::balance::TOWER_SHOT_HEIGHT;
+
+use shared::wire::StructureKind;
+
+use crate::entities::StructureRole;
+
+use crate::sim::minions::apply_minion_damage;
+
+use crate::entities::Structure;
 
 /// Each defending lane unlocks front-to-back. A base unlocks when any
 /// configured nonempty lane is cleared; an arena with no lane towers is open.

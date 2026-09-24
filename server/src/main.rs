@@ -75,12 +75,11 @@ use shared::wire::{
 };
 use shared::{
     HeroClass, PlayerActionKind, SkillSlot, TargetingMode, ability_for_class_slot,
-    rank_effect_scale, scaled_cast_range, scaled_mana_cost, unlocked_slots_for_level,
+    rank_effect_scale, scaled_mana_cost, unlocked_slots_for_level,
 };
 use shop::*;
 use std::{
-    collections::{HashMap, HashSet},
-    fmt, io,
+    collections::{HashMap, HashSet}, io,
     net::{SocketAddr, UdpSocket},
     time::{Duration, Instant},
 };

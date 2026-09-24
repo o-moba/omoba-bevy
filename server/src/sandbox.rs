@@ -1,5 +1,45 @@
 //! Local-only authoritative combat lab, using ordinary actors and hit resolution.
-use crate::*;
+use crate::entities::ConnectedPlayer;
+use crate::sim::cast::handle_cast_request;
+use std::collections::HashMap;
+use std::time::Duration;
+use crate::balance::MAX_LEVEL;
+use shared::map::Lane;
+use shared::SkillSlot;
+use crate::session::handle_join_request_with_sprite;
+use std::collections::HashSet;
+use shared::ability_for_class_slot;
+use std::net::SocketAddr;
+use shared::combat::CombatEntityKind;
+use crate::runtime::ServerRuntime;
+use crate::bots;
+use crate::balance::PLAYER_GROUND_Y;
+use crate::hero_stats;
+use shared::wire::TargetId;
+use crate::world::spawn_minion_wave_for_team_lane;
+use crate::balance::PLAYER_HIT_RADIUS;
+use crate::neutrals::build_boss_neutrals;
+use crate::combat_feedback::CombatLog;
+use crate::progression::xp_threshold_for_level;
+use crate::session::handle_transform_request_with_structures;
+use crate::balance::RESPAWN_DELAY;
+use shared::map::Team;
+use shared::TargetingMode;
+use shared::wire::default_character_choice;
+use shared::wire::GameState;
+use crate::entities::TeamBuffs;
+use crate::neutrals::build_neutral_camps;
+use shared::wire::TargetKind;
+use std::time::Instant;
+use crate::world::build_configured_structures;
+use crate::hero_stats::StatModifiers;
+use crate::world::structure_collision_radius;
+use crate::entities::DisconnectedSession;
+use crate::basic_attack::handle_basic_attack_request;
+use crate::hero_timers;
+use shared::unlocked_slots_for_level;
+use shared::PlayerActionKind;
+use crate::neutrals::schedule_boss_spawns;
 use shared::sandbox::*;
 
 const ENEMY_ADDR: SocketAddr =

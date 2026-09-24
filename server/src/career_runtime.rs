@@ -1,6 +1,21 @@
 //! Simulation-facing career integration. The backend owns every blocking I/O
 //! operation; the tick only exchanges bounded worker commands and acknowledgements.
-use crate::*;
+use crate::entities::ConnectedPlayer;
+use std::time::Duration;
+use std::collections::HashSet;
+use crate::session;
+use crate::session::normalize_session_id;
+use shared::wire::ClientPacket;
+use std::net::SocketAddr;
+use crate::runtime::ServerRuntime;
+use shared::map::Team;
+use shared::wire::GameState;
+use omoba_career_store::matchmaking;
+use std::time::Instant;
+use std::collections::HashMap;
+use shared::wire::ServerPacket;
+use crate::session::handle_join_request_with_sprite;
+use crate::career_port::CareerPort;
 use shared::career::{
     CareerRequest, CareerView, MatchOutcome, MatchResult, MatchStats, ParticipantResult, QueueView,
 };
