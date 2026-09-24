@@ -20,13 +20,12 @@ pub struct Presentation3dPlugin;
 
 impl Plugin for Presentation3dPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<CombatPresentation>()
-            .add_systems(
-                PostUpdate,
-                (collect_feedback, draw_feedback)
-                    .chain()
-                    .run_if(in_models3d()),
-            );
+        app.init_resource::<CombatPresentation>().add_systems(
+            PostUpdate,
+            (collect_feedback, draw_feedback)
+                .chain()
+                .run_if(in_models3d()),
+        );
     }
 }
 

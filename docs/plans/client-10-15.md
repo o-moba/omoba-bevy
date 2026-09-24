@@ -268,6 +268,8 @@ The mode is never mutated in production; `sprite.rs:123` is the only non-test wr
 - `world.rs:192-193` (`force_vrm_models_double_sided`, `apply_lighting_settings_system`) and `sync_selected_player_assets` (guard at 403)
 - `battlefield_atmosphere.rs:13-14`, but check its `sync_visibility` first (I didn't see a mode guard)
 
+> Status (10d): gated as listed, except `battlefield_atmosphere.rs`, which stays ungated. Its mist is a screen-space UI node with no mode guard, shown in both modes while the game is Running, and `overlay_is_single_noninteractive_full_viewport_and_match_scoped` adds the plugin without a `PlayerVisualMode`. `river.rs` gates its whole registration (`repair_river` + `remove_orphaned_replacements`, a no-op without 3D replacements); `world.rs` gates the three systems as one set.
+
 **Must run in both modes (they branch internally)**
 - `camera.rs` systems
 - `net/apply` (spawn bundles)
@@ -326,6 +328,8 @@ Leave in place:
 - `TeamSelection` (lobby intent).
 
 ## 10.7 Step 10 slices
+
+> Status: 10a and 10d are in one PR (`refactor/client-domain`, progress note `docs/progress/2026-09-24-client-domain.md`); 10b onwards are open.
 
 | # | Slice | Size | Risk |
 |---|---|---|---|

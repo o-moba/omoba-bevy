@@ -13,10 +13,10 @@ use bevy::{
 use shared::{HeroClass, avatar_roster};
 use std::collections::HashMap;
 
+pub use crate::domain::Team;
 use crate::frontend::AppScreen;
 use crate::net::{ClientConnectionState, ClientSession, NetworkCommand, SessionUiCommand};
 use crate::sprite::{PlayerVisualMode, SpriteVisualAssets};
-pub use crate::domain::Team;
 pub use ekza_bevy_sdk::EkzaCharacter as CharacterChoice;
 
 const TEAM_BUTTON_SIZE: f32 = 64.0;
