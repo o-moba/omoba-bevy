@@ -14,6 +14,7 @@ use shared::{SkillSlot, ability_for_class_slot, scaled_mana_cost};
 
 use crate::{
     combat::{CombatStats, LocalCastCooldown},
+    domain::RoundId,
     input_context::{GameplayInputContext, InputContextSet},
     net::{NetworkHeroClass, PlayerProgression},
     player::Player,
@@ -125,7 +126,7 @@ pub(crate) struct MobileControls {
     captures: HashMap<u64, Capture>,
     upgrade_enabled: [bool; 4],
     layout_changed: bool,
-    round_identity: Option<(u64, u64)>,
+    round_identity: Option<RoundId>,
     next_attack_gesture: u64,
     attack_canceled_this_frame: bool,
     skill_released_this_frame: bool,
@@ -646,8 +647,7 @@ fn read_mobile_controls(
 ) {
     mobile.begin_input_frame();
     if let Some(snapshot) = snapshot {
-        let identity = (snapshot.meta.server_epoch, snapshot.meta.match_id);
-        if identity.0 != 0 && identity.1 != 0 {
+        if let Some(identity) = RoundId::from_meta(&snapshot.meta) {
             if mobile
                 .round_identity
                 .is_some_and(|previous| previous != identity)
@@ -1930,7 +1930,10 @@ mod tests {
                 _ => {
                     app.world_mut()
                         .resource_mut::<MobileControls>()
-                        .round_identity = Some((1, 1));
+                        .round_identity = Some(RoundId {
+                        server_epoch: 1,
+                        match_id: 1,
+                    });
                     let mut snapshot = app
                         .world_mut()
                         .resource_mut::<crate::net::GameStateSnapshot>();

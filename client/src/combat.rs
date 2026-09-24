@@ -4,8 +4,10 @@ use bevy::{
 };
 
 use crate::camera::MainCamera;
+use crate::domain::RoundId;
 use crate::input_bindings::{SKILL_CAST_KEYS, SKILL_UPGRADE_KEY};
 use crate::input_context::{GameplayInputContext, InputContextSet};
+pub(crate) use crate::input_context::{CombatPointerInputSet, WorldMovementInputSet};
 use crate::minimap::MinimapNavigationState;
 use crate::model_scale::NormalizeModelScale;
 use crate::net::{
@@ -22,7 +24,7 @@ use shared::{
     scaled_cast_range, scaled_cooldown, scaled_mana_cost,
 };
 
-pub use shared::hero_balance::{DEFAULT_MAX_HP as MAX_HP, MAX_MANA};
+pub use crate::domain::{CombatStats, MAX_HP};
 
 /// Local per-slot cast cooldown mirror for HUD feedback (the server remains
 /// authoritative; values come from the shared class kit numbers).
@@ -85,7 +87,7 @@ fn update_action_feedback(
 
 /// Keep valid identity across a transient disconnect (whose snapshot is empty).
 #[derive(Resource, Default)]
-struct CombatRoundIdentity(Option<(u64, u64)>);
+struct CombatRoundIdentity(Option<RoundId>);
 
 fn reset_round_input_state(
     mut commands: Commands,
@@ -99,10 +101,9 @@ fn reset_round_input_state(
     mut queued: ResMut<Messages<NetworkCommand>>,
 ) {
     let (mut pending, mut basic) = orders;
-    let identity = (snapshot.meta.server_epoch, snapshot.meta.match_id);
-    if identity.0 == 0 || identity.1 == 0 {
+    let Some(identity) = RoundId::from_meta(&snapshot.meta) else {
         return;
-    }
+    };
     let changed = previous.0.is_some_and(|last| last != identity);
     previous.0 = Some(identity);
     if !changed {
@@ -165,12 +166,6 @@ const SKILL_UPGRADE_HOVER_COLOR: Color = Color::srgba(0.26, 0.72, 0.32, 0.98);
 const SKILL_UPGRADE_IDLE_COLOR: Color = Color::srgba(0.16, 0.16, 0.18, 0.55);
 
 pub struct CombatPlugin;
-
-#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct CombatPointerInputSet;
-
-#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct WorldMovementInputSet;
 
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
@@ -253,31 +248,6 @@ fn configure_target_presentation(app: &mut App) {
             .before(bevy::ui::UiSystems::Layout)
             .before(bevy::transform::TransformSystems::Propagate),
     );
-}
-
-#[derive(Component, Clone, Copy, Debug)]
-pub struct CombatStats {
-    pub hp: f32,
-    pub max_hp: f32,
-    pub mana: f32,
-    pub max_mana: f32,
-}
-
-impl Default for CombatStats {
-    fn default() -> Self {
-        Self {
-            hp: MAX_HP,
-            max_hp: MAX_HP,
-            mana: MAX_MANA,
-            max_mana: MAX_MANA,
-        }
-    }
-}
-
-impl CombatStats {
-    pub fn is_alive(self) -> bool {
-        self.hp > 0.0
-    }
 }
 
 #[derive(Resource)]

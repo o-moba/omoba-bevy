@@ -14,7 +14,7 @@ use serde::Deserialize;
 
 use crate::{
     combat_visuals::safe_asset_path,
-    sprite::PlayerVisualMode,
+    sprite::{PlayerVisualMode, in_models3d},
     verdant3d::{VerdantEnvironment, VerdantFoliage},
 };
 
@@ -458,7 +458,8 @@ impl Plugin for MapVisualsPlugin {
                     tint_props,
                 )
                     .chain()
-                    .before(bevy::transform::TransformSystems::Propagate),
+                    .before(bevy::transform::TransformSystems::Propagate)
+                    .run_if(in_models3d()),
             );
     }
 }

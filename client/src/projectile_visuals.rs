@@ -12,7 +12,7 @@ use crate::{
     net::{
         NetworkAvatar, NetworkHeroClass, NetworkPlayerId, NetworkProjectile, NetworkSpriteCharacter,
     },
-    sprite::PlayerVisualMode,
+    sprite::{PlayerVisualMode, in_models3d},
     team::Team,
     world2d::{layer, simulation_xz_to_render_xy},
 };
@@ -22,12 +22,13 @@ pub(crate) const MAX_VISUALS: usize = 384;
 pub struct ProjectileVisualsPlugin;
 impl Plugin for ProjectileVisualsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_assets)
+        app.add_systems(Startup, setup_assets.run_if(in_models3d()))
             .add_systems(
                 PostUpdate,
                 (attach_visuals, update_visuals, animate_orbits)
                     .chain()
-                    .before(bevy::transform::TransformSystems::Propagate),
+                    .before(bevy::transform::TransformSystems::Propagate)
+                    .run_if(in_models3d()),
             )
             .add_systems(
                 PostUpdate,

@@ -10,7 +10,11 @@ use bevy::{
     prelude::*,
 };
 
-use crate::{maps::MapLayout, sprite::PlayerVisualMode, verdant3d::VerdantEnvironment};
+use crate::{
+    maps::MapLayout,
+    sprite::{PlayerVisualMode, in_models3d},
+    verdant3d::VerdantEnvironment,
+};
 
 const WATER_Y: f32 = -0.035;
 const MEADOW_Y: f32 = -0.02;
@@ -31,7 +35,8 @@ pub(super) fn register(app: &mut App) {
         PostUpdate,
         (repair_river, remove_orphaned_replacements)
             .chain()
-            .before(bevy::transform::TransformSystems::Propagate),
+            .before(bevy::transform::TransformSystems::Propagate)
+            .run_if(in_models3d()),
     );
 }
 

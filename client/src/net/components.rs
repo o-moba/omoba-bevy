@@ -8,6 +8,7 @@ use shared::protocol::SnapshotMeta;
 use shared::wire::{PlayerState, StructureState};
 use shared::{HeroClass, PlayerActionKind};
 
+pub use crate::domain::RemotePlayer;
 use crate::team::{CharacterChoice, Team};
 
 use super::{GameState, Lane, MinionBrainState, NeutralAiState, NeutralCampType, TeamBuffState};
@@ -47,9 +48,6 @@ pub(in crate::net) struct NetworkState {
     pub(in crate::net) speed_boost_active: bool,
     pub(in crate::net) local_dash_ack: Option<(u64, u64, u64, u64)>,
 }
-
-#[derive(Component)]
-pub struct RemotePlayer;
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkPlayerId(pub u64);

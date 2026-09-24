@@ -7,7 +7,7 @@ use crate::creatures3d::{
     setup_creature_assets, spawn_creature, update_minion_attack_pulses,
 };
 use crate::net::{NetworkMinion, NetworkMinionAction, NetworkMinionKind};
-use crate::sprite::PlayerVisualMode;
+use crate::sprite::{PlayerVisualMode, in_models3d};
 use crate::team::Team;
 
 pub struct MinionVisualsPlugin;
@@ -16,7 +16,9 @@ impl Plugin for MinionVisualsPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Startup,
-            setup_creature_assets.after(crate::persistence::load_persistent_client_settings),
+            setup_creature_assets
+                .after(crate::persistence::load_persistent_client_settings)
+                .run_if(in_models3d()),
         )
         .add_systems(
             Update,
@@ -25,7 +27,8 @@ impl Plugin for MinionVisualsPlugin {
                 update_minion_attack_pulses,
                 animate_creatures,
             )
-                .chain(),
+                .chain()
+                .run_if(in_models3d()),
         );
     }
 }

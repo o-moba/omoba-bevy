@@ -17,6 +17,7 @@ mod combat_visuals;
 mod creatures3d;
 mod debug_console;
 mod decor;
+mod domain;
 mod edge_hud;
 mod forest_pickup_qa;
 mod frontend;

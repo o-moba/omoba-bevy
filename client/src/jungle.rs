@@ -6,16 +6,18 @@ use crate::{
     maps::MapLayout,
     model_scale::NormalizeModelScale,
     net::{NetworkNeutral, NetworkNeutralCampType, NeutralCampType},
-    sprite::PlayerVisualMode,
+    sprite::{PlayerVisualMode, in_models3d},
 };
 
 pub struct JungleVisualsPlugin;
 impl Plugin for JungleVisualsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, attach_jungle_creatures)
+        app.add_systems(Update, attach_jungle_creatures.run_if(in_models3d()))
             .add_systems(
                 PostUpdate,
-                ground_jungle_creatures.before(bevy::transform::TransformSystems::Propagate),
+                ground_jungle_creatures
+                    .before(bevy::transform::TransformSystems::Propagate)
+                    .run_if(in_models3d()),
             );
     }
 }

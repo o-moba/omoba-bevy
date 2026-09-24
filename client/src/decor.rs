@@ -1,14 +1,14 @@
 //! Verdant3d owns the imported foliage scene and reuses `DecorRoot` for F4.
 //! Historical scatter fixtures remain test-only to retain layout regressions;
 //! the unchanged World2d renderer owns its separate tile/prop presentation.
-use crate::sprite::PlayerVisualMode;
+use crate::sprite::{PlayerVisualMode, in_models3d};
 use bevy::prelude::*;
 
 pub struct DecorPlugin;
 
 impl Plugin for DecorPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, toggle_decor_visibility);
+        app.add_systems(Update, toggle_decor_visibility.run_if(in_models3d()));
     }
 }
 

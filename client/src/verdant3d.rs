@@ -7,18 +7,25 @@ use crate::decor::DecorRoot;
 use crate::map_visuals::MapPropInstance;
 use crate::maps::MapLayout;
 use crate::net::{NetworkMapStructure, NetworkStructure, StructureKind};
-use crate::sprite::PlayerVisualMode;
+use crate::sprite::{PlayerVisualMode, in_models3d};
 use crate::team::Team;
 
 pub struct Verdant3dPlugin;
 
 impl Plugin for Verdant3dPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, (load_assets, spawn_environment).chain())
-            .add_systems(
-                PostUpdate,
-                reconcile_structures.before(bevy::transform::TransformSystems::Propagate),
-            );
+        app.add_systems(
+            Startup,
+            (load_assets, spawn_environment)
+                .chain()
+                .run_if(in_models3d()),
+        )
+        .add_systems(
+            PostUpdate,
+            reconcile_structures
+                .before(bevy::transform::TransformSystems::Propagate)
+                .run_if(in_models3d()),
+        );
     }
 }
 
