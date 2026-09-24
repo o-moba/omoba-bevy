@@ -98,4 +98,20 @@ partial `ItemBonuses`; omitted fields are neutral, unknown ones rejected).
 - Neutrality: the snapshot byte pins in `server/src/tests/player_view.rs`
   and the golden JSON tests in `shared/src/protocol/wire.rs` are unchanged
   and green.
-- GATE_PLACEHOLDER
+- Gate (from the worktree): `cargo fmt --all -- --check`, `cargo clippy
+  --workspace --all-targets --no-deps -- -D warnings`, `cargo test -p shared
+  -p server` (shared 88, was 78; server 283 + 3 ignored, unchanged), `cargo
+  test -p client --lib` (549, unchanged), `cargo build -p server && cargo
+  test --locked -p harness -- --test-threads=1` (22 unit + 24 black-box,
+  unchanged, against the freshly built server), `python3 -m unittest
+  discover -s scripts -p 'test_*.py'` (93, was 86; one skipped as before).
+- New tests: `catalog::tests` (the shipped files load; a bad file panics
+  with its path; enum order and id round-trips; schema version, unknown
+  fields, bonus keys, projectile styles and roles; kit shape, effects,
+  targeting, unique ids and value ranges; item costs and bonus ranges;
+  recommendations and unknown item ids; starter budget and a full duel
+  inventory), `hero_balance::tests::default_max_hp_is_the_warrior_base_hp`,
+  `practice::tests::duel_gold_cap_buys_a_full_inventory`,
+  `scripts/test_catalog.py` (5), a Warden `--hero` check in
+  `test_combat_test.py` and a Warden offensive-slot check in
+  `test_beta_match.py`.
