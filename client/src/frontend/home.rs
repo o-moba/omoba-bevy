@@ -122,6 +122,7 @@ fn spawn_home(
     card: Res<ProfileCard>,
     thumbnails: Res<AvatarThumbnails>,
     mut preview: ResMut<super::preview::AvatarPreview>,
+    platform: Res<crate::ui::UiPlatform>,
 ) {
     if automation_bypass() {
         return;
@@ -131,7 +132,7 @@ fn spawn_home(
         preview.show_portrait(slug);
     }
     let preview_image = preview.image.clone();
-    let phone = crate::platform::ui_profile() == crate::platform::UiProfile::Mobile;
+    let phone = platform.is_mobile();
     let (status, status_color) = connection_line(&session);
     let profile = career.view.profile.clone();
     let last_match = career
@@ -439,6 +440,7 @@ fn refresh_home(
     card: Res<ProfileCard>,
     thumbnails: Res<AvatarThumbnails>,
     preview: ResMut<super::preview::AvatarPreview>,
+    platform: Res<crate::ui::UiPlatform>,
     roots: Query<Entity, With<HomeRoot>>,
     mut last: Local<Option<HomeSignature>>,
 ) {
@@ -454,7 +456,9 @@ fn refresh_home(
         .entity(root)
         .despawn_related::<Children>()
         .despawn();
-    spawn_home(commands, career, session, card, thumbnails, preview);
+    spawn_home(
+        commands, career, session, card, thumbnails, preview, platform,
+    );
 }
 
 #[cfg(test)]

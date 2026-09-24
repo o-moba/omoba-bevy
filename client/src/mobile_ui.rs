@@ -750,21 +750,7 @@ struct ScrollTouch {
     held: Option<(u64, Entity, Vec2, Vec2, bool)>,
 }
 
-pub(crate) fn logical_ui_rect(
-    node: &ComputedNode,
-    transform: &UiGlobalTransform,
-    clip: Option<&bevy::ui::CalculatedClip>,
-    dpi: f32,
-) -> Rect {
-    let mut rect = Rect::from_center_size(
-        transform.translation / dpi,
-        node.size() * transform.to_scale_angle_translation().0.abs() / dpi,
-    );
-    if let Some(clip) = clip {
-        rect = rect.intersect(Rect::from_corners(clip.clip.min / dpi, clip.clip.max / dpi));
-    }
-    rect
-}
+pub(crate) use crate::ui::gesture::logical_ui_rect;
 
 fn scroll_phone_panels(
     mobile: Res<MobileControls>,

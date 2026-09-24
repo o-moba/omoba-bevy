@@ -91,6 +91,7 @@ fn spawn_catalogue_grid(
     catalogue: &crate::passport::AvatarCatalogue,
     selected: Option<&str>,
     thumbnails: &AvatarThumbnails,
+    phone: bool,
 ) {
     grid.spawn(widgets::heading("Included heroes", 17.0));
     for (defaults, title) in [(true, ""), (false, "Ekza Studio · Library")] {
@@ -154,6 +155,7 @@ fn spawn_catalogue_grid(
                         entry.source,
                         selected == Some(entry.avatar.slug.as_str()),
                         thumbnails,
+                        phone,
                     );
                 }
             }
@@ -203,6 +205,7 @@ fn refresh_collection_catalogue(
     mut thumbnails: ResMut<AvatarThumbnails>,
     preview: Res<AvatarPreview>,
     mut grids: Query<(Entity, &mut CatalogueRevision), With<CollectionGrid>>,
+    platform: Res<crate::ui::UiPlatform>,
 ) {
     crate::passport::poll_account();
     crate::passport::poll_wallet();
@@ -219,7 +222,13 @@ fn refresh_collection_catalogue(
             .entity(grid)
             .despawn_related::<Children>()
             .with_children(|grid| {
-                spawn_catalogue_grid(grid, &catalogue, preview.slug.as_deref(), &thumbnails);
+                spawn_catalogue_grid(
+                    grid,
+                    &catalogue,
+                    preview.slug.as_deref(),
+                    &thumbnails,
+                    platform.is_mobile(),
+                );
             });
     }
 }
@@ -231,10 +240,11 @@ fn spawn_collection(
     selection: Res<TeamSelection>,
     mut thumbnails: ResMut<AvatarThumbnails>,
     asset_server: Res<AssetServer>,
+    platform: Res<crate::ui::UiPlatform>,
 ) {
     ensure_thumbnails(&asset_server, &mut thumbnails);
     let catalogue = crate::passport::avatar_catalogue();
-    let phone = crate::platform::ui_profile() == crate::platform::UiProfile::Mobile;
+    let phone = platform.is_mobile();
     let entries = collection_entries();
     // Open on something: the current loadout avatar, else the showcase, else
     // the first entry.
@@ -316,7 +326,7 @@ fn spawn_collection(
                     Name::new("CollectionGrid"),
                 ))
                 .with_children(|grid| {
-                    spawn_catalogue_grid(grid, &catalogue, initial.as_deref(), &thumbnails);
+                    spawn_catalogue_grid(grid, &catalogue, initial.as_deref(), &thumbnails, phone);
                 });
 
                 // Preview column.
@@ -387,26 +397,15 @@ fn spawn_avatar_tile(
     source: AvatarSource,
     selected: bool,
     thumbnails: &AvatarThumbnails,
+    phone: bool,
 ) {
     let playable = crate::passport::can_select(avatar);
     let menu = MenuButton::tile(selected);
     grid.spawn((
         Button,
         Node {
-            width: Val::Px(
-                if crate::platform::ui_profile() == crate::platform::UiProfile::Mobile {
-                    136.0
-                } else {
-                    112.0
-                },
-            ),
-            height: Val::Px(
-                if crate::platform::ui_profile() == crate::platform::UiProfile::Mobile {
-                    180.0
-                } else {
-                    146.0
-                },
-            ),
+            width: Val::Px(if phone { 136.0 } else { 112.0 }),
+            height: Val::Px(if phone { 180.0 } else { 146.0 }),
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
             justify_content: JustifyContent::FlexStart,
@@ -730,6 +729,7 @@ fn refresh_collection_details(
     selection: Res<TeamSelection>,
     clip_row: Query<Entity, With<ClipRow>>,
     detail: Query<(Entity, Ref<DetailPanel>)>,
+    platform: Res<crate::ui::UiPlatform>,
     mut last: Local<
         Option<(
             Option<String>,
@@ -803,22 +803,24 @@ fn refresh_collection_details(
                 }
                 PreviewStatus::Ready => {
                     for (index, label) in clips {
-                        widgets::tile(
+                        widgets::compact_tile(
                             row,
                             &label,
                             index == selected,
                             CollectionAction::Clip(index),
                             &format!("AvatarClip-{index}"),
+                            platform.is_mobile(),
                         );
                     }
                 }
             }
-            widgets::tile(
+            widgets::compact_tile(
                 row,
                 if spinning { "Stop spin" } else { "Auto spin" },
                 spinning,
                 CollectionAction::ToggleSpin,
                 "AvatarAutoSpin",
+                platform.is_mobile(),
             );
         });
     }
@@ -1103,6 +1105,7 @@ mod tests {
             .init_asset::<Image>()
             .init_resource::<AvatarPreview>()
             .init_resource::<AvatarThumbnails>()
+            .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
             .add_systems(Update, refresh_collection_catalogue);
         let selected = shared::avatar_roster()[0].slug.clone();
         app.world_mut()
@@ -1147,6 +1150,7 @@ mod tests {
             .init_asset::<Image>()
             .init_resource::<AvatarPreview>()
             .init_resource::<AvatarThumbnails>()
+            .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
             .add_systems(
                 Update,
                 (refresh_collection_catalogue, refresh_connection_labels).chain(),

@@ -6,6 +6,10 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### UI kit
+- New `client/src/ui/` (roadmap step 9 pilot, `docs/ui-kit.md`): `UiKitPlugin`, a `UiPlatform` resource read where systems used to call `platform::ui_profile()`, one theme (`ui/theme.rs` merges `ui_theme` and the `frontend::widgets` palette, both kept as shims), one tap recognizer (`Pressable`, `TapTracker`, `recognize_presses`, `GestureEpoch`, `SyntheticPress`) replacing the pause menu's and career's copies, typed button actions (`UiAction<T>` → `Activated<T>` via `add_ui_action::<T>()`), `ButtonStyle` painting and `TestId` (mirrored into `Name`).
+- The pause menu and the practice sandbox are rebuilt on the kit: `PauseAction`/`PracticeAction` enums and four handlers replace 19 marker components and 10 per-button systems; every QA-visible `Name` is unchanged. Career buttons use `Pressable` and bump the gesture epoch on modal changes. The audio QA harness presses kit buttons through `SyntheticPress`. Behaviour is unchanged except: career taps share the unified gate (landscape + focus) and get mouse emulation in mobile preview builds; the pause header `×` keeps its tile colour on hover instead of turning primary green after the first hover.
+
 ### Client network module
 - `client/src/net.rs` (5600 lines) is split into `client/src/net/{mod,components,transport,session,commands,ingest,apply,interpolate,status_ui}.rs` plus a `cfg(test)` `test_fixtures.rs`; the 40 inline tests moved next to the code they cover. `mod.rs` keeps `NetworkingPlugin`, `ClientNetPipeline`, the wire re-exports and re-exports the public types, so `crate::net::X` paths used by the rest of the client are unchanged. Items shared between the submodules gained `pub(in crate::net)`; `offline.rs` and `public_transport.rs` import what they need explicitly instead of `use super::*`. No behavior change; the session-event redesign (roadmap step 8, second half) is still pending.
 

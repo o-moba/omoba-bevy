@@ -274,8 +274,9 @@ fn spawn_card_screen(
     card: Res<ProfileCard>,
     career: Res<crate::career::CareerClient>,
     thumbnails: Res<AvatarThumbnails>,
+    platform: Res<crate::ui::UiPlatform>,
 ) {
-    let phone = crate::platform::ui_profile() == crate::platform::UiProfile::Mobile;
+    let phone = platform.is_mobile();
     let wins = career
         .view
         .profile

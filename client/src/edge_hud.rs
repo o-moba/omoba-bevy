@@ -30,8 +30,6 @@ pub(crate) struct ScoreboardState {
     namespace: Option<(u64, u64)>,
 }
 #[derive(Component)]
-pub(crate) struct MatchHelpButton;
-#[derive(Component)]
 struct EdgePart;
 #[derive(Component)]
 struct ScoreLabel;

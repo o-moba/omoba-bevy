@@ -1,7 +1,10 @@
+//! In-match pause menu: main page, settings page and the practice sandbox
+//! page. Built on the UI kit (`crate::ui`): every control carries a
+//! `PauseAction`, the kit recognizes clicks and taps and paints the buttons,
+//! and the systems here only consume `Activated<PauseAction>`.
 use bevy::{
     app::AppExit,
     input::mouse::{MouseScrollUnit, MouseWheel},
-    input::touch::{TouchInput, TouchPhase},
     prelude::*,
     window::{CursorGrabMode, CursorOptions, PrimaryWindow},
 };
@@ -18,6 +21,11 @@ use crate::persistence::{
 };
 use crate::session_config::DEFAULT_GAME_SERVER_ADDR;
 use crate::team::TeamSelection;
+use crate::ui::{
+    Activated, GestureEpoch, Pressable, UiAction, UiActionAppExt, UiSet,
+    theme::{self, ButtonKind, metric},
+    widgets,
+};
 use crate::world::{
     DEFAULT_AMBIENT_BRIGHTNESS, DEFAULT_LIGHT_ILLUMINANCE, DEFAULT_LIGHT_PITCH_DEG,
     DEFAULT_LIGHT_YAW_DEG, LightingSettings, MAX_AMBIENT_BRIGHTNESS, MAX_LIGHT_ILLUMINANCE,
@@ -25,25 +33,21 @@ use crate::world::{
     MIN_LIGHT_PITCH_DEG, MIN_LIGHT_YAW_DEG,
 };
 
-const OVERLAY_ALPHA: f32 = 0.7;
 const PANEL_WIDTH: f32 = 480.0;
 const PANEL_HEIGHT: f32 = 560.0;
-const BUTTON_WIDTH: f32 = 320.0;
-const BUTTON_HEIGHT: f32 = 46.0;
-const ADJUST_BUTTON_SIZE: f32 = 44.0;
 const SCALE_STEP: f32 = 0.04;
 const ILLUMINANCE_STEP: f32 = 2_000.0;
 const AMBIENT_STEP: f32 = 50.0;
 const ANGLE_STEP_DEG: f32 = 5.0;
-pub(crate) const BUTTON_COLOR: Color = crate::ui_theme::TILE;
-pub(crate) const BUTTON_HOVER_COLOR: Color = crate::ui_theme::HOVER;
+const AUDIO_STEP: f32 = 0.05;
 
 pub struct PauseMenuPlugin;
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum PauseMenuSet {
     Close,
-    /// Mobile tap collection; button handlers run after it.
+    /// Anchor after the kit dispatched this frame's presses; the handlers
+    /// (`Visuals`) and the practice page run after it.
     Taps,
     Visuals,
 }
@@ -53,49 +57,49 @@ impl Plugin for PauseMenuPlugin {
         app.init_resource::<PauseMenuState>()
             .init_resource::<AudioSettings>()
             .init_resource::<crate::help_overlay::HelpOverlayVisible>()
+            .add_ui_action::<PauseAction>()
             .add_systems(Startup, setup_pause_menu_ui)
-            .add_systems(
+            .configure_sets(
                 Update,
-                (toggle_pause_menu, close_pause_menu_when_disconnected)
-                    .chain()
-                    .in_set(PauseMenuSet::Close)
-                    .after(crate::help_overlay::HelpOverlaySet::Input)
-                    .after(crate::shop::ShopModalSet)
-                    .in_set(crate::input_context::InputContextSet::Modal),
-            )
-            .add_systems(
-                Update,
-                collect_pause_button_taps
-                    .after(close_pause_menu_when_disconnected)
-                    .in_set(PauseMenuSet::Taps)
-                    .in_set(crate::input_context::InputContextSet::Modal),
+                (
+                    PauseMenuSet::Close
+                        .after(UiSet::Gesture)
+                        .after(crate::help_overlay::HelpOverlaySet::Input)
+                        .after(crate::shop::ShopModalSet)
+                        .in_set(crate::input_context::InputContextSet::Modal),
+                    PauseMenuSet::Taps
+                        .after(PauseMenuSet::Close)
+                        .after(UiSet::Dispatch)
+                        .in_set(crate::input_context::InputContextSet::Modal),
+                    PauseMenuSet::Visuals.after(PauseMenuSet::Taps),
+                ),
             )
             .add_systems(
                 Update,
                 (
-                    handle_settings_navigation_buttons,
+                    toggle_pause_menu,
+                    close_pause_menu_when_disconnected,
+                    bump_gesture_epoch_on_navigation,
+                    gate_buttons_behind_server_entry,
+                )
+                    .chain()
+                    .in_set(PauseMenuSet::Close),
+            )
+            .add_systems(
+                Update,
+                (
+                    apply_pause_navigation,
+                    apply_pause_settings,
+                    apply_pause_audio,
+                    apply_pause_session,
+                    update_setting_labels.after(apply_pause_settings),
+                    update_audio_labels.after(apply_pause_audio),
                     sync_pause_menu_visibility,
                     sync_pause_menu_sections,
-                    handle_model_scale_buttons,
-                    handle_camera_zoom_buttons,
-                    update_camera_zoom_label.after(handle_camera_zoom_buttons),
-                    handle_lighting_buttons,
-                    handle_audio_buttons,
-                    update_audio_labels.after(handle_audio_buttons),
-                    update_model_scale_label,
-                    update_lighting_labels,
-                    handle_resume_button,
-                    reset_pause_scroll_on_navigation
-                        .after(handle_settings_navigation_buttons)
-                        .after(handle_resume_button),
-                    handle_reset_graphics_defaults_button,
-                    handle_exit_button,
-                    handle_leave_practice_button,
-                    handle_controls_button,
+                    reset_pause_scroll_on_navigation.after(apply_pause_navigation),
                     sync_practice_actions,
                     sync_settings_server_addr_label,
                 )
-                    .after(collect_pause_button_taps)
                     .in_set(PauseMenuSet::Visuals),
             )
             .add_systems(
@@ -122,84 +126,9 @@ struct MainMenuSection;
 struct MainMenuFooter;
 
 #[derive(Component)]
-struct CloseButton;
-
-#[derive(Component)]
 struct SettingsSection;
 #[derive(Component)]
 struct SettingsFooter;
-
-#[derive(Component)]
-struct SettingsOpenButton;
-
-#[derive(Component)]
-struct SettingsBackButton;
-
-#[derive(Component)]
-struct ResetGraphicsDefaultsButton;
-
-#[derive(Component)]
-struct ExitButton;
-
-#[derive(Component)]
-struct LeavePracticeButton;
-
-#[derive(Component)]
-struct ResumeButton;
-
-#[derive(Component)]
-struct CameraZoomDecreaseButton;
-
-#[derive(Component)]
-struct CameraZoomIncreaseButton;
-
-#[derive(Component)]
-struct CameraZoomValueLabel;
-
-#[derive(Component)]
-struct ScaleDecreaseButton;
-
-#[derive(Component)]
-struct ScaleIncreaseButton;
-
-#[derive(Component)]
-struct ScaleValueLabel;
-
-#[derive(Component)]
-struct LightDecreaseButton;
-
-#[derive(Component)]
-struct LightIncreaseButton;
-
-#[derive(Component)]
-struct AmbientDecreaseButton;
-
-#[derive(Component)]
-struct AmbientIncreaseButton;
-
-#[derive(Component)]
-struct PitchDecreaseButton;
-
-#[derive(Component)]
-struct PitchIncreaseButton;
-
-#[derive(Component)]
-struct YawDecreaseButton;
-
-#[derive(Component)]
-struct YawIncreaseButton;
-
-#[derive(Component)]
-struct LightValueLabel;
-
-#[derive(Component)]
-struct AmbientValueLabel;
-
-#[derive(Component)]
-struct PitchValueLabel;
-
-#[derive(Component)]
-struct YawValueLabel;
 
 #[derive(Component)]
 struct SettingsServerAddrLabel;
@@ -207,8 +136,40 @@ struct SettingsServerAddrLabel;
 #[derive(Component)]
 struct PauseMenuPanel;
 
+/// A stepped graphics setting on the settings page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AudioBus {
+pub(crate) enum Setting {
+    CameraZoom,
+    ModelScale,
+    Light,
+    Ambient,
+    Pitch,
+    Yaw,
+}
+
+/// The value label next to a setting's stepper.
+#[derive(Component, Clone, Copy)]
+struct SettingLabel(Setting);
+
+/// Everything a pause menu control can do.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum PauseAction {
+    Resume,
+    Close,
+    OpenSettings,
+    BackFromSettings,
+    Help,
+    Exit,
+    LeavePractice,
+    ResetGraphics,
+    /// One step of a setting; the sign is the direction.
+    Step(Setting, i8),
+    Audio(AudioButton),
+    OpenPractice,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AudioBus {
     Master,
     Music,
     Effects,
@@ -236,8 +197,8 @@ impl AudioBus {
     }
 }
 
-#[derive(Component, Clone, Copy)]
-enum AudioButton {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum AudioButton {
     Adjust(AudioBus, f32),
     Mute,
 }
@@ -267,6 +228,33 @@ fn size_desktop_pause_panel(
     }
 }
 
+fn section_title(parent: &mut ChildSpawnerCommands, text: &str, name: &str) {
+    parent.spawn((
+        Text::new(text),
+        theme::text(18.0),
+        TextColor(theme::GOLD),
+        Name::new(name.to_owned()),
+    ));
+}
+
+fn setting_row(
+    parent: &mut ChildSpawnerCommands,
+    label: &str,
+    value: String,
+    setting: Setting,
+    id: &str,
+) {
+    widgets::adjust_row(
+        parent,
+        label,
+        value,
+        SettingLabel(setting),
+        PauseAction::Step(setting, -1),
+        PauseAction::Step(setting, 1),
+        id,
+    );
+}
+
 fn setup_pause_menu_ui(mut commands: Commands) {
     commands
         .spawn((
@@ -281,7 +269,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                 align_items: AlignItems::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, OVERLAY_ALPHA)),
+            BackgroundColor(theme::SCRIM),
             Visibility::Hidden,
             ZIndex(100),
             PauseMenuRoot,
@@ -305,8 +293,8 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                         border_radius: BorderRadius::all(Val::Px(12.0)),
                         ..default()
                     },
-                    BackgroundColor(crate::ui_theme::PANEL.with_alpha(1.0)),
-                    BorderColor::all(crate::ui_theme::EDGE),
+                    BackgroundColor(theme::PANEL.with_alpha(1.0)),
+                    BorderColor::all(theme::EDGE),
                     PauseMenuPanel,
                     Name::new("PauseMenuPanel"),
                 ))
@@ -315,7 +303,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                         .spawn((
                             Node {
                                 width: Val::Percent(100.0),
-                                min_height: Val::Px(46.0),
+                                min_height: Val::Px(metric::BUTTON_H),
                                 flex_shrink: 0.0,
                                 justify_content: JustifyContent::SpaceBetween,
                                 align_items: AlignItems::Center,
@@ -326,36 +314,17 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                         .with_children(|header| {
                             header.spawn((
                                 Text::new("Game menu"),
-                                crate::ui_theme::text(28.0),
-                                TextColor(crate::ui_theme::IVORY),
+                                theme::text(28.0),
+                                TextColor(theme::IVORY),
                                 Name::new("PauseMenuTitle"),
                             ));
-                            header
-                                .spawn((
-                                    Button,
-                                    CloseButton,
-                                    PauseButtonGesture::default(),
-                                    Node {
-                                        width: Val::Px(46.0),
-                                        height: Val::Px(46.0),
-                                        flex_shrink: 0.0,
-                                        justify_content: JustifyContent::Center,
-                                        align_items: AlignItems::Center,
-                                        border: UiRect::all(Val::Px(1.0)),
-                                        border_radius: BorderRadius::all(Val::Px(6.0)),
-                                        ..default()
-                                    },
-                                    BackgroundColor(BUTTON_COLOR),
-                                    BorderColor::all(crate::ui_theme::EDGE),
-                                    Name::new("PauseMenuCloseButton"),
-                                ))
-                                .with_children(|button| {
-                                    button.spawn((
-                                        Text::new("×"),
-                                        crate::ui_theme::text(28.0),
-                                        TextColor(crate::ui_theme::IVORY),
-                                    ));
-                                });
+                            widgets::icon_button(
+                                header,
+                                "×",
+                                ButtonKind::Secondary,
+                                PauseAction::Close,
+                                "PauseMenuCloseButton",
+                            );
                         });
 
                     panel
@@ -381,32 +350,37 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                         .with_children(|main| {
                             main.spawn((
                                 Text::new("Your match continues while this menu is open."),
-                                TextFont {
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(crate::ui_theme::MUTED),
+                                theme::text(14.0),
+                                TextColor(theme::MUTED),
                                 Name::new("PauseMenuMainTitle"),
                             ));
-
-                            spawn_menu_button(
+                            widgets::button(
                                 main,
                                 "Settings",
-                                SettingsOpenButton,
+                                ButtonKind::Secondary,
+                                PauseAction::OpenSettings,
                                 "SettingsButton",
                             );
                             crate::practice_sandbox::spawn_practice_open_button(main);
-                            spawn_menu_button(
+                            widgets::button(
                                 main,
                                 "Controls guide",
-                                crate::edge_hud::MatchHelpButton,
+                                ButtonKind::Secondary,
+                                PauseAction::Help,
                                 "PauseMenuHelpButton",
                             );
-                            spawn_menu_button(main, "Exit game", ExitButton, "PauseMenuExitButton");
-                            spawn_menu_button(
+                            widgets::button(
+                                main,
+                                "Exit game",
+                                ButtonKind::Secondary,
+                                PauseAction::Exit,
+                                "PauseMenuExitButton",
+                            );
+                            widgets::button(
                                 main,
                                 "Leave practice",
-                                LeavePracticeButton,
+                                ButtonKind::Secondary,
+                                PauseAction::LeavePractice,
                                 "PauseMenuLeavePracticeButton",
                             );
                         });
@@ -435,20 +409,12 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                         .with_children(|settings| {
                             settings.spawn((
                                 Text::new("Settings"),
-                                TextFont {
-                                    font_size: 22.0,
-                                    ..default()
-                                },
-                                TextColor(crate::ui_theme::IVORY),
+                                theme::text(22.0),
+                                TextColor(theme::IVORY),
                                 Name::new("PauseMenuSettingsTitle"),
                             ));
 
-                            settings.spawn((
-                                Text::new("Sound"),
-                                crate::ui_theme::text(18.0),
-                                TextColor(crate::ui_theme::GOLD),
-                                Name::new("PauseMenuAudioTitle"),
-                            ));
+                            section_title(settings, "Sound", "PauseMenuAudioTitle");
                             for (bus, label, name) in [
                                 (AudioBus::Master, "Master", "PauseMenuAudioMasterControls"),
                                 (AudioBus::Music, "Music", "PauseMenuAudioMusicControls"),
@@ -459,150 +425,89 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                 ),
                                 (AudioBus::Ui, "Interface", "PauseMenuAudioUiControls"),
                             ] {
-                                spawn_adjust_row(
+                                widgets::adjust_row(
                                     settings,
                                     label,
                                     format!("{:.0}%", bus.value(AudioSettings::default()) * 100.0),
-                                    AudioButton::Adjust(bus, -0.05),
                                     AudioLabel::Bus(bus),
-                                    AudioButton::Adjust(bus, 0.05),
+                                    PauseAction::Audio(AudioButton::Adjust(bus, -AUDIO_STEP)),
+                                    PauseAction::Audio(AudioButton::Adjust(bus, AUDIO_STEP)),
                                     name,
                                 );
                             }
-                            settings
-                                .spawn((
-                                    Button,
-                                    PauseButtonGesture::default(),
-                                    AudioButton::Mute,
-                                    Node {
-                                        width: Val::Px(BUTTON_WIDTH),
-                                        min_height: Val::Px(BUTTON_HEIGHT),
-                                        flex_shrink: 0.0,
-                                        justify_content: JustifyContent::Center,
-                                        align_items: AlignItems::Center,
-                                        ..default()
-                                    },
-                                    BorderColor::all(crate::ui_theme::EDGE),
-                                    BackgroundColor(BUTTON_COLOR),
-                                    Name::new("PauseMenuAudioMuteButton"),
-                                ))
-                                .with_children(|button| {
-                                    button.spawn((
-                                        Text::new("Mute sound"),
-                                        crate::ui_theme::text(20.0),
-                                        TextColor(crate::ui_theme::IVORY),
-                                        AudioLabel::Mute,
-                                        Name::new("PauseMenuAudioMuteLabel"),
-                                    ));
-                                });
+                            widgets::button_with_label(
+                                settings,
+                                "Mute sound",
+                                ButtonKind::Secondary,
+                                PauseAction::Audio(AudioButton::Mute),
+                                "PauseMenuAudioMuteButton",
+                                AudioLabel::Mute,
+                                "PauseMenuAudioMuteLabel",
+                            );
 
                             settings.spawn((
                                 Text::new(""),
-                                TextFont {
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(crate::ui_theme::MUTED),
+                                theme::text(14.0),
+                                TextColor(theme::MUTED),
                                 SettingsServerAddrLabel,
                                 Name::new("PauseMenuServerAddrHint"),
                             ));
 
-                            settings.spawn((
-                                Text::new("Lighting"),
-                                TextFont {
-                                    font_size: 18.0,
-                                    ..default()
-                                },
-                                TextColor(crate::ui_theme::GOLD),
-                                Name::new("PauseMenuLightingTitle"),
-                            ));
-
-                            spawn_adjust_row(
+                            section_title(settings, "Lighting", "PauseMenuLightingTitle");
+                            setting_row(
                                 settings,
                                 "Main Light",
                                 format!("{:.0}", DEFAULT_LIGHT_ILLUMINANCE),
-                                LightDecreaseButton,
-                                LightValueLabel,
-                                LightIncreaseButton,
+                                Setting::Light,
                                 "PauseMenuMainLightControls",
                             );
-
-                            spawn_adjust_row(
+                            setting_row(
                                 settings,
                                 "Ambient",
                                 format!("{:.0}", DEFAULT_AMBIENT_BRIGHTNESS),
-                                AmbientDecreaseButton,
-                                AmbientValueLabel,
-                                AmbientIncreaseButton,
+                                Setting::Ambient,
                                 "PauseMenuAmbientControls",
                             );
-
-                            spawn_adjust_row(
+                            setting_row(
                                 settings,
                                 "Pitch",
                                 format!("{:.0}°", DEFAULT_LIGHT_PITCH_DEG),
-                                PitchDecreaseButton,
-                                PitchValueLabel,
-                                PitchIncreaseButton,
+                                Setting::Pitch,
                                 "PauseMenuPitchControls",
                             );
-
-                            spawn_adjust_row(
+                            setting_row(
                                 settings,
                                 "Yaw",
                                 format!("{:.0}°", DEFAULT_LIGHT_YAW_DEG),
-                                YawDecreaseButton,
-                                YawValueLabel,
-                                YawIncreaseButton,
+                                Setting::Yaw,
                                 "PauseMenuYawControls",
                             );
 
-                            settings.spawn((
-                                Text::new("Camera"),
-                                TextFont {
-                                    font_size: 18.0,
-                                    ..default()
-                                },
-                                TextColor(crate::ui_theme::GOLD),
-                                Name::new("PauseMenuCameraTitle"),
-                            ));
-
+                            section_title(settings, "Camera", "PauseMenuCameraTitle");
                             // 100% is the default follow view; lower values bring
                             // the camera closer so hero silhouettes read larger.
-                            spawn_adjust_row(
+                            setting_row(
                                 settings,
                                 "Distance",
                                 CameraSettings::default().percent_label(),
-                                CameraZoomDecreaseButton,
-                                CameraZoomValueLabel,
-                                CameraZoomIncreaseButton,
+                                Setting::CameraZoom,
                                 "PauseMenuCameraZoomControls",
                             );
 
-                            settings.spawn((
-                                Text::new("Model"),
-                                TextFont {
-                                    font_size: 18.0,
-                                    ..default()
-                                },
-                                TextColor(crate::ui_theme::GOLD),
-                                Name::new("PauseMenuModelTitle"),
-                            ));
-
-                            spawn_adjust_row(
+                            section_title(settings, "Model", "PauseMenuModelTitle");
+                            setting_row(
                                 settings,
                                 "Scale",
                                 format!("{:.2}", DEFAULT_MODEL_TARGET_HEIGHT),
-                                ScaleDecreaseButton,
-                                ScaleValueLabel,
-                                ScaleIncreaseButton,
+                                Setting::ModelScale,
                                 "PauseMenuScaleControls",
                             );
 
-                            spawn_menu_button(
+                            widgets::button(
                                 settings,
                                 "Reset graphics",
-                                ResetGraphicsDefaultsButton,
+                                ButtonKind::Secondary,
+                                PauseAction::ResetGraphics,
                                 "PauseMenuResetGraphicsButton",
                             );
                         });
@@ -610,7 +515,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                         .spawn((
                             Node {
                                 flex_shrink: 0.0,
-                                min_height: Val::Px(BUTTON_HEIGHT),
+                                min_height: Val::Px(metric::BUTTON_H),
                                 justify_content: JustifyContent::Center,
                                 ..default()
                             },
@@ -618,10 +523,11 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                             Name::new("PauseMenuMainFooter"),
                         ))
                         .with_children(|footer| {
-                            spawn_menu_button(
+                            widgets::button(
                                 footer,
                                 "Return to game",
-                                ResumeButton,
+                                ButtonKind::Primary,
+                                PauseAction::Resume,
                                 "PauseMenuResumeButton",
                             );
                         });
@@ -630,7 +536,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                             Node {
                                 display: Display::None,
                                 flex_shrink: 0.0,
-                                min_height: Val::Px(46.0),
+                                min_height: Val::Px(metric::BUTTON_H),
                                 justify_content: JustifyContent::Center,
                                 ..default()
                             },
@@ -639,165 +545,16 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                             Name::new("PauseMenuSettingsFooter"),
                         ))
                         .with_children(|footer| {
-                            spawn_menu_button(footer, "Back", SettingsBackButton, "BackButton")
+                            widgets::button(
+                                footer,
+                                "Back",
+                                ButtonKind::Secondary,
+                                PauseAction::BackFromSettings,
+                                "BackButton",
+                            );
                         });
                     crate::practice_sandbox::spawn_practice_section(panel);
                 });
-        });
-}
-
-pub(crate) fn spawn_menu_button<M: Component>(
-    parent: &mut ChildSpawnerCommands,
-    text: &str,
-    marker: M,
-    name: &str,
-) {
-    parent
-        .spawn((
-            Button,
-            PauseButtonGesture::default(),
-            Node {
-                width: Val::Px(BUTTON_WIDTH),
-                height: Val::Px(BUTTON_HEIGHT),
-                max_width: Val::Percent(100.0),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(6.0)),
-                flex_shrink: 0.0,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            BorderColor::all(crate::ui_theme::EDGE),
-            BackgroundColor(if name == "PauseMenuResumeButton" {
-                crate::frontend::widgets::PRIMARY
-            } else {
-                BUTTON_COLOR
-            }),
-            marker,
-            Name::new(name.to_owned()),
-        ))
-        .with_children(|button| {
-            button.spawn((
-                Text::new(text),
-                TextFont {
-                    font_size: 17.0,
-                    ..default()
-                },
-                TextColor(crate::ui_theme::IVORY),
-            ));
-        });
-}
-
-pub(crate) fn spawn_adjust_row<Dec: Component, ValueMarker: Component, Inc: Component>(
-    parent: &mut ChildSpawnerCommands,
-    label: &str,
-    value: String,
-    decrease_marker: Dec,
-    value_marker: ValueMarker,
-    increase_marker: Inc,
-    row_name: &str,
-) {
-    parent
-        .spawn((
-            Node {
-                flex_direction: FlexDirection::Row,
-                flex_shrink: 0.0,
-                column_gap: Val::Px(10.0),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            Name::new(row_name.to_owned()),
-        ))
-        .with_children(|row| {
-            row.spawn((
-                Text::new(label),
-                Node {
-                    width: Val::Px(110.0),
-                    flex_shrink: 0.0,
-                    ..default()
-                },
-                TextFont {
-                    font_size: 18.0,
-                    ..default()
-                },
-                TextColor(crate::ui_theme::IVORY),
-            ));
-
-            row.spawn((
-                Button,
-                PauseButtonGesture::default(),
-                Node {
-                    width: Val::Px(ADJUST_BUTTON_SIZE),
-                    height: Val::Px(ADJUST_BUTTON_SIZE),
-                    flex_shrink: 0.0,
-                    border: UiRect::all(Val::Px(1.0)),
-                    border_radius: BorderRadius::all(Val::Px(6.0)),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                BorderColor::all(crate::ui_theme::EDGE),
-                BackgroundColor(BUTTON_COLOR),
-                decrease_marker,
-                Name::new(format!("{row_name}-Down")),
-            ))
-            .with_children(|button| {
-                button.spawn((
-                    Text::new("-"),
-                    TextFont {
-                        font_size: 22.0,
-                        ..default()
-                    },
-                    TextColor(crate::ui_theme::IVORY),
-                ));
-            });
-
-            row.spawn((
-                Text::new(value),
-                Node {
-                    width: Val::Px(62.0),
-                    flex_shrink: 0.0,
-                    ..default()
-                },
-                TextLayout::new_with_justify(Justify::Center),
-                TextFont {
-                    font_size: 18.0,
-                    ..default()
-                },
-                TextColor(crate::ui_theme::IVORY),
-                value_marker,
-                Name::new(format!("{row_name}-Value")),
-            ));
-
-            row.spawn((
-                Button,
-                PauseButtonGesture::default(),
-                Node {
-                    width: Val::Px(ADJUST_BUTTON_SIZE),
-                    height: Val::Px(ADJUST_BUTTON_SIZE),
-                    flex_shrink: 0.0,
-                    border: UiRect::all(Val::Px(1.0)),
-                    border_radius: BorderRadius::all(Val::Px(6.0)),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                BorderColor::all(crate::ui_theme::EDGE),
-                BackgroundColor(BUTTON_COLOR),
-                increase_marker,
-                Name::new(format!("{row_name}-Up")),
-            ))
-            .with_children(|button| {
-                button.spawn((
-                    Text::new("+"),
-                    TextFont {
-                        font_size: 22.0,
-                        ..default()
-                    },
-                    TextColor(crate::ui_theme::IVORY),
-                ));
-            });
         });
 }
 
@@ -843,6 +600,47 @@ pub(crate) fn toggle_pause_menu(
             "Pause menu {}",
             if menu_state.open { "opened" } else { "closed" }
         );
+    }
+}
+
+/// Opening, closing or changing page drops the tap held across it, so a
+/// release on the new page never activates a button of the old one.
+fn bump_gesture_epoch_on_navigation(
+    menu: Res<PauseMenuState>,
+    practice: Option<Res<crate::practice_sandbox::PracticeSandboxState>>,
+    mut epoch: ResMut<GestureEpoch>,
+    mut previous: Local<Option<(bool, bool, bool)>>,
+) {
+    let current = (
+        menu.open,
+        menu.in_settings,
+        practice.as_ref().is_some_and(|practice| practice.open),
+    );
+    if *previous != Some(current) {
+        if previous.is_some() {
+            epoch.bump();
+        }
+        *previous = Some(current);
+    }
+}
+
+/// The phone server-address overlay sits over the menu without owning its
+/// buttons; while it is open the menu controls are disabled.
+fn gate_buttons_behind_server_entry(
+    server: Option<Res<crate::mobile_ui::ServerEntry>>,
+    mut buttons: Query<
+        &mut Pressable,
+        Or<(
+            With<UiAction<PauseAction>>,
+            With<UiAction<crate::practice_sandbox::PracticeAction>>,
+        )>,
+    >,
+) {
+    let disabled = server.as_ref().is_some_and(|entry| entry.open);
+    for mut pressable in &mut buttons {
+        if pressable.disabled != disabled {
+            pressable.disabled = disabled;
+        }
     }
 }
 
@@ -910,477 +708,149 @@ fn sync_pause_menu_sections(
     }
 }
 
-/// Scrollable mobile menus activate only on a short release within the same
-/// visible button. Desktop mouse Interaction behavior remains unchanged.
-#[derive(Component, Default, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct PauseButtonGesture {
-    touch_mode: bool,
-    activated: bool,
-}
-
-impl PauseButtonGesture {
-    pub(crate) fn effective(&self, interaction: Interaction) -> Interaction {
-        if !self.touch_mode {
-            return interaction;
-        }
-        if self.activated {
-            Interaction::Pressed
-        } else if interaction == Interaction::Pressed {
-            Interaction::Hovered
-        } else {
-            interaction
-        }
-    }
-}
-
-#[derive(Default)]
-pub(crate) struct PauseTapState {
-    held: Option<PauseTap>,
-    menu: Option<(bool, bool, Vec2)>,
-}
-
-struct PauseTap {
-    id: u64,
-    button: Entity,
-    start: Vec2,
-    canceled: bool,
-}
-
-impl PauseTapState {
-    pub(crate) fn event(
-        &mut self,
-        id: u64,
-        phase: TouchPhase,
-        point: Vec2,
-        buttons: &[(Entity, Rect)],
-    ) -> Option<Entity> {
-        if !point.is_finite() {
-            self.held = None;
-            return None;
-        }
-        if phase == TouchPhase::Started {
-            if self.held.is_none() {
-                if let Some((button, _)) = buttons.iter().find(|(_, rect)| rect.contains(point)) {
-                    self.held = Some(PauseTap {
-                        id,
-                        button: *button,
-                        start: point,
-                        canceled: false,
-                    });
-                }
-            }
-            return None;
-        }
-        let tap = self.held.as_mut().filter(|tap| tap.id == id)?;
-        // Sticky cancellation: scrolling away then back cannot revive a tap.
-        tap.canceled |= tap.start.distance(point) > 10.0;
-        let candidate = tap.button;
-        let released = phase == TouchPhase::Ended
-            && !tap.canceled
-            && buttons
-                .iter()
-                .any(|(entity, rect)| *entity == candidate && rect.contains(point));
-        if matches!(phase, TouchPhase::Ended | TouchPhase::Canceled) {
-            self.held = None;
-        }
-        released.then_some(candidate)
-    }
-}
-
-fn collect_pause_button_taps(
-    mut state: Local<PauseTapState>,
-    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
-    menu: Res<PauseMenuState>,
-    server: Option<Res<crate::mobile_ui::ServerEntry>>,
-    touches: Res<Touches>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    window: Query<(Entity, &Window), With<PrimaryWindow>>,
-    mut events: MessageReader<TouchInput>,
-    lifecycle: Option<Res<Messages<bevy::window::AppLifecycle>>>,
-    mut lifecycle_cursor: Local<bevy::ecs::message::MessageCursor<bevy::window::AppLifecycle>>,
-    mut buttons: Query<(
-        Entity,
-        &mut PauseButtonGesture,
-        Option<&ComputedNode>,
-        Option<&UiGlobalTransform>,
-        Option<&InheritedVisibility>,
-        Option<&bevy::ui::CalculatedClip>,
-    )>,
+/// Page navigation: resume/close, settings in and out, the controls guide.
+fn apply_pause_navigation(
+    mut activated: MessageReader<Activated<PauseAction>>,
+    mut menu: ResMut<PauseMenuState>,
+    mut help: ResMut<crate::help_overlay::HelpOverlayVisible>,
 ) {
-    let touch_mode = mobile.as_ref().is_some_and(|m| m.enabled);
-    for (_, mut gesture, _, _, _, _) in &mut buttons {
-        gesture.set_if_neq(PauseButtonGesture {
-            touch_mode,
-            activated: false,
-        });
-    }
-    let Some(mobile) = mobile.filter(|m| m.enabled && m.landscape && m.focused) else {
-        state.held = None;
-        events.clear();
-        return;
-    };
-    let interrupted = lifecycle.as_ref().is_some_and(|events| {
-        lifecycle_cursor.read(events).any(|event| {
-            matches!(
-                event,
-                bevy::window::AppLifecycle::WillSuspend
-                    | bevy::window::AppLifecycle::Suspended
-                    | bevy::window::AppLifecycle::WillResume
-            )
-        })
-    });
-    if interrupted {
-        state.held = None;
-        events.clear();
-        return;
-    }
-    let current_menu = (menu.open, menu.in_settings, mobile.viewport);
-    if state.menu != Some(current_menu) {
-        state.held = None;
-        state.menu = Some(current_menu);
-    }
-    if !menu.open || server.as_ref().is_some_and(|entry| entry.open) {
-        state.held = None;
-        events.clear();
-        return;
-    }
-    let visible: Vec<_> = buttons
-        .iter()
-        .filter_map(|(entity, _, node, transform, visibility, clip)| {
-            if visibility.is_some_and(|v| !v.get()) {
-                return None;
+    for Activated { action, .. } in activated.read() {
+        match action {
+            PauseAction::Resume | PauseAction::Close => {
+                menu.open = false;
+                menu.in_settings = false;
             }
-            let (Some(node), Some(transform)) = (node, transform) else {
-                return None;
-            };
-            let factor = 1.0 / window.single().map_or(1.0, |(_, w)| w.scale_factor());
-            let size = node.size() * transform.to_scale_angle_translation().0.abs() * factor;
-            if size.min_element() <= 0.0 {
-                return None;
+            PauseAction::OpenSettings => menu.in_settings = true,
+            PauseAction::BackFromSettings => menu.in_settings = false,
+            PauseAction::Help if menu.open => {
+                menu.open = false;
+                menu.in_settings = false;
+                help.0 = true;
             }
-            let mut rect = Rect::from_center_size(transform.translation * factor, size);
-            if let Some(clip) = clip {
-                rect = rect.intersect(Rect::from_corners(
-                    clip.clip.min * factor,
-                    clip.clip.max * factor,
-                ));
-            }
-            (rect.width() > 0.0 && rect.height() > 0.0).then_some((entity, rect))
-        })
-        .collect();
-    let Ok((window_entity, window)) = window.single() else {
-        state.held = None;
-        events.clear();
-        return;
-    };
-    let mut activated = Vec::new();
-    for event in events.read() {
-        if event.window == window_entity {
-            if let Some(entity) = state.event(event.id, event.phase, event.position, &visible) {
-                activated.push(entity);
-            }
-        }
-    }
-    // Mouse QA follows the same release rule. Native touch devices ignore
-    // synthesized mouse events so a physical release cannot activate twice.
-    if !cfg!(any(target_os = "android", target_os = "ios"))
-        && touches.iter().next().is_none()
-        && !touches.any_just_released()
-        && !touches.any_just_canceled()
-    {
-        if let Some(point) = window.cursor_position() {
-            let phase = if mouse.just_pressed(MouseButton::Left) {
-                Some(TouchPhase::Started)
-            } else if mouse.just_released(MouseButton::Left) {
-                Some(TouchPhase::Ended)
-            } else if mouse.pressed(MouseButton::Left) {
-                Some(TouchPhase::Moved)
-            } else {
-                None
-            };
-            if let Some(phase) = phase {
-                if let Some(entity) = state.event(u64::MAX, phase, point, &visible) {
-                    activated.push(entity);
-                }
-            }
-        }
-    }
-    for entity in activated {
-        if let Ok((_, mut gesture, _, _, _, _)) = buttons.get_mut(entity) {
-            gesture.activated = true;
+            _ => {}
         }
     }
 }
 
-fn handle_settings_navigation_buttons(
-    mut menu_state: ResMut<PauseMenuState>,
-    mut button_query: Query<
-        (
-            &Interaction,
-            &PauseButtonGesture,
-            Option<&SettingsOpenButton>,
-            Option<&SettingsBackButton>,
-            &mut BackgroundColor,
-        ),
-        (
-            Or<(Changed<Interaction>, Changed<PauseButtonGesture>)>,
-            With<Button>,
-        ),
-    >,
+/// Graphics steppers and the reset button.
+#[allow(clippy::too_many_arguments)]
+fn apply_pause_settings(
+    mut activated: MessageReader<Activated<PauseAction>>,
+    mut lighting: ResMut<LightingSettings>,
+    mut model: ResMut<ModelScaleSettings>,
+    mut camera: ResMut<CameraSettings>,
+    mut prefs_gate: ResMut<ClientPrefsSaveGate>,
+    resolved_addr: Res<ResolvedServerAddressForPrefs>,
+    client_session_id: Res<ClientSessionId>,
+    team: Res<TeamSelection>,
+    audio: Res<AudioSettings>,
 ) {
-    for (interaction, gesture, open_button, back_button, mut color) in &mut button_query {
-        if open_button.is_none() && back_button.is_none() {
-            continue;
-        }
-
-        match gesture.effective(*interaction) {
-            Interaction::Pressed => {
-                if open_button.is_some() {
-                    menu_state.in_settings = true;
+    for Activated { action, .. } in activated.read() {
+        match *action {
+            PauseAction::Step(setting, direction) => {
+                let sign = f32::from(direction.signum());
+                match setting {
+                    Setting::CameraZoom => camera.adjust(sign * CAMERA_ZOOM_STEP),
+                    Setting::ModelScale => {
+                        model.target_height = (model.target_height + sign * SCALE_STEP)
+                            .clamp(MIN_MODEL_TARGET_HEIGHT, MAX_MODEL_TARGET_HEIGHT);
+                    }
+                    Setting::Light => {
+                        lighting.illuminance = (lighting.illuminance + sign * ILLUMINANCE_STEP)
+                            .clamp(MIN_LIGHT_ILLUMINANCE, MAX_LIGHT_ILLUMINANCE);
+                    }
+                    Setting::Ambient => {
+                        lighting.ambient_brightness = (lighting.ambient_brightness
+                            + sign * AMBIENT_STEP)
+                            .clamp(MIN_AMBIENT_BRIGHTNESS, MAX_AMBIENT_BRIGHTNESS);
+                    }
+                    Setting::Pitch => {
+                        lighting.light_pitch_deg = (lighting.light_pitch_deg
+                            + sign * ANGLE_STEP_DEG)
+                            .clamp(MIN_LIGHT_PITCH_DEG, MAX_LIGHT_PITCH_DEG);
+                    }
+                    Setting::Yaw => {
+                        lighting.light_yaw_deg = (lighting.light_yaw_deg + sign * ANGLE_STEP_DEG)
+                            .clamp(MIN_LIGHT_YAW_DEG, MAX_LIGHT_YAW_DEG);
+                    }
                 }
-                if back_button.is_some() {
-                    menu_state.in_settings = false;
-                }
-                *color = BUTTON_HOVER_COLOR.into();
             }
-            Interaction::Hovered => {
-                *color = BUTTON_HOVER_COLOR.into();
+            PauseAction::ResetGraphics => {
+                let addr = server_addr_for_prefs(&resolved_addr);
+                reset_graphics_to_defaults(
+                    lighting.as_mut(),
+                    model.as_mut(),
+                    camera.as_mut(),
+                    prefs_gate.as_mut(),
+                    team.character,
+                    addr,
+                    client_session_id.0.as_str(),
+                    audio.as_ref(),
+                );
             }
-            Interaction::None => {
-                *color = BUTTON_COLOR.into();
-            }
+            _ => {}
         }
     }
 }
 
-fn handle_model_scale_buttons(
-    mut scale_settings: ResMut<ModelScaleSettings>,
-    mut button_query: Query<
-        (
-            &Interaction,
-            &PauseButtonGesture,
-            Option<&ScaleDecreaseButton>,
-            Option<&ScaleIncreaseButton>,
-            &mut BackgroundColor,
-        ),
-        (
-            Or<(Changed<Interaction>, Changed<PauseButtonGesture>)>,
-            With<Button>,
-        ),
-    >,
-) {
-    for (interaction, gesture, is_down, is_up, mut color) in &mut button_query {
-        if is_down.is_none() && is_up.is_none() {
-            continue;
-        }
-
-        match gesture.effective(*interaction) {
-            Interaction::Pressed => {
-                if is_down.is_some() {
-                    scale_settings.target_height =
-                        (scale_settings.target_height - SCALE_STEP).max(MIN_MODEL_TARGET_HEIGHT);
-                } else if is_up.is_some() {
-                    scale_settings.target_height =
-                        (scale_settings.target_height + SCALE_STEP).min(MAX_MODEL_TARGET_HEIGHT);
-                }
-                *color = BUTTON_HOVER_COLOR.into();
-            }
-            Interaction::Hovered => {
-                *color = BUTTON_HOVER_COLOR.into();
-            }
-            Interaction::None => {
-                *color = BUTTON_COLOR.into();
-            }
-        }
-    }
-}
-
-fn handle_camera_zoom_buttons(
-    mut camera_settings: ResMut<CameraSettings>,
-    mut button_query: Query<
-        (
-            &Interaction,
-            &PauseButtonGesture,
-            Option<&CameraZoomDecreaseButton>,
-            Option<&CameraZoomIncreaseButton>,
-            &mut BackgroundColor,
-        ),
-        (
-            Or<(Changed<Interaction>, Changed<PauseButtonGesture>)>,
-            With<Button>,
-        ),
-    >,
-) {
-    for (interaction, gesture, is_closer, is_farther, mut color) in &mut button_query {
-        if is_closer.is_none() && is_farther.is_none() {
-            continue;
-        }
-
-        match gesture.effective(*interaction) {
-            Interaction::Pressed => {
-                if is_closer.is_some() {
-                    camera_settings.adjust(-CAMERA_ZOOM_STEP);
-                } else {
-                    camera_settings.adjust(CAMERA_ZOOM_STEP);
-                }
-                *color = BUTTON_HOVER_COLOR.into();
-            }
-            Interaction::Hovered => {
-                *color = BUTTON_HOVER_COLOR.into();
-            }
-            Interaction::None => {
-                *color = BUTTON_COLOR.into();
-            }
-        }
-    }
-}
-
-/// Also follows wheel zoom, since the camera writes it back into the setting.
-fn update_camera_zoom_label(
-    camera_settings: Res<CameraSettings>,
-    mut label_query: Query<&mut Text, With<CameraZoomValueLabel>>,
-) {
-    if !camera_settings.is_changed() {
-        return;
-    }
-
-    if let Ok(mut text) = label_query.single_mut() {
-        text.0 = camera_settings.percent_label();
-    }
-}
-
-fn handle_lighting_buttons(
-    mut lighting_settings: ResMut<LightingSettings>,
-    mut button_query: Query<
-        (
-            &Interaction,
-            &PauseButtonGesture,
-            Option<&LightDecreaseButton>,
-            Option<&LightIncreaseButton>,
-            Option<&AmbientDecreaseButton>,
-            Option<&AmbientIncreaseButton>,
-            Option<&PitchDecreaseButton>,
-            Option<&PitchIncreaseButton>,
-            Option<&YawDecreaseButton>,
-            Option<&YawIncreaseButton>,
-            &mut BackgroundColor,
-        ),
-        (
-            Or<(Changed<Interaction>, Changed<PauseButtonGesture>)>,
-            With<Button>,
-        ),
-    >,
-) {
-    for (
-        interaction,
-        gesture,
-        light_down,
-        light_up,
-        ambient_down,
-        ambient_up,
-        pitch_down,
-        pitch_up,
-        yaw_down,
-        yaw_up,
-        mut color,
-    ) in &mut button_query
-    {
-        let is_lighting_button = light_down.is_some()
-            || light_up.is_some()
-            || ambient_down.is_some()
-            || ambient_up.is_some()
-            || pitch_down.is_some()
-            || pitch_up.is_some()
-            || yaw_down.is_some()
-            || yaw_up.is_some();
-
-        if !is_lighting_button {
-            continue;
-        }
-
-        match gesture.effective(*interaction) {
-            Interaction::Pressed => {
-                if light_down.is_some() {
-                    lighting_settings.illuminance = (lighting_settings.illuminance
-                        - ILLUMINANCE_STEP)
-                        .max(MIN_LIGHT_ILLUMINANCE);
-                } else if light_up.is_some() {
-                    lighting_settings.illuminance = (lighting_settings.illuminance
-                        + ILLUMINANCE_STEP)
-                        .min(MAX_LIGHT_ILLUMINANCE);
-                } else if ambient_down.is_some() {
-                    lighting_settings.ambient_brightness = (lighting_settings.ambient_brightness
-                        - AMBIENT_STEP)
-                        .max(MIN_AMBIENT_BRIGHTNESS);
-                } else if ambient_up.is_some() {
-                    lighting_settings.ambient_brightness = (lighting_settings.ambient_brightness
-                        + AMBIENT_STEP)
-                        .min(MAX_AMBIENT_BRIGHTNESS);
-                } else if pitch_down.is_some() {
-                    lighting_settings.light_pitch_deg = (lighting_settings.light_pitch_deg
-                        - ANGLE_STEP_DEG)
-                        .max(MIN_LIGHT_PITCH_DEG);
-                } else if pitch_up.is_some() {
-                    lighting_settings.light_pitch_deg = (lighting_settings.light_pitch_deg
-                        + ANGLE_STEP_DEG)
-                        .min(MAX_LIGHT_PITCH_DEG);
-                } else if yaw_down.is_some() {
-                    lighting_settings.light_yaw_deg =
-                        (lighting_settings.light_yaw_deg - ANGLE_STEP_DEG).max(MIN_LIGHT_YAW_DEG);
-                } else if yaw_up.is_some() {
-                    lighting_settings.light_yaw_deg =
-                        (lighting_settings.light_yaw_deg + ANGLE_STEP_DEG).min(MAX_LIGHT_YAW_DEG);
-                }
-                *color = BUTTON_HOVER_COLOR.into();
-            }
-            Interaction::Hovered => {
-                *color = BUTTON_HOVER_COLOR.into();
-            }
-            Interaction::None => {
-                *color = BUTTON_COLOR.into();
-            }
-        }
-    }
-}
-
-fn handle_audio_buttons(
+/// Sound levels and mute; only while the settings page is the front-most modal.
+fn apply_pause_audio(
+    mut activated: MessageReader<Activated<PauseAction>>,
     menu: Res<PauseMenuState>,
     career: Option<Res<crate::career::CareerClient>>,
     social: Option<Res<crate::social::SocialClient>>,
     mut settings: ResMut<AudioSettings>,
-    mut buttons: Query<
-        (
-            &Interaction,
-            &PauseButtonGesture,
-            &AudioButton,
-            &mut BackgroundColor,
-        ),
-        (
-            Or<(Changed<Interaction>, Changed<PauseButtonGesture>)>,
-            With<Button>,
-        ),
-    >,
 ) {
-    if !menu.open
-        || !menu.in_settings
-        || career.as_ref().is_some_and(|career| career.modal_open())
-        || social
+    let allowed = menu.open
+        && menu.in_settings
+        && !career.as_ref().is_some_and(|career| career.modal_open())
+        && !social
             .as_ref()
-            .is_some_and(|social| social.blocks_gameplay())
-    {
-        return;
+            .is_some_and(|social| social.blocks_gameplay());
+    for Activated { action, .. } in activated.read() {
+        let PauseAction::Audio(button) = action else {
+            continue;
+        };
+        if !allowed {
+            continue;
+        }
+        match *button {
+            AudioButton::Adjust(bus, delta) => bus.adjust(&mut settings, delta),
+            AudioButton::Mute => settings.muted = !settings.muted,
+        }
     }
-    for (interaction, gesture, action, mut color) in &mut buttons {
-        match gesture.effective(*interaction) {
-            Interaction::Pressed => {
-                match *action {
-                    AudioButton::Adjust(bus, delta) => bus.adjust(&mut settings, delta),
-                    AudioButton::Mute => settings.muted = !settings.muted,
+}
+
+/// Leaving: quit the application or leave an offline practice match.
+fn apply_pause_session(
+    mut activated: MessageReader<Activated<PauseAction>>,
+    mut commands: Commands,
+    session: Res<ClientSession>,
+    mut menu: ResMut<PauseMenuState>,
+    mut session_commands: MessageWriter<crate::net::SessionUiCommand>,
+    mut cursor_query: Query<&mut CursorOptions, With<PrimaryWindow>>,
+    window_query: Query<Entity, With<PrimaryWindow>>,
+    mut app_exit_writer: MessageWriter<AppExit>,
+) {
+    for Activated { action, .. } in activated.read() {
+        match action {
+            PauseAction::Exit => {
+                info!("Exit selected from pause menu.");
+                if let Ok(mut cursor) = cursor_query.single_mut() {
+                    cursor.grab_mode = CursorGrabMode::None;
+                    cursor.visible = true;
                 }
-                *color = BUTTON_HOVER_COLOR.into();
+                if let Ok(primary_window) = window_query.single() {
+                    commands.entity(primary_window).despawn();
+                }
+                app_exit_writer.write(AppExit::Success);
             }
-            Interaction::Hovered => *color = BUTTON_HOVER_COLOR.into(),
-            Interaction::None => *color = BUTTON_COLOR.into(),
+            PauseAction::LeavePractice if session.is_offline() => {
+                session_commands.write(crate::net::SessionUiCommand::LeaveMatch);
+                menu.open = false;
+                menu.in_settings = false;
+            }
+            _ => {}
         }
     }
 }
@@ -1449,43 +919,38 @@ fn reset_pause_scroll_on_navigation(
     }
 }
 
-fn update_model_scale_label(
-    scale_settings: Res<ModelScaleSettings>,
-    mut label_query: Query<&mut Text, With<ScaleValueLabel>>,
+/// Value labels follow their settings, including changes made elsewhere
+/// (wheel zoom writes the camera setting back).
+fn update_setting_labels(
+    camera: Res<CameraSettings>,
+    model: Res<ModelScaleSettings>,
+    lighting: Res<LightingSettings>,
+    mut labels: Query<(&SettingLabel, &mut Text)>,
 ) {
-    if !scale_settings.is_changed() {
-        return;
-    }
-
-    if let Ok(mut text) = label_query.single_mut() {
-        text.0 = format!("{:.2}", scale_settings.target_height);
+    for (label, mut text) in &mut labels {
+        let next = match label.0 {
+            Setting::CameraZoom if camera.is_changed() => camera.percent_label(),
+            Setting::ModelScale if model.is_changed() => format!("{:.2}", model.target_height),
+            Setting::Light if lighting.is_changed() => format!("{:.0}", lighting.illuminance),
+            Setting::Ambient if lighting.is_changed() => {
+                format!("{:.0}", lighting.ambient_brightness)
+            }
+            Setting::Pitch if lighting.is_changed() => {
+                format!("{:.0}°", lighting.light_pitch_deg)
+            }
+            Setting::Yaw if lighting.is_changed() => format!("{:.0}°", lighting.light_yaw_deg),
+            _ => continue,
+        };
+        text.0 = next;
     }
 }
 
-fn update_lighting_labels(
-    lighting_settings: Res<LightingSettings>,
-    mut label_queries: ParamSet<(
-        Query<&mut Text, With<LightValueLabel>>,
-        Query<&mut Text, With<AmbientValueLabel>>,
-        Query<&mut Text, With<PitchValueLabel>>,
-        Query<&mut Text, With<YawValueLabel>>,
-    )>,
-) {
-    if !lighting_settings.is_changed() {
-        return;
-    }
-
-    if let Ok(mut text) = label_queries.p0().single_mut() {
-        text.0 = format!("{:.0}", lighting_settings.illuminance);
-    }
-    if let Ok(mut text) = label_queries.p1().single_mut() {
-        text.0 = format!("{:.0}", lighting_settings.ambient_brightness);
-    }
-    if let Ok(mut text) = label_queries.p2().single_mut() {
-        text.0 = format!("{:.0}°", lighting_settings.light_pitch_deg);
-    }
-    if let Ok(mut text) = label_queries.p3().single_mut() {
-        text.0 = format!("{:.0}°", lighting_settings.light_yaw_deg);
+fn server_addr_for_prefs(resolved: &ResolvedServerAddressForPrefs) -> &str {
+    let s = resolved.0.as_str().trim();
+    if s.is_empty() {
+        DEFAULT_GAME_SERVER_ADDR
+    } else {
+        s
     }
 }
 
@@ -1493,14 +958,7 @@ fn sync_settings_server_addr_label(
     resolved_addr: Res<ResolvedServerAddressForPrefs>,
     mut label_q: Query<&mut Text, With<SettingsServerAddrLabel>>,
 ) {
-    let addr = {
-        let s = resolved_addr.0.as_str().trim();
-        if s.is_empty() {
-            DEFAULT_GAME_SERVER_ADDR
-        } else {
-            s
-        }
-    };
+    let addr = server_addr_for_prefs(&resolved_addr);
     let next = format!("Server: {addr}\nSettings are saved automatically.");
     if let Ok(mut text) = label_q.single_mut() {
         if text.0 != next {
@@ -1509,68 +967,19 @@ fn sync_settings_server_addr_label(
     }
 }
 
-fn handle_reset_graphics_defaults_button(
-    mut lighting: ResMut<LightingSettings>,
-    mut model: ResMut<ModelScaleSettings>,
-    mut camera: ResMut<CameraSettings>,
-    mut prefs_gate: ResMut<ClientPrefsSaveGate>,
-    resolved_addr: Res<ResolvedServerAddressForPrefs>,
-    client_session_id: Res<ClientSessionId>,
-    team: Res<TeamSelection>,
-    audio: Res<AudioSettings>,
-    mut button_query: Query<
-        (&Interaction, &PauseButtonGesture, &mut BackgroundColor),
-        (
-            Or<(Changed<Interaction>, Changed<PauseButtonGesture>)>,
-            With<Button>,
-            With<ResetGraphicsDefaultsButton>,
-        ),
-    >,
-) {
-    let addr = {
-        let s = resolved_addr.0.as_str().trim();
-        if s.is_empty() {
-            DEFAULT_GAME_SERVER_ADDR
-        } else {
-            s
-        }
-    };
-
-    for (interaction, gesture, mut color) in &mut button_query {
-        match gesture.effective(*interaction) {
-            Interaction::Pressed => {
-                reset_graphics_to_defaults(
-                    lighting.as_mut(),
-                    model.as_mut(),
-                    camera.as_mut(),
-                    prefs_gate.as_mut(),
-                    team.character,
-                    addr,
-                    client_session_id.0.as_str(),
-                    audio.as_ref(),
-                );
-                *color = BUTTON_HOVER_COLOR.into();
-            }
-            Interaction::Hovered => {
-                *color = BUTTON_HOVER_COLOR.into();
-            }
-            Interaction::None => {
-                *color = BUTTON_COLOR.into();
-            }
-        }
-    }
-}
-
+/// "Exit game" belongs to online matches, "Leave practice" to offline ones.
 fn sync_practice_actions(
     session: Res<ClientSession>,
-    mut buttons: Query<
-        (&mut Node, Has<LeavePracticeButton>),
-        Or<(With<ExitButton>, With<LeavePracticeButton>)>,
-    >,
+    mut buttons: Query<(&mut Node, &UiAction<PauseAction>)>,
     mut hints: Query<(&Name, &mut Text)>,
 ) {
     let offline = session.is_offline();
-    for (mut node, leave_practice) in &mut buttons {
+    for (mut node, action) in &mut buttons {
+        let leave_practice = match action.0 {
+            PauseAction::Exit => false,
+            PauseAction::LeavePractice => true,
+            _ => continue,
+        };
         let display = if offline == leave_practice {
             Display::Flex
         } else {
@@ -1594,118 +1003,20 @@ fn sync_practice_actions(
     }
 }
 
-fn handle_controls_button(
-    mut menu: ResMut<PauseMenuState>,
-    mut help: ResMut<crate::help_overlay::HelpOverlayVisible>,
-    mut buttons: Query<
-        (&Interaction, &PauseButtonGesture, &mut BackgroundColor),
-        (
-            Or<(Changed<Interaction>, Changed<PauseButtonGesture>)>,
-            With<crate::edge_hud::MatchHelpButton>,
-        ),
-    >,
-) {
-    for (interaction, gesture, mut color) in &mut buttons {
-        match gesture.effective(*interaction) {
-            Interaction::Pressed if menu.open => {
-                menu.open = false;
-                menu.in_settings = false;
-                help.0 = true;
-            }
-            Interaction::Hovered => *color = BUTTON_HOVER_COLOR.into(),
-            _ => *color = BUTTON_COLOR.into(),
-        }
-    }
-}
-
-fn handle_leave_practice_button(
-    session: Res<ClientSession>,
-    mut menu: ResMut<PauseMenuState>,
-    mut commands: MessageWriter<crate::net::SessionUiCommand>,
-    mut buttons: Query<
-        (&Interaction, &PauseButtonGesture, &mut BackgroundColor),
-        (
-            Or<(Changed<Interaction>, Changed<PauseButtonGesture>)>,
-            With<LeavePracticeButton>,
-        ),
-    >,
-) {
-    for (interaction, gesture, mut color) in &mut buttons {
-        match gesture.effective(*interaction) {
-            Interaction::Pressed if session.is_offline() => {
-                commands.write(crate::net::SessionUiCommand::LeaveMatch);
-                menu.open = false;
-                menu.in_settings = false;
-            }
-            Interaction::Hovered => *color = BUTTON_HOVER_COLOR.into(),
-            _ => *color = BUTTON_COLOR.into(),
-        }
-    }
-}
-
-fn handle_exit_button(
-    mut commands: Commands,
-    mut interaction_query: Query<
-        (&Interaction, &PauseButtonGesture, &mut BackgroundColor),
-        (
-            Or<(Changed<Interaction>, Changed<PauseButtonGesture>)>,
-            With<Button>,
-            With<ExitButton>,
-        ),
-    >,
-    mut cursor_query: Query<&mut CursorOptions, With<PrimaryWindow>>,
-    window_query: Query<Entity, With<PrimaryWindow>>,
-    mut app_exit_writer: MessageWriter<AppExit>,
-) {
-    for (interaction, gesture, mut color) in &mut interaction_query {
-        match gesture.effective(*interaction) {
-            Interaction::Pressed => {
-                info!("Exit selected from pause menu.");
-                if let Ok(mut cursor) = cursor_query.single_mut() {
-                    cursor.grab_mode = CursorGrabMode::None;
-                    cursor.visible = true;
-                }
-                if let Ok(primary_window) = window_query.single() {
-                    commands.entity(primary_window).despawn();
-                }
-                app_exit_writer.write(AppExit::Success);
-            }
-            Interaction::Hovered => {
-                *color = BUTTON_HOVER_COLOR.into();
-            }
-            Interaction::None => {
-                *color = BUTTON_COLOR.into();
-            }
-        }
-    }
-}
-
-fn handle_resume_button(
-    mut menu_state: ResMut<PauseMenuState>,
-    mut buttons: Query<
-        (&Interaction, &PauseButtonGesture, &mut BackgroundColor),
-        (
-            Or<(Changed<Interaction>, Changed<PauseButtonGesture>)>,
-            With<Button>,
-            Or<(With<ResumeButton>, With<CloseButton>)>,
-        ),
-    >,
-) {
-    for (interaction, gesture, mut color) in &mut buttons {
-        match gesture.effective(*interaction) {
-            Interaction::Pressed => {
-                menu_state.open = false;
-                menu_state.in_settings = false;
-            }
-            Interaction::Hovered => *color = crate::frontend::widgets::PRIMARY_HOVER.into(),
-            Interaction::None => *color = crate::frontend::widgets::PRIMARY.into(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::{action::dispatch_actions, gesture::recognize_presses, test_id::harness};
+    use bevy::input::touch::{TouchInput, TouchPhase};
+
+    fn action_button(app: &mut App, wanted: impl Fn(&PauseAction) -> bool) -> Entity {
+        app.world_mut()
+            .query::<(Entity, &UiAction<PauseAction>)>()
+            .iter(app.world())
+            .find(|(_, action)| wanted(&action.0))
+            .unwrap()
+            .0
+    }
 
     // Real Bevy/Taffy layout, font measurement and clipping; no fabricated
     // ComputedNode rectangles. GPU/window event loop are not required.
@@ -1727,20 +1038,29 @@ mod tests {
         app.init_resource::<Assets<bevy::mesh::Mesh>>()
             .init_resource::<Assets<TextureAtlasLayout>>()
             .init_resource::<ClientSession>()
+            .insert_resource(crate::ui::UiPlatform(if mobile_enabled {
+                crate::platform::UiProfile::Mobile
+            } else {
+                crate::platform::UiProfile::Desktop
+            }))
+            .init_resource::<GestureEpoch>()
             .insert_resource(PauseMenuState {
                 open: true,
                 in_settings: true,
             })
             .init_resource::<AudioSettings>()
             .init_resource::<crate::help_overlay::HelpOverlayVisible>()
+            .add_message::<Activated<PauseAction>>()
+            .add_message::<crate::ui::SyntheticPress>()
             .add_systems(Startup, setup_pause_menu_ui)
             .add_systems(
                 Update,
                 (
-                    collect_pause_button_taps,
-                    handle_audio_buttons,
-                    handle_resume_button,
-                    handle_controls_button,
+                    bump_gesture_epoch_on_navigation,
+                    recognize_presses,
+                    dispatch_actions::<PauseAction>,
+                    apply_pause_navigation,
+                    apply_pause_audio,
                     sync_pause_menu_visibility,
                     sync_pause_menu_sections,
                     reset_pause_scroll_on_navigation,
@@ -1970,13 +1290,11 @@ mod tests {
                     "desktop={size:?} settings={settings} scroll={} last={last_rect:?}",
                     app.world().get::<ScrollPosition>(body).unwrap().y
                 );
-                *app.world_mut().get_mut::<Interaction>(close).unwrap() = Interaction::Pressed;
-                use bevy::ecs::system::RunSystemOnce;
-                app.world_mut()
-                    .run_system_once(handle_resume_button)
-                    .unwrap();
+                // A press on the header close (synthetic: the UI focus pass
+                // would clear a pointer-less `Interaction::Pressed`) closes the menu.
+                harness::press(app.world_mut(), "PauseMenuCloseButton");
+                app.update();
                 assert!(!app.world().resource::<PauseMenuState>().open);
-                *app.world_mut().get_mut::<Interaction>(close).unwrap() = Interaction::None;
                 app.world_mut().resource_mut::<PauseMenuState>().open = true;
                 app.update();
             }
@@ -2021,11 +1339,22 @@ mod tests {
                 open: false,
                 in_settings: true,
             })
+            .add_message::<Activated<PauseAction>>()
             .add_systems(Startup, setup_pause_menu_ui)
-            .add_systems(Update, (handle_audio_buttons, update_audio_labels).chain());
+            .add_systems(
+                Update,
+                (
+                    dispatch_actions::<PauseAction>,
+                    apply_pause_audio,
+                    update_audio_labels,
+                )
+                    .chain(),
+            );
         app.update();
-        let music = app.world_mut().query::<(Entity, &AudioButton)>().iter(app.world())
-            .find(|(_, button)| matches!(button, AudioButton::Adjust(AudioBus::Music, delta) if *delta < 0.0)).unwrap().0;
+        let music = action_button(
+            &mut app,
+            |action| matches!(action, PauseAction::Audio(AudioButton::Adjust(AudioBus::Music, delta)) if *delta < 0.0),
+        );
         app.world_mut()
             .entity_mut(music)
             .insert(Interaction::Pressed);
@@ -2061,13 +1390,7 @@ mod tests {
                 .iter()
                 .any(|(label, text)| matches!(label, AudioLabel::Mute) && text == "Unmute sound")
         );
-        let mute = app
-            .world_mut()
-            .query::<(Entity, &AudioButton)>()
-            .iter(app.world())
-            .find(|(_, action)| matches!(action, AudioButton::Mute))
-            .unwrap()
-            .0;
+        let mute = harness::find(app.world_mut(), "PauseMenuAudioMuteButton").unwrap();
         app.world_mut()
             .entity_mut(mute)
             .insert(Interaction::Pressed);
@@ -2096,6 +1419,7 @@ mod tests {
         mobile.focused = true;
         mobile.landscape = true;
         app.insert_resource(mobile)
+            .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Mobile))
             .init_resource::<AudioSettings>()
             .insert_resource(PauseMenuState {
                 open: true,
@@ -2104,9 +1428,15 @@ mod tests {
             .init_resource::<Touches>()
             .init_resource::<ButtonInput<MouseButton>>()
             .add_message::<TouchInput>()
+            .add_message::<Activated<PauseAction>>()
             .add_systems(
                 Update,
-                (collect_pause_button_taps, handle_audio_buttons).chain(),
+                (
+                    recognize_presses,
+                    dispatch_actions::<PauseAction>,
+                    apply_pause_audio,
+                )
+                    .chain(),
             );
         let window = app
             .world_mut()
@@ -2115,10 +1445,12 @@ mod tests {
         app.world_mut().spawn((
             Button,
             Node::default(),
-            AudioButton::Adjust(AudioBus::Music, 0.05),
-            PauseButtonGesture::default(),
+            UiAction(PauseAction::Audio(AudioButton::Adjust(
+                AudioBus::Music,
+                0.05,
+            ))),
             Interaction::Pressed,
-            BackgroundColor(BUTTON_COLOR),
+            BackgroundColor(theme::TILE),
             ComputedNode {
                 size: Vec2::new(44.0, 44.0),
                 inverse_scale_factor: 1.0,
@@ -2168,11 +1500,7 @@ mod tests {
         let mut app = App::new();
         app.add_systems(Startup, setup_pause_menu_ui);
         app.update();
-        let back = app
-            .world_mut()
-            .query_filtered::<Entity, With<SettingsBackButton>>()
-            .single(app.world())
-            .unwrap();
+        let back = harness::find(app.world_mut(), "BackButton").unwrap();
         let body = app
             .world_mut()
             .query_filtered::<Entity, With<SettingsSection>>()
@@ -2184,6 +1512,10 @@ mod tests {
         assert_ne!(footer, body);
         assert_eq!(app.world().get::<Node>(footer).unwrap().flex_shrink, 0.0);
         assert_eq!(app.world().get::<Node>(back).unwrap().height, Val::Px(46.0));
+        assert_eq!(
+            app.world().get::<UiAction<PauseAction>>(back).unwrap().0,
+            PauseAction::BackFromSettings
+        );
     }
 
     #[test]
@@ -2226,10 +1558,11 @@ mod tests {
 
     #[test]
     fn pause_tap_cancels_a_scroll_even_after_returning_to_the_button() {
+        use crate::ui::gesture::TapTracker;
         let entity = Entity::PLACEHOLDER;
         let rect = Rect::from_center_size(Vec2::new(100.0, 100.0), Vec2::new(180.0, 46.0));
         let buttons = [(entity, rect)];
-        let mut state = PauseTapState::default();
+        let mut state = TapTracker::default();
         assert_eq!(
             state.event(1, TouchPhase::Started, rect.center(), &buttons),
             None
@@ -2278,17 +1611,26 @@ mod tests {
         let mut mobile = crate::mobile_controls::MobileControls::default();
         mobile.enabled = true;
         app.insert_resource(mobile)
+            .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Mobile))
             .insert_resource(PauseMenuState {
                 open: true,
                 in_settings: false,
             })
+            .init_resource::<ClientSession>()
             .init_resource::<Touches>()
             .init_resource::<ButtonInput<MouseButton>>()
             .add_message::<TouchInput>()
             .add_message::<AppExit>()
+            .add_message::<crate::net::SessionUiCommand>()
+            .add_message::<Activated<PauseAction>>()
             .add_systems(
                 Update,
-                (collect_pause_button_taps, handle_exit_button).chain(),
+                (
+                    recognize_presses,
+                    dispatch_actions::<PauseAction>,
+                    apply_pause_session,
+                )
+                    .chain(),
             );
         let window = app
             .world_mut()
@@ -2299,10 +1641,9 @@ mod tests {
             .spawn((
                 Button,
                 Node::default(),
-                ExitButton,
-                PauseButtonGesture::default(),
+                UiAction(PauseAction::Exit),
                 Interaction::Pressed,
-                BackgroundColor(BUTTON_COLOR),
+                BackgroundColor(theme::TILE),
                 ComputedNode {
                     size: Vec2::new(180.0, 46.0),
                     inverse_scale_factor: 1.0,
@@ -2377,19 +1718,29 @@ mod tests {
             in_settings: false,
         })
         .init_resource::<TeamSelection>()
+        .init_resource::<crate::help_overlay::HelpOverlayVisible>()
+        .add_message::<Activated<PauseAction>>()
         .add_systems(Startup, setup_pause_menu_ui)
         .add_systems(
             Update,
-            (handle_resume_button, sync_pause_menu_visibility).chain(),
+            (
+                dispatch_actions::<PauseAction>,
+                apply_pause_navigation,
+                sync_pause_menu_visibility,
+            )
+                .chain(),
         );
         app.world_mut().resource_mut::<TeamSelection>().team = Some(crate::team::Team::Green);
         let player = app.world_mut().spawn(crate::player::Player).id();
         app.update();
-        let button = app
-            .world_mut()
-            .query_filtered::<Entity, With<ResumeButton>>()
-            .single(app.world())
-            .unwrap();
+        let button = harness::find(app.world_mut(), "PauseMenuResumeButton").unwrap();
+        assert_eq!(
+            app.world()
+                .get::<crate::ui::widgets::ButtonStyle>(button)
+                .unwrap()
+                .kind,
+            ButtonKind::Primary
+        );
         app.world_mut()
             .entity_mut(button)
             .insert(Interaction::Pressed);
@@ -2418,18 +1769,34 @@ mod tests {
     #[test]
     fn exit_button_emits_clean_application_exit() {
         let mut app = App::new();
-        app.add_message::<AppExit>()
+        app.init_resource::<ClientSession>()
+            .init_resource::<PauseMenuState>()
+            .add_message::<AppExit>()
+            .add_message::<crate::net::SessionUiCommand>()
+            .add_message::<Activated<PauseAction>>()
             .add_systems(Startup, setup_pause_menu_ui)
-            .add_systems(Update, handle_exit_button);
+            .add_systems(
+                Update,
+                (dispatch_actions::<PauseAction>, apply_pause_session).chain(),
+            );
         app.update();
-        let button = app
-            .world_mut()
-            .query_filtered::<Entity, With<ExitButton>>()
-            .single(app.world())
-            .unwrap();
+        let button = harness::find(app.world_mut(), "PauseMenuExitButton").unwrap();
         app.world_mut()
             .entity_mut(button)
             .insert(Interaction::Pressed);
+        app.update();
+        assert_eq!(app.world().resource::<Messages<AppExit>>().len(), 1);
+        // The synthetic press reaches the same handler through the recognizer.
+        app.add_message::<crate::ui::SyntheticPress>()
+            .add_message::<TouchInput>()
+            .add_systems(
+                Update,
+                recognize_presses.before(dispatch_actions::<PauseAction>),
+            );
+        app.world_mut().entity_mut(button).insert(Interaction::None);
+        app.update();
+        app.world_mut().resource_mut::<Messages<AppExit>>().clear();
+        harness::press(app.world_mut(), "PauseMenuExitButton");
         app.update();
         assert_eq!(app.world().resource::<Messages<AppExit>>().len(), 1);
     }

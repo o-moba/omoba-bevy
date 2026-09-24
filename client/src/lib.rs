@@ -70,6 +70,7 @@ mod targeting_qa;
 mod team;
 mod team_vision;
 mod team_vision_qa;
+mod ui;
 mod ui_theme;
 mod verdant3d;
 mod visual_qa;
@@ -162,7 +163,7 @@ pub fn main() {
     .add_plugins((FrontendPlugin, frontend_qa::FrontendQaPlugin))
     .add_plugins((
         input_context::InputContextPlugin,
-        ui_theme::UiThemePlugin,
+        ui::UiKitPlugin,
         shop::ShopPlugin,
         HelpOverlayPlugin,
         DebugConsolePlugin,
