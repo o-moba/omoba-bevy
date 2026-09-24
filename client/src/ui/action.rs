@@ -20,6 +20,8 @@ pub(crate) struct UiAction<T: UiActionT>(pub T);
 #[derive(Message, Clone, Debug)]
 pub(crate) struct Activated<T: UiActionT> {
     pub action: T,
+    /// The button that fired; for rows that own several presses of one action.
+    #[allow(dead_code)]
     pub source: Entity,
 }
 
@@ -87,10 +89,16 @@ mod tests {
         app.update();
         assert_eq!(count(&mut app), 0, "a held button does not repeat");
         // Touch mode: a resting finger is a hover, the completed tap fires.
-        app.world_mut().get_mut::<Pressable>(button).unwrap().touch_mode = true;
+        app.world_mut()
+            .get_mut::<Pressable>(button)
+            .unwrap()
+            .touch_mode = true;
         app.update();
         assert_eq!(count(&mut app), 0);
-        app.world_mut().get_mut::<Pressable>(button).unwrap().activated = true;
+        app.world_mut()
+            .get_mut::<Pressable>(button)
+            .unwrap()
+            .activated = true;
         app.update();
         let fired: Vec<_> = app
             .world_mut()

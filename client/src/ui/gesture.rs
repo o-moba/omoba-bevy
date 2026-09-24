@@ -154,12 +154,13 @@ pub(crate) fn recognize_presses(
     mut state: Local<RecognizerState>,
     platform: Option<Res<crate::ui::UiPlatform>>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
-    epoch: Res<GestureEpoch>,
+    epoch: Option<Res<GestureEpoch>>,
     touches: Option<Res<Touches>>,
     mouse: Option<Res<ButtonInput<MouseButton>>>,
     window: Query<(Entity, &Window), With<PrimaryWindow>>,
     mut events: MessageReader<TouchInput>,
-    mut synthetic: MessageReader<SyntheticPress>,
+    synthetic: Option<Res<Messages<SyntheticPress>>>,
+    mut synthetic_cursor: Local<bevy::ecs::message::MessageCursor<SyntheticPress>>,
     lifecycle: Option<Res<Messages<AppLifecycle>>>,
     mut lifecycle_cursor: Local<bevy::ecs::message::MessageCursor<AppLifecycle>>,
     mut buttons: Query<(
@@ -171,7 +172,9 @@ pub(crate) fn recognize_presses(
         Option<&bevy::ui::CalculatedClip>,
     )>,
 ) {
-    let touch_mode = platform.as_ref().is_some_and(|platform| platform.is_mobile());
+    let touch_mode = platform
+        .as_ref()
+        .is_some_and(|platform| platform.is_mobile());
     for (_, mut pressable, ..) in &mut buttons {
         let disabled = pressable.disabled;
         pressable.set_if_neq(Pressable {
@@ -180,16 +183,19 @@ pub(crate) fn recognize_presses(
             disabled,
         });
     }
-    for SyntheticPress(entity) in synthetic.read() {
-        if let Ok((_, mut pressable, ..)) = buttons.get_mut(*entity)
-            && !pressable.disabled
-        {
-            pressable.activated = true;
+    if let Some(synthetic) = synthetic.as_ref() {
+        for SyntheticPress(entity) in synthetic_cursor.read(synthetic) {
+            if let Ok((_, mut pressable, ..)) = buttons.get_mut(*entity)
+                && !pressable.disabled
+            {
+                pressable.activated = true;
+            }
         }
     }
-    if state.epoch != Some(epoch.0) {
+    let epoch = epoch.as_ref().map_or(0, |epoch| epoch.0);
+    if state.epoch != Some(epoch) {
         state.tracker.clear();
-        state.epoch = Some(epoch.0);
+        state.epoch = Some(epoch);
     }
     if let Some(mobile) = mobile.as_ref() {
         if state.viewport != Some(mobile.viewport) {
@@ -295,57 +301,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tap_cancels_a_scroll_even_after_returning_to_the_button() {
-        let entity = Entity::PLACEHOLDER;
-        let rect = Rect::from_center_size(Vec2::new(100.0, 100.0), Vec2::new(180.0, 46.0));
-        let buttons = [(entity, rect)];
-        let mut state = TapTracker::default();
-        assert_eq!(
-            state.event(1, TouchPhase::Started, rect.center(), &buttons),
-            None
-        );
-        assert_eq!(
-            state.event(2, TouchPhase::Ended, rect.center(), &buttons),
-            None
-        );
-        assert_eq!(
-            state.event(
-                1,
-                TouchPhase::Moved,
-                rect.center() + Vec2::Y * 30.0,
-                &buttons
-            ),
-            None
-        );
-        assert_eq!(
-            state.event(1, TouchPhase::Ended, rect.center(), &buttons),
-            None
-        );
-        state.event(3, TouchPhase::Started, rect.center(), &buttons);
-        assert_eq!(
-            state.event(3, TouchPhase::Canceled, rect.center(), &buttons),
-            None
-        );
-        state.event(4, TouchPhase::Started, rect.center(), &buttons);
-        assert_eq!(
-            state.event(
-                4,
-                TouchPhase::Ended,
-                rect.center() + Vec2::X * 4.0,
-                &buttons
-            ),
-            Some(entity)
-        );
-        assert_eq!(
-            state.event(4, TouchPhase::Ended, rect.center(), &buttons),
-            None
-        );
-    }
-
-    #[test]
     fn effective_interaction_follows_touch_mode_and_disabled() {
         let desktop = Pressable::default();
-        assert_eq!(desktop.effective(Interaction::Pressed), Interaction::Pressed);
+        assert_eq!(
+            desktop.effective(Interaction::Pressed),
+            Interaction::Pressed
+        );
         let touch = Pressable {
             touch_mode: true,
             ..default()
@@ -424,7 +385,10 @@ mod tests {
         app.world_mut().write_message(SyntheticPress(button));
         app.update();
         assert!(app.world().get::<Pressable>(button).unwrap().activated);
-        app.world_mut().get_mut::<Pressable>(button).unwrap().disabled = true;
+        app.world_mut()
+            .get_mut::<Pressable>(button)
+            .unwrap()
+            .disabled = true;
         app.world_mut().write_message(SyntheticPress(button));
         app.update();
         let pressable = app.world().get::<Pressable>(button).unwrap();

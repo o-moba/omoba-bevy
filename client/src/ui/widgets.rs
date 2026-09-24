@@ -59,12 +59,7 @@ pub(crate) fn paint_pressables(
     }
 }
 
-fn button_bundle<T: UiActionT>(
-    node: Node,
-    kind: ButtonKind,
-    action: T,
-    id: TestId,
-) -> impl Bundle {
+fn button_bundle<T: UiActionT>(node: Node, kind: ButtonKind, action: T, id: TestId) -> impl Bundle {
     let style = ButtonStyle::new(kind);
     (
         Button,
@@ -99,13 +94,46 @@ pub(crate) fn button<T: UiActionT>(
     action: T,
     id: impl Into<TestId>,
 ) -> Entity {
+    spawn_menu_button(parent, label, kind, action, id.into(), ())
+}
+
+/// [`button`] whose label carries `label_marker` and its own id, for a
+/// caption the owning module rewrites (a mute/unmute toggle).
+pub(crate) fn button_with_label<T: UiActionT, M: Component>(
+    parent: &mut ChildSpawnerCommands,
+    label: &str,
+    kind: ButtonKind,
+    action: T,
+    id: impl Into<TestId>,
+    label_marker: M,
+    label_id: impl Into<TestId>,
+) -> Entity {
+    spawn_menu_button(
+        parent,
+        label,
+        kind,
+        action,
+        id.into(),
+        (label_marker, label_id.into()),
+    )
+}
+
+fn spawn_menu_button<T: UiActionT>(
+    parent: &mut ChildSpawnerCommands,
+    label: &str,
+    kind: ButtonKind,
+    action: T,
+    id: TestId,
+    label_extra: impl Bundle,
+) -> Entity {
     parent
-        .spawn(button_bundle(menu_button_node(), kind, action, id.into()))
+        .spawn(button_bundle(menu_button_node(), kind, action, id))
         .with_children(|button| {
             button.spawn((
                 Text::new(label),
                 theme::text(17.0),
                 TextColor(theme::IVORY),
+                label_extra,
             ));
         })
         .id()
@@ -132,11 +160,7 @@ pub(crate) fn icon_button<T: UiActionT>(
     parent
         .spawn(button_bundle(node, kind, action, id.into()))
         .with_children(|button| {
-            button.spawn((
-                Text::new(glyph),
-                theme::text(28.0),
-                TextColor(theme::IVORY),
-            ));
+            button.spawn((Text::new(glyph), theme::text(28.0), TextColor(theme::IVORY)));
         })
         .id()
 }
@@ -154,11 +178,7 @@ fn adjust_button<T: UiActionT>(row: &mut ChildSpawnerCommands, glyph: &str, acti
     };
     row.spawn(button_bundle(node, ButtonKind::Secondary, action, id))
         .with_children(|button| {
-            button.spawn((
-                Text::new(glyph),
-                theme::text(22.0),
-                TextColor(theme::IVORY),
-            ));
+            button.spawn((Text::new(glyph), theme::text(22.0), TextColor(theme::IVORY)));
         });
 }
 
@@ -254,11 +274,7 @@ pub(crate) fn toggle_row<T: UiActionT, M: Component>(
             id.child("Button"),
         ))
         .with_children(|button| {
-            button.spawn((
-                Text::new(label),
-                theme::text(17.0),
-                TextColor(theme::IVORY),
-            ));
+            button.spawn((Text::new(label), theme::text(17.0), TextColor(theme::IVORY)));
             button.spawn((
                 Text::new(value),
                 theme::text(17.0),
@@ -289,11 +305,23 @@ mod tests {
         app.add_message::<super::super::SyntheticPress>()
             .add_systems(Update, paint_pressables);
         let root = app.world_mut().spawn(Node::default()).id();
-        app.world_mut().entity_mut(root).with_children(|parent| {
-            adjust_row(parent, "Level", "5".into(), Value, Probe::Down, Probe::Up, "Row");
-            toggle_row(parent, "God mode", "OFF", Value, Probe::Toggle, "Practice");
-            button(parent, "Resume", ButtonKind::Primary, Probe::Up, "Resume");
-        });
+        app.world_mut()
+            .commands()
+            .entity(root)
+            .with_children(|parent| {
+                adjust_row(
+                    parent,
+                    "Level",
+                    "5".into(),
+                    Value,
+                    Probe::Down,
+                    Probe::Up,
+                    "Row",
+                );
+                toggle_row(parent, "God mode", "OFF", Value, Probe::Toggle, "Practice");
+                button(parent, "Resume", ButtonKind::Primary, Probe::Up, "Resume");
+            });
+        app.world_mut().flush();
         app.update();
         let names: Vec<String> = app
             .world_mut()
@@ -326,7 +354,10 @@ mod tests {
             theme::PRIMARY_HOVER
         );
         // A disabled button never lights.
-        app.world_mut().get_mut::<Pressable>(resume).unwrap().disabled = true;
+        app.world_mut()
+            .get_mut::<Pressable>(resume)
+            .unwrap()
+            .disabled = true;
         app.update();
         assert_eq!(
             app.world().get::<BackgroundColor>(resume).unwrap().0,

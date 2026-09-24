@@ -12,9 +12,8 @@ use bevy::prelude::*;
 use super::AppScreen;
 
 pub use crate::ui::theme::{
-    ACCENTS, BACKDROP, ButtonKind, DANGER, DANGER_HOVER, GOLD, IVORY, MUTED, MenuButton,
-    PANEL_EDGE, PANEL_OPAQUE as PANEL, PRIMARY, PRIMARY_HOVER, SCREEN_Z, TILE, TILE_HOVER,
-    TILE_SELECTED, accent_color,
+    ACCENTS, BACKDROP, ButtonKind, DANGER_HOVER, GOLD, IVORY, MUTED, MenuButton, PANEL_EDGE,
+    PANEL_OPAQUE as PANEL, PRIMARY, SCREEN_Z, TILE, TILE_HOVER, TILE_SELECTED, accent_color,
 };
 
 pub struct FrontendWidgetsPlugin;
@@ -84,7 +83,9 @@ fn adapt_phone_menu_readability(
     }
     for (metric, mut node) in &mut buttons {
         let height = if phone {
-            metric.height.max(44.0 / scale)
+            metric
+                .height
+                .max(crate::ui::theme::metric::TOUCH_MIN / scale)
         } else {
             metric.height
         };
@@ -187,7 +188,14 @@ pub fn tile<M: Component>(
     marker: M,
     name: &str,
 ) -> Entity {
-    spawn_button(parent, text, MenuButton::tile(selected), marker, name, false)
+    spawn_button(
+        parent,
+        text,
+        MenuButton::tile(selected),
+        marker,
+        name,
+        false,
+    )
 }
 
 /// A grid tile that shrinks on a phone (the avatar clip strip).
@@ -199,7 +207,14 @@ pub fn compact_tile<M: Component>(
     name: &str,
     compact: bool,
 ) -> Entity {
-    spawn_button(parent, text, MenuButton::tile(selected), marker, name, compact)
+    spawn_button(
+        parent,
+        text,
+        MenuButton::tile(selected),
+        marker,
+        name,
+        compact,
+    )
 }
 
 fn spawn_button<M: Component>(
@@ -210,9 +225,10 @@ fn spawn_button<M: Component>(
     name: &str,
     compact_clip: bool,
 ) -> Entity {
+    use crate::ui::theme::metric;
     let (width, height, font) = match menu.kind {
-        ButtonKind::Primary => (Val::Px(240.0), Val::Px(60.0), 22.0),
-        _ => (Val::Auto, Val::Px(44.0), 15.0),
+        ButtonKind::Primary => (Val::Px(metric::PRIMARY.0), Val::Px(metric::PRIMARY.1), 22.0),
+        _ => (Val::Auto, Val::Px(metric::TOUCH_MIN), 15.0),
     };
     parent
         .spawn((
@@ -239,9 +255,9 @@ fn spawn_button<M: Component>(
             BackgroundColor(menu.idle_color()),
             MenuControl {
                 height: if menu.kind == ButtonKind::Primary {
-                    60.0
+                    metric::PRIMARY.1
                 } else {
-                    44.0
+                    metric::TOUCH_MIN
                 },
             },
             menu,

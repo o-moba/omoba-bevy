@@ -122,6 +122,7 @@ fn spawn_home(
     card: Res<ProfileCard>,
     thumbnails: Res<AvatarThumbnails>,
     mut preview: ResMut<super::preview::AvatarPreview>,
+    platform: Res<crate::ui::UiPlatform>,
 ) {
     if automation_bypass() {
         return;
@@ -439,6 +440,7 @@ fn refresh_home(
     card: Res<ProfileCard>,
     thumbnails: Res<AvatarThumbnails>,
     preview: ResMut<super::preview::AvatarPreview>,
+    platform: Res<crate::ui::UiPlatform>,
     roots: Query<Entity, With<HomeRoot>>,
     mut last: Local<Option<HomeSignature>>,
 ) {
@@ -454,7 +456,9 @@ fn refresh_home(
         .entity(root)
         .despawn_related::<Children>()
         .despawn();
-    spawn_home(commands, career, session, card, thumbnails, preview);
+    spawn_home(
+        commands, career, session, card, thumbnails, preview, platform,
+    );
 }
 
 #[cfg(test)]

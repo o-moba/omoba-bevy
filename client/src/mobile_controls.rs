@@ -134,7 +134,8 @@ pub(crate) struct MobileControls {
 impl Default for MobileControls {
     fn default() -> Self {
         Self {
-            enabled: crate::platform::ui_profile() == crate::platform::UiProfile::Mobile,
+            // `MobileControlsPlugin` copies the platform in; tests set it.
+            enabled: false,
             viewport: Vec2::new(844.0, 390.0),
             landscape: true,
             safe: MobileSafeInsets {
@@ -574,8 +575,12 @@ fn attack_aim_vector(delta: Vec2, scale: f32) -> Option<MobileAttackAim> {
 pub(crate) struct MobileControlsPlugin;
 impl Plugin for MobileControlsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<MobileControls>()
-            .add_systems(Startup, setup_mobile_controls)
+        app.init_resource::<MobileControls>();
+        if let Some(platform) = app.world().get_resource::<crate::ui::UiPlatform>() {
+            let enabled = platform.is_mobile();
+            app.world_mut().resource_mut::<MobileControls>().enabled = enabled;
+        }
+        app.add_systems(Startup, setup_mobile_controls)
             .add_systems(
                 Update,
                 refresh_mobile_layout

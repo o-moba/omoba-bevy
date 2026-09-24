@@ -26,7 +26,7 @@ impl TestId {
 
     /// `"{id}{suffix}"`, for a widget's child controls.
     pub(crate) fn child(&self, suffix: &str) -> Self {
-        Self(Cow::Owned(format!("{}{suffix}", self.0)))
+        Self::new(format!("{}{suffix}", self.0))
     }
 }
 
@@ -48,7 +48,7 @@ fn mirror_into_name(mut world: DeferredWorld, context: HookContext) {
     }
     let id = world
         .get::<TestId>(context.entity)
-        .map(|id| id.0.clone())
+        .map(|id| id.as_str().to_owned())
         .unwrap_or_default();
     world
         .commands()
@@ -119,10 +119,38 @@ mod tests {
             .spawn((TestId::new("KitOther"), Name::new("Custom")))
             .id();
         app.update();
-        assert_eq!(app.world().get::<Name>(mirrored).unwrap().as_str(), "KitButton");
+        assert_eq!(
+            app.world().get::<Name>(mirrored).unwrap().as_str(),
+            "KitButton"
+        );
         assert_eq!(app.world().get::<Name>(kept).unwrap().as_str(), "Custom");
         assert_eq!(harness::find(app.world_mut(), "KitOther"), Some(kept));
         assert_eq!(harness::press(app.world_mut(), "KitButton"), mirrored);
         assert_eq!(TestId::new("Row").child("-Up").as_str(), "Row-Up");
+    }
+
+    #[test]
+    fn test_ids_param_finds_and_presses() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.add_message::<super::super::SyntheticPress>();
+        let entity = app.world_mut().spawn(TestId::new("Kit")).id();
+        let outcome = app
+            .world_mut()
+            .run_system_once(move |mut ids: harness::TestIds| {
+                (
+                    ids.find("Kit") == Some(entity),
+                    ids.press("Kit"),
+                    ids.press("Missing"),
+                )
+            })
+            .unwrap();
+        assert_eq!(outcome, (true, true, false));
+        let queued: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<super::super::SyntheticPress>>()
+            .drain()
+            .collect();
+        assert_eq!(queued, vec![super::super::SyntheticPress(entity)]);
     }
 }

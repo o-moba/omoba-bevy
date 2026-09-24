@@ -8,27 +8,27 @@ use shared::practice::{
 
 use crate::combat::ActionFeedback;
 use crate::net::{ClientSession, GameStateSnapshot, NetworkCommand};
-use crate::pause_menu::{
-    BUTTON_COLOR, BUTTON_HOVER_COLOR, PauseButtonGesture, PauseMenuSet, PauseMenuState,
-    spawn_adjust_row, spawn_menu_button,
-};
+use crate::pause_menu::{PauseAction, PauseMenuSet, PauseMenuState};
+use crate::ui::{Activated, UiActionAppExt, theme, theme::ButtonKind, widgets};
 
 pub(crate) struct PracticeSandboxPlugin;
 
 impl Plugin for PracticeSandboxPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PracticeSandboxState>().add_systems(
-            Update,
-            (
-                sync_practice_availability,
-                handle_practice_buttons,
-                sync_practice_section,
-                update_practice_labels,
-            )
-                .chain()
-                .after(PauseMenuSet::Taps)
-                .in_set(PauseMenuSet::Visuals),
-        );
+        app.init_resource::<PracticeSandboxState>()
+            .add_ui_action::<PracticeAction>()
+            .add_systems(
+                Update,
+                (
+                    sync_practice_availability,
+                    apply_practice_actions,
+                    sync_practice_section,
+                    update_practice_labels,
+                )
+                    .chain()
+                    .after(PauseMenuSet::Taps)
+                    .in_set(PauseMenuSet::Visuals),
+            );
     }
 }
 
@@ -76,8 +76,9 @@ pub(crate) struct PracticeSection;
 #[derive(Component)]
 pub(crate) struct PracticeOpenButton;
 
-#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
-enum PracticeButton {
+/// Controls of the sandbox page.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum PracticeAction {
     Back,
     GodMode,
     Roster,
@@ -98,12 +99,14 @@ enum PracticeLabel {
 }
 
 pub(crate) fn spawn_practice_open_button(main: &mut ChildSpawnerCommands) {
-    spawn_menu_button(
+    let button = widgets::button(
         main,
         "Practice sandbox",
-        PracticeOpenButton,
+        ButtonKind::Secondary,
+        PauseAction::OpenPractice,
         "PauseMenuPracticeButton",
     );
+    main.commands().entity(button).insert(PracticeOpenButton);
 }
 
 pub(crate) fn spawn_practice_section(panel: &mut ChildSpawnerCommands) {
@@ -126,133 +129,89 @@ pub(crate) fn spawn_practice_section(panel: &mut ChildSpawnerCommands) {
         .with_children(|section| {
             section.spawn((
                 Text::new("Practice sandbox"),
-                TextFont {
-                    font_size: 20.0,
-                    ..default()
-                },
-                TextColor(crate::ui_theme::IVORY),
+                theme::text(20.0),
+                TextColor(theme::IVORY),
                 Name::new("PauseMenuPracticeTitle"),
             ));
             section.spawn((
                 Text::new("Local bots only. Nothing here counts toward career or rating."),
-                TextFont {
-                    font_size: 13.0,
-                    ..default()
-                },
-                TextColor(crate::ui_theme::MUTED),
+                theme::text(13.0),
+                TextColor(theme::MUTED),
                 Name::new("PauseMenuPracticeNote"),
             ));
-            spawn_toggle_row(section, "God mode", god_mode_label(defaults.god_mode));
+            widgets::toggle_row(
+                section,
+                "God mode",
+                god_mode_label(defaults.god_mode),
+                PracticeLabel::GodMode,
+                PracticeAction::GodMode,
+                "PauseMenuPracticeGodMode",
+            );
             section.spawn((
                 Text::new("Bots"),
-                TextFont {
-                    font_size: 18.0,
-                    ..default()
-                },
-                TextColor(crate::ui_theme::GOLD),
+                theme::text(18.0),
+                TextColor(theme::GOLD),
                 Name::new("PauseMenuPracticeBotsTitle"),
             ));
-            spawn_menu_button(
+            widgets::button(
                 section,
                 "Standard bots (lanes)",
-                PracticeButton::Roster,
+                ButtonKind::Secondary,
+                PracticeAction::Roster,
                 "PauseMenuPracticeRosterButton",
             );
-            spawn_menu_button(
+            widgets::button(
                 section,
                 "Clear all bots",
-                PracticeButton::ClearBots,
+                ButtonKind::Secondary,
+                PracticeAction::ClearBots,
                 "PauseMenuPracticeClearButton",
             );
-            spawn_menu_button(
+            widgets::button(
                 section,
                 "Spawn target dummy",
-                PracticeButton::SpawnDummy,
+                ButtonKind::Secondary,
+                PracticeAction::SpawnDummy,
                 "PauseMenuPracticeDummyButton",
             );
             section.spawn((
                 Text::new("1v1 opponent"),
-                TextFont {
-                    font_size: 18.0,
-                    ..default()
-                },
-                TextColor(crate::ui_theme::GOLD),
+                theme::text(18.0),
+                TextColor(theme::GOLD),
                 Name::new("PauseMenuPracticeDuelTitle"),
             ));
-            spawn_adjust_row(
+            widgets::adjust_row(
                 section,
                 "Level",
                 defaults.duel_level.to_string(),
-                PracticeButton::LevelDown,
                 PracticeLabel::Level,
-                PracticeButton::LevelUp,
+                PracticeAction::LevelDown,
+                PracticeAction::LevelUp,
                 "PauseMenuPracticeLevelControls",
             );
-            spawn_adjust_row(
+            widgets::adjust_row(
                 section,
                 "Gold",
                 defaults.duel_gold.to_string(),
-                PracticeButton::GoldDown,
                 PracticeLabel::Gold,
-                PracticeButton::GoldUp,
+                PracticeAction::GoldDown,
+                PracticeAction::GoldUp,
                 "PauseMenuPracticeGoldControls",
             );
-            spawn_menu_button(
+            widgets::button(
                 section,
                 "Start 1v1 on mid",
-                PracticeButton::StartDuel,
+                ButtonKind::Secondary,
+                PracticeAction::StartDuel,
                 "PauseMenuPracticeDuelButton",
             );
-            spawn_menu_button(
+            widgets::button(
                 section,
                 "Back",
-                PracticeButton::Back,
+                ButtonKind::Secondary,
+                PracticeAction::Back,
                 "PauseMenuPracticeBackButton",
             );
-        });
-}
-
-fn spawn_toggle_row(parent: &mut ChildSpawnerCommands, label: &str, value: &str) {
-    parent
-        .spawn((
-            Button,
-            PauseButtonGesture::default(),
-            Node {
-                width: Val::Px(320.0),
-                height: Val::Px(46.0),
-                max_width: Val::Percent(100.0),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(6.0)),
-                flex_shrink: 0.0,
-                padding: UiRect::horizontal(Val::Px(14.0)),
-                justify_content: JustifyContent::SpaceBetween,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            BorderColor::all(crate::ui_theme::EDGE),
-            BackgroundColor(BUTTON_COLOR),
-            PracticeButton::GodMode,
-            Name::new("PauseMenuPracticeGodModeButton"),
-        ))
-        .with_children(|button| {
-            button.spawn((
-                Text::new(label),
-                TextFont {
-                    font_size: 17.0,
-                    ..default()
-                },
-                TextColor(crate::ui_theme::IVORY),
-            ));
-            button.spawn((
-                Text::new(value),
-                TextFont {
-                    font_size: 17.0,
-                    ..default()
-                },
-                TextColor(crate::ui_theme::GOLD),
-                PracticeLabel::GodMode,
-                Name::new("PauseMenuPracticeGodModeValue"),
-            ));
         });
 }
 
@@ -299,7 +258,12 @@ fn sync_practice_availability(
     }
 }
 
-fn handle_practice_buttons(
+/// The main-page entry (`PauseAction::OpenPractice`) and the page's own
+/// controls; everything is ignored outside an open menu in a practice match.
+#[allow(clippy::too_many_arguments)]
+fn apply_practice_actions(
+    mut opened: MessageReader<Activated<PauseAction>>,
+    mut activated: MessageReader<Activated<PracticeAction>>,
     menu: Res<PauseMenuState>,
     snapshot: Option<Res<GameStateSnapshot>>,
     session: Res<ClientSession>,
@@ -307,93 +271,66 @@ fn handle_practice_buttons(
     mut debug: Option<ResMut<crate::god_mode::DebugToggleState>>,
     mut feedback: Option<ResMut<ActionFeedback>>,
     mut commands: MessageWriter<NetworkCommand>,
-    mut buttons: Query<
-        (
-            &Interaction,
-            &PauseButtonGesture,
-            Option<&PracticeButton>,
-            Option<&PracticeOpenButton>,
-            &mut BackgroundColor,
-        ),
-        (
-            Or<(Changed<Interaction>, Changed<PauseButtonGesture>)>,
-            With<Button>,
-        ),
-    >,
 ) {
-    let practice = is_practice(snapshot.as_deref(), &session);
-    for (interaction, gesture, action, open, mut color) in &mut buttons {
-        let Some(action) = action.copied().or(open.map(|_| PracticeButton::Back)) else {
+    let allowed = menu.open && is_practice(snapshot.as_deref(), &session);
+    for Activated { action, .. } in opened.read() {
+        if *action == PauseAction::OpenPractice && allowed {
+            state.open = true;
+        }
+    }
+    for Activated { action, .. } in activated.read() {
+        if !allowed {
             continue;
+        }
+        let mut say = |line: &str| {
+            if let Some(feedback) = feedback.as_deref_mut() {
+                feedback.push_line(line);
+            }
         };
-        let opening = open.is_some();
-        match gesture.effective(*interaction) {
-            Interaction::Pressed => {
-                *color = BUTTON_HOVER_COLOR.into();
-                if !menu.open || !practice {
-                    continue;
+        match action {
+            PracticeAction::Back => state.open = false,
+            PracticeAction::GodMode => {
+                state.god_mode = !state.god_mode;
+                if let Some(debug) = debug.as_deref_mut() {
+                    debug.god_mode = state.god_mode;
                 }
-                if opening {
-                    state.open = true;
-                    continue;
-                }
-                let mut say = |line: &str| {
-                    if let Some(feedback) = feedback.as_deref_mut() {
-                        feedback.push_line(line);
-                    }
-                };
-                match action {
-                    PracticeButton::Back => state.open = false,
-                    PracticeButton::GodMode => {
-                        state.god_mode = !state.god_mode;
-                        if let Some(debug) = debug.as_deref_mut() {
-                            debug.god_mode = state.god_mode;
-                        }
-                        commands.write(NetworkCommand::SetGodMode {
-                            enabled: state.god_mode,
-                        });
-                        say(if state.god_mode {
-                            "God mode on: the server skips damage to you."
-                        } else {
-                            "God mode off."
-                        });
-                    }
-                    PracticeButton::Roster => {
-                        commands.write(NetworkCommand::Practice {
-                            command: PracticeCommand::Roster,
-                        });
-                        say("Standard practice bots restored.");
-                    }
-                    PracticeButton::ClearBots => {
-                        commands.write(NetworkCommand::Practice {
-                            command: PracticeCommand::ClearBots,
-                        });
-                        say("All bots removed.");
-                    }
-                    PracticeButton::SpawnDummy => {
-                        commands.write(NetworkCommand::Practice {
-                            command: PracticeCommand::SpawnDummy,
-                        });
-                        say("Target dummy placed in front of you.");
-                    }
-                    PracticeButton::StartDuel => {
-                        commands.write(NetworkCommand::Practice {
-                            command: state.duel_command(),
-                        });
-                        say("1v1: an opponent is coming down mid.");
-                    }
-                    PracticeButton::LevelDown => state.adjust_level(-1),
-                    PracticeButton::LevelUp => state.adjust_level(1),
-                    PracticeButton::GoldDown => state.adjust_gold(-1),
-                    PracticeButton::GoldUp => state.adjust_gold(1),
-                }
+                commands.write(NetworkCommand::SetGodMode {
+                    enabled: state.god_mode,
+                });
+                say(if state.god_mode {
+                    "God mode on: the server skips damage to you."
+                } else {
+                    "God mode off."
+                });
             }
-            Interaction::Hovered => {
-                *color = BUTTON_HOVER_COLOR.into();
+            PracticeAction::Roster => {
+                commands.write(NetworkCommand::Practice {
+                    command: PracticeCommand::Roster,
+                });
+                say("Standard practice bots restored.");
             }
-            Interaction::None => {
-                *color = BUTTON_COLOR.into();
+            PracticeAction::ClearBots => {
+                commands.write(NetworkCommand::Practice {
+                    command: PracticeCommand::ClearBots,
+                });
+                say("All bots removed.");
             }
+            PracticeAction::SpawnDummy => {
+                commands.write(NetworkCommand::Practice {
+                    command: PracticeCommand::SpawnDummy,
+                });
+                say("Target dummy placed in front of you.");
+            }
+            PracticeAction::StartDuel => {
+                commands.write(NetworkCommand::Practice {
+                    command: state.duel_command(),
+                });
+                say("1v1: an opponent is coming down mid.");
+            }
+            PracticeAction::LevelDown => state.adjust_level(-1),
+            PracticeAction::LevelUp => state.adjust_level(1),
+            PracticeAction::GoldDown => state.adjust_gold(-1),
+            PracticeAction::GoldUp => state.adjust_gold(1),
         }
     }
 }
@@ -441,6 +378,7 @@ fn update_practice_labels(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::{UiAction, action::dispatch_actions};
 
     #[test]
     fn duel_settings_clamp_and_build_the_wire_command() {
@@ -478,11 +416,15 @@ mod tests {
             .init_resource::<ClientSession>()
             .init_resource::<GameStateSnapshot>()
             .add_message::<NetworkCommand>()
+            .add_message::<Activated<PauseAction>>()
+            .add_message::<Activated<PracticeAction>>()
             .add_systems(
                 Update,
                 (
+                    dispatch_actions::<PauseAction>,
+                    dispatch_actions::<PracticeAction>,
                     sync_practice_availability,
-                    handle_practice_buttons,
+                    apply_practice_actions,
                     sync_practice_section,
                     update_practice_labels,
                 )
@@ -492,11 +434,11 @@ mod tests {
             .world_mut()
             .spawn((
                 Button,
-                PauseButtonGesture::default(),
+                UiAction(PauseAction::OpenPractice),
                 Node::default(),
                 Visibility::Inherited,
                 Interaction::None,
-                BackgroundColor(BUTTON_COLOR),
+                BackgroundColor(theme::TILE),
                 PracticeOpenButton,
             ))
             .id();
@@ -504,10 +446,9 @@ mod tests {
             .world_mut()
             .spawn((
                 Button,
-                PauseButtonGesture::default(),
+                UiAction(PracticeAction::SpawnDummy),
                 Interaction::None,
-                BackgroundColor(BUTTON_COLOR),
-                PracticeButton::SpawnDummy,
+                BackgroundColor(theme::TILE),
             ))
             .id();
         let section = app

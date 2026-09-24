@@ -13,6 +13,7 @@ pub const PANEL: Color = Color::srgba(0.025, 0.060, 0.065, 0.96);
 pub const PANEL_OPAQUE: Color = Color::srgb(0.025, 0.060, 0.065);
 pub const TILE: Color = Color::srgb(0.050, 0.115, 0.125);
 pub const HOVER: Color = Color::srgb(0.085, 0.205, 0.200);
+pub const TILE_HOVER: Color = HOVER;
 pub const EDGE: Color = Color::srgb(0.19, 0.32, 0.30);
 pub const PANEL_EDGE: Color = EDGE;
 pub const TILE_SELECTED: Color = Color::srgb(0.095, 0.27, 0.23);

@@ -79,9 +79,9 @@ struct HelpOverlayPanel;
 #[derive(Component)]
 struct HelpDismissButton;
 
-fn setup_help_overlay(mut commands: Commands, platform: Res<crate::ui::UiPlatform>) {
+fn setup_help_overlay(mut commands: Commands, platform: Option<Res<crate::ui::UiPlatform>>) {
     let body = help_overlay_body();
-    let phone = platform.is_mobile();
+    let phone = platform.is_some_and(|platform| platform.is_mobile());
 
     commands
         .spawn((

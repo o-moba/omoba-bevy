@@ -94,12 +94,12 @@ struct Input<'w, 's> {
         'w,
         's,
         (
+            Entity,
             &'static Name,
             &'static ComputedNode,
             &'static UiGlobalTransform,
             &'static InheritedVisibility,
             Option<&'static bevy::ui::CalculatedClip>,
-            &'static mut Interaction,
         ),
         With<Button>,
     >,
@@ -115,6 +115,7 @@ struct Input<'w, 's> {
     >,
     keys: MessageWriter<'w, KeyboardInput>,
     touches: MessageWriter<'w, TouchInput>,
+    presses: MessageWriter<'w, crate::ui::SyntheticPress>,
 }
 fn touch(window: Entity, position: Vec2, phase: TouchPhase) -> TouchInput {
     TouchInput {
@@ -302,8 +303,8 @@ fn drive(
 }
 
 fn click(name: &str, window: Entity, mobile: bool, input: &mut Input, qa: &mut Qa) -> bool {
-    let Some((_, node, transform, visible, clip, mut interaction)) =
-        input.buttons.iter_mut().find(|(n, ..)| n.as_str() == name)
+    let Some((entity, _, node, transform, visible, clip)) =
+        input.buttons.iter().find(|(_, n, ..)| n.as_str() == name)
     else {
         return false;
     };
@@ -342,8 +343,8 @@ fn click(name: &str, window: Entity, mobile: bool, input: &mut Input, qa: &mut Q
             .write(touch(window, rect.center(), TouchPhase::Started));
         qa.pending_touch = Some(rect.center());
     } else {
-        // Runs after Bevy's focus system and before the normal button handlers.
-        *interaction = Interaction::Pressed;
+        // A synthetic press activates the kit button on the next recognizer run.
+        input.presses.write(crate::ui::SyntheticPress(entity));
     }
     qa.action_at = qa.started.elapsed().as_secs_f64();
     true

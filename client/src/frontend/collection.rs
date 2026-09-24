@@ -326,13 +326,7 @@ fn spawn_collection(
                     Name::new("CollectionGrid"),
                 ))
                 .with_children(|grid| {
-                    spawn_catalogue_grid(
-                        grid,
-                        &catalogue,
-                        initial.as_deref(),
-                        &thumbnails,
-                        phone,
-                    );
+                    spawn_catalogue_grid(grid, &catalogue, initial.as_deref(), &thumbnails, phone);
                 });
 
                 // Preview column.
@@ -1111,6 +1105,7 @@ mod tests {
             .init_asset::<Image>()
             .init_resource::<AvatarPreview>()
             .init_resource::<AvatarThumbnails>()
+            .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
             .add_systems(Update, refresh_collection_catalogue);
         let selected = shared::avatar_roster()[0].slug.clone();
         app.world_mut()
@@ -1155,6 +1150,7 @@ mod tests {
             .init_asset::<Image>()
             .init_resource::<AvatarPreview>()
             .init_resource::<AvatarThumbnails>()
+            .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
             .add_systems(
                 Update,
                 (refresh_collection_catalogue, refresh_connection_labels).chain(),

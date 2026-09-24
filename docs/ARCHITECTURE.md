@@ -148,7 +148,9 @@ Ordered by value over cost. Each step is a separate change with the full
    `SnapshotApplied`, splitting `apply_server_snapshot`) are the open
    follow-up.
 9. One UI kit (theme, widgets, gestures, scroll, actions) and a modal
-   registry.
+   registry (pilot done: `client/src/ui/` with theme, tap recognizer, typed
+   actions and widgets; the pause menu and the practice sandbox use it;
+   remaining steps in `docs/ui-kit.md`).
 10. Client domain module, combat/player split, render backends behind
     `run_if`, plugin groups, QA behind a cargo feature.
 11. One debug tooling family shared by Combat Test, practice and offline.
