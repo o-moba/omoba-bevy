@@ -261,7 +261,7 @@ pub(crate) fn spawn_minion_wave_for_team_lane(
                 let inv_len = len_sq.sqrt().recip();
                 spawn_x -= dir_x * inv_len * offset;
                 spawn_z -= dir_z * inv_len * offset;
-                yaw = dir_x.atan2(dir_z);
+                yaw = shared::math::unit_yaw_towards(dir_x, dir_z);
             }
         }
 

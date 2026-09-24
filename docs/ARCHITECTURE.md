@@ -24,9 +24,10 @@ Rules that follow from the map:
   includes every wire type; never copy a wire struct into another crate.
 - `shared` must stay free of Bevy so the server and tools compile without an
   engine. Client-side ECS components wrap shared types instead.
-- Tuning numbers have one home. Hero growth and cooldown formulas are in
-  `shared::hero_balance`; server-only simulation numbers are in
-  `server/src/balance.rs`; tower stats come from the map JSON.
+- Tuning numbers have one home. Hero growth, speed, mana, respawn, XP
+  thresholds and projectile speed are in `shared::hero_balance`; facing
+  conventions in `shared::math`; server-only simulation numbers (minions,
+  towers, neutrals) in `server/src/balance.rs`; tower stats in the map JSON.
 
 ## Client frame
 
@@ -103,7 +104,7 @@ Ordered by value over cost. Each step is a separate change with the full
 1. CI gate, pinned toolchain, `make check` (done).
 2. One wire protocol in `shared`, golden JSON tests, harness on shared types
    (done).
-3. Balance constants and the hero facing convention in one place.
+3. Balance constants and the hero facing convention in one place (done).
 4. Crate hygiene: retire the orphan `skills` crate, move the career store out
    of the server package, keep I/O out of the shared model.
 5. Server `World` + tick context instead of many-map parameters; split

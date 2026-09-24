@@ -89,7 +89,7 @@ const MAX_CLIENT_REQUEST_PAYLOAD_BYTES: usize = 8 * 1024;
 /// request instead of accidentally accepting a valid truncated prefix.
 const CLIENT_DATAGRAM_RECEIVE_CAPACITY: usize = 65_536;
 /// Largest application payload that can be carried by one IPv4 UDP datagram.
-const IPV4_UDP_MAX_PAYLOAD_BYTES: usize = 65_507;
+const IPV4_UDP_MAX_PAYLOAD_BYTES: usize = shared::transport::MAX_SNAPSHOT_BYTES;
 const _: () = assert!(CLIENT_DATAGRAM_RECEIVE_CAPACITY > IPV4_UDP_MAX_PAYLOAD_BYTES);
 const NETWORK_DIAGNOSTIC_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -841,8 +841,10 @@ impl ServerRuntime {
             }
         }
         let receive_started = Instant::now();
-        for _ in 0..128 {
-            if receive_started.elapsed() >= Duration::from_millis(2) {
+        for _ in 0..shared::public_transport::MAX_PACKETS_PER_TICK {
+            if receive_started.elapsed()
+                >= Duration::from_millis(shared::public_transport::RECEIVE_BUDGET_MILLIS)
+            {
                 break;
             }
             match self.socket.recv_from(&mut self.recv_buf) {
@@ -2870,7 +2872,7 @@ fn simulate_neutrals(
             let dir_x = target_hit.x - neutral.state.x;
             let dir_z = target_hit.z - neutral.state.z;
             if dir_x * dir_x + dir_z * dir_z > 0.0001 {
-                neutral.state.yaw = dir_x.atan2(dir_z);
+                neutral.state.yaw = shared::math::unit_yaw_towards(dir_x, dir_z);
             }
         } else {
             neutral.state.ai_state = NeutralAiState::Aggro;
@@ -3231,7 +3233,7 @@ fn simulate_minions(
                 }
             }
             if distance_sq > 0.0001 {
-                minion.state.yaw = dir_x.atan2(dir_z);
+                minion.state.yaw = shared::math::unit_yaw_towards(dir_x, dir_z);
             }
             continue;
         }
@@ -3316,7 +3318,7 @@ fn simulate_minions(
                 let dir_x = target_pos.x - minion.state.x;
                 let dir_z = target_pos.z - minion.state.z;
                 if dir_x * dir_x + dir_z * dir_z > 0.0001 {
-                    minion.state.yaw = dir_x.atan2(dir_z);
+                    minion.state.yaw = shared::math::unit_yaw_towards(dir_x, dir_z);
                 }
                 continue;
             }
@@ -3338,7 +3340,7 @@ fn simulate_minions(
             let inv_distance = distance.recip();
             minion.state.x += dir_x * inv_distance * travel;
             minion.state.z += dir_z * inv_distance * travel;
-            minion.state.yaw = dir_x.atan2(dir_z);
+            minion.state.yaw = shared::math::unit_yaw_towards(dir_x, dir_z);
             if travel >= distance - 0.001 {
                 minion.next_waypoint += 1;
             }

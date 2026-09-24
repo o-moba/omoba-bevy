@@ -236,5 +236,5 @@ pub(crate) fn chase_neutral(
     }
     neutral.state.x = next[0];
     neutral.state.z = next[1];
-    neutral.state.yaw = dx.atan2(dz);
+    neutral.state.yaw = shared::math::unit_yaw_towards(dx, dz);
 }

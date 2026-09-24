@@ -27,11 +27,11 @@ use crate::{HeroClass, PlayerActionKind};
 pub use ekza_bevy_sdk::EkzaCharacter as CharacterChoice;
 
 /// Level a snapshot from a server that predates progression decodes to.
-const LEGACY_PLAYER_LEVEL: u32 = 1;
-/// Next-level XP for the same legacy snapshots.
-const LEGACY_NEXT_LEVEL_XP: u32 = 120;
+const LEGACY_PLAYER_LEVEL: u32 = crate::hero_balance::STARTING_LEVEL;
+/// Next-level XP for the same legacy snapshots: the first real threshold.
+const LEGACY_NEXT_LEVEL_XP: u32 = crate::hero_balance::LEVEL_XP_THRESHOLDS[0];
 /// Mana pool used before per-class balance existed.
-const LEGACY_MAX_MANA: f32 = 100.0;
+const LEGACY_MAX_MANA: f32 = crate::hero_balance::MAX_MANA;
 
 /// Client -> server request datagram.
 #[derive(Debug, Clone, Serialize, Deserialize)]

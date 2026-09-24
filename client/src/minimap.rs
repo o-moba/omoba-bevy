@@ -21,10 +21,10 @@ pub(crate) const DESKTOP_MINIMAP_INSET: f32 = 16.0;
 /// Render the shared map coordinate space as a compact upper-left module.
 pub(crate) const DESKTOP_MINIMAP_SIZE: f32 = 144.0;
 pub(crate) const MINIMAP_INNER_SIZE: f32 = 232.0;
-const HERO_SIGHT: f32 = 32.0;
-const MINION_SIGHT: f32 = 22.0;
-const TOWER_SIGHT: f32 = 28.0;
-const BASE_SIGHT: f32 = 34.0;
+use shared::vision::{
+    BASE_SIGHT_RADIUS as BASE_SIGHT, HERO_SIGHT_RADIUS as HERO_SIGHT,
+    MINION_SIGHT_RADIUS as MINION_SIGHT, TOWER_SIGHT_RADIUS as TOWER_SIGHT,
+};
 
 pub struct MinimapPlugin;
 impl Plugin for MinimapPlugin {

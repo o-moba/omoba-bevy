@@ -26,13 +26,10 @@ use crate::protocol::{
 
 // --- Map geometry mirror (server/src/balance.rs + world.rs) ---------------
 
-const PLAYER_SPEED: f32 = 5.0;
-const TARGET_BASE_RUN_TIME_SECONDS: f32 = 45.0;
-const TARGET_BASE_DISTANCE: f32 = PLAYER_SPEED * TARGET_BASE_RUN_TIME_SECONDS;
-const BASE_PAD_SIZE: f32 = 46.0;
-const BASE_EDGE_MARGIN: f32 = 6.0;
-const LANE_WIDTH: f32 = 12.0;
-const LANE_EDGE_PADDING: f32 = 6.0;
+use shared::hero_balance::PLAYER_SPEED;
+use shared::map::{
+    BASE_EDGE_MARGIN, BASE_PAD_SIZE, LANE_EDGE_PADDING, LANE_WIDTH, TARGET_BASE_DISTANCE,
+};
 
 /// A bot walks at the legal server speed; exported for the driver loop.
 pub const BOT_MOVE_SPEED: f32 = PLAYER_SPEED;

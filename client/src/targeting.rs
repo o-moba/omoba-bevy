@@ -217,15 +217,14 @@ pub(crate) fn clear_invalid_selection(
     }
 }
 
-/// Turn a hero toward `target` on the ground plane. Hero models face their
-/// local -Z (Bevy forward), the same convention as movement in `player.rs`;
-/// `blend` of 1.0 snaps, smaller values ease over several frames.
+/// Turn a hero toward `target` on the ground plane using the shared hero
+/// facing convention; `blend` of 1.0 snaps, smaller values ease over frames.
 pub(crate) fn face_target(transform: &mut Transform, target: Vec3, blend: f32) {
     let to_target = (target - transform.translation).xz();
     if to_target.length_squared() <= 1e-4 || !to_target.is_finite() {
         return;
     }
-    let yaw = (-to_target.x).atan2(-to_target.y);
+    let yaw = shared::math::hero_yaw_towards(to_target.x, to_target.y);
     let desired = Quat::from_rotation_y(yaw);
     transform.rotation = if blend >= 1.0 {
         desired

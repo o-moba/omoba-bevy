@@ -15,15 +15,13 @@ use std::time::Duration;
 
 // --- Player baselines & regeneration ---
 /// Default pre-admission Warrior HP; joined heroes resolve their own class baseline.
-pub const MAX_HP: f32 = shared::hero_balance::base_hp(shared::HeroClass::Warrior);
-pub const MAX_MANA: f32 = 100.0;
-pub const MANA_REGEN_PER_SECOND: f32 = 8.0;
+pub use shared::hero_balance::{DEFAULT_MAX_HP as MAX_HP, MANA_REGEN_PER_SECOND, MAX_MANA};
 /// Own-base fountain restores 12% of maximum HP per second within the shop zone.
 pub const BASE_HEAL_FRACTION_PER_SECOND: f32 = 0.12;
 pub const BASE_HEAL_RADIUS: f32 = shared::shop::SHOP_RADIUS;
 
 // --- Projectile simulation (ability numbers live in the shared class kits) ---
-pub const PROJECTILE_SPEED: f32 = 19.0;
+pub use shared::hero_balance::PROJECTILE_SPEED;
 /// Skill slots tracked by progression (`skill_points`); matches the shared Q/W/E/R kits.
 #[allow(dead_code)]
 pub const SKILL_SLOT_COUNT: usize = 4;
@@ -32,7 +30,7 @@ pub const PROJECTILE_LIFETIME: Duration = Duration::from_secs(3);
 pub const PLAYER_HIT_RADIUS: f32 = shared::PLAYER_TARGET_RADIUS;
 pub const CAST_SPAWN_HEIGHT: f32 = 0.85;
 pub const AIM_HEIGHT: f32 = 0.55;
-pub const RESPAWN_DELAY: Duration = Duration::from_secs(5);
+pub const RESPAWN_DELAY: Duration = Duration::from_secs(shared::hero_balance::RESPAWN_DELAY_SECS);
 
 // --- Lane towers & base tower threat ---
 #[cfg(test)]
@@ -83,15 +81,13 @@ pub const EMPTY_ROSTER_GRACE: Duration = Duration::from_secs(10);
 pub const SESSION_RECLAIM_WINDOW: Duration = Duration::from_secs(30);
 
 // --- Level curve & stat growth ---
-/// Debug movement multiplier applied when a client enables the speed-boost toggle.
-pub const DEBUG_SPEED_MULTIPLIER: f32 = 2.6;
-pub const STARTING_LEVEL: u32 = 1;
-pub const MAX_LEVEL: u32 = shared::hero_balance::MAX_LEVEL;
-pub const LEVEL_UP_HP_BONUS: f32 = 18.0;
-pub const LEVEL_UP_MANA_BONUS: f32 = 12.0;
-// Team-shared kill XP depends on roster size. The full-roster deterministic
-// baseline is covered in release_tests; solo kill estimates do not apply to 5v5.
-pub const LEVEL_XP_THRESHOLDS: [u32; 9] = [90, 150, 180, 220, 260, 300, 340, 380, 420];
+// Growth, speed and XP live in `shared::hero_balance` so client prediction,
+// the offline playground and the harness cannot drift from the server.
+#[allow(unused_imports)] // `LEVEL_XP_THRESHOLDS` is read by balance and neutral tests.
+pub use shared::hero_balance::{
+    DEBUG_SPEED_MULTIPLIER, LEVEL_UP_HP_BONUS, LEVEL_UP_MANA_BONUS, LEVEL_XP_THRESHOLDS, MAX_LEVEL,
+    STARTING_LEVEL,
+};
 
 // --- Jungle neutrals (camp stats & reward pacing) ---
 pub const NEUTRAL_RADIUS: f32 = shared::NEUTRAL_TARGET_RADIUS;
@@ -181,7 +177,7 @@ pub const VICTORY_REMATCH_DELAY: Duration = Duration::from_secs(10);
 // --- Map generation (affects lane length and jungle placement) ---
 #[cfg(test)]
 pub const TARGET_BASE_RUN_TIME_SECONDS: f32 = 45.0;
-pub const PLAYER_SPEED: f32 = 5.0;
+pub use shared::hero_balance::PLAYER_SPEED;
 #[cfg(test)]
 pub const TARGET_BASE_DISTANCE: f32 = PLAYER_SPEED * TARGET_BASE_RUN_TIME_SECONDS;
 

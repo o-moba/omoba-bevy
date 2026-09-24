@@ -821,7 +821,8 @@ impl ServerRuntime {
             origin[0] + dx / distance * step,
             PLAYER_GROUND_Y,
             origin[1] + dz / distance * step,
-            dx.atan2(dz),
+            // A sandbox actor is a hero model: -Z forward, unlike minions.
+            shared::math::hero_yaw_towards(dx, dz),
             now,
         );
     }
