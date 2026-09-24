@@ -10,7 +10,7 @@ maintainers are working through. Feature-level documentation lives in
 
 | Crate | Role | Depends on |
 | --- | --- | --- |
-| `shared` (MPL) | The gameplay model both sides agree on: hero classes and ability kits, hero growth, items, map geometry and navigation, the wire protocol, prematch/draft, social/career/account contracts, sandbox and practice commands. No Bevy, no I/O in the model itself. | serde |
+| `shared` (MPL) | The gameplay model both sides agree on: hero classes and ability kits, hero growth, items, map geometry and navigation, the wire protocol, prematch/draft, social/career/account contracts, sandbox and practice commands. Per-class and per-item data is JSON in `shared/assets/catalog/`, embedded and validated at startup (`shared::catalog`). No Bevy, no I/O in the model itself. | serde |
 | `server` (AGPL) | The authoritative simulation and UDP endpoint: match lifecycle, bots, combat, shop, career settlement, public transport signing, allocation workers. Binary only. | shared, passport, career-store |
 | `career-store` (AGPL) | Trusted career persistence (Postgres, migrations) and the bounded queue policy, linked by the server and the account API without the engine. | shared, sqlx |
 | `client` (MPL) | The Bevy game: networking, prediction, presentation (2D sprites and 3D models), UI, mobile input, offline practice, QA harnesses (`qa` feature, on by default). | shared, passport, bevy, ekza-bevy-sdk |
@@ -25,10 +25,13 @@ Rules that follow from the map:
   includes every wire type; never copy a wire struct into another crate.
 - `shared` must stay free of Bevy so the server and tools compile without an
   engine. Client-side ECS components wrap shared types instead.
-- Tuning numbers have one home. Hero growth, speed, mana, respawn, XP
-  thresholds and projectile speed are in `shared::hero_balance`; facing
-  conventions in `shared::math`; server-only simulation numbers (minions,
-  towers, neutrals) in `server/src/balance.rs`; tower stats in the map JSON.
+- Tuning numbers have one home. What differs per class or item (base HP,
+  growth caps, basic attack, ability kit, item costs and bonuses) is in
+  `shared/assets/catalog/*.json`; the uniform growth curve, speed, mana,
+  respawn, XP thresholds and projectile speed are in `shared::hero_balance`;
+  facing conventions in `shared::math`; server-only simulation numbers
+  (minions, towers, neutrals) in `server/src/balance.rs`; tower stats in the
+  map JSON.
 
 ## Client frame
 
@@ -314,14 +317,47 @@ values per mode is pinned by `match_rules::tests::rules_table_per_mode`.
 
 ## Adding content
 
-- **Hero class:** `HeroClass` and its ability kit in `shared/src/lib.rs`,
-  growth in `shared/src/hero_balance.rs`, recommended items in
-  `shared/src/shop.rs`, bot composition in `server/src/bots.rs`, class visuals
-  in `client/assets/config/combat_visuals.json`, the skill atlas, audio cues,
-  and the Python choice lists under `scripts/`. Client and server ship
-  together; an old client decodes an unknown class as Warrior.
-- **Item:** `ItemId` and `ITEMS` in `shared/src/shop.rs` (the array length is
-  tied to the inventory capacity today) plus each class's recommended order.
+Hero and item data lives in two JSON files, `shared/assets/catalog/heroes.json`
+and `shared/assets/catalog/items.json`. `shared::catalog` embeds them in both
+binaries, parses them once and validates them; `catalog::ensure_loaded()` runs
+at the top of the server's `runtime::run` and the client's `main`, so a bad
+file stops the process at startup with the file and the entry that failed.
+There is no runtime override: client and server must agree. The rule of thumb
+is that what differs per class or per item is data, and what is the same for
+everyone (rank scaling, slot unlock levels, the growth curve and the global
+values in `shared::hero_balance`, starting gold, inventory capacity, shop
+radius) is code.
+
+- **Tuning a class or an item:** edit the JSON only. `heroes.json` lists the
+  classes in `HeroClass::ALL` order, each with `id`, `display_name`,
+  `tagline`, `role`, `base_hp`, `growth` (`basic_damage_cap`,
+  `attack_rate_cap`), `basic_attack` (`range`, `damage`, `cooldown_secs`),
+  `projectile_style`, four `abilities` in Q/W/E/R order (`id`, `name`,
+  `description`, `targeting`, `mana_cost`, `cooldown_secs`, `cast_range` and
+  exactly one of `projectile_damage`, `self_heal`, `self_mana_restore`) and
+  `recommended_items` (every item exactly once, in buying order).
+  `items.json` lists the items in `ItemId::ALL` order with `id`, `name`,
+  `description`, `cost` and `bonuses` (a partial `ItemBonuses`; missing
+  fields are neutral). Unknown fields are rejected. `cargo test -p shared`
+  runs the catalog checks (enum coverage and order, kit shape, value ranges,
+  starter budget). The Python tools read the same files through
+  `scripts/catalog.py`.
+- **Hero class** still needs code: a `HeroClass` variant, its place in
+  `HeroClass::ALL` and its `id` in `shared/src/lib.rs`, plus its
+  `heroes.json` entry at the same position; bot composition and bot avatars
+  in `server/src/bots.rs`; the client art: the skill atlas and its order in
+  `client/src/skill_icons.rs`, a class entry in
+  `client/assets/config/combat_visuals.json`, the minimap letter in
+  `client/src/minimap.rs`, and audio cues. A new projectile look needs a
+  `ProjectileStyle` variant and its visuals. Behaviour beyond the three
+  ability effects (like the Warden's jungle passive in `shared/src/jungle.rs`)
+  is code. Client and server ship together; an old client decodes an unknown
+  class as Warrior.
+- **Item** still needs code: an `ItemId` variant, its place in `ItemId::ALL`
+  and its `id` in `shared/src/shop.rs`, plus its `items.json` entry at the
+  same position, a place in every class's `recommended_items`, and its short
+  code in `client/src/shop.rs` (`item_code`). The number of items is
+  independent of `INVENTORY_CAPACITY`.
 - **Map:** structure placement and stats in a map JSON
   (`docs/map-customization.md`); arena geometry and collision are fixed.
 
@@ -385,4 +421,9 @@ Ordered by value over cost. Each step is a separate change with the full
     imports off the re-export shims) are listed in
     `docs/plans/client-10-15.md`.
 11. One debug tooling family shared by Combat Test, practice and offline.
-12. Data-driven hero and item catalogs.
+12. Data-driven hero and item catalogs (done: `shared/assets/catalog/`
+    `heroes.json` and `items.json`, loaded and validated once by
+    `shared::catalog`; the accessors keep their names and signatures, the
+    Rust tables are gone, the item count is independent of the inventory
+    capacity, and the Python scripts read the same files through
+    `scripts/catalog.py`). Step complete.

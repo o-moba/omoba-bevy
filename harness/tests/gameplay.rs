@@ -26,7 +26,7 @@ use shared::navigation::Disc;
 const GROUND_Y: f32 = 0.5;
 /// Default warrior health follows shared class balance; mana remains independent.
 use shared::hero_balance::{DEFAULT_MAX_HP as MAX_HP, MAX_MANA};
-/// Warrior `shield_bash` cast range (`shared::WARRIOR_ABILITIES[0]`) — the
+/// Warrior `shield_bash` cast range (`HeroClass::Warrior.ability(SkillSlot::Q)`) — the
 /// shortest Q range of any kit. We bring players closer than this before
 /// casting so every class's Q connects.
 const SHORTEST_Q_CAST_RANGE: f32 = 12.0;

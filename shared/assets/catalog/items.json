@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "items": [
+    {
+      "id": "ember_blade",
+      "name": "Ember Blade",
+      "description": "+12% damage",
+      "cost": 80,
+      "bonuses": { "damage_multiplier": 1.12 }
+    },
+    {
+      "id": "swift_grip",
+      "name": "Swift Grip",
+      "description": "+12% basic attack and Q rate",
+      "cost": 80,
+      "bonuses": { "attack_speed_multiplier": 1.12 }
+    },
+    {
+      "id": "trail_boots",
+      "name": "Trail Boots",
+      "description": "+8% movement speed",
+      "cost": 80,
+      "bonuses": { "move_speed_multiplier": 1.08 }
+    },
+    {
+      "id": "vitality_gem",
+      "name": "Vitality Gem",
+      "description": "+30 maximum HP",
+      "cost": 80,
+      "bonuses": { "max_hp": 30.0 }
+    },
+    {
+      "id": "focus_charm",
+      "name": "Focus Charm",
+      "description": "+20 mana / +10% W E R haste",
+      "cost": 100,
+      "bonuses": { "max_mana": 20.0, "spell_haste_multiplier": 1.10 }
+    },
+    {
+      "id": "guardian_crest",
+      "name": "Guardian Crest",
+      "description": "+15 maximum HP / +6% damage",
+      "cost": 120,
+      "bonuses": { "max_hp": 15.0, "damage_multiplier": 1.06 }
+    }
+  ]
+}

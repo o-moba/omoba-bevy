@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 /// server's `MAX_LEVEL`).
 pub const DUEL_MAX_LEVEL: u32 = 10;
 pub const DUEL_MIN_LEVEL: u32 = 1;
-/// Gold step and cap for the duel opponent's shopping budget. Six items cost
-/// 540 in total, so the cap buys the full inventory.
+/// Gold step and cap for the duel opponent's shopping budget. The cap buys a
+/// full inventory of any items (pinned by a test against the catalog).
 pub const DUEL_GOLD_STEP: u32 = 100;
 pub const DUEL_MAX_GOLD: u32 = 1_000;
 /// Stationary dummies alive at once; older ones are recycled first.
@@ -41,6 +41,21 @@ impl PracticeCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shop::{INVENTORY_CAPACITY, items};
+
+    #[test]
+    fn duel_gold_cap_buys_a_full_inventory() {
+        // The dearest items that fit in the inventory, so any shopping order
+        // fills every slot within the cap.
+        let mut costs: Vec<u32> = items().iter().map(|item| item.cost).collect();
+        costs.sort_unstable_by(|a, b| b.cmp(a));
+        assert!(costs.len() >= INVENTORY_CAPACITY);
+        let dearest_full_inventory: u32 = costs.iter().take(INVENTORY_CAPACITY).sum();
+        assert!(
+            dearest_full_inventory <= DUEL_MAX_GOLD,
+            "{dearest_full_inventory} gold for a full inventory exceeds the duel cap"
+        );
+    }
 
     #[test]
     fn duel_values_are_clamped_and_round_trip_on_the_wire() {

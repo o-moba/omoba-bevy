@@ -72,6 +72,7 @@ use sprite::PlayerVisualMode;
 
 #[bevy_main]
 pub fn main() {
+    shared::catalog::ensure_loaded();
     #[cfg(feature = "qa")]
     if let Some(directory) = std::env::var_os("OMOBA_ANIMATION_QA") {
         qa::animation_qa::run(directory.into());

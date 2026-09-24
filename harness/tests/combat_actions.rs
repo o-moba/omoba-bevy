@@ -119,7 +119,10 @@ fn two_clients_observe_sequential_accepted_casts_once_and_defaults_are_inert() {
 
     // Use the kit's authoritative cooldown instead of an obsolete 450ms assumption.
     std::thread::sleep(
-        shared::scaled_cooldown(&shared::WARRIOR_ABILITIES[0], 1) + Duration::from_millis(100),
+        shared::scaled_cooldown(
+            shared::ability_for_class_slot(shared::HeroClass::Warrior, shared::SkillSlot::Q),
+            1,
+        ) + Duration::from_millis(100),
     );
     caster.cast(TargetId::player(observer_id));
     let second_remote = observer
