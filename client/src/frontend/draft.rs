@@ -1,12 +1,5 @@
 //! Shared pre-match choices. The server owns accepted selections and lock state.
-use bevy::{
-    input::{
-        mouse::MouseWheel,
-        touch::{TouchInput, TouchPhase},
-    },
-    prelude::*,
-    window::PrimaryWindow,
-};
+use bevy::{prelude::*, window::PrimaryWindow};
 use shared::{
     HeroClass,
     prematch::{DraftPlayer, PrematchAction, PrematchPhase, PrematchRequest, Role},
@@ -61,7 +54,12 @@ impl Plugin for DraftScreenPlugin {
                     .in_set(DraftSet::Draw)
                     .run_if(in_state(AppScreen::Draft)),
             )
-            .add_systems(Update, scroll_panels.after(DraftSet::Draw));
+            .add_systems(
+                Update,
+                remember_scroll
+                    .after(DraftSet::Draw)
+                    .after(crate::ui::UiSet::Scroll),
+            );
     }
 }
 
@@ -368,6 +366,20 @@ pub(super) fn composition_warning(players: &[DraftPlayer], local_id: u64) -> Str
 struct DraftRoot;
 #[derive(Component, Clone, Copy)]
 pub(super) struct DraftScroll(pub u8);
+
+/// A draft or loading roster pane: wheel (24 px per notch, any unit) while
+/// the cursor is over it, touch drag from the first pixel. The pane ID keys
+/// the drag so it survives the pane being rebuilt under the finger.
+pub(super) fn draft_pane(pane: u8) -> (DraftScroll, crate::ui::ScrollArea) {
+    (
+        DraftScroll(pane),
+        crate::ui::ScrollArea::wheel(24.0)
+            .pixel_step(24.0)
+            .hover_only()
+            .touch_drag(0.0)
+            .keyed(u64::from(pane)),
+    )
+}
 #[derive(Resource, Default)]
 pub(super) struct DraftScrollMemory(pub std::collections::HashMap<u8, f32>);
 
@@ -675,7 +687,7 @@ fn render_draft(
                                 ..default()
                             },
                             ScrollPosition(Vec2::new(0.0, *scroll.0.get(&0).unwrap_or(&0.0))),
-                            DraftScroll(0),
+                            draft_pane(0),
                             Name::new("DraftTeamRoster"),
                         ))
                         .with_children(|rows| {
@@ -739,7 +751,7 @@ fn render_draft(
                                 ..default()
                             },
                             ScrollPosition(Vec2::new(0.0, *scroll.0.get(&1).unwrap_or(&0.0))),
-                            DraftScroll(1),
+                            draft_pane(1),
                             Name::new("DraftAvatarCatalogue"),
                         ))
                         .with_children(|avatars| {
@@ -923,125 +935,44 @@ fn render_draft(
         });
 }
 
-#[derive(Clone, Copy)]
-struct ScrollGesture {
-    finger: u64,
-    pane: u8,
-    screen: AppScreen,
-    previous_y: f32,
-    pending_delta: f32,
-    ended: bool,
-}
-
-fn scroll_panels(
+/// Rebuilt panes reopen at the offset they had (`render_draft` and the
+/// loading screen read the memory); `ui::scroll` moves them.
+fn remember_scroll(
     screen: Res<State<AppScreen>>,
-    windows: Query<&Window, With<PrimaryWindow>>,
-    mut wheel: MessageReader<MouseWheel>,
-    mut touch: MessageReader<TouchInput>,
-    mut panels: Query<(
-        Entity,
-        &DraftScroll,
-        &ComputedNode,
-        &UiGlobalTransform,
-        &mut ScrollPosition,
-    )>,
+    panels: Query<(&DraftScroll, &ComputedNode, &ScrollPosition)>,
     mut memory: ResMut<DraftScrollMemory>,
-    mut held: Local<Option<ScrollGesture>>,
 ) {
     if !matches!(screen.get(), AppScreen::Draft | AppScreen::Loading) {
-        wheel.clear();
-        touch.clear();
-        *held = None;
         return;
     }
-    if held.is_some_and(|gesture| gesture.screen != *screen.get()) {
-        *held = None;
-    }
-    let pointer = windows.single().ok().and_then(Window::cursor_position);
-    let mut delta = 0.0;
-    for event in wheel.read() {
-        delta -= event.y * 24.0;
-    }
-    for event in touch.read() {
-        match event.phase {
-            TouchPhase::Started if held.is_none() => {
-                for (_, pane, node, transform, _) in &panels {
-                    if node.size().min_element() <= 0.0 {
-                        continue;
-                    }
-                    let rect = Rect::from_center_size(
-                        transform.translation * node.inverse_scale_factor(),
-                        node.size() * node.inverse_scale_factor(),
-                    );
-                    if rect.contains(event.position) {
-                        *held = Some(ScrollGesture {
-                            finger: event.id,
-                            pane: pane.0,
-                            screen: *screen.get(),
-                            previous_y: event.position.y,
-                            pending_delta: 0.0,
-                            ended: false,
-                        });
-                        break;
-                    }
-                }
-            }
-            TouchPhase::Moved => {
-                if let Some(gesture) = held.as_mut()
-                    && gesture.finger == event.id
-                {
-                    gesture.pending_delta += gesture.previous_y - event.position.y;
-                    gesture.previous_y = event.position.y;
-                }
-            }
-            TouchPhase::Ended if held.is_some_and(|gesture| gesture.finger == event.id) => {
-                held.as_mut().unwrap().ended = true;
-            }
-            TouchPhase::Canceled if held.is_some_and(|gesture| gesture.finger == event.id) => {
-                *held = None;
-            }
-            _ => {}
-        }
-    }
-    for (_, pane, node, transform, mut position) in &mut panels {
+    for (pane, node, position) in &panels {
         // Rebuilt panels keep their stable pane ID but have no measured size
-        // until layout runs. Preserve both the saved offset and pending motion.
+        // until layout runs; keep the saved offset until then.
         if node.size().min_element() <= 0.0 {
             continue;
         }
-        let rect = Rect::from_center_size(
-            transform.translation * node.inverse_scale_factor(),
-            node.size() * node.inverse_scale_factor(),
-        );
-        let max = (node.content_size().y - node.size().y).max(0.0) * node.inverse_scale_factor();
-        if let Some(gesture) = held.as_mut()
-            && gesture.pane == pane.0
-        {
-            position.0.y = (position.0.y + gesture.pending_delta).clamp(0.0, max);
-            gesture.pending_delta = 0.0;
+        let offset = position.y.clamp(0.0, crate::ui::scroll::max_offset(node));
+        if memory.0.get(&pane.0) != Some(&offset) {
+            memory.0.insert(pane.0, offset);
         }
-        if pointer.is_some_and(|point| rect.contains(point)) {
-            position.0.y = (position.0.y + delta).clamp(0.0, max);
-        }
-        memory.0.insert(pane.0, position.0.y.clamp(0.0, max));
-    }
-    if held.is_some_and(|gesture| gesture.ended && gesture.pending_delta == 0.0) {
-        *held = None;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::input::touch::{TouchInput, TouchPhase};
 
     #[test]
     fn scroll_gesture_survives_panel_replacement_and_unmeasured_rebuild_frame() {
         let mut app = App::new();
         app.insert_resource(State::new(AppScreen::Loading))
             .init_resource::<DraftScrollMemory>()
-            .add_message::<MouseWheel>()
             .add_message::<TouchInput>()
-            .add_systems(Update, scroll_panels);
+            .add_systems(
+                Update,
+                (crate::ui::scroll::scroll_areas, remember_scroll).chain(),
+            );
         let window = app
             .world_mut()
             .spawn((Window::default(), PrimaryWindow))
@@ -1055,7 +986,7 @@ mod tests {
         let old_panel = app
             .world_mut()
             .spawn((
-                DraftScroll(2),
+                draft_pane(2),
                 measured(),
                 UiGlobalTransform::default(),
                 ScrollPosition::default(),
@@ -1079,7 +1010,7 @@ mod tests {
         let new_panel = app
             .world_mut()
             .spawn((
-                DraftScroll(2),
+                draft_pane(2),
                 ComputedNode::default(),
                 UiGlobalTransform::default(),
                 ScrollPosition(Vec2::new(0.0, 30.0)),

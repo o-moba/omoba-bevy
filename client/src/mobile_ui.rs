@@ -1,7 +1,6 @@
 //! Phone layouts and a shell-free address entry for controlled native playtests.
 use bevy::{
     input::keyboard::{Key, KeyboardInput},
-    input::touch::{TouchInput, TouchPhase},
     prelude::*,
     window::PrimaryWindow,
 };
@@ -9,6 +8,7 @@ use bevy::{
 use crate::{
     mobile_controls::{MobileControls, MobileControlsSet},
     net::{ClientSession, SessionUiCommand},
+    ui::{ModalId, ModalRoot, ScrollArea},
     ui_theme as ui,
 };
 
@@ -39,7 +39,7 @@ impl Plugin for MobileUiPlugin {
             )
             .add_systems(
                 PostUpdate,
-                (adapt_phone_layout, scroll_phone_panels).before(bevy::ui::UiSystems::Layout),
+                adapt_phone_layout.before(bevy::ui::UiSystems::Layout),
             );
     }
 }
@@ -132,6 +132,7 @@ fn setup_phone_ui(mut commands: Commands) {
             BackgroundColor(Color::srgba(0.005, 0.02, 0.02, 0.98)),
             ZIndex(150),
             ServerEntryRoot,
+            ModalRoot(ModalId::ServerEntry),
             Name::new("ServerEntryRoot"),
         ))
         .with_children(|overlay| {
@@ -603,7 +604,7 @@ fn adapt_phone_layout(
                 node.overflow = Overflow::scroll_y();
                 commands
                     .entity(entity)
-                    .insert_if_new((ScrollPosition::default(), TouchScrollPanel));
+                    .insert_if_new(ScrollArea::phone_panel());
             }
             "ShopPanel" => {
                 // Center inside the asymmetric safe area while the backdrop
@@ -628,7 +629,7 @@ fn adapt_phone_layout(
                 node.overflow = Overflow::scroll_y();
                 commands
                     .entity(entity)
-                    .insert_if_new((ScrollPosition::default(), TouchScrollPanel));
+                    .insert_if_new(ScrollArea::phone_panel());
             }
             "ShopFooter" => node.display = Display::None,
             "ShopCloseButton" => {
@@ -741,127 +742,22 @@ fn adapt_phone_layout(
     }
 }
 
-/// Explicit ownership prevents a hidden or underlying panel from stealing drags.
-#[derive(Component)]
-pub(crate) struct TouchScrollPanel;
-
-#[derive(Default)]
-struct ScrollTouch {
-    held: Option<(u64, Entity, Vec2, Vec2, bool)>,
-}
-
-pub(crate) use crate::ui::gesture::logical_ui_rect;
-
-fn scroll_phone_panels(
-    mobile: Res<MobileControls>,
-    window: Query<(Entity, &Window), With<PrimaryWindow>>,
-    mut events: MessageReader<TouchInput>,
-    mut drag: Local<ScrollTouch>,
-    career: Option<Res<crate::career::CareerClient>>,
-    pause: Option<Res<crate::pause_menu::PauseMenuState>>,
-    mut panels: Query<
-        (
-            Entity,
-            &Name,
-            &ComputedNode,
-            &UiGlobalTransform,
-            &mut ScrollPosition,
-            Option<&InheritedVisibility>,
-            Option<&bevy::ui::CalculatedClip>,
-        ),
-        With<TouchScrollPanel>,
-    >,
-) {
-    let Ok((window_id, window)) = window.single() else {
-        events.clear();
-        drag.held = None;
-        return;
-    };
-    if !mobile.enabled || !mobile.focused || !mobile.landscape || !window.focused {
-        events.clear();
-        drag.held = None;
-        return;
-    }
-    let allowed = |name: &str| {
-        if career.as_ref().is_some_and(|c| c.modal_open()) {
-            name == "CareerBody"
-        } else if pause.as_ref().is_some_and(|p| p.open) {
-            if pause.as_ref().is_some_and(|p| p.in_settings) {
-                name == "PauseMenuSettingsSection"
-            } else {
-                name == "PauseMenuMainSection"
-            }
-        } else {
-            name == "HelpBody" || name == "ShopCards"
-        }
-    };
-    for event in events.read().filter(|e| e.window == window_id) {
-        if event.phase == TouchPhase::Started && drag.held.is_none() {
-            let candidate = panels
-                .iter()
-                .filter(|(_, name, node, _, _, visible, _)| {
-                    allowed(name.as_str())
-                        && visible.is_none_or(|v| v.get())
-                        && node.size().min_element() > 0.0
-                        && node.content_size().y > node.size().y
-                })
-                .filter(|(_, _, node, transform, _, _, clip)| {
-                    logical_ui_rect(node, transform, *clip, window.scale_factor())
-                        .contains(event.position)
-                })
-                .min_by(|a, b| {
-                    (a.2.size().x * a.2.size().y).total_cmp(&(b.2.size().x * b.2.size().y))
-                })
-                .map(|p| p.0);
-            if let Some(entity) = candidate {
-                drag.held = Some((event.id, entity, event.position, event.position, false));
-            }
-            continue;
-        }
-        let Some((id, entity, start, previous, moved)) =
-            drag.held.as_mut().filter(|(id, ..)| *id == event.id)
-        else {
-            continue;
-        };
-        let _ = id;
-        if let Ok((_, name, node, _, mut scroll, visible, _)) = panels.get_mut(*entity) {
-            if !allowed(name.as_str()) || visible.is_some_and(|v| !v.get()) {
-                drag.held = None;
-                continue;
-            }
-            let was_moved = *moved;
-            *moved |= start.distance(event.position) > 10.0;
-            if *moved && matches!(event.phase, TouchPhase::Moved | TouchPhase::Ended) {
-                let delta = if was_moved { previous.y } else { start.y } - event.position.y;
-                let max = ((node.content_size().y - node.size().y) * node.inverse_scale_factor())
-                    .max(0.0);
-                // ScrollPosition is in UI units; TouchInput is in logical window pixels.
-                scroll.y = (scroll.y + delta * window.scale_factor() * node.inverse_scale_factor())
-                    .clamp(0.0, max);
-            }
-            *previous = event.position;
-        } else {
-            drag.held = None;
-            continue;
-        }
-        if matches!(event.phase, TouchPhase::Ended | TouchPhase::Canceled) {
-            drag.held = None;
-        }
-    }
-}
-
 #[cfg(test)]
 pub(crate) fn add_pause_layout_test_systems(app: &mut App) {
     app.add_systems(
         PostUpdate,
-        (adapt_phone_layout, scroll_phone_panels).before(bevy::ui::UiSystems::Layout),
+        adapt_phone_layout.before(bevy::ui::UiSystems::Layout),
     );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::input::touch::{TouchInput, TouchPhase};
 
+    /// The phone panels (help, shop, pause sections, career body) scroll
+    /// through `ui::scroll` with the `mobile_ui` feel: window pixels, the
+    /// first finger owns the drag, a short tap does not scroll.
     #[test]
     fn touch_scroll_uses_window_pixels_and_owns_drag_through_release() {
         for (dpi, ui_scale) in [(1.0, 1.0), (2.0, 1.0), (2.0, 0.75)] {
@@ -871,12 +767,8 @@ mod tests {
             mobile.focused = true;
             mobile.landscape = true;
             app.insert_resource(mobile)
-                .insert_resource(crate::pause_menu::PauseMenuState {
-                    open: true,
-                    in_settings: true,
-                })
                 .add_message::<TouchInput>()
-                .add_systems(Update, scroll_phone_panels);
+                .add_systems(Update, crate::ui::scroll::scroll_areas);
             let mut window = Window::default();
             window.resolution.set_scale_factor_override(Some(dpi));
             let window = app.world_mut().spawn((window, PrimaryWindow)).id();
@@ -884,8 +776,8 @@ mod tests {
             let panel = app
                 .world_mut()
                 .spawn((
-                    TouchScrollPanel,
-                    Name::new("PauseMenuSettingsSection"),
+                    ScrollArea::phone_panel(),
+                    Name::new("HelpBody"),
                     ComputedNode {
                         size: Vec2::new(400.0, 200.0) * combined,
                         content_size: Vec2::new(400.0, 800.0) * combined,
@@ -895,7 +787,6 @@ mod tests {
                     UiGlobalTransform::from(bevy::math::Affine2::from_translation(
                         Vec2::new(500.0, 400.0) * dpi,
                     )),
-                    ScrollPosition::default(),
                 ))
                 .id();
             let event = |id, phase, position| TouchInput {
@@ -920,7 +811,7 @@ mod tests {
                 (app.world().get::<ScrollPosition>(panel).unwrap().y - 100.0 / ui_scale).abs()
                     < 0.01
             );
-            // Short taps don't scroll. Closed menus cannot retain ownership.
+            // Short taps don't scroll.
             app.world_mut()
                 .write_message(event(3, TouchPhase::Started, Vec2::new(500.0, 400.0)));
             app.world_mut()
@@ -930,7 +821,54 @@ mod tests {
                 (app.world().get::<ScrollPosition>(panel).unwrap().y - 100.0 / ui_scale).abs()
                     < 0.01
             );
+            // A hidden panel cannot take or keep a drag.
+            app.world_mut()
+                .entity_mut(panel)
+                .insert(InheritedVisibility::HIDDEN);
+            for e in [
+                event(4, TouchPhase::Started, Vec2::new(500.0, 440.0)),
+                event(4, TouchPhase::Moved, Vec2::new(500.0, 340.0)),
+            ] {
+                app.world_mut().write_message(e);
+            }
+            app.update();
+            assert!(
+                (app.world().get::<ScrollPosition>(panel).unwrap().y - 100.0 / ui_scale).abs()
+                    < 0.01
+            );
         }
+    }
+
+    #[test]
+    fn help_and_shop_panels_become_phone_scroll_areas_and_the_server_entry_is_a_modal_root() {
+        let mut app = App::new();
+        let mut mobile = MobileControls::default();
+        mobile.enabled = true;
+        mobile.landscape = true;
+        mobile.viewport = Vec2::new(844.0, 390.0);
+        app.insert_resource(mobile)
+            .init_resource::<ClientSession>()
+            .add_systems(Startup, setup_phone_ui)
+            .add_systems(PostUpdate, adapt_phone_layout);
+        for name in ["HelpBody", "ShopCards"] {
+            app.world_mut().spawn((Node::default(), Name::new(name)));
+        }
+        app.update();
+        app.update();
+        let mut areas = app.world_mut().query::<(&Name, &ScrollArea)>();
+        let mut found: Vec<_> = areas
+            .iter(app.world())
+            .map(|(name, area)| {
+                assert_eq!(*area, ScrollArea::phone_panel());
+                name.as_str().to_owned()
+            })
+            .collect();
+        found.sort();
+        assert_eq!(found, ["HelpBody", "ShopCards"]);
+        let mut roots = app.world_mut().query::<(&Name, &ModalRoot)>();
+        assert!(roots.iter(app.world()).any(
+            |(name, root)| name.as_str() == "ServerEntryRoot" && root.0 == ModalId::ServerEntry
+        ));
     }
 
     #[test]

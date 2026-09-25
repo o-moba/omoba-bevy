@@ -38,7 +38,7 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
    (`OMOBA_TEST_DATABASE_URL`; not part of `make check`, CI runs it in the
    `postgres` job on every push, PR and nightly). Reference
    counts at the time of writing: server 297 (+3 ignored), shared 92, client
-   lib 571, passport 26, harness 22 unit + 24 black-box.
+   lib 586, passport 26, harness 22 unit + 24 black-box.
 4. One step per branch, named `refactor/<topic>` (docs-only: `docs/<topic>`),
    cut from the current `origin/main`.
 5. No wire-visible change unless the step says so explicitly; `shared/` stays
@@ -74,7 +74,7 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
 | 12 | Data-driven hero and item catalogs with validation tests | done: 12a-12e; 12f (optional client cross-checks) open | #38 |
 | 13 | Roster/asset loading and SDK types out of the shared model | done: 13a-13e (with O5 load validation and the O30 working-directory slice); 13f (server-owned registry) optional | #48 (shared without I/O) |
 | 15 | Client session events and staged snapshot application | done: 15a+15b1 (#39), 15b2+15c+15d (#41), 15e (#43); 15f/15g optional | #39, #41, #43 |
-| 9b | UI kit follow-ups: scroll unification, modal registry, frontend/social/supporter/sandbox screens, responsive layout, `TestId` in QA | pending (order in [ui-kit.md](ui-kit.md)) | |
+| 9b | UI kit follow-ups: scroll unification, modal registry, frontend/social/supporter/sandbox screens, responsive layout, `TestId` in QA | in progress: scroll + modal registry (this PR); items 3–7 in [ui-kit.md](ui-kit.md) open | this PR (ui scroll + modals) |
 
 Suggested order after 7: 14 (done), 10 (done), 15, 11, 12, 13, 9b (server first while
 its structure is fresh, then the client). Each row is one to four PRs.
@@ -197,3 +197,6 @@ O2 (CI as a required gate): the maintainer approved it on 2026-09-25. Rules 2 an
 
 ### 9b: UI kit follow-ups
 - Order and details in [ui-kit.md](ui-kit.md).
+- 9b-1 (scroll): `ui::scroll::ScrollArea` + `scroll_areas` in `UiSet::Scroll`; the per-module scroll systems of pause menu, career, `mobile_ui`, social, sandbox, draft/loading, collection, team, supporter and scoreboard are gone, each panel's wheel step, page step and drag threshold kept as `ScrollArea` parameters (table in ui-kit.md).
+- 9b-2 (modal registry): `ui::modal::ModalStack` ordered by draw layer, `register_modal` (six registrations in `input_context::register_modals`), `ModalRoot` on each root, `Pressable::blocked` for top-only gating; `gate_buttons_behind_server_entry` removed; `input_context` reads `ModalStack::is_open()` for pause, career, shop, supporter, scoreboard and server entry and keeps help, sandbox, social, front-end, hero picker and phone orientation as its own checks.
+- Open: 9b-3 front-end screens, 9b-4 career/social/supporter/sandbox actions, 9b-5 responsive layout, 9b-6 `TestId` in QA, 9b-7 colours.

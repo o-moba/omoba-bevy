@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use crate::debug::DebugConsole;
 use crate::help_overlay::HelpOverlayVisible;
 use crate::net::{GameState, GameStateSnapshot};
-use crate::pause_menu::PauseMenuState;
+use crate::ui::{ModalAppExt, ModalId, ModalStack};
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum InputContextSet {
@@ -64,33 +64,53 @@ impl Plugin for InputContextPlugin {
             )
             .add_systems(
                 Update,
-                resolve_input_context.in_set(InputContextSet::Resolve),
+                resolve_input_context
+                    .in_set(InputContextSet::Resolve)
+                    .after(crate::ui::modal::ModalSet::Late),
             );
+        register_modals(app);
     }
 }
 
+/// The overlays that are modal panels, in one list next to the policy that
+/// reads them. Each root carries `ui::ModalRoot` with the same id; a missing
+/// resource (no `ServerEntry` on desktop) counts as closed.
+fn register_modals(app: &mut App) {
+    app.register_modal::<crate::pause_menu::PauseMenuState>(ModalId::Pause, |menu| menu.open)
+        .register_modal::<crate::career::CareerClient>(
+            ModalId::Career,
+            crate::career::CareerClient::modal_open,
+        )
+        .register_modal::<crate::shop::ShopState>(ModalId::Shop, |shop| shop.open)
+        .register_modal::<crate::supporter::SupporterUiState>(ModalId::Supporter, |state| {
+            state.open
+        })
+        .register_modal::<crate::edge_hud::ScoreboardState>(ModalId::Scoreboard, |state| state.open)
+        .register_modal::<crate::mobile_ui::ServerEntry>(ModalId::ServerEntry, |entry| entry.open);
+}
+
+/// Gameplay is blocked while any registered modal is open (`ModalStack`:
+/// pause menu, career, shop, supporter, scoreboard, phone server entry) and
+/// by the checks below, which are not "a modal panel is open" and so stay
+/// here: the help overlay only blocks during a running match, the sandbox
+/// also blocks in teleport/edit modes without a panel, social also blocks
+/// for the chat wheel and one frame after a send, the front-end is a screen
+/// state, the hero picker is detected by its root entity, and a phone blocks
+/// while it is portrait or unfocused.
 fn resolve_input_context(
     keyboard: Res<ButtonInput<KeyCode>>,
-    pause: Option<Res<PauseMenuState>>,
+    modals: Option<Res<ModalStack>>,
     help: Option<Res<HelpOverlayVisible>>,
     game: Option<Res<GameStateSnapshot>>,
-    shop: Option<Res<crate::shop::ShopState>>,
     session: Option<Res<crate::net::ClientSession>>,
     debug: Option<Res<DebugConsole>>,
     join_ui: Query<Entity, With<crate::team::TeamSelectRoot>>,
     mut context: ResMut<GameplayInputContext>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
-    server_entry: Option<Res<crate::mobile_ui::ServerEntry>>,
-    career: Option<Res<crate::career::CareerClient>>,
     social: Option<Res<crate::social::SocialClient>>,
-    supporter: Option<Res<crate::supporter::SupporterUiState>>,
-    test_and_score: (
-        Option<Res<crate::edge_hud::ScoreboardState>>,
-        Option<Res<crate::sandbox::SandboxClient>>,
-    ),
+    sandbox: Option<Res<crate::sandbox::SandboxClient>>,
     screen: Option<Res<State<crate::frontend::AppScreen>>>,
 ) {
-    let (scoreboard, sandbox) = test_and_score;
     context.running = game
         .as_ref()
         .is_some_and(|game| matches!(game.state, GameState::Running))
@@ -100,21 +120,16 @@ fn resolve_input_context(
     // Every front-end screen is modal: the world keeps simulating behind it,
     // but nothing the player does on a menu may reach gameplay.
     let front_end_open = screen.as_ref().is_some_and(|screen| screen.get().is_menu());
-    context.modal_open = sandbox.as_ref().is_some_and(|s| s.blocks_world())
+    context.modal_open = modals.as_ref().is_some_and(|modals| modals.is_open())
+        || sandbox.as_ref().is_some_and(|s| s.blocks_world())
         || front_end_open
-        || scoreboard.is_some_and(|s| s.open)
         || mobile
             .as_ref()
             .is_some_and(|mobile| mobile.enabled && (!mobile.landscape || !mobile.focused))
         || social
             .as_ref()
             .is_some_and(|social| social.blocks_gameplay())
-        || supporter.as_ref().is_some_and(|state| state.open)
-        || career.as_ref().is_some_and(|career| career.modal_open())
-        || server_entry.as_ref().is_some_and(|entry| entry.open)
-        || shop.as_ref().is_some_and(|shop| shop.open)
         || !join_ui.is_empty()
-        || pause.as_ref().is_some_and(|pause| pause.open)
         || (context.running && help.as_ref().is_some_and(|help| help.0));
     let debug_enabled = debug.as_ref().is_some_and(|debug| debug.ui_enabled);
     if !debug_enabled || (!context.modal_open && keyboard.just_pressed(KeyCode::Space)) {
@@ -127,6 +142,76 @@ fn resolve_input_context(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pause_menu::PauseMenuState;
+
+    #[test]
+    fn gameplay_and_camera_are_blocked_while_any_modal_is_open() {
+        type Toggle = fn(&mut World, bool);
+        let modals: [(ModalId, Toggle); 6] = [
+            (ModalId::Pause, |world, open| {
+                world.resource_mut::<PauseMenuState>().open = open
+            }),
+            (ModalId::Career, |world, open| {
+                world.resource_mut::<crate::career::CareerClient>().modal = if open {
+                    crate::career::CareerModal::Profile
+                } else {
+                    crate::career::CareerModal::Closed
+                }
+            }),
+            (ModalId::Shop, |world, open| {
+                world.resource_mut::<crate::shop::ShopState>().open = open
+            }),
+            (ModalId::Supporter, |world, open| {
+                world
+                    .resource_mut::<crate::supporter::SupporterUiState>()
+                    .open = open
+            }),
+            (ModalId::Scoreboard, |world, open| {
+                world
+                    .resource_mut::<crate::edge_hud::ScoreboardState>()
+                    .open = open
+            }),
+            (ModalId::ServerEntry, |world, open| {
+                world.resource_mut::<crate::mobile_ui::ServerEntry>().open = open
+            }),
+        ];
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .insert_resource(GameStateSnapshot {
+                state: GameState::Running,
+                ..default()
+            })
+            .init_resource::<PauseMenuState>()
+            .init_resource::<crate::career::CareerClient>()
+            .init_resource::<crate::shop::ShopState>()
+            .init_resource::<crate::supporter::SupporterUiState>()
+            .init_resource::<crate::edge_hud::ScoreboardState>()
+            .init_resource::<crate::mobile_ui::ServerEntry>()
+            .add_plugins(InputContextPlugin);
+        app.update();
+        assert!(
+            app.world()
+                .resource::<GameplayInputContext>()
+                .gameplay_allowed()
+        );
+        for (id, toggle) in modals {
+            toggle(app.world_mut(), true);
+            app.update();
+            assert_eq!(app.world().resource::<ModalStack>().top(), Some(id));
+            let context = app.world().resource::<GameplayInputContext>();
+            assert!(!context.gameplay_allowed(), "{id:?}");
+            assert!(!context.camera_allowed(), "{id:?}");
+            toggle(app.world_mut(), false);
+            app.update();
+            assert!(!app.world().resource::<ModalStack>().is_open());
+            assert!(
+                app.world()
+                    .resource::<GameplayInputContext>()
+                    .gameplay_allowed(),
+                "{id:?}"
+            );
+        }
+    }
 
     #[test]
     fn same_frame_modal_toggle_blocks_actions_and_debug_flight_requires_opt_in() {
