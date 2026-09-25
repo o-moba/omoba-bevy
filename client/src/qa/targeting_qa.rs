@@ -254,25 +254,22 @@ fn admission(
     session: Res<ClientSession>,
     selection: Res<TeamSelection>,
     help: Res<HelpOverlayVisible>,
-    mut buttons: Query<(&Name, &mut Interaction), With<Button>>,
+    mut buttons: crate::qa::NamedPresses,
 ) {
     if qa.stage != 0 {
         return;
     }
-    for (name, mut interaction) in &mut buttons {
-        let press = (session.is_connected()
+    buttons.press_where(|name| {
+        (session.is_connected()
             && !session.join_confirmed()
-            && name.as_str()
+            && name
                 == if selection.hero_class == shared::HeroClass::Mage {
                     "TeamGreenButton"
                 } else {
                     "ClassButton-mage"
                 })
-            || (session.join_confirmed() && help.0 && name.as_str() == "HelpDismissButton");
-        if press {
-            *interaction = Interaction::Pressed;
-        }
-    }
+            || (session.join_confirmed() && help.0 && name == "HelpDismissButton")
+    });
 }
 
 fn observe_commands(

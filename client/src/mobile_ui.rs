@@ -9,7 +9,7 @@ use bevy::{
 use crate::{
     mobile_controls::{MobileControls, MobileControlsSet},
     net::{ClientSession, SessionUiCommand},
-    ui_theme as ui,
+    ui::theme as ui,
 };
 
 pub(crate) struct MobileUiPlugin;
@@ -107,7 +107,7 @@ fn setup_phone_ui(mut commands: Commands) {
             },
             // Above the front-end screens: on a phone this bar is the only way
             // to settings and to the server address (there is no Escape key).
-            ZIndex(crate::frontend::widgets::SCREEN_Z + 10),
+            ZIndex(crate::ui::theme::SCREEN_Z + 10),
             PhoneBar,
             Name::new("PhoneMenuBar"),
         ))

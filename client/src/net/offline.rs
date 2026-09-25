@@ -815,8 +815,8 @@ pub(super) fn setup_banner(mut commands: Commands) {
             font_size: 13.0,
             ..default()
         },
-        TextColor(crate::ui_theme::GOLD),
-        BackgroundColor(crate::ui_theme::PANEL),
+        TextColor(crate::ui::theme::GOLD),
+        BackgroundColor(crate::ui::theme::PANEL),
         Node {
             position_type: PositionType::Absolute,
             top: Val::Px(68.0),

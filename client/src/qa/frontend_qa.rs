@@ -150,7 +150,7 @@ struct Shot(usize);
 fn prepare_help_buttons(
     qa: Res<FrontendQa>,
     help: Res<crate::help_overlay::HelpOverlayVisible>,
-    mut buttons: Query<(&Name, &mut Interaction), With<Button>>,
+    mut buttons: crate::qa::NamedPresses,
 ) {
     if qa.finished || qa.applied_stage != Some(qa.stage) {
         return;
@@ -160,11 +160,7 @@ fn prepare_help_buttons(
         12 if help.0 => "HelpDismissButton",
         _ => return,
     };
-    for (name, mut interaction) in &mut buttons {
-        if name.as_str() == wanted {
-            *interaction = Interaction::Pressed;
-        }
-    }
+    buttons.press(wanted);
 }
 
 fn watermark(mut commands: Commands) {

@@ -8,7 +8,7 @@ use crate::{
         NetworkNeutralId, NetworkPlayerId, NetworkStructureId, TargetKind,
     },
     player::Player,
-    ui_theme as ui,
+    ui::theme as ui,
 };
 use bevy::{
     input::{

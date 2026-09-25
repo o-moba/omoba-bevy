@@ -843,7 +843,7 @@ pub(crate) fn setup_targeting_ui(mut commands: Commands) {
                 display: Display::None,
                 ..default()
             },
-            BorderColor::all(crate::ui_theme::GOLD),
+            BorderColor::all(crate::ui::theme::GOLD),
             BackgroundColor(Color::srgba(1.0, 0.8, 0.1, 0.06)),
             ZIndex(32),
             FocusPolicy::Pass,
@@ -858,7 +858,7 @@ pub(crate) fn setup_targeting_ui(mut commands: Commands) {
                     ..default()
                 },
                 TextColor(Color::srgb(0.06, 0.05, 0.01)),
-                BackgroundColor(crate::ui_theme::GOLD),
+                BackgroundColor(crate::ui::theme::GOLD),
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px(-3.0),
@@ -899,7 +899,7 @@ pub(crate) fn setup_targeting_ui(mut commands: Commands) {
                     font_size: 12.0,
                     ..default()
                 },
-                TextColor(crate::ui_theme::IVORY),
+                TextColor(crate::ui::theme::IVORY),
             ));
         }
     }

@@ -21,6 +21,7 @@ use crate::{
     },
     sprite::{PlayerSpriteVisual, PlayerVisualMode},
     team::{AvatarThumbnails, CharacterChoice},
+    ui::{Activated, UiActionAppExt, theme},
     verdant3d::{VerdantEnvironment, VerdantFoliage, VerdantStructureVisual},
     world::AvatarAssetCache,
     world2d::World2dStatic,
@@ -40,35 +41,39 @@ pub fn tip_for(index: usize) -> &'static str {
 pub struct LoadingScreenPlugin;
 impl Plugin for LoadingScreenPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (loading_actions, assess_readiness)
-                .chain()
-                .in_set(DraftSet::Input)
-                .run_if(in_state(AppScreen::Loading)),
-        )
-        .add_systems(
-            Update,
-            render_loading
-                .in_set(DraftSet::Draw)
-                .run_if(in_state(AppScreen::Loading)),
-        );
+        app.add_ui_action::<LoadingAction>()
+            .add_systems(
+                Update,
+                (loading_actions, assess_readiness)
+                    .chain()
+                    .in_set(DraftSet::Input)
+                    .run_if(in_state(AppScreen::Loading)),
+            )
+            .add_systems(
+                Update,
+                render_loading
+                    .in_set(DraftSet::Draw)
+                    .run_if(in_state(AppScreen::Loading)),
+            );
     }
 }
 
 #[derive(Component)]
 struct LoadingRoot;
-#[derive(Component)]
-struct LoadingCancel;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LoadingAction {
+    Cancel,
+}
 
+/// Runs in `DraftSet::Input`, after `UiSet::Dispatch`.
 fn loading_actions(
-    buttons: Query<&Interaction, (Changed<Interaction>, With<LoadingCancel>)>,
+    mut activated: MessageReader<Activated<LoadingAction>>,
     mut state: ResMut<DraftClient>,
     mut session: MessageWriter<SessionUiCommand>,
 ) {
-    if buttons
-        .iter()
-        .any(|interaction| *interaction == Interaction::Pressed)
+    if activated
+        .read()
+        .any(|pressed| pressed.action == LoadingAction::Cancel)
     {
         state.reset();
         session.write(SessionUiCommand::LeaveMatch);
@@ -364,8 +369,8 @@ fn render_loading(
                 row_gap: Val::Px(10.0),
                 ..default()
             },
-            BackgroundColor(widgets::BACKDROP),
-            ZIndex(widgets::SCREEN_Z),
+            BackgroundColor(theme::BACKDROP),
+            ZIndex(theme::SCREEN_Z),
             DespawnOnExit(AppScreen::Loading),
             LoadingRoot,
             Name::new("LoadingScreen"),
@@ -397,7 +402,7 @@ fn render_loading(
                                     "The match starts when every player is ready"
                                 },
                                 12.0,
-                                widgets::MUTED,
+                                theme::MUTED,
                             ),
                             Name::new("LoadingPhaseSubtitle"),
                         ));
@@ -405,7 +410,7 @@ fn render_loading(
                 draft::action_button(
                     header,
                     "Cancel",
-                    LoadingCancel,
+                    LoadingAction::Cancel,
                     "LoadingCancel",
                     86.0,
                     false,
@@ -446,7 +451,7 @@ fn render_loading(
                                         "OPPONENTS"
                                     },
                                     12.0,
-                                    widgets::GOLD,
+                                    theme::GOLD,
                                 ));
                                 let id = index as u8 + 2;
                                 column
@@ -494,7 +499,7 @@ fn render_loading(
                             }
                         ),
                         14.0,
-                        widgets::GOLD,
+                        theme::GOLD,
                     ),
                     Name::new("LoadingReadyCount"),
                 ));
@@ -506,7 +511,7 @@ fn render_loading(
                             &state.local_assets
                         },
                         12.0,
-                        widgets::IVORY,
+                        theme::IVORY,
                     ),
                     Name::new("LoadingAssetStatus"),
                 ));
@@ -524,12 +529,12 @@ fn render_loading(
                     body.spawn(widgets::label(
                         "Connecting to the battlefield…",
                         18.0,
-                        widgets::GOLD,
+                        theme::GOLD,
                     ));
                 });
             }
             root.spawn((
-                widgets::label(tip_for(game.meta.match_id as usize), 12.0, widgets::MUTED),
+                widgets::label(tip_for(game.meta.match_id as usize), 12.0, theme::MUTED),
                 Name::new("LoadingTip"),
             ));
         });
@@ -596,5 +601,42 @@ mod tests {
             &meshes,
             &materials
         ));
+    }
+
+    #[test]
+    fn cancel_leaves_once_and_a_disabled_cancel_does_nothing() {
+        use crate::ui::test_id::harness;
+        let mut app = harness::kit_app();
+        app.init_resource::<DraftClient>()
+            .add_message::<SessionUiCommand>()
+            .add_ui_action::<LoadingAction>()
+            .add_systems(Update, loading_actions.after(crate::ui::UiSet::Dispatch));
+        harness::spawn_ui(app.world_mut(), |header| {
+            draft::action_button(
+                header,
+                "Cancel",
+                LoadingAction::Cancel,
+                "LoadingCancel",
+                86.0,
+                false,
+                false,
+            );
+        });
+        app.update();
+        let leaves = |app: &mut App| {
+            app.world_mut()
+                .resource_mut::<Messages<SessionUiCommand>>()
+                .drain()
+                .count()
+        };
+        harness::press(app.world_mut(), "LoadingCancel");
+        app.update();
+        assert_eq!(leaves(&mut app), 1);
+        app.update();
+        assert_eq!(leaves(&mut app), 0);
+        harness::set_disabled(app.world_mut(), "LoadingCancel", true);
+        harness::press(app.world_mut(), "LoadingCancel");
+        app.update();
+        assert_eq!(leaves(&mut app), 0);
     }
 }

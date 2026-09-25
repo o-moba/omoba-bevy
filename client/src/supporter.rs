@@ -7,7 +7,7 @@ use crate::{
     net::{NetworkCommand, RemotePlayer},
     player::Player,
     sprite::PlayerVisualMode,
-    ui_theme as ui,
+    ui::{Activated, Pressable, TestId, UiAction, UiActionAppExt, UiSet, theme as ui},
 };
 use bevy::{
     asset::RenderAssetUsages,
@@ -92,7 +92,9 @@ struct SupporterRoot;
 struct SupporterScroll;
 #[derive(Component)]
 struct PreviewImage;
-#[derive(Component, Clone, Copy)]
+/// Supporter panel presses. The buttons keep their flat look (no hover
+/// colour, as before): they carry `UiAction<Action>` but no `ButtonStyle`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Action {
     Close,
     Select(AuraStyle),
@@ -255,12 +257,14 @@ impl Plugin for SupporterPlugin {
             .init_resource::<SupporterPlatformState>()
             .init_resource::<AuraRegistry>()
             .add_message::<SupporterPlatformAction>()
+            .add_ui_action::<Action>()
             .add_systems(Startup, setup)
             .add_systems(
                 Update,
                 (actions, keyboard_close)
                     .chain()
                     .in_set(InputContextSet::Modal)
+                    .after(UiSet::Dispatch)
                     .before(crate::pause_menu::toggle_pause_menu),
             )
             .add_systems(
@@ -681,7 +685,7 @@ fn keyboard_close(mut keys: ResMut<ButtonInput<KeyCode>>, mut state: ResMut<Supp
     }
 }
 fn actions(
-    mut interactions: Query<(&Interaction, &Action), Changed<Interaction>>,
+    mut activated: MessageReader<Activated<Action>>,
     mut state: ResMut<SupporterUiState>,
     mut career: ResMut<CareerClient>,
     platform: Res<SupporterPlatformState>,
@@ -689,10 +693,7 @@ fn actions(
     mut requests: MessageWriter<NetworkCommand>,
     mut sequence: Local<u64>,
 ) {
-    for (interaction, action) in &mut interactions {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
+    for Activated { action, .. } in activated.read() {
         *sequence = sequence.saturating_add(1);
         let id = 0x5000_0000_0000_0000u64.saturating_add(*sequence);
         match action {
@@ -896,26 +897,46 @@ fn scroll_panel(
 }
 
 fn button(parent: &mut ChildSpawnerCommands, label: String, action: Action, enabled: bool) {
-    let mut button = parent.spawn((
-        Button,
-        Node {
-            min_height: Val::Px(38.),
-            padding: UiRect::axes(Val::Px(12.), Val::Px(7.)),
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
-            border_radius: BorderRadius::all(Val::Px(6.)),
-            ..default()
-        },
-        BackgroundColor(if enabled { ui::TILE } else { ui::PANEL }),
-    ));
-    if enabled {
-        button.insert(action);
+    parent
+        .spawn((
+            Button,
+            Node {
+                min_height: Val::Px(38.),
+                padding: UiRect::axes(Val::Px(12.), Val::Px(7.)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                border_radius: BorderRadius::all(Val::Px(6.)),
+                ..default()
+            },
+            BackgroundColor(if enabled { ui::TILE } else { ui::PANEL }),
+            UiAction(action),
+            // A disabled button is never hit or pressed (it used to carry no
+            // action at all).
+            Pressable {
+                disabled: !enabled,
+                ..default()
+            },
+            TestId::new(action.test_id()),
+        ))
+        .with_child((
+            Text::new(label),
+            ui::text(13.),
+            TextColor(if enabled { ui::IVORY } else { ui::MUTED }),
+        ));
+}
+
+impl Action {
+    fn test_id(self) -> String {
+        match self {
+            Self::Close => "SupporterClose".into(),
+            Self::Select(style) => format!("SupporterAura-{}", style.id()),
+            Self::Equip => "SupporterEquip".into(),
+            Self::Disable => "SupporterDisable".into(),
+            Self::Refresh => "SupporterRefresh".into(),
+            Self::Purchase => "SupporterPurchase".into(),
+            Self::Restore => "SupporterRestore".into(),
+        }
     }
-    button.with_child((
-        Text::new(label),
-        ui::text(13.),
-        TextColor(if enabled { ui::IVORY } else { ui::MUTED }),
-    ));
 }
 
 #[cfg(test)]
@@ -1241,5 +1262,45 @@ mod tests {
             app.world().get::<CombatStats>(actor).unwrap().hp,
             CombatStats::default().hp
         );
+    }
+
+    #[test]
+    fn supporter_presses_apply_once_and_disabled_buttons_do_nothing() {
+        use crate::ui::test_id::harness;
+        let mut app = harness::kit_app();
+        app.init_resource::<SupporterUiState>()
+            .init_resource::<SupporterPlatformState>()
+            .init_resource::<CareerClient>()
+            .add_message::<SupporterPlatformAction>()
+            .add_message::<NetworkCommand>()
+            .add_ui_action::<Action>()
+            .add_systems(Update, actions.after(UiSet::Dispatch));
+        harness::spawn_ui(app.world_mut(), |row| {
+            button(row, "Refresh".into(), Action::Refresh, true);
+            button(row, "Hide my aura".into(), Action::Disable, false);
+            button(row, "Close".into(), Action::Close, true);
+        });
+        app.world_mut().resource_mut::<SupporterUiState>().open = true;
+        app.update();
+        let requests = |app: &mut App| {
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .count()
+        };
+        harness::press(app.world_mut(), "SupporterRefresh");
+        app.update();
+        assert_eq!(requests(&mut app), 1);
+        app.update();
+        assert_eq!(requests(&mut app), 0, "a press fires once");
+        harness::drain_actions::<Action>(app.world_mut());
+        // Rendered disabled (inactive membership): never pressed.
+        harness::press(app.world_mut(), "SupporterDisable");
+        app.update();
+        assert_eq!(requests(&mut app), 0);
+        assert!(harness::drain_actions::<Action>(app.world_mut()).is_empty());
+        harness::press(app.world_mut(), "SupporterClose");
+        app.update();
+        assert!(!app.world().resource::<SupporterUiState>().open);
     }
 }

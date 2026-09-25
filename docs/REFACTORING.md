@@ -74,7 +74,7 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
 | 12 | Data-driven hero and item catalogs with validation tests | done: 12a-12e; 12f (optional client cross-checks) open | #38 |
 | 13 | Roster/asset loading and SDK types out of the shared model | done: 13a-13e (with O5 load validation and the O30 working-directory slice); 13f (server-owned registry) optional | #48 (shared without I/O) |
 | 15 | Client session events and staged snapshot application | done: 15a+15b1 (#39), 15b2+15c+15d (#41), 15e (#43); 15f/15g optional | #39, #41, #43 |
-| 9b | UI kit follow-ups: scroll unification, modal registry, frontend/social/supporter/sandbox screens, responsive layout, `TestId` in QA | pending (order in [ui-kit.md](ui-kit.md)) | |
+| 9b | UI kit follow-ups: scroll unification, modal registry, frontend/social/supporter/sandbox screens, responsive layout, `TestId` in QA | in progress: screens + career/social/supporter/sandbox actions (this PR); scroll, modal registry, layout, `TestId` in QA, colours open (order in [ui-kit.md](ui-kit.md)) | this PR |
 
 Suggested order after 7: 14 (done), 10 (done), 15, 11, 12, 13, 9b (server first while
 its structure is fresh, then the client). Each row is one to four PRs.
@@ -197,3 +197,9 @@ O2 (CI as a required gate): the maintainer approved it on 2026-09-25. Rules 2 an
 
 ### 9b: UI kit follow-ups
 - Order and details in [ui-kit.md](ui-kit.md).
+- Items 3 and 4 (this PR): front-end screens, hero select (the new handler
+  calls `team::lock_in`), career, social, supporter, the Combat Test panel
+  and the help overlay on `UiAction`/`Activated<T>`; `MenuButton`,
+  `frontend::widgets::{button, tile, compact_tile}` and the `ui_theme` and
+  `frontend::widgets` palette shims removed. Progress note:
+  [progress/2026-09-25-ui-screens.md](progress/2026-09-25-ui-screens.md).

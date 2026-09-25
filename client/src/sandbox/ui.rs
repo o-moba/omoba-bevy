@@ -1,7 +1,12 @@
 #[cfg(feature = "qa")]
 mod qa;
 use super::*;
-use crate::frontend::widgets::{self as w, ButtonKind};
+use crate::frontend::widgets as w;
+use crate::ui::{
+    Activated, TestId, UiAction, UiActionAppExt, UiSet,
+    theme::{self, ButtonKind},
+    widgets::ButtonStyle,
+};
 use bevy::{
     input::{
         keyboard::{Key, KeyboardInput},
@@ -234,7 +239,8 @@ impl Toggle {
         }
     }
 }
-#[derive(Component, Clone, Debug)]
+/// Combat Test panel presses: every panel button carries `UiAction<Action>`.
+#[derive(Clone, Debug)]
 enum Action {
     Tab(Tab),
     Close,
@@ -259,6 +265,48 @@ enum Action {
     LoadNamed,
     Actor(SandboxActor),
 }
+impl Action {
+    /// Identifier of the control, `CombatTest…`, for QA node dumps and tests.
+    fn test_id(&self) -> String {
+        let debug_head = |value: &dyn std::fmt::Debug| {
+            let text = format!("{value:?}");
+            text.split([' ', '{', '('])
+                .next()
+                .unwrap_or_default()
+                .to_owned()
+        };
+        match self {
+            Self::Tab(tab) => format!("CombatTestTab-{}", tab.label()),
+            Self::Close => "CombatTestClose".into(),
+            Self::Toggle(toggle) => format!("CombatTestToggle-{toggle:?}"),
+            Self::Edit(field) => format!("CombatTestEdit-{field:?}"),
+            Self::Step(field, delta) => format!(
+                "CombatTestStep-{field:?}{}",
+                if *delta < 0.0 { "-Down" } else { "-Up" }
+            ),
+            Self::Hero(hero) => format!("CombatTestHero-{}", hero.id()),
+            Self::Avatar(slug) => format!("CombatTestAvatar-{slug}"),
+            Self::Stage(level) => format!("CombatTestStage-{level}"),
+            Self::Xp(amount) => format!("CombatTestXp{amount:+}"),
+            Self::Command(SandboxCommand::ForceCast { slot, .. }) => {
+                format!("CombatTestCast-{slot}")
+            }
+            Self::Command(command) => format!("CombatTestCommand-{}", debug_head(command)),
+            Self::Behavior(mode) => format!("CombatTestBehavior-{mode:?}"),
+            Self::Speed(speed) => format!("CombatTestSpeed-{speed}"),
+            Self::Item(item) => format!("CombatTestItem-{item:?}"),
+            Self::ClearItems => "CombatTestClearItems".into(),
+            Self::Teleport => "CombatTestTeleport".into(),
+            Self::Preview(kind) => format!("CombatTestPreview-{kind:?}"),
+            Self::StopPreview => "CombatTestStopPreview".into(),
+            Self::Repeat => "CombatTestRepeat".into(),
+            Self::Save => "CombatTestSave".into(),
+            Self::Load(name) => format!("CombatTestLoad-{name}"),
+            Self::LoadNamed => "CombatTestLoadNamed".into(),
+            Self::Actor(actor) => format!("CombatTestActor-{actor:?}"),
+        }
+    }
+}
 #[derive(Component)]
 enum Label {
     Field(Field),
@@ -278,23 +326,25 @@ struct Overlay;
 pub(super) fn install(app: &mut App) {
     #[cfg(feature = "qa")]
     qa::install(app);
-    app.add_systems(
-        Update,
-        (
-            keys,
-            actions,
-            edit_keys,
-            teleport,
-            build_panel,
-            refresh_labels,
-            scroll,
-            overlay,
+    app.add_ui_action::<Action>()
+        .add_systems(
+            Update,
+            (
+                keys,
+                actions,
+                edit_keys,
+                teleport,
+                build_panel,
+                refresh_labels,
+                scroll,
+                overlay,
+            )
+                .chain()
+                .in_set(crate::input_context::InputContextSet::Modal)
+                .after(UiSet::Dispatch)
+                .before(crate::pause_menu::toggle_pause_menu),
         )
-            .chain()
-            .in_set(crate::input_context::InputContextSet::Modal)
-            .before(crate::pause_menu::toggle_pause_menu),
-    )
-    .add_systems(PostUpdate, draw_geometry);
+        .add_systems(PostUpdate, draw_geometry);
 }
 fn row() -> Node {
     Node {
@@ -318,16 +368,17 @@ fn button(parent: &mut ChildSpawnerCommands, label: impl Into<String>, action: A
                 border_radius: BorderRadius::all(Val::Px(5.0)),
                 ..default()
             },
-            BackgroundColor(w::TILE),
-            w::MenuButton::new(ButtonKind::Secondary),
-            action,
+            BackgroundColor(theme::TILE),
+            ButtonStyle::new(ButtonKind::Secondary),
+            TestId::new(action.test_id()),
+            UiAction(action),
         ))
-        .with_child(w::label(&label.into(), 13.0, w::IVORY));
+        .with_child(w::label(&label.into(), 13.0, theme::IVORY));
 }
 fn number(parent: &mut ChildSpawnerCommands, field: Field, s: &SandboxClient) {
     parent.spawn(row()).with_children(|r| {
         r.spawn((
-            w::label(&field.label(), 13.0, w::MUTED),
+            w::label(&field.label(), 13.0, theme::MUTED),
             Node {
                 width: Val::Px(180.0),
                 ..default()
@@ -343,11 +394,13 @@ fn number(parent: &mut ChildSpawnerCommands, field: Field, s: &SandboxClient) {
                 align_items: AlignItems::Center,
                 ..default()
             },
-            BackgroundColor(w::TILE),
-            Action::Edit(field),
+            // The value field keeps its flat look: no ButtonStyle.
+            BackgroundColor(theme::TILE),
+            TestId::new(Action::Edit(field).test_id()),
+            UiAction(Action::Edit(field)),
         ))
         .with_child((
-            w::label(&field.value(s), 14.0, w::IVORY),
+            w::label(&field.value(s), 14.0, theme::IVORY),
             Label::Field(field),
         ));
         button(r, "+", Action::Step(field, field.step()));
@@ -358,18 +411,24 @@ fn toggle(parent: &mut ChildSpawnerCommands, t: Toggle, s: &SandboxClient) {
     node.min_height = Val::Px(32.0);
     node.padding = UiRect::axes(Val::Px(9.0), Val::Px(6.0));
     parent
-        .spawn((Button, node, BackgroundColor(w::TILE), Action::Toggle(t)))
+        .spawn((
+            Button,
+            node,
+            BackgroundColor(theme::TILE),
+            TestId::new(Action::Toggle(t).test_id()),
+            UiAction(Action::Toggle(t)),
+        ))
         .with_child((
             w::label(
                 &format!("{}: {}", t.label(), if t.value(s) { "ON" } else { "OFF" }),
                 14.0,
-                w::IVORY,
+                theme::IVORY,
             ),
             Label::Toggle(t),
         ));
 }
 fn heading(parent: &mut ChildSpawnerCommands, text: &str) {
-    parent.spawn(w::label(text, 16.0, w::GOLD));
+    parent.spawn(w::label(text, 16.0, theme::GOLD));
 }
 fn build_panel(
     mut commands: Commands,
@@ -387,14 +446,14 @@ fn build_panel(
     if !state.open {
         return;
     }
-    commands.spawn((Node{position_type:PositionType::Absolute,right:Val::Px(14.0),top:Val::Px(60.0),bottom:Val::Px(16.0),width:Val::Px(460.0),max_width:Val::Percent(95.0),flex_direction:FlexDirection::Column,padding:UiRect::all(Val::Px(14.0)),row_gap:Val::Px(10.0),border:UiRect::all(Val::Px(1.0)),border_radius:BorderRadius::all(Val::Px(10.0)),..default()},Root,Name::new("CombatTestPanel"),BackgroundColor(w::PANEL),BorderColor::all(w::GOLD),GlobalZIndex(120))).with_children(|p|{
+    commands.spawn((Node{position_type:PositionType::Absolute,right:Val::Px(14.0),top:Val::Px(60.0),bottom:Val::Px(16.0),width:Val::Px(460.0),max_width:Val::Percent(95.0),flex_direction:FlexDirection::Column,padding:UiRect::all(Val::Px(14.0)),row_gap:Val::Px(10.0),border:UiRect::all(Val::Px(1.0)),border_radius:BorderRadius::all(Val::Px(10.0)),..default()},Root,Name::new("CombatTestPanel"),BackgroundColor(theme::PANEL_OPAQUE),BorderColor::all(theme::GOLD),GlobalZIndex(120))).with_children(|p|{
         p.spawn(row()).with_children(|r|{heading(r,"COMBAT TEST");button(r,"Close [F6]",Action::Close);});
-        p.spawn((w::label(&state.status,12.0,w::MUTED),Label::Status));
+        p.spawn((w::label(&state.status,12.0,theme::MUTED),Label::Status));
         p.spawn(row()).with_children(|r|{for t in Tab::ALL{button(r,t.label(),Action::Tab(t));}});
         p.spawn((Node{flex_direction:FlexDirection::Column,flex_grow:1.0,min_height:Val::Px(0.0),overflow:Overflow::scroll_y(),row_gap:Val::Px(9.0),padding:UiRect::right(Val::Px(6.0)),..default()},Body,Name::new("CombatTestBody"),ScrollPosition::default())).with_children(|p|match state.tab{
             Tab::Player|Tab::Enemy=>{
                 if state.tab==Tab::Enemy{toggle(p,Toggle::Enemy,&state);}
-                heading(p,"Hero and progression");p.spawn((w::label("",13.0,w::IVORY),Label::Actor));
+                heading(p,"Hero and progression");p.spawn((w::label("",13.0,theme::IVORY),Label::Actor));
                 p.spawn(row()).with_children(|r|for hero in shared::HeroClass::ALL{button(r,hero.display_name(),Action::Hero(hero));});
                 p.spawn(row()).with_children(|r|for(level,label)in [(1,"Early"),(5,"Mid"),(10,"Late")]{button(r,label,Action::Stage(level));});
                 number(p,Field::Level,&state);
@@ -416,37 +475,37 @@ fn build_panel(
                 heading(p,"Training target");for t in [Toggle::Dummy,Toggle::DummyInfinite,Toggle::DummyMoving]{toggle(p,t,&state);}
                 for f in [Field::DummyHp,Field::DummyArmor,Field::DummyResistance]{number(p,f,&state);}
                 button(p,"Move dummy: pick point",Action::Teleport);button(p,"Reset damage measurements",Action::Command(SandboxCommand::ResetAnalytics));
-                p.spawn(w::label("Infinite HP records full mitigated hits. Finite HP records health actually removed. Armor reduces physical hits; resistance reduces skills.",13.0,w::MUTED));
+                p.spawn(w::label("Infinite HP records full mitigated hits. Finite HP records health actually removed. Armor reduces physical hits; resistance reduces skills.",13.0,theme::MUTED));
             },
             Tab::World=>{
                 heading(p,"Simulation time");p.spawn(row()).with_children(|r|for speed in TIME_SCALES{button(r,format!("{speed}x"),Action::Speed(speed));});
                 toggle(p,Toggle::Pause,&state);button(p,"Step one simulation frame",Action::Command(SandboxCommand::FrameStep));
                 heading(p,"Match environment");toggle(p,Toggle::Minions,&state);toggle(p,Toggle::MinionPause,&state);button(p,"Spawn one wave",Action::Command(SandboxCommand::SpawnWave));
                 toggle(p,Toggle::Overlay,&state);toggle(p,Toggle::Geometry,&state);
-                p.spawn(w::label("Network and menu input keep running while combat is paused. F7 pause/resume · F9 frame step.",13.0,w::MUTED));
+                p.spawn(w::label("Network and menu input keep running while combat is paused. F7 pause/resume · F9 frame step.",13.0,theme::MUTED));
             },
             Tab::Animation=>{
                 heading(p,"Inspect model motion");p.spawn(row()).with_children(|r|{button(r,"Your hero",Action::Actor(SandboxActor::Player));button(r,"Enemy",Action::Actor(SandboxActor::Enemy));});
-                p.spawn((w::label("Waiting for loaded animation graph…",13.0,w::MUTED),Label::Animations));
+                p.spawn((w::label("Waiting for loaded animation graph…",13.0,theme::MUTED),Label::Animations));
                 p.spawn(row()).with_children(|r|for(kind,label)in [(PreviewKind::Idle,"Idle"),(PreviewKind::Run,"Run"),(PreviewKind::Walk,"Walk"),(PreviewKind::Attack,"Attack"),(PreviewKind::Cast,"Skill"),(PreviewKind::Hit,"Hit"),(PreviewKind::Death,"Death")]{button(r,label,Action::Preview(kind));});
                 button(p,"Resume combat animation",Action::StopPreview);button(p,"Repeat last action / preview",Action::Repeat);
                 p.spawn(row()).with_children(|r|for speed in TIME_SCALES{button(r,format!("{speed}x"),Action::Speed(speed));});toggle(p,Toggle::Pause,&state);button(p,"Step frame",Action::Command(SandboxCommand::FrameStep));
-                p.spawn(w::label("Preview changes only the selected model's pose; it does not deal damage or kill the hero. Use Cast in Hero/Enemy to repeat a real skill.",13.0,w::MUTED));
+                p.spawn(w::label("Preview changes only the selected model's pose; it does not deal damage or kill the hero. Use Cast in Hero/Enemy to repeat a real skill.",13.0,theme::MUTED));
             },
             Tab::Damage=>{
                 heading(p,"Confirmed damage");p.spawn(row()).with_children(|r|{button(r,"Dummy",Action::Actor(SandboxActor::Dummy));button(r,"Enemy",Action::Actor(SandboxActor::Enemy));button(r,"Your hero",Action::Actor(SandboxActor::Player));});
-                p.spawn((w::label("Deal damage to begin.",14.0,w::IVORY),Label::Analytics));button(p,"Reset meter",Action::Command(SandboxCommand::ResetAnalytics));
-                p.spawn(w::label("DPS = confirmed damage / simulation seconds since reset. Pauses do not dilute DPS. Breakdown filters the selected target; source IDs separate each attacker.",13.0,w::MUTED));
+                p.spawn((w::label("Deal damage to begin.",14.0,theme::IVORY),Label::Analytics));button(p,"Reset meter",Action::Command(SandboxCommand::ResetAnalytics));
+                p.spawn(w::label("DPS = confirmed damage / simulation seconds since reset. Pauses do not dilute DPS. Breakdown filters the selected target; source IDs separate each attacker.",13.0,theme::MUTED));
             },
             Tab::Presets=>{
                 heading(p,"Start from a scenario");for name in presets::BUILTINS{button(p,name,Action::Load(name.into()));}
-                p.spawn(w::label("duel: both level 10 · late-game: max build + waves · dps: infinite target · animation: 0.25x",13.0,w::MUTED));
-                heading(p,"Save your complete test configuration");p.spawn((Button,row(),BackgroundColor(w::TILE),Action::Edit(Field::PresetName))).with_child((w::label(&state.preset_name,14.0,w::IVORY),Label::Field(Field::PresetName)));
+                p.spawn(w::label("duel: both level 10 · late-game: max build + waves · dps: infinite target · animation: 0.25x",13.0,theme::MUTED));
+                heading(p,"Save your complete test configuration");p.spawn((Button,row(),BackgroundColor(theme::TILE),TestId::new(Action::Edit(Field::PresetName).test_id()),UiAction(Action::Edit(Field::PresetName)))).with_child((w::label(&state.preset_name,14.0,theme::IVORY),Label::Field(Field::PresetName)));
                 button(p,"Save named preset",Action::Save);button(p,"Load named preset",Action::LoadNamed);
-                p.spawn(w::label(&format!("Files: {}",presets::directory().display()),12.0,w::MUTED));
+                p.spawn(w::label(&format!("Files: {}",presets::directory().display()),12.0,theme::MUTED));
             }
         });
-        p.spawn(w::label("Click a value to type · Enter applies · Esc cancels · F6 closes",11.0,w::MUTED));
+        p.spawn(w::label("Click a value to type · Enter applies · Esc cancels · F6 closes",11.0,theme::MUTED));
     });
 }
 fn keys(mut keys: ResMut<ButtonInput<KeyCode>>, mut s: ResMut<SandboxClient>) {
@@ -480,12 +539,13 @@ fn actions(
     mut s: ResMut<SandboxClient>,
     game: Res<GameStateSnapshot>,
     mut network: MessageWriter<NetworkCommand>,
-    buttons: Query<(&Interaction, &Action), Changed<Interaction>>,
+    mut activated: MessageReader<Activated<Action>>,
 ) {
     if !s.enabled || !s.open {
+        activated.clear();
         return;
     }
-    for (_, action) in buttons.iter().filter(|(i, _)| **i == Interaction::Pressed) {
+    for Activated { action, .. } in activated.read() {
         match action {
             Action::Tab(t) => {
                 s.tab = *t;
@@ -906,7 +966,7 @@ fn overlay(
                 font_size: 12.0,
                 ..default()
             },
-            TextColor(w::IVORY),
+            TextColor(theme::IVORY),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(14.0),
@@ -916,7 +976,7 @@ fn overlay(
                 border_radius: BorderRadius::all(Val::Px(6.0)),
                 ..default()
             },
-            BackgroundColor(w::PANEL),
+            BackgroundColor(theme::PANEL_OPAQUE),
             GlobalZIndex(90),
             Overlay,
             Name::new("CombatTestTelemetry"),
@@ -1069,5 +1129,55 @@ mod tests {
         assert!(text.contains("DPS 15.00"));
         assert!(text.contains("Last hit on target: 30.0"));
         assert!(!text.contains("500.0"));
+    }
+
+    #[test]
+    fn panel_presses_apply_once_closed_panel_drops_them_and_disabled_do_nothing() {
+        use crate::ui::test_id::harness;
+        let mut app = harness::kit_app();
+        app.insert_resource(SandboxClient {
+            enabled: true,
+            open: true,
+            ..default()
+        })
+        .init_resource::<GameStateSnapshot>()
+        .add_message::<NetworkCommand>()
+        .add_ui_action::<Action>()
+        .add_systems(Update, actions.after(UiSet::Dispatch));
+        harness::spawn_ui(app.world_mut(), |r| {
+            button(r, "Enemy", Action::Tab(Tab::Enemy));
+            button(r, "Close [F6]", Action::Close);
+        });
+        app.update();
+        let tab = harness::find(app.world_mut(), "CombatTestTab-Enemy").unwrap();
+        assert_eq!(
+            app.world().get::<ButtonStyle>(tab).unwrap().kind,
+            ButtonKind::Secondary
+        );
+        harness::press(app.world_mut(), "CombatTestTab-Enemy");
+        app.update();
+        let s = app.world().resource::<SandboxClient>();
+        assert_eq!((s.tab, s.actor), (Tab::Enemy, SandboxActor::Enemy));
+        app.world_mut().resource_mut::<SandboxClient>().rebuild = false;
+        app.update();
+        assert!(
+            !app.world().resource::<SandboxClient>().rebuild,
+            "no repeat"
+        );
+        harness::set_disabled(app.world_mut(), "CombatTestClose", true);
+        harness::press(app.world_mut(), "CombatTestClose");
+        app.update();
+        assert!(app.world().resource::<SandboxClient>().open);
+        // A press while the panel is closed is dropped, not replayed on open.
+        app.world_mut().resource_mut::<SandboxClient>().open = false;
+        harness::set_disabled(app.world_mut(), "CombatTestClose", false);
+        harness::press(app.world_mut(), "CombatTestTab-Enemy");
+        app.update();
+        app.world_mut().resource_mut::<SandboxClient>().open = true;
+        app.update();
+        assert!(!app.world().resource::<SandboxClient>().rebuild);
+        harness::press(app.world_mut(), "CombatTestClose");
+        app.update();
+        assert!(!app.world().resource::<SandboxClient>().open);
     }
 }

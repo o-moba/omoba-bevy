@@ -12,7 +12,10 @@ use crate::{
     reaction_visuals::{self, ReactionVisuals},
     sprite::PlayerVisualMode,
     targeting::BasicAttackState,
-    ui_theme as ui,
+    ui::{
+        Activated, TestId, UiAction, UiActionAppExt, UiSet, theme as ui, theme::ButtonKind,
+        widgets::ButtonStyle,
+    },
 };
 use bevy::{
     input::{
@@ -176,6 +179,18 @@ pub(crate) struct SocialClient {
     last_viewport: Option<Vec2>,
     mute_all: bool,
     muted: HashSet<u64>,
+    /// What this frame's button presses may act on; `None` while social input
+    /// is gated (another modal, no admitted match, window not usable).
+    buttons: Option<ButtonFrame>,
+}
+/// Filled by `input` for `social_actions`, which runs after the kit's
+/// dispatch in the same frame.
+#[derive(Clone, Copy, Debug)]
+struct ButtonFrame {
+    hero: bool,
+    hero_point: Option<Vec2>,
+    viewport: Vec2,
+    scale: f32,
 }
 impl Default for SocialClient {
     fn default() -> Self {
@@ -204,6 +219,7 @@ impl Default for SocialClient {
             last_viewport: None,
             mute_all: false,
             muted: HashSet::new(),
+            buttons: None,
         }
     }
 }
@@ -397,6 +413,14 @@ pub(crate) struct SocialPlugin;
 impl Plugin for SocialPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SocialClient>()
+            .add_ui_action::<SocialAction>()
+            .add_systems(
+                Update,
+                social_actions
+                    .in_set(InputContextSet::Modal)
+                    .after(UiSet::Dispatch)
+                    .before(crate::career::CareerUiSet),
+            )
             .add_systems(
                 Update,
                 input
@@ -450,7 +474,7 @@ pub(crate) fn clear_on_scope_reset(
         social.clear();
     }
 }
-#[derive(Component, Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum SocialAction {
     Chat,
     Wheel,
@@ -520,7 +544,6 @@ fn input(
     time: Res<Time>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mut touches: MessageReader<TouchInput>,
-    buttons: Query<(&Interaction, &SocialAction), (With<Button>, Changed<Interaction>)>,
     ui_hits: Query<
         (
             &ComputedNode,
@@ -537,6 +560,7 @@ fn input(
     }
     social.blocked_frame = false;
     social.opened_frame = false;
+    social.buttons = None;
     social
         .reactions
         .retain(|(_, start)| start.elapsed().as_secs_f32() < REACTION_SECONDS);
@@ -623,54 +647,12 @@ fn input(
             .open(hero_point.unwrap_or(viewport * 0.5), viewport, scale);
         social.blocked_frame = true;
     }
-    for (interaction, action) in &buttons {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
-        match action {
-            SocialAction::Chat => {
-                social.open_chat();
-            }
-            SocialAction::Wheel => {
-                if hero.is_some() {
-                    social.wheel.cancel();
-                    social
-                        .wheel
-                        .open(hero_point.unwrap_or(viewport * 0.5), viewport, scale);
-                    social.blocked_frame = true;
-                }
-            }
-            SocialAction::Close => {
-                if social.wheel.owner.is_none() {
-                    social.close();
-                }
-            }
-            SocialAction::Send => social.send_chat(&mut out),
-            SocialAction::Keyboard => {
-                social.keyboard_requested = !social.keyboard_requested;
-            }
-            SocialAction::FocusComposer => social.keyboard_requested = true,
-            SocialAction::Channel => {
-                social.channel = if social.channel == SocialChannel::Team {
-                    SocialChannel::Match
-                } else {
-                    SocialChannel::Team
-                }
-            }
-            SocialAction::MuteAll => social.mute_all = !social.mute_all,
-            SocialAction::Mute(id) => {
-                if !social.muted.remove(id) {
-                    social.muted.insert(*id);
-                }
-            }
-            SocialAction::Reaction(index) => {
-                if social.wheel.owner.is_none() {
-                    social.send_reaction(*index, &mut out);
-                    social.close();
-                }
-            }
-        }
-    }
+    social.buttons = Some(ButtonFrame {
+        hero: hero.is_some(),
+        hero_point,
+        viewport,
+        scale,
+    });
     if social.wheel.center.is_some() && social.wheel.owner.is_none() {
         for (index, key) in [
             KeyCode::Digit1,
@@ -754,6 +736,65 @@ fn input(
                 request_id: pending.id,
                 command: pending.command.clone(),
             });
+        }
+    }
+}
+/// Applies this frame's social button presses (`UiSet::Dispatch` ran after
+/// `input` filled [`SocialClient::buttons`]). Gated frames drop the presses.
+fn social_actions(
+    mut social: ResMut<SocialClient>,
+    mut activated: MessageReader<Activated<SocialAction>>,
+    mut out: MessageWriter<NetworkCommand>,
+) {
+    let Some(frame) = social.buttons else {
+        activated.clear();
+        return;
+    };
+    for Activated { action, .. } in activated.read() {
+        match action {
+            SocialAction::Chat => {
+                social.open_chat();
+            }
+            SocialAction::Wheel => {
+                if frame.hero {
+                    social.wheel.cancel();
+                    social.wheel.open(
+                        frame.hero_point.unwrap_or(frame.viewport * 0.5),
+                        frame.viewport,
+                        frame.scale,
+                    );
+                    social.blocked_frame = true;
+                }
+            }
+            SocialAction::Close => {
+                if social.wheel.owner.is_none() {
+                    social.close();
+                }
+            }
+            SocialAction::Send => social.send_chat(&mut out),
+            SocialAction::Keyboard => {
+                social.keyboard_requested = !social.keyboard_requested;
+            }
+            SocialAction::FocusComposer => social.keyboard_requested = true,
+            SocialAction::Channel => {
+                social.channel = if social.channel == SocialChannel::Team {
+                    SocialChannel::Match
+                } else {
+                    SocialChannel::Team
+                }
+            }
+            SocialAction::MuteAll => social.mute_all = !social.mute_all,
+            SocialAction::Mute(id) => {
+                if !social.muted.remove(id) {
+                    social.muted.insert(*id);
+                }
+            }
+            SocialAction::Reaction(index) => {
+                if social.wheel.owner.is_none() {
+                    social.send_reaction(*index, &mut out);
+                    social.close();
+                }
+            }
         }
     }
 }
@@ -918,11 +959,9 @@ fn button(parent: &mut ChildSpawnerCommands, title: &str, action: SocialAction, 
             },
             BackgroundColor(ui::TILE),
             BorderColor::all(ui::EDGE),
-            crate::frontend::widgets::MenuButton::new(
-                crate::frontend::widgets::ButtonKind::Secondary,
-            ),
-            action,
-            Name::new(name.to_owned()),
+            ButtonStyle::new(ButtonKind::Secondary),
+            UiAction(action),
+            TestId::new(name.to_owned()),
         ))
         .with_children(|p| {
             if !compact {
@@ -1098,8 +1137,8 @@ fn render_phone_chat(
                             ..default()
                         },
                         BackgroundColor(ui::TILE),
-                        SocialAction::FocusComposer,
-                        Name::new("SocialPhoneComposer"),
+                        UiAction(SocialAction::FocusComposer),
+                        TestId::new("SocialPhoneComposer"),
                     ))
                     .with_children(|p| {
                         p.spawn((
@@ -1493,8 +1532,8 @@ fn render(
                         } else {
                             ui::EDGE
                         }),
-                        SocialAction::Reaction(index),
-                        Name::new(format!("SocialWheelChoice{index}")),
+                        UiAction(SocialAction::Reaction(index)),
+                        TestId::new(format!("SocialWheelChoice{index}")),
                     ))
                     .with_children(|p| {
                         if let Some(image) = assets.as_ref().and_then(|a| a.image(id, &images)) {
@@ -2250,5 +2289,45 @@ mod tests {
         assert!(app.world().get::<MovementTarget>(hero).is_none());
         assert!(app.world().get::<MovementRoute>(hero).is_none());
         assert!(!app.world().resource::<PendingCast>().is_pending());
+    }
+
+    #[test]
+    fn social_presses_apply_once_gated_frames_drop_them_and_disabled_do_nothing() {
+        use crate::ui::test_id::harness;
+        let mut app = harness::kit_app();
+        app.init_resource::<SocialClient>()
+            .add_message::<NetworkCommand>()
+            .add_ui_action::<SocialAction>()
+            .add_systems(Update, social_actions.after(UiSet::Dispatch));
+        harness::spawn_ui(app.world_mut(), |p| {
+            button(p, "Close", SocialAction::Close, "SocialClose");
+            button(p, "Mute all", SocialAction::MuteAll, "SocialMuteAll");
+        });
+        let frame = ButtonFrame {
+            hero: false,
+            hero_point: None,
+            viewport: Vec2::new(1280.0, 720.0),
+            scale: 1.0,
+        };
+        app.world_mut().resource_mut::<SocialClient>().chat_open = true;
+        app.update();
+        // Gated (input left no button frame): the press is dropped for good.
+        harness::press(app.world_mut(), "SocialClose");
+        app.update();
+        app.world_mut().resource_mut::<SocialClient>().buttons = Some(frame);
+        app.update();
+        assert!(app.world().resource::<SocialClient>().chat_open);
+        harness::press(app.world_mut(), "SocialClose");
+        app.update();
+        assert!(!app.world().resource::<SocialClient>().chat_open);
+        harness::press(app.world_mut(), "SocialMuteAll");
+        app.update();
+        assert!(app.world().resource::<SocialClient>().mute_all);
+        app.update();
+        assert!(app.world().resource::<SocialClient>().mute_all, "no repeat");
+        harness::set_disabled(app.world_mut(), "SocialMuteAll", true);
+        harness::press(app.world_mut(), "SocialMuteAll");
+        app.update();
+        assert!(app.world().resource::<SocialClient>().mute_all);
     }
 }

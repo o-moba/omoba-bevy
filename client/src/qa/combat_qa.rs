@@ -170,7 +170,7 @@ fn prepare(
     mut joined: Local<bool>,
     help: Res<HelpOverlayVisible>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
-    mut buttons: Query<(&Name, &mut Interaction), With<Button>>,
+    mut buttons: crate::qa::NamedPresses,
 ) {
     if let Ok(mut window) = windows.single_mut() {
         window.resolution.set_scale_factor_override(Some(1.0));
@@ -197,11 +197,7 @@ fn prepare(
             sprite_character: None,
         });
     }
-    for (name, mut interaction) in &mut buttons {
-        if session.join_confirmed() && help.0 && name.as_str() == "HelpDismissButton" {
-            *interaction = Interaction::Pressed;
-        }
-    }
+    buttons.press_where(|name| session.join_confirmed() && help.0 && name == "HelpDismissButton");
 }
 
 #[derive(SystemParam)]

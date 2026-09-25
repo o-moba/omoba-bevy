@@ -10,8 +10,11 @@ use omoba_passport::avatars::AvatarDefinition;
 use super::AppScreen;
 use super::card::ProfileCard;
 use super::preview::{AvatarPreview, PreviewStatus};
-use super::widgets::{self, ButtonKind, MenuButton};
+use super::widgets;
 use crate::team::{AvatarThumbnails, TeamSelection};
+use crate::ui::theme::{self, ButtonKind};
+use crate::ui::widgets::{ButtonStyle, compact_screen_tile, screen_button, screen_tile};
+use crate::ui::{Activated, TestId, UiAction, UiActionAppExt, UiSet};
 
 pub use crate::passport::AvatarCatalogueSource as AvatarSource;
 
@@ -20,6 +23,7 @@ pub struct CollectionScreenPlugin;
 impl Plugin for CollectionScreenPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CollectionDrag>()
+            .add_ui_action::<CollectionAction>()
             .add_systems(OnEnter(AppScreen::Collection), spawn_collection)
             .add_systems(OnExit(AppScreen::Collection), clear_collection_drag)
             .add_systems(
@@ -33,12 +37,13 @@ impl Plugin for CollectionScreenPlugin {
                     refresh_collection_details,
                 )
                     .chain()
+                    .after(UiSet::Dispatch)
                     .run_if(in_state(AppScreen::Collection)),
             );
     }
 }
 
-#[derive(Component, Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum CollectionAction {
     Back,
     Select(String),
@@ -101,7 +106,7 @@ fn spawn_catalogue_grid(
                 Name::new("CollectionStudioHeading"),
             ));
             grid.spawn((
-                widgets::label(catalogue.status.label(), 12.0, widgets::MUTED),
+                widgets::label(catalogue.status.label(), 12.0, theme::MUTED),
                 Name::new("CollectionStudioStatus"),
             ));
             grid.spawn(Node {
@@ -111,14 +116,14 @@ fn spawn_catalogue_grid(
                 ..default()
             })
             .with_children(|row| {
-                widgets::button(
+                screen_button(
                     row,
                     "Refresh",
                     ButtonKind::Secondary,
                     CollectionAction::Refresh,
                     "CollectionRefresh",
                 );
-                widgets::button(
+                screen_button(
                     row,
                     if crate::passport::account_connected() {
                         "Sign out of Ekza"
@@ -134,7 +139,7 @@ fn spawn_catalogue_grid(
                 widgets::label(
                     &crate::passport::avatar_account_status_line(),
                     11.0,
-                    widgets::MUTED,
+                    theme::MUTED,
                 ),
                 Name::new("CollectionAccountStatus"),
             ));
@@ -164,7 +169,7 @@ fn spawn_catalogue_grid(
     // Preserve existing paid-avatar pairing as an optional action, below the
     // primary account/free library path.
     {
-        widgets::button(
+        screen_button(
             grid,
             "Connect wallet (optional)",
             ButtonKind::Secondary,
@@ -172,7 +177,7 @@ fn spawn_catalogue_grid(
             "CollectionConnectWallet",
         );
         grid.spawn((
-            widgets::label(&crate::passport::wallet_status_line(), 11.0, widgets::MUTED),
+            widgets::label(&crate::passport::wallet_status_line(), 11.0, theme::MUTED),
             Name::new("CollectionWalletStatus"),
         ));
     }
@@ -285,10 +290,10 @@ fn spawn_collection(
                         title.spawn(widgets::label(
                             "Your heroes, your identity · Drag a model to inspect it",
                             13.0,
-                            widgets::MUTED,
+                            theme::MUTED,
                         ));
                     });
-                widgets::button(
+                screen_button(
                     header,
                     "Back",
                     ButtonKind::Secondary,
@@ -319,8 +324,8 @@ fn spawn_collection(
                         overflow: Overflow::scroll_y(),
                         ..default()
                     },
-                    BackgroundColor(widgets::PANEL),
-                    BorderColor::all(widgets::PANEL_EDGE),
+                    BackgroundColor(theme::PANEL_OPAQUE),
+                    BorderColor::all(theme::PANEL_EDGE),
                     CollectionGrid,
                     CatalogueRevision(catalogue.revision),
                     Name::new("CollectionGrid"),
@@ -342,8 +347,8 @@ fn spawn_collection(
                         min_width: Val::Px(0.0),
                         ..default()
                     },
-                    BackgroundColor(widgets::PANEL),
-                    BorderColor::all(widgets::PANEL_EDGE),
+                    BackgroundColor(theme::PANEL_OPAQUE),
+                    BorderColor::all(theme::PANEL_EDGE),
                     Name::new("CollectionPreview"),
                 ))
                 .with_children(|column| {
@@ -360,7 +365,7 @@ fn spawn_collection(
                             border_radius: BorderRadius::all(Val::Px(12.0)),
                             ..default()
                         },
-                        BorderColor::all(widgets::PANEL_EDGE),
+                        BorderColor::all(theme::PANEL_EDGE),
                         PreviewSurface,
                         Name::new("AvatarPreviewSurface"),
                     ));
@@ -400,7 +405,10 @@ fn spawn_avatar_tile(
     phone: bool,
 ) {
     let playable = crate::passport::can_select(avatar);
-    let menu = MenuButton::tile(selected);
+    let style = ButtonStyle {
+        kind: ButtonKind::Tile,
+        selected,
+    };
     grid.spawn((
         Button,
         Node {
@@ -414,10 +422,10 @@ fn spawn_avatar_tile(
             border_radius: BorderRadius::all(Val::Px(10.0)),
             ..default()
         },
-        BackgroundColor(menu.idle_color()),
-        menu,
-        CollectionAction::Select(avatar.slug.clone()),
-        Name::new(format!("CollectionTile-{}", avatar.slug)),
+        BackgroundColor(style.idle_color()),
+        style,
+        UiAction(CollectionAction::Select(avatar.slug.clone())),
+        TestId::new(format!("CollectionTile-{}", avatar.slug)),
     ))
     .with_children(|tile| {
         let mut thumb = tile.spawn((
@@ -427,7 +435,7 @@ fn spawn_avatar_tile(
                 border_radius: BorderRadius::all(Val::Px(8.0)),
                 ..default()
             },
-            BackgroundColor(widgets::PANEL),
+            BackgroundColor(theme::PANEL_OPAQUE),
         ));
         if let Some(image) = thumbnails.0.get(&avatar.slug) {
             thumb.insert(ImageNode::new(image.clone()));
@@ -452,7 +460,7 @@ fn spawn_avatar_tile(
                     portrait.spawn(widgets::heading(&initials, 24.0));
                 });
         }
-        tile.spawn(widgets::label(&avatar.display_name, 12.0, widgets::IVORY));
+        tile.spawn(widgets::label(&avatar.display_name, 12.0, theme::IVORY));
         tile.spawn(widgets::label(
             if playable {
                 source.label()
@@ -460,11 +468,7 @@ fn spawn_avatar_tile(
                 "View only"
             },
             10.5,
-            if playable {
-                widgets::MUTED
-            } else {
-                widgets::GOLD
-            },
+            if playable { theme::MUTED } else { theme::GOLD },
         ));
     });
 }
@@ -475,17 +479,17 @@ fn collection_actions(
     mut selection: ResMut<TeamSelection>,
     mut next: ResMut<NextState<AppScreen>>,
     drag: Res<CollectionDrag>,
-    buttons: Query<(&Interaction, &CollectionAction), Changed<Interaction>>,
-    mut tiles: Query<(&CollectionAction, &mut MenuButton)>,
+    mut activated: MessageReader<Activated<CollectionAction>>,
+    mut tiles: Query<(&UiAction<CollectionAction>, &mut ButtonStyle)>,
 ) {
     if drag.block_actions {
+        // A press made while the preview owns the pointer is dropped, not
+        // replayed later.
+        activated.clear();
         return;
     }
     let mut picked: Option<String> = None;
-    for (interaction, action) in &buttons {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
+    for Activated { action, .. } in activated.read() {
         match action {
             CollectionAction::Back => next.set(AppScreen::Home),
             CollectionAction::Refresh => crate::passport::refresh_avatar_catalogue(),
@@ -520,7 +524,7 @@ fn collection_actions(
         return;
     };
     for (action, mut button) in &mut tiles {
-        if let CollectionAction::Select(slug) = action {
+        if let CollectionAction::Select(slug) = &action.0 {
             let selected = *slug == picked;
             if button.selected != selected {
                 button.selected = selected;
@@ -787,39 +791,39 @@ fn refresh_collection_details(
         commands.entity(row).with_children(|row| {
             match status {
                 PreviewStatus::Empty => {
-                    row.spawn(widgets::label("Pick an avatar", 13.0, widgets::MUTED));
+                    row.spawn(widgets::label("Pick an avatar", 13.0, theme::MUTED));
                 }
                 PreviewStatus::Loading => {
-                    row.spawn(widgets::label("Loading model…", 13.0, widgets::MUTED));
+                    row.spawn(widgets::label("Loading model…", 13.0, theme::MUTED));
                 }
                 PreviewStatus::Unavailable => {
                     row.spawn(widgets::label(
                         "Model unavailable · refresh Studio to retry",
                         13.0,
-                        widgets::GOLD,
+                        theme::GOLD,
                     ));
                 }
                 PreviewStatus::NoAnimations => {
                     row.spawn(widgets::label(
                         "This avatar ships without animation clips",
                         13.0,
-                        widgets::GOLD,
+                        theme::GOLD,
                     ));
                 }
                 PreviewStatus::Ready => {
                     for (index, label) in clips {
-                        widgets::compact_tile(
+                        compact_screen_tile(
                             row,
                             &label,
                             index == selected,
                             CollectionAction::Clip(index),
-                            &format!("AvatarClip-{index}"),
+                            format!("AvatarClip-{index}"),
                             platform.is_mobile(),
                         );
                     }
                 }
             }
-            widgets::compact_tile(
+            compact_screen_tile(
                 row,
                 if spinning { "Stop spin" } else { "Auto spin" },
                 spinning,
@@ -844,9 +848,9 @@ fn refresh_collection_details(
                         definition.author.as_deref().unwrap_or("unknown author")
                     ),
                     12.0,
-                    widgets::MUTED,
+                    theme::MUTED,
                 ));
-                panel.spawn(widgets::label(&definition.license, 11.5, widgets::MUTED));
+                panel.spawn(widgets::label(&definition.license, 11.5, theme::MUTED));
             }
             panel
                 .spawn(Node {
@@ -854,7 +858,7 @@ fn refresh_collection_details(
                     ..default()
                 })
                 .with_children(|row| {
-                    widgets::tile(
+                    screen_tile(
                         row,
                         if is_showcase {
                             "On your card"
@@ -866,7 +870,7 @@ fn refresh_collection_details(
                         "AvatarShowcase",
                     );
                     if playable {
-                        widgets::tile(
+                        screen_tile(
                             row,
                             if is_equipped {
                                 "Selected"
@@ -881,7 +885,7 @@ fn refresh_collection_details(
                         row.spawn(widgets::label(
                             "Not unlocked for matches",
                             12.0,
-                            widgets::GOLD,
+                            theme::GOLD,
                         ));
                     }
                 });
@@ -905,7 +909,13 @@ mod tests {
             .init_resource::<NextState<AppScreen>>()
             .add_message::<MouseMotion>()
             .add_message::<TouchInput>()
-            .add_systems(Update, (drag_to_rotate, collection_actions).chain());
+            .add_ui_action::<CollectionAction>()
+            .add_systems(
+                Update,
+                (drag_to_rotate, collection_actions)
+                    .chain()
+                    .after(UiSet::Dispatch),
+            );
         let window = app
             .world_mut()
             .spawn((Window::default(), PrimaryWindow))
@@ -1010,7 +1020,7 @@ mod tests {
             .resource_mut::<ProfileCard>()
             .showcase_avatar = None;
         app.world_mut()
-            .spawn((CollectionAction::Showcase, Interaction::Pressed));
+            .spawn((UiAction(CollectionAction::Showcase), Interaction::Pressed));
         app.world_mut().write_message(TouchInput {
             window,
             id: 1,
@@ -1053,9 +1063,9 @@ mod tests {
             UiGlobalTransform::from_translation(Vec2::new(300.0, 100.0)),
         ));
         app.world_mut().spawn((
-            CollectionAction::Select("grid-choice".into()),
+            UiAction(CollectionAction::Select("grid-choice".into())),
             Interaction::Pressed,
-            MenuButton::tile(false),
+            ButtonStyle::new(ButtonKind::Tile),
         ));
         touch(
             &mut app,
@@ -1244,5 +1254,69 @@ mod tests {
             !collection_entries().is_empty(),
             "the shipped roster must be visible in the collection"
         );
+    }
+
+    #[test]
+    fn a_tile_press_selects_once_repaints_and_a_disabled_tile_does_nothing() {
+        use crate::ui::test_id::harness;
+        let mut app = harness::kit_app();
+        app.init_resource::<Assets<Image>>()
+            .init_resource::<AvatarPreview>()
+            .init_resource::<CollectionDrag>()
+            .init_resource::<TeamSelection>()
+            .init_resource::<ProfileCard>()
+            .init_resource::<NextState<AppScreen>>()
+            .add_ui_action::<CollectionAction>()
+            .add_systems(Update, collection_actions.after(UiSet::Dispatch));
+        harness::spawn_ui(app.world_mut(), |grid| {
+            for slug in ["first", "second"] {
+                grid.spawn((
+                    Button,
+                    ButtonStyle::new(ButtonKind::Tile),
+                    BackgroundColor(theme::TILE),
+                    UiAction(CollectionAction::Select(slug.into())),
+                    TestId::new(format!("CollectionTile-{slug}")),
+                ));
+            }
+            screen_button(
+                grid,
+                "Back",
+                ButtonKind::Secondary,
+                CollectionAction::Back,
+                "CollectionBack",
+            );
+        });
+        app.update();
+        harness::press(app.world_mut(), "CollectionTile-second");
+        app.update();
+        assert_eq!(
+            harness::drain_actions::<CollectionAction>(app.world_mut()),
+            [CollectionAction::Select("second".into())]
+        );
+        assert_eq!(
+            app.world().resource::<AvatarPreview>().slug.as_deref(),
+            Some("second")
+        );
+        app.update();
+        assert!(harness::drain_actions::<CollectionAction>(app.world_mut()).is_empty());
+        let second = harness::find(app.world_mut(), "CollectionTile-second").unwrap();
+        assert!(app.world().get::<ButtonStyle>(second).unwrap().selected);
+        assert_eq!(
+            app.world().get::<BackgroundColor>(second).unwrap().0,
+            theme::TILE_SELECTED
+        );
+        harness::set_disabled(app.world_mut(), "CollectionTile-first", true);
+        harness::press(app.world_mut(), "CollectionTile-first");
+        harness::set_disabled(app.world_mut(), "CollectionBack", true);
+        harness::press(app.world_mut(), "CollectionBack");
+        app.update();
+        assert_eq!(
+            app.world().resource::<AvatarPreview>().slug.as_deref(),
+            Some("second")
+        );
+        assert!(matches!(
+            *app.world().resource::<NextState<AppScreen>>(),
+            NextState::Unchanged
+        ));
     }
 }

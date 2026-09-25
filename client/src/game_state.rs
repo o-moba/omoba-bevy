@@ -64,8 +64,8 @@ fn setup_game_state_ui(mut commands: Commands) {
                         border_radius: BorderRadius::all(Val::Px(12.0)),
                         ..default()
                     },
-                    BackgroundColor(crate::ui_theme::PANEL),
-                    BorderColor::all(crate::ui_theme::GOLD),
+                    BackgroundColor(crate::ui::theme::PANEL),
+                    BorderColor::all(crate::ui::theme::GOLD),
                     Pickable::IGNORE,
                     Name::new("GameStateCard"),
                 ))

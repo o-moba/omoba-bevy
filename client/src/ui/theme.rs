@@ -1,7 +1,7 @@
 //! One Verdant palette, the packaged fonts and the metrics every overlay shares.
 //!
-//! The old `ui_theme` and `frontend::widgets` constants live here; both keep
-//! `pub use` shims so callers did not have to move in the same change.
+//! Every overlay and front-end screen reads its colours from here; the old
+//! `ui_theme` and `frontend::widgets` re-export shims are gone.
 use bevy::prelude::*;
 
 /// Opaque menu backdrop. The gameplay world keeps rendering underneath, so the
@@ -13,7 +13,6 @@ pub const PANEL: Color = Color::srgba(0.025, 0.060, 0.065, 0.96);
 pub const PANEL_OPAQUE: Color = Color::srgb(0.025, 0.060, 0.065);
 pub const TILE: Color = Color::srgb(0.050, 0.115, 0.125);
 pub const HOVER: Color = Color::srgb(0.085, 0.205, 0.200);
-pub const TILE_HOVER: Color = HOVER;
 pub const EDGE: Color = Color::srgb(0.19, 0.32, 0.30);
 pub const PANEL_EDGE: Color = EDGE;
 pub const TILE_SELECTED: Color = Color::srgb(0.095, 0.27, 0.23);
@@ -27,6 +26,14 @@ pub const MUTED: Color = Color::srgb(0.61, 0.72, 0.70);
 pub const JADE: Color = Color::srgb(0.24, 0.79, 0.58);
 /// Dim scrim behind a modal overlay (the pause menu root).
 pub const SCRIM: Color = Color::srgba(0.0, 0.0, 0.0, 0.7);
+/// Ekza wallet/account connection buttons on hero select.
+pub const LINK: Color = Color::srgb(0.22, 0.30, 0.55);
+pub const LINK_HOVER: Color = Color::srgb(0.30, 0.40, 0.70);
+/// Team-coloured lock-in buttons on hero select.
+pub const TEAM_GREEN: Color = Color::srgba(0.12, 0.40, 0.28, 0.98);
+pub const TEAM_GREEN_HOVER: Color = Color::srgba(0.18, 0.65, 0.28, 0.98);
+pub const TEAM_BLUE: Color = Color::srgba(0.16, 0.28, 0.48, 0.98);
+pub const TEAM_BLUE_HOVER: Color = Color::srgba(0.22, 0.45, 0.85, 0.98);
 
 /// Accent colours a player can put on their profile card.
 pub const ACCENTS: [(&str, Color); 6] = [
@@ -70,6 +77,11 @@ pub enum ButtonKind {
     Tile,
     /// Destructive or "back out" commands.
     Danger,
+    /// External connections (Ekza wallet/account, studio refresh) on hero
+    /// select; the blue the picker always used for them.
+    Link,
+    /// A team's lock-in button, in the team's colour.
+    Team(crate::domain::Team),
 }
 
 /// Background when the pointer is away. Selected tiles keep their colour.
@@ -81,6 +93,9 @@ pub fn button_idle_color(kind: ButtonKind, selected: bool) -> Color {
         ButtonKind::Primary => PRIMARY,
         ButtonKind::Secondary | ButtonKind::Tile => TILE,
         ButtonKind::Danger => DANGER,
+        ButtonKind::Link => LINK,
+        ButtonKind::Team(crate::domain::Team::Green) => TEAM_GREEN,
+        ButtonKind::Team(crate::domain::Team::Blue) => TEAM_BLUE,
     }
 }
 
@@ -93,40 +108,9 @@ pub fn button_hover_color(kind: ButtonKind, selected: bool) -> Color {
         ButtonKind::Primary => PRIMARY_HOVER,
         ButtonKind::Secondary | ButtonKind::Tile => HOVER,
         ButtonKind::Danger => DANGER_HOVER,
-    }
-}
-
-/// Makes a front-end button react to the pointer without every screen
-/// repeating it. Painted by `frontend::widgets`; kit widgets use
-/// [`crate::ui::widgets::ButtonStyle`] instead.
-#[derive(Component, Clone, Copy)]
-pub struct MenuButton {
-    pub kind: ButtonKind,
-    /// Screens set this for grid tiles; selected tiles ignore hover colours.
-    pub selected: bool,
-}
-
-impl MenuButton {
-    pub fn new(kind: ButtonKind) -> Self {
-        Self {
-            kind,
-            selected: false,
-        }
-    }
-
-    pub fn tile(selected: bool) -> Self {
-        Self {
-            kind: ButtonKind::Tile,
-            selected,
-        }
-    }
-
-    pub fn idle_color(&self) -> Color {
-        button_idle_color(self.kind, self.selected)
-    }
-
-    pub fn hover_color(&self) -> Color {
-        button_hover_color(self.kind, self.selected)
+        ButtonKind::Link => LINK_HOVER,
+        ButtonKind::Team(crate::domain::Team::Green) => TEAM_GREEN_HOVER,
+        ButtonKind::Team(crate::domain::Team::Blue) => TEAM_BLUE_HOVER,
     }
 }
 
@@ -239,11 +223,27 @@ mod tests {
 
     #[test]
     fn selected_tiles_keep_their_colour_under_the_pointer() {
-        let tile = MenuButton::tile(true);
-        assert_eq!(tile.idle_color(), TILE_SELECTED);
-        assert_eq!(tile.hover_color(), TILE_SELECTED);
-        let plain = MenuButton::tile(false);
-        assert_ne!(plain.idle_color(), plain.hover_color());
+        assert_eq!(button_idle_color(ButtonKind::Tile, true), TILE_SELECTED);
+        assert_eq!(button_hover_color(ButtonKind::Tile, true), TILE_SELECTED);
+        assert_ne!(
+            button_idle_color(ButtonKind::Tile, false),
+            button_hover_color(ButtonKind::Tile, false)
+        );
+    }
+
+    #[test]
+    fn hero_select_kinds_keep_the_picker_colours() {
+        use crate::domain::Team;
+        assert_eq!(button_idle_color(ButtonKind::Link, false), LINK);
+        assert_eq!(button_hover_color(ButtonKind::Link, false), LINK_HOVER);
+        assert_eq!(
+            button_idle_color(ButtonKind::Team(Team::Green), false),
+            TEAM_GREEN
+        );
+        assert_eq!(
+            button_hover_color(ButtonKind::Team(Team::Blue), false),
+            TEAM_BLUE_HOVER
+        );
     }
 
     #[test]

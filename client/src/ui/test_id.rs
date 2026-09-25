@@ -103,6 +103,60 @@ pub(crate) mod harness {
         world.write_message(super::super::SyntheticPress(entity));
         entity
     }
+
+    /// A bare app with the kit's frame order: recognizer, then the
+    /// dispatchers added with `add_ui_action`, then the painter. Screen tests
+    /// add their action type and handler (`.after(UiSet::Dispatch)`).
+    pub(crate) fn kit_app() -> App {
+        use super::super::{UiSet, gesture, widgets};
+        let mut app = App::new();
+        app.add_message::<super::super::SyntheticPress>()
+            .add_message::<bevy::input::touch::TouchInput>()
+            .configure_sets(
+                Update,
+                (UiSet::Gesture, UiSet::Dispatch, UiSet::Paint).chain(),
+            )
+            .add_systems(
+                Update,
+                (
+                    gesture::recognize_presses.in_set(UiSet::Gesture),
+                    widgets::paint_pressables.in_set(UiSet::Paint),
+                ),
+            );
+        app
+    }
+
+    /// Spawns `children` under a fresh root node and applies the commands.
+    pub(crate) fn spawn_ui(
+        world: &mut World,
+        children: impl FnOnce(&mut ChildSpawnerCommands),
+    ) -> Entity {
+        let root = world
+            .commands()
+            .spawn(Node::default())
+            .with_children(children)
+            .id();
+        world.flush();
+        root
+    }
+
+    /// Marks the button carrying `id` disabled (or enabled again).
+    pub(crate) fn set_disabled(world: &mut World, id: &str, disabled: bool) {
+        let entity = find(world, id).unwrap_or_else(|| panic!("no TestId {id}"));
+        world
+            .get_mut::<super::super::Pressable>(entity)
+            .unwrap_or_else(|| panic!("{id} is not pressable"))
+            .disabled = disabled;
+    }
+
+    /// Every `Activated<T>` action still queued, oldest first; clears them.
+    pub(crate) fn drain_actions<T: super::super::action::UiActionT>(world: &mut World) -> Vec<T> {
+        world
+            .resource_mut::<Messages<super::super::Activated<T>>>()
+            .drain()
+            .map(|activated| activated.action)
+            .collect()
+    }
 }
 
 #[cfg(test)]

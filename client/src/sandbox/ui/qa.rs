@@ -1,5 +1,6 @@
 //! Explicit native evidence harness: real button handlers and UDP authority.
-//! It injects Interaction signals, not physical mouse input; reports that limit.
+//! It injects `SyntheticPress` messages through the UI kit, not physical
+//! mouse input; reports that limit.
 use super::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use std::path::PathBuf;
@@ -41,12 +42,27 @@ pub(super) fn install(app: &mut App) {
     .insert_resource(bevy::winit::WinitSettings::continuous())
     .add_systems(Update, drive.before(keys));
 }
+/// The panel's kit buttons and the press channel into the recognizer.
+#[derive(bevy::ecs::system::SystemParam)]
+struct Buttons<'w, 's> {
+    query: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static UiAction<Action>,
+            &'static ComputedNode,
+            &'static UiGlobalTransform,
+        ),
+    >,
+    presses: MessageWriter<'w, crate::ui::SyntheticPress>,
+}
 fn press(
-    buttons: &mut Query<(&Action, &mut Interaction, &ComputedNode, &UiGlobalTransform)>,
+    buttons: &mut Buttons,
     panels: &mut Query<(&ComputedNode, &UiGlobalTransform, &mut ScrollPosition), With<Body>>,
     predicate: impl Fn(&Action) -> bool,
 ) -> bool {
-    for (a, mut interaction, node, transform) in buttons.iter_mut() {
+    for (entity, UiAction(a), node, transform) in buttons.query.iter() {
         if !predicate(a) {
             continue;
         }
@@ -64,7 +80,7 @@ fn press(
                 return false;
             }
         }
-        *interaction = Interaction::Pressed;
+        buttons.presses.write(crate::ui::SyntheticPress(entity));
         return true;
     }
     false
@@ -77,7 +93,7 @@ fn shot(commands: &mut Commands, qa: &mut Qa, name: &str) {
 }
 fn finish(qa: &mut Qa, success: bool, reason: &str, exit: &mut MessageWriter<AppExit>) {
     qa.finished = true;
-    let result = serde_json::json!({"status":if success{"PASS"}else{"FAIL"},"reason":reason,"version":env!("CARGO_PKG_VERSION"),"method":"synthetic Interaction::Pressed through actual panel actions, live UDP authoritative sandbox, native rendering", "manual_input_verified":false,"warm_entry_seconds":qa.warm,"trace":qa.trace,"screenshots":qa.capture});
+    let result = serde_json::json!({"status":if success{"PASS"}else{"FAIL"},"reason":reason,"version":env!("CARGO_PKG_VERSION"),"method":"SyntheticPress through the UI kit on actual panel actions, live UDP authoritative sandbox, native rendering", "manual_input_verified":false,"warm_entry_seconds":qa.warm,"trace":qa.trace,"screenshots":qa.capture});
     std::fs::write(
         qa.dir.join("qa-summary.json"),
         serde_json::to_vec_pretty(&result).unwrap(),
@@ -97,7 +113,7 @@ fn drive(
     session: Res<crate::net::ClientSession>,
     animations: Res<AnimationReadout>,
     playback: Query<(Entity, &AnimationPlayer)>,
-    mut buttons: Query<(&Action, &mut Interaction, &ComputedNode, &UiGlobalTransform)>,
+    mut buttons: Buttons,
     mut panels: Query<(&ComputedNode, &UiGlobalTransform, &mut ScrollPosition), With<Body>>,
     mut network: MessageWriter<NetworkCommand>,
     mut exit: MessageWriter<AppExit>,

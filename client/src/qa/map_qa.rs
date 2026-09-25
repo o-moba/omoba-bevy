@@ -152,7 +152,7 @@ fn prepare(
     session: Res<ClientSession>,
     help: Res<HelpOverlayVisible>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
-    mut buttons: Query<(&Name, &mut Interaction), With<Button>>,
+    mut buttons: crate::qa::NamedPresses,
 ) {
     if let Ok(mut window) = windows.single_mut() {
         window.resolution.set_scale_factor_override(Some(1.0));
@@ -165,15 +165,10 @@ fn prepare(
     if qa.stage != 0 {
         return;
     }
-    for (name, mut interaction) in &mut buttons {
-        if (session.is_connected()
-            && !session.join_confirmed()
-            && name.as_str() == "TeamGreenButton")
-            || (session.join_confirmed() && help.0 && name.as_str() == "HelpDismissButton")
-        {
-            *interaction = Interaction::Pressed;
-        }
-    }
+    buttons.press_where(|name| {
+        (session.is_connected() && !session.join_confirmed() && name == "TeamGreenButton")
+            || (session.join_confirmed() && help.0 && name == "HelpDismissButton")
+    });
 }
 fn position_camera(
     qa: Res<MapQa>,

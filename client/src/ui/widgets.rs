@@ -1,7 +1,8 @@
 //! Kit widgets: menu buttons, `-`/`+` stepper rows, toggle rows and value
-//! labels in the overlay style the pause menu established. Every control gets
-//! a [`UiAction`], a [`ButtonStyle`] and a [`TestId`]; the module that owns it
-//! only handles `Activated<T>`.
+//! labels in the overlay style the pause menu established, plus the front-end
+//! screen buttons and tiles. Every control gets a [`UiAction`], a
+//! [`ButtonStyle`] and a [`TestId`]; the module that owns it only handles
+//! `Activated<T>`.
 use bevy::prelude::*;
 
 use super::{
@@ -281,6 +282,122 @@ pub(crate) fn toggle_row<T: UiActionT, M: Component>(
                 value_marker,
                 id.child("Value"),
             ));
+        })
+        .id()
+}
+
+/// Font size a front-end label was designed at; `frontend::widgets` raises it
+/// to a readable minimum on a phone (roadmap item 5 folds that into `metric`).
+#[derive(Component)]
+pub(crate) struct MenuTypography {
+    pub size: f32,
+    pub heading: bool,
+}
+
+/// Height a front-end control was designed at; raised to the touch minimum on
+/// a phone by the same pass as [`MenuTypography`].
+#[derive(Component)]
+pub(crate) struct MenuControl {
+    pub height: f32,
+}
+
+/// A front-end screen label in `color`, with its phone readability metric.
+pub(crate) fn screen_label(text: &str, size: f32, color: Color) -> impl Bundle {
+    (
+        Text::new(text.to_owned()),
+        theme::text(size),
+        TextColor(color),
+        MenuTypography {
+            size,
+            heading: false,
+        },
+    )
+}
+
+/// A front-end screen button: `Primary` is the one big call to action with a
+/// gold edge, everything else a 44 px pill sized to its label.
+pub(crate) fn screen_button<T: UiActionT>(
+    parent: &mut ChildSpawnerCommands,
+    text: &str,
+    kind: ButtonKind,
+    action: T,
+    id: impl Into<TestId>,
+) -> Entity {
+    spawn_screen_button(
+        parent,
+        text,
+        ButtonStyle::new(kind),
+        action,
+        id.into(),
+        false,
+    )
+}
+
+/// A grid tile whose selected state is owned by the screen (it flips
+/// `ButtonStyle::selected`; the painter repaints).
+pub(crate) fn screen_tile<T: UiActionT>(
+    parent: &mut ChildSpawnerCommands,
+    text: &str,
+    selected: bool,
+    action: T,
+    id: impl Into<TestId>,
+) -> Entity {
+    compact_screen_tile(parent, text, selected, action, id, false)
+}
+
+/// [`screen_tile`] that shrinks on a phone (the collection's clip strip).
+pub(crate) fn compact_screen_tile<T: UiActionT>(
+    parent: &mut ChildSpawnerCommands,
+    text: &str,
+    selected: bool,
+    action: T,
+    id: impl Into<TestId>,
+    compact: bool,
+) -> Entity {
+    let style = ButtonStyle {
+        kind: ButtonKind::Tile,
+        selected,
+    };
+    spawn_screen_button(parent, text, style, action, id.into(), compact)
+}
+
+fn spawn_screen_button<T: UiActionT>(
+    parent: &mut ChildSpawnerCommands,
+    text: &str,
+    style: ButtonStyle,
+    action: T,
+    id: TestId,
+    compact: bool,
+) -> Entity {
+    let primary = style.kind == ButtonKind::Primary;
+    let (width, height, font) = if primary {
+        (Val::Px(metric::PRIMARY.0), metric::PRIMARY.1, 22.0)
+    } else {
+        (Val::Auto, metric::TOUCH_MIN, 15.0)
+    };
+    parent
+        .spawn((
+            Button,
+            Node {
+                width,
+                height: Val::Px(height),
+                min_width: Val::Px(if compact { 86.0 } else { 120.0 }),
+                padding: UiRect::axes(Val::Px(if compact { 10.0 } else { 18.0 }), Val::Px(8.0)),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                border_radius: BorderRadius::all(Val::Px(8.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BorderColor::all(if primary { theme::GOLD } else { theme::EDGE }),
+            BackgroundColor(style.idle_color()),
+            MenuControl { height },
+            style,
+            UiAction(action),
+            id,
+        ))
+        .with_children(|button| {
+            button.spawn(screen_label(text, font, theme::IVORY));
         })
         .id()
 }

@@ -215,7 +215,7 @@ fn admission_buttons(
     qa: Res<NavigationQa>,
     session: Res<ClientSession>,
     help: Res<HelpOverlayVisible>,
-    mut buttons: Query<(&Name, &mut Interaction), With<Button>>,
+    mut buttons: crate::qa::NamedPresses,
 ) {
     if qa.stage != 0 {
         return;
@@ -225,13 +225,10 @@ fn admission_buttons(
     } else {
         "TeamGreenButton"
     };
-    for (name, mut interaction) in &mut buttons {
-        if (session.is_connected() && !session.join_confirmed() && name.as_str() == team_button)
-            || (session.join_confirmed() && help.0 && name.as_str() == "HelpDismissButton")
-        {
-            *interaction = Interaction::Pressed;
-        }
-    }
+    buttons.press_where(|name| {
+        (session.is_connected() && !session.join_confirmed() && name == team_button)
+            || (session.join_confirmed() && help.0 && name == "HelpDismissButton")
+    });
 }
 
 #[derive(bevy::ecs::system::SystemParam)]

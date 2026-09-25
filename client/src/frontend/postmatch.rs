@@ -5,19 +5,27 @@ use bevy::prelude::*;
 use shared::career::{MatchOutcome, MatchResult};
 
 use super::AppScreen;
-use super::widgets::{self, ButtonKind};
+use super::widgets;
 use crate::career::CareerClient;
 use crate::net::{GameState, GameStateSnapshot, NetworkCommand, SessionUiCommand};
 use crate::team::Team;
+use crate::ui::theme::{self, ButtonKind};
+use crate::ui::widgets::screen_button;
+use crate::ui::{Activated, UiActionAppExt, UiSet};
 
 pub struct PostMatchScreenPlugin;
 
 impl Plugin for PostMatchScreenPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(AppScreen::PostMatch), spawn_post_match)
+        app.add_ui_action::<PostMatchAction>()
+            .add_systems(OnEnter(AppScreen::PostMatch), spawn_post_match)
             .add_systems(
                 Update,
-                (post_match_actions, refresh_post_match).run_if(in_state(AppScreen::PostMatch)),
+                (
+                    post_match_actions.after(UiSet::Dispatch),
+                    refresh_post_match,
+                )
+                    .run_if(in_state(AppScreen::PostMatch)),
             );
     }
 }
@@ -25,7 +33,7 @@ impl Plugin for PostMatchScreenPlugin {
 #[derive(Component)]
 struct PostMatchRoot(Option<MatchResult>, bool);
 
-#[derive(Component, Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PostMatchAction {
     PlayAgain,
     BackToMenu,
@@ -111,7 +119,7 @@ fn spawn_post_match(
                 ..default()
             },
             BackgroundColor(Color::srgba(0.01, 0.03, 0.035, 0.72)),
-            ZIndex(widgets::SCREEN_Z),
+            ZIndex(theme::SCREEN_Z),
             bevy::state::state_scoped::DespawnOnExit(AppScreen::PostMatch),
             Name::new("PostMatchScreen"),
             PostMatchRoot(result.clone(), career.view.storage_enabled),
@@ -129,18 +137,18 @@ fn spawn_post_match(
                     border_radius: BorderRadius::all(Val::Px(12.0)),
                     ..default()
                 },
-                BackgroundColor(widgets::PANEL),
-                BorderColor::all(widgets::GOLD),
+                BackgroundColor(theme::PANEL_OPAQUE),
+                BorderColor::all(theme::GOLD),
                 Name::new("PostMatchPanel"),
             ))
             .with_children(|panel| {
-                panel.spawn(widgets::label("THE VERDANT ARENA", 12.0, widgets::GOLD));
+                panel.spawn(widgets::label("THE VERDANT ARENA", 12.0, theme::GOLD));
                 panel.spawn(widgets::heading(headline, 42.0));
                 if let Some(summary) = summary.as_deref() {
-                    panel.spawn(widgets::label(summary, 15.0, widgets::IVORY));
+                    panel.spawn(widgets::label(summary, 15.0, theme::IVORY));
                 }
                 if let Some(personal) = personal.as_deref() {
-                    panel.spawn(widgets::label(personal, 14.0, widgets::GOLD));
+                    panel.spawn(widgets::label(personal, 14.0, theme::GOLD));
                 }
                 panel.spawn(widgets::label(
                     if result.as_ref().is_some_and(|result| result.saved) {
@@ -151,7 +159,7 @@ fn spawn_post_match(
                         "Saving match results…"
                     },
                     13.0,
-                    widgets::MUTED,
+                    theme::MUTED,
                 ));
                 panel
                     .spawn(Node {
@@ -160,14 +168,14 @@ fn spawn_post_match(
                         ..default()
                     })
                     .with_children(|row| {
-                        widgets::button(
+                        screen_button(
                             row,
                             "Play again",
                             ButtonKind::Primary,
                             PostMatchAction::PlayAgain,
                             "PostMatchPlayAgain",
                         );
-                        widgets::button(
+                        screen_button(
                             row,
                             "Back to menu",
                             ButtonKind::Secondary,
@@ -210,14 +218,11 @@ fn refresh_post_match(
 fn post_match_actions(
     mut commands: MessageWriter<NetworkCommand>,
     mut session_ui: MessageWriter<SessionUiCommand>,
-    buttons: Query<(&Interaction, &PostMatchAction), Changed<Interaction>>,
+    mut activated: MessageReader<Activated<PostMatchAction>>,
     flow: Option<Res<crate::match_service::MatchServiceClient>>,
     roots: Query<&PostMatchRoot>,
 ) {
-    for (interaction, action) in &buttons {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
+    for Activated { action, .. } in activated.read() {
         match action {
             PostMatchAction::PlayAgain => {
                 if flow.as_ref().is_some_and(|flow| flow.allocation.is_some()) {
@@ -281,7 +286,15 @@ mod tests {
             .init_resource::<GameStateSnapshot>()
             .add_message::<NetworkCommand>()
             .add_message::<SessionUiCommand>()
-            .add_systems(Update, (refresh_post_match, post_match_actions).chain());
+            .add_ui_action::<PostMatchAction>()
+            .add_systems(
+                Update,
+                (
+                    refresh_post_match,
+                    post_match_actions.after(UiSet::Dispatch),
+                )
+                    .chain(),
+            );
         let mut flow = crate::match_service::MatchServiceClient::default();
         flow.allocation = Some(shared::match_service::MatchAllocation {
             allocation_id: "allocated".into(),
@@ -313,8 +326,11 @@ mod tests {
             .server_epoch = 999;
         app.update();
         assert!(app.world().get_entity(panel).is_ok());
-        app.world_mut()
-            .spawn((Interaction::Pressed, PostMatchAction::PlayAgain));
+        app.world_mut().spawn((
+            Button,
+            Interaction::Pressed,
+            crate::ui::UiAction(PostMatchAction::PlayAgain),
+        ));
         app.update();
         assert_eq!(
             app.world().resource::<Messages<SessionUiCommand>>().len(),
@@ -335,5 +351,56 @@ mod tests {
         );
         assert_eq!(outcome_headline(Some(Team::Green), None), "Match complete");
         assert_eq!(outcome_headline(None, Some(Team::Blue)), "Match complete");
+    }
+
+    #[test]
+    fn post_match_presses_dispatch_once_and_disabled_buttons_do_nothing() {
+        use crate::ui::test_id::harness;
+        let mut app = harness::kit_app();
+        app.add_message::<NetworkCommand>()
+            .add_message::<SessionUiCommand>()
+            .add_ui_action::<PostMatchAction>()
+            .add_systems(Update, post_match_actions.after(UiSet::Dispatch));
+        harness::spawn_ui(app.world_mut(), |row| {
+            screen_button(
+                row,
+                "Play again",
+                ButtonKind::Primary,
+                PostMatchAction::PlayAgain,
+                "PostMatchPlayAgain",
+            );
+            screen_button(
+                row,
+                "Back to menu",
+                ButtonKind::Secondary,
+                PostMatchAction::BackToMenu,
+                "PostMatchBackToMenu",
+            );
+        });
+        app.update();
+        harness::press(app.world_mut(), "PostMatchPlayAgain");
+        app.update();
+        assert_eq!(
+            harness::drain_actions::<PostMatchAction>(app.world_mut()),
+            [PostMatchAction::PlayAgain]
+        );
+        let rematches = |app: &mut App| {
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .filter(|command| matches!(command, NetworkCommand::RequestRematch))
+                .count()
+        };
+        assert_eq!(rematches(&mut app), 1);
+        app.update();
+        assert_eq!(rematches(&mut app), 0);
+        harness::set_disabled(app.world_mut(), "PostMatchBackToMenu", true);
+        harness::press(app.world_mut(), "PostMatchBackToMenu");
+        app.update();
+        assert!(
+            app.world()
+                .resource::<Messages<SessionUiCommand>>()
+                .is_empty()
+        );
     }
 }

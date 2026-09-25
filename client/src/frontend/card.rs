@@ -13,8 +13,11 @@ use shared::career::ProfileSummary;
 use std::path::PathBuf;
 
 use super::AppScreen;
-use super::widgets::{self, ButtonKind, MenuButton};
+use super::widgets;
 use crate::team::AvatarThumbnails;
+use crate::ui::theme::{self, ButtonKind};
+use crate::ui::widgets::{ButtonStyle, screen_button, screen_tile};
+use crate::ui::{Activated, TestId, UiAction, UiActionAppExt, UiSet};
 
 const CARD_FILE: &str = "profile_card.json";
 
@@ -40,7 +43,7 @@ pub struct ProfileCard {
     pub main_class: HeroClass,
     /// Avatar slug displayed on the card, if the player picked one.
     pub showcase_avatar: Option<String>,
-    /// Index into [`widgets::ACCENTS`].
+    /// Index into [`theme::ACCENTS`].
     pub accent: usize,
     /// Index into [`TITLES`].
     pub title: usize,
@@ -61,7 +64,7 @@ impl Default for ProfileCard {
 
 impl ProfileCard {
     pub fn accent_color(&self) -> Color {
-        widgets::accent_color(self.accent)
+        theme::accent_color(self.accent)
     }
 
     pub fn title_text(&self, wins: u32) -> &'static str {
@@ -80,7 +83,7 @@ impl ProfileCard {
     /// the player's choice on every launch. An avatar that never turns up
     /// simply renders without a portrait.
     pub fn sanitized(mut self) -> Self {
-        self.accent = self.accent.min(widgets::ACCENTS.len() - 1);
+        self.accent = self.accent.min(theme::ACCENTS.len() - 1);
         self.title = self.title.min(TITLES.len() - 1);
         self.showcase_avatar = self.showcase_avatar.filter(|slug| plausible_slug(slug));
         self
@@ -154,6 +157,7 @@ pub struct ProfileCardPlugin;
 impl Plugin for ProfileCardPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ProfileCard>()
+            .add_ui_action::<CardAction>()
             .add_systems(Startup, load_card)
             .add_systems(Update, save_card)
             .add_systems(OnEnter(AppScreen::Card), spawn_card_screen)
@@ -161,6 +165,7 @@ impl Plugin for ProfileCardPlugin {
                 Update,
                 (card_actions, refresh_card_screen)
                     .chain()
+                    .after(UiSet::Dispatch)
                     .run_if(in_state(AppScreen::Card)),
             );
     }
@@ -188,7 +193,7 @@ pub fn spawn_card(
                 border_radius: BorderRadius::all(Val::Px(8.0)),
                 ..default()
             },
-            BackgroundColor(widgets::TILE),
+            BackgroundColor(theme::TILE),
             BorderColor::all(accent),
             Name::new("ProfileCard"),
         ))
@@ -212,7 +217,7 @@ pub fn spawn_card(
                             border_radius: BorderRadius::all(Val::Px(42.0)),
                             ..default()
                         },
-                        BackgroundColor(widgets::TILE),
+                        BackgroundColor(theme::TILE),
                         BorderColor::all(accent),
                         Name::new("ProfileCardPortrait"),
                     ));
@@ -235,7 +240,7 @@ pub fn spawn_card(
                         column.spawn(widgets::label(
                             &format!("Level {level} · {}", card.main_class.display_name()),
                             13.0,
-                            widgets::MUTED,
+                            theme::MUTED,
                         ));
                     });
                 });
@@ -246,18 +251,18 @@ pub fn spawn_card(
                 ),
                 None => "Career profile not loaded yet".to_owned(),
             };
-            card_node.spawn(widgets::label(&stats, 13.0, widgets::IVORY));
+            card_node.spawn(widgets::label(&stats, 13.0, theme::IVORY));
             if profile.is_some_and(ProfileSummary::newcomer) {
                 card_node.spawn(widgets::label(
                     "Newcomer placement: matched with other new players",
                     12.0,
-                    widgets::MUTED,
+                    theme::MUTED,
                 ));
             }
         });
 }
 
-#[derive(Component, Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CardAction {
     Back,
     Class(HeroClass),
@@ -298,14 +303,14 @@ fn spawn_card_screen(
                         ..default()
                     })
                     .with_children(|actions| {
-                        widgets::button(
+                        screen_button(
                             actions,
                             "Avatars",
                             ButtonKind::Secondary,
                             CardAction::Showcase,
                             "CardOpenCollection",
                         );
-                        widgets::button(
+                        screen_button(
                             actions,
                             "Back",
                             ButtonKind::Secondary,
@@ -347,7 +352,7 @@ fn spawn_card_screen(
                     Name::new("CardEditors"),
                 ))
                 .with_children(|editors| {
-                    editors.spawn(widgets::label("Main hero", 16.0, widgets::MUTED));
+                    editors.spawn(widgets::label("Main hero", 16.0, theme::MUTED));
                     editors
                         .spawn(Node {
                             column_gap: Val::Px(8.0),
@@ -357,23 +362,23 @@ fn spawn_card_screen(
                         })
                         .with_children(|row| {
                             for class in HeroClass::ALL {
-                                widgets::tile(
+                                screen_tile(
                                     row,
                                     class.display_name(),
                                     class == card.main_class,
                                     CardAction::Class(class),
-                                    &format!("CardClass-{}", class.id()),
+                                    format!("CardClass-{}", class.id()),
                                 );
                             }
                         });
-                    editors.spawn(widgets::label("Accent", 16.0, widgets::MUTED));
+                    editors.spawn(widgets::label("Accent", 16.0, theme::MUTED));
                     editors
                         .spawn(Node {
                             column_gap: Val::Px(8.0),
                             ..default()
                         })
                         .with_children(|row| {
-                            for (index, (name, color)) in widgets::ACCENTS.iter().enumerate() {
+                            for (index, (name, color)) in theme::ACCENTS.iter().enumerate() {
                                 row.spawn((
                                     Button,
                                     Node {
@@ -389,16 +394,17 @@ fn spawn_card_screen(
                                     },
                                     BackgroundColor(*color),
                                     BorderColor::all(if index == card.accent {
-                                        widgets::IVORY
+                                        theme::IVORY
                                     } else {
-                                        widgets::PANEL_EDGE
+                                        theme::PANEL_EDGE
                                     }),
-                                    CardAction::Accent(index),
-                                    Name::new(format!("CardAccent-{name}")),
+                                    // The swatch is its own colour: no ButtonStyle.
+                                    UiAction(CardAction::Accent(index)),
+                                    TestId::new(format!("CardAccent-{name}")),
                                 ));
                             }
                         });
-                    editors.spawn(widgets::label("Title", 16.0, widgets::MUTED));
+                    editors.spawn(widgets::label("Title", 16.0, theme::MUTED));
                     editors
                         .spawn(Node {
                             column_gap: Val::Px(8.0),
@@ -414,19 +420,19 @@ fn spawn_card_screen(
                                 } else {
                                     format!("{name} · {needed} wins")
                                 };
-                                widgets::tile(
+                                screen_tile(
                                     row,
                                     &text,
                                     index == card.title && unlocked,
                                     CardAction::Title(index),
-                                    &format!("CardTitle-{name}"),
+                                    format!("CardTitle-{name}"),
                                 );
                             }
                         });
                     editors.spawn(widgets::label(
                         "Showcase avatar is picked in the collection.",
                         13.0,
-                        widgets::MUTED,
+                        theme::MUTED,
                     ));
                 });
             });
@@ -437,17 +443,14 @@ fn card_actions(
     mut card: ResMut<ProfileCard>,
     career: Res<crate::career::CareerClient>,
     mut next: ResMut<NextState<AppScreen>>,
-    buttons: Query<(&Interaction, &CardAction), Changed<Interaction>>,
+    mut activated: MessageReader<Activated<CardAction>>,
 ) {
     let wins = career
         .view
         .profile
         .as_ref()
         .map_or(0, |profile| profile.wins);
-    for (interaction, action) in &buttons {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
+    for Activated { action, .. } in activated.read() {
         match action {
             CardAction::Back => next.set(AppScreen::Home),
             CardAction::Showcase => next.set(AppScreen::Collection),
@@ -470,22 +473,22 @@ fn refresh_card_screen(
     career: Res<crate::career::CareerClient>,
     thumbnails: Res<AvatarThumbnails>,
     slot: Query<Entity, With<CardPreviewSlot>>,
-    mut tiles: Query<(&CardAction, &mut MenuButton)>,
-    mut swatches: Query<(&CardAction, &mut Node, &mut BorderColor), Without<MenuButton>>,
+    mut tiles: Query<(&UiAction<CardAction>, &mut ButtonStyle)>,
+    mut swatches: Query<(&UiAction<CardAction>, &mut Node, &mut BorderColor), Without<ButtonStyle>>,
 ) {
     if !card.is_changed() {
         return;
     }
     for (action, mut node, mut border) in &mut swatches {
-        let CardAction::Accent(index) = action else {
+        let CardAction::Accent(index) = action.0 else {
             continue;
         };
-        let chosen = *index == card.accent;
+        let chosen = index == card.accent;
         node.border = UiRect::all(Val::Px(if chosen { 3.0 } else { 1.0 }));
         *border = BorderColor::all(if chosen {
-            widgets::IVORY
+            theme::IVORY
         } else {
-            widgets::PANEL_EDGE
+            theme::PANEL_EDGE
         });
     }
     let wins = career
@@ -494,7 +497,7 @@ fn refresh_card_screen(
         .as_ref()
         .map_or(0, |profile| profile.wins);
     for (action, mut button) in &mut tiles {
-        let selected = match action {
+        let selected = match &action.0 {
             CardAction::Class(class) => *class == card.main_class,
             CardAction::Title(index) => *index == card.title && title_unlocked(*index, wins),
             _ => continue,
@@ -569,7 +572,7 @@ mod tests {
             ..Default::default()
         }
         .sanitized();
-        assert_eq!(card.accent, widgets::ACCENTS.len() - 1);
+        assert_eq!(card.accent, theme::ACCENTS.len() - 1);
         assert_eq!(card.title, TITLES.len() - 1);
         assert!(card.showcase_avatar.is_none());
     }
@@ -586,5 +589,60 @@ mod tests {
         }
         .sanitized();
         assert_eq!(card.showcase_avatar.as_deref(), Some(slug));
+    }
+
+    #[test]
+    fn card_presses_apply_once_repaint_tiles_and_disabled_buttons_do_nothing() {
+        use crate::ui::test_id::harness;
+        let mut app = harness::kit_app();
+        app.add_plugins(bevy::state::app::StatesPlugin)
+            .init_state::<AppScreen>()
+            .init_resource::<ProfileCard>()
+            .init_resource::<crate::career::CareerClient>()
+            .init_resource::<AvatarThumbnails>()
+            .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
+            .add_ui_action::<CardAction>()
+            .add_systems(Startup, spawn_card_screen)
+            .add_systems(
+                Update,
+                (card_actions, refresh_card_screen)
+                    .chain()
+                    .after(UiSet::Dispatch),
+            );
+        app.update();
+        let mage = format!("CardClass-{}", HeroClass::Mage.id());
+        harness::press(app.world_mut(), &mage);
+        app.update();
+        assert_eq!(
+            harness::drain_actions::<CardAction>(app.world_mut()),
+            [CardAction::Class(HeroClass::Mage)]
+        );
+        assert_eq!(
+            app.world().resource::<ProfileCard>().main_class,
+            HeroClass::Mage
+        );
+        app.update();
+        assert!(harness::drain_actions::<CardAction>(app.world_mut()).is_empty());
+        let tile = harness::find(app.world_mut(), &mage).unwrap();
+        assert!(app.world().get::<ButtonStyle>(tile).unwrap().selected);
+        assert_eq!(
+            app.world().get::<BackgroundColor>(tile).unwrap().0,
+            theme::TILE_SELECTED
+        );
+        // A locked title is pressable but does not change the card.
+        harness::press(app.world_mut(), &format!("CardTitle-{}", TITLES[5].0));
+        app.update();
+        assert_eq!(app.world().resource::<ProfileCard>().title, 0);
+        let rogue = format!("CardClass-{}", HeroClass::Ranger.id());
+        harness::set_disabled(app.world_mut(), &rogue, true);
+        harness::press(app.world_mut(), &rogue);
+        app.update();
+        assert_eq!(
+            app.world().resource::<ProfileCard>().main_class,
+            HeroClass::Mage
+        );
+        harness::press(app.world_mut(), "CardAccent-Ember");
+        app.update();
+        assert_eq!(app.world().resource::<ProfileCard>().accent, 1);
     }
 }

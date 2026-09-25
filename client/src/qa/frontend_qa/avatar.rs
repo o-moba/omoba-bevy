@@ -118,7 +118,7 @@ fn input(
     preview: Res<AvatarPreview>,
     nodes: Query<(&Name, &ComputedNode, &UiGlobalTransform)>,
     mut scrolls: Query<(&Name, &ComputedNode, &mut ScrollPosition)>,
-    mut buttons: Query<(&Name, &mut Interaction), With<Button>>,
+    mut buttons: crate::qa::NamedPresses,
     mut touch: MessageWriter<TouchInput>,
 ) {
     if qa.finished || qa.in_flight {
@@ -189,11 +189,8 @@ fn input(
         let Some(slug) = qa.slug.clone() else {
             return;
         };
-        for (name, mut interaction) in &mut buttons {
-            if name.as_str() == format!("CollectionTile-{slug}") {
-                *interaction = Interaction::Pressed;
-                qa.sdk_pressed = true;
-            }
+        if buttons.press(&format!("CollectionTile-{slug}")) {
+            qa.sdk_pressed = true;
         }
     }
 }
