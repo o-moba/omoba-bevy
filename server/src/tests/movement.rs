@@ -181,3 +181,114 @@ fn movement_authority_keeps_players_inside_map_bounds() {
     assert!(player.hero.x >= world.map_layout.min_x);
     assert!(player.hero.z >= world.map_layout.min_z);
 }
+
+/// Joins one hero on a runtime driven by a manual clock and parks it in open
+/// ground, so every step below is limited by the movement budget alone.
+fn budget_runtime(
+    port: u16,
+) -> (
+    crate::runtime::ServerRuntime,
+    crate::runtime::ports::MemoryTransport,
+    crate::runtime::ports::ManualClock,
+    SocketAddr,
+) {
+    use crate::runtime::ports::{ManualClock, MemoryTransport};
+    let clock = ManualClock::new(Instant::now());
+    let transport = MemoryTransport::new("127.0.0.1:4000".parse().unwrap());
+    let mut rt = crate::runtime::ServerRuntime::for_test(
+        transport.clone(),
+        clock.clone(),
+        crate::career_backend::MemoryCareer::disabled(u64::from(port)),
+        crate::match_rules::MatchConfig::dev(),
+    );
+    let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+    let join = shared::wire::ClientPacket::Join {
+        prematch: false,
+        team: Team::Green,
+        character: CharacterChoice::Ipfs,
+        hero_class: HeroClass::default(),
+        avatar: None,
+        sprite_character: None,
+        session_id: Some(format!("budget-{port}")),
+        passport_ticket: None,
+    };
+    transport.push_inbound(addr, serde_json::to_vec(&join).unwrap());
+    let (now, dt) = rt.prepare_tick();
+    rt.tick(now, dt);
+    let player = rt.world.players.get_mut(&addr).unwrap();
+    assert!(player.joined);
+    player.hero.x = -12.0;
+    player.hero.z = 0.0;
+    player.timers.last_movement_at = now;
+    (rt, transport, clock, addr)
+}
+
+fn send_transform(
+    rt: &mut crate::runtime::ServerRuntime,
+    transport: &crate::runtime::ports::MemoryTransport,
+    clock: &crate::runtime::ports::ManualClock,
+    addr: SocketAddr,
+    step: Duration,
+    x: f32,
+) {
+    clock.advance(step);
+    let packet = shared::wire::ClientPacket::Transform {
+        dash_sequence: 0,
+        x,
+        y: PLAYER_GROUND_Y,
+        z: 0.0,
+        yaw: 0.0,
+    };
+    transport.push_inbound(addr, serde_json::to_vec(&packet).unwrap());
+    let (now, dt) = rt.prepare_tick();
+    rt.tick(now, dt);
+    transport.take_outbound();
+}
+
+/// O3: the position tolerance is a budget, not a per-packet allowance. A
+/// client flooding 120 transforms a second, each asking for a far point,
+/// covers no more than a second of normal speed plus one tolerance (the old
+/// envelope granted `+0.10` per packet: 17 u/s instead of 5).
+#[test]
+fn movement_budget_caps_a_packet_flood_at_normal_speed() {
+    let (mut rt, transport, clock, addr) = budget_runtime(35101);
+    let speed = crate::hero_stats::move_speed(&rt.world.players[&addr]);
+    let start_x = rt.world.players[&addr].hero.x;
+    let step = Duration::from_secs(1) / 120;
+    for _ in 0..120 {
+        let x = rt.world.players[&addr].hero.x + 100.0;
+        send_transform(&mut rt, &transport, &clock, addr, step, x);
+    }
+    let covered = rt.world.players[&addr].hero.x - start_x;
+    let ceiling = speed * step.as_secs_f32() * 120.0 + MOVEMENT_POSITION_TOLERANCE + 0.001;
+    assert!(covered > speed * 0.9, "the flood still moves: {covered}");
+    assert!(
+        covered <= ceiling,
+        "a 120 packet/s flood covered {covered} in 1 s (ceiling {ceiling})"
+    );
+}
+
+/// O3: a normal 20 Hz client stepping at its own speed, with ±15 ms arrival
+/// jitter, is never clipped by the time budget.
+#[test]
+fn movement_budget_leaves_a_normal_20hz_client_unclipped() {
+    let (mut rt, transport, clock, addr) = budget_runtime(35102);
+    let speed = crate::hero_stats::move_speed(&rt.world.players[&addr]);
+    let start_x = rt.world.players[&addr].hero.x;
+    let mut client_x = start_x;
+    // Arrival gaps around the 50 ms send interval; ten sends, 500 ms.
+    let gaps_ms = [35_u64, 65, 50, 40, 60, 50, 50, 35, 65, 50];
+    for round in 0..2 {
+        for gap in gaps_ms {
+            client_x += speed * 0.05;
+            let step = Duration::from_millis(gap);
+            send_transform(&mut rt, &transport, &clock, addr, step, client_x);
+            let hero_x = rt.world.players[&addr].hero.x;
+            assert!(
+                (hero_x - client_x).abs() < 0.001,
+                "round {round}: step clipped to {hero_x}, client at {client_x}"
+            );
+        }
+    }
+    assert!((rt.world.players[&addr].hero.x - start_x - speed * 0.05 * 20.0).abs() < 0.01);
+}

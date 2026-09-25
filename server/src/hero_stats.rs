@@ -12,9 +12,7 @@ use std::time::{Duration, Instant};
 use shared::SkillSlot;
 use shared::shop::ItemBonuses;
 
-use crate::balance::{
-    LEVEL_UP_HP_BONUS, LEVEL_UP_MANA_BONUS, MAX_MANA, MOVEMENT_POSITION_TOLERANCE, PLAYER_SPEED,
-};
+use crate::balance::{LEVEL_UP_HP_BONUS, LEVEL_UP_MANA_BONUS, MAX_MANA, PLAYER_SPEED};
 use crate::entities::ConnectedPlayer;
 use crate::utility::utility_movement_multiplier;
 
@@ -144,8 +142,10 @@ pub(crate) fn move_speed(player: &ConnectedPlayer) -> f32 {
 }
 
 /// Distance a movement request may cover after `elapsed` seconds, including
-/// haste and the position tolerance. The factor order is the one the
-/// envelope has always used, so accepted positions are bit-identical.
+/// haste and the unspent position tolerance (`timers.movement_slack`, which
+/// starts at `MOVEMENT_POSITION_TOLERANCE`). The factor order is the one the
+/// envelope has always used, so a single request from a fresh budget is
+/// accepted bit-identically to the old per-packet allowance.
 pub(crate) fn movement_envelope(player: &ConnectedPlayer, now: Instant, elapsed: f32) -> f32 {
     let multiplier = player.modifiers.move_speed_mult.max(0.1)
         * utility_movement_multiplier(player, now)
@@ -154,7 +154,7 @@ pub(crate) fn movement_envelope(player: &ConnectedPlayer, now: Instant, elapsed:
             player.hero.progress.level,
         );
     PLAYER_SPEED * multiplier * player.economy.item_bonuses.move_speed_multiplier * elapsed
-        + MOVEMENT_POSITION_TOLERANCE
+        + player.timers.movement_slack
 }
 
 /// Full HP pool: the class base (or the configured override), level growth

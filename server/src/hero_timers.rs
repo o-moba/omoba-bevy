@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use shared::SkillSlot;
 
+use crate::balance::MOVEMENT_POSITION_TOLERANCE;
 use crate::entities::ConnectedPlayer;
 use crate::game_world::GameWorld;
 use crate::hero_stats;
@@ -20,6 +21,12 @@ use crate::hero_stats;
 pub(crate) struct HeroTimers {
     /// Last accepted movement, dash or teleport; bounds the next move.
     pub(crate) last_movement_at: Instant,
+    /// Unspent position tolerance carried between `Transform` packets, in
+    /// world units, never above `MOVEMENT_POSITION_TOLERANCE`. Movement is a
+    /// time budget: each packet may cover the distance its elapsed time
+    /// earns plus this slack, so a flood of packets cannot collect the
+    /// tolerance once per packet.
+    pub(crate) movement_slack: f32,
     /// Per-slot cast timestamps (Q/W/E/R); each ability cools down independently.
     pub(crate) last_cast_at: [Option<Instant>; 4],
     /// Independent of Q/W/E/R and never charged against mana.
@@ -34,6 +41,7 @@ impl HeroTimers {
     pub(crate) fn new(now: Instant) -> Self {
         Self {
             last_movement_at: now,
+            movement_slack: MOVEMENT_POSITION_TOLERANCE,
             last_cast_at: [None; 4],
             last_basic_attack_at: None,
             dash_ready_at: None,

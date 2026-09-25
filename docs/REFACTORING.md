@@ -96,8 +96,9 @@ its structure is fresh, then the client). Each row is one to four PRs.
 ## Report follow-ups
 
 Items from [ARCHITECTURE_REPORT.md](ARCHITECTURE_REPORT.md) §8 handled
-outside the numbered steps (note:
-[progress/2026-09-24-gate-hardening.md](progress/2026-09-24-gate-hardening.md)).
+outside the numbered steps (notes:
+[progress/2026-09-24-gate-hardening.md](progress/2026-09-24-gate-hardening.md),
+[progress/2026-09-25-report-fixes.md](progress/2026-09-25-report-fixes.md)).
 
 | Item | Scope | State | PR |
 | --- | --- | --- | --- |
@@ -113,8 +114,16 @@ outside the numbered steps (note:
 | Q7 | `max_hp_for_level` used by the offline duelist (server keeps its override-aware form) | done | gate hardening |
 | Q8 | stale `allow(dead_code)` and duplicate clippy allows, `LICENSING.md`, SDK revision in `[workspace.dependencies]` | done | gate hardening |
 | Q9 | doc drift from report §5.4 | done | gate hardening |
+| O3 | time-based movement budget: unspent tolerance carried as `HeroTimers::movement_slack` (starts at the allowance) instead of `+0.10` per `Transform`; `ARCHITECTURE.md` protocol rule reworded (`Cast` carries no request id) | done | this PR (report fixes) |
+| O11 | career portrait resolves avatar thumbnails through `passport::thumbnail_asset_path` (`ekza://` for store avatars) | done | this PR (report fixes) |
+| O7 | snapshot apply compares the draft loadout before writing `TeamSelection`; the settings file is written to a temp file and renamed | done | this PR (report fixes) |
+| O16 | offline practice: level-6 HP/mana pools (`max_hp_for_level`, new `max_mana_for_level`), heals/restores/damage scaled like the server, no mana regen while dead, Q recorded as Attack (`PlayerActionKind::for_cast`); harness bots untouched | done | this PR (report fixes) |
+| O13 | `sim/cast.rs` uses `basic_attack::resolve_hostile_target`; projectile `joined` check unchanged | done | this PR (report fixes) |
+| O17 | `settle_finished_round` split out of `record_match_metrics`; `restart_round` finalizes a won round as Completed, anything else as Abandoned | done | this PR (report fixes) |
+| O29 | pure `recover_outbox(&Path)` from the career worker prologue, temp-dir tests; worker otherwise unchanged | done | this PR (report fixes) |
+| O25 | pure `team::lock_in(...)` decision for the hero-select lock-in, tests; no file move (9b-3) | done | this PR (report fixes) |
 
-O2 (CI as a required gate): the maintainer approved it on 2026-09-25. Rules 2 and 6 now say "merge only after every check is green"; branch protection on `main` with the four required checks is a repository setting the maintainer switches on. Still open from §8.2: the rest of the list.
+O2 (CI as a required gate): the maintainer approved it on 2026-09-25. Rules 2 and 6 now say "merge only after every check is green"; branch protection on `main` with the four required checks is a repository setting the maintainer switches on. Still open from §8.2: the rest of the list outside the rows above.
 
 ## Plans for the open steps
 

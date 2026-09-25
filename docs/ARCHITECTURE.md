@@ -407,8 +407,14 @@ Developer and practice commands form two families, kept apart on purpose.
   changes; peers with another version are rejected at `Hello`.
 - Compatible changes are additive: new fields carry `#[serde(default)]`,
   new enum values are only added where the decoder tolerates unknown values.
-- Gameplay commands that must not replay carry `server_epoch`, `match_id`
-  and a monotonic `request_id`; transforms carry `dash_sequence`.
+- Gameplay commands that must not replay (`BasicAttack`, `Utility`,
+  `BuyItem`) carry `server_epoch`, `match_id` and a monotonic `request_id`.
+  `Cast` carries none: a replayed cast is refused by the slot's cooldown,
+  skill recovery and mana. Transforms carry `dash_sequence`, and the distance
+  a transform may cover is a time budget (speed × elapsed time plus at most
+  one `MOVEMENT_POSITION_TOLERANCE` of unspent slack,
+  `HeroTimers::movement_slack`), not a per-packet allowance, so sending
+  transforms faster does not move a hero faster.
 - Snapshots are trimmed to the UDP payload limit by dropping the oldest
   cosmetic combat events, never gameplay state.
 - A player's private economy (gold, earned gold, inventory, item bonuses,
