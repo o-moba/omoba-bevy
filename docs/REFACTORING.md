@@ -74,7 +74,7 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
 | 12 | Data-driven hero and item catalogs with validation tests | done: 12a-12e; 12f (optional client cross-checks) open | #38 |
 | 13 | Roster/asset loading and SDK types out of the shared model | done: 13a-13e (with O5 load validation and the O30 working-directory slice); 13f (server-owned registry) optional | #48 (shared without I/O) |
 | 15 | Client session events and staged snapshot application | done: 15a+15b1 (#39), 15b2+15c+15d (#41), 15e (#43); 15f/15g optional | #39, #41, #43 |
-| 9b | UI kit follow-ups: scroll unification, modal registry, frontend/social/supporter/sandbox screens, responsive layout, `TestId` in QA | in progress: scroll + modal registry (#50); screens + career/social/supporter/sandbox actions (#51); layout, `TestId` in QA, colours open (order in [ui-kit.md](ui-kit.md)) | #50, #51 |
+| 9b | UI kit follow-ups: scroll unification, modal registry, frontend/social/supporter/sandbox screens, responsive layout, `TestId` in QA | done: scroll + modal registry (#50); screens + career/social/supporter/sandbox actions (#51); `metric` policy, `TestId` in QA, HUD buttons and colours (this PR); details in [ui-kit.md](ui-kit.md) | #50, #51, this PR |
 
 Suggested order after 7: 14 (done), 10 (done), 15, 11, 12, 13, 9b (server first while
 its structure is fresh, then the client). Each row is one to four PRs.
@@ -205,4 +205,16 @@ O2 (CI as a required gate): the maintainer approved it on 2026-09-25. Rules 2 an
   `frontend::widgets::{button, tile, compact_tile}` and the `ui_theme` and
   `frontend::widgets` palette shims removed. Progress note:
   [progress/2026-09-25-ui-screens.md](progress/2026-09-25-ui-screens.md).
-- Open: 9b-5 responsive layout, 9b-6 `TestId` in QA, 9b-7 colours.
+- Items 5 to 7 (this PR): `ui::theme::metric` is the one responsive
+  policy (`Form`, `menu_font`, `menu_control_height`, `pause_panel_height`,
+  phone panel and bar sizes, the phone font table) behind
+  `adapt_phone_menu_readability`, `adapt_phone_layout`, `sync_phone_ui` and
+  `size_desktop_pause_panel`, same pixel values; QA harnesses press by
+  `TestId` (`crate::qa::TestIdPresses`) and dump through `QaName`, the
+  `TestId` → `Name` mirror is gone (layout passes read `NodeKey`); the
+  combat skill bar, shop, phone bar and server entry, edge HUD and
+  scoreboard, connection Retry and debug HUD toggles are on
+  `UiAction`/`ButtonStyle` with new `ButtonKind::{Skill, SkillUpgrade,
+  ShopItem, Debug}` and a per-kind pressed colour. Progress note:
+  [progress/2026-09-25-ui-finish.md](progress/2026-09-25-ui-finish.md).
+- Step 9b is complete.

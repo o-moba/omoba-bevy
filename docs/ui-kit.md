@@ -6,28 +6,31 @@ actions and their widgets. Roadmap step 9
 (`docs/ARCHITECTURE.md`) planned it; the pause menu and the practice sandbox
 were the pilot. Step 9b items 3 and 4 moved the front-end screens, hero
 select, career, social, supporter, the Combat Test panel and the help
-overlay onto typed actions; what still uses its own buttons is listed under
-[Remaining migration](#remaining-migration).
+overlay onto typed actions; items 5 to 7 put the phone/desktop sizes behind
+one `metric` policy, moved the QA harnesses to `TestId` and the last HUD
+buttons onto the kit. Every button the client draws is now a kit button (see
+[Remaining migration](#remaining-migration)).
 
 ## Modules
 
 | Module | Holds |
 | --- | --- |
 | `ui/mod.rs` | `UiKitPlugin`, `UiPlatform`, `UiSet` |
-| `ui/theme.rs` | palette, fonts, `metric`, `ButtonKind` (`Primary`, `Secondary`, `Tile`, `Danger`, `Link`, `Team(Team)`) and its idle/hover colours |
+| `ui/theme.rs` | palette, fonts, `metric` (sizes and the responsive policy: `Form`, `menu_font`, `menu_control_height`, `pause_panel_height`, `phone_class_column`, `phone_shop_card`, `phone_font`/`PhoneText`, phone panel widths), `ButtonKind` (`Primary`, `Secondary`, `Tile`, `Danger`, `Link`, `Team(Team)`, `Skill`, `SkillUpgrade`, `ShopItem`, `Debug(DebugToggle)`) and its idle/hover/pressed colours |
 | `ui/gesture.rs` | `Pressable`, `TapTracker`, `TAP_SLOP`, `recognize_presses`, `GestureEpoch`, `SyntheticPress`, `logical_ui_rect` |
 | `ui/scroll.rs` | `ScrollArea` (`WheelScroll`, `DragScroll`, `ScrollPlatform`), `scroll_areas`, `max_offset`, `harness` (tests) |
 | `ui/modal.rs` | `ModalId`, `ModalStack`, `ModalRoot`, `ModalAppExt::register_modal`, `ModalSet`, `ModalGate` |
 | `ui/action.rs` | `UiAction<T>`, `Activated<T>`, `dispatch_actions::<T>`, `UiActionAppExt` |
 | `ui/widgets.rs` | `ButtonStyle`, `paint_pressables`, `button`, `button_with_label`, `icon_button`, `adjust_row`, `toggle_row`, `value_label`; front-end `screen_button`, `screen_tile`, `compact_screen_tile`, `screen_label` and their phone metrics `MenuTypography`/`MenuControl` |
-| `ui/test_id.rs` | `TestId`, `harness::{TestIds, find, press, kit_app, spawn_ui, set_disabled, drain_actions}` (tests) |
+| `ui/test_id.rs` | `TestId`, `NodeKey`/`node_key` (a node's `TestId`, else its `Name`), `harness::{TestIds, find, press, kit_app, spawn_ui, set_disabled, drain_actions}` (tests) |
 
 The `crate::ui_theme` shim, the `frontend::widgets` palette re-export,
 `MenuButton` and `frontend::widgets::{button, tile, compact_tile}` are gone:
 every module imports `crate::ui::theme` (a few keep a local alias, `ui` or
 `ui_theme`). `frontend::widgets` keeps the layout nodes (`screen_root`,
 `panel_row`, `heading`, `label`) and the phone readability pass
-(`adapt_phone_menu_readability`, item 5).
+(`adapt_phone_menu_readability`, which applies `metric::menu_font` and
+`metric::menu_control_height`).
 
 ## Platform
 
@@ -57,7 +60,9 @@ card, home, help overlay); `MobileControls.enabled` is the runtime copy that
    `Or<(Changed<Interaction>, Changed<Pressable>)>`, so a held click or a
    resting finger fires once.
 4. **Paint** – `paint_pressables` colours `(Pressable, ButtonStyle,
-   BackgroundColor)` from the effective interaction.
+   BackgroundColor)` from the effective interaction: idle, hover, or the
+   kind's pressed colour (the hover colour except for `Skill` and an unowned
+   `ShopItem`, which darken to `TILE` as they always did).
 
 Modules consume `Activated<T>` after `UiSet::Dispatch` (the pause menu in
 `PauseMenuSet::Visuals`). A handler that is gated (audio only while the
@@ -214,15 +219,19 @@ is `ButtonKind::Primary` (the pause menu's Resume), not a name check.
 
 ## TestId policy
 
-`TestId(Cow<'static, str>)` mirrors itself into `Name` on insert when the
-entity has none, so QA node dumps and `Name` lookups keep resolving. Every
-kit control and rewritable value label carries one; layout-only nodes keep a
-plain `Name`. Under `cfg(test)` `ui::test_id::harness` offers `find(world,
-id)`, `press(world, id)` (queues a `SyntheticPress`) and the `TestIds`
-system param, plus `kit_app()` (recognizer, dispatch sets, painter),
-`spawn_ui`, `set_disabled` and `drain_actions::<T>` for screen tests. QA
-harnesses press kit buttons with `SyntheticPress` (`audio_qa` directly, the
-rest through `crate::qa::NamedPresses`, see below) instead of writing
+`TestId(Cow<'static, str>)` identifies every kit control and rewritable
+value label; layout-only nodes keep a plain `Name`. The two are independent:
+a `TestId` no longer mirrors itself into `Name` (item 6). Code that addresses
+both kinds of node by string, the phone layout pass (`adapt_phone_layout`,
+`phone_family`), the edge HUD layout and the QA node dumps, reads the
+`NodeKey` query data (`key.as_str()`: the `TestId`, else the `Name`, empty
+for neither); `crate::qa::QaName` is the same type. Under `cfg(test)`
+`ui::test_id::harness` offers `find(world, id)`, `press(world, id)` (queues a
+`SyntheticPress`) and the `TestIds` system param, plus `kit_app()`
+(recognizer, dispatch sets, painter), `spawn_ui`, `set_disabled` and
+`drain_actions::<T>` for screen tests. QA harnesses press kit buttons with
+`SyntheticPress` (`audio_qa` directly, the rest through
+`crate::qa::TestIdPresses`, see below) instead of writing
 `Interaction::Pressed`.
 
 ## Screens on typed actions (9b items 3 and 4)
@@ -246,11 +255,57 @@ system ordered `.after(UiSet::Dispatch)`:
 | `sandbox/ui.rs` | `sandbox::ui::Action` | `actions` (panel chain, now after `Dispatch`) | a closed panel clears the presses; ids `CombatTest…` |
 | `help_overlay.rs` | `HelpAction` | `dismiss_help_button` | needed to retire `MenuButton` |
 
-QA harnesses press by `Name` through `crate::qa::NamedPresses` (and the
-same rule in `offline_qa` and `sandbox/ui/qa.rs`): a kit button gets a
-`SyntheticPress`, which activates it once in desktop and touch mode; any
-other button still gets `Interaction::Pressed`. Every `Name` the harnesses
-press is unchanged (`TestId` mirrors into `Name`).
+QA harnesses press by `TestId` through `crate::qa::TestIdPresses` (and the
+same lookup in `offline_qa`; `sandbox/ui/qa.rs` presses by action): every
+button a harness presses is a kit button and gets a `SyntheticPress`, which
+activates it once in desktop and touch mode and, like a real tap, does
+nothing while a modal in front blocks it. The ids are the names the
+harnesses always pressed. The harnesses' node dumps and lookups read
+`QaName`, so a kit control is listed under its `TestId`.
+
+## Responsive metrics (9b item 5)
+
+`ui::theme::metric` is the one place that decides a phone or desktop size.
+`Form::{Desktop, Phone}` (`Form::from_mobile(MobileControls)`) picks the
+family; the functions return the pixel values the adapters used to compute
+inline, unchanged:
+
+| Policy | Desktop | Phone | Applied by |
+| --- | --- | --- | --- |
+| `menu_font(form, size, heading, ui_scale)` | designed size | at least 20 (heading) / 12 px ÷ `UiScale` | `frontend::widgets::adapt_phone_menu_readability` |
+| `menu_control_height(form, height, ui_scale)` | designed height | at least `TOUCH_MIN` (44) ÷ `UiScale` | same |
+| `pause_panel_height(form, in_settings, available)` | 560 settings / 380 main (`PAUSE_PANEL` 480×560 as spawned) | safe-area height / `min(height, 360)` | `pause_menu::size_desktop_pause_panel`, `mobile_ui::adapt_phone_layout` |
+| `phone_class_column(width)` | – | `0.26 × width` in 150..=210 | `adapt_phone_layout` (hero select) |
+| `phone_shop_card(width)` | – | `((width − 36) / 3, 103)` | `adapt_phone_layout` |
+| `phone_font(PhoneText, original, width, ui_scale)` | – | the per-panel font table (bar ÷ `UiScale`, entry 11..=16, shop cards 12/15 below 650 px, shop 12..=18, summary 14, result 20, help 15, pause 14..=22) | `adapt_phone_layout` |
+| `PHONE_PAUSE_W`, `PHONE_HELP_W`, `PHONE_SERVER_W`, `PHONE_RESULT_W` | – | 650, 740, 860, 640 caps | `adapt_phone_layout` |
+| `PHONE_BAR_{HELP,MENU,SERVER,MIN}_W`, `TOUCH_MIN` | – | 48, 64, 88, 48 wide × 44 ÷ `UiScale` | `mobile_ui::sync_phone_ui` |
+
+`theme::tests::metric_policy_keeps_the_phone_and_desktop_sizes` pins them.
+The phone layout pass still positions each named node itself (safe-area
+anchors and offsets are layout, not a size policy), and the gameplay HUD
+docking (`match_hud::adapt_desktop_dock`, `minimap::adapt_minimap_edge`,
+`shop::adapt_desktop_equipment_width`, `mobile_controls` layout) keeps its
+world-relative geometry, which scales with `MobileControls::scale()`.
+
+## HUD buttons on the kit (9b item 7)
+
+| Module | Action type | Handler | Look |
+| --- | --- | --- | --- |
+| `combat/hotbar.rs` | `HotbarAction::{Cast(slot), Upgrade(slot)}` | `skill_button_system`, `skill_upgrade_input_system` (`InputContextSet::Actions`) | `ButtonKind::Skill` (slot: `PANEL`/`HOVER`/`TILE` pressed), `SkillUpgrade` (ready green) |
+| `shop.rs` | `ShopAction::{Toggle, Close, Buy(item), QuickBuy(slot)}` | `toggle_shop` (after `Dispatch`), `purchase_buttons` (`Actions`) | item cards `ButtonKind::ShopItem` (`selected` = owned, `SHOP_OWNED`); gold button, quick-buy slots, OPEN SHOP and CLOSE keep their fixed colours |
+| `mobile_ui.rs` | `PhoneAction` (bar and server entry) | `phone_menu_actions` (after `Dispatch`, before help) | fixed `TILE` |
+| `edge_hud.rs` | `EdgeAction::{Score, Menu, Close}` | `actions` (after `Dispatch`) | fixed panel colours; the backdrop is a `Close` |
+| `net/status_ui.rs` | `RetryPressed` | `handle_connection_retry_button` (`SessionRetryInput`, after `Dispatch`) | fixed green |
+| `debug/hud.rs` | `DebugHudAction::{GodMode, SpeedBoost}` | `handle_debug_buttons` (after `Dispatch`) | `ButtonKind::Debug(DebugToggle)`, `selected` = on |
+
+Each handler reads every `Activated<T>` before its gates (shop closed or
+pending purchase, gameplay not allowed, debug access off), so a press made
+while gated cannot fire later. These buttons sit outside every `ModalRoot`
+except the shop cards and CLOSE (`ModalRoot(Shop)`), the scoreboard's Close
+and backdrop (`ModalRoot(Scoreboard)`) and the server-entry keys
+(`ModalRoot(ServerEntry)`), so with a modal open only the top modal's
+buttons react.
 
 ## Remaining migration
 
@@ -266,15 +321,20 @@ In the order the roadmap intends, each a PR of its own:
 4. ~~Career, social, supporter, sandbox~~ – done. The Combat Test panel moved
    completely: its text fields are keyboard-driven (`edit_keys`) and
    teleport picking is a world click (`teleport`), neither is a button.
-5. **Responsive layout** – phone metrics (`adapt_phone_menu_readability`,
-   `adapt_phone_layout`, `size_desktop_pause_panel`) through one `metric`
-   policy.
-6. **TestId in QA** – harness lookups by `TestId` instead of `Name`, then
-   the `Name` mirror can go.
-7. **Colours and the last own buttons** – the remaining hand-painted or
-   `Interaction`-reading buttons onto `UiAction`/`ButtonStyle`: the combat
-   skill bar (`combat/hotbar.rs`), the shop (`shop.rs`), the phone bar and
-   server entry (`mobile_ui.rs`), the edge HUD and scoreboard
-   (`edge_hud.rs`), the connection panel (`net/status_ui.rs`) and the debug
-   HUD (`debug/hud.rs`). Hero select is on `ButtonStyle` now (`Link`,
-   `Team`); `ui/theme.rs` keeps the team colours.
+5. **Responsive layout** – done: `ui::theme::metric` answers every
+   phone/desktop size the readability pass, the phone layout pass, the phone
+   bar and the desktop pause panel apply (see
+   [Responsive metrics](#responsive-metrics-9b-item-5)).
+6. **TestId in QA** – done: harness presses by `TestId`
+   (`crate::qa::TestIdPresses`), dumps through `QaName`, and the `Name`
+   mirror is gone (see [TestId policy](#testid-policy)).
+7. **Colours and the last own buttons** – done: the combat skill bar, the
+   shop, the phone bar and server entry, the edge HUD and scoreboard, the
+   connection Retry button and the debug HUD toggles are kit buttons (see
+   [HUD buttons on the kit](#hud-buttons-on-the-kit-9b-item-7)). None
+   needed hold semantics: the desktop skill bar casts on press, and the
+   phone's hold-to-repeat attack and drag-to-aim skills are
+   `mobile_controls` touch input, not buttons. Buttons that still read
+   `Interaction` do so only to keep world clicks off the UI
+   (`combat::selection`, `player::input`) or to play the click sound
+   (`game_audio`).
