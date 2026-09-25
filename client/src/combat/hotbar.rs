@@ -7,6 +7,7 @@ use crate::net::{
 };
 use crate::player::Player;
 use crate::team::TeamSelection;
+use crate::ui::{Activated, TestId, UiAction, theme::ButtonKind, widgets::ButtonStyle};
 use bevy::prelude::*;
 use shared::{
     MAX_ABILITY_RANK, SkillSlot, TargetingMode, ability_for_class_slot, scaled_cast_range,
@@ -20,16 +21,13 @@ use super::selection::TargetState;
 
 pub(super) const SKILL_SLOT_SIZE: f32 = 80.0;
 const SKILL_SLOT_GAP: f32 = 8.0;
-const SKILL_BUTTON_COLOR: Color = crate::ui::theme::PANEL;
-const SKILL_BUTTON_HOVER_COLOR: Color = crate::ui::theme::HOVER;
-const SKILL_BUTTON_PRESS_COLOR: Color = crate::ui::theme::TILE;
-const SKILL_UPGRADE_READY_COLOR: Color = Color::srgba(0.20, 0.62, 0.26, 0.95);
-const SKILL_UPGRADE_HOVER_COLOR: Color = Color::srgba(0.26, 0.72, 0.32, 0.98);
-const SKILL_UPGRADE_IDLE_COLOR: Color = Color::srgba(0.16, 0.16, 0.18, 0.55);
 
-#[derive(Component)]
-pub(super) struct SkillBarSlot {
-    slot: usize,
+/// A press on the desktop skill bar: cast the slot, or spend a point on it.
+/// The slots are painted by the kit (`ButtonKind::Skill`, `SkillUpgrade`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HotbarAction {
+    Cast(usize),
+    Upgrade(usize),
 }
 
 #[derive(Component)]
@@ -103,6 +101,7 @@ pub(super) fn setup_combat_ui(mut commands: Commands, asset_server: Option<Res<A
                 ))
                 .with_children(|col| {
                     // Upgrade arrow above the slot; bright when a point can be spent.
+                    let upgrade = ButtonStyle::new(ButtonKind::SkillUpgrade);
                     col.spawn((
                         Button,
                         Node {
@@ -112,9 +111,11 @@ pub(super) fn setup_combat_ui(mut commands: Commands, asset_server: Option<Res<A
                             align_items: AlignItems::Center,
                             ..default()
                         },
-                        BackgroundColor(SKILL_UPGRADE_IDLE_COLOR),
+                        BackgroundColor(upgrade.idle_color()),
+                        upgrade,
+                        UiAction(HotbarAction::Upgrade(i)),
                         SkillUpgradeButton { slot: i },
-                        Name::new(format!("SkillUpgrade-{label}")),
+                        TestId::new(format!("SkillUpgrade-{label}")),
                     ))
                     .with_children(|arrow| {
                         arrow.spawn((
@@ -141,10 +142,11 @@ pub(super) fn setup_combat_ui(mut commands: Commands, asset_server: Option<Res<A
                             row_gap: Val::Px(1.0),
                             ..default()
                         },
-                        BackgroundColor(SKILL_BUTTON_COLOR),
+                        BackgroundColor(crate::ui::theme::PANEL),
                         BorderColor::all(crate::ui::theme::EDGE),
-                        SkillBarSlot { slot: i },
-                        Name::new(format!("SkillSlot-{label}")),
+                        ButtonStyle::new(ButtonKind::Skill),
+                        UiAction(HotbarAction::Cast(i)),
+                        TestId::new(format!("SkillSlot-{label}")),
                     ))
                     .with_children(|slot| {
                         // The atlas is presentation only; shortcuts and status remain
@@ -244,15 +246,7 @@ pub(super) fn update_skill_bar_system(
     mut name_labels: Query<(&SkillNameLabel, &mut Text), Without<SkillRankLabel>>,
     images: Option<Res<Assets<Image>>>,
     mut icons: Query<(&DesktopSkillIcon, &mut ImageNode, &mut Node), Without<SkillUpgradeButton>>,
-    mut upgrade_buttons: Query<
-        (
-            &SkillUpgradeButton,
-            &Interaction,
-            &mut BackgroundColor,
-            &mut Node,
-        ),
-        With<Button>,
-    >,
+    mut upgrade_buttons: Query<(&SkillUpgradeButton, &mut Node), With<Button>>,
 ) {
     let local = progression.iter().next();
     let prog = local.map(|(prog, ..)| *prog).unwrap_or_default();
@@ -340,7 +334,7 @@ pub(super) fn update_skill_bar_system(
         }
     }
 
-    for (button, interaction, mut color, mut node) in &mut upgrade_buttons {
+    for (button, mut node) in &mut upgrade_buttons {
         let rank = prog.ranks.get(button.slot).copied().unwrap_or(1).max(1);
         let can_upgrade =
             prog.skill_points > 0 && rank < MAX_ABILITY_RANK && prog.unlocked()[button.slot];
@@ -353,12 +347,6 @@ pub(super) fn update_skill_bar_system(
         if node.display != display {
             node.display = display;
         }
-        let next_color = if matches!(interaction, Interaction::Hovered | Interaction::Pressed) {
-            SKILL_UPGRADE_HOVER_COLOR
-        } else {
-            SKILL_UPGRADE_READY_COLOR
-        };
-        *color = next_color.into();
     }
 }
 
@@ -367,13 +355,18 @@ pub(super) fn update_skill_bar_system(
 pub(super) fn skill_upgrade_input_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     progression: Query<&PlayerProgression, With<Player>>,
-    upgrade_buttons: Query<
-        (&SkillUpgradeButton, &Interaction),
-        (Changed<Interaction>, With<Button>),
-    >,
+    mut activated: MessageReader<Activated<HotbarAction>>,
     mut command_writer: MessageWriter<NetworkCommand>,
     context: Res<GameplayInputContext>,
 ) {
+    // Read every press, so one made while gameplay is gated cannot fire later.
+    let presses: Vec<usize> = activated
+        .read()
+        .filter_map(|activated| match activated.action {
+            HotbarAction::Upgrade(slot) => Some(slot),
+            HotbarAction::Cast(_) => None,
+        })
+        .collect();
     if !context.gameplay_allowed() {
         return;
     }
@@ -390,20 +383,15 @@ pub(super) fn skill_upgrade_input_system(
             command_writer.write(NetworkCommand::UpgradeSkill { slot: slot as u8 });
         }
     }
-    for (button, interaction) in &upgrade_buttons {
-        if matches!(interaction, Interaction::Pressed) && eligible(button.slot) {
-            command_writer.write(NetworkCommand::UpgradeSkill {
-                slot: button.slot as u8,
-            });
+    for slot in presses {
+        if eligible(slot) {
+            command_writer.write(NetworkCommand::UpgradeSkill { slot: slot as u8 });
         }
     }
 }
 
 pub(super) fn skill_button_system(
-    mut interactions: Query<
-        (&Interaction, &SkillBarSlot, &mut BackgroundColor),
-        (Changed<Interaction>, With<Button>),
-    >,
+    mut activated: MessageReader<Activated<HotbarAction>>,
     game_state: Option<Res<GameStateSnapshot>>,
     team_selection: Res<TeamSelection>,
     local_player: Query<
@@ -421,6 +409,13 @@ pub(super) fn skill_button_system(
     context: Res<GameplayInputContext>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
 ) {
+    let casts: Vec<usize> = activated
+        .read()
+        .filter_map(|activated| match activated.action {
+            HotbarAction::Cast(slot) => Some(slot),
+            HotbarAction::Upgrade(_) => None,
+        })
+        .collect();
     if !context.gameplay_allowed() || mobile.as_ref().is_some_and(|mobile| mobile.enabled) {
         return;
     }
@@ -430,28 +425,11 @@ pub(super) fn skill_button_system(
             return;
         }
     }
-    for (interaction, bar_slot, mut color) in interactions.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                *color = SKILL_BUTTON_PRESS_COLOR.into();
-                let Ok((_stats, _prog, _net_id, class)) = local_player.single() else {
-                    continue;
-                };
-                let class = local_hero_class(Some(class), &team_selection);
-                queue_cast_request(
-                    bar_slot.slot,
-                    class,
-                    &target_state,
-                    &mut pending_cast,
-                    &mut feedback,
-                );
-            }
-            Interaction::Hovered => {
-                *color = SKILL_BUTTON_HOVER_COLOR.into();
-            }
-            Interaction::None => {
-                *color = SKILL_BUTTON_COLOR.into();
-            }
-        }
+    for slot in casts {
+        let Ok((_stats, _prog, _net_id, class)) = local_player.single() else {
+            continue;
+        };
+        let class = local_hero_class(Some(class), &team_selection);
+        queue_cast_request(slot, class, &target_state, &mut pending_cast, &mut feedback);
     }
 }

@@ -13,6 +13,11 @@ use shared::debug::DebugCommand;
 
 use super::{ClientDebugAccess, DebugAccessSet, DebugConsole, DebugToggles};
 use crate::net::{ClientSession, NetworkCommand};
+use crate::ui::{
+    Activated, TestId, UiAction, UiActionAppExt,
+    theme::{ButtonKind, DebugToggle},
+    widgets::ButtonStyle,
+};
 
 const BUTTON_LEFT: f32 = 20.0;
 /// Sits on the same bottom line as the skill bar (which is anchored bottom-right).
@@ -20,12 +25,14 @@ const BUTTON_BOTTOM: f32 = 20.0;
 const BUTTON_WIDTH: f32 = 150.0;
 const BUTTON_HEIGHT: f32 = 64.0;
 const BUTTON_GAP: f32 = 10.0;
-const OFF_COLOR: Color = Color::srgba(0.18, 0.18, 0.20, 0.92);
-const OFF_HOVER_COLOR: Color = Color::srgba(0.26, 0.26, 0.28, 0.95);
-const GOD_ON_COLOR: Color = Color::srgba(0.78, 0.20, 0.22, 0.96);
-const GOD_ON_HOVER_COLOR: Color = Color::srgba(0.88, 0.28, 0.30, 0.98);
-const SPEED_ON_COLOR: Color = Color::srgba(0.20, 0.44, 0.80, 0.96);
-const SPEED_ON_HOVER_COLOR: Color = Color::srgba(0.28, 0.52, 0.90, 0.98);
+
+/// The two HUD toggles; painted by the kit (`ButtonKind::Debug`, selected
+/// while on).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DebugHudAction {
+    GodMode,
+    SpeedBoost,
+}
 
 pub struct GodModePlugin;
 
@@ -33,21 +40,19 @@ impl Plugin for GodModePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DebugConsole>()
             .init_resource::<DebugToggles>()
+            .add_ui_action::<DebugHudAction>()
             .add_systems(Startup, setup_debug_buttons)
             .add_systems(
                 Update,
                 (
-                    (
-                        keyboard_debug_toggles,
-                        handle_god_mode_button,
-                        handle_speed_boost_button,
-                    )
-                        .run_if(debug_controls_enabled),
+                    keyboard_debug_toggles.run_if(debug_controls_enabled),
+                    handle_debug_buttons,
                     sync_debug_button_visibility,
                     sync_debug_button_labels,
                 )
                     .chain()
-                    .after(DebugAccessSet),
+                    .after(DebugAccessSet)
+                    .after(crate::ui::UiSet::Dispatch),
             );
     }
 }
@@ -57,13 +62,7 @@ impl Plugin for GodModePlugin {
 struct DebugHudButton;
 
 #[derive(Component)]
-struct GodModeButton;
-
-#[derive(Component)]
 struct GodModeButtonLabel;
-
-#[derive(Component)]
-struct SpeedBoostButton;
 
 #[derive(Component)]
 struct SpeedBoostButtonLabel;
@@ -103,8 +102,7 @@ fn setup_debug_buttons(mut commands: Commands, console: Res<DebugConsole>) {
         &mut commands,
         BUTTON_LEFT,
         "God Mode: OFF",
-        OFF_COLOR,
-        GodModeButton,
+        DebugHudAction::GodMode,
         GodModeButtonLabel,
         "GodModeButton",
     );
@@ -112,22 +110,24 @@ fn setup_debug_buttons(mut commands: Commands, console: Res<DebugConsole>) {
         &mut commands,
         BUTTON_LEFT + BUTTON_WIDTH + BUTTON_GAP,
         "Speed: OFF",
-        OFF_COLOR,
-        SpeedBoostButton,
+        DebugHudAction::SpeedBoost,
         SpeedBoostButtonLabel,
         "SpeedBoostButton",
     );
 }
 
-fn spawn_toggle_button<B: Component, L: Component>(
+fn spawn_toggle_button<L: Component>(
     commands: &mut Commands,
     left: f32,
     text: &str,
-    color: Color,
-    button_marker: B,
+    action: DebugHudAction,
     label_marker: L,
     name: &str,
 ) {
+    let style = ButtonStyle::new(ButtonKind::Debug(match action {
+        DebugHudAction::GodMode => DebugToggle::GodMode,
+        DebugHudAction::SpeedBoost => DebugToggle::SpeedBoost,
+    }));
     commands
         .spawn((
             Button,
@@ -144,11 +144,12 @@ fn spawn_toggle_button<B: Component, L: Component>(
                 ..default()
             },
             Visibility::Hidden,
-            BackgroundColor(color),
+            BackgroundColor(style.idle_color()),
+            style,
             ZIndex(20),
             DebugHudButton,
-            button_marker,
-            Name::new(name.to_owned()),
+            UiAction(action),
+            TestId::new(name.to_owned()),
         ))
         .with_children(|button| {
             button.spawn((
@@ -191,48 +192,49 @@ fn keyboard_debug_toggles(
     }
 }
 
-fn handle_god_mode_button(
+/// Button presses toggle like F2/F3 (only while the controls are enabled);
+/// every press is read so one made while disabled cannot fire later. The
+/// buttons show the toggle state through `ButtonStyle::selected`.
+fn handle_debug_buttons(
+    console: Res<DebugConsole>,
+    access: Option<Res<ClientDebugAccess>>,
+    mut activated: MessageReader<Activated<DebugHudAction>>,
     mut toggles: ResMut<DebugToggles>,
     client_session: Res<ClientSession>,
     mut command_writer: MessageWriter<NetworkCommand>,
-    mut button_query: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<Button>, With<GodModeButton>),
-    >,
+    mut styles: Query<(&UiAction<DebugHudAction>, &mut ButtonStyle)>,
 ) {
-    for (interaction, mut color) in &mut button_query {
-        if matches!(*interaction, Interaction::Pressed) {
-            toggles.god_mode = !toggles.god_mode;
-            info!("[debug] god_mode button -> {}", toggles.god_mode);
-            if client_session.is_connected() {
-                command_writer.write(NetworkCommand::Debug(DebugCommand::GodMode(
-                    toggles.god_mode,
-                )));
+    let enabled = debug_controls_enabled(console, access);
+    for Activated { action, .. } in activated.read() {
+        if !enabled {
+            continue;
+        }
+        match action {
+            DebugHudAction::GodMode => {
+                toggles.god_mode = !toggles.god_mode;
+                info!("[debug] god_mode button -> {}", toggles.god_mode);
+                if client_session.is_connected() {
+                    command_writer.write(NetworkCommand::Debug(DebugCommand::GodMode(
+                        toggles.god_mode,
+                    )));
+                }
+            }
+            DebugHudAction::SpeedBoost => {
+                toggles.speed_boost = !toggles.speed_boost;
+                if client_session.is_connected() {
+                    command_writer.write(NetworkCommand::Debug(DebugCommand::SpeedBoost(
+                        toggles.speed_boost,
+                    )));
+                }
             }
         }
-        *color = god_color(toggles.god_mode, *interaction).into();
     }
-}
-
-fn handle_speed_boost_button(
-    mut toggles: ResMut<DebugToggles>,
-    client_session: Res<ClientSession>,
-    mut command_writer: MessageWriter<NetworkCommand>,
-    mut button_query: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<Button>, With<SpeedBoostButton>),
-    >,
-) {
-    for (interaction, mut color) in &mut button_query {
-        if matches!(*interaction, Interaction::Pressed) {
-            toggles.speed_boost = !toggles.speed_boost;
-            if client_session.is_connected() {
-                command_writer.write(NetworkCommand::Debug(DebugCommand::SpeedBoost(
-                    toggles.speed_boost,
-                )));
-            }
-        }
-        *color = speed_color(toggles.speed_boost, *interaction).into();
+    for (UiAction(action), mut style) in &mut styles {
+        let on = match action {
+            DebugHudAction::GodMode => toggles.god_mode,
+            DebugHudAction::SpeedBoost => toggles.speed_boost,
+        };
+        ButtonStyle::set_selected(&mut style, on);
     }
 }
 
@@ -263,26 +265,6 @@ fn sync_debug_button_labels(
         if text.0 != speed {
             text.0 = speed.to_string();
         }
-    }
-}
-
-fn god_color(enabled: bool, interaction: Interaction) -> Color {
-    let hot = matches!(interaction, Interaction::Hovered | Interaction::Pressed);
-    match (enabled, hot) {
-        (true, true) => GOD_ON_HOVER_COLOR,
-        (true, false) => GOD_ON_COLOR,
-        (false, true) => OFF_HOVER_COLOR,
-        (false, false) => OFF_COLOR,
-    }
-}
-
-fn speed_color(enabled: bool, interaction: Interaction) -> Color {
-    let hot = matches!(interaction, Interaction::Hovered | Interaction::Pressed);
-    match (enabled, hot) {
-        (true, true) => SPEED_ON_HOVER_COLOR,
-        (true, false) => SPEED_ON_COLOR,
-        (false, true) => OFF_HOVER_COLOR,
-        (false, false) => OFF_COLOR,
     }
 }
 
@@ -362,6 +344,59 @@ mod tests {
             2
         );
         assert_eq!(visible_buttons(&mut enabled), 2);
+    }
+
+    /// The HUD buttons are kit buttons: a press toggles once and the
+    /// painter shows the state in the toggle's colour.
+    #[test]
+    fn hud_buttons_toggle_through_the_kit_and_paint_their_state() {
+        use crate::ui::{UiSet, test_id::harness, theme};
+        let mut app = harness::kit_app();
+        let mut console = DebugConsole::default();
+        console.ui_enabled = true;
+        app.insert_resource(console)
+            .insert_resource(ClientDebugAccess {
+                server: DebugAccess::for_match_mode("dev"),
+                combat_test: false,
+            })
+            .insert_resource(ClientSession::admitted_for_test())
+            .init_resource::<DebugToggles>()
+            .add_message::<NetworkCommand>()
+            .add_ui_action::<DebugHudAction>()
+            .add_systems(Startup, setup_debug_buttons)
+            .add_systems(
+                Update,
+                handle_debug_buttons
+                    .after(UiSet::Dispatch)
+                    .before(UiSet::Paint),
+            );
+        app.update();
+        let god = harness::press(app.world_mut(), "GodModeButton");
+        app.update();
+        app.update();
+        assert_eq!(
+            *app.world().resource::<DebugToggles>(),
+            DebugToggles {
+                god_mode: true,
+                speed_boost: false
+            }
+        );
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .count(),
+            1
+        );
+        assert_eq!(
+            app.world().get::<BackgroundColor>(god).unwrap().0,
+            theme::DEBUG_GOD
+        );
+        let speed = harness::find(app.world_mut(), "SpeedBoostButton").unwrap();
+        assert_eq!(
+            app.world().get::<BackgroundColor>(speed).unwrap().0,
+            theme::DEBUG_OFF
+        );
     }
 
     /// Step 11e: with `OMOBA_DEBUG_UI` the HUD still follows access: hidden

@@ -141,7 +141,7 @@ impl FlowQa {
 }
 
 /// Presses the button with this name, if it is on screen.
-fn press(buttons: &mut crate::qa::NamedPresses, wanted: &str) {
+fn press(buttons: &mut crate::qa::TestIdPresses, wanted: &str) {
     buttons.press(wanted);
 }
 
@@ -153,7 +153,7 @@ fn drive_flow(
     players: Query<(), With<Player>>,
     snapshot: Res<crate::net::GameStateSnapshot>,
     mut draft_since: Local<Option<Instant>>,
-    mut buttons: crate::qa::NamedPresses,
+    mut buttons: crate::qa::TestIdPresses,
     mut session_ui: MessageWriter<crate::net::SessionUiCommand>,
     mut windows: Query<(Entity, &mut Window), With<PrimaryWindow>>,
     mut exit: MessageWriter<AppExit>,

@@ -112,9 +112,13 @@ these together to understand frame order:
    `CombatPointerInputSet`) and mobile controls. Both input sets are
    defined in `input_context.rs`. Button presses go through the UI kit:
    `UiSet::{Gesture, Dispatch, Paint}` runs at the start of `Modal`, and
-   every screen and overlay on it (front-end screens, hero select, career,
-   social, supporter, Combat Test panel, pause menu, help) handles its
-   `Activated<T>` in a system ordered after `UiSet::Dispatch`
+   every screen, overlay and HUD button on it (front-end screens, hero
+   select, career, social, supporter, Combat Test panel, pause menu, help,
+   shop, scoreboard and match chrome, phone bar and server entry, the
+   desktop skill bar, connection Retry, the debug HUD) handles its
+   `Activated<T>` in a system ordered after `UiSet::Dispatch` (the skill bar
+   and shop purchases in `Actions`). Phone and desktop sizes come from one
+   policy, `ui::theme::metric`; QA harnesses find controls by `TestId`
    ([ui-kit.md](ui-kit.md)).
 3. `ClientNetPipeline::SendLocalState` and `SendCommands` after `Actions`:
    the local transform and the queued `NetworkCommand`s become packets.
@@ -571,13 +575,14 @@ Ordered by value over cost. Each step is a separate change with the full
    the optional slices 15f and 15g are listed in
    `docs/plans/client-10-15.md`).
 9. One UI kit (theme, widgets, gestures, scroll, actions) and a modal
-   registry (pilot done: `client/src/ui/` with theme, tap recognizer, typed
-   actions and widgets; the pause menu, the practice sandbox, the front-end
-   screens, hero select, career, social, supporter, the Combat Test panel
-   and the help overlay use it; one `ScrollArea` system scrolls every panel
-   and the `ModalStack` registry gates input top-only; the `ui_theme` and
-   `frontend::widgets` shims and `MenuButton` are gone; remaining steps in
-   `docs/ui-kit.md`).
+   registry (done: `client/src/ui/` with theme, tap recognizer, typed
+   actions and widgets; every client button is a kit button, from the
+   pause menu, front-end screens and career to the shop, skill bar, phone
+   bar, scoreboard and debug HUD; one `ScrollArea` system scrolls every
+   panel, the `ModalStack` registry gates input top-only, one `metric`
+   policy sizes phone and desktop layouts and QA harnesses press by
+   `TestId`; the `ui_theme` and `frontend::widgets` shims, `MenuButton` and
+   the `TestId` → `Name` mirror are gone; see `docs/ui-kit.md`).
 10. Client domain module, combat/player split, render backends behind
     `run_if`, plugin groups, QA behind a cargo feature (done: the domain
     module and the `in_models3d`/`in_sprite2d` backend gates; `combat.rs`

@@ -1790,7 +1790,7 @@ mod tests {
         let mut choices = app.world_mut().query::<&AvatarSelectButton>();
         assert_eq!(choices.iter(app.world()).count(), avatar_roster().len());
         // Defaults precede the persistent Studio section, even without a connection.
-        let mut names = app.world_mut().query::<&Name>();
+        let mut names = app.world_mut().query::<crate::ui::test_id::NodeKey>();
         let names: Vec<String> = names
             .iter(app.world())
             .map(|name| name.as_str().to_owned())

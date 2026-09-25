@@ -254,7 +254,7 @@ fn admission(
     session: Res<ClientSession>,
     selection: Res<TeamSelection>,
     help: Res<HelpOverlayVisible>,
-    mut buttons: crate::qa::NamedPresses,
+    mut buttons: crate::qa::TestIdPresses,
 ) {
     if qa.stage != 0 {
         return;
@@ -333,7 +333,7 @@ struct Scene<'w, 's> {
         'w,
         's,
         (
-            Option<&'static Name>,
+            crate::qa::QaName,
             &'static Interaction,
             Option<&'static ComputedNode>,
             Option<&'static InheritedVisibility>,
@@ -358,7 +358,7 @@ struct Scene<'w, 's> {
         'w,
         's,
         (
-            &'static Name,
+            crate::qa::QaName,
             &'static ComputedNode,
             &'static UiGlobalTransform,
             &'static InheritedVisibility,
@@ -386,7 +386,7 @@ fn selection_gates(
         .filter(|(_, interaction, _, _)| **interaction != Interaction::None)
         .map(|(name, interaction, node, visible)| {
             serde_json::json!({
-                "name":name.map(Name::as_str),"interaction":format!("{interaction:?}"),
+                "name":Some(name.as_str()).filter(|name| !name.is_empty()),"interaction":format!("{interaction:?}"),
                 "size":node.map(|n|n.size().to_array()),"inherited_visible":visible.map(|v| v.get())
             })
         })

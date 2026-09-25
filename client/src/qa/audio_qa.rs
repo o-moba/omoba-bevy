@@ -95,7 +95,7 @@ struct Input<'w, 's> {
         's,
         (
             Entity,
-            &'static Name,
+            crate::qa::QaName,
             &'static ComputedNode,
             &'static UiGlobalTransform,
             &'static InheritedVisibility,
@@ -107,7 +107,7 @@ struct Input<'w, 's> {
         'w,
         's,
         (
-            &'static Name,
+            crate::qa::QaName,
             &'static ComputedNode,
             &'static UiGlobalTransform,
             &'static mut ScrollPosition,
@@ -356,7 +356,7 @@ fn capture(
     settings: Res<AudioSettings>,
     diagnostics: Res<GameAudioDiagnostics>,
     nodes: Query<(
-        &Name,
+        crate::qa::QaName,
         &ComputedNode,
         &UiGlobalTransform,
         &InheritedVisibility,

@@ -155,7 +155,7 @@ fn prepare_controls(
     qa: Res<BetaUiQa>,
     session: Res<ClientSession>,
     help: Res<HelpOverlayVisible>,
-    mut buttons: crate::qa::NamedPresses,
+    mut buttons: crate::qa::TestIdPresses,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
     shop: Res<crate::shop::ShopState>,
     equipment: Query<&crate::net::PlayerEquipment, With<crate::player::Player>>,
@@ -390,7 +390,7 @@ struct UiScene<'w, 's> {
         'w,
         's,
         (
-            &'static Name,
+            crate::qa::QaName,
             &'static ComputedNode,
             &'static UiGlobalTransform,
             Option<&'static InheritedVisibility>,

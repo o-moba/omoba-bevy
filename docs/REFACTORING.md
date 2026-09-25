@@ -70,11 +70,11 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
 | 7 | Server `MatchRules` policy object; career, transport and clock behind traits | done | #31, #32 |
 | 14 | Server per-variant packet handlers, explicit imports instead of crate-root globs | done | #33 |
 | 10 | Client domain module, combat/player split, render backends behind `run_if`, plugin groups, QA behind a cargo feature | done (optional 10h/10i open, see [plans/client-10-15.md](plans/client-10-15.md)) | #35, #36, #37 |
-| 11 | One debug tooling family shared by Combat Test, practice and offline | done: 11-0 (#34), 11a–11c (#42), 11d (#43), 11e+11f (this PR; server-driven `Snapshot.debug_access`, tools page/HUD/re-send follow it) | #34, #42, #43, this PR |
+| 11 | One debug tooling family shared by Combat Test, practice and offline | done: 11-0 (#34), 11a–11c (#42), 11d (#43), 11e+11f (#49; server-driven `Snapshot.debug_access`, tools page/HUD/re-send follow it) | #34, #42, #43, #49 |
 | 12 | Data-driven hero and item catalogs with validation tests | done: 12a-12e; 12f (optional client cross-checks) open | #38 |
 | 13 | Roster/asset loading and SDK types out of the shared model | done: 13a-13e (with O5 load validation and the O30 working-directory slice); 13f (server-owned registry) optional | #48 (shared without I/O) |
 | 15 | Client session events and staged snapshot application | done: 15a+15b1 (#39), 15b2+15c+15d (#41), 15e (#43); 15f/15g optional | #39, #41, #43 |
-| 9b | UI kit follow-ups: scroll unification, modal registry, frontend/social/supporter/sandbox screens, responsive layout, `TestId` in QA | in progress: scroll + modal registry (#50); screens + career/social/supporter/sandbox actions (this PR); layout, `TestId` in QA, colours open (order in [ui-kit.md](ui-kit.md)) | #50, this PR |
+| 9b | UI kit follow-ups: scroll unification, modal registry, frontend/social/supporter/sandbox screens, responsive layout, `TestId` in QA | done: scroll + modal registry (#50); screens + career/social/supporter/sandbox actions (#51); `metric` policy, `TestId` in QA, HUD buttons and colours (this PR); details in [ui-kit.md](ui-kit.md) | #50, #51, this PR |
 
 Suggested order after 7: 14 (done), 10 (done), 15, 11, 12, 13, 9b (server first while
 its structure is fresh, then the client). Each row is one to four PRs.
@@ -168,15 +168,15 @@ O2 (CI as a required gate): the maintainer approved it on 2026-09-25. Rules 2 an
 - 15d (#41): `SessionReactions` members: `career::clear_account_on_scope_reset` and `social::clear_on_scope_reset` (`ServerScopeReset`), `frontend::return_home_on_leave` (`Left` → `PendingScreen(Home)`). `update_session_lifecycle` lost its `CareerClient`, `SocialClient` and `PendingScreen` writes; `TeamSelection.team = None`, `take_return_to_lobby()` and the `CancelQueue` signing stay in `net` (hazards 8, 9). `scope_reset_clears_career_and_social_in_its_frame_so_the_next_view_survives` pins the same-frame clearing (hazard 7).
 - Next: 15e (`ClientSession` accessors); 15f (camera through `SnapshotApplied`, its first reader, which also drops its `expect(dead_code)`) and 15g are optional.
 
-### 11: One debug tooling family (done: 11-0 #34, 11a-11c #42, 11d #43, 11e+11f this PR)
+### 11: One debug tooling family (done: 11-0 #34, 11a-11c #42, 11d #43, 11e+11f #49)
 - Plan: [plans/steps-11-13.md](plans/steps-11-13.md), "Step 11". The Combat Test protocol stays its own family (acknowledged, sequenced, epoch-scoped, dev-only); no new `ClientPacket` variant.
 - 11-0 (#34): `SetGodMode`/`SetSpeedBoost` refuse worker-allocated rounds (`match_allocation::tests::allocated_practice_refuses_debug_toggles_after_the_durable_start`).
 - 11a (#42): `shared/src/debug.rs` with `DebugCommand { GodMode, SpeedBoost, Practice }` (no serde; `to_packet`/`from_packet` over the existing packets, pinned against the golden and fixture strings), `DebugAccess { toggles, practice }` with `for_match_mode` and `allows`, and the constants `DUMMY_MAX_HP`, `DUMMY_DISTANCE`, `OFFLINE_PRACTICE_MODE` (the copies in `server/src/bots.rs` and `client/src/net/offline.rs` are gone). `PracticeCommand` gained `#[serde(other)] Unsupported`: an unknown `kind` decodes and is ignored instead of failing the packet.
 - 11b (#42): `server/src/debug/{mod,toggles,practice}.rs`. `ServerRuntime::debug_access()` (`rules.debug_commands`/`rules.fills_with_bots`, each without a worker; `debug::tests::match_mode_access_equals_the_server_access_without_a_worker` pins it to `for_match_mode(rules.mode_id())`) and `handle_debug(addr, DebugCommand, now)`. The practice orchestration (`handle_practice_command`, `dummy_anchor`, `configure_duelist`, `opposite_team`) moved out of `bots.rs`; `spawn_bot`, `remove_bot`, `remove_all_bots` and `place_dummy` stay there as `pub(crate)`. `runtime/handlers/debug.rs` became `handlers/tools.rs` with only `handle_sandbox_packet`. The dispatcher arms keep their positions, clocks and `ControlFlow` (`Practice` before the pause gate on the wall clock, `Break`; the toggles after it on the sandbox clock, `Continue` once applied) and convert the packet with `DebugCommand::from_packet`.
 - 11c (#42): `shared::progression::skill_upgrade_order` and `shared::shop::plan_purchases`; server `auto_rank_skills`/`auto_shop` (still one `apply_skill_upgrade`/`handle_purchase` per step), harness `choose_shop_item` and the offline duel (its `ranks_for_level`/`shop_with` are gone) use them. A temporary equivalence test compared old and new over every class × level 1-10 × budget 0-1000 (plus every rank vector, owned-item subset and eligibility flag) and passed before the old code was deleted.
 - 11d (#43): client `debug/` module (`DebugToggles`, `NetworkCommand::Debug`, `DebugPlugins`), offline `Simulation::debug`; notes in [progress/2026-09-24-client-debug-session.md](progress/2026-09-24-client-debug-session.md).
-- 11f (this PR, wire-visible, additive, no `PROTOCOL_VERSION` bump): `DebugAccess` derives serde (fields `serde(default)`); `ServerPacket::Snapshot.debug_access: Option<DebugAccess>` (`serde(default, skip_serializing_if = "Option::is_none")`), so `GOLDEN_SNAPSHOT` is byte-identical. The server sends `Some(debug_access())` to every joined recipient of a world snapshot (also all-false in release and worker rounds) and nothing to unjoined recipients, the prejoin status reply or the lobby snapshot (`debug::snapshot_debug_access`). Pinned by `wire::tests::snapshot_debug_access_is_additive`, `debug::tests::joined_players_receive_the_server_access_in_every_snapshot` (dev, practice, release), the worker victory-snapshot test in `match_allocation` and the prejoin status-reply check.
-- 11e (this PR, behaviour change approved by the maintainer on 2026-09-25): `ClientDebugAccess` (snapshot value, else `for_match_mode`; nothing before join; Combat Test withholds the toggles) drives the pause-menu "Debug tools" page (toggles in dev and practice, bots only in practice, a Combat Test panel entry in Combat Test), the `OMOBA_DEBUG_UI` HUD buttons and hotkeys, and the 0.5 s re-send (no longer tied to the env var). `DebugToggles` is held at off while the toggles are not allowed (`debug::tests::toggles_reset_when_access_drops`). Notes: [progress/2026-09-25-debug-access.md](progress/2026-09-25-debug-access.md).
+- 11f (#49, wire-visible, additive, no `PROTOCOL_VERSION` bump): `DebugAccess` derives serde (fields `serde(default)`); `ServerPacket::Snapshot.debug_access: Option<DebugAccess>` (`serde(default, skip_serializing_if = "Option::is_none")`), so `GOLDEN_SNAPSHOT` is byte-identical. The server sends `Some(debug_access())` to every joined recipient of a world snapshot (also all-false in release and worker rounds) and nothing to unjoined recipients, the prejoin status reply or the lobby snapshot (`debug::snapshot_debug_access`). Pinned by `wire::tests::snapshot_debug_access_is_additive`, `debug::tests::joined_players_receive_the_server_access_in_every_snapshot` (dev, practice, release), the worker victory-snapshot test in `match_allocation` and the prejoin status-reply check.
+- 11e (#49, behaviour change approved by the maintainer on 2026-09-25): `ClientDebugAccess` (snapshot value, else `for_match_mode`; nothing before join; Combat Test withholds the toggles) drives the pause-menu "Debug tools" page (toggles in dev and practice, bots only in practice, a Combat Test panel entry in Combat Test), the `OMOBA_DEBUG_UI` HUD buttons and hotkeys, and the 0.5 s re-send (no longer tied to the env var). `DebugToggles` is held at off while the toggles are not allowed (`debug::tests::toggles_reset_when_access_drops`). Notes: [progress/2026-09-25-debug-access.md](progress/2026-09-25-debug-access.md).
 
 ### 12: Data-driven catalogs (done, #38)
 - Plan: [plans/steps-11-13.md](plans/steps-11-13.md), "Step 12". Slices 12a-12e landed together; 12f (client cross-checks: `combat_visuals.json` classes cover the catalog, `combat/targeting.rs` reads its attack-rate caps from `hero_balance`) is optional and open.
@@ -199,10 +199,22 @@ O2 (CI as a required gate): the maintainer approved it on 2026-09-25. Rules 2 an
 - Order and details in [ui-kit.md](ui-kit.md).
 - 9b-1 (scroll): `ui::scroll::ScrollArea` + `scroll_areas` in `UiSet::Scroll`; the per-module scroll systems of pause menu, career, `mobile_ui`, social, sandbox, draft/loading, collection, team, supporter and scoreboard are gone, each panel's wheel step, page step and drag threshold kept as `ScrollArea` parameters (table in ui-kit.md).
 - 9b-2 (modal registry): `ui::modal::ModalStack` ordered by draw layer, `register_modal` (six registrations in `input_context::register_modals`), `ModalRoot` on each root, `Pressable::blocked` for top-only gating; `gate_buttons_behind_server_entry` removed; `input_context` reads `ModalStack::is_open()` for pause, career, shop, supporter, scoreboard and server entry and keeps help, sandbox, social, front-end, hero picker and phone orientation as its own checks.
-- Items 3 and 4 (this PR): front-end screens, hero select (the new handler
+- Items 3 and 4 (#51): front-end screens, hero select (the new handler
   calls `team::lock_in`), career, social, supporter, the Combat Test panel
   and the help overlay on `UiAction`/`Activated<T>`; `MenuButton`,
   `frontend::widgets::{button, tile, compact_tile}` and the `ui_theme` and
   `frontend::widgets` palette shims removed. Progress note:
   [progress/2026-09-25-ui-screens.md](progress/2026-09-25-ui-screens.md).
-- Open: 9b-5 responsive layout, 9b-6 `TestId` in QA, 9b-7 colours.
+- Items 5 to 7 (this PR): `ui::theme::metric` is the one responsive
+  policy (`Form`, `menu_font`, `menu_control_height`, `pause_panel_height`,
+  phone panel and bar sizes, the phone font table) behind
+  `adapt_phone_menu_readability`, `adapt_phone_layout`, `sync_phone_ui` and
+  `size_desktop_pause_panel`, same pixel values; QA harnesses press by
+  `TestId` (`crate::qa::TestIdPresses`) and dump through `QaName`, the
+  `TestId` → `Name` mirror is gone (layout passes read `NodeKey`); the
+  combat skill bar, shop, phone bar and server entry, edge HUD and
+  scoreboard, connection Retry and debug HUD toggles are on
+  `UiAction`/`ButtonStyle` with new `ButtonKind::{Skill, SkillUpgrade,
+  ShopItem, Debug}` and a per-kind pressed colour. Progress note:
+  [progress/2026-09-25-ui-finish.md](progress/2026-09-25-ui-finish.md).
+- Step 9b is complete.

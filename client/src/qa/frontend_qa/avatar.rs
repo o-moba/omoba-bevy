@@ -116,9 +116,9 @@ fn input(
     screen: Res<State<AppScreen>>,
     mut next: ResMut<NextState<AppScreen>>,
     preview: Res<AvatarPreview>,
-    nodes: Query<(&Name, &ComputedNode, &UiGlobalTransform)>,
-    mut scrolls: Query<(&Name, &ComputedNode, &mut ScrollPosition)>,
-    mut buttons: crate::qa::NamedPresses,
+    nodes: Query<(crate::qa::QaName, &ComputedNode, &UiGlobalTransform)>,
+    mut scrolls: Query<(crate::qa::QaName, &ComputedNode, &mut ScrollPosition)>,
+    mut buttons: crate::qa::TestIdPresses,
     mut touch: MessageWriter<TouchInput>,
 ) {
     if qa.finished || qa.in_flight {
@@ -215,7 +215,7 @@ fn capture(
     preview: Res<AvatarPreview>,
     screen: Res<State<AppScreen>>,
     nodes: Query<(
-        &Name,
+        crate::qa::QaName,
         &ComputedNode,
         &UiGlobalTransform,
         Option<&InheritedVisibility>,

@@ -69,7 +69,7 @@ fn drive(
     scoreboard: Res<crate::edge_hud::ScoreboardState>,
     selection: Res<TeamSelection>,
     equipment: Query<&PlayerEquipment, With<Player>>,
-    mut buttons: crate::qa::NamedPresses,
+    mut buttons: crate::qa::TestIdPresses,
     mobile: Res<crate::mobile_controls::MobileControls>,
     windows: Query<Entity, With<PrimaryWindow>>,
     mut touches: MessageWriter<TouchInput>,

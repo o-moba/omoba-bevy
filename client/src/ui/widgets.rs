@@ -36,6 +36,17 @@ impl ButtonStyle {
     pub(crate) fn hover_color(&self) -> Color {
         theme::button_hover_color(self.kind, self.selected)
     }
+
+    pub(crate) fn pressed_color(&self) -> Color {
+        theme::button_pressed_color(self.kind, self.selected)
+    }
+
+    /// `selected`, set only when it changes (the painter reacts to changes).
+    pub(crate) fn set_selected(style: &mut Mut<Self>, selected: bool) {
+        if style.selected != selected {
+            style.selected = selected;
+        }
+    }
 }
 
 /// Runs in `UiSet::Paint`; the one place kit buttons change colour.
@@ -51,7 +62,8 @@ pub(crate) fn paint_pressables(
 ) {
     for (interaction, pressable, style, mut color) in &mut buttons {
         let next = match pressable.effective(*interaction) {
-            Interaction::Pressed | Interaction::Hovered => style.hover_color(),
+            Interaction::Pressed => style.pressed_color(),
+            Interaction::Hovered => style.hover_color(),
             Interaction::None => style.idle_color(),
         };
         if color.0 != next {
@@ -286,16 +298,17 @@ pub(crate) fn toggle_row<T: UiActionT, M: Component>(
         .id()
 }
 
-/// Font size a front-end label was designed at; `frontend::widgets` raises it
-/// to a readable minimum on a phone (roadmap item 5 folds that into `metric`).
+/// Font size a front-end label was designed at; `frontend::widgets` applies
+/// `metric::menu_font` to it every frame (a readable minimum on a phone).
 #[derive(Component)]
 pub(crate) struct MenuTypography {
     pub size: f32,
     pub heading: bool,
 }
 
-/// Height a front-end control was designed at; raised to the touch minimum on
-/// a phone by the same pass as [`MenuTypography`].
+/// Height a front-end control was designed at; `metric::menu_control_height`
+/// raises it to the touch minimum on a phone, in the same pass as
+/// [`MenuTypography`].
 #[derive(Component)]
 pub(crate) struct MenuControl {
     pub height: f32,
@@ -441,7 +454,7 @@ mod tests {
         app.update();
         let names: Vec<String> = app
             .world_mut()
-            .query::<&Name>()
+            .query::<crate::ui::test_id::NodeKey>()
             .iter(app.world())
             .map(|name| name.as_str().to_owned())
             .collect();

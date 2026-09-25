@@ -22,34 +22,24 @@ impl Plugin for FrontendWidgetsPlugin {
     }
 }
 
+/// Applies the `metric` policy to front-end labels and controls: phone
+/// minimums for fonts and touch targets, the designed sizes on desktop.
 fn adapt_phone_menu_readability(
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     scale: Res<UiScale>,
     mut labels: Query<(&MenuTypography, &mut TextFont)>,
     mut buttons: Query<(&MenuControl, &mut Node)>,
 ) {
-    let phone = mobile.as_ref().is_some_and(|mobile| mobile.enabled);
-    let scale = scale.0.max(0.1);
-    for (metric, mut font) in &mut labels {
-        let size = if phone {
-            metric
-                .size
-                .max(if metric.heading { 20.0 } else { 12.0 } / scale)
-        } else {
-            metric.size
-        };
+    use crate::ui::theme::metric;
+    let form = metric::Form::from_mobile(mobile.as_deref());
+    for (typography, mut font) in &mut labels {
+        let size = metric::menu_font(form, typography.size, typography.heading, scale.0);
         if font.font_size != size {
             font.font_size = size;
         }
     }
-    for (metric, mut node) in &mut buttons {
-        let height = if phone {
-            metric
-                .height
-                .max(crate::ui::theme::metric::TOUCH_MIN / scale)
-        } else {
-            metric.height
-        };
+    for (control, mut node) in &mut buttons {
+        let height = metric::menu_control_height(form, control.height, scale.0);
         if node.height != Val::Px(height) {
             node.height = Val::Px(height);
         }

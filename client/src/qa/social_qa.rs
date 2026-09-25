@@ -338,7 +338,7 @@ fn capture(
     world: QaWorld,
     mut social: ResMut<SocialClient>,
     nodes: Query<(
-        &Name,
+        crate::qa::QaName,
         &ComputedNode,
         &UiGlobalTransform,
         Option<&InheritedVisibility>,

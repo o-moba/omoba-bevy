@@ -150,7 +150,7 @@ struct Shot(usize);
 fn prepare_help_buttons(
     qa: Res<FrontendQa>,
     help: Res<crate::help_overlay::HelpOverlayVisible>,
-    mut buttons: crate::qa::NamedPresses,
+    mut buttons: crate::qa::TestIdPresses,
 ) {
     if qa.finished || qa.applied_stage != Some(qa.stage) {
         return;
@@ -191,7 +191,7 @@ fn drive(
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
     mut pause: ResMut<crate::pause_menu::PauseMenuState>,
     server: Option<ResMut<crate::mobile_ui::ServerEntry>>,
-    mut scrolls: Query<(&Name, &ComputedNode, &mut ScrollPosition)>,
+    mut scrolls: Query<(crate::qa::QaName, &ComputedNode, &mut ScrollPosition)>,
     mut career: ResMut<crate::career::CareerClient>,
 ) {
     if qa.finished || qa.stage >= VIEWS.len() {
@@ -269,13 +269,13 @@ fn observe(
     mobile: Res<crate::mobile_controls::MobileControls>,
     windows: Query<(Entity, &Window), With<PrimaryWindow>>,
     nodes: Query<(
-        &Name,
+        crate::qa::QaName,
         &ComputedNode,
         &UiGlobalTransform,
         Option<&InheritedVisibility>,
         Option<&ZIndex>,
     )>,
-    buttons: Query<&Name, With<Button>>,
+    buttons: Query<crate::qa::QaName, With<Button>>,
     preview_cameras: Query<&Camera, With<crate::frontend::preview::PreviewCamera>>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -477,7 +477,11 @@ fn observe(
                 })
             })
         });
-    let interactive: Vec<&str> = buttons.iter().map(Name::as_str).collect();
+    let interactive: Vec<String> = buttons
+        .iter()
+        .map(|name| name.as_str().to_owned())
+        .filter(|name| !name.is_empty())
+        .collect();
     let help_transition_scale_correct = match qa.stage {
         11 => (ui_scale.0 - 1.0).abs() < 0.001,
         12 => (ui_scale.0 - crate::frontend::menu_scale(window.height())).abs() < 0.001,

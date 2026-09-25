@@ -2758,7 +2758,7 @@ mod tests {
             app.update();
             let names: Vec<_> = app
                 .world_mut()
-                .query::<&Name>()
+                .query::<crate::ui::test_id::NodeKey>()
                 .iter(app.world())
                 .map(|n| n.as_str().to_owned())
                 .collect();
@@ -3051,7 +3051,7 @@ mod tests {
                 .unwrap();
             let field = app
                 .world_mut()
-                .query::<(Entity, &Name)>()
+                .query::<(Entity, crate::ui::test_id::NodeKey)>()
                 .iter(app.world())
                 .find(|(_, n)| n.as_str() == "CareerFriendCodeField")
                 .unwrap()
@@ -3254,7 +3254,7 @@ mod tests {
             app.update();
             let names: Vec<_> = app
                 .world_mut()
-                .query::<&Name>()
+                .query::<crate::ui::test_id::NodeKey>()
                 .iter(app.world())
                 .map(|name| name.as_str().to_owned())
                 .collect();
@@ -3280,7 +3280,7 @@ mod tests {
         app.update();
         let field = |app: &mut App| {
             app.world_mut()
-                .query::<(Entity, &Name)>()
+                .query::<(Entity, crate::ui::test_id::NodeKey)>()
                 .iter(app.world())
                 .find(|(_, n)| n.as_str() == "DeviceRecoveryField")
                 .map(|(e, _)| e)

@@ -1,18 +1,15 @@
 //! Stable identifiers for QA harnesses and tests.
 //!
-//! A `TestId` mirrors itself into `Name` when the entity has none, so the
-//! existing QA node dumps and `Name` lookups keep resolving while modules
-//! migrate. Policy: every kit button and value label gets one; layout-only
-//! nodes keep a plain `Name`.
+//! Policy: every kit button and rewritable value label gets a `TestId`;
+//! layout-only nodes keep a plain `Name`. The two are independent (a
+//! `TestId` no longer mirrors itself into `Name`): QA presses look buttons up
+//! by `TestId` (`crate::qa::TestIdPresses`), and layout passes and QA dumps
+//! that address both kinds of node read [`NodeKey`].
 use std::borrow::Cow;
 
-use bevy::{
-    ecs::{lifecycle::HookContext, world::DeferredWorld},
-    prelude::*,
-};
+use bevy::{ecs::query::QueryData, prelude::*};
 
 #[derive(Component, Clone, Debug, PartialEq, Eq, Hash)]
-#[component(on_insert = mirror_into_name)]
 pub(crate) struct TestId(pub Cow<'static, str>);
 
 impl TestId {
@@ -42,18 +39,24 @@ impl From<String> for TestId {
     }
 }
 
-fn mirror_into_name(mut world: DeferredWorld, context: HookContext) {
-    if world.get::<Name>(context.entity).is_some() {
-        return;
+/// The string a layout pass or a QA dump matches a node by: a kit control's
+/// `TestId`, otherwise its `Name`.
+pub(crate) fn node_key<'a>(name: Option<&'a Name>, id: Option<&'a TestId>) -> Option<&'a str> {
+    id.map(TestId::as_str).or(name.map(Name::as_str))
+}
+
+/// Query data for [`node_key`]: a node's `Name` and `TestId`, either absent.
+#[derive(QueryData)]
+pub(crate) struct NodeKey {
+    name: Option<&'static Name>,
+    id: Option<&'static TestId>,
+}
+
+impl NodeKeyItem<'_, '_> {
+    /// The `TestId`, else the `Name`; empty for a node that has neither.
+    pub(crate) fn as_str(&self) -> &str {
+        node_key(self.name, self.id).unwrap_or_default()
     }
-    let id = world
-        .get::<TestId>(context.entity)
-        .map(|id| id.as_str().to_owned())
-        .unwrap_or_default();
-    world
-        .commands()
-        .entity(context.entity)
-        .insert(Name::new(id));
 }
 
 /// Lookup and press by identifier for tests and harness systems.
@@ -164,22 +167,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_id_mirrors_into_name_only_when_absent() {
+    fn test_id_and_name_are_independent_and_node_key_prefers_the_id() {
         let mut app = App::new();
         app.add_message::<super::super::SyntheticPress>();
-        let mirrored = app.world_mut().spawn(TestId::new("KitButton")).id();
-        let kept = app
+        let kit = app.world_mut().spawn(TestId::new("KitButton")).id();
+        let both = app
             .world_mut()
             .spawn((TestId::new("KitOther"), Name::new("Custom")))
             .id();
+        let layout = app.world_mut().spawn(Name::new("Layout")).id();
         app.update();
-        assert_eq!(
-            app.world().get::<Name>(mirrored).unwrap().as_str(),
-            "KitButton"
-        );
-        assert_eq!(app.world().get::<Name>(kept).unwrap().as_str(), "Custom");
-        assert_eq!(harness::find(app.world_mut(), "KitOther"), Some(kept));
-        assert_eq!(harness::press(app.world_mut(), "KitButton"), mirrored);
+        assert!(app.world().get::<Name>(kit).is_none(), "no Name mirror");
+        let keys: Vec<(Entity, String)> = app
+            .world_mut()
+            .query::<(Entity, NodeKey)>()
+            .iter(app.world())
+            .map(|(entity, key)| (entity, key.as_str().to_owned()))
+            .collect();
+        for (entity, key) in [(kit, "KitButton"), (both, "KitOther"), (layout, "Layout")] {
+            assert!(keys.contains(&(entity, key.to_owned())), "{key}");
+        }
+        assert_eq!(harness::find(app.world_mut(), "KitOther"), Some(both));
+        assert_eq!(harness::find(app.world_mut(), "Custom"), None);
+        assert_eq!(harness::press(app.world_mut(), "KitButton"), kit);
         assert_eq!(TestId::new("Row").child("-Up").as_str(), "Row-Up");
     }
 

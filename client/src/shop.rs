@@ -9,7 +9,11 @@ use crate::{
     },
     pause_menu::PauseMenuState,
     player::{MovementTarget, Player},
-    ui::{ModalId, ModalRoot, theme as ui},
+    ui::{
+        Activated, ModalId, ModalRoot, TestId, UiAction, UiActionAppExt,
+        theme::{self as ui, ButtonKind},
+        widgets::ButtonStyle,
+    },
 };
 use bevy::prelude::*;
 use shared::shop::{self, ItemId, PurchaseError};
@@ -43,10 +47,17 @@ struct PendingPurchase {
 }
 #[derive(Component)]
 struct ShopRoot;
-#[derive(Component)]
-struct ShopToggle;
-#[derive(Component)]
-struct ShopClose;
+/// Presses on the shop and its HUD shortcuts. Only the item cards are painted
+/// by the kit (`ButtonKind::ShopItem`); the HUD buttons and the close button
+/// keep their fixed colours.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ShopAction {
+    /// The gold HUD button and the equipment panel's OPEN SHOP.
+    Toggle,
+    Close,
+    Buy(ItemId),
+    QuickBuy(usize),
+}
 #[derive(Component)]
 struct ShopBuy(ItemId);
 #[derive(Component)]
@@ -84,6 +95,7 @@ struct InventoryIcon {
 impl Plugin for ShopPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ShopState>()
+            .add_ui_action::<ShopAction>()
             .add_systems(Startup, (setup_shop, setup_quick_buy))
             .add_systems(Update, adapt_desktop_equipment_width)
             .add_systems(
@@ -91,6 +103,7 @@ impl Plugin for ShopPlugin {
                 (toggle_shop, sync_shop_visibility)
                     .chain()
                     .after(crate::help_overlay::HelpOverlaySet::Input)
+                    .after(crate::ui::UiSet::Dispatch)
                     .in_set(ShopModalSet)
                     .in_set(InputContextSet::Modal),
             )
@@ -165,8 +178,8 @@ fn setup_quick_buy(mut commands: Commands) {
                 },
                 BackgroundColor(ui::PANEL),
                 BorderColor::all(ui::GOLD),
-                ShopToggle,
-                Name::new("GoldShopButton"),
+                UiAction(ShopAction::Toggle),
+                TestId::new("GoldShopButton"),
             ))
             .with_children(|button| {
                 button.spawn((
@@ -205,7 +218,8 @@ fn setup_quick_buy(mut commands: Commands) {
                     BackgroundColor(ui::PANEL),
                     BorderColor::all(ui::EDGE),
                     QuickBuySlot(slot),
-                    Name::new(format!("QuickBuy-{slot}")),
+                    UiAction(ShopAction::QuickBuy(slot)),
+                    TestId::new(format!("QuickBuy-{slot}")),
                 ))
                 .with_children(|button| {
                     button.spawn((
@@ -395,8 +409,8 @@ fn setup_shop(mut commands: Commands) {
                         ..default()
                     },
                     BackgroundColor(ui::HOVER),
-                    ShopToggle,
-                    Name::new("ShopOpenButton"),
+                    UiAction(ShopAction::Toggle),
+                    TestId::new("ShopOpenButton"),
                 ))
                 .with_children(|button| {
                     button.spawn((
@@ -421,7 +435,7 @@ fn setup_shop(mut commands: Commands) {
                         .with_children(|row| {
                             row.spawn((Text::new("Sanctuary shop"), ui::text(26.0), TextColor(ui::IVORY)));
                             row.spawn((Button, Node { padding: UiRect::axes(Val::Px(12.0), Val::Px(7.0)), ..default() },
-                                BackgroundColor(ui::TILE), ShopClose, Name::new("ShopCloseButton")))
+                                BackgroundColor(ui::TILE), UiAction(ShopAction::Close), TestId::new("ShopCloseButton")))
                                 .with_children(|button| { button.spawn((Text::new("ESC  CLOSE"), Name::new("ShopCloseLabel"), ui::text(13.0), TextColor(ui::MUTED))); });
                         });
                     panel.spawn((Text::new(""), ui::text(16.0), TextColor(ui::GOLD), ShopSummary, Name::new("ShopSummary")));
@@ -432,7 +446,8 @@ fn setup_shop(mut commands: Commands) {
                                 row_gap: Val::Px(7.0), border: UiRect::all(Val::Px(1.0)),
                                 border_radius: BorderRadius::all(Val::Px(7.0)), ..default() },
                                 BackgroundColor(ui::TILE), BorderColor::all(ui::EDGE), ShopBuy(definition.id),
-                                Name::new(format!("ShopBuy-{}", item_code(definition.id)))))
+                                ButtonStyle::new(ButtonKind::ShopItem), UiAction(ShopAction::Buy(definition.id)),
+                                TestId::new(format!("ShopBuy-{}", item_code(definition.id)))))
                                 .with_children(|card| {
                                     card.spawn((Node { align_items: AlignItems::Center, column_gap: Val::Px(10.0), ..default() },)).with_children(|row| {
                                         spawn_item_icon(row, definition.id, 36.0);
@@ -602,14 +617,22 @@ fn toggle_shop(
     help: Res<HelpOverlayVisible>,
     pause: Res<PauseMenuState>,
     mut shop: ResMut<ShopState>,
-    buttons: Query<&Interaction, (With<ShopToggle>, Changed<Interaction>)>,
-    close: Query<&Interaction, (With<ShopClose>, Changed<Interaction>)>,
+    mut activated: MessageReader<Activated<ShopAction>>,
     moving: Query<Entity, (With<Player>, With<MovementTarget>)>,
     mut commands: Commands,
     career: Option<Res<crate::career::CareerClient>>,
     social: Option<Res<crate::social::SocialClient>>,
     scoreboard: Option<Res<crate::edge_hud::ScoreboardState>>,
 ) {
+    // Every press is read, so one made while the shop is gated cannot fire later.
+    let (mut toggle, mut close) = (false, false);
+    for Activated { action, .. } in activated.read() {
+        match action {
+            ShopAction::Toggle => toggle = true,
+            ShopAction::Close => close = true,
+            ShopAction::Buy(_) | ShopAction::QuickBuy(_) => {}
+        }
+    }
     let allowed = session.join_confirmed() && !matches!(game.state, GameState::Victory { .. });
     let visible_help = matches!(game.state, GameState::Running) && help.0;
     if !allowed
@@ -627,10 +650,9 @@ fn toggle_shop(
     if shop.open && keys.just_pressed(KeyCode::Escape) {
         shop.open = false;
         keys.clear_just_pressed(KeyCode::Escape);
-    } else if keys.just_pressed(KeyCode::KeyP) || buttons.iter().any(|i| *i == Interaction::Pressed)
-    {
+    } else if keys.just_pressed(KeyCode::KeyP) || toggle {
         shop.open = !shop.open;
-    } else if close.iter().any(|i| *i == Interaction::Pressed) {
+    } else if close {
         shop.open = false;
     }
     if shop.open {
@@ -687,29 +709,29 @@ fn purchase_buttons(
     mut state: ResMut<ShopState>,
     game: Res<GameStateSnapshot>,
     player: Query<(&PlayerEquipment, &CombatStats, Option<&NetworkHeroClass>), With<Player>>,
-    buttons: Query<(&Interaction, Option<&ShopBuy>, Option<&QuickBuySlot>), Changed<Interaction>>,
+    mut activated: MessageReader<Activated<ShopAction>>,
     context: Option<Res<crate::input_context::GameplayInputContext>>,
     mut feedback: Option<ResMut<ActionFeedback>>,
     mut outgoing: MessageWriter<NetworkCommand>,
 ) {
+    // Every press is read, so one made while a purchase is pending cannot
+    // fire when it resolves.
+    let presses: Vec<ShopAction> = activated.read().map(|activated| activated.action).collect();
     if state.pending.is_some() {
         return;
     }
     let Ok((equipment, stats, class)) = player.single() else {
         return;
     };
-    for (interaction, button, quick) in &buttons {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
-        let item = if let Some(button) = button.filter(|_| state.open) {
-            Some(button.0)
-        } else if let Some(quick) =
-            quick.filter(|_| !state.open && context.as_ref().is_some_and(|c| c.gameplay_allowed()))
-        {
-            class.and_then(|class| quick_offers(class.0, &equipment.inventory)[quick.0])
-        } else {
-            None
+    for action in presses {
+        let item = match action {
+            ShopAction::Buy(item) if state.open => Some(item),
+            ShopAction::QuickBuy(slot)
+                if !state.open && context.as_ref().is_some_and(|c| c.gameplay_allowed()) =>
+            {
+                class.and_then(|class| quick_offers(class.0, &equipment.inventory)[slot])
+            }
+            _ => None,
         };
         let Some(item) = item else { continue };
         if let Some(reason) = unavailable_reason(equipment, stats, item) {
@@ -895,12 +917,7 @@ fn update_shop(
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     player: Query<(&PlayerEquipment, &CombatStats, &NetworkHeroClass), With<Player>>,
     mut labels: ShopLabels,
-    mut cards: Query<(
-        &ShopBuy,
-        &Interaction,
-        &mut BackgroundColor,
-        &mut BorderColor,
-    )>,
+    mut cards: Query<(&ShopBuy, &mut ButtonStyle, &mut BorderColor)>,
 ) {
     let Ok((equipment, stats, class)) = player.single() else {
         return;
@@ -956,15 +973,10 @@ fn update_shop(
             )
         };
     }
-    for (card, interaction, mut background, mut border) in &mut cards {
+    for (card, mut style, mut border) in &mut cards {
         let owned = equipment.inventory.contains(&card.0);
-        *background = BackgroundColor(if owned {
-            Color::srgb(0.07, 0.22, 0.17)
-        } else if *interaction == Interaction::Hovered {
-            ui::HOVER
-        } else {
-            ui::TILE
-        });
+        // Owned cards keep `SHOP_OWNED` under the pointer; the kit paints.
+        ButtonStyle::set_selected(&mut style, owned);
         *border = BorderColor::all(
             if owned || shop::recommended_items(class.0)[..3].contains(&card.0) {
                 ui::GOLD
@@ -1123,10 +1135,16 @@ mod tests {
             .init_resource::<ActionFeedback>()
             .init_resource::<Time>()
             .add_message::<NetworkCommand>()
+            .add_ui_action::<ShopAction>()
             .add_plugins(crate::input_context::InputContextPlugin)
+            .configure_sets(
+                Update,
+                crate::ui::UiSet::Dispatch.in_set(InputContextSet::Modal),
+            )
             .add_systems(
                 Update,
                 toggle_shop
+                    .after(crate::ui::UiSet::Dispatch)
                     .in_set(ShopModalSet)
                     .in_set(InputContextSet::Modal),
             )
@@ -1213,8 +1231,11 @@ mod tests {
             .id();
         app.update();
         app.world_mut().resource_mut::<ShopState>().open = true;
-        app.world_mut()
-            .spawn((ShopBuy(ItemId::EmberBlade), Interaction::Pressed));
+        app.world_mut().spawn((
+            ShopBuy(ItemId::EmberBlade),
+            UiAction(ShopAction::Buy(ItemId::EmberBlade)),
+            Interaction::Pressed,
+        ));
         let mut cursor = MessageCursor::<NetworkCommand>::default();
         app.update();
         let first: Vec<_> = cursor
@@ -1310,8 +1331,11 @@ mod tests {
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .reset_all();
-        app.world_mut()
-            .spawn((ShopBuy(ItemId::TrailBoots), Interaction::Pressed));
+        app.world_mut().spawn((
+            ShopBuy(ItemId::TrailBoots),
+            UiAction(ShopAction::Buy(ItemId::TrailBoots)),
+            Interaction::Pressed,
+        ));
         app.update();
         let mut cursor = MessageCursor::<NetworkCommand>::default();
         assert_eq!(
@@ -1337,8 +1361,11 @@ mod tests {
         app.world_mut().resource_mut::<ShopState>().pending = None;
         app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Running;
         app.world_mut().resource_mut::<HelpOverlayVisible>().0 = true;
-        app.world_mut()
-            .spawn((ShopBuy(ItemId::EmberBlade), Interaction::Pressed));
+        app.world_mut().spawn((
+            ShopBuy(ItemId::EmberBlade),
+            UiAction(ShopAction::Buy(ItemId::EmberBlade)),
+            Interaction::Pressed,
+        ));
         app.update();
         assert!(!app.world().resource::<ShopState>().open);
         assert_eq!(
@@ -1407,7 +1434,11 @@ mod tests {
         app.update();
         let button = app
             .world_mut()
-            .spawn((QuickBuySlot(0), Interaction::Pressed))
+            .spawn((
+                QuickBuySlot(0),
+                UiAction(ShopAction::QuickBuy(0)),
+                Interaction::Pressed,
+            ))
             .id();
         let mut cursor = MessageCursor::<NetworkCommand>::default();
         app.update();
