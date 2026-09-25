@@ -15,8 +15,15 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
 
 1. Every refactoring step lands through a pull request into `main`; never push
    refactoring commits to `main` directly.
-2. Open the PR, then merge it immediately (the maintainer reviews on `main`);
-   `merge` or `squash`, whichever gives one readable commit per step.
+2. Open the PR, wait until every CI check on the PR is green
+   (`fmt, clippy, tests`, `headless gameplay harness`, `postgres-backed tests`,
+   `python tooling tests`; about ten minutes), then merge it (`squash`, one
+   readable commit per step). Never merge a PR with a red or pending check; a
+   red check is work on that PR now. The maintainer decided this on
+   2026-09-25 after the report showed that "open and merge immediately" let a
+   red harness go unnoticed for 11 merges (report §5.3); it replaces the
+   earlier "merge immediately" rule. Branch protection on `main` with these
+   four required checks enforces it on GitHub (Settings → Branches).
 3. Before opening a PR the full gate must be green locally:
    `make check` (= `cargo fmt --all -- --check`,
    `cargo clippy --workspace --all-targets --no-deps -- -D warnings`,
@@ -39,8 +46,8 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
    untouched in server-only and client-only steps. Snapshot bytes are pinned by
    `server/src/tests/player_view.rs` and the golden JSON tests in
    `shared/src/protocol/wire.rs`.
-6. After merging, look at the CI run on `main` (Actions tab) and treat a red
-   run as work now, even if the local gate was green.
+6. After merging, still look at the push run on `main` (Actions tab) and
+   treat a red run as work now: a merge of two green branches can still break.
 7. Each PR updates: the roadmap line in `ARCHITECTURE.md`, a `CHANGELOG.md`
    entry under `## [Unreleased]`, a `docs/progress/<date>-<topic>.md` note,
    and the table below.
@@ -107,7 +114,7 @@ outside the numbered steps (note:
 | Q8 | stale `allow(dead_code)` and duplicate clippy allows, `LICENSING.md`, SDK revision in `[workspace.dependencies]` | done | gate hardening |
 | Q9 | doc drift from report §5.4 | done | gate hardening |
 
-Still open from §8.2: O2 (CI as a required gate: branch protection, auto-merge, rules 2 and 6) and the rest of the list.
+O2 (CI as a required gate): the maintainer approved it on 2026-09-25. Rules 2 and 6 now say "merge only after every check is green"; branch protection on `main` with the four required checks is a repository setting the maintainer switches on. Still open from §8.2: the rest of the list.
 
 ## Plans for the open steps
 
