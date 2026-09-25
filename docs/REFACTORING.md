@@ -24,6 +24,12 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
    red harness go unnoticed for 11 merges (report §5.3); it replaces the
    earlier "merge immediately" rule. Branch protection on `main` with these
    four required checks enforces it on GitHub (Settings → Branches).
+   Exception, 2026-09-25 from about 02:40 UTC to the end of the programme
+   (#49–#52 and the final docs PR): the maintainer asked to merge right after
+   the full local gate (harness included) without waiting for CI, and to check
+   CI on `main` once at the end. That sweep found every push run on `main`
+   green (see "Final CI sweep" below). The exception is over; this rule
+   applies to new work.
 3. Before opening a PR the full gate must be green locally:
    `make check` (= `cargo fmt --all -- --check`,
    `cargo clippy --workspace --all-targets --no-deps -- -D warnings`,
@@ -37,8 +43,8 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
    `make test-postgres` against a disposable database
    (`OMOBA_TEST_DATABASE_URL`; not part of `make check`, CI runs it in the
    `postgres` job on every push, PR and nightly). Reference
-   counts at the time of writing: server 297 (+3 ignored), shared 92, client
-   lib 586, passport 26, harness 22 unit + 24 black-box.
+   counts at the time of writing: server 298 (+3 ignored), shared 94, client
+   lib 609, passport 26, harness 22 unit + 24 black-box.
 4. One step per branch, named `refactor/<topic>` (docs-only: `docs/<topic>`),
    cut from the current `origin/main`.
 5. No wire-visible change unless the step says so explicitly; `shared/` stays
@@ -74,7 +80,7 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
 | 12 | Data-driven hero and item catalogs with validation tests | done: 12a-12e; 12f (optional client cross-checks) open | #38 |
 | 13 | Roster/asset loading and SDK types out of the shared model | done: 13a-13e (with O5 load validation and the O30 working-directory slice); 13f (server-owned registry) optional | #48 (shared without I/O) |
 | 15 | Client session events and staged snapshot application | done: 15a+15b1 (#39), 15b2+15c+15d (#41), 15e (#43); 15f/15g optional | #39, #41, #43 |
-| 9b | UI kit follow-ups: scroll unification, modal registry, frontend/social/supporter/sandbox screens, responsive layout, `TestId` in QA | done: scroll + modal registry (#50); screens + career/social/supporter/sandbox actions (#51); `metric` policy, `TestId` in QA, HUD buttons and colours (this PR); details in [ui-kit.md](ui-kit.md) | #50, #51, this PR |
+| 9b | UI kit follow-ups: scroll unification, modal registry, frontend/social/supporter/sandbox screens, responsive layout, `TestId` in QA | done: scroll + modal registry (#50); screens + career/social/supporter/sandbox actions (#51); `metric` policy, `TestId` in QA, HUD buttons and colours (#52); details in [ui-kit.md](ui-kit.md) | #50, #51, #52 |
 
 Suggested order after 7: 14 (done), 10 (done), 15, 11, 12, 13, 9b (server first while
 its structure is fresh, then the client). Each row is one to four PRs.
@@ -205,7 +211,7 @@ O2 (CI as a required gate): the maintainer approved it on 2026-09-25. Rules 2 an
   `frontend::widgets::{button, tile, compact_tile}` and the `ui_theme` and
   `frontend::widgets` palette shims removed. Progress note:
   [progress/2026-09-25-ui-screens.md](progress/2026-09-25-ui-screens.md).
-- Items 5 to 7 (this PR): `ui::theme::metric` is the one responsive
+- Items 5 to 7 (#52): `ui::theme::metric` is the one responsive
   policy (`Form`, `menu_font`, `menu_control_height`, `pause_panel_height`,
   phone panel and bar sizes, the phone font table) behind
   `adapt_phone_menu_readability`, `adapt_phone_layout`, `sync_phone_ui` and
