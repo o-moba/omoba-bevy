@@ -18,6 +18,12 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 - Documented the flow in `README.md` and `mobile/README.md` (Android section
   now leads with the `make` targets; the direct `python3 mobile/android/build.py
   --sdk/--ndk` invocation remains for custom paths).
+- Added `--universal` to `mobile/android/build.py` (`make android-universal`):
+  builds `armeabi-v7a` and `x86_64` alongside the default `arm64-v8a` and
+  packages all three into one APK, for the rare case a tester's device is
+  confirmed non-arm64. `make android`'s default output and filename are
+  unchanged. Needs `rustup target add armv7-linux-androideabi
+  x86_64-linux-android` once.
 
 ### UI kit: layout, TestId QA, last buttons
 - Roadmap step 9b, items 5 to 7 of `docs/ui-kit.md` (step 9b is complete). **Layout:** `ui::theme::metric` is the one responsive policy: `Form::{Desktop, Phone}`, `menu_font`, `menu_control_height`, `pause_panel_height`, `phone_class_column`, `phone_shop_card`, `phone_font`/`PhoneText` and the phone panel and bar sizes. `adapt_phone_menu_readability`, `adapt_phone_layout`, `sync_phone_ui` and `size_desktop_pause_panel` apply its numbers; every pixel value is unchanged and pinned by a test.

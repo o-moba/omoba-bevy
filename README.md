@@ -126,7 +126,8 @@ Run **`make` or `make help`** to see commands without starting a game or build.
 | `make iphone-check` | Check Xcode and physical iPhone build prerequisites |
 | `make iphone` | Build an **unsigned** device package; signing is a separate step |
 | `make android-check` | Check Android SDK/NDK/Rust target build prerequisites |
-| `make android` | Build a locally-signed **debug APK** into `target/mobile/android/omoba-<version>-android-arm64-debug.apk`; set `ANDROID_SERVER=host:port` to bake in a server address |
+| `make android` | Build a locally-signed **debug APK** (arm64 only) into `target/mobile/android/omoba-<version>-android-arm64-debug.apk`; set `ANDROID_SERVER=host:port` to bake in a server address |
+| `make android-universal` | Same, but bundles arm64-v8a + armeabi-v7a + x86_64 in one APK; bigger/slower, only needed for a non-arm64 device |
 | `make verify-gameplay` / `make verify-task-12` | Headless gameplay/matchmaking checks and live UDP QA |
 | `make stop` / `make restart` | Broad legacy local-process cleanup / restart; not session-scoped |
 

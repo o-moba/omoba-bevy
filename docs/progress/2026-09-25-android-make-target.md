@@ -52,3 +52,42 @@ targets are a thin, no-behaviour-change wrapper.
 - `target/mobile/android/` and `builds/` are git-ignored by design (per
   `mobile/README.md`); the APK itself is a local artifact, not part of this
   commit.
+
+## Follow-up: `--universal` / `make android-universal`
+
+A friend's Xiaomi phone installed the arm64 debug APK fine but crashed on
+launch ("Omoba beta приложение снова произошёл сбой" — Android's generic
+crash dialog). Since the APK already installed, the architecture almost
+certainly already matched (arm64-v8a covers effectively all Xiaomi phones
+from the last ~8 years); the far more likely cause is the manifest's
+hard `Vulkan level 1 required="true"` failing on that device's GPU driver.
+No `adb logcat` capture was available to confirm. The user asked for a
+"universal" build anyway to rule out the ABI question.
+
+- Added `ABIS` (arm64-v8a / armeabi-v7a / x86_64 → Rust target + NDK clang
+  triple) to `mobile/android/build.py`, a `--universal` flag, and looped the
+  existing single-target build/env/strip logic per selected ABI. Default
+  behavior (`arm64-v8a` only, same output filename) is unchanged — verified
+  by rerunning `scripts/test_package_licenses.py` (mocks/asserts the default,
+  non-universal path) and the full `test-scripts` suite (124 + 42 tests, all
+  passing).
+- `make android-universal` wraps `build.py --universal`, mirroring `make
+  android`.
+- Installed the two extra Rust targets (`rustup target add
+  armv7-linux-androideabi x86_64-linux-android`) and ran a real universal
+  build: `make android-universal ANDROID_SERVER=192.168.1.77:4000`. Three
+  separate `cargo rustc` cross-compiles finished in ~3m31s combined, packaged
+  into one signed, verified APK with all three `.so`s confirmed present
+  (`unzip -l` showed `lib/arm64-v8a`, `lib/armeabi-v7a`, `lib/x86_64`, all
+  ~117–167 MB each). Artifact:
+  `target/mobile/android/omoba-0.23.0-rc.6-android-universal-debug.apk`
+  (~578 MB — expected for three uncompressed debug `.so`s in one package).
+- Documented in `README.md` / `mobile/README.md`: `--universal` is framed as
+  a last resort for a confirmed non-arm64 device, not a general "just in
+  case" build, and the Vulkan-requirement caveat is spelled out so the next
+  reader does not repeat the same blind guess.
+
+### Still unresolved
+The friend's actual crash cause is not confirmed — no logcat was obtained.
+If the universal APK still crashes for them, the next step is `adb logcat`
+during a repro, not another build permutation.
