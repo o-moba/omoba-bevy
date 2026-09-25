@@ -8,8 +8,7 @@ use crate::{
         NetworkNeutralId, NetworkPlayerId, NetworkStructureId, TargetKind,
     },
     player::Player,
-    ui::{ModalId, ModalRoot, ScrollArea},
-    ui_theme as ui,
+    ui::{ModalId, ModalRoot, ScrollArea, theme as ui},
 };
 use bevy::{prelude::*, window::PrimaryWindow};
 use shared::{

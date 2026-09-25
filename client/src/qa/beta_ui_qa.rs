@@ -155,7 +155,7 @@ fn prepare_controls(
     qa: Res<BetaUiQa>,
     session: Res<ClientSession>,
     help: Res<HelpOverlayVisible>,
-    mut buttons: Query<(&Name, &mut Interaction), With<Button>>,
+    mut buttons: crate::qa::NamedPresses,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
     shop: Res<crate::shop::ShopState>,
     equipment: Query<&crate::net::PlayerEquipment, With<crate::player::Player>>,
@@ -216,30 +216,26 @@ fn prepare_controls(
     } else {
         keys.release(KeyCode::Escape);
     }
-    for (name, mut interaction) in &mut buttons {
+    buttons.press_where(|name| {
         let class_press = qa.stage == 0
             && qa.hero_class.is_some_and(|class| {
-                selection.hero_class != class
-                    && name.as_str() == format!("ClassButton-{}", class.id())
+                selection.hero_class != class && name == format!("ClassButton-{}", class.id())
             });
-        let press = class_press
-            || (qa.stage == 2 && help.0 && name.as_str() == "HelpDismissButton")
-            || (qa.stage == 3 && !shop.open && name.as_str() == "GoldShopButton")
-            || (qa.stage == 5 && shop.open && phone && name.as_str() == "ShopCloseButton")
+        class_press
+            || (qa.stage == 2 && help.0 && name == "HelpDismissButton")
+            || (qa.stage == 3 && !shop.open && name == "GoldShopButton")
+            || (qa.stage == 5 && shop.open && phone && name == "ShopCloseButton")
             || (qa.stage == 4
                 && !qa.edge
                 && shop.open
                 && !shop.purchase_pending()
-                && name.as_str() == "ShopBuy-EB"
+                && name == "ShopBuy-EB"
                 && equipment.single().is_ok_and(|equipment| {
                     !equipment
                         .inventory
                         .contains(&shared::shop::ItemId::EmberBlade)
-                }));
-        if press {
-            *interaction = Interaction::Pressed;
-        }
-    }
+                }))
+    });
 }
 
 #[derive(Component)]

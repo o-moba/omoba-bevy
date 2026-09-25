@@ -5,15 +5,18 @@ use shared::{
     prematch::{DraftPlayer, PrematchAction, PrematchPhase, PrematchRequest, Role},
 };
 
-use super::{
-    AppScreen,
-    widgets::{self, ButtonKind, MenuButton},
-};
+use super::{AppScreen, widgets};
 use crate::{
     net::{ClientSession, GameStateSnapshot, NetworkCommand, SessionUiCommand},
     passport::{AvatarCatalogueSource, TicketPoll},
     persistence::ClientSessionId,
     team::{AvatarThumbnails, CharacterChoice},
+    ui::{
+        Activated, TestId, UiAction, UiActionAppExt, UiSet,
+        action::UiActionT,
+        theme::{self, ButtonKind},
+        widgets::ButtonStyle,
+    },
 };
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -29,6 +32,7 @@ impl Plugin for DraftScreenPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DraftClient>()
             .init_resource::<DraftScrollMemory>()
+            .add_ui_action::<DraftAction>()
             .configure_sets(
                 Update,
                 (
@@ -40,6 +44,8 @@ impl Plugin for DraftScreenPlugin {
                     .chain()
                     .after(crate::net::ClientNetPipeline::ApplySnapshot),
             )
+            // Draft and loading handle their typed presses in `Input`.
+            .configure_sets(Update, DraftSet::Input.after(UiSet::Dispatch))
             .add_systems(Update, sync_draft.in_set(DraftSet::Sync))
             .add_systems(
                 Update,
@@ -176,7 +182,7 @@ fn sync_draft(game: Res<GameStateSnapshot>, mut state: ResMut<DraftClient>) {
     }
 }
 
-#[derive(Component, Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum DraftAction {
     Class(HeroClass),
     Role(Role),
@@ -188,18 +194,17 @@ enum DraftAction {
 }
 
 fn draft_actions(
-    buttons: Query<(&Interaction, &DraftAction), Changed<Interaction>>,
+    mut activated: MessageReader<Activated<DraftAction>>,
     game: Res<GameStateSnapshot>,
     mut state: ResMut<DraftClient>,
     mut session: MessageWriter<SessionUiCommand>,
 ) {
+    let pressed: Vec<DraftAction> = activated.read().map(|a| a.action.clone()).collect();
     // Leaving remains available when transport teardown removed the roster.
-    for (interaction, action) in &buttons {
-        if *interaction == Interaction::Pressed && matches!(action, DraftAction::Leave) {
-            state.reset();
-            session.write(SessionUiCommand::LeaveMatch);
-            return;
-        }
+    if pressed.contains(&DraftAction::Leave) {
+        state.reset();
+        session.write(SessionUiCommand::LeaveMatch);
+        return;
     }
     let Some(draft) = &game.prematch else {
         return;
@@ -207,10 +212,7 @@ fn draft_actions(
     let Some(local) = draft.players.iter().find(|p| p.player_id == game.your_id) else {
         return;
     };
-    for (interaction, action) in &buttons {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
+    for action in &pressed {
         match action {
             DraftAction::Leave => {
                 state.reset();
@@ -383,19 +385,24 @@ pub(super) fn draft_pane(pane: u8) -> (DraftScroll, crate::ui::ScrollArea) {
 #[derive(Resource, Default)]
 pub(super) struct DraftScrollMemory(pub std::collections::HashMap<u8, f32>);
 
-pub(super) fn action_button<M: Component>(
+/// A fixed-width 44 px draft/loading button: a selected tile, the primary
+/// lock-in or a secondary command, with a gold edge on the first two.
+pub(super) fn action_button<T: UiActionT>(
     parent: &mut ChildSpawnerCommands,
     label: &str,
-    marker: M,
+    action: T,
     name: &str,
     width: f32,
     primary: bool,
     selected: bool,
 ) {
-    let menu = if selected {
-        MenuButton::tile(true)
+    let style = if selected {
+        ButtonStyle {
+            kind: ButtonKind::Tile,
+            selected: true,
+        }
     } else {
-        MenuButton::new(if primary {
+        ButtonStyle::new(if primary {
             ButtonKind::Primary
         } else {
             ButtonKind::Secondary
@@ -417,18 +424,18 @@ pub(super) fn action_button<M: Component>(
                 border_radius: BorderRadius::all(Val::Px(6.0)),
                 ..default()
             },
-            BackgroundColor(menu.idle_color()),
+            BackgroundColor(style.idle_color()),
             BorderColor::all(if primary || selected {
-                widgets::GOLD
+                theme::GOLD
             } else {
-                widgets::PANEL_EDGE
+                theme::PANEL_EDGE
             }),
-            menu,
-            marker,
-            Name::new(name.to_owned()),
+            style,
+            UiAction(action),
+            TestId::new(name.to_owned()),
         ))
         .with_children(|button| {
-            button.spawn(widgets::label(label, 13.0, widgets::IVORY));
+            button.spawn(widgets::label(label, 13.0, theme::IVORY));
         });
 }
 
@@ -459,15 +466,11 @@ pub(super) fn roster_row(
                 ..default()
             },
             BackgroundColor(if mine {
-                widgets::TILE_SELECTED
+                theme::TILE_SELECTED
             } else {
-                widgets::PANEL
+                theme::PANEL_OPAQUE
             }),
-            BorderColor::all(if mine {
-                widgets::GOLD
-            } else {
-                widgets::PANEL_EDGE
-            }),
+            BorderColor::all(if mine { theme::GOLD } else { theme::PANEL_EDGE }),
             Name::new(format!("DraftPlayer-{}", player.player_id)),
         ))
         .with_children(|row| {
@@ -502,7 +505,7 @@ pub(super) fn roster_row(
                     if player.is_bot { " · BOT" } else { "" }
                 );
                 text.spawn((
-                    widgets::label(&identity, 13.0, widgets::IVORY),
+                    widgets::label(&identity, 13.0, theme::IVORY),
                     TextLayout::new_with_justify(Justify::Left).with_linebreak(LineBreak::NoWrap),
                 ));
                 text.spawn(widgets::label(
@@ -512,10 +515,10 @@ pub(super) fn roster_row(
                         player.role.label()
                     ),
                     12.0,
-                    widgets::GOLD,
+                    theme::GOLD,
                 ));
                 text.spawn((
-                    widgets::label(&avatar_name(player.avatar.as_deref()), 11.0, widgets::MUTED),
+                    widgets::label(&avatar_name(player.avatar.as_deref()), 11.0, theme::MUTED),
                     TextLayout::new_with_justify(Justify::Left).with_linebreak(LineBreak::NoWrap),
                 ));
             });
@@ -529,9 +532,9 @@ pub(super) fn roster_row(
                 },
                 10.0,
                 if player.loaded || (!loading && player.locked) {
-                    crate::ui_theme::JADE
+                    crate::ui::theme::JADE
                 } else {
-                    widgets::MUTED
+                    theme::MUTED
                 },
             ));
         });
@@ -615,8 +618,8 @@ fn render_draft(
                 row_gap: Val::Px(8.0),
                 ..default()
             },
-            BackgroundColor(widgets::BACKDROP),
-            ZIndex(widgets::SCREEN_Z),
+            BackgroundColor(theme::BACKDROP),
+            ZIndex(theme::SCREEN_Z),
             DespawnOnExit(AppScreen::Draft),
             DraftRoot,
             Name::new("DraftScreen"),
@@ -647,7 +650,7 @@ fn render_draft(
                                 draft.needed
                             ),
                             12.0,
-                            widgets::MUTED,
+                            theme::MUTED,
                         ));
                     });
                 action_button(
@@ -675,7 +678,7 @@ fn render_draft(
                     ..default()
                 })
                 .with_children(|roster| {
-                    roster.spawn(widgets::label("YOUR TEAM", 12.0, widgets::GOLD));
+                    roster.spawn(widgets::label("YOUR TEAM", 12.0, theme::GOLD));
                     roster
                         .spawn((
                             Node {
@@ -764,7 +767,7 @@ fn render_draft(
                                             "EKZA STUDIO · LIBRARY"
                                         },
                                         12.0,
-                                        widgets::GOLD,
+                                        theme::GOLD,
                                     ),
                                     Name::new(if defaults {
                                         "DraftIncludedHeading"
@@ -777,7 +780,7 @@ fn render_draft(
                                         widgets::label(
                                             catalogue.status.label(),
                                             12.0,
-                                            widgets::MUTED,
+                                            theme::MUTED,
                                         ),
                                         Name::new("DraftStudioStatus"),
                                     ));
@@ -823,7 +826,10 @@ fn render_draft(
                                             let selected = choice.is_some_and(|c| {
                                                 c.avatar.as_deref() == Some(&entry.avatar.slug)
                                             });
-                                            let menu = MenuButton::tile(selected);
+                                            let style = ButtonStyle {
+                                                kind: ButtonKind::Tile,
+                                                selected,
+                                            };
                                             tiles
                                                 .spawn((
                                                     Button,
@@ -843,15 +849,17 @@ fn render_draft(
                                                         overflow: Overflow::clip(),
                                                         ..default()
                                                     },
-                                                    BackgroundColor(menu.idle_color()),
+                                                    BackgroundColor(style.idle_color()),
                                                     BorderColor::all(if selected {
-                                                        widgets::GOLD
+                                                        theme::GOLD
                                                     } else {
-                                                        widgets::PANEL_EDGE
+                                                        theme::PANEL_EDGE
                                                     }),
-                                                    menu,
-                                                    DraftAction::Avatar(entry.avatar.slug.clone()),
-                                                    Name::new(format!(
+                                                    style,
+                                                    UiAction(DraftAction::Avatar(
+                                                        entry.avatar.slug.clone(),
+                                                    )),
+                                                    TestId::new(format!(
                                                         "DraftAvatar-{}",
                                                         entry.avatar.slug
                                                     )),
@@ -874,7 +882,7 @@ fn render_draft(
                                                         widgets::label(
                                                             &entry.avatar.display_name,
                                                             11.0,
-                                                            widgets::IVORY,
+                                                            theme::IVORY,
                                                         ),
                                                         TextLayout::new_with_justify(
                                                             Justify::Center,
@@ -902,9 +910,9 @@ fn render_draft(
                         &message,
                         12.0,
                         if state.notice.is_some() {
-                            widgets::GOLD
+                            theme::GOLD
                         } else {
-                            widgets::MUTED
+                            theme::MUTED
                         },
                     ),
                     Node {
@@ -1284,5 +1292,68 @@ mod tests {
         assert!(composition_warning(&players, 1).contains("Jungle"));
         players[1].role = Role::Support;
         assert!(composition_warning(&players, 1).contains("class determines"));
+    }
+
+    #[test]
+    fn draft_presses_dispatch_once_and_disabled_buttons_do_nothing() {
+        use crate::ui::test_id::harness;
+        let mut app = harness::kit_app();
+        app.init_resource::<DraftClient>()
+            .init_resource::<GameStateSnapshot>()
+            .add_message::<SessionUiCommand>()
+            .add_ui_action::<DraftAction>()
+            .add_systems(Update, draft_actions.after(UiSet::Dispatch));
+        harness::spawn_ui(app.world_mut(), |root| {
+            action_button(
+                root,
+                "Cancel",
+                DraftAction::Leave,
+                "DraftCancel",
+                86.0,
+                false,
+                false,
+            );
+            action_button(
+                root,
+                "Lock in",
+                DraftAction::Lock,
+                "DraftLock",
+                132.0,
+                true,
+                false,
+            );
+        });
+        app.update();
+        let lock = harness::find(app.world_mut(), "DraftLock").unwrap();
+        assert_eq!(
+            app.world().get::<ButtonStyle>(lock).unwrap().kind,
+            ButtonKind::Primary
+        );
+        let leaves = |app: &mut App| {
+            app.world_mut()
+                .resource_mut::<Messages<SessionUiCommand>>()
+                .drain()
+                .filter(|command| matches!(command, SessionUiCommand::LeaveMatch))
+                .count()
+        };
+        // Leaving works even without a roster (transport teardown).
+        harness::press(app.world_mut(), "DraftCancel");
+        app.update();
+        assert_eq!(leaves(&mut app), 1);
+        app.update();
+        assert_eq!(leaves(&mut app), 0);
+        harness::set_disabled(app.world_mut(), "DraftCancel", true);
+        harness::press(app.world_mut(), "DraftCancel");
+        app.update();
+        assert_eq!(leaves(&mut app), 0);
+        assert!(harness::drain_actions::<DraftAction>(app.world_mut()).is_empty());
+        // Without a prematch roster the lock-in has nothing to toggle.
+        harness::press(app.world_mut(), "DraftLock");
+        app.update();
+        assert_eq!(
+            harness::drain_actions::<DraftAction>(app.world_mut()),
+            [DraftAction::Lock]
+        );
+        assert_eq!(app.world().resource::<DraftClient>().desired_lock, None);
     }
 }

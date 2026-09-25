@@ -1,64 +1,25 @@
-//! Shared look and behaviour for the front-end screens.
+//! Layout nodes shared by the front-end screens: the screen root, panel
+//! strips, headings and labels, and the phone readability pass.
 //!
-//! Screens describe *what* they show; this module owns the palette, the
-//! reusable nodes and the hover/press feedback so every screen reacts the same
-//! way. A screen only has to read [`Interaction::Pressed`] on its own marker.
-//!
-//! The palette and [`MenuButton`] live in `crate::ui::theme`; they are
-//! re-exported here so the screens did not have to change.
+//! Buttons and tiles are kit widgets (`crate::ui::widgets::{screen_button,
+//! screen_tile}`) carrying a typed `UiAction`; the palette is
+//! `crate::ui::theme`.
 
 use bevy::prelude::*;
 
 use super::AppScreen;
-
-pub use crate::ui::theme::{
-    ACCENTS, BACKDROP, ButtonKind, DANGER_HOVER, GOLD, IVORY, MUTED, MenuButton, PANEL_EDGE,
-    PANEL_OPAQUE as PANEL, PRIMARY, SCREEN_Z, TILE, TILE_HOVER, TILE_SELECTED, accent_color,
-};
+use crate::ui::theme::{BACKDROP, IVORY, PANEL_EDGE, PANEL_OPAQUE, SCREEN_Z};
+use crate::ui::widgets::{MenuControl, MenuTypography};
 
 pub struct FrontendWidgetsPlugin;
 
 impl Plugin for FrontendWidgetsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (paint_buttons, repaint_changed_buttons))
-            .add_systems(
-                PostUpdate,
-                adapt_phone_menu_readability.before(bevy::ui::UiSystems::Layout),
-            );
+        app.add_systems(
+            PostUpdate,
+            adapt_phone_menu_readability.before(bevy::ui::UiSystems::Layout),
+        );
     }
-}
-
-fn paint_buttons(
-    mut buttons: Query<(&Interaction, &MenuButton, &mut BackgroundColor), Changed<Interaction>>,
-) {
-    for (interaction, button, mut color) in &mut buttons {
-        *color = BackgroundColor(match interaction {
-            Interaction::Hovered | Interaction::Pressed => button.hover_color(),
-            Interaction::None => button.idle_color(),
-        });
-    }
-}
-
-/// Selection changes come from the screen, not the pointer, so a tile that
-/// just became (un)selected has to be repainted even without a hover event.
-fn repaint_changed_buttons(
-    mut buttons: Query<(&MenuButton, &mut BackgroundColor), Changed<MenuButton>>,
-) {
-    for (button, mut color) in &mut buttons {
-        *color = BackgroundColor(button.idle_color());
-    }
-}
-
-/// Frontend metrics are retained separately so global menu fitting never
-/// turns phone controls into sub-44px touch targets or tiny labels.
-#[derive(Component)]
-struct MenuTypography {
-    size: f32,
-    heading: bool,
-}
-#[derive(Component)]
-struct MenuControl {
-    height: f32,
 }
 
 fn adapt_phone_menu_readability(
@@ -134,7 +95,7 @@ pub fn panel_row() -> impl Bundle {
             border_radius: BorderRadius::all(Val::Px(8.0)),
             ..default()
         },
-        BackgroundColor(PANEL),
+        BackgroundColor(PANEL_OPAQUE),
         BorderColor::all(PANEL_EDGE),
     )
 }
@@ -155,117 +116,5 @@ pub fn heading(text: &str, size: f32) -> impl Bundle {
 }
 
 pub fn label(text: &str, size: f32, color: Color) -> impl Bundle {
-    (
-        Text::new(text.to_owned()),
-        TextFont {
-            font_size: size,
-            ..default()
-        },
-        TextColor(color),
-        MenuTypography {
-            size,
-            heading: false,
-        },
-    )
-}
-
-/// Spawns a labelled button carrying the screen's own action marker.
-pub fn button<M: Component>(
-    parent: &mut ChildSpawnerCommands,
-    text: &str,
-    kind: ButtonKind,
-    marker: M,
-    name: &str,
-) -> Entity {
-    spawn_button(parent, text, MenuButton::new(kind), marker, name, false)
-}
-
-/// A grid tile whose selected state is owned by the screen.
-pub fn tile<M: Component>(
-    parent: &mut ChildSpawnerCommands,
-    text: &str,
-    selected: bool,
-    marker: M,
-    name: &str,
-) -> Entity {
-    spawn_button(
-        parent,
-        text,
-        MenuButton::tile(selected),
-        marker,
-        name,
-        false,
-    )
-}
-
-/// A grid tile that shrinks on a phone (the avatar clip strip).
-pub fn compact_tile<M: Component>(
-    parent: &mut ChildSpawnerCommands,
-    text: &str,
-    selected: bool,
-    marker: M,
-    name: &str,
-    compact: bool,
-) -> Entity {
-    spawn_button(
-        parent,
-        text,
-        MenuButton::tile(selected),
-        marker,
-        name,
-        compact,
-    )
-}
-
-fn spawn_button<M: Component>(
-    parent: &mut ChildSpawnerCommands,
-    text: &str,
-    menu: MenuButton,
-    marker: M,
-    name: &str,
-    compact_clip: bool,
-) -> Entity {
-    use crate::ui::theme::metric;
-    let (width, height, font) = match menu.kind {
-        ButtonKind::Primary => (Val::Px(metric::PRIMARY.0), Val::Px(metric::PRIMARY.1), 22.0),
-        _ => (Val::Auto, Val::Px(metric::TOUCH_MIN), 15.0),
-    };
-    parent
-        .spawn((
-            Button,
-            Node {
-                width,
-                height,
-                min_width: Val::Px(if compact_clip { 86.0 } else { 120.0 }),
-                padding: UiRect::axes(
-                    Val::Px(if compact_clip { 10.0 } else { 18.0 }),
-                    Val::Px(8.0),
-                ),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                border_radius: BorderRadius::all(Val::Px(8.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(if menu.kind == ButtonKind::Primary {
-                GOLD
-            } else {
-                PANEL_EDGE
-            }),
-            BackgroundColor(menu.idle_color()),
-            MenuControl {
-                height: if menu.kind == ButtonKind::Primary {
-                    metric::PRIMARY.1
-                } else {
-                    metric::TOUCH_MIN
-                },
-            },
-            menu,
-            marker,
-            Name::new(name.to_owned()),
-        ))
-        .with_children(|button| {
-            button.spawn(label(text, font, IVORY));
-        })
-        .id()
+    crate::ui::widgets::screen_label(text, size, color)
 }

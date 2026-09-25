@@ -15,6 +15,9 @@ pub use crate::domain::Team;
 use crate::frontend::AppScreen;
 use crate::net::{ClientConnectionState, ClientSession, NetworkCommand, SessionUiCommand};
 use crate::sprite::{PlayerVisualMode, SpriteVisualAssets};
+use crate::ui::theme::ButtonKind;
+use crate::ui::widgets::ButtonStyle;
+use crate::ui::{Activated, TestId, UiAction, UiActionAppExt, UiSet};
 pub use shared::wire::CharacterChoice;
 
 const TEAM_BUTTON_SIZE: f32 = 64.0;
@@ -30,26 +33,23 @@ const AVATAR_GRID_COLUMNS: usize = 8;
 const SPRITE_GRID_MAX_COLUMNS: usize = 5;
 const SPRITE_GRID_WIDTH_PERCENT: f32 = 92.0;
 // Opaque: the match world must not be visible while a hero is being picked.
-const TEAM_OVERLAY_COLOR: Color = crate::frontend::widgets::BACKDROP;
-const SELECT_BUTTON_COLOR: Color = crate::frontend::widgets::TILE;
-const SELECT_BUTTON_HOVER_COLOR: Color = crate::frontend::widgets::TILE_HOVER;
-const SELECT_BUTTON_SELECTED_COLOR: Color = crate::frontend::widgets::TILE_SELECTED;
+const TEAM_OVERLAY_COLOR: Color = crate::ui::theme::BACKDROP;
+const SELECT_BUTTON_COLOR: Color = crate::ui::theme::TILE;
+const SELECT_BUTTON_SELECTED_COLOR: Color = crate::ui::theme::TILE_SELECTED;
 
-// Team-select presentation; the team itself lives in `crate::domain`.
-impl Team {
-    pub fn ui_color(self) -> Color {
-        match self {
-            Team::Green => Color::srgba(0.12, 0.40, 0.28, 0.98),
-            Team::Blue => Color::srgba(0.16, 0.28, 0.48, 0.98),
-        }
-    }
-
-    pub fn ui_hover_color(self) -> Color {
-        match self {
-            Team::Green => Color::srgba(0.18, 0.65, 0.28, 0.98),
-            Team::Blue => Color::srgba(0.22, 0.45, 0.85, 0.98),
-        }
-    }
+/// Every press on hero select. Buttons carry `UiAction<HeroSelectAction>`
+/// and a `ButtonStyle` (tiles, `Link` for Ekza, `Team` for the lock-in); the
+/// lock-in itself is decided by [`lock_in`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum HeroSelectAction {
+    Back,
+    Class(HeroClass),
+    Avatar(String),
+    Sprite(String),
+    LockIn(Team),
+    ConnectWallet,
+    ConnectAccount,
+    RefreshStudio,
 }
 
 #[derive(Resource)]
@@ -91,6 +91,7 @@ impl Plugin for TeamSelectPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TeamSelection>()
             .init_resource::<AvatarThumbnails>()
+            .add_ui_action::<HeroSelectAction>()
             // Thumbnails are loaded up front so the collection and the profile
             // card can draw avatars without opening the picker first.
             .add_systems(
@@ -108,20 +109,15 @@ impl Plugin for TeamSelectPlugin {
                     // Before the network send: the join written by a lock-in is
                     // committed in the same frame, so the search screen never
                     // opens on an uncommitted join.
-                    team_select_ui_system.before(crate::net::ClientNetPipeline::SendCommands),
+                    team_select_ui_system
+                        .after(UiSet::Dispatch)
+                        .before(crate::net::ClientNetPipeline::SendCommands),
                     sync_hero_panel,
                     sync_hero_select_status,
                 )
                     .run_if(in_state(AppScreen::HeroSelect)),
             )
-            .add_systems(
-                Update,
-                (
-                    attach_avatar_thumbnails,
-                    refresh_picker_catalogue,
-                    restore_picker_scroll,
-                ),
-            )
+            .add_systems(Update, (attach_avatar_thumbnails, restore_picker_scroll))
             .add_systems(
                 Update,
                 wallet_connect_ui_system
@@ -132,6 +128,7 @@ impl Plugin for TeamSelectPlugin {
                 Update,
                 adapt_mobile_selection_contrast
                     .after(team_select_ui_system)
+                    .after(UiSet::Paint)
                     .run_if(in_state(AppScreen::HeroSelect)),
             )
             .add_systems(Update, (autojoin_from_env, sync_practice_picker));
@@ -153,9 +150,7 @@ struct HeroSelectStatus;
 struct JoinActionLabel;
 
 #[derive(Component)]
-struct TeamSelectButton {
-    team: Team,
-}
+struct TeamSelectButton;
 
 #[derive(Component)]
 struct ClassSelectButton {
@@ -189,8 +184,7 @@ struct AccountStatusText;
 #[derive(Component)]
 struct AccountConnectButton;
 
-const WALLET_BUTTON_COLOR: Color = Color::srgb(0.22, 0.30, 0.55);
-const WALLET_BUTTON_HOVER_COLOR: Color = Color::srgb(0.30, 0.40, 0.70);
+const WALLET_BUTTON_COLOR: Color = crate::ui::theme::LINK;
 
 #[derive(Component)]
 struct SpriteAvatarGrid;
@@ -308,19 +302,7 @@ fn wallet_connect_ui_system(
     sprite_assets: Res<SpriteVisualAssets>,
     asset_server: Res<AssetServer>,
     mut thumbnails: ResMut<AvatarThumbnails>,
-    mut buttons: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<WalletConnectButton>),
-    >,
     mut status: Query<&mut Text, (With<WalletStatusText>, Without<AccountStatusText>)>,
-    mut account_buttons: Query<
-        (&Interaction, &mut BackgroundColor),
-        (
-            Changed<Interaction>,
-            With<AccountConnectButton>,
-            Without<WalletConnectButton>,
-        ),
-    >,
     mut account_status: Query<&mut Text, (With<AccountStatusText>, Without<WalletStatusText>)>,
     preview: Res<crate::frontend::preview::AvatarPreview>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
@@ -332,25 +314,11 @@ fn wallet_connect_ui_system(
     if selection.team.is_some() || overlay_query.is_empty() {
         return;
     }
-    for (interaction, mut color) in &mut buttons {
-        match *interaction {
-            Interaction::Pressed => crate::passport::connect(),
-            Interaction::Hovered => *color = BackgroundColor(WALLET_BUTTON_HOVER_COLOR),
-            Interaction::None => *color = BackgroundColor(WALLET_BUTTON_COLOR),
-        }
-    }
     let just_connected = crate::passport::poll_wallet();
     let line = crate::passport::wallet_status_line();
     for mut text in &mut status {
         if text.0 != line {
             text.0.clone_from(&line);
-        }
-    }
-    for (interaction, mut color) in &mut account_buttons {
-        match *interaction {
-            Interaction::Pressed => crate::passport::connect_account(),
-            Interaction::Hovered => *color = BackgroundColor(WALLET_BUTTON_HOVER_COLOR),
-            Interaction::None => *color = BackgroundColor(WALLET_BUTTON_COLOR),
         }
     }
     let account_just_connected = crate::passport::poll_account();
@@ -402,17 +370,8 @@ fn picker_catalogue_changed(
         || previous_account.is_some_and(|previous| previous != connected)
 }
 
-#[derive(Component)]
-struct RefreshCatalogueButton;
 #[derive(Resource)]
 struct PickerScrollRestore(f32);
-fn refresh_picker_catalogue(
-    buttons: Query<&Interaction, (Changed<Interaction>, With<RefreshCatalogueButton>)>,
-) {
-    if buttons.iter().any(|i| *i == Interaction::Pressed) {
-        crate::passport::refresh_avatar_catalogue();
-    }
-}
 fn restore_picker_scroll(
     mut commands: Commands,
     pending: Option<Res<PickerScrollRestore>>,
@@ -463,7 +422,7 @@ pub fn spawn_team_select_ui(
                 ..default()
             },
             BackgroundColor(TEAM_OVERLAY_COLOR),
-            ZIndex(crate::frontend::widgets::SCREEN_Z),
+            ZIndex(crate::ui::theme::SCREEN_Z),
             // Leaving hero select always takes the picker with it, whether the
             // player locked in, went back, or the session pulled the screen.
             bevy::state::state_scoped::DespawnOnExit(AppScreen::HeroSelect),
@@ -493,8 +452,10 @@ pub fn spawn_team_select_ui(
                                 ..default()
                             },
                             BackgroundColor(SELECT_BUTTON_COLOR),
+                            ButtonStyle::new(ButtonKind::Secondary),
+                            UiAction(HeroSelectAction::Back),
                             HeroSelectBackButton,
-                            Name::new("HeroSelectBack"),
+                            TestId::new("HeroSelectBack"),
                         ))
                         .with_children(|button| {
                             button.spawn((
@@ -521,7 +482,7 @@ pub fn spawn_team_select_ui(
                             font_size: 13.0,
                             ..default()
                         },
-                        TextColor(crate::frontend::widgets::MUTED),
+                        TextColor(crate::ui::theme::MUTED),
                         Node {
                             margin: UiRect::left(Val::Auto),
                             max_width: Val::Percent(45.0),
@@ -559,7 +520,7 @@ pub fn spawn_team_select_ui(
                     font_size: 12.5,
                     ..default()
                 },
-                TextColor(crate::frontend::widgets::MUTED),
+                TextColor(crate::ui::theme::MUTED),
                 Name::new("RendererStatus"),
             ));
 
@@ -638,8 +599,9 @@ pub fn spawn_team_select_ui(
                             ..default()
                         },
                         BackgroundColor(WALLET_BUTTON_COLOR),
-                        RefreshCatalogueButton,
-                        Name::new("PickerRefreshStudio"),
+                        ButtonStyle::new(ButtonKind::Link),
+                        UiAction(HeroSelectAction::RefreshStudio),
+                        TestId::new("PickerRefreshStudio"),
                     ))
                     .with_children(|button| {
                         button.spawn((
@@ -808,8 +770,8 @@ fn spawn_hero_panel(
                 border_radius: BorderRadius::all(Val::Px(12.0)),
                 ..default()
             },
-            BackgroundColor(crate::frontend::widgets::PANEL),
-            BorderColor::all(crate::frontend::widgets::PANEL_EDGE),
+            BackgroundColor(crate::ui::theme::PANEL_OPAQUE),
+            BorderColor::all(crate::ui::theme::PANEL_EDGE),
             Name::new("HeroSelectPanel"),
         ))
         .with_children(|panel| {
@@ -830,7 +792,7 @@ fn spawn_hero_panel(
                     font_size: 19.0,
                     ..default()
                 },
-                TextColor(crate::frontend::widgets::IVORY),
+                TextColor(crate::ui::theme::IVORY),
                 HeroPanelAvatarName,
                 Name::new("HeroSelectAvatarName"),
             ));
@@ -840,7 +802,7 @@ fn spawn_hero_panel(
                     font_size: 12.5,
                     ..default()
                 },
-                TextColor(crate::frontend::widgets::MUTED),
+                TextColor(crate::ui::theme::MUTED),
                 HeroPanelClassName,
                 Name::new("HeroSelectClassName"),
             ));
@@ -851,7 +813,7 @@ fn spawn_hero_panel(
                         font_size: 13.0,
                         ..default()
                     },
-                    TextColor(crate::frontend::widgets::GOLD),
+                    TextColor(crate::ui::theme::GOLD),
                     HeroPanelAbility(index),
                     Name::new(format!("HeroSelectAbility-{index}")),
                 ));
@@ -874,10 +836,10 @@ fn sync_hero_select_status(
     // A failed lock-in outranks the plain connection line: it is the reason
     // the player is looking at the picker again.
     let (line, color) = match notice.as_ref().and_then(|notice| notice.0.clone()) {
-        Some(reason) => (reason, crate::frontend::widgets::GOLD),
+        Some(reason) => (reason, crate::ui::theme::GOLD),
         None => {
             let (line, _) = crate::frontend::home::connection_line(&session);
-            (line, crate::frontend::widgets::MUTED)
+            (line, crate::ui::theme::MUTED)
         }
     };
     for (mut text, mut text_color) in &mut status {
@@ -949,8 +911,8 @@ fn spawn_ekza_row(parent: &mut ChildSpawnerCommands) {
                 border_radius: BorderRadius::all(Val::Px(10.0)),
                 ..default()
             },
-            BackgroundColor(crate::frontend::widgets::PANEL),
-            BorderColor::all(crate::frontend::widgets::PANEL_EDGE),
+            BackgroundColor(crate::ui::theme::PANEL_OPAQUE),
+            BorderColor::all(crate::ui::theme::PANEL_EDGE),
             Name::new("EkzaConnectRow"),
         ))
         .with_children(|row| {
@@ -960,7 +922,7 @@ fn spawn_ekza_row(parent: &mut ChildSpawnerCommands) {
                     font_size: 12.5,
                     ..default()
                 },
-                TextColor(crate::frontend::widgets::MUTED),
+                TextColor(crate::ui::theme::MUTED),
                 WalletStatusText,
                 Name::new("PassportStatus"),
             ));
@@ -973,7 +935,7 @@ fn spawn_ekza_row(parent: &mut ChildSpawnerCommands) {
                     font_size: 12.5,
                     ..default()
                 },
-                TextColor(crate::frontend::widgets::MUTED),
+                TextColor(crate::ui::theme::MUTED),
                 AccountStatusText,
                 Name::new("EkzaAccountStatus"),
             ));
@@ -1006,13 +968,22 @@ fn spawn_connect_button(row: &mut ChildSpawnerCommands, label: &str, target: Con
             ..default()
         },
         BackgroundColor(WALLET_BUTTON_COLOR),
+        ButtonStyle::new(ButtonKind::Link),
     ));
     match target {
         ConnectTarget::Wallet => {
-            button.insert((WalletConnectButton, Name::new("WalletConnectButton")));
+            button.insert((
+                WalletConnectButton,
+                UiAction(HeroSelectAction::ConnectWallet),
+                TestId::new("WalletConnectButton"),
+            ));
         }
         ConnectTarget::Account => {
-            button.insert((AccountConnectButton, Name::new("AccountConnectButton")));
+            button.insert((
+                AccountConnectButton,
+                UiAction(HeroSelectAction::ConnectAccount),
+                TestId::new("AccountConnectButton"),
+            ));
         }
     }
     button.with_children(|button| {
@@ -1056,11 +1027,16 @@ fn spawn_sprite_button(
         } else {
             SELECT_BUTTON_COLOR
         }),
-        Name::new(format!("SpriteButton-{}", character.id)),
+        TestId::new(format!("SpriteButton-{}", character.id)),
     ));
     if !draft {
         tile.insert((
             Button,
+            ButtonStyle {
+                kind: ButtonKind::Tile,
+                selected,
+            },
+            UiAction(HeroSelectAction::Sprite(character.id.clone())),
             SpriteSelectButton {
                 id: character.id.clone(),
             },
@@ -1176,8 +1152,13 @@ fn spawn_class_button(row: &mut ChildSpawnerCommands, class: HeroClass, selected
         } else {
             SELECT_BUTTON_COLOR
         }),
+        ButtonStyle {
+            kind: ButtonKind::Tile,
+            selected,
+        },
+        UiAction(HeroSelectAction::Class(class)),
         ClassSelectButton { class },
-        Name::new(format!("ClassButton-{}", class.id())),
+        TestId::new(format!("ClassButton-{}", class.id())),
     ))
     .with_children(|button| {
         button.spawn((
@@ -1223,10 +1204,15 @@ fn spawn_avatar_button(
         } else {
             SELECT_BUTTON_COLOR
         }),
+        ButtonStyle {
+            kind: ButtonKind::Tile,
+            selected,
+        },
+        UiAction(HeroSelectAction::Avatar(slug.to_owned())),
         AvatarSelectButton {
             slug: slug.to_owned(),
         },
-        Name::new(format!("AvatarButton-{slug}")),
+        TestId::new(format!("AvatarButton-{slug}")),
     ))
     .with_children(|button| {
         button
@@ -1239,7 +1225,7 @@ fn spawn_avatar_button(
                     border_radius: BorderRadius::all(Val::Px(6.0)),
                     ..default()
                 },
-                BackgroundColor(crate::ui_theme::PANEL),
+                BackgroundColor(crate::ui::theme::PANEL),
                 AvatarThumbnailSlot {
                     slug: slug.to_owned(),
                 },
@@ -1257,8 +1243,8 @@ fn spawn_avatar_button(
                         .collect();
                     portrait.spawn((
                         Text::new(initials),
-                        crate::ui_theme::text(22.0),
-                        TextColor(crate::ui_theme::GOLD),
+                        crate::ui::theme::text(22.0),
+                        TextColor(crate::ui::theme::GOLD),
                     ));
                 }
             });
@@ -1303,10 +1289,15 @@ fn spawn_team_button(row: &mut ChildSpawnerCommands, team: Team, name: &str) {
             align_items: AlignItems::Center,
             ..default()
         },
-        BackgroundColor(team.ui_color()),
-        BorderColor::all(crate::ui_theme::EDGE),
-        TeamSelectButton { team },
-        Name::new(name.to_owned()),
+        BackgroundColor(crate::ui::theme::button_idle_color(
+            ButtonKind::Team(team),
+            false,
+        )),
+        BorderColor::all(crate::ui::theme::EDGE),
+        ButtonStyle::new(ButtonKind::Team(team)),
+        UiAction(HeroSelectAction::LockIn(team)),
+        TeamSelectButton,
+        TestId::new(name.to_owned()),
     ))
     .with_children(|button| {
         button.spawn((
@@ -1356,10 +1347,10 @@ fn adapt_mobile_selection_contrast(
                 .is_some_and(|button| selection.avatar.as_deref() == Some(button.slug.as_str()))
             || sprite.is_some_and(|button| button.id == selection.sprite_character);
         if selected {
-            *background = crate::ui_theme::TILE.into();
+            *background = crate::ui::theme::TILE.into();
         }
         let color = if selected {
-            crate::ui_theme::GOLD
+            crate::ui::theme::GOLD
         } else {
             Color::NONE
         };
@@ -1373,153 +1364,64 @@ fn adapt_mobile_selection_contrast(
     }
 }
 
+/// Applies hero-select presses. Runs after `UiSet::Dispatch` and before the
+/// network send, so a lock-in's join leaves in the same frame.
 fn team_select_ui_system(
     mut commands: Commands,
     client_session: Res<ClientSession>,
     mut selection: ResMut<TeamSelection>,
-    mut interaction_sets: ParamSet<(
-        Query<
-            (&Interaction, &TeamSelectButton, &mut BackgroundColor),
-            (Changed<Interaction>, With<Button>),
-        >,
-        Query<
-            (&Interaction, &ClassSelectButton, &mut BackgroundColor),
-            (Changed<Interaction>, With<Button>),
-        >,
-        Query<
-            (&Interaction, &AvatarSelectButton, &mut BackgroundColor),
-            (Changed<Interaction>, With<Button>),
-        >,
-        Query<
-            (&Interaction, &SpriteSelectButton, &mut BackgroundColor),
-            (Changed<Interaction>, With<Button>),
-        >,
-    )>,
-    class_buttons: Query<(Entity, &ClassSelectButton), With<Button>>,
-    avatar_buttons: Query<(Entity, &AvatarSelectButton), With<Button>>,
-    sprite_buttons: Query<(Entity, &SpriteSelectButton), With<Button>>,
+    mut activated: MessageReader<Activated<HeroSelectAction>>,
+    mut styles: Query<(&UiAction<HeroSelectAction>, &mut ButtonStyle)>,
     overlay_query: Query<Entity, With<TeamSelectRoot>>,
-    back_buttons: Query<&Interaction, (Changed<Interaction>, With<HeroSelectBackButton>)>,
     mut screen: Option<ResMut<NextState<AppScreen>>>,
     mut notice: Option<ResMut<crate::frontend::JoinNotice>>,
     mut command_writer: MessageWriter<NetworkCommand>,
     mut session_ui_writer: MessageWriter<SessionUiCommand>,
 ) {
     if selection.team.is_some() {
+        // Locked in: a press queued before the lock must not fire later.
+        activated.clear();
         return;
     }
-
-    if back_buttons
-        .iter()
-        .any(|interaction| *interaction == Interaction::Pressed)
-        && let Some(screen) = screen.as_deref_mut()
-    {
-        if client_session.is_offline() {
-            session_ui_writer.write(SessionUiCommand::LeaveMatch);
-        }
-        screen.set(AppScreen::Home);
-        return;
-    }
-
-    let mut class_changed = false;
-    for (interaction, button, mut color) in interaction_sets.p1().iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                selection.hero_class = button.class;
-                class_changed = true;
-            }
-            Interaction::Hovered => {
-                if selection.hero_class != button.class {
-                    *color = SELECT_BUTTON_HOVER_COLOR.into();
+    let mut selection_changed = false;
+    for Activated { action, .. } in activated.read() {
+        match action {
+            HeroSelectAction::Back => {
+                if let Some(screen) = screen.as_deref_mut() {
+                    if client_session.is_offline() {
+                        session_ui_writer.write(SessionUiCommand::LeaveMatch);
+                    }
+                    screen.set(AppScreen::Home);
+                    return;
                 }
             }
-            Interaction::None => {
-                if selection.hero_class != button.class {
-                    *color = SELECT_BUTTON_COLOR.into();
-                }
+            HeroSelectAction::Class(class) => {
+                selection.hero_class = *class;
+                selection_changed = true;
             }
-        }
-    }
-    if class_changed {
-        for (entity, button) in &class_buttons {
-            let color = if button.class == selection.hero_class {
-                SELECT_BUTTON_SELECTED_COLOR
-            } else {
-                SELECT_BUTTON_COLOR
-            };
-            commands.entity(entity).try_insert(BackgroundColor(color));
-        }
-    }
-
-    let mut avatar_changed = false;
-    for (interaction, button, mut color) in interaction_sets.p2().iter_mut() {
-        let is_selected = selection.avatar.as_deref() == Some(button.slug.as_str());
-        match *interaction {
-            Interaction::Pressed => {
+            HeroSelectAction::Avatar(slug) => {
                 if client_session.is_offline()
                     && !omoba_passport::avatars::avatar_roster()
                         .iter()
-                        .any(|a| a.slug == button.slug && a.passport.is_none())
+                        .any(|a| a.slug == *slug && a.passport.is_none())
                 {
                     if let Some(notice) = notice.as_deref_mut() {
                         notice.0=Some("Offline practice uses the included avatars. Choose an avatar from the first group.".into());
                     }
                     continue;
                 }
-                selection.avatar = Some(button.slug.clone());
-                avatar_changed = true;
+                selection.avatar = Some(slug.clone());
+                selection_changed = true;
             }
-            Interaction::Hovered => {
-                if !is_selected {
-                    *color = SELECT_BUTTON_HOVER_COLOR.into();
-                }
+            HeroSelectAction::Sprite(id) => {
+                selection_changed |= update_sprite_selection(&mut selection, id);
             }
-            Interaction::None => {
-                if !is_selected {
-                    *color = SELECT_BUTTON_COLOR.into();
-                }
-            }
-        }
-    }
-    if avatar_changed {
-        for (entity, button) in &avatar_buttons {
-            let color = if selection.avatar.as_deref() == Some(button.slug.as_str()) {
-                SELECT_BUTTON_SELECTED_COLOR
-            } else {
-                SELECT_BUTTON_COLOR
-            };
-            commands.entity(entity).try_insert(BackgroundColor(color));
-        }
-    }
-
-    let mut sprite_changed = false;
-    for (interaction, button, mut color) in interaction_sets.p3().iter_mut() {
-        let selected = selection.sprite_character == button.id;
-        match *interaction {
-            Interaction::Pressed => {
-                sprite_changed |= update_sprite_selection(&mut selection, &button.id);
-            }
-            Interaction::Hovered if !selected => *color = SELECT_BUTTON_HOVER_COLOR.into(),
-            Interaction::None if !selected => *color = SELECT_BUTTON_COLOR.into(),
-            _ => {}
-        }
-    }
-    if sprite_changed {
-        for (entity, button) in &sprite_buttons {
-            let color = if button.id == selection.sprite_character {
-                SELECT_BUTTON_SELECTED_COLOR
-            } else {
-                SELECT_BUTTON_COLOR
-            };
-            commands.entity(entity).try_insert(BackgroundColor(color));
-        }
-    }
-
-    for (interaction, button, mut color) in interaction_sets.p0().iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
+            HeroSelectAction::ConnectWallet => crate::passport::connect(),
+            HeroSelectAction::ConnectAccount => crate::passport::connect_account(),
+            HeroSelectAction::RefreshStudio => crate::passport::refresh_avatar_catalogue(),
+            HeroSelectAction::LockIn(team) => {
                 let (join, next_screen) = match lock_in(
-                    button.team,
+                    *team,
                     &selection,
                     client_session.join_in_flight(),
                     client_session.state(),
@@ -1537,14 +1439,14 @@ fn team_select_ui_system(
                     }
                     LockIn::Join { command, screen } => (command, screen),
                 };
-                selection.team = Some(button.team);
+                selection.team = Some(*team);
                 // A new attempt: the previous failure is no longer the story.
                 if let Some(notice) = notice.as_deref_mut() {
                     notice.0 = None;
                 }
                 info!(
                     "[omoba:cli] event=join_request team={:?} class={} avatar={:?} character={:?}",
-                    button.team,
+                    team,
                     selection.hero_class.id(),
                     selection.avatar,
                     selection.character
@@ -1560,12 +1462,20 @@ fn team_select_ui_system(
                 if let Some(screen) = screen.as_deref_mut() {
                     screen.set(next_screen);
                 }
+                return;
             }
-            Interaction::Hovered => {
-                *color = button.team.ui_hover_color().into();
-            }
-            Interaction::None => {
-                *color = button.team.ui_color().into();
+        }
+    }
+    if selection_changed {
+        for (action, mut style) in &mut styles {
+            let selected = match &action.0 {
+                HeroSelectAction::Class(class) => *class == selection.hero_class,
+                HeroSelectAction::Avatar(slug) => selection.avatar.as_deref() == Some(slug),
+                HeroSelectAction::Sprite(id) => selection.sprite_character == *id,
+                _ => continue,
+            };
+            if style.selected != selected {
+                style.selected = selected;
             }
         }
     }
@@ -1783,9 +1693,6 @@ mod tests {
         }
     }
 
-    /// Bevy checks query conflicts when a system is initialized, not when it compiles.
-    /// The picker system holds two `&mut Text` and two `&mut BackgroundColor` queries
-    /// (wallet and account); they must stay disjoint or the game panics on start.
     #[test]
     fn picker_refreshes_account_action_even_with_an_unchanged_empty_library() {
         assert!(!picker_catalogue_changed(Some(3), 3, Some(false), false));
@@ -1794,6 +1701,9 @@ mod tests {
         assert!(picker_catalogue_changed(Some(3), 4, Some(true), true));
     }
 
+    /// Bevy checks query conflicts when a system is initialized, not when it compiles.
+    /// The picker system holds two `&mut Text` queries (wallet and account
+    /// status); they must stay disjoint or the game panics on start.
     #[test]
     fn picker_system_queries_are_disjoint() {
         let mut world = World::new();
@@ -1930,6 +1840,119 @@ mod tests {
             status
                 .iter(app.world())
                 .any(|(name, button)| name.as_str() == "RendererStatus" && button.is_none())
+        );
+    }
+
+    fn hero_select_app() -> App {
+        use crate::ui::test_id::harness;
+        let mut app = harness::kit_app();
+        let mut session = ClientSession::default();
+        session.set_state_for_test(ClientConnectionState::Connected);
+        app.add_plugins(bevy::state::app::StatesPlugin)
+            .init_state::<AppScreen>()
+            .insert_resource(session)
+            .init_resource::<TeamSelection>()
+            .init_resource::<crate::frontend::JoinNotice>()
+            .add_message::<NetworkCommand>()
+            .add_message::<SessionUiCommand>()
+            .add_ui_action::<HeroSelectAction>()
+            .add_systems(Startup, |mut commands: Commands| {
+                spawn_team_select_ui(
+                    &mut commands,
+                    &TeamSelection::default(),
+                    PlayerVisualMode::Models3d,
+                    &SpriteVisualAssets::default(),
+                    Handle::default(),
+                    false,
+                )
+            })
+            .add_systems(Update, team_select_ui_system.after(UiSet::Dispatch));
+        app.update();
+        app
+    }
+
+    #[test]
+    fn class_presses_select_once_and_repaint_the_tiles() {
+        use crate::ui::test_id::harness;
+        let mut app = hero_select_app();
+        let mage = format!("ClassButton-{}", HeroClass::Mage.id());
+        harness::press(app.world_mut(), &mage);
+        app.update();
+        assert_eq!(
+            harness::drain_actions::<HeroSelectAction>(app.world_mut()),
+            [HeroSelectAction::Class(HeroClass::Mage)]
+        );
+        assert_eq!(
+            app.world().resource::<TeamSelection>().hero_class,
+            HeroClass::Mage
+        );
+        app.update();
+        assert!(harness::drain_actions::<HeroSelectAction>(app.world_mut()).is_empty());
+        let tile = harness::find(app.world_mut(), &mage).unwrap();
+        assert_eq!(
+            app.world().get::<BackgroundColor>(tile).unwrap().0,
+            SELECT_BUTTON_SELECTED_COLOR
+        );
+        let warrior = harness::find(
+            app.world_mut(),
+            &format!("ClassButton-{}", HeroClass::Warrior.id()),
+        )
+        .unwrap();
+        assert_eq!(
+            app.world().get::<BackgroundColor>(warrior).unwrap().0,
+            SELECT_BUTTON_COLOR
+        );
+        // A disabled tile does nothing.
+        let ranger = format!("ClassButton-{}", HeroClass::Ranger.id());
+        harness::set_disabled(app.world_mut(), &ranger, true);
+        harness::press(app.world_mut(), &ranger);
+        app.update();
+        assert_eq!(
+            app.world().resource::<TeamSelection>().hero_class,
+            HeroClass::Mage
+        );
+    }
+
+    #[test]
+    fn the_lock_in_press_goes_through_the_lock_in_decision_once() {
+        use crate::ui::test_id::harness;
+        let mut app = hero_select_app();
+        let button = harness::find(app.world_mut(), "FindMatchButton").unwrap();
+        assert_eq!(
+            app.world().get::<BackgroundColor>(button).unwrap().0,
+            crate::ui::theme::TEAM_GREEN
+        );
+        harness::set_disabled(app.world_mut(), "FindMatchButton", true);
+        harness::press(app.world_mut(), "FindMatchButton");
+        app.update();
+        assert!(
+            app.world()
+                .resource::<Messages<NetworkCommand>>()
+                .is_empty()
+        );
+        harness::set_disabled(app.world_mut(), "FindMatchButton", false);
+        harness::press(app.world_mut(), "FindMatchButton");
+        app.update();
+        let joins: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<NetworkCommand>>()
+            .drain()
+            .collect();
+        // Not the sandbox, not offline: the prematch draft, then Searching.
+        assert!(matches!(joins[..], [NetworkCommand::JoinPrematch { .. }]));
+        assert_eq!(
+            app.world().resource::<TeamSelection>().team,
+            Some(Team::Green)
+        );
+        assert!(matches!(
+            *app.world().resource::<NextState<AppScreen>>(),
+            NextState::Pending(AppScreen::Searching)
+        ));
+        app.update();
+        assert!(
+            app.world()
+                .resource::<Messages<NetworkCommand>>()
+                .is_empty()
         );
     }
 }

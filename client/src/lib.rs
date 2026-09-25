@@ -59,7 +59,6 @@ mod supporter_storekit;
 mod team;
 mod team_vision;
 mod ui;
-mod ui_theme;
 mod verdant3d;
 mod world;
 mod world2d;

@@ -20,9 +20,9 @@ use super::selection::TargetState;
 
 pub(super) const SKILL_SLOT_SIZE: f32 = 80.0;
 const SKILL_SLOT_GAP: f32 = 8.0;
-const SKILL_BUTTON_COLOR: Color = crate::ui_theme::PANEL;
-const SKILL_BUTTON_HOVER_COLOR: Color = crate::ui_theme::HOVER;
-const SKILL_BUTTON_PRESS_COLOR: Color = crate::ui_theme::TILE;
+const SKILL_BUTTON_COLOR: Color = crate::ui::theme::PANEL;
+const SKILL_BUTTON_HOVER_COLOR: Color = crate::ui::theme::HOVER;
+const SKILL_BUTTON_PRESS_COLOR: Color = crate::ui::theme::TILE;
 const SKILL_UPGRADE_READY_COLOR: Color = Color::srgba(0.20, 0.62, 0.26, 0.95);
 const SKILL_UPGRADE_HOVER_COLOR: Color = Color::srgba(0.26, 0.72, 0.32, 0.98);
 const SKILL_UPGRADE_IDLE_COLOR: Color = Color::srgba(0.16, 0.16, 0.18, 0.55);
@@ -142,7 +142,7 @@ pub(super) fn setup_combat_ui(mut commands: Commands, asset_server: Option<Res<A
                             ..default()
                         },
                         BackgroundColor(SKILL_BUTTON_COLOR),
-                        BorderColor::all(crate::ui_theme::EDGE),
+                        BorderColor::all(crate::ui::theme::EDGE),
                         SkillBarSlot { slot: i },
                         Name::new(format!("SkillSlot-{label}")),
                     ))

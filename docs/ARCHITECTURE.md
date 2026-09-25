@@ -110,7 +110,12 @@ these together to understand frame order:
    `Actions` holds movement (`WorldMovementInputSet`), targeting and casting
    (the combat chain in `client/src/combat/`, pointer picking in
    `CombatPointerInputSet`) and mobile controls. Both input sets are
-   defined in `input_context.rs`.
+   defined in `input_context.rs`. Button presses go through the UI kit:
+   `UiSet::{Gesture, Dispatch, Paint}` runs at the start of `Modal`, and
+   every screen and overlay on it (front-end screens, hero select, career,
+   social, supporter, Combat Test panel, pause menu, help) handles its
+   `Activated<T>` in a system ordered after `UiSet::Dispatch`
+   ([ui-kit.md](ui-kit.md)).
 3. `ClientNetPipeline::SendLocalState` and `SendCommands` after `Actions`:
    the local transform and the queued `NetworkCommand`s become packets.
 4. `PostUpdate`: grounding, target presentation, UI layout adjustments.
@@ -567,10 +572,12 @@ Ordered by value over cost. Each step is a separate change with the full
    `docs/plans/client-10-15.md`).
 9. One UI kit (theme, widgets, gestures, scroll, actions) and a modal
    registry (pilot done: `client/src/ui/` with theme, tap recognizer, typed
-   actions and widgets; the pause menu and the practice sandbox use it.
-   9b in progress: one `ScrollArea` system for every scrolling panel and
-   the `ModalStack` registry with top-only gesture gating are done;
-   remaining steps in `docs/ui-kit.md`).
+   actions and widgets; the pause menu, the practice sandbox, the front-end
+   screens, hero select, career, social, supporter, the Combat Test panel
+   and the help overlay use it; one `ScrollArea` system scrolls every panel
+   and the `ModalStack` registry gates input top-only; the `ui_theme` and
+   `frontend::widgets` shims and `MenuButton` are gone; remaining steps in
+   `docs/ui-kit.md`).
 10. Client domain module, combat/player split, render backends behind
     `run_if`, plugin groups, QA behind a cargo feature (done: the domain
     module and the `in_models3d`/`in_sprite2d` backend gates; `combat.rs`

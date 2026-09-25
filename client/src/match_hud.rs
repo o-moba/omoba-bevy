@@ -75,7 +75,7 @@ fn hp_bar_color(ratio: f32) -> Color {
 }
 
 fn setup_match_hud(mut commands: Commands) {
-    use crate::ui_theme as ui;
+    use crate::ui::theme as ui;
     commands
         .spawn((
             Button,
@@ -294,8 +294,8 @@ fn update_hero_details(
                 commands.entity(entity).with_children(|portrait| {
                     portrait.spawn((
                         Text::new("H"),
-                        crate::ui_theme::text(24.0),
-                        TextColor(crate::ui_theme::GOLD),
+                        crate::ui::theme::text(24.0),
+                        TextColor(crate::ui::theme::GOLD),
                     ));
                 });
             }
@@ -396,7 +396,7 @@ fn spawn_stat_bar<F: Component>(
         ));
         track.spawn((
             Text::new("100 / 100"),
-            crate::ui_theme::text(12.0),
+            crate::ui::theme::text(12.0),
             TextColor(Color::WHITE),
             HudResourceText(label),
             ZIndex(1),

@@ -9,8 +9,7 @@ use crate::{
     },
     pause_menu::PauseMenuState,
     player::{MovementTarget, Player},
-    ui::{ModalId, ModalRoot},
-    ui_theme as ui,
+    ui::{ModalId, ModalRoot, theme as ui},
 };
 use bevy::prelude::*;
 use shared::shop::{self, ItemId, PurchaseError};

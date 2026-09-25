@@ -6,6 +6,9 @@ use crate::input_bindings::{
     HELP_TOGGLE_KEY, help_key_display, skill_keys_display, upgrade_key_display,
 };
 use crate::net::{ClientSession, GameState, GameStateSnapshot};
+use crate::ui::theme::ButtonKind;
+use crate::ui::widgets::ButtonStyle;
+use crate::ui::{Activated, TestId, UiAction, UiActionAppExt};
 
 pub struct HelpOverlayPlugin;
 
@@ -18,6 +21,7 @@ impl Plugin for HelpOverlayPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<HelpOverlayVisible>()
             .init_resource::<HelpAutoShowState>()
+            .add_ui_action::<HelpAction>()
             .add_systems(Startup, setup_help_overlay)
             .add_systems(
                 Update,
@@ -29,6 +33,7 @@ impl Plugin for HelpOverlayPlugin {
                 )
                     .chain()
                     .in_set(HelpOverlaySet::Input)
+                    .after(crate::ui::UiSet::Dispatch)
                     .in_set(crate::input_context::InputContextSet::Modal),
             );
     }
@@ -79,6 +84,12 @@ struct HelpOverlayPanel;
 #[derive(Component)]
 struct HelpDismissButton;
 
+/// The overlay's one button.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HelpAction {
+    Dismiss,
+}
+
 fn setup_help_overlay(mut commands: Commands, platform: Option<Res<crate::ui::UiPlatform>>) {
     let body = help_overlay_body();
     let phone = platform.is_some_and(|platform| platform.is_mobile());
@@ -97,7 +108,7 @@ fn setup_help_overlay(mut commands: Commands, platform: Option<Res<crate::ui::Ui
                 ..default()
             },
             Visibility::Hidden,
-            ZIndex(crate::frontend::widgets::SCREEN_Z + 50),
+            ZIndex(crate::ui::theme::SCREEN_Z + 50),
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.45)),
             HelpOverlayRoot,
             Name::new("HelpOverlayRoot"),
@@ -115,21 +126,21 @@ fn setup_help_overlay(mut commands: Commands, platform: Option<Res<crate::ui::Ui
                         border_radius: BorderRadius::all(Val::Px(12.0)),
                         ..default()
                     },
-                    BackgroundColor(crate::ui_theme::PANEL.with_alpha(1.0)),
-                    BorderColor::all(crate::ui_theme::EDGE),
+                    BackgroundColor(crate::ui::theme::PANEL.with_alpha(1.0)),
+                    BorderColor::all(crate::ui::theme::EDGE),
                     Name::new("HelpPanel"),
                 ))
                 .with_children(|panel| {
                     if !phone {
                         panel.spawn((
                             Text::new("FIELD GUIDE  /  VERDANT ARENA"),
-                            crate::ui_theme::text(11.0),
-                            TextColor(crate::ui_theme::GOLD),
+                            crate::ui::theme::text(11.0),
+                            TextColor(crate::ui::theme::GOLD),
                         ));
                         panel.spawn((
                             Text::new("Make your first move."),
-                            crate::ui_theme::text(28.0),
-                            TextColor(crate::ui_theme::IVORY),
+                            crate::ui::theme::text(28.0),
+                            TextColor(crate::ui::theme::IVORY),
                         ));
                     }
                     panel.spawn((
@@ -138,7 +149,7 @@ fn setup_help_overlay(mut commands: Commands, platform: Option<Res<crate::ui::Ui
                             font_size: 15.0,
                             ..default()
                         },
-                        TextColor(crate::ui_theme::IVORY),
+                        TextColor(crate::ui::theme::IVORY),
                         HelpOverlayPanel,
                         Name::new("HelpBody"),
                     ));
@@ -153,12 +164,11 @@ fn setup_help_overlay(mut commands: Commands, platform: Option<Res<crate::ui::Ui
                                 justify_content: JustifyContent::Center,
                                 ..default()
                             },
-                            BackgroundColor(crate::frontend::widgets::PRIMARY),
-                            crate::frontend::widgets::MenuButton::new(
-                                crate::frontend::widgets::ButtonKind::Primary,
-                            ),
+                            BackgroundColor(crate::ui::theme::PRIMARY),
+                            ButtonStyle::new(ButtonKind::Primary),
+                            UiAction(HelpAction::Dismiss),
                             HelpDismissButton,
-                            Name::new("HelpDismissButton"),
+                            TestId::new("HelpDismissButton"),
                         ))
                         .with_children(|button| {
                             button.spawn((
@@ -204,14 +214,13 @@ fn toggle_help_overlay(
 }
 
 fn dismiss_help_button(
-    buttons: Query<&Interaction, (With<HelpDismissButton>, Changed<Interaction>)>,
+    mut activated: MessageReader<Activated<HelpAction>>,
     mut visible: ResMut<HelpOverlayVisible>,
 ) {
-    if buttons
-        .iter()
-        .any(|interaction| *interaction == Interaction::Pressed)
-    {
-        visible.0 = false;
+    for Activated { action, .. } in activated.read() {
+        match action {
+            HelpAction::Dismiss => visible.0 = false,
+        }
     }
 }
 

@@ -4,7 +4,10 @@ use crate::{
     net::{GameState, GameStateSnapshot, NetworkCommand, SessionEvent, SessionReactions},
     platform::UiProfile,
     sprite::{PlayerVisualMode, SpriteVisualAssets},
-    ui_theme as ui,
+    ui::{
+        Activated, TestId, UiAction, UiActionAppExt, UiSet, theme as ui, theme::ButtonKind,
+        widgets::ButtonStyle,
+    },
 };
 use bevy::{
     input::keyboard::{Key, KeyboardInput},
@@ -405,6 +408,7 @@ impl Plugin for CareerPlugin {
             .init_resource::<crate::career_identity::CareerIdentity>()
             .add_message::<NicknameChanged>()
             .add_message::<bevy::input::touch::TouchInput>()
+            .add_ui_action::<Action>()
             .add_systems(
                 Update,
                 (
@@ -416,7 +420,7 @@ impl Plugin for CareerPlugin {
                     nickname_input,
                 )
                     .chain()
-                    .after(crate::ui::UiSet::Gesture)
+                    .after(UiSet::Dispatch)
                     .after(crate::mobile_ui::address_keyboard)
                     .after(crate::net::ClientNetPipeline::ApplySnapshot)
                     .before(crate::pause_menu::toggle_pause_menu)
@@ -453,7 +457,9 @@ pub(crate) fn clear_account_on_scope_reset(
 struct CareerRoot;
 #[derive(Component)]
 struct CareerScroll;
-#[derive(Component, Clone)]
+/// Every career press; buttons carry `UiAction<Action>` and `actions`
+/// handles `Activated<Action>`.
+#[derive(Clone, Debug, PartialEq)]
 enum Action {
     Supporter,
     DevicesOpen,
@@ -643,13 +649,7 @@ fn bump_gesture_epoch_on_navigation(
 }
 
 fn actions(
-    buttons: Query<
-        (&Interaction, &Action, Option<&crate::ui::Pressable>),
-        (
-            With<Button>,
-            Or<(Changed<Interaction>, Changed<crate::ui::Pressable>)>,
-        ),
-    >,
+    mut activated: MessageReader<Activated<Action>>,
     mut career: ResMut<CareerClient>,
     mut requests: MessageWriter<NetworkCommand>,
     mut changed: MessageWriter<NicknameChanged>,
@@ -664,15 +664,12 @@ fn actions(
         .as_ref()
         .is_some_and(|social| social.blocks_gameplay())
     {
+        // Gated: drop the presses so none fires once social lets go.
+        activated.clear();
         return;
     }
     career.expire_request(Instant::now());
-    for (interaction, action, pressable) in &buttons {
-        let effective =
-            pressable.map_or(*interaction, |pressable| pressable.effective(*interaction));
-        if effective != Interaction::Pressed {
-            continue;
-        }
+    for Activated { action, .. } in activated.read() {
         web::act(action, &mut career, &identity, &mut web_worker);
         devices::act(action, &mut career, &identity, &mut device_worker);
         match action {
@@ -1001,18 +998,17 @@ fn button(parent: &mut ChildSpawnerCommands, value: &str, action: Action, name: 
         &action,
         Action::SaveName | Action::AddFriend | Action::LookupFriend | Action::PlayAgain
     );
-    let menu = crate::frontend::widgets::MenuButton::new(if emphasis {
-        crate::frontend::widgets::ButtonKind::Primary
+    let style = ButtonStyle::new(if emphasis {
+        ButtonKind::Primary
     } else if matches!(&action, Action::WebDeny) {
-        crate::frontend::widgets::ButtonKind::Danger
+        ButtonKind::Danger
     } else {
-        crate::frontend::widgets::ButtonKind::Secondary
+        ButtonKind::Secondary
     });
     parent
         .spawn((
             Button,
-            crate::ui::Pressable::default(),
-            menu,
+            style,
             Node {
                 min_height: Val::Px(if input { 52.0 } else { 44.0 }),
                 height: if input { Val::Px(52.0) } else { Val::Auto },
@@ -1035,10 +1031,10 @@ fn button(parent: &mut ChildSpawnerCommands, value: &str, action: Action, name: 
                 flex_shrink: 0.0,
                 ..default()
             },
-            BackgroundColor(menu.idle_color()),
+            BackgroundColor(style.idle_color()),
             BorderColor::all(ui::EDGE),
-            action,
-            Name::new(name.to_owned()),
+            UiAction(action),
+            TestId::new(name.to_owned()),
         ))
         .with_children(|parent| label(parent, value, 15.0, ui::IVORY, &format!("{name}Label")));
 }
@@ -2352,12 +2348,15 @@ fn render(
                                 ),
                             ),
                         ] {
-                            let menu = crate::frontend::widgets::MenuButton::tile(selected);
+                            let style = ButtonStyle {
+                                kind: ButtonKind::Tile,
+                                selected,
+                            };
                             p.spawn((
                                 Button,
-                                menu,
-                                action,
-                                Name::new(name),
+                                style,
+                                UiAction(action),
+                                TestId::new(name),
                                 Node {
                                     min_height: Val::Px(44.0),
                                     padding: UiRect::axes(Val::Px(16.0), Val::Px(8.0)),
@@ -2366,7 +2365,7 @@ fn render(
                                     border_radius: BorderRadius::top(Val::Px(6.0)),
                                     ..default()
                                 },
-                                BackgroundColor(menu.idle_color()),
+                                BackgroundColor(style.idle_color()),
                                 BorderColor::all(if selected { ui::GOLD } else { ui::EDGE }),
                             ))
                             .with_children(|p| {
@@ -3355,5 +3354,59 @@ mod tests {
             .history_before = Some(42);
         app.update();
         assert_eq!(scroll(&mut app), 0.0);
+    }
+
+    #[test]
+    fn career_presses_dispatch_once_social_gating_drops_them_and_disabled_do_nothing() {
+        use crate::ui::test_id::harness;
+        let mut app = harness::kit_app();
+        app.init_resource::<CareerClient>()
+            .init_resource::<crate::career_identity::CareerIdentity>()
+            .init_resource::<web::Worker>()
+            .init_resource::<devices::Worker>()
+            .init_resource::<crate::social::SocialClient>()
+            .add_message::<NetworkCommand>()
+            .add_message::<NicknameChanged>()
+            .add_ui_action::<Action>()
+            .add_systems(Update, actions.after(UiSet::Dispatch));
+        harness::spawn_ui(app.world_mut(), |p| {
+            button(p, "Close", Action::Close, "CareerClose");
+            button(p, "History", Action::History, "CareerHistoryButton");
+        });
+        app.world_mut()
+            .resource_mut::<CareerClient>()
+            .open_profile_modal();
+        app.update();
+        let close = harness::find(app.world_mut(), "CareerClose").unwrap();
+        assert_eq!(
+            app.world().get::<ButtonStyle>(close).unwrap().kind,
+            ButtonKind::Secondary
+        );
+        // While chat owns input the press is dropped, not replayed later.
+        app.world_mut()
+            .resource_mut::<crate::social::SocialClient>()
+            .chat_open = true;
+        harness::press(app.world_mut(), "CareerClose");
+        app.update();
+        app.world_mut()
+            .resource_mut::<crate::social::SocialClient>()
+            .chat_open = false;
+        app.update();
+        assert!(app.world().resource::<CareerClient>().modal_open());
+        harness::drain_actions::<Action>(app.world_mut());
+        harness::set_disabled(app.world_mut(), "CareerClose", true);
+        harness::press(app.world_mut(), "CareerClose");
+        app.update();
+        assert!(app.world().resource::<CareerClient>().modal_open());
+        harness::set_disabled(app.world_mut(), "CareerClose", false);
+        harness::press(app.world_mut(), "CareerClose");
+        app.update();
+        assert_eq!(
+            harness::drain_actions::<Action>(app.world_mut()),
+            [Action::Close]
+        );
+        assert!(!app.world().resource::<CareerClient>().modal_open());
+        app.update();
+        assert!(harness::drain_actions::<Action>(app.world_mut()).is_empty());
     }
 }

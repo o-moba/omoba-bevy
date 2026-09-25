@@ -69,7 +69,7 @@ fn drive(
     scoreboard: Res<crate::edge_hud::ScoreboardState>,
     selection: Res<TeamSelection>,
     equipment: Query<&PlayerEquipment, With<Player>>,
-    mut buttons: Query<(&Name, &mut Interaction), With<Button>>,
+    mut buttons: crate::qa::NamedPresses,
     mobile: Res<crate::mobile_controls::MobileControls>,
     windows: Query<Entity, With<PrimaryWindow>>,
     mut touches: MessageWriter<TouchInput>,
@@ -85,21 +85,14 @@ fn drive(
         });
     }
     let purchased = purchase_verified(&state, equipment.single().ok());
-    for (name, mut interaction) in &mut buttons {
-        let press = match qa.stage {
-            4 if !purchased && shop.open => name.as_str() == "ShopCloseButton",
-            4 if !purchased && !shop.open && !shop.purchase_pending() => {
-                name.as_str() == "QuickBuy-0"
-            }
-            4 if purchased && !shop.open => name.as_str() == "GoldShopButton",
-            11 if !scoreboard.open => name.as_str() == "MatchScoreButton",
-            12 if scoreboard.open => name.as_str() == "ScoreboardCloseButton",
-            _ => false,
-        };
-        if press {
-            *interaction = Interaction::Pressed;
-        }
-    }
+    buttons.press_where(|name| match qa.stage {
+        4 if !purchased && shop.open => name == "ShopCloseButton",
+        4 if !purchased && !shop.open && !shop.purchase_pending() => name == "QuickBuy-0",
+        4 if purchased && !shop.open => name == "GoldShopButton",
+        11 if !scoreboard.open => name == "MatchScoreButton",
+        12 if scoreboard.open => name == "ScoreboardCloseButton",
+        _ => false,
+    });
     if qa.skill_upgrades
         && matches!(qa.stage, 2 | 5)
         && mobile.enabled
@@ -179,8 +172,8 @@ fn fixture(
                     font_size: 12.0,
                     ..default()
                 },
-                TextColor(crate::ui_theme::GOLD),
-                BackgroundColor(crate::ui_theme::PANEL),
+                TextColor(crate::ui::theme::GOLD),
+                BackgroundColor(crate::ui::theme::PANEL),
             ));
         state.fixture_applied = true;
     }

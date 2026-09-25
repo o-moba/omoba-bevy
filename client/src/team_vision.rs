@@ -119,7 +119,7 @@ fn setup(
         Name::new("BrushStatus"),
         BrushStatus,
         Text::new(""),
-        crate::ui_theme::text(12.),
+        crate::ui::theme::text(12.),
         TextColor(Color::srgb(0.7, 1., 0.78)),
         Node {
             position_type: PositionType::Absolute,

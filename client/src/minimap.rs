@@ -14,7 +14,7 @@ use crate::net::{
 use crate::player::{PLAYER_SIZE, Player};
 use crate::sprite::{PlayerVisualMode, SpriteVisualAssets};
 use crate::team::{AvatarThumbnails, Team};
-use crate::ui_theme;
+use crate::ui::theme as ui_theme;
 
 pub(crate) const MINIMAP_SIZE: f32 = 252.0;
 pub(crate) const DESKTOP_MINIMAP_INSET: f32 = 16.0;

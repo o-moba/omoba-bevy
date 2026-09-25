@@ -4,20 +4,25 @@ use bevy::prelude::*;
 use shared::career::QueueView;
 
 use super::AppScreen;
-use super::widgets::{self, ButtonKind};
+use super::widgets;
 use crate::career::CareerClient;
 use crate::net::{ClientSession, GameState, GameStateSnapshot, SessionUiCommand};
 use crate::team::TeamSelection;
+use crate::ui::theme::{self, ButtonKind};
+use crate::ui::widgets::screen_button;
+use crate::ui::{Activated, UiActionAppExt, UiSet};
 
 pub struct SearchingScreenPlugin;
 
 impl Plugin for SearchingScreenPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(AppScreen::Searching), spawn_searching)
+        app.add_ui_action::<SearchingAction>()
+            .add_systems(OnEnter(AppScreen::Searching), spawn_searching)
             .add_systems(
                 Update,
                 (searching_actions, refresh_status)
                     .chain()
+                    .after(UiSet::Dispatch)
                     .run_if(in_state(AppScreen::Searching)),
             );
     }
@@ -26,8 +31,10 @@ impl Plugin for SearchingScreenPlugin {
 #[derive(Component)]
 struct SearchingStatus;
 
-#[derive(Component)]
-struct SearchingCancel;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SearchingAction {
+    Cancel,
+}
 
 /// One status line for the screen. The career queue is authoritative when the
 /// server runs ranked matchmaking; otherwise the match formation counters are.
@@ -86,12 +93,12 @@ fn spawn_searching(mut commands: Commands, selection: Res<TeamSelection>) {
                     row_gap: Val::Px(16.0),
                     ..default()
                 },
-                BackgroundColor(widgets::PANEL),
-                BorderColor::all(widgets::PANEL_EDGE),
+                BackgroundColor(theme::PANEL_OPAQUE),
+                BorderColor::all(theme::PANEL_EDGE),
                 Name::new("SearchingBody"),
             ))
             .with_children(|body| {
-                body.spawn(widgets::label("MATCHMAKING", 12.0, widgets::GOLD));
+                body.spawn(widgets::label("MATCHMAKING", 12.0, theme::GOLD));
                 body.spawn((
                     Node {
                         width: Val::Px(48.0),
@@ -99,20 +106,20 @@ fn spawn_searching(mut commands: Commands, selection: Res<TeamSelection>) {
                         margin: UiRect::bottom(Val::Px(12.0)),
                         ..default()
                     },
-                    BackgroundColor(widgets::GOLD),
+                    BackgroundColor(theme::GOLD),
                 ));
                 body.spawn(widgets::heading("Finding a match", 34.0));
                 body.spawn((
-                    widgets::label("Contacting the server…", 16.0, widgets::IVORY),
+                    widgets::label("Contacting the server…", 16.0, theme::IVORY),
                     SearchingStatus,
                     Name::new("SearchingStatus"),
                 ));
-                body.spawn(widgets::label(&hero, 14.0, widgets::MUTED));
-                widgets::button(
+                body.spawn(widgets::label(&hero, 14.0, theme::MUTED));
+                screen_button(
                     body,
                     "Cancel",
                     ButtonKind::Secondary,
-                    SearchingCancel,
+                    SearchingAction::Cancel,
                     "SearchingCancel",
                 );
             });
@@ -121,12 +128,10 @@ fn spawn_searching(mut commands: Commands, selection: Res<TeamSelection>) {
 
 fn searching_actions(
     mut session_ui: MessageWriter<SessionUiCommand>,
-    buttons: Query<&Interaction, (Changed<Interaction>, With<SearchingCancel>)>,
+    mut activated: MessageReader<Activated<SearchingAction>>,
 ) {
-    for interaction in &buttons {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
+    for Activated { action, .. } in activated.read() {
+        let SearchingAction::Cancel = action;
         // One path for every server mode: the server drops the queue entry or
         // the seat, the client drops the join, and the shell goes home. A
         // signed career `CancelQueue` alone did nothing on a practice or dev
@@ -188,5 +193,39 @@ mod tests {
         session.reject_for_test(shared::protocol::JoinRejection::MatchFull);
         let text = status_text(&QueueView::Idle, &GameState::Lobby, &session);
         assert_eq!(text, shared::protocol::JoinRejection::MatchFull.message());
+    }
+
+    #[test]
+    fn cancel_leaves_once_and_a_disabled_cancel_does_nothing() {
+        use crate::ui::test_id::harness;
+        let mut app = harness::kit_app();
+        app.add_message::<SessionUiCommand>()
+            .add_ui_action::<SearchingAction>()
+            .add_systems(Update, searching_actions.after(UiSet::Dispatch));
+        harness::spawn_ui(app.world_mut(), |root| {
+            screen_button(
+                root,
+                "Cancel",
+                ButtonKind::Secondary,
+                SearchingAction::Cancel,
+                "SearchingCancel",
+            );
+        });
+        app.update();
+        let sent = |app: &mut App| {
+            app.world_mut()
+                .resource_mut::<Messages<SessionUiCommand>>()
+                .drain()
+                .collect::<Vec<_>>()
+        };
+        harness::press(app.world_mut(), "SearchingCancel");
+        app.update();
+        assert!(matches!(sent(&mut app)[..], [SessionUiCommand::LeaveMatch]));
+        app.update();
+        assert!(sent(&mut app).is_empty());
+        harness::set_disabled(app.world_mut(), "SearchingCancel", true);
+        harness::press(app.world_mut(), "SearchingCancel");
+        app.update();
+        assert!(sent(&mut app).is_empty());
     }
 }

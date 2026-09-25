@@ -916,9 +916,9 @@ fn setup_mobile_controls(
                     overflow: Overflow::clip(),
                     ..default()
                 },
-                BackgroundColor(crate::ui_theme::PANEL),
+                BackgroundColor(crate::ui::theme::PANEL),
                 UiTransform::default(),
-                BorderColor::all(crate::ui_theme::EDGE),
+                BorderColor::all(crate::ui::theme::EDGE),
                 ZIndex(if is_rotate {
                     250
                 } else if is_description {
@@ -1017,7 +1017,7 @@ fn setup_mobile_controls(
                         font_size: 15.0,
                         ..default()
                     },
-                    TextColor(crate::ui_theme::IVORY),
+                    TextColor(crate::ui::theme::IVORY),
                     TextLayout::new_with_justify(Justify::Center),
                     Node {
                         align_self: if icon_slot.is_some() || attack_icon || glyph.is_some() {
@@ -1153,7 +1153,7 @@ fn draw_mobile_controls(
                 String::new(),
                 visible,
                 Color::srgba(0.02, 0.08, 0.08, 0.45),
-                crate::ui_theme::MUTED,
+                crate::ui::theme::MUTED,
             ),
             MobileVisual::Thumb => (
                 layout.joystick_center + mobile.movement * layout.joystick_radius * 0.7,
@@ -1161,7 +1161,7 @@ fn draw_mobile_controls(
                 String::new(),
                 visible,
                 Color::srgba(0.43, 0.7, 0.62, 0.72),
-                crate::ui_theme::JADE,
+                crate::ui::theme::JADE,
             ),
             MobileVisual::Attack => (
                 layout.attack_center,
@@ -1174,23 +1174,23 @@ fn draw_mobile_controls(
                 visible,
                 if attack_cooling {
                     if attack_held {
-                        crate::ui_theme::TILE
+                        crate::ui::theme::TILE
                     } else {
-                        crate::ui_theme::PANEL
+                        crate::ui::theme::PANEL
                     }
                 } else if attack.is_some() {
-                    crate::ui_theme::HOVER
+                    crate::ui::theme::HOVER
                 } else {
-                    crate::ui_theme::TILE
+                    crate::ui::theme::TILE
                 },
                 if mobile.attack_cancelled() {
                     canceled_color
                 } else if attack_cooling {
-                    crate::ui_theme::EDGE
+                    crate::ui::theme::EDGE
                 } else if attack_held {
-                    crate::ui_theme::JADE
+                    crate::ui::theme::JADE
                 } else {
-                    crate::ui_theme::GOLD
+                    crate::ui::theme::GOLD
                 },
             ),
             MobileVisual::AttackVector | MobileVisual::AttackThumb => (
@@ -1207,9 +1207,9 @@ fn draw_mobile_controls(
                 if mobile.attack_cancelled() {
                     canceled_color
                 } else {
-                    crate::ui_theme::JADE
+                    crate::ui::theme::JADE
                 },
-                crate::ui_theme::IVORY,
+                crate::ui::theme::IVORY,
             ),
             MobileVisual::Cancel => (
                 layout.cancel_center,
@@ -1219,7 +1219,7 @@ fn draw_mobile_controls(
                 if aiming.is_some_and(|capture| capture.canceled) {
                     canceled_color
                 } else {
-                    crate::ui_theme::PANEL
+                    crate::ui::theme::PANEL
                 },
                 canceled_color,
             ),
@@ -1250,16 +1250,16 @@ fn draw_mobile_controls(
                     status,
                     visible,
                     if active {
-                        crate::ui_theme::HOVER
+                        crate::ui::theme::HOVER
                     } else {
-                        crate::ui_theme::PANEL
+                        crate::ui::theme::PANEL
                     },
                     if mobile.upgrade_enabled[slot] {
-                        crate::ui_theme::GOLD
+                        crate::ui::theme::GOLD
                     } else if !unlocked || !mana || cooldown.remaining_secs[slot] > 0.0 {
-                        crate::ui_theme::EDGE
+                        crate::ui::theme::EDGE
                     } else {
-                        crate::ui_theme::JADE
+                        crate::ui::theme::JADE
                     },
                 )
             }
@@ -1281,19 +1281,19 @@ fn draw_mobile_controls(
                 },
                 visible && mobile.upgrade_enabled.iter().any(|enabled| *enabled),
                 if mobile.upgrade_mode {
-                    crate::ui_theme::HOVER
+                    crate::ui::theme::HOVER
                 } else {
-                    crate::ui_theme::PANEL
+                    crate::ui::theme::PANEL
                 },
-                crate::ui_theme::GOLD,
+                crate::ui::theme::GOLD,
             ),
             MobileVisual::CategoryAttack(index) => (
                 layout.category_centers[index],
                 layout.auxiliary_radius,
                 ["MIN", "TWR"][index].into(),
                 visible,
-                crate::ui_theme::PANEL,
-                crate::ui_theme::GOLD,
+                crate::ui::theme::PANEL,
+                crate::ui::theme::GOLD,
             ),
             MobileVisual::Utility(index) => {
                 let remaining = [utility.dash_remaining_secs, utility.haste_remaining_secs][index];
@@ -1311,16 +1311,16 @@ fn draw_mobile_controls(
                     label,
                     visible,
                     if active {
-                        crate::ui_theme::HOVER
+                        crate::ui::theme::HOVER
                     } else {
-                        crate::ui_theme::PANEL
+                        crate::ui::theme::PANEL
                     },
                     if active {
-                        crate::ui_theme::JADE
+                        crate::ui::theme::JADE
                     } else if remaining > 0.0 {
-                        crate::ui_theme::EDGE
+                        crate::ui::theme::EDGE
                     } else {
-                        crate::ui_theme::GOLD
+                        crate::ui::theme::GOLD
                     },
                 )
             }
@@ -1349,8 +1349,8 @@ fn draw_mobile_controls(
                     1.0,
                     message.into(),
                     visible && aiming.is_some() && mobile.inspected_skill().is_none(),
-                    crate::ui_theme::PANEL,
-                    crate::ui_theme::EDGE,
+                    crate::ui::theme::PANEL,
+                    crate::ui::theme::EDGE,
                 )
             }
             MobileVisual::SkillDescription => {
@@ -1376,7 +1376,7 @@ fn draw_mobile_controls(
                     label,
                     visible && slot.is_some(),
                     Color::srgb(0.025, 0.055, 0.065),
-                    crate::ui_theme::GOLD,
+                    crate::ui::theme::GOLD,
                 )
             }
             MobileVisual::Rotate => (
@@ -1384,8 +1384,8 @@ fn draw_mobile_controls(
                 1.0,
                 "Rotate your phone\nPlay Omoba in landscape".into(),
                 mobile.enabled && !mobile.landscape,
-                crate::ui_theme::PANEL,
-                crate::ui_theme::GOLD,
+                crate::ui::theme::PANEL,
+                crate::ui::theme::GOLD,
             ),
         };
         node.display = if show { Display::Flex } else { Display::None };

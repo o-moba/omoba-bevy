@@ -1,8 +1,9 @@
 //! Opt-in end-to-end capture of the front-end flow against a real server.
 //!
 //! Unlike [`super::frontend_qa`], which sets each screen directly, this harness
-//! presses the actual buttons (it flips their [`Interaction`] to `Pressed`, the
-//! same signal a click produces) and then lets the session drive the shell. It
+//! presses the actual buttons (a `SyntheticPress` on UI-kit buttons, which the
+//! recognizer turns into the same activation a click or tap produces) and then
+//! lets the session drive the shell. It
 //! exists to prove the ordering the shell promises: nothing is sent to the
 //! server from the home screen, and the match world only appears after a hero
 //! is locked in.
@@ -116,7 +117,7 @@ impl FlowQa {
             "reason": reason,
             "scenario": "frontend-flow",
             "version": env!("CARGO_PKG_VERSION"),
-            "method": "synthetic Interaction::Pressed on the real buttons, live UDP server",
+            "method": "synthetic presses (SyntheticPress on UI-kit buttons) on the real buttons, live UDP server",
             "screen_trace": self.trace,
             "join_committed_from_the_menus": self.join_committed_on_home,
             "local_hero_before_lock_in": self.world_before_lock_in,
@@ -140,12 +141,8 @@ impl FlowQa {
 }
 
 /// Presses the button with this name, if it is on screen.
-fn press(buttons: &mut Query<(&Name, &mut Interaction)>, wanted: &str) {
-    for (name, mut interaction) in buttons.iter_mut() {
-        if name.as_str() == wanted {
-            *interaction = Interaction::Pressed;
-        }
-    }
+fn press(buttons: &mut crate::qa::NamedPresses, wanted: &str) {
+    buttons.press(wanted);
 }
 
 fn drive_flow(
@@ -156,7 +153,7 @@ fn drive_flow(
     players: Query<(), With<Player>>,
     snapshot: Res<crate::net::GameStateSnapshot>,
     mut draft_since: Local<Option<Instant>>,
-    mut buttons: Query<(&Name, &mut Interaction)>,
+    mut buttons: crate::qa::NamedPresses,
     mut session_ui: MessageWriter<crate::net::SessionUiCommand>,
     mut windows: Query<(Entity, &mut Window), With<PrimaryWindow>>,
     mut exit: MessageWriter<AppExit>,

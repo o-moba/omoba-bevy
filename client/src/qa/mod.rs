@@ -9,6 +9,8 @@
 //! `init_resource` (the order they had before the groups).
 
 use bevy::app::{PluginGroup, PluginGroupBuilder};
+use bevy::ecs::system::SystemParam;
+use bevy::prelude::*;
 
 pub(crate) mod animation_qa;
 mod audio_qa;
@@ -47,5 +49,48 @@ impl PluginGroup for QaPlugins {
             .add(combat_qa::CombatQaPlugin)
             .add(forest_pickup_qa::ForestPickupQaPlugin)
             .add(targeting_qa::TargetingQaPlugin)
+    }
+}
+
+/// Harness presses by `Name`. A UI-kit button (it carries `Pressable`) is
+/// pressed with `SyntheticPress`, which the recognizer turns into exactly one
+/// activation in desktop and touch mode alike; anything else still gets
+/// `Interaction::Pressed` written, as the harnesses always did.
+#[derive(SystemParam)]
+pub(crate) struct NamedPresses<'w, 's> {
+    buttons: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static Name,
+            &'static mut Interaction,
+            Has<crate::ui::Pressable>,
+        ),
+    >,
+    presses: MessageWriter<'w, crate::ui::SyntheticPress>,
+}
+
+impl NamedPresses<'_, '_> {
+    /// Presses every button whose name satisfies `wanted`; true if any did.
+    pub(crate) fn press_where(&mut self, mut wanted: impl FnMut(&str) -> bool) -> bool {
+        let mut pressed = false;
+        for (entity, name, mut interaction, kit) in &mut self.buttons {
+            if !wanted(name.as_str()) {
+                continue;
+            }
+            pressed = true;
+            if kit {
+                self.presses.write(crate::ui::SyntheticPress(entity));
+            } else {
+                *interaction = Interaction::Pressed;
+            }
+        }
+        pressed
+    }
+
+    /// Presses the button named `wanted`, if it is on screen.
+    pub(crate) fn press(&mut self, wanted: &str) -> bool {
+        self.press_where(|name| name == wanted)
     }
 }
