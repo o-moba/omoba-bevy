@@ -1,4 +1,4 @@
-# Party, party lobby and co-op vs bots (0.24.0-rc.1)
+# Party, party lobby and co-op vs bots (0.24.0)
 
 A **party** is up to five players connected to the same server who see each
 other in the party lobby, start together and are always seated on **one team**.

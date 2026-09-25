@@ -14,7 +14,7 @@ were always split across teams and there was no party or invite.
 - Client: `party.rs` (view, presence, launch follow), `frontend/lobby.rs`,
   `frontend/party_stage.rs`, Home toast/button/PLAY label, frontend QA stage.
 - Docs: README "Play with a friend", `docs/party.md`, features, changelog;
-  version 0.24.0-rc.1.
+  version 0.24.0.
 
 ## Checks
 - `make check`: fmt, clippy (with and without `qa`), 1074 tests passed, 0 failed.
