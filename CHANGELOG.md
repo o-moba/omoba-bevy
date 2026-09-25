@@ -6,6 +6,9 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Process
+- Pull requests merge only after every CI check on the PR is green (`docs/REFACTORING.md` rule 2), replacing "open and merge immediately". Recommended by the architecture report (O2) and approved by the maintainer.
+
 ### Report fixes
 - **Behaviour change (server, O3): movement under packet flooding.** The movement envelope added `MOVEMENT_POSITION_TOLERANCE` (0.10) to every `Transform`, so a client sending 120 transforms a second could cover 17 units a second instead of 5 (a normal 20 Hz client already got up to 7). The tolerance is now a budget: `HeroTimers::movement_slack` starts at 0.10, each transform may cover speed × elapsed time plus the slack, and what the step leaves unspent (capped at 0.10) carries to the next one. A single transform from a fresh budget is accepted exactly as before, and a 20 Hz client with ±15 ms arrival jitter is never clipped; a flood covers at most a second of speed plus one tolerance. The slack resets on round reset and on a session reclaim. `ARCHITECTURE.md` now says which commands carry `request_id` (`Cast` does not) and describes the budget.
 - **Player-visible (client, O11):** career portraits load avatar thumbnails through `passport::thumbnail_asset_path`, so store avatars come from `ekza://avatars/…` instead of a bundled `avatars/` file that does not exist (the portrait was blank).
