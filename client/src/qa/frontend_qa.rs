@@ -27,7 +27,7 @@ mod avatar;
 const SETTLE_FRAMES: u32 = 32;
 const COLLECTION_SETTLE_FRAMES: u32 = 240;
 
-const VIEWS: [(&str, AppScreen, &str); 13] = [
+const VIEWS: [(&str, AppScreen, &str); 14] = [
     ("01-home.png", AppScreen::Home, "HomeScreen"),
     ("02-profile-card.png", AppScreen::Card, "CardScreen"),
     (
@@ -53,6 +53,7 @@ const VIEWS: [(&str, AppScreen, &str); 13] = [
     ("11-server.png", AppScreen::Home, "ServerEntryPanel"),
     ("12-home-help.png", AppScreen::Home, "HelpOverlayRoot"),
     ("13-home-help-closed.png", AppScreen::Home, "HomeScreen"),
+    ("14-party-lobby.png", AppScreen::Lobby, "LobbyScreen"),
 ];
 
 pub(crate) struct FrontendQaPlugin;
@@ -105,6 +106,7 @@ impl Plugin for FrontendQaPlugin {
             PreUpdate,
             prepare_help_buttons.after(bevy::ui::UiSystems::Focus),
         )
+        .add_systems(Update, accept_party_invite)
         .add_systems(
             Update,
             drive
@@ -136,7 +138,10 @@ struct FrontendQa {
 
 impl FrontendQa {
     fn settle_target(&self) -> u32 {
-        if VIEWS[self.stage].1 == AppScreen::Collection {
+        if matches!(
+            VIEWS[self.stage].1,
+            AppScreen::Collection | AppScreen::Lobby
+        ) {
             COLLECTION_SETTLE_FRAMES
         } else {
             SETTLE_FRAMES
@@ -236,6 +241,33 @@ fn drive(
     }
 }
 
+/// `OMOBA_FRONTEND_QA_ACCEPT_PARTY=1`: on the lobby stage, accept the first
+/// pending party invite (from a scripted friend on the same server) so the
+/// capture shows a real two-member line-up.
+fn accept_party_invite(
+    qa: Res<FrontendQa>,
+    party: Res<crate::party::PartyClient>,
+    mut requests: MessageWriter<crate::net::NetworkCommand>,
+    mut sent: Local<bool>,
+) {
+    if *sent
+        || std::env::var("OMOBA_FRONTEND_QA_ACCEPT_PARTY").as_deref() != Ok("1")
+        || VIEWS
+            .get(qa.stage)
+            .is_none_or(|view| view.1 != AppScreen::Lobby)
+    {
+        return;
+    }
+    if let Some(invite) = party.view.invites.first() {
+        requests.write(crate::net::NetworkCommand::Party(
+            shared::party::PartyCommand::Accept {
+                party_id: invite.party_id,
+            },
+        ));
+        *sent = true;
+    }
+}
+
 fn fits(min: Vec2, size: Vec2, viewport: Vec2) -> bool {
     size.x > 0.0
         && size.y > 0.0
@@ -299,9 +331,12 @@ fn observe(
         qa.stage += 1;
         qa.in_flight = false;
         qa.applied_stage = None;
-        // The hosted-server form is a phone-only surface. Desktop settings
-        // retain their existing server-address hint rather than this keypad.
-        if qa.stage == VIEWS.len() || (qa.stage == 10 && !mobile.enabled) {
+        // The hosted-server form and the phone help overlay are phone-only
+        // surfaces: desktop goes straight on to the party lobby.
+        if qa.stage == 10 && !mobile.enabled {
+            qa.stage = VIEWS.len() - 1;
+        }
+        if qa.stage == VIEWS.len() {
             let summary = serde_json::json!({
                 "status": "passed",
                 "scenario": "frontend-shell",
@@ -359,6 +394,7 @@ fn observe(
         if name.as_str() == root_name
             || name.as_str().starts_with("Avatar")
             || name.as_str().starts_with("Home")
+            || name.as_str().starts_with("Lobby")
             || name.as_str().starts_with("Card")
             || name.as_str().starts_with("Collection")
             || name.as_str().starts_with("Searching")
@@ -389,7 +425,7 @@ fn observe(
             "HomeAccount",
             "HomeCollection",
             "HomeHistory",
-            "HomeFriends",
+            "HomeParty",
         ],
         0 => &[
             "HomePlay",
@@ -397,7 +433,7 @@ fn observe(
             "HomeAccount",
             "HomeCollection",
             "HomeHistory",
-            "HomeFriends",
+            "HomeParty",
         ],
         1 => &["CardBack", "CardOpenCollection"],
         2 => &[
@@ -436,8 +472,9 @@ fn observe(
             "HomeAccount",
             "HomeCollection",
             "HomeHistory",
-            "HomeFriends",
+            "HomeParty",
         ],
+        13 => &["LobbyBack"],
         _ => &[],
     };
     let controls_fit = required.iter().all(|required| {

@@ -51,6 +51,7 @@ use crate::{
     mobile_ui::MobileUiPlugin,
     model_scale::ModelScalePlugin,
     net::NetworkingPlugin,
+    party::PartyPlugin,
     pause_menu::PauseMenuPlugin,
     persistence::ClientPersistencePlugin,
     player::PlayerPlugin,
@@ -170,6 +171,7 @@ impl PluginGroup for UiPlugins {
             .add(HelpOverlayPlugin)
             .add(PauseMenuPlugin)
             .add(SocialPlugin)
+            .add(PartyPlugin)
             .add(CareerPlugin)
             .add(SupporterPlugin)
             .add(SupporterStoreKitPlugin)

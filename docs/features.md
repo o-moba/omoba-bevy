@@ -1,5 +1,9 @@
 # Feature Inventory
 
+## Party lobby and co-op vs bots (0.24.0-rc.1)
+
+Home → **Party & friends** opens a party lobby: invite anyone connected to the same server (friends first when career storage is on), accept or decline invites from a Home toast, and see every member's avatar in a 3D line-up with leader and status plates. The leader's **PLAY VS BOTS** moves the whole party to hero select; the party is seated on one team and bots fill every other seat. Works on a database-free practice server and on the public lobby, where Play with bots allocates one arena for the party and Quick match never splits a party. See [the party guide](party.md).
+
 ## Five classes and the Warden jungler (0.23.0-rc.6)
 
 A fifth class, **Warden**, completes one class per draft duty: Warrior → Solo (top), Mage → Mid, Ranger → Carry (bot), Cleric → Support (bot), Warden → Jungle. Choosing a class in the draft proposes its role; a deliberately chosen role is kept. Warden is a melee jungler (210 HP, Feral Swipe / Barkskin / Hunter's Mark / Primal Maul) whose server-authoritative passive **Forest Tracker** deals +35% damage to jungle camps (+15% on bosses) and earns +40% gold and +25% XP per camp kill; boss rewards are unchanged because their value is the team buff. Practice bots now fill a team as that composition, skipping classes a human already took; the bot Warden clears its own half's camps and falls back to mid lane when every camp is down. The skill atlas gains a fifth Warden row in the same painted style. See [the balance note](balance-tuning.md#five-classes-and-the-warden-0230-rc6).

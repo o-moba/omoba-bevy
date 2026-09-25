@@ -40,6 +40,7 @@ CLAUDE.md
 docs/*
 !docs/ARCHITECTURE.md
 !docs/features.md
+!docs/party.md
 !docs/bot-practice-and-social.md
 !docs/game-audio.md
 !docs/player-handles.md

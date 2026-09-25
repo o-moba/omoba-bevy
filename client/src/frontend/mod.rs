@@ -6,6 +6,9 @@
 //!
 //! `Home -> HeroSelect -> Searching -> Loading -> InMatch -> PostMatch -> Home`
 //!
+//! `Home -> Lobby` groups a party; the leader's launch sends every member to
+//! `HeroSelect` together (`crate::party`).
+//!
 //! Gameplay plugins keep running underneath; menu screens paint an opaque
 //! full-screen root above them and [`crate::input_context`] treats every menu
 //! screen as a modal so world input stays inert.
@@ -15,6 +18,8 @@ pub mod collection;
 pub mod draft;
 pub mod home;
 pub mod loading;
+pub mod lobby;
+pub mod party_stage;
 pub mod postmatch;
 pub mod preview;
 pub mod searching;
@@ -32,6 +37,8 @@ pub enum AppScreen {
     /// Welcome screen: profile card, PLAY, navigation.
     #[default]
     Home,
+    /// Party lobby: invite players, see the party's avatars, play together.
+    Lobby,
     /// Profile card customization (main class, showcase avatar, accent).
     Card,
     /// Avatar collection with the 3D preview.
@@ -101,6 +108,8 @@ impl Plugin for FrontendPlugin {
                 card::ProfileCardPlugin,
                 collection::CollectionScreenPlugin,
                 preview::AvatarPreviewPlugin,
+                lobby::LobbyScreenPlugin,
+                party_stage::PartyStagePlugin,
                 searching::SearchingScreenPlugin,
                 draft::DraftScreenPlugin,
                 loading::LoadingScreenPlugin,
@@ -378,6 +387,7 @@ mod tests {
     fn menu_screens_hide_the_world_and_match_screens_do_not() {
         for screen in [
             AppScreen::Home,
+            AppScreen::Lobby,
             AppScreen::Card,
             AppScreen::Collection,
             AppScreen::HeroSelect,

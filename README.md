@@ -105,6 +105,26 @@ screen. `127.0.0.1` on a phone means the phone itself. Both devices must be able
 to reach the host's UDP port. This command runs a foreground practice server;
 24/7 public hosting additionally needs supervised operations and network setup.
 
+## Play with a friend (party vs bots)
+
+Host a practice server as above, then both of you start the client against it
+(`make game GAME_SERVER_ADDR=<host-lan-ip>:4000`; the host can use
+`127.0.0.1:4000`). No database or wallet is needed.
+
+1. On Home, open **Party & friends**. Everyone connected to the same server is
+   listed under *Online on this server*; press **Invite**.
+2. Your friend sees *"… invites you to a party"* on Home (or in the party
+   screen) and presses **Accept**. Both avatars now stand in the party line-up.
+3. The leader presses **PLAY VS BOTS** (or **PLAY AS PARTY** on Home). Every
+   member moves to hero select; lock in your heroes.
+4. The whole party is seated on one team and bots take every other seat
+   (two friends: you + 3 bots against 5 bots). The draft waits up to a minute
+   for party members who are still picking.
+
+On a public lobby (`OMOBA_SERVER_ROLE=lobby`) the same party queues together:
+Play with bots allocates one arena with the party on one team, and Quick match
+never splits a party. Details: [docs/party.md](docs/party.md).
+
 Persistent profiles and match history require a configured career server and
 PostgreSQL. See [career setup](docs/match-progression.md),
 [Account API operations](account-api/README.md) and [RUNBOOK.md](RUNBOOK.md).

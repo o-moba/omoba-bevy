@@ -1003,8 +1003,9 @@ impl ServerRuntime {
                 self.career.backend.profile(addr),
                 self.career.backend.authenticated_session(addr),
             ) {
+                let party = self.party_tag(addr);
                 self.match_service
-                    .enqueue(profile, session, request_id, preference, now);
+                    .enqueue(profile, session, request_id, preference, party, now);
             }
         }
         self.handle_rejected_career_start(now);

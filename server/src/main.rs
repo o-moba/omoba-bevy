@@ -31,6 +31,7 @@ mod navigation_tests;
 mod neutrals;
 #[cfg(test)]
 mod objective_balance_tests;
+mod party;
 mod passport_admission;
 #[cfg(test)]
 mod practice_tests;

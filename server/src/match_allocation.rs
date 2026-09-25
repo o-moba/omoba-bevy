@@ -61,7 +61,10 @@ impl Manifest {
                 .iter()
                 .any(|t| self.humans.iter().filter(|h| h.team == *t).count() > 5)
             || (self.preference == MatchPreference::HumansOnly && self.humans.len() != 10)
-            || (self.preference == MatchPreference::BotPractice && self.humans.len() != 1)
+            // Bot practice seats one player or one party, all on one team.
+            || (self.preference == MatchPreference::BotPractice
+                && (self.humans.len() > shared::party::MAX_PARTY_SIZE
+                    || self.humans.iter().any(|h| h.team != self.humans[0].team)))
         {
             return Err("Invalid allocated match manifest".into());
         }
