@@ -542,6 +542,7 @@ fn cosmetic_history_yields_space_to_gameplay_and_keeps_newest_receipts() {
     let mut packet = ServerPacket::Snapshot {
         vision: None,
         sandbox: None,
+        debug_access: None,
         match_mode: "dev".into(),
         geometry_id: shared::map::GEOMETRY_ID.to_owned(),
         map_profile: "verdant_default".to_owned(),

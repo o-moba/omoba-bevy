@@ -5,7 +5,9 @@ use crossbeam_channel::{Receiver, Sender};
 use std::collections::{HashMap, VecDeque};
 
 use shared::combat::{CombatEntityKind, CombatEvent, ProjectileStyle};
-use shared::debug::{DUMMY_DISTANCE, DUMMY_MAX_HP, DebugCommand, OFFLINE_PRACTICE_MODE};
+use shared::debug::{
+    DUMMY_DISTANCE, DUMMY_MAX_HP, DebugAccess, DebugCommand, OFFLINE_PRACTICE_MODE,
+};
 use shared::map::Team;
 use shared::protocol::{JoinRejection, SnapshotMeta};
 use shared::wire::{
@@ -764,6 +766,9 @@ impl Simulation {
                 GameState::Running
             },
             sandbox: None,
+            // The offline simulation is its own host: it accepts both the
+            // toggles and the practice commands (`Simulation::debug`).
+            debug_access: Some(DebugAccess::for_match_mode(OFFLINE_PRACTICE_MODE)),
             vision: None,
             forest_pickups: vec![],
             scoreboard: (!self.players.is_empty()).then(|| shared::live_score::LiveScoreboard {

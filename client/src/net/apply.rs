@@ -307,6 +307,7 @@ fn apply_snapshot_resources(
     game_state_snapshot.combat_events = std::mem::take(&mut data.combat_events);
     game_state_snapshot.scoreboard = data.scoreboard.take();
     game_state_snapshot.sandbox = data.sandbox.take();
+    game_state_snapshot.debug_access = data.debug_access.take();
     game_state_snapshot.forest_pickups = std::mem::take(&mut data.forest_pickups);
     game_state_snapshot.vision = data.vision.take();
 

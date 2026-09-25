@@ -218,6 +218,9 @@ impl ServerRuntime {
                 .map(|(addr, _)| *addr)
                 .collect::<Vec<_>>();
 
+        // Step 11f: the same for every recipient of this match, but only a
+        // joined player gets it (see `snapshot_debug_access`).
+        let debug_access = self.debug_access();
         for addr in recipients {
             let player = &world.players[&addr];
             let mut packet = ServerPacket::Snapshot {
@@ -226,6 +229,7 @@ impl ServerRuntime {
                     .sandbox
                     .as_ref()
                     .map(|s| s.snapshot(addr, &world.players, &self.combat_log)),
+                debug_access: crate::debug::snapshot_debug_access(player, debug_access),
                 match_mode: self.rules.mode_id().into(),
                 geometry_id: world.map_config.geometry_id.clone(),
                 map_profile: world.map_config.map_profile.clone(),

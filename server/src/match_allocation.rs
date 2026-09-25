@@ -600,12 +600,18 @@ mod runtime_tests {
                 game_state,
                 players,
                 scoreboard,
+                debug_access,
+                match_mode,
                 ..
             } = packet
             else {
                 unreachable!()
             };
             assert_eq!(game_state, GameState::Victory { winner: Team::Blue });
+            // Step 11f: a worker round reports "practice" but accepts no
+            // debug command, and says so to the joined player.
+            assert_eq!(match_mode, "practice");
+            assert_eq!(debug_access, Some(shared::debug::DebugAccess::default()));
             assert_eq!(meta.server_epoch, epoch);
             assert_eq!(meta.match_id, match_id);
             assert_eq!(players.len(), 5, "victory retains team fog");

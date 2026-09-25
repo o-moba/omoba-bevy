@@ -419,6 +419,7 @@ impl ServerRuntime {
             let packet = ServerPacket::Snapshot {
                 vision: None,
                 sandbox: None,
+                debug_access: None,
                 match_mode: if self.match_service.is_lobby() {
                     "lobby"
                 } else {

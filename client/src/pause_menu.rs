@@ -1,5 +1,5 @@
-//! In-match pause menu: main page, settings page and the practice sandbox
-//! page. Built on the UI kit (`crate::ui`): every control carries a
+//! In-match pause menu: main page, settings page and the debug tools page
+//! (`crate::debug::tools_page`). Built on the UI kit (`crate::ui`): every control carries a
 //! `PauseAction`, the kit recognizes clicks and taps and paints the buttons,
 //! and the systems here only consume `Activated<PauseAction>`.
 use bevy::{
