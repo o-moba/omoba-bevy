@@ -1,4 +1,4 @@
-# 2026-09-24 — Shared model free of I/O (roadmap step 13, slices 13a-13e)
+# 2026-09-25 — Shared model free of I/O (roadmap step 13, slices 13a-13e)
 
 ## Goal
 Slices 13a-13e from [plans/steps-11-13.md](../plans/steps-11-13.md), "Step
@@ -102,6 +102,10 @@ are unchanged, and so are the snapshot byte pins.
   with `world::sdk_character` where it calls the SDK model catalogue
   (`handles_for`, `label_for`; the Android stub takes the SDK type too).
   `model_scale_key` only needs `slug()` and needs no conversion.
+- `CharacterChoice` is listed in `shared/src/protocol/wire_enums.rs`
+  (`Strict [Ipfs, Toka, Wang, Cube, Paco]`, added on `main` by #47, which
+  had excluded it as an SDK type); the stale `SpriteSheetKind` and
+  `SpriteAnimationPlayback` entries left `NOT_UDP_WIRE` with 13a.
 - New tests: shared `character_choice_wire_ids_are_the_snake_case_slugs`,
   client `world::tests::sdk_character_keeps_every_variant_and_wire_id`
   (same variants in the same order, same `slug`, `as_str` and JSON).
@@ -119,8 +123,36 @@ are unchanged, and so are the snapshot byte pins.
 - `ekza-bevy-sdk` is removed from `shared/Cargo.toml`; career-store,
   account-api and the harness no longer compile it through shared.
 
+## Merge with `main` (#44-#47)
+- `client/src/career.rs`, `client/src/passport.rs`: #46 added
+  `avatar_portrait_path` and `thumbnail_asset_path_in` (store portraits);
+  kept, with `shared::AvatarDefinition`/`avatar_definition`/`avatar_roster`
+  rewritten to `omoba_passport::avatars::…` (also in the new portrait test).
+- `harness/src/server.rs`: both sides kept (#44's stale-binary warning and
+  log helpers, this branch's `roster_avatar_slugs`).
+- `shared/Cargo.toml`: the SDK stays removed.
+- `docs/ARCHITECTURE.md` crate map: this branch's `shared` and `passport`
+  roles with #44's dependency columns.
+- `client/src/net/apply.rs`: #46's new test built a `DraftPlayer` with
+  `ekza_bevy_sdk::EkzaCharacter::Ipfs`; now `shared::wire::CharacterChoice::Ipfs`.
+
 ## Tests
-COUNTS
+- shared 99 → 92 (13a −2, 13b −5, 13e −1 moved to passport, 13d +1).
+- client lib 567 → 571 (13a +3, 13d +1).
+- passport lib 18 → 26 (avatar roster, registry, loader and O5 tests,
+  the moved grant test).
+- server 297 (+3 ignored), harness 22 unit + 24 black-box, Python script
+  tests 124 (1 skipped): unchanged.
 
 ## Gate
-GATE
+- `cargo fmt --all -- --check`: clean.
+- `cargo clippy --workspace --all-targets --no-deps -- -D warnings`: clean.
+- `cargo clippy -p client --lib --no-deps --no-default-features -- -D warnings`: clean.
+- `cargo test --workspace --locked --exclude harness`: all passed.
+- `cargo build -p server && cargo test --locked -p harness -- --test-threads=1`: all passed.
+- `python3 -m unittest discover -s scripts -p 'test_*.py'`: 124 OK (1 skipped).
+- `cargo tree -p shared | grep -c ekza`: 0 (`shared` → serde, serde_json).
+- Server startup from the checkout prints
+  `Avatar roster: 15 avatars from …/client/assets/avatars/manifest.json`;
+  with `OMOBA_ASSET_DIR=/nonexistent`,
+  `Avatar roster: 15 avatars from embedded manifest`.
