@@ -32,8 +32,6 @@ use crate::world::{
     MIN_LIGHT_PITCH_DEG, MIN_LIGHT_YAW_DEG,
 };
 
-const PANEL_WIDTH: f32 = 480.0;
-const PANEL_HEIGHT: f32 = 560.0;
 const SCALE_STEP: f32 = 0.04;
 const ILLUMINANCE_STEP: f32 = 2_000.0;
 const AMBIENT_STEP: f32 = 50.0;
@@ -213,14 +211,12 @@ fn size_desktop_pause_panel(
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     mut panels: Query<&mut Node, With<PauseMenuPanel>>,
 ) {
-    if mobile.as_ref().is_some_and(|mobile| mobile.enabled) {
+    // The phone panel is sized against the safe area by `adapt_phone_layout`.
+    let form = metric::Form::from_mobile(mobile.as_deref());
+    if form == metric::Form::Phone {
         return;
     }
-    let height = if menu.in_settings {
-        Val::Px(PANEL_HEIGHT)
-    } else {
-        Val::Px(380.0)
-    };
+    let height = Val::Px(metric::pause_panel_height(form, menu.in_settings, 0.0));
     for mut panel in &mut panels {
         if panel.height != height {
             panel.height = height;
@@ -280,8 +276,8 @@ fn setup_pause_menu_ui(mut commands: Commands) {
             parent
                 .spawn((
                     Node {
-                        width: Val::Px(PANEL_WIDTH),
-                        height: Val::Px(PANEL_HEIGHT),
+                        width: Val::Px(metric::PAUSE_PANEL.0),
+                        height: Val::Px(metric::PAUSE_PANEL.1),
                         max_width: Val::Percent(95.0),
                         max_height: Val::Percent(95.0),
                         overflow: Overflow::clip(),

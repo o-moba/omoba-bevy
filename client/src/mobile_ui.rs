@@ -8,7 +8,13 @@ use bevy::{
 use crate::{
     mobile_controls::{MobileControls, MobileControlsSet},
     net::{ClientSession, SessionUiCommand},
-    ui::{ModalId, ModalRoot, ScrollArea, theme as ui},
+    ui::{
+        ModalId, ModalRoot, ScrollArea,
+        theme::{
+            self as ui,
+            metric::{self, PhoneText},
+        },
+    },
 };
 
 pub(crate) struct MobileUiPlugin;
@@ -356,7 +362,7 @@ fn sync_phone_ui(
     mut errors: Query<&mut Text, (With<ServerErrorLabel>, Without<ServerAddressLabel>)>,
     ui_scale: Option<Res<UiScale>>,
 ) {
-    let scale = ui_scale.as_ref().map_or(1.0, |scale| scale.0.max(0.1));
+    let scale = metric::ui_scale(ui_scale.as_ref().map_or(1.0, |scale| scale.0));
     if mobile.enabled && !entry.initialized && !session.server_addr().is_empty() {
         entry.initialized = true;
         if session.server_addr() == "127.0.0.1:4000" {
@@ -389,16 +395,16 @@ fn sync_phone_ui(
     }
     for (action, mut node) in &mut buttons {
         let width = match action {
-            PhoneAction::Help => Some(48.0),
-            PhoneAction::Menu => Some(64.0),
-            PhoneAction::Server => Some(88.0),
+            PhoneAction::Help => Some(metric::PHONE_BAR_HELP_W),
+            PhoneAction::Menu => Some(metric::PHONE_BAR_MENU_W),
+            PhoneAction::Server => Some(metric::PHONE_BAR_SERVER_W),
             _ => None,
         };
         if let Some(width) = width {
             node.width = Val::Px(width / scale);
-            node.min_width = Val::Px(48.0 / scale);
-            node.height = Val::Px(44.0 / scale);
-            node.min_height = Val::Px(44.0 / scale);
+            node.min_width = Val::Px(metric::PHONE_BAR_MIN_W / scale);
+            node.height = Val::Px(metric::TOUCH_MIN / scale);
+            node.min_height = Val::Px(metric::TOUCH_MIN / scale);
             node.padding = UiRect::horizontal(Val::Px(10.0 / scale));
             node.border_radius = BorderRadius::all(Val::Px(8.0 / scale));
         }
@@ -431,26 +437,26 @@ struct PhoneFontSize(f32);
 fn phone_family(
     entity: Entity,
     hierarchy: &Query<(Option<&ChildOf>, Option<&Name>)>,
-) -> Option<&'static str> {
+) -> Option<PhoneText> {
     let mut next = Some(entity);
     for _ in 0..12 {
         let (parent, name) = hierarchy.get(next?).ok()?;
         if let Some(name) = name {
             if name.as_str().starts_with("ShopBuy-") {
-                return Some("shop-card");
+                return Some(PhoneText::ShopCard);
             }
             let family = match name.as_str() {
-                "TeamSelectOverlay" => "entry",
-                "ShopPanel" => "shop",
-                "ShopSummary" => "shop-summary",
-                "PauseMenuPanel" => "pause",
-                "GameStateCard" => "result",
-                "HelpPanel" => "help",
-                "PhoneMenuBar" => "phone-menu",
-                _ => "",
+                "TeamSelectOverlay" => Some(PhoneText::Entry),
+                "ShopPanel" => Some(PhoneText::Shop),
+                "ShopSummary" => Some(PhoneText::ShopSummary),
+                "PauseMenuPanel" => Some(PhoneText::Pause),
+                "GameStateCard" => Some(PhoneText::Result),
+                "HelpPanel" => Some(PhoneText::Help),
+                "PhoneMenuBar" => Some(PhoneText::Bar),
+                _ => None,
             };
-            if !family.is_empty() {
-                return Some(family);
+            if family.is_some() {
+                return family;
             }
         }
         next = parent.map(ChildOf::parent);
@@ -485,13 +491,13 @@ fn adapt_phone_layout(
     if !mobile.enabled || !mobile.landscape {
         return;
     }
-    let scale = ui_scale.as_ref().map_or(1.0, |scale| scale.0.max(0.1));
+    let scale = ui_scale.as_ref().map_or(1.0, |scale| scale.0);
     let left = mobile.safe.left;
     let top = mobile.safe.top;
     let bottom = mobile.safe.bottom;
     let width = mobile.viewport.x - left - mobile.safe.right;
     let height = mobile.viewport.y - top - bottom;
-    let class_width = (width * 0.26).clamp(150.0, 210.0);
+    let class_width = metric::phone_class_column(width);
     let grid_left = left + class_width + 20.0;
     let grid_width = width - class_width - 20.0;
     for (entity, name, mut node, _transform) in &mut nodes {
@@ -550,7 +556,7 @@ fn adapt_phone_layout(
             }
             "FindMatchButton" => {
                 node.width = Val::Px(grid_width);
-                node.height = Val::Px(44.0);
+                node.height = Val::Px(metric::TOUCH_MIN);
             }
             // The hint starts beside the Back button, not under it.
             "TeamSelectHint" => absolute(
@@ -568,13 +574,13 @@ fn adapt_phone_layout(
                     left,
                     mobile.viewport.y - bottom - 48.0,
                     class_width,
-                    Some(44.0),
+                    Some(metric::TOUCH_MIN),
                 );
                 node.column_gap = Val::Px(0.0);
             }
             "HeroSelectBack" => {
                 node.width = Val::Percent(100.0);
-                node.height = Val::Px(44.0);
+                node.height = Val::Px(metric::TOUCH_MIN);
             }
             // Desktop-only picker parts: no room beside the phone grid, and the
             // wallet pairing flow is not supported on a phone yet.
@@ -582,14 +588,14 @@ fn adapt_phone_layout(
                 node.display = Display::None;
             }
             "ServerEntryPanel" => {
-                node.width = Val::Px(width.min(860.0));
+                node.width = Val::Px(width.min(metric::PHONE_SERVER_W));
                 node.max_width = Val::Px(width);
                 node.padding = UiRect::all(Val::Px(10.0));
                 node.row_gap = Val::Px(6.0);
             }
             "HelpPanel" => {
                 node.max_height = Val::Px(height);
-                node.width = Val::Px(width.min(740.0));
+                node.width = Val::Px(width.min(metric::PHONE_HELP_W));
                 node.max_width = Val::Px(width);
                 node.padding = UiRect::all(Val::Px(14.0));
                 node.row_gap = Val::Px(10.0);
@@ -632,19 +638,19 @@ fn adapt_phone_layout(
             }
             "ShopFooter" => node.display = Display::None,
             "ShopCloseButton" => {
-                node.min_height = Val::Px(44.0);
+                node.min_height = Val::Px(metric::TOUCH_MIN);
                 node.padding = UiRect::axes(Val::Px(10.0), Val::Px(5.0));
             }
             "PauseMenuPanel" => {
                 node.top = Val::Px((top - bottom) * 0.5);
-                node.width = Val::Px(width.min(650.0));
+                node.width = Val::Px(width.min(metric::PHONE_PAUSE_W));
                 // Bound both bodies so short windows scroll between the fixed
                 // header/close control and footer.
-                node.height = if pause.as_ref().is_some_and(|pause| pause.in_settings) {
-                    Val::Px(height)
-                } else {
-                    Val::Px(height.min(360.0))
-                };
+                node.height = Val::Px(metric::pause_panel_height(
+                    metric::Form::Phone,
+                    pause.as_ref().is_some_and(|pause| pause.in_settings),
+                    height,
+                ));
                 node.max_height = Val::Px(height);
                 node.padding = UiRect::all(Val::Px(10.0));
                 node.row_gap = Val::Px(6.0);
@@ -652,7 +658,7 @@ fn adapt_phone_layout(
             }
             "PauseMenuMainSection" => node.row_gap = Val::Px(10.0),
             "GameStateCard" => {
-                node.width = Val::Px(width.min(640.0));
+                node.width = Val::Px(width.min(metric::PHONE_RESULT_W));
                 node.max_width = Val::Px(width);
                 node.padding = UiRect::all(Val::Px(16.0));
             }
@@ -672,7 +678,7 @@ fn adapt_phone_layout(
                 );
                 node.padding = UiRect::all(Val::Px(8.0));
             }
-            "ConnectionRetryButton" => node.height = Val::Px(44.0),
+            "ConnectionRetryButton" => node.height = Val::Px(metric::TOUCH_MIN),
             name if name.starts_with("ClassButton-") => {
                 node.width = Val::Px(class_width);
                 node.height = Val::Px(48.0);
@@ -682,8 +688,9 @@ fn adapt_phone_layout(
                 node.height = Val::Px(82.0);
             }
             name if name.starts_with("ShopBuy-") => {
-                node.width = Val::Px((width - 36.0) / 3.0);
-                node.height = Val::Px(103.0);
+                let (card_width, card_height) = metric::phone_shop_card(width);
+                node.width = Val::Px(card_width);
+                node.height = Val::Px(card_height);
                 node.padding = UiRect::all(Val::Px(if width < 650.0 { 6.0 } else { 7.0 }));
                 node.row_gap = Val::Px(if width < 650.0 { 2.0 } else { 3.0 });
             }
@@ -698,24 +705,7 @@ fn adapt_phone_layout(
         if base.is_none() {
             commands.entity(entity).insert(PhoneFontSize(original));
         }
-        font.font_size = match family {
-            "phone-menu" => original / scale,
-            "entry" => original.clamp(11.0, 16.0),
-            "shop-card" if width < 650.0 => {
-                if original >= 18.0 {
-                    15.0
-                } else {
-                    12.0
-                }
-            }
-            "shop-card" => original.clamp(12.0, 18.0),
-            "shop" => original.clamp(12.0, 18.0),
-            "shop-summary" => 14.0,
-            "result" => 20.0,
-            "help" => 15.0,
-            "pause" => original.clamp(14.0, 22.0),
-            _ => original,
-        };
+        font.font_size = metric::phone_font(family, original, width, scale);
     }
     for (name, mut text) in &mut copy {
         match name.as_str() {
