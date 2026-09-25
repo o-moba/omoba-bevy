@@ -9,8 +9,12 @@
 //! it is acknowledged, sequenced and epoch-scoped, and dev-only.
 //!
 //! [`DebugAccess`] is the permission predicate. The server derives its own
-//! from its rules and worker allocation; a client that only knows the
-//! snapshot's `match_mode` string uses [`DebugAccess::for_match_mode`].
+//! from its rules and worker allocation and sends it to each joined player in
+//! the additive `Snapshot.debug_access` field; a client talking to an older
+//! server (field absent) falls back to [`DebugAccess::for_match_mode`] on the
+//! snapshot's `match_mode` string.
+
+use serde::{Deserialize, Serialize};
 
 use crate::wire::ClientPacket;
 
@@ -58,11 +62,17 @@ impl DebugCommand {
 }
 
 /// Which debug commands a match accepts.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+///
+/// On the wire as `Snapshot.debug_access` (`{"toggles":..,"practice":..}`).
+/// Every field is `serde(default)`, so a field added later is additive and a
+/// missing one reads as "not allowed"; unknown fields are ignored.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DebugAccess {
     /// God mode and the speed boost.
+    #[serde(default)]
     pub toggles: bool,
     /// Practice sandbox commands.
+    #[serde(default)]
     pub practice: bool,
 }
 
@@ -166,6 +176,29 @@ mod tests {
                 r#"{"type":"practice","command":{"kind":"start_duel"}}"#
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn access_encodes_as_a_small_tolerant_object() {
+        let access = DebugAccess {
+            toggles: true,
+            practice: false,
+        };
+        let json = serde_json::to_string(&access).unwrap();
+        assert_eq!(json, r#"{"toggles":true,"practice":false}"#);
+        assert_eq!(serde_json::from_str::<DebugAccess>(&json).unwrap(), access);
+        // Missing fields mean "not allowed"; unknown ones are ignored.
+        assert_eq!(
+            serde_json::from_str::<DebugAccess>(r#"{"practice":true,"combat_test":true}"#).unwrap(),
+            DebugAccess {
+                toggles: false,
+                practice: true,
+            }
+        );
+        assert_eq!(
+            serde_json::from_str::<DebugAccess>("{}").unwrap(),
+            DebugAccess::default()
         );
     }
 

@@ -14,6 +14,7 @@ fn empty_snapshot() -> ServerPacket {
     ServerPacket::Snapshot {
         vision: None,
         sandbox: None,
+        debug_access: None,
         match_mode: "dev".into(),
         geometry_id: shared::map::GEOMETRY_ID.to_owned(),
         map_profile: "verdant_default".to_owned(),
@@ -62,6 +63,7 @@ fn snapshot_serializer_rejects_whole_over_limit_payload() {
     let packet = ServerPacket::Snapshot {
         vision: None,
         sandbox: None,
+        debug_access: None,
         match_mode: "dev".into(),
         geometry_id: shared::map::GEOMETRY_ID.to_owned(),
         map_profile: "verdant_default".to_owned(),

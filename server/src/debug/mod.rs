@@ -8,6 +8,11 @@
 //! before the paused-sandbox gate on the wall clock, the toggles after it on
 //! the (sandbox) simulation clock. The Combat Test protocol is a separate
 //! family (`crate::sandbox`, dispatched through `runtime/handlers/tools.rs`).
+//!
+//! The predicate also goes out on the wire (step 11f): every world snapshot
+//! to a joined player carries `debug_access` ([`snapshot_debug_access`]), so
+//! the client's tools page follows the server instead of guessing from the
+//! `match_mode` string (which reads `"practice"` in a worker round too).
 
 mod practice;
 mod toggles;
@@ -18,7 +23,23 @@ use std::time::Instant;
 
 use shared::debug::{DebugAccess, DebugCommand};
 
+use crate::entities::ConnectedPlayer;
 use crate::runtime::ServerRuntime;
+
+/// `Snapshot.debug_access` for one recipient of a world snapshot: the match's
+/// access for a joined player, `None` for anyone else (an endpoint that is
+/// only career-authenticated, or whose join was rejected). The prejoin status
+/// reply and the lobby snapshot never carry it.
+///
+/// A public worker round sends `Some` with both flags false: it reveals
+/// nothing (no debug command works there) and tells a new client not to show
+/// the tools page, which the `"practice"` mode string alone would.
+pub(crate) fn snapshot_debug_access(
+    player: &ConnectedPlayer,
+    access: DebugAccess,
+) -> Option<DebugAccess> {
+    player.joined.then_some(access)
+}
 
 impl ServerRuntime {
     /// Which debug commands this match accepts: the toggles in Dev and
@@ -71,12 +92,19 @@ impl ServerRuntime {
 
 #[cfg(test)]
 mod tests {
-    use std::net::UdpSocket;
+    use std::net::{SocketAddr, UdpSocket};
+    use std::time::Instant;
 
+    use shared::HeroClass;
     use shared::debug::DebugAccess;
+    use shared::map::Team;
+    use shared::wire::{CharacterChoice, ClientPacket, ServerPacket};
 
+    use crate::career_backend;
     use crate::match_rules::{MatchConfig, MatchMode};
     use crate::runtime::ServerRuntime;
+    use crate::runtime::ports::{ManualClock, MemoryTransport};
+    use crate::snapshot::SNAPSHOT_INTERVAL;
 
     /// Every mode; the `match` fails to compile when a mode is added, so the
     /// parity test below cannot silently skip it.
@@ -100,6 +128,80 @@ mod tests {
                 DebugAccess::for_match_mode(rt.rules.mode_id()),
                 rt.debug_access(),
                 "{mode:?}"
+            );
+        }
+    }
+
+    /// Step 11f: the world snapshot to a joined player carries the server's
+    /// own access (`Some`, even when both flags are false); the worker case is
+    /// pinned in `match_allocation` (`saved_worker_repeats_victory_...`), the
+    /// unjoined status reply in `runtime/prejoin/tests.rs`.
+    #[test]
+    fn joined_players_receive_the_server_access_in_every_snapshot() {
+        let toggles_only = DebugAccess {
+            toggles: true,
+            practice: false,
+        };
+        let all = DebugAccess {
+            toggles: true,
+            practice: true,
+        };
+        let cases = [
+            (MatchMode::Dev, toggles_only),
+            (MatchMode::Practice, all),
+            (MatchMode::Release, DebugAccess::default()),
+        ];
+        for (mode, expected) in cases {
+            let clock = ManualClock::new(Instant::now());
+            let transport = MemoryTransport::new("127.0.0.1:4100".parse().unwrap());
+            let mut rt = ServerRuntime::for_test(
+                transport.clone(),
+                clock.clone(),
+                career_backend::MemoryCareer::disabled(54200),
+                MatchConfig { mode, team_size: 1 },
+            );
+            let addr: SocketAddr = "127.0.0.1:58990".parse().unwrap();
+            let join = ClientPacket::Join {
+                prematch: false,
+                team: Team::Green,
+                character: CharacterChoice::Ipfs,
+                hero_class: HeroClass::Mage,
+                avatar: None,
+                sprite_character: None,
+                session_id: Some(format!("debug-access-{mode:?}")),
+                passport_ticket: None,
+            };
+            transport.push_inbound(addr, serde_json::to_vec(&join).unwrap());
+            let (now, dt) = rt.prepare_tick();
+            rt.tick(now, dt);
+            assert!(rt.world.players[&addr].joined, "{mode:?}");
+            transport.take_outbound();
+            clock.advance(SNAPSHOT_INTERVAL);
+            let (now, dt) = rt.prepare_tick();
+            rt.tick(now, dt);
+            let sent = transport.take_outbound();
+            let snapshot = sent
+                .iter()
+                .filter(|(to, _)| *to == addr)
+                .find_map(|(_, bytes)| match serde_json::from_slice(bytes) {
+                    Ok(packet @ ServerPacket::Snapshot { .. }) => Some(packet),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{mode:?}: no snapshot"));
+            let ServerPacket::Snapshot {
+                debug_access,
+                match_mode,
+                ..
+            } = snapshot
+            else {
+                unreachable!()
+            };
+            assert_eq!(debug_access, Some(expected), "{mode:?}");
+            assert_eq!(debug_access, Some(rt.debug_access()), "{mode:?}");
+            assert_eq!(
+                DebugAccess::for_match_mode(&match_mode),
+                expected,
+                "{mode:?}: without a worker the fallback agrees"
             );
         }
     }

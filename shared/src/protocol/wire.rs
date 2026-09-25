@@ -507,6 +507,13 @@ pub enum ServerPacket {
         vision: Option<crate::vision::TeamVision>,
         #[serde(default)]
         sandbox: Option<crate::sandbox::SandboxSnapshot>,
+        /// What debug commands the server accepts from this recipient
+        /// (additive, step 11f). Sent to joined players only; absent (never
+        /// `null`) otherwise, so older snapshots and older peers are
+        /// unaffected. A client that gets no value falls back to
+        /// `DebugAccess::for_match_mode(match_mode)`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        debug_access: Option<crate::debug::DebugAccess>,
         #[serde(default)]
         match_mode: String,
         #[serde(default)]
@@ -619,6 +626,7 @@ mod tests {
         ServerPacket::Snapshot {
             vision: None,
             sandbox: None,
+            debug_access: None,
             match_mode: "dev".into(),
             geometry_id: "verdant".into(),
             map_profile: "verdant_default".into(),
@@ -879,6 +887,52 @@ mod tests {
     #[test]
     fn golden_snapshot_decodes_back_to_the_same_bytes() {
         let decoded: ServerPacket = serde_json::from_str(GOLDEN_SNAPSHOT).unwrap();
+        assert_eq!(serde_json::to_string(&decoded).unwrap(), GOLDEN_SNAPSHOT);
+    }
+
+    /// Step 11f: `debug_access` is additive. With a value it round-trips and
+    /// sits after `sandbox`; `None` leaves the golden bytes untouched (checked
+    /// above), and a snapshot from a server that predates it decodes to
+    /// `None`.
+    #[test]
+    fn snapshot_debug_access_is_additive() {
+        let mut value: Value = serde_json::from_str(GOLDEN_SNAPSHOT).unwrap();
+        assert!(
+            value.get("debug_access").is_none(),
+            "None is not serialized"
+        );
+        let ServerPacket::Snapshot { debug_access, .. } =
+            serde_json::from_value(value.clone()).unwrap()
+        else {
+            panic!("snapshot");
+        };
+        assert_eq!(debug_access, None, "an old snapshot has no access");
+
+        value.as_object_mut().unwrap().insert(
+            "debug_access".into(),
+            json!({"toggles": true, "practice": false}),
+        );
+        let mut decoded: ServerPacket = serde_json::from_value(value).unwrap();
+        let ServerPacket::Snapshot { debug_access, .. } = &decoded else {
+            panic!("snapshot");
+        };
+        let access = crate::debug::DebugAccess {
+            toggles: true,
+            practice: false,
+        };
+        assert_eq!(*debug_access, Some(access));
+        let encoded = serde_json::to_string(&decoded).unwrap();
+        assert!(
+            encoded.contains(
+                r#""sandbox":null,"debug_access":{"toggles":true,"practice":false},"match_mode""#
+            ),
+            "{encoded}"
+        );
+        let again: ServerPacket = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(serde_json::to_string(&again).unwrap(), encoded);
+        if let ServerPacket::Snapshot { debug_access, .. } = &mut decoded {
+            *debug_access = None;
+        }
         assert_eq!(serde_json::to_string(&decoded).unwrap(), GOLDEN_SNAPSHOT);
     }
 

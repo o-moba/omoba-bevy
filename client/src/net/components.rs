@@ -16,6 +16,10 @@ use super::{GameState, Lane, MinionBrainState, NeutralAiState, NeutralCampType, 
 #[derive(Resource, Default, Clone)]
 pub struct GameStateSnapshot {
     pub sandbox: Option<shared::sandbox::SandboxSnapshot>,
+    /// What debug commands the server accepts from us (step 11f); `None`
+    /// from a server that predates the field. Read it through
+    /// `crate::debug::ClientDebugAccess`, which applies the fallback.
+    pub debug_access: Option<shared::debug::DebugAccess>,
     pub forest_pickups: Vec<shared::forest_pickups::ForestPickupState>,
     pub vision: Option<shared::vision::TeamVision>,
     pub your_id: u64,
