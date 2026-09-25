@@ -72,7 +72,7 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
 | 10 | Client domain module, combat/player split, render backends behind `run_if`, plugin groups, QA behind a cargo feature | done (optional 10h/10i open, see [plans/client-10-15.md](plans/client-10-15.md)) | #35, #36, #37 |
 | 11 | One debug tooling family shared by Combat Test, practice and offline | done: 11-0 (#34), 11a–11c (#42), 11d (#43), 11e+11f (this PR; server-driven `Snapshot.debug_access`, tools page/HUD/re-send follow it) | #34, #42, #43, this PR |
 | 12 | Data-driven hero and item catalogs with validation tests | done: 12a-12e; 12f (optional client cross-checks) open | #38 |
-| 13 | Roster/asset loading and SDK types out of the shared model | done: 13a-13e (with O5 load validation and the O30 working-directory slice); 13f (server-owned registry) optional | this PR (shared without I/O) |
+| 13 | Roster/asset loading and SDK types out of the shared model | done: 13a-13e (with O5 load validation and the O30 working-directory slice); 13f (server-owned registry) optional | #48 (shared without I/O) |
 | 15 | Client session events and staged snapshot application | done: 15a+15b1 (#39), 15b2+15c+15d (#41), 15e (#43); 15f/15g optional | #39, #41, #43 |
 | 9b | UI kit follow-ups: scroll unification, modal registry, frontend/social/supporter/sandbox screens, responsive layout, `TestId` in QA | pending (order in [ui-kit.md](ui-kit.md)) | |
 
@@ -114,20 +114,20 @@ outside the numbered steps (notes:
 | Q7 | `max_hp_for_level` used by the offline duelist (server keeps its override-aware form) | done | gate hardening |
 | Q8 | stale `allow(dead_code)` and duplicate clippy allows, `LICENSING.md`, SDK revision in `[workspace.dependencies]` | done | gate hardening |
 | Q9 | doc drift from report §5.4 | done | gate hardening |
-| O3 | time-based movement budget: unspent tolerance carried as `HeroTimers::movement_slack` (starts at the allowance) instead of `+0.10` per `Transform`; `ARCHITECTURE.md` protocol rule reworded (`Cast` carries no request id) | done | this PR (report fixes) |
-| O11 | career portrait resolves avatar thumbnails through `passport::thumbnail_asset_path` (`ekza://` for store avatars) | done | this PR (report fixes) |
-| O7 | snapshot apply compares the draft loadout before writing `TeamSelection`; the settings file is written to a temp file and renamed | done | this PR (report fixes) |
-| O16 | offline practice: level-6 HP/mana pools (`max_hp_for_level`, new `max_mana_for_level`), heals/restores/damage scaled like the server, no mana regen while dead, Q recorded as Attack (`PlayerActionKind::for_cast`); harness bots untouched | done | this PR (report fixes) |
-| O13 | `sim/cast.rs` uses `basic_attack::resolve_hostile_target`; projectile `joined` check unchanged | done | this PR (report fixes) |
-| O17 | `settle_finished_round` split out of `record_match_metrics`; `restart_round` finalizes a won round as Completed, anything else as Abandoned | done | this PR (report fixes) |
-| O29 | pure `recover_outbox(&Path)` from the career worker prologue, temp-dir tests; worker otherwise unchanged | done | this PR (report fixes) |
-| O25 | pure `team::lock_in(...)` decision for the hero-select lock-in, tests; no file move (9b-3) | done | this PR (report fixes) |
-| O4 | standalone server keeps at most `MAX_PREJOIN_ENDPOINTS` (64) unverified endpoints; unverified endpoints get one small status snapshot per datagram (at most one per 250 ms) instead of the world every 50 ms; public roles unchanged | done | this PR (pre-beta) |
-| O6 | `mobile/ios` tests (42) in the CI `scripts` job and `make test-scripts`; the asset-gate class runs (27 of 28); only the renamed-denied-binary test skips without the denied bytes | done | this PR (pre-beta) |
-| O24 | CI `android` job: `cargo check -p client --target aarch64-linux-android` with the runner's NDK (build scripts compile C/C++); weekly/manual macOS `ios-check.yml` for `aarch64-apple-ios` (not a PR gate) | done | this PR (pre-beta) |
-| O5 | roster entries with an `ekza-` slug or a passport boundary must pass the `register_store_avatar` rule at load, else skipped with a warning (`roster_entries_must_follow_the_store_avatar_rule`); the arena-sync half (check before `fs::write`) is open | done (load half) | this PR (shared without I/O) |
-| O30 | no roster lookup relative to the working directory; the binaries print the roster size and source at startup | done (cheap slice) | this PR (shared without I/O) |
-| O10 | `shared/src/protocol/wire_enums.rs`: 43 UDP wire enums with exhaustive no-`_` matches pinned to `PROTOCOL_VERSION`, a scan that makes every new serde enum in `shared` be classified, tolerant/strict decode tests; rule in `ARCHITECTURE.md` | done | this PR (pre-beta) |
+| O3 | time-based movement budget: unspent tolerance carried as `HeroTimers::movement_slack` (starts at the allowance) instead of `+0.10` per `Transform`; `ARCHITECTURE.md` protocol rule reworded (`Cast` carries no request id) | done | #46 |
+| O11 | career portrait resolves avatar thumbnails through `passport::thumbnail_asset_path` (`ekza://` for store avatars) | done | #46 |
+| O7 | snapshot apply compares the draft loadout before writing `TeamSelection`; the settings file is written to a temp file and renamed | done | #46 |
+| O16 | offline practice: level-6 HP/mana pools (`max_hp_for_level`, new `max_mana_for_level`), heals/restores/damage scaled like the server, no mana regen while dead, Q recorded as Attack (`PlayerActionKind::for_cast`); harness bots untouched | done | #46 |
+| O13 | `sim/cast.rs` uses `basic_attack::resolve_hostile_target`; projectile `joined` check unchanged | done | #46 |
+| O17 | `settle_finished_round` split out of `record_match_metrics`; `restart_round` finalizes a won round as Completed, anything else as Abandoned | done | #46 |
+| O29 | pure `recover_outbox(&Path)` from the career worker prologue, temp-dir tests; worker otherwise unchanged | done | #46 |
+| O25 | pure `team::lock_in(...)` decision for the hero-select lock-in, tests; no file move (9b-3) | done | #46 |
+| O4 | standalone server keeps at most `MAX_PREJOIN_ENDPOINTS` (64) unverified endpoints; unverified endpoints get one small status snapshot per datagram (at most one per 250 ms) instead of the world every 50 ms; public roles unchanged | done | #47 |
+| O6 | `mobile/ios` tests (42) in the CI `scripts` job and `make test-scripts`; the asset-gate class runs (27 of 28); only the renamed-denied-binary test skips without the denied bytes | done | #47 |
+| O24 | CI `android` job: `cargo check -p client --target aarch64-linux-android` with the runner's NDK (build scripts compile C/C++); weekly/manual macOS `ios-check.yml` for `aarch64-apple-ios` (not a PR gate) | done | #47 |
+| O5 | roster entries with an `ekza-` slug or a passport boundary must pass the `register_store_avatar` rule at load, else skipped with a warning (`roster_entries_must_follow_the_store_avatar_rule`); the arena-sync half (check before `fs::write`) is open | done (load half) | #48 (shared without I/O) |
+| O30 | no roster lookup relative to the working directory; the binaries print the roster size and source at startup | done (cheap slice) | #48 (shared without I/O) |
+| O10 | `shared/src/protocol/wire_enums.rs`: 43 UDP wire enums with exhaustive no-`_` matches pinned to `PROTOCOL_VERSION`, a scan that makes every new serde enum in `shared` be classified, tolerant/strict decode tests; rule in `ARCHITECTURE.md` | done | #47 |
 
 O2 (CI as a required gate): the maintainer approved it on 2026-09-25. Rules 2 and 6 now say "merge only after every check is green"; branch protection on `main` with the four required checks is a repository setting the maintainer switches on. Still open from §8.2: the rest of the list outside the rows above.
 
@@ -186,7 +186,7 @@ O2 (CI as a required gate): the maintainer approved it on 2026-09-25. Rules 2 an
 - 12d: the catalog length is `ItemId::ALL.len()`, not `INVENTORY_CAPACITY`; the "all items" test and preset sites take at most `INVENTORY_CAPACITY`; `practice::tests::duel_gold_cap_buys_a_full_inventory` replaces the comment claim.
 - 12e: `scripts/catalog.py` reads the JSON; `combat_test.py` (`--hero` choices), `verify_beta_match.py` (item costs; offensive slots = abilities with `projectile_damage`) and `capture_combat.py` (`STYLES`) use it. `check_combat_balance.py` keeps taking its classes from its captures.
 
-### 13: Shared model free of I/O (done, this PR)
+### 13: Shared model free of I/O (done, #48)
 - Plan: [plans/steps-11-13.md](plans/steps-11-13.md), "Step 13"; notes in [progress/2026-09-25-shared-no-io.md](progress/2026-09-25-shared-no-io.md). `shared` depends on `serde` and `serde_json` only and reads no environment variable or file at runtime.
 - 13a: sprite presentation (schema, embedded manifest, roster, render fallback) in `client/src/sprite_roster.rs`; `shared` keeps `SPRITE_CHARACTER_IDS` and `normalize_sprite_character_id`.
 - 13b: `omoba_passport::assets::client_asset_root` and `omoba_passport::avatars` (roster, `AvatarDefinition`, store-avatar registry, same names; the global stays process-wide, phase 1). The harness reads the manifest as plain JSON.
