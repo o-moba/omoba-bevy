@@ -56,6 +56,7 @@ impl ServerRuntime {
             self.maintain_roster(now);
             self.send_lobby_snapshots(now);
             self.send_career_views(now);
+            self.tick_party(now);
             return;
         }
         if self
@@ -166,5 +167,6 @@ impl ServerRuntime {
         self.checkpoint_career_round(now);
         self.send_career_views(now);
         self.send_social_views(now);
+        self.tick_party(now);
     }
 }

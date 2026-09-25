@@ -118,7 +118,10 @@ impl ServerRuntime {
         match self.prematch.phase.unwrap_or(PrematchPhase::Draft) {
             PrematchPhase::Draft => {
                 self.world.game_state = GameState::Forming { ready, needed };
-                if ready >= needed && all(|d| d.locked) {
+                // A launched party holds the countdown (bounded) until its
+                // members, still picking heroes, have joined.
+                let gathering = self.match_service.worker().is_none() && self.party_gathering(now);
+                if ready >= needed && all(|d| d.locked) && !gathering {
                     self.prematch.phase = Some(PrematchPhase::Countdown);
                     self.prematch.deadline = Some(now + Duration::from_millis(COUNTDOWN_MS.into()));
                     self.world.game_state = GameState::Starting {

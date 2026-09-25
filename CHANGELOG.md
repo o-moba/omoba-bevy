@@ -6,6 +6,25 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-09-25
+
+First tagged playtest release since 0.18. **Highlights:** play with a friend —
+form a party, see each other's avatars in the party lobby, and play on the same
+team against bots. Desktop players can now type the server address in the game.
+Packages for macOS, Windows, Linux, Android and iPhone are built by one script.
+
+### Release tooling and packages
+- `scripts/release.py` (+ `make release-*`, `docs/RELEASING.md`): turnkey packages into `dist/v<version>/` with checksums — macOS `Omoba.app` (ad-hoc signed zip with a practice-host script), Windows x64 zip (`Omoba.exe`, host `.bat`), Linux x64 tarball (client, server, systemd example), Android arm64 APK with a stable playtest key and a version-derived `versionCode`, iPhone App Store archive / TestFlight upload. `release draft` creates an unpublished GitHub release; `release ci` runs the new `.github/workflows/release.yml` (tag `v*` → macOS/Windows/Linux/Android → draft release).
+- Security: patch updates for open advisories — `rustls-webpki` 0.103.15 (CRL parsing DoS, name-constraint and CRL-matching fixes), `bytes` 1.12.1, `grid` 1.0.1, `rand` 0.9.5.
+- Client: the party lobby has a **SERVER** field on desktop (Change → type `host:port` → Enter); it reconnects and is remembered. A release Windows client opens no console window. A macOS app bundle finds its assets in `Contents/Resources`.
+
+### Party, party lobby and co-op vs bots
+- **Party.** New additive `ClientPacket::Party` / `ServerPacket::Party` (`shared::party`). The server (`server/src/party.rs`) owns presence, invites (60 s), accept/decline, leave (lead passes on), kick, a five-member cap and the leader-only launch. Parties run on standalone/practice servers and the public lobby, not in match workers; profile members are rebound after a public match.
+- **Same team vs bots.** On a practice server a joining human takes a seat on a seated party mate's team; the draft countdown waits up to 60 s for launched members still picking. In the public lobby, a party is queued as one unit (all present members, one preference), allocated into one manifest and one team (`split_teams`); Play with bots allocates the whole party together; the worker manifest contract now accepts a bot-practice roster of one to five humans on one team (was exactly one).
+- **Party lobby (client).** New `AppScreen::Lobby` with a 3D line-up of members' avatars (`frontend/party_stage.rs`, render layer 27), name/leader/status plates, online players with Invite, invites with Accept/Decline, PLAY VS BOTS / Quick match for the leader, Leave and Kick. Home: **Party & friends** replaces the Friends button (the career friends list opens from the lobby when storage is on), an invite toast, and PLAY becomes PLAY AS PARTY (leader) / PARTY LOBBY (member). A launch moves every member to hero select once.
+- QA: frontend capture adds `14-party-lobby.png` (`OMOBA_FRONTEND_QA_ACCEPT_PARTY=1` accepts a scripted friend's invite); end-to-end script `party_e2e.py` drives two UDP clients against the real server.
+- Tests: shared +4, server +16 (party rules, practice seating, launch gate, lobby units/splits), client +9. `make check`: 1075 passed, 0 failed.
+
 ### UI kit: layout, TestId QA, last buttons
 - Roadmap step 9b, items 5 to 7 of `docs/ui-kit.md` (step 9b is complete). **Layout:** `ui::theme::metric` is the one responsive policy: `Form::{Desktop, Phone}`, `menu_font`, `menu_control_height`, `pause_panel_height`, `phone_class_column`, `phone_shop_card`, `phone_font`/`PhoneText` and the phone panel and bar sizes. `adapt_phone_menu_readability`, `adapt_phone_layout`, `sync_phone_ui` and `size_desktop_pause_panel` apply its numbers; every pixel value is unchanged and pinned by a test.
 - **Buttons:** the combat skill bar (`HotbarAction`), the shop and its HUD shortcuts (`ShopAction`), the phone bar and server entry (`PhoneAction`), the match chrome and scoreboard (`EdgeAction`), the connection Retry button (`RetryPressed`) and the `OMOBA_DEBUG_UI` toggles (`DebugHudAction`) carry `UiAction<T>` and a `TestId` and handle `Activated<T>`; no module reads `Interaction` for a press any more. New `ButtonKind::{Skill, SkillUpgrade, ShopItem, Debug(DebugToggle)}` keep the hand-painted colours (moved to `ui::theme`), and `theme::button_pressed_color` keeps the skill slot's and shop card's darker pressed colour. Buttons with a fixed colour (gold shop button, quick-buy slots, OPEN SHOP, CLOSE, phone bar, score strip, menu button, Retry) have no `ButtonStyle`.

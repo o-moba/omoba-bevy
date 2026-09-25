@@ -40,6 +40,8 @@ CLAUDE.md
 docs/*
 !docs/ARCHITECTURE.md
 !docs/features.md
+!docs/party.md
+!docs/RELEASING.md
 !docs/bot-practice-and-social.md
 !docs/game-audio.md
 !docs/player-handles.md
@@ -148,3 +150,6 @@ node_modules/
 
 # Private local Ekza rehearsal configuration and logs
 .ekza-lan/
+
+# Release packages (scripts/release.py)
+/dist/

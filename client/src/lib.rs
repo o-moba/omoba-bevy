@@ -35,6 +35,7 @@ mod mobile_ui;
 mod model_scale;
 mod navigation;
 mod net;
+mod party;
 mod passport;
 mod pause_menu;
 mod persistence;

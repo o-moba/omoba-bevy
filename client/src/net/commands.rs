@@ -23,6 +23,8 @@ pub enum NetworkCommand {
         request_id: u64,
         command: shared::social::SocialCommand,
     },
+    /// Party presence, invites and launch; valid before any match.
+    Party(shared::party::PartyCommand),
     Utility {
         action: shared::utility::UtilityAction,
         direction: Vec2,
@@ -152,6 +154,7 @@ pub(in crate::net) fn send_network_commands(
                 command,
                 NetworkCommand::Career(_)
                     | NetworkCommand::Social { .. }
+                    | NetworkCommand::Party(_)
                     | NetworkCommand::BuyItem { .. }
             )
         {
@@ -228,6 +231,11 @@ pub(in crate::net) fn send_network_commands(
                 {
                     social.request_failed(*request_id, error);
                 }
+            }
+            NetworkCommand::Party(command) => {
+                let _ = channels.outgoing.try_send(ClientPacket::Party {
+                    command: command.clone(),
+                });
             }
             NetworkCommand::Career(request) => {
                 let Some(identity) = career_identity.as_mut() else {

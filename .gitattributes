@@ -4,3 +4,7 @@
 # Preserve verbatim upstream license texts, including their trailing spaces.
 LICENSES/*.txt whitespace=-blank-at-eol
 */LICENSE whitespace=-blank-at-eol
+
+# Shipped assets are byte-exact: the asset review gate pins their hashes, so a
+# Windows checkout must not rewrite line endings.
+client/assets/** -text

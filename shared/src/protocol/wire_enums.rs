@@ -62,8 +62,9 @@ macro_rules! wire_enums {
 }
 
 wire_enums! {
-    crate::protocol::wire::ClientPacket => Strict [Sandbox, Leave, Social, Career, Hello, Transform, Cast, Utility, BasicAttack, Join, Prematch, Ping, RequestRematch, SetGodMode, SetSpeedBoost, Practice, UpgradeSkill, BuyItem],
-    crate::protocol::wire::ServerPacket => Strict [Social, Career, Snapshot],
+    crate::protocol::wire::ClientPacket => Strict [Sandbox, Leave, Social, Party, Career, Hello, Transform, Cast, Utility, BasicAttack, Join, Prematch, Ping, RequestRematch, SetGodMode, SetSpeedBoost, Practice, UpgradeSkill, BuyItem],
+    crate::protocol::wire::ServerPacket => Strict [Party, Social, Career, Snapshot],
+    crate::party::PartyCommand => Strict [Presence, Invite, Accept, Decline, Leave, Kick, Launch],
     crate::public_transport::PublicClientDatagram => Strict [TransportProbe, TransportProof, TransportBootstrap, SignedCommand],
     crate::public_transport::PublicServerDatagram => Strict [TransportChallenge],
     crate::career::CareerRequest => Strict [FindMatch, SupporterStatus, EquipSupporterAura, Social, Challenge, Authenticate, History, Detail, Friends, Friend, Profile, LookupPlayer, Rename, Authorized, CancelQueue],
