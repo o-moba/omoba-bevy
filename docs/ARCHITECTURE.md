@@ -52,7 +52,7 @@ Rules that follow from the map:
 | `NetPlugins` | `ClientPersistencePlugin`, `NetworkingPlugin`, `MatchServicePlugin`, `CareerIdentityPlugin` |
 | `UiPlugins` | `UiKitPlugin`, `MobileControlsPlugin`, `MobileUiPlugin`, `FrontendPlugin` (+ its nine screen and widget plugins), `TeamSelectPlugin`, `GameStateUiPlugin`, `MatchHudPlugin`, `EdgeHudPlugin`, `MinimapPlugin` (+ `MinimapRoutePlugin`), `ShopPlugin`, `HelpOverlayPlugin`, `PauseMenuPlugin`, `SocialPlugin`, `CareerPlugin`, `SupporterPlugin`, `SupporterStoreKitPlugin` |
 | `GameplayPlugins` | `MapsPlugin`, `InputContextPlugin`, `PlayerPlugin`, `CombatPlugin` |
-| `DebugPlugins` | `SandboxPlugin` (Combat Test panel), `PracticeSandboxPlugin` (pause-menu practice page), `GodModePlugin` (debug HUD toggles and their re-send), `DebugConsolePlugin` |
+| `DebugPlugins` | `SandboxPlugin` (Combat Test panel), `DebugAccessPlugin` (`ClientDebugAccess`, the toggle reset and re-send), `PracticeSandboxPlugin` (pause-menu debug tools page), `GodModePlugin` (`OMOBA_DEBUG_UI` HUD toggles), `DebugConsolePlugin` |
 | `PresentationPlugins` | shared: `CameraPlugin`, `SetupPlugin`, `ModelScalePlugin`, `CombatVisualsPlugin`, `CombatFeedbackPlugin`, `GameVfxPlugin`, `ReactionVisualsPlugin`, `TeamVisionPlugin`, `GameAudioPlugin`, `MapVisualsPlugin`; 2D: `SpriteVisualsPlugin`, `Presentation2dPlugin`, `World2dPlugin`; 3D: `Presentation3dPlugin`, `Verdant3dPlugin`, `DecorPlugin`, `JungleVisualsPlugin`, `MinionVisualsPlugin`, `BossesPlugin`, `ProjectileVisualsPlugin`, `BattlefieldAtmospherePlugin` |
 | `QaPlugins` (`qa` feature) | `FrontendQaPlugin` (+ avatar and flow), `VisualQaPlugin` (+ beta UI and navigation), `SocialQaPlugin`, `SupporterQaPlugin`, `TeamVisionQaPlugin`, `AudioQaPlugin`, `OfflineQaPlugin`, `CareerVisualQaPlugin`, `MapQaPlugin`, `CombatQaPlugin`, `ForestPickupQaPlugin`, `TargetingQaPlugin` |
 
@@ -362,10 +362,12 @@ Developer and practice commands form two families, kept apart on purpose.
   unknown tags, so a new `{"type":"debug"}` would be dropped by an old
   server. `PracticeCommand` decodes an unknown `kind` as `Unsupported`,
   which every host ignores, so new practice commands are additive.
-  `DebugAccess { toggles, practice }` says what a match accepts;
-  `DebugAccess::for_match_mode` derives it from the snapshot's `match_mode`
-  (`dev`: the toggles; `practice` and `offline_practice`: both; anything
-  else: neither). `DUMMY_MAX_HP`, `DUMMY_DISTANCE` and
+  `DebugAccess { toggles, practice }` says what a match accepts; it is
+  serde (every field `serde(default)`, unknown fields ignored) because the
+  server sends it (below). `DebugAccess::for_match_mode` derives it from the
+  snapshot's `match_mode` (`dev`: the toggles; `practice` and
+  `offline_practice`: both; anything else: neither); clients use it only
+  when the server sends no value. `DUMMY_MAX_HP`, `DUMMY_DISTANCE` and
   `OFFLINE_PRACTICE_MODE` live here too; `shared::practice` keeps the
   command type and the duel limits and is re-exported from `shared::debug`.
 - **Server** (`server/src/debug/`): `ServerRuntime::debug_access()` is
@@ -373,6 +375,12 @@ Developer and practice commands form two families, kept apart on purpose.
   only without a worker allocation (a worker round fixes its durable
   ruleset at round start). A test pins it to
   `DebugAccess::for_match_mode(rules.mode_id())` for every mode.
+  **Debug access on the wire:** every world snapshot to a joined player
+  carries `Snapshot.debug_access = Some(debug_access())`, also when both
+  flags are false (release, and a worker round, which reports
+  `match_mode` `"practice"` but accepts nothing). Recipients that have not
+  joined, the prejoin status reply and the lobby snapshot carry none; the
+  field is then omitted, not `null` (`debug::snapshot_debug_access`).
   `ServerRuntime::handle_debug(addr, command, now)` is the one entry point:
   `toggles.rs` writes `god_mode` (plus `infinite_resource` outside Combat
   Test) and `move_speed_mult`; `practice.rs` restores the roster, clears the
@@ -387,7 +395,8 @@ Developer and practice commands form two families, kept apart on purpose.
   its own simulation, through one `Simulation::debug(DebugCommand)` fed by
   `DebugCommand::from_packet`: a ring roster instead of lane bots, god mode
   as a local flag, the speed boost an explicit no-op (offline accepts any
-  finite client transform, so there is no clamp to raise).
+  finite client transform, so there is no clamp to raise). Its snapshots
+  carry `debug_access` for `offline_practice` (both allowed).
 - **Bot planners** for every host that levels or equips a hero without a
   player: `shared::progression::skill_upgrade_order` (the ultimate first
   once unlocked, then Q, W, E) and `shared::shop::plan_purchases` (greedy
@@ -401,19 +410,27 @@ Developer and practice commands form two families, kept apart on purpose.
   fixed actors on a virtual clock, dev and loopback only. Offline cannot
   host it.
 - **Client** (`client/src/debug/`, the `DebugPlugins` group):
+  `ClientDebugAccess` is what the tools may do, recomputed every frame by
+  `sync_debug_access` (`DebugAccessSet`): nothing before the join is
+  confirmed, then `snapshot.debug_access`, or
+  `DebugAccess::for_match_mode(match_mode)` from an older server; in
+  Combat Test (`snapshot.sandbox` or the launch flag) the toggles are not
+  offered because the actor config owns them.
   `DebugToggles { god_mode, speed_boost }` is the one client copy of the
-  toggles. The debug HUD (`hud.rs`: F2/F3 and the two buttons), the
-  pause-menu practice page (`tools_page.rs`), local movement and the
-  local-player snapshot stage (snap threshold while boosting) read it.
-  Every debug command is `NetworkCommand::Debug(DebugCommand)`, encoded
-  with `to_packet()` once the join is confirmed. `resend_debug_toggles`
-  re-sends both toggles every 0.5 s, only while the HUD is enabled
-  (`OMOBA_DEBUG_UI`, not in Combat Test). The practice page shows when
-  `DebugAccess::for_match_mode(match_mode).practice`, and leaving a
-  practice match clears `god_mode`. `console.rs` is the on-screen log.
-  One tools page driven by `DebugAccess` everywhere toggles are allowed
-  (dev without the env var, practice re-send) is slice 11e, a behaviour
-  change that waits for the owner.
+  toggles, held at "both off" while the toggles are not allowed (leaving
+  practice, a worker round, release, a disconnect). The pause-menu
+  "Debug tools" page (`tools_page.rs`) shows god mode and speed boost where
+  the toggles are allowed, the bots and 1v1 section where practice is
+  allowed, and in Combat Test only an entry that opens the Combat Test
+  panel; its main-page entry is hidden when none applies.
+  `resend_debug_toggles` re-sends both toggles every 0.5 s wherever they
+  are allowed. `OMOBA_DEBUG_UI` adds the extras: the HUD buttons and
+  F2/F3 (`hud.rs`, shown only where the toggles are allowed), the
+  on-screen log (`console.rs`) and F8 debug flight. Local movement and the
+  local-player snapshot stage (snap threshold while boosting) read
+  `DebugToggles`. Every debug command is
+  `NetworkCommand::Debug(DebugCommand)`, encoded with `to_packet()` once
+  the join is confirmed.
 
 ## Protocol rules
 
@@ -421,6 +438,11 @@ Developer and practice commands form two families, kept apart on purpose.
   changes; peers with another version are rejected at `Hello`.
 - Compatible changes are additive: new fields carry `#[serde(default)]`,
   new enum values are only added where the decoder tolerates unknown values.
+  An optional field that is absent most of the time also carries
+  `skip_serializing_if = "Option::is_none"` so the bytes of existing
+  packets do not change (`Snapshot.debug_access`; the golden snapshot is
+  byte-identical with it `None`). Old clients ignore unknown fields, and a
+  new client reading an old server gets the default and must fall back.
 - Enum evolution: every enum the UDP protocol carries is listed with its
   variants in `shared/src/protocol/wire_enums.rs` and matched there with no
   `_` arm, so a new variant does not compile until it is listed. Listing it
@@ -561,14 +583,14 @@ Ordered by value over cost. Each step is a separate change with the full
     imports off the re-export shims) are listed in
     `docs/plans/client-10-15.md`.
 11. One debug tooling family shared by Combat Test, practice and offline
-    (in progress: the toggles refuse worker-allocated rounds; `shared::debug`
+    (done: the toggles refuse worker-allocated rounds; `shared::debug`
     with `DebugCommand` and `DebugAccess`, the server's `debug/` module with
-    `handle_debug` and `debug_access`, and the shared bot planners
-    `skill_upgrade_order` and `plan_purchases` are done; so is the client
-    `debug/` module with `DebugToggles`, `NetworkCommand::Debug` and
-    `DebugPlugins`. One tools page driven by `DebugAccess` (11e) widens
-    where the page and the re-send appear and waits for the owner's
-    decision).
+    `handle_debug` and `debug_access`, the shared bot planners
+    `skill_upgrade_order` and `plan_purchases`, the client `debug/` module
+    with `DebugToggles`, `NetworkCommand::Debug` and `DebugPlugins`; the
+    server sends `Snapshot.debug_access` (additive) and one pause-menu
+    tools page, the HUD and the toggle re-send follow it, with a fallback
+    to the `match_mode` table for older servers).
 12. Data-driven hero and item catalogs (done: `shared/assets/catalog/`
     `heroes.json` and `items.json`, loaded and validated once by
     `shared::catalog`; the accessors keep their names and signatures, the

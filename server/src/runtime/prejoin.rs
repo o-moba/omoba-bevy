@@ -95,6 +95,7 @@ pub(crate) fn status_snapshot(
     Some(ServerPacket::Snapshot {
         vision: None,
         sandbox: None,
+        debug_access: None,
         match_mode: match_mode.into(),
         geometry_id: world.map_config.geometry_id.clone(),
         map_profile: world.map_config.map_profile.clone(),

@@ -26,6 +26,7 @@ pub(in crate::net) struct PendingSnapshotData {
     pub(in crate::net) vision: Option<shared::vision::TeamVision>,
     pub(in crate::net) forest_pickups: Vec<shared::forest_pickups::ForestPickupState>,
     pub(in crate::net) sandbox: Option<shared::sandbox::SandboxSnapshot>,
+    pub(in crate::net) debug_access: Option<shared::debug::DebugAccess>,
     pub(in crate::net) prematch: Option<shared::prematch::PrematchSnapshot>,
     pub(in crate::net) match_mode: String,
     pub(in crate::net) geometry_id: String,
@@ -122,6 +123,7 @@ pub(in crate::net) fn ingest_server_snapshot_packets(
                 }
                 ServerPacket::Snapshot {
                     sandbox,
+                    debug_access,
                     forest_pickups,
                     vision,
                     geometry_id,
@@ -174,6 +176,7 @@ pub(in crate::net) fn ingest_server_snapshot_packets(
                     }
                     latest_snapshot = Some(PendingSnapshotData {
                         sandbox,
+                        debug_access,
                         forest_pickups,
                         vision,
                         match_mode,

@@ -79,6 +79,10 @@ fn assert_status_reply(bytes: &[u8]) -> Value {
     for field in ["vision", "sandbox", "scoreboard", "prematch"] {
         assert_eq!(value[field], Value::Null, "{field} leaked");
     }
+    assert!(
+        value.get("debug_access").is_none(),
+        "debug access goes to joined players only"
+    );
     value
 }
 
