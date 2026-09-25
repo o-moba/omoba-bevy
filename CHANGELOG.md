@@ -15,6 +15,7 @@ Packages for macOS, Windows, Linux, Android and iPhone are built by one script.
 
 ### Release tooling and packages
 - `scripts/release.py` (+ `make release-*`, `docs/RELEASING.md`): turnkey packages into `dist/v<version>/` with checksums — macOS `Omoba.app` (ad-hoc signed zip with a practice-host script), Windows x64 zip (`Omoba.exe`, host `.bat`), Linux x64 tarball (client, server, systemd example), Android arm64 APK with a stable playtest key and a version-derived `versionCode`, iPhone App Store archive / TestFlight upload. `release draft` creates an unpublished GitHub release; `release ci` runs the new `.github/workflows/release.yml` (tag `v*` → macOS/Windows/Linux/Android → draft release).
+- Security: patch updates for open advisories — `rustls-webpki` 0.103.15 (CRL parsing DoS, name-constraint and CRL-matching fixes), `bytes` 1.12.1, `grid` 1.0.1, `rand` 0.9.5.
 - Client: the party lobby has a **SERVER** field on desktop (Change → type `host:port` → Enter); it reconnects and is remembered. A release Windows client opens no console window. A macOS app bundle finds its assets in `Contents/Resources`.
 
 ### Party, party lobby and co-op vs bots
