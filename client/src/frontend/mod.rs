@@ -23,6 +23,7 @@ pub mod party_stage;
 pub mod postmatch;
 pub mod preview;
 pub mod searching;
+pub mod server_field;
 pub mod widgets;
 
 use bevy::prelude::*;
@@ -110,6 +111,7 @@ impl Plugin for FrontendPlugin {
                 preview::AvatarPreviewPlugin,
                 lobby::LobbyScreenPlugin,
                 party_stage::PartyStagePlugin,
+                server_field::ServerFieldPlugin,
                 searching::SearchingScreenPlugin,
                 draft::DraftScreenPlugin,
                 loading::LoadingScreenPlugin,

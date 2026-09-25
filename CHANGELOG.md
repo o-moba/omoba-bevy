@@ -6,7 +6,18 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
-### 0.24.0 — Party, party lobby and co-op vs bots
+## [0.24.0] - 2026-09-25
+
+First tagged playtest release since 0.18. **Highlights:** play with a friend —
+form a party, see each other's avatars in the party lobby, and play on the same
+team against bots. Desktop players can now type the server address in the game.
+Packages for macOS, Windows, Linux, Android and iPhone are built by one script.
+
+### Release tooling and packages
+- `scripts/release.py` (+ `make release-*`, `docs/RELEASING.md`): turnkey packages into `dist/v<version>/` with checksums — macOS `Omoba.app` (ad-hoc signed zip with a practice-host script), Windows x64 zip (`Omoba.exe`, host `.bat`), Linux x64 tarball (client, server, systemd example), Android arm64 APK with a stable playtest key and a version-derived `versionCode`, iPhone App Store archive / TestFlight upload. `release draft` creates an unpublished GitHub release; `release ci` runs the new `.github/workflows/release.yml` (tag `v*` → macOS/Windows/Linux/Android → draft release).
+- Client: the party lobby has a **SERVER** field on desktop (Change → type `host:port` → Enter); it reconnects and is remembered. A release Windows client opens no console window. A macOS app bundle finds its assets in `Contents/Resources`.
+
+### Party, party lobby and co-op vs bots
 - **Party.** New additive `ClientPacket::Party` / `ServerPacket::Party` (`shared::party`). The server (`server/src/party.rs`) owns presence, invites (60 s), accept/decline, leave (lead passes on), kick, a five-member cap and the leader-only launch. Parties run on standalone/practice servers and the public lobby, not in match workers; profile members are rebound after a public match.
 - **Same team vs bots.** On a practice server a joining human takes a seat on a seated party mate's team; the draft countdown waits up to 60 s for launched members still picking. In the public lobby, a party is queued as one unit (all present members, one preference), allocated into one manifest and one team (`split_teams`); Play with bots allocates the whole party together; the worker manifest contract now accepts a bot-practice roster of one to five humans on one team (was exactly one).
 - **Party lobby (client).** New `AppScreen::Lobby` with a 3D line-up of members' avatars (`frontend/party_stage.rs`, render layer 27), name/leader/status plates, online players with Invite, invites with Accept/Decline, PLAY VS BOTS / Quick match for the leader, Leave and Kick. Home: **Party & friends** replaces the Friends button (the career friends list opens from the lobby when storage is on), an invite toast, and PLAY becomes PLAY AS PARTY (leader) / PARTY LOBBY (member). A launch moves every member to hero select once.

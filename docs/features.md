@@ -2,7 +2,7 @@
 
 ## Party lobby and co-op vs bots (0.24.0)
 
-Home → **Party & friends** opens a party lobby: invite anyone connected to the same server (friends first when career storage is on), accept or decline invites from a Home toast, and see every member's avatar in a 3D line-up with leader and status plates. The leader's **PLAY VS BOTS** moves the whole party to hero select; the party is seated on one team and bots fill every other seat. Works on a database-free practice server and on the public lobby, where Play with bots allocates one arena for the party and Quick match never splits a party. See [the party guide](party.md).
+Home → **Party & friends** opens a party lobby: invite anyone connected to the same server (friends first when career storage is on), accept or decline invites from a Home toast, and see every member's avatar in a 3D line-up with leader and status plates. The leader's **PLAY VS BOTS** moves the whole party to hero select; the party is seated on one team and bots fill every other seat. Works on a database-free practice server and on the public lobby, where Play with bots allocates one arena for the party and Quick match never splits a party. See [the party guide](party.md). On desktop the lobby's **SERVER** field (Change → `host:port` → Enter) connects to another host and is remembered; release packages for every platform come from `scripts/release.py` ([releasing](RELEASING.md)).
 
 ## Five classes and the Warden jungler (0.23.0-rc.6)
 

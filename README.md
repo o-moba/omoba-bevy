@@ -111,6 +111,10 @@ Host a practice server as above, then both of you start the client against it
 (`make game GAME_SERVER_ADDR=<host-lan-ip>:4000`; the host can use
 `127.0.0.1:4000`). No database or wallet is needed.
 
+Players with a downloaded build ([GitHub Releases](https://github.com/o-moba/omoba-bevy/releases))
+set the host address in the game: **Party & friends → SERVER → Change**, type
+`host:port`, Enter. It is remembered.
+
 1. On Home, open **Party & friends**. Everyone connected to the same server is
    listed under *Online on this server*; press **Invite**.
 2. Your friend sees *"… invites you to a party"* on Home (or in the party
@@ -128,6 +132,13 @@ never splits a party. Details: [docs/party.md](docs/party.md).
 Persistent profiles and match history require a configured career server and
 PostgreSQL. See [career setup](docs/match-progression.md),
 [Account API operations](account-api/README.md) and [RUNBOOK.md](RUNBOOK.md).
+
+## Build release packages
+
+`make release-check` shows what this computer can build; `make release-ci`
+builds macOS, Windows, Linux and Android on GitHub Actions into a draft
+release; `make release-testflight` uploads the iPhone build. See
+[docs/RELEASING.md](docs/RELEASING.md).
 
 ## Commands at a glance
 

@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone check fmt fmt-check lint check-no-qa test test-scripts test-postgres
+.PHONY: help release-check release-local release-mac release-linux release-android release-ios release-testflight release-ci release-draft release-notes server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone check fmt fmt-check lint check-no-qa test test-scripts test-postgres
 
 # ---------------------------------------------------------------------------
 # Match modes (TASK-22)
@@ -157,3 +157,40 @@ verify-task-12: ## Build server and run the live UDP QA matrix
 verify-gameplay: ## Build server and run headless gameplay/matchmaking checks
 	cargo build -p server
 	cargo test -p harness -- --test-threads=1
+
+# ---------------------------------------------------------------------------
+# Releases (docs/RELEASING.md). Artifacts go to dist/v<version>/.
+# RELEASE_SERVER=host:port compiles the initial server address into clients.
+# ---------------------------------------------------------------------------
+RELEASE_SERVER ?=
+RELEASE_FLAGS = $(if $(RELEASE_SERVER),--server $(RELEASE_SERVER),)
+
+release-check: ## Which release platforms this computer can build
+	python3 scripts/release.py check
+
+release-local: ## Build every package this computer can (macOS, iPhone archive, Linux via Docker, Android if SDK)
+	python3 scripts/release.py build all $(RELEASE_FLAGS)
+
+release-mac: ## macOS Apple-silicon Omoba.app zip
+	python3 scripts/release.py build macos $(RELEASE_FLAGS)
+
+release-linux: ## Linux x64 client + practice server tarball (Docker on macOS)
+	python3 scripts/release.py build linux $(RELEASE_FLAGS)
+
+release-android: ## Android arm64 APK (needs ANDROID_HOME + NDK)
+	python3 scripts/release.py build android $(RELEASE_FLAGS)
+
+release-ios: ## iPhone App Store archive + .ipa (no upload)
+	python3 scripts/release.py build ios $(RELEASE_FLAGS)
+
+release-testflight: ## iPhone build uploaded to App Store Connect / TestFlight
+	python3 scripts/release.py build ios --upload $(RELEASE_FLAGS)
+
+release-ci: ## Run the GitHub release workflow: macOS, Windows, Linux, Android -> draft release
+	python3 scripts/release.py ci $(RELEASE_FLAGS)
+
+release-draft: ## Upload local dist/ packages to a DRAFT GitHub release
+	python3 scripts/release.py draft
+
+release-notes: ## Print release notes for the current version
+	python3 scripts/release.py notes

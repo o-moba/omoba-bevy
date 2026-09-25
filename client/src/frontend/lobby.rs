@@ -108,12 +108,14 @@ struct LobbySignature {
     public: bool,
     friends: bool,
     server: String,
+    field: super::server_field::ServerField,
 }
 
 fn signature(
     party: &PartyClient,
     career: &crate::career::CareerClient,
     session: &ClientSession,
+    field: &super::server_field::ServerField,
 ) -> LobbySignature {
     LobbySignature {
         view: party.view.clone(),
@@ -121,6 +123,7 @@ fn signature(
         public: career.view.match_service.is_some(),
         friends: career.view.storage_enabled,
         server: session.server_addr().to_owned(),
+        field: field.clone(),
     }
 }
 
@@ -134,12 +137,13 @@ fn spawn_lobby(
     selection: Res<crate::team::TeamSelection>,
     mut stage: ResMut<PartyStage>,
     platform: Res<crate::ui::UiPlatform>,
+    field: Res<super::server_field::ServerField>,
 ) {
     if automation_bypass() {
         return;
     }
     let phone = platform.is_mobile();
-    let sig = signature(&party, &career, &session);
+    let sig = signature(&party, &career, &session, &field);
     let view = &sig.view;
     stage.members = stage_members(view, crate::party::presence_avatar(&card, &selection));
     let image = stage.image.clone();
@@ -345,6 +349,10 @@ fn spawn_lobby(
                     Name::new("LobbySocial"),
                 ))
                 .with_children(|column| {
+                    // A phone reaches the server through its SERVER keypad.
+                    if !phone {
+                        super::server_field::spawn_server_field(column, &sig.field, &sig.server);
+                    }
                     if !view.invites.is_empty() {
                         column.spawn(widgets::label("INVITES", 12.0, theme::GOLD));
                         for invite in &view.invites {
@@ -563,10 +571,11 @@ fn refresh_lobby(
     selection: Res<crate::team::TeamSelection>,
     stage: ResMut<PartyStage>,
     platform: Res<crate::ui::UiPlatform>,
+    field: Res<super::server_field::ServerField>,
     roots: Query<Entity, With<LobbyRoot>>,
     mut last: Local<Option<LobbySignature>>,
 ) {
-    let mut current = signature(&party, &career, &session);
+    let mut current = signature(&party, &career, &session, &field);
     // Invite countdowns tick every second; they are not worth a rebuild.
     for invite in &mut current.view.invites {
         invite.expires_in_secs = 0;
@@ -587,7 +596,7 @@ fn refresh_lobby(
         .despawn_related::<Children>()
         .despawn();
     spawn_lobby(
-        commands, party, career, session, card, selection, stage, platform,
+        commands, party, career, session, card, selection, stage, platform, field,
     );
 }
 
