@@ -1,0 +1,30 @@
+name: iOS compile check
+
+# Not a pull-request gate: macOS runners are slow and scarce. Runs weekly and
+# on demand so iOS-only code (`target_os = "ios"`, the StoreKit FFI) cannot
+# silently stop compiling between releases (report O24).
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 4 * * 1"
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  ios:
+    name: cargo check -p client (aarch64-apple-ios)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.1
+          targets: aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo check the client for iOS
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "15.0"
+        run: cargo check -p client --target aarch64-apple-ios --locked

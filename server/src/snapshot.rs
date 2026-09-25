@@ -7,11 +7,11 @@ use shared::wire::{GameState, PlayerState, ServerPacket};
 
 use crate::balance::VICTORY_REMATCH_DELAY;
 use crate::game_world::GameWorld;
-use crate::runtime::ServerRuntime;
+use crate::runtime::ports::Transport;
+use crate::runtime::{RateLimitedDiagnostic, ServerRuntime};
 use crate::sim::towers::structure_is_protected;
 use crate::{prematch, vision};
 
-#[cfg(test)]
 use std::net::SocketAddr;
 
 pub(crate) const SNAPSHOT_INTERVAL: Duration = Duration::from_millis(50);
@@ -86,8 +86,9 @@ pub(crate) fn validate_snapshot_payload_size(
 /// Replicated player list for the recipient with hero id `recipient`: their
 /// own entry is the `owner_view`, everyone else (teammates included) the
 /// redacted `public_view`; `None` redacts every entry. Only joined players
-/// are visible to clients. Pre-join endpoints keep receiving snapshots (they
-/// are still addressable) but must not appear in the world as ghost players.
+/// are visible to clients. Pre-join endpoints are still addressable (public
+/// lobby views, standalone status replies) but must not appear in the world
+/// as ghost players.
 pub(crate) fn build_players_snapshot(
     world: &GameWorld,
     recipient: Option<u64>,
@@ -189,15 +190,17 @@ impl ServerRuntime {
         };
 
         // Recipients are fixed before sending: the combat log is drained per
-        // recipient below, which needs it mutably.
+        // recipient below, which needs it mutably. A standalone server sends
+        // the world only to verified endpoints (joined, or career-authenticated).
         let recipients =
             world
                 .players
                 .iter()
                 .filter(|(addr, player)| {
                     !player.hero.identity.is_bot
-                        && (!self.match_service.is_public()
-                            || self.public_transport.validated(**addr, now)
+                        && (!self.match_service.is_public() && self.endpoint_verified(**addr)
+                            || self.match_service.is_public()
+                                && self.public_transport.validated(**addr, now)
                                 && self.career.backend.gameplay_principal(**addr).is_some_and(
                                     |p| {
                                         self.match_service.can_observe(
@@ -259,56 +262,113 @@ impl ServerRuntime {
                 vision::filter_snapshot(&mut packet, player, world, now);
             }
 
-            let payloads = if player.framed_snapshots {
-                serialize_snapshot_datagram(&packet)
-                    .map_err(|error| error.to_string())
-                    .and_then(|payload| {
-                        shared::transport::encode_snapshot(
-                            &payload,
-                            self.server_epoch,
-                            self.snapshot_tick,
-                        )
-                        .map_err(|error| error.to_string())
-                    })
-            } else {
-                serialize_snapshot_datagram(&packet)
-                    .map(|payload| vec![payload])
-                    .map_err(|error| error.to_string())
-            };
-            match payloads {
-                Ok(payloads) => {
-                    for payload in payloads {
-                        let result = self.transport.send_to(&payload, addr).and_then(|sent| {
-                            if sent == payload.len() {
-                                Ok(())
-                            } else {
-                                Err(io::Error::new(
-                                    io::ErrorKind::WriteZero,
-                                    "incomplete UDP datagram",
-                                ))
-                            }
-                        });
-                        if let Err(error) = result {
-                            if let Some(suppressed) = self.snapshot_send_diagnostic.record(now) {
-                                eprintln!(
-                                    "Failed to send complete {}-byte snapshot datagram to {addr}: {error}; suppressed {suppressed} similar errors",
-                                    payload.len()
-                                );
-                            }
-                            break;
-                        }
-                    }
-                }
-                Err(error) => {
-                    if let Some(suppressed) = self.snapshot_send_diagnostic.record(now) {
-                        eprintln!(
-                            "Rejected snapshot for {addr}: {error}; suppressed {suppressed} similar errors"
-                        );
-                    }
-                }
+            send_snapshot(
+                self.transport.as_ref(),
+                &mut self.snapshot_send_diagnostic,
+                &packet,
+                player.framed_snapshots,
+                self.server_epoch,
+                self.snapshot_tick,
+                addr,
+                now,
+            );
+        }
+
+        // Unverified standalone endpoints get a small status snapshot, one
+        // per datagram they sent and at most once per interval (report O4).
+        if !self.match_service.is_public() {
+            let mut replies = std::mem::take(&mut self.prejoin_replies);
+            let due = crate::runtime::prejoin::due_status_replies(
+                &mut replies,
+                |addr| world.players.contains_key(&addr) && !self.endpoint_verified(addr),
+                now,
+            );
+            self.prejoin_replies = replies;
+            let meta = shared::protocol::SnapshotMeta::new(
+                self.server_epoch,
+                self.match_id,
+                self.snapshot_tick,
+            );
+            for addr in due {
+                let Some(packet) = crate::runtime::prejoin::status_snapshot(
+                    meta,
+                    self.rules.mode_id(),
+                    world,
+                    addr,
+                ) else {
+                    continue;
+                };
+                send_snapshot(
+                    self.transport.as_ref(),
+                    &mut self.snapshot_send_diagnostic,
+                    &packet,
+                    world.players[&addr].framed_snapshots,
+                    self.server_epoch,
+                    self.snapshot_tick,
+                    addr,
+                    now,
+                );
             }
         }
 
         self.last_snapshot_at = snapshot_now;
+    }
+}
+
+/// Serializes `packet` (framed for a recipient that said Hello) and sends it
+/// to `addr`, reporting failures through the rate-limited `diagnostic`.
+fn send_snapshot(
+    transport: &dyn Transport,
+    diagnostic: &mut RateLimitedDiagnostic,
+    packet: &ServerPacket,
+    framed: bool,
+    server_epoch: u64,
+    snapshot_tick: u64,
+    addr: SocketAddr,
+    now: Instant,
+) {
+    let payloads = if framed {
+        serialize_snapshot_datagram(packet)
+            .map_err(|error| error.to_string())
+            .and_then(|payload| {
+                shared::transport::encode_snapshot(&payload, server_epoch, snapshot_tick)
+                    .map_err(|error| error.to_string())
+            })
+    } else {
+        serialize_snapshot_datagram(packet)
+            .map(|payload| vec![payload])
+            .map_err(|error| error.to_string())
+    };
+    match payloads {
+        Ok(payloads) => {
+            for payload in payloads {
+                let result = transport.send_to(&payload, addr).and_then(|sent| {
+                    if sent == payload.len() {
+                        Ok(())
+                    } else {
+                        Err(io::Error::new(
+                            io::ErrorKind::WriteZero,
+                            "incomplete UDP datagram",
+                        ))
+                    }
+                });
+                if let Err(error) = result {
+                    if let Some(suppressed) = diagnostic.record(now) {
+                        eprintln!(
+                            "Failed to send complete {}-byte snapshot datagram to {addr}: {error}; suppressed {suppressed} similar errors",
+                            payload.len()
+                        );
+                    }
+                    break;
+                }
+            }
+        }
+        Err(error) => {
+            if let Some(suppressed) = diagnostic.record(now) {
+                eprintln!(
+                    "Rejected snapshot for {addr}: {error}; suppressed {suppressed} similar errors"
+                );
+            }
+        }
     }
 }
