@@ -1055,7 +1055,7 @@ mod tests {
 
     fn named(app: &mut App, name: &str) -> Entity {
         app.world_mut()
-            .query::<(Entity, &Name)>()
+            .query::<(Entity, crate::ui::test_id::NodeKey)>()
             .iter(app.world())
             .find(|(_, n)| n.as_str() == name)
             .unwrap()

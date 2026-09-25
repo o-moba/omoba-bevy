@@ -170,7 +170,7 @@ fn prepare(
     mut joined: Local<bool>,
     help: Res<HelpOverlayVisible>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
-    mut buttons: crate::qa::NamedPresses,
+    mut buttons: crate::qa::TestIdPresses,
 ) {
     if let Ok(mut window) = windows.single_mut() {
         window.resolution.set_scale_factor_override(Some(1.0));
@@ -274,7 +274,7 @@ struct Scene<'w, 's> {
         'w,
         's,
         (
-            &'static Name,
+            crate::qa::QaName,
             &'static ComputedNode,
             &'static InheritedVisibility,
         ),

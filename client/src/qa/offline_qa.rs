@@ -67,24 +67,15 @@ fn capture(world: &mut World, qa: &Qa, name: &str) {
         .spawn(Screenshot::primary_window())
         .observe(save_to_disk(qa.directory.join(name)));
 }
-/// Presses the named button: a UI-kit button through `SyntheticPress`,
-/// anything else by writing `Interaction::Pressed`.
-fn press(world: &mut World, name: &str) -> bool {
-    let mut kit = None;
-    for (entity, n, mut interaction, pressable) in world
-        .query::<(Entity, &Name, &mut Interaction, Has<crate::ui::Pressable>)>()
-        .iter_mut(world)
-    {
-        if n.as_str() == name {
-            if pressable {
-                kit = Some(entity);
-                break;
-            }
-            *interaction = Interaction::Pressed;
-            return true;
-        }
-    }
-    kit.map(|entity| world.write_message(crate::ui::SyntheticPress(entity)))
+/// Presses the UI-kit button carrying `id` with a `SyntheticPress`.
+fn press(world: &mut World, id: &str) -> bool {
+    let entity = world
+        .query_filtered::<(Entity, &crate::ui::TestId), With<crate::ui::Pressable>>()
+        .iter(world)
+        .find(|(_, test_id)| test_id.as_str() == id)
+        .map(|(entity, _)| entity);
+    entity
+        .map(|entity| world.write_message(crate::ui::SyntheticPress(entity)))
         .is_some()
 }
 fn drive(world: &mut World) {

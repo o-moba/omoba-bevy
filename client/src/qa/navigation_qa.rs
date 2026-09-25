@@ -215,7 +215,7 @@ fn admission_buttons(
     qa: Res<NavigationQa>,
     session: Res<ClientSession>,
     help: Res<HelpOverlayVisible>,
-    mut buttons: crate::qa::NamedPresses,
+    mut buttons: crate::qa::TestIdPresses,
 ) {
     if qa.stage != 0 {
         return;

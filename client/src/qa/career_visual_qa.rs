@@ -248,7 +248,7 @@ fn prepare(
     mut qa: ResMut<CareerQa>,
     mut career: ResMut<CareerClient>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
-    mut scrolls: Query<(&Name, &mut ScrollPosition)>,
+    mut scrolls: Query<(crate::qa::QaName, &mut ScrollPosition)>,
 ) {
     if qa.finished || qa.stage >= VIEWS.len() {
         return;
@@ -302,7 +302,7 @@ fn observe(
     mut qa: ResMut<CareerQa>,
     windows: Query<(Entity, &Window), With<PrimaryWindow>>,
     nodes: Query<(
-        &Name,
+        crate::qa::QaName,
         &ComputedNode,
         &UiGlobalTransform,
         Option<&InheritedVisibility>,

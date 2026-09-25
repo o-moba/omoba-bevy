@@ -454,7 +454,7 @@ mod tests {
         app.update();
         let names: Vec<String> = app
             .world_mut()
-            .query::<&Name>()
+            .query::<crate::ui::test_id::NodeKey>()
             .iter(app.world())
             .map(|name| name.as_str().to_owned())
             .collect();

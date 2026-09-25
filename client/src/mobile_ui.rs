@@ -10,6 +10,7 @@ use crate::{
     net::{ClientSession, SessionUiCommand},
     ui::{
         Activated, ModalId, ModalRoot, ScrollArea, TestId, UiAction, UiActionAppExt,
+        test_id::NodeKey,
         theme::{
             self as ui,
             metric::{self, PhoneText},
@@ -441,16 +442,17 @@ struct PhoneFontSize(f32);
 
 fn phone_family(
     entity: Entity,
-    hierarchy: &Query<(Option<&ChildOf>, Option<&Name>)>,
+    hierarchy: &Query<(Option<&ChildOf>, NodeKey)>,
 ) -> Option<PhoneText> {
     let mut next = Some(entity);
     for _ in 0..12 {
-        let (parent, name) = hierarchy.get(next?).ok()?;
-        if let Some(name) = name {
-            if name.as_str().starts_with("ShopBuy-") {
+        let (parent, key) = hierarchy.get(next?).ok()?;
+        let name = key.as_str();
+        if !name.is_empty() {
+            if name.starts_with("ShopBuy-") {
                 return Some(PhoneText::ShopCard);
             }
-            let family = match name.as_str() {
+            let family = match name {
                 "TeamSelectOverlay" => Some(PhoneText::Entry),
                 "ShopPanel" => Some(PhoneText::Shop),
                 "ShopSummary" => Some(PhoneText::ShopSummary),
@@ -486,10 +488,10 @@ fn adapt_phone_layout(
     mut commands: Commands,
     mobile: Res<MobileControls>,
     session: Res<ClientSession>,
-    mut nodes: Query<(Entity, &Name, &mut Node, Option<&mut UiTransform>)>,
+    mut nodes: Query<(Entity, NodeKey, &mut Node, Option<&mut UiTransform>)>,
     mut fonts: Query<(Entity, &mut TextFont, Option<&PhoneFontSize>)>,
-    mut copy: Query<(&Name, &mut Text)>,
-    hierarchy: Query<(Option<&ChildOf>, Option<&Name>)>,
+    mut copy: Query<(NodeKey, &mut Text)>,
+    hierarchy: Query<(Option<&ChildOf>, NodeKey)>,
     pause: Option<Res<crate::pause_menu::PauseMenuState>>,
     ui_scale: Option<Res<UiScale>>,
 ) {

@@ -1147,14 +1147,14 @@ mod tests {
         app.update();
         let button = app
             .world_mut()
-            .query::<(Entity, &Name)>()
+            .query::<(Entity, crate::ui::test_id::NodeKey)>()
             .iter(app.world())
             .find(|(_, name)| name.as_str() == "CollectionConnectAccount")
             .unwrap()
             .0;
         let label = app
             .world_mut()
-            .query::<(Entity, &Name)>()
+            .query::<(Entity, crate::ui::test_id::NodeKey)>()
             .iter(app.world())
             .find(|(_, name)| name.as_str() == "CollectionAccountStatus")
             .unwrap()

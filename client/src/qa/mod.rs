@@ -52,45 +52,35 @@ impl PluginGroup for QaPlugins {
     }
 }
 
-/// Harness presses by `Name`. A UI-kit button (it carries `Pressable`) is
-/// pressed with `SyntheticPress`, which the recognizer turns into exactly one
-/// activation in desktop and touch mode alike; anything else still gets
-/// `Interaction::Pressed` written, as the harnesses always did.
+/// A node's label in QA lookups and dumps: the `TestId` of a kit control,
+/// otherwise its `Name` (layout nodes); see [`crate::ui::test_id::NodeKey`].
+pub(crate) use crate::ui::test_id::NodeKey as QaName;
+
+/// Harness presses by `TestId`. Every button a harness presses is a UI-kit
+/// button, so the press is a `SyntheticPress`, which the recognizer turns
+/// into exactly one activation in desktop and touch mode alike (and which a
+/// modal in front blocks, like a real tap).
 #[derive(SystemParam)]
-pub(crate) struct NamedPresses<'w, 's> {
-    buttons: Query<
-        'w,
-        's,
-        (
-            Entity,
-            &'static Name,
-            &'static mut Interaction,
-            Has<crate::ui::Pressable>,
-        ),
-    >,
+pub(crate) struct TestIdPresses<'w, 's> {
+    buttons: Query<'w, 's, (Entity, &'static crate::ui::TestId), With<crate::ui::Pressable>>,
     presses: MessageWriter<'w, crate::ui::SyntheticPress>,
 }
 
-impl NamedPresses<'_, '_> {
-    /// Presses every button whose name satisfies `wanted`; true if any did.
+impl TestIdPresses<'_, '_> {
+    /// Presses every button whose id satisfies `wanted`; true if any did.
     pub(crate) fn press_where(&mut self, mut wanted: impl FnMut(&str) -> bool) -> bool {
         let mut pressed = false;
-        for (entity, name, mut interaction, kit) in &mut self.buttons {
-            if !wanted(name.as_str()) {
-                continue;
-            }
-            pressed = true;
-            if kit {
+        for (entity, id) in &self.buttons {
+            if wanted(id.as_str()) {
+                pressed = true;
                 self.presses.write(crate::ui::SyntheticPress(entity));
-            } else {
-                *interaction = Interaction::Pressed;
             }
         }
         pressed
     }
 
-    /// Presses the button named `wanted`, if it is on screen.
+    /// Presses the button with id `wanted`, if it is on screen.
     pub(crate) fn press(&mut self, wanted: &str) -> bool {
-        self.press_where(|name| name == wanted)
+        self.press_where(|id| id == wanted)
     }
 }
