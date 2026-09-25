@@ -6,6 +6,19 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Android: `make android` / `make android-check` build targets
+- Wired the existing `mobile/android/build.py` local-debug-APK packager into the
+  `Makefile` (`android-check`, `android`) so it matches the iPhone workflow
+  (`iphone-check`, `iphone`). No packaging behaviour changed — the script still
+  needs the Rust `aarch64-linux-android` target, an Android SDK
+  (`platforms;android-35`, `build-tools;35.0.0`) and NDK r27+, picked up from
+  `ANDROID_HOME`/`ANDROID_SDK_ROOT` and `ANDROID_NDK_HOME`.
+- `make android ANDROID_SERVER=host:port` forwards `--server` so a build can
+  carry a real LAN server address for testers instead of typing it in-game.
+- Documented the flow in `README.md` and `mobile/README.md` (Android section
+  now leads with the `make` targets; the direct `python3 mobile/android/build.py
+  --sdk/--ndk` invocation remains for custom paths).
+
 ### UI kit: layout, TestId QA, last buttons
 - Roadmap step 9b, items 5 to 7 of `docs/ui-kit.md` (step 9b is complete). **Layout:** `ui::theme::metric` is the one responsive policy: `Form::{Desktop, Phone}`, `menu_font`, `menu_control_height`, `pause_panel_height`, `phone_class_column`, `phone_shop_card`, `phone_font`/`PhoneText` and the phone panel and bar sizes. `adapt_phone_menu_readability`, `adapt_phone_layout`, `sync_phone_ui` and `size_desktop_pause_panel` apply its numbers; every pixel value is unchanged and pinned by a test.
 - **Buttons:** the combat skill bar (`HotbarAction`), the shop and its HUD shortcuts (`ShopAction`), the phone bar and server entry (`PhoneAction`), the match chrome and scoreboard (`EdgeAction`), the connection Retry button (`RetryPressed`) and the `OMOBA_DEBUG_UI` toggles (`DebugHudAction`) carry `UiAction<T>` and a `TestId` and handle `Activated<T>`; no module reads `Interaction` for a press any more. New `ButtonKind::{Skill, SkillUpgrade, ShopItem, Debug(DebugToggle)}` keep the hand-painted colours (moved to `ui::theme`), and `theme::button_pressed_color` keeps the skill slot's and shop card's darker pressed colour. Buttons with a fixed colour (gold shop button, quick-buy slots, OPEN SHOP, CLOSE, phone bar, score strip, menu button, Retry) have no `ButtonStyle`.

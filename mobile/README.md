@@ -80,9 +80,23 @@ least 6 GiB for build output in addition to installed tools; a cold build may ne
 The script reports prerequisites and does not install or upgrade any toolchain.
 
 ```sh
+export ANDROID_HOME=/path/to/android-sdk
+export ANDROID_NDK_HOME=/path/to/android-ndk
+make android-check
+make android
+```
+
+`--sdk`/`--ndk` also work directly if you would rather not export the environment
+variables:
+
+```sh
 python3 mobile/android/build.py --check --sdk /path/to/android-sdk --ndk /path/to/android-ndk
 python3 mobile/android/build.py --sdk /path/to/android-sdk --ndk /path/to/android-ndk
 ```
+
+To bake a real server address into the build (so testers do not have to type it
+in-game), pass `ANDROID_SERVER=host:port` to `make android` or `--server
+host:port` to the script directly.
 
 `build.py` runs Cargo's Android cdylib target with the NDK compiler, includes the
 existing `client/assets`, aligns the APK and signs a **local debug APK** using a
