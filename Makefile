@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone check fmt fmt-check lint check-no-qa test test-scripts test-postgres
+.PHONY: help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone iphone-box android-check android android-universal check fmt fmt-check lint check-no-qa test test-scripts test-postgres
 
 # ---------------------------------------------------------------------------
 # Match modes (TASK-22)
@@ -23,10 +23,12 @@
 GAME_SERVER_ADDR ?= 127.0.0.1:4000
 LOCAL_SERVER_ADDR ?= 127.0.0.1:4000
 IPHONE_OUTPUT ?= builds/iphone
+ANDROID_OUTPUT ?= target/mobile/android
+ANDROID_SERVER ?=
 
 # Bare make is discovery only; game and toolchain processes start explicitly.
 help: ## Show commands, common overrides and documentation
-	@awk 'BEGIN { FS = ":.*## "; print "Open Moba - play, create, build together\n" } /^[a-zA-Z0-9_-]+:.*## / { printf "  make %-19s %s\n", $$1, $$2 } END { print "\nOverrides:"; print "  make practice LOCAL_SERVER_ADDR=127.0.0.1:4010"; print "  make practice-server LOCAL_SERVER_ADDR=0.0.0.0:4000"; print "  make game GAME_SERVER_ADDR=192.168.1.10:4000"; print "  make bots BOTS=4 BOTS_SERVER=127.0.0.1:4000"; print "  make iphone IPHONE_OUTPUT=builds/iphone"; print "\nDocs: README.md, RUNBOOK.md, mobile/ios/README.md"; print "TestFlight: mobile/ios/TESTFLIGHT.md (separate signing/upload steps)"; print "SDK: https://github.com/ekza-space/ekza-bevy-sdk" }' $(MAKEFILE_LIST)
+	@awk 'BEGIN { FS = ":.*## "; print "Open Moba - play, create, build together\n" } /^[a-zA-Z0-9_-]+:.*## / { printf "  make %-19s %s\n", $$1, $$2 } END { print "\nOverrides:"; print "  make practice LOCAL_SERVER_ADDR=127.0.0.1:4010"; print "  make practice-server LOCAL_SERVER_ADDR=0.0.0.0:4000"; print "  make game GAME_SERVER_ADDR=192.168.1.10:4000"; print "  make bots BOTS=4 BOTS_SERVER=127.0.0.1:4000"; print "  make iphone IPHONE_OUTPUT=builds/iphone"; print "  make android ANDROID_SERVER=192.168.1.10:4000"; print "  make android-universal   # arm64-v8a + armeabi-v7a + x86_64 in one APK"; print "\nDocs: README.md, RUNBOOK.md, mobile/ios/README.md, mobile/README.md"; print "TestFlight: mobile/ios/TESTFLIGHT.md (separate signing/upload steps)"; print "Android needs ANDROID_HOME (SDK) and ANDROID_NDK_HOME (NDK r27+) set first"; print "SDK: https://github.com/ekza-space/ekza-bevy-sdk" }' $(MAKEFILE_LIST)
 
 # ---------------------------------------------------------------------------
 # Quality gate. `make check` is what CI runs (.github/workflows/ci.yml); run it
@@ -71,6 +73,25 @@ iphone: ## Build an unsigned physical iPhone package into builds/iphone
 
 iphone-box: ## Build an unsigned physical iPhone package into a timestamped builds/iphone-* folder
 	python3 mobile/ios/build_device.py --output "builds/iphone-$$(date +%Y%m%d-%H%M%S)"
+
+# Physical Android package (arm64 debug APK); install the Rust Android target,
+# an Android SDK (platforms;android-35, build-tools;35.0.0) and NDK r27+ first.
+# ANDROID_HOME/ANDROID_SDK_ROOT and ANDROID_NDK_HOME are picked up automatically;
+# see mobile/README.md for the one-time setup this depends on.
+android-check: ## Check Android SDK/NDK/Rust target build prerequisites
+	python3 mobile/android/build.py --check
+
+android: ## Build a locally-signed debug Android APK (arm64 only); optional ANDROID_SERVER=host:port bakes in an initial server address
+	python3 mobile/android/build.py --output "$(ANDROID_OUTPUT)" $(if $(ANDROID_SERVER),--server "$(ANDROID_SERVER)")
+	@echo "APK: $(ANDROID_OUTPUT)/omoba-$$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)-android-arm64-debug.apk"
+
+# Same as `android`, but bundles arm64-v8a + armeabi-v7a + x86_64 into one APK.
+# Slower to build and a bigger file; only worth it when a tester's device ABI
+# is unknown or confirmed non-arm64 (arm64-v8a alone already covers nearly
+# every real phone/tablet from the last decade).
+android-universal: ## Build a debug APK with arm64-v8a + armeabi-v7a + x86_64 in one package
+	python3 mobile/android/build.py --output "$(ANDROID_OUTPUT)" --universal $(if $(ANDROID_SERVER),--server "$(ANDROID_SERVER)")
+	@echo "APK: $(ANDROID_OUTPUT)/omoba-$$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)-android-universal-debug.apk"
 
 # Run the game server in RELEASE match mode (matches form to 5v5 before starting).
 server: ## Game server with full-roster matchmaking by default

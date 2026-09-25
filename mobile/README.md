@@ -80,9 +80,23 @@ least 6 GiB for build output in addition to installed tools; a cold build may ne
 The script reports prerequisites and does not install or upgrade any toolchain.
 
 ```sh
+export ANDROID_HOME=/path/to/android-sdk
+export ANDROID_NDK_HOME=/path/to/android-ndk
+make android-check
+make android
+```
+
+`--sdk`/`--ndk` also work directly if you would rather not export the environment
+variables:
+
+```sh
 python3 mobile/android/build.py --check --sdk /path/to/android-sdk --ndk /path/to/android-ndk
 python3 mobile/android/build.py --sdk /path/to/android-sdk --ndk /path/to/android-ndk
 ```
+
+To bake a real server address into the build (so testers do not have to type it
+in-game), pass `ANDROID_SERVER=host:port` to `make android` or `--server
+host:port` to the script directly.
 
 `build.py` runs Cargo's Android cdylib target with the NDK compiler, includes the
 existing `client/assets`, aligns the APK and signs a **local debug APK** using a
@@ -95,6 +109,29 @@ The output name is `target/mobile/android/omoba-<version>-android-arm64-debug.ap
 `--unsigned` deliberately skips signing and produces an APK that cannot be installed.
 The package requires arm64, Android 8/API 26 or newer, touchscreen and Vulkan level 1;
 these are build prerequisites, not a claim that every such device performs well.
+
+### Universal build (multiple ABIs)
+
+`make android` / `build.py` default to `arm64-v8a` only, which already covers
+effectively every real phone and tablet from the last decade. If a tester's
+device architecture is unknown, or `adb shell getprop ro.product.cpu.abi`
+confirms it is not `arm64-v8a`, add `--universal` (or `make android-universal`)
+to also cross-compile `armeabi-v7a` and `x86_64` into the same APK:
+
+```sh
+make android-universal   # or: python3 mobile/android/build.py --universal
+```
+
+This needs the extra Rust targets installed once (`rustup target add
+armv7-linux-androideabi x86_64-linux-android`), compiles three times, and
+produces a noticeably larger APK at
+`target/mobile/android/omoba-<version>-android-universal-debug.apk`. A crash
+right after launch on an already-`arm64-v8a` device is an architecture
+mismatch only if `adb logcat` actually says so (e.g. `UnsatisfiedLinkError`);
+a generic "app keeps stopping" is far more often the mandatory Vulkan level 1
+feature (line above) failing on that device's GPU driver, which `--universal`
+does not change. Get an `adb logcat` capture (`adb logcat -d | grep -A 30
+"FATAL EXCEPTION\|libclient\|panic"`) before assuming it is an ABI problem.
 
 After an actual successful build, use the installed SDK's adb to install the debug
 APK on a consenting test device, then launch **Omoba Beta** from its icon. The game

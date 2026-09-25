@@ -26,6 +26,16 @@ from package_licenses import add_legal_notices_to_zip, collect_legal_notices
 TARGET = "aarch64-linux-android"
 API = 26
 
+# ABI name -> (Rust target triple, NDK clang triple). armeabi-v7a and x86_64
+# are optional extra slices for --universal; arm64-v8a alone already covers
+# effectively all real phones/tablets from the last decade.
+ABIS = {
+    "arm64-v8a": ("aarch64-linux-android", "aarch64-linux-android"),
+    "armeabi-v7a": ("armv7-linux-androideabi", "armv7a-linux-androideabi"),
+    "x86_64": ("x86_64-linux-android", "x86_64-linux-android"),
+}
+DEFAULT_ABI = "arm64-v8a"
+
 
 def run(command, *, env=None):
     print("+ " + " ".join(map(str, command)), flush=True)
@@ -41,9 +51,14 @@ def main():
     parser.add_argument("--unsigned", action="store_true", help="skip local debug signing; output is not installable")
     parser.add_argument("--server", help="optional real host:port compiled as initial address; editable in game")
     parser.add_argument("--version-code", type=int, default=1)
+    parser.add_argument("--universal", action="store_true",
+                         help="build all supported ABIs (arm64-v8a, armeabi-v7a, x86_64) into one APK "
+                              "instead of arm64-v8a only; only worth it when a device's real ABI is unknown "
+                              "or confirmed non-arm64, since it multiplies build time and APK size")
     args = parser.parse_args()
     if args.version_code < 1:
         parser.error("--version-code must be positive")
+    abis = list(ABIS) if args.universal else [DEFAULT_ABI]
     legal_notices = None if args.check else collect_legal_notices(ROOT)
     sdk = args.sdk.expanduser().resolve() if args.sdk else None
     ndk = args.ndk.expanduser().resolve() if args.ndk else None
@@ -58,11 +73,13 @@ def main():
     for name, found in tools.items():
         if not found and (name != "keytool" or not args.unsigned):
             problems.append(f"Missing executable: {name}")
-    if tools["rustc"]:
-        result = subprocess.run([tools["rustc"], "--print", "target-libdir", "--target", TARGET], text=True, capture_output=True)
-        library_dir = Path(result.stdout.strip())
-        if result.returncode or not library_dir.is_dir() or not list(library_dir.glob("libstd-*.rlib")):
-            problems.append(f"Rust standard library for {TARGET} is not installed in the selected toolchain.")
+    for abi in abis:
+        rust_target, _ = ABIS[abi]
+        if tools["rustc"]:
+            result = subprocess.run([tools["rustc"], "--print", "target-libdir", "--target", rust_target], text=True, capture_output=True)
+            library_dir = Path(result.stdout.strip())
+            if result.returncode or not library_dir.is_dir() or not list(library_dir.glob("libstd-*.rlib")):
+                problems.append(f"Rust standard library for {rust_target} ({abi}) is not installed in the selected toolchain.")
     build_tools = sdk / "build-tools/35.0.0" if sdk else Path("/__missing_sdk__")
     android_jar = sdk / "platforms/android-35/android.jar" if sdk else Path("/__missing_sdk__/android.jar")
     ndk_bin = ndk / f"toolchains/llvm/prebuilt/{host}/bin" if ndk else Path("/__missing_ndk__")
@@ -70,11 +87,18 @@ def main():
         "android.jar": android_jar,
         "aapt2": build_tools / "aapt2",
         "zipalign": build_tools / "zipalign",
-        "clang": ndk_bin / f"aarch64-linux-android{API}-clang",
-        "clang++": ndk_bin / f"aarch64-linux-android{API}-clang++",
         "llvm-ar": ndk_bin / "llvm-ar",
         "llvm-strip": ndk_bin / "llvm-strip",
     }
+    clang_paths = {}
+    for abi in abis:
+        _, clang_triple = ABIS[abi]
+        clang_paths[abi] = {
+            "clang": ndk_bin / f"{clang_triple}{API}-clang",
+            "clang++": ndk_bin / f"{clang_triple}{API}-clang++",
+        }
+        paths[f"clang ({abi})"] = clang_paths[abi]["clang"]
+        paths[f"clang++ ({abi})"] = clang_paths[abi]["clang++"]
     if not args.unsigned:
         paths["apksigner"] = build_tools / "apksigner"
     for name, path in paths.items():
@@ -88,7 +112,7 @@ def main():
     if free < 6 * 1024**3:
         problems.append(f"Only {free / 1024**3:.2f} GiB free; reserve at least 6 GiB for a fresh Android build (more may be needed).")
     report = {
-        "target": TARGET, "min_sdk": API, "target_sdk": 35,
+        "target": [ABIS[abi][0] for abi in abis], "abis": abis, "min_sdk": API, "target_sdk": 35,
         "sdk": str(sdk) if sdk else None, "ndk": str(ndk) if ndk else None,
         "free_bytes": free, "ready_to_build": not problems,
         "problems": problems,
@@ -101,32 +125,40 @@ def main():
         return 0
     out = args.output.expanduser().resolve()
     out.mkdir(parents=True, exist_ok=True)
-    env = os.environ.copy()
-    env.update({
-        "CARGO_TARGET_DIR": str(out / "cargo"),
-        "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER": str(paths["clang"]),
-        "CC_aarch64_linux_android": str(paths["clang"]),
-        "CXX_aarch64_linux_android": str(paths["clang++"]),
-        "AR_aarch64_linux_android": str(paths["llvm-ar"]),
-        "CARGO_PROFILE_DEV_DEBUG": "0", "CARGO_INCREMENTAL": "0",
-    })
-    # CARGO_ENCODED_RUSTFLAGS/RUSTFLAGS override target-specific flags in Cargo.
-    # Preserve caller flags and append the 16 KiB ABI requirement at highest precedence.
-    if "CARGO_ENCODED_RUSTFLAGS" in env:
-        rustflags = [flag for flag in env["CARGO_ENCODED_RUSTFLAGS"].split("\x1f") if flag]
-    else:
-        rustflags = shlex.split(env.get("RUSTFLAGS", env.get("CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS", "")))
-    env["CARGO_ENCODED_RUSTFLAGS"] = "\x1f".join(rustflags + ["-C", "link-arg=-Wl,-z,max-page-size=16384"])
-    if args.server:
-        env["OMOBA_DEFAULT_GAME_SERVER_ADDR"] = args.server
-    run([tools["cargo"], "rustc", "--locked", "-p", "client", "--lib", "--target", TARGET,
-         "--crate-type", "cdylib"], env=env)
-    library = out / f"cargo/{TARGET}/debug/libclient.so"
-    if not library.is_file():
-        raise RuntimeError(f"Cargo produced no expected native library: {library}")
-    packaged_lib = out / "libclient.so"
-    shutil.copy2(library, packaged_lib)
-    run([paths["llvm-strip"], "--strip-debug", packaged_lib])
+    packaged_libs = {}
+    for abi in abis:
+        rust_target, _ = ABIS[abi]
+        env = os.environ.copy()
+        target_env = rust_target.replace("-", "_")
+        target_env_upper = target_env.upper()
+        env.update({
+            "CARGO_TARGET_DIR": str(out / "cargo"),
+            f"CARGO_TARGET_{target_env_upper}_LINKER": str(clang_paths[abi]["clang"]),
+            f"CC_{target_env}": str(clang_paths[abi]["clang"]),
+            f"CXX_{target_env}": str(clang_paths[abi]["clang++"]),
+            f"AR_{target_env}": str(paths["llvm-ar"]),
+            "CARGO_PROFILE_DEV_DEBUG": "0", "CARGO_INCREMENTAL": "0",
+        })
+        # CARGO_ENCODED_RUSTFLAGS/RUSTFLAGS override target-specific flags in Cargo.
+        # Preserve caller flags and append the 16 KiB ABI requirement at highest precedence.
+        # This only matters for arm64-v8a (Android 15's page-size requirement), but is
+        # harmless on the other ABIs too.
+        if "CARGO_ENCODED_RUSTFLAGS" in env:
+            rustflags = [flag for flag in env["CARGO_ENCODED_RUSTFLAGS"].split("\x1f") if flag]
+        else:
+            rustflags = shlex.split(env.get("RUSTFLAGS", env.get(f"CARGO_TARGET_{target_env_upper}_RUSTFLAGS", "")))
+        env["CARGO_ENCODED_RUSTFLAGS"] = "\x1f".join(rustflags + ["-C", "link-arg=-Wl,-z,max-page-size=16384"])
+        if args.server:
+            env["OMOBA_DEFAULT_GAME_SERVER_ADDR"] = args.server
+        run([tools["cargo"], "rustc", "--locked", "-p", "client", "--lib", "--target", rust_target,
+             "--crate-type", "cdylib"], env=env)
+        library = out / f"cargo/{rust_target}/debug/libclient.so"
+        if not library.is_file():
+            raise RuntimeError(f"Cargo produced no expected native library: {library}")
+        packaged_lib = out / f"libclient-{abi}.so"
+        shutil.copy2(library, packaged_lib)
+        run([paths["llvm-strip"], "--strip-debug", packaged_lib])
+        packaged_libs[abi] = packaged_lib
     version = re.search(r'(?ms)^\[workspace\.package\]\s*\n(?:(?!^\[).)*?^version\s*=\s*"([^"\n]+)"', (ROOT / "Cargo.toml").read_text()).group(1)
     manifest_text = Path(__file__).with_name("AndroidManifest.xml").read_text()
     manifest_text = manifest_text.replace("__VERSION__", version).replace('android:versionCode="1"', f'android:versionCode="{args.version_code}"')
@@ -137,10 +169,12 @@ def main():
     run([paths["aapt2"], "link", "-I", android_jar, "--manifest", manifest,
          "-A", ROOT / "client/assets", "-o", unaligned])
     with zipfile.ZipFile(unaligned, "a") as apk:
-        apk.write(packaged_lib, "lib/arm64-v8a/libclient.so", compress_type=zipfile.ZIP_STORED)
+        for abi, packaged_lib in packaged_libs.items():
+            apk.write(packaged_lib, f"lib/{abi}/libclient.so", compress_type=zipfile.ZIP_STORED)
         add_legal_notices_to_zip(legal_notices, apk)
     run([paths["zipalign"], "-P", "16", "-f", "4", unaligned, unsigned])
     artifact = unsigned
+    abi_tag = "universal" if args.universal else "arm64"
     if not args.unsigned:
         keystore = out / "local-debug.keystore"
         if not keystore.exists():
@@ -148,7 +182,7 @@ def main():
                  "-storepass", "android", "-keypass", "android", "-alias", "androiddebugkey",
                  "-keyalg", "RSA", "-keysize", "2048", "-validity", "3650",
                  "-dname", "CN=Omoba Local Debug,O=Development,C=US"])
-        artifact = out / f"omoba-{version}-android-arm64-debug.apk"
+        artifact = out / f"omoba-{version}-android-{abi_tag}-debug.apk"
         run([paths["apksigner"], "sign", "--ks", keystore, "--ks-key-alias", "androiddebugkey",
              "--ks-pass", "pass:android", "--key-pass", "pass:android", "--out", artifact, unsigned])
         run([paths["apksigner"], "verify", "--verbose", artifact])

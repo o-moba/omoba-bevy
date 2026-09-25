@@ -125,15 +125,24 @@ Run **`make` or `make help`** to see commands without starting a game or build.
 | `make bots BOTS=4 BOTS_SERVER=127.0.0.1:4000` | Add external harness players to an existing server |
 | `make iphone-check` | Check Xcode and physical iPhone build prerequisites |
 | `make iphone` | Build an **unsigned** device package; signing is a separate step |
+| `make android-check` | Check Android SDK/NDK/Rust target build prerequisites |
+| `make android` | Build a locally-signed **debug APK** (arm64 only) into `target/mobile/android/omoba-<version>-android-arm64-debug.apk`; set `ANDROID_SERVER=host:port` to bake in a server address |
+| `make android-universal` | Same, but bundles arm64-v8a + armeabi-v7a + x86_64 in one APK; bigger/slower, only needed for a non-arm64 device |
 | `make verify-gameplay` / `make verify-task-12` | Headless gameplay/matchmaking checks and live UDP QA |
 | `make stop` / `make restart` | Broad legacy local-process cleanup / restart; not session-scoped |
 
 For iPhone, install Xcode and the Rust `aarch64-apple-ios` target first. Follow
 [signing and installation](mobile/ios/README.md) or the
 [TestFlight archive guide](mobile/ios/TESTFLIGHT.md). `make iphone` does not upload
-to Apple. Retain `builds/` when clearing disposable `target/` caches. Android and
-iOS Simulator workflows are in the [mobile guide](mobile/README.md), with their
-measured limits.
+to Apple. Retain `builds/` when clearing disposable `target/` caches.
+
+For Android, install a JDK, the Rust `aarch64-linux-android` target, an Android
+SDK (`platforms;android-35`, `build-tools;35.0.0`) and NDK r27+, then export
+`ANDROID_HOME` and `ANDROID_NDK_HOME`. `make android` produces an installable
+arm64 debug APK signed with a local development key — see the
+[Android build guide](mobile/README.md#android-local-test-package) for the full
+prerequisite list and how to play with friends over LAN. iOS Simulator workflows
+are also in the [mobile guide](mobile/README.md), with their measured limits.
 
 ## Bring Ekza into your game
 
