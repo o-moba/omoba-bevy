@@ -4,7 +4,6 @@
 //! and the systems here only consume `Activated<PauseAction>`.
 use bevy::{
     app::AppExit,
-    input::mouse::{MouseScrollUnit, MouseWheel},
     prelude::*,
     window::{CursorGrabMode, CursorOptions, PrimaryWindow},
 };
@@ -22,7 +21,7 @@ use crate::persistence::{
 use crate::session_config::DEFAULT_GAME_SERVER_ADDR;
 use crate::team::TeamSelection;
 use crate::ui::{
-    Activated, GestureEpoch, Pressable, UiAction, UiActionAppExt, UiSet,
+    Activated, GestureEpoch, ModalId, ModalRoot, ScrollArea, UiAction, UiActionAppExt, UiSet,
     theme::{self, ButtonKind, metric},
     widgets,
 };
@@ -40,6 +39,9 @@ const ILLUMINANCE_STEP: f32 = 2_000.0;
 const AMBIENT_STEP: f32 = 50.0;
 const ANGLE_STEP_DEG: f32 = 5.0;
 const AUDIO_STEP: f32 = 0.05;
+/// Wheel step (UI px per line) of the main and settings bodies on desktop;
+/// on a phone they scroll by touch drag past the tap slop.
+const MENU_WHEEL_STEP: f32 = 32.0;
 
 pub struct PauseMenuPlugin;
 
@@ -80,7 +82,6 @@ impl Plugin for PauseMenuPlugin {
                     toggle_pause_menu,
                     close_pause_menu_when_disconnected,
                     bump_gesture_epoch_on_navigation,
-                    gate_buttons_behind_server_entry,
                 )
                     .chain()
                     .in_set(PauseMenuSet::Close),
@@ -104,8 +105,7 @@ impl Plugin for PauseMenuPlugin {
             )
             .add_systems(
                 PostUpdate,
-                (scroll_desktop_settings, size_desktop_pause_panel)
-                    .before(bevy::ui::UiSystems::Layout),
+                size_desktop_pause_panel.before(bevy::ui::UiSystems::Layout),
             );
     }
 }
@@ -273,6 +273,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
             Visibility::Hidden,
             ZIndex(100),
             PauseMenuRoot,
+            ModalRoot(ModalId::Pause),
             Name::new("PauseMenuRoot"),
         ))
         .with_children(|parent| {
@@ -342,8 +343,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                 overflow: Overflow::scroll_y(),
                                 ..default()
                             },
-                            ScrollPosition::default(),
-                            crate::mobile_ui::TouchScrollPanel,
+                            ScrollArea::menu(MENU_WHEEL_STEP),
                             MainMenuSection,
                             Name::new("PauseMenuMainSection"),
                         ))
@@ -401,8 +401,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                 ..default()
                             },
                             Visibility::Hidden,
-                            ScrollPosition::default(),
-                            crate::mobile_ui::TouchScrollPanel,
+                            ScrollArea::menu(MENU_WHEEL_STEP),
                             SettingsSection,
                             Name::new("PauseMenuSettingsSection"),
                         ))
@@ -621,26 +620,6 @@ fn bump_gesture_epoch_on_navigation(
             epoch.bump();
         }
         *previous = Some(current);
-    }
-}
-
-/// The phone server-address overlay sits over the menu without owning its
-/// buttons; while it is open the menu controls are disabled.
-fn gate_buttons_behind_server_entry(
-    server: Option<Res<crate::mobile_ui::ServerEntry>>,
-    mut buttons: Query<
-        &mut Pressable,
-        Or<(
-            With<UiAction<PauseAction>>,
-            With<UiAction<crate::debug::tools_page::PracticeAction>>,
-        )>,
-    >,
-) {
-    let disabled = server.as_ref().is_some_and(|entry| entry.open);
-    for mut pressable in &mut buttons {
-        if pressable.disabled != disabled {
-            pressable.disabled = disabled;
-        }
     }
 }
 
@@ -872,38 +851,6 @@ fn update_audio_labels(settings: Res<AudioSettings>, mut labels: Query<(&AudioLa
     }
 }
 
-fn scroll_desktop_settings(
-    menu: Res<PauseMenuState>,
-    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
-    mut wheel: MessageReader<MouseWheel>,
-    mut panels: Query<
-        (&ComputedNode, &mut ScrollPosition, Has<SettingsSection>),
-        Or<(With<SettingsSection>, With<MainMenuSection>)>,
-    >,
-) {
-    let delta: f32 = wheel
-        .read()
-        .map(|event| {
-            event.y
-                * if event.unit == MouseScrollUnit::Line {
-                    32.0
-                } else {
-                    1.0
-                }
-        })
-        .sum();
-    if !menu.open || mobile.as_ref().is_some_and(|mobile| mobile.enabled) {
-        return;
-    }
-    for (node, mut scroll, settings) in &mut panels {
-        if settings != menu.in_settings {
-            continue;
-        }
-        let max = ((node.content_size().y - node.size().y) * node.inverse_scale_factor()).max(0.0);
-        scroll.y = (scroll.y - delta).clamp(0.0, max);
-    }
-}
-
 fn reset_pause_scroll_on_navigation(
     menu: Res<PauseMenuState>,
     mut previous: Local<Option<(bool, bool)>>,
@@ -1005,8 +952,14 @@ fn sync_practice_actions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::{action::dispatch_actions, gesture::recognize_presses, test_id::harness};
-    use bevy::input::touch::{TouchInput, TouchPhase};
+    use crate::ui::{
+        ModalAppExt, Pressable, action::dispatch_actions, gesture::recognize_presses,
+        scroll::scroll_areas, test_id::harness,
+    };
+    use bevy::input::{
+        mouse::{MouseScrollUnit, MouseWheel},
+        touch::{TouchInput, TouchPhase},
+    };
 
     fn action_button(app: &mut App, wanted: impl Fn(&PauseAction) -> bool) -> Entity {
         app.world_mut()
@@ -1057,6 +1010,7 @@ mod tests {
                 (
                     bump_gesture_epoch_on_navigation,
                     recognize_presses,
+                    scroll_areas,
                     dispatch_actions::<PauseAction>,
                     apply_pause_navigation,
                     apply_pause_audio,
@@ -1069,8 +1023,7 @@ mod tests {
             )
             .add_systems(
                 PostUpdate,
-                (size_desktop_pause_panel, scroll_desktop_settings)
-                    .before(bevy::ui::UiSystems::Layout),
+                size_desktop_pause_panel.before(bevy::ui::UiSystems::Layout),
             );
         let mut mobile = crate::mobile_controls::MobileControls::default();
         mobile.enabled = mobile_enabled;
@@ -1114,7 +1067,7 @@ mod tests {
     }
 
     fn rect(app: &App, entity: Entity, dpi: f32) -> Rect {
-        crate::mobile_ui::logical_ui_rect(
+        crate::ui::gesture::logical_ui_rect(
             app.world().get::<ComputedNode>(entity).unwrap(),
             app.world().get::<UiGlobalTransform>(entity).unwrap(),
             app.world().get::<bevy::ui::CalculatedClip>(entity),
@@ -1524,16 +1477,21 @@ mod tests {
             open: true,
             in_settings: true,
         })
+        .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
         .add_message::<MouseWheel>()
         .add_systems(
             Update,
-            (reset_pause_scroll_on_navigation, scroll_desktop_settings).chain(),
+            (reset_pause_scroll_on_navigation, scroll_areas).chain(),
         );
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
         let panel = app
             .world_mut()
             .spawn((
                 SettingsSection,
-                ScrollPosition::default(),
+                ScrollArea::menu(MENU_WHEEL_STEP),
                 ComputedNode {
                     size: Vec2::new(400.0, 200.0),
                     content_size: Vec2::new(400.0, 800.0),
@@ -1545,14 +1503,87 @@ mod tests {
         app.world_mut().write_message(MouseWheel {
             unit: MouseScrollUnit::Line,
             x: 0.0,
+            y: -2.0,
+            window,
+        });
+        app.update();
+        assert_eq!(
+            app.world().get::<ScrollPosition>(panel).unwrap().y,
+            64.0,
+            "32 px per line"
+        );
+        app.world_mut().write_message(MouseWheel {
+            unit: MouseScrollUnit::Line,
+            x: 0.0,
             y: -50.0,
-            window: Entity::PLACEHOLDER,
+            window,
         });
         app.update();
         assert_eq!(app.world().get::<ScrollPosition>(panel).unwrap().y, 600.0);
         app.world_mut().resource_mut::<PauseMenuState>().in_settings = false;
         app.update();
         assert_eq!(app.world().get::<ScrollPosition>(panel).unwrap().y, 0.0);
+    }
+
+    /// Modal registry: the phone server-address entry opened over the pause
+    /// menu takes its taps and its scroll without touching `Pressable::disabled`.
+    #[test]
+    fn server_entry_over_the_pause_menu_blocks_its_buttons_until_it_closes() {
+        let (mut app, window) = layout_app(Vec2::new(844.0, 390.0), 2.0, true);
+        app.init_resource::<crate::mobile_ui::ServerEntry>()
+            .register_modal::<PauseMenuState>(ModalId::Pause, |menu| menu.open)
+            .register_modal::<crate::mobile_ui::ServerEntry>(ModalId::ServerEntry, |entry| {
+                entry.open
+            });
+        app.world_mut().resource_mut::<PauseMenuState>().in_settings = false;
+        app.update();
+        app.update();
+        let help = harness::find(app.world_mut(), "PauseMenuHelpButton").unwrap();
+        let tap = |app: &mut App, id| {
+            let center = rect(app, help, 2.0).center();
+            for phase in [TouchPhase::Started, TouchPhase::Ended] {
+                app.world_mut().write_message(TouchInput {
+                    phase,
+                    position: center,
+                    window,
+                    id,
+                    force: None,
+                });
+            }
+            app.update();
+        };
+        app.world_mut()
+            .resource_mut::<crate::mobile_ui::ServerEntry>()
+            .open = true;
+        app.update();
+        let pressable = *app.world().get::<Pressable>(help).unwrap();
+        assert!(pressable.blocked && !pressable.disabled);
+        tap(&mut app, 1);
+        assert!(
+            !app.world()
+                .resource::<crate::help_overlay::HelpOverlayVisible>()
+                .0
+        );
+        // A synthetic press is gated like a tap.
+        harness::press(app.world_mut(), "PauseMenuHelpButton");
+        app.update();
+        assert!(
+            !app.world()
+                .resource::<crate::help_overlay::HelpOverlayVisible>()
+                .0
+        );
+        assert!(app.world().resource::<PauseMenuState>().open);
+        app.world_mut()
+            .resource_mut::<crate::mobile_ui::ServerEntry>()
+            .open = false;
+        app.update();
+        assert!(!app.world().get::<Pressable>(help).unwrap().blocked);
+        tap(&mut app, 2);
+        assert!(
+            app.world()
+                .resource::<crate::help_overlay::HelpOverlayVisible>()
+                .0
+        );
     }
 
     #[test]

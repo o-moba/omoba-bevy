@@ -7,10 +7,7 @@ use crate::{
     ui_theme as ui,
 };
 use bevy::{
-    input::{
-        keyboard::{Key, KeyboardInput},
-        mouse::{MouseScrollUnit, MouseWheel},
-    },
+    input::keyboard::{Key, KeyboardInput},
     prelude::*,
     window::PrimaryWindow,
 };
@@ -396,6 +393,9 @@ impl CareerClient {
 pub(crate) struct NicknameChanged(pub String);
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct CareerUiSet;
+/// Wheel step (UI px per line) of the career body on desktop; on a phone it
+/// scrolls by touch drag past the tap slop.
+const CAREER_WHEEL_STEP: f32 = 28.0;
 pub(crate) struct CareerPlugin;
 impl Plugin for CareerPlugin {
     fn build(&self, app: &mut App) {
@@ -427,10 +427,6 @@ impl Plugin for CareerPlugin {
             .add_systems(
                 Update,
                 clear_account_on_scope_reset.in_set(SessionReactions),
-            )
-            .add_systems(
-                PostUpdate,
-                scroll_desktop.before(bevy::ui::UiSystems::Layout),
             );
     }
 }
@@ -2309,6 +2305,7 @@ fn render(
             BackgroundColor(Color::srgba(0.0, 0.025, 0.03, 0.94)),
             ZIndex(120),
             CareerRoot,
+            crate::ui::ModalRoot(crate::ui::ModalId::Career),
             Name::new(if phone {
                 "CareerMobileRoot"
             } else {
@@ -2401,7 +2398,7 @@ fn render(
                             },
                             scroll_position,
                             CareerScroll,
-                            crate::mobile_ui::TouchScrollPanel,
+                            crate::ui::ScrollArea::menu(CAREER_WHEEL_STEP),
                             Name::new("CareerBody"),
                         ))
                         .with_children(|body| {
@@ -2460,30 +2457,6 @@ fn render(
                 });
         });
 }
-fn scroll_desktop(
-    profile: Res<crate::ui::UiPlatform>,
-    mut wheel: MessageReader<MouseWheel>,
-    mut panels: Query<(&ComputedNode, &mut ScrollPosition), With<CareerScroll>>,
-) {
-    let delta: f32 = wheel
-        .read()
-        .map(|e| {
-            e.y * if e.unit == MouseScrollUnit::Line {
-                28.0
-            } else {
-                1.0
-            }
-        })
-        .sum();
-    if profile.0 != UiProfile::Desktop {
-        return;
-    }
-    for (node, mut scroll) in &mut panels {
-        let max = ((node.content_size().y - node.size().y) * node.inverse_scale_factor()).max(0.0);
-        scroll.y = (scroll.y - delta).clamp(0.0, max);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2672,6 +2645,25 @@ mod tests {
             .insert_resource(CareerClient { modal, ..default() })
             .add_systems(Update, render);
         app
+    }
+    #[test]
+    fn career_body_scrolls_by_wheel_on_desktop_and_by_touch_drag_on_a_phone() {
+        use crate::ui::scroll::harness;
+        for (profile, expected) in [(UiProfile::Desktop, 28.0), (UiProfile::Mobile, 60.0)] {
+            let mut app = render_app(profile, CareerModal::History);
+            let window = harness::install(&mut app, profile);
+            app.update();
+            let body = app
+                .world_mut()
+                .query_filtered::<Entity, With<CareerScroll>>()
+                .single(app.world())
+                .unwrap();
+            let center = Vec2::new(400.0, 300.0);
+            harness::measure(&mut app, body, center);
+            harness::wheel_lines(&mut app, window, -1.0);
+            harness::drag(&mut app, window, 1, center, 60.0);
+            assert_eq!(harness::offset(&app, body), expected, "{profile:?}");
+        }
     }
     fn texts(app: &mut App) -> Vec<String> {
         app.world_mut()

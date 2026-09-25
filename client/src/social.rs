@@ -17,7 +17,6 @@ use crate::{
 use bevy::{
     input::{
         keyboard::{Key, KeyboardInput},
-        mouse::{MouseScrollUnit, MouseWheel},
         touch::{TouchInput, TouchPhase},
     },
     prelude::*,
@@ -418,8 +417,7 @@ impl Plugin for SocialPlugin {
                     .before(InputContextSet::Resolve),
             )
             .add_systems(Update, render.after(InputContextSet::Actions))
-            .add_systems(Update, clear_on_scope_reset.in_set(SessionReactions))
-            .add_systems(PostUpdate, scroll_chat.before(bevy::ui::UiSystems::Layout));
+            .add_systems(Update, clear_on_scope_reset.in_set(SessionReactions));
         configure_social_bubbles(app);
     }
 }
@@ -1192,6 +1190,8 @@ fn render_chat_log(
             ..column()
         },
         old_scroll,
+        // Desktop wheel only, as before: the phone chat log does not scroll.
+        crate::ui::ScrollArea::default().desktop_wheel(28.0),
         Name::new("SocialChatLog"),
     ))
     .with_children(|p| {
@@ -1709,38 +1709,36 @@ fn desktop_social_top() -> f32 {
     crate::minimap::DESKTOP_MINIMAP_INSET
 }
 
-fn scroll_chat(
-    social: Res<SocialClient>,
-    mobile: Res<MobileControls>,
-    mut wheel: MessageReader<MouseWheel>,
-    mut panels: Query<(&Name, &ComputedNode, &mut ScrollPosition)>,
-) {
-    let delta: f32 = wheel
-        .read()
-        .map(|event| {
-            event.y
-                * if event.unit == MouseScrollUnit::Line {
-                    28.0
-                } else {
-                    1.0
-                }
-        })
-        .sum();
-    if !social.chat_open || mobile.enabled {
-        return;
-    }
-    for (name, node, mut scroll) in &mut panels {
-        if name.as_str() == "SocialChatLog" {
-            let max =
-                ((node.content_size().y - node.size().y) * node.inverse_scale_factor()).max(0.0);
-            scroll.y = (scroll.y - delta).clamp(0.0, max);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn chat_log_scrolls_by_wheel_on_desktop_only() {
+        use crate::platform::UiProfile;
+        use crate::ui::scroll::harness;
+        for (profile, expected) in [(UiProfile::Desktop, 28.0), (UiProfile::Mobile, 0.0)] {
+            let mut app = App::new();
+            let window = harness::install(&mut app, profile);
+            app.add_systems(Startup, |mut commands: Commands| {
+                commands.spawn(Node::default()).with_children(|p| {
+                    render_chat_log(p, &SocialClient::default(), ScrollPosition::default())
+                });
+            });
+            app.update();
+            let log = app
+                .world_mut()
+                .query::<(Entity, &Name)>()
+                .iter(app.world())
+                .find(|(_, name)| name.as_str() == "SocialChatLog")
+                .unwrap()
+                .0;
+            let center = Vec2::new(400.0, 300.0);
+            harness::measure(&mut app, log, center);
+            harness::wheel_lines(&mut app, window, -1.0);
+            harness::drag(&mut app, window, 1, center, 60.0);
+            assert_eq!(harness::offset(&app, log), expected, "{profile:?}");
+        }
+    }
     #[test]
     fn phone_composer_stays_in_top_safe_row_and_history_expands_when_keyboard_hides() {
         let safe = crate::mobile_controls::MobileSafeInsets {
