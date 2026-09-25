@@ -3,6 +3,7 @@
 use bevy::prelude::*;
 
 use crate::session_config::{T_RETRY, T_WAIT_MAX};
+use crate::ui::{Activated, TestId, UiAction};
 
 use super::session::{ClientConnectionState, ClientSession, MAX_JOIN_ATTEMPTS, SessionUiCommand};
 
@@ -14,6 +15,10 @@ pub(in crate::net) struct ConnectionStatusLabel;
 
 #[derive(Component)]
 pub(in crate::net) struct ConnectionRetryButton;
+
+/// The Retry press. The button keeps its fixed green (no `ButtonStyle`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::net) struct RetryPressed;
 
 const CONNECTION_PANEL_BG: Color = Color::srgba(0.02, 0.02, 0.06, 0.72);
 
@@ -61,7 +66,8 @@ pub(in crate::net) fn setup_connection_status_ui(mut commands: Commands) {
                     BackgroundColor(Color::srgb(0.25, 0.42, 0.32)),
                     Visibility::Hidden,
                     ConnectionRetryButton,
-                    Name::new("ConnectionRetryButton"),
+                    UiAction(RetryPressed),
+                    TestId::new("ConnectionRetryButton"),
                 ))
                 .with_children(|button| {
                     button.spawn((
@@ -77,13 +83,11 @@ pub(in crate::net) fn setup_connection_status_ui(mut commands: Commands) {
 }
 
 pub(in crate::net) fn handle_connection_retry_button(
-    interaction: Query<&Interaction, (With<ConnectionRetryButton>, Changed<Interaction>)>,
+    mut activated: MessageReader<Activated<RetryPressed>>,
     mut writer: MessageWriter<SessionUiCommand>,
 ) {
-    for i in &interaction {
-        if *i == Interaction::Pressed {
-            writer.write(SessionUiCommand::Retry);
-        }
+    for _ in activated.read() {
+        writer.write(SessionUiCommand::Retry);
     }
 }
 
@@ -188,12 +192,16 @@ mod tests {
     #[test]
     fn admission_hides_status_and_disconnection_exposes_working_retry_without_empty_layout() {
         let mut app = App::new();
+        use crate::ui::UiActionAppExt;
         app.init_resource::<ClientSession>()
             .add_message::<SessionUiCommand>()
+            .add_ui_action::<RetryPressed>()
             .add_systems(Startup, setup_connection_status_ui)
             .add_systems(
                 Update,
-                (handle_connection_retry_button, sync_connection_status_ui).chain(),
+                (handle_connection_retry_button, sync_connection_status_ui)
+                    .chain()
+                    .after(crate::ui::UiSet::Dispatch),
             );
         app.update();
         let root = app

@@ -138,9 +138,11 @@ pub(crate) fn configure_network_pipeline(app: &mut App) {
 
 impl Plugin for NetworkingPlugin {
     fn build(&self, app: &mut App) {
+        use crate::ui::UiActionAppExt;
         configure_network_pipeline(app);
         app.add_message::<NetworkCommand>()
             .add_message::<SessionUiCommand>()
+            .add_ui_action::<status_ui::RetryPressed>()
             .add_message::<SessionEvent>()
             .add_message::<SnapshotApplied>()
             // Snapshot application announces accepted dashes to the VFX layer.
@@ -201,7 +203,9 @@ impl Plugin for NetworkingPlugin {
             )
             .add_systems(
                 Update,
-                handle_connection_retry_button.in_set(ClientNetPipeline::SessionRetryInput),
+                handle_connection_retry_button
+                    .in_set(ClientNetPipeline::SessionRetryInput)
+                    .after(crate::ui::UiSet::Dispatch),
             )
             .add_systems(
                 Update,

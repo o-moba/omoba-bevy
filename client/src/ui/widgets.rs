@@ -36,6 +36,17 @@ impl ButtonStyle {
     pub(crate) fn hover_color(&self) -> Color {
         theme::button_hover_color(self.kind, self.selected)
     }
+
+    pub(crate) fn pressed_color(&self) -> Color {
+        theme::button_pressed_color(self.kind, self.selected)
+    }
+
+    /// `selected`, set only when it changes (the painter reacts to changes).
+    pub(crate) fn set_selected(style: &mut Mut<Self>, selected: bool) {
+        if style.selected != selected {
+            style.selected = selected;
+        }
+    }
 }
 
 /// Runs in `UiSet::Paint`; the one place kit buttons change colour.
@@ -51,7 +62,8 @@ pub(crate) fn paint_pressables(
 ) {
     for (interaction, pressable, style, mut color) in &mut buttons {
         let next = match pressable.effective(*interaction) {
-            Interaction::Pressed | Interaction::Hovered => style.hover_color(),
+            Interaction::Pressed => style.pressed_color(),
+            Interaction::Hovered => style.hover_color(),
             Interaction::None => style.idle_color(),
         };
         if color.0 != next {

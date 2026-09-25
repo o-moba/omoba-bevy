@@ -34,6 +34,18 @@ pub const TEAM_GREEN: Color = Color::srgba(0.12, 0.40, 0.28, 0.98);
 pub const TEAM_GREEN_HOVER: Color = Color::srgba(0.18, 0.65, 0.28, 0.98);
 pub const TEAM_BLUE: Color = Color::srgba(0.16, 0.28, 0.48, 0.98);
 pub const TEAM_BLUE_HOVER: Color = Color::srgba(0.22, 0.45, 0.85, 0.98);
+/// Combat skill-bar upgrade arrow, ready and under the pointer.
+pub const SKILL_UPGRADE: Color = Color::srgba(0.20, 0.62, 0.26, 0.95);
+pub const SKILL_UPGRADE_HOVER: Color = Color::srgba(0.26, 0.72, 0.32, 0.98);
+/// A shop item card the hero already owns.
+pub const SHOP_OWNED: Color = Color::srgb(0.07, 0.22, 0.17);
+/// `OMOBA_DEBUG_UI` toggles: off, god mode on, speed boost on (and hovers).
+pub const DEBUG_OFF: Color = Color::srgba(0.18, 0.18, 0.20, 0.92);
+pub const DEBUG_OFF_HOVER: Color = Color::srgba(0.26, 0.26, 0.28, 0.95);
+pub const DEBUG_GOD: Color = Color::srgba(0.78, 0.20, 0.22, 0.96);
+pub const DEBUG_GOD_HOVER: Color = Color::srgba(0.88, 0.28, 0.30, 0.98);
+pub const DEBUG_SPEED: Color = Color::srgba(0.20, 0.44, 0.80, 0.96);
+pub const DEBUG_SPEED_HOVER: Color = Color::srgba(0.28, 0.52, 0.90, 0.98);
 
 /// Accent colours a player can put on their profile card.
 pub const ACCENTS: [(&str, Color); 6] = [
@@ -217,35 +229,69 @@ pub enum ButtonKind {
     Link,
     /// A team's lock-in button, in the team's colour.
     Team(crate::domain::Team),
+    /// A desktop combat skill-bar slot; darkens while held.
+    Skill,
+    /// The upgrade arrow above a skill slot (shown only when a point can be
+    /// spent, so it is always the "ready" green).
+    SkillUpgrade,
+    /// A shop item card; `selected` means owned and wins over the pointer.
+    ShopItem,
+    /// An `OMOBA_DEBUG_UI` toggle; `selected` means on.
+    Debug(DebugToggle),
+}
+
+/// Which debug toggle a [`ButtonKind::Debug`] button shows when on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DebugToggle {
+    GodMode,
+    SpeedBoost,
 }
 
 /// Background when the pointer is away. Selected tiles keep their colour.
 pub fn button_idle_color(kind: ButtonKind, selected: bool) -> Color {
-    if selected {
-        return TILE_SELECTED;
-    }
-    match kind {
-        ButtonKind::Primary => PRIMARY,
-        ButtonKind::Secondary | ButtonKind::Tile => TILE,
-        ButtonKind::Danger => DANGER,
-        ButtonKind::Link => LINK,
-        ButtonKind::Team(crate::domain::Team::Green) => TEAM_GREEN,
-        ButtonKind::Team(crate::domain::Team::Blue) => TEAM_BLUE,
+    match (kind, selected) {
+        (ButtonKind::ShopItem, true) => SHOP_OWNED,
+        (ButtonKind::Debug(DebugToggle::GodMode), true) => DEBUG_GOD,
+        (ButtonKind::Debug(DebugToggle::SpeedBoost), true) => DEBUG_SPEED,
+        (_, true) => TILE_SELECTED,
+        (ButtonKind::Primary, false) => PRIMARY,
+        (ButtonKind::Secondary | ButtonKind::Tile | ButtonKind::ShopItem, false) => TILE,
+        (ButtonKind::Danger, false) => DANGER,
+        (ButtonKind::Link, false) => LINK,
+        (ButtonKind::Team(crate::domain::Team::Green), false) => TEAM_GREEN,
+        (ButtonKind::Team(crate::domain::Team::Blue), false) => TEAM_BLUE,
+        (ButtonKind::Skill, false) => PANEL,
+        (ButtonKind::SkillUpgrade, false) => SKILL_UPGRADE,
+        (ButtonKind::Debug(_), false) => DEBUG_OFF,
     }
 }
 
-/// Background while hovered or held.
+/// Background while hovered (and, unless [`button_pressed_color`] says
+/// otherwise, while held).
 pub fn button_hover_color(kind: ButtonKind, selected: bool) -> Color {
-    if selected {
-        return TILE_SELECTED;
+    match (kind, selected) {
+        (ButtonKind::ShopItem, true) => SHOP_OWNED,
+        (ButtonKind::Debug(DebugToggle::GodMode), true) => DEBUG_GOD_HOVER,
+        (ButtonKind::Debug(DebugToggle::SpeedBoost), true) => DEBUG_SPEED_HOVER,
+        (_, true) => TILE_SELECTED,
+        (ButtonKind::Primary, false) => PRIMARY_HOVER,
+        (ButtonKind::Secondary | ButtonKind::Tile | ButtonKind::ShopItem, false) => HOVER,
+        (ButtonKind::Danger, false) => DANGER_HOVER,
+        (ButtonKind::Link, false) => LINK_HOVER,
+        (ButtonKind::Team(crate::domain::Team::Green), false) => TEAM_GREEN_HOVER,
+        (ButtonKind::Team(crate::domain::Team::Blue), false) => TEAM_BLUE_HOVER,
+        (ButtonKind::Skill, false) => HOVER,
+        (ButtonKind::SkillUpgrade, false) => SKILL_UPGRADE_HOVER,
+        (ButtonKind::Debug(_), false) => DEBUG_OFF_HOVER,
     }
-    match kind {
-        ButtonKind::Primary => PRIMARY_HOVER,
-        ButtonKind::Secondary | ButtonKind::Tile => HOVER,
-        ButtonKind::Danger => DANGER_HOVER,
-        ButtonKind::Link => LINK_HOVER,
-        ButtonKind::Team(crate::domain::Team::Green) => TEAM_GREEN_HOVER,
-        ButtonKind::Team(crate::domain::Team::Blue) => TEAM_BLUE_HOVER,
+}
+
+/// Background while held. The hover colour, except for the skill slots and
+/// shop cards, which always darkened to `TILE` under a click.
+pub fn button_pressed_color(kind: ButtonKind, selected: bool) -> Color {
+    match (kind, selected) {
+        (ButtonKind::Skill, _) | (ButtonKind::ShopItem, false) => TILE,
+        _ => button_hover_color(kind, selected),
     }
 }
 
@@ -439,6 +485,44 @@ mod tests {
         assert_eq!(metric::phone_font(PhoneText::Help, 30.0, 700.0, 1.0), 15.0);
         assert_eq!(metric::phone_font(PhoneText::Pause, 30.0, 700.0, 1.0), 22.0);
         assert_eq!(metric::phone_font(PhoneText::Pause, 10.0, 700.0, 1.0), 14.0);
+    }
+
+    /// The skill bar, shop cards and debug toggles keep the colours their
+    /// modules painted by hand before they moved onto `ButtonStyle`.
+    #[test]
+    fn hud_kinds_keep_their_hand_painted_colours() {
+        use ButtonKind::*;
+        let states = |kind, selected| {
+            (
+                button_idle_color(kind, selected),
+                button_hover_color(kind, selected),
+                button_pressed_color(kind, selected),
+            )
+        };
+        assert_eq!(states(Skill, false), (PANEL, HOVER, TILE));
+        assert_eq!(
+            states(SkillUpgrade, false),
+            (SKILL_UPGRADE, SKILL_UPGRADE_HOVER, SKILL_UPGRADE_HOVER)
+        );
+        assert_eq!(states(ShopItem, false), (TILE, HOVER, TILE));
+        assert_eq!(states(ShopItem, true), (SHOP_OWNED, SHOP_OWNED, SHOP_OWNED));
+        for toggle in [DebugToggle::GodMode, DebugToggle::SpeedBoost] {
+            assert_eq!(
+                states(Debug(toggle), false),
+                (DEBUG_OFF, DEBUG_OFF_HOVER, DEBUG_OFF_HOVER)
+            );
+        }
+        assert_eq!(
+            states(Debug(DebugToggle::GodMode), true),
+            (DEBUG_GOD, DEBUG_GOD_HOVER, DEBUG_GOD_HOVER)
+        );
+        assert_eq!(
+            states(Debug(DebugToggle::SpeedBoost), true),
+            (DEBUG_SPEED, DEBUG_SPEED_HOVER, DEBUG_SPEED_HOVER)
+        );
+        // The menu kinds still press in their hover colour.
+        assert_eq!(button_pressed_color(Primary, false), PRIMARY_HOVER);
+        assert_eq!(button_pressed_color(Tile, true), TILE_SELECTED);
     }
 
     #[test]

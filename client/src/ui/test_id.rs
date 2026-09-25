@@ -56,6 +56,12 @@ fn mirror_into_name(mut world: DeferredWorld, context: HookContext) {
         .insert(Name::new(id));
 }
 
+/// The string a layout pass or a QA dump matches a node by: a kit control's
+/// `TestId`, otherwise its `Name`.
+pub(crate) fn node_key<'a>(name: Option<&'a Name>, id: Option<&'a TestId>) -> Option<&'a str> {
+    id.map(TestId::as_str).or(name.map(Name::as_str))
+}
+
 /// Lookup and press by identifier for tests and harness systems.
 #[cfg(test)]
 pub(crate) mod harness {

@@ -9,7 +9,7 @@ use crate::{
     mobile_controls::{MobileControls, MobileControlsSet},
     net::{ClientSession, SessionUiCommand},
     ui::{
-        ModalId, ModalRoot, ScrollArea,
+        Activated, ModalId, ModalRoot, ScrollArea, TestId, UiAction, UiActionAppExt,
         theme::{
             self as ui,
             metric::{self, PhoneText},
@@ -28,11 +28,13 @@ impl Plugin for MobileUiPlugin {
             return;
         }
         app.init_resource::<ServerEntry>()
+            .add_ui_action::<PhoneAction>()
             .add_systems(Startup, setup_phone_ui)
             .add_systems(
                 Update,
                 phone_menu_actions
                     .after(MobileControlsSet::Layout)
+                    .after(crate::ui::UiSet::Dispatch)
                     .before(crate::help_overlay::HelpOverlaySet::Input)
                     .in_set(crate::input_context::InputContextSet::Modal),
             )
@@ -58,7 +60,9 @@ pub(crate) struct ServerEntry {
     keyboard: bool,
 }
 
-#[derive(Component, Clone)]
+/// Presses on the phone bar and the server-address entry. The buttons keep
+/// their fixed `TILE` colour (no `ButtonStyle`).
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum PhoneAction {
     Menu,
     Help,
@@ -93,8 +97,8 @@ fn phone_button(parent: &mut ChildSpawnerCommands, label: &str, name: &str, acti
                 ..default()
             },
             BackgroundColor(ui::TILE),
-            action,
-            Name::new(name.to_owned()),
+            UiAction(action),
+            TestId::new(name.to_owned()),
         ))
         .with_children(|button| {
             button.spawn((Text::new(label), ui::text(14.0), TextColor(ui::IVORY)));
@@ -245,7 +249,7 @@ fn edit_address(address: &mut String, text: &str) {
 }
 
 fn phone_menu_actions(
-    actions: Query<(&Interaction, &PhoneAction), (With<Button>, Changed<Interaction>)>,
+    mut activated: MessageReader<Activated<PhoneAction>>,
     mobile: Res<MobileControls>,
     session: Res<ClientSession>,
     mut entry: ResMut<ServerEntry>,
@@ -253,13 +257,11 @@ fn phone_menu_actions(
     mut help: ResMut<crate::help_overlay::HelpOverlayVisible>,
     mut requests: MessageWriter<SessionUiCommand>,
 ) {
+    let presses: Vec<PhoneAction> = activated.read().map(|a| a.action).collect();
     if !mobile.enabled {
         return;
     }
-    for (interaction, action) in &actions {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
+    for action in presses {
         match action {
             PhoneAction::Menu => pause.open = !pause.open,
             PhoneAction::Help => help.0 = !help.0,
@@ -346,7 +348,7 @@ fn sync_phone_ui(
         (
             With<PhoneBar>,
             Without<ServerEntryRoot>,
-            Without<PhoneAction>,
+            Without<UiAction<PhoneAction>>,
         ),
     >,
     mut overlay: Query<
@@ -354,10 +356,13 @@ fn sync_phone_ui(
         (
             With<ServerEntryRoot>,
             Without<PhoneBar>,
-            Without<PhoneAction>,
+            Without<UiAction<PhoneAction>>,
         ),
     >,
-    mut buttons: Query<(&PhoneAction, &mut Node), (Without<PhoneBar>, Without<ServerEntryRoot>)>,
+    mut buttons: Query<
+        (&UiAction<PhoneAction>, &mut Node),
+        (Without<PhoneBar>, Without<ServerEntryRoot>),
+    >,
     mut address: Query<&mut Text, (With<ServerAddressLabel>, Without<ServerErrorLabel>)>,
     mut errors: Query<&mut Text, (With<ServerErrorLabel>, Without<ServerAddressLabel>)>,
     ui_scale: Option<Res<UiScale>>,
@@ -393,7 +398,7 @@ fn sync_phone_ui(
         node.top = Val::Px(mobile.safe.top / scale);
         node.column_gap = Val::Px(6.0 / scale);
     }
-    for (action, mut node) in &mut buttons {
+    for (UiAction(action), mut node) in &mut buttons {
         let width = match action {
             PhoneAction::Help => Some(metric::PHONE_BAR_HELP_W),
             PhoneAction::Menu => Some(metric::PHONE_BAR_MENU_W),
@@ -915,8 +920,8 @@ mod tests {
                 .resource_mut::<crate::shop::ShopState>()
                 .open = shop_open;
             app.update();
-            let mut buttons = app.world_mut().query::<(&PhoneAction, &Node)>();
-            for (action, node) in buttons.iter(app.world()) {
+            let mut buttons = app.world_mut().query::<(&UiAction<PhoneAction>, &Node)>();
+            for (UiAction(action), node) in buttons.iter(app.world()) {
                 if matches!(
                     action,
                     PhoneAction::Help | PhoneAction::Menu | PhoneAction::Server

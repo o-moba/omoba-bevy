@@ -43,7 +43,9 @@ pub struct CombatPlugin;
 
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<TargetState>()
+        use crate::ui::UiActionAppExt;
+        app.add_ui_action::<hotbar::HotbarAction>()
+            .init_resource::<TargetState>()
             .init_resource::<BasicAttackState>()
             .init_resource::<TargetAimPreview>()
             .init_resource::<LocalCastCooldown>()

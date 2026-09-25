@@ -886,6 +886,7 @@ fn actual_cast_and_upgrade_systems_obey_help_pause_and_debug_context() {
         .init_resource::<ActionFeedback>()
         .init_resource::<LocalCastCooldown>()
         .init_resource::<crate::pause_menu::PauseMenuState>()
+        .add_message::<crate::ui::Activated<super::hotbar::HotbarAction>>()
         .insert_resource(GameStateSnapshot {
             state: GameState::Running,
             ..default()

@@ -8,7 +8,10 @@ use crate::{
         NetworkNeutralId, NetworkPlayerId, NetworkStructureId, TargetKind,
     },
     player::Player,
-    ui::{ModalId, ModalRoot, ScrollArea, theme as ui},
+    ui::{
+        Activated, ModalId, ModalRoot, ScrollArea, TestId, UiAction, UiActionAppExt,
+        test_id::node_key, theme as ui,
+    },
 };
 use bevy::{prelude::*, window::PrimaryWindow};
 use shared::{
@@ -21,6 +24,17 @@ pub(crate) struct EdgeHudPlugin;
 pub(crate) struct ScoreboardState {
     pub open: bool,
     namespace: Option<(u64, u64)>,
+}
+/// Presses on the match chrome and the scoreboard. The buttons keep their
+/// fixed panel colours (no `ButtonStyle`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EdgeAction {
+    /// The score strip toggles the scoreboard.
+    Score,
+    /// The ≡ button opens the pause menu.
+    Menu,
+    /// The scoreboard's Close button and its backdrop.
+    Close,
 }
 #[derive(Component)]
 struct EdgePart;
@@ -44,11 +58,13 @@ struct ScoreDetail;
 impl Plugin for EdgeHudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ScoreboardState>()
+            .add_ui_action::<EdgeAction>()
             .add_systems(Startup, setup)
             .add_systems(
                 Update,
                 actions
                     .in_set(InputContextSet::Modal)
+                    .after(crate::ui::UiSet::Dispatch)
                     .before(crate::help_overlay::HelpOverlaySet::Input)
                     .before(crate::shop::ShopModalSet),
             )
@@ -96,7 +112,8 @@ fn setup(mut commands: Commands) {
                 button_node(68.0),
                 BackgroundColor(ui::PANEL),
                 BorderColor::all(ui::EDGE),
-                Name::new("MatchScoreButton"),
+                UiAction(EdgeAction::Score),
+                TestId::new("MatchScoreButton"),
             ))
             .with_children(|p| {
                 p.spawn((
@@ -143,7 +160,8 @@ fn setup(mut commands: Commands) {
             BorderColor::all(ui::EDGE),
             ZIndex(14),
             EdgePart,
-            Name::new("MatchMenuButton"),
+            UiAction(EdgeAction::Menu),
+            TestId::new("MatchMenuButton"),
         ))
         .with_children(|p| {
             for _ in 0..3 {
@@ -249,7 +267,8 @@ fn setup(mut commands: Commands) {
                     height: Val::Percent(100.0),
                     ..default()
                 },
-                Name::new("ScoreboardBackdrop"),
+                UiAction(EdgeAction::Close),
+                TestId::new("ScoreboardBackdrop"),
             ));
             overlay
                 .spawn((
@@ -281,7 +300,8 @@ fn setup(mut commands: Commands) {
                                 button_node(64.0),
                                 BackgroundColor(ui::TILE),
                                 BorderColor::all(ui::EDGE),
-                                Name::new("ScoreboardCloseButton"),
+                                UiAction(EdgeAction::Close),
+                                TestId::new("ScoreboardCloseButton"),
                             ))
                             .with_children(|p| text(p, "Close", 14.0, ui::IVORY));
                         });
@@ -363,7 +383,7 @@ fn actions(
     screen: Option<Res<State<crate::frontend::AppScreen>>>,
     entry: Option<Res<crate::mobile_ui::ServerEntry>>,
     mobile: Option<Res<MobileControls>>,
-    buttons: Query<(&Name, &Interaction), (With<Button>, Changed<Interaction>)>,
+    mut activated: MessageReader<Activated<EdgeAction>>,
 ) {
     let identity = (game.meta.server_epoch, game.meta.match_id);
     let allowed = session.join_confirmed() && matches!(game.state, GameState::Running);
@@ -394,14 +414,11 @@ fn actions(
         state.open = !state.open;
         keys.clear_just_pressed(KeyCode::Tab);
     }
-    for (name, interaction) in &buttons {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
-        match name.as_str() {
-            "ScoreboardCloseButton" | "ScoreboardBackdrop" => state.open = false,
-            "MatchScoreButton" if can_open => state.open = !state.open,
-            "MatchMenuButton" if can_open => {
+    for Activated { action, .. } in activated.read() {
+        match action {
+            EdgeAction::Close => state.open = false,
+            EdgeAction::Score if can_open => state.open = !state.open,
+            EdgeAction::Menu if can_open => {
                 state.open = false;
                 pause.open = true;
                 pause.in_settings = false;
@@ -455,7 +472,7 @@ fn update(
         Option<&TargetValue>,
         Option<&ScoreDetail>,
     )>,
-    mut nodes: Query<(&Name, &mut Node)>,
+    mut nodes: Query<(Option<&Name>, Option<&TestId>, &mut Node)>,
 ) {
     let (score, kda) = scores(game.scoreboard.as_ref(), local.single().ok().map(|id| id.0));
     let details = target
@@ -512,8 +529,11 @@ fn update(
     }
     let resting =
         session.join_confirmed() && matches!(game.state, GameState::Running) && !context.modal_open;
-    for (name, mut node) in &mut nodes {
-        let show = match name.as_str() {
+    for (name, id, mut node) in &mut nodes {
+        let Some(name) = node_key(name, id) else {
+            continue;
+        };
+        let show = match name {
             "MatchScoreStrip" | "MatchMenuButton" => Some(resting),
             "TargetHealthRoot" => Some(resting && details.is_some()),
             "ScoreboardRoot" => Some(state.open),
@@ -522,7 +542,7 @@ fn update(
         if let Some(show) = show {
             node.display = if show { Display::Flex } else { Display::None };
         }
-        if name.as_str() == "TargetHealthFill" {
+        if name == "TargetHealthFill" {
             node.width = Val::Percent(
                 details
                     .as_ref()
@@ -646,7 +666,7 @@ fn render_rows(
 fn layout(
     windows: Query<&Window, With<PrimaryWindow>>,
     mobile: Res<MobileControls>,
-    mut nodes: Query<(&Name, &mut Node)>,
+    mut nodes: Query<(Option<&Name>, Option<&TestId>, &mut Node)>,
 ) {
     let Ok(window) = windows.single() else {
         return;
@@ -654,8 +674,8 @@ fn layout(
     let phone = mobile.enabled;
     let right = if phone { mobile.safe.right } else { 16.0 };
     let top = if phone { mobile.safe.top } else { 16.0 };
-    for (name, mut node) in &mut nodes {
-        match name.as_str() {
+    for (name, id, mut node) in &mut nodes {
+        match node_key(name, id).unwrap_or_default() {
             "MatchScoreStrip" => {
                 node.right = Val::Px(right + 150.0);
                 node.top = Val::Px(top);
@@ -741,9 +761,9 @@ mod tests {
     }
     fn named(app: &mut App, name: &str) -> Entity {
         app.world_mut()
-            .query::<(Entity, &Name)>()
+            .query::<(Entity, Option<&Name>, Option<&TestId>)>()
             .iter(app.world())
-            .find(|(_, n)| n.as_str() == name)
+            .find(|(_, n, id)| node_key(*n, *id) == Some(name))
             .unwrap()
             .0
     }
