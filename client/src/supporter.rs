@@ -7,7 +7,10 @@ use crate::{
     net::{NetworkCommand, RemotePlayer},
     player::Player,
     sprite::PlayerVisualMode,
-    ui::{Activated, Pressable, TestId, UiAction, UiActionAppExt, UiSet, theme as ui},
+    ui::{
+        Activated, ModalId, ModalRoot, Pressable, ScrollArea, TestId, UiAction, UiActionAppExt,
+        UiSet, theme as ui,
+    },
 };
 use bevy::{
     asset::RenderAssetUsages,
@@ -277,7 +280,6 @@ impl Plugin for SupporterPlugin {
                 Update,
                 sync_auras.after(crate::net::ClientNetPipeline::ApplySnapshot),
             )
-            .add_systems(PostUpdate, scroll_panel.before(bevy::ui::UiSystems::Layout))
             .add_systems(
                 PostUpdate,
                 (follow_actors, animate_orbits)
@@ -830,9 +832,9 @@ fn render_panel(
     if !state.open {
         return;
     }
-    commands.spawn((SupporterRoot,Node{position_type:PositionType::Absolute,width:Val::Percent(100.),height:Val::Percent(100.),align_items:AlignItems::Center,justify_content:JustifyContent::Center,padding:UiRect::all(Val::Px(10.)),..default()},BackgroundColor(Color::srgba(0.,0.,0.,0.72)),GlobalZIndex(1300))).with_children(|root| {
+    commands.spawn((SupporterRoot,ModalRoot(ModalId::Supporter),Node{position_type:PositionType::Absolute,width:Val::Percent(100.),height:Val::Percent(100.),align_items:AlignItems::Center,justify_content:JustifyContent::Center,padding:UiRect::all(Val::Px(10.)),..default()},BackgroundColor(Color::srgba(0.,0.,0.,0.72)),GlobalZIndex(1300))).with_children(|root| {
         root.spawn((Node{position_type:PositionType::Absolute,top:Val::Px(8.),right:Val::Px(8.),..default()},GlobalZIndex(1301))).with_children(|corner|{button(corner,"Close".into(),Action::Close,true);});
-        root.spawn((SupporterScroll,ScrollPosition::default(),Node{width:Val::Px(660.),max_width:Val::Percent(100.),max_height:Val::Percent(96.),flex_direction:FlexDirection::Column,row_gap:Val::Px(if compact{5.}else{9.}),padding:UiRect::all(Val::Px(if compact{8.}else{12.})),overflow:Overflow::scroll_y(),..ui::panel_node()},BackgroundColor(ui::PANEL.with_alpha(1.0)),BorderColor::all(ui::EDGE))).with_children(|panel| {
+        root.spawn((SupporterScroll,panel_scroll(),Node{width:Val::Px(660.),max_width:Val::Percent(100.),max_height:Val::Percent(96.),flex_direction:FlexDirection::Column,row_gap:Val::Px(if compact{5.}else{9.}),padding:UiRect::all(Val::Px(if compact{8.}else{12.})),overflow:Overflow::scroll_y(),..ui::panel_node()},BackgroundColor(ui::PANEL.with_alpha(1.0)),BorderColor::all(ui::EDGE))).with_children(|panel| {
             panel.spawn((Text::new(format!("Open Moba Supporter · {}",career.nickname)),ui::text(if compact{16.}else{20.}),TextColor(ui::GOLD)));
             panel.spawn((Text::new(summary),ui::text(if compact{12.}else{14.}),TextColor(ui::IVORY)));
             panel.spawn((Node{flex_direction:FlexDirection::Row,column_gap:Val::Px(12.),flex_wrap:FlexWrap::Wrap,..default()},)).with_children(|row| {
@@ -856,44 +858,10 @@ fn render_panel(
         });
     });
 }
-fn scroll_panel(
-    state: Res<SupporterUiState>,
-    mut wheel: MessageReader<bevy::input::mouse::MouseWheel>,
-    touches: Res<Touches>,
-    mut gesture: Local<Option<(u64, Vec2)>>,
-    mut panels: Query<(&ComputedNode, &mut ScrollPosition), With<SupporterScroll>>,
-) {
-    let mut delta = wheel
-        .read()
-        .map(|event| {
-            -event.y
-                * if event.unit == bevy::input::mouse::MouseScrollUnit::Line {
-                    24.0
-                } else {
-                    1.0
-                }
-        })
-        .sum::<f32>();
-    if !state.open {
-        *gesture = None;
-        return;
-    }
-    if let Some(touch) = touches.iter().next() {
-        let current = (touch.id(), touch.position());
-        if let Some((id, previous)) = *gesture {
-            if id == current.0 {
-                delta += previous.y - current.1.y;
-            }
-        }
-        *gesture = Some(current);
-    } else {
-        *gesture = None;
-    }
-    for (node, mut scroll) in &mut panels {
-        let maximum =
-            (node.content_size().y - node.size().y).max(0.0) * node.inverse_scale_factor();
-        scroll.y = (scroll.y + delta).clamp(0.0, maximum);
-    }
+/// The supporter panel body: 24 px per wheel notch on every build, touch drag
+/// from the first pixel.
+fn panel_scroll() -> ScrollArea {
+    ScrollArea::wheel(24.0).touch_drag(0.0)
 }
 
 fn button(parent: &mut ChildSpawnerCommands, label: String, action: Action, enabled: bool) {
@@ -942,6 +910,41 @@ impl Action {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn supporter_panel_scrolls_by_wheel_and_drag_while_it_is_the_top_modal() {
+        use crate::platform::UiProfile;
+        use crate::ui::scroll::harness;
+        for profile in [UiProfile::Desktop, UiProfile::Mobile] {
+            let mut app = App::new();
+            let window = harness::install(&mut app, profile);
+            let mut stack = crate::ui::ModalStack::default();
+            stack.push(ModalId::Supporter);
+            app.insert_resource(stack);
+            let root = app
+                .world_mut()
+                .spawn((SupporterRoot, ModalRoot(ModalId::Supporter)))
+                .id();
+            let panel = app
+                .world_mut()
+                .spawn((SupporterScroll, panel_scroll(), ChildOf(root)))
+                .id();
+            let center = Vec2::new(400.0, 300.0);
+            harness::measure(&mut app, panel, center);
+            harness::wheel_lines(&mut app, window, -1.0);
+            assert_eq!(harness::offset(&app, panel), 24.0, "{profile:?}");
+            harness::drag(&mut app, window, 1, center, 30.0);
+            assert_eq!(harness::offset(&app, panel), 54.0, "{profile:?}");
+            // Covered by another modal: the panel keeps its offset.
+            app.world_mut()
+                .resource_mut::<crate::ui::ModalStack>()
+                .pop(ModalId::Supporter);
+            app.world_mut()
+                .resource_mut::<crate::ui::ModalStack>()
+                .push(ModalId::Pause);
+            harness::wheel_lines(&mut app, window, -1.0);
+            assert_eq!(harness::offset(&app, panel), 54.0, "{profile:?}");
+        }
+    }
     #[test]
     fn orbital_paths_are_continuous_bounded_and_time_based() {
         for i in 0..ORBIT_COUNT {

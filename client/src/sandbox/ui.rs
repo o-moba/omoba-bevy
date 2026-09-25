@@ -8,10 +8,7 @@ use crate::ui::{
     widgets::ButtonStyle,
 };
 use bevy::{
-    input::{
-        keyboard::{Key, KeyboardInput},
-        mouse::{MouseScrollUnit, MouseWheel},
-    },
+    input::keyboard::{Key, KeyboardInput},
     window::PrimaryWindow,
 };
 
@@ -336,7 +333,6 @@ pub(super) fn install(app: &mut App) {
                 teleport,
                 build_panel,
                 refresh_labels,
-                scroll,
                 overlay,
             )
                 .chain()
@@ -450,7 +446,7 @@ fn build_panel(
         p.spawn(row()).with_children(|r|{heading(r,"COMBAT TEST");button(r,"Close [F6]",Action::Close);});
         p.spawn((w::label(&state.status,12.0,theme::MUTED),Label::Status));
         p.spawn(row()).with_children(|r|{for t in Tab::ALL{button(r,t.label(),Action::Tab(t));}});
-        p.spawn((Node{flex_direction:FlexDirection::Column,flex_grow:1.0,min_height:Val::Px(0.0),overflow:Overflow::scroll_y(),row_gap:Val::Px(9.0),padding:UiRect::right(Val::Px(6.0)),..default()},Body,Name::new("CombatTestBody"),ScrollPosition::default())).with_children(|p|match state.tab{
+        p.spawn((Node{flex_direction:FlexDirection::Column,flex_grow:1.0,min_height:Val::Px(0.0),overflow:Overflow::scroll_y(),row_gap:Val::Px(9.0),padding:UiRect::right(Val::Px(6.0)),..default()},Body,Name::new("CombatTestBody"),crate::ui::ScrollArea::wheel(32.0))).with_children(|p|match state.tab{
             Tab::Player|Tab::Enemy=>{
                 if state.tab==Tab::Enemy{toggle(p,Toggle::Enemy,&state);}
                 heading(p,"Hero and progression");p.spawn((w::label("",13.0,theme::IVORY),Label::Actor));
@@ -852,30 +848,6 @@ fn analytics_text(s: &SandboxClient, game: &GameStateSnapshot) -> String {
     }
     text
 }
-fn scroll(
-    mut events: MessageReader<MouseWheel>,
-    s: Res<SandboxClient>,
-    mut panels: Query<(&ComputedNode, &mut ScrollPosition), With<Body>>,
-) {
-    if !s.open || !s.enabled {
-        events.clear();
-        return;
-    }
-    let delta: f32 = events
-        .read()
-        .map(|e| {
-            e.y * if e.unit == MouseScrollUnit::Line {
-                32.0
-            } else {
-                1.0
-            }
-        })
-        .sum();
-    for (node, mut pos) in &mut panels {
-        let max = ((node.content_size().y - node.size().y) * node.inverse_scale_factor()).max(0.0);
-        pos.y = (pos.y - delta).clamp(0.0, max);
-    }
-}
 fn teleport(
     mut s: ResMut<SandboxClient>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -1048,6 +1020,32 @@ fn draw_geometry(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn combat_test_body_scrolls_by_wheel_on_every_build() {
+        use crate::platform::UiProfile;
+        use crate::ui::scroll::harness;
+        for profile in [UiProfile::Desktop, UiProfile::Mobile] {
+            let mut app = App::new();
+            let window = harness::install(&mut app, profile);
+            app.insert_resource(SandboxClient {
+                enabled: true,
+                open: true,
+                rebuild: true,
+                ..default()
+            })
+            .insert_resource(crate::net::ClientSession::admitted_for_test())
+            .add_systems(Update, build_panel);
+            app.update();
+            let body = app
+                .world_mut()
+                .query_filtered::<Entity, With<Body>>()
+                .single(app.world())
+                .unwrap();
+            harness::measure(&mut app, body, Vec2::new(400.0, 300.0));
+            harness::wheel_lines(&mut app, window, -2.0);
+            assert_eq!(harness::offset(&app, body), 64.0, "{profile:?}");
+        }
+    }
     #[test]
     fn field_edit_is_numeric_and_queues_real_authority_request() {
         let mut s = SandboxClient {

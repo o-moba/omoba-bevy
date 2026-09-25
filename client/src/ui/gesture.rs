@@ -22,6 +22,9 @@ pub(crate) struct Pressable {
     pub activated: bool,
     /// Owned by the module: a disabled button is never hit, pressed or lit.
     pub disabled: bool,
+    /// Set by the recognizer every frame from the [`super::modal::ModalStack`]:
+    /// a button outside the top open modal behaves as disabled.
+    pub blocked: bool,
 }
 
 impl Pressable {
@@ -29,7 +32,7 @@ impl Pressable {
     /// only hovers; the tap release activates. A synthetic press activates
     /// in either mode.
     pub(crate) fn effective(&self, interaction: Interaction) -> Interaction {
-        if self.disabled {
+        if self.disabled || self.blocked {
             return Interaction::None;
         }
         if self.activated {
@@ -45,6 +48,11 @@ impl Pressable {
         }
     }
 }
+
+/// How far (logical px) a finger may travel before a tap turns into a drag.
+/// The tap recognizer cancels past it and phone scroll areas start past it,
+/// so one gesture is never both a press and a scroll.
+pub(crate) const TAP_SLOP: f32 = 10.0;
 
 /// Bumped by a modal whenever it navigates (page change, open, close), which
 /// drops the tap held across the change so a release on the new page cannot
@@ -108,7 +116,7 @@ impl TapTracker {
         }
         let tap = self.held.as_mut().filter(|tap| tap.id == id)?;
         // Sticky cancellation: scrolling away then back cannot revive a tap.
-        tap.canceled |= tap.start.distance(point) > 10.0;
+        tap.canceled |= tap.start.distance(point) > TAP_SLOP;
         let candidate = tap.button;
         let released = phase == TouchPhase::Ended
             && !tap.canceled
@@ -148,7 +156,8 @@ pub(crate) struct RecognizerState {
 
 /// Runs first in `InputContextSet::Modal` (`UiSet::Gesture`) for every
 /// [`Pressable`] in the world. `activated` is a one-frame flag; `touch_mode`
-/// follows the platform; `disabled` is left to the owning module.
+/// follows the platform; `blocked` follows the modal stack (only the top
+/// modal's buttons react); `disabled` is left to the owning module.
 pub(crate) fn recognize_presses(
     mut state: Local<RecognizerState>,
     platform: Option<Res<crate::ui::UiPlatform>>,
@@ -162,6 +171,7 @@ pub(crate) fn recognize_presses(
     mut synthetic_cursor: Local<bevy::ecs::message::MessageCursor<SyntheticPress>>,
     lifecycle: Option<Res<Messages<AppLifecycle>>>,
     mut lifecycle_cursor: Local<bevy::ecs::message::MessageCursor<AppLifecycle>>,
+    gate: super::modal::ModalGate,
     mut buttons: Query<(
         Entity,
         &mut Pressable,
@@ -174,18 +184,20 @@ pub(crate) fn recognize_presses(
     let touch_mode = platform
         .as_ref()
         .is_some_and(|platform| platform.is_mobile());
-    for (_, mut pressable, ..) in &mut buttons {
+    for (entity, mut pressable, ..) in &mut buttons {
         let disabled = pressable.disabled;
         pressable.set_if_neq(Pressable {
             touch_mode,
             activated: false,
             disabled,
+            blocked: !gate.allows(entity),
         });
     }
     if let Some(synthetic) = synthetic.as_ref() {
         for SyntheticPress(entity) in synthetic_cursor.read(synthetic) {
             if let Ok((_, mut pressable, ..)) = buttons.get_mut(*entity)
                 && !pressable.disabled
+                && !pressable.blocked
             {
                 pressable.activated = true;
             }
@@ -234,7 +246,7 @@ pub(crate) fn recognize_presses(
     let mut visible: Vec<_> = buttons
         .iter()
         .filter_map(|(entity, pressable, node, transform, visibility, clip)| {
-            if pressable.disabled || visibility.is_some_and(|v| !v.get()) {
+            if pressable.disabled || pressable.blocked || visibility.is_some_and(|v| !v.get()) {
                 return None;
             }
             let (Some(node), Some(transform)) = (node, transform) else {
@@ -315,15 +327,22 @@ mod tests {
         let tapped = Pressable {
             touch_mode: true,
             activated: true,
-            disabled: false,
+            ..default()
         };
         assert_eq!(tapped.effective(Interaction::None), Interaction::Pressed);
         let disabled = Pressable {
             touch_mode: false,
             activated: true,
             disabled: true,
+            ..default()
         };
         assert_eq!(disabled.effective(Interaction::Pressed), Interaction::None);
+        let blocked = Pressable {
+            activated: true,
+            blocked: true,
+            ..default()
+        };
+        assert_eq!(blocked.effective(Interaction::Pressed), Interaction::None);
     }
 
     fn touch_app() -> (App, Entity, Entity) {

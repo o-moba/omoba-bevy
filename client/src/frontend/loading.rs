@@ -10,7 +10,7 @@ use shared::prematch::PrematchPhase;
 
 use super::{
     AppScreen,
-    draft::{self, DraftClient, DraftScroll, DraftScrollMemory, DraftSet},
+    draft::{self, DraftClient, DraftScrollMemory, DraftSet},
     widgets,
 };
 use crate::{
@@ -468,7 +468,7 @@ fn render_loading(
                                             0.0,
                                             *scroll.0.get(&id).unwrap_or(&0.0),
                                         )),
-                                        DraftScroll(id),
+                                        draft::draft_pane(id),
                                         Name::new(format!("LoadingTeam-{index}")),
                                     ))
                                     .with_children(|rows| {

@@ -8,16 +8,9 @@ use crate::{
         NetworkNeutralId, NetworkPlayerId, NetworkStructureId, TargetKind,
     },
     player::Player,
-    ui::theme as ui,
+    ui::{ModalId, ModalRoot, ScrollArea, theme as ui},
 };
-use bevy::{
-    input::{
-        mouse::{MouseScrollUnit, MouseWheel},
-        touch::{TouchInput, TouchPhase},
-    },
-    prelude::*,
-    window::PrimaryWindow,
-};
+use bevy::{prelude::*, window::PrimaryWindow};
 use shared::{
     live_score::{LiveScorePlayer, LiveScoreboard},
     map::Team,
@@ -61,7 +54,7 @@ impl Plugin for EdgeHudPlugin {
             )
             .add_systems(
                 Update,
-                (update, render_rows, scroll_rows)
+                (update, render_rows)
                     .chain()
                     .after(InputContextSet::Resolve),
             )
@@ -244,6 +237,7 @@ fn setup(mut commands: Commands) {
             },
             BackgroundColor(Color::srgba(0.0, 0.015, 0.02, 0.72)),
             ZIndex(90),
+            ModalRoot(ModalId::Scoreboard),
             Name::new("ScoreboardRoot"),
         ))
         .with_children(|overlay| {
@@ -331,7 +325,9 @@ fn setup(mut commands: Commands) {
                                                 overflow: Overflow::scroll_y(),
                                                 ..default()
                                             },
-                                            ScrollPosition::default(),
+                                            // Wheel under the cursor, touch
+                                            // drag from the first pixel.
+                                            ScrollArea::wheel(28.0).hover_only().touch_drag(0.0),
                                             ScoreRows(team),
                                             ScoreScroll,
                                             Name::new(if team == Team::Green {
@@ -713,67 +709,13 @@ fn layout(
         }
     }
 }
-fn scroll_rows(
-    state: Res<ScoreboardState>,
-    windows: Query<&Window, With<PrimaryWindow>>,
-    mut wheel: MessageReader<MouseWheel>,
-    mut touches: MessageReader<TouchInput>,
-    mut held: Local<Option<(u64, Vec2)>>,
-    mut rows: Query<(&ComputedNode, &UiGlobalTransform, &mut ScrollPosition), With<ScoreScroll>>,
-) {
-    if !state.open {
-        wheel.clear();
-        touches.clear();
-        *held = None;
-        return;
-    }
-    let pointer = windows.single().ok().and_then(Window::cursor_position);
-    let mut delta = 0.0;
-    let mut point = pointer;
-    for event in wheel.read() {
-        delta -= event.y
-            * if event.unit == MouseScrollUnit::Line {
-                28.0
-            } else {
-                1.0
-            };
-    }
-    for event in touches.read() {
-        match event.phase {
-            TouchPhase::Started => *held = Some((event.id, event.position)),
-            TouchPhase::Moved => {
-                if let Some((id, previous)) = held.as_mut() {
-                    if *id == event.id {
-                        delta += previous.y - event.position.y;
-                        point = Some(event.position);
-                        *previous = event.position;
-                    }
-                }
-            }
-            TouchPhase::Ended | TouchPhase::Canceled => {
-                if held.is_some_and(|(id, _)| id == event.id) {
-                    *held = None;
-                }
-            }
-        }
-    }
-    let Some(point) = point else {
-        return;
-    };
-    for (node, transform, mut scroll) in &mut rows {
-        let center = transform.translation * node.inverse_scale_factor();
-        let size = node.size() * node.inverse_scale_factor();
-        if Rect::from_center_size(center, size).contains(point) {
-            let max =
-                (node.content_size().y - node.size().y).max(0.0) * node.inverse_scale_factor();
-            scroll.0.y = (scroll.0.y + delta).clamp(0.0, max);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::input::{
+        mouse::{MouseScrollUnit, MouseWheel},
+        touch::{TouchInput, TouchPhase},
+    };
     fn app() -> App {
         let mut app = App::new();
         app.insert_resource(ClientSession::admitted_for_test())
@@ -855,6 +797,70 @@ mod tests {
             .match_id += 1;
         app.update();
         assert!(!app.world().resource::<ScoreboardState>().open);
+    }
+    #[test]
+    fn open_scoreboard_rows_scroll_by_hovered_wheel_and_touch_drag() {
+        let mut app = app();
+        app.insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
+            .add_systems(
+                Update,
+                crate::ui::scroll::scroll_areas.after(InputContextSet::Resolve),
+            );
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
+        app.update();
+        app.world_mut().resource_mut::<ScoreboardState>().open = true;
+        app.update();
+        assert_eq!(
+            app.world().resource::<crate::ui::ModalStack>().top(),
+            Some(crate::ui::ModalId::Scoreboard)
+        );
+        let rows = named(&mut app, "ScoreboardGreenRows");
+        app.world_mut().entity_mut(rows).insert((
+            ComputedNode {
+                size: Vec2::new(300.0, 190.0),
+                content_size: Vec2::new(300.0, 600.0),
+                inverse_scale_factor: 1.0,
+                ..default()
+            },
+            UiGlobalTransform::from_translation(Vec2::new(300.0, 300.0)),
+            InheritedVisibility::VISIBLE,
+        ));
+        let y = |app: &App| app.world().get::<ScrollPosition>(rows).unwrap().y;
+        let wheel = |app: &mut App| {
+            app.world_mut().write_message(MouseWheel {
+                unit: MouseScrollUnit::Line,
+                x: 0.0,
+                y: -1.0,
+                window,
+            });
+            app.update();
+        };
+        wheel(&mut app);
+        assert_eq!(y(&app), 0.0, "the wheel needs the cursor over the rows");
+        app.world_mut()
+            .get_mut::<Window>(window)
+            .unwrap()
+            .set_cursor_position(Some(Vec2::new(300.0, 300.0)));
+        wheel(&mut app);
+        assert_eq!(y(&app), 28.0);
+        for (phase, dy) in [
+            (TouchPhase::Started, 0.0),
+            (TouchPhase::Moved, 40.0),
+            (TouchPhase::Ended, 40.0),
+        ] {
+            app.world_mut().write_message(TouchInput {
+                window,
+                id: 1,
+                phase,
+                position: Vec2::new(300.0, 300.0 - dy),
+                force: None,
+            });
+        }
+        app.update();
+        assert_eq!(y(&app), 68.0);
     }
     #[test]
     fn scoreboard_cannot_reopen_over_chat_or_frontend_from_key_or_button() {

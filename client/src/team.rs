@@ -6,10 +6,7 @@
 //! selected. Picking a team commits the join (class + avatar + team in one
 //! packet).
 
-use bevy::{
-    input::mouse::{MouseScrollUnit, MouseWheel},
-    prelude::*,
-};
+use bevy::prelude::*;
 use omoba_passport::avatars::avatar_roster;
 use shared::HeroClass;
 use std::collections::HashMap;
@@ -115,7 +112,6 @@ impl Plugin for TeamSelectPlugin {
                     team_select_ui_system
                         .after(UiSet::Dispatch)
                         .before(crate::net::ClientNetPipeline::SendCommands),
-                    scroll_avatar_roster,
                     sync_hero_panel,
                     sync_hero_select_status,
                 )
@@ -562,7 +558,7 @@ pub fn spawn_team_select_ui(
                     } else {
                         Visibility::Hidden
                     },
-                    ScrollPosition::default(),
+                    roster_scroll(),
                     ModelAvatarGrid,
                     Name::new("AvatarGrid"),
                 ))
@@ -663,7 +659,7 @@ pub fn spawn_team_select_ui(
                     } else {
                         Visibility::Hidden
                     },
-                    ScrollPosition::default(),
+                    roster_scroll(),
                     SpriteAvatarGrid,
                     Name::new("SpriteCharacterGrid"),
                 ))
@@ -1002,40 +998,9 @@ fn spawn_connect_button(row: &mut ChildSpawnerCommands, label: &str, target: Con
     });
 }
 
-fn scroll_avatar_roster(
-    mut wheel: MessageReader<MouseWheel>,
-    keys: Res<ButtonInput<KeyCode>>,
-    mut grids: Query<
-        (&Node, &ComputedNode, &mut ScrollPosition),
-        Or<(With<ModelAvatarGrid>, With<SpriteAvatarGrid>)>,
-    >,
-) {
-    let mut delta = wheel
-        .read()
-        .map(|event| {
-            -event.y
-                * if event.unit == MouseScrollUnit::Line {
-                    48.0
-                } else {
-                    1.0
-                }
-        })
-        .sum::<f32>();
-    if keys.just_pressed(KeyCode::PageDown) {
-        delta += 180.0;
-    }
-    if keys.just_pressed(KeyCode::PageUp) {
-        delta -= 180.0;
-    }
-    for (node, computed, mut position) in &mut grids {
-        if node.display == Display::None {
-            continue;
-        }
-        let maximum = ((computed.content_size().y - computed.size().y)
-            * computed.inverse_scale_factor())
-        .max(0.0);
-        position.y = (position.y + delta).clamp(0.0, maximum);
-    }
+/// The hero roster grids: 48 px per wheel notch, 180 px per PageUp/PageDown.
+fn roster_scroll() -> crate::ui::ScrollArea {
+    crate::ui::ScrollArea::wheel(48.0).page_keys(180.0)
 }
 
 fn spawn_sprite_button(
@@ -1790,8 +1755,9 @@ mod tests {
     #[test]
     fn model_join_ui_excludes_inactive_layout_and_scrolls_all_shipped_choices() {
         let mut app = App::new();
-        app.add_message::<MouseWheel>()
+        app.add_message::<bevy::input::mouse::MouseWheel>()
             .init_resource::<ButtonInput<KeyCode>>()
+            .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
             .add_systems(Startup, |mut commands: Commands| {
                 spawn_team_select_ui(
                     &mut commands,
@@ -1802,7 +1768,9 @@ mod tests {
                     false,
                 )
             })
-            .add_systems(Update, scroll_avatar_roster);
+            .add_systems(Update, crate::ui::scroll::scroll_areas);
+        app.world_mut()
+            .spawn((Window::default(), bevy::window::PrimaryWindow));
         app.update();
         let mut model = app
             .world_mut()
@@ -1847,12 +1815,16 @@ mod tests {
         assert_eq!(teams.iter(app.world()).count(), 1);
         // A 720p / 768p roster viewport is bounded while the complete content scrolls.
         for height in [720.0, 768.0] {
-            app.world_mut().entity_mut(grid).insert(ComputedNode {
-                size: Vec2::new(672.0, height * 0.32),
-                content_size: Vec2::new(672.0, 700.0),
-                inverse_scale_factor: 1.0,
-                ..default()
-            });
+            app.world_mut().entity_mut(grid).insert((
+                ComputedNode {
+                    size: Vec2::new(672.0, height * 0.32),
+                    content_size: Vec2::new(672.0, 700.0),
+                    inverse_scale_factor: 1.0,
+                    ..default()
+                },
+                // No visibility propagation in this app.
+                InheritedVisibility::VISIBLE,
+            ));
             app.world_mut()
                 .resource_mut::<ButtonInput<KeyCode>>()
                 .press(KeyCode::PageDown);

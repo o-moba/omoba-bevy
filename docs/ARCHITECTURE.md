@@ -99,7 +99,14 @@ these together to understand frame order:
    `crate::net::X`.
 2. `InputContextSet::{Social, Modal, Resolve, Actions}`
    (`client/src/input_context.rs`): modal UI (pause menu, shop, career,
-   social, help) runs first and decides whether gameplay input is allowed;
+   social, help) runs first and decides whether gameplay input is allowed.
+   Inside `Modal` the UI kit runs `ModalSet::Early` (the registered modals
+   update `ui::modal::ModalStack`) and then `UiSet::Gesture → Scroll →
+   Dispatch → Paint` (tap recognizer with top-modal gating, the one
+   `ScrollArea` system, typed actions, button colours; `docs/ui-kit.md`).
+   `Resolve` starts with `ModalSet::Late` and reads `ModalStack::is_open()`
+   plus the checks that are not modal panels (help in a running match,
+   sandbox, social, front-end screens, hero picker, phone orientation);
    `Actions` holds movement (`WorldMovementInputSet`), targeting and casting
    (the combat chain in `client/src/combat/`, pointer picking in
    `CombatPointerInputSet`) and mobile controls. Both input sets are
@@ -567,8 +574,10 @@ Ordered by value over cost. Each step is a separate change with the full
    registry (pilot done: `client/src/ui/` with theme, tap recognizer, typed
    actions and widgets; the pause menu, the practice sandbox, the front-end
    screens, hero select, career, social, supporter, the Combat Test panel
-   and the help overlay use it; the `ui_theme` and `frontend::widgets`
-   shims and `MenuButton` are gone; remaining steps in `docs/ui-kit.md`).
+   and the help overlay use it; one `ScrollArea` system scrolls every panel
+   and the `ModalStack` registry gates input top-only; the `ui_theme` and
+   `frontend::widgets` shims and `MenuButton` are gone; remaining steps in
+   `docs/ui-kit.md`).
 10. Client domain module, combat/player split, render backends behind
     `run_if`, plugin groups, QA behind a cargo feature (done: the domain
     module and the `in_models3d`/`in_sprite2d` backend gates; `combat.rs`

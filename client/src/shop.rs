@@ -9,7 +9,7 @@ use crate::{
     },
     pause_menu::PauseMenuState,
     player::{MovementTarget, Player},
-    ui::theme as ui,
+    ui::{ModalId, ModalRoot, theme as ui},
 };
 use bevy::prelude::*;
 use shared::shop::{self, ItemId, PurchaseError};
@@ -411,7 +411,7 @@ fn setup_shop(mut commands: Commands) {
         top: Val::Px(0.0), bottom: Val::Px(0.0), display: Display::None,
         align_items: AlignItems::Center, justify_content: JustifyContent::Center, ..default() },
         BackgroundColor(Color::srgba(0.005, 0.025, 0.025, 0.68)), Visibility::Hidden,
-        ZIndex(45), ShopRoot, Name::new("ShopRoot")))
+        ZIndex(45), ShopRoot, ModalRoot(ModalId::Shop), Name::new("ShopRoot")))
         .with_children(|overlay| {
             overlay.spawn((Node { width: Val::Px(864.0), max_width: Val::Percent(94.0), flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(12.0), padding: UiRect::all(Val::Px(22.0)), ..ui::panel_node() },

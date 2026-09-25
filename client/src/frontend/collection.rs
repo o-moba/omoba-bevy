@@ -1,7 +1,7 @@
 //! Avatar collection: every avatar the player can look at, with a live 3D
 //! preview, animation switching and the showcase/loadout choices.
 
-use bevy::input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel};
+use bevy::input::mouse::MouseMotion;
 use bevy::input::touch::{TouchInput, TouchPhase};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -33,7 +33,6 @@ impl Plugin for CollectionScreenPlugin {
                     refresh_connection_labels,
                     drag_to_rotate,
                     collection_actions,
-                    scroll_collection,
                     refresh_collection_details,
                 )
                     .chain()
@@ -327,6 +326,7 @@ fn spawn_collection(
                     BackgroundColor(theme::PANEL_OPAQUE),
                     BorderColor::all(theme::PANEL_EDGE),
                     CollectionGrid,
+                    grid_scroll(),
                     CatalogueRevision(catalogue.revision),
                     Name::new("CollectionGrid"),
                 ))
@@ -533,44 +533,13 @@ fn collection_actions(
     }
 }
 
-/// Bevy lays a scroll container out but does not move it: without this the
-/// avatars below the fold could be seen clipped and never reached.
-fn scroll_collection(
-    mut wheel: MessageReader<MouseWheel>,
-    keys: Res<ButtonInput<KeyCode>>,
-    mut grids: Query<(&ComputedNode, &mut ScrollPosition), With<CollectionGrid>>,
-) {
-    let mut delta = wheel
-        .read()
-        .map(|event| {
-            -event.y
-                * if event.unit == MouseScrollUnit::Line {
-                    48.0
-                } else {
-                    1.0
-                }
-        })
-        .sum::<f32>();
-    if keys.just_pressed(KeyCode::PageDown) {
-        delta += 300.0;
-    }
-    if keys.just_pressed(KeyCode::PageUp) {
-        delta -= 300.0;
-    }
-    if delta == 0.0 {
-        return;
-    }
-    for (computed, mut position) in &mut grids {
-        position.y = scrolled(position.y, delta, computed);
-    }
-}
-
-/// New scroll offset, kept inside what the container can actually show.
-fn scrolled(current: f32, delta: f32, computed: &ComputedNode) -> f32 {
-    let maximum = ((computed.content_size().y - computed.size().y)
-        * computed.inverse_scale_factor())
-    .max(0.0);
-    (current + delta).clamp(0.0, maximum)
+/// The avatar grid: 48 px per wheel notch, 300 px per PageUp/PageDown, touch
+/// drag from the first pixel (`drag_to_rotate` still owns the finger so it
+/// cannot also turn the preview, and blocks actions after 4 px).
+fn grid_scroll() -> crate::ui::ScrollArea {
+    crate::ui::ScrollArea::wheel(48.0)
+        .page_keys(300.0)
+        .touch_drag(0.0)
 }
 
 #[derive(Resource, Default)]
@@ -626,10 +595,7 @@ fn drag_to_rotate(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     surfaces: Query<(&ComputedNode, &UiGlobalTransform), With<PreviewSurface>>,
-    mut grids: Query<
-        (&ComputedNode, &UiGlobalTransform, &mut ScrollPosition),
-        With<CollectionGrid>,
-    >,
+    grids: Query<(&ComputedNode, &UiGlobalTransform), With<CollectionGrid>>,
 ) {
     drag.block_actions = matches!(
         drag.owner,
@@ -659,7 +625,7 @@ fn drag_to_rotate(
                         previous: event.position,
                     });
                     drag.block_actions = true;
-                } else if grids.iter().any(|(node, transform, _)| {
+                } else if grids.iter().any(|(node, transform)| {
                     surface_rect(node, transform, window.scale_factor()).contains(event.position)
                 }) {
                     drag.owner = Some(DragOwner::GridTouch {
@@ -682,11 +648,10 @@ fn drag_to_rotate(
                     previous,
                     moved,
                 }) if id == event.id => {
+                    // `ui::scroll` moves the grid; this only keeps the
+                    // finger from turning the preview or pressing a tile.
                     let moved = moved || event.position.distance(previous) > 4.0;
                     drag.block_actions |= moved;
-                    for (node, _, mut scroll) in &mut grids {
-                        scroll.y = scrolled(scroll.y, previous.y - event.position.y, node);
-                    }
                     drag.owner = Some(DragOwner::GridTouch {
                         id,
                         previous: event.position,
@@ -1217,6 +1182,75 @@ mod tests {
             children
         );
         assert_eq!(app.world().get::<ScrollPosition>(grid).unwrap().y, 120.0);
+    }
+
+    #[test]
+    fn the_avatar_grid_scrolls_by_wheel_page_keys_and_touch_drag() {
+        use bevy::input::{
+            mouse::{MouseScrollUnit, MouseWheel},
+            touch::{TouchInput, TouchPhase},
+        };
+        let mut app = App::new();
+        app.insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_message::<MouseWheel>()
+            .add_message::<TouchInput>()
+            .add_systems(Update, crate::ui::scroll::scroll_areas);
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
+        let grid = app
+            .world_mut()
+            .spawn((
+                CollectionGrid,
+                grid_scroll(),
+                ComputedNode {
+                    size: Vec2::new(400.0, 300.0),
+                    content_size: Vec2::new(400.0, 1200.0),
+                    inverse_scale_factor: 1.0,
+                    ..default()
+                },
+                UiGlobalTransform::from_translation(Vec2::new(300.0, 300.0)),
+            ))
+            .id();
+        let y = |app: &App| app.world().get::<ScrollPosition>(grid).unwrap().y;
+        app.world_mut().write_message(MouseWheel {
+            unit: MouseScrollUnit::Line,
+            x: 0.0,
+            y: -1.0,
+            window,
+        });
+        app.update();
+        assert_eq!(y(&app), 48.0);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::PageDown);
+        app.update();
+        assert_eq!(y(&app), 348.0);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        for (phase, dy) in [
+            (TouchPhase::Started, 0.0),
+            (TouchPhase::Moved, 2.0),
+            (TouchPhase::Moved, 50.0),
+            (TouchPhase::Ended, 50.0),
+        ] {
+            app.world_mut().write_message(TouchInput {
+                window,
+                id: 1,
+                phase,
+                position: Vec2::new(300.0, 300.0 - dy),
+                force: None,
+            });
+        }
+        app.update();
+        assert_eq!(
+            y(&app),
+            398.0,
+            "the grid follows the finger from the first pixel"
+        );
     }
 
     #[test]
