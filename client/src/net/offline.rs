@@ -118,8 +118,8 @@ fn hero(
     serde_json::from_value(serde_json::json!({
         "id":id, "is_bot":id != LOCAL_ID, "x":x, "y":MapLayout::default().terrain_height_3d(x,z)+0.5, "z":z, "yaw":0.0,
         "team":team, "hero_class":class, "avatar":avatar, "level":LEVEL,
-        "hp":balance::base_hp(class), "max_hp":balance::base_hp(class),
-        "mana":100.0, "max_mana":100.0, "ranks":[1,1,1,1],
+        "hp":balance::max_hp_for_level(class, LEVEL, 0.0), "max_hp":balance::max_hp_for_level(class, LEVEL, 0.0),
+        "mana":balance::max_mana_for_level(LEVEL, 0.0), "max_mana":balance::max_mana_for_level(LEVEL, 0.0), "ranks":[1,1,1,1],
         "basic_attack_cooldown_secs":balance::basic_cooldown(class, LEVEL, ItemBonuses::NONE).as_secs_f32()
     })).expect("static practice player contract")
 }
@@ -209,9 +209,12 @@ impl Simulation {
                     return;
                 };
                 let def = shared::ability_for_class_slot(p.hero_class, index);
-                if p.skill_cooldown_remaining_secs[slot as usize] > 0.0
+                let rank = p.ranks[slot as usize].clamp(1, def.max_rank);
+                let mana_cost = shared::scaled_mana_cost(def, rank);
+                if p.hp <= 0.0
+                    || p.skill_cooldown_remaining_secs[slot as usize] > 0.0
                     || p.skill_recovery_remaining_secs > 0.0
-                    || p.mana < def.base_mana_cost
+                    || p.mana < mana_cost
                 {
                     return;
                 }
@@ -220,20 +223,24 @@ impl Simulation {
                 {
                     return;
                 }
+                // The server's effect scale: rank and level power apply to
+                // heals, mana restores and damage alike (`sim/cast.rs`).
+                let effect_scale = shared::rank_effect_scale(rank)
+                    * balance::ability_power_multiplier(p.hero_class, LEVEL);
                 let p = &mut self.players[0];
-                p.mana = (p.mana - def.base_mana_cost + def.self_mana_restore.unwrap_or(0.0))
+                p.mana = (p.mana - mana_cost
+                    + def.self_mana_restore.unwrap_or(0.0) * effect_scale)
                     .min(p.max_mana);
-                p.hp = (p.hp + def.self_heal.unwrap_or(0.0)).min(p.max_hp);
+                p.hp = (p.hp + def.self_heal.unwrap_or(0.0) * effect_scale).min(p.max_hp);
                 p.skill_cooldown_remaining_secs[slot as usize] =
-                    balance::ability_cooldown(p.hero_class, LEVEL, 1, index, ItemBonuses::NONE)
+                    balance::ability_cooldown(p.hero_class, LEVEL, rank, index, ItemBonuses::NONE)
                         .as_secs_f32();
                 p.skill_recovery_remaining_secs = balance::skill_recovery_secs(LEVEL);
                 p.action_sequence += 1;
-                p.action_kind = PlayerActionKind::Cast;
+                p.action_kind = PlayerActionKind::for_cast(index);
                 p.action_slot = slot;
                 if let Some(damage) = def.projectile_damage {
-                    let damage = damage * balance::ability_power_multiplier(p.hero_class, LEVEL);
-                    self.attack(target, damage, Some(slot));
+                    self.attack(target, damage * effect_scale, Some(slot));
                 }
             }
             ClientPacket::Utility {
@@ -476,7 +483,7 @@ impl Simulation {
                 duelist.gold = budget - spent;
                 duelist.max_hp = balance::max_hp_for_level(class, level, bonuses.max_hp);
                 duelist.hp = duelist.max_hp;
-                duelist.max_mana += bonuses.max_mana;
+                duelist.max_mana = balance::max_mana_for_level(level, bonuses.max_mana);
                 duelist.mana = duelist.max_mana;
                 duelist.basic_attack_cooldown_secs =
                     balance::basic_cooldown(class, level, bonuses).as_secs_f32();
@@ -588,7 +595,7 @@ impl Simulation {
                 balance::ability_cooldown(class, level, rank, index_slot, bonuses).as_secs_f32();
             bot.skill_recovery_remaining_secs = balance::skill_recovery_secs(level);
             bot.action_sequence += 1;
-            bot.action_kind = PlayerActionKind::Cast;
+            bot.action_kind = PlayerActionKind::for_cast(index_slot);
             bot.action_slot = slot;
             bot.yaw = yaw_towards(to_local.x, to_local.y);
             let damage = base_damage
@@ -614,7 +621,10 @@ impl Simulation {
             {
                 *timer = (*timer - dt).max(0.0);
             }
-            p.mana = (p.mana + balance::MANA_REGEN_PER_SECOND * dt).min(p.max_mana);
+            // The dead do not regenerate, as on the server.
+            if p.hp > 0.0 {
+                p.mana = (p.mana + balance::MANA_REGEN_PER_SECOND * dt).min(p.max_mana);
+            }
             if p.id == LOCAL_ID {
                 if self.god_mode {
                     p.hp = p.max_hp;
@@ -931,6 +941,60 @@ mod tests {
             assert!(sim.players.is_empty());
             assert!(sim.shots.is_empty());
         }
+    }
+    /// O16: offline practice follows the server's formulas: "Level 6"
+    /// heroes get level-6 pools, heals scale with rank and level power, Q
+    /// plays as an Attack, and the dead do not regenerate mana.
+    #[test]
+    fn offline_formulas_match_the_server() {
+        let mut healed = false;
+        for class in HeroClass::ALL {
+            let mut sim = joined(class);
+            for p in &sim.players {
+                assert_eq!(p.max_hp, balance::max_hp_for_level(p.hero_class, LEVEL, 0.0));
+                assert_eq!(p.hp, p.max_hp);
+                assert_eq!(p.max_mana, balance::max_mana_for_level(LEVEL, 0.0));
+            }
+            assert!(sim.players[0].max_hp > balance::base_hp(class));
+
+            for slot in 0..4_u8 {
+                let index = SkillSlot::from_index(slot).unwrap();
+                let def = shared::ability_for_class_slot(class, index);
+                let local = &mut sim.players[0];
+                local.mana = local.max_mana;
+                local.hp = 1.0;
+                local.skill_cooldown_remaining_secs = [0.0; 4];
+                local.skill_recovery_remaining_secs = 0.0;
+                let before = local.action_sequence;
+                sim.command(ClientPacket::Cast {
+                    target: target(),
+                    slot,
+                });
+                let local = &sim.players[0];
+                if local.action_sequence == before {
+                    continue; // A unit-target skill out of range.
+                }
+                let expected = if index == SkillSlot::Q {
+                    PlayerActionKind::Attack
+                } else {
+                    PlayerActionKind::Cast
+                };
+                assert_eq!(local.action_kind, expected, "{class:?} slot {slot}");
+                if let Some(heal) = def.self_heal {
+                    let scaled = heal * balance::ability_power_multiplier(class, LEVEL);
+                    assert!((local.hp - (1.0 + scaled)).abs() < 1e-4, "{class:?} heal");
+                    assert!(scaled > heal);
+                    healed = true;
+                }
+            }
+
+            // A dead ring bot keeps its mana until it respawns.
+            sim.players[1].hp = 0.0;
+            sim.players[1].mana = 10.0;
+            sim.advance(0.1);
+            assert_eq!(sim.players[1].mana, 10.0);
+        }
+        assert!(healed, "some class has a self heal");
     }
     #[test]
     fn utilities_are_local_and_late_pre_dash_transforms_cannot_undo_dash() {

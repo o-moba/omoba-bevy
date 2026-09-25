@@ -100,7 +100,7 @@ fn practice_solo_starts_with_labelled_heroes_without_database_ack_or_ranked_cred
     rt.world.game_state = GameState::Victory {
         winner: Team::Green,
     };
-    rt.record_match_metrics(now + Duration::from_secs(1));
+    rt.settle_finished_round(now + Duration::from_secs(1));
     let result = rt.career_view(addr(1), now).last_result.unwrap();
     assert!(!result.saved && !result.rated);
     assert!(
@@ -1691,4 +1691,56 @@ fn jungle_bots_clear_camps_on_their_own_half_for_warden_rewards() {
         );
         assert!(warden.economy.gold > shared::shop::STARTING_GOLD && warden.hero.progress.xp > 0);
     }
+}
+
+/// O17: a round torn down after its victory settles as Completed even when
+/// no tick settled it first; a round torn down mid-play is Abandoned.
+#[test]
+fn restart_round_settles_a_won_round_as_completed_and_a_running_one_as_abandoned() {
+    use shared::career::MatchOutcome;
+    for (state, expected, winner) in [
+        (
+            GameState::Victory {
+                winner: Team::Green,
+            },
+            MatchOutcome::Completed,
+            Some(Team::Green),
+        ),
+        (GameState::Running, MatchOutcome::Abandoned, None),
+    ] {
+        let (mut rt, clock, transport) = memory_runtime(2);
+        let now = clock.now();
+        transport.push_inbound(addr(1), serde_json::to_vec(&join("settle")).unwrap());
+        rt.prepare_tick();
+        assert_eq!(rt.world.game_state, GameState::Running);
+        assert!(rt.career_allocation_for_test().is_some());
+        rt.world.game_state = state;
+        rt.restart_round(now + Duration::from_secs(1));
+        let result = rt
+            .career_view(addr(1), now)
+            .last_result
+            .expect("the torn-down round has a result");
+        assert_eq!(result.outcome, expected, "{state:?}");
+        assert_eq!(result.winner, winner, "{state:?}");
+    }
+}
+
+/// O17: `record_match_metrics` only logs; `settle_finished_round` finalizes
+/// the won round and starts the rematch timer.
+#[test]
+fn match_metrics_do_not_settle_the_round() {
+    let (mut rt, clock, transport) = memory_runtime(2);
+    let now = clock.now();
+    transport.push_inbound(addr(1), serde_json::to_vec(&join("metrics")).unwrap());
+    rt.prepare_tick();
+    rt.world.game_state = GameState::Victory {
+        winner: Team::Blue,
+    };
+    rt.record_match_metrics(now);
+    assert!(rt.victory_at.is_none());
+    assert!(rt.career_view(addr(1), now).last_result.is_none());
+    rt.settle_finished_round(now);
+    assert_eq!(rt.victory_at, Some(now));
+    let result = rt.career_view(addr(1), now).last_result.unwrap();
+    assert_eq!(result.outcome, shared::career::MatchOutcome::Completed);
 }

@@ -8,6 +8,7 @@ use shared::wire::{CharacterChoice, GameState};
 
 use crate::balance::{
     EMPTY_ROSTER_GRACE, FIRST_MINION_WAVE_DELAY, MINION_WAVE_INTERVAL, MOVEMENT_MAX_DELTA_SECONDS,
+    MOVEMENT_POSITION_TOLERANCE,
     PLAYER_GROUND_Y, SESSION_RECLAIM_WINDOW,
 };
 use crate::combat_feedback::CombatLog;
@@ -129,6 +130,7 @@ impl GameWorld {
                 player.session_id = Some(session_id);
                 player.last_seen = now;
                 player.timers.last_movement_at = now;
+                player.timers.movement_slack = MOVEMENT_POSITION_TOLERANCE;
                 players.insert(addr, player);
                 return true;
             }
@@ -147,6 +149,7 @@ impl GameWorld {
                 disconnected.player.session_id = Some(session_id);
                 disconnected.player.last_seen = now;
                 disconnected.player.timers.last_movement_at = now;
+                disconnected.player.timers.movement_slack = MOVEMENT_POSITION_TOLERANCE;
                 players.insert(addr, disconnected.player);
                 return true;
             }
@@ -251,6 +254,7 @@ pub(crate) fn reset_player_round(
     player.timers.haste_ready_at = None;
     player.timers.haste_expires_at = None;
     player.timers.last_movement_at = now;
+    player.timers.movement_slack = MOVEMENT_POSITION_TOLERANCE;
     player.timers.last_cast_at = [None; 4];
     player.timers.last_basic_attack_at = None;
     player.timers.respawn_at = None;
@@ -324,6 +328,10 @@ pub(crate) fn handle_transform_request_with_structures(
     let accepted_xz = shared::navigation::world_navigation()
         .clip_movement([current.x, current.z], [accepted.x, accepted.z]);
     let accepted_xz = clip_live_structures([current.x, current.z], accepted_xz, structures);
+    // Whatever the step did not spend stays available as slack, capped at
+    // the tolerance: the budget is time-based, not per packet.
+    let moved = ((accepted_xz[0] - current.x).powi(2) + (accepted_xz[1] - current.z).powi(2)).sqrt();
+    player.timers.movement_slack = (max_distance - moved).clamp(0.0, MOVEMENT_POSITION_TOLERANCE);
     player.hero.x = accepted_xz[0];
     player.hero.y = PLAYER_GROUND_Y;
     player.hero.z = accepted_xz[1];
@@ -513,7 +521,8 @@ impl ServerRuntime {
             self.reset_sandbox_duel(now);
             return;
         }
-        self.finish_career_round(shared::career::MatchOutcome::Abandoned, None, now);
+        let (outcome, winner) = self.teardown_outcome();
+        self.finish_career_round(outcome, winner, now);
         if let crate::match_service::MatchService::Worker(worker) = &mut self.match_service {
             worker.aborted = true;
             return;
@@ -624,15 +633,32 @@ impl ServerRuntime {
                 );
             }
         }
+    }
+
+    /// Round lifecycle at the end of a tick: a won round is finalized as
+    /// Completed for the career store and starts the rematch timer
+    /// (`victory_at`). Idempotent; logging lives in `record_match_metrics`.
+    pub(crate) fn settle_finished_round(&mut self, now: Instant) {
         if let GameState::Victory { winner } = self.world.game_state {
             self.finish_career_round(shared::career::MatchOutcome::Completed, Some(winner), now);
             if self.victory_at.is_none() {
                 self.victory_at = Some(now);
                 println!(
-                    "MATCH_METRIC event=victory epoch={} match={} winner={winner:?} duration_ms={elapsed}",
-                    self.server_epoch, self.match_id
+                    "MATCH_METRIC event=victory epoch={} match={} winner={winner:?} duration_ms={}",
+                    self.server_epoch,
+                    self.match_id,
+                    self.elapsed_match_ms(now)
                 );
             }
+        }
+    }
+
+    /// How an unfinalized career round ends when the round is torn down: a
+    /// won round is Completed, anything else is Abandoned.
+    fn teardown_outcome(&self) -> (shared::career::MatchOutcome, Option<shared::map::Team>) {
+        match self.world.game_state {
+            GameState::Victory { winner } => (shared::career::MatchOutcome::Completed, Some(winner)),
+            _ => (shared::career::MatchOutcome::Abandoned, None),
         }
     }
 }

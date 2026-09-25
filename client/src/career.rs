@@ -1152,6 +1152,16 @@ pub(crate) fn queue_text(queue: &QueueView) -> Option<String> {
         _ => None,
     }
 }
+/// Asset path of a career portrait's avatar thumbnail. `thumbnail` is the
+/// passport resolver, so store avatars load from `ekza://` like everywhere
+/// else instead of a bundled `avatars/` file that does not exist.
+fn avatar_portrait_path(
+    avatar: Option<&str>,
+    thumbnail: impl Fn(&shared::AvatarDefinition) -> Option<String>,
+) -> Option<String> {
+    avatar.and_then(shared::avatar_definition).and_then(thumbnail)
+}
+
 fn portrait(
     parent: &mut ChildSpawnerCommands,
     avatar: Option<&str>,
@@ -1177,11 +1187,9 @@ fn portrait(
         None
     }
     .or_else(|| {
-        avatar
-            .and_then(shared::avatar_definition)
-            .and_then(|a| a.thumbnail.as_deref())
+        avatar_portrait_path(avatar, crate::passport::thumbnail_asset_path)
             .zip(assets)
-            .map(|(file, assets)| ImageNode::new(assets.load(format!("avatars/{file}"))))
+            .map(|(path, assets)| ImageNode::new(assets.load(path)))
     });
     let mut entity = parent.spawn((
         Node {
@@ -2477,6 +2485,31 @@ fn scroll_desktop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// O11: a store avatar's portrait resolves through the passport path
+    /// (`ekza://avatars/...`), not a bundled `avatars/` file.
+    #[test]
+    fn career_portrait_loads_store_avatars_from_the_ekza_source() {
+        let avatar = shared::avatar_roster()
+            .iter()
+            .find(|a| a.thumbnail.is_some())
+            .expect("a roster avatar with a thumbnail");
+        let file = avatar.thumbnail.as_deref().unwrap();
+        let store = avatar_portrait_path(Some(&avatar.slug), |a| {
+            crate::passport::thumbnail_asset_path_in(a, true)
+        });
+        assert_eq!(store, Some(format!("ekza://avatars/{file}")));
+        let bundled = avatar_portrait_path(Some(&avatar.slug), |a| {
+            crate::passport::thumbnail_asset_path_in(a, false)
+        });
+        assert_eq!(bundled, Some(format!("avatars/{file}")));
+        assert_eq!(
+            avatar_portrait_path(Some(&avatar.slug), crate::passport::thumbnail_asset_path),
+            bundled,
+            "without a store runtime the roster avatar stays bundled"
+        );
+        assert_eq!(avatar_portrait_path(None, crate::passport::thumbnail_asset_path), None);
+    }
     #[test]
     fn career_touch_actions_wait_for_release_and_cancel_after_scroll() {
         use bevy::input::touch::{TouchInput, TouchPhase};

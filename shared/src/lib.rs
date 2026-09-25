@@ -113,6 +113,18 @@ pub enum PlayerActionKind {
     None,
 }
 
+impl PlayerActionKind {
+    /// The cosmetic action a Q/W/E/R cast records: Q plays as the class's
+    /// attack, the other slots as a cast.
+    pub fn for_cast(slot: SkillSlot) -> Self {
+        if slot == SkillSlot::Q {
+            Self::Attack
+        } else {
+            Self::Cast
+        }
+    }
+}
+
 /// Basic attacks are not a Q/W/E/R slot. Cosmetic action consumers can still
 /// play the Attack animation without treating this event as a Q cast.
 pub const BASIC_ATTACK_ACTION_SLOT: u8 = u8::MAX;

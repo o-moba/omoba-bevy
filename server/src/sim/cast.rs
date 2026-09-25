@@ -4,20 +4,16 @@ use std::net::SocketAddr;
 use std::time::Instant;
 
 use shared::combat::{CombatEntityKind, ProjectileStyle};
-use shared::wire::{GameState, ProjectileState, TargetId, TargetKind};
+use shared::wire::{GameState, ProjectileState, TargetId};
 use shared::{
     PlayerActionKind, SkillSlot, TargetingMode, ability_for_class_slot, rank_effect_scale,
     scaled_cast_range, scaled_mana_cost, unlocked_slots_for_level,
 };
 
-use crate::balance::{
-    AIM_HEIGHT, CAST_SPAWN_HEIGHT, MINION_RADIUS, NEUTRAL_RADIUS, PLAYER_HIT_RADIUS,
-    PROJECTILE_LIFETIME, PROJECTILE_RADIUS, PROJECTILE_SPEED,
-};
+use crate::balance::{CAST_SPAWN_HEIGHT, PROJECTILE_LIFETIME, PROJECTILE_RADIUS, PROJECTILE_SPEED};
+use crate::basic_attack::resolve_hostile_target;
 use crate::entities::{ConnectedPlayer, Projectile, Vec3f};
 use crate::game_world::GameWorld;
-use crate::sim::towers::structure_is_protected;
-use crate::world::structure_radius;
 use crate::{hero_stats, hero_timers, vision};
 
 /// Spends a skill point on the given slot, capped by the class ability's max rank.
@@ -108,76 +104,15 @@ pub(crate) fn handle_cast_request(
     if !caster.modifiers.bypass_vision && !vision::target_visible(caster_team, target, world, now) {
         return;
     }
-    let (target_position, target_radius) = match target.kind {
-        TargetKind::Player => {
-            let Some(target_player) = world.players.values().find(|player| {
-                player.joined
-                    && player.hero.identity.id == target.id
-                    && player.hero.hp > 0.0
-                    && player.hero.identity.team != caster_team
-            }) else {
-                return;
-            };
-            (
-                Vec3f::new(
-                    target_player.hero.x,
-                    target_player.hero.y + AIM_HEIGHT,
-                    target_player.hero.z,
-                ),
-                PLAYER_HIT_RADIUS,
-            )
-        }
-        TargetKind::Minion => {
-            let Some(target_minion) = world.minions.get(&target.id) else {
-                return;
-            };
-            if target_minion.state.hp <= 0.0 || target_minion.state.team == caster_team {
-                return;
-            }
-            (
-                Vec3f::new(
-                    target_minion.state.x,
-                    target_minion.state.y + MINION_RADIUS * 0.8,
-                    target_minion.state.z,
-                ),
-                MINION_RADIUS,
-            )
-        }
-        TargetKind::Structure => {
-            let Some(target_structure) = world.structures.get(&target.id) else {
-                return;
-            };
-            if target_structure.state.hp <= 0.0
-                || target_structure.state.team == caster_team
-                || structure_is_protected(&world.structures, target.id)
-            {
-                return;
-            }
-            (
-                Vec3f::new(
-                    target_structure.state.x,
-                    target_structure.state.y,
-                    target_structure.state.z,
-                ),
-                structure_radius(target_structure.state.kind),
-            )
-        }
-        TargetKind::Neutral => {
-            let Some(target_neutral) = world.neutrals.get(&target.id) else {
-                return;
-            };
-            if target_neutral.dead_until.is_some() || target_neutral.state.hp <= 0.0 {
-                return;
-            }
-            (
-                Vec3f::new(
-                    target_neutral.state.x,
-                    target_neutral.state.y + NEUTRAL_RADIUS * 0.85,
-                    target_neutral.state.z,
-                ),
-                NEUTRAL_RADIUS,
-            )
-        }
+    let Some((target_position, target_radius)) = resolve_hostile_target(
+        caster_team,
+        target,
+        &world.players,
+        &world.minions,
+        &world.structures,
+        &world.neutrals,
+    ) else {
+        return;
     };
 
     let caster_position = Vec3f::new(
@@ -257,10 +192,6 @@ pub(crate) fn record_player_action(player: &mut ConnectedPlayer, slot: SkillSlot
     if player.hero.last_action.sequence == 0 {
         player.hero.last_action.sequence = 1;
     }
-    player.hero.last_action.kind = if slot == SkillSlot::Q {
-        PlayerActionKind::Attack
-    } else {
-        PlayerActionKind::Cast
-    };
+    player.hero.last_action.kind = PlayerActionKind::for_cast(slot);
     player.hero.last_action.slot = slot.index() as u8;
 }

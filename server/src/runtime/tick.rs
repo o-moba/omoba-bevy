@@ -162,6 +162,7 @@ impl ServerRuntime {
 
         self.broadcast_snapshots(now, career_flow);
         self.record_match_metrics(now);
+        self.settle_finished_round(now);
         self.checkpoint_career_round(now);
         self.send_career_views(now);
         self.send_social_views(now);

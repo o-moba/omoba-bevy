@@ -44,6 +44,13 @@ pub fn max_hp_for_level(class: HeroClass, level: u32, item_hp: f32) -> f32 {
         + item_hp
 }
 
+/// Maximum mana of a hero at `level` wearing items worth `item_mana`.
+pub fn max_mana_for_level(level: u32, item_mana: f32) -> f32 {
+    MAX_MANA
+        + LEVEL_UP_MANA_BONUS * level.clamp(STARTING_LEVEL, MAX_LEVEL).saturating_sub(1) as f32
+        + item_mana
+}
+
 /// Level-one maximum HP of `class` (`base_hp` in the hero catalog).
 pub fn base_hp(class: HeroClass) -> f32 {
     catalog::hero(class).base_hp

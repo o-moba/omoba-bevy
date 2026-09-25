@@ -1154,21 +1154,23 @@ fn write_record(root: &Path, record: &PendingRecord) -> Result<(), String> {
     Ok(())
 }
 
-fn worker(
-    url: String,
-    outbox: PathBuf,
-    jobs: Receiver<Job>,
-    replies: SyncSender<Reply>,
-    scope: RecoveryScope,
-) {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("career async runtime");
-    let mut store: Option<CareerStore> = None;
+/// What a restarted career worker takes over from its outbox directory.
+#[derive(Default)]
+struct RecoveredOutbox {
+    /// Receipts still to deliver, by result id. A live (Start or Checkpoint)
+    /// receipt comes back as an unrated `Interrupted` settle.
+    pending: BTreeMap<String, PendingRecord>,
+    /// Results the store already refused; later records for them are dropped.
+    rejected_ids: VecDeque<String>,
+}
+
+/// Reads the outbox left by a previous worker. Only `*.json` receipts are
+/// considered; an unreadable one is left on disk for manual recovery and a
+/// missing directory is an empty outbox.
+fn recover_outbox(outbox: &Path) -> RecoveredOutbox {
     let mut pending: BTreeMap<String, PendingRecord> = BTreeMap::new();
     let mut rejected_ids = VecDeque::new();
-    if let Ok(entries) = fs::read_dir(&outbox) {
+    if let Ok(entries) = fs::read_dir(outbox) {
         for entry in entries.flatten() {
             if entry.path().extension().is_some_and(|e| e == "json") {
                 match fs::read(entry.path())
@@ -1213,6 +1215,28 @@ fn worker(
             }
         }
     }
+    RecoveredOutbox {
+        pending,
+        rejected_ids,
+    }
+}
+
+fn worker(
+    url: String,
+    outbox: PathBuf,
+    jobs: Receiver<Job>,
+    replies: SyncSender<Reply>,
+    scope: RecoveryScope,
+) {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("career async runtime");
+    let mut store: Option<CareerStore> = None;
+    let RecoveredOutbox {
+        mut pending,
+        mut rejected_ids,
+    } = recover_outbox(&outbox);
     let mut last_retry = Instant::now() - Duration::from_secs(10);
     let mut heartbeat = Instant::now();
     let mut connected = true;
@@ -1640,6 +1664,110 @@ mod tests {
         }
         assert!(!verify(&public, &"00".repeat(64), &bytes));
     }
+    fn outbox_result(id: &str, outcome: MatchOutcome) -> MatchResult {
+        MatchResult {
+            result_id: id.into(),
+            server_epoch: 1,
+            match_id: 1,
+            started_at_ms: 1_000,
+            ended_at_ms: 2_000,
+            duration_ms: 1_000,
+            map_profile: "test".into(),
+            ruleset: "test-ranked".into(),
+            outcome,
+            winner: Some(shared::map::Team::Green),
+            rated: true,
+            unrated_reason: None,
+            participants: Vec::new(),
+            saved: false,
+        }
+    }
+
+    fn outbox_dir() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("omoba-outbox-unit-{}", random_id::<16>()));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// O29: a missing outbox is empty; a terminal receipt is kept as is; a
+    /// live one becomes an unrated Interrupted settle carrying its allocation;
+    /// a rejected id is remembered; unreadable and non-json files are left
+    /// on disk and skipped.
+    #[test]
+    fn recover_outbox_restores_terminal_interrupts_live_and_skips_junk() {
+        let missing = std::env::temp_dir().join(format!("omoba-no-outbox-{}", random_id::<16>()));
+        let empty = recover_outbox(&missing);
+        assert!(empty.pending.is_empty() && empty.rejected_ids.is_empty());
+
+        let dir = outbox_dir();
+        let record = |kind, id: &str, outcome| PendingRecord {
+            kind,
+            result: outbox_result(id, outcome),
+            recovery_allocation: None,
+            recovered_live: false,
+        };
+        write_record(&dir, &record(RecordKind::Settle, "settled", MatchOutcome::Completed)).unwrap();
+        write_record(&dir, &record(RecordKind::Checkpoint, "live", MatchOutcome::Completed)).unwrap();
+        write_record(&dir, &record(RecordKind::Start, "started", MatchOutcome::Completed)).unwrap();
+        write_record(&dir, &record(RecordKind::Rejected, "refused", MatchOutcome::Completed)).unwrap();
+        fs::write(dir.join("broken.json"), b"{not json").unwrap();
+        fs::write(dir.join("half.tmp"), b"{}").unwrap();
+
+        let recovered = recover_outbox(&dir);
+        assert_eq!(
+            recovered.pending.keys().collect::<Vec<_>>(),
+            vec!["live", "settled", "started"]
+        );
+        assert_eq!(recovered.rejected_ids, VecDeque::from(["refused".to_string()]));
+
+        let settled = &recovered.pending["settled"];
+        assert!(matches!(settled.kind, RecordKind::Settle));
+        assert!(!settled.recovered_live);
+        assert_eq!(settled.result, outbox_result("settled", MatchOutcome::Completed));
+
+        for id in ["live", "started"] {
+            let live = &recovered.pending[id];
+            assert!(matches!(live.kind, RecordKind::Settle), "{id}");
+            assert!(live.recovered_live);
+            assert_eq!(live.result.outcome, MatchOutcome::Interrupted);
+            assert_eq!(live.result.winner, None);
+            assert!(!live.result.rated);
+            assert_eq!(live.result.unrated_reason.as_deref(), Some("server_interrupted"));
+            assert!(live.result.ended_at_ms > 2_000);
+            assert_eq!(
+                live.result.duration_ms,
+                live.result.ended_at_ms - live.result.started_at_ms
+            );
+            assert_eq!(
+                live.recovery_allocation,
+                Some(outbox_result(id, MatchOutcome::Completed)),
+                "the allocation is the receipt as written"
+            );
+        }
+        assert!(dir.join("broken.json").exists(), "unreadable receipts stay on disk");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// O29: a live receipt that already carries its allocation keeps it.
+    #[test]
+    fn recover_outbox_keeps_an_existing_recovery_allocation() {
+        let dir = outbox_dir();
+        let allocation = outbox_result("carried", MatchOutcome::Interrupted);
+        write_record(
+            &dir,
+            &PendingRecord {
+                kind: RecordKind::Checkpoint,
+                result: outbox_result("carried", MatchOutcome::Completed),
+                recovery_allocation: Some(allocation.clone()),
+                recovered_live: false,
+            },
+        )
+        .unwrap();
+        let recovered = recover_outbox(&dir);
+        assert_eq!(recovered.pending["carried"].recovery_allocation, Some(allocation));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn receipt_paths_cannot_escape_outbox() {
         for id in ["", "../secret", "/tmp/key", "a/b", "a.b"] {
