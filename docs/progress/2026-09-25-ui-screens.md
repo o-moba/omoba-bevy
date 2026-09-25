@@ -96,3 +96,4 @@ for the new kinds. `ui::test_id::harness` gained `kit_app`, `spawn_ui`,
 `set_disabled` and `drain_actions`. Existing tests needed only mechanical
 edits (collection drag tests and the post-match retirement test spawn
 `UiAction` instead of the marker; the help test is unchanged).
+- Counts: client lib 577 → 591 (557 → 571 without `qa`); server 298 (+3 ignored), shared 94, passport 26 unchanged; Python script tests 124 (+1 skipped).
