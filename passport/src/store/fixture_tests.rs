@@ -161,7 +161,7 @@ fn sdk_http_catalogue_refresh_validation_and_failed_cache_are_real() {
     let initial = runtime.state.lock().unwrap().items.clone();
     assert_eq!(initial.values().filter(|item| item.free).count(), 1);
     let approved = initial.values().find(|item| item.free).unwrap();
-    let definition = shared::avatar_definition(&approved.slug).unwrap();
+    let definition = crate::avatars::avatar_definition(&approved.slug).unwrap();
     assert!(definition.free);
     assert!(definition.thumbnail.is_some());
     install_blocking_inner(runtime, approved)
@@ -197,7 +197,7 @@ fn sdk_http_catalogue_refresh_validation_and_failed_cache_are_real() {
         assert_ne!(changed.thumbnail, old_thumbnail);
         assert_eq!(changed.passport, definition.passport);
         assert_eq!(
-            shared::avatar_definition(&approved.slug)
+            crate::avatars::avatar_definition(&approved.slug)
                 .unwrap()
                 .display_name,
             definition.display_name

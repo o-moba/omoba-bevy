@@ -5182,7 +5182,6 @@ dependencies = [
 name = "shared"
 version = "0.23.0-rc.6"
 dependencies = [
- "ekza-bevy-sdk",
  "serde",
  "serde_json",
 ]

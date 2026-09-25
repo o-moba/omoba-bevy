@@ -168,7 +168,7 @@ impl ServerRuntime {
                     .and_then(|player| player.hero.identity.avatar.as_deref());
                 if retained.is_some_and(|slug| {
                     (slug.starts_with("ekza-")
-                        || shared::avatar_definition(slug)
+                        || omoba_passport::avatars::avatar_definition(slug)
                             .is_some_and(|entry| entry.passport.is_some()))
                         && avatar.as_deref().map(str::trim) != Some(slug)
                 }) {

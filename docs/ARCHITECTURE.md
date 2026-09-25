@@ -10,12 +10,12 @@ maintainers are working through. Feature-level documentation lives in
 
 | Crate | Role | Depends on |
 | --- | --- | --- |
-| `shared` (MPL) | The gameplay model both sides agree on: hero classes and ability kits, hero growth, items, map geometry and navigation, the wire protocol, prematch/draft, social/career/account contracts, the debug command family (`shared::debug`) and the Combat Test sandbox protocol, and the pure bot planners (`shared::progression`, `shop::plan_purchases`). Per-class and per-item data is JSON in `shared/assets/catalog/`, embedded and validated at startup (`shared::catalog`). No Bevy, no I/O in the model itself. | serde |
+| `shared` (MPL) | The gameplay model both sides agree on: hero classes and ability kits, hero growth, items, map geometry and navigation, the wire protocol, prematch/draft, social/career/account contracts, the debug command family (`shared::debug`) and the Combat Test sandbox protocol, and the pure bot planners (`shared::progression`, `shop::plan_purchases`). Per-class and per-item data is JSON in `shared/assets/catalog/`, embedded and validated at startup (`shared::catalog`), and the frozen sprite character ids with their normalization. No Bevy, no I/O: no environment, filesystem or network reads, and no Ekza SDK types. | serde, serde_json |
 | `server` (AGPL) | The authoritative simulation and UDP endpoint: match lifecycle, bots, combat, shop, career settlement, public transport signing, allocation workers. Binary only. | shared, passport, career-store |
 | `career-store` (AGPL) | Trusted career persistence (Postgres, migrations) and the bounded queue policy, linked by the server and the account API without the engine. | shared, sqlx |
-| `client` (MPL) | The Bevy game: networking, prediction, presentation (2D sprites and 3D models), UI, mobile input, offline practice, QA harnesses (`qa` feature, on by default). | shared, passport, bevy, ekza-bevy-sdk |
+| `client` (MPL) | The Bevy game: networking, prediction, presentation (2D sprites and 3D models, the sprite roster in `sprite_roster.rs`), UI, mobile input, offline practice, QA harnesses (`qa` feature, on by default). | shared, passport, bevy, ekza-bevy-sdk |
 | `harness` | Black-box UDP players and gameplay/matchmaking checks that launch the server binary. | shared |
-| `passport` | Ekza passport contract: tickets, device and web accounts, store admission. | shared, ekza-bevy-sdk |
+| `passport` | Ekza passport contract: tickets, device and web accounts, store admission; the asset root (`passport::assets`), the avatar roster and the store-avatar registry (`passport::avatars`), and the companion reaction grant (`passport::entitlements`). | shared, ekza-bevy-sdk |
 | `account-api` | Axum/Postgres HTTP service over the career store (portal, devices, supporter billing). | shared, career-store |
 | `arena-sync` | CLI that pulls Ekza Arena avatars and merges the avatar manifest. | reqwest |
 
@@ -25,6 +25,13 @@ Rules that follow from the map:
   includes every wire type; never copy a wire struct into another crate.
 - `shared` must stay free of Bevy so the server and tools compile without an
   engine. Client-side ECS components wrap shared types instead.
+- `shared` has no I/O: it reads no environment variables and no files at
+  runtime (its own `shared/assets/` data is embedded with `include_str!`),
+  embeds nothing from `client/`, and does not depend on the Ekza SDK. Data
+  loaded at runtime and process-global registries live in the crate that
+  owns the boundary (`omoba_passport::avatars`), and the binaries read the
+  environment at startup (`RosterSource::from_env()` in server
+  `runtime::run` and client `main`) and pass it down.
 - Tuning numbers have one home. What differs per class or item (base HP,
   growth caps, basic attack, ability kit, item costs and bonuses) is in
   `shared/assets/catalog/*.json`; the uniform growth curve, speed, mana,
@@ -472,8 +479,8 @@ Ordered by value over cost. Each step is a separate change with the full
    (done).
 3. Balance constants and the hero facing convention in one place (done).
 4. Crate hygiene: retire the orphan `skills` crate, move the career store out
-   of the server package (done); keep I/O out of the shared model (the avatar
-   and sprite rosters still embed client manifests and read env vars; open).
+   of the server package (done); keep I/O out of the shared model (done in
+   step 13).
 5. Server `GameWorld` + tick context instead of many-map parameters; split
    `main.rs` into runtime (dispatch, tick), snapshot, formation, entities,
    ECS and simulation modules (done); per-variant packet handlers in
@@ -538,3 +545,14 @@ Ordered by value over cost. Each step is a separate change with the full
     Rust tables are gone, the item count is independent of the inventory
     capacity, and the Python scripts read the same files through
     `scripts/catalog.py`). Step complete.
+13. Shared model free of I/O (done: the sprite schema and manifest moved
+    to `client/src/sprite_roster.rs`, shared keeps `SPRITE_CHARACTER_IDS`
+    and `normalize_sprite_character_id`; the asset root, the avatar roster
+    and the store-avatar registry moved to `omoba_passport::{assets,
+    avatars}` with the same function names; `RosterSource::from_env()` is
+    read by the server and client binaries, which print the roster size and
+    source, with no lookup relative to the working directory, and roster
+    entries that break the store-avatar rule are skipped at load; shared owns
+    `CharacterChoice`; the companion grant moved to
+    `omoba_passport::entitlements`; `shared` no longer depends on the Ekza
+    SDK). Step complete; 13f (a server-owned registry) is optional.

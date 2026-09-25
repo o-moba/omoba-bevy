@@ -579,7 +579,7 @@ mod tests {
         // Not in the shipped roster, and the store catalogue is empty in a test:
         // exactly the situation at startup for an owned or community avatar.
         let slug = "community-star-walker";
-        assert!(shared::avatar_definition(slug).is_none());
+        assert!(omoba_passport::avatars::avatar_definition(slug).is_none());
         let card = ProfileCard {
             showcase_avatar: Some(slug.into()),
             ..Default::default()

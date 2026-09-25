@@ -10,14 +10,15 @@ use bevy::{
     input::mouse::{MouseScrollUnit, MouseWheel},
     prelude::*,
 };
-use shared::{HeroClass, avatar_roster};
+use omoba_passport::avatars::avatar_roster;
+use shared::HeroClass;
 use std::collections::HashMap;
 
 pub use crate::domain::Team;
 use crate::frontend::AppScreen;
 use crate::net::{ClientConnectionState, ClientSession, NetworkCommand, SessionUiCommand};
 use crate::sprite::{PlayerVisualMode, SpriteVisualAssets};
-pub use ekza_bevy_sdk::EkzaCharacter as CharacterChoice;
+pub use shared::wire::CharacterChoice;
 
 const TEAM_BUTTON_SIZE: f32 = 64.0;
 const TEAM_BUTTON_GAP: f32 = 28.0;
@@ -222,7 +223,7 @@ fn sprite_grid_layout(character_count: usize) -> SpriteGridLayout {
 
 fn update_sprite_selection(selection: &mut TeamSelection, requested: &str) -> bool {
     let normalized = shared::normalize_sprite_character_id(Some(requested));
-    if shared::sprite_character_definition(normalized)
+    if crate::sprite_roster::sprite_character_definition(normalized)
         .is_some_and(|entry| entry.render_fallback.is_some())
     {
         return false;
@@ -441,7 +442,7 @@ pub fn spawn_team_select_ui(
     preview_image: Handle<Image>,
     compact: bool,
 ) {
-    let sprite_grid = sprite_grid_layout(shared::sprite_character_roster().len());
+    let sprite_grid = sprite_grid_layout(crate::sprite_roster::sprite_character_roster().len());
     let root = commands
         .spawn((
             Node {
@@ -705,7 +706,7 @@ pub fn spawn_team_select_ui(
                     Name::new("SpriteCharacterGrid"),
                 ))
                 .with_children(|grid| {
-                    for (index, character) in shared::sprite_character_roster()
+                    for (index, character) in crate::sprite_roster::sprite_character_roster()
                         .iter()
                         .enumerate()
                         .filter(|_| visual_mode == PlayerVisualMode::Sprite2d)
@@ -1068,7 +1069,7 @@ fn scroll_avatar_roster(
 
 fn spawn_sprite_button(
     grid: &mut ChildSpawnerCommands,
-    character: &shared::SpriteCharacterDefinition,
+    character: &crate::sprite_roster::SpriteCharacterDefinition,
     portrait: (Handle<Image>, Handle<TextureAtlasLayout>, usize),
     selected: bool,
 ) {
@@ -1117,8 +1118,9 @@ fn spawn_sprite_button(
             },
         ));
         let label = if draft {
-            let fallback = shared::sprite_character_render_definition(Some(&character.id))
-                .map_or("default", |entry| entry.display_name.as_str());
+            let fallback =
+                crate::sprite_roster::sprite_character_render_definition(Some(&character.id))
+                    .map_or("default", |entry| entry.display_name.as_str());
             format!("{}\nArt pending\nUses {fallback}", character.display_name)
         } else {
             character.display_name.clone()
@@ -1278,7 +1280,7 @@ fn spawn_avatar_button(
                 },
             ))
             .with_children(|portrait| {
-                if shared::avatar_definition(slug)
+                if omoba_passport::avatars::avatar_definition(slug)
                     .and_then(crate::passport::thumbnail_asset_path)
                     .is_none()
                 {
@@ -1490,7 +1492,7 @@ fn team_select_ui_system(
         match *interaction {
             Interaction::Pressed => {
                 if client_session.is_offline()
-                    && !shared::avatar_roster()
+                    && !omoba_passport::avatars::avatar_roster()
                         .iter()
                         .any(|a| a.slug == button.slug && a.passport.is_none())
                 {
@@ -1644,7 +1646,7 @@ fn autojoin_from_env(
 
     let mut parts = raw.split(':');
     let class = HeroClass::from_id(parts.next().unwrap_or("")).unwrap_or_default();
-    let avatar = shared::normalize_avatar_slug(parts.next()).map(str::to_owned);
+    let avatar = omoba_passport::avatars::normalize_avatar_slug(parts.next()).map(str::to_owned);
     let team = match parts.next() {
         Some("blue") => Team::Blue,
         _ => Team::Green,

@@ -1164,7 +1164,7 @@ fn portrait(
     let image = if mode == PlayerVisualMode::Sprite2d {
         sprite
             .and_then(|id| {
-                shared::sprite_character_roster()
+                crate::sprite_roster::sprite_character_roster()
                     .iter()
                     .position(|entry| entry.id == id)
             })
@@ -1178,7 +1178,7 @@ fn portrait(
     }
     .or_else(|| {
         avatar
-            .and_then(shared::avatar_definition)
+            .and_then(omoba_passport::avatars::avatar_definition)
             .and_then(|a| a.thumbnail.as_deref())
             .zip(assets)
             .map(|(file, assets)| ImageNode::new(assets.load(format!("avatars/{file}"))))
@@ -1205,7 +1205,7 @@ fn hero_name(player: &ParticipantResult) -> String {
     let cosmetic = player
         .avatar
         .as_deref()
-        .and_then(shared::avatar_definition)
+        .and_then(omoba_passport::avatars::avatar_definition)
         .map(|a| a.display_name.as_str())
         .or(player.sprite_character.as_deref())
         .unwrap_or(&player.character);

@@ -5,7 +5,7 @@ use bevy::input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel};
 use bevy::input::touch::{TouchInput, TouchPhase};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-use shared::AvatarDefinition;
+use omoba_passport::avatars::AvatarDefinition;
 
 use super::AppScreen;
 use super::card::ProfileCard;
@@ -508,7 +508,7 @@ fn collection_actions(
                 if preview
                     .slug
                     .as_deref()
-                    .and_then(shared::avatar_definition)
+                    .and_then(omoba_passport::avatars::avatar_definition)
                     .is_some_and(crate::passport::can_select)
                 {
                     selection.avatar = preview.slug.clone();
@@ -750,7 +750,12 @@ fn refresh_collection_details(
         .iter()
         .find(|entry| Some(entry.avatar.slug.as_str()) == preview.slug.as_deref())
         .map(|entry| &entry.avatar)
-        .or_else(|| preview.slug.as_deref().and_then(shared::avatar_definition));
+        .or_else(|| {
+            preview
+                .slug
+                .as_deref()
+                .and_then(omoba_passport::avatars::avatar_definition)
+        });
     let playable = definition.is_some_and(crate::passport::can_select);
     let current = (
         preview.slug.clone(),
@@ -1107,7 +1112,7 @@ mod tests {
             .init_resource::<AvatarThumbnails>()
             .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
             .add_systems(Update, refresh_collection_catalogue);
-        let selected = shared::avatar_roster()[0].slug.clone();
+        let selected = omoba_passport::avatars::avatar_roster()[0].slug.clone();
         app.world_mut()
             .resource_mut::<AvatarPreview>()
             .show_portrait(&selected);

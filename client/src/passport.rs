@@ -202,7 +202,7 @@ pub fn initialize_store() -> Option<std::path::PathBuf> {
 
 /// Every avatar this player may pick: the shipped roster, then owned store
 /// avatars. Unowned store entries stay hidden; they are bought on the web.
-pub fn selectable_avatars() -> Vec<&'static shared::AvatarDefinition> {
+pub fn selectable_avatars() -> Vec<&'static omoba_passport::avatars::AvatarDefinition> {
     let mut avatars = default_avatars();
     avatars.extend(purchased_avatars());
     avatars
@@ -210,8 +210,8 @@ pub fn selectable_avatars() -> Vec<&'static shared::AvatarDefinition> {
 
 /// Avatars that ship with the game (plus roster entries staged by an
 /// operator), as far as this player may pick them.
-pub fn default_avatars() -> Vec<&'static shared::AvatarDefinition> {
-    shared::avatar_roster()
+pub fn default_avatars() -> Vec<&'static omoba_passport::avatars::AvatarDefinition> {
+    omoba_passport::avatars::avatar_roster()
         .iter()
         .filter(|avatar| can_select(avatar))
         .collect()
@@ -219,8 +219,8 @@ pub fn default_avatars() -> Vec<&'static shared::AvatarDefinition> {
 
 /// Avatars that are not in the box: bought on Ekza by the paired wallet and
 /// delivered through the SDK store.
-pub fn purchased_avatars() -> Vec<&'static shared::AvatarDefinition> {
-    shared::store_avatars()
+pub fn purchased_avatars() -> Vec<&'static omoba_passport::avatars::AvatarDefinition> {
+    omoba_passport::avatars::store_avatars()
         .into_iter()
         .filter(|avatar| {
             !store::free_access(&avatar.slug).unwrap_or(avatar.free) && can_select(avatar)
@@ -230,12 +230,12 @@ pub fn purchased_avatars() -> Vec<&'static shared::AvatarDefinition> {
 
 /// Free avatars creators prepared for Omoba and an Omoba owner approved. Anyone
 /// may wear them; the server admits them from its own read of the registry.
-pub fn community_avatars() -> Vec<&'static shared::AvatarDefinition> {
+pub fn community_avatars() -> Vec<&'static omoba_passport::avatars::AvatarDefinition> {
     let mine: Vec<_> = library_avatars()
         .iter()
         .map(|avatar| avatar.slug.clone())
         .collect();
-    shared::store_avatars()
+    omoba_passport::avatars::store_avatars()
         .into_iter()
         .filter(|avatar| {
             store::free_access(&avatar.slug).unwrap_or(avatar.free) && !mine.contains(&avatar.slug)
@@ -244,7 +244,7 @@ pub fn community_avatars() -> Vec<&'static shared::AvatarDefinition> {
 }
 
 /// Asset path of an avatar thumbnail, wherever its file lives.
-pub fn thumbnail_asset_path(avatar: &shared::AvatarDefinition) -> Option<String> {
+pub fn thumbnail_asset_path(avatar: &omoba_passport::avatars::AvatarDefinition) -> Option<String> {
     let file = avatar.thumbnail.as_deref()?;
     Some(if store::knows(&avatar.slug) {
         store::thumbnail_asset_path(file)
@@ -253,7 +253,7 @@ pub fn thumbnail_asset_path(avatar: &shared::AvatarDefinition) -> Option<String>
     })
 }
 
-pub fn can_select(avatar: &shared::AvatarDefinition) -> bool {
+pub fn can_select(avatar: &omoba_passport::avatars::AvatarDefinition) -> bool {
     store::free_access(&avatar.slug).unwrap_or(avatar.free)
         || avatar.passport.as_ref().is_none_or(|protected| {
             SESSION
@@ -263,7 +263,7 @@ pub fn can_select(avatar: &shared::AvatarDefinition) -> bool {
 }
 
 pub fn ticket_for_slug(slug: Option<&str>, session_id: &str) -> TicketPoll {
-    let Some(avatar) = slug.and_then(shared::avatar_definition) else {
+    let Some(avatar) = slug.and_then(omoba_passport::avatars::avatar_definition) else {
         return TicketPoll::Free;
     };
     let Some(protected) = &avatar.passport else {
@@ -285,7 +285,7 @@ pub fn ticket_for_slug(slug: Option<&str>, session_id: &str) -> TicketPoll {
         let session = session.clone();
         let protected = protected.clone();
         let session_id = session_id.to_owned();
-        let path = shared::client_asset_root()
+        let path = omoba_passport::assets::client_asset_root()
             .join("avatars")
             .join(format!("{}.glb", avatar.slug));
         let slug = avatar.slug.clone();
@@ -332,7 +332,7 @@ impl AvatarCatalogueSource {
 }
 
 pub struct AvatarCatalogueEntry {
-    pub avatar: shared::AvatarDefinition,
+    pub avatar: omoba_passport::avatars::AvatarDefinition,
     pub source: AvatarCatalogueSource,
 }
 
@@ -435,7 +435,10 @@ pub fn avatar_display_name(slug: Option<&str>) -> String {
         .into_iter()
         .find(|avatar| avatar.slug == slug)
         .map(|avatar| avatar.display_name)
-        .or_else(|| shared::avatar_definition(slug).map(|avatar| avatar.display_name.clone()))
+        .or_else(|| {
+            omoba_passport::avatars::avatar_definition(slug)
+                .map(|avatar| avatar.display_name.clone())
+        })
         .unwrap_or_else(|| "Default avatar".into())
 }
 
@@ -446,7 +449,7 @@ mod catalogue_tests {
     #[test]
     fn loading_and_empty_status_do_not_invalidate_avatar_controls() {
         let entries = vec![AvatarCatalogueEntry {
-            avatar: shared::avatar_roster()[0].clone(),
+            avatar: omoba_passport::avatars::avatar_roster()[0].clone(),
             source: AvatarCatalogueSource::Default,
         }];
         assert_eq!(
@@ -457,7 +460,7 @@ mod catalogue_tests {
 
     #[test]
     fn same_slug_metadata_changes_invalidate_the_catalogue_snapshot() {
-        let avatar = shared::avatar_roster()[0].clone();
+        let avatar = omoba_passport::avatars::avatar_roster()[0].clone();
         let status = store::CatalogueStatus::Ready { count: 1 };
         let mut entries = vec![AvatarCatalogueEntry {
             avatar,
@@ -476,7 +479,7 @@ mod catalogue_tests {
 
     #[test]
     fn same_count_identity_and_source_changes_invalidate_catalogue() {
-        let roster = shared::avatar_roster();
+        let roster = omoba_passport::avatars::avatar_roster();
         assert!(roster.len() > 1);
         let make = |index: usize, source| {
             vec![AvatarCatalogueEntry {

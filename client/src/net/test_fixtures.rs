@@ -37,7 +37,7 @@ pub(in crate::net) fn admission_app() -> (
         last_join: Some(CommittedJoin {
             prematch: false,
             team: crate::team::Team::Green,
-            character: ekza_bevy_sdk::EkzaCharacter::Ipfs,
+            character: crate::team::CharacterChoice::Ipfs,
             hero_class: shared::HeroClass::Warrior,
             avatar: None,
             sprite_character: None,

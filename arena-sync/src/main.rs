@@ -6,7 +6,7 @@
 //! load through Bevy's glTF loader), downloads the model + thumbnail into
 //! `client/assets/avatars/`, and merges the entries into `manifest.json`.
 //!
-//! The game then picks the new avatars up at startup: `shared::avatar_roster()`
+//! The game then picks the new avatars up at startup: `omoba_passport::avatars::avatar_roster()`
 //! reads the manifest at runtime (embedded copy is only a fallback), so no
 //! rebuild is needed — run this tool, restart the client, the arena avatars
 //! appear in the "Choose Avatar" grid.

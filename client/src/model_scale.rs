@@ -162,7 +162,7 @@ pub struct ModelScaleSource {
 /// a known avatar, legacy character slug otherwise.
 pub fn model_scale_key(character: CharacterChoice, avatar: Option<&str>) -> String {
     avatar
-        .and_then(shared::avatar_definition)
+        .and_then(omoba_passport::avatars::avatar_definition)
         .map(|definition| definition.slug.clone())
         .unwrap_or_else(|| character.slug().to_owned())
 }
@@ -223,7 +223,7 @@ fn parse_overrides(raw: &str) -> Result<HashMap<String, f32>, serde_json::Error>
 
 #[cfg(not(target_os = "android"))]
 fn overrides_path() -> Option<PathBuf> {
-    let path = shared::client_asset_root().join(OVERRIDES_RELATIVE_PATH);
+    let path = omoba_passport::assets::client_asset_root().join(OVERRIDES_RELATIVE_PATH);
     path.exists().then_some(path)
 }
 
@@ -570,7 +570,7 @@ fn normalize_model_scale_fallback_system(
 pub fn run_model_measurement_analyzer() {
     use bevy::asset::{AssetPlugin, RecursiveDependencyLoadState};
 
-    let assets_root = shared::client_asset_root();
+    let assets_root = omoba_passport::assets::client_asset_root();
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .add_plugins(AssetPlugin {
@@ -669,7 +669,7 @@ mod tests {
     fn android_bundled_model_overrides_are_valid_for_shipped_roster() {
         let multipliers = parse_overrides(BUNDLED_MODEL_SCALE_OVERRIDES).unwrap();
         assert!(!multipliers.is_empty());
-        for definition in shared::avatar_roster() {
+        for definition in omoba_passport::avatars::avatar_roster() {
             let multiplier = multipliers.get(&definition.slug).copied().unwrap_or(1.0);
             assert!(multiplier.is_finite());
             assert!((MIN_OVERRIDE_MULTIPLIER..=MAX_OVERRIDE_MULTIPLIER).contains(&multiplier));

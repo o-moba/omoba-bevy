@@ -2,8 +2,11 @@
 //! Secrets stay in memory. Game packets contain only one-use scoped tickets.
 
 pub mod account;
+pub mod assets;
+pub mod avatars;
 pub mod community;
 pub mod device_account;
+pub mod entitlements;
 pub mod humanoid;
 pub mod store;
 pub mod supporter_account;

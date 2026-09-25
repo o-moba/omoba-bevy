@@ -1,17 +1,16 @@
 //! Manifest-driven hero animation proxies for the true XY render world.
 
 use bevy::prelude::*;
-use shared::{
-    DEFAULT_SPRITE_CHARACTER_ID, PlayerActionKind, SpriteAnimationDefinition,
-    SpriteAnimationPlayback, SpriteCharacterDefinition, SpriteSheetKind,
-    normalize_sprite_character_id, sprite_character_definition, sprite_character_render_definition,
-    sprite_character_roster,
-};
+use shared::{DEFAULT_SPRITE_CHARACTER_ID, PlayerActionKind, normalize_sprite_character_id};
 use std::collections::HashMap;
 
 use crate::combat::CombatStats;
 use crate::net::{NetworkSpriteCharacter, PlayerCosmeticAction, RemotePlayer};
 use crate::player::Player;
+use crate::sprite_roster::{
+    SpriteAnimationDefinition, SpriteAnimationPlayback, SpriteCharacterDefinition, SpriteSheetKind,
+    sprite_character_definition, sprite_character_render_definition, sprite_character_roster,
+};
 use crate::world2d::{layer, simulation_xz_to_render_xy, y_sorted_z};
 
 const MOVEMENT_EPSILON: f32 = 0.002;

@@ -55,7 +55,9 @@ pub(crate) fn run(directory: PathBuf) {
     app.add_plugins(
         DefaultPlugins
             .set(AssetPlugin {
-                file_path: shared::client_asset_root().to_string_lossy().into_owned(),
+                file_path: omoba_passport::assets::client_asset_root()
+                    .to_string_lossy()
+                    .into_owned(),
                 ..default()
             })
             .set(WindowPlugin {
@@ -157,7 +159,7 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>, qa: Res<Audit>) {
             ),
         ]
     } else {
-        shared::avatar_roster()
+        omoba_passport::avatars::avatar_roster()
             .iter()
             .filter(|a| a.passport.is_none())
             .map(|a| (a.slug.clone(), format!("avatars/{}.glb", a.slug)))

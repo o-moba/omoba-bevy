@@ -29,7 +29,7 @@ const LOCAL_RESPAWN_SECS: f32 = balance::RESPAWN_DELAY_SECS as f32;
 
 pub(super) fn shipped_avatar(slug: Option<&str>) -> bool {
     slug.is_none_or(|s| {
-        shared::avatar_roster()
+        omoba_passport::avatars::avatar_roster()
             .iter()
             .any(|a| a.slug == s && a.passport.is_none())
     })
@@ -346,7 +346,7 @@ impl Simulation {
     fn spawn_ring(&mut self) {
         let [x, z] = shared::map::geometry().home;
         for (i, class) in HeroClass::ALL.into_iter().enumerate() {
-            let avatar = shared::avatar_roster()
+            let avatar = omoba_passport::avatars::avatar_roster()
                 .iter()
                 .filter(|a| a.passport.is_none())
                 .nth(i)

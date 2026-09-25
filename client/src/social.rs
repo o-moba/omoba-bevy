@@ -1636,7 +1636,7 @@ fn social_head_anchor(
     sprite: Option<&crate::net::NetworkSpriteCharacter>,
 ) -> Vec3 {
     if mode == PlayerVisualMode::Sprite2d {
-        let height = shared::sprite_character_render_definition(
+        let height = crate::sprite_roster::sprite_character_render_definition(
             sprite.and_then(|sprite| sprite.0.as_deref()),
         )
         .map(|definition| (1.0 - definition.pivot[1]) * definition.world_height)

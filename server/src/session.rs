@@ -195,7 +195,7 @@ pub(crate) fn handle_join_request_with_sprite(
     }
     // Unknown avatar slugs are dropped (client falls back to the default model);
     // unknown class strings already decoded to the default class in serde.
-    let normalized_avatar = shared::normalize_avatar_slug(avatar);
+    let normalized_avatar = omoba_passport::avatars::normalize_avatar_slug(avatar);
     let normalized_sprite = shared::normalize_sprite_character_id(sprite_character);
     if avatar.is_some() && normalized_avatar.is_none() {
         eprintln!(

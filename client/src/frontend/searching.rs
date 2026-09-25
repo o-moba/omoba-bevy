@@ -63,7 +63,7 @@ fn spawn_searching(mut commands: Commands, selection: Res<TeamSelection>) {
         selection
             .avatar
             .as_deref()
-            .and_then(shared::avatar_definition)
+            .and_then(omoba_passport::avatars::avatar_definition)
             .map_or("default avatar", |avatar| avatar.display_name.as_str())
     );
     commands

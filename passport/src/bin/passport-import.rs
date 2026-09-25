@@ -2,7 +2,7 @@ use omoba_passport::{PassportApi, import_owned, pair_interactively};
 use std::path::PathBuf;
 
 fn run() -> Result<(), String> {
-    let asset_root = shared::client_asset_root();
+    let asset_root = omoba_passport::assets::client_asset_root();
     let manifest = std::env::args()
         .nth(1)
         .map(PathBuf::from)
