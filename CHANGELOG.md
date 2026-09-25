@@ -6,6 +6,9 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Process
+- Pull requests merge only after every CI check on the PR is green (`docs/REFACTORING.md` rule 2), replacing "open and merge immediately". Recommended by the architecture report (O2) and approved by the maintainer.
+
 ### Gate hardening
 - CI gains a `postgres` job (`postgres:16` service with a health check) that runs on pushes to `main`, on pull requests and nightly (the workflow now also has a nightly `schedule`). It runs `scripts/postgres_tests.py`, which checks the database is reachable, applies the career and portal migrations, creates the restricted runtime roles from `account-api/ops/grants.sql` and runs every career-store, account-api and server test with `--include-ignored` (the 35 PostgreSQL tests that no CI run executed before). `make test-postgres` runs the same locally with `OMOBA_TEST_DATABASE_URL`; it is not part of `make check`. The documented command `cargo test -p server career_store -- --ignored`, which has selected no tests since career-store became its own crate, is corrected in its three places.
 - `postgres_live_udp_signed_profiles_queue_real_cast_and_durable_history` fails instead of passing silently when `OMOBA_REQUIRE_TEST_DATABASE` is set (as the script does) and no database URL is given; without either variable it still skips.
