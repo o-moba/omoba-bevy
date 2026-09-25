@@ -224,3 +224,20 @@ O2 (CI as a required gate): the maintainer approved it on 2026-09-25. Rules 2 an
   ShopItem, Debug}` and a per-kind pressed colour. Progress note:
   [progress/2026-09-25-ui-finish.md](progress/2026-09-25-ui-finish.md).
 - Step 9b is complete.
+
+## Final CI sweep (2026-09-25)
+
+Every PR from #49 to #52 was merged after the full local gate but without
+waiting for CI (the exception under rule 2). The sweep then read the push run
+on `main` for each merge: #49 (run 66), #50 (run 68), #51 (run 70) and #52
+(run 72) are green in all five jobs (`fmt, clippy, tests`, `headless gameplay
+harness`, `postgres-backed tests`, `python tooling tests`, `android compile
+check`), as are all earlier runs back to #40. Nothing needed fixing. For #52 a
+60 s launch of the real client under Xvfb also confirmed the system schedule
+builds without ordering cycles (no unit test builds the whole app).
+
+The programme is finished. The final documents:
+[ARCHITECTURE_CURRENT.md](ARCHITECTURE_CURRENT.md) (the current architecture,
+in Russian, with Mermaid diagrams) and
+[REFACTORING_SCALE.md](REFACTORING_SCALE.md) (before vs after: lines, files,
+modules, tests, PRs, bugs found).
