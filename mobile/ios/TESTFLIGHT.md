@@ -163,7 +163,8 @@ runtime and app: file metadata in app-owned storage (`C617.1`) and monotonic
 interval/timer measurements (`35F9.1`). The September 16 binary imports `stat`,
 `lstat`, `fstat` and `mach_absolute_time`. Source examples include profile-key file
 validation in `client/src/career_identity.rs` and session/network timers in
-`client/src/session_config.rs` and `client/src/net.rs`.
+`client/src/session_config.rs` and the `client/src/net/` module (`session.rs`,
+`transport.rs`).
 
 This is not a claim that the game collects no data. Profiles, nicknames, chat,
 match statistics and account operations require a separate App Store privacy

@@ -444,3 +444,59 @@ fn cast_range_validation_covers_target_types_and_rejects_far_targets() {
     assert_eq!(world.projectiles.len(), projectile_count);
     assert!((world.players.get(&caster_addr).unwrap().hero.mana - mana_before).abs() < EPSILON);
 }
+
+/// O13: casts resolve targets through the same hostile-target resolver as
+/// basic attacks, so a tower protected by a living outer tower is rejected
+/// (no projectile, no mana) and becomes a legal target once the outer falls.
+#[test]
+fn cast_on_a_protected_tower_is_rejected() {
+    let mut world = GameWorld::empty();
+    let caster_addr: SocketAddr = "127.0.0.1:53011".parse().unwrap();
+    let now = Instant::now();
+    let q = ability_for_class_slot(HeroClass::Mage, SkillSlot::Q);
+    world.ensure_connected(caster_addr, now);
+    handle_join_request(
+        world.players.get_mut(&caster_addr).unwrap(),
+        Team::Green,
+        CharacterChoice::Ipfs,
+        HeroClass::Mage,
+        None,
+        &world.map_layout,
+        now,
+    );
+    {
+        let caster = world.players.get_mut(&caster_addr).unwrap();
+        caster.hero.x = 0.0;
+        caster.hero.z = 0.0;
+    }
+    let mut structure_id = 30;
+    for (tier, z) in [(1, 20.0), (2, 0.0)] {
+        let id = structure_id;
+        add_structure(
+            &mut world.structures,
+            &mut structure_id,
+            StructureKind::Tower,
+            StructureRole::LaneTower { lane: Lane::Mid },
+            Team::Blue,
+            Vec3f::new(q.cast_range * 0.5, 3.0, z),
+        );
+        world.structures.get_mut(&id).unwrap().state.tier = tier;
+    }
+    let inner = TargetId {
+        kind: TargetKind::Structure,
+        id: 31,
+    };
+    assert_eq!(world.structures[&31].state.tier, 2);
+
+    handle_cast_request(&mut world, caster_addr, inner, 0, now);
+    assert!(world.projectiles.is_empty(), "protected tower is rejected");
+    assert!((world.players[&caster_addr].hero.mana - MAX_MANA).abs() < EPSILON);
+
+    world.structures.get_mut(&30).unwrap().state.hp = 0.0;
+    handle_cast_request(&mut world, caster_addr, inner, 0, now);
+    assert_eq!(
+        world.projectiles.len(),
+        1,
+        "unprotected once the outer falls"
+    );
+}

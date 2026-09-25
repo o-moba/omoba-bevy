@@ -5,6 +5,8 @@ Run: python3 scripts/test_candidate_assets.py -v
 Known denied bytes are read from the immutable pre-removal commit f2a3359,
 never retained in the candidate. A shallow checkout may instead provide the
 prior asset tree through OMOBA_DENIED_ASSET_ROOT. No downloads are performed.
+Only the renamed-denied-binary test needs those bytes; without them it alone
+skips and the rest of the gate tests run (CI runs them on every PR).
 """
 import copy
 import hashlib
@@ -22,6 +24,9 @@ import package_native
 
 from validate_candidate_assets import POLICY, ROOT, validate
 
+# The immutable pre-removal commit that still holds the denied files.
+DENIED_FIXTURE_COMMIT = "f2a3359"
+
 
 class CandidateAssetGateTests(unittest.TestCase):
     @classmethod
@@ -33,27 +38,37 @@ class CandidateAssetGateTests(unittest.TestCase):
         shutil.copytree(ROOT / "client/assets", cls.assets)
         cls.reviewed_policy = json.loads(POLICY.read_text())
         cls.legal_notices = package_native.collect_legal_notices(ROOT)
-        cls.denied_bytes = {}
+
+    @classmethod
+    def denied_fixture(cls):
+        """The reviewed denied files' historical bytes, or None when absent.
+
+        Only the renamed-denied-binary test needs them. They come from
+        OMOBA_DENIED_ASSET_ROOT or, in a full clone, from commit f2a3359; a
+        shallow CI checkout has neither, so that one test skips while every
+        other gate test runs. Bytes that exist but differ from the reviewed
+        identity are an error, never a skip.
+        """
+        if hasattr(cls, "_denied_bytes"):
+            return cls._denied_bytes
+        denied = {}
         archive = os.environ.get("OMOBA_DENIED_ASSET_ROOT")
-        if not archive and cls.reviewed_policy["denied_files"]:
-            raise unittest.SkipTest(
-                "Denied historical fixture unavailable; set OMOBA_DENIED_ASSET_ROOT "
-                "to prior assets to run the asset gate tests"
-            )
         for relative, record in cls.reviewed_policy["denied_files"].items():
             if archive:
                 data = (Path(archive) / relative).read_bytes()
             else:
                 result = subprocess.run(
-                    ["git", "show", f"f2a3359:client/assets/{relative}"],
+                    ["git", "show", f"{DENIED_FIXTURE_COMMIT}:client/assets/{relative}"],
                     cwd=ROOT, capture_output=True, check=False)
                 if result.returncode:
-                    raise RuntimeError("Denied historical fixture unavailable; provide "
-                                       "OMOBA_DENIED_ASSET_ROOT pointing to prior assets")
+                    cls._denied_bytes = None
+                    return None
                 data = result.stdout
             if hashlib.sha256(data).hexdigest() != record["sha256"]:
                 raise RuntimeError(f"Historical fixture does not match reviewed denied identity: {relative}")
-            cls.denied_bytes[relative] = data
+            denied[relative] = data
+        cls._denied_bytes = denied
+        return denied
 
     def setUp(self):
         self.saved = {}
@@ -120,7 +135,12 @@ class CandidateAssetGateTests(unittest.TestCase):
                 self.assertEqual(result["errors"], [])
 
     def test_every_denied_binary_and_preview_fails_when_renamed(self):
-        for index, (original, data) in enumerate(self.denied_bytes.items()):
+        denied = self.denied_fixture()
+        if denied is None:
+            self.skipTest(
+                "Denied historical fixture unavailable (shallow checkout); set "
+                "OMOBA_DENIED_ASSET_ROOT to the prior assets or use a full clone")
+        for index, (original, data) in enumerate(denied.items()):
             relative = f"unexpected/relabelled-{index}.dat"
             with self.subTest(original=original):
                 self.write(relative, data)

@@ -218,7 +218,27 @@ fn write_preferences_file(path: &Path, prefs: &ClientPreferencesFile) -> io::Res
     }
     let data = serde_json::to_vec_pretty(prefs)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    fs::write(path, data)
+    write_atomically(path, &data)
+}
+
+/// Writes `data` to a sibling temp file, then renames it over `path`. A
+/// crash or full disk mid-write leaves the previous file (and its
+/// `client_session_id`) intact instead of a truncated one.
+fn write_atomically(path: &Path, data: &[u8]) -> io::Result<()> {
+    let mut temp_name = path.file_name().unwrap_or_default().to_os_string();
+    temp_name.push(".tmp");
+    let temp = path.with_file_name(temp_name);
+    let result = (|| {
+        use std::io::Write;
+        let mut file = fs::File::create(&temp)?;
+        file.write_all(data)?;
+        file.sync_all()?;
+        fs::rename(&temp, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result
 }
 
 /// Startup: load JSON if present and apply to resources; always sets [`FileGameServerAddr`].
@@ -458,6 +478,41 @@ pub(crate) fn reset_graphics_to_defaults(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scratch_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "omoba-prefs-{name}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// O7: the settings file is replaced by rename, never truncated in place.
+    #[test]
+    fn preferences_are_written_atomically() {
+        let dir = scratch_dir("atomic");
+        let path = dir.join("client.json");
+        write_atomically(&path, b"old").unwrap();
+        write_atomically(&path, b"new").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"new");
+        let leftovers: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(leftovers, vec![std::ffi::OsString::from("client.json")]);
+
+        // A write that cannot complete (the temp path is taken by a
+        // directory) fails without touching the previous file.
+        fs::create_dir(dir.join("client.json.tmp")).unwrap();
+        assert!(write_atomically(&path, b"lost").is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"new");
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn schema_four_gets_audio_defaults_without_repeating_readability_migration() {

@@ -22,9 +22,6 @@ pub const BASE_HEAL_RADIUS: f32 = shared::shop::SHOP_RADIUS;
 
 // --- Projectile simulation (ability numbers live in the shared class kits) ---
 pub use shared::hero_balance::PROJECTILE_SPEED;
-/// Skill slots tracked by progression (`skill_points`); matches the shared Q/W/E/R kits.
-#[allow(dead_code)]
-pub const SKILL_SLOT_COUNT: usize = 4;
 pub const PROJECTILE_RADIUS: f32 = shared::PROJECTILE_COLLISION_RADIUS;
 pub const PROJECTILE_LIFETIME: Duration = Duration::from_secs(3);
 pub const PLAYER_HIT_RADIUS: f32 = shared::PLAYER_TARGET_RADIUS;
@@ -251,9 +248,8 @@ mod tests {
 
     #[test]
     fn skill_slot_count_matches_shared_kits() {
-        assert_eq!(SKILL_SLOT_COUNT, 4);
         for class in shared::HeroClass::ALL {
-            assert_eq!(class.abilities().len(), SKILL_SLOT_COUNT);
+            assert_eq!(class.abilities().len(), shared::SkillSlot::ALL.len());
         }
     }
 }

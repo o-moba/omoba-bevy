@@ -1553,20 +1553,25 @@ fn team_select_ui_system(
     for (interaction, button, mut color) in interaction_sets.p0().iter_mut() {
         match *interaction {
             Interaction::Pressed => {
-                if client_session.join_in_flight() {
-                    continue;
-                }
-                // Dead transport: a Join written now would be silently lost and
-                // the overlay would be gone with no way back. Trigger the same
-                // recovery as the Retry button and keep the select screen up.
-                if client_session.state() == ClientConnectionState::Disconnected {
-                    info!(
-                        "[omoba:cli] event=join_deferred reason=disconnected \
-                         msg=\"Reconnecting to server; try finding a match once connected.\""
-                    );
-                    session_ui_writer.write(SessionUiCommand::Retry);
-                    continue;
-                }
+                let (join, next_screen) = match lock_in(
+                    button.team,
+                    &selection,
+                    client_session.join_in_flight(),
+                    client_session.state(),
+                    crate::sandbox::requested(),
+                    client_session.is_offline(),
+                ) {
+                    LockIn::Ignore => continue,
+                    LockIn::Reconnect => {
+                        info!(
+                            "[omoba:cli] event=join_deferred reason=disconnected \
+                             msg=\"Reconnecting to server; try finding a match once connected.\""
+                        );
+                        session_ui_writer.write(SessionUiCommand::Retry);
+                        continue;
+                    }
+                    LockIn::Join { command, screen } => (command, screen),
+                };
                 selection.team = Some(button.team);
                 // A new attempt: the previous failure is no longer the story.
                 if let Some(notice) = notice.as_deref_mut() {
@@ -1579,22 +1584,7 @@ fn team_select_ui_system(
                     selection.avatar,
                     selection.character
                 );
-                if crate::sandbox::requested() || client_session.is_offline() {
-                    command_writer.write(NetworkCommand::Join {
-                        team: button.team,
-                        character: selection.character,
-                        hero_class: selection.hero_class,
-                        avatar: selection.avatar.clone(),
-                        sprite_character: Some(selection.sprite_character.clone()),
-                    });
-                } else {
-                    command_writer.write(NetworkCommand::JoinPrematch {
-                        character: selection.character,
-                        hero_class: selection.hero_class,
-                        avatar: selection.avatar.clone(),
-                        sprite_character: Some(selection.sprite_character.clone()),
-                    });
-                }
+                command_writer.write(join);
                 if let Ok(overlay) = overlay_query.single() {
                     commands
                         .entity(overlay)
@@ -1603,11 +1593,7 @@ fn team_select_ui_system(
                 }
                 // The hero is locked: matchmaking owns the screen from here.
                 if let Some(screen) = screen.as_deref_mut() {
-                    screen.set(if crate::sandbox::requested() {
-                        AppScreen::InMatch
-                    } else {
-                        AppScreen::Searching
-                    });
+                    screen.set(next_screen);
                 }
             }
             Interaction::Hovered => {
@@ -1617,6 +1603,65 @@ fn team_select_ui_system(
                 *color = button.team.ui_color().into();
             }
         }
+    }
+}
+
+/// What pressing a team's lock-in button on hero select does.
+#[derive(Debug)]
+enum LockIn {
+    /// A join is already on its way: the press is ignored.
+    Ignore,
+    /// The transport is dead: a join written now would be lost, so the
+    /// select screen stays and the connection is retried instead.
+    Reconnect,
+    /// Send `command` and hand the screen to `screen`.
+    Join {
+        command: NetworkCommand,
+        screen: AppScreen,
+    },
+}
+
+/// The lock-in decision, without the ECS: the sandbox and offline practice
+/// join the arena directly, everyone else joins the prematch draft; the
+/// sandbox goes straight into the match, everyone else to the search screen.
+fn lock_in(
+    team: Team,
+    selection: &TeamSelection,
+    join_in_flight: bool,
+    connection: ClientConnectionState,
+    sandbox: bool,
+    offline: bool,
+) -> LockIn {
+    if join_in_flight {
+        return LockIn::Ignore;
+    }
+    if connection == ClientConnectionState::Disconnected {
+        return LockIn::Reconnect;
+    }
+    let sprite_character = Some(selection.sprite_character.clone());
+    let command = if sandbox || offline {
+        NetworkCommand::Join {
+            team,
+            character: selection.character,
+            hero_class: selection.hero_class,
+            avatar: selection.avatar.clone(),
+            sprite_character,
+        }
+    } else {
+        NetworkCommand::JoinPrematch {
+            character: selection.character,
+            hero_class: selection.hero_class,
+            avatar: selection.avatar.clone(),
+            sprite_character,
+        }
+    };
+    LockIn::Join {
+        command,
+        screen: if sandbox {
+            AppScreen::InMatch
+        } else {
+            AppScreen::Searching
+        },
     }
 }
 
@@ -1700,6 +1745,78 @@ fn sync_practice_picker(
 mod tests {
     use super::*;
     use shared::SPRITE_CHARACTER_IDS;
+
+    /// O25: the lock-in decision for every connection/mode combination.
+    #[test]
+    fn lock_in_ignores_in_flight_reconnects_dead_and_routes_by_mode() {
+        let selection = TeamSelection {
+            hero_class: HeroClass::Mage,
+            avatar: Some("agnes".into()),
+            sprite_character: "ronin".into(),
+            ..default()
+        };
+        let connected = ClientConnectionState::Connected;
+        for (sandbox, offline) in [(false, false), (true, false), (false, true)] {
+            assert!(matches!(
+                lock_in(Team::Blue, &selection, true, connected, sandbox, offline),
+                LockIn::Ignore
+            ));
+            assert!(
+                matches!(
+                    lock_in(
+                        Team::Blue,
+                        &selection,
+                        true,
+                        ClientConnectionState::Disconnected,
+                        sandbox,
+                        offline
+                    ),
+                    LockIn::Ignore
+                ),
+                "an in-flight join wins over a reconnect"
+            );
+            assert!(matches!(
+                lock_in(
+                    Team::Blue,
+                    &selection,
+                    false,
+                    ClientConnectionState::Disconnected,
+                    sandbox,
+                    offline
+                ),
+                LockIn::Reconnect
+            ));
+        }
+
+        let LockIn::Join { command, screen } =
+            lock_in(Team::Blue, &selection, false, connected, false, false)
+        else {
+            panic!("online lock-in joins");
+        };
+        assert_eq!(screen, AppScreen::Searching);
+        assert!(matches!(
+            command,
+            NetworkCommand::JoinPrematch { hero_class: HeroClass::Mage, avatar: Some(ref a), sprite_character: Some(ref s), .. }
+                if a == "agnes" && s == "ronin"
+        ));
+
+        for (sandbox, expected) in [(true, AppScreen::InMatch), (false, AppScreen::Searching)] {
+            let LockIn::Join { command, screen } =
+                lock_in(Team::Blue, &selection, false, connected, sandbox, !sandbox)
+            else {
+                panic!("sandbox and offline lock-ins join");
+            };
+            assert_eq!(screen, expected);
+            assert!(matches!(
+                command,
+                NetworkCommand::Join {
+                    team: Team::Blue,
+                    hero_class: HeroClass::Mage,
+                    ..
+                }
+            ));
+        }
+    }
 
     /// Bevy checks query conflicts when a system is initialized, not when it compiles.
     /// The picker system holds two `&mut Text` and two `&mut BackgroundColor` queries

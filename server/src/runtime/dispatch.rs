@@ -129,6 +129,11 @@ impl ServerRuntime {
             self.handle_social_request(addr, request, false, now);
             return;
         }
+        // Standalone only: bound the pre-join table and owe an unverified
+        // endpoint one status reply for this datagram (report O4).
+        if !self.admit_standalone_datagram(addr, now) {
+            return;
+        }
         self.career.backend.touch(addr);
         if let ClientPacket::Prematch { request } = packet {
             self.handle_prematch(addr, request, now);

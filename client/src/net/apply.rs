@@ -328,11 +328,23 @@ fn apply_snapshot_resources(
         .as_ref()
         .and_then(|draft| draft.players.iter().find(|p| p.player_id == your_id))
     {
-        team_selection.character = own.character;
-        team_selection.hero_class = own.hero_class;
-        team_selection.avatar = own.avatar.clone();
-        if let Some(sprite) = &own.sprite_character {
-            team_selection.sprite_character = sprite.clone();
+        // Compare first: every write marks `TeamSelection` changed and the
+        // settings file is rewritten on each change, so an unchanged draft
+        // row (sent up to 20 times a second) must not touch it.
+        let differs = team_selection.character != own.character
+            || team_selection.hero_class != own.hero_class
+            || team_selection.avatar != own.avatar
+            || own
+                .sprite_character
+                .as_ref()
+                .is_some_and(|sprite| *sprite != team_selection.sprite_character);
+        if differs {
+            team_selection.character = own.character;
+            team_selection.hero_class = own.hero_class;
+            team_selection.avatar = own.avatar.clone();
+            if let Some(sprite) = &own.sprite_character {
+                team_selection.sprite_character = sprite.clone();
+            }
         }
         if let Some(join) = client_session.last_join.as_mut() {
             join.character = own.character;
@@ -1727,6 +1739,64 @@ mod tests {
 
     // Round changes for the reactions after `ApplySnapshot` (roadmap step 15c):
     // the teardown gap the combat round reset used to ride out itself.
+
+    /// O7: an unchanged draft row must not mark `TeamSelection` changed
+    /// (the settings file is rewritten on every change); a new pick does.
+    #[test]
+    fn repeated_draft_snapshot_leaves_team_selection_unchanged() {
+        let (mut app, incoming) = snapshot_app();
+        let draft = |tick: u64, hero_class: shared::HeroClass| {
+            let own = shared::prematch::DraftPlayer {
+                player_id: 1,
+                nickname: "me".into(),
+                team: shared::map::Team::Green,
+                character: shared::wire::CharacterChoice::Ipfs,
+                hero_class,
+                avatar: None,
+                sprite_character: Some("ronin".into()),
+                role: Default::default(),
+                is_bot: false,
+                locked: false,
+                loaded: false,
+            };
+            let mut draft = serde_json::to_value(admission_snapshot(1, tick, true, None)).unwrap();
+            draft["prematch"] = json!({"generation": 1, "phase": "draft", "remaining_ms": 1000,
+                "needed": 10, "last_request_id": 0, "error": null, "players": [own]});
+            serde_json::from_value::<shared::wire::ServerPacket>(draft).unwrap()
+        };
+        incoming.send(draft(1, shared::HeroClass::Mage)).unwrap();
+        app.update();
+        let first = app.world().resource_ref::<TeamSelection>().last_changed();
+        assert_eq!(
+            app.world().resource::<TeamSelection>().hero_class,
+            shared::HeroClass::Mage
+        );
+        assert_eq!(
+            app.world().resource::<TeamSelection>().sprite_character,
+            "ronin"
+        );
+
+        for tick in 2..6 {
+            incoming.send(draft(tick, shared::HeroClass::Mage)).unwrap();
+            app.update();
+        }
+        assert_eq!(
+            app.world().resource_ref::<TeamSelection>().last_changed(),
+            first,
+            "identical draft rows leave the selection (and the settings file) alone"
+        );
+
+        incoming.send(draft(6, shared::HeroClass::Warrior)).unwrap();
+        app.update();
+        assert_ne!(
+            app.world().resource_ref::<TeamSelection>().last_changed(),
+            first
+        );
+        assert_eq!(
+            app.world().resource::<TeamSelection>().hero_class,
+            shared::HeroClass::Warrior
+        );
+    }
 
     #[test]
     fn teardown_gap_keeps_the_last_round_so_only_the_next_round_is_a_change() {

@@ -165,8 +165,7 @@ Use a disposable database, build current sources, migrate, and run:
 
 ```sh
 cargo test --locked -p client --lib
-OMOBA_TEST_DATABASE_URL='postgres://localhost/omoba_test' cargo test --locked -p server
-OMOBA_TEST_DATABASE_URL='postgres://localhost/omoba_test' cargo test --locked -p server --lib career_store -- --ignored --test-threads=1
+OMOBA_TEST_DATABASE_URL='postgres://localhost/omoba_test' make test-postgres
 export OMOBA_TEST_DATABASE_URL='postgres://localhost/omoba_test'
 export HARNESS_SERVER_BIN="$PWD/target/debug/server"
 node scripts/test_public_mvp.mjs --scenario=lifecycle --clients=1 --preference=bot_practice

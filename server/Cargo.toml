@@ -6,17 +6,20 @@ edition.workspace = true
 license = "AGPL-3.0-only"
 
 [dependencies]
-sqlx = { version = "0.8.6", default-features = false, features = ["postgres", "runtime-tokio-rustls", "json"] }
 tokio = { version = "1.49.0", features = ["rt", "time", "sync", "macros"] }
 ed25519-dalek = "2.2.0"
 getrandom = "0.3.4"
-bevy = { version = "0.18.0", default-features = false, features = ["std"] }
-ekza-bevy-sdk = { git = "https://github.com/ekza-space/ekza-bevy-sdk", rev = "247ddbf6dbfc9bac95b52b74ce3a0a1321466a24", default-features = false }
+ekza-bevy-sdk.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 shared = { path = "../shared" }
 omoba-career-store = { path = "../career-store" }
 omoba-passport = { path = "../passport" }
+
+[dev-dependencies]
+# Only the PostgreSQL fixtures query the database directly; production code
+# reaches it through omoba-career-store.
+sqlx = { version = "0.8.6", default-features = false, features = ["postgres", "runtime-tokio-rustls", "json"] }
 
 [lints]
 workspace = true

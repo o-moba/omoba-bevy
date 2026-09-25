@@ -10,13 +10,13 @@ maintainers are working through. Feature-level documentation lives in
 
 | Crate | Role | Depends on |
 | --- | --- | --- |
-| `shared` (MPL) | The gameplay model both sides agree on: hero classes and ability kits, hero growth, items, map geometry and navigation, the wire protocol, prematch/draft, social/career/account contracts, the debug command family (`shared::debug`) and the Combat Test sandbox protocol, and the pure bot planners (`shared::progression`, `shop::plan_purchases`). Per-class and per-item data is JSON in `shared/assets/catalog/`, embedded and validated at startup (`shared::catalog`), and the frozen sprite character ids with their normalization. No Bevy, no I/O: no environment, filesystem or network reads, and no Ekza SDK types. | serde, serde_json |
-| `server` (AGPL) | The authoritative simulation and UDP endpoint: match lifecycle, bots, combat, shop, career settlement, public transport signing, allocation workers. Binary only. | shared, passport, career-store |
+| `shared` (MPL) | The gameplay model both sides agree on: hero classes and ability kits, hero growth, items, map geometry and navigation, the wire protocol, prematch/draft, social/career/account contracts, the debug command family (`shared::debug`) and the Combat Test sandbox protocol, and the pure bot planners (`shared::progression`, `shop::plan_purchases`). Per-class and per-item data is JSON in `shared/assets/catalog/`, embedded and validated at startup (`shared::catalog`), and the frozen sprite character ids with their normalization. No Bevy, no I/O: no environment, filesystem or network reads, and no Ekza SDK types. | serde, serde_json; no I/O |
+| `server` (AGPL) | The authoritative simulation and UDP endpoint: match lifecycle, bots, combat, shop, career settlement, public transport signing, allocation workers. Binary only. No Bevy since step 6a; `sqlx` is a dev-dependency (the PostgreSQL fixtures), production reaches the database through career-store. | shared, passport, career-store, ekza-bevy-sdk (no default features), tokio, ed25519-dalek |
 | `career-store` (AGPL) | Trusted career persistence (Postgres, migrations) and the bounded queue policy, linked by the server and the account API without the engine. | shared, sqlx |
 | `client` (MPL) | The Bevy game: networking, prediction, presentation (2D sprites and 3D models, the sprite roster in `sprite_roster.rs`), UI, mobile input, offline practice, QA harnesses (`qa` feature, on by default). | shared, passport, bevy, ekza-bevy-sdk |
 | `harness` | Black-box UDP players and gameplay/matchmaking checks that launch the server binary. | shared |
-| `passport` | Ekza passport contract: tickets, device and web accounts, store admission; the asset root (`passport::assets`), the avatar roster and the store-avatar registry (`passport::avatars`), and the companion reaction grant (`passport::entitlements`). | shared, ekza-bevy-sdk |
-| `account-api` | Axum/Postgres HTTP service over the career store (portal, devices, supporter billing). | shared, career-store |
+| `passport` | Ekza passport contract: tickets, device and web accounts, store admission; the asset root (`passport::assets`), the avatar roster and the store-avatar registry (`passport::avatars`), and the companion reaction grant (`passport::entitlements`). | shared, ekza-bevy-sdk (`http`), reqwest |
+| `account-api` | Axum/Postgres HTTP service over the career store (portal, devices, supporter billing). | shared, career-store, axum, sqlx |
 | `arena-sync` | CLI that pulls Ekza Arena avatars and merges the avatar manifest. | reqwest |
 
 Rules that follow from the map:
@@ -222,8 +222,10 @@ Modules import what they use (`use crate::entities::ConnectedPlayer;`,
 `use shared::wire::GameState;`, `use std::time::Instant;`); there are no
 crate-root glob re-exports and no `use crate::*;`, and only test modules
 keep `use super::*;` for their parent module. `runtime::run` is a plain
-fixed-step loop (`SIMULATION_STEP_SLEEP`, 10 ms): `prepare_tick`, then
-`tick`, then sleep the remainder of the step. There is no Bevy `App` and no
+paced loop (`SIMULATION_STEP_SLEEP`, 10 ms): `prepare_tick`, then
+`tick`, then sleep the remainder of the step. It is not a fixed timestep:
+`prepare_tick` passes the real elapsed time as `dt` (capped at 100 ms), so a slow step makes
+the next `dt` longer (the Combat Sandbox can scale or pause it). There is no Bevy `App` and no
 ECS mirror on the server; the `GameWorld` maps are the only copy of the
 state.
 
@@ -412,8 +414,27 @@ Developer and practice commands form two families, kept apart on purpose.
   changes; peers with another version are rejected at `Hello`.
 - Compatible changes are additive: new fields carry `#[serde(default)]`,
   new enum values are only added where the decoder tolerates unknown values.
-- Gameplay commands that must not replay carry `server_epoch`, `match_id`
-  and a monotonic `request_id`; transforms carry `dash_sequence`.
+- Enum evolution: every enum the UDP protocol carries is listed with its
+  variants in `shared/src/protocol/wire_enums.rs` and matched there with no
+  `_` arm, so a new variant does not compile until it is listed. Listing it
+  is the decision: on a strict enum, bump `PROTOCOL_VERSION`; otherwise make
+  the enum tolerant (`#[serde(other)]` or a lenient `Deserialize`) in a
+  release that ships before the variant is sent. The list is pinned to
+  `POLICY_PROTOCOL_VERSION`, and a new serde enum in `shared` must be
+  classified there (wire or not) before tests pass.
+- Standalone servers (no public admission) keep at most
+  `MAX_PREJOIN_ENDPOINTS` (64) unverified endpoints and send the world only
+  to verified ones (joined, or career-authenticated). An unverified endpoint
+  gets one small status snapshot (no players or world state) per datagram,
+  at most one per `PREJOIN_STATUS_INTERVAL` (250 ms).
+- Gameplay commands that must not replay (`BasicAttack`, `Utility`,
+  `BuyItem`) carry `server_epoch`, `match_id` and a monotonic `request_id`.
+  `Cast` carries none: a replayed cast is refused by the slot's cooldown,
+  skill recovery and mana. Transforms carry `dash_sequence`, and the distance
+  a transform may cover is a time budget (speed × elapsed time plus at most
+  one `MOVEMENT_POSITION_TOLERANCE` of unspent slack,
+  `HeroTimers::movement_slack`), not a per-packet allowance, so sending
+  transforms faster does not move a hero faster.
 - Snapshots are trimmed to the UDP payload limit by dropping the oldest
   cosmetic combat events, never gameplay state.
 - A player's private economy (gold, earned gold, inventory, item bonuses,

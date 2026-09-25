@@ -210,7 +210,7 @@ fn immediate_memory_career_acknowledges_start_and_settle_through_poll() {
     rt.world.game_state = GameState::Victory {
         winner: Team::Green,
     };
-    rt.record_match_metrics(later);
+    rt.settle_finished_round(later);
     let result = rt.career_view(addr(59301), later).last_result.unwrap();
     assert!(result.rated);
     assert!(!result.saved);
@@ -259,7 +259,7 @@ fn frozen_result_contains_offline_totals_and_survives_round_reset_until_ack() {
     rt.world.game_state = GameState::Victory {
         winner: Team::Green,
     };
-    rt.record_match_metrics(later);
+    rt.settle_finished_round(later);
     let result = rt.career_view(addr(59322), later).last_result.unwrap();
     let offline = result
         .participants
@@ -276,7 +276,7 @@ fn frozen_result_contains_offline_totals_and_survives_round_reset_until_ack() {
     );
     assert!(offline.disconnected);
     assert!(!result.saved);
-    rt.record_match_metrics(later + Duration::from_secs(1));
+    rt.settle_finished_round(later + Duration::from_secs(1));
     assert_eq!(
         rt.career_view(addr(59322), later).last_result,
         Some(result.clone())
@@ -364,7 +364,7 @@ fn practice_results_are_explicitly_unrated_and_play_again_preserves_result_for_o
     rt.world.game_state = GameState::Victory {
         winner: Team::Green,
     };
-    rt.record_match_metrics(now);
+    rt.settle_finished_round(now);
     let result = rt.career_view(addr(59342), now).last_result.unwrap();
     assert_eq!(result.participants.len(), 2);
     assert!(!result.rated);
@@ -540,6 +540,12 @@ fn empty_roster_finalizes_abandoned_before_reset_without_ranked_winner() {
 fn postgres_live_udp_signed_profiles_queue_real_cast_and_durable_history() {
     use ed25519_dalek::Signer;
     let Ok(url) = std::env::var("OMOBA_TEST_DATABASE_URL") else {
+        // `scripts/postgres_tests.py` (`make test-postgres`, the `postgres` CI
+        // job) sets this flag, so a lost URL there is a failure, not a skip.
+        assert!(
+            std::env::var_os("OMOBA_REQUIRE_TEST_DATABASE").is_none(),
+            "OMOBA_REQUIRE_TEST_DATABASE is set but OMOBA_TEST_DATABASE_URL is not"
+        );
         eprintln!("SKIP postgres_live_udp: OMOBA_TEST_DATABASE_URL is not configured");
         return;
     };
@@ -1007,7 +1013,7 @@ fn live_udp_full_roster_career_result_exceeds_9kb_and_arrives_in_small_fragments
     rt.world.game_state = GameState::Victory {
         winner: Team::Green,
     };
-    rt.record_match_metrics(now);
+    rt.settle_finished_round(now);
     let expected = rt.career_view(address, now).last_result.unwrap();
     assert_eq!(expected.participants.len(), 32);
     let epoch = rt.server_epoch;

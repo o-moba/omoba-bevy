@@ -1,6 +1,8 @@
 //! Shared session envelope and, in [`wire`], the gameplay packet types.
 
 pub mod wire;
+#[cfg(test)]
+mod wire_enums;
 
 use serde::{Deserialize, Serialize};
 

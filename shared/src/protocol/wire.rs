@@ -490,7 +490,6 @@ pub struct ProjectileState {
 #[serde(tag = "type", rename_all = "snake_case")]
 // Outbound packets are serialized immediately, never queued as enum values.
 // Keep both envelopes inline to avoid an extra allocation per gameplay snapshot.
-#[allow(clippy::large_enum_variant)]
 pub enum ServerPacket {
     Social {
         server_epoch: u64,
