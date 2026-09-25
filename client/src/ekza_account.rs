@@ -241,23 +241,23 @@ pub fn account_status_line() -> String {
 }
 
 fn library_entries<'a>(
-    avatars: impl IntoIterator<Item = &'a shared::AvatarDefinition>,
+    avatars: impl IntoIterator<Item = &'a omoba_passport::avatars::AvatarDefinition>,
     mut has: impl FnMut(&str) -> bool,
     mut current_free: impl FnMut(&str) -> Option<bool>,
-) -> Vec<&'a shared::AvatarDefinition> {
+) -> Vec<&'a omoba_passport::avatars::AvatarDefinition> {
     avatars
         .into_iter()
         .filter(|avatar| current_free(&avatar.slug).unwrap_or(avatar.free) && has(&avatar.slug))
         .collect()
 }
 
-pub fn library_avatars() -> Vec<&'static shared::AvatarDefinition> {
+pub fn library_avatars() -> Vec<&'static omoba_passport::avatars::AvatarDefinition> {
     let state = STATE.lock().unwrap();
     let Some(session) = &state.session else {
         return Vec::new();
     };
     library_entries(
-        shared::store_avatars(),
+        omoba_passport::avatars::store_avatars(),
         |slug| session.has(slug),
         store::free_access,
     )
@@ -428,9 +428,9 @@ mod tests {
 
     #[test]
     fn library_uses_current_entitlements_and_requires_account_membership() {
-        let mut originally_free = shared::avatar_roster()[0].clone();
+        let mut originally_free = omoba_passport::avatars::avatar_roster()[0].clone();
         originally_free.free = true;
-        let mut originally_paid = shared::avatar_roster()[1].clone();
+        let mut originally_paid = omoba_passport::avatars::avatar_roster()[1].clone();
         originally_paid.free = false;
         let avatars = [&originally_free, &originally_paid];
         let fallback = library_entries(avatars, |_| true, |_| None);

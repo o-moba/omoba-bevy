@@ -115,7 +115,7 @@ fn join_applies_class_and_normalizes_avatar() {
     let now = Instant::now();
     world.ensure_connected(addr, now);
 
-    let valid_slug = shared::avatar_roster()[0].slug.clone();
+    let valid_slug = omoba_passport::avatars::avatar_roster()[0].slug.clone();
     handle_join_request(
         world.players.get_mut(&addr).unwrap(),
         Team::Blue,

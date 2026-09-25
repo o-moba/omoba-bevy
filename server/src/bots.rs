@@ -197,9 +197,9 @@ pub(crate) fn bot_avatar(class: HeroClass, slot: u16) -> Option<&'static str> {
     [preferred[variant], preferred[1 - variant], "agnes", "anna"]
         .into_iter()
         .find_map(|slug| {
-            shared::avatar_definition(slug)
+            omoba_passport::avatars::avatar_definition(slug)
                 .filter(|avatar| avatar.passport.is_none())
-                .and_then(|_| shared::normalize_avatar_slug(Some(slug)))
+                .and_then(|_| omoba_passport::avatars::normalize_avatar_slug(Some(slug)))
         })
 }
 

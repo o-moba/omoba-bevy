@@ -37,9 +37,8 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
    `make test-postgres` against a disposable database
    (`OMOBA_TEST_DATABASE_URL`; not part of `make check`, CI runs it in the
    `postgres` job on every push, PR and nightly). Reference
-   counts at the time of writing: server 283 (+3 ignored), shared 88, client
-   lib 561 (541 with `--no-default-features`, i.e. without the QA
-   harnesses), harness 22 unit + 24 black-box.
+   counts at the time of writing: server 297 (+3 ignored), shared 92, client
+   lib 571, passport 26, harness 22 unit + 24 black-box.
 4. One step per branch, named `refactor/<topic>` (docs-only: `docs/<topic>`),
    cut from the current `origin/main`.
 5. No wire-visible change unless the step says so explicitly; `shared/` stays
@@ -73,7 +72,7 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
 | 10 | Client domain module, combat/player split, render backends behind `run_if`, plugin groups, QA behind a cargo feature | done (optional 10h/10i open, see [plans/client-10-15.md](plans/client-10-15.md)) | #35, #36, #37 |
 | 11 | One debug tooling family shared by Combat Test, practice and offline | done: 11-0 (#34), 11a–11c (#42), 11d (#43), 11e+11f (this PR; server-driven `Snapshot.debug_access`, tools page/HUD/re-send follow it) | #34, #42, #43, this PR |
 | 12 | Data-driven hero and item catalogs with validation tests | done: 12a-12e; 12f (optional client cross-checks) open | #38 |
-| 13 | Roster/asset loading and SDK types out of the shared model | pending | |
+| 13 | Roster/asset loading and SDK types out of the shared model | done: 13a-13e (with O5 load validation and the O30 working-directory slice); 13f (server-owned registry) optional | this PR (shared without I/O) |
 | 15 | Client session events and staged snapshot application | done: 15a+15b1 (#39), 15b2+15c+15d (#41), 15e (#43); 15f/15g optional | #39, #41, #43 |
 | 9b | UI kit follow-ups: scroll unification, modal registry, frontend/social/supporter/sandbox screens, responsive layout, `TestId` in QA | pending (order in [ui-kit.md](ui-kit.md)) | |
 
@@ -126,6 +125,8 @@ outside the numbered steps (notes:
 | O4 | standalone server keeps at most `MAX_PREJOIN_ENDPOINTS` (64) unverified endpoints; unverified endpoints get one small status snapshot per datagram (at most one per 250 ms) instead of the world every 50 ms; public roles unchanged | done | this PR (pre-beta) |
 | O6 | `mobile/ios` tests (42) in the CI `scripts` job and `make test-scripts`; the asset-gate class runs (27 of 28); only the renamed-denied-binary test skips without the denied bytes | done | this PR (pre-beta) |
 | O24 | CI `android` job: `cargo check -p client --target aarch64-linux-android` with the runner's NDK (build scripts compile C/C++); weekly/manual macOS `ios-check.yml` for `aarch64-apple-ios` (not a PR gate) | done | this PR (pre-beta) |
+| O5 | roster entries with an `ekza-` slug or a passport boundary must pass the `register_store_avatar` rule at load, else skipped with a warning (`roster_entries_must_follow_the_store_avatar_rule`); the arena-sync half (check before `fs::write`) is open | done (load half) | this PR (shared without I/O) |
+| O30 | no roster lookup relative to the working directory; the binaries print the roster size and source at startup | done (cheap slice) | this PR (shared without I/O) |
 | O10 | `shared/src/protocol/wire_enums.rs`: 43 UDP wire enums with exhaustive no-`_` matches pinned to `PROTOCOL_VERSION`, a scan that makes every new serde enum in `shared` be classified, tolerant/strict decode tests; rule in `ARCHITECTURE.md` | done | this PR (pre-beta) |
 
 O2 (CI as a required gate): the maintainer approved it on 2026-09-25. Rules 2 and 6 now say "merge only after every check is green"; branch protection on `main` with the four required checks is a repository setting the maintainer switches on. Still open from §8.2: the rest of the list outside the rows above.
@@ -185,8 +186,14 @@ O2 (CI as a required gate): the maintainer approved it on 2026-09-25. Rules 2 an
 - 12d: the catalog length is `ItemId::ALL.len()`, not `INVENTORY_CAPACITY`; the "all items" test and preset sites take at most `INVENTORY_CAPACITY`; `practice::tests::duel_gold_cap_buys_a_full_inventory` replaces the comment claim.
 - 12e: `scripts/catalog.py` reads the JSON; `combat_test.py` (`--hero` choices), `verify_beta_match.py` (item costs; offensive slots = abilities with `projectile_damage`) and `capture_combat.py` (`STYLES`) use it. `check_combat_balance.py` keeps taking its classes from its captures.
 
-### 13: Shared I/O isolation
-- Move avatar/sprite roster manifests and env-var reads out of `shared` into `client` (and the SDK types into a small adapter crate or `passport`); `shared` keeps the model only.
+### 13: Shared model free of I/O (done, this PR)
+- Plan: [plans/steps-11-13.md](plans/steps-11-13.md), "Step 13"; notes in [progress/2026-09-25-shared-no-io.md](progress/2026-09-25-shared-no-io.md). `shared` depends on `serde` and `serde_json` only and reads no environment variable or file at runtime.
+- 13a: sprite presentation (schema, embedded manifest, roster, render fallback) in `client/src/sprite_roster.rs`; `shared` keeps `SPRITE_CHARACTER_IDS` and `normalize_sprite_character_id`.
+- 13b: `omoba_passport::assets::client_asset_root` and `omoba_passport::avatars` (roster, `AvatarDefinition`, store-avatar registry, same names; the global stays process-wide, phase 1). The harness reads the manifest as plain JSON.
+- 13c: `RosterSource::from_env()` in server `runtime::run` and client `main`, one startup line (`Avatar roster: N avatars from <path | embedded manifest>`), pure `load_roster(candidates, read)`; no working-directory candidates (O30); O5 validation at load.
+- 13d: `shared::wire::CharacterChoice` (same snake_case serde as the SDK's `EkzaCharacter`, goldens unchanged), listed in `wire_enums.rs`; the client converts with `world::sdk_character`.
+- 13e: `grant_verified_avatar` in `omoba_passport::entitlements`; the SDK dependency left `shared/Cargo.toml`.
+- Open: 13f (registry owned by the server runtime), optional.
 
 ### 9b: UI kit follow-ups
 - Order and details in [ui-kit.md](ui-kit.md).

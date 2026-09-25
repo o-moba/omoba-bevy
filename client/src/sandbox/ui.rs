@@ -410,7 +410,7 @@ fn build_panel(
                 }
                 p.spawn(row()).with_children(|r|for i in 0..4{button(r,format!("Cast {}",["Q","W","E","R"][i]),Action::Command(SandboxCommand::ForceCast{actor:state.actor,slot:i as u8,target_id:None}));});
                 heading(p,"Grant equipment");p.spawn(row()).with_children(|r|{for item in shared::shop::items(){button(r,item.name,Action::Item(item.id));}button(r,"Clear inventory",Action::ClearItems);});
-                heading(p,"Shipped appearances");p.spawn(row()).with_children(|r|for avatar in shared::avatar_roster().iter().filter(|a|a.passport.is_none()){button(r,&avatar.slug,Action::Avatar(avatar.slug.clone()));});
+                heading(p,"Shipped appearances");p.spawn(row()).with_children(|r|for avatar in omoba_passport::avatars::avatar_roster().iter().filter(|a|a.passport.is_none()){button(r,&avatar.slug,Action::Avatar(avatar.slug.clone()));});
             },
             Tab::Dummy=>{
                 heading(p,"Training target");for t in [Toggle::Dummy,Toggle::DummyInfinite,Toggle::DummyMoving]{toggle(p,t,&state);}

@@ -6,7 +6,6 @@
 //! ticket consumption; it does not verify arbitrary sticker NFTs.
 use std::{collections::HashSet, sync::OnceLock};
 
-use ekza_bevy_sdk::passport::{ConsumedTicket, ProtectedAvatar, validate_avatar_id};
 use serde::{Deserialize, Serialize};
 
 pub const MAX_CHAT_CHARS: usize = 160;
@@ -301,25 +300,55 @@ impl Entitlements {
         Ok(())
     }
 
-    /// Only call after successful one-use ticket consumption at the server's
-    /// trusted Passport API for the current admitted session. This checks the
-    /// returned exact avatar/rendition, not the network origin, expiry or session;
-    /// the trusted service/caller has already verified those. A client-created
-    /// ConsumedTicket must never reach this method as evidence.
-    pub fn grant_verified_avatar(
-        &mut self,
-        expected: &ProtectedAvatar,
-        consumed: &ConsumedTicket,
-    ) -> Result<(), &'static str> {
-        expected.validate_consumed_ticket(consumed)?;
+    /// Record a verified companion avatar. The only caller is
+    /// `omoba_passport::entitlements::grant_verified_avatar`, which first
+    /// checks the consumed ticket against the exact expected avatar and
+    /// rendition; never call this with an id taken from a packet or a client
+    /// file. The id itself must still be a canonical avatar identity.
+    pub fn grant_verified_avatar_id(&mut self, avatar_id: &str) -> Result<(), &'static str> {
+        validate_avatar_id(avatar_id)?;
         if self.verified_avatar_ids.len() >= MAX_PACKS
-            && !self.verified_avatar_ids.contains(&expected.avatar_id)
+            && !self.verified_avatar_ids.contains(avatar_id)
         {
             return Err("Excessive companion reaction grants.");
         }
-        self.verified_avatar_ids.insert(expected.avatar_id.clone());
+        self.verified_avatar_ids.insert(avatar_id.to_owned());
         Ok(())
     }
+}
+
+/// Canonical avatar identity, as the Ekza SDK's `passport::validate_avatar_id`
+/// defines it (copied so the shared model does not depend on the SDK): an
+/// on-chain template `solana:devnet:avatar-data:<base58 key>` or an Ekza
+/// Studio avatar `ekza:avatar:<lowercase uuid>`.
+fn validate_avatar_id(id: &str) -> Result<(), &'static str> {
+    if let Some(key) = id.strip_prefix("solana:devnet:avatar-data:") {
+        return if valid_base58_key(key) {
+            Ok(())
+        } else {
+            Err("Invalid canonical devnet avatar identity")
+        };
+    }
+    match id.strip_prefix("ekza:avatar:") {
+        Some(uuid) if valid_uuid(uuid) => Ok(()),
+        _ => Err("Invalid canonical avatar identity"),
+    }
+}
+
+fn valid_base58_key(value: &str) -> bool {
+    (32..=44).contains(&value.len())
+        && value.bytes().all(|byte| {
+            matches!(byte, b'1'..=b'9' | b'A'..=b'H' | b'J'..=b'N' | b'P'..=b'Z' | b'a'..=b'k' | b'm'..=b'z')
+        })
+}
+
+/// Lowercase canonical UUID text (8-4-4-4-12).
+fn valid_uuid(value: &str) -> bool {
+    value.len() == 36
+        && value.bytes().enumerate().all(|(index, byte)| match index {
+            8 | 13 | 18 | 23 => byte == b'-',
+            _ => byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte),
+        })
 }
 
 fn fallback_catalog() -> ReactionCatalog {
@@ -520,70 +549,6 @@ mod tests {
     }
 
     #[test]
-    fn companion_grants_require_exact_approved_avatar_response_and_stay_scoped() {
-        use ekza_bevy_sdk::passport::{ProjectSupport, Rendition};
-        // Trusted-service response fixture, not a real NFT ownership assertion.
-        let expected = ProtectedAvatar {
-            avatar_id: format!("solana:devnet:avatar-data:{}", "1".repeat(32)),
-            support: ProjectSupport {
-                project_id: "omoba".into(),
-                platform: "desktop".into(),
-                profile: "humanoid-glb-v1".into(),
-                status: "approved".into(),
-                rendition: Rendition {
-                    id: "r1".into(),
-                    url: "https://example.test/avatar.glb".into(),
-                    sha256: "a".repeat(64),
-                    size_bytes: 20,
-                    format: "glb".into(),
-                },
-            },
-        };
-        let mut consumed = ConsumedTicket {
-            wallet: "2".repeat(32),
-            mint: "3".repeat(32),
-            avatar_id: expected.avatar_id.clone(),
-            expires_at: "2099-01-01T00:00:00Z".into(),
-            support: expected.support.clone(),
-        };
-        let mut catalog = fallback_catalog();
-        for (id, avatar_id) in [
-            ("companion", expected.avatar_id.clone()),
-            (
-                "other_companion",
-                format!("solana:devnet:avatar-data:{}", "4".repeat(32)),
-            ),
-        ] {
-            catalog.packs.push(ReactionPack {
-                id: id.into(),
-                label: id.into(),
-                access: PackAccess::VerifiedAvatar { avatar_id },
-            });
-            catalog.reactions.push(ReactionDefinition {
-                id: id.into(),
-                label: id.into(),
-                pack_id: id.into(),
-            });
-        }
-        catalog.validate().unwrap();
-        let mut entitlements = Entitlements::default();
-        consumed.support.rendition.sha256 = "b".repeat(64);
-        assert!(
-            entitlements
-                .grant_verified_avatar(&expected, &consumed)
-                .is_err()
-        );
-        assert!(!catalog.reaction_allowed("companion", &entitlements));
-        consumed.support = expected.support.clone();
-        entitlements
-            .grant_verified_avatar(&expected, &consumed)
-            .unwrap();
-        assert!(catalog.reaction_allowed("companion", &entitlements));
-        assert!(!catalog.reaction_allowed("other_companion", &entitlements));
-        assert!(!catalog.reaction_allowed("companion", &Entitlements::default()));
-    }
-
-    #[test]
     fn trusted_grant_storage_is_bounded_and_duplicates_are_idempotent() {
         let mut entitlements = Entitlements::default();
         for n in 0..MAX_PACKS {
@@ -594,6 +559,19 @@ mod tests {
         entitlements.grant_operator_pack("pack_0").unwrap();
         assert_eq!(entitlements.operator_pack_ids.len(), MAX_PACKS);
         assert!(entitlements.grant_operator_pack("overflow").is_err());
+        // Verified avatar grants keep the canonical identity check.
+        let chain = format!("solana:devnet:avatar-data:{}", "1".repeat(32));
+        let studio = "ekza:avatar:0f8fad5b-d9cb-469f-a165-70867728950e";
+        entitlements.grant_verified_avatar_id(&chain).unwrap();
+        entitlements.grant_verified_avatar_id(studio).unwrap();
+        for invalid in [
+            "solana:devnet:avatar-data:0OIl",
+            "ekza:avatar:0F8FAD5B-D9CB-469F-A165-70867728950E",
+            "../secret",
+        ] {
+            assert!(entitlements.grant_verified_avatar_id(invalid).is_err());
+        }
+        assert_eq!(entitlements.verified_avatar_ids.len(), 2);
     }
 
     #[test]

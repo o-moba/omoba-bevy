@@ -300,7 +300,7 @@ impl ServerRuntime {
                 role,
                 ..
             } if self.prematch.phase == Some(PrematchPhase::Draft) && !player.draft.locked => {
-                let normalized = shared::normalize_avatar_slug(avatar.as_deref());
+                let normalized = omoba_passport::avatars::normalize_avatar_slug(avatar.as_deref());
                 if avatar.is_some() && normalized.is_none() {
                     player.draft.error = Some(
                         "This avatar is no longer available. Choose another character.".into(),

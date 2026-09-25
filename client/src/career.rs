@@ -1157,10 +1157,10 @@ pub(crate) fn queue_text(queue: &QueueView) -> Option<String> {
 /// else instead of a bundled `avatars/` file that does not exist.
 fn avatar_portrait_path(
     avatar: Option<&str>,
-    thumbnail: impl Fn(&shared::AvatarDefinition) -> Option<String>,
+    thumbnail: impl Fn(&omoba_passport::avatars::AvatarDefinition) -> Option<String>,
 ) -> Option<String> {
     avatar
-        .and_then(shared::avatar_definition)
+        .and_then(omoba_passport::avatars::avatar_definition)
         .and_then(thumbnail)
 }
 
@@ -1176,7 +1176,7 @@ fn portrait(
     let image = if mode == PlayerVisualMode::Sprite2d {
         sprite
             .and_then(|id| {
-                shared::sprite_character_roster()
+                crate::sprite_roster::sprite_character_roster()
                     .iter()
                     .position(|entry| entry.id == id)
             })
@@ -1215,7 +1215,7 @@ fn hero_name(player: &ParticipantResult) -> String {
     let cosmetic = player
         .avatar
         .as_deref()
-        .and_then(shared::avatar_definition)
+        .and_then(omoba_passport::avatars::avatar_definition)
         .map(|a| a.display_name.as_str())
         .or(player.sprite_character.as_deref())
         .unwrap_or(&player.character);
@@ -2492,7 +2492,7 @@ mod tests {
     /// (`ekza://avatars/...`), not a bundled `avatars/` file.
     #[test]
     fn career_portrait_loads_store_avatars_from_the_ekza_source() {
-        let avatar = shared::avatar_roster()
+        let avatar = omoba_passport::avatars::avatar_roster()
             .iter()
             .find(|a| a.thumbnail.is_some())
             .expect("a roster avatar with a thumbnail");

@@ -49,7 +49,7 @@ fn parse_launch(args: impl IntoIterator<Item = String>, enabled: bool) -> Result
         return Err("Sandbox options require --combat-test".into());
     }
     if let Some(slug) = &result.avatar {
-        if shared::avatar_definition(slug).is_none_or(|a| a.passport.is_some()) {
+        if omoba_passport::avatars::avatar_definition(slug).is_none_or(|a| a.passport.is_some()) {
             return Err(format!(
                 "Unknown or paid avatar '{slug}'; use a shipped free avatar"
             ));

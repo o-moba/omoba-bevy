@@ -53,6 +53,7 @@ mod shop;
 mod skill_icons;
 mod social;
 mod sprite;
+mod sprite_roster;
 mod supporter;
 mod supporter_storekit;
 mod team;
@@ -71,6 +72,11 @@ use sprite::PlayerVisualMode;
 #[bevy_main]
 pub fn main() {
     shared::catalog::ensure_loaded();
+    // The one environment read of the avatar roster source, before any screen,
+    // QA harness or the passport store looks an avatar up.
+    let roster_source = omoba_passport::avatars::RosterSource::from_env();
+    let roster = omoba_passport::avatars::init_avatar_roster(&roster_source);
+    eprintln!("{}", roster.summary());
     #[cfg(feature = "qa")]
     if let Some(directory) = std::env::var_os("OMOBA_ANIMATION_QA") {
         qa::animation_qa::run(directory.into());
@@ -86,7 +92,7 @@ pub fn main() {
         model_scale::run_model_measurement_analyzer();
         return;
     }
-    let asset_root = shared::client_asset_root();
+    let asset_root = roster_source.asset_root;
     eprintln!("Omoba asset root: {}", asset_root.display());
     let mut app = App::new();
     platform::configure_app(&mut app);

@@ -334,3 +334,29 @@ fn newest_modification(dir: &Path) -> Option<(SystemTime, PathBuf)> {
     }
     newest
 }
+
+/// Slugs of the committed avatar roster, read as plain JSON from
+/// `client/assets/avatars/manifest.json` (the manifest a server launched from
+/// this checkout validates against). The harness stays black-box: it never
+/// links the server's roster loader.
+pub fn roster_avatar_slugs() -> Vec<String> {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../client/assets/avatars/manifest.json");
+    let raw = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+    let manifest: serde_json::Value = serde_json::from_str(&raw).expect("avatar manifest JSON");
+    manifest["avatars"]
+        .as_array()
+        .expect("avatar manifest lists avatars")
+        .iter()
+        .filter_map(|avatar| avatar["slug"].as_str().map(str::to_owned))
+        .collect()
+}
+
+/// The longest roster slug: the worst case for snapshot size budgets.
+pub fn longest_roster_avatar_slug() -> String {
+    roster_avatar_slugs()
+        .into_iter()
+        .max_by_key(String::len)
+        .expect("the shipped avatar roster must not be empty")
+}

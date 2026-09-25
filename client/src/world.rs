@@ -50,12 +50,28 @@ pub struct PlayerModelCatalog;
 
 #[cfg(target_os = "android")]
 impl PlayerModelCatalog {
-    pub fn handles_for(&self, _: CharacterChoice) -> (Option<Handle<Scene>>, Option<Handle<Gltf>>) {
+    pub fn handles_for(
+        &self,
+        _: ekza_bevy_sdk::EkzaCharacter,
+    ) -> (Option<Handle<Scene>>, Option<Handle<Gltf>>) {
         (None, None)
     }
 
-    pub fn label_for(&self, character: CharacterChoice) -> String {
+    pub fn label_for(&self, character: ekza_bevy_sdk::EkzaCharacter) -> String {
         character.as_str().to_owned()
+    }
+}
+
+/// The Ekza SDK's character for the shared wire choice. The shared enum mirrors
+/// the SDK's variants and wire ids; the orphan rule rules out a `From` impl here.
+pub fn sdk_character(choice: CharacterChoice) -> ekza_bevy_sdk::EkzaCharacter {
+    use ekza_bevy_sdk::EkzaCharacter;
+    match choice {
+        CharacterChoice::Ipfs => EkzaCharacter::Ipfs,
+        CharacterChoice::Toka => EkzaCharacter::Toka,
+        CharacterChoice::Wang => EkzaCharacter::Wang,
+        CharacterChoice::Cube => EkzaCharacter::Cube,
+        CharacterChoice::Paco => EkzaCharacter::Paco,
     }
 }
 
@@ -63,7 +79,7 @@ pub fn model_assets_for_choice(
     catalog: &PlayerModelCatalog,
     choice: CharacterChoice,
 ) -> (Option<Handle<Scene>>, Option<Handle<Gltf>>) {
-    catalog.handles_for(choice)
+    catalog.handles_for(sdk_character(choice))
 }
 
 /// Lazily-created asset handles for roster avatars (slug -> scene + gltf).
@@ -133,7 +149,7 @@ impl PlayerModelResolver<'_> {
     ) -> (Option<Handle<Scene>>, Option<Handle<Gltf>>) {
         use omoba_passport::store::{self, ModelState};
         if let Some(slug) = avatar
-            && shared::avatar_definition(slug).is_none()
+            && omoba_passport::avatars::avatar_definition(slug).is_none()
             && ekza_bevy_sdk::passport::is_protected_slug(slug)
         {
             // Someone wears a store avatar published after our last catalogue
@@ -141,13 +157,13 @@ impl PlayerModelResolver<'_> {
             store::request_refresh();
         }
         if let Some(slug) = avatar
-            && shared::avatar_definition(slug).is_some()
+            && omoba_passport::avatars::avatar_definition(slug).is_some()
         {
             if store::knows(slug) {
                 // Verified install on first use, off the main thread. Until it
                 // lands (or if it cannot), the legacy model stands in.
                 if store::model_state(slug) != ModelState::Ready {
-                    return self.catalog.handles_for(character);
+                    return self.catalog.handles_for(sdk_character(character));
                 }
                 let (scene, gltf) = self.avatars.ensure_loaded_from(
                     &self.asset_server,
@@ -156,21 +172,21 @@ impl PlayerModelResolver<'_> {
                 );
                 return (Some(scene), Some(gltf));
             }
-            if let Some(protected) =
-                shared::avatar_definition(slug).and_then(|entry| entry.passport.as_ref())
+            if let Some(protected) = omoba_passport::avatars::avatar_definition(slug)
+                .and_then(|entry| entry.passport.as_ref())
             {
-                let path = shared::client_asset_root()
+                let path = omoba_passport::assets::client_asset_root()
                     .join("avatars")
                     .join(format!("{slug}.glb"));
                 if let Err(error) = omoba_passport::verify_local(protected, &path) {
                     warn!("Purchased avatar integrity check failed: {error}");
-                    return self.catalog.handles_for(character);
+                    return self.catalog.handles_for(sdk_character(character));
                 }
             }
             let (scene, gltf) = self.avatars.ensure_loaded(&self.asset_server, slug);
             return (Some(scene), Some(gltf));
         }
-        self.catalog.handles_for(character)
+        self.catalog.handles_for(sdk_character(character))
     }
 }
 
@@ -413,9 +429,13 @@ fn sync_selected_player_assets(
     let label = team_selection
         .avatar
         .as_deref()
-        .and_then(shared::avatar_definition)
+        .and_then(omoba_passport::avatars::avatar_definition)
         .map(|avatar| avatar.display_name.clone())
-        .unwrap_or_else(|| models.catalog.label_for(team_selection.character));
+        .unwrap_or_else(|| {
+            models
+                .catalog
+                .label_for(sdk_character(team_selection.character))
+        });
 
     let changed = player_assets.scene != scene || player_assets.gltf != gltf;
     if changed {
@@ -590,6 +610,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn sdk_character_keeps_every_variant_and_wire_id() {
+        assert_eq!(
+            CharacterChoice::ALL.len(),
+            ekza_bevy_sdk::EkzaCharacter::ALL.len()
+        );
+        for (choice, sdk) in CharacterChoice::ALL
+            .into_iter()
+            .zip(ekza_bevy_sdk::EkzaCharacter::ALL)
+        {
+            assert_eq!(sdk_character(choice), sdk);
+            assert_eq!(sdk.slug(), choice.slug());
+            assert_eq!(sdk.as_str(), choice.as_str());
+            assert_eq!(
+                serde_json::to_string(&sdk).unwrap(),
+                serde_json::to_string(&choice).unwrap()
+            );
+        }
+    }
+
+    #[test]
     fn prematch_admission_cannot_spawn_through_the_legacy_fallback() {
         let mut session = crate::net::ClientSession::admitted_for_test();
         session.set_joined_prematch_for_test(true);
@@ -662,7 +702,7 @@ mod tests {
             CharacterChoice::Toka,
             CharacterChoice::Wang,
         ] {
-            assert_eq!(catalog.handles_for(choice), (None, None));
+            assert_eq!(catalog.handles_for(sdk_character(choice)), (None, None));
         }
         let assets = app.world().resource::<PlayerAssets>();
         assert!(assets.scene.is_none());

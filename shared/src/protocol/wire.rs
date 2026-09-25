@@ -23,8 +23,47 @@ use crate::protocol::{JoinRejection, SnapshotMeta};
 use crate::shop::{ItemBonuses, ItemId, PurchaseReceipt};
 use crate::{HeroClass, PlayerActionKind};
 
-/// Legacy SDK character carried by `Join` and replicated on every player.
-pub use ekza_bevy_sdk::EkzaCharacter as CharacterChoice;
+/// Legacy character carried by `Join` and replicated on every player. Owned
+/// here (step 13) with the exact wire form of the Ekza SDK's `EkzaCharacter`
+/// it replaced: snake_case ids, `ipfs` by default, unknown ids rejected. The
+/// client converts it to the SDK type where it loads SDK models.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CharacterChoice {
+    #[default]
+    Ipfs,
+    Toka,
+    Wang,
+    Cube,
+    /// CC0 VRM humanoid avatar (glTF 2.0 binary loaded through the glTF pipeline).
+    Paco,
+}
+
+impl CharacterChoice {
+    pub const ALL: [Self; 5] = [Self::Ipfs, Self::Toka, Self::Wang, Self::Cube, Self::Paco];
+
+    /// Display label.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ipfs => "IPFS",
+            Self::Toka => "Toka",
+            Self::Wang => "Wang",
+            Self::Cube => "Cube",
+            Self::Paco => "Paco",
+        }
+    }
+
+    /// Stable id, identical to the wire form.
+    pub fn slug(self) -> &'static str {
+        match self {
+            Self::Ipfs => "ipfs",
+            Self::Toka => "toka",
+            Self::Wang => "wang",
+            Self::Cube => "cube",
+            Self::Paco => "paco",
+        }
+    }
+}
 
 /// Level a snapshot from a server that predates progression decodes to.
 const LEGACY_PLAYER_LEVEL: u32 = crate::hero_balance::STARTING_LEVEL;
@@ -828,6 +867,21 @@ mod tests {
             .unwrap(),
             GOLDEN_SOCIAL
         );
+    }
+
+    #[test]
+    fn character_choice_wire_ids_are_the_snake_case_slugs() {
+        for choice in CharacterChoice::ALL {
+            let wire = serde_json::to_string(&choice).unwrap();
+            assert_eq!(wire, format!("\"{}\"", choice.slug()));
+            assert_eq!(
+                serde_json::from_str::<CharacterChoice>(&wire).unwrap(),
+                choice
+            );
+        }
+        assert_eq!(CharacterChoice::default(), CharacterChoice::Ipfs);
+        assert!(serde_json::from_str::<CharacterChoice>("\"IPFS\"").is_err());
+        assert!(serde_json::from_str::<CharacterChoice>("\"other\"").is_err());
     }
 
     #[test]

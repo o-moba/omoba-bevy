@@ -516,7 +516,7 @@ fn update_minimap_icons_system(
             commands.entity(*icon).despawn();
         }
         let mut image = if *mode == PlayerVisualMode::Sprite2d {
-            let index = shared::sprite_character_roster()
+            let index = crate::sprite_roster::sprite_character_roster()
                 .iter()
                 .position(|entry| entry.id == sprite_id)
                 .unwrap_or(0);

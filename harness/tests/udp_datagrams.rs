@@ -80,10 +80,7 @@ fn host_legacy_datagram_ceiling_is_measured_without_changing_settings() {
 #[test]
 fn real_server_legacy_json_compatibility_survives_malformed_requests() {
     let host_ceiling = host_legacy_send_ceiling();
-    let avatar = shared::avatar_roster()
-        .iter()
-        .max_by_key(|avatar| avatar.slug.len())
-        .unwrap();
+    let avatar = harness::longest_roster_avatar_slug();
     let server = ServerProcess::spawn();
     let mut bots = [Bot::connect(server.addr()), Bot::connect(server.addr())];
     for (index, bot) in bots.iter().enumerate() {
@@ -91,7 +88,7 @@ fn real_server_legacy_json_compatibility_survives_malformed_requests() {
             if index == 0 { Team::Green } else { Team::Blue },
             Character::Ipfs,
             HeroClass::Warrior,
-            Some(&avatar.slug),
+            Some(avatar.as_str()),
             Some("cathedral-moth-bellringer"),
         );
     }
@@ -135,7 +132,7 @@ fn real_server_legacy_json_compatibility_survives_malformed_requests() {
     );
     let expected_your_id = snapshot["your_id"].as_u64().unwrap();
     for player in snapshot["players"].as_array().unwrap() {
-        assert_eq!(player["avatar"].as_str(), Some(avatar.slug.as_str()));
+        assert_eq!(player["avatar"].as_str(), Some(avatar.as_str()));
     }
     bots[0].send_raw(br#"{"type":"transform","x":"#);
     if host_ceiling > OLD_CLIENT_BOUNDARY {
@@ -211,10 +208,7 @@ fn receive_native_payload(
 fn real_server_framed_populated_snapshot_above_8_kib_survives_malformed_requests() {
     // Arena-synced avatars are local-only; use the same available roster
     // that the server validates instead of naming an optional download.
-    let avatar = shared::avatar_roster()
-        .iter()
-        .max_by_key(|avatar| avatar.slug.len())
-        .expect("the shipped avatar roster must not be empty");
+    let avatar = harness::longest_roster_avatar_slug();
     let server =
         ServerProcess::spawn_with_env(&[("OMOBA_MATCH_MODE", "release"), ("OMOBA_TEAM_SIZE", "5")]);
     let mut bots = (0..10)
@@ -228,7 +222,7 @@ fn real_server_framed_populated_snapshot_above_8_kib_survives_malformed_requests
             Team::Green,
             Character::Ipfs,
             HeroClass::Warrior,
-            Some(&avatar.slug),
+            Some(avatar.as_str()),
             Some(LONGEST_SPRITE_ID),
         );
     }
@@ -286,7 +280,7 @@ fn real_server_framed_populated_snapshot_above_8_kib_survives_malformed_requests
         );
     }
     for player in snapshot["players"].as_array().expect("players array") {
-        assert_eq!(player["avatar"].as_str(), Some(avatar.slug.as_str()));
+        assert_eq!(player["avatar"].as_str(), Some(avatar.as_str()));
     }
     assert_eq!(last_entity_id(&snapshot, "structures"), Some(7));
     assert_eq!(last_entity_id(&snapshot, "minions"), Some(15));
