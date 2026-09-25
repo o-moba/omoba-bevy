@@ -49,8 +49,9 @@ check-no-qa: ## Clippy on the client library without the default `qa` feature
 test: ## Rust unit and integration tests (harness excluded; see verify-gameplay)
 	cargo test --workspace --locked --exclude harness
 
-test-scripts: ## Python launcher, packaging and asset-gate tests
+test-scripts: ## Python launcher, packaging, asset-gate and iOS tooling tests
 	python3 -m unittest discover -s scripts -p 'test_*.py'
+	python3 -m unittest discover -s mobile/ios -p 'test_*.py'
 
 # Not part of `check`: needs a disposable PostgreSQL database, for example
 #   OMOBA_TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1/omoba_test make test-postgres

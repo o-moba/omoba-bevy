@@ -24,6 +24,7 @@ use crate::runtime::ports::{ManualClock, MemoryTransport};
 pub(crate) mod dispatch;
 mod handlers;
 pub(crate) mod ports;
+pub(crate) mod prejoin;
 pub(crate) mod tick;
 
 pub(crate) const DEFAULT_BIND_ADDR: &str = "0.0.0.0:4000";
@@ -76,6 +77,9 @@ pub(crate) struct ServerRuntime {
     pub(crate) recv_buf: Vec<u8>,
     pub(crate) invalid_request_diagnostic: RateLimitedDiagnostic,
     pub(crate) snapshot_send_diagnostic: RateLimitedDiagnostic,
+    /// Standalone only: status-reply bookkeeping per unverified endpoint.
+    pub(crate) prejoin_replies: HashMap<std::net::SocketAddr, prejoin::PrejoinReply>,
+    pub(crate) prejoin_limit_diagnostic: RateLimitedDiagnostic,
     pub(crate) last_snapshot_at: Instant,
     pub(crate) last_bootstrap_at: Instant,
     pub(crate) last_simulation_at: Instant,
@@ -171,6 +175,8 @@ impl ServerRuntime {
             recv_buf: vec![0_u8; CLIENT_DATAGRAM_RECEIVE_CAPACITY],
             invalid_request_diagnostic: RateLimitedDiagnostic::default(),
             snapshot_send_diagnostic: RateLimitedDiagnostic::default(),
+            prejoin_replies: HashMap::new(),
+            prejoin_limit_diagnostic: RateLimitedDiagnostic::default(),
             last_snapshot_at: now,
             last_bootstrap_at: now,
             last_simulation_at: now,

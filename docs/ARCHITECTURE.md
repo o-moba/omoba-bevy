@@ -407,6 +407,19 @@ Developer and practice commands form two families, kept apart on purpose.
   changes; peers with another version are rejected at `Hello`.
 - Compatible changes are additive: new fields carry `#[serde(default)]`,
   new enum values are only added where the decoder tolerates unknown values.
+- Enum evolution: every enum the UDP protocol carries is listed with its
+  variants in `shared/src/protocol/wire_enums.rs` and matched there with no
+  `_` arm, so a new variant does not compile until it is listed. Listing it
+  is the decision: on a strict enum, bump `PROTOCOL_VERSION`; otherwise make
+  the enum tolerant (`#[serde(other)]` or a lenient `Deserialize`) in a
+  release that ships before the variant is sent. The list is pinned to
+  `POLICY_PROTOCOL_VERSION`, and a new serde enum in `shared` must be
+  classified there (wire or not) before tests pass.
+- Standalone servers (no public admission) keep at most
+  `MAX_PREJOIN_ENDPOINTS` (64) unverified endpoints and send the world only
+  to verified ones (joined, or career-authenticated). An unverified endpoint
+  gets one small status snapshot (no players or world state) per datagram,
+  at most one per `PREJOIN_STATUS_INTERVAL` (250 ms).
 - Gameplay commands that must not replay (`BasicAttack`, `Utility`,
   `BuyItem`) carry `server_epoch`, `match_id` and a monotonic `request_id`.
   `Cast` carries none: a replayed cast is refused by the slot's cooldown,

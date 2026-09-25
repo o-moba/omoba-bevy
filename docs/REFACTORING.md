@@ -98,7 +98,8 @@ its structure is fresh, then the client). Each row is one to four PRs.
 Items from [ARCHITECTURE_REPORT.md](ARCHITECTURE_REPORT.md) §8 handled
 outside the numbered steps (notes:
 [progress/2026-09-24-gate-hardening.md](progress/2026-09-24-gate-hardening.md),
-[progress/2026-09-25-report-fixes.md](progress/2026-09-25-report-fixes.md)).
+[progress/2026-09-25-report-fixes.md](progress/2026-09-25-report-fixes.md),
+[progress/2026-09-25-pre-beta.md](progress/2026-09-25-pre-beta.md)).
 
 | Item | Scope | State | PR |
 | --- | --- | --- | --- |
@@ -122,6 +123,10 @@ outside the numbered steps (notes:
 | O17 | `settle_finished_round` split out of `record_match_metrics`; `restart_round` finalizes a won round as Completed, anything else as Abandoned | done | this PR (report fixes) |
 | O29 | pure `recover_outbox(&Path)` from the career worker prologue, temp-dir tests; worker otherwise unchanged | done | this PR (report fixes) |
 | O25 | pure `team::lock_in(...)` decision for the hero-select lock-in, tests; no file move (9b-3) | done | this PR (report fixes) |
+| O4 | standalone server keeps at most `MAX_PREJOIN_ENDPOINTS` (64) unverified endpoints; unverified endpoints get one small status snapshot per datagram (at most one per 250 ms) instead of the world every 50 ms; public roles unchanged | done | this PR (pre-beta) |
+| O6 | `mobile/ios` tests (42) in the CI `scripts` job and `make test-scripts`; the asset-gate class runs (27 of 28); only the renamed-denied-binary test skips without the denied bytes | done | this PR (pre-beta) |
+| O24 | CI `android` job: `cargo check -p client --target aarch64-linux-android` with the runner's NDK (build scripts compile C/C++); weekly/manual macOS `ios-check.yml` for `aarch64-apple-ios` (not a PR gate) | done | this PR (pre-beta) |
+| O10 | `shared/src/protocol/wire_enums.rs`: 43 UDP wire enums with exhaustive no-`_` matches pinned to `PROTOCOL_VERSION`, a scan that makes every new serde enum in `shared` be classified, tolerant/strict decode tests; rule in `ARCHITECTURE.md` | done | this PR (pre-beta) |
 
 O2 (CI as a required gate): the maintainer approved it on 2026-09-25. Rules 2 and 6 now say "merge only after every check is green"; branch protection on `main` with the four required checks is a repository setting the maintainer switches on. Still open from §8.2: the rest of the list outside the rows above.
 
