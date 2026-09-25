@@ -83,9 +83,11 @@ from an old server still shows the page and the server still refuses.
   victory-snapshot test in `match_allocation` asserts `Some(all false)` with
   `match_mode` `"practice"`; the prejoin status reply asserts the field is
   absent.
-- client lib 567 → 573: access fallback and Combat Test
+- client lib 567 → 573 (547 → 553 without `qa`): access fallback and Combat Test
   (`debug::tests::access_prefers_the_server_value_and_falls_back_to_the_match_mode`),
   the reset (`debug::tests::toggles_reset_when_access_drops`: dev keeps,
   practice → release and practice → worker reset), the re-send without the
   env var, the HUD following access, the page per access, the page reset,
   and the Combat Test entry.
+
+Gate: fmt, both clippy runs, workspace tests, harness (22 unit + 24 black-box) and Python script tests (124, 1 skipped) green locally.
