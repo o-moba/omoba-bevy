@@ -274,7 +274,7 @@ fn spawn_home(
                     let avatar_name = card
                         .showcase_avatar
                         .as_deref()
-                        .and_then(shared::avatar_definition)
+                        .and_then(omoba_passport::avatars::avatar_definition)
                         .map_or("Your hero", |avatar| avatar.display_name.as_str());
                     column.spawn(widgets::heading(avatar_name, 22.0));
                     column.spawn(widgets::label(

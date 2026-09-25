@@ -49,7 +49,7 @@ pub(super) fn directory() -> PathBuf {
     std::env::var_os("OMOBA_SANDBOX_PRESET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            shared::client_asset_root()
+            omoba_passport::assets::client_asset_root()
                 .parent()
                 .and_then(|p| p.parent())
                 .unwrap_or(std::path::Path::new("."))

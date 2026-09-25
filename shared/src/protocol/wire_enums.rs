@@ -20,8 +20,8 @@
 //! serde enum anywhere in `shared` fails `every_serde_enum_in_shared_is_classified`
 //! until it is listed here or in [`NOT_UDP_WIRE`].
 //!
-//! `CharacterChoice` (`Join.character`, `PlayerState.character`) is the SDK's
-//! `EkzaCharacter`, defined outside this crate, and is not listed.
+//! `CharacterChoice` (`Join.character`, `PlayerState.character`) is owned by
+//! this crate since step 13 (it was the SDK's `EkzaCharacter`) and is listed.
 use std::path::Path;
 
 use crate::protocol::PROTOCOL_VERSION;
@@ -105,6 +105,7 @@ wire_enums! {
     crate::shop::PurchaseError => Strict [Unavailable, Dead, OutsideBase, InsufficientGold, AlreadyOwned, InventoryFull, UnknownItem],
     crate::career::FriendPresence => Strict [Offline, Online, Playing],
     crate::sandbox::BotBehavior => Strict [Stationary, Flee, Attack, Fight],
+    crate::protocol::wire::CharacterChoice => Strict [Ipfs, Toka, Wang, Cube, Paco],
 }
 
 /// Serde enums in `shared` that the UDP protocol does not carry, and why.
@@ -117,8 +118,6 @@ const NOT_UDP_WIRE: &[(&str, &str)] = &[
     ("Placement", "map configuration file"),
     ("SkillSlot", "hero catalog data"),
     ("TargetingMode", "hero catalog data"),
-    ("SpriteSheetKind", "sprite roster metadata"),
-    ("SpriteAnimationPlayback", "sprite roster metadata"),
 ];
 
 fn short_name(path: &str) -> &str {

@@ -131,8 +131,11 @@ fn bot_models_are_distinct_bundled_free_avatars_with_unchanged_sprite_assignment
             .avatar
             .as_deref()
             .expect("practice bots have a real roster model");
-        assert_eq!(shared::normalize_avatar_slug(Some(slug)), Some(slug));
-        let avatar = shared::avatar_definition(slug).unwrap();
+        assert_eq!(
+            omoba_passport::avatars::normalize_avatar_slug(Some(slug)),
+            Some(slug)
+        );
+        let avatar = omoba_passport::avatars::avatar_definition(slug).unwrap();
         assert!(avatar.passport.is_none() && !slug.starts_with("ekza-"));
         assert_eq!(avatar.license, "CC0");
         assert_eq!(

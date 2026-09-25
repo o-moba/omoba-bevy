@@ -27,10 +27,7 @@ fn keys(value: &Value) -> BTreeSet<&str> {
 
 #[test]
 fn real_release_5v5_snapshots_fit_framed_datagrams_and_keep_complete_ordered_schema() {
-    let avatar = shared::avatar_roster()
-        .iter()
-        .max_by_key(|avatar| avatar.slug.len())
-        .expect("shipped avatar roster");
+    let avatar = harness::longest_roster_avatar_slug();
     let server =
         ServerProcess::spawn_with_env(&[("OMOBA_MATCH_MODE", "release"), ("OMOBA_TEAM_SIZE", "5")]);
     // Capture a real legacy packet before upgrading this endpoint. The first
@@ -40,7 +37,7 @@ fn real_release_5v5_snapshots_fit_framed_datagrams_and_keep_complete_ordered_sch
         Team::Green,
         Character::Ipfs,
         HeroClass::Warrior,
-        Some(&avatar.slug),
+        Some(avatar.as_str()),
         Some("cathedral-moth-bellringer"),
     );
     let legacy_deadline = Instant::now() + Duration::from_secs(3);
@@ -72,7 +69,7 @@ fn real_release_5v5_snapshots_fit_framed_datagrams_and_keep_complete_ordered_sch
             Team::Green,
             Character::Ipfs,
             HeroClass::Warrior,
-            Some(&avatar.slug),
+            Some(avatar.as_str()),
             Some("cathedral-moth-bellringer"),
         );
     }
@@ -159,7 +156,7 @@ fn real_release_5v5_snapshots_fit_framed_datagrams_and_keep_complete_ordered_sch
     let mut teams = HashMap::new();
     for player in array(&snapshot, "players") {
         assert_eq!(keys(player), player_keys);
-        assert_eq!(player["avatar"], avatar.slug.as_str());
+        assert_eq!(player["avatar"], avatar.as_str());
         assert_eq!(player["sprite_character"], "cathedral-moth-bellringer");
         *teams.entry(player["team"].as_str().unwrap()).or_insert(0) += 1;
     }

@@ -228,7 +228,7 @@ fn draft_actions(
                 state.notice = Some("Unlock your choice before making changes.".into());
             }
             DraftAction::Avatar(slug) => {
-                if shared::avatar_definition(slug)
+                if omoba_passport::avatars::avatar_definition(slug)
                     .is_none_or(|avatar| !crate::passport::can_select(avatar))
                 {
                     state.notice = Some("This avatar is not available in your library.".into());

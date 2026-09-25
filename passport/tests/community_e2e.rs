@@ -31,7 +31,8 @@ fn free_studio_avatar_is_listed_for_the_server_and_installs_on_the_client() {
             item.protected.avatar_id
         );
         assert_eq!(omoba_passport::protected_slug(&item.protected), item.slug);
-        let entry = shared::avatar_definition(&item.slug).expect("registered by the store");
+        let entry = omoba_passport::avatars::avatar_definition(&item.slug)
+            .expect("registered by the store");
         assert!(entry.free, "the client must know it needs no wallet");
         assert_eq!(entry.passport.as_ref(), Some(&item.protected));
 

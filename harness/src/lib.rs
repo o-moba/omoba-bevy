@@ -40,4 +40,4 @@ pub use protocol::{
     PlayerState, ServerPacket, SnapshotView, StructureKind, TargetId, TargetKind, Team,
     TeamBuffKind, TeamBuffState,
 };
-pub use server::ServerProcess;
+pub use server::{ServerProcess, longest_roster_avatar_slug, roster_avatar_slugs};

@@ -237,10 +237,9 @@ fn validate_position(position: [f32; 2]) -> Result<(), String> {
     Ok(())
 }
 fn validate_actor(c: &ActorConfig) -> Result<(), String> {
-    if c.avatar
-        .as_ref()
-        .is_some_and(|a| shared::avatar_definition(a).is_none_or(|d| d.passport.is_some()))
-    {
+    if c.avatar.as_ref().is_some_and(|a| {
+        omoba_passport::avatars::avatar_definition(a).is_none_or(|d| d.passport.is_some())
+    }) {
         return Err("Avatar must be a shipped free roster model".into());
     }
     if !(1..=MAX_LEVEL).contains(&c.level) || c.xp >= xp_threshold_for_level(c.level).max(1) {

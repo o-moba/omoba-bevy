@@ -1,6 +1,6 @@
 //! Additive opt-in character draft and asset readiness protocol.
+use crate::wire::CharacterChoice;
 use crate::{HeroClass, map::Team};
-use ekza_bevy_sdk::EkzaCharacter;
 use serde::{Deserialize, Serialize};
 
 pub const COUNTDOWN_MS: u32 = 3_000;
@@ -49,7 +49,7 @@ pub struct PrematchRequest {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PrematchAction {
     Select {
-        character: EkzaCharacter,
+        character: CharacterChoice,
         hero_class: HeroClass,
         avatar: Option<String>,
         sprite_character: Option<String>,
@@ -76,7 +76,7 @@ pub struct DraftPlayer {
     pub player_id: u64,
     pub nickname: String,
     pub team: Team,
-    pub character: EkzaCharacter,
+    pub character: CharacterChoice,
     pub hero_class: HeroClass,
     pub avatar: Option<String>,
     pub sprite_character: Option<String>,
@@ -110,7 +110,7 @@ mod tests {
             generation: 4,
             request_id: 9,
             action: PrematchAction::Select {
-                character: EkzaCharacter::Ipfs,
+                character: CharacterChoice::Ipfs,
                 hero_class: HeroClass::default(),
                 avatar: None,
                 sprite_character: None,

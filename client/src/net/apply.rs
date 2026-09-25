@@ -1750,7 +1750,7 @@ mod tests {
                 player_id: 1,
                 nickname: "me".into(),
                 team: shared::map::Team::Green,
-                character: ekza_bevy_sdk::EkzaCharacter::Ipfs,
+                character: shared::wire::CharacterChoice::Ipfs,
                 hero_class,
                 avatar: None,
                 sprite_character: Some("ronin".into()),

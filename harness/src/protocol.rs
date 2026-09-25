@@ -20,7 +20,7 @@ pub use shared::wire::{
 pub use shared::{HeroClass, PlayerActionKind};
 
 /// Playable character selection sent in a `Join`. The wire type is
-/// `ekza_bevy_sdk::EkzaCharacter` (`rename_all = "snake_case"`), so an invalid
+/// `shared::wire::CharacterChoice` (`rename_all = "snake_case"`), so an invalid
 /// character is a compile-time error rather than a silently rejected packet.
 pub use shared::wire::CharacterChoice as Character;
 

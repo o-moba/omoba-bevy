@@ -49,7 +49,7 @@ fn join(session: &str, team: Team) -> ClientPacket {
         team,
         character: CharacterChoice::Ipfs,
         hero_class: HeroClass::default(),
-        avatar: Some(shared::avatar_roster()[0].slug.clone()),
+        avatar: Some(omoba_passport::avatars::avatar_roster()[0].slug.clone()),
         sprite_character: None,
         session_id: Some(session.to_owned()),
         passport_ticket: None,

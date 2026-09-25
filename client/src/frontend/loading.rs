@@ -231,7 +231,7 @@ fn assess_readiness(
             return;
         }
         if let Some(slug) = &selected.avatar {
-            if shared::avatar_definition(slug).is_none() {
+            if omoba_passport::avatars::avatar_definition(slug).is_none() {
                 omoba_passport::store::request_refresh();
                 state.local_assets = "Refreshing the approved Studio heroes…".into();
                 return;

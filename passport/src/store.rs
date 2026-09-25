@@ -100,7 +100,7 @@ pub fn catalogue_slugs() -> Vec<String> {
 }
 
 /// Owned display snapshots; shared model identities remain immutable.
-pub fn catalogue_definitions() -> Vec<shared::AvatarDefinition> {
+pub fn catalogue_definitions() -> Vec<crate::avatars::AvatarDefinition> {
     runtime().map_or_else(Vec::new, |runtime| {
         runtime
             .state
@@ -114,7 +114,7 @@ pub fn catalogue_definitions() -> Vec<shared::AvatarDefinition> {
 }
 
 /// Current access hint from the approved catalogue, independent of an older
-/// immutable shared definition. The game server still decides admission.
+/// immutable registered definition. The game server still decides admission.
 pub fn free_access(slug: &str) -> Option<bool> {
     runtime().and_then(|runtime| {
         runtime
@@ -136,7 +136,7 @@ enum Install {
 #[derive(Default)]
 struct State {
     items: HashMap<String, StoreAvatar>,
-    definitions: HashMap<String, shared::AvatarDefinition>,
+    definitions: HashMap<String, crate::avatars::AvatarDefinition>,
     installs: HashMap<String, Install>,
     changed: Vec<String>,
     refreshing: bool,
@@ -315,7 +315,7 @@ fn refresh_catalogue(runtime: &Runtime) -> Result<Vec<StoreAvatar>, String> {
     Ok(items)
 }
 
-/// Register catalogue items with the shared roster; new slugs are reported
+/// Register catalogue items with the process avatar registry; new slugs are reported
 /// through [`take_changed`] so already spawned players can pick them up.
 fn adopt(runtime: &Runtime, items: Vec<StoreAvatar>) {
     let mut accepted = HashMap::new();
@@ -324,7 +324,7 @@ fn adopt(runtime: &Runtime, items: Vec<StoreAvatar>) {
     for item in items {
         let was_known = runtime.state.lock().unwrap().items.contains_key(&item.slug);
         let thumbnail = thumbnail(&runtime.store, &item);
-        let definition = shared::AvatarDefinition {
+        let definition = crate::avatars::AvatarDefinition {
             slug: item.slug.clone(),
             display_name: item.name.clone(),
             collection: "Ekza store".into(),
@@ -338,7 +338,7 @@ fn adopt(runtime: &Runtime, items: Vec<StoreAvatar>) {
             passport: Some(item.protected.clone()),
             free: item.free,
         };
-        let registered = shared::register_store_avatar(definition.clone());
+        let registered = crate::avatars::register_store_avatar(definition.clone());
         // A slug the server registered first (same derivation) is equally fine.
         if registered.is_some_and(|entry| entry.passport.as_ref() == Some(&item.protected)) {
             if !was_known {

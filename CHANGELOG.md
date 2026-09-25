@@ -6,6 +6,13 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Shared without I/O
+- `shared` reads no environment variable and no file at runtime and depends on `serde` and `serde_json` only (roadmap step 13, slices 13a-13e). The sprite presentation roster moved to `client/src/sprite_roster.rs`; `shared` keeps the frozen sprite ids and their normalization. The asset root, avatar roster and Ekza store-avatar registry moved to `omoba_passport::{assets, avatars}` under the same names; `grant_verified_avatar` moved to `omoba_passport::entitlements`; `ekza-bevy-sdk` is no longer a dependency of `shared` (career-store, account-api and the harness stop compiling it).
+- `CharacterChoice` is owned by `shared::wire` with the exact serde form of the SDK's `EkzaCharacter` (golden JSON unchanged) and listed in `wire_enums.rs`; the client converts it to the SDK type where it loads SDK models.
+- **Behaviour change (server and client, O30): roster lookup.** Server and client read `RosterSource::from_env()` (`OMOBA_AVATAR_MANIFEST`, then `<asset root>/avatars/manifest.json`, then the embedded copy) once at startup and print `Avatar roster: N avatars from <path>` (or `from embedded manifest`). The three working-directory candidates (`client/assets/…`, `assets/…`, `../client/assets/…`) are gone; every launcher and package already resolves the manifest through `OMOBA_ASSET_DIR` or the executable-relative asset root.
+- **Behaviour change (O5): roster validation at load.** A manifest entry with an `ekza-` slug or a passport boundary must satisfy the rule `register_store_avatar` applies (valid boundary, slug derived from it) or it is skipped with a warning; before, an `ekza-<hash>` entry without a boundary was admitted as a free cosmetic. The committed manifest already follows the rule. Join admission is otherwise unchanged.
+- No wire change. Tests: shared 99 → 92, client lib 567 → 571, passport 18 → 26, server 297 (+3 ignored) unchanged, harness 22 + 24 unchanged; Python script tests 124.
+
 ### Process
 - Pull requests merge only after every CI check on the PR is green (`docs/REFACTORING.md` rule 2), replacing "open and merge immediately". Recommended by the architecture report (O2) and approved by the maintainer.
 

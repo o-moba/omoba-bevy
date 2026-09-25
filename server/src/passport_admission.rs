@@ -190,7 +190,7 @@ impl PassportAdmissions {
                 }
             }
         }
-        let definition = shared::avatar_definition(slug);
+        let definition = omoba_passport::avatars::avatar_definition(slug);
         // A shipped or already registered entry pins the exact rendition. A
         // store slug the server has never seen is still admissible: the
         // passport's consumed ticket names the rendition, and the slug is a
@@ -259,10 +259,10 @@ impl PassportAdmissions {
 /// Make the granted avatar visible to slug normalization and to the clients
 /// that will render it. Roster entries are already known.
 fn register(slug: &str, granted: ProtectedAvatar) -> bool {
-    if shared::avatar_definition(slug).is_some() {
+    if omoba_passport::avatars::avatar_definition(slug).is_some() {
         return true;
     }
-    shared::register_store_avatar(shared::AvatarDefinition {
+    omoba_passport::avatars::register_store_avatar(omoba_passport::avatars::AvatarDefinition {
         slug: slug.to_owned(),
         display_name: "Ekza avatar".into(),
         collection: "Ekza store".into(),
@@ -283,10 +283,10 @@ fn register_free(item: &StoreAvatar) -> bool {
     {
         return false;
     }
-    if let Some(existing) = shared::avatar_definition(&item.slug) {
+    if let Some(existing) = omoba_passport::avatars::avatar_definition(&item.slug) {
         return existing.passport.as_ref() == Some(&item.protected);
     }
-    shared::register_store_avatar(shared::AvatarDefinition {
+    omoba_passport::avatars::register_store_avatar(omoba_passport::avatars::AvatarDefinition {
         slug: item.slug.clone(),
         display_name: item.name.clone(),
         collection: "Ekza community".into(),
@@ -608,10 +608,11 @@ mod tests {
             gate.begin(addr, &join(&format!(" {} ", free.slug))),
             Admission::Free
         ));
-        let entry = shared::avatar_definition(&free.slug).expect("registered for rendering");
+        let entry = omoba_passport::avatars::avatar_definition(&free.slug)
+            .expect("registered for rendering");
         assert!(entry.free && entry.passport.as_ref() == Some(&free.protected));
         assert_eq!(
-            shared::normalize_avatar_slug(Some(&free.slug)),
+            omoba_passport::avatars::normalize_avatar_slug(Some(&free.slug)),
             Some(free.slug.as_str())
         );
 
@@ -620,13 +621,13 @@ mod tests {
             gate.begin(addr, &join(&owned.slug)),
             Admission::Denied
         ));
-        assert!(shared::avatar_definition(&owned.slug).is_none());
+        assert!(omoba_passport::avatars::avatar_definition(&owned.slug).is_none());
         // A well-formed slug the registry never listed: a client cannot declare it free.
         assert!(matches!(
             gate.begin(addr, &join(&absent.slug)),
             Admission::Denied
         ));
-        assert!(shared::avatar_definition(&absent.slug).is_none());
+        assert!(omoba_passport::avatars::avatar_definition(&absent.slug).is_none());
     }
 
     #[test]
@@ -733,7 +734,7 @@ mod tests {
         assert_eq!(granted, expected);
         assert!(register(&slug, granted));
         assert_eq!(
-            shared::normalize_avatar_slug(Some(&slug)),
+            omoba_passport::avatars::normalize_avatar_slug(Some(&slug)),
             Some(slug.as_str())
         );
 
@@ -811,9 +812,12 @@ mod tests {
         let done = settle(&mut gate);
         assert!(done.len() == 1 && !done[0].allowed);
         assert!(matches!(gate.begin(addr, &ticketless), Admission::Denied));
-        assert!(shared::avatar_definition(&format!("ekza-{}", "a".repeat(64))).is_none());
+        assert!(
+            omoba_passport::avatars::avatar_definition(&format!("ekza-{}", "a".repeat(64)))
+                .is_none()
+        );
         let free: ClientPacket = serde_json::from_value(serde_json::json!({
-            "type":"join", "team":"green", "avatar":shared::avatar_roster()[0].slug
+            "type":"join", "team":"green", "avatar":omoba_passport::avatars::avatar_roster()[0].slug
         }))
         .unwrap();
         assert!(matches!(gate.begin(addr, &free), Admission::Free));
