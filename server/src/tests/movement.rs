@@ -276,7 +276,7 @@ fn movement_budget_leaves_a_normal_20hz_client_unclipped() {
     let speed = crate::hero_stats::move_speed(&rt.world.players[&addr]);
     let start_x = rt.world.players[&addr].hero.x;
     let mut client_x = start_x;
-    // Arrival gaps around the 50 ms send interval; they sum to 1 s.
+    // Arrival gaps around the 50 ms send interval; ten sends, 500 ms.
     let gaps_ms = [35_u64, 65, 50, 40, 60, 50, 50, 35, 65, 50];
     for round in 0..2 {
         for gap in gaps_ms {
@@ -290,5 +290,5 @@ fn movement_budget_leaves_a_normal_20hz_client_unclipped() {
             );
         }
     }
-    assert!((rt.world.players[&addr].hero.x - start_x - speed * 1.0 * 2.0).abs() < 0.01);
+    assert!((rt.world.players[&addr].hero.x - start_x - speed * 0.05 * 20.0).abs() < 0.01);
 }

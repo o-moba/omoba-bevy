@@ -494,5 +494,9 @@ fn cast_on_a_protected_tower_is_rejected() {
 
     world.structures.get_mut(&30).unwrap().state.hp = 0.0;
     handle_cast_request(&mut world, caster_addr, inner, 0, now);
-    assert_eq!(world.projectiles.len(), 1, "unprotected once the outer falls");
+    assert_eq!(
+        world.projectiles.len(),
+        1,
+        "unprotected once the outer falls"
+    );
 }

@@ -250,7 +250,10 @@ pub fn thumbnail_asset_path(avatar: &shared::AvatarDefinition) -> Option<String>
 
 /// [`thumbnail_asset_path`] with the store lookup already made: store
 /// avatars load from the `ekza://` asset source, bundled ones from `avatars/`.
-pub fn thumbnail_asset_path_in(avatar: &shared::AvatarDefinition, in_store: bool) -> Option<String> {
+pub fn thumbnail_asset_path_in(
+    avatar: &shared::AvatarDefinition,
+    in_store: bool,
+) -> Option<String> {
     let file = avatar.thumbnail.as_deref()?;
     Some(if in_store {
         store::thumbnail_asset_path(file)

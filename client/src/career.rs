@@ -1159,7 +1159,9 @@ fn avatar_portrait_path(
     avatar: Option<&str>,
     thumbnail: impl Fn(&shared::AvatarDefinition) -> Option<String>,
 ) -> Option<String> {
-    avatar.and_then(shared::avatar_definition).and_then(thumbnail)
+    avatar
+        .and_then(shared::avatar_definition)
+        .and_then(thumbnail)
 }
 
 fn portrait(
@@ -2508,7 +2510,10 @@ mod tests {
             bundled,
             "without a store runtime the roster avatar stays bundled"
         );
-        assert_eq!(avatar_portrait_path(None, crate::passport::thumbnail_asset_path), None);
+        assert_eq!(
+            avatar_portrait_path(None, crate::passport::thumbnail_asset_path),
+            None
+        );
     }
     #[test]
     fn career_touch_actions_wait_for_release_and_cancel_after_scroll() {

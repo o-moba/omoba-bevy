@@ -1706,10 +1706,26 @@ mod tests {
             recovery_allocation: None,
             recovered_live: false,
         };
-        write_record(&dir, &record(RecordKind::Settle, "settled", MatchOutcome::Completed)).unwrap();
-        write_record(&dir, &record(RecordKind::Checkpoint, "live", MatchOutcome::Completed)).unwrap();
-        write_record(&dir, &record(RecordKind::Start, "started", MatchOutcome::Completed)).unwrap();
-        write_record(&dir, &record(RecordKind::Rejected, "refused", MatchOutcome::Completed)).unwrap();
+        write_record(
+            &dir,
+            &record(RecordKind::Settle, "settled", MatchOutcome::Completed),
+        )
+        .unwrap();
+        write_record(
+            &dir,
+            &record(RecordKind::Checkpoint, "live", MatchOutcome::Completed),
+        )
+        .unwrap();
+        write_record(
+            &dir,
+            &record(RecordKind::Start, "started", MatchOutcome::Completed),
+        )
+        .unwrap();
+        write_record(
+            &dir,
+            &record(RecordKind::Rejected, "refused", MatchOutcome::Completed),
+        )
+        .unwrap();
         fs::write(dir.join("broken.json"), b"{not json").unwrap();
         fs::write(dir.join("half.tmp"), b"{}").unwrap();
 
@@ -1718,12 +1734,18 @@ mod tests {
             recovered.pending.keys().collect::<Vec<_>>(),
             vec!["live", "settled", "started"]
         );
-        assert_eq!(recovered.rejected_ids, VecDeque::from(["refused".to_string()]));
+        assert_eq!(
+            recovered.rejected_ids,
+            VecDeque::from(["refused".to_string()])
+        );
 
         let settled = &recovered.pending["settled"];
         assert!(matches!(settled.kind, RecordKind::Settle));
         assert!(!settled.recovered_live);
-        assert_eq!(settled.result, outbox_result("settled", MatchOutcome::Completed));
+        assert_eq!(
+            settled.result,
+            outbox_result("settled", MatchOutcome::Completed)
+        );
 
         for id in ["live", "started"] {
             let live = &recovered.pending[id];
@@ -1732,7 +1754,10 @@ mod tests {
             assert_eq!(live.result.outcome, MatchOutcome::Interrupted);
             assert_eq!(live.result.winner, None);
             assert!(!live.result.rated);
-            assert_eq!(live.result.unrated_reason.as_deref(), Some("server_interrupted"));
+            assert_eq!(
+                live.result.unrated_reason.as_deref(),
+                Some("server_interrupted")
+            );
             assert!(live.result.ended_at_ms > 2_000);
             assert_eq!(
                 live.result.duration_ms,
@@ -1744,7 +1769,10 @@ mod tests {
                 "the allocation is the receipt as written"
             );
         }
-        assert!(dir.join("broken.json").exists(), "unreadable receipts stay on disk");
+        assert!(
+            dir.join("broken.json").exists(),
+            "unreadable receipts stay on disk"
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -1764,7 +1792,10 @@ mod tests {
         )
         .unwrap();
         let recovered = recover_outbox(&dir);
-        assert_eq!(recovered.pending["carried"].recovery_allocation, Some(allocation));
+        assert_eq!(
+            recovered.pending["carried"].recovery_allocation,
+            Some(allocation)
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -1767,8 +1767,14 @@ mod tests {
         incoming.send(draft(1, shared::HeroClass::Mage)).unwrap();
         app.update();
         let first = app.world().resource_ref::<TeamSelection>().last_changed();
-        assert_eq!(app.world().resource::<TeamSelection>().hero_class, shared::HeroClass::Mage);
-        assert_eq!(app.world().resource::<TeamSelection>().sprite_character, "ronin");
+        assert_eq!(
+            app.world().resource::<TeamSelection>().hero_class,
+            shared::HeroClass::Mage
+        );
+        assert_eq!(
+            app.world().resource::<TeamSelection>().sprite_character,
+            "ronin"
+        );
 
         for tick in 2..6 {
             incoming.send(draft(tick, shared::HeroClass::Mage)).unwrap();
@@ -1782,8 +1788,14 @@ mod tests {
 
         incoming.send(draft(6, shared::HeroClass::Warrior)).unwrap();
         app.update();
-        assert_ne!(app.world().resource_ref::<TeamSelection>().last_changed(), first);
-        assert_eq!(app.world().resource::<TeamSelection>().hero_class, shared::HeroClass::Warrior);
+        assert_ne!(
+            app.world().resource_ref::<TeamSelection>().last_changed(),
+            first
+        );
+        assert_eq!(
+            app.world().resource::<TeamSelection>().hero_class,
+            shared::HeroClass::Warrior
+        );
     }
 
     #[test]

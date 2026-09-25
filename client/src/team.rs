@@ -1759,12 +1759,29 @@ mod tests {
                 lock_in(Team::Blue, &selection, true, connected, sandbox, offline),
                 LockIn::Ignore
             ));
+            assert!(
+                matches!(
+                    lock_in(
+                        Team::Blue,
+                        &selection,
+                        true,
+                        ClientConnectionState::Disconnected,
+                        sandbox,
+                        offline
+                    ),
+                    LockIn::Ignore
+                ),
+                "an in-flight join wins over a reconnect"
+            );
             assert!(matches!(
-                lock_in(Team::Blue, &selection, true, ClientConnectionState::Disconnected, sandbox, offline),
-                LockIn::Ignore
-            ), "an in-flight join wins over a reconnect");
-            assert!(matches!(
-                lock_in(Team::Blue, &selection, false, ClientConnectionState::Disconnected, sandbox, offline),
+                lock_in(
+                    Team::Blue,
+                    &selection,
+                    false,
+                    ClientConnectionState::Disconnected,
+                    sandbox,
+                    offline
+                ),
                 LockIn::Reconnect
             ));
         }
@@ -1790,7 +1807,11 @@ mod tests {
             assert_eq!(screen, expected);
             assert!(matches!(
                 command,
-                NetworkCommand::Join { team: Team::Blue, hero_class: HeroClass::Mage, .. }
+                NetworkCommand::Join {
+                    team: Team::Blue,
+                    hero_class: HeroClass::Mage,
+                    ..
+                }
             ));
         }
     }

@@ -12,9 +12,7 @@ use std::time::{Duration, Instant};
 use shared::SkillSlot;
 use shared::shop::ItemBonuses;
 
-use crate::balance::{
-    LEVEL_UP_HP_BONUS, LEVEL_UP_MANA_BONUS, MAX_MANA, PLAYER_SPEED,
-};
+use crate::balance::{LEVEL_UP_HP_BONUS, LEVEL_UP_MANA_BONUS, MAX_MANA, PLAYER_SPEED};
 use crate::entities::ConnectedPlayer;
 use crate::utility::utility_movement_multiplier;
 

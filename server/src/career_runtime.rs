@@ -475,7 +475,7 @@ impl ServerRuntime {
             if self.career.queue.is_empty() {
                 return;
             }
-            self.record_match_metrics(now);
+            self.settle_finished_round(now);
             self.restart_round(now);
         }
         if self.career.queue.selection().is_some() {
@@ -1112,7 +1112,7 @@ impl ServerRuntime {
             return;
         }
         if matches!(self.world.game_state, GameState::Victory { .. }) {
-            self.record_match_metrics(now);
+            self.settle_finished_round(now);
         }
         if let Some(result) = self.career.last_results.get(&id) {
             if self.rules.career_flow && self.career.backend.enabled() && !result.saved {

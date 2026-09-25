@@ -8,8 +8,7 @@ use shared::wire::{CharacterChoice, GameState};
 
 use crate::balance::{
     EMPTY_ROSTER_GRACE, FIRST_MINION_WAVE_DELAY, MINION_WAVE_INTERVAL, MOVEMENT_MAX_DELTA_SECONDS,
-    MOVEMENT_POSITION_TOLERANCE,
-    PLAYER_GROUND_Y, SESSION_RECLAIM_WINDOW,
+    MOVEMENT_POSITION_TOLERANCE, PLAYER_GROUND_Y, SESSION_RECLAIM_WINDOW,
 };
 use crate::combat_feedback::CombatLog;
 use crate::entities::{ConnectedPlayer, DisconnectedSession, MapLayoutState, Structure, Vec3f};
@@ -330,7 +329,8 @@ pub(crate) fn handle_transform_request_with_structures(
     let accepted_xz = clip_live_structures([current.x, current.z], accepted_xz, structures);
     // Whatever the step did not spend stays available as slack, capped at
     // the tolerance: the budget is time-based, not per packet.
-    let moved = ((accepted_xz[0] - current.x).powi(2) + (accepted_xz[1] - current.z).powi(2)).sqrt();
+    let moved =
+        ((accepted_xz[0] - current.x).powi(2) + (accepted_xz[1] - current.z).powi(2)).sqrt();
     player.timers.movement_slack = (max_distance - moved).clamp(0.0, MOVEMENT_POSITION_TOLERANCE);
     player.hero.x = accepted_xz[0];
     player.hero.y = PLAYER_GROUND_Y;
@@ -657,7 +657,9 @@ impl ServerRuntime {
     /// won round is Completed, anything else is Abandoned.
     fn teardown_outcome(&self) -> (shared::career::MatchOutcome, Option<shared::map::Team>) {
         match self.world.game_state {
-            GameState::Victory { winner } => (shared::career::MatchOutcome::Completed, Some(winner)),
+            GameState::Victory { winner } => {
+                (shared::career::MatchOutcome::Completed, Some(winner))
+            }
             _ => (shared::career::MatchOutcome::Abandoned, None),
         }
     }

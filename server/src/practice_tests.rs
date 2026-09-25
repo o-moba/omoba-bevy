@@ -1714,7 +1714,7 @@ fn restart_round_settles_a_won_round_as_completed_and_a_running_one_as_abandoned
         rt.prepare_tick();
         assert_eq!(rt.world.game_state, GameState::Running);
         assert!(rt.career_allocation_for_test().is_some());
-        rt.world.game_state = state;
+        rt.world.game_state = state.clone();
         rt.restart_round(now + Duration::from_secs(1));
         let result = rt
             .career_view(addr(1), now)
@@ -1733,9 +1733,7 @@ fn match_metrics_do_not_settle_the_round() {
     let now = clock.now();
     transport.push_inbound(addr(1), serde_json::to_vec(&join("metrics")).unwrap());
     rt.prepare_tick();
-    rt.world.game_state = GameState::Victory {
-        winner: Team::Blue,
-    };
+    rt.world.game_state = GameState::Victory { winner: Team::Blue };
     rt.record_match_metrics(now);
     assert!(rt.victory_at.is_none());
     assert!(rt.career_view(addr(1), now).last_result.is_none());

@@ -228,8 +228,7 @@ impl Simulation {
                 let effect_scale = shared::rank_effect_scale(rank)
                     * balance::ability_power_multiplier(p.hero_class, LEVEL);
                 let p = &mut self.players[0];
-                p.mana = (p.mana - mana_cost
-                    + def.self_mana_restore.unwrap_or(0.0) * effect_scale)
+                p.mana = (p.mana - mana_cost + def.self_mana_restore.unwrap_or(0.0) * effect_scale)
                     .min(p.max_mana);
                 p.hp = (p.hp + def.self_heal.unwrap_or(0.0) * effect_scale).min(p.max_hp);
                 p.skill_cooldown_remaining_secs[slot as usize] =
@@ -951,7 +950,10 @@ mod tests {
         for class in HeroClass::ALL {
             let mut sim = joined(class);
             for p in &sim.players {
-                assert_eq!(p.max_hp, balance::max_hp_for_level(p.hero_class, LEVEL, 0.0));
+                assert_eq!(
+                    p.max_hp,
+                    balance::max_hp_for_level(p.hero_class, LEVEL, 0.0)
+                );
                 assert_eq!(p.hp, p.max_hp);
                 assert_eq!(p.max_mana, balance::max_mana_for_level(LEVEL, 0.0));
             }
