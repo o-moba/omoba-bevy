@@ -552,7 +552,12 @@ fn input(
         With<Button>,
     >,
     mut out: MessageWriter<NetworkCommand>,
+    gamepad: Option<Res<crate::gamepad::GamepadControls>>,
 ) {
+    // A controller's D-pad left opens the reaction wheel like T.
+    let pad_reactions = gamepad
+        .as_ref()
+        .is_some_and(|pad| pad.active && pad.reaction_pressed);
     if let Some(visuals) = world.visuals.as_ref() {
         social.wheel_ids.clone_from(&visuals.wheel);
     }
@@ -638,7 +643,10 @@ fn input(
         && social.wheel.center.is_none()
     {
         social.open_chat();
-    } else if back.keys().just_pressed(KeyCode::KeyT) && !social.chat_open && hero.is_some() {
+    } else if (back.keys().just_pressed(KeyCode::KeyT) || pad_reactions)
+        && !social.chat_open
+        && hero.is_some()
+    {
         social.wheel.cancel();
         social
             .wheel

@@ -641,6 +641,7 @@ fn read_mobile_controls(
     local: Query<(&CombatStats, Option<&PlayerProgression>), With<Player>>,
     mut mobile: ResMut<MobileControls>,
     mut session_events: MessageReader<SessionEvent>,
+    gamepad: Option<Res<crate::gamepad::GamepadControls>>,
 ) {
     mobile.begin_input_frame();
     // A new round (`net` skips zero ids and same-round reconnects) releases
@@ -655,7 +656,11 @@ fn read_mobile_controls(
         mobile.layout_changed = true;
     }
     let alive = local.single().is_ok_and(|(stats, _)| stats.is_alive());
+    // A controller that owns input hides the touch HUD; the first touch
+    // takes ownership back before this runs, so no finger is lost.
+    let controller = gamepad.as_ref().is_some_and(|pad| pad.active);
     if !mobile.enabled
+        || controller
         || !mobile.landscape
         || !mobile.focused
         || !context.gameplay_allowed()
@@ -1057,6 +1062,7 @@ fn draw_mobile_controls(
     selection: Res<TeamSelection>,
     cooldown: Res<LocalCastCooldown>,
     basic_attack: Option<Res<crate::targeting::BasicAttackState>>,
+    gamepad: Option<Res<crate::gamepad::GamepadControls>>,
     images: Option<Res<Assets<Image>>>,
     mut icons: Query<(&SkillIcon, &mut ImageNode), Without<SkillOverlay>>,
     textures: Option<Res<SkillRingTextures>>,
@@ -1088,6 +1094,7 @@ fn draw_mobile_controls(
         .map_or_else(Default::default, |equipment| equipment.item_bonuses);
     let sandbox = game.as_ref().and_then(|g| g.sandbox.as_ref());
     let visible = mobile.enabled
+        && !gamepad.as_ref().is_some_and(|pad| pad.active)
         && mobile.landscape
         && context.gameplay_allowed()
         && local.is_some_and(|(stats, _, _, _)| stats.is_alive());
@@ -1531,6 +1538,47 @@ mod tests {
             let text = &app.world().get::<Text>(label).unwrap().0;
             assert!(text.contains(expected), "expected {expected}, got {text}");
         }
+    }
+
+    #[test]
+    fn an_owning_controller_hides_the_touch_hud_and_giving_input_back_restores_it() {
+        let mut app = App::new();
+        app.insert_resource(controls())
+            .init_resource::<GameplayInputContext>()
+            .init_resource::<TeamSelection>()
+            .init_resource::<LocalCastCooldown>()
+            .init_resource::<crate::gamepad::GamepadControls>()
+            .add_systems(Update, draw_mobile_controls);
+        app.world_mut()
+            .spawn((Player, CombatStats::default(), PlayerProgression::default()));
+        let joystick = app
+            .world_mut()
+            .spawn((
+                MobileVisual::Joystick,
+                Node::default(),
+                BackgroundColor::default(),
+                BorderColor::default(),
+                UiTransform::default(),
+            ))
+            .id();
+        let label = app
+            .world_mut()
+            .spawn((Text::default(), TextFont::default()))
+            .id();
+        app.world_mut().entity_mut(joystick).add_child(label);
+        let shown = |app: &App| app.world().get::<Node>(joystick).unwrap().display != Display::None;
+        app.update();
+        assert!(shown(&app), "touch owns input");
+        app.world_mut()
+            .resource_mut::<crate::gamepad::GamepadControls>()
+            .active = true;
+        app.update();
+        assert!(!shown(&app), "the controller owns input");
+        app.world_mut()
+            .resource_mut::<crate::gamepad::GamepadControls>()
+            .active = false;
+        app.update();
+        assert!(shown(&app), "a touch took input back");
     }
 
     fn controls() -> MobileControls {

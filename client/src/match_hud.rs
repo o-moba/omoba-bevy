@@ -313,7 +313,12 @@ fn sync_gameplay_hud_visibility(
     shop: Option<Res<crate::shop::ShopState>>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     mut roots: Query<(&Name, &mut Node, &mut Visibility), Without<ChildOf>>,
+    gamepad: Option<Res<crate::gamepad::GamepadControls>>,
 ) {
+    // The touch skill buttons hide while a controller owns input; the
+    // desktop skill bar carries its bindings instead.
+    let touch_hud = mobile.as_ref().is_some_and(|mobile| mobile.enabled)
+        && !gamepad.as_ref().is_some_and(|pad| pad.active);
     let show = session.join_confirmed()
         && matches!(game.state, GameState::Running)
         && !help.is_some_and(|help| help.0)
@@ -334,8 +339,7 @@ fn sync_gameplay_hud_visibility(
                 node.display = if show
                     && name.as_str() != "MatchObjectiveRoot"
                     && name.as_str() != "EquipmentHud"
-                    && !(name.as_str() == "SkillBarRoot"
-                        && mobile.as_ref().is_some_and(|mobile| mobile.enabled))
+                    && !(name.as_str() == "SkillBarRoot" && touch_hud)
                 {
                     Display::Flex
                 } else {

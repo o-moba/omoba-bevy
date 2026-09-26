@@ -384,8 +384,18 @@ fn actions(
     entry: Option<Res<crate::mobile_ui::ServerEntry>>,
     mobile: Option<Res<MobileControls>>,
     mut activated: MessageReader<Activated<EdgeAction>>,
+    pad_menu: (
+        Option<Res<crate::gamepad::GamepadControls>>,
+        Option<Res<crate::ui::ModalStack>>,
+    ),
 ) {
+    let (gamepad, modals) = pad_menu;
     let identity = (game.meta.server_epoch, game.meta.match_id);
+    // A controller's Start/Options is the `≡` button: it opens the pause
+    // menu where `≡` could, and closes the menu when it is the top modal.
+    let start = gamepad
+        .as_ref()
+        .is_some_and(|pad| pad.active && pad.menu_pressed);
     let allowed = session.join_confirmed() && matches!(game.state, GameState::Running);
     if state.namespace != Some(identity) || !allowed {
         state.open = false;
@@ -414,7 +424,17 @@ fn actions(
         state.open = !state.open;
         back.keys_mut().clear_just_pressed(KeyCode::Tab);
     }
-    for Activated { action, .. } in activated.read() {
+    if start
+        && pause.open
+        && modals
+            .as_ref()
+            .is_some_and(|modals| modals.top() == Some(ModalId::Pause))
+    {
+        pause.open = false;
+        pause.in_settings = false;
+    }
+    let pad_menu = (start && can_open).then_some(EdgeAction::Menu);
+    for action in activated.read().map(|a| a.action).chain(pad_menu) {
         match action {
             EdgeAction::Close => state.open = false,
             EdgeAction::Score if can_open => state.open = !state.open,
@@ -766,6 +786,65 @@ mod tests {
             .find(|(_, n, id)| node_key(*n, *id) == Some(name))
             .unwrap()
             .0
+    }
+    #[test]
+    fn controller_start_opens_pause_like_the_menu_button_and_east_only_closes_it() {
+        let mut app = app();
+        app.init_resource::<crate::ui::BackPress>()
+            .add_systems(Last, crate::ui::back::clear_back_press);
+        let mut pad = crate::gamepad::GamepadControls::default();
+        pad.active = true;
+        app.insert_resource(pad);
+        app.update();
+        let pause = |app: &App| {
+            app.world()
+                .resource::<crate::pause_menu::PauseMenuState>()
+                .open
+        };
+        let start = |app: &mut App, down: bool| {
+            app.world_mut()
+                .resource_mut::<crate::gamepad::GamepadControls>()
+                .menu_pressed = down;
+        };
+        // East in play is not Esc: it never opens the menu.
+        app.world_mut()
+            .resource_mut::<crate::ui::BackPress>()
+            .press();
+        app.update();
+        assert!(!pause(&app));
+        start(&mut app, true);
+        app.update();
+        assert!(
+            pause(&app),
+            "Start opens the menu where the menu button can"
+        );
+        start(&mut app, false);
+        app.update();
+        assert!(pause(&app));
+        start(&mut app, true);
+        app.update();
+        assert!(!pause(&app), "Start closes the menu when it is on top");
+        start(&mut app, false);
+        app.update();
+        assert!(!pause(&app));
+        start(&mut app, true);
+        app.update();
+        start(&mut app, false);
+        assert!(pause(&app));
+        app.world_mut()
+            .resource_mut::<crate::ui::BackPress>()
+            .press();
+        app.update();
+        assert!(!pause(&app), "East closes the menu like Esc");
+        // The scoreboard is closed by East too.
+        app.world_mut().resource_mut::<ScoreboardState>().open = true;
+        app.update();
+        app.world_mut()
+            .resource_mut::<crate::ui::BackPress>()
+            .press();
+        app.update();
+        assert!(!app.world().resource::<ScoreboardState>().open);
+        assert!(!pause(&app), "consumed by the scoreboard");
     }
     #[test]
     fn score_button_blocks_same_frame_escape_restores_and_round_change_closes() {
