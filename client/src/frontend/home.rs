@@ -38,8 +38,10 @@ enum HomeAction {
     Card,
     Collection,
     History,
-    Friends,
     Profile,
+    Party,
+    AcceptInvite(u64),
+    DeclineInvite(u64),
 }
 
 #[derive(Component)]
@@ -57,11 +59,33 @@ struct HomeSignature {
     card: ProfileCard,
     last_result: Option<String>,
     public_matchmaking: bool,
+    /// (party id, inviter) of the newest pending party invite.
+    invite: Option<(u64, String)>,
+    /// Party size and leader, when in a party.
+    party: Option<(usize, String, bool)>,
 }
 
-fn signature(career: &CareerClient, session: &ClientSession, card: &ProfileCard) -> HomeSignature {
+fn signature(
+    career: &CareerClient,
+    session: &ClientSession,
+    card: &ProfileCard,
+    party: &crate::party::PartyClient,
+) -> HomeSignature {
     let profile = career.view.profile.as_ref();
     HomeSignature {
+        invite: party
+            .view
+            .invites
+            .last()
+            .map(|i| (i.party_id, i.from_nickname.clone())),
+        party: party.view.party.as_ref().map(|p| {
+            let leader = p
+                .members
+                .iter()
+                .find(|m| m.leader)
+                .map_or_else(String::new, |m| m.nickname.clone());
+            (p.members.len(), leader, p.leader == party.view.you)
+        }),
         nickname: profile.map_or_else(
             || career.nickname.clone(),
             |profile| profile.nickname.clone(),
@@ -120,6 +144,7 @@ pub(crate) fn connection_line(session: &ClientSession) -> (String, Color) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_home(
     mut commands: Commands,
     career: Res<CareerClient>,
@@ -128,6 +153,7 @@ fn spawn_home(
     thumbnails: Res<AvatarThumbnails>,
     mut preview: ResMut<super::preview::AvatarPreview>,
     platform: Res<crate::ui::UiPlatform>,
+    party: Res<crate::party::PartyClient>,
 ) {
     if automation_bypass() {
         return;
@@ -138,6 +164,7 @@ fn spawn_home(
     }
     let preview_image = preview.image.clone();
     let phone = platform.is_mobile();
+    let party_line = signature(&career, &session, &card, &party);
     let (status, status_color) = connection_line(&session);
     let profile = career.view.profile.clone();
     let last_match = career
@@ -314,13 +341,22 @@ fn spawn_home(
                             theme::MUTED,
                         ));
                     }
+                    let play_label = match &party_line.party {
+                        Some((size, _, true)) => format!("PLAY AS PARTY ({size})"),
+                        Some(_) => "PARTY LOBBY".to_owned(),
+                        None if career.view.match_service.is_some() => "QUICK MATCH".to_owned(),
+                        None => "PLAY".to_owned(),
+                    };
                     screen_button(
                         column,
-                        if career.view.match_service.is_some() { "QUICK MATCH" } else { "PLAY" },
+                        &play_label,
                         ButtonKind::Primary,
                         HomeAction::Play,
                         "HomePlay",
                     );
+                    if let Some((_, leader, false)) = &party_line.party {
+                        column.spawn(widgets::label(&format!("{leader} leads your party"), 12.0, theme::GOLD));
+                    }
                     screen_button(column, "Offline practice", ButtonKind::Secondary, HomeAction::OfflinePractice, "HomeOfflinePractice");
                     column.spawn(widgets::label("No internet needed · No rating or rewards", 12.0, theme::MUTED));
                     if career.view.match_service.is_some() {
@@ -361,16 +397,19 @@ fn spawn_home(
                             );
                             screen_button(
                                 row,
-                                "Friends",
+                                "Party & friends",
                                 ButtonKind::Secondary,
-                                HomeAction::Friends,
-                                "HomeFriends",
+                                HomeAction::Party,
+                                "HomeParty",
                             );
                         });
                     }
                 });
             });
 
+            if let Some((party_id, from)) = &party_line.invite {
+                spawn_invite_banner(root, *party_id, from);
+            }
             if phone {
                 root.spawn(Node {
                     align_items: AlignItems::Center,
@@ -383,7 +422,7 @@ fn spawn_home(
                         .with_children(|navigation| {
                             screen_button(navigation, "Avatars", ButtonKind::Secondary, HomeAction::Collection, "HomeCollection");
                             screen_button(navigation, "Match history", ButtonKind::Secondary, HomeAction::History, "HomeHistory");
-                            screen_button(navigation, "Friends", ButtonKind::Secondary, HomeAction::Friends, "HomeFriends");
+                            screen_button(navigation, "Party & friends", ButtonKind::Secondary, HomeAction::Party, "HomeParty");
                         });
                 });
             } else {
@@ -404,9 +443,46 @@ fn home_actions(
     session: Res<ClientSession>,
     mut matchmaking: ResMut<crate::match_service::MatchServiceClient>,
     mut activated: MessageReader<Activated<HomeAction>>,
+    party: Option<Res<crate::party::PartyClient>>,
 ) {
+    let in_party = party.as_ref().is_some_and(|p| p.in_party());
+    let leads = party.as_ref().is_some_and(|p| p.view.is_leader());
     for Activated { action, .. } in activated.read() {
         match action {
+            HomeAction::Play | HomeAction::HumansOnly | HomeAction::BotPractice if in_party => {
+                // A party plays together: the leader launches it, a member
+                // waits for the leader in the lobby.
+                if leads {
+                    let preference = match *action {
+                        HomeAction::HumansOnly => {
+                            shared::match_service::MatchPreference::HumansOnly
+                        }
+                        HomeAction::BotPractice => {
+                            shared::match_service::MatchPreference::BotPractice
+                        }
+                        _ => shared::match_service::MatchPreference::Quick,
+                    };
+                    requests.write(NetworkCommand::Party(shared::party::PartyCommand::Launch {
+                        preference,
+                    }));
+                } else {
+                    next.set(AppScreen::Lobby);
+                }
+            }
+            HomeAction::Party => next.set(AppScreen::Lobby),
+            HomeAction::AcceptInvite(party_id) => {
+                requests.write(NetworkCommand::Party(shared::party::PartyCommand::Accept {
+                    party_id: *party_id,
+                }));
+                next.set(AppScreen::Lobby);
+            }
+            HomeAction::DeclineInvite(party_id) => {
+                requests.write(NetworkCommand::Party(
+                    shared::party::PartyCommand::Decline {
+                        party_id: *party_id,
+                    },
+                ));
+            }
             HomeAction::OfflinePractice => {
                 session_ui.write(crate::net::SessionUiCommand::StartOffline);
                 next.set(AppScreen::HeroSelect);
@@ -427,7 +503,6 @@ fn home_actions(
             HomeAction::Card => next.set(AppScreen::Card),
             HomeAction::Collection => next.set(AppScreen::Collection),
             HomeAction::History => crate::career::open_history_modal(&mut career, &mut requests),
-            HomeAction::Friends => crate::career::open_friends_modal(&mut career, &mut requests),
             HomeAction::Profile => career.open_profile_modal(),
         }
     }
@@ -443,10 +518,11 @@ fn refresh_home(
     thumbnails: Res<AvatarThumbnails>,
     preview: ResMut<super::preview::AvatarPreview>,
     platform: Res<crate::ui::UiPlatform>,
+    party: Res<crate::party::PartyClient>,
     roots: Query<Entity, With<HomeRoot>>,
     mut last: Local<Option<HomeSignature>>,
 ) {
-    let current = signature(&career, &session, &card);
+    let current = signature(&career, &session, &card, &party);
     if last.as_ref() == Some(&current) {
         return;
     }
@@ -459,8 +535,62 @@ fn refresh_home(
         .despawn_related::<Children>()
         .despawn();
     spawn_home(
-        commands, career, session, card, thumbnails, preview, platform,
+        commands, career, session, card, thumbnails, preview, platform, party,
     );
+}
+
+/// "X invites you to a party" with Accept / Decline: a toast centred at the
+/// top of the screen, over the layout rather than inside a column.
+fn spawn_invite_banner(parent: &mut ChildSpawnerCommands, party_id: u64, from: &str) {
+    parent
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(20.0),
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            Pickable::IGNORE,
+        ))
+        .with_children(|strip| {
+            strip
+                .spawn((
+                    Node {
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(10.0),
+                        padding: UiRect::axes(Val::Px(14.0), Val::Px(6.0)),
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(10.0)),
+                        ..default()
+                    },
+                    BackgroundColor(theme::TILE_SELECTED),
+                    BorderColor::all(theme::GOLD),
+                    Name::new("HomePartyInvite"),
+                ))
+                .with_children(|banner| {
+                    banner.spawn(widgets::label(
+                        &format!("{from} invites you to a party"),
+                        14.0,
+                        theme::IVORY,
+                    ));
+                    screen_button(
+                        banner,
+                        "Accept",
+                        ButtonKind::Secondary,
+                        HomeAction::AcceptInvite(party_id),
+                        "HomeAcceptInvite",
+                    );
+                    screen_button(
+                        banner,
+                        "Decline",
+                        ButtonKind::Secondary,
+                        HomeAction::DeclineInvite(party_id),
+                        "HomeDeclineInvite",
+                    );
+                });
+        });
 }
 
 #[cfg(test)]

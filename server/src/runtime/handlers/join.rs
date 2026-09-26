@@ -35,6 +35,12 @@ impl ServerRuntime {
         let combat_sandbox = self.sandbox_allowed();
         let targeting_qa = self.targeting_qa;
         let rules = self.rules;
+        // A party mate already seated pulls this human onto the same team
+        // (while it has human room). A free client choice is left alone.
+        let party_team = self.party_team(addr).filter(|_| {
+            !matches!(rules.team_assignment, TeamAssignment::ClientChoice)
+                || (prematch && !combat_sandbox)
+        });
         let world = &mut self.world;
         world.ensure_connected(addr, now);
         let player = world.players.get_mut(&addr).unwrap();
@@ -64,37 +70,39 @@ impl ServerRuntime {
         // choice; `Balanced` (release) balances teams server-side
         // (rejoining players keep their original team);
         // `PracticeSeat` takes a bot's seat.
-        let assigned_team = allocated_team.or_else(|| match rules.team_assignment {
-            TeamAssignment::PracticeSeat => {
-                bots::assign_human_team(&world.players, rules.team_size)
-            }
-            TeamAssignment::ClientChoice if combat_sandbox => {
-                sandbox::assign_human_team(&world.players, &world.disconnected_sessions)
-            }
-            TeamAssignment::ClientChoice if prematch => assign_reserved_release_team(
-                &world.players,
-                &world.disconnected_sessions,
-                rules.team_size,
-            ),
-            TeamAssignment::ClientChoice => (joined_count(&world.players)
-                + (world.disconnected_sessions.len() as u32)
-                < rules.roster_size())
-            .then_some(team),
-            TeamAssignment::Balanced => {
-                let existing_team = world
-                    .players
-                    .get(&addr)
-                    .filter(|player| player.joined)
-                    .map(|player| player.hero.identity.team);
-                existing_team.or_else(|| {
-                    assign_reserved_release_team(
-                        &world.players,
-                        &world.disconnected_sessions,
-                        rules.team_size,
-                    )
-                })
-            }
-        });
+        let assigned_team = allocated_team
+            .or(party_team)
+            .or_else(|| match rules.team_assignment {
+                TeamAssignment::PracticeSeat => {
+                    bots::assign_human_team(&world.players, rules.team_size)
+                }
+                TeamAssignment::ClientChoice if combat_sandbox => {
+                    sandbox::assign_human_team(&world.players, &world.disconnected_sessions)
+                }
+                TeamAssignment::ClientChoice if prematch => assign_reserved_release_team(
+                    &world.players,
+                    &world.disconnected_sessions,
+                    rules.team_size,
+                ),
+                TeamAssignment::ClientChoice => (joined_count(&world.players)
+                    + (world.disconnected_sessions.len() as u32)
+                    < rules.roster_size())
+                .then_some(team),
+                TeamAssignment::Balanced => {
+                    let existing_team = world
+                        .players
+                        .get(&addr)
+                        .filter(|player| player.joined)
+                        .map(|player| player.hero.identity.team);
+                    existing_team.or_else(|| {
+                        assign_reserved_release_team(
+                            &world.players,
+                            &world.disconnected_sessions,
+                            rules.team_size,
+                        )
+                    })
+                }
+            });
         let Some(assigned_team) = assigned_team else {
             println!(
                 "Matchmaking: match is full ({} players) - join from {addr} rejected",

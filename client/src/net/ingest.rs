@@ -57,6 +57,7 @@ pub(in crate::net) fn ingest_server_snapshot_packets(
     mut career_client: Option<ResMut<crate::career::CareerClient>>,
     mut career_identity: Option<ResMut<crate::career_identity::CareerIdentity>>,
     mut social_client: Option<ResMut<crate::social::SocialClient>>,
+    mut party_client: Option<ResMut<crate::party::PartyClient>>,
 ) {
     pending.frame = None;
     let Some(channels) = channels.as_ref() else {
@@ -78,6 +79,15 @@ pub(in crate::net) fn ingest_server_snapshot_packets(
                 break;
             }
             Ok(packet) => match packet {
+                ServerPacket::Party {
+                    server_epoch,
+                    sequence,
+                    party,
+                } => {
+                    if let Some(client) = party_client.as_mut() {
+                        client.apply_view(server_epoch, sequence, party, Instant::now());
+                    }
+                }
                 ServerPacket::Social {
                     server_epoch,
                     match_id,

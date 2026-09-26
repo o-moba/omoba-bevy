@@ -20,6 +20,7 @@ pub mod map;
 pub mod match_service;
 pub mod math;
 pub mod navigation;
+pub mod party;
 pub mod practice;
 pub mod prematch;
 pub mod progression;
