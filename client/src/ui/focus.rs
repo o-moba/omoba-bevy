@@ -234,7 +234,6 @@ type ButtonItem<'a> = (
 
 /// Runs in `UiSet::Focus`, after the modal registry synced and before the
 /// tap recognizer, which applies the synthetic press this writes.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn navigate_focus(
     mut focus: ResMut<UiFocus>,
     mut nav: MessageReader<FocusNav>,

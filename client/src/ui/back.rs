@@ -6,8 +6,8 @@
 //! the pause menu) read [`BackInput`] in the same frame order they always
 //! had. The first one that acts calls [`BackInput::consume`], so the same
 //! press cannot also close the next overlay or open the pause menu. A source
-//! other than the keyboard writes [`BackPress`] for one frame; it is cleared
-//! at the start of every frame, before input is read.
+//! other than the keyboard writes [`BackPress`] for one frame (the gamepad
+//! does so in `PreUpdate`); it is cleared at the end of every frame.
 use bevy::{ecs::system::SystemParam, prelude::*};
 
 /// A back press from a non-keyboard source (a gamepad's East), live for the
@@ -22,12 +22,13 @@ impl BackPress {
         self.pending = true;
     }
 
+    #[cfg(test)]
     pub(crate) fn pending(&self) -> bool {
         self.pending
     }
 }
 
-/// Clears an unconsumed [`BackPress`] before the next frame's input.
+/// Clears an unconsumed [`BackPress`] at the end of the frame (`Last`).
 pub(crate) fn clear_back_press(mut back: ResMut<BackPress>) {
     if back.pending {
         back.pending = false;
@@ -46,12 +47,12 @@ pub(crate) struct BackInput<'w> {
 impl BackInput<'_> {
     /// A back press is waiting this frame (not consumed yet).
     pub(crate) fn just_pressed(&self) -> bool {
-        self.from_keyboard() || self.other.as_ref().is_some_and(|back| back.pending)
+        self.pressed_on_keyboard() || self.other.as_ref().is_some_and(|back| back.pending)
     }
 
     /// The waiting press came from `Esc`. The pause menu opens only on this;
     /// a gamepad's back button closes the menu but never opens it.
-    pub(crate) fn from_keyboard(&self) -> bool {
+    pub(crate) fn pressed_on_keyboard(&self) -> bool {
         self.keys.just_pressed(KeyCode::Escape)
     }
 
@@ -86,7 +87,7 @@ mod tests {
 
     fn read(app: &mut App) -> (bool, bool) {
         app.world_mut()
-            .run_system_once(|back: BackInput| (back.just_pressed(), back.from_keyboard()))
+            .run_system_once(|back: BackInput| (back.just_pressed(), back.pressed_on_keyboard()))
             .unwrap()
     }
 

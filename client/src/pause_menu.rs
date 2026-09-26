@@ -586,7 +586,7 @@ pub(crate) fn toggle_pause_menu(
     {
         return;
     }
-    if back.just_pressed() && (menu_state.open || back.from_keyboard()) {
+    if back.just_pressed() && (menu_state.open || back.pressed_on_keyboard()) {
         if menu_state.open {
             menu_state.open = false;
             menu_state.in_settings = false;

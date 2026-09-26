@@ -60,7 +60,7 @@ impl Plugin for UiKitPlugin {
             .init_resource::<UiFocus>()
             .add_message::<SyntheticPress>()
             .add_message::<FocusNav>()
-            .add_systems(First, back::clear_back_press)
+            .add_systems(Last, back::clear_back_press)
             .configure_sets(
                 Update,
                 (
