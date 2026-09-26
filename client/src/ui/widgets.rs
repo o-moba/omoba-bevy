@@ -72,6 +72,75 @@ pub(crate) fn paint_pressables(
     }
 }
 
+/// The focus ring: one overlay node drawn around the focused kit button.
+/// An overlay (rather than an `Outline` on the button) leaves outlines that
+/// screens own, such as hero select's selected tiles, untouched.
+#[derive(Component)]
+pub(crate) struct FocusRing;
+
+/// Runs in `UiSet::Paint` next to [`paint_pressables`]: places the ring on
+/// [`super::UiFocus::focused`] (clipped like the button) or hides it.
+pub(crate) fn paint_focus_ring(
+    mut commands: Commands,
+    focus: Option<Res<super::UiFocus>>,
+    buttons: Query<(
+        &ComputedNode,
+        &UiGlobalTransform,
+        Option<&bevy::ui::CalculatedClip>,
+    )>,
+    mut rings: Query<&mut Node, With<FocusRing>>,
+) {
+    let rect = focus
+        .as_ref()
+        .and_then(|focus| focus.focused())
+        .and_then(|entity| buttons.get(entity).ok())
+        .and_then(|(node, transform, clip)| {
+            let mut rect = super::focus::node_rect(node, transform);
+            if let Some(clip) = clip {
+                rect = rect.intersect(clip.clip);
+            }
+            let scale = node.inverse_scale_factor();
+            (!rect.is_empty() && rect.min.is_finite() && rect.max.is_finite())
+                .then(|| Rect::from_corners(rect.min * scale, rect.max * scale))
+        });
+    let Ok(mut ring) = rings.single_mut() else {
+        if rect.is_some() {
+            commands.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    display: Display::None,
+                    ..default()
+                },
+                Outline::new(Val::Px(3.0), Val::Px(2.0), theme::GOLD),
+                GlobalZIndex(5000),
+                bevy::ui::FocusPolicy::Pass,
+                Pickable::IGNORE,
+                FocusRing,
+                Name::new("UiFocusRing"),
+            ));
+        }
+        return;
+    };
+    let next = match rect {
+        Some(rect) => Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(rect.min.x),
+            top: Val::Px(rect.min.y),
+            width: Val::Px(rect.width()),
+            height: Val::Px(rect.height()),
+            ..default()
+        },
+        None => Node {
+            position_type: PositionType::Absolute,
+            display: Display::None,
+            ..default()
+        },
+    };
+    if *ring != next {
+        *ring = next;
+    }
+}
+
 fn button_bundle<T: UiActionT>(node: Node, kind: ButtonKind, action: T, id: TestId) -> impl Bundle {
     let style = ButtonStyle::new(kind);
     (
