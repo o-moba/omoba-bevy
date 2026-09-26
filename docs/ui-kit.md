@@ -21,7 +21,9 @@ buttons onto the kit. Every button the client draws is now a kit button (see
 | `ui/scroll.rs` | `ScrollArea` (`WheelScroll`, `DragScroll`, `ScrollPlatform`), `scroll_areas`, `max_offset`, `harness` (tests) |
 | `ui/modal.rs` | `ModalId`, `ModalStack`, `ModalRoot`, `ModalAppExt::register_modal`, `ModalSet`, `ModalGate` |
 | `ui/action.rs` | `UiAction<T>`, `Activated<T>`, `dispatch_actions::<T>`, `UiActionAppExt` |
-| `ui/widgets.rs` | `ButtonStyle`, `paint_pressables`, `button`, `button_with_label`, `icon_button`, `adjust_row`, `toggle_row`, `value_label`; front-end `screen_button`, `screen_tile`, `compact_screen_tile`, `screen_label` and their phone metrics `MenuTypography`/`MenuControl` |
+| `ui/back.rs` | `BackInput` (Esc plus `BackPress`), `BackPress`, `clear_back_press` |
+| `ui/focus.rs` | `UiFocus`, `FocusNav`, `navigate_focus`, `directional_neighbor`, `reveal_delta` |
+| `ui/widgets.rs` | `ButtonStyle`, `paint_pressables`, `paint_focus_ring` (`FocusRing`), `button`, `button_with_label`, `icon_button`, `adjust_row`, `toggle_row`, `value_label`; front-end `screen_button`, `screen_tile`, `compact_screen_tile`, `screen_label` and their phone metrics `MenuTypography`/`MenuControl` |
 | `ui/test_id.rs` | `TestId`, `NodeKey`/`node_key` (a node's `TestId`, else its `Name`), `harness::{TestIds, find, press, kit_app, spawn_ui, set_disabled, drain_actions}` (tests) |
 
 The `crate::ui_theme` shim, the `frontend::widgets` palette re-export,
@@ -42,27 +44,31 @@ card, home, help overlay); `MobileControls.enabled` is the runtime copy that
 
 ## Order
 
-`UiKitPlugin` configures `UiSet::Gesture → Scroll → Dispatch → Paint` in
-`InputContextSet::Modal`, after `ModalSet::Early`:
+`UiKitPlugin` configures `UiSet::Focus → Gesture → Scroll → Dispatch →
+Paint` in `InputContextSet::Modal`, after `ModalSet::Early`:
 
 0. **ModalSet::Early** – the registered modal sources update `ModalStack`
    (see [Modal registry](#modal-registry)).
-1. **Gesture** – `recognize_presses` resets every `Pressable` (`touch_mode`
+1. **Focus** – `navigate_focus` moves the focused button on this frame's
+   `FocusNav` messages and turns a confirm into a `SyntheticPress` (see
+   [Focus](#focus)); it does nothing unless a driver enabled `UiFocus`.
+2. **Gesture** – `recognize_presses` resets every `Pressable` (`touch_mode`
    from the platform, `activated = false`, `blocked` from the modal stack,
    `disabled` untouched), applies `SyntheticPress` messages, then feeds this
    frame's `TouchInput` (and, on a desktop build in touch mode, the left
    mouse button) to the `TapTracker`.
-2. **Scroll** – `scroll_areas` moves every `ScrollArea` by wheel, page keys
+3. **Scroll** – `scroll_areas` moves every `ScrollArea` by wheel, page keys
    and touch drag (see [Scroll](#scroll)).
-3. **Dispatch** – `dispatch_actions::<T>` (one per `add_ui_action::<T>()`)
+4. **Dispatch** – `dispatch_actions::<T>` (one per `add_ui_action::<T>()`)
    writes `Activated<T> { action, source }` for every button whose
    `Pressable::effective(Interaction)` became `Pressed` this frame. It runs on
    `Or<(Changed<Interaction>, Changed<Pressable>)>`, so a held click or a
    resting finger fires once.
-4. **Paint** – `paint_pressables` colours `(Pressable, ButtonStyle,
+5. **Paint** – `paint_pressables` colours `(Pressable, ButtonStyle,
    BackgroundColor)` from the effective interaction: idle, hover, or the
    kind's pressed colour (the hover colour except for `Skill` and an unowned
    `ShopItem`, which darken to `TILE` as they always did).
+   `paint_focus_ring` places the focus ring on the focused button.
 
 Modules consume `Activated<T>` after `UiSet::Dispatch` (the pause menu in
 `PauseMenuSet::Visuals`). A handler that is gated (audio only while the
@@ -166,7 +172,7 @@ scoreboard 90, pause 100, career 120, server entry 150, supporter
 `GlobalZIndex` 1300), then by opening order, so `top()` is the modal in
 front. `app.register_modal::<R>(id, |r| r.open)` adds a system that keeps
 `id` in the stack while resource `R` exists and says open; it runs twice a
-frame, in `ModalSet::Early` (before `UiSet::Gesture`) and in `ModalSet::Late`
+frame, in `ModalSet::Early` (before `UiSet::Focus`) and in `ModalSet::Late`
 (the start of `InputContextSet::Resolve`). `InputContextPlugin` registers
 all six in one list (`register_modals`): `PauseMenuState.open`,
 `CareerClient::modal_open`, `ShopState.open`, `SupporterUiState.open`,
@@ -187,6 +193,73 @@ also covers teleport and field edit without a panel), social
 (`blocks_gameplay` also covers the chat wheel and the frame after a send),
 the front-end screen state, the hero picker root and a portrait or
 unfocused phone.
+
+## Focus
+
+`ui::focus` is directional focus for kit buttons, for any input that is not
+a pointer. Today the gamepad drives it (`docs/controller.md`); nothing in it
+is controller specific.
+
+- **Driver.** A driver calls `UiFocus::set_enabled(true)` each frame it owns
+  the input and writes `FocusNav::{Up, Down, Left, Right, Confirm}`
+  messages. While no driver is enabled the focus is dropped and no ring is
+  drawn, so mouse and touch players never see it. The gamepad enables it
+  while it owns input on a surface where gameplay is not allowed (a modal,
+  a front-end screen, the help overlay).
+- **Candidates.** Every `Pressable` that is not `disabled`, is allowed by
+  `ModalGate` (the top modal's buttons, or the whole screen with no modal),
+  is visible (its ancestors are walked directly, so a parent hidden this
+  frame drops its buttons before visibility propagates) and is measured.
+  A button clipped out of sight counts only inside a `ScrollArea`. They
+  are ordered top-to-bottom, then left-to-right.
+- **Navigation.** A direction moves to the nearest candidate that way,
+  scored `along + |across| * 3` so the same row or column wins over a
+  closer diagonal; at an edge the focus stays. When the set of candidates
+  changes (a modal opened, a page changed, a section hid) or a modal bumps
+  `GestureEpoch`, the first candidate is focused and the next `Confirm`
+  must be a fresh press (a frame without one comes first).
+- **Activation.** `Confirm` writes `SyntheticPress(focused)`, which the
+  recognizer applies in `UiSet::Gesture` only when the button is neither
+  `disabled` nor `blocked`: the same gate as a click or a tap, and the same
+  one-frame `Activated<T>`. The click sound (`game_audio`) follows real
+  pointer and key presses only, so a focus confirm is silent.
+- **Scroll into view.** When the focus moves, every `ScrollArea` ancestor
+  scrolls just enough (`reveal_delta`, clamped to the content) to show the
+  focused button.
+- **Ring.** `paint_focus_ring` draws one overlay node (`FocusRing`,
+  `GlobalZIndex(5000)`, gold 3 px outline, not pickable) on the focused
+  button's clipped rectangle. It is an overlay rather than an `Outline` on
+  the button so outlines a screen owns (hero select's selected tiles) are
+  left alone.
+
+## Back
+
+`ui::back::BackInput` is the one "back" signal: `Esc` plus `BackPress`, a
+one-frame press from another source (a gamepad's East, written in
+`PreUpdate`, cleared in `Last`). `just_pressed()` is either;
+`pressed_on_keyboard()` is `Esc` only; `consume()` takes both, so later
+readers this frame see nothing. It holds `ButtonInput<KeyCode>` mutably, so
+a system that also reads other keys uses `keys()` / `keys_mut()`.
+
+Every overlay that closes on back reads it where it always read `Esc`, with
+the same schedule constraints, so the same overlay takes a press as before
+(the first reader that acts consumes it):
+
+| Reader | Scheduled | Closes |
+| --- | --- | --- |
+| `social::input` | `InputContextSet::Social` (before every modal) | chat or reaction wheel |
+| `edge_hud::actions` | `Modal`, after `Dispatch`, before help and the shop | scoreboard |
+| `help_overlay::toggle_help_overlay` | `HelpOverlaySet::Input` | help overlay (in a match or on a menu) |
+| `shop::toggle_shop` | `ShopModalSet`, after help | shop |
+| `supporter::keyboard_close` | `Modal`, before `toggle_pause_menu` | supporter panel |
+| `career::dismiss_with_escape` | `Modal`, before `toggle_pause_menu` | career modal |
+| `sandbox::ui::keys` | `Modal`, before `toggle_pause_menu` | Combat Test panel, teleport, field edit |
+| `frontend::server_field::type_address` | before `PauseMenuSet::Close` | lobby server field edit |
+| `pause_menu::toggle_pause_menu` | `PauseMenuSet::Close`, after help and the shop | toggles the pause menu |
+
+The pause menu is the last reader: `Esc` opens or closes it; a back press
+from another source only closes it (a gamepad opens it with Start, through
+the `≡` button's path).
 
 ## Actions and widgets
 
@@ -338,3 +411,5 @@ In the order the roadmap intends, each a PR of its own:
    `Interaction` do so only to keep world clicks off the UI
    (`combat::selection`, `player::input`) or to play the click sound
    (`game_audio`).
+8. **Focus and back** – done (0.25.0): `ui::focus` and `ui::back` (see
+   [Focus](#focus) and [Back](#back)); every `Esc` site reads `BackInput`.

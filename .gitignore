@@ -40,6 +40,7 @@ CLAUDE.md
 docs/*
 !docs/ARCHITECTURE.md
 !docs/features.md
+!docs/controller.md
 !docs/party.md
 !docs/RELEASING.md
 !docs/bot-practice-and-social.md
