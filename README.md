@@ -16,6 +16,7 @@ a character, a map, a sound, an idea or a pull request. Help shape what comes ne
 [Ekza ecosystem](https://ekza.io/) ·
 [Ekza Space](https://space.ekza.io/) ·
 [Ekza Bevy SDK](https://github.com/ekza-space/ekza-bevy-sdk) ·
+[Gameplay trailer](https://ekza.mypinata.cloud/ipfs/bafybeicvcylgpcfnf4axiiljjga7rnbi23pmdt2bpt7njwweufb6v54a2y/reel-editor-33198b2b853142b0bafaf20b115b6830.mp4) ·
 [Our mission](MISSION.md) · [Contribute](CONTRIBUTING.md)
 
 ## Choose your way in
