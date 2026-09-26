@@ -116,7 +116,15 @@ def main():
         rustflags = [flag for flag in env["CARGO_ENCODED_RUSTFLAGS"].split("\x1f") if flag]
     else:
         rustflags = shlex.split(env.get("RUSTFLAGS", env.get("CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS", "")))
-    env["CARGO_ENCODED_RUSTFLAGS"] = "\x1f".join(rustflags + ["-C", "link-arg=-Wl,-z,max-page-size=16384"])
+    # oboe-sys links libc++_static, but newer NDKs ship the C++ ABI runtime (__cxa_*,
+    # operator new/delete, RTTI) separately in libc++abi.a. Without it the .so links with
+    # unresolved symbols and dlopen fails on the device; --no-undefined turns any such
+    # gap into a build error instead of a launch crash.
+    env["CARGO_ENCODED_RUSTFLAGS"] = "\x1f".join(rustflags + [
+        "-C", "link-arg=-Wl,-z,max-page-size=16384",
+        "-C", "link-arg=-Wl,--no-undefined",
+        "-C", "link-arg=-lc++abi",
+    ])
     if args.server:
         env["OMOBA_DEFAULT_GAME_SERVER_ADDR"] = args.server
     run([tools["cargo"], "rustc", "--locked", "-p", "client", "--lib", "--target", TARGET,
@@ -134,8 +142,10 @@ def main():
     manifest.write_text(manifest_text)
     unaligned = out / "omoba-unaligned.apk"
     unsigned = out / "omoba-unsigned.apk"
+    compiled_resources = out / "compiled-res.zip"
+    run([paths["aapt2"], "compile", "--dir", Path(__file__).with_name("res"), "-o", compiled_resources])
     run([paths["aapt2"], "link", "-I", android_jar, "--manifest", manifest,
-         "-A", ROOT / "client/assets", "-o", unaligned])
+         "-A", ROOT / "client/assets", compiled_resources, "-o", unaligned])
     with zipfile.ZipFile(unaligned, "a") as apk:
         apk.write(packaged_lib, "lib/arm64-v8a/libclient.so", compress_type=zipfile.ZIP_STORED)
         add_legal_notices_to_zip(legal_notices, apk)
