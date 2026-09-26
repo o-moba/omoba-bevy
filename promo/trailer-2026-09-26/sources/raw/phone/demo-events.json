@@ -1,0 +1,33 @@
+{
+  "class": "ranger",
+  "elapsed_seconds": 39.973261542,
+  "events": [
+    {
+      "seconds": 1.5509579169999999,
+      "subtitle": "The left thumb steers the joystick",
+      "title": "Phone controls"
+    },
+    {
+      "seconds": 19.930019792,
+      "subtitle": "ATK and ability buttons around the right thumb",
+      "title": "Touch combat"
+    }
+  ],
+  "method": "scripted production inputs against a live server; recorder readbacks",
+  "pace": [
+    {
+      "seconds": 1.559971292,
+      "speed": 4.0
+    },
+    {
+      "seconds": 19.921153,
+      "speed": 1.0
+    }
+  ],
+  "pixels": [
+    844,
+    390
+  ],
+  "script": "phone",
+  "version": "0.23.0-rc.6"
+}

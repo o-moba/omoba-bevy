@@ -14,7 +14,7 @@ use crate::runtime::dispatch::CLIENT_DATAGRAM_RECEIVE_CAPACITY;
 use crate::runtime::ports::{Clock, SystemClock, Transport, UdpTransport};
 use crate::world::load_map_config;
 use crate::{
-    bots, career_backend, career_runtime, match_service, passport_admission, prematch,
+    bots, career_backend, career_runtime, match_service, party, passport_admission, prematch,
     public_transport, sandbox, social, targeting_qa,
 };
 
@@ -63,6 +63,7 @@ pub(crate) struct ServerRuntime {
     pub(crate) public_transport: public_transport::PublicTransport,
     pub(crate) prematch: prematch::PrematchRuntime,
     pub(crate) social: social::SocialRuntime,
+    pub(crate) party: party::PartyState,
     pub(crate) bots: bots::BotControllers,
     pub(crate) career: career_runtime::CareerRuntime,
     pub(crate) combat_log: CombatLog,
@@ -165,6 +166,7 @@ impl ServerRuntime {
             prematch: prematch::PrematchRuntime::default(),
             bots: bots::BotControllers::default(),
             social: social::SocialRuntime::default(),
+            party: party::PartyState::default(),
             career: career_runtime::CareerRuntime::new(career),
             combat_log: CombatLog::default(),
             passport_admissions: passport_admission::PassportAdmissions::default(),

@@ -135,6 +135,10 @@ impl ServerRuntime {
             return;
         }
         self.career.backend.touch(addr);
+        if let ClientPacket::Party { command } = packet {
+            self.handle_party(addr, command, now);
+            return;
+        }
         if let ClientPacket::Prematch { request } = packet {
             self.handle_prematch(addr, request, now);
             return;
@@ -334,6 +338,7 @@ impl ServerRuntime {
             } => self.handle_buy_item(addr, item_id, request_id, match_id, server_epoch, now),
             ClientPacket::Career { .. }
             | ClientPacket::Social { .. }
+            | ClientPacket::Party { .. }
             | ClientPacket::Prematch { .. } => {
                 unreachable!("handled by handle_packet before gameplay admission")
             }

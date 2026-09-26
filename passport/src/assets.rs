@@ -28,6 +28,12 @@ fn desktop_or_ios_asset_root() -> PathBuf {
             if assets.is_dir() {
                 return assets;
             }
+            // A macOS app bundle keeps data in Contents/Resources, beside
+            // Contents/MacOS where the executable lives.
+            let bundled = parent.join("../Resources/assets");
+            if bundled.is_dir() {
+                return bundled;
+            }
         }
     }
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

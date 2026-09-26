@@ -20,6 +20,8 @@ struct Waiting {
     queued: Instant,
     touched: Instant,
     order: u64,
+    /// (party id, members the party waits for). Refreshed on every retry.
+    party: Option<(u64, usize)>,
 }
 pub(crate) struct Lobby {
     pool: crate::match_pool::Pool,
@@ -118,6 +120,7 @@ impl MatchService {
         session: String,
         request_id: u64,
         preference: MatchPreference,
+        party: Option<(u64, usize)>,
         now: Instant,
     ) {
         let Self::Lobby(lobby) = self else {
@@ -141,6 +144,7 @@ impl MatchService {
         {
             if existing.session == session && existing.preference == preference {
                 existing.touched = now;
+                existing.party = party;
             } else {
                 lobby
                     .errors
@@ -160,6 +164,7 @@ impl MatchService {
             queued: now,
             touched: now,
             order: lobby.order,
+            party,
         });
     }
     pub fn cancel(&mut self, profile: &str) {
@@ -234,7 +239,7 @@ impl MatchService {
                 preference: w.preference,
                 humans,
                 needed: if w.preference == MatchPreference::BotPractice {
-                    1
+                    w.party.map_or(1, |(_, size)| size as u32)
                 } else {
                     10
                 },
@@ -295,30 +300,15 @@ impl MatchService {
             let Some(indices) = select(&lobby.waiting, now) else {
                 break;
             };
-            let mut selected: Vec<_> = indices.iter().map(|&i| lobby.waiting[i].clone()).collect();
-            selected.sort_by_key(|w| (std::cmp::Reverse(w.profile.rating), w.order));
-            let mut sums = [0_i64; 2];
-            let mut counts = [0_usize; 2];
+            let selected: Vec<_> = indices.iter().map(|&i| lobby.waiting[i].clone()).collect();
+            let teams = split_teams(&selected);
             let humans = selected
                 .iter()
-                .map(|w| {
-                    let team =
-                        if counts[0] > counts[1] || (counts[0] == counts[1] && sums[0] > sums[1]) {
-                            1
-                        } else {
-                            0
-                        };
-                    counts[team] += 1;
-                    sums[team] += i64::from(w.profile.rating);
-                    AllocatedHuman {
-                        profile_id: w.profile.profile_id.clone(),
-                        session_id: w.session.clone(),
-                        team: if team == 0 {
-                            shared::map::Team::Green
-                        } else {
-                            shared::map::Team::Blue
-                        },
-                    }
+                .zip(teams)
+                .map(|(w, team)| AllocatedHuman {
+                    profile_id: w.profile.profile_id.clone(),
+                    session_id: w.session.clone(),
+                    team,
                 })
                 .collect();
             let mut bytes = [0_u8; 16];
@@ -368,36 +358,155 @@ fn compatible(a: &Waiting, b: &Waiting) -> bool {
         && a.profile.newcomer() == b.profile.newcomer()
         && (i64::from(a.profile.rating) - i64::from(b.profile.rating)).abs() <= 300
 }
-fn select(waiting: &[Waiting], now: Instant) -> Option<Vec<usize>> {
-    let mut best: Option<Vec<usize>> = None;
-    for (i, low) in waiting.iter().enumerate() {
-        if low.preference == MatchPreference::BotPractice {
-            return Some(vec![i]);
+/// Queue units: a party's queued members travel together, everyone else
+/// alone. A party is a unit only once every member it waits for has queued
+/// with the same preference. Units are in queue order.
+fn units(waiting: &[Waiting]) -> Vec<Vec<usize>> {
+    let mut parties: std::collections::BTreeMap<u64, Vec<usize>> = Default::default();
+    let mut out = Vec::new();
+    for (i, w) in waiting.iter().enumerate() {
+        match w.party {
+            Some((id, _)) => parties.entry(id).or_default().push(i),
+            None => out.push(vec![i]),
         }
-        let mut cohort: Vec<_> = waiting
+    }
+    for members in parties.into_values() {
+        let need = members
             .iter()
-            .enumerate()
-            .filter(|(_, w)| compatible(low, w) && w.profile.rating >= low.profile.rating)
-            .map(|(i, _)| i)
-            .collect();
-        cohort.sort_by_key(|&i| waiting[i].order);
-        cohort.truncate(10);
-        if cohort.len() < 10
+            .filter_map(|&i| waiting[i].party.map(|(_, n)| n))
+            .max()
+            .unwrap_or(1);
+        let preference = waiting[members[0]].preference;
+        if members.len() >= need
+            && members.len() <= 5
+            && members.iter().all(|&i| waiting[i].preference == preference)
+        {
+            out.push(members);
+        }
+    }
+    out.sort_by_key(|unit| unit.iter().map(|&i| waiting[i].order).min());
+    out
+}
+
+/// Units of these sizes can be seated on two teams of at most five.
+fn splits(sizes: &[usize]) -> bool {
+    let total: usize = sizes.iter().sum();
+    total <= 10
+        && (0_u32..1 << sizes.len()).any(|mask| {
+            let green: usize = sizes
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| mask & (1 << i) != 0)
+                .map(|(_, s)| s)
+                .sum();
+            green <= 5 && total - green <= 5
+        })
+}
+
+/// Team per selected entry: parties stay together, head counts as even as
+/// possible, then rating sums as close as possible. A lone party (bot
+/// practice) plays Green.
+fn split_teams(selected: &[Waiting]) -> Vec<shared::map::Team> {
+    use shared::map::Team;
+    let units = units(selected);
+    // Every selected entry belongs to exactly one unit; an incomplete party
+    // cannot have been selected, but seat any stray entry on its own.
+    let mut covered = vec![false; selected.len()];
+    let mut units: Vec<Vec<usize>> = units;
+    for unit in &units {
+        for &i in unit {
+            covered[i] = true;
+        }
+    }
+    units.extend(
+        (0..selected.len())
+            .filter(|&i| !covered[i])
+            .map(|i| vec![i]),
+    );
+    let rating = |unit: &Vec<usize>| -> i64 {
+        unit.iter()
+            .map(|&i| i64::from(selected[i].profile.rating))
+            .sum()
+    };
+    let mut best: Option<((usize, i64, bool), u32)> = None;
+    for mask in 0_u32..1 << units.len() {
+        let (mut counts, mut sums) = ([0_usize; 2], [0_i64; 2]);
+        for (u, unit) in units.iter().enumerate() {
+            let side = usize::from(mask & (1 << u) == 0);
+            counts[side] += unit.len();
+            sums[side] += rating(unit);
+        }
+        if counts[0] > 5 || counts[1] > 5 {
+            continue;
+        }
+        let key = (
+            counts[0].abs_diff(counts[1]),
+            (sums[0] - sums[1]).abs(),
+            counts[0] < counts[1],
+        );
+        if best.is_none_or(|(k, _)| key < k) {
+            best = Some((key, mask));
+        }
+    }
+    let mask = best.map_or(0, |(_, mask)| mask);
+    let mut teams = vec![Team::Green; selected.len()];
+    for (u, unit) in units.iter().enumerate() {
+        for &i in unit {
+            teams[i] = if mask & (1 << u) != 0 {
+                Team::Green
+            } else {
+                Team::Blue
+            };
+        }
+    }
+    teams
+}
+
+fn select(waiting: &[Waiting], now: Instant) -> Option<Vec<usize>> {
+    let units = units(waiting);
+    let mut best: Option<Vec<usize>> = None;
+    for anchor in &units {
+        let low = anchor
+            .iter()
+            .map(|&i| &waiting[i])
+            .min_by_key(|w| w.profile.rating)
+            .expect("units are never empty");
+        if low.preference == MatchPreference::BotPractice {
+            return Some(anchor.clone());
+        }
+        let mut cohort: Vec<&Vec<usize>> = vec![anchor];
+        for unit in &units {
+            if std::ptr::eq(unit, anchor)
+                || !unit.iter().all(|&i| {
+                    compatible(low, &waiting[i]) && waiting[i].profile.rating >= low.profile.rating
+                })
+            {
+                continue;
+            }
+            let mut sizes: Vec<usize> = cohort.iter().map(|u| u.len()).collect();
+            sizes.push(unit.len());
+            if splits(&sizes) {
+                cohort.push(unit);
+            }
+        }
+        let mut members: Vec<usize> = cohort.iter().flat_map(|u| u.iter().copied()).collect();
+        members.sort_by_key(|&i| waiting[i].order);
+        if members.len() < 10
             && (low.preference == MatchPreference::HumansOnly
-                || cohort
+                || members
                     .iter()
                     .all(|&i| now.saturating_duration_since(waiting[i].queued) < QUICK_WAIT))
         {
             continue;
         }
         if best.as_ref().is_none_or(|b| {
-            cohort
+            members
                 .iter()
                 .map(|&i| waiting[i].order)
                 .cmp(b.iter().map(|&i| waiting[i].order))
                 .is_lt()
         }) {
-            best = Some(cohort);
+            best = Some(members);
         }
     }
     best
@@ -573,6 +682,7 @@ mod tests {
             queued: now,
             touched: now,
             order: id,
+            party: None,
         }
     }
     #[test]
@@ -611,6 +721,114 @@ mod tests {
             Some(vec![0])
         );
     }
+    fn in_party(mut entry: Waiting, party: u64, size: usize) -> Waiting {
+        entry.party = Some((party, size));
+        entry
+    }
+
+    #[test]
+    fn a_party_practices_together_once_every_member_queued() {
+        let now = Instant::now();
+        let mut q = vec![in_party(w(1, MatchPreference::BotPractice, now), 7, 2)];
+        assert!(select(&q, now).is_none(), "the friend has not queued yet");
+        q.push(w(2, MatchPreference::BotPractice, now));
+        // A stranger's practice is its own allocation.
+        assert_eq!(select(&q, now), Some(vec![1]));
+        q.remove(1);
+        q.push(in_party(w(3, MatchPreference::BotPractice, now), 7, 2));
+        let picked = select(&q, now).unwrap();
+        assert_eq!(picked, vec![0, 1]);
+        let chosen: Vec<_> = picked.iter().map(|&i| q[i].clone()).collect();
+        let teams = split_teams(&chosen);
+        assert_eq!(teams, vec![shared::map::Team::Green; 2]);
+    }
+
+    fn manifest_for(chosen: &[Waiting]) -> Manifest {
+        let teams = split_teams(chosen);
+        Manifest {
+            version: 1,
+            allocation_id: "a".repeat(32),
+            endpoint: "127.0.0.1:41000".into(),
+            bind: "127.0.0.1:41000".into(),
+            preference: chosen[0].preference,
+            humans: chosen
+                .iter()
+                .zip(teams)
+                .map(|(w, team)| AllocatedHuman {
+                    profile_id: w.profile.profile_id.clone(),
+                    session_id: w.session.clone(),
+                    team,
+                })
+                .collect(),
+            join_deadline_ms: 0,
+        }
+    }
+
+    #[test]
+    fn a_party_bot_practice_manifest_is_accepted_by_the_worker_contract() {
+        let now = Instant::now();
+        let q = vec![
+            in_party(w(1, MatchPreference::BotPractice, now), 7, 2),
+            in_party(w(2, MatchPreference::BotPractice, now), 7, 2),
+        ];
+        let chosen: Vec<_> = select(&q, now)
+            .unwrap()
+            .iter()
+            .map(|&i| q[i].clone())
+            .collect();
+        let manifest = manifest_for(&chosen);
+        assert_eq!(manifest.validate(), Ok(()));
+        // A solo practice still validates; a split bot practice does not.
+        assert_eq!(manifest_for(&chosen[..1]).validate(), Ok(()));
+        let mut split = manifest;
+        split.humans[1].team = shared::map::Team::Blue;
+        assert!(split.validate().is_err());
+    }
+
+    #[test]
+    fn quick_matches_keep_every_party_on_one_team() {
+        let now = Instant::now();
+        let mut q: Vec<_> = (1..=10)
+            .map(|i| w(i, MatchPreference::Quick, now))
+            .collect();
+        for i in [0, 1, 2] {
+            q[i] = in_party(q[i].clone(), 1, 3);
+        }
+        for i in [5, 6] {
+            q[i] = in_party(q[i].clone(), 2, 2);
+        }
+        let picked = select(&q, now).unwrap();
+        assert_eq!(picked.len(), 10);
+        let chosen: Vec<_> = picked.iter().map(|&i| q[i].clone()).collect();
+        let teams = split_teams(&chosen);
+        let team_of = |order: u64| teams[chosen.iter().position(|c| c.order == order).unwrap()];
+        assert!([2, 3].iter().all(|&o| team_of(o) == team_of(1)));
+        assert_eq!(team_of(6), team_of(7));
+        let green = teams
+            .iter()
+            .filter(|t| **t == shared::map::Team::Green)
+            .count();
+        assert_eq!(green, 5);
+    }
+
+    #[test]
+    fn parties_that_cannot_be_seated_wait_for_a_better_mix() {
+        assert!(splits(&[5, 5]));
+        assert!(splits(&[3, 2, 3, 2]));
+        assert!(!splits(&[4, 3, 3]));
+        assert!(!splits(&[4, 2, 2, 2]));
+        // A lone party in a bot-filled quick match still plays together.
+        let now = Instant::now();
+        let q = vec![
+            in_party(w(1, MatchPreference::Quick, now), 3, 2),
+            in_party(w(2, MatchPreference::Quick, now), 3, 2),
+        ];
+        let picked = select(&q, now + QUICK_WAIT).unwrap();
+        let chosen: Vec<_> = picked.iter().map(|&i| q[i].clone()).collect();
+        let teams = split_teams(&chosen);
+        assert_eq!(teams[0], teams[1]);
+    }
+
     #[test]
     fn rating_windows_and_preferences_stay_separate() {
         let now = Instant::now();

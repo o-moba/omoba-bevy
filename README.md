@@ -16,7 +16,9 @@ a character, a map, a sound, an idea or a pull request. Help shape what comes ne
 [Ekza ecosystem](https://ekza.io/) ·
 [Ekza Space](https://space.ekza.io/) ·
 [Ekza Bevy SDK](https://github.com/ekza-space/ekza-bevy-sdk) ·
-[Our mission](MISSION.md) · [Contribute](CONTRIBUTING.md)
+[Gameplay trailer](https://ekza.mypinata.cloud/ipfs/bafybeicvcylgpcfnf4axiiljjga7rnbi23pmdt2bpt7njwweufb6v54a2y/reel-editor-33198b2b853142b0bafaf20b115b6830.mp4) ·
+[Our mission](MISSION.md) · [Contribute](CONTRIBUTING.md) ·
+[Support the project](#support-the-project)
 
 ## Choose your way in
 
@@ -27,15 +29,17 @@ a character, a map, a sound, an idea or a pull request. Help shape what comes ne
 | Make characters, worlds or effects | [Create with us](#create-with-us) |
 | Bring avatars into another game | [Integrate Ekza](#bring-ekza-into-your-game) |
 | Host matches or connect a phone and PC | [Hosting and connection](#host-a-practice-match) and [runbook](RUNBOOK.md) |
+| Help the game and its protocol grow | [Support the project](#support-the-project) |
 
 ## What you can play today
 
 This is a **native beta under active development**. The source version is
-[`0.21.0-rc.1`](Cargo.toml); see [features](docs/features.md) and
+[`0.23.0-rc.6`](Cargo.toml); see [features](docs/features.md) and
 [changes](CHANGELOG.md) for the detailed implementation history. A source version
 is not a promise of a published installer or a live public server.
 
-- **Team combat:** four classes, basic attacks and class abilities, lane minions,
+- **Team combat:** five classes (Warrior, Mage, Ranger, Cleric and the Warden
+  jungler), basic attacks and class abilities, lane minions,
   towers, jungle camps that respawn, items and match results.
 - **Bot practice:** native server bots fill empty seats; people can join and take
   over those seats. Practice is separate from ranked progression.
@@ -105,9 +109,40 @@ screen. `127.0.0.1` on a phone means the phone itself. Both devices must be able
 to reach the host's UDP port. This command runs a foreground practice server;
 24/7 public hosting additionally needs supervised operations and network setup.
 
+## Play with a friend (party vs bots)
+
+Host a practice server as above, then both of you start the client against it
+(`make game GAME_SERVER_ADDR=<host-lan-ip>:4000`; the host can use
+`127.0.0.1:4000`). No database or wallet is needed.
+
+Players with a downloaded build ([GitHub Releases](https://github.com/o-moba/omoba-bevy/releases))
+set the host address in the game: **Party & friends → SERVER → Change**, type
+`host:port`, Enter. It is remembered.
+
+1. On Home, open **Party & friends**. Everyone connected to the same server is
+   listed under *Online on this server*; press **Invite**.
+2. Your friend sees *"… invites you to a party"* on Home (or in the party
+   screen) and presses **Accept**. Both avatars now stand in the party line-up.
+3. The leader presses **PLAY VS BOTS** (or **PLAY AS PARTY** on Home). Every
+   member moves to hero select; lock in your heroes.
+4. The whole party is seated on one team and bots take every other seat
+   (two friends: you + 3 bots against 5 bots). The draft waits up to a minute
+   for party members who are still picking.
+
+On a public lobby (`OMOBA_SERVER_ROLE=lobby`) the same party queues together:
+Play with bots allocates one arena with the party on one team, and Quick match
+never splits a party. Details: [docs/party.md](docs/party.md).
+
 Persistent profiles and match history require a configured career server and
 PostgreSQL. See [career setup](docs/match-progression.md),
 [Account API operations](account-api/README.md) and [RUNBOOK.md](RUNBOOK.md).
+
+## Build release packages
+
+`make release-check` shows what this computer can build; `make release-ci`
+builds macOS, Windows, Linux and Android on GitHub Actions into a draft
+release; `make release-testflight` uploads the iPhone build. See
+[docs/RELEASING.md](docs/RELEASING.md).
 
 ## Commands at a glance
 
@@ -198,6 +233,29 @@ We want collaboration to leave people with more possibilities: useful tools,
 shared knowledge, fair credit and worlds they can help shape. Contributors
 retain their copyright; permissions and asset provenance remain explicit.
 Read [our mission](MISSION.md) and the [contribution terms](CONTRIBUTING.md).
+
+## Support the project
+
+Open Moba and the Ekza protocol behind it are built in the open by a small
+independent team. **We need your support to make this game and protocol grow.**
+Donations fund public match servers, new heroes and art, the open Ekza SDK and
+builds for every device. See [omoba.io/donate](https://omoba.io/donate) for
+details.
+
+| Network | Address | QR |
+| --- | --- | --- |
+| Bitcoin (BTC) | `bc1q36szau9zfdjlhtthy4dn7ljvhjpx5meknwkeft` | <img src="docs/support/btc.png" alt="BTC donation address QR code" width="120"> |
+| USDT on BEP20 (BNB Smart Chain) | `0xE2c893ed006f039C420d9bF4920CBD7F4f2Ac35F` | <img src="docs/support/evm.png" alt="USDT BEP20 donation address QR code" width="120"> |
+| Ethereum (ETH) | `0xE2c893ed006f039C420d9bF4920CBD7F4f2Ac35F` | <img src="docs/support/evm.png" alt="ETH donation address QR code" width="120"> |
+| Solana (SOL) | `G4AiaDubjun6DKUjquuS9d3rNe6q3K4gnM9CwdzeGs7e` | <img src="docs/support/sol.png" alt="SOL donation address QR code" width="120"> |
+
+Send each asset only on the network listed next to it; tokens sent on the wrong
+network can be lost. Donations are voluntary gifts to development: they do not
+buy in-game items, tokens or any stake in the project, and they are separate
+from the in-game [Supporter](docs/supporter.md) cosmetics.
+
+Not ready to donate? Star the repository, [contribute](#create-with-us) or join
+the playtests on [Discord](https://discord.gg/DMhvaVpj7Q).
 
 ## Controls
 

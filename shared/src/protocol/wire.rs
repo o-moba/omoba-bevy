@@ -86,6 +86,10 @@ pub enum ClientPacket {
     Social {
         request: crate::social::SocialRequest,
     },
+    /// Party presence, invites and launch. Ignored by match workers.
+    Party {
+        command: crate::party::PartyCommand,
+    },
     Career {
         request: crate::career::CareerRequest,
     },
@@ -491,6 +495,11 @@ pub struct ProjectileState {
 // Outbound packets are serialized immediately, never queued as enum values.
 // Keep both envelopes inline to avoid an extra allocation per gameplay snapshot.
 pub enum ServerPacket {
+    Party {
+        server_epoch: u64,
+        sequence: u64,
+        party: crate::party::PartyView,
+    },
     Social {
         server_epoch: u64,
         match_id: u64,
