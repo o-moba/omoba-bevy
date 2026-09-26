@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone check fmt fmt-check lint check-no-qa test test-scripts test-postgres
+.PHONY: help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay showcase iphone-check iphone check fmt fmt-check lint check-no-qa test test-scripts test-postgres
 
 # ---------------------------------------------------------------------------
 # Match modes (TASK-22)
@@ -23,6 +23,7 @@
 GAME_SERVER_ADDR ?= 127.0.0.1:4000
 LOCAL_SERVER_ADDR ?= 127.0.0.1:4000
 IPHONE_OUTPUT ?= builds/iphone
+SHOWCASE_OUTPUT ?= builds/showcase
 
 # Bare make is discovery only; game and toolchain processes start explicitly.
 help: ## Show commands, common overrides and documentation
@@ -157,3 +158,9 @@ verify-task-12: ## Build server and run the live UDP QA matrix
 verify-gameplay: ## Build server and run headless gameplay/matchmaking checks
 	cargo build -p server
 	cargo test -p harness -- --test-threads=1
+
+# Staged native screenshots for the website, stores and README: desktop and
+# phone-preview scenes (hero select, lane fight, shop) from a local dev build.
+# Needs a GPU window for a few minutes. Scenes live in scripts/capture_showcase.py.
+showcase: ## Capture staged desktop/phone screenshots into SHOWCASE_OUTPUT (default builds/showcase)
+	python3 scripts/capture_showcase.py --build --output $(SHOWCASE_OUTPUT)

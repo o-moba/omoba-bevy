@@ -31,11 +31,12 @@ a character, a map, a sound, an idea or a pull request. Help shape what comes ne
 ## What you can play today
 
 This is a **native beta under active development**. The source version is
-[`0.21.0-rc.1`](Cargo.toml); see [features](docs/features.md) and
+[`0.23.0-rc.6`](Cargo.toml); see [features](docs/features.md) and
 [changes](CHANGELOG.md) for the detailed implementation history. A source version
 is not a promise of a published installer or a live public server.
 
-- **Team combat:** four classes, basic attacks and class abilities, lane minions,
+- **Team combat:** five classes (Warrior, Mage, Ranger, Cleric and the Warden
+  jungler), basic attacks and class abilities, lane minions,
   towers, jungle camps that respawn, items and match results.
 - **Bot practice:** native server bots fill empty seats; people can join and take
   over those seats. Practice is separate from ranked progression.
