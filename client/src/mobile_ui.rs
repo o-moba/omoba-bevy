@@ -46,6 +46,12 @@ impl Plugin for MobileUiPlugin {
                     .after(phone_menu_actions),
             )
             .add_systems(
+                Update,
+                close_server_entry_on_back
+                    .before(crate::pause_menu::PauseMenuSet::Close)
+                    .in_set(crate::input_context::InputContextSet::Modal),
+            )
+            .add_systems(
                 PostUpdate,
                 adapt_phone_layout.before(bevy::ui::UiSystems::Layout),
             );
@@ -297,6 +303,19 @@ fn phone_menu_actions(
             }
             _ => {}
         }
+    }
+}
+
+/// A non-keyboard back (a gamepad's East) closes the address entry before the
+/// pause menu under it reads the press. `Esc` still closes the entry through
+/// `address_keyboard`, unchanged.
+pub(crate) fn close_server_entry_on_back(
+    mut back: crate::ui::BackInput,
+    mut entry: ResMut<ServerEntry>,
+) {
+    if entry.open && back.just_pressed() && !back.pressed_on_keyboard() {
+        entry.open = false;
+        back.consume();
     }
 }
 
@@ -750,6 +769,48 @@ pub(crate) fn add_pause_layout_test_systems(app: &mut App) {
 mod tests {
     use super::*;
     use bevy::input::touch::{TouchInput, TouchPhase};
+
+    /// A gamepad back over the server entry closes the entry only; the pause
+    /// menu under it stays open until the next back.
+    #[test]
+    fn pad_back_closes_the_server_entry_before_the_pause_menu_under_it() {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<crate::ui::BackPress>()
+            .init_resource::<ServerEntry>()
+            .init_resource::<crate::pause_menu::PauseMenuState>()
+            .add_systems(
+                Update,
+                (
+                    close_server_entry_on_back,
+                    crate::pause_menu::toggle_pause_menu,
+                )
+                    .chain(),
+            );
+        app.world_mut()
+            .resource_mut::<crate::pause_menu::PauseMenuState>()
+            .open = true;
+        app.world_mut().resource_mut::<ServerEntry>().open = true;
+        let pad_back = |app: &mut App| {
+            app.world_mut()
+                .resource_mut::<crate::ui::BackPress>()
+                .press();
+            app.update();
+        };
+        pad_back(&mut app);
+        assert!(!app.world().resource::<ServerEntry>().open);
+        assert!(
+            app.world()
+                .resource::<crate::pause_menu::PauseMenuState>()
+                .open
+        );
+        pad_back(&mut app);
+        assert!(
+            !app.world()
+                .resource::<crate::pause_menu::PauseMenuState>()
+                .open
+        );
+    }
 
     /// The phone panels (help, shop, pause sections, career body) scroll
     /// through `ui::scroll` with the `mobile_ui` feel: window pixels, the
