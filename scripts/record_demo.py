@@ -157,14 +157,22 @@ def caption_filters(events, start, end, pace):
     return filters
 
 
-def encode_clip(record, raw, output):
-    """Real-time clip from timestamped frames, fitted into 1280x720, with captions."""
+def clip_span(record):
+    """Recorder-clock start/end of the kept part of a clip (from its first caption)."""
+    frames, events = record["frames"], record["events"]
+    start = max(events[0]["seconds"] - 0.4, frames[0]["seconds"]) if events else frames[0]["seconds"]
+    return start, frames[-1]["seconds"] + 1.0 / FPS
+
+
+def encode_clip(record, raw, output, captions=True):
+    """Real-time clip from timestamped frames, fitted into 1280x720. With
+    `captions`, the profile label and event captions are burned in; without,
+    only the timelapse badge is (the trailer adds its own titles)."""
     frames = record["frames"]
     events = record["events"]
     pace = record.get("pace", [])
-    start = max(events[0]["seconds"] - 0.4, frames[0]["seconds"]) if events else frames[0]["seconds"]
+    start, end = clip_span(record)
     kept = [row for row in frames if row["seconds"] >= start]
-    end = kept[-1]["seconds"] + 1.0 / FPS
     listing = raw / "frames.ffconcat"
     lines = ["ffconcat version 1.0"]
     for current, following in zip(kept, kept[1:] + [None]):
@@ -177,10 +185,13 @@ def encode_clip(record, raw, output):
     label = escape(record["label"])
     chain = [f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease",
              f"pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=0x05060c",
-             f"fps={FPS}", "format=yuv420p",
-             f"drawtext=fontfile='{font}':text='{label}':fontsize=18:fontcolor=white@0.75:"
-             f"x=24:y=h-th-20:box=1:boxcolor=black@0.45:boxborderw=8"]
-    chain += caption_filters(events, start, end, pace)
+             f"fps={FPS}", "format=yuv420p"]
+    if captions:
+        chain.append(f"drawtext=fontfile='{font}':text='{label}':fontsize=18:fontcolor=white@0.75:"
+                     f"x=24:y=h-th-20:box=1:boxcolor=black@0.45:boxborderw=8")
+        chain += caption_filters(events, start, end, pace)
+    else:
+        chain += [f for f in caption_filters([], start, end, pace)]
     subprocess.run([FFMPEG, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(listing),
                     "-vf", ",".join(chain), "-r", str(FPS), "-c:v", "libx264", "-preset", "medium",
                     "-crf", "20", "-pix_fmt", "yuv420p", str(output)], check=True, cwd=raw)
