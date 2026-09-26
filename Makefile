@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay showcase iphone-check iphone check fmt fmt-check lint check-no-qa test test-scripts test-postgres
+.PHONY: help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay showcase demo-video iphone-check iphone check fmt fmt-check lint check-no-qa test test-scripts test-postgres
 
 # ---------------------------------------------------------------------------
 # Match modes (TASK-22)
@@ -24,6 +24,7 @@ GAME_SERVER_ADDR ?= 127.0.0.1:4000
 LOCAL_SERVER_ADDR ?= 127.0.0.1:4000
 IPHONE_OUTPUT ?= builds/iphone
 SHOWCASE_OUTPUT ?= builds/showcase
+DEMO_OUTPUT ?= builds/demo
 
 # Bare make is discovery only; game and toolchain processes start explicitly.
 help: ## Show commands, common overrides and documentation
@@ -164,3 +165,9 @@ verify-gameplay: ## Build server and run headless gameplay/matchmaking checks
 # Needs a GPU window for a few minutes. Scenes live in scripts/capture_showcase.py.
 showcase: ## Capture staged desktop/phone screenshots into SHOWCASE_OUTPUT (default builds/showcase)
 	python3 scripts/capture_showcase.py --build --output $(SHOWCASE_OUTPUT)
+
+# Short gameplay demo video (desktop lane fight with targeting, Warden jungle,
+# phone controls) recorded from live practice matches; needs ffmpeg with
+# drawtext (brew install ffmpeg-full). Clips live in scripts/record_demo.py.
+demo-video: ## Record the gameplay demo video into DEMO_OUTPUT (default builds/demo)
+	python3 scripts/record_demo.py --build --output $(DEMO_OUTPUT)
