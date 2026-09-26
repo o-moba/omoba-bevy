@@ -6,6 +6,25 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Android: `make android` / `make android-check` build targets
+- Wired the existing `mobile/android/build.py` local-debug-APK packager into the
+  `Makefile` (`android-check`, `android`) so it matches the iPhone workflow
+  (`iphone-check`, `iphone`). No packaging behaviour changed — the script still
+  needs the Rust `aarch64-linux-android` target, an Android SDK
+  (`platforms;android-35`, `build-tools;35.0.0`) and NDK r27+, picked up from
+  `ANDROID_HOME`/`ANDROID_SDK_ROOT` and `ANDROID_NDK_HOME`.
+- `make android ANDROID_SERVER=host:port` forwards `--server` so a build can
+  carry a real LAN server address for testers instead of typing it in-game.
+- Documented the flow in `README.md` and `mobile/README.md` (Android section
+  now leads with the `make` targets; the direct `python3 mobile/android/build.py
+  --sdk/--ndk` invocation remains for custom paths).
+- Added `--universal` to `mobile/android/build.py` (`make android-universal`):
+  builds `armeabi-v7a` and `x86_64` alongside the default `arm64-v8a` and
+  packages all three into one APK, for the rare case a tester's device is
+  confirmed non-arm64. `make android`'s default output and filename are
+  unchanged. Needs `rustup target add armv7-linux-androideabi
+  x86_64-linux-android` once.
+
 ### Android: launch crash and missing launcher icon
 - **Fix (Android packaging):** the debug APK crashed on launch with `dlopen failed: cannot locate symbol "__cxa_pure_virtual"`. `oboe-sys` (audio, via `cpal`) links `libc++_static`, but current NDKs ship the C++ ABI runtime (`__cxa_*`, `operator new/delete`, RTTI) in a separate `libc++abi.a`, so `libclient.so` linked with 27 unresolved C++ symbols. `mobile/android/build.py` now links `-lc++abi` and passes `-Wl,--no-undefined`, so an unresolved symbol fails the build instead of the device launch.
 - **Fix (Android packaging):** the app installed without an icon because the manifest had no `android:icon`. Launcher icons (`mobile/android/res/mipmap-*/ic_launcher.png`, generated from the iOS app icon) are compiled with `aapt2 compile` and linked into the APK.
