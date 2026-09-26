@@ -611,7 +611,7 @@ fn update_inventory_icons(
 }
 
 fn toggle_shop(
-    mut keys: ResMut<ButtonInput<KeyCode>>,
+    mut back: crate::ui::BackInput,
     game: Res<GameStateSnapshot>,
     session: Res<ClientSession>,
     help: Res<HelpOverlayVisible>,
@@ -647,10 +647,10 @@ fn toggle_shop(
         shop.open = false;
         return;
     }
-    if shop.open && keys.just_pressed(KeyCode::Escape) {
+    if shop.open && back.just_pressed() {
         shop.open = false;
-        keys.clear_just_pressed(KeyCode::Escape);
-    } else if keys.just_pressed(KeyCode::KeyP) || toggle {
+        back.consume();
+    } else if back.keys().just_pressed(KeyCode::KeyP) || toggle {
         shop.open = !shop.open;
     } else if close {
         shop.open = false;

@@ -370,7 +370,7 @@ fn setup(mut commands: Commands) {
         });
 }
 fn actions(
-    mut keys: ResMut<ButtonInput<KeyCode>>,
+    mut back: crate::ui::BackInput,
     session: Res<ClientSession>,
     game: Res<GameStateSnapshot>,
     mut state: ResMut<ScoreboardState>,
@@ -406,13 +406,13 @@ fn actions(
         state.open = false;
     }
     let can_open = allowed && !other_modal;
-    if state.open && keys.just_pressed(KeyCode::Escape) {
+    if state.open && back.just_pressed() {
         state.open = false;
-        keys.clear_just_pressed(KeyCode::Escape);
+        back.consume();
     }
-    if can_open && keys.just_pressed(KeyCode::Tab) {
+    if can_open && back.keys().just_pressed(KeyCode::Tab) {
         state.open = !state.open;
-        keys.clear_just_pressed(KeyCode::Tab);
+        back.keys_mut().clear_just_pressed(KeyCode::Tab);
     }
     for Activated { action, .. } in activated.read() {
         match action {

@@ -186,7 +186,7 @@ fn setup_help_overlay(mut commands: Commands, platform: Option<Res<crate::ui::Ui
 }
 
 fn toggle_help_overlay(
-    mut keyboard: ResMut<ButtonInput<KeyCode>>,
+    mut back: crate::ui::BackInput,
     game: Res<GameStateSnapshot>,
     mut visible: ResMut<HelpOverlayVisible>,
     career: Option<Res<crate::career::CareerClient>>,
@@ -203,12 +203,12 @@ fn toggle_help_overlay(
     if visible.0
         && (matches!(game.state, GameState::Running)
             || screen.as_ref().is_some_and(|screen| screen.get().is_menu()))
-        && keyboard.just_pressed(KeyCode::Escape)
+        && back.just_pressed()
     {
         visible.0 = false;
         // Consume only this dismissal so the same key does not open Pause.
-        keyboard.clear_just_pressed(KeyCode::Escape);
-    } else if keyboard.just_pressed(HELP_TOGGLE_KEY) {
+        back.consume();
+    } else if back.keys().just_pressed(HELP_TOGGLE_KEY) {
         visible.0 = !visible.0;
     }
 }

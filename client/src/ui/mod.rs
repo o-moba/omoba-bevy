@@ -4,6 +4,7 @@
 use bevy::prelude::*;
 
 pub(crate) mod action;
+pub(crate) mod back;
 pub(crate) mod gesture;
 pub(crate) mod modal;
 pub(crate) mod scroll;
@@ -12,6 +13,7 @@ pub(crate) mod theme;
 pub(crate) mod widgets;
 
 pub(crate) use action::{Activated, UiAction, UiActionAppExt};
+pub(crate) use back::{BackInput, BackPress};
 pub(crate) use gesture::{GestureEpoch, Pressable, SyntheticPress};
 pub(crate) use modal::{ModalAppExt, ModalId, ModalRoot, ModalStack};
 pub(crate) use scroll::ScrollArea;
@@ -50,7 +52,9 @@ impl Plugin for UiKitPlugin {
             app.insert_resource(UiPlatform(crate::platform::ui_profile()));
         }
         app.init_resource::<GestureEpoch>()
+            .init_resource::<BackPress>()
             .add_message::<SyntheticPress>()
+            .add_systems(First, back::clear_back_press)
             .configure_sets(
                 Update,
                 (UiSet::Gesture, UiSet::Scroll, UiSet::Dispatch, UiSet::Paint)
