@@ -164,6 +164,11 @@ fn prepare_help_buttons(
 }
 
 fn watermark(mut commands: Commands) {
+    // Showcase captures record the offline-shell provenance in their manifest
+    // instead of burning it into the published frame.
+    if std::env::var("OMOBA_QA_CLEAN_FRAME").is_ok_and(|value| value == "1") {
+        return;
+    }
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,

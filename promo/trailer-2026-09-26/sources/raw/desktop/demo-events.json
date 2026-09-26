@@ -1,0 +1,64 @@
+{
+  "class": "mage",
+  "elapsed_seconds": 82.674409334,
+  "events": [
+    {
+      "seconds": 0.176320667,
+      "subtitle": "Warrior · Mage · Ranger · Cleric · Warden",
+      "title": "Five classes"
+    },
+    {
+      "seconds": 8.034262334,
+      "subtitle": "Gold buys permanent items at your base",
+      "title": "Sanctuary shop"
+    },
+    {
+      "seconds": 13.667330667,
+      "subtitle": "Move orders path around the map",
+      "title": "Push the lane"
+    },
+    {
+      "seconds": 33.20994525,
+      "subtitle": "Click locks an enemy · right-click attacks",
+      "title": "Targeting"
+    },
+    {
+      "seconds": 61.904632,
+      "subtitle": "Q W E R on the locked target · level up to unlock",
+      "title": "Abilities"
+    }
+  ],
+  "method": "scripted production inputs against a live server; recorder readbacks",
+  "pace": [
+    {
+      "seconds": 13.674558667,
+      "speed": 4.0
+    },
+    {
+      "seconds": 33.202127834,
+      "speed": 1.0
+    },
+    {
+      "seconds": 44.469220125,
+      "speed": 4.0
+    },
+    {
+      "seconds": 59.147005334,
+      "speed": 1.0
+    },
+    {
+      "seconds": 68.480395375,
+      "speed": 4.0
+    },
+    {
+      "seconds": 73.217035417,
+      "speed": 1.0
+    }
+  ],
+  "pixels": [
+    1280,
+    720
+  ],
+  "script": "desktop",
+  "version": "0.23.0-rc.6"
+}

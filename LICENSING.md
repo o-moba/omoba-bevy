@@ -13,6 +13,7 @@ Open Moba is an open-source MOBA and reusable engine project. You may study, mod
 | Sprite, presentation2D and world2D art already dedicated to CC0 | Their existing directory `LICENSE.md` declarations; CC0 is preserved |
 | Imported models, animations, font and other third-party works | Their own notices; see [ATTRIBUTION.md](ATTRIBUTION.md) and the relevant manifests |
 | Dependencies, the separately maintained Ekza SDK, runtime downloads and user-supplied avatars | Their own licenses/permissions; this repository does not grant rights on their authors' behalf |
+| Promotional media in `promo/` (trailer, captures, posters) | Footage shows the game and its assets under their own terms above; the ElevenLabs-generated music is not openly licensed. No additional license is granted; see each folder's README |
 | Names and logos used as identifiers of the official project | Separate [brand policy](TRADEMARKS.md); no automatic trademark license |
 
 Source/configuration/metadata files in art directories remain MPL-2.0; the visual asset grant does not change their source license. Comments, docstrings and code examples inside source files use the license of their containing source file. Asset-specific notices take precedence over the defaults above. Included third-party excerpts, license texts, standards and notices retain their existing terms. Do not overwrite a specific license notice with a directory default.

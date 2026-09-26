@@ -1,0 +1,197 @@
+{
+  "schema_version": 1,
+  "generator": "scripts/record_demo.py",
+  "recorded_on": "2026-09-26",
+  "source": {
+    "commit": "d63ed4b215b72c74459a46e319716ee0c2d89a02",
+    "dirty": true,
+    "version": "0.23.0-rc.6"
+  },
+  "binaries": {
+    "client": {
+      "path": "target/iphone-cargo/debug/client",
+      "sha256": "1f2d07098ecfd8a0223173732f4a5c7b39d6acf277cee669c409e5baa2497321"
+    },
+    "server": {
+      "path": "target/iphone-cargo/debug/server",
+      "sha256": "5e1eff7f9a2172e4297d4d0e40274ec983cde99e451931666b7da6e856213065"
+    }
+  },
+  "method": "scripted production inputs against a live practice server; timestamped window readbacks; captions added by ffmpeg",
+  "clips": [
+    {
+      "clip": "desktop",
+      "script": "desktop",
+      "hero": "mage",
+      "touch": false,
+      "label": "Desktop",
+      "size": [
+        1280,
+        720
+      ],
+      "client_exit_code": 0,
+      "events": [
+        {
+          "seconds": 0.176320667,
+          "subtitle": "Warrior · Mage · Ranger · Cleric · Warden",
+          "title": "Five classes"
+        },
+        {
+          "seconds": 8.034262334,
+          "subtitle": "Gold buys permanent items at your base",
+          "title": "Sanctuary shop"
+        },
+        {
+          "seconds": 13.667330667,
+          "subtitle": "Move orders path around the map",
+          "title": "Push the lane"
+        },
+        {
+          "seconds": 33.20994525,
+          "subtitle": "Click locks an enemy · right-click attacks",
+          "title": "Targeting"
+        },
+        {
+          "seconds": 61.904632,
+          "subtitle": "Q W E R on the locked target · level up to unlock",
+          "title": "Abilities"
+        }
+      ],
+      "pace": [
+        {
+          "seconds": 13.674558667,
+          "speed": 4.0
+        },
+        {
+          "seconds": 33.202127834,
+          "speed": 1.0
+        },
+        {
+          "seconds": 44.469220125,
+          "speed": 4.0
+        },
+        {
+          "seconds": 59.147005334,
+          "speed": 1.0
+        },
+        {
+          "seconds": 68.480395375,
+          "speed": 4.0
+        },
+        {
+          "seconds": 73.217035417,
+          "speed": 1.0
+        }
+      ],
+      "pass": true,
+      "attempt": 1,
+      "encoded_seconds": 53.17035560283333,
+      "frame_count": 2466
+    },
+    {
+      "clip": "jungle",
+      "script": "jungle",
+      "hero": "warden",
+      "touch": false,
+      "label": "Desktop · Warden",
+      "size": [
+        1280,
+        720
+      ],
+      "client_exit_code": 0,
+      "events": [
+        {
+          "seconds": 1.482940708,
+          "subtitle": "Forest Tracker: faster camps, more gold",
+          "title": "Warden jungler"
+        },
+        {
+          "seconds": 5.454701625,
+          "subtitle": "Neutral creatures fight back and respawn",
+          "title": "Jungle camps"
+        }
+      ],
+      "pace": [
+        {
+          "seconds": 1.493178208,
+          "speed": 4.0
+        },
+        {
+          "seconds": 5.446154792,
+          "speed": 1.0
+        },
+        {
+          "seconds": 7.165110792,
+          "speed": 4.0
+        },
+        {
+          "seconds": 8.629833125,
+          "speed": 1.0
+        },
+        {
+          "seconds": 17.249181042,
+          "speed": 4.0
+        },
+        {
+          "seconds": 34.051982625,
+          "speed": 1.0
+        },
+        {
+          "seconds": 39.230022625,
+          "speed": 4.0
+        },
+        {
+          "seconds": 57.302373875,
+          "speed": 1.0
+        }
+      ],
+      "pass": true,
+      "attempt": 1,
+      "encoded_seconds": 30.54918727083333,
+      "frame_count": 1845
+    },
+    {
+      "clip": "phone",
+      "script": "phone",
+      "hero": "ranger",
+      "touch": true,
+      "label": "Phone interface preview (rendered on desktop)",
+      "size": [
+        844,
+        390
+      ],
+      "client_exit_code": 0,
+      "events": [
+        {
+          "seconds": 1.5509579169999999,
+          "subtitle": "The left thumb steers the joystick",
+          "title": "Phone controls"
+        },
+        {
+          "seconds": 19.930019792,
+          "subtitle": "ATK and ability buttons around the right thumb",
+          "title": "Touch combat"
+        }
+      ],
+      "pace": [
+        {
+          "seconds": 1.559971292,
+          "speed": 4.0
+        },
+        {
+          "seconds": 19.921153,
+          "speed": 1.0
+        }
+      ],
+      "pass": true,
+      "attempt": 1,
+      "encoded_seconds": 25.043780844333327,
+      "frame_count": 1188
+    }
+  ],
+  "video": {
+    "file": "omoba-demo.mp4",
+    "bytes": 22947148,
+    "sha256": "c2cbe43fd5c2f605d5c4d5dec6b2f7c24cbe54a20a28ff59ef623dde92f27d8d"
+  }
+}
