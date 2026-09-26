@@ -6,6 +6,11 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Android: launch crash and missing launcher icon
+- **Fix (Android packaging):** the debug APK crashed on launch with `dlopen failed: cannot locate symbol "__cxa_pure_virtual"`. `oboe-sys` (audio, via `cpal`) links `libc++_static`, but current NDKs ship the C++ ABI runtime (`__cxa_*`, `operator new/delete`, RTTI) in a separate `libc++abi.a`, so `libclient.so` linked with 27 unresolved C++ symbols. `mobile/android/build.py` now links `-lc++abi` and passes `-Wl,--no-undefined`, so an unresolved symbol fails the build instead of the device launch.
+- **Fix (Android packaging):** the app installed without an icon because the manifest had no `android:icon`. Launcher icons (`mobile/android/res/mipmap-*/ic_launcher.png`, generated from the iOS app icon) are compiled with `aapt2 compile` and linked into the APK.
+- No runtime code change. Verified with `llvm-readelf` (no unresolved C++ symbols; NEEDED only system libraries) and `aapt2 dump badging`; Python packager tests pass. Launch on a physical device still needs confirmation.
+
 ### Showcase screenshots and demo video
 - New `scripts/capture_showcase.py` (`make showcase`) stages and captures website/store screenshots from a local dev build: desktop and phone-preview scenes for the mid-lane fight, the sanctuary shop and hero selection with all five classes, plus a 1600×1000 banner. Scenes (profile, viewport, class, lane point, hold time, kept frames) are declared in one table; the output has the curated PNGs, `showcase-manifest.json` (commit, version, binary hashes, scene parameters, image hashes) and every raw harness frame and log. Scenes retry once, because a live match can kill or body-block the hero.
 - **QA (client):** `OMOBA_BETA_UI_SCENE_LANE=<top|mid|bot>:<0..1>` stages the beta-ui gameplay shot on a lane: after the help overlay the hero gets an ordinary `MovementTarget` order to that point (from its own base) and the capture waits for arrival and `OMOBA_BETA_UI_SCENE_HOLD` seconds of live match; scene runs stop after the gameplay frame. `OMOBA_BETA_UI_CLASS` accepts every class, including `warden`. `OMOBA_QA_CLEAN_FRAME=1` leaves the front-end QA watermark out; the showcase manifest records the offline-shell provenance instead.
