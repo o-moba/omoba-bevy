@@ -103,6 +103,7 @@ impl Ownership {
     }
 
     /// The device sampled last (for keeping the same desktop pad).
+    #[cfg(not(target_os = "ios"))]
     pub(crate) fn identity(&self) -> Option<u64> {
         self.last.map(|pad| pad.identity)
     }

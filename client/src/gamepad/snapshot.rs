@@ -111,9 +111,12 @@ pub(crate) fn clamp_axis(value: f32) -> f32 {
     }
 }
 
+#[cfg(any(test, not(target_os = "ios")))]
 const SONY_VENDOR_ID: u16 = 0x054c;
 
-/// PlayStation controllers by USB vendor id or by the OS-reported name.
+/// PlayStation controllers by USB vendor id or by the OS-reported name
+/// (desktop; the iOS bridge reports the family itself).
+#[cfg(any(test, not(target_os = "ios")))]
 pub(crate) fn is_playstation(vendor: Option<u16>, name: &str) -> bool {
     let name = name.to_lowercase();
     vendor == Some(SONY_VENDOR_ID)
