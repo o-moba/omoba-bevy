@@ -1,0 +1,3 @@
+# Shows the "Sponsor" button on GitHub. Wallets and QR codes live on the page
+# below and in README.md#support-the-project.
+custom: ["https://omoba.io/donate"]
