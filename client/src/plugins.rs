@@ -38,6 +38,7 @@ use crate::{
     game_audio::GameAudioPlugin,
     game_state::GameStateUiPlugin,
     game_vfx::GameVfxPlugin,
+    gamepad::GamepadPlugin,
     help_overlay::HelpOverlayPlugin,
     input_context::InputContextPlugin,
     jungle::JungleVisualsPlugin,
@@ -96,6 +97,7 @@ impl PluginGroup for GameplayPlugins {
             .add(InputContextPlugin)
             .add(PlayerPlugin)
             .add(CombatPlugin)
+            .add(GamepadPlugin)
     }
 }
 

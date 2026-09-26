@@ -90,7 +90,7 @@ impl ModalStack {
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ModalRoot(pub ModalId);
 
-/// Where the registry syncs: `Early` before the kit's gesture recognizer
+/// Where the registry syncs: `Early` before the kit's focus and gesture recognizer
 /// (inside `InputContextSet::Modal`), `Late` at the start of
 /// `InputContextSet::Resolve`, after every modal toggled and before the
 /// gameplay input context is resolved.
@@ -115,6 +115,7 @@ impl ModalAppExt for App {
                 (
                     ModalSet::Early
                         .in_set(crate::input_context::InputContextSet::Modal)
+                        .before(super::UiSet::Focus)
                         .before(super::UiSet::Gesture),
                     ModalSet::Late.in_set(crate::input_context::InputContextSet::Resolve),
                 ),

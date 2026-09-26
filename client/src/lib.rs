@@ -18,6 +18,7 @@ mod frontend;
 mod game_audio;
 mod game_state;
 mod game_vfx;
+mod gamepad;
 mod help_overlay;
 mod humanoid;
 mod input_bindings;

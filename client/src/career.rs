@@ -832,13 +832,10 @@ pub(crate) fn clipboard_text() -> Result<String, &'static str> {
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     Err("Use your device keyboard's paste action, or type the code.")
 }
-fn dismiss_with_escape(
-    mut career: ResMut<CareerClient>,
-    mut keyboard: ResMut<ButtonInput<KeyCode>>,
-) {
-    if career.modal_open() && keyboard.just_pressed(KeyCode::Escape) {
+fn dismiss_with_escape(mut career: ResMut<CareerClient>, mut back: crate::ui::BackInput) {
+    if career.modal_open() && back.just_pressed() {
         career.close();
-        keyboard.clear_just_pressed(KeyCode::Escape);
+        back.consume();
     }
 }
 fn nickname_input(

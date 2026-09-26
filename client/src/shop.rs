@@ -611,7 +611,7 @@ fn update_inventory_icons(
 }
 
 fn toggle_shop(
-    mut keys: ResMut<ButtonInput<KeyCode>>,
+    mut back: crate::ui::BackInput,
     game: Res<GameStateSnapshot>,
     session: Res<ClientSession>,
     help: Res<HelpOverlayVisible>,
@@ -623,9 +623,15 @@ fn toggle_shop(
     career: Option<Res<crate::career::CareerClient>>,
     social: Option<Res<crate::social::SocialClient>>,
     scoreboard: Option<Res<crate::edge_hud::ScoreboardState>>,
+    gamepad: Option<Res<crate::gamepad::GamepadControls>>,
 ) {
     // Every press is read, so one made while the shop is gated cannot fire later.
     let (mut toggle, mut close) = (false, false);
+    // A controller's D-pad right is the shop button (it only reaches here in
+    // play; inside the shop the D-pad navigates and East closes it).
+    toggle |= gamepad
+        .as_ref()
+        .is_some_and(|pad| pad.active && pad.shop_pressed);
     for Activated { action, .. } in activated.read() {
         match action {
             ShopAction::Toggle => toggle = true,
@@ -647,10 +653,10 @@ fn toggle_shop(
         shop.open = false;
         return;
     }
-    if shop.open && keys.just_pressed(KeyCode::Escape) {
+    if shop.open && back.just_pressed() {
         shop.open = false;
-        keys.clear_just_pressed(KeyCode::Escape);
-    } else if keys.just_pressed(KeyCode::KeyP) || toggle {
+        back.consume();
+    } else if back.keys().just_pressed(KeyCode::KeyP) || toggle {
         shop.open = !shop.open;
     } else if close {
         shop.open = false;
@@ -1161,6 +1167,40 @@ mod tests {
                     .in_set(InputContextSet::Actions),
             );
         app
+    }
+
+    #[test]
+    fn controller_dpad_right_opens_the_shop_and_east_closes_it_without_pause() {
+        let mut app = interaction_app();
+        app.init_resource::<crate::ui::BackPress>()
+            .add_systems(Last, crate::ui::back::clear_back_press);
+        let mut pad = crate::gamepad::GamepadControls::default();
+        pad.active = true;
+        pad.shop_pressed = true;
+        app.insert_resource(pad);
+        app.update();
+        assert!(app.world().resource::<ShopState>().open);
+        app.world_mut()
+            .resource_mut::<crate::gamepad::GamepadControls>()
+            .shop_pressed = false;
+        app.update();
+        assert!(app.world().resource::<ShopState>().open);
+        app.world_mut()
+            .resource_mut::<crate::ui::BackPress>()
+            .press();
+        app.update();
+        assert!(!app.world().resource::<ShopState>().open);
+        assert!(!app.world().resource::<PauseMenuState>().open);
+        // An idle (not owning) controller cannot open it.
+        {
+            let mut pad = app
+                .world_mut()
+                .resource_mut::<crate::gamepad::GamepadControls>();
+            pad.active = false;
+            pad.shop_pressed = true;
+        }
+        app.update();
+        assert!(!app.world().resource::<ShopState>().open);
     }
 
     #[test]

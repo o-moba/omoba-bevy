@@ -6,6 +6,18 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+Workspace version 0.25.0.
+
+### Controller support (desktop and iPhone)
+- **Client:** play with a gamepad. Left stick moves the hero camera-relative with analog speed (radial dead zone 0.18; NaN and out-of-range readings are centred), right stick aims, hold R2/RT to attack (80 ms grace for the ultimate chord, shared cooldown, never chases), hold L1/R1/L2 (LB/RB/LT) to aim a skill and release to cast, L2+R2 (LT+RT) for the ultimate in either order (latched until both triggers are up, so it never also casts skill 3 or attacks), Triangle/Y + skill to upgrade (never casts), R3 to lock and unlock a target (an invalidated lock cancels instead of retargeting). Aim assist keeps a candidate within 12 px of the best. Everything goes through the existing paths: `PendingCast`, `BasicAttackState`, `NetworkCommand::UpgradeSkill`. No protocol or server change.
+- **Ownership:** a connected idle controller never overrides mouse, keyboard or touch; a new press or a deliberate stick push takes over, any key, click or touch hands back. A modal, focus loss, disconnect, device change, death, round change and Circle/B cancel held and queued controller actions and movement, keep cooldowns and wait for neutral input.
+- **Menus:** new generic UI kit focus layer `ui::focus` (`UiFocus`, `FocusNav`): D-pad or left stick moves a gold ring over the kit buttons of the front-most modal (or the screen), Cross/A activates through `SyntheticPress` and the modal gate, lists scroll the focused button into view, a new page starts on its first button and needs a fresh press. Options/Start opens the pause menu through the `≡` button's path and closes it on top; D-pad right opens the shop (`ShopAction::Toggle`), D-pad left the reaction wheel. The touch HUD hides while a controller owns input and returns on touch; the skill bar, aim label and a legend strip use PlayStation or generic button names.
+- **Back:** one back signal `ui::back::BackInput` (Esc plus a one-frame `BackPress`): social, help, supporter, career, scoreboard, shop, the lobby server field, the Combat Test panel and the pause menu read it with unchanged order and behaviour. A controller's East is a back press; it closes the pause menu but never opens it.
+- **Movement refactor:** the analog step of `move_player_mobile` is `move_player_analog` with an `analog_source` shared by the thumb stick and the controller.
+- **iOS:** `mobile/ios/OmobaGameController.swift` (value-only main-thread poll, per-connection identity, no retained pointers) is compiled by `client/build.rs` and links `GameController.framework`; `Info.plist` declares optional ExtendedGamepad support. Android reads no controllers (no gilrs backend there).
+- Docs: `docs/controller.md`, `docs/ui-kit.md` (Focus, Back), `docs/features.md`, `docs/progress/2026-09-27-gamepad-v2.md`. **Physical controller and iPhone playtests are not done yet** (hardware acceptance unverified).
+- Tests: client lib 622 → 660 (600 → 638 without `qa`): dead zone, gestures and chords, ownership and handoff, safety cancels, combat intents on the real resolvers, analog movement, focus navigation and `BackInput`. iOS packaging tests +1; the native Swift bridge harness passes on macOS.
+
 ### Android: `make android` / `make android-check` build targets
 - Wired the existing `mobile/android/build.py` local-debug-APK packager into the
   `Makefile` (`android-check`, `android`) so it matches the iPhone workflow

@@ -540,7 +540,7 @@ fn input(
     mut social: ResMut<SocialClient>,
     world: SocialWorld,
     time: Res<Time>,
-    mut keys: ResMut<ButtonInput<KeyCode>>,
+    mut back: crate::ui::BackInput,
     mut touches: MessageReader<TouchInput>,
     ui_hits: Query<
         (
@@ -552,7 +552,12 @@ fn input(
         With<Button>,
     >,
     mut out: MessageWriter<NetworkCommand>,
+    gamepad: Option<Res<crate::gamepad::GamepadControls>>,
 ) {
+    // A controller's D-pad left opens the reaction wheel like T.
+    let pad_reactions = gamepad
+        .as_ref()
+        .is_some_and(|pad| pad.active && pad.reaction_pressed);
     if let Some(visuals) = world.visuals.as_ref() {
         social.wheel_ids.clone_from(&visuals.wheel);
     }
@@ -630,15 +635,18 @@ fn input(
     if hero.is_none() {
         social.wheel.cancel();
     }
-    if keys.just_pressed(KeyCode::Escape) && social.blocks_gameplay() {
+    if back.just_pressed() && social.blocks_gameplay() {
         social.close();
-        keys.clear_just_pressed(KeyCode::Escape);
-    } else if keys.just_pressed(KeyCode::Enter)
+        back.consume();
+    } else if back.keys().just_pressed(KeyCode::Enter)
         && !social.chat_open
         && social.wheel.center.is_none()
     {
         social.open_chat();
-    } else if keys.just_pressed(KeyCode::KeyT) && !social.chat_open && hero.is_some() {
+    } else if (back.keys().just_pressed(KeyCode::KeyT) || pad_reactions)
+        && !social.chat_open
+        && hero.is_some()
+    {
         social.wheel.cancel();
         social
             .wheel
@@ -661,7 +669,7 @@ fn input(
         .into_iter()
         .enumerate()
         {
-            if keys.just_pressed(key) {
+            if back.keys().just_pressed(key) {
                 social.send_reaction(index, &mut out);
                 social.close();
                 break;

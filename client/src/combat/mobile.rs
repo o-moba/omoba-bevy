@@ -167,7 +167,7 @@ pub(super) fn mobile_cast_system(
     queue_cast_request(intent.slot, class, &target, &mut pending, &mut feedback);
 }
 
-pub(super) fn mobile_assisted_target(
+pub(crate) fn mobile_assisted_target(
     position: Vec3,
     team: Team,
     range: f32,

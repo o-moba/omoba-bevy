@@ -256,9 +256,13 @@ fn update_camera(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mouse_input: Res<ButtonInput<MouseButton>>,
     context: Res<GameplayInputContext>,
-    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    sticks: (
+        Option<Res<crate::mobile_controls::MobileControls>>,
+        Option<Res<crate::gamepad::GamepadControls>>,
+    ),
     sandbox: Option<Res<crate::sandbox::SandboxClient>>,
 ) {
+    let (mobile, gamepad) = sticks;
     let Ok((camera, mut projection, mut camera_transform)) = camera_query.single_mut() else {
         return;
     };
@@ -292,13 +296,17 @@ fn update_camera(
         }
         return;
     }
-    if mobile.as_ref().is_some_and(|mobile| mobile.enabled) {
+    // Stick movement is camera-relative, so a phone or a controller that owns
+    // input keeps the camera locked on the hero with no orbit.
+    let controller = gamepad.as_ref().filter(|pad| pad.active);
+    if mobile.as_ref().is_some_and(|mobile| mobile.enabled) || controller.is_some() {
         cam_state.locked = true;
         cam_state.orbit_yaw = 0.0;
         cam_state.orbit_height = 1.0;
         if mobile
             .as_ref()
             .is_some_and(|mobile| mobile.movement.length_squared() > 0.001)
+            || controller.is_some_and(|pad| pad.movement.length_squared() > 0.001)
         {
             if let Some(nav) = minimap_nav.as_deref_mut() {
                 nav.focus_target = None;

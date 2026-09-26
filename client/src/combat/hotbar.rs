@@ -45,6 +45,13 @@ pub(super) struct SkillRankLabel {
     pub(super) slot: usize,
 }
 
+/// The binding caption in a hotbar slot's corner (Q/W/E/R, or the
+/// controller's buttons while a controller owns input).
+#[derive(Component)]
+pub(super) struct SkillKeyLabel {
+    slot: usize,
+}
+
 /// Ability-name caption on a hotbar slot; follows the selected class kit.
 #[derive(Component)]
 pub(super) struct SkillNameLabel {
@@ -187,6 +194,7 @@ pub(super) fn setup_combat_ui(mut commands: Commands, asset_server: Option<Res<A
                                 ..default()
                             },
                             TextColor::WHITE,
+                            SkillKeyLabel { slot: i },
                         ));
                         slot.spawn((
                             Text::new(""),
@@ -350,6 +358,29 @@ pub(super) fn update_skill_bar_system(
     }
 }
 
+/// Shows the controller's skill bindings (PS or generic names) while it owns
+/// input and the keyboard keys otherwise.
+pub(super) fn sync_skill_key_labels(
+    gamepad: Option<Res<crate::gamepad::GamepadControls>>,
+    mut labels: Query<(&SkillKeyLabel, &mut Text)>,
+) {
+    let keys = match gamepad.as_ref().filter(|pad| pad.active) {
+        Some(pad) => crate::gamepad::legend::skill_labels(pad.playstation),
+        None => crate::input_bindings::SKILL_SLOT_KEY_LABELS,
+    };
+    for (label, mut text) in &mut labels {
+        if text.0 != keys[label.slot] {
+            text.0 = keys[label.slot].to_owned();
+        }
+    }
+}
+
+/// A skill point can be spent on `slot` (0..4): the one rule the arrow, the
+/// upgrade key and a controller's North + skill share.
+pub(crate) fn upgrade_eligible(prog: &PlayerProgression, slot: usize) -> bool {
+    prog.skill_points > 0 && prog.unlocked()[slot] && prog.ranks[slot] < MAX_ABILITY_RANK
+}
+
 /// Arrow click or the upgrade key spends a point on the matching slot. The server
 /// is authoritative: it ignores the request when no point is available.
 pub(super) fn skill_upgrade_input_system(
@@ -374,10 +405,7 @@ pub(super) fn skill_upgrade_input_system(
     let Some(prog) = progression.iter().next() else {
         return;
     };
-    let unlocked = prog.unlocked();
-    let eligible = |slot: usize| {
-        prog.skill_points > 0 && unlocked[slot] && prog.ranks[slot] < MAX_ABILITY_RANK
-    };
+    let eligible = |slot: usize| upgrade_eligible(prog, slot);
     if keyboard.just_pressed(SKILL_UPGRADE_KEY) {
         if let Some(slot) = (0..4).find(|slot| eligible(*slot)) {
             command_writer.write(NetworkCommand::UpgradeSkill { slot: slot as u8 });

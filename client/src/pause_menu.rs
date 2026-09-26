@@ -572,8 +572,11 @@ fn close_pause_menu_when_disconnected(
     }
 }
 
+/// Last reader of the back chain: `Esc` toggles the menu. A back press from
+/// another source (a gamepad's East) only closes it; opening it from a pad
+/// is the Start button, which goes through the `≡` button's path.
 pub(crate) fn toggle_pause_menu(
-    keyboard_input: Res<ButtonInput<KeyCode>>,
+    back: crate::ui::BackInput,
     social: Option<Res<crate::social::SocialClient>>,
     mut menu_state: ResMut<PauseMenuState>,
 ) {
@@ -583,7 +586,7 @@ pub(crate) fn toggle_pause_menu(
     {
         return;
     }
-    if keyboard_input.just_pressed(KeyCode::Escape) {
+    if back.just_pressed() && (menu_state.open || back.pressed_on_keyboard()) {
         if menu_state.open {
             menu_state.open = false;
             menu_state.in_settings = false;

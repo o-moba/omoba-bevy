@@ -504,29 +504,29 @@ fn build_panel(
         p.spawn(w::label("Click a value to type · Enter applies · Esc cancels · F6 closes",11.0,theme::MUTED));
     });
 }
-fn keys(mut keys: ResMut<ButtonInput<KeyCode>>, mut s: ResMut<SandboxClient>) {
+fn keys(mut back: crate::ui::BackInput, mut s: ResMut<SandboxClient>) {
     if !s.enabled {
         return;
     }
-    if keys.just_pressed(KeyCode::F6) {
+    if back.keys().just_pressed(KeyCode::F6) {
         s.open ^= true;
         s.edit = None;
         s.teleport = false;
         s.rebuild = true;
     }
-    if keys.just_pressed(KeyCode::Escape) && (s.open || s.teleport) {
+    if back.just_pressed() && (s.open || s.teleport) {
         if s.edit.take().is_none() {
             s.open = false;
             s.teleport = false;
             s.rebuild = true;
         }
-        keys.clear_just_pressed(KeyCode::Escape);
+        back.consume();
     }
     if s.edit.is_none() {
-        if keys.just_pressed(KeyCode::F7) {
+        if back.keys().just_pressed(KeyCode::F7) {
             Toggle::Pause.flip(&mut s);
         }
-        if keys.just_pressed(KeyCode::F9) {
+        if back.keys().just_pressed(KeyCode::F9) {
             s.submit(SandboxCommand::FrameStep);
         }
     }

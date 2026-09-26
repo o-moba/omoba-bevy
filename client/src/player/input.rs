@@ -129,13 +129,36 @@ pub(super) fn handle_player_input(
     }
 }
 
-/// Thumb motion is a direct, analog step through the existing collision and map
-/// clipping path. It never creates a long-lived route or an automatic chase.
-pub(super) fn move_player_mobile(
+/// Which analog stick steers the hero this frame, and whether it may: a
+/// controller that owns input, else the phone's thumb stick. `None` when
+/// neither is in use, so a connected but idle controller (or a desktop
+/// without touch) leaves a mouse route alone.
+pub(crate) fn analog_source(
+    mobile: Option<&crate::mobile_controls::MobileControls>,
+    pad: Option<&crate::gamepad::GamepadControls>,
+    gameplay_allowed: bool,
+) -> Option<(Vec2, bool)> {
+    if let Some(pad) = pad.filter(|pad| pad.active) {
+        return Some((pad.movement, gameplay_allowed));
+    }
+    let mobile = mobile.filter(|mobile| mobile.enabled)?;
+    Some((
+        mobile.movement,
+        gameplay_allowed && mobile.focused && mobile.landscape,
+    ))
+}
+
+/// Stick motion (thumb or controller) is a direct, analog step through the
+/// existing collision and map clipping path. It never creates a long-lived
+/// route or an automatic chase.
+pub(super) fn move_player_analog(
     game: Option<Res<GameStateSnapshot>>,
     mut commands: Commands,
     time: Res<Time>,
-    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    sources: (
+        Option<Res<crate::mobile_controls::MobileControls>>,
+        Option<Res<crate::gamepad::GamepadControls>>,
+    ),
     context: Res<crate::input_context::GameplayInputContext>,
     mode: Res<PlayerVisualMode>,
     camera: Query<&GlobalTransform, With<MainCamera>>,
@@ -160,7 +183,12 @@ pub(super) fn move_player_mobile(
     mut pending: ResMut<PendingCast>,
     mut basic: ResMut<BasicAttackState>,
 ) {
-    let Some(mobile) = mobile.filter(|mobile| mobile.enabled) else {
+    let (mobile, pad) = sources;
+    let Some((movement, allowed)) = analog_source(
+        mobile.as_deref(),
+        pad.as_deref(),
+        context.gameplay_allowed(),
+    ) else {
         return;
     };
     let other_players = transforms
@@ -174,11 +202,10 @@ pub(super) fn move_player_mobile(
         .filter(|(_, _, stats)| stats.is_none_or(|s| s.is_alive()))
         .map(|(t, kind, _)| (t.translation, *kind))
         .collect::<Vec<_>>();
-    let allowed = context.gameplay_allowed() && mobile.focused && mobile.landscape;
     let direction = camera
         .single()
         .ok()
-        .map(|camera| mobile_screen_direction(mobile.movement, camera, *mode))
+        .map(|camera| mobile_screen_direction(movement, camera, *mode))
         .unwrap_or(Vec3::ZERO);
     for (entity, mut transform, stats, equipment, utility, class, progression) in
         &mut transforms.p0()

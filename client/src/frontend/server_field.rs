@@ -92,15 +92,15 @@ fn connect(field: &mut ServerField, commands: &mut MessageWriter<SessionUiComman
 fn type_address(
     mut field: ResMut<ServerField>,
     mut typed: MessageReader<KeyboardInput>,
-    mut keys: ResMut<ButtonInput<KeyCode>>,
+    mut back: crate::ui::BackInput,
     mut commands: MessageWriter<SessionUiCommand>,
 ) {
     if !field.editing {
         typed.clear();
         return;
     }
-    if keys.just_pressed(KeyCode::Escape) {
-        keys.clear_just_pressed(KeyCode::Escape);
+    if back.just_pressed() {
+        back.consume();
         field.editing = false;
         field.error = None;
         typed.clear();

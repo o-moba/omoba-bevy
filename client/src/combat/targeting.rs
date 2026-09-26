@@ -94,7 +94,7 @@ pub(crate) struct TargetValidity<'w, 's> {
     >,
 }
 impl TargetValidity<'_, '_> {
-    fn radius(&self, entity: Entity, id: TargetId) -> f32 {
+    pub(crate) fn radius(&self, entity: Entity, id: TargetId) -> f32 {
         match id.kind {
             TargetKind::Player => shared::PLAYER_TARGET_RADIUS,
             TargetKind::Minion => shared::MINION_TARGET_RADIUS,
@@ -111,7 +111,7 @@ impl TargetValidity<'_, '_> {
         }
     }
 
-    fn position(&self, entity: Entity) -> Option<Vec3> {
+    pub(crate) fn position(&self, entity: Entity) -> Option<Vec3> {
         self.positions.get(entity).ok().map(|t| t.translation)
     }
     pub fn valid(&self, entity: Entity, id: TargetId, team: Team) -> bool {
@@ -272,7 +272,10 @@ pub(crate) fn resolve_basic_attack(
     positions: Query<(&Transform, Option<&StructureKind>), Without<Player>>,
     validity: TargetValidity,
     selection: Res<TeamSelection>,
-    mobile: Option<Res<MobileControls>>,
+    sticks: (
+        Option<Res<MobileControls>>,
+        Option<Res<crate::gamepad::GamepadControls>>,
+    ),
     pending: Res<PendingCast>,
     mut basic: ResMut<BasicAttackState>,
     mut outgoing: MessageWriter<NetworkCommand>,
@@ -327,14 +330,21 @@ pub(crate) fn resolve_basic_attack(
         .translation
         .xz()
         .distance(position.translation.xz());
+    let (mobile, pad) = sticks;
     let phone = mobile.as_ref().is_some_and(|m| m.enabled);
+    // A controller never chases: its attack only strikes what is in reach.
+    let controller = pad.as_ref().is_some_and(|pad| pad.active);
     // While the thumb is on the stick the player steers; the attack does not
     // fight the stick for the hero. Otherwise a phone chases like a desktop.
     let steering = mobile
         .as_ref()
-        .is_some_and(|m| m.enabled && m.movement.length_squared() > 0.0001);
+        .is_some_and(|m| m.enabled && m.movement.length_squared() > 0.0001)
+        || (controller
+            && pad
+                .as_ref()
+                .is_some_and(|pad| pad.movement.length_squared() > 0.0001));
     if distance > range {
-        if phone && steering {
+        if (phone && steering) || controller {
             feedback.push_line("Target out of attack range — move closer.");
             basic.cancel();
         } else {
@@ -389,7 +399,7 @@ pub(crate) fn resolve_basic_attack(
     }
 }
 
-fn projected_position(
+pub(crate) fn projected_position(
     camera: &Camera,
     transform: &GlobalTransform,
     mode: PlayerVisualMode,
@@ -404,7 +414,7 @@ fn projected_position(
     screen.is_finite().then_some(screen)
 }
 
-fn screen_position(
+pub(crate) fn screen_position(
     camera: &Camera,
     transform: &GlobalTransform,
     mode: PlayerVisualMode,
@@ -465,7 +475,7 @@ fn acquire_score(kind: TargetKind, distance: f32) -> f32 {
     f32::from(acquire_tier(kind)) * 10_000.0 + distance
 }
 
-fn pick_mobile(
+pub(crate) fn pick_mobile(
     origin_position: Vec3,
     team: Team,
     range: f32,
@@ -906,6 +916,7 @@ pub(crate) fn setup_targeting_ui(mut commands: Commands) {
 }
 pub(crate) fn draw_targeting_ui(
     preview: Res<TargetAimPreview>,
+    gamepad: Option<Res<crate::gamepad::GamepadControls>>,
     mut nodes: Query<(
         &AimVisual,
         &mut Node,
@@ -937,7 +948,13 @@ pub(crate) fn draw_targeting_ui(
                     ..default()
                 };
                 if let Some(mut text) = label {
-                    text.0 = if ready {
+                    text.0 = if let Some(pad) = gamepad.as_ref().filter(|pad| pad.active) {
+                        crate::gamepad::legend::aim_label(
+                            pad.playstation,
+                            pad.aiming_slot.is_some(),
+                            pad.locked,
+                        )
+                    } else if ready {
                         "RELEASE TO ATTACK"
                     } else if preview.candidate.is_some() {
                         "LOCK · MOVE CLOSER"

@@ -680,10 +680,10 @@ fn sync_preview(
         ));
     }
 }
-fn keyboard_close(mut keys: ResMut<ButtonInput<KeyCode>>, mut state: ResMut<SupporterUiState>) {
-    if state.open && keys.just_pressed(KeyCode::Escape) {
+fn keyboard_close(mut back: crate::ui::BackInput, mut state: ResMut<SupporterUiState>) {
+    if state.open && back.just_pressed() {
         state.open = false;
-        keys.clear_just_pressed(KeyCode::Escape);
+        back.consume();
     }
 }
 fn actions(
