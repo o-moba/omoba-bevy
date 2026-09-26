@@ -49,6 +49,8 @@ docs/*
 !docs/mvp-scope-and-limitations.md
 !docs/progress/
 !docs/progress/**
+!docs/support/
+!docs/support/**
 
 tasks/*
 !tasks/MVP-CHECKLIST.md
