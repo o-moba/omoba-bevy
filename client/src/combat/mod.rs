@@ -17,10 +17,12 @@ use bevy::prelude::*;
 
 #[cfg(feature = "qa")]
 pub(crate) use bars::CombatBarAnchor;
-pub(crate) use cast::PendingCast;
+pub(crate) use cast::{PendingCast, queue_cast_request};
 pub use cooldown::LocalCastCooldown;
 pub(crate) use cooldown::effective_cast_duration;
 pub(crate) use feedback::ActionFeedback;
+pub(crate) use hotbar::upgrade_eligible;
+pub(crate) use mobile::mobile_assisted_target;
 pub use selection::TargetState;
 #[cfg(feature = "qa")]
 pub(crate) use selection::nearest_enemy;
@@ -34,7 +36,8 @@ use cast::{cast_spell_system, resolve_pending_cast_system};
 use cooldown::{sync_authoritative_cooldown_durations, tick_local_cast_cooldown};
 use feedback::{adapt_mobile_combat_feedback, update_action_feedback};
 use hotbar::{
-    setup_combat_ui, skill_button_system, skill_upgrade_input_system, update_skill_bar_system,
+    setup_combat_ui, skill_button_system, skill_upgrade_input_system, sync_skill_key_labels,
+    update_skill_bar_system,
 };
 use marker::update_target_marker_system;
 use mobile::{mobile_cast_system, mobile_utility_system};
@@ -89,6 +92,7 @@ impl Plugin for CombatPlugin {
                     resolve_pending_cast_system,
                     skill_upgrade_input_system,
                     update_skill_bar_system,
+                    sync_skill_key_labels,
                     adapt_mobile_combat_feedback,
                     crate::targeting::draw_targeting_ui,
                 )

@@ -499,3 +499,135 @@ fn target_minimap_and_ui_presses_never_leak_ground_movement() {
     assert!(!should_issue_ground_move(false, true, false));
     assert!(!should_issue_ground_move(false, false, true));
 }
+
+#[test]
+fn analog_source_prefers_an_owning_controller_and_ignores_an_idle_one() {
+    use super::input::analog_source;
+    let mut pad = crate::gamepad::GamepadControls::default();
+    pad.connected = true;
+    pad.movement = Vec2::X;
+    assert_eq!(analog_source(None, Some(&pad), true), None, "idle pad");
+    pad.active = true;
+    assert_eq!(analog_source(None, Some(&pad), true), Some((Vec2::X, true)));
+    assert_eq!(
+        analog_source(None, Some(&pad), false),
+        Some((Vec2::X, false))
+    );
+    let mut mobile = crate::mobile_controls::MobileControls::default();
+    mobile.enabled = true;
+    mobile.focused = true;
+    mobile.landscape = false;
+    mobile.movement = Vec2::Y;
+    assert_eq!(
+        analog_source(Some(&mobile), Some(&pad), true),
+        Some((Vec2::X, true)),
+        "the controller owns input over the thumb stick"
+    );
+    pad.active = false;
+    assert_eq!(
+        analog_source(Some(&mobile), Some(&pad), true),
+        Some((Vec2::Y, false)),
+        "portrait blocks the thumb stick"
+    );
+    mobile.enabled = false;
+    assert_eq!(analog_source(Some(&mobile), None, true), None, "desktop");
+}
+
+#[test]
+fn controller_moves_the_hero_on_desktop_and_an_idle_pad_preserves_a_click_route() {
+    use super::input::move_player_analog;
+    use super::*;
+    use crate::camera::MainCamera;
+    use crate::gamepad::GamepadControls;
+    use crate::input_context::GameplayInputContext;
+    let mut app = App::new();
+    let mut pad = GamepadControls::default();
+    pad.connected = true;
+    app.insert_resource(pad)
+        .init_resource::<Time>()
+        .init_resource::<GameplayInputContext>()
+        .init_resource::<crate::debug::DebugToggles>()
+        .init_resource::<PendingCast>()
+        .init_resource::<BasicAttackState>()
+        .insert_resource(PlayerVisualMode::Models3d)
+        .add_systems(Update, move_player_analog);
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(std::time::Duration::from_secs_f32(0.05));
+    app.world_mut().spawn((
+        MainCamera,
+        GlobalTransform::from(
+            Transform::from_translation(crate::camera::locked_camera_offset(1.0))
+                .looking_at(Vec3::ZERO, Vec3::Y),
+        ),
+    ));
+    let destination = Vec3::X * 2.0;
+    let actor = app
+        .world_mut()
+        .spawn((
+            Player,
+            Transform::default(),
+            CombatStats::default(),
+            MovementTarget {
+                target: destination,
+            },
+            MovementRoute {
+                requested_target: destination,
+                destination,
+                structure_revision: 0,
+                waypoints: vec![destination],
+            },
+        ))
+        .id();
+
+    // Connected, idle: the mouse route stays and nothing moves.
+    app.update();
+    assert!(app.world().entity(actor).contains::<MovementRoute>());
+    assert!(app.world().entity(actor).contains::<MovementTarget>());
+    assert_eq!(
+        app.world().get::<Transform>(actor).unwrap().translation,
+        Vec3::ZERO
+    );
+
+    // Owning input with a half tilt: the stick takes over at half speed,
+    // camera-relative (screen right is world +Z behind this camera).
+    {
+        let mut pad = app.world_mut().resource_mut::<GamepadControls>();
+        pad.active = true;
+        pad.movement = Vec2::X * 0.5;
+    }
+    app.update();
+    assert!(!app.world().entity(actor).contains::<MovementRoute>());
+    assert!(!app.world().entity(actor).contains::<MovementTarget>());
+    let half = app.world().get::<Transform>(actor).unwrap().translation;
+    assert!(half.length() > 0.0);
+    assert!((half.length() - PLAYER_SPEED * 0.05 * 0.5).abs() < 0.001);
+
+    app.world_mut()
+        .get_mut::<Transform>(actor)
+        .unwrap()
+        .translation = Vec3::ZERO;
+    app.world_mut().resource_mut::<GamepadControls>().movement = Vec2::X;
+    app.update();
+    let full = app.world().get::<Transform>(actor).unwrap().translation;
+    assert!((full - half * 2.0).length() < 0.001, "analog speed");
+
+    // A modal or death stops the step.
+    app.world_mut()
+        .resource_mut::<GameplayInputContext>()
+        .modal_open = true;
+    app.update();
+    assert_eq!(
+        app.world().get::<Transform>(actor).unwrap().translation,
+        full
+    );
+    app.world_mut()
+        .resource_mut::<GameplayInputContext>()
+        .modal_open = false;
+    app.world_mut().get_mut::<CombatStats>(actor).unwrap().hp = 0.0;
+    app.update();
+    assert_eq!(
+        app.world().get::<Transform>(actor).unwrap().translation,
+        full
+    );
+}

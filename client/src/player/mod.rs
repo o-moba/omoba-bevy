@@ -18,7 +18,7 @@ pub(crate) use animation::register_hero_animation_systems;
 pub(crate) use input::{mobile_screen_direction, viewport_to_simulation_world};
 
 use animation::{PlayerAnimationLibrary, sync_jump_fallback_mode};
-use input::{handle_player_input, move_player_mobile, plan_movement_routes};
+use input::{handle_player_input, move_player_analog, plan_movement_routes};
 use motion::{animate_jump, apply_gravity, move_player, resolve_player_structure_overlap};
 use respawn_ui::{RespawnCountdown, respawn_countdown_system, setup_respawn_ui};
 
@@ -61,7 +61,7 @@ impl Plugin for PlayerPlugin {
             (
                 sync_jump_fallback_mode,
                 handle_player_input.after(crate::input_context::InputContextSet::Resolve),
-                move_player_mobile,
+                move_player_analog,
                 plan_movement_routes,
                 animate_jump,
                 move_player,

@@ -30,6 +30,17 @@ pub struct TargetState {
     pub(super) marker_entity: Option<Entity>,
 }
 
+impl TargetState {
+    /// A one-off selection for a cast request (the aim-assisted target).
+    pub(crate) fn for_request(entity: Entity, target: TargetId) -> Self {
+        Self {
+            selected_entity: Some(entity),
+            selected_target: Some(target),
+            ..default()
+        }
+    }
+}
+
 /// Per-frame routing state that prevents one physical press from both
 /// attacking a unit and issuing a ground movement command.
 #[derive(Resource, Default)]

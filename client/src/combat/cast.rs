@@ -143,7 +143,7 @@ fn try_cast_slot(
     true
 }
 
-pub(super) fn queue_cast_request(
+pub(crate) fn queue_cast_request(
     slot_index: usize,
     class: HeroClass,
     target_state: &TargetState,
@@ -246,11 +246,16 @@ pub(super) fn resolve_pending_cast_system(
     context: Res<GameplayInputContext>,
     protection: Query<&crate::net::NetworkStructureProtected>,
     equipment: Query<&crate::net::PlayerEquipment, With<Player>>,
-    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    sticks: (
+        Option<Res<crate::mobile_controls::MobileControls>>,
+        Option<Res<crate::gamepad::GamepadControls>>,
+    ),
     validity: crate::targeting::TargetValidity,
     game: Option<Res<GameStateSnapshot>>,
 ) {
-    let touch_mode = mobile.as_ref().is_some_and(|mobile| mobile.enabled);
+    // Touch and controller casts never walk to an out-of-range target.
+    let touch_mode = sticks.0.as_ref().is_some_and(|mobile| mobile.enabled)
+        || sticks.1.as_ref().is_some_and(|pad| pad.active);
     if !context.gameplay_allowed() {
         pending_cast.cancel();
         return;
