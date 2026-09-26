@@ -1,0 +1,89 @@
+{
+  "generator": "scripts/edit_trailer.py",
+  "edited_on": "2026-09-26",
+  "source": {
+    "commit": "d63ed4b215b72c74459a46e319716ee0c2d89a02",
+    "dirty": true,
+    "version": "0.23.0-rc.6"
+  },
+  "recorded_on": "2026-09-26",
+  "footage": "real-time native captures with scripted inputs; walks timelapsed and badged",
+  "shots": [
+    {
+      "clip": "desktop",
+      "event": "Abilities",
+      "at": 37.96,
+      "seconds": 4.0,
+      "title": ""
+    },
+    {
+      "clip": "desktop",
+      "event": "Five classes",
+      "at": 0.4,
+      "seconds": 5.6,
+      "title": "Five classes"
+    },
+    {
+      "clip": "desktop",
+      "event": "Sanctuary shop",
+      "at": 8.04,
+      "seconds": 3.6,
+      "title": "Build your hero"
+    },
+    {
+      "clip": "desktop",
+      "event": "Push the lane",
+      "at": 13.88,
+      "seconds": 4.2,
+      "title": "Push the lanes"
+    },
+    {
+      "clip": "desktop",
+      "event": "Targeting",
+      "at": 18.67,
+      "seconds": 8.5,
+      "title": "Lock your target"
+    },
+    {
+      "clip": "desktop",
+      "event": "Abilities",
+      "at": 35.96,
+      "seconds": 7.5,
+      "title": "Four abilities"
+    },
+    {
+      "clip": "jungle",
+      "event": "Jungle camps",
+      "at": 1.71,
+      "seconds": 8.5,
+      "title": "Warden jungler"
+    },
+    {
+      "clip": "phone",
+      "event": "Phone controls",
+      "at": 0.6,
+      "seconds": 3.8,
+      "title": "Built for phones too"
+    },
+    {
+      "clip": "phone",
+      "event": "Touch combat",
+      "at": 5.31,
+      "seconds": 7.5,
+      "title": "Touch combat"
+    }
+  ],
+  "crossfade_seconds": 0.5,
+  "seconds": 53.2,
+  "music": {
+    "source": "ElevenLabs Music API (/v1/music, force_instrumental)",
+    "prompt": "Instrumental game trailer music for a bright fantasy team battle game: punchy modern drums, driving synth bass, heroic brass and string stabs, playful arpeggios, a short rising intro, confident energetic middle, and a clean final hit with a short tail. About 120 BPM, no vocals.",
+    "file": "music.mp3",
+    "sha256": "d8beebe1032be81dd00bb041388700047c244dc720240ff3ffc5cf943b658190"
+  },
+  "video": {
+    "file": "omoba-trailer.mp4",
+    "bytes": 13567654,
+    "sha256": "e0d07c152b15dbe0489aef92a62e156ee84b77ff82bb568bdbf7fecf6e9eff88"
+  }
+}
