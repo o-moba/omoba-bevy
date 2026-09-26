@@ -189,6 +189,27 @@ pub(super) fn select_target_system(
     }
 }
 
+/// The Tab rule (nearest valid enemy), for scripted demos that then aim the
+/// real cursor at the result.
+#[cfg(feature = "qa")]
+pub(crate) fn nearest_enemy(
+    local_pos: Vec3,
+    local_team: Team,
+    validity: &crate::targeting::TargetValidity,
+    candidates: &TargetCandidates,
+) -> Option<Entity> {
+    find_nearest_enemy_target(
+        local_pos,
+        local_team,
+        validity,
+        &candidates.players,
+        &candidates.minions,
+        &candidates.neutrals,
+        &candidates.structures,
+    )
+    .map(|(entity, _)| entity)
+}
+
 pub(super) fn find_nearest_enemy_target(
     local_pos: Vec3,
     local_team: Team,

@@ -2,6 +2,10 @@
 //! production button handlers. The final result snapshot is synthetic. An explicit
 //! OMOBA_BETA_UI_SKILL_UPGRADES=1 additionally enables a client-only progression
 //! fixture in gameplay captures. Both are labeled and reported, never match proof.
+//! OMOBA_BETA_UI_SCENE_LANE=<top|mid|bot>:<0..1> stages a showcase shot instead:
+//! after the help overlay the hero gets an ordinary move order to that lane point
+//! (measured from its own base), and the gameplay capture waits for arrival plus
+//! OMOBA_BETA_UI_SCENE_HOLD seconds of live match. Scene runs stop after gameplay.
 use std::{
     path::PathBuf,
     time::{Duration, Instant},
@@ -65,9 +69,12 @@ impl Plugin for BetaUiQaPlugin {
             timeout: Duration::from_secs(seconds),
             next_readiness_report: Duration::ZERO,
             hero_class: std::env::var("OMOBA_BETA_UI_CLASS").ok().map(|name| {
-                shared::HeroClass::from_id(&name)
-                    .expect("OMOBA_BETA_UI_CLASS must be warrior, mage, ranger or cleric")
+                shared::HeroClass::from_id(&name).unwrap_or_else(|| {
+                    let known: Vec<_> = shared::HeroClass::ALL.iter().map(|c| c.id()).collect();
+                    panic!("OMOBA_BETA_UI_CLASS must be one of {}", known.join(", "))
+                })
             }),
+            scene: SceneStaging::from_env(),
             edge: std::env::var("OMOBA_BETA_UI_EDGE").is_ok_and(|value| value == "1"),
             stage: 0,
             frames: 0,
@@ -102,6 +109,12 @@ impl Plugin for BetaUiQaPlugin {
         if app.world().resource::<BetaUiQa>().edge {
             edge::configure(app);
         }
+        if app.world().resource::<BetaUiQa>().scene.is_some() {
+            app.add_systems(
+                Update,
+                stage_scene.after(crate::net::ClientNetPipeline::ApplySnapshot),
+            );
+        }
         if app.world().resource::<BetaUiQa>().skill_upgrades {
             app.init_resource::<SkillUpgradeFixtureState>().add_systems(
                 Update,
@@ -122,6 +135,7 @@ struct BetaUiQa {
     timeout: Duration,
     next_readiness_report: Duration,
     hero_class: Option<shared::HeroClass>,
+    scene: Option<SceneStaging>,
     edge: bool,
     stage: usize,
     frames: u32,
@@ -135,6 +149,11 @@ struct BetaUiQa {
 }
 impl BetaUiQa {
     fn total(&self, phone: bool) -> usize {
+        if self.scene.is_some() {
+            // Entry, help and the staged gameplay shot. The shop and purchase
+            // stages need the base, which a lane scene has left behind.
+            return 3;
+        }
         FILES.len()
             + if self.edge {
                 if phone {
@@ -150,6 +169,129 @@ impl BetaUiQa {
 
 #[derive(Component)]
 struct BetaUiShot(usize);
+
+/// Opt-in showcase staging: an ordinary move order and a wall-clock hold.
+struct SceneStaging {
+    lane: shared::map::Lane,
+    progress: f32,
+    hold: Duration,
+    target: Option<Vec3>,
+    admitted_at: Option<Instant>,
+    last_order: Option<Instant>,
+    orders: u32,
+    distance: Option<f32>,
+    ready: bool,
+}
+
+impl SceneStaging {
+    fn from_env() -> Option<Self> {
+        let raw = std::env::var("OMOBA_BETA_UI_SCENE_LANE").ok()?;
+        let (lane, progress) = parse_scene_lane(&raw).unwrap_or_else(|| {
+            panic!("OMOBA_BETA_UI_SCENE_LANE must look like mid:0.45, got {raw:?}")
+        });
+        let hold = std::env::var("OMOBA_BETA_UI_SCENE_HOLD")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(30)
+            .min(300);
+        Some(Self {
+            lane,
+            progress,
+            hold: Duration::from_secs(hold),
+            target: None,
+            admitted_at: None,
+            last_order: None,
+            orders: 0,
+            distance: None,
+            ready: false,
+        })
+    }
+
+    fn describe(&self) -> serde_json::Value {
+        serde_json::json!({
+            "lane": format!("{:?}", self.lane).to_lowercase(),
+            "progress_from_own_base": self.progress,
+            "hold_seconds": self.hold.as_secs(),
+            "target": self.target.map(|t| [t.x, t.z]),
+            "last_distance": self.distance,
+            "move_orders": self.orders,
+            "method": "ordinary MovementTarget order, the same component a ground click inserts",
+        })
+    }
+}
+
+fn parse_scene_lane(raw: &str) -> Option<(shared::map::Lane, f32)> {
+    let (lane, progress) = raw.split_once(':')?;
+    let lane = match lane {
+        "top" => shared::map::Lane::Top,
+        "mid" => shared::map::Lane::Mid,
+        "bot" => shared::map::Lane::Bot,
+        _ => return None,
+    };
+    let progress: f32 = progress.parse().ok()?;
+    (0.0..=1.0).contains(&progress).then_some((lane, progress))
+}
+
+/// Walks the admitted hero to the scene point with ordinary move orders and
+/// marks the gameplay shot ready once it arrived and the hold elapsed.
+fn stage_scene(
+    mut commands: Commands,
+    mut qa: ResMut<BetaUiQa>,
+    session: Res<ClientSession>,
+    help: Res<HelpOverlayVisible>,
+    player: Query<
+        (
+            Entity,
+            &Transform,
+            &crate::team::Team,
+            Option<&crate::player::MovementTarget>,
+        ),
+        With<crate::player::Player>,
+    >,
+) {
+    let stage = qa.stage;
+    let Some(scene) = qa.scene.as_mut() else {
+        return;
+    };
+    scene.ready = false;
+    if !session.join_confirmed() {
+        return;
+    }
+    let admitted_at = *scene.admitted_at.get_or_insert_with(Instant::now);
+    if stage != 2 || help.0 {
+        return;
+    }
+    let Ok((entity, transform, team, order)) = player.single() else {
+        return;
+    };
+    let target = *scene.target.get_or_insert_with(|| {
+        let progress = if *team == crate::team::Team::Blue {
+            1.0 - scene.progress
+        } else {
+            scene.progress
+        };
+        let [x, z] = shared::map::sample_lane(scene.lane, progress);
+        Vec3::new(x, transform.translation.y, z)
+    });
+    let distance = transform.translation.xz().distance(target.xz());
+    scene.distance = Some(distance);
+    // Waves and heroes crowd the lane point; close enough is in frame.
+    let arrived = distance <= 10.0;
+    // Re-issue the order if combat or a respawn cleared it, at most every 2 s.
+    if !arrived
+        && order.is_none()
+        && scene
+            .last_order
+            .is_none_or(|last| last.elapsed() >= Duration::from_secs(2))
+    {
+        commands
+            .entity(entity)
+            .insert(crate::player::MovementTarget { target });
+        scene.last_order = Some(Instant::now());
+        scene.orders += 1;
+    }
+    scene.ready = arrived && admitted_at.elapsed() >= scene.hold;
+}
 
 fn prepare_controls(
     qa: Res<BetaUiQa>,
@@ -441,6 +583,7 @@ fn capture(
             qa.in_flight = false;
             if qa.stage == qa.total(phone) {
                 let summary = serde_json::json!({"version":env!("CARGO_PKG_VERSION"), "scenario":"beta-ui", "pixels":[qa.width,qa.height],
+                    "scene":qa.scene.as_ref().map(SceneStaging::describe),
                     "method":"Bevy Screenshot::primary_window + save_to_disk", "captures":qa.captures,
                     "elapsed_seconds":qa.started.elapsed().as_secs_f64(), "manual_interaction_verified":false,
                     "button_handler_interactions":"scripted production Join/Help/Gold/Shop/purchase/Close buttons; edge mode also drives scoreboard and mobile touch utility controls",
@@ -507,6 +650,7 @@ fn capture(
                     && matches!(game.state, GameState::Running)
                     && !help.0
                     && scene.join.is_empty()
+                    && qa.scene.as_ref().is_none_or(|staging| staging.ready)
             }
             3 => shop.open && !context.gameplay_allowed(),
             4 => {
@@ -551,6 +695,7 @@ fn capture(
             "connected": session.is_connected(), "admitted": session.join_confirmed(),
             "picker_roots": scene.join.iter().count(), "scenes_ready": scenes_ready, "class_ready":class_ready,
             "requested_class":qa.hero_class.map(|class|class.id()),
+            "scene":qa.scene.as_ref().map(SceneStaging::describe),
             "environment_roots": scene.environment.iter().count(),
             "scenes": scene.scenes.iter().map(|(root, instance)| serde_json::json!({
                 "instance_ready": instance.is_some_and(|instance| spawner.instance_is_ready(**instance)),
@@ -1061,6 +1206,20 @@ fn clears_playfield(panel: Rect, viewport: Vec2, phone: bool) -> bool {
 #[cfg(test)]
 mod layout_tests {
     use super::*;
+    #[test]
+    fn scene_lane_accepts_lane_and_bounded_progress_only() {
+        assert_eq!(
+            parse_scene_lane("mid:0.45"),
+            Some((shared::map::Lane::Mid, 0.45))
+        );
+        assert_eq!(
+            parse_scene_lane("bot:1"),
+            Some((shared::map::Lane::Bot, 1.0))
+        );
+        for raw in ["mid", "river:0.5", "top:1.5", "top:-0.1", "mid:x", ""] {
+            assert_eq!(parse_scene_lane(raw), None, "{raw}");
+        }
+    }
     #[test]
     fn edge_guard_accepts_target_strip_but_rejects_old_phone_bottom_banner() {
         let viewport = Vec2::new(844.0, 390.0);

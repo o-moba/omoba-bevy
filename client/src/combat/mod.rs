@@ -22,6 +22,8 @@ pub use cooldown::LocalCastCooldown;
 pub(crate) use cooldown::effective_cast_duration;
 pub(crate) use feedback::ActionFeedback;
 pub use selection::TargetState;
+#[cfg(feature = "qa")]
+pub(crate) use selection::nearest_enemy;
 pub(crate) use selection::{TargetCandidates, WorldPointerState};
 
 use bars::{

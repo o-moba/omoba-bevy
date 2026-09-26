@@ -1,0 +1,57 @@
+{
+  "class": "warden",
+  "elapsed_seconds": 61.856972042,
+  "events": [
+    {
+      "seconds": 1.482940708,
+      "subtitle": "Forest Tracker: faster camps, more gold",
+      "title": "Warden jungler"
+    },
+    {
+      "seconds": 5.454701625,
+      "subtitle": "Neutral creatures fight back and respawn",
+      "title": "Jungle camps"
+    }
+  ],
+  "method": "scripted production inputs against a live server; recorder readbacks",
+  "pace": [
+    {
+      "seconds": 1.493178208,
+      "speed": 4.0
+    },
+    {
+      "seconds": 5.446154792,
+      "speed": 1.0
+    },
+    {
+      "seconds": 7.165110792,
+      "speed": 4.0
+    },
+    {
+      "seconds": 8.629833125,
+      "speed": 1.0
+    },
+    {
+      "seconds": 17.249181042,
+      "speed": 4.0
+    },
+    {
+      "seconds": 34.051982625,
+      "speed": 1.0
+    },
+    {
+      "seconds": 39.230022625,
+      "speed": 4.0
+    },
+    {
+      "seconds": 57.302373875,
+      "speed": 1.0
+    }
+  ],
+  "pixels": [
+    1280,
+    720
+  ],
+  "script": "jungle",
+  "version": "0.23.0-rc.6"
+}

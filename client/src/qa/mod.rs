@@ -17,12 +17,14 @@ mod audio_qa;
 mod beta_ui_qa;
 mod career_visual_qa;
 mod combat_qa;
+mod demo_qa;
 mod forest_pickup_qa;
 mod frontend_flow_qa;
 mod frontend_qa;
 mod map_qa;
 mod navigation_qa;
 mod offline_qa;
+mod record_qa;
 mod social_qa;
 mod supporter;
 mod targeting_qa;
@@ -49,6 +51,8 @@ impl PluginGroup for QaPlugins {
             .add(combat_qa::CombatQaPlugin)
             .add(forest_pickup_qa::ForestPickupQaPlugin)
             .add(targeting_qa::TargetingQaPlugin)
+            .add(record_qa::RecordQaPlugin)
+            .add(demo_qa::DemoQaPlugin)
     }
 }
 
