@@ -1,0 +1,16 @@
+{
+  "state.lobby": "Waiting for players...",
+  "state.forming": "Waiting for players - {ready}/{needed}\nTeams start automatically when all 10 players have joined.",
+  "state.starting": "Match found!\nStarting in {seconds}...",
+  "state.team.green": "Green",
+  "state.team.blue": "Blue",
+  "state.result.victory": "Victory!",
+  "state.result.defeat": "Defeat",
+  "state.result.complete": "Match complete",
+  "state.finalizing": "Match complete\n{team} destroyed the enemy base.\nFinalizing your match results…",
+  "state.next_round.preparing": "Preparing the next round...",
+  "state.next_round.countdown": "Next round in {seconds}s",
+  "state.exit_hint": "Escape: settings or exit game.",
+  "state.exit_hint_phone": "MENU: settings or exit game.",
+  "state.round_over": "{result}\n{team} destroyed the enemy base.\n\n{next_round}\nStay connected to play again with your hero.\n{exit}"
+}
