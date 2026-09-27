@@ -1,0 +1,13 @@
+{
+  "card.level_class": "等级 {level} · {hero}",
+  "card.stats": "排位分 {rating} · {matches} 场 · {wins} 胜 / {losses} 负",
+  "card.not_loaded": "生涯资料尚未加载",
+  "card.newcomer_placement": "新手定位：与其他新玩家匹配",
+  "card.title": "名片",
+  "card.button.avatars": "形象",
+  "card.main_hero": "主力英雄",
+  "card.accent": "强调色",
+  "card.title_heading": "称号",
+  "card.title_locked": "{title} · {wins} 胜",
+  "card.showcase_hint": "展示形象在收藏中选择。"
+}

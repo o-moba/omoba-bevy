@@ -1,3 +1,4 @@
+// i18n-strict
 mod bars;
 mod cast;
 mod cooldown;

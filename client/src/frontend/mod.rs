@@ -12,6 +12,10 @@
 //! Gameplay plugins keep running underneath; menu screens paint an opaque
 //! full-screen root above them and [`crate::input_context`] treats every menu
 //! screen as a modal so world input stays inert.
+//!
+//! The screens read their text from one dictionary namespace each (`home`,
+//! `lobby`, `draft`, …); the shell's own text is in `frontend`.
+// i18n-strict
 
 pub mod card;
 pub mod collection;
@@ -244,13 +248,14 @@ fn drive_screen_from_session(
             if session.join_blocked() {
                 // Keep the reason, drop the dead join: the picker must be usable
                 // again and the player must know why they are back on it.
-                notice.0 = Some(session.join_rejection().map_or_else(
-                    || {
-                        "The server did not answer the join. Check the connection and lock in again."
-                            .to_owned()
-                    },
-                    |rejection| rejection.message().to_owned(),
-                ));
+                notice.0 = Some(
+                    session
+                        .join_rejection()
+                        .map_or(crate::i18n::tr("frontend.join.no_answer"), |rejection| {
+                            crate::i18n::data::join_rejection(rejection)
+                        })
+                        .to_owned(),
+                );
                 session.abandon_join();
                 next.set(AppScreen::HeroSelect);
             } else if !committed && matchmaking.as_ref().is_some_and(|flow| flow.is_searching()) {

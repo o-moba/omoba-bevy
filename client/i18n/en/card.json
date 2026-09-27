@@ -1,0 +1,13 @@
+{
+  "card.level_class": "Level {level} · {hero}",
+  "card.stats": "Rating {rating} · {matches} matches · {wins}W / {losses}L",
+  "card.not_loaded": "Career profile not loaded yet",
+  "card.newcomer_placement": "Newcomer placement: matched with other new players",
+  "card.title": "Profile card",
+  "card.button.avatars": "Avatars",
+  "card.main_hero": "Main hero",
+  "card.accent": "Accent",
+  "card.title_heading": "Title",
+  "card.title_locked": "{title} · {wins} wins",
+  "card.showcase_hint": "Showcase avatar is picked in the collection."
+}

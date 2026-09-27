@@ -108,10 +108,10 @@ pub fn browser_approval_hint() -> &'static str {
             fn omoba_browser_failed() -> bool;
         }
         if unsafe { omoba_browser_failed() } {
-            return "Browser could not open · retry the button or open this link manually";
+            return crate::i18n::tr("account.browser.failed");
         }
     }
-    "Confirm in your browser, then return to Omoba"
+    crate::i18n::tr("account.browser.confirm")
 }
 
 #[cfg(test)]

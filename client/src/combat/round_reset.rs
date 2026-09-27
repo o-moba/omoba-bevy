@@ -1,3 +1,4 @@
+// i18n-strict
 use crate::net::{NetworkCommand, SessionEvent};
 use crate::player::MovementTarget;
 use crate::targeting::BasicAttackState;

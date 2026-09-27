@@ -5,6 +5,7 @@
 //! snapshot into caller-owned stack storage. A changed identity or `None`
 //! (disconnect, replacement, the app resigning active) makes the caller
 //! cancel held gameplay actions.
+// i18n-strict
 use super::snapshot::{BUTTON_MASK, clamp_axis};
 
 #[derive(Clone, Copy, Debug)]

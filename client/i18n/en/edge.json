@@ -1,0 +1,19 @@
+{
+  "edge.kda": "K / D / A",
+  "edge.scoreboard.title": "MATCH SCORE",
+  "edge.scoreboard.close": "Close",
+  "edge.team.green": "GREEN TEAM",
+  "edge.team.blue": "BLUE TEAM",
+  "edge.column.player": "PLAYER",
+  "edge.column.kda": "K/D/A",
+  "edge.column.gold": "GOLD ↑",
+  "edge.column.level": "LV",
+  "edge.target.hero": "Hero",
+  "edge.target.minion": "Minion",
+  "edge.target.structure": "Tower / base",
+  "edge.target.neutral": "Neutral monster",
+  "edge.scoreboard.detail": "Gold ↑ is total income this round; starting gold excluded. Clear one lane to unlock the enemy base.",
+  "edge.scoreboard.waiting": "Waiting for live score…",
+  "edge.scoreboard.empty": "No players",
+  "edge.scoreboard.offline": "{name} · off"
+}

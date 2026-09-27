@@ -1,4 +1,5 @@
 //! Presentation consumes accepted server hits, never HP deltas or projectile disappearance.
+// i18n-strict
 use bevy::prelude::*;
 use bevy::ui::FocusPolicy;
 use shared::combat::{CombatEntityKind, CombatEvent};

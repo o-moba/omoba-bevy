@@ -1,0 +1,11 @@
+{
+  "phone.bar.menu": "MENU",
+  "phone.bar.server": "SERVER",
+  "phone.server.title": "Join a hosted game",
+  "phone.server.hint": "Enter the address your host shared, for example 192.168.1.20:4000",
+  "phone.server.delete": "DELETE",
+  "phone.server.connect": "CONNECT",
+  "phone.server.close": "CLOSE",
+  "phone.server.keyboard": "KEYBOARD",
+  "phone.server.invalid": "Use a host address and port, for example 192.168.1.20:4000"
+}

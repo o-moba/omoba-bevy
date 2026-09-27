@@ -1,0 +1,18 @@
+{
+  "postmatch.outcome.victory": "Victory",
+  "postmatch.outcome.defeat": "Defeat",
+  "postmatch.outcome.complete": "Match complete",
+  "postmatch.personal": "{kills}/{deaths}/{assists} · level {level} · +{xp} XP",
+  "postmatch.personal_rated": "{kills}/{deaths}/{assists} · level {level} · +{xp} XP · rating {delta}",
+  "postmatch.summary.green": "Green destroyed the enemy base · {minutes} min",
+  "postmatch.summary.blue": "Blue destroyed the enemy base · {minutes} min",
+  "postmatch.summary.nobody": "Nobody destroyed the enemy base · {minutes} min",
+  "postmatch.summary.abandoned": "Match abandoned",
+  "postmatch.summary.interrupted": "Match interrupted",
+  "postmatch.tagline": "THE VERDANT ARENA",
+  "postmatch.saved": "Progress saved",
+  "postmatch.local_result": "Local practice result",
+  "postmatch.saving": "Saving match results…",
+  "postmatch.button.play_again": "Play again",
+  "postmatch.button.back_to_menu": "Back to menu"
+}

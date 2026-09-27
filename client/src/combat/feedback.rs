@@ -1,3 +1,4 @@
+// i18n-strict
 use bevy::prelude::*;
 
 /// One visible action message, replaced in place and expired after three seconds.

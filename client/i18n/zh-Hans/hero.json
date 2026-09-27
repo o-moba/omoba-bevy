@@ -1,0 +1,12 @@
+{
+  "hero.warrior.name": "战士",
+  "hero.warrior.tagline": "近战斗士：重击与自我续航",
+  "hero.mage.name": "法师",
+  "hero.mage.tagline": "远程爆发：高额伤害，法力引擎",
+  "hero.ranger.name": "游侠",
+  "hero.ranger.tagline": "敏捷游击：快速射击，射程最远",
+  "hero.cleric.name": "牧师",
+  "hero.cleric.tagline": "辅助：伤害一般，治疗强大",
+  "hero.warden.name": "守林人",
+  "hero.warden.tagline": "打野：快速清理野怪营地，额外获得森林金币"
+}

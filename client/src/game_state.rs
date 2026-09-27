@@ -1,5 +1,8 @@
+//! Full-screen game state card: matchmaking progress and the round result.
+// i18n-strict
 use bevy::prelude::*;
 
+use crate::i18n::{tr, trf};
 use crate::net::{ClientSession, GameState, GameStateSnapshot};
 use crate::player::Player;
 use crate::team::Team;
@@ -92,20 +95,30 @@ fn matchmaking_status_text(state: &GameState, join_committed: bool) -> Option<St
         return None;
     }
     match state {
-        GameState::Lobby => Some("Waiting for players...".to_owned()),
-        GameState::Forming { ready, needed } => Some(format!(
-            "Waiting for players - {ready}/{needed}\nTeams start automatically when all 10 players have joined."
+        GameState::Lobby => Some(tr("state.lobby").to_owned()),
+        GameState::Forming { ready, needed } => Some(trf(
+            "state.forming",
+            &[("ready", ready), ("needed", needed)],
         )),
-        GameState::Starting { countdown_ms } => Some(format!(
-            "Match found!\nStarting in {}...",
-            countdown_ms.div_ceil(1000).max(1)
+        GameState::Starting { countdown_ms } => Some(trf(
+            "state.starting",
+            &[("seconds", &countdown_ms.div_ceil(1000).max(1))],
         )),
         GameState::Running | GameState::Victory { .. } => None,
     }
 }
 
+/// A team's name in the result text.
+fn team_name(team: Team) -> &'static str {
+    tr(match team {
+        Team::Green => "state.team.green",
+        Team::Blue => "state.team.blue",
+    })
+}
+
 fn update_game_state_ui(
     game_state: Res<GameStateSnapshot>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     client_session: Res<ClientSession>,
     local_team: Query<&Team, With<Player>>,
     career: Option<Res<crate::career::CareerClient>>,
@@ -176,28 +189,39 @@ fn update_game_state_ui(
                 Some(false) => LOSE_COLOR,
                 None => LOBBY_COLOR,
             });
-            let result = match local_won {
-                Some(true) => "Victory!",
-                Some(false) => "Defeat",
-                None => "Match complete",
-            };
+            let result = tr(match local_won {
+                Some(true) => "state.result.victory",
+                Some(false) => "state.result.defeat",
+                None => "state.result.complete",
+            });
             if career
                 .as_ref()
                 .is_some_and(|career| career.view.profile.is_some())
             {
-                label.0 = format!(
-                    "Match complete\n{} destroyed the enemy base.\nFinalizing your match results…",
-                    Team::from(winner).as_str()
+                label.0 = trf(
+                    "state.finalizing",
+                    &[("team", &team_name(Team::from(winner)))],
                 );
                 return;
             }
             let next_round = game_state.rematch_in_secs.map_or_else(
-                || "Preparing the next round...".to_owned(),
-                |secs| format!("Next round in {secs}s"),
+                || tr("state.next_round.preparing").to_owned(),
+                |secs| trf("state.next_round.countdown", &[("seconds", &secs)]),
             );
-            label.0 = format!(
-                "{result}\n{} destroyed the enemy base.\n\n{next_round}\nStay connected to play again with your hero.\nEscape: settings or exit game.",
-                Team::from(winner).as_str()
+            // Phones open the menu with the MENU button, not Escape.
+            let exit = tr(if mobile.as_ref().is_some_and(|mobile| mobile.enabled) {
+                "state.exit_hint_phone"
+            } else {
+                "state.exit_hint"
+            });
+            label.0 = trf(
+                "state.round_over",
+                &[
+                    ("result", &result),
+                    ("team", &team_name(Team::from(winner))),
+                    ("next_round", &next_round),
+                    ("exit", &exit),
+                ],
             );
         }
     }
@@ -442,5 +466,50 @@ mod tests {
             .0;
         assert!(text.contains("3/10 compatible players"));
         assert!(text.contains("New players"));
+    }
+
+    #[test]
+    fn round_result_names_the_phone_menu_and_follows_the_language() {
+        if crate::i18n::testing::isolated(
+            "game_state::tests::round_result_names_the_phone_menu_and_follows_the_language",
+        ) {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, Locale, LocaleId};
+        let mut app = spawn_ui_app();
+        let mut controls = crate::mobile_controls::MobileControls::default();
+        controls.enabled = true;
+        app.add_plugins(I18nPlugin::default())
+            .insert_resource(controls);
+        app.world_mut()
+            .resource_mut::<ClientSession>()
+            .set_state_for_test(ClientConnectionState::Connected);
+        app.world_mut().spawn((Player, Team::Blue));
+        app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Victory {
+            winner: shared::map::Team::Green,
+        };
+        app.update();
+        let label = app
+            .world_mut()
+            .query_filtered::<Entity, With<GameStateLabel>>()
+            .single(app.world())
+            .unwrap();
+        let text = |app: &App| app.world().get::<Text>(label).unwrap().0.clone();
+        assert!(text(&app).starts_with("Defeat\nGreen destroyed the enemy base."));
+        assert!(text(&app).ends_with("MENU: settings or exit game."));
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(LocaleId::parse("zh-Hans").unwrap());
+        app.update();
+        assert!(
+            text(&app).starts_with("失败\n绿队摧毁了敌方基地。"),
+            "{}",
+            text(&app)
+        );
+        assert!(text(&app).ends_with("菜单：设置或退出游戏。"));
+        assert_eq!(
+            matchmaking_status_text(&GameState::Lobby, true).as_deref(),
+            Some("等待玩家加入…")
+        );
     }
 }

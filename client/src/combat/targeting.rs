@@ -1,7 +1,9 @@
 //! Basic attacks and touch target locking, independent of the four skill slots.
+// i18n-strict
 use crate::{
     camera::MainCamera,
     combat::{ActionFeedback, CombatStats, PendingCast, TargetCandidates, TargetState},
+    i18n::tr,
     input_context::GameplayInputContext,
     mobile_controls::{MobileAttackAim, MobileControls},
     net::{
@@ -345,7 +347,7 @@ pub(crate) fn resolve_basic_attack(
                 .is_some_and(|pad| pad.movement.length_squared() > 0.0001));
     if distance > range {
         if (phone && steering) || controller {
-            feedback.push_line("Target out of attack range — move closer.");
+            feedback.push_line(tr("combat.attack.out_of_range"));
             basic.cancel();
         } else {
             let direction = (position.translation - transform.translation)
@@ -356,7 +358,7 @@ pub(crate) fn resolve_basic_attack(
                 target: destination,
             });
             if !basic.chasing {
-                feedback.push_line("Approaching selected target.");
+                feedback.push_line(tr("combat.attack.approaching"));
             }
             basic.chasing = true;
         }
@@ -743,17 +745,17 @@ pub(crate) fn mobile_basic_attack(
         if category.is_some() {
             target.selected_entity = None;
             target.selected_target = None;
-            feedback.push_line(if category == Some(TargetKind::Minion) {
-                "No hostile minion in range."
+            feedback.push_line(tr(if category == Some(TargetKind::Minion) {
+                "combat.attack.no_minion"
             } else {
-                "No vulnerable enemy structure in range."
-            });
+                "combat.attack.no_structure"
+            }));
         } else if intent.is_some() {
-            feedback.push_line(if aim.is_some() {
-                "No enemy in that direction."
+            feedback.push_line(tr(if aim.is_some() {
+                "combat.attack.no_enemy_direction"
             } else {
-                "No enemy in range."
-            });
+                "combat.attack.no_enemy"
+            }));
         }
     }
 }
@@ -829,11 +831,11 @@ pub(crate) fn draw_locked_target(
         ..default()
     };
     if let Ok(mut label) = label.single_mut() {
-        label.0 = if basic.order.is_some_and(|order| order.target == id) {
-            "ATTACK"
+        label.0 = tr(if basic.order.is_some_and(|order| order.target == id) {
+            "combat.marker.attack"
         } else {
-            "LOCKED"
-        }
+            "combat.marker.locked"
+        })
         .into();
     }
 }
@@ -862,7 +864,7 @@ pub(crate) fn setup_targeting_ui(mut commands: Commands) {
         ))
         .with_children(|parent| {
             parent.spawn((
-                Text::new("LOCKED"),
+                Text::new(tr("combat.marker.locked")),
                 TextFont {
                     font_size: 10.0,
                     ..default()
@@ -955,11 +957,11 @@ pub(crate) fn draw_targeting_ui(
                             pad.locked,
                         )
                     } else if ready {
-                        "RELEASE TO ATTACK"
+                        tr("combat.aim.release")
                     } else if preview.candidate.is_some() {
-                        "LOCK · MOVE CLOSER"
+                        tr("combat.aim.move_closer")
                     } else {
-                        "AIM AT A TARGET"
+                        tr("combat.aim.none")
                     }
                     .into();
                 }

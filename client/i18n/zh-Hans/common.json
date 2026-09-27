@@ -1,0 +1,16 @@
+{
+  "common.ok": "确定",
+  "common.cancel": "取消",
+  "common.back": "返回",
+  "common.close": "关闭",
+  "common.retry": "重试",
+  "common.continue": "继续",
+  "common.confirm": "确认",
+  "common.save": "保存",
+  "common.done": "完成",
+  "common.yes": "是",
+  "common.no": "否",
+  "common.on": "开",
+  "common.off": "关",
+  "common.loading": "加载中…"
+}

@@ -5,6 +5,10 @@
 //! the server owns — nickname, rating, level, wins — while the card carries the
 //! presentation the player chooses. It is stored next to the client
 //! preferences in its own file so the preferences schema stays untouched.
+//!
+//! Text comes from the `card` dictionary (titles through `i18n::data`); the
+//! customization screen is rebuilt on a language change.
+// i18n-strict
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -14,6 +18,7 @@ use std::path::PathBuf;
 
 use super::AppScreen;
 use super::widgets;
+use crate::i18n::{Locale, data, tr, trf};
 use crate::team::AvatarThumbnails;
 use crate::ui::theme::{self, ButtonKind};
 use crate::ui::widgets::{ButtonStyle, screen_button, screen_tile};
@@ -22,14 +27,15 @@ use crate::ui::{Activated, TestId, UiAction, UiActionAppExt, UiSet};
 const CARD_FILE: &str = "profile_card.json";
 
 /// Titles a player can put on the card. The requirement is the number of
-/// matches won; index 0 is always available.
+/// matches won; index 0 is always available. The names are ids (TestIds);
+/// the shown text is `i18n::data::card_title(index)`.
 pub const TITLES: [(&str, u32); 6] = [
-    ("Newcomer", 0),
-    ("Lane Regular", 5),
-    ("Jungle Warden", 15),
-    ("Tower Breaker", 30),
-    ("Verdant Veteran", 60),
-    ("Ancient Champion", 120),
+    ("Newcomer", 0),           // i18n-allow
+    ("Lane Regular", 5),       // i18n-allow
+    ("Jungle Warden", 15),     // i18n-allow
+    ("Tower Breaker", 30),     // i18n-allow
+    ("Verdant Veteran", 60),   // i18n-allow
+    ("Ancient Champion", 120), // i18n-allow
 ];
 
 pub fn title_unlocked(index: usize, wins: u32) -> bool {
@@ -67,11 +73,12 @@ impl ProfileCard {
         theme::accent_color(self.accent)
     }
 
+    /// The shown title, in the active language.
     pub fn title_text(&self, wins: u32) -> &'static str {
         if title_unlocked(self.title, wins) {
-            TITLES[self.title.min(TITLES.len() - 1)].0
+            data::card_title(self.title.min(TITLES.len() - 1))
         } else {
-            TITLES[0].0
+            data::card_title(0)
         }
     }
 
@@ -167,6 +174,12 @@ impl Plugin for ProfileCardPlugin {
                     .chain()
                     .after(UiSet::Dispatch)
                     .run_if(in_state(AppScreen::Card)),
+            )
+            .add_systems(
+                Update,
+                relocalize_card_screen
+                    .after(refresh_card_screen)
+                    .run_if(in_state(AppScreen::Card)),
             );
     }
 }
@@ -238,23 +251,34 @@ pub fn spawn_card(
                         column.spawn(widgets::label(card.title_text(wins), 14.0, accent));
                         let level = profile.map_or(1, ProfileSummary::level);
                         column.spawn(widgets::label(
-                            &format!("Level {level} · {}", card.main_class.display_name()),
+                            &trf(
+                                "card.level_class",
+                                &[
+                                    ("level", &level),
+                                    ("hero", &data::hero_name(card.main_class)),
+                                ],
+                            ),
                             13.0,
                             theme::MUTED,
                         ));
                     });
                 });
             let stats = match profile {
-                Some(profile) => format!(
-                    "Rating {} · {} matches · {}W / {}L",
-                    profile.rating, profile.matches_played, profile.wins, profile.losses
+                Some(profile) => trf(
+                    "card.stats",
+                    &[
+                        ("rating", &profile.rating),
+                        ("matches", &profile.matches_played),
+                        ("wins", &profile.wins),
+                        ("losses", &profile.losses),
+                    ],
                 ),
-                None => "Career profile not loaded yet".to_owned(),
+                None => tr("card.not_loaded").to_owned(),
             };
             card_node.spawn(widgets::label(&stats, 13.0, theme::IVORY));
             if profile.is_some_and(ProfileSummary::newcomer) {
                 card_node.spawn(widgets::label(
-                    "Newcomer placement: matched with other new players",
+                    tr("card.newcomer_placement"),
                     12.0,
                     theme::MUTED,
                 ));
@@ -274,6 +298,10 @@ enum CardAction {
 #[derive(Component)]
 struct CardPreviewSlot;
 
+/// The customization screen's root, rebuilt on a language change.
+#[derive(Component)]
+struct CardScreenRoot;
+
 fn spawn_card_screen(
     mut commands: Commands,
     card: Res<ProfileCard>,
@@ -288,7 +316,10 @@ fn spawn_card_screen(
         .as_ref()
         .map_or(0, |profile| profile.wins);
     commands
-        .spawn(widgets::screen_root(AppScreen::Card, "CardScreen"))
+        .spawn((
+            widgets::screen_root(AppScreen::Card, "CardScreen"),
+            CardScreenRoot,
+        ))
         .with_children(|root| {
             root.spawn(Node {
                 justify_content: JustifyContent::SpaceBetween,
@@ -296,7 +327,7 @@ fn spawn_card_screen(
                 ..default()
             })
             .with_children(|header| {
-                header.spawn(widgets::heading("Profile card", 30.0));
+                header.spawn(widgets::heading(tr("card.title"), 30.0));
                 header
                     .spawn(Node {
                         column_gap: Val::Px(8.0),
@@ -305,14 +336,14 @@ fn spawn_card_screen(
                     .with_children(|actions| {
                         screen_button(
                             actions,
-                            "Avatars",
+                            tr("card.button.avatars"),
                             ButtonKind::Secondary,
                             CardAction::Showcase,
                             "CardOpenCollection",
                         );
                         screen_button(
                             actions,
-                            "Back",
+                            tr("common.back"),
                             ButtonKind::Secondary,
                             CardAction::Back,
                             "CardBack",
@@ -352,7 +383,7 @@ fn spawn_card_screen(
                     Name::new("CardEditors"),
                 ))
                 .with_children(|editors| {
-                    editors.spawn(widgets::label("Main hero", 16.0, theme::MUTED));
+                    editors.spawn(widgets::label(tr("card.main_hero"), 16.0, theme::MUTED));
                     editors
                         .spawn(Node {
                             column_gap: Val::Px(8.0),
@@ -364,14 +395,14 @@ fn spawn_card_screen(
                             for class in HeroClass::ALL {
                                 screen_tile(
                                     row,
-                                    class.display_name(),
+                                    data::hero_name(class),
                                     class == card.main_class,
                                     CardAction::Class(class),
                                     format!("CardClass-{}", class.id()),
                                 );
                             }
                         });
-                    editors.spawn(widgets::label("Accent", 16.0, theme::MUTED));
+                    editors.spawn(widgets::label(tr("card.accent"), 16.0, theme::MUTED));
                     editors
                         .spawn(Node {
                             column_gap: Val::Px(8.0),
@@ -404,7 +435,7 @@ fn spawn_card_screen(
                                 ));
                             }
                         });
-                    editors.spawn(widgets::label("Title", 16.0, theme::MUTED));
+                    editors.spawn(widgets::label(tr("card.title_heading"), 16.0, theme::MUTED));
                     editors
                         .spawn(Node {
                             column_gap: Val::Px(8.0),
@@ -415,10 +446,11 @@ fn spawn_card_screen(
                         .with_children(|row| {
                             for (index, (name, needed)) in TITLES.iter().enumerate() {
                                 let unlocked = wins >= *needed;
+                                let title = data::card_title(index);
                                 let text = if unlocked {
-                                    (*name).to_owned()
+                                    title.to_owned()
                                 } else {
-                                    format!("{name} · {needed} wins")
+                                    trf("card.title_locked", &[("title", &title), ("wins", needed)])
                                 };
                                 screen_tile(
                                     row,
@@ -429,11 +461,7 @@ fn spawn_card_screen(
                                 );
                             }
                         });
-                    editors.spawn(widgets::label(
-                        "Showcase avatar is picked in the collection.",
-                        13.0,
-                        theme::MUTED,
-                    ));
+                    editors.spawn(widgets::label(tr("card.showcase_hint"), 13.0, theme::MUTED));
                 });
             });
         });
@@ -519,6 +547,31 @@ fn refresh_card_screen(
             &thumbnails,
         );
     });
+}
+
+/// Rebuilds the customization screen when the language changes.
+fn relocalize_card_screen(
+    commands: Commands,
+    card: Res<ProfileCard>,
+    career: Res<crate::career::CareerClient>,
+    thumbnails: Res<AvatarThumbnails>,
+    platform: Res<crate::ui::UiPlatform>,
+    locale: Option<Res<Locale>>,
+    roots: Query<Entity, With<CardScreenRoot>>,
+    mut last: Local<Option<u32>>,
+) {
+    let Some(generation) = locale.as_ref().map(|locale| locale.generation()) else {
+        return;
+    };
+    let first = last.is_none();
+    if last.replace(generation) == Some(generation) || first {
+        return;
+    }
+    let mut commands = commands;
+    for root in &roots {
+        commands.entity(root).despawn();
+    }
+    spawn_card_screen(commands, card, career, thumbnails, platform);
 }
 
 #[cfg(test)]

@@ -7,6 +7,7 @@ use shared::wire::ClientPacket;
 
 use crate::persistence::ClientSessionId;
 use crate::player::Player;
+use crate::social::SocialStatus;
 use crate::team::{CharacterChoice, Team};
 
 use super::components::{GameStateSnapshot, PlayerBasicAttackCooldown, PlayerUtility};
@@ -171,7 +172,7 @@ pub(in crate::net) fn send_network_commands(
                 command,
             } => {
                 let error = if !client_session.join_confirmed() {
-                    Some("Join a match before sending a message.".to_owned())
+                    Some(SocialStatus::Key("social.status.join_first"))
                 } else if let Some(snapshot) = snapshot.as_ref() {
                     let request = shared::social::SocialRequest {
                         request_id: *request_id,
@@ -202,14 +203,16 @@ pub(in crate::net) fn send_network_commands(
                     ) {
                         career_identity
                             .as_mut()
-                            .ok_or_else(|| "Your profile is not connected.".to_owned())
+                            .ok_or(SocialStatus::Key("social.status.no_profile"))
                             .and_then(|identity| {
-                                identity.prepare_request(
-                                    &shared::career::CareerRequest::Social { request },
-                                    &client_session.server_addr_display,
-                                    snapshot.meta.server_epoch,
-                                    &client_session_id.0,
-                                )
+                                identity
+                                    .prepare_request(
+                                        &shared::career::CareerRequest::Social { request },
+                                        &client_session.server_addr_display,
+                                        snapshot.meta.server_epoch,
+                                        &client_session_id.0,
+                                    )
+                                    .map_err(SocialStatus::from_text)
                             })
                             .map(|request| ClientPacket::Career { request })
                     } else {
@@ -220,11 +223,11 @@ pub(in crate::net) fn send_network_commands(
                             .outgoing
                             .try_send(packet)
                             .err()
-                            .map(|_| "Connection lost.".to_owned()),
+                            .map(|_| SocialStatus::Key("social.status.connection_lost")),
                         Err(error) => Some(error),
                     }
                 } else {
-                    Some("The match is not ready.".to_owned())
+                    Some(SocialStatus::Key("social.status.not_ready"))
                 };
                 if let Some(error) = error
                     && let Some(social) = social_client.as_mut()

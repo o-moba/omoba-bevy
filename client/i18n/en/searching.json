@@ -1,0 +1,21 @@
+{
+  "searching.status.waiting": "Waiting for players…",
+  "searching.status.forming": "Waiting for players · {ready}/{needed}\nThe match starts as soon as the roster is full.",
+  "searching.status.starting": "Match found!\nStarting in {seconds}…",
+  "searching.status.joining": "Joining the match…",
+  "searching.status.contacting": "Contacting the server…",
+  "searching.hero": "{hero} · {avatar}",
+  "searching.default_avatar": "default avatar",
+  "searching.title": "MATCHMAKING",
+  "searching.heading": "Finding a match",
+  "searching.match.connecting": "Connecting your profile to matchmaking…",
+  "searching.match.capacity": "All arenas are busy. Your place in the queue is reserved.",
+  "searching.match.preparing": "Preparing your match…",
+  "searching.match.bot_fill": "Bots fill empty seats in {seconds}s",
+  "searching.match.humans_only": "Waiting for a full human roster · no bots",
+  "searching.match.bot_practice": "Preparing your bot match…",
+  "searching.match.waiting": "Players found · {humans}/{needed}\n{policy} · waiting {elapsed}s",
+  "searching.match.allocating": "Match found · preparing the arena…",
+  "searching.match.assigned": "Match found · connecting to your team…",
+  "searching.match.failed": "Could not start the match: {code}\nCancel and try again."
+}

@@ -1,4 +1,8 @@
 //! Matchmaking screen: what the server says about the queue, and a way out.
+//!
+//! Text comes from the `searching` dictionary: the static labels are
+//! `Localized`, the status and hero lines are rewritten every frame.
+// i18n-strict
 
 use bevy::prelude::*;
 use shared::career::QueueView;
@@ -6,6 +10,7 @@ use shared::career::QueueView;
 use super::AppScreen;
 use super::widgets;
 use crate::career::CareerClient;
+use crate::i18n::{Localized, data, tr, trf};
 use crate::net::{ClientSession, GameState, GameStateSnapshot, SessionUiCommand};
 use crate::team::TeamSelection;
 use crate::ui::theme::{self, ButtonKind};
@@ -31,6 +36,10 @@ impl Plugin for SearchingScreenPlugin {
 #[derive(Component)]
 struct SearchingStatus;
 
+/// The "hero · avatar" line under the status.
+#[derive(Component)]
+struct SearchingHero;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SearchingAction {
     Cancel,
@@ -43,36 +52,47 @@ pub fn status_text(queue: &QueueView, game: &GameState, session: &ClientSession)
         return super::home::connection_line(session).0;
     }
     if let Some(rejection) = session.join_rejection() {
-        return rejection.message().to_owned();
+        return data::join_rejection(rejection).to_owned();
     }
     if let Some(text) = crate::career::queue_text(queue) {
         return text;
     }
     match game {
-        GameState::Lobby => "Waiting for players…".to_owned(),
-        GameState::Forming { ready, needed } => {
-            format!(
-                "Waiting for players · {ready}/{needed}\nThe match starts as soon as the roster is full."
-            )
-        }
-        GameState::Starting { countdown_ms } => format!(
-            "Match found!\nStarting in {}…",
-            countdown_ms.div_ceil(1000).max(1)
+        GameState::Lobby => tr("searching.status.waiting").to_owned(),
+        GameState::Forming { ready, needed } => trf(
+            "searching.status.forming",
+            &[("ready", ready), ("needed", needed)],
         ),
-        GameState::Running | GameState::Victory { .. } => "Joining the match…".to_owned(),
+        GameState::Starting { countdown_ms } => trf(
+            "searching.status.starting",
+            &[("seconds", &countdown_ms.div_ceil(1000).max(1))],
+        ),
+        GameState::Running | GameState::Victory { .. } => tr("searching.status.joining").to_owned(),
     }
 }
 
+/// "Hero · avatar" for the chosen hero, in the active language.
+fn hero_line(selection: &TeamSelection) -> String {
+    trf(
+        "searching.hero",
+        &[
+            ("hero", &data::hero_name(selection.hero_class)),
+            (
+                "avatar",
+                &selection
+                    .avatar
+                    .as_deref()
+                    .and_then(omoba_passport::avatars::avatar_definition)
+                    .map_or(tr("searching.default_avatar"), |avatar| {
+                        avatar.display_name.as_str()
+                    }),
+            ),
+        ],
+    )
+}
+
 fn spawn_searching(mut commands: Commands, selection: Res<TeamSelection>) {
-    let hero = format!(
-        "{} · {}",
-        selection.hero_class.display_name(),
-        selection
-            .avatar
-            .as_deref()
-            .and_then(omoba_passport::avatars::avatar_definition)
-            .map_or("default avatar", |avatar| avatar.display_name.as_str())
-    );
+    let hero = hero_line(&selection);
     commands
         .spawn(widgets::screen_root(
             AppScreen::Searching,
@@ -98,7 +118,11 @@ fn spawn_searching(mut commands: Commands, selection: Res<TeamSelection>) {
                 Name::new("SearchingBody"),
             ))
             .with_children(|body| {
-                body.spawn(widgets::label("MATCHMAKING", 12.0, theme::GOLD));
+                body.spawn(widgets::label(
+                    Localized::new("searching.title"),
+                    12.0,
+                    theme::GOLD,
+                ));
                 body.spawn((
                     Node {
                         width: Val::Px(48.0),
@@ -108,16 +132,16 @@ fn spawn_searching(mut commands: Commands, selection: Res<TeamSelection>) {
                     },
                     BackgroundColor(theme::GOLD),
                 ));
-                body.spawn(widgets::heading("Finding a match", 34.0));
+                body.spawn(widgets::heading(Localized::new("searching.heading"), 34.0));
                 body.spawn((
-                    widgets::label("Contacting the server…", 16.0, theme::IVORY),
+                    widgets::label(tr("searching.status.contacting"), 16.0, theme::IVORY),
                     SearchingStatus,
                     Name::new("SearchingStatus"),
                 ));
-                body.spawn(widgets::label(&hero, 14.0, theme::MUTED));
+                body.spawn((widgets::label(&hero, 14.0, theme::MUTED), SearchingHero));
                 screen_button(
                     body,
-                    "Cancel",
+                    Localized::new("common.cancel"),
                     ButtonKind::Secondary,
                     SearchingAction::Cancel,
                     "SearchingCancel",
@@ -144,8 +168,18 @@ fn refresh_status(
     career: Res<CareerClient>,
     game: Res<GameStateSnapshot>,
     session: Res<ClientSession>,
-    mut status: Query<&mut Text, With<SearchingStatus>>,
+    selection: Option<Res<TeamSelection>>,
+    mut status: Query<&mut Text, (With<SearchingStatus>, Without<SearchingHero>)>,
+    mut hero: Query<&mut Text, (With<SearchingHero>, Without<SearchingStatus>)>,
 ) {
+    if let Some(selection) = selection.as_deref() {
+        let line = hero_line(selection);
+        for mut label in &mut hero {
+            if label.0 != line {
+                label.0.clone_from(&line);
+            }
+        }
+    }
     let text = if session.state() != crate::net::ClientConnectionState::Connected {
         super::home::connection_line(&session).0
     } else if let Some(error) = career

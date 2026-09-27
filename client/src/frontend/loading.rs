@@ -1,4 +1,8 @@
 //! One server-owned countdown and an asset barrier shared by the whole roster.
+//!
+//! Text comes from the `loading` dictionary; the render key includes the
+//! locale generation. Server-authored draft errors stay English.
+// i18n-strict
 use bevy::{
     asset::RecursiveDependencyLoadState,
     ecs::system::SystemParam,
@@ -14,6 +18,7 @@ use super::{
     widgets,
 };
 use crate::{
+    i18n::{Locale, tr, trf},
     model_scale::ModelScaleSource,
     net::{
         GameStateSnapshot, NetworkAvatar, NetworkCharacterChoice, NetworkPlayerId,
@@ -27,13 +32,15 @@ use crate::{
     world2d::World2dStatic,
 };
 
+/// Dictionary keys of the loading tips.
 const TIPS: [&str; 5] = [
-    "Last-hitting minions is the safest gold in the lane.",
-    "Towers hit harder than you do early. Bring minions with you.",
-    "Jungle camps respawn: clear them between waves.",
-    "Watch the minimap before you rotate; a missing enemy is a warning.",
-    "Your ultimate is not an escape. Buy the item that is.",
+    "loading.tip.last_hit",
+    "loading.tip.towers",
+    "loading.tip.jungle",
+    "loading.tip.minimap",
+    "loading.tip.ultimate",
 ];
+/// The dictionary key of the tip shown for `index` (show it with `tr`).
 pub fn tip_for(index: usize) -> &'static str {
     TIPS[index % TIPS.len()]
 }
@@ -199,7 +206,7 @@ fn assess_readiness(
                 .all(|sprite| assets.image_ready(&sprite.image))
     };
     if !map_ready {
-        state.local_assets = "Loading the battlefield…".into();
+        state.local_assets = tr("loading.assets.battlefield").into();
         return;
     }
     for selected in &draft.players {
@@ -208,11 +215,11 @@ fn assess_readiness(
             .iter()
             .find(|(_, id, _, _, _, _)| id.0 == selected.player_id)
         else {
-            state.local_assets = "Preparing the team’s heroes…".into();
+            state.local_assets = tr("loading.assets.team_heroes").into();
             return;
         };
         if avatar.0 != selected.avatar || character.0 != selected.character {
-            state.local_assets = "Applying the accepted team choices…".into();
+            state.local_assets = tr("loading.assets.applying").into();
             return;
         }
         if *assets.mode == PlayerVisualMode::Sprite2d {
@@ -221,7 +228,7 @@ fn assess_readiness(
                     visual.owner() == entity && assets.image_ready(&sprite.image)
                 })
             {
-                state.local_assets = "Loading the team’s sprites…".into();
+                state.local_assets = tr("loading.assets.sprites").into();
                 return;
             }
             continue;
@@ -232,23 +239,23 @@ fn assess_readiness(
             if assets.cube_ready(entity) {
                 continue;
             }
-            state.local_assets = "Preparing built-in hero materials…".into();
+            state.local_assets = tr("loading.assets.built_in").into();
             return;
         }
         if let Some(slug) = &selected.avatar {
             if omoba_passport::avatars::avatar_definition(slug).is_none() {
                 omoba_passport::store::request_refresh();
-                state.local_assets = "Refreshing the approved Studio heroes…".into();
+                state.local_assets = tr("loading.assets.refreshing").into();
                 return;
             }
             if omoba_passport::store::knows(slug) {
                 match omoba_passport::store::model_state(slug) {
                     omoba_passport::store::ModelState::Pending => {
-                        state.local_assets = "Downloading and verifying Studio heroes…".into();
+                        state.local_assets = tr("loading.assets.downloading").into();
                         return;
                     }
                     omoba_passport::store::ModelState::Unavailable => {
-                        state.local_assets = "A Studio hero is unavailable. Cancel to choose another, or wait for the draft to reopen.".into();
+                        state.local_assets = tr("loading.assets.unavailable").into();
                         return;
                     }
                     omoba_passport::store::ModelState::Ready => {}
@@ -262,7 +269,7 @@ fn assess_readiness(
                 .find(|(cached, _)| *cached == slug)
                 .map(|(_, handle)| handle);
             if !matching_avatar_asset(expected, source.map(|source| &source.gltf)) {
-                state.local_assets = "Preparing the selected avatar models…".into();
+                state.local_assets = tr("loading.assets.avatar_models").into();
                 return;
             }
         }
@@ -276,11 +283,11 @@ fn assess_readiness(
                 )
             })
         {
-            state.local_assets = "Loading hero materials and animations…".into();
+            state.local_assets = tr("loading.assets.animations").into();
             return;
         }
     }
-    state.local_assets = "Your battlefield and all selected heroes are ready.".into();
+    state.local_assets = tr("loading.assets.ready").into();
     if draft.phase == PrematchPhase::Loading && !draft.players.is_empty() {
         state.request_loaded();
     }
@@ -304,6 +311,7 @@ fn render_loading(
     mut thumbnails: ResMut<AvatarThumbnails>,
     assets: Res<AssetServer>,
     scroll: Res<DraftScrollMemory>,
+    locale: Option<Res<Locale>>,
     mut last: Local<String>,
 ) {
     let Ok(window) = windows.single() else {
@@ -316,11 +324,12 @@ fn render_loading(
         .map_or(0, |p| p.remaining_ms.div_ceil(1000));
     let roster_key = game.prematch.as_ref().map(|p| (&p.players, &p.error));
     let key = format!(
-        "{phase:?}:{seconds}:{}:{:?}:{}:{}",
+        "{phase:?}:{seconds}:{}:{:?}:{}:{}:{}",
         serde_json::to_string(&roster_key).unwrap_or_default(),
         state.local_assets,
         window.width(),
-        window.height()
+        window.height(),
+        locale.as_ref().map_or(0, |locale| locale.generation())
     );
     if *last == key && !roots.is_empty() {
         return;
@@ -339,9 +348,9 @@ fn render_loading(
     let compact = window.height() < 500.0;
     let countdown = phase == Some(PrematchPhase::Countdown);
     let title = if countdown {
-        format!("Team ready · {seconds}")
+        trf("loading.title.countdown", &[("seconds", &seconds)])
     } else {
-        "Entering the Verdant".into()
+        tr("loading.title.entering").into()
     };
     let ready = game
         .prematch
@@ -397,9 +406,9 @@ fn render_loading(
                         heading.spawn((
                             widgets::label(
                                 if countdown {
-                                    "Everyone shares this countdown · choices are locked"
+                                    tr("loading.subtitle.countdown")
                                 } else {
-                                    "The match starts when every player is ready"
+                                    tr("loading.subtitle.loading")
                                 },
                                 12.0,
                                 theme::MUTED,
@@ -409,7 +418,7 @@ fn render_loading(
                     });
                 draft::action_button(
                     header,
-                    "Cancel",
+                    tr("common.cancel"),
                     LoadingAction::Cancel,
                     "LoadingCancel",
                     86.0,
@@ -446,9 +455,9 @@ fn render_loading(
                             .with_children(|column| {
                                 column.spawn(widgets::label(
                                     if Some(team) == own_team {
-                                        "YOUR TEAM"
+                                        tr("loading.your_team")
                                     } else {
-                                        "OPPONENTS"
+                                        tr("loading.opponents")
                                     },
                                     12.0,
                                     theme::GOLD,
@@ -490,14 +499,17 @@ fn render_loading(
                 });
                 root.spawn((
                     widgets::label(
-                        &format!(
-                            "{ready} / {total} players ready{}",
-                            if countdown {
-                                String::new()
-                            } else {
-                                format!(" · up to {seconds}s remaining")
-                            }
-                        ),
+                        &if countdown {
+                            trf(
+                                "loading.ready_count",
+                                &[("ready", &ready), ("total", &total)],
+                            )
+                        } else {
+                            trf(
+                                "loading.ready_count_timed",
+                                &[("ready", &ready), ("total", &total), ("seconds", &seconds)],
+                            )
+                        },
                         14.0,
                         theme::GOLD,
                     ),
@@ -506,7 +518,7 @@ fn render_loading(
                 root.spawn((
                     widgets::label(
                         if state.local_assets.is_empty() {
-                            "Preparing the battlefield…"
+                            tr("loading.assets.preparing")
                         } else {
                             &state.local_assets
                         },
@@ -526,15 +538,11 @@ fn render_loading(
                     Name::new("LoadingBody"),
                 ))
                 .with_children(|body| {
-                    body.spawn(widgets::label(
-                        "Connecting to the battlefield…",
-                        18.0,
-                        theme::GOLD,
-                    ));
+                    body.spawn(widgets::label(tr("loading.connecting"), 18.0, theme::GOLD));
                 });
             }
             root.spawn((
-                widgets::label(tip_for(game.meta.match_id as usize), 12.0, theme::MUTED),
+                widgets::label(tr(tip_for(game.meta.match_id as usize)), 12.0, theme::MUTED),
                 Name::new("LoadingTip"),
             ));
         });

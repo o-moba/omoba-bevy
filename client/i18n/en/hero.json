@@ -1,0 +1,12 @@
+{
+  "hero.warrior.name": "Warrior",
+  "hero.warrior.tagline": "Close-range bruiser: heavy hits, self-sustain",
+  "hero.mage.name": "Mage",
+  "hero.mage.tagline": "Long-range nuker: big damage, mana engine",
+  "hero.ranger.name": "Ranger",
+  "hero.ranger.tagline": "Fast skirmisher: rapid shots, longest reach",
+  "hero.cleric.name": "Cleric",
+  "hero.cleric.tagline": "Support: modest damage, strong heals",
+  "hero.warden.name": "Warden",
+  "hero.warden.tagline": "Jungler: fast camp clears, bonus forest gold"
+}

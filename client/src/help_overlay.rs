@@ -1,7 +1,13 @@
 //! Toggleable controls and onboarding copy. Does not despawn gameplay entities.
+//!
+//! The copy is platform-specific: the desktop guide (keyboard and mouse,
+//! `help.body`) and the phone guide (touch controls, `help.phone.body`), both
+//! `Localized`, so they follow a language change while the overlay exists.
+// i18n-strict
 
 use bevy::prelude::*;
 
+use crate::i18n::Localized;
 use crate::input_bindings::{
     HELP_TOGGLE_KEY, help_key_display, skill_keys_display, upgrade_key_display,
 };
@@ -91,8 +97,15 @@ enum HelpAction {
 }
 
 fn setup_help_overlay(mut commands: Commands, platform: Option<Res<crate::ui::UiPlatform>>) {
-    let body = help_overlay_body();
     let phone = platform.is_some_and(|platform| platform.is_mobile());
+    let (body, dismiss) = if phone {
+        (
+            Localized::new("help.phone.body"),
+            Localized::new("help.phone.dismiss"),
+        )
+    } else {
+        (help_overlay_text(), Localized::new("help.dismiss"))
+    };
 
     commands
         .spawn((
@@ -133,18 +146,18 @@ fn setup_help_overlay(mut commands: Commands, platform: Option<Res<crate::ui::Ui
                 .with_children(|panel| {
                     if !phone {
                         panel.spawn((
-                            Text::new("FIELD GUIDE  /  VERDANT ARENA"),
+                            Localized::new("help.eyebrow").into_text(),
                             crate::ui::theme::text(11.0),
                             TextColor(crate::ui::theme::GOLD),
                         ));
                         panel.spawn((
-                            Text::new("Make your first move."),
+                            Localized::new("help.title").into_text(),
                             crate::ui::theme::text(28.0),
                             TextColor(crate::ui::theme::IVORY),
                         ));
                     }
                     panel.spawn((
-                        Text::new(body),
+                        body.into_text(),
                         TextFont {
                             font_size: 15.0,
                             ..default()
@@ -172,7 +185,7 @@ fn setup_help_overlay(mut commands: Commands, platform: Option<Res<crate::ui::Ui
                         ))
                         .with_children(|button| {
                             button.spawn((
-                                Text::new("Enter the arena   /   Escape or F1"),
+                                dismiss.into_text(),
                                 Name::new("HelpDismissLabel"),
                                 TextFont {
                                     font_size: 18.0,
@@ -261,24 +274,22 @@ fn sync_help_overlay_visibility(
     };
 }
 
-fn help_overlay_body() -> String {
-    let help_key = help_key_display();
-    let skills = skill_keys_display();
-    let upgrade = upgrade_key_display();
-    format!(
-        "MOVE: Right-click ground to travel. Your route appears on the minimap.\n\
-ATTACK: Right-click a hostile to approach and attack. Basic attacks use no mana.\n\
-TARGET: Left-click selects. Tab finds a foe; Backspace clears. S stops your hero.\n\n\
-CAST: Use {skills} or the on-screen buttons. W/E/R unlock as you level.\n\
-GROW: Spend skill points with {upgrade} or the arrows above the hotbar.\n\
-SHOP: Press P at your base. Spend earned gold on items that suit your class.\n\n\
-OBJECTIVE: Follow your minions. Clear every tower in one lane, then destroy the enemy base.\n\
-SURVIVE: Let minions take tower fire. If defeated, wait for your respawn.\n\
-READ THE FIELD: Your hero has a double ring; allies have squares; enemies have triangles.\n\n\
-CAMERA: Y toggles hero follow; Space returns to your hero. Wheel zooms; Settings > Camera remembers the distance.\n\
-Left-click the minimap to scout. Alt + right mouse orbits the 3D view.\n\
-Need this guide again? In a match, press {help_key}. Escape opens the game menu."
+/// The desktop guide with this build's key bindings filled in.
+fn help_overlay_text() -> Localized {
+    Localized::with_args(
+        "help.body",
+        [
+            ("skills", &skill_keys_display()),
+            ("upgrade", &upgrade_key_display()),
+            ("help_key", &help_key_display()),
+        ],
     )
+}
+
+/// The desktop guide in the active language.
+#[cfg(test)]
+fn help_overlay_body() -> String {
+    help_overlay_text().text()
 }
 
 #[cfg(test)]
@@ -337,6 +348,72 @@ mod tests {
         assert!(body.contains("OBJECTIVE:"));
         assert!(body.contains("Y toggles hero follow"));
         assert!(body.contains(&skill_keys_display()));
+    }
+
+    /// The platform guide follows a language change while the overlay
+    /// exists, with the key bindings still filled in. Isolated: it switches
+    /// the process-wide language.
+    #[test]
+    fn help_copy_follows_the_language_on_desktop_and_phone() {
+        if crate::i18n::testing::isolated(
+            "help_overlay::tests::help_copy_follows_the_language_on_desktop_and_phone",
+        ) {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, Locale, LocaleId};
+        let zh = LocaleId::parse("zh-Hans").unwrap();
+        for (profile, body_start, dismiss) in [
+            (
+                crate::platform::UiProfile::Desktop,
+                "移动：",
+                "进入竞技场   /   Esc 或 F1",
+            ),
+            (
+                crate::platform::UiProfile::Mobile,
+                "你的第一场对局",
+                "知道了，开始游戏",
+            ),
+        ] {
+            let mut app = App::new();
+            app.add_plugins(I18nPlugin::default())
+                .insert_resource(crate::ui::UiPlatform(profile))
+                .init_resource::<ButtonInput<KeyCode>>()
+                .init_resource::<GameStateSnapshot>()
+                .add_plugins(HelpOverlayPlugin);
+            app.update();
+            let body = |app: &mut App| {
+                app.world_mut()
+                    .query_filtered::<&Text, With<HelpOverlayPanel>>()
+                    .single(app.world())
+                    .unwrap()
+                    .0
+                    .clone()
+            };
+            let english = body(&mut app);
+            assert!(
+                english.starts_with(if profile == crate::platform::UiProfile::Mobile {
+                    "YOUR FIRST MATCH"
+                } else {
+                    "MOVE:"
+                })
+            );
+            app.world_mut().resource_mut::<Locale>().set(zh);
+            app.update();
+            let chinese = body(&mut app);
+            assert!(chinese.starts_with(body_start), "{chinese}");
+            if profile == crate::platform::UiProfile::Desktop {
+                assert!(chinese.contains(&skill_keys_display()));
+                assert!(chinese.contains("按 F1"));
+            }
+            let label = app
+                .world_mut()
+                .query::<(&Name, &Text)>()
+                .iter(app.world())
+                .find(|(name, _)| name.as_str() == "HelpDismissLabel")
+                .map(|(_, text)| text.0.clone())
+                .unwrap();
+            assert_eq!(label, dismiss);
+        }
     }
 
     #[test]

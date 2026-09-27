@@ -5,11 +5,16 @@
 //! never reach the host. This field types a `host:port`, validates it with
 //! the same rule as the preferences file and reconnects through
 //! `SessionUiCommand::ConnectTo`, which also remembers it for the next start.
+//!
+//! Text comes from the `lobby` dictionary (`lobby.server.*`); the lobby
+//! rebuilds it on a language change.
+// i18n-strict
 
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
 
 use super::{AppScreen, widgets};
+use crate::i18n::tr;
 use crate::net::SessionUiCommand;
 use crate::ui::theme::{self, ButtonKind};
 use crate::ui::widgets::screen_button;
@@ -22,7 +27,8 @@ const MAX_ADDRESS_CHARS: usize = 64;
 pub struct ServerField {
     pub editing: bool,
     pub text: String,
-    pub error: Option<String>,
+    /// Dictionary key of the message shown under the field.
+    pub error: Option<&'static str>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,10 +73,10 @@ pub(crate) fn append_address(text: &mut String, typed: &str) {
     }
 }
 
-/// `Ok(address)` to connect to, or the message shown under the field.
-pub(crate) fn submit(text: &str) -> Result<String, String> {
-    crate::persistence::validate_game_server_addr(text.trim())
-        .ok_or_else(|| "Use host:port, for example 192.168.1.20:4000".to_owned())
+/// `Ok(address)` to connect to, or the dictionary key of the message shown
+/// under the field.
+pub(crate) fn submit(text: &str) -> Result<String, &'static str> {
+    crate::persistence::validate_game_server_addr(text.trim()).ok_or("lobby.server.invalid")
 }
 
 fn stop_editing(mut field: ResMut<ServerField>) {
@@ -153,7 +159,7 @@ pub(crate) fn spawn_server_field(
     field: &ServerField,
     current: &str,
 ) {
-    parent.spawn(widgets::label("SERVER", 12.0, theme::GOLD));
+    parent.spawn(widgets::label(tr("lobby.server.title"), 12.0, theme::GOLD));
     parent
         .spawn((
             Node {
@@ -179,13 +185,9 @@ pub(crate) fn spawn_server_field(
                     16.0,
                     theme::IVORY,
                 ));
-                block.spawn(widgets::label(
-                    "Type the host's address · Enter connects · Esc cancels",
-                    11.0,
-                    theme::MUTED,
-                ));
+                block.spawn(widgets::label(tr("lobby.server.hint"), 11.0, theme::MUTED));
                 if let Some(error) = &field.error {
-                    block.spawn(widgets::label(error, 12.0, theme::DANGER_HOVER));
+                    block.spawn(widgets::label(tr(error), 12.0, theme::DANGER_HOVER));
                 }
                 block
                     .spawn(Node {
@@ -195,14 +197,14 @@ pub(crate) fn spawn_server_field(
                     .with_children(|row| {
                         screen_button(
                             row,
-                            "Connect",
+                            tr("lobby.server.connect"),
                             ButtonKind::Secondary,
                             ServerFieldAction::Connect,
                             "LobbyServerConnect",
                         );
                         screen_button(
                             row,
-                            "Cancel",
+                            tr("common.cancel"),
                             ButtonKind::Secondary,
                             ServerFieldAction::Cancel,
                             "LobbyServerCancel",
@@ -220,7 +222,7 @@ pub(crate) fn spawn_server_field(
                         row.spawn(widgets::label(current, 15.0, theme::IVORY));
                         screen_button(
                             row,
-                            "Change",
+                            tr("lobby.server.change"),
                             ButtonKind::Secondary,
                             ServerFieldAction::Edit,
                             "LobbyServerChange",

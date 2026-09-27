@@ -1,0 +1,15 @@
+{
+  "web.title": "Connect player portal",
+  "web.instructions": "Open the player website and enter its eight-character code here. Only approve a login you started yourself.",
+  "web.code_field": "Code: {code}",
+  "web.challenge": "Website: {origin}\nAccount: {account}\nRead career history; manage friends, nickname and privacy.\nAuthorize and revoke devices, create recovery codes, manage Supporter. This grants account control.\nExpires: {expires} (Unix seconds).",
+  "web.busy": "Contacting website…",
+  "web.decision_sent": "Decision sent. Return to the website.",
+  "web.button.lookup": "Look up code",
+  "web.button.approve": "Approve website access",
+  "web.button.deny": "Deny",
+  "web.error.code_format": "Enter the eight-character code shown on the website.",
+  "web.error.code_length": "Enter the eight-character code from the website.",
+  "web.error.previous_pending": "Previous website request is finishing. Try again shortly.",
+  "web.error.stopped": "Website request stopped. Please retry."
+}

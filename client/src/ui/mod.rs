@@ -55,6 +55,7 @@ impl Plugin for UiKitPlugin {
         if !app.world().contains_resource::<UiPlatform>() {
             app.insert_resource(UiPlatform(crate::platform::ui_profile()));
         }
+        crate::i18n::configure_text_sets(app);
         app.init_resource::<GestureEpoch>()
             .init_resource::<BackPress>()
             .init_resource::<UiFocus>()
@@ -74,7 +75,10 @@ impl Plugin for UiKitPlugin {
                     .in_set(crate::input_context::InputContextSet::Modal),
             )
             .add_systems(Startup, theme::load_theme)
-            .add_systems(Update, theme::apply_theme_font)
+            .add_systems(
+                PostUpdate,
+                theme::apply_theme_font.in_set(crate::i18n::I18nSystems::Font),
+            )
             .add_systems(Update, gesture::recognize_presses.in_set(UiSet::Gesture))
             .add_systems(Update, scroll::scroll_areas.in_set(UiSet::Scroll))
             .add_systems(Update, focus::navigate_focus.in_set(UiSet::Focus))

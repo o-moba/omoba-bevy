@@ -1,5 +1,9 @@
 //! Result screen. The match is over, the world is still on screen behind it,
 //! and the player decides what happens next.
+//!
+//! Text comes from the `postmatch` dictionary; the panel is rebuilt on a
+//! language change.
+// i18n-strict
 
 use bevy::prelude::*;
 use shared::career::{MatchOutcome, MatchResult};
@@ -7,6 +11,7 @@ use shared::career::{MatchOutcome, MatchResult};
 use super::AppScreen;
 use super::widgets;
 use crate::career::CareerClient;
+use crate::i18n::{Locale, locale_changed, tr, trf};
 use crate::net::{GameState, GameStateSnapshot, NetworkCommand, SessionUiCommand};
 use crate::team::Team;
 use crate::ui::theme::{self, ButtonKind};
@@ -42,9 +47,9 @@ enum PostMatchAction {
 /// Headline for the result, from the player's point of view.
 pub fn outcome_headline(winner: Option<Team>, local_team: Option<Team>) -> &'static str {
     match (winner, local_team) {
-        (Some(winner), Some(local)) if winner == local => "Victory",
-        (Some(_), Some(_)) => "Defeat",
-        _ => "Match complete",
+        (Some(winner), Some(local)) if winner == local => tr("postmatch.outcome.victory"),
+        (Some(_), Some(_)) => tr("postmatch.outcome.defeat"),
+        _ => tr("postmatch.outcome.complete"),
     }
 }
 
@@ -55,19 +60,24 @@ pub fn personal_line(result: &MatchResult, profile_id: Option<&str>) -> Option<S
         .participants
         .iter()
         .find(|entry| entry.profile_id.as_deref() == Some(profile_id))?;
-    let rating = participant
+    let stats = &participant.stats;
+    let delta = participant
         .rating
         .as_ref()
-        .map(|change| format!(" · rating {:+}", change.delta))
-        .unwrap_or_default();
-    Some(format!(
-        "{}/{}/{} · level {} · +{} XP{rating}",
-        participant.stats.kills,
-        participant.stats.deaths,
-        participant.stats.assists,
-        participant.stats.final_level,
-        participant.progression_xp_gained,
-    ))
+        .map(|change| format!("{:+}", change.delta));
+    let args: [(&str, &dyn std::fmt::Display); 6] = [
+        ("kills", &stats.kills),
+        ("deaths", &stats.deaths),
+        ("assists", &stats.assists),
+        ("level", &stats.final_level),
+        ("xp", &participant.progression_xp_gained),
+        ("delta", &delta.as_deref().unwrap_or_default()),
+    ];
+    Some(if delta.is_some() {
+        trf("postmatch.personal_rated", &args)
+    } else {
+        trf("postmatch.personal", &args)
+    })
 }
 
 fn current_result<'a>(
@@ -92,16 +102,16 @@ fn spawn_post_match(
     let headline = outcome_headline(winner, local_team.iter().next().copied());
     let result = current_result(&career, &game).cloned();
     let summary = result.as_ref().map(|result| match result.outcome {
-        MatchOutcome::Completed => format!(
-            "{} destroyed the enemy base · {} min",
-            result.winner.map_or("Nobody", |team| match team {
-                shared::map::Team::Green => "Green",
-                shared::map::Team::Blue => "Blue",
-            }),
-            result.duration_ms / 60_000
+        MatchOutcome::Completed => trf(
+            match result.winner {
+                Some(shared::map::Team::Green) => "postmatch.summary.green",
+                Some(shared::map::Team::Blue) => "postmatch.summary.blue",
+                None => "postmatch.summary.nobody",
+            },
+            &[("minutes", &(result.duration_ms / 60_000))],
         ),
-        MatchOutcome::Abandoned => "Match abandoned".to_owned(),
-        MatchOutcome::Interrupted => "Match interrupted".to_owned(),
+        MatchOutcome::Abandoned => tr("postmatch.summary.abandoned").to_owned(),
+        MatchOutcome::Interrupted => tr("postmatch.summary.interrupted").to_owned(),
     });
     let personal = result
         .as_ref()
@@ -142,7 +152,7 @@ fn spawn_post_match(
                 Name::new("PostMatchPanel"),
             ))
             .with_children(|panel| {
-                panel.spawn(widgets::label("THE VERDANT ARENA", 12.0, theme::GOLD));
+                panel.spawn(widgets::label(tr("postmatch.tagline"), 12.0, theme::GOLD));
                 panel.spawn(widgets::heading(headline, 42.0));
                 if let Some(summary) = summary.as_deref() {
                     panel.spawn(widgets::label(summary, 15.0, theme::IVORY));
@@ -152,11 +162,11 @@ fn spawn_post_match(
                 }
                 panel.spawn(widgets::label(
                     if result.as_ref().is_some_and(|result| result.saved) {
-                        "Progress saved"
+                        tr("postmatch.saved")
                     } else if !career.view.storage_enabled {
-                        "Local practice result"
+                        tr("postmatch.local_result")
                     } else {
-                        "Saving match results…"
+                        tr("postmatch.saving")
                     },
                     13.0,
                     theme::MUTED,
@@ -170,14 +180,14 @@ fn spawn_post_match(
                     .with_children(|row| {
                         screen_button(
                             row,
-                            "Play again",
+                            tr("postmatch.button.play_again"),
                             ButtonKind::Primary,
                             PostMatchAction::PlayAgain,
                             "PostMatchPlayAgain",
                         );
                         screen_button(
                             row,
-                            "Back to menu",
+                            tr("postmatch.button.back_to_menu"),
                             ButtonKind::Secondary,
                             PostMatchAction::BackToMenu,
                             "PostMatchBackToMenu",
@@ -193,6 +203,7 @@ fn refresh_post_match(
     career: Res<CareerClient>,
     local_team: Query<&Team, With<crate::player::Player>>,
     roots: Query<(Entity, &PostMatchRoot)>,
+    locale: Option<Res<Locale>>,
 ) {
     let Ok((entity, root)) = roots.single() else {
         return;
@@ -206,7 +217,10 @@ fn refresh_post_match(
     {
         return;
     }
-    if root.0.as_ref() != current_result(&career, &game) || root.1 != career.view.storage_enabled {
+    if root.0.as_ref() != current_result(&career, &game)
+        || root.1 != career.view.storage_enabled
+        || locale_changed(&locale)
+    {
         commands
             .entity(entity)
             .despawn_related::<Children>()

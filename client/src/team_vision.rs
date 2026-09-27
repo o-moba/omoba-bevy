@@ -1,4 +1,5 @@
 //! 3D presentation of server-owned team sight. This module never grants vision.
+// i18n-strict
 use crate::{
     camera::MainCamera,
     maps::MapLayout,
@@ -166,7 +167,7 @@ fn setup(
         let y = layout.terrain_height_3d(zone.center[0], zone.center[1]);
         commands
             .spawn((
-                Name::new(format!("Gameplay brush {}", zone.id)),
+                Name::new(format!("Gameplay brush {}", zone.id)), // i18n-allow
                 BrushArt,
                 Transform::from_xyz(zone.center[0], y, zone.center[1]),
                 Visibility::Visible,
@@ -308,11 +309,11 @@ fn sync_visibility(
         let show = art.active && vision.is_some_and(|v| v.local_brush.is_some());
         node.display = if show { Display::Flex } else { Display::None };
         if let Some(vision) = vision.filter(|_| show) {
-            let line = if vision.local_hidden {
-                "BRUSH · CONCEALED"
+            let line = crate::i18n::tr(if vision.local_hidden {
+                "hud.brush.concealed"
             } else {
-                "BRUSH · REVEALED"
-            };
+                "hud.brush.revealed"
+            });
             if text.0 != line {
                 text.0 = line.into();
             }

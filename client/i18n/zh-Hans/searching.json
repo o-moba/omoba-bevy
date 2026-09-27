@@ -1,0 +1,21 @@
+{
+  "searching.status.waiting": "等待玩家…",
+  "searching.status.forming": "等待玩家 · {ready}/{needed}\n人数满员后对局立即开始。",
+  "searching.status.starting": "已找到对局！\n{seconds} 秒后开始…",
+  "searching.status.joining": "正在加入对局…",
+  "searching.status.contacting": "正在联系服务器…",
+  "searching.hero": "{hero} · {avatar}",
+  "searching.default_avatar": "默认形象",
+  "searching.title": "匹配",
+  "searching.heading": "正在寻找对局",
+  "searching.match.connecting": "正在将你的资料接入匹配系统…",
+  "searching.match.capacity": "所有竞技场均已占用。你在队列中的位置已保留。",
+  "searching.match.preparing": "正在准备你的对局…",
+  "searching.match.bot_fill": "{seconds} 秒后由电脑玩家补满空位",
+  "searching.match.humans_only": "等待真人玩家满员 · 不加入电脑玩家",
+  "searching.match.bot_practice": "正在准备你的电脑玩家对局…",
+  "searching.match.waiting": "已找到玩家 · {humans}/{needed}\n{policy} · 已等待 {elapsed} 秒",
+  "searching.match.allocating": "已找到对局 · 正在准备竞技场…",
+  "searching.match.assigned": "已找到对局 · 正在连接你的队伍…",
+  "searching.match.failed": "无法开始对局：{code}\n请取消后重试。"
+}

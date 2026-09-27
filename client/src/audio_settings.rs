@@ -1,4 +1,5 @@
 //! User-controlled mixer levels shared by playback, settings and persistence.
+// i18n-strict
 use bevy::prelude::Resource;
 use serde::{Deserialize, Serialize};
 

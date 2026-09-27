@@ -6,6 +6,7 @@
 //! activation baseline remembers where the sticks rested when the pad last
 //! lost ownership, so a drifting or still-tilted stick cannot steal input
 //! again; a stick that returns to centre resets its baseline.
+// i18n-strict
 use bevy::prelude::*;
 
 use super::snapshot::PadSnapshot;

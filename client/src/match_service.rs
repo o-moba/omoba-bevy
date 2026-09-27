@@ -1,4 +1,8 @@
 //! Public lobby matchmaking and the handoff to one allocated arena.
+//!
+//! The status line shown while searching comes from the `searching`
+//! dictionary (`searching.match.*`).
+// i18n-strict
 use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
@@ -10,6 +14,7 @@ use shared::{
 use crate::{
     career::CareerClient,
     career_identity::CareerIdentity,
+    i18n::{tr, trf},
     net::{ClientSession, GameStateSnapshot, NetworkCommand, SessionUiCommand},
     persistence::ClientSessionId,
 };
@@ -140,9 +145,10 @@ fn update_match_service(
     }
 }
 
+/// The matchmaking status line for the searching screen, in the active language.
 pub(crate) fn status_text(view: &MatchServiceView) -> String {
     match view {
-        MatchServiceView::Idle => "Connecting your profile to matchmaking…".into(),
+        MatchServiceView::Idle => tr("searching.match.connecting").into(),
         MatchServiceView::Waiting {
             preference,
             humans,
@@ -152,27 +158,33 @@ pub(crate) fn status_text(view: &MatchServiceView) -> String {
             capacity_wait,
         } => {
             if *capacity_wait {
-                return "All arenas are busy. Your place in the queue is reserved.".into();
+                return tr("searching.match.capacity").into();
             }
             let policy = match preference {
                 MatchPreference::Quick => {
-                    bot_fill_after_secs.map_or("Preparing your match…".into(), |seconds| {
-                        format!(
-                            "Bots fill empty seats in {}s",
-                            seconds.saturating_sub(*elapsed_secs)
+                    bot_fill_after_secs.map_or(tr("searching.match.preparing").into(), |seconds| {
+                        trf(
+                            "searching.match.bot_fill",
+                            &[("seconds", &seconds.saturating_sub(*elapsed_secs))],
                         )
                     })
                 }
-                MatchPreference::HumansOnly => "Waiting for a full human roster · no bots".into(),
-                MatchPreference::BotPractice => "Preparing your bot match…".into(),
+                MatchPreference::HumansOnly => tr("searching.match.humans_only").into(),
+                MatchPreference::BotPractice => tr("searching.match.bot_practice").into(),
             };
-            format!("Players found · {humans}/{needed}\n{policy} · waiting {elapsed_secs}s")
+            trf(
+                "searching.match.waiting",
+                &[
+                    ("humans", humans),
+                    ("needed", needed),
+                    ("policy", &policy),
+                    ("elapsed", elapsed_secs),
+                ],
+            )
         }
-        MatchServiceView::Allocating => "Match found · preparing the arena…".into(),
-        MatchServiceView::Assigned { .. } => "Match found · connecting to your team…".into(),
-        MatchServiceView::Failed { code } => {
-            format!("Could not start the match: {code}\nCancel and try again.")
-        }
+        MatchServiceView::Allocating => tr("searching.match.allocating").into(),
+        MatchServiceView::Assigned { .. } => tr("searching.match.assigned").into(),
+        MatchServiceView::Failed { code } => trf("searching.match.failed", &[("code", code)]),
     }
 }
 
@@ -204,5 +216,50 @@ mod tests {
         assert!(text.contains("3/10"));
         assert!(text.contains("no bots"));
         assert!(!text.contains("fill empty"));
+    }
+    /// The searching status follows the active language.
+    #[test]
+    fn status_text_follows_the_language() {
+        if crate::i18n::testing::isolated("match_service::tests::status_text_follows_the_language")
+        {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, Locale, LocaleId};
+        let waiting = MatchServiceView::Waiting {
+            preference: MatchPreference::Quick,
+            humans: 4,
+            needed: 10,
+            elapsed_secs: 12,
+            bot_fill_after_secs: Some(30),
+            capacity_wait: false,
+        };
+        let failed = MatchServiceView::Failed {
+            code: "no_capacity".into(),
+        };
+        let mut app = App::new();
+        app.add_plugins(I18nPlugin::default());
+        assert_eq!(
+            status_text(&waiting),
+            "Players found · 4/10\nBots fill empty seats in 18s · waiting 12s"
+        );
+        assert_eq!(
+            status_text(&failed),
+            "Could not start the match: no_capacity\nCancel and try again."
+        );
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(LocaleId::parse("zh-Hans").unwrap());
+        assert_eq!(
+            status_text(&waiting),
+            "已找到玩家 · 4/10\n18 秒后由电脑玩家补满空位 · 已等待 12 秒"
+        );
+        assert_eq!(
+            status_text(&failed),
+            "无法开始对局：no_capacity\n请取消后重试。"
+        );
+        assert_eq!(
+            status_text(&MatchServiceView::Allocating),
+            "已找到对局 · 正在准备竞技场…"
+        );
     }
 }
