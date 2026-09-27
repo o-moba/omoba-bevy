@@ -1,4 +1,5 @@
 //! Explicit website approval; background HTTP never receives the private game key.
+// i18n-strict
 use super::*;
 use crate::career_identity::CareerIdentity;
 use omoba_passport::web_account::WebAccountApi;
@@ -28,7 +29,7 @@ impl WebState {
 pub(super) fn append(code: &mut String, text: &str) -> Result<(), &'static str> {
     let normalized = text.trim().to_ascii_uppercase().replace([' ', '-'], "");
     if !normalized.bytes().all(|b| b.is_ascii_alphanumeric()) || code.len() + normalized.len() > 8 {
-        return Err("Enter the eight-character code shown on the website.");
+        return Err(tr("web.error.code_format"));
     }
     code.push_str(&normalized);
     Ok(())
@@ -56,13 +57,11 @@ pub(super) fn act(
         }
         Action::WebLookup if !career.web.busy => {
             if worker.pending.is_some() {
-                career.web.message =
-                    Some("Previous website request is finishing. Try again shortly.".into());
+                career.web.message = Some(tr("web.error.previous_pending").into());
                 return;
             }
             if career.web.code.len() != 8 {
-                career.web.message =
-                    Some("Enter the eight-character code from the website.".into());
+                career.web.message = Some(tr("web.error.code_length").into());
                 return;
             }
             let key = match identity.public_key() {
@@ -143,7 +142,7 @@ pub(super) fn poll(mut career: ResMut<CareerClient>, mut worker: ResMut<Worker>)
                 Ok(Some(challenge)) => career.web.challenge = Some(challenge),
                 Ok(None) => {
                     career.web.challenge = None;
-                    career.web.message = Some("Decision sent. Return to the website.".into());
+                    career.web.message = Some(tr("web.decision_sent").into());
                 }
                 Err(e) => career.web.message = Some(e),
             }
@@ -151,22 +150,16 @@ pub(super) fn poll(mut career: ResMut<CareerClient>, mut worker: ResMut<Worker>)
         Some(Err(mpsc::TryRecvError::Disconnected)) => {
             worker.pending = None;
             career.web.busy = false;
-            career.web.message = Some("Website request stopped. Please retry.".into());
+            career.web.message = Some(tr("web.error.stopped").into());
         }
         _ => {}
     }
 }
 pub(super) fn body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
+    label(parent, tr("web.title"), 26., ui::GOLD, "WebLinkTitle");
     label(
         parent,
-        "Connect player portal",
-        26.,
-        ui::GOLD,
-        "WebLinkTitle",
-    );
-    label(
-        parent,
-        "Open the player website and enter its eight-character code here. Only approve a login you started yourself.",
+        tr("web.instructions"),
         16.,
         ui::IVORY,
         "WebLinkInstructions",
@@ -174,29 +167,39 @@ pub(super) fn body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
     button(
         parent,
         &format!(
-            "Code: {}{}",
-            career.web.code,
+            "{}{}",
+            trf("web.code_field", &[("code", &career.web.code)]),
             if career.web.focused { " |" } else { "" }
         ),
         Action::WebEdit,
         "WebLinkCode",
     );
     if !career.web.busy {
-        button(parent, "Look up code", Action::WebLookup, "WebLinkLookup");
+        button(
+            parent,
+            tr("web.button.lookup"),
+            Action::WebLookup,
+            "WebLinkLookup",
+        );
     }
     if let Some(c) = &career.web.challenge {
         label(
             parent,
-            format!(
-                "Website: {}\nAccount: {}\nRead career history; manage friends, nickname and privacy.\nAuthorize and revoke devices, create recovery codes, manage Supporter. This grants account control.\nExpires: {} (Unix seconds).",
-                c.origin,
-                career
-                    .view
-                    .profile
-                    .as_ref()
-                    .map(|p| p.nickname.as_str())
-                    .unwrap_or(&career.nickname),
-                c.expires_at
+            trf(
+                "web.challenge",
+                &[
+                    ("origin", &c.origin),
+                    (
+                        "account",
+                        &career
+                            .view
+                            .profile
+                            .as_ref()
+                            .map(|p| p.nickname.as_str())
+                            .unwrap_or(&career.nickname),
+                    ),
+                    ("expires", &c.expires_at),
+                ],
             ),
             16.,
             ui::IVORY,
@@ -205,15 +208,20 @@ pub(super) fn body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
         if !career.web.busy {
             button(
                 parent,
-                "Approve website access",
+                tr("web.button.approve"),
                 Action::WebApprove,
                 "WebLinkApprove",
             );
-            button(parent, "Deny", Action::WebDeny, "WebLinkDeny");
+            button(
+                parent,
+                tr("web.button.deny"),
+                Action::WebDeny,
+                "WebLinkDeny",
+            );
         }
     }
     if career.web.busy {
-        label(parent, "Contacting website…", 15., ui::MUTED, "WebLinkBusy");
+        label(parent, tr("web.busy"), 15., ui::MUTED, "WebLinkBusy");
     }
     if let Some(message) = &career.web.message {
         label(parent, message, 15., ui::GOLD, "WebLinkMessage");

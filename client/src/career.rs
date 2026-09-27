@@ -1,5 +1,7 @@
 //! Authoritative career UI. Match receipts outlive live entities and connections.
+// i18n-strict
 use crate::{
+    i18n::{Locale, data, lookup, tr, trf},
     input_context::InputContextSet,
     net::{GameState, GameStateSnapshot, NetworkCommand, SessionEvent, SessionReactions},
     platform::UiProfile,
@@ -83,7 +85,7 @@ impl Default for CareerClient {
             web: web::WebState::default(),
             devices: devices::DeviceState::default(),
             public_profile_id: None,
-            nickname: "Player".into(),
+            nickname: "Player".into(), // i18n-allow: protocol default nickname
             local_player_id: None,
             modal: CareerModal::Closed,
             draft: String::new(),
@@ -135,8 +137,7 @@ impl CareerClient {
         {
             self.pending = None;
             self.view.loading = false;
-            self.request_error =
-                Some("Saved progress is unavailable. Check your connection and try again.".into());
+            self.request_error = Some(tr("career.error.progress_unavailable").into());
         }
     }
     pub fn modal_open(&self) -> bool {
@@ -206,7 +207,7 @@ impl CareerClient {
         self.nickname = view
             .profile
             .as_ref()
-            .map_or_else(|| "QA Player".into(), |profile| profile.nickname.clone());
+            .map_or_else(|| "QA Player".into(), |profile| profile.nickname.clone()); // i18n-allow
         self.draft.clone_from(&self.nickname);
         self.selected_result = view
             .last_result
@@ -497,7 +498,7 @@ enum Action {
 fn profile_id(raw: &str) -> Result<String, &'static str> {
     let value = raw.trim();
     if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err("Invalid player reference. Find the player again.");
+        return Err(tr("career.error.invalid_player"));
     }
     Ok(value.to_ascii_lowercase())
 }
@@ -565,7 +566,7 @@ fn friend_action(
         }
     };
     if career.public_profile_id.as_deref() == Some(&id) {
-        career.form_error = Some("That is your own player tag.".into());
+        career.form_error = Some(tr("career.error.own_tag").into());
         return;
     }
     career.form_error = None;
@@ -788,10 +789,10 @@ fn actions(
 fn append_name(current: &mut String, text: &str) -> Result<(), &'static str> {
     let next = format!("{current}{text}");
     if next.chars().count() > shared::career::MAX_PLAYER_HANDLE_CHARS || next.len() > 85 {
-        return Err("Use up to 20 name characters, # and four digits.");
+        return Err(tr("career.error.name_too_long"));
     }
     if next.chars().any(char::is_control) {
-        return Err("Names cannot contain control characters.");
+        return Err(tr("career.error.name_control"));
     }
     *current = next;
     Ok(())
@@ -817,20 +818,20 @@ pub(crate) fn clipboard_text() -> Result<String, &'static str> {
         .args([
             "-NoProfile",
             "-NonInteractive",
-            "-Command",
-            "Get-Clipboard -Raw",
+            "-Command",           // i18n-allow: shell arguments
+            "Get-Clipboard -Raw", // i18n-allow
         ])
         .output();
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
-        let output = output.map_err(|_| "Clipboard paste is unavailable.")?;
+        let output = output.map_err(|_| tr("career.clipboard.unavailable"))?;
         if !output.status.success() || output.stdout.len() > 4096 {
-            return Err("Clipboard text is unavailable or too long.");
+            return Err(tr("career.clipboard.too_long"));
         }
-        String::from_utf8(output.stdout).map_err(|_| "Clipboard text is invalid.")
+        String::from_utf8(output.stdout).map_err(|_| tr("career.clipboard.invalid"))
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    Err("Use your device keyboard's paste action, or type the code.")
+    Err(tr("career.clipboard.use_keyboard"))
 }
 fn dismiss_with_escape(mut career: ResMut<CareerClient>, mut back: crate::ui::BackInput) {
     if career.modal_open() && back.just_pressed() {
@@ -1033,7 +1034,11 @@ fn button(parent: &mut ChildSpawnerCommands, value: &str, action: Action, name: 
             UiAction(action),
             TestId::new(name.to_owned()),
         ))
-        .with_children(|parent| label(parent, value, 15.0, ui::IVORY, &format!("{name}Label")));
+        .with_children(|parent| label(parent, value, 15.0, ui::IVORY, &label_name(name)));
+}
+/// `Name` of a button's label: an identity, never display text.
+fn label_name(name: &str) -> String {
+    format!("{name}Label") // i18n-allow
 }
 fn row_node() -> Node {
     Node {
@@ -1071,7 +1076,7 @@ fn timestamp(ms: u64) -> String {
     let month = month_index + if month_index < 10 { 3 } else { -9 };
     let year = year + i64::from(month <= 2);
     format!(
-        "{year:04}-{month:02}-{day:02} {:02}:{:02} UTC",
+        "{year:04}-{month:02}-{day:02} {:02}:{:02} UTC", // i18n-allow: ISO date and UTC
         (seconds % 86400) / 3600,
         (seconds % 3600) / 60
     )
@@ -1085,9 +1090,52 @@ fn number(value: f64) -> String {
 }
 fn rating(change: Option<&shared::career::RatingChange>) -> String {
     change.map_or_else(
-        || "Unrated".into(),
+        || tr("career.rating.unrated").into(),
         |r| format!("{} ({:+})", r.after, r.delta),
     )
+}
+fn player_nickname(player: &ParticipantResult) -> String {
+    if player.is_bot {
+        trf("career.player.bot", &[("name", &player.nickname)])
+    } else {
+        player.nickname.clone()
+    }
+}
+fn player_progress(player: &ParticipantResult) -> String {
+    let args: [(&str, &dyn std::fmt::Display); 2] = [
+        ("rating", &rating(player.rating.as_ref())),
+        ("xp", &player.progression_xp_gained),
+    ];
+    if player.disconnected {
+        trf("career.player.progress_disconnected", &args)
+    } else {
+        trf("career.player.progress", &args)
+    }
+}
+fn profile_progress(profile: &ProfileSummary) -> String {
+    trf(
+        "career.profile.progress",
+        &[
+            ("level", &profile.level()),
+            ("xp", &profile.progression_xp),
+            ("rating", &profile.rating),
+            ("rated", &profile.rated_matches),
+            ("wins", &profile.wins),
+            ("losses", &profile.losses),
+            ("played", &profile.matches_played),
+        ],
+    )
+}
+/// A server reason code (`allocated_bots`) shows its dictionary text; any
+/// other reason is server-authored prose and stays as sent.
+fn unrated_reason(reason: &str) -> &str {
+    let code = !reason.is_empty()
+        && reason
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte == b'_');
+    code.then(|| lookup(&format!("career.unrated.{reason}")))
+        .flatten()
+        .unwrap_or(reason)
 }
 fn local_participant<'a>(
     result: &'a MatchResult,
@@ -1111,12 +1159,12 @@ fn local_participant<'a>(
 }
 fn result_title(result: &MatchResult, career: &CareerClient) -> &'static str {
     match result.outcome {
-        MatchOutcome::Abandoned => "Match abandoned",
-        MatchOutcome::Interrupted => "Match interrupted",
+        MatchOutcome::Abandoned => tr("career.result.abandoned"),
+        MatchOutcome::Interrupted => tr("career.result.interrupted"),
         MatchOutcome::Completed => match (result.winner, local_participant(result, career)) {
-            (Some(winner), Some(player)) if winner == player.team => "Victory",
-            (Some(_), Some(_)) => "Defeat",
-            _ => "Match complete",
+            (Some(winner), Some(player)) if winner == player.team => tr("career.result.victory"),
+            (Some(_), Some(_)) => tr("career.result.defeat"),
+            _ => tr("career.result.complete"),
         },
     }
 }
@@ -1127,17 +1175,24 @@ pub(crate) fn queue_text(queue: &QueueView) -> Option<String> {
             needed,
             elapsed_secs,
             newcomer,
-        } => Some(format!(
-            "Finding a fair match · {compatible}/{needed} compatible players · {}\n{}",
-            duration(elapsed_secs.saturating_mul(1000)),
-            if *newcomer {
-                "New players are matched with other newcomers."
-            } else {
-                "Waiting for players with similar experience and rating."
-            }
+        } => Some(trf(
+            "career.queue.waiting",
+            &[
+                ("compatible", compatible),
+                ("needed", needed),
+                ("elapsed", &duration(elapsed_secs.saturating_mul(1000))),
+                (
+                    "hint",
+                    &tr(if *newcomer {
+                        "career.queue.hint_newcomer"
+                    } else {
+                        "career.queue.hint_rating"
+                    }),
+                ),
+            ],
         )),
-        QueueView::Full => Some("The waiting queue is full. Try again shortly.".into()),
-        QueueView::Selected => Some("Match found · preparing teams…".into()),
+        QueueView::Full => Some(tr("career.queue.full").into()),
+        QueueView::Selected => Some(tr("career.queue.selected").into()),
         _ => None,
     }
 }
@@ -1208,22 +1263,24 @@ fn hero_name(player: &ParticipantResult) -> String {
         .map(|a| a.display_name.as_str())
         .or(player.sprite_character.as_deref())
         .unwrap_or(&player.character);
-    format!("{} · {cosmetic}", player.hero_class.display_name())
+    format!("{} · {}", data::hero_name(player.hero_class), cosmetic)
 }
 fn player_detail(parent: &mut ChildSpawnerCommands, player: &ParticipantResult) {
     let s = &player.stats;
     label(
         parent,
-        format!(
-            "Damage to heroes: {}   ·   Creeps: {}\nStructures: {}   ·   Damage taken: {}\nMinion last hits: {}   ·   Jungle last hits: {}\nStructures destroyed: {}   ·   Hero level: {}",
-            number(s.damage_to_heroes),
-            number(s.damage_to_creeps),
-            number(s.damage_to_structures),
-            number(s.damage_taken),
-            s.minion_last_hits,
-            s.jungle_last_hits,
-            s.structures_destroyed,
-            s.final_level
+        trf(
+            "career.player.stats",
+            &[
+                ("hero_damage", &number(s.damage_to_heroes)),
+                ("creep_damage", &number(s.damage_to_creeps)),
+                ("structure_damage", &number(s.damage_to_structures)),
+                ("taken", &number(s.damage_taken)),
+                ("minion_last_hits", &s.minion_last_hits),
+                ("jungle_last_hits", &s.jungle_last_hits),
+                ("structures_destroyed", &s.structures_destroyed),
+                ("level", &s.final_level),
+            ],
         ),
         14.0,
         ui::IVORY,
@@ -1243,14 +1300,14 @@ fn desktop_team(
         .spawn((row_node(), Name::new("CareerDesktopTableHeader")))
         .with_children(|p| {
             for (title, width) in [
-                ("PLAYER / HERO", 280.0),
-                ("K / D / A", 90.0),
-                ("HERO DMG", 100.0),
-                ("CREEP DMG", 100.0),
-                ("STRUCTURE", 100.0),
-                ("TAKEN", 90.0),
+                ("career.table.player_hero", 280.0),
+                ("career.table.kda", 90.0),
+                ("career.table.hero_damage", 100.0),
+                ("career.table.creep_damage", 100.0),
+                ("career.table.structure", 100.0),
+                ("career.table.taken", 90.0),
             ] {
-                cell(p, title.into(), width, ui::MUTED);
+                cell(p, tr(title).into(), width, ui::MUTED);
             }
         });
     for player in result.participants.iter().filter(|p| p.team == team) {
@@ -1286,11 +1343,7 @@ fn desktop_team(
                     .with_children(|p| {
                         label(
                             p,
-                            if player.is_bot {
-                                format!("{} · BOT", player.nickname)
-                            } else {
-                                player.nickname.clone()
-                            },
+                            player_nickname(player),
                             16.0,
                             ui::IVORY,
                             "CareerPlayerNickname",
@@ -1317,16 +1370,7 @@ fn desktop_team(
                 }
                 label(
                     p,
-                    format!(
-                        "{} · +{} career XP{}",
-                        rating(player.rating.as_ref()),
-                        player.progression_xp_gained,
-                        if player.disconnected {
-                            " · Disconnected"
-                        } else {
-                            ""
-                        }
-                    ),
+                    player_progress(player),
                     12.0,
                     ui::MUTED,
                     "CareerPlayerProgress",
@@ -1344,23 +1388,17 @@ fn cell(parent: &mut ChildSpawnerCommands, text: String, width: f32, color: Colo
         .with_children(|p| label(p, text, 14.0, color, "CareerCell"));
 }
 fn team_label(parent: &mut ChildSpawnerCommands, result: &MatchResult, team: shared::map::Team) {
-    let name = if team == shared::map::Team::Green {
-        "Green team"
+    let name = tr(if team == shared::map::Team::Green {
+        "career.team.green"
     } else {
-        "Blue team"
+        "career.team.blue"
+    });
+    let text = match result.winner {
+        Some(winner) if winner == team => trf("career.team.winners", &[("team", &name)]),
+        Some(_) => trf("career.team.defeated", &[("team", &name)]),
+        None => name.to_owned(),
     };
-    let outcome = match result.winner {
-        Some(winner) if winner == team => " · Winners",
-        Some(_) => " · Defeated",
-        None => "",
-    };
-    label(
-        parent,
-        format!("{name}{outcome}"),
-        18.0,
-        ui::GOLD,
-        "CareerTeamLabel",
-    );
+    label(parent, text, 18.0, ui::GOLD, "CareerTeamLabel");
 }
 fn mobile_team(
     parent: &mut ChildSpawnerCommands,
@@ -1401,11 +1439,7 @@ fn mobile_team(
                     .with_children(|p| {
                         label(
                             p,
-                            if player.is_bot {
-                                format!("{} · BOT", player.nickname)
-                            } else {
-                                player.nickname.clone()
-                            },
+                            player_nickname(player),
                             16.0,
                             ui::IVORY,
                             "CareerPlayerNickname",
@@ -1414,30 +1448,26 @@ fn mobile_team(
                     });
                     button(
                         p,
-                        if career.expanded_player == Some(player.player_id) {
-                            "Less"
+                        tr(if career.expanded_player == Some(player.player_id) {
+                            "career.button.less"
                         } else {
-                            "Stats"
-                        },
+                            "career.button.stats"
+                        }),
                         Action::Expand(player.player_id),
                         "CareerPlayerDetails",
                     );
                 });
                 label(
                     p,
-                    format!(
-                        "{} / {} / {} KDA · {} hero damage\n{} · +{} career XP{}",
-                        player.stats.kills,
-                        player.stats.deaths,
-                        player.stats.assists,
-                        number(player.stats.damage_to_heroes),
-                        rating(player.rating.as_ref()),
-                        player.progression_xp_gained,
-                        if player.disconnected {
-                            " · Disconnected"
-                        } else {
-                            ""
-                        }
+                    trf(
+                        "career.player.summary",
+                        &[
+                            ("kills", &player.stats.kills),
+                            ("deaths", &player.stats.deaths),
+                            ("assists", &player.stats.assists),
+                            ("damage", &number(player.stats.damage_to_heroes)),
+                            ("progress", &player_progress(player)),
+                        ],
                     ),
                     14.0,
                     ui::IVORY,
@@ -1460,11 +1490,13 @@ fn result_body(
     let Some(result) = career.result() else {
         label(
             parent,
-            if career.view.error.is_some() || career.request_error.is_some() {
-                "The result could not be loaded."
-            } else {
-                "Loading match result…"
-            },
+            tr(
+                if career.view.error.is_some() || career.request_error.is_some() {
+                    "career.result.load_failed"
+                } else {
+                    "career.result.loading"
+                },
+            ),
             18.0,
             ui::MUTED,
             "CareerResultLoading",
@@ -1484,36 +1516,52 @@ fn result_body(
     );
     label(
         parent,
-        format!(
-            "{} played · {}\n{}",
-            duration(result.duration_ms),
-            if result.rated {
-                "Rated match"
-            } else {
-                "Unrated match"
-            },
-            if result.saved {
-                "Result saved"
-            } else if result.ruleset != "practice-bots-v1" && career.view.storage_enabled {
-                "Saving result…"
-            } else {
-                "Local practice result · not saved"
-            }
+        trf(
+            "career.result.meta",
+            &[
+                ("duration", &duration(result.duration_ms)),
+                (
+                    "rating",
+                    &tr(if result.rated {
+                        "career.result.rated"
+                    } else {
+                        "career.result.unrated"
+                    }),
+                ),
+                (
+                    "saved",
+                    &tr(if result.saved {
+                        "career.result.saved"
+                    } else if result.ruleset != "practice-bots-v1" && career.view.storage_enabled {
+                        "career.result.saving"
+                    } else {
+                        "career.result.local"
+                    }),
+                ),
+            ],
         ),
         15.0,
         ui::IVORY,
         "CareerResultMeta",
     );
     if let Some(reason) = result.unrated_reason.as_ref() {
-        label(parent, reason, 14.0, ui::MUTED, "CareerUnratedReason");
+        label(
+            parent,
+            unrated_reason(reason),
+            14.0,
+            ui::MUTED,
+            "CareerUnratedReason",
+        );
     }
     if let Some(me) = local_participant(result, career) {
         label(
             parent,
-            format!(
-                "Your rating: {}  ·  +{} career XP",
-                rating(me.rating.as_ref()),
-                me.progression_xp_gained
+            trf(
+                "career.result.my_progress",
+                &[
+                    ("rating", &rating(me.rating.as_ref())),
+                    ("xp", &me.progression_xp_gained),
+                ],
             ),
             17.0,
             ui::JADE,
@@ -1529,21 +1577,18 @@ fn result_body(
     }
 }
 fn profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
-    label(parent, "Your profile", 26.0, ui::GOLD, "CareerProfileTitle");
+    label(
+        parent,
+        tr("career.profile.title"),
+        26.0,
+        ui::GOLD,
+        "CareerProfileTitle",
+    );
     if let Some(profile) = &career.view.profile {
         friend_code_label(parent, &profile.nickname);
         label(
             parent,
-            format!(
-                "Career level {} · {} XP\nRating {} · {} rated matches\n{} wins · {} losses · {} matches played",
-                profile.level(),
-                profile.progression_xp,
-                profile.rating,
-                profile.rated_matches,
-                profile.wins,
-                profile.losses,
-                profile.matches_played
-            ),
+            profile_progress(profile),
             17.0,
             ui::IVORY,
             "CareerProfileProgress",
@@ -1551,7 +1596,7 @@ fn profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
         if profile.newcomer() {
             label(
                 parent,
-                "Newcomer matchmaking",
+                tr("career.profile.newcomer"),
                 14.0,
                 ui::JADE,
                 "CareerNewcomer",
@@ -1560,11 +1605,11 @@ fn profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
     } else {
         label(
             parent,
-            if career.view.loading {
-                "Connecting your profile…"
+            tr(if career.view.loading {
+                "career.profile.connecting"
             } else {
-                "Saved progress is not available yet. Connect to a server that supports profiles."
-            },
+                "career.profile.unavailable"
+            }),
             16.0,
             ui::MUTED,
             "CareerProfilePending",
@@ -1572,7 +1617,7 @@ fn profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
     }
     label(
         parent,
-        "Player tag · name (1–20 characters) # 4 digits",
+        tr("career.profile.tag_prompt"),
         15.0,
         ui::IVORY,
         "CareerNicknamePrompt",
@@ -1597,13 +1642,13 @@ fn profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
     );
     button(
         parent,
-        "Save player tag",
+        tr("career.button.save_tag"),
         Action::SaveName,
         "CareerSaveNickname",
     );
     label(
         parent,
-        "Rating measures match results. Career XP records your progress.",
+        tr("career.profile.rating_explanation"),
         14.0,
         ui::MUTED,
         "CareerRatingExplanation",
@@ -1619,19 +1664,29 @@ fn profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
         .with_children(|row| {
             button(
                 row,
-                "Link or recover account",
+                tr("career.button.devices"),
                 Action::DevicesOpen,
                 "CareerDevices",
             );
-            button(row, "Player website", Action::WebOpen, "CareerWebsite");
-            button(row, "Support OMOBA", Action::Supporter, "CareerSupporter");
+            button(
+                row,
+                tr("career.button.website"),
+                Action::WebOpen,
+                "CareerWebsite",
+            );
+            button(
+                row,
+                tr("career.button.supporter"),
+                Action::Supporter,
+                "CareerSupporter",
+            );
         });
 }
 
 fn friend_code_label(parent: &mut ChildSpawnerCommands, handle: &str) {
     label(
         parent,
-        "Player tag · share this with friends",
+        tr("career.profile.tag_share"),
         13.0,
         ui::MUTED,
         "CareerFriendCodePrompt",
@@ -1649,16 +1704,7 @@ fn profile_summary(parent: &mut ChildSpawnerCommands, profile: &ProfileSummary) 
     );
     label(
         parent,
-        format!(
-            "Career level {} · {} XP\nRating {} · {} rated matches\n{} wins · {} losses · {} matches played",
-            profile.level(),
-            profile.progression_xp,
-            profile.rating,
-            profile.rated_matches,
-            profile.wins,
-            profile.losses,
-            profile.matches_played
-        ),
+        profile_progress(profile),
         17.0,
         ui::IVORY,
         "CareerVisitedStats",
@@ -1666,7 +1712,7 @@ fn profile_summary(parent: &mut ChildSpawnerCommands, profile: &ProfileSummary) 
     if profile.newcomer() {
         label(
             parent,
-            "Newcomer matchmaking",
+            tr("career.profile.newcomer"),
             14.0,
             ui::JADE,
             "CareerVisitedNewcomer",
@@ -1678,7 +1724,7 @@ fn profile_summary(parent: &mut ChildSpawnerCommands, profile: &ProfileSummary) 
 fn friend_row(
     parent: &mut ChildSpawnerCommands,
     friend: &FriendProfile,
-    actions: &[(&str, FriendAction)],
+    actions: &[(&'static str, FriendAction)],
 ) {
     parent
         .spawn((
@@ -1690,11 +1736,11 @@ fn friend_row(
             Name::new(format!("CareerFriend-{}", friend.profile.profile_id)),
         ))
         .with_children(|row| {
-            let presence = match friend.presence {
-                FriendPresence::Offline => "Offline",
-                FriendPresence::Online => "Online",
-                FriendPresence::Playing => "In a match",
-            };
+            let presence = tr(match friend.presence {
+                FriendPresence::Offline => "career.presence.offline",
+                FriendPresence::Online => "career.presence.online",
+                FriendPresence::Playing => "career.presence.playing",
+            });
             label(
                 row,
                 &friend.profile.nickname,
@@ -1704,10 +1750,13 @@ fn friend_row(
             );
             label(
                 row,
-                format!(
-                    "{presence} · Rating {} · Career level {}",
-                    friend.profile.rating,
-                    friend.profile.level()
+                trf(
+                    "career.friend.presence",
+                    &[
+                        ("presence", &presence),
+                        ("rating", &friend.profile.rating),
+                        ("level", &friend.profile.level()),
+                    ],
                 ),
                 14.0,
                 if friend.presence == FriendPresence::Offline {
@@ -1720,15 +1769,15 @@ fn friend_row(
             row.spawn(row_node()).with_children(|buttons| {
                 button(
                     buttons,
-                    "Profile",
+                    tr("career.button.profile"),
                     Action::VisitProfile(friend.profile.profile_id.clone()),
                     "CareerFriendProfile",
                 );
-                for (title, action) in actions {
+                for &(title, action) in actions {
                     button(
                         buttons,
-                        title,
-                        Action::Friend(friend.profile.profile_id.clone(), *action),
+                        tr(title),
+                        Action::Friend(friend.profile.profile_id.clone(), action),
                         &format!("CareerFriend{action:?}"),
                     );
                 }
@@ -1737,10 +1786,16 @@ fn friend_row(
 }
 
 fn friends_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
-    label(parent, "Friends", 26.0, ui::GOLD, "CareerFriendsTitle");
     label(
         parent,
-        "Friends and their status on this server. Refresh to update.",
+        tr("career.friends.title"),
+        26.0,
+        ui::GOLD,
+        "CareerFriendsTitle",
+    );
+    label(
+        parent,
+        tr("career.friends.scope"),
         14.0,
         ui::MUTED,
         "CareerFriendsScope",
@@ -1750,7 +1805,7 @@ fn friends_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
     }
     label(
         parent,
-        "Find a friend by nickname#1234",
+        tr("career.friends.find_prompt"),
         15.0,
         ui::IVORY,
         "CareerFriendInputPrompt",
@@ -1762,7 +1817,7 @@ fn friends_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
             draft,
             &career.preedit,
             career.friend_code_focused,
-            "Nickname#1234",
+            tr("career.friends.placeholder"),
         ),
         Action::EditFriendCode,
         "CareerFriendCodeField",
@@ -1777,7 +1832,7 @@ fn friends_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
     if let Some(found) = &career.view.found_player {
         label(
             parent,
-            format!("Found: {}", found.nickname),
+            trf("career.friends.found", &[("name", &found.nickname)]),
             17.0,
             ui::JADE,
             "CareerFoundPlayer",
@@ -1785,7 +1840,7 @@ fn friends_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
         if career.public_profile_id.as_ref() != Some(&found.profile_id) {
             button(
                 parent,
-                "Send friend request",
+                tr("career.button.send_request"),
                 Action::AddFriend,
                 "CareerSendFriendRequest",
             );
@@ -1794,16 +1849,21 @@ fn friends_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
     parent.spawn(row_node()).with_children(|buttons| {
         button(
             buttons,
-            "Find player",
+            tr("career.button.find_player"),
             Action::LookupFriend,
             "CareerLookupProfile",
         );
-        button(buttons, "Refresh", Action::Friends, "CareerFriendsRefresh");
+        button(
+            buttons,
+            tr("career.button.refresh"),
+            Action::Friends,
+            "CareerFriendsRefresh",
+        );
     });
     if career.view.loading {
         label(
             parent,
-            "Updating friends…",
+            tr("career.friends.updating"),
             16.0,
             ui::MUTED,
             "CareerFriendsLoading",
@@ -1812,7 +1872,7 @@ fn friends_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
     if career.request_error.is_some() || career.view.error.is_some() {
         label(
             parent,
-            "The list may be out of date. Refresh to try again.",
+            tr("career.friends.stale"),
             15.0,
             ui::MUTED,
             "CareerFriendsUnavailable",
@@ -1822,7 +1882,7 @@ fn friends_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
         if !career.view.loading {
             label(
                 parent,
-                "Connect your profile, then refresh your friends list.",
+                tr("career.friends.unloaded"),
                 16.0,
                 ui::MUTED,
                 "CareerFriendsUnloaded",
@@ -1832,7 +1892,10 @@ fn friends_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
     };
     label(
         parent,
-        format!("Incoming requests · {}", friends.incoming.len()),
+        trf(
+            "career.friends.incoming",
+            &[("count", &friends.incoming.len())],
+        ),
         18.0,
         ui::GOLD,
         "CareerIncomingTitle",
@@ -1842,14 +1905,14 @@ fn friends_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
             parent,
             friend,
             &[
-                ("Accept", FriendAction::Accept),
-                ("Decline", FriendAction::Reject),
+                ("career.friend.accept", FriendAction::Accept),
+                ("career.friend.decline", FriendAction::Reject),
             ],
         );
     }
     label(
         parent,
-        format!("Friends · {}", friends.friends.len()),
+        trf("career.friends.list", &[("count", &friends.friends.len())]),
         18.0,
         ui::GOLD,
         "CareerFriendsListTitle",
@@ -1857,31 +1920,42 @@ fn friends_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
     if friends.friends.is_empty() {
         label(
             parent,
-            "No friends yet. Send a request using a friend code.",
+            tr("career.friends.empty"),
             15.0,
             ui::MUTED,
             "CareerFriendsEmpty",
         );
     }
     for friend in &friends.friends {
-        friend_row(parent, friend, &[("Remove", FriendAction::Remove)]);
+        friend_row(
+            parent,
+            friend,
+            &[("career.friend.remove", FriendAction::Remove)],
+        );
     }
     label(
         parent,
-        format!("Sent requests · {}", friends.outgoing.len()),
+        trf(
+            "career.friends.outgoing",
+            &[("count", &friends.outgoing.len())],
+        ),
         18.0,
         ui::GOLD,
         "CareerOutgoingTitle",
     );
     for friend in &friends.outgoing {
-        friend_row(parent, friend, &[("Cancel request", FriendAction::Cancel)]);
+        friend_row(
+            parent,
+            friend,
+            &[("career.friend.cancel", FriendAction::Cancel)],
+        );
     }
 }
 
 fn visited_profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
     label(
         parent,
-        "Player profile",
+        tr("career.visited.title"),
         26.0,
         ui::GOLD,
         "CareerVisitedTitle",
@@ -1889,7 +1963,7 @@ fn visited_profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient
     if career.view.loading {
         label(
             parent,
-            "Loading profile…",
+            tr("career.visited.loading"),
             17.0,
             ui::MUTED,
             "CareerVisitedLoading",
@@ -1913,7 +1987,7 @@ fn visited_profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient
             if !known {
                 button(
                     parent,
-                    "Send friend request",
+                    tr("career.button.send_request"),
                     Action::Friend(profile.profile_id.clone(), FriendAction::Request),
                     "CareerVisitedAddFriend",
                 );
@@ -1922,7 +1996,7 @@ fn visited_profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient
     } else {
         label(
             parent,
-            "This profile is unavailable. Check the friend code and try again.",
+            tr("career.visited.unavailable"),
             17.0,
             ui::MUTED,
             "CareerVisitedUnavailable",
@@ -1930,7 +2004,7 @@ fn visited_profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient
     }
     button(
         parent,
-        "Back to friends",
+        tr("career.button.back_to_friends"),
         Action::Friends,
         "CareerVisitedBack",
     );
@@ -1944,7 +2018,7 @@ fn history_body(
 ) {
     label(
         parent,
-        "Match history",
+        tr("career.history.title"),
         26.0,
         ui::GOLD,
         "CareerHistoryTitle",
@@ -1952,7 +2026,7 @@ fn history_body(
     if career.view.loading {
         label(
             parent,
-            "Loading history…",
+            tr("career.history.loading"),
             17.0,
             ui::MUTED,
             "CareerHistoryLoading",
@@ -1962,7 +2036,7 @@ fn history_body(
     if career.view.error.is_some() || career.request_error.is_some() {
         label(
             parent,
-            "History is unavailable. Try refreshing.",
+            tr("career.history.unavailable"),
             17.0,
             ui::MUTED,
             "CareerHistoryUnavailable",
@@ -1972,7 +2046,7 @@ fn history_body(
     if !career.view.history_loaded {
         label(
             parent,
-            "Load your history to see saved matches.",
+            tr("career.history.unloaded"),
             17.0,
             ui::MUTED,
             "CareerHistoryUnloaded",
@@ -1982,7 +2056,7 @@ fn history_body(
     if career.view.history.is_empty() {
         label(
             parent,
-            "No saved matches yet.",
+            tr("career.history.empty"),
             17.0,
             ui::MUTED,
             "CareerHistoryEmpty",
@@ -2014,21 +2088,24 @@ fn history_body(
                     ..column_node()
                 })
                 .with_children(|p| {
-                    let outcome = match item.outcome {
-                        MatchOutcome::Abandoned => "Abandoned",
-                        MatchOutcome::Interrupted => "Interrupted",
+                    let outcome = tr(match item.outcome {
+                        MatchOutcome::Abandoned => "career.history.abandoned",
+                        MatchOutcome::Interrupted => "career.history.interrupted",
                         MatchOutcome::Completed => match item.won {
-                            Some(true) => "Victory",
-                            Some(false) => "Defeat",
-                            None => "Complete",
+                            Some(true) => "career.result.victory",
+                            Some(false) => "career.result.defeat",
+                            None => "career.history.complete",
                         },
-                    };
+                    });
                     label(
                         p,
-                        format!(
-                            "{outcome} · {} · {}",
-                            item.hero_class.display_name(),
-                            duration(item.duration_ms)
+                        trf(
+                            "career.history.outcome",
+                            &[
+                                ("outcome", &outcome),
+                                ("hero", &data::hero_name(item.hero_class)),
+                                ("duration", &duration(item.duration_ms)),
+                            ],
                         ),
                         16.0,
                         ui::IVORY,
@@ -2043,13 +2120,15 @@ fn history_body(
                     );
                     label(
                         p,
-                        format!(
-                            "{} / {} / {} · {} hero damage · {}",
-                            item.kills,
-                            item.deaths,
-                            item.assists,
-                            number(item.damage_to_heroes),
-                            rating(item.rating.as_ref())
+                        trf(
+                            "career.history.stats",
+                            &[
+                                ("kills", &item.kills),
+                                ("deaths", &item.deaths),
+                                ("assists", &item.assists),
+                                ("damage", &number(item.damage_to_heroes)),
+                                ("rating", &rating(item.rating.as_ref())),
+                            ],
                         ),
                         14.0,
                         ui::MUTED,
@@ -2058,7 +2137,7 @@ fn history_body(
                 });
                 button(
                     p,
-                    "Details",
+                    tr("career.button.details"),
                     Action::Detail(item.result_id.clone()),
                     "CareerHistoryDetail",
                 );
@@ -2066,12 +2145,27 @@ fn history_body(
     }
     parent.spawn(row_node()).with_children(|p| {
         if !career.history_back.is_empty() {
-            button(p, "Previous", Action::Previous, "CareerHistoryPrevious");
+            button(
+                p,
+                tr("career.button.previous"),
+                Action::Previous,
+                "CareerHistoryPrevious",
+            );
         }
         if career.view.history_next.is_some() {
-            button(p, "Older", Action::Next, "CareerHistoryNext");
+            button(
+                p,
+                tr("career.button.older"),
+                Action::Next,
+                "CareerHistoryNext",
+            );
         }
-        button(p, "Refresh", Action::Refresh, "CareerHistoryRefresh");
+        button(
+            p,
+            tr("career.button.refresh"),
+            Action::Refresh,
+            "CareerHistoryRefresh",
+        );
     });
 }
 
@@ -2084,6 +2178,8 @@ struct RenderKey {
     show_entry: bool,
     selection_recovery: bool,
     mode: PlayerVisualMode,
+    /// A language change rebuilds the screen in the new language.
+    locale: u32,
 }
 fn render(
     mut commands: Commands,
@@ -2094,7 +2190,8 @@ fn render(
     pause: Option<Res<crate::pause_menu::PauseMenuState>>,
     game: Option<Res<GameStateSnapshot>>,
     session: Option<Res<crate::net::ClientSession>>,
-    mode: Option<Res<PlayerVisualMode>>,
+    // Grouped: a system takes at most 16 parameters.
+    (mode, locale): (Option<Res<PlayerVisualMode>>, Option<Res<Locale>>),
     assets: Option<Res<AssetServer>>,
     sprites: Option<Res<SpriteVisualAssets>>,
     screen: Option<Res<State<crate::frontend::AppScreen>>>,
@@ -2103,6 +2200,7 @@ fn render(
     mut previous: Local<Option<RenderKey>>,
     mut texts: Query<(&Name, &mut Text)>,
 ) {
+    let locale = locale.as_ref().map_or(0, |locale| locale.generation());
     // Keep focused widgets alive. Updating glyphs must never replace the modal,
     // reset pointer capture/scroll, or dismiss the phone's IME.
     for (name, mut text) in &mut texts {
@@ -2111,13 +2209,13 @@ fn render(
                 &career.friend_code,
                 &career.preedit,
                 career.friend_code_focused,
-                "Nickname#1234",
+                tr("career.friends.placeholder"),
             )),
             "CareerNicknameFieldLabel" => Some(field_text(
                 &career.draft,
                 &career.preedit,
                 career.nickname_focused,
-                "Nickname#1234",
+                tr("career.friends.placeholder"),
             )),
             "DeviceRecoveryFieldLabel" => Some(devices::recovery_field(&career.devices)),
             "DeviceInputError" => Some(career.form_error.clone().unwrap_or_default()),
@@ -2169,6 +2267,7 @@ fn render(
                 && p.viewport == viewport
                 && p.insets == insets
                 && p.profile == profile.0
+                && p.locale == locale
         })
     {
         return;
@@ -2191,6 +2290,7 @@ fn render(
         show_entry,
         selection_recovery,
         mode,
+        locale,
     };
     if previous.as_ref() == Some(&key) {
         return;
@@ -2225,13 +2325,28 @@ fn render(
                     Name::new("CareerEntryActions"),
                 ))
                 .with_children(|p| {
-                    button(p, "Profile", Action::Profile, "CareerProfileButton");
-                    button(p, "History", Action::History, "CareerHistoryButton");
-                    button(p, "Friends", Action::Friends, "CareerFriendsButton");
+                    button(
+                        p,
+                        tr("career.button.profile"),
+                        Action::Profile,
+                        "CareerProfileButton",
+                    );
+                    button(
+                        p,
+                        tr("career.button.history"),
+                        Action::History,
+                        "CareerHistoryButton",
+                    );
+                    button(
+                        p,
+                        tr("career.button.friends"),
+                        Action::Friends,
+                        "CareerFriendsButton",
+                    );
                     if selection_recovery {
                         button(
                             p,
-                            "Back to selection",
+                            tr("career.button.back_to_selection"),
                             Action::CancelQueue,
                             "CareerBackToSelection",
                         );
@@ -2239,7 +2354,7 @@ fn render(
                     if matches!(career.view.queue, QueueView::Waiting { .. }) {
                         button(
                             p,
-                            "Leave queue",
+                            tr("career.button.leave_queue"),
                             Action::CancelQueue,
                             "CareerQueueLeaveButton",
                         );
@@ -2324,19 +2439,19 @@ fn render(
                     panel.spawn(row_node()).with_children(|p| {
                         for (title, action, name, selected) in [
                             (
-                                "Profile",
+                                "career.button.profile",
                                 Action::Profile,
                                 "CareerProfileTab",
                                 career.modal == CareerModal::Profile,
                             ),
                             (
-                                "History",
+                                "career.button.history",
                                 Action::History,
                                 "CareerHistoryTab",
                                 career.modal == CareerModal::History,
                             ),
                             (
-                                "Friends",
+                                "career.button.friends",
                                 Action::Friends,
                                 "CareerFriendsTab",
                                 matches!(
@@ -2366,21 +2481,26 @@ fn render(
                                 BorderColor::all(if selected { ui::GOLD } else { ui::EDGE }),
                             ))
                             .with_children(|p| {
-                                label(p, title, 15.0, ui::IVORY, &format!("{name}Label"))
+                                label(p, tr(title), 15.0, ui::IVORY, &label_name(name))
                             });
                         }
                         if career.view.last_result.is_some() {
                             button(
                                 p,
-                                "Last match",
+                                tr("career.button.last_match"),
                                 Action::LastResult,
                                 "CareerLastResultButton",
                             );
                         }
                         if career.modal == CareerModal::History {
-                            button(p, "Refresh", Action::Refresh, "CareerHistoryRetry");
+                            button(
+                                p,
+                                tr("career.button.refresh"),
+                                Action::Refresh,
+                                "CareerHistoryRetry",
+                            );
                         }
-                        button(p, "Close", Action::Close, "CareerClose");
+                        button(p, tr("career.button.close"), Action::Close, "CareerClose");
                     });
                     panel
                         .spawn((
@@ -2406,7 +2526,7 @@ fn render(
                             if selection_recovery {
                                 button(
                                     body,
-                                    "Back to selection",
+                                    tr("career.button.back_to_selection"),
                                     Action::CancelQueue,
                                     "CareerBackToSelection",
                                 );
@@ -2415,7 +2535,7 @@ fn render(
                                 label(body, queue, 16.0, ui::IVORY, "CareerQueueStatus");
                                 button(
                                     body,
-                                    "Leave queue",
+                                    tr("career.button.leave_queue"),
                                     Action::CancelQueue,
                                     "CareerCancelQueue",
                                 );
@@ -2446,8 +2566,18 @@ fn render(
                         });
                     if career.modal == CareerModal::Result {
                         panel.spawn(row_node()).with_children(|p| {
-                            button(p, "Play again", Action::PlayAgain, "CareerPlayAgain");
-                            button(p, "Match history", Action::History, "CareerResultHistory");
+                            button(
+                                p,
+                                tr("career.button.play_again"),
+                                Action::PlayAgain,
+                                "CareerPlayAgain",
+                            );
+                            button(
+                                p,
+                                tr("career.button.match_history"),
+                                Action::History,
+                                "CareerResultHistory",
+                            );
                         });
                     }
                 });
@@ -3405,5 +3535,74 @@ mod tests {
         assert!(!app.world().resource::<CareerClient>().modal_open());
         app.update();
         assert!(harness::drain_actions::<Action>(app.world_mut()).is_empty());
+    }
+
+    #[test]
+    fn unrated_reason_codes_are_localized_and_prose_stays_as_sent() {
+        assert_eq!(
+            unrated_reason("allocated_bots"),
+            "Bots filled open seats, so this match is unrated."
+        );
+        assert_eq!(unrated_reason("Practice match"), "Practice match");
+        assert_eq!(unrated_reason("unknown_code"), "unknown_code");
+        assert_eq!(unrated_reason(""), "");
+    }
+
+    /// A language change rebuilds every career modal in the new language,
+    /// including the web-link and device bodies, without touching TestIds.
+    #[test]
+    fn career_modals_relabel_live_on_a_language_switch() {
+        if crate::i18n::testing::isolated(
+            "career::tests::career_modals_relabel_live_on_a_language_switch",
+        ) {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, LocaleId};
+        let mut app = render_app(UiProfile::Desktop, CareerModal::Profile);
+        app.add_plugins(I18nPlugin::default());
+        app.update();
+        let all = texts(&mut app);
+        assert!(all.iter().any(|t| t == "Your profile"), "{all:?}");
+        assert!(all.iter().any(|t| t == "Save player tag"), "{all:?}");
+        let zh = LocaleId::parse("zh-Hans").unwrap();
+        app.world_mut().resource_mut::<Locale>().set(zh);
+        app.update();
+        let all = texts(&mut app);
+        assert!(all.iter().any(|t| t == "你的资料"), "{all:?}");
+        assert!(all.iter().any(|t| t == "保存玩家标签"), "{all:?}");
+        assert!(all.iter().any(|t| t == "资料"), "tab relabelled: {all:?}");
+        assert!(!all.iter().any(|t| t == "Your profile"), "{all:?}");
+        assert!(harness_named(&mut app, "CareerSaveNickname"));
+        for (modal, title) in [
+            (CareerModal::WebLink, "连接玩家门户"),
+            (CareerModal::Devices, "使用已有账号"),
+            (CareerModal::History, "对局记录"),
+            (CareerModal::Friends, "好友"),
+        ] {
+            app.world_mut().resource_mut::<CareerClient>().modal = modal;
+            app.update();
+            let all = texts(&mut app);
+            assert!(all.iter().any(|t| t == title), "{modal:?}: {all:?}");
+        }
+        app.world_mut().resource_mut::<CareerClient>().modal = CareerModal::Result;
+        app.world_mut()
+            .resource_mut::<CareerClient>()
+            .apply_view(CareerView {
+                last_result: Some(result()),
+                ..default()
+            });
+        app.update();
+        let all = texts(&mut app);
+        assert!(all.iter().any(|t| t == "对局结束"), "{all:?}");
+        assert!(all.iter().any(|t| t.starts_with("对局时长 ")), "{all:?}");
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(LocaleId::ENGLISH);
+        app.update();
+        let all = texts(&mut app);
+        assert!(all.iter().any(|t| t == "Match complete"), "{all:?}");
+    }
+    fn harness_named(app: &mut App, id: &str) -> bool {
+        crate::ui::test_id::harness::find(app.world_mut(), id).is_some()
     }
 }
