@@ -34,7 +34,7 @@ a character, a map, a sound, an idea or a pull request. Help shape what comes ne
 ## What you can play today
 
 This is a **native beta under active development**. The source version is
-[`0.23.0-rc.6`](Cargo.toml); see [features](docs/features.md) and
+[`0.26.0`](Cargo.toml); see [features](docs/features.md) and
 [changes](CHANGELOG.md) for the detailed implementation history. A source version
 is not a promise of a published installer or a live public server.
 
@@ -43,6 +43,8 @@ is not a promise of a published installer or a live public server.
   towers, jungle camps that respawn, items and match results.
 - **Bot practice:** native server bots fill empty seats; people can join and take
   over those seats. Practice is separate from ranked progression.
+- **English and Simplified Chinese:** Settings → Language switches every
+  menu and HUD text live; see [localization](docs/i18n.md).
 - **Desktop and phone controls:** mouse/keyboard on desktop; movement joystick,
   right-thumb attacks, directional targeting and skill inspection on phones.
   The compiled platform selects the interface; both use the same game protocol.

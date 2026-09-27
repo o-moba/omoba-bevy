@@ -1,5 +1,9 @@
 # Feature Inventory
 
+## Language setting: English and Simplified Chinese (0.26.0)
+
+Settings → Language (pause menu, also from Home) switches the whole game between English and 简体中文 live: menus, career, match HUD, shop, scoreboard, phone controls, chat and social, account screens, help and the names and descriptions of heroes, abilities and items. The choice is saved with the other client preferences; `OMOBA_LANGUAGE=zh-Hans` starts a QA or capture run in Chinese. Dictionaries live in `client/i18n/<locale>/` and are embedded at build time, so another language is added by adding a folder of JSON files. Developer tools, logs, server-authored free text and proper names stay English. See [localization](i18n.md).
+
 ## Controller support (0.25.0)
 
 Play with a gamepad on macOS, Windows, Linux and iPhone: left stick moves (camera-relative, analog), right stick aims, R2/RT attacks, L1/R1/L2 (LB/RB/LT) hold-to-aim and release-to-cast, L2+R2 (LT+RT) is the ultimate, Triangle/Y + skill upgrades and R3 locks a target. Menus are navigated with the D-pad or left stick through the UI kit's new focus layer, Cross/A selects, Circle/B goes back (the same signal as Esc), Options/Start opens the pause menu, D-pad right the shop and left the reactions. An idle controller never takes over from mouse, keyboard or touch. Android reads no controllers. Physical controller and iPhone playtests are still pending. See [the controller guide](controller.md).
