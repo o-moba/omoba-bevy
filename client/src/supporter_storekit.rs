@@ -1,4 +1,5 @@
 //! StoreKit payment lifecycle. Only a committed server verification finishes a transaction.
+// i18n-strict
 use bevy::prelude::*;
 
 pub(crate) struct SupporterStoreKitPlugin;
@@ -14,7 +15,9 @@ impl Plugin for SupporterStoreKitPlugin {
 mod ios {
     use super::*;
     use crate::career_identity::CareerIdentity;
-    use crate::supporter::{SupporterPlatformAction, SupporterPlatformState, SupporterUiState};
+    use crate::supporter::{
+        PlatformMessage, SupporterPlatformAction, SupporterPlatformState, SupporterUiState,
+    };
     use omoba_passport::{supporter_account, web_account::WebAccountApi};
     use serde_json::{Value, json};
     use shared::supporter::NativeSupporterAction;
@@ -79,13 +82,15 @@ mod ios {
         identity: &CareerIdentity,
         action: NativeSupporterAction,
         job: Job,
-    ) -> Result<(), String> {
-        let api = WebAccountApi::from_env()?;
+    ) -> Result<(), PlatformMessage> {
+        let api = WebAccountApi::from_env().map_err(PlatformMessage::Text)?;
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|_| "Invalid system clock.")?
+            .map_err(|_| PlatformMessage::Key("supporter.store.clock"))?
             .as_secs();
-        let proof = identity.sign_supporter_request(action, &api.origin, now)?;
+        let proof = identity
+            .sign_supporter_request(action, &api.origin, now)
+            .map_err(PlatformMessage::Text)?;
         let (tx, rx) = mpsc::sync_channel(1);
         bridge.pending = Some(Mutex::new(rx));
         std::thread::spawn(move || {
@@ -127,27 +132,26 @@ mod ios {
                         // Restore only needs the configured product/account, not a successful price lookup.
                         platform.available = true;
                         command(json!({"action":"configure","product_id":product}));
-                        platform.message = Some("Loading App Store pricing…".into());
+                        platform.message = Some(PlatformMessage::Key("supporter.store.loading"));
                     } else {
                         platform.message =
-                            Some("Supporter purchases are not configured for this build.".into());
+                            Some(PlatformMessage::Key("supporter.store.unconfigured"));
                     }
                 }
                 (Job::Verify(id), Ok(_)) => {
                     command(json!({"action":"finish","transaction_id":id}));
                     bridge.receipts.retain(|r| r.id != id);
-                    platform.message =
-                        Some("Purchase confirmed. Your Supporter status is syncing.".into());
+                    platform.message = Some(PlatformMessage::Key("supporter.store.confirmed"));
                 }
                 (Job::Verify(id), Err(_)) => {
                     // Do not finish: Apple re-delivers pending transactions after restart.
-                    platform.message = Some("Account service could not confirm the purchase. Check this game account and use Restore purchases; do not pay again.".into());
+                    platform.message = Some(PlatformMessage::Key("supporter.store.unverified"));
                     if let Some(receipt) = bridge.receipts.iter_mut().find(|r| r.id == id) {
                         receipt.retry_at = Instant::now() + Duration::from_secs(60);
                     }
                 }
                 (Job::Prepare, Err(_)) => {
-                    platform.message = Some("App Store purchases are unavailable from the account service. You can still use free aura preview.".into());
+                    platform.message = Some(PlatformMessage::Key("supporter.store.unavailable"));
                     bridge.retry_at = Instant::now() + Duration::from_secs(60);
                 }
             }
@@ -155,7 +159,7 @@ mod ios {
             bridge.pending = None;
             platform.busy = false;
             bridge.retry_at = Instant::now() + Duration::from_secs(60);
-            platform.message = Some("Account request stopped. Try Restore purchases.".into());
+            platform.message = Some(PlatformMessage::Key("supporter.store.stopped"));
         }
         for _ in 0..8 {
             let Some(value) = event() else {
@@ -165,10 +169,7 @@ mod ios {
                 Some("products") => {
                     platform.available = true;
                     platform.price_label = value["price_label"].as_str().map(str::to_owned);
-                    platform.message = Some(
-                        "Monthly subscription. Auto-renews until cancelled in Apple ID settings."
-                            .into(),
-                    );
+                    platform.message = Some(PlatformMessage::Key("supporter.store.subscription"));
                 }
                 Some("transaction") => {
                     if let (Some(id), Some(payload)) = (
@@ -189,7 +190,10 @@ mod ios {
                 }
                 _ => {
                     platform.busy = false;
-                    platform.message = value["message"].as_str().map(str::to_owned);
+                    // StoreKit's own (system-localized) text.
+                    platform.message = value["message"]
+                        .as_str()
+                        .map(|message| PlatformMessage::Text(message.to_owned()));
                 }
             }
         }
