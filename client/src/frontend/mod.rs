@@ -308,6 +308,11 @@ fn drive_screen_from_session(
     }
 }
 
+/// Clear colour of the avatar preview and party stage cameras: transparent,
+/// so the menu background shows behind the models (DECISIONS R2.4).
+pub const PREVIEW_CLEAR: bevy::camera::ClearColorConfig =
+    bevy::camera::ClearColorConfig::Custom(Color::NONE);
+
 /// Height the front-end screens are laid out for. Everything was checked at
 /// 1280x720 and 1024x640; a phone in landscape is ~400 logical pixels tall.
 const MENU_DESIGN_HEIGHT: f32 = 640.0;
@@ -351,7 +356,20 @@ fn scale_menus_to_the_window(
     // Draft/loading have their own real-pixel compact layout and 44px controls.
     let shared_prematch = matches!(screen.get(), AppScreen::Draft | AppScreen::Loading);
     let unscaled_pause = pause.as_ref().is_some_and(|state| state.open);
-    let wanted = if screen.get().is_menu() && !phone_picker && !shared_prematch && !unscaled_pause {
+    let wanted = if !phone {
+        // Desktop menus follow the 1280×720 reference (DECISIONS R2.3). The
+        // match stays at 1.0 until its world-anchored overlays (nameplates,
+        // floating combat numbers, chat bubbles), which place nodes at
+        // logical viewport coordinates, divide by `UiScale` (HUD step P0-A).
+        if screen.get().is_menu() {
+            crate::ui::theme::metric::desktop_ui_scale(
+                window.resolution.width(),
+                window.resolution.height(),
+            )
+        } else {
+            1.0
+        }
+    } else if screen.get().is_menu() && !phone_picker && !shared_prematch && !unscaled_pause {
         menu_scale(window.resolution.height())
     } else {
         1.0
@@ -503,6 +521,67 @@ mod tests {
             .unwrap();
         assert_eq!(node.display, Display::None);
         assert_eq!(*visibility, Visibility::Hidden);
+    }
+
+    /// R2.3: desktop menus follow the 1280×720 reference, clamped to
+    /// 0.8–2.0; the desktop match keeps 1.0 (world-anchored overlays).
+    #[test]
+    fn desktop_menus_scale_to_the_reference_and_the_match_does_not() {
+        for ((width, height), expected) in [
+            ((1280, 720), 1.0),
+            ((1920, 1080), 1.5),
+            ((1024, 640), 0.8),
+            ((3840, 2160), 2.0),
+        ] {
+            let mut app = App::new();
+            app.add_plugins(bevy::state::app::StatesPlugin)
+                .init_state::<AppScreen>()
+                .init_resource::<UiScale>()
+                .init_resource::<crate::mobile_controls::MobileControls>()
+                .add_systems(Update, scale_menus_to_the_window);
+            app.world_mut().spawn((
+                Window {
+                    resolution: (width, height).into(),
+                    ..default()
+                },
+                bevy::window::PrimaryWindow,
+            ));
+            app.update();
+            assert_eq!(
+                app.world().resource::<UiScale>().0,
+                expected,
+                "{width}x{height} home"
+            );
+            app.world_mut()
+                .resource_mut::<NextState<AppScreen>>()
+                .set(AppScreen::InMatch);
+            app.update();
+            app.update();
+            assert_eq!(app.world().resource::<UiScale>().0, 1.0, "in match");
+        }
+    }
+
+    /// R2.4: the preview and party stage cameras clear to transparent.
+    #[test]
+    fn preview_cameras_clear_to_transparent() {
+        let mut app = App::new();
+        app.init_resource::<Assets<Image>>()
+            .init_resource::<preview::AvatarPreview>()
+            .init_resource::<party_stage::PartyStage>()
+            .add_systems(Startup, (preview::setup_preview, party_stage::setup_stage));
+        app.update();
+        let clears: Vec<_> = app
+            .world_mut()
+            .query::<&Camera>()
+            .iter(app.world())
+            .map(|camera| camera.clear_color.clone())
+            .collect();
+        assert_eq!(clears.len(), 2);
+        for clear in clears {
+            assert!(
+                matches!(clear, bevy::camera::ClearColorConfig::Custom(color) if color == Color::NONE)
+            );
+        }
     }
 
     #[test]

@@ -182,14 +182,14 @@ impl Plugin for AvatarPreviewPlugin {
 #[derive(Component)]
 pub struct PreviewCamera;
 
-fn setup_preview(mut commands: Commands, preview: Res<AvatarPreview>) {
+pub(super) fn setup_preview(mut commands: Commands, preview: Res<AvatarPreview>) {
     let image = preview.image.clone();
     commands.spawn((
         Camera3d::default(),
         Camera {
             order: -2,
             is_active: false,
-            clear_color: Color::srgb(0.035, 0.085, 0.092).into(),
+            clear_color: super::PREVIEW_CLEAR,
             ..default()
         },
         RenderTarget::Image(image.into()),
