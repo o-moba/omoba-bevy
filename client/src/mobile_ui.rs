@@ -53,7 +53,10 @@ impl Plugin for MobileUiPlugin {
             )
             .add_systems(
                 PostUpdate,
-                adapt_phone_layout.before(bevy::ui::UiSystems::Layout),
+                // It rewrites phone copy, so the font pass must see it.
+                adapt_phone_layout
+                    .before(bevy::ui::UiSystems::Layout)
+                    .before(crate::i18n::I18nSystems::Font),
             );
     }
 }
@@ -743,15 +746,36 @@ fn adapt_phone_layout(
 
             "ShopCloseLabel" => text.0 = "CLOSE".into(),
             "ShopSummary" => text.0 = text.0.replace("click an item", "tap an item"),
-            "HelpDismissLabel" => text.0 = "Got it — play".into(),
-            "MatchStatusText" => text.0 = text.0
-                .replace("clear all towers in one lane to expose the enemy base.", "Clear a lane's towers to unlock the base.")
-                .replace("Select a foe · P shop · F1 help", "Tap ATTACK · Drag to lock")
-                .replace("Target locked · Attack / Q W E R", "Target locked · ATTACK / skills"),
-            "ShopFooter" => text.0 = "Buy at your base. Items survive respawn and reset next round.".into(),
-            name if name.starts_with("ShopDescription-") => text.0 = text.0.replace("maximum HP", "max HP"),
-            "HelpBody" => text.0 = "YOUR FIRST MATCH\n\nMOVE: Drag the left stick. Release to stop.\nATTACK: Tap the large right button; hold to repeat. No mana needed.\nTARGET: Drag ATTACK to extend the reticle. Release on a highlighted foe to lock. Drag to X to cancel.\nFARM: The small minion and tower buttons target only that category.\nUTILITY: Dash moves in your stick direction; drag it to aim. Haste boosts movement briefly.\nSKILLS: Q/W/E/R surround ATTACK. Tap to use the locked target, or drag to aim.\nGROW: Abilities unlock as you level. Tap RANK, then a glowing skill to spend a point.\nWIN: Follow your minions, clear all towers in one lane, then destroy the enemy base.\nRECOVER: Return to your base to heal and shop. If defeated, wait to respawn.\nLOOK: Tap the minimap to scout. Move the stick to follow your hero again.\n\nThe match continues while menus are open. Stay connected for the next round.".into(),
-            "GameStateLabel" => text.0 = text.0.replace("Escape: settings or exit game.", "MENU: settings or exit game."),
+            "HelpDismissLabel" => text.0 = crate::i18n::tr("help.phone.dismiss").into(),
+            "MatchStatusText" => {
+                text.0 = text
+                    .0
+                    .replace(
+                        "clear all towers in one lane to expose the enemy base.",
+                        "Clear a lane's towers to unlock the base.",
+                    )
+                    .replace(
+                        "Select a foe · P shop · F1 help",
+                        "Tap ATTACK · Drag to lock",
+                    )
+                    .replace(
+                        "Target locked · Attack / Q W E R",
+                        "Target locked · ATTACK / skills",
+                    )
+            }
+            "ShopFooter" => {
+                text.0 = "Buy at your base. Items survive respawn and reset next round.".into()
+            }
+            name if name.starts_with("ShopDescription-") => {
+                text.0 = text.0.replace("maximum HP", "max HP")
+            }
+            "HelpBody" => text.0 = crate::i18n::tr("help.phone.body").into(),
+            "GameStateLabel" => {
+                text.0 = text.0.replace(
+                    "Escape: settings or exit game.",
+                    "MENU: settings or exit game.",
+                )
+            }
             _ => {}
         }
     }

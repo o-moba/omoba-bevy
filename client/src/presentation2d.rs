@@ -140,11 +140,12 @@ enum TowerLane {
 }
 
 impl TowerLane {
-    const fn label(self) -> &'static str {
+    /// Dictionary key of the lane label.
+    const fn key(self) -> &'static str {
         match self {
-            Self::Top => "TOP",
-            Self::Mid => "MID",
-            Self::Bot => "BOT",
+            Self::Top => "lane.top",
+            Self::Mid => "lane.mid",
+            Self::Bot => "lane.bot",
         }
     }
 
@@ -348,16 +349,12 @@ fn spawn_structure_cues(
     let cue_y = world_height * 0.54;
     commands.entity(visual).with_children(|parent| {
         spawn_team_badge(parent, owner, team, Vec2::new(-1.15, cue_y), 0.82);
-        let (label, id, kind) =
-            lane.map_or(("BASE", "BASE", PresentationCueKind::BaseLabel), |lane| {
-                (
-                    lane.label(),
-                    lane.id(),
-                    PresentationCueKind::LaneLabel(lane),
-                )
-            });
+        let (key, id, kind) = lane.map_or(
+            ("lane.base", "BASE", PresentationCueKind::BaseLabel),
+            |lane| (lane.key(), lane.id(), PresentationCueKind::LaneLabel(lane)),
+        );
         parent.spawn((
-            Text2d::new(label),
+            crate::i18n::Localized::new(key).text2d(),
             TextFont {
                 font_size: 16.0,
                 ..default()
@@ -568,11 +565,10 @@ fn attach_actor(
         } else {
             shared::wire::NeutralCampType::KingMutatioBoss
         };
-        let label = crate::bosses::boss_display_name(camp);
         let id = crate::bosses::boss_name_id(camp);
         commands.entity(visual_entity).with_children(|parent| {
             parent.spawn((
-                Text2d::new(label),
+                crate::i18n::Localized::new(crate::i18n::data::boss_key(camp)).text2d(),
                 TextFont {
                     font_size: 18.0,
                     ..default()

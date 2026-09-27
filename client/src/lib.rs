@@ -21,6 +21,7 @@ mod game_vfx;
 mod gamepad;
 mod help_overlay;
 mod humanoid;
+mod i18n;
 mod input_bindings;
 mod input_context;
 mod jungle;
@@ -119,6 +120,8 @@ pub fn main() {
     // The render backend is chosen once, before any plugin builds. After
     // `DefaultPlugins` so an invalid value's warning reaches the log.
     .insert_resource(PlayerVisualMode::from_environment())
+    // The language is resolved before any plugin spawns text.
+    .add_plugins(i18n::I18nPlugin::from_environment())
     .add_plugins((
         NetPlugins,
         UiPlugins,

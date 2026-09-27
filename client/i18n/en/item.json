@@ -1,0 +1,20 @@
+{
+  "item.ember_blade.name": "Ember Blade",
+  "item.ember_blade.desc": "+12% damage",
+  "item.ember_blade.short": "Blade",
+  "item.swift_grip.name": "Swift Grip",
+  "item.swift_grip.desc": "+12% basic attack and Q rate",
+  "item.swift_grip.short": "Grip",
+  "item.trail_boots.name": "Trail Boots",
+  "item.trail_boots.desc": "+8% movement speed",
+  "item.trail_boots.short": "Boots",
+  "item.vitality_gem.name": "Vitality Gem",
+  "item.vitality_gem.desc": "+30 maximum HP",
+  "item.vitality_gem.short": "Gem",
+  "item.focus_charm.name": "Focus Charm",
+  "item.focus_charm.desc": "+20 mana / +10% W E R haste",
+  "item.focus_charm.short": "Charm",
+  "item.guardian_crest.name": "Guardian Crest",
+  "item.guardian_crest.desc": "+15 maximum HP / +6% damage",
+  "item.guardian_crest.short": "Crest"
+}

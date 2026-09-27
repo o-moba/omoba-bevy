@@ -41,13 +41,9 @@ struct BossNameplate {
     boss: Entity,
 }
 
-/// Display name shown on the boss nameplate.
+/// Display name shown on the boss nameplate, in the active language.
 pub fn boss_display_name(camp_type: NeutralCampType) -> &'static str {
-    match camp_type {
-        NeutralCampType::WendigoBoss => "Wendigo",
-        NeutralCampType::KingMutatioBoss => "King Mutatio",
-        _ => "Neutral",
-    }
+    crate::i18n::data::boss(camp_type)
 }
 
 /// Stable identifier of a boss in entity `Name`s and QA lookups. It keeps
@@ -207,7 +203,7 @@ fn attach_boss_models(
             visual.camp_type
         );
         commands.spawn((
-            Text::new(boss_display_name(visual.camp_type)),
+            crate::i18n::Localized::new(crate::i18n::data::boss_key(visual.camp_type)).into_text(),
             TextFont {
                 font_size: 18.0,
                 ..default()

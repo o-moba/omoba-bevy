@@ -317,21 +317,36 @@ fn needs_cjk_font(text: &str) -> bool {
     })
 }
 
-pub(super) fn apply_theme_font(
+/// Picks the packaged Latin/Cyrillic font or the CJK fallback for every UI
+/// text, span and world-space `Text2d` whose text changed. Runs in
+/// `PostUpdate` in `I18nSystems::Font`, after every `Update` text writer and
+/// the `Localized` relabel, before UI and `Text2d` layout, so a text never
+/// renders a frame in the wrong font.
+pub(crate) fn apply_theme_font(
     theme: Res<UiTheme>,
     mut text: Query<
-        (&mut TextFont, Option<&Text>, Option<&TextSpan>),
-        Or<(Added<TextFont>, Changed<Text>, Changed<TextSpan>)>,
+        (
+            &mut TextFont,
+            Option<&Text>,
+            Option<&TextSpan>,
+            Option<&Text2d>,
+        ),
+        Or<(
+            Added<TextFont>,
+            Changed<Text>,
+            Changed<TextSpan>,
+            Changed<Text2d>,
+        )>,
     >,
 ) {
-    for (mut font, root, span) in &mut text {
+    for (mut font, root, span, world) in &mut text {
         let cjk = root.is_some_and(|text| needs_cjk_font(&text.0))
-            || span.is_some_and(|text| needs_cjk_font(&text.0));
-        font.font = if cjk {
-            theme.cjk_font.clone()
-        } else {
-            theme.font.clone()
-        };
+            || span.is_some_and(|text| needs_cjk_font(&text.0))
+            || world.is_some_and(|text| needs_cjk_font(&text.0));
+        let next = if cjk { &theme.cjk_font } else { &theme.font };
+        if font.font != *next {
+            font.font = next.clone();
+        }
     }
 }
 
@@ -400,6 +415,52 @@ mod tests {
             .id();
         app.update();
         assert_eq!(app.world().get::<TextFont>(span).unwrap().font, cjk_font);
+    }
+
+    /// World-space labels (lane and boss plates, nameplates) switch fonts
+    /// too, and a text written in `Update` gets its font in the same frame's
+    /// `PostUpdate`, before layout.
+    #[test]
+    fn text2d_and_update_writers_get_the_cjk_font_in_the_same_frame() {
+        let mut fonts = Assets::<Font>::default();
+        let font = fonts.add(packaged_font("Inter.ttf"));
+        let cjk_font = fonts.add(packaged_font("NotoSansCJKsc-Regular.otf"));
+        let mut app = App::new();
+        app.insert_resource(UiTheme {
+            font: font.clone(),
+            cjk_font: cjk_font.clone(),
+        })
+        .init_resource::<crate::i18n::Locale>();
+        crate::i18n::configure_text_sets(&mut app);
+        app.add_systems(
+            PostUpdate,
+            (
+                crate::i18n::relabel_localized.in_set(crate::i18n::I18nSystems::Relabel),
+                apply_theme_font.in_set(crate::i18n::I18nSystems::Font),
+            ),
+        );
+        let lane = app
+            .world_mut()
+            .spawn((
+                crate::i18n::Localized::new("lane.top").text2d(),
+                TextFont::default(),
+            ))
+            .id();
+        let plate = app
+            .world_mut()
+            .spawn((Text2d::new("Wendigo"), TextFont::default()))
+            .id();
+        app.update();
+        assert_eq!(app.world().get::<TextFont>(lane).unwrap().font, font);
+        let zh = crate::i18n::LocaleId::parse("zh-Hans").unwrap();
+        app.world_mut()
+            .resource_mut::<crate::i18n::Locale>()
+            .set(zh);
+        app.world_mut().get_mut::<Text2d>(plate).unwrap().0 = "温迪戈".into();
+        app.update();
+        assert_eq!(app.world().get::<Text2d>(lane).unwrap().0, "上路");
+        assert_eq!(app.world().get::<TextFont>(lane).unwrap().font, cjk_font);
+        assert_eq!(app.world().get::<TextFont>(plate).unwrap().font, cjk_font);
     }
 
     #[test]

@@ -3,6 +3,10 @@
 //! screen buttons and tiles. Every control gets a [`UiAction`], a
 //! [`ButtonStyle`] and a [`TestId`]; the module that owns it only handles
 //! `Activated<T>`.
+//!
+//! Captions are `impl UiLabel`: a literal (`"×"`, a formatted `String`) or a
+//! `crate::i18n::Localized` key, which the widget spawns filled in the active
+//! language and which follows later language changes.
 use bevy::prelude::*;
 
 use super::{
@@ -10,6 +14,7 @@ use super::{
     action::UiActionT,
     theme::{self, ButtonKind, metric},
 };
+use crate::i18n::UiLabel;
 
 /// Colour role of a kit button. Painted by [`paint_pressables`] from the
 /// effective interaction, so a resting finger lights the button and a
@@ -171,7 +176,7 @@ fn menu_button_node() -> Node {
 /// A full-width menu button with a centred label.
 pub(crate) fn button<T: UiActionT>(
     parent: &mut ChildSpawnerCommands,
-    label: &str,
+    label: impl UiLabel,
     kind: ButtonKind,
     action: T,
     id: impl Into<TestId>,
@@ -183,7 +188,7 @@ pub(crate) fn button<T: UiActionT>(
 /// caption the owning module rewrites (a mute/unmute toggle).
 pub(crate) fn button_with_label<T: UiActionT, M: Component>(
     parent: &mut ChildSpawnerCommands,
-    label: &str,
+    label: impl UiLabel,
     kind: ButtonKind,
     action: T,
     id: impl Into<TestId>,
@@ -202,7 +207,7 @@ pub(crate) fn button_with_label<T: UiActionT, M: Component>(
 
 fn spawn_menu_button<T: UiActionT>(
     parent: &mut ChildSpawnerCommands,
-    label: &str,
+    label: impl UiLabel,
     kind: ButtonKind,
     action: T,
     id: TestId,
@@ -212,7 +217,7 @@ fn spawn_menu_button<T: UiActionT>(
         .spawn(button_bundle(menu_button_node(), kind, action, id))
         .with_children(|button| {
             button.spawn((
-                Text::new(label),
+                label.into_text(),
                 theme::text(17.0),
                 TextColor(theme::IVORY),
                 label_extra,
@@ -292,7 +297,7 @@ pub(crate) fn value_label<M: Component>(
 /// `{id}-Up`. Returns the row.
 pub(crate) fn adjust_row<T: UiActionT, M: Component>(
     parent: &mut ChildSpawnerCommands,
-    label: &str,
+    label: impl UiLabel,
     value: String,
     value_marker: M,
     decrease: T,
@@ -314,7 +319,7 @@ pub(crate) fn adjust_row<T: UiActionT, M: Component>(
         ))
         .with_children(|row| {
             row.spawn((
-                Text::new(label),
+                label.into_text(),
                 Node {
                     width: Val::Px(110.0),
                     flex_shrink: 0.0,
@@ -335,7 +340,7 @@ pub(crate) fn adjust_row<T: UiActionT, M: Component>(
 /// the value `{id}Value`. Returns the button.
 pub(crate) fn toggle_row<T: UiActionT, M: Component>(
     parent: &mut ChildSpawnerCommands,
-    label: &str,
+    label: impl UiLabel,
     value: &str,
     value_marker: M,
     action: T,
@@ -355,7 +360,11 @@ pub(crate) fn toggle_row<T: UiActionT, M: Component>(
             id.child("Button"),
         ))
         .with_children(|button| {
-            button.spawn((Text::new(label), theme::text(17.0), TextColor(theme::IVORY)));
+            button.spawn((
+                label.into_text(),
+                theme::text(17.0),
+                TextColor(theme::IVORY),
+            ));
             button.spawn((
                 Text::new(value),
                 theme::text(17.0),
@@ -384,9 +393,9 @@ pub(crate) struct MenuControl {
 }
 
 /// A front-end screen label in `color`, with its phone readability metric.
-pub(crate) fn screen_label(text: &str, size: f32, color: Color) -> impl Bundle {
+pub(crate) fn screen_label(text: impl UiLabel, size: f32, color: Color) -> impl Bundle {
     (
-        Text::new(text.to_owned()),
+        text.into_text(),
         theme::text(size),
         TextColor(color),
         MenuTypography {
@@ -400,7 +409,7 @@ pub(crate) fn screen_label(text: &str, size: f32, color: Color) -> impl Bundle {
 /// gold edge, everything else a 44 px pill sized to its label.
 pub(crate) fn screen_button<T: UiActionT>(
     parent: &mut ChildSpawnerCommands,
-    text: &str,
+    text: impl UiLabel,
     kind: ButtonKind,
     action: T,
     id: impl Into<TestId>,
@@ -419,7 +428,7 @@ pub(crate) fn screen_button<T: UiActionT>(
 /// `ButtonStyle::selected`; the painter repaints).
 pub(crate) fn screen_tile<T: UiActionT>(
     parent: &mut ChildSpawnerCommands,
-    text: &str,
+    text: impl UiLabel,
     selected: bool,
     action: T,
     id: impl Into<TestId>,
@@ -430,7 +439,7 @@ pub(crate) fn screen_tile<T: UiActionT>(
 /// [`screen_tile`] that shrinks on a phone (the collection's clip strip).
 pub(crate) fn compact_screen_tile<T: UiActionT>(
     parent: &mut ChildSpawnerCommands,
-    text: &str,
+    text: impl UiLabel,
     selected: bool,
     action: T,
     id: impl Into<TestId>,
@@ -445,7 +454,7 @@ pub(crate) fn compact_screen_tile<T: UiActionT>(
 
 fn spawn_screen_button<T: UiActionT>(
     parent: &mut ChildSpawnerCommands,
-    text: &str,
+    text: impl UiLabel,
     style: ButtonStyle,
     action: T,
     id: TestId,

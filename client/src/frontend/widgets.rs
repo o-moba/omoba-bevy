@@ -90,9 +90,10 @@ pub fn panel_row() -> impl Bundle {
     )
 }
 
-pub fn heading(text: &str, size: f32) -> impl Bundle {
+/// A front-end heading; `text` is a literal or a `crate::i18n::Localized` key.
+pub fn heading(text: impl crate::i18n::UiLabel, size: f32) -> impl Bundle {
     (
-        Text::new(text.to_owned()),
+        text.into_text(),
         TextFont {
             font_size: size,
             ..default()
@@ -105,6 +106,7 @@ pub fn heading(text: &str, size: f32) -> impl Bundle {
     )
 }
 
-pub fn label(text: &str, size: f32, color: Color) -> impl Bundle {
+/// A front-end label; `text` is a literal or a `crate::i18n::Localized` key.
+pub fn label(text: impl crate::i18n::UiLabel, size: f32, color: Color) -> impl Bundle {
     crate::ui::widgets::screen_label(text, size, color)
 }
