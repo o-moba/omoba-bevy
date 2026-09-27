@@ -121,8 +121,8 @@ fn setup_match_hud(mut commands: Commands) {
                     Name::new("MatchHudBars"),
                 ))
                 .with_children(|bars| {
-                    spawn_stat_bar(bars, "HP", hp_bar_color(1.0), HpBarFill);
-                    spawn_stat_bar(bars, "MP", MANA_BAR_COLOR, ManaBarFill);
+                    spawn_stat_bar(bars, HudResource::Health, hp_bar_color(1.0), HpBarFill);
+                    spawn_stat_bar(bars, HudResource::Mana, MANA_BAR_COLOR, ManaBarFill);
                 });
             panel.spawn((
                 Text::new(""),
@@ -235,8 +235,25 @@ fn adapt_desktop_dock(
 struct HudPortrait;
 #[derive(Component)]
 struct HudXpText;
+/// Which pool a HUD bar shows. Identity comes from this, never from text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HudResource {
+    Health,
+    Mana,
+}
+
+impl HudResource {
+    /// Stable id in the bar's `Name` (`MatchHudBar-HP`); never translated.
+    const fn id(self) -> &'static str {
+        match self {
+            Self::Health => "HP",
+            Self::Mana => "MP",
+        }
+    }
+}
+
 #[derive(Component)]
-struct HudResourceText(&'static str);
+struct HudResourceText(HudResource);
 
 fn update_hero_details(
     mut commands: Commands,
@@ -258,7 +275,7 @@ fn update_hero_details(
         return;
     };
     for (label, mut text) in &mut labels {
-        text.0 = if label.0 == "HP" {
+        text.0 = if label.0 == HudResource::Health {
             format!("{:.0} / {:.0}", stats.hp.max(0.0), stats.max_hp)
         } else {
             format!("{:.0} / {:.0}", stats.mana.max(0.0), stats.max_mana)
@@ -368,7 +385,7 @@ fn sync_buff_row_visibility(mut rows: Query<(&Text, &mut Node), With<MatchHudBuf
 
 fn spawn_stat_bar<F: Component>(
     col: &mut ChildSpawnerCommands,
-    label: &'static str,
+    resource: HudResource,
     fill_color: Color,
     fill_marker: F,
 ) {
@@ -383,7 +400,7 @@ fn spawn_stat_bar<F: Component>(
             ..default()
         },
         BackgroundColor(BAR_TRACK_COLOR),
-        Name::new(format!("MatchHudBar-{label}")),
+        Name::new(format!("MatchHudBar-{}", resource.id())),
     ))
     .with_children(|track| {
         track.spawn((
@@ -402,7 +419,7 @@ fn spawn_stat_bar<F: Component>(
             Text::new("100 / 100"),
             crate::ui::theme::text(12.0),
             TextColor(Color::WHITE),
-            HudResourceText(label),
+            HudResourceText(resource),
             ZIndex(1),
         ));
     });

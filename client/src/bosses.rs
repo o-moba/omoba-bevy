@@ -50,6 +50,17 @@ pub fn boss_display_name(camp_type: NeutralCampType) -> &'static str {
     }
 }
 
+/// Stable identifier of a boss in entity `Name`s and QA lookups. It keeps
+/// the historical English spelling so existing names do not change, and it
+/// is never translated (the nameplate text is `boss_display_name`).
+pub(crate) fn boss_name_id(camp_type: NeutralCampType) -> &'static str {
+    match camp_type {
+        NeutralCampType::WendigoBoss => "Wendigo",
+        NeutralCampType::KingMutatioBoss => "King Mutatio",
+        _ => "Neutral",
+    }
+}
+
 /// Asset path slug under `client/assets/bosses/` for a boss camp type.
 fn boss_slug(camp_type: NeutralCampType) -> Option<&'static str> {
     match camp_type {
@@ -190,13 +201,13 @@ fn attach_boss_models(
             warn!("No staged model for boss {:?}", visual.camp_type);
         }
 
-        let display_name = boss_display_name(visual.camp_type);
         info!(
-            "Boss spawned on client: {display_name} ({:?})",
+            "Boss spawned on client: {} ({:?})",
+            boss_name_id(visual.camp_type),
             visual.camp_type
         );
         commands.spawn((
-            Text::new(display_name),
+            Text::new(boss_display_name(visual.camp_type)),
             TextFont {
                 font_size: 18.0,
                 ..default()
@@ -210,7 +221,8 @@ fn attach_boss_models(
             },
             ZIndex(9),
             BossNameplate { boss: boss_entity },
-            Name::new(format!("BossNameplate-{display_name}")),
+            // The Name is the stable boss id, never the (translatable) label.
+            Name::new(format!("BossNameplate-{}", boss_name_id(visual.camp_type))),
         ));
     }
 }
