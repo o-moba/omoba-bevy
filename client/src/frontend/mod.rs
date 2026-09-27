@@ -574,7 +574,7 @@ mod tests {
             .world_mut()
             .query::<&Camera>()
             .iter(app.world())
-            .map(|camera| camera.clear_color.clone())
+            .map(|camera| camera.clear_color)
             .collect();
         assert_eq!(clears.len(), 2);
         for clear in clears {

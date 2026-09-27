@@ -365,6 +365,7 @@ fn icon_tint(skin: KitSkin, style: &ButtonStyle, state: ButtonState) -> Color {
         (_, Disabled) => color::TEXT_DISABLED,
         (KitSkin::Icon, Hover) => color::GOLD_300,
         (KitSkin::Icon | KitSkin::Cycle, _) => color::TEXT_GOLD,
+        (KitSkin::ShopCard, _) => color::GOLD_400,
         (KitSkin::Tab { .. }, _) if style.selected => color::TEXT_GOLD,
         (KitSkin::Tab { .. }, Hover) => color::TEXT_PRIMARY,
         (KitSkin::Tab { .. }, _) => color::TEXT_MUTED,
@@ -714,7 +715,12 @@ pub(crate) fn paint_preview_rings(
     }
 }
 
-fn button_bundle<T: UiActionT>(node: Node, kind: ButtonKind, action: T, id: TestId) -> impl Bundle {
+pub(crate) fn button_bundle<T: UiActionT>(
+    node: Node,
+    kind: ButtonKind,
+    action: T,
+    id: TestId,
+) -> impl Bundle {
     let style = ButtonStyle::new(kind);
     (
         Button,
@@ -751,6 +757,7 @@ pub(crate) const TERTIARY_LABEL: super::tokens::Metric =
     super::tokens::Metric::new(14.0, TextRole::Label.style().size.phone);
 
 /// Button sizes of `components/button.md`.
+#[cfg_attr(not(feature = "qa"), allow(dead_code))]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum ButtonSize {
     /// `size.button.*` (46 / 44), min width 120.

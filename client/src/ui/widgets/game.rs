@@ -6,6 +6,8 @@
 //! compose them; state lives in small view components (`BarValue`,
 //! `AbilityView`, `TimerRing`) that the owner updates.
 // i18n-strict
+// Kit parts that screen steps adopt; the kit gallery (`qa` feature) uses all of them.
+#![cfg_attr(not(feature = "qa"), allow(dead_code))]
 use bevy::prelude::*;
 
 use super::{ButtonStyle, KitParts, KitSkin, NoSlab, button_bundle, icon_node};
@@ -847,6 +849,49 @@ pub(crate) fn item_slot(
         .id()
 }
 
+/// An inventory slot as a shop control (`ButtonKind::ShopItem`, selected =
+/// owned): the slot look with the item card's states.
+pub(crate) fn item_slot_button<T: UiActionT>(
+    parent: &mut ChildSpawnerCommands,
+    icon: Icon,
+    form: Form,
+    action: T,
+    id: impl Into<TestId>,
+) -> Entity {
+    let side = size::ITEM_SLOT.at(form);
+    let mut parts = KitParts::default();
+    let mut button = parent.spawn((
+        button_bundle(
+            Node {
+                width: Val::Px(side),
+                height: Val::Px(side),
+                flex_shrink: 0.0,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                border: UiRect::all(Val::Px(border::HAIRLINE)),
+                border_radius: BorderRadius::all(Val::Px(ITEM_SLOT_RADIUS)),
+                ..default()
+            },
+            ButtonKind::ShopItem,
+            action,
+            id.into(),
+        ),
+        KitSkin::ShopCard,
+        UiTransform::IDENTITY,
+    ));
+    button.with_children(|slot| {
+        parts.icon = Some(
+            slot.spawn(icon_node(
+                icon,
+                ITEM_ICON.min(side - space::S4),
+                color::GOLD_400,
+            ))
+            .id(),
+        );
+    });
+    button.insert(parts).id()
+}
+
 /// The 32 px glyph of a catalogue item.
 pub(crate) fn item_icon(item: shared::shop::ItemId) -> Icon {
     use shared::shop::ItemId;
@@ -1651,7 +1696,7 @@ pub(crate) fn group_digits(value: u32) -> String {
     let digits = value.to_string();
     let mut out = String::new();
     for (index, digit) in digits.chars().enumerate() {
-        if index > 0 && (digits.len() - index) % 3 == 0 {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
             out.push(' ');
         }
         out.push(digit);

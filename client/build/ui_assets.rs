@@ -24,7 +24,8 @@ fn camel(words: &str) -> String {
 }
 
 fn float(value: f64) -> String {
-    let text = format!("{value:?}");
+    // f32 shortest form: the constants are f32, so more digits are noise.
+    let text = format!("{:?}", value as f32);
     if text.contains('.') {
         text
     } else {

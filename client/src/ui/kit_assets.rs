@@ -196,7 +196,7 @@ pub(crate) fn resolve_kit_images(
             _ => NodeImageMode::Stretch,
         };
         let atlas = match (kit.source, kit.frame) {
-            (KitSource::Sprite(sprite), Some(index)) => sprite.atlas(hi).and_then(|grid| {
+            (KitSource::Sprite(sprite), Some(index)) => sprite.atlas(hi).map(|grid| {
                 let layout = layouts.0.entry((sprite, hi)).or_insert_with(|| {
                     layout_assets
                         .as_mut()
@@ -210,10 +210,10 @@ pub(crate) fn resolve_kit_images(
                             ))
                         })
                 });
-                Some(TextureAtlas {
+                TextureAtlas {
                     layout: layout.clone(),
                     index: index.min(grid.frames as usize - 1),
-                })
+                }
             }),
             _ => None,
         };

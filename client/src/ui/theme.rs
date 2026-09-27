@@ -953,7 +953,14 @@ mod tests {
             let text = std::fs::read_to_string(&path).unwrap();
             let values: serde_json::Map<String, serde_json::Value> =
                 serde_json::from_str(&text).unwrap();
-            for value in values.values().filter_map(serde_json::Value::as_str) {
+            // The kit gallery is a developer screen: its copy may use characters
+            // outside the subset (they fall back to Noto Sans CJK SC, see
+            // `text_roles_pair_cjk_faces_and_resolve_sizes_per_profile`).
+            for value in values
+                .iter()
+                .filter(|(key, _)| !key.starts_with("kit.gallery."))
+                .filter_map(|(_, value)| value.as_str())
+            {
                 for character in value.chars().filter(|c| is_cjk(*c)) {
                     if coverage.covers(FontFamily::CjkDisplay, &character.to_string()) != Some(true)
                     {

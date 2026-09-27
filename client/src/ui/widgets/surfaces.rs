@@ -2,6 +2,8 @@
 //! frame, modal over a scrim), list rows, badges, tooltips and toasts
 //! (`omoba-ui/handoff/components/{panel,list-row,badge,tooltip,toast}.md`).
 // i18n-strict
+// Kit parts that screen steps adopt; the kit gallery (`qa` feature) uses all of them.
+#![cfg_attr(not(feature = "qa"), allow(dead_code))]
 use std::time::Duration;
 
 use bevy::prelude::*;
@@ -90,9 +92,6 @@ pub(crate) fn ornament_frame() -> impl Bundle {
         Pickable::IGNORE,
     )
 }
-
-/// Content inset inside the ornament frame line (`space.32` + frame).
-pub(crate) const ORNAMENT_CONTENT: f32 = space::S8 + space::S32;
 
 /// A modal's open animation: scale from `motion.panel_open.scale_from` and
 /// the scrim fading in over `motion.duration.panel_open`.

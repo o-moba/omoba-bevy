@@ -5,6 +5,8 @@
 //! the gamepad focus ring reaches it; the slider and the cycle row take
 //! Left/Right themselves ([`super::super::focus::FocusAdjustable`]).
 // i18n-strict
+// Kit parts that screen steps adopt; the kit gallery (`qa` feature) uses all of them.
+#![cfg_attr(not(feature = "qa"), allow(dead_code))]
 use std::time::Duration;
 
 use bevy::prelude::*;
