@@ -30,9 +30,9 @@ pub(crate) mod controls;
 pub(crate) mod game;
 pub(crate) mod surfaces;
 
-/// Colour role of a kit button. Painted by [`paint_pressables`] from the
-/// effective interaction, so a resting finger lights the button and a
-/// completed tap flashes it exactly like a desktop click.
+/// Colour role of a kit button. Painted by [`paint_pressables`] from
+/// [`kit_state`]: on desktop hover and press follow the pointer; on touch a
+/// resting finger shows the pressed look and there is no hover.
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct ButtonStyle {
     pub kind: ButtonKind,
@@ -192,10 +192,10 @@ pub(crate) fn paint_pressables(
             Some(ButtonState::Pressed) => style.pressed_color(),
             Some(ButtonState::Hover) => style.hover_color(),
             Some(_) => style.idle_color(),
-            None => match pressable.effective(*interaction) {
-                Interaction::Pressed => style.pressed_color(),
-                Interaction::Hovered => style.hover_color(),
-                Interaction::None => style.idle_color(),
+            None => match kit_state(*interaction, pressable, None) {
+                ButtonState::Pressed => style.pressed_color(),
+                ButtonState::Hover => style.hover_color(),
+                _ => style.idle_color(),
             },
         };
         if color.0 != next {
