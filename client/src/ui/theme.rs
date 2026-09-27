@@ -4,8 +4,7 @@
 //!
 //! Every colour and size here comes from [`super::tokens`] (generated from
 //! `client/ui/tokens/verdant-crown.json`). Documented exceptions that stay
-//! literal: the developer-only `OMOBA_DEBUG_UI` toggle colours, the profile
-//! card accent swatches (player-chosen content, not theme roles) and the
+//! literal: the developer-only `OMOBA_DEBUG_UI` toggle colours and the
 //! legacy responsive layout policy in [`metric`] (panel widths and phone text
 //! clamps of screens that are not redesigned yet; they go as the screen steps
 //! migrate).
@@ -73,16 +72,16 @@ pub const DEBUG_GOD_HOVER: Color = Color::srgba(0.88, 0.28, 0.30, 0.98);
 pub const DEBUG_SPEED: Color = Color::srgba(0.20, 0.44, 0.80, 0.96);
 pub const DEBUG_SPEED_HOVER: Color = Color::srgba(0.28, 0.52, 0.90, 0.98);
 
-/// Accent colours a player can put on their profile card. The name is only the
-/// swatch `TestId` suffix (`CardAccent-<name>`); the card shows the colour.
-/// Player content, not theme roles, so they are not tokens.
+/// Accent colours a player can put on their profile card
+/// (`color.card_accent.*`). The name is only the swatch `TestId` suffix
+/// (`CardAccent-<name>`); the card shows the colour.
 pub const ACCENTS: [(&str, Color); 6] = [
-    ("Verdant", Color::srgb(0.24, 0.79, 0.58)),  // i18n-allow
-    ("Ember", Color::srgb(0.90, 0.46, 0.22)),    // i18n-allow
-    ("Amethyst", Color::srgb(0.58, 0.42, 0.88)), // i18n-allow
-    ("Tide", Color::srgb(0.24, 0.58, 0.88)),     // i18n-allow
-    ("Gold", Color::srgb(0.94, 0.77, 0.43)),     // i18n-allow
-    ("Rose", Color::srgb(0.88, 0.36, 0.52)),     // i18n-allow
+    ("Verdant", color::CARD_ACCENT_VERDANT),   // i18n-allow
+    ("Ember", color::CARD_ACCENT_EMBER),       // i18n-allow
+    ("Amethyst", color::CARD_ACCENT_AMETHYST), // i18n-allow
+    ("Tide", color::CARD_ACCENT_TIDE),         // i18n-allow
+    ("Gold", color::CARD_ACCENT_GOLD),         // i18n-allow
+    ("Rose", color::CARD_ACCENT_ROSE),         // i18n-allow
 ];
 
 pub fn accent_color(index: usize) -> Color {

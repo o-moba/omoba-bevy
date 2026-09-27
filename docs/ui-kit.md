@@ -433,8 +433,7 @@ compose these parts.
   pair → one `Metric`; a lone `.phone` keeps its suffix
   (`size::ABILITY_ATTACK_PHONE`); `space.8` → `space::S8`.
 - Kit code (`ui/theme.rs`, `ui/widgets/`) names tokens only. Documented
-  literal exceptions: the `OMOBA_DEBUG_UI` toggle colours, the profile-card
-  accent swatches (player content), the legacy responsive screen policy in
+  literal exceptions: the `OMOBA_DEBUG_UI` toggle colours, the legacy responsive screen policy in
   `metric` (`MENU_W`, `PAUSE_PANEL`, `phone_font`, … until the screens are
   redesigned) and component anatomy numbers the handoff states in px without
   a token (e.g. the 22 px level-up disc, 36 px chevrons, 280 px cycle
