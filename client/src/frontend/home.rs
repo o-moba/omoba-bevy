@@ -1,5 +1,9 @@
 //! Welcome screen: who you are, what you can look at, and the one button that
 //! starts a match.
+//!
+//! Text comes from the `home` dictionary; the render key includes the locale
+//! generation, so a language change rebuilds the screen.
+// i18n-strict
 
 use bevy::prelude::*;
 
@@ -7,6 +11,7 @@ use super::card::{ProfileCard, spawn_card};
 use super::widgets;
 use super::{AppScreen, automation_bypass};
 use crate::career::CareerClient;
+use crate::i18n::{Locale, data, tr, trf};
 use crate::net::{ClientConnectionState, ClientSession, NetworkCommand};
 use crate::team::AvatarThumbnails;
 use crate::ui::theme::{self, ButtonKind};
@@ -63,6 +68,8 @@ struct HomeSignature {
     invite: Option<(u64, String)>,
     /// Party size and leader, when in a party.
     party: Option<(usize, String, bool)>,
+    /// The locale generation: a language change rebuilds the screen.
+    locale: u32,
 }
 
 fn signature(
@@ -70,9 +77,11 @@ fn signature(
     session: &ClientSession,
     card: &ProfileCard,
     party: &crate::party::PartyClient,
+    locale: Option<&Locale>,
 ) -> HomeSignature {
     let profile = career.view.profile.as_ref();
     HomeSignature {
+        locale: locale.map_or(0, Locale::generation),
         invite: party
             .view
             .invites
@@ -114,33 +123,43 @@ pub fn last_match_line(result: &shared::career::MatchResult, profile_id: Option<
             .find(|entry| entry.profile_id.as_deref() == Some(id))
     });
     let outcome = match (result.winner, mine.map(|entry| entry.team)) {
-        (Some(winner), Some(team)) if winner == team => "Victory",
-        (Some(_), Some(_)) => "Defeat",
-        _ => "Match complete",
+        (Some(winner), Some(team)) if winner == team => tr("home.outcome.victory"),
+        (Some(_), Some(_)) => tr("home.outcome.defeat"),
+        _ => tr("home.outcome.complete"),
     };
     let minutes = result.duration_ms / 60_000;
     match mine {
-        Some(entry) => format!(
-            "{outcome} · {}/{}/{} · {} · {minutes} min",
-            entry.stats.kills,
-            entry.stats.deaths,
-            entry.stats.assists,
-            entry.hero_class.display_name(),
+        Some(entry) => trf(
+            "home.last_match.line",
+            &[
+                ("outcome", &outcome),
+                ("kills", &entry.stats.kills),
+                ("deaths", &entry.stats.deaths),
+                ("assists", &entry.stats.assists),
+                ("hero", &data::hero_name(entry.hero_class)),
+                ("minutes", &minutes),
+            ],
         ),
-        None => format!("{outcome} · {minutes} min"),
+        None => trf(
+            "home.last_match.short",
+            &[("outcome", &outcome), ("minutes", &minutes)],
+        ),
     }
 }
 
 /// Shared status line: the home header and the picker header both use it.
 pub(crate) fn connection_line(session: &ClientSession) -> (String, Color) {
     match session.state() {
-        ClientConnectionState::Connected => ("Online · ready to play".to_owned(), theme::PRIMARY),
+        ClientConnectionState::Connected => {
+            (tr("home.connection.online").to_owned(), theme::PRIMARY)
+        }
         ClientConnectionState::Connecting | ClientConnectionState::WaitingForServer => {
-            ("Connecting…".to_owned(), theme::GOLD)
+            (tr("home.connection.connecting").to_owned(), theme::GOLD)
         }
-        ClientConnectionState::Disconnected => {
-            ("Offline · reconnecting…".to_owned(), theme::DANGER_HOVER)
-        }
+        ClientConnectionState::Disconnected => (
+            tr("home.connection.offline").to_owned(),
+            theme::DANGER_HOVER,
+        ),
     }
 }
 
@@ -154,6 +173,7 @@ fn spawn_home(
     mut preview: ResMut<super::preview::AvatarPreview>,
     platform: Res<crate::ui::UiPlatform>,
     party: Res<crate::party::PartyClient>,
+    locale: Option<Res<Locale>>,
 ) {
     if automation_bypass() {
         return;
@@ -164,7 +184,7 @@ fn spawn_home(
     }
     let preview_image = preview.image.clone();
     let phone = platform.is_mobile();
-    let party_line = signature(&career, &session, &card, &party);
+    let party_line = signature(&career, &session, &card, &party, locale.as_deref());
     let (status, status_color) = connection_line(&session);
     let profile = career.view.profile.clone();
     let last_match = career
@@ -191,8 +211,8 @@ fn spawn_home(
                         ..default()
                     })
                     .with_children(|title| {
-                        title.spawn(widgets::heading("OMOBA", 36.0));
-                        title.spawn(widgets::label("THE VERDANT ARENA", 14.0, theme::MUTED));
+                        title.spawn(widgets::heading("OMOBA", 36.0)); // i18n-allow
+                        title.spawn(widgets::label(tr("home.tagline"), 14.0, theme::MUTED));
                     });
                 header.spawn((
                     widgets::label(&status, 15.0, status_color),
@@ -231,7 +251,7 @@ fn spawn_home(
                     Name::new("HomeIdentity"),
                 ))
                 .with_children(|column| {
-                    column.spawn(widgets::label("PLAYER PROFILE", 12.0, theme::GOLD));
+                    column.spawn(widgets::label(tr("home.profile"), 12.0, theme::GOLD));
                     spawn_card(
                         column,
                         &card,
@@ -247,14 +267,14 @@ fn spawn_home(
                         .with_children(|row| {
                             screen_button(
                                 row,
-                                "Customize card",
+                                tr("home.button.customize_card"),
                                 ButtonKind::Secondary,
                                 HomeAction::Card,
                                 "HomeCustomizeCard",
                             );
                             screen_button(
                                 row,
-                                "Account",
+                                tr("home.button.account"),
                                 ButtonKind::Secondary,
                                 HomeAction::Profile,
                                 "HomeAccount",
@@ -264,7 +284,11 @@ fn spawn_home(
                         column
                             .spawn((widgets::panel_row(), Name::new("HomeLastMatch")))
                             .with_children(|panel| {
-                                panel.spawn(widgets::label("Last match", 12.0, theme::MUTED));
+                                panel.spawn(widgets::label(
+                                    tr("home.last_match"),
+                                    12.0,
+                                    theme::MUTED,
+                                ));
                                 panel.spawn(widgets::label(last, 14.0, theme::IVORY));
                             });
                     }
@@ -288,7 +312,7 @@ fn spawn_home(
                     Name::new("HomeShowcase"),
                 ))
                 .with_children(|column| {
-                    column.spawn(widgets::label("YOUR CHAMPION", 12.0, theme::GOLD));
+                    column.spawn(widgets::label(tr("home.showcase"), 12.0, theme::GOLD));
                     column.spawn((
                         ImageNode::new(preview_image),
                         Node {
@@ -307,10 +331,12 @@ fn spawn_home(
                         .showcase_avatar
                         .as_deref()
                         .and_then(omoba_passport::avatars::avatar_definition)
-                        .map_or("Your hero", |avatar| avatar.display_name.as_str());
+                        .map_or(tr("home.showcase.your_hero"), |avatar| {
+                            avatar.display_name.as_str()
+                        });
                     column.spawn(widgets::heading(avatar_name, 22.0));
                     column.spawn(widgets::label(
-                        card.main_class.display_name(),
+                        data::hero_name(card.main_class),
                         13.0,
                         theme::MUTED,
                     ));
@@ -331,21 +357,19 @@ fn spawn_home(
                 ))
                 .with_children(|column| {
                     if !phone {
-                        column.spawn(widgets::label("ENTER THE ARENA", 12.0, theme::GOLD));
+                        column.spawn(widgets::label(tr("home.enter_arena"), 12.0, theme::GOLD));
                     }
-                    column.spawn(widgets::heading("Your next battle", 24.0));
+                    column.spawn(widgets::heading(tr("home.next_battle"), 24.0));
                     if !phone {
-                        column.spawn(widgets::label(
-                            "5 versus 5 · Team strategy",
-                            13.0,
-                            theme::MUTED,
-                        ));
+                        column.spawn(widgets::label(tr("home.mode"), 13.0, theme::MUTED));
                     }
                     let play_label = match &party_line.party {
-                        Some((size, _, true)) => format!("PLAY AS PARTY ({size})"),
-                        Some(_) => "PARTY LOBBY".to_owned(),
-                        None if career.view.match_service.is_some() => "QUICK MATCH".to_owned(),
-                        None => "PLAY".to_owned(),
+                        Some((size, _, true)) => trf("home.play.party", &[("size", size)]),
+                        Some(_) => tr("home.play.party_lobby").to_owned(),
+                        None if career.view.match_service.is_some() => {
+                            tr("home.play.quick_match").to_owned()
+                        }
+                        None => tr("home.play.play").to_owned(),
                     };
                     screen_button(
                         column,
@@ -355,54 +379,72 @@ fn spawn_home(
                         "HomePlay",
                     );
                     if let Some((_, leader, false)) = &party_line.party {
-                        column.spawn(widgets::label(&format!("{leader} leads your party"), 12.0, theme::GOLD));
-                    }
-                    screen_button(column, "Offline practice", ButtonKind::Secondary, HomeAction::OfflinePractice, "HomeOfflinePractice");
-                    column.spawn(widgets::label("No internet needed · No rating or rewards", 12.0, theme::MUTED));
-                    if career.view.match_service.is_some() {
-                        screen_button(column, "Wait for players", ButtonKind::Secondary, HomeAction::HumansOnly, "HomeHumansOnly");
-                        screen_button(column, "Play with bots", ButtonKind::Secondary, HomeAction::BotPractice, "HomeBotPractice");
-                        column.spawn(widgets::label("Quick match fills empty seats with bots.\nProgress in every match · rating in PvP.", 12.0, theme::MUTED));
-                    }
-                    if !phone {
                         column.spawn(widgets::label(
-                            "Choose a hero. Make your mark.",
-                            14.0,
-                            theme::MUTED,
+                            &trf("home.party_leader", &[("leader", leader)]),
+                            12.0,
+                            theme::GOLD,
                         ));
                     }
+                    screen_button(
+                        column,
+                        tr("home.button.offline_practice"),
+                        ButtonKind::Secondary,
+                        HomeAction::OfflinePractice,
+                        "HomeOfflinePractice",
+                    );
+                    column.spawn(widgets::label(tr("home.offline_hint"), 12.0, theme::MUTED));
+                    if career.view.match_service.is_some() {
+                        screen_button(
+                            column,
+                            tr("home.button.humans_only"),
+                            ButtonKind::Secondary,
+                            HomeAction::HumansOnly,
+                            "HomeHumansOnly",
+                        );
+                        screen_button(
+                            column,
+                            tr("home.button.bot_practice"),
+                            ButtonKind::Secondary,
+                            HomeAction::BotPractice,
+                            "HomeBotPractice",
+                        );
+                        column.spawn(widgets::label(tr("home.quick_hint"), 12.0, theme::MUTED));
+                    }
                     if !phone {
-                    column
-                        .spawn(Node {
-                            flex_direction: FlexDirection::Column,
-                            align_items: AlignItems::Stretch,
-                            width: Val::Percent(100.0),
-                            row_gap: Val::Px(8.0),
-                            ..default()
-                        })
-                        .with_children(|row| {
-                            screen_button(
-                                row,
-                                "Avatars",
-                                ButtonKind::Secondary,
-                                HomeAction::Collection,
-                                "HomeCollection",
-                            );
-                            screen_button(
-                                row,
-                                "Match history",
-                                ButtonKind::Secondary,
-                                HomeAction::History,
-                                "HomeHistory",
-                            );
-                            screen_button(
-                                row,
-                                "Party & friends",
-                                ButtonKind::Secondary,
-                                HomeAction::Party,
-                                "HomeParty",
-                            );
-                        });
+                        column.spawn(widgets::label(tr("home.slogan"), 14.0, theme::MUTED));
+                    }
+                    if !phone {
+                        column
+                            .spawn(Node {
+                                flex_direction: FlexDirection::Column,
+                                align_items: AlignItems::Stretch,
+                                width: Val::Percent(100.0),
+                                row_gap: Val::Px(8.0),
+                                ..default()
+                            })
+                            .with_children(|row| {
+                                screen_button(
+                                    row,
+                                    tr("home.button.avatars"),
+                                    ButtonKind::Secondary,
+                                    HomeAction::Collection,
+                                    "HomeCollection",
+                                );
+                                screen_button(
+                                    row,
+                                    tr("home.button.history"),
+                                    ButtonKind::Secondary,
+                                    HomeAction::History,
+                                    "HomeHistory",
+                                );
+                                screen_button(
+                                    row,
+                                    tr("home.button.party"),
+                                    ButtonKind::Secondary,
+                                    HomeAction::Party,
+                                    "HomeParty",
+                                );
+                            });
                     }
                 });
             });
@@ -416,21 +458,40 @@ fn spawn_home(
                     justify_content: JustifyContent::SpaceBetween,
                     column_gap: Val::Px(12.0),
                     ..default()
-                }).with_children(|footer| {
-                    footer.spawn(widgets::label("MENU opens settings · SERVER sets the address", 12.0, theme::MUTED));
-                    footer.spawn(Node { column_gap: Val::Px(12.0), ..default() })
+                })
+                .with_children(|footer| {
+                    footer.spawn(widgets::label(tr("home.phone_footer"), 12.0, theme::MUTED));
+                    footer
+                        .spawn(Node {
+                            column_gap: Val::Px(12.0),
+                            ..default()
+                        })
                         .with_children(|navigation| {
-                            screen_button(navigation, "Avatars", ButtonKind::Secondary, HomeAction::Collection, "HomeCollection");
-                            screen_button(navigation, "Match history", ButtonKind::Secondary, HomeAction::History, "HomeHistory");
-                            screen_button(navigation, "Party & friends", ButtonKind::Secondary, HomeAction::Party, "HomeParty");
+                            screen_button(
+                                navigation,
+                                tr("home.button.avatars"),
+                                ButtonKind::Secondary,
+                                HomeAction::Collection,
+                                "HomeCollection",
+                            );
+                            screen_button(
+                                navigation,
+                                tr("home.button.history"),
+                                ButtonKind::Secondary,
+                                HomeAction::History,
+                                "HomeHistory",
+                            );
+                            screen_button(
+                                navigation,
+                                tr("home.button.party"),
+                                ButtonKind::Secondary,
+                                HomeAction::Party,
+                                "HomeParty",
+                            );
                         });
                 });
             } else {
-            root.spawn(widgets::label(
-                "Escape · Settings                         OMOBA · Verdant Arena",
-                12.0,
-                theme::MUTED,
-            ));
+                root.spawn(widgets::label(tr("home.footer"), 12.0, theme::MUTED));
             }
         });
 }
@@ -520,9 +581,10 @@ fn refresh_home(
     platform: Res<crate::ui::UiPlatform>,
     party: Res<crate::party::PartyClient>,
     roots: Query<Entity, With<HomeRoot>>,
+    locale: Option<Res<Locale>>,
     mut last: Local<Option<HomeSignature>>,
 ) {
-    let current = signature(&career, &session, &card, &party);
+    let current = signature(&career, &session, &card, &party, locale.as_deref());
     if last.as_ref() == Some(&current) {
         return;
     }
@@ -535,7 +597,7 @@ fn refresh_home(
         .despawn_related::<Children>()
         .despawn();
     spawn_home(
-        commands, career, session, card, thumbnails, preview, platform, party,
+        commands, career, session, card, thumbnails, preview, platform, party, locale,
     );
 }
 
@@ -571,20 +633,20 @@ fn spawn_invite_banner(parent: &mut ChildSpawnerCommands, party_id: u64, from: &
                 ))
                 .with_children(|banner| {
                     banner.spawn(widgets::label(
-                        &format!("{from} invites you to a party"),
+                        &trf("home.invite", &[("name", &from)]),
                         14.0,
                         theme::IVORY,
                     ));
                     screen_button(
                         banner,
-                        "Accept",
+                        tr("home.button.accept"),
                         ButtonKind::Secondary,
                         HomeAction::AcceptInvite(party_id),
                         "HomeAcceptInvite",
                     );
                     screen_button(
                         banner,
-                        "Decline",
+                        tr("home.button.decline"),
                         ButtonKind::Secondary,
                         HomeAction::DeclineInvite(party_id),
                         "HomeDeclineInvite",
@@ -610,6 +672,63 @@ mod tests {
             let (line, _) = connection_line(&session);
             assert!(!line.is_empty(), "{state:?} must have a status line");
         }
+    }
+
+    /// The home screen is a render-key screen: a language change rebuilds it
+    /// in the new language (buttons, headings and the status line).
+    #[test]
+    fn a_language_change_rebuilds_the_home_screen_in_that_language() {
+        if crate::i18n::testing::isolated(
+            "frontend::home::tests::a_language_change_rebuilds_the_home_screen_in_that_language",
+        ) {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, LocaleId};
+        use crate::ui::test_id::harness;
+        let mut app = harness::kit_app();
+        app.add_plugins((bevy::state::app::StatesPlugin, I18nPlugin::default()))
+            .init_state::<AppScreen>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<super::super::preview::AvatarPreview>()
+            .init_resource::<CareerClient>()
+            .init_resource::<ClientSession>()
+            .init_resource::<ProfileCard>()
+            .init_resource::<AvatarThumbnails>()
+            .init_resource::<crate::party::PartyClient>()
+            .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
+            .add_systems(Startup, spawn_home)
+            .add_systems(Update, refresh_home);
+        app.update();
+        let label = |app: &mut App, id: &str| {
+            let button = harness::find(app.world_mut(), id).unwrap();
+            let child = app.world().get::<Children>(button).unwrap()[0];
+            app.world().get::<Text>(child).unwrap().0.clone()
+        };
+        let status = |app: &mut App| {
+            let (_, text) = app
+                .world_mut()
+                .query::<(&Name, &Text)>()
+                .iter(app.world())
+                .find(|(name, _)| name.as_str() == "HomeConnectionStatus")
+                .map(|(name, text)| (name.clone(), text.0.clone()))
+                .unwrap();
+            text
+        };
+        assert_eq!(label(&mut app, "HomePlay"), "PLAY");
+        assert_eq!(label(&mut app, "HomeCustomizeCard"), "Customize card");
+        let english_status = status(&mut app);
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(LocaleId::parse("zh-Hans").unwrap());
+        app.update();
+        assert_eq!(label(&mut app, "HomePlay"), "开始游戏");
+        assert_eq!(label(&mut app, "HomeCustomizeCard"), "自定义名片");
+        assert_eq!(label(&mut app, "HomeHistory"), "对局记录");
+        assert_ne!(status(&mut app), english_status);
+        assert_eq!(
+            status(&mut app),
+            connection_line(&ClientSession::default()).0
+        );
     }
 
     #[test]

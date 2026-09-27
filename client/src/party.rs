@@ -4,6 +4,8 @@
 //!
 //! The server owns every rule (`server/src/party.rs`); this module only sends
 //! [`PartyCommand`]s and remembers what came back.
+//! No player-facing text: the lobby (`frontend::lobby`) renders the view.
+// i18n-strict
 use std::time::{Duration, Instant};
 
 use bevy::prelude::*;

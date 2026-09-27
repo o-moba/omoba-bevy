@@ -1,0 +1,12 @@
+{
+  "gamepad.aim.release": "松开即释放",
+  "gamepad.aim.locked": "已锁定目标",
+  "gamepad.aim.idle_playstation": "R2 攻击 · R3 锁定",
+  "gamepad.aim.idle": "RT 攻击 · RS 锁定",
+  "gamepad.legend.menu_playstation": "十字键 / LS：导航 · ✕：选择 · ○：返回",
+  "gamepad.legend.menu": "十字键 / LS：导航 · A：选择 · B：返回",
+  "gamepad.legend.phone_playstation": "LS 移动 · RS 瞄准 · R3 锁定 · R2 攻击 · ○ 取消 · Options 菜单\n按住技能：瞄准；松开：释放 · △ + 技能：加点 · 十字键右：商店；左：表情",
+  "gamepad.legend.phone": "LS 移动 · RS 瞄准 · 按下 RS 锁定 · RT 攻击 · B 取消 · Menu 菜单\n按住技能：瞄准；松开：释放 · Y + 技能：加点 · 十字键右：商店；左：表情",
+  "gamepad.legend.match_playstation": "左摇杆：移动   右摇杆：瞄准   R2：攻击   R3：锁定\n按住 L1 / R1 / L2：瞄准技能，松开：释放   L2+R2：大招\n○：取消   △ + 技能：加点   Options：菜单   十字键右：商店；左：表情",
+  "gamepad.legend.match": "左摇杆：移动   右摇杆：瞄准   RT：攻击   按下 RS：锁定\n按住 LB / RB / LT：瞄准技能，松开：释放   LT+RT：大招\nB：取消   Y + 技能：加点   Menu：菜单   十字键右：商店；左：表情"
+}

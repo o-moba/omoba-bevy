@@ -2,6 +2,7 @@
 //! (`crate::debug::tools_page`). Built on the UI kit (`crate::ui`): every control carries a
 //! `PauseAction`, the kit recognizes clicks and taps and paints the buttons,
 //! and the systems here only consume `Activated<PauseAction>`.
+// i18n-strict
 use bevy::{
     app::AppExit,
     prelude::*,
@@ -10,6 +11,7 @@ use bevy::{
 
 use crate::audio_settings::AudioSettings;
 use crate::camera::{CAMERA_ZOOM_STEP, CameraSettings};
+use crate::i18n::{Locale, Localized, locale_changed, tr, trf};
 use crate::model_scale::{
     DEFAULT_MODEL_TARGET_HEIGHT, MAX_MODEL_TARGET_HEIGHT, MIN_MODEL_TARGET_HEIGHT,
     ModelScaleSettings,
@@ -91,8 +93,12 @@ impl Plugin for PauseMenuPlugin {
                     apply_pause_settings,
                     apply_pause_audio,
                     apply_pause_session,
+                    apply_pause_language,
                     update_setting_labels.after(apply_pause_settings),
-                    update_audio_labels.after(apply_pause_audio),
+                    update_audio_labels
+                        .after(apply_pause_audio)
+                        .after(apply_pause_language),
+                    update_language_value.after(apply_pause_language),
                     sync_pause_menu_visibility,
                     sync_pause_menu_sections,
                     reset_pause_scroll_on_navigation.after(apply_pause_navigation),
@@ -131,6 +137,10 @@ struct SettingsFooter;
 #[derive(Component)]
 struct SettingsServerAddrLabel;
 
+/// The Language row's value (the active language's native name).
+#[derive(Component)]
+struct LanguageValue;
+
 #[derive(Component)]
 struct PauseMenuPanel;
 
@@ -164,6 +174,8 @@ pub(crate) enum PauseAction {
     Step(Setting, i8),
     Audio(AudioButton),
     OpenPractice,
+    /// Switch to the next shipped language.
+    CycleLanguage,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -224,9 +236,9 @@ fn size_desktop_pause_panel(
     }
 }
 
-fn section_title(parent: &mut ChildSpawnerCommands, text: &str, name: &str) {
+fn section_title(parent: &mut ChildSpawnerCommands, key: &'static str, name: &str) {
     parent.spawn((
-        Text::new(text),
+        Localized::new(key).into_text(),
         theme::text(18.0),
         TextColor(theme::GOLD),
         Name::new(name.to_owned()),
@@ -235,7 +247,7 @@ fn section_title(parent: &mut ChildSpawnerCommands, text: &str, name: &str) {
 
 fn setting_row(
     parent: &mut ChildSpawnerCommands,
-    label: &str,
+    label: Localized,
     value: String,
     setting: Setting,
     id: &str,
@@ -310,7 +322,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                         ))
                         .with_children(|header| {
                             header.spawn((
-                                Text::new("Game menu"),
+                                Localized::new("pause.title").into_text(),
                                 theme::text(28.0),
                                 TextColor(theme::IVORY),
                                 Name::new("PauseMenuTitle"),
@@ -345,14 +357,14 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                         ))
                         .with_children(|main| {
                             main.spawn((
-                                Text::new("Your match continues while this menu is open."),
+                                Text::new(tr("pause.hint.online")),
                                 theme::text(14.0),
                                 TextColor(theme::MUTED),
                                 Name::new("PauseMenuMainTitle"),
                             ));
                             widgets::button(
                                 main,
-                                "Settings",
+                                Localized::new("pause.button.settings"),
                                 ButtonKind::Secondary,
                                 PauseAction::OpenSettings,
                                 "SettingsButton",
@@ -360,21 +372,21 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                             crate::debug::tools_page::spawn_practice_open_button(main);
                             widgets::button(
                                 main,
-                                "Controls guide",
+                                Localized::new("pause.button.help"),
                                 ButtonKind::Secondary,
                                 PauseAction::Help,
                                 "PauseMenuHelpButton",
                             );
                             widgets::button(
                                 main,
-                                "Exit game",
+                                Localized::new("pause.button.exit"),
                                 ButtonKind::Secondary,
                                 PauseAction::Exit,
                                 "PauseMenuExitButton",
                             );
                             widgets::button(
                                 main,
-                                "Leave practice",
+                                Localized::new("pause.button.leave_practice"),
                                 ButtonKind::Secondary,
                                 PauseAction::LeavePractice,
                                 "PauseMenuLeavePracticeButton",
@@ -403,26 +415,42 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                         ))
                         .with_children(|settings| {
                             settings.spawn((
-                                Text::new("Settings"),
+                                Localized::new("pause.settings.title").into_text(),
                                 theme::text(22.0),
                                 TextColor(theme::IVORY),
                                 Name::new("PauseMenuSettingsTitle"),
                             ));
+                            widgets::toggle_row(
+                                settings,
+                                Localized::new("pause.settings.language"),
+                                crate::i18n::active().native_name(),
+                                LanguageValue,
+                                PauseAction::CycleLanguage,
+                                "PauseMenuLanguage",
+                            );
 
-                            section_title(settings, "Sound", "PauseMenuAudioTitle");
-                            for (bus, label, name) in [
-                                (AudioBus::Master, "Master", "PauseMenuAudioMasterControls"),
-                                (AudioBus::Music, "Music", "PauseMenuAudioMusicControls"),
+                            section_title(settings, "pause.settings.sound", "PauseMenuAudioTitle");
+                            for (bus, key, name) in [
+                                (
+                                    AudioBus::Master,
+                                    "pause.audio.master",
+                                    "PauseMenuAudioMasterControls",
+                                ),
+                                (
+                                    AudioBus::Music,
+                                    "pause.audio.music",
+                                    "PauseMenuAudioMusicControls",
+                                ),
                                 (
                                     AudioBus::Effects,
-                                    "Effects",
+                                    "pause.audio.effects",
                                     "PauseMenuAudioEffectsControls",
                                 ),
-                                (AudioBus::Ui, "Interface", "PauseMenuAudioUiControls"),
+                                (AudioBus::Ui, "pause.audio.ui", "PauseMenuAudioUiControls"),
                             ] {
                                 widgets::adjust_row(
                                     settings,
-                                    label,
+                                    Localized::new(key),
                                     format!("{:.0}%", bus.value(AudioSettings::default()) * 100.0),
                                     AudioLabel::Bus(bus),
                                     PauseAction::Audio(AudioButton::Adjust(bus, -AUDIO_STEP)),
@@ -430,9 +458,10 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                     name,
                                 );
                             }
+                            // Mute/unmute is state-dependent: `update_audio_labels` owns it.
                             widgets::button_with_label(
                                 settings,
-                                "Mute sound",
+                                tr("pause.audio.mute"),
                                 ButtonKind::Secondary,
                                 PauseAction::Audio(AudioButton::Mute),
                                 "PauseMenuAudioMuteButton",
@@ -448,51 +477,59 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                 Name::new("PauseMenuServerAddrHint"),
                             ));
 
-                            section_title(settings, "Lighting", "PauseMenuLightingTitle");
+                            section_title(
+                                settings,
+                                "pause.settings.lighting",
+                                "PauseMenuLightingTitle",
+                            );
                             setting_row(
                                 settings,
-                                "Main Light",
+                                Localized::new("pause.light.main"),
                                 format!("{:.0}", DEFAULT_LIGHT_ILLUMINANCE),
                                 Setting::Light,
                                 "PauseMenuMainLightControls",
                             );
                             setting_row(
                                 settings,
-                                "Ambient",
+                                Localized::new("pause.light.ambient"),
                                 format!("{:.0}", DEFAULT_AMBIENT_BRIGHTNESS),
                                 Setting::Ambient,
                                 "PauseMenuAmbientControls",
                             );
                             setting_row(
                                 settings,
-                                "Pitch",
+                                Localized::new("pause.light.pitch"),
                                 format!("{:.0}°", DEFAULT_LIGHT_PITCH_DEG),
                                 Setting::Pitch,
                                 "PauseMenuPitchControls",
                             );
                             setting_row(
                                 settings,
-                                "Yaw",
+                                Localized::new("pause.light.yaw"),
                                 format!("{:.0}°", DEFAULT_LIGHT_YAW_DEG),
                                 Setting::Yaw,
                                 "PauseMenuYawControls",
                             );
 
-                            section_title(settings, "Camera", "PauseMenuCameraTitle");
+                            section_title(
+                                settings,
+                                "pause.settings.camera",
+                                "PauseMenuCameraTitle",
+                            );
                             // 100% is the default follow view; lower values bring
                             // the camera closer so hero silhouettes read larger.
                             setting_row(
                                 settings,
-                                "Distance",
+                                Localized::new("pause.camera.distance"),
                                 CameraSettings::default().percent_label(),
                                 Setting::CameraZoom,
                                 "PauseMenuCameraZoomControls",
                             );
 
-                            section_title(settings, "Model", "PauseMenuModelTitle");
+                            section_title(settings, "pause.settings.model", "PauseMenuModelTitle");
                             setting_row(
                                 settings,
-                                "Scale",
+                                Localized::new("pause.model.scale"),
                                 format!("{:.2}", DEFAULT_MODEL_TARGET_HEIGHT),
                                 Setting::ModelScale,
                                 "PauseMenuScaleControls",
@@ -500,7 +537,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
 
                             widgets::button(
                                 settings,
-                                "Reset graphics",
+                                Localized::new("pause.button.reset_graphics"),
                                 ButtonKind::Secondary,
                                 PauseAction::ResetGraphics,
                                 "PauseMenuResetGraphicsButton",
@@ -520,7 +557,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                         .with_children(|footer| {
                             widgets::button(
                                 footer,
-                                "Return to game",
+                                Localized::new("pause.button.resume"),
                                 ButtonKind::Primary,
                                 PauseAction::Resume,
                                 "PauseMenuResumeButton",
@@ -542,7 +579,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                         .with_children(|footer| {
                             widgets::button(
                                 footer,
-                                "Back",
+                                Localized::new("common.back"),
                                 ButtonKind::Secondary,
                                 PauseAction::BackFromSettings,
                                 "BackButton",
@@ -721,6 +758,8 @@ fn apply_pause_settings(
     client_session_id: Res<ClientSessionId>,
     team: Res<TeamSelection>,
     audio: Res<AudioSettings>,
+    locale: Option<Res<Locale>>,
+    saved_language: Option<Res<crate::persistence::SavedLanguage>>,
 ) {
     for Activated { action, .. } in activated.read() {
         match *action {
@@ -763,6 +802,10 @@ fn apply_pause_settings(
                     addr,
                     client_session_id.0.as_str(),
                     audio.as_ref(),
+                    crate::persistence::language_to_save(
+                        locale.as_deref(),
+                        saved_language.as_deref().unwrap_or(&Default::default()),
+                    ),
                 );
             }
             _ => {}
@@ -832,21 +875,75 @@ fn apply_pause_session(
     }
 }
 
-fn update_audio_labels(settings: Res<AudioSettings>, mut labels: Query<(&AudioLabel, &mut Text)>) {
-    if !settings.is_changed() {
+/// Levels and the mute caption follow the settings and the language (the
+/// caption's key depends on the mute state, so it is not `Localized`).
+fn update_audio_labels(
+    settings: Res<AudioSettings>,
+    locale: Option<Res<Locale>>,
+    mut labels: Query<(&AudioLabel, &mut Text)>,
+) {
+    if !settings.is_changed() && !locale_changed(&locale) {
         return;
     }
     let settings = settings.sanitized();
     for (label, mut text) in &mut labels {
         text.0 = match *label {
             AudioLabel::Bus(bus) => format!("{:.0}%", bus.value(settings) * 100.0),
-            AudioLabel::Mute => if settings.muted {
-                "Unmute sound"
+            AudioLabel::Mute => tr(if settings.muted {
+                "pause.audio.unmute"
             } else {
-                "Mute sound"
-            }
+                "pause.audio.mute"
+            })
             .into(),
         };
+    }
+}
+
+/// The Language row cycles through the shipped languages. `Locale::set`
+/// switches the process-wide language at once; `Localized` labels, the
+/// per-frame writers and the saved preference follow the resource change.
+fn apply_pause_language(
+    mut activated: MessageReader<Activated<PauseAction>>,
+    locale: Option<ResMut<Locale>>,
+) {
+    let mut cycles = 0;
+    for Activated { action, .. } in activated.read() {
+        if *action == PauseAction::CycleLanguage {
+            cycles += 1;
+        }
+    }
+    let Some(mut locale) = locale else {
+        return;
+    };
+    if cycles == 0 {
+        return;
+    }
+    let mut next = locale.id();
+    for _ in 0..cycles {
+        next = next.next();
+    }
+    if next != locale.id() {
+        info!("Language: {} ({})", next.native_name(), next.code());
+        locale.set(next);
+    }
+}
+
+/// The Language row shows the active language in its own script.
+fn update_language_value(
+    locale: Option<Res<Locale>>,
+    mut values: Query<&mut Text, With<LanguageValue>>,
+) {
+    let Some(locale) = locale else {
+        return;
+    };
+    if !locale.is_changed() {
+        return;
+    }
+    let name = locale.id().native_name();
+    for mut value in &mut values {
+        if value.0 != name {
+            value.0 = name.to_owned();
+        }
     }
 }
 
@@ -904,7 +1001,7 @@ fn sync_settings_server_addr_label(
     mut label_q: Query<&mut Text, With<SettingsServerAddrLabel>>,
 ) {
     let addr = server_addr_for_prefs(&resolved_addr);
-    let next = format!("Server: {addr}\nSettings are saved automatically.");
+    let next = trf("pause.settings.server_hint", &[("addr", &addr)]);
     if let Ok(mut text) = label_q.single_mut() {
         if text.0 != next {
             text.0 = next;
@@ -936,11 +1033,11 @@ fn sync_practice_actions(
     }
     for (name, mut text) in &mut hints {
         if name.as_str() == "PauseMenuMainTitle" {
-            let label = if offline {
-                "Offline practice · No rating or progression rewards."
+            let label = tr(if offline {
+                "pause.hint.offline"
             } else {
-                "Your match continues while this menu is open."
-            };
+                "pause.hint.online"
+            });
             if text.0 != label {
                 text.0 = label.into();
             }
@@ -1828,6 +1925,106 @@ mod tests {
         harness::press(app.world_mut(), "PauseMenuExitButton");
         app.update();
         assert_eq!(app.world().resource::<Messages<AppExit>>().len(), 1);
+    }
+
+    /// The Language row cycles the shipped languages; every pause-menu text
+    /// follows without a respawn: `Localized` labels, the state-dependent
+    /// mute caption and hints, and the row's own value. Names and TestIds
+    /// never change. Isolated: it switches the process-wide language.
+    #[test]
+    fn language_row_switches_every_pause_menu_text_live() {
+        if crate::i18n::testing::isolated(
+            "pause_menu::tests::language_row_switches_every_pause_menu_text_live",
+        ) {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, Locale, LocaleId};
+        let mut app = App::new();
+        app.add_plugins(I18nPlugin::default())
+            .insert_resource(PauseMenuState {
+                open: true,
+                in_settings: true,
+            })
+            .init_resource::<AudioSettings>()
+            .init_resource::<ClientSession>()
+            .init_resource::<ResolvedServerAddressForPrefs>()
+            .add_message::<Activated<PauseAction>>()
+            .add_systems(Startup, setup_pause_menu_ui)
+            .add_systems(
+                Update,
+                (
+                    dispatch_actions::<PauseAction>,
+                    apply_pause_language,
+                    update_audio_labels,
+                    update_language_value,
+                    sync_practice_actions,
+                    sync_settings_server_addr_label,
+                )
+                    .chain(),
+            );
+        app.update();
+        let text = |app: &mut App, id: &str| {
+            let entity = named(app, id);
+            app.world().get::<Text>(entity).unwrap().0.clone()
+        };
+        let child_text = |app: &mut App, id: &str| {
+            let entity = named(app, id);
+            let child = app.world().get::<Children>(entity).unwrap()[0];
+            app.world().get::<Text>(child).unwrap().0.clone()
+        };
+        assert_eq!(text(&mut app, "PauseMenuLanguageValue"), "English");
+        assert_eq!(text(&mut app, "PauseMenuTitle"), "Game menu");
+        assert_eq!(child_text(&mut app, "SettingsButton"), "Settings");
+        assert_eq!(text(&mut app, "PauseMenuAudioMuteLabel"), "Mute sound");
+        let button = harness::find(app.world_mut(), "PauseMenuLanguageButton").unwrap();
+        app.world_mut()
+            .entity_mut(button)
+            .insert(Interaction::Pressed);
+        app.update();
+        app.world_mut().entity_mut(button).insert(Interaction::None);
+        app.update();
+        let zh = LocaleId::parse("zh-Hans").unwrap();
+        assert_eq!(app.world().resource::<Locale>().id(), zh);
+        assert_eq!(app.world().resource::<Locale>().generation(), 1);
+        assert_eq!(text(&mut app, "PauseMenuLanguageValue"), "简体中文");
+        assert_eq!(text(&mut app, "PauseMenuTitle"), "游戏菜单");
+        assert_eq!(child_text(&mut app, "SettingsButton"), "设置");
+        assert_eq!(child_text(&mut app, "BackButton"), "返回");
+        assert_eq!(text(&mut app, "PauseMenuAudioMuteLabel"), "静音");
+        assert_eq!(text(&mut app, "PauseMenuAudioTitle"), "声音");
+        assert_eq!(
+            text(&mut app, "PauseMenuMainTitle"),
+            "菜单打开期间，对局仍在继续。"
+        );
+        assert!(text(&mut app, "PauseMenuServerAddrHint").ends_with("设置会自动保存。"));
+        let row = named(&mut app, "PauseMenuAudioMusicControls");
+        let caption = app.world().get::<Children>(row).unwrap()[0];
+        assert_eq!(app.world().get::<Text>(caption).unwrap().0, "音乐");
+        // Cycling again wraps back to English.
+        app.world_mut()
+            .entity_mut(button)
+            .insert(Interaction::Pressed);
+        app.update();
+        app.update();
+        assert_eq!(app.world().resource::<Locale>().id(), LocaleId::ENGLISH);
+        assert_eq!(text(&mut app, "PauseMenuTitle"), "Game menu");
+        assert_eq!(text(&mut app, "PauseMenuAudioMuteLabel"), "Mute sound");
+    }
+
+    #[test]
+    fn language_row_sits_on_the_settings_page_with_stable_ids() {
+        let mut app = App::new();
+        app.add_systems(Startup, setup_pause_menu_ui);
+        app.update();
+        let button = harness::find(app.world_mut(), "PauseMenuLanguageButton").unwrap();
+        let value = harness::find(app.world_mut(), "PauseMenuLanguageValue").unwrap();
+        assert_eq!(
+            app.world().get::<UiAction<PauseAction>>(button).unwrap().0,
+            PauseAction::CycleLanguage
+        );
+        assert_eq!(app.world().get::<Text>(value).unwrap().0, "English");
+        let section = app.world().get::<ChildOf>(button).unwrap().parent();
+        assert!(app.world().get::<SettingsSection>(section).is_some());
     }
 
     #[test]

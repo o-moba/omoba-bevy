@@ -1,47 +1,41 @@
 //! Controller legends: button names for the hotbar, the aim label and a
 //! one-strip control reminder, in PlayStation or generic (Xbox-style) names.
+// i18n-strict
 use bevy::{prelude::*, window::PrimaryWindow};
 
 use super::GamepadControls;
+use crate::i18n::tr;
 
 /// Hotbar slot captions for skills 1–3 and the ultimate.
 pub(crate) fn skill_labels(playstation: bool) -> [&'static str; 4] {
     if playstation {
         ["L1", "R1", "L2", "L2+R2"]
     } else {
-        ["LB", "RB", "LT", "LT+RT"]
+        ["LB", "RB", "LT", "LT+RT"] // i18n-allow: button names
     }
 }
 
 /// The aim reticle's caption while the controller owns input.
 pub(crate) fn aim_label(playstation: bool, aiming: bool, locked: bool) -> &'static str {
-    match (aiming, locked, playstation) {
-        (true, _, _) => "RELEASE TO CAST",
-        (false, true, _) => "TARGET LOCKED",
-        (false, false, true) => "R2 ATTACK · R3 LOCK",
-        (false, false, false) => "RT ATTACK · RS LOCK",
-    }
+    tr(match (aiming, locked, playstation) {
+        (true, _, _) => "gamepad.aim.release",
+        (false, true, _) => "gamepad.aim.locked",
+        (false, false, true) => "gamepad.aim.idle_playstation",
+        (false, false, false) => "gamepad.aim.idle",
+    })
 }
 
 /// The reminder strip: menu controls on menus, the full layout in a match.
 pub(crate) fn legend(playstation: bool, menu: bool, phone: bool) -> &'static str {
-    match (playstation, menu, phone) {
-        (true, true, _) => "D-pad / LS: navigate · Cross: select · Circle: back",
-        (false, true, _) => "D-pad / LS: navigate · A: select · B: back",
+    tr(match (playstation, menu, phone) {
+        (true, true, _) => "gamepad.legend.menu_playstation",
+        (false, true, _) => "gamepad.legend.menu",
         // The phone skill bar carries the four trigger labels above this strip.
-        (true, false, true) => {
-            "LS move · RS aim · R3 lock · R2 attack · Circle cancel · Options menu\nHold skill: aim; release: cast · Triangle + skill: upgrade · D-pad right: shop; left: reactions"
-        }
-        (false, false, true) => {
-            "LS move · RS aim · RS click lock · RT attack · B cancel · Menu\nHold skill: aim; release: cast · Y + skill: upgrade · D-pad right: shop; left: reactions"
-        }
-        (true, false, false) => {
-            "Left stick: move   Right stick: aim   R2: attack   R3: lock\nHold L1 / R1 / L2: aim skill, release: cast   L2+R2: ultimate\nCircle: cancel   Triangle + skill: upgrade   Options: menu   D-pad right: shop; left: reactions"
-        }
-        (false, false, false) => {
-            "Left stick: move   Right stick: aim   RT: attack   RS click: lock\nHold LB / RB / LT: aim skill, release: cast   LT+RT: ultimate\nB: cancel   Y + skill: upgrade   Menu: menu   D-pad right: shop; left: reactions"
-        }
-    }
+        (true, false, true) => "gamepad.legend.phone_playstation",
+        (false, false, true) => "gamepad.legend.phone",
+        (true, false, false) => "gamepad.legend.match_playstation",
+        (false, false, false) => "gamepad.legend.match",
+    })
 }
 
 #[derive(Component)]

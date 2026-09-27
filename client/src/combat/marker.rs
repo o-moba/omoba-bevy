@@ -1,3 +1,4 @@
+// i18n-strict
 use crate::net::{NetworkMinion, NetworkNeutral, NetworkStructure, RemotePlayer, StructureKind};
 use crate::player::Player;
 use crate::sprite::PlayerVisualMode;

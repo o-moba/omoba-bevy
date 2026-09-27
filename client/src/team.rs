@@ -5,6 +5,7 @@
 //! [`TeamSelection::character`] as the fallback model when no roster avatar is
 //! selected. Picking a team commits the join (class + avatar + team in one
 //! packet).
+// i18n-strict
 
 use bevy::prelude::*;
 use omoba_passport::avatars::avatar_roster;
@@ -13,6 +14,7 @@ use std::collections::HashMap;
 
 pub use crate::domain::Team;
 use crate::frontend::AppScreen;
+use crate::i18n::{Locale, Localized, data, locale_changed, tr};
 use crate::net::{ClientConnectionState, ClientSession, NetworkCommand, SessionUiCommand};
 use crate::sprite::{PlayerVisualMode, SpriteVisualAssets};
 use crate::ui::theme::ButtonKind;
@@ -114,6 +116,7 @@ impl Plugin for TeamSelectPlugin {
                         .before(crate::net::ClientNetPipeline::SendCommands),
                     sync_hero_panel,
                     sync_hero_select_status,
+                    apply_phone_copy,
                 )
                     .run_if(in_state(AppScreen::HeroSelect)),
             )
@@ -148,6 +151,56 @@ struct HeroSelectStatus;
 
 #[derive(Component)]
 struct JoinActionLabel;
+
+/// A hero-select label with a shorter phone wording: [`apply_phone_copy`]
+/// points its `Localized` key at `phone` on a phone and at `desktop`
+/// elsewhere (the relabel system then rewrites the text).
+#[derive(Component)]
+struct PhoneCopy {
+    desktop: &'static str,
+    phone: &'static str,
+}
+
+impl PhoneCopy {
+    /// The label (filled with the desktop wording) and its phone variant.
+    fn label(desktop: &'static str, phone: &'static str) -> (Text, Localized, Self) {
+        let (text, localized) = Localized::new(desktop).into_text();
+        (text, localized, Self { desktop, phone })
+    }
+}
+
+fn apply_phone_copy(
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    mut labels: Query<(Ref<PhoneCopy>, &mut Localized)>,
+) {
+    let phone = mobile.as_ref().is_some_and(|mobile| mobile.enabled);
+    let platform_changed = mobile.as_ref().is_some_and(|mobile| mobile.is_changed());
+    for (copy, mut localized) in &mut labels {
+        if !platform_changed && !copy.is_added() {
+            continue;
+        }
+        let key = if phone { copy.phone } else { copy.desktop };
+        if localized.key != key {
+            localized.key = key;
+        }
+    }
+}
+
+/// Dictionary keys of a class's name and tagline, for `Localized` labels.
+fn class_keys(class: HeroClass) -> (&'static str, &'static str) {
+    match class {
+        HeroClass::Warrior => ("hero.warrior.name", "hero.warrior.tagline"),
+        HeroClass::Mage => ("hero.mage.name", "hero.mage.tagline"),
+        HeroClass::Ranger => ("hero.ranger.name", "hero.ranger.tagline"),
+        HeroClass::Cleric => ("hero.cleric.name", "hero.cleric.tagline"),
+        HeroClass::Warden => ("hero.warden.name", "hero.warden.tagline"),
+    }
+}
+
+/// `Warrior · Melee bruiser…` in the active language.
+fn class_line(class: HeroClass) -> String {
+    format!("{} · {}", data::hero_name(class), data::hero_tagline(class))
+}
 
 #[derive(Component)]
 struct TeamSelectButton;
@@ -310,6 +363,8 @@ fn wallet_connect_ui_system(
     mut listed_revision: Local<Option<u64>>,
     mut listed_account: Local<Option<bool>>,
     grid_scroll: Query<&ScrollPosition, With<ModelAvatarGrid>>,
+    locale: Option<Res<crate::i18n::Locale>>,
+    mut listed_locale: Local<Option<u32>>,
 ) {
     if selection.team.is_some() || overlay_query.is_empty() {
         return;
@@ -338,7 +393,11 @@ fn wallet_connect_ui_system(
     );
     *listed_account = Some(connected);
     *listed_revision = Some(catalogue.revision);
-    if just_connected || account_just_connected || stale {
+    // The Studio hint and the avatar source suffixes are plain text built here.
+    let generation = locale.as_ref().map(|locale| locale.generation());
+    let relabel = listed_locale.is_some() && *listed_locale != generation;
+    *listed_locale = generation;
+    if just_connected || account_just_connected || stale || relabel {
         if let Ok(scroll) = grid_scroll.single() {
             commands.insert_resource(PickerScrollRestore(scroll.y));
         }
@@ -459,7 +518,7 @@ pub fn spawn_team_select_ui(
                         ))
                         .with_children(|button| {
                             button.spawn((
-                                Text::new("Back"),
+                                Localized::new("team.back").into_text(),
                                 TextFont {
                                     font_size: 15.0,
                                     ..default()
@@ -468,7 +527,7 @@ pub fn spawn_team_select_ui(
                             ));
                         });
                     header.spawn((
-                        Text::new("Choose your hero"),
+                        Localized::new("team.title").into_text(),
                         TextFont {
                             font_size: 26.0,
                             ..default()
@@ -492,7 +551,11 @@ pub fn spawn_team_select_ui(
                         Name::new("HeroSelectStatus"),
                     ));
                 });
-            spawn_section_title(parent, "01  CHOOSE YOUR CLASS", "ClassSelectTitle");
+            spawn_section_title(
+                parent,
+                PhoneCopy::label("team.section.class", "team.section.class_phone"),
+                "ClassSelectTitle",
+            );
 
             parent
                 .spawn((
@@ -513,9 +576,13 @@ pub fn spawn_team_select_ui(
                     }
                 });
 
-            spawn_section_title(parent, "02  CHOOSE YOUR AVATAR", "AvatarSelectTitle");
+            spawn_section_title(
+                parent,
+                PhoneCopy::label("team.section.avatar", "team.section.avatar_phone"),
+                "AvatarSelectTitle",
+            );
             parent.spawn((
-                Text::new("Scroll heroes: mouse wheel / Page Up / Page Down"),
+                PhoneCopy::label("team.scroll_hint", "team.scroll_hint_phone"),
                 TextFont {
                     font_size: 12.5,
                     ..default()
@@ -567,7 +634,7 @@ pub fn spawn_team_select_ui(
                         return;
                     }
                     let catalogue = crate::passport::avatar_catalogue();
-                    spawn_avatar_group_label(grid, "Default avatars", "DefaultAvatarsLabel");
+                    spawn_avatar_group_label(grid, "team.group.default", "DefaultAvatarsLabel");
                     for entry in catalogue
                         .entries
                         .iter()
@@ -581,12 +648,11 @@ pub fn spawn_team_select_ui(
                             selection.avatar.as_deref() == Some(avatar.slug.as_str()),
                         );
                     }
-                    spawn_avatar_group_label(
+                    spawn_avatar_group_label(grid, "team.group.studio", "StudioAvatarsLabel");
+                    spawn_avatar_group_hint(
                         grid,
-                        "Ekza Studio · your library",
-                        "StudioAvatarsLabel",
+                        crate::i18n::data::catalogue_status(&catalogue.status),
                     );
-                    spawn_avatar_group_hint(grid, catalogue.status.label());
                     grid.spawn((
                         Button,
                         Node {
@@ -605,7 +671,7 @@ pub fn spawn_team_select_ui(
                     ))
                     .with_children(|button| {
                         button.spawn((
-                            Text::new("Refresh Studio"),
+                            Localized::new("team.refresh_studio").into_text(),
                             TextFont {
                                 font_size: 13.0,
                                 ..default()
@@ -627,10 +693,7 @@ pub fn spawn_team_select_ui(
                         );
                     }
                     if !crate::passport::account_connected() {
-                        spawn_avatar_group_hint(
-                            grid,
-                            "Connect Ekza to see your saved and purchased avatars.",
-                        );
+                        spawn_avatar_group_hint(grid, Localized::new("team.connect_hint"));
                     }
                 });
 
@@ -682,11 +745,14 @@ pub fn spawn_team_select_ui(
 
             spawn_section_title(
                 parent,
-                if crate::sandbox::requested() {
-                    "03  ENTER COMBAT TEST"
-                } else {
-                    "03  FIND YOUR TEAM"
-                },
+                PhoneCopy::label(
+                    if crate::sandbox::requested() {
+                        "team.section.combat_test"
+                    } else {
+                        "team.section.match"
+                    },
+                    "team.section.match_phone",
+                ),
                 "TeamSelectTitle",
             );
 
@@ -704,7 +770,7 @@ pub fn spawn_team_select_ui(
                 });
 
             parent.spawn((
-                Text::new("Choose a hero. Your team and starting side are assigned automatically."),
+                PhoneCopy::label("team.hint", "team.hint_phone"),
                 TextFont {
                     font_size: 15.0,
                     ..default()
@@ -797,7 +863,7 @@ fn spawn_hero_panel(
                 Name::new("HeroSelectAvatarName"),
             ));
             panel.spawn((
-                Text::new(format!("{} · {}", class.display_name(), class.tagline())),
+                Text::new(class_line(class)),
                 TextFont {
                     font_size: 12.5,
                     ..default()
@@ -808,7 +874,11 @@ fn spawn_hero_panel(
             ));
             for (index, ability) in class.abilities().iter().enumerate() {
                 panel.spawn((
-                    Text::new(format!("{}  {}", ability_key(index), ability.name)),
+                    Text::new(format!(
+                        "{}  {}",
+                        ability_key(index),
+                        data::ability_name(ability)
+                    )),
                     TextFont {
                         font_size: 13.0,
                         ..default()
@@ -854,6 +924,7 @@ fn sync_hero_select_status(
 
 fn sync_hero_panel(
     selection: Res<TeamSelection>,
+    locale: Option<Res<Locale>>,
     mut preview: ResMut<crate::frontend::preview::AvatarPreview>,
     mut names: Query<&mut Text, (With<HeroPanelAvatarName>, Without<HeroPanelClassName>)>,
     mut classes: Query<&mut Text, (With<HeroPanelClassName>, Without<HeroPanelAvatarName>)>,
@@ -862,10 +933,12 @@ fn sync_hero_panel(
         (Without<HeroPanelAvatarName>, Without<HeroPanelClassName>),
     >,
 ) {
-    if !selection.is_changed() {
+    if !selection.is_changed() && !locale_changed(&locale) {
         return;
     }
-    if let Some(slug) = selection.avatar.as_deref() {
+    if selection.is_changed()
+        && let Some(slug) = selection.avatar.as_deref()
+    {
         preview.show_portrait(slug);
     }
     let avatar_name = crate::passport::avatar_display_name(selection.avatar.as_deref());
@@ -875,7 +948,7 @@ fn sync_hero_panel(
         }
     }
     let class = selection.hero_class;
-    let class_line = format!("{} · {}", class.display_name(), class.tagline());
+    let class_line = class_line(class);
     for mut text in &mut classes {
         if text.0 != class_line {
             text.0.clone_from(&class_line);
@@ -886,7 +959,7 @@ fn sync_hero_panel(
         let Some(ability) = kit.get(slot.0) else {
             continue;
         };
-        let line = format!("{}  {}", ability_key(slot.0), ability.name);
+        let line = format!("{}  {}", ability_key(slot.0), data::ability_name(ability));
         if text.0 != line {
             text.0 = line;
         }
@@ -927,7 +1000,7 @@ fn spawn_ekza_row(parent: &mut ChildSpawnerCommands) {
                 Name::new("PassportStatus"),
             ));
             if !crate::passport::is_connected() {
-                spawn_connect_button(row, "Connect wallet", ConnectTarget::Wallet);
+                spawn_connect_button(row, "team.connect_wallet", ConnectTarget::Wallet);
             }
             row.spawn((
                 Text::new(crate::passport::account_status_line()),
@@ -942,9 +1015,9 @@ fn spawn_ekza_row(parent: &mut ChildSpawnerCommands) {
             spawn_connect_button(
                 row,
                 if crate::passport::account_connected() {
-                    "Sign out of Ekza"
+                    "team.sign_out"
                 } else {
-                    "Connect account"
+                    "team.connect_account"
                 },
                 ConnectTarget::Account,
             );
@@ -957,7 +1030,11 @@ enum ConnectTarget {
     Account,
 }
 
-fn spawn_connect_button(row: &mut ChildSpawnerCommands, label: &str, target: ConnectTarget) {
+fn spawn_connect_button(
+    row: &mut ChildSpawnerCommands,
+    label: &'static str,
+    target: ConnectTarget,
+) {
     let mut button = row.spawn((
         Button,
         Node {
@@ -988,7 +1065,7 @@ fn spawn_connect_button(row: &mut ChildSpawnerCommands, label: &str, target: Con
     }
     button.with_children(|button| {
         button.spawn((
-            Text::new(label.to_owned()),
+            Localized::new(label).into_text(),
             TextFont {
                 font_size: 13.0,
                 ..default()
@@ -1058,28 +1135,36 @@ fn spawn_sprite_button(
                 index: portrait.2,
             },
         ));
-        let label = if draft {
-            let fallback =
-                crate::sprite_roster::sprite_character_render_definition(Some(&character.id))
-                    .map_or("default", |entry| entry.display_name.as_str());
-            format!("{}\nArt pending\nUses {fallback}", character.display_name)
-        } else {
-            character.display_name.clone()
-        };
-        button.spawn((
-            Text::new(label),
+        let style = (
             TextFont {
                 font_size: 9.5,
                 ..default()
             },
             TextColor(Color::srgba(0.86, 0.88, 0.92, 1.0)),
-        ));
+        );
+        if draft {
+            let fallback =
+                crate::sprite_roster::sprite_character_render_definition(Some(&character.id))
+                    .map_or(tr("team.sprite.default"), |entry| {
+                        entry.display_name.as_str()
+                    });
+            button.spawn((
+                Localized::with_args(
+                    "team.sprite.pending",
+                    [("name", &character.display_name), ("fallback", &fallback)],
+                )
+                .into_text(),
+                style,
+            ));
+        } else {
+            button.spawn((Text::new(character.display_name.clone()), style));
+        }
     });
 }
 
-fn spawn_section_title(parent: &mut ChildSpawnerCommands, title: &str, name: &str) {
+fn spawn_section_title(parent: &mut ChildSpawnerCommands, title: impl Bundle, name: &str) {
     parent.spawn((
-        Text::new(title),
+        title,
         TextFont {
             font_size: 20.0,
             ..default()
@@ -1091,7 +1176,7 @@ fn spawn_section_title(parent: &mut ChildSpawnerCommands, title: &str, name: &st
 
 /// Full-width row inside the wrapping avatar grid, so each group starts on its
 /// own line while the grid keeps a single scroll area.
-fn spawn_avatar_group_label(grid: &mut ChildSpawnerCommands, title: &str, name: &str) {
+fn spawn_avatar_group_label(grid: &mut ChildSpawnerCommands, title: &'static str, name: &str) {
     grid.spawn((
         Node {
             width: Val::Percent(100.0),
@@ -1102,7 +1187,7 @@ fn spawn_avatar_group_label(grid: &mut ChildSpawnerCommands, title: &str, name: 
     ))
     .with_children(|row| {
         row.spawn((
-            Text::new(title),
+            Localized::new(title).into_text(),
             TextFont {
                 font_size: 15.0,
                 ..default()
@@ -1112,7 +1197,7 @@ fn spawn_avatar_group_label(grid: &mut ChildSpawnerCommands, title: &str, name: 
     });
 }
 
-fn spawn_avatar_group_hint(grid: &mut ChildSpawnerCommands, hint: &str) {
+fn spawn_avatar_group_hint(grid: &mut ChildSpawnerCommands, hint: impl crate::i18n::UiLabel) {
     grid.spawn((
         Node {
             width: Val::Percent(100.0),
@@ -1123,7 +1208,7 @@ fn spawn_avatar_group_hint(grid: &mut ChildSpawnerCommands, hint: &str) {
     ))
     .with_children(|row| {
         row.spawn((
-            Text::new(hint),
+            hint.into_text(),
             TextFont {
                 font_size: 12.0,
                 ..default()
@@ -1161,8 +1246,9 @@ fn spawn_class_button(row: &mut ChildSpawnerCommands, class: HeroClass, selected
         TestId::new(format!("ClassButton-{}", class.id())),
     ))
     .with_children(|button| {
+        let (name, tagline) = class_keys(class);
         button.spawn((
-            Text::new(class.display_name()),
+            Localized::new(name).into_text(),
             TextFont {
                 font_size: 17.0,
                 ..default()
@@ -1170,7 +1256,7 @@ fn spawn_class_button(row: &mut ChildSpawnerCommands, class: HeroClass, selected
             TextColor(Color::WHITE),
         ));
         button.spawn((
-            Text::new(class.tagline()),
+            Localized::new(tagline).into_text(),
             TextFont {
                 font_size: 10.5,
                 ..default()
@@ -1302,11 +1388,11 @@ fn spawn_team_button(row: &mut ChildSpawnerCommands, team: Team, name: &str) {
     .with_children(|button| {
         button.spawn((
             JoinActionLabel,
-            Text::new(if crate::sandbox::requested() {
-                "Enter Combat Test"
+            Text::new(tr(if crate::sandbox::requested() {
+                "team.join.combat_test"
             } else {
-                "Find match"
-            }),
+                "team.join.find_match"
+            })),
             TextFont {
                 font_size: 22.0,
                 ..default()
@@ -1406,7 +1492,7 @@ fn team_select_ui_system(
                         .any(|a| a.slug == *slug && a.passport.is_none())
                 {
                     if let Some(notice) = notice.as_deref_mut() {
-                        notice.0=Some("Offline practice uses the included avatars. Choose an avatar from the first group.".into());
+                        notice.0 = Some(tr("team.notice.offline_avatar").into());
                     }
                     continue;
                 }
@@ -1602,13 +1688,13 @@ fn sync_practice_picker(
     session: Res<ClientSession>,
     mut labels: Query<&mut Text, With<JoinActionLabel>>,
 ) {
-    let label = if session.is_offline() {
-        "Start practice"
+    let label = tr(if session.is_offline() {
+        "team.join.practice"
     } else if crate::sandbox::requested() {
-        "Enter Combat Test"
+        "team.join.combat_test"
     } else {
-        "Find match"
-    };
+        "team.join.find_match"
+    });
     for mut text in &mut labels {
         if text.0 != label {
             text.0 = label.into();
@@ -1954,5 +2040,36 @@ mod tests {
                 .resource::<Messages<NetworkCommand>>()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn phone_copy_follows_the_platform_and_the_language() {
+        use crate::i18n::{Locale, LocaleId, relabel_localized};
+        let mut controls = crate::mobile_controls::MobileControls::default();
+        controls.enabled = true;
+        let mut app = App::new();
+        app.insert_resource(Locale::detached(LocaleId::ENGLISH))
+            .insert_resource(controls)
+            .add_systems(Update, apply_phone_copy)
+            .add_systems(PostUpdate, relabel_localized);
+        let label = app
+            .world_mut()
+            .spawn(PhoneCopy::label(
+                "team.section.class",
+                "team.section.class_phone",
+            ))
+            .id();
+        let text = |app: &App| app.world().get::<Text>(label).unwrap().0.clone();
+        assert_eq!(text(&app), "01  CHOOSE YOUR CLASS");
+        app.update();
+        assert_eq!(text(&app), "01  CLASS");
+        app.insert_resource(Locale::detached(LocaleId::parse("zh-Hans").unwrap()));
+        app.update();
+        assert_eq!(text(&app), "01  职业");
+        app.world_mut()
+            .resource_mut::<crate::mobile_controls::MobileControls>()
+            .enabled = false;
+        app.update();
+        assert_eq!(text(&app), "01  选择职业");
     }
 }

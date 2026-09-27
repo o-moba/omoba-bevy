@@ -1091,7 +1091,7 @@ fn apply_snapshot_neutrals(
                     Name::new(format!(
                         "Boss-{}-{}",
                         neutral.id,
-                        crate::bosses::boss_display_name(neutral.camp_type)
+                        crate::bosses::boss_name_id(neutral.camp_type)
                     )),
                 ))
                 .id()

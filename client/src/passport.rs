@@ -1,5 +1,7 @@
 //! First native wallet integration: explicit terminal pairing before startup.
 //! Tokens remain process-local; only scoped tickets enter the UDP protocol.
+// i18n-strict
+use crate::i18n::{tr, trf};
 use omoba_passport::{
     NativeSession, PairingFlow, PairingState, PassportApi, pair_interactively, store, verify_local,
 };
@@ -14,8 +16,41 @@ static TICKETS: OnceLock<Mutex<HashMap<(String, String), TicketResult>>> = OnceL
 
 /// In-game wallet pairing, if one was started from the menu.
 static PAIRING: Mutex<Option<PairingFlow>> = Mutex::new(None);
-static WALLET_ERROR: Mutex<Option<String>> = Mutex::new(None);
+static WALLET_ERROR: Mutex<Option<Notice>> = Mutex::new(None);
 static BROWSER_OPENED: Mutex<Option<String>> = Mutex::new(None);
+
+/// A menu status line: client copy by key (shown in the language active when
+/// the menu reads it), or prose from the SDK / the platform, shown as is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Notice {
+    Key(&'static str),
+    Text(String),
+    /// `account.wallet.unavailable` with the SDK's reason.
+    WalletUnavailable(String),
+}
+impl Notice {
+    fn text(&self) -> String {
+        match self {
+            Self::Key(key) => tr(key).to_owned(),
+            Self::Text(text) => text.clone(),
+            Self::WalletUnavailable(error) => {
+                trf("account.wallet.unavailable", &[("error", error)])
+            }
+        }
+    }
+}
+
+/// The browser-approval line shared by the wallet and account status.
+fn approval_line(user_code: &str, verification_url: &str) -> String {
+    trf(
+        "account.status.approval",
+        &[
+            ("hint", &crate::platform::browser_approval_hint()),
+            ("code", &user_code),
+            ("url", &verification_url),
+        ],
+    )
+}
 
 /// What the menu shows about the wallet connection.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,8 +80,9 @@ pub fn connect() {
             verification_url, ..
         } = flow.state()
         {
-            *WALLET_ERROR.lock().unwrap() =
-                crate::platform::open_external_url(&verification_url).err();
+            *WALLET_ERROR.lock().unwrap() = crate::platform::open_external_url(&verification_url)
+                .err()
+                .map(Notice::Text);
         }
         return;
     }
@@ -55,7 +91,7 @@ pub fn connect() {
     *pairing = match PassportApi::from_env() {
         Ok(api) => Some(PairingFlow::start(api.client().clone())),
         Err(error) => {
-            *WALLET_ERROR.lock().unwrap() = Some(format!("Wallet connection unavailable: {error}"));
+            *WALLET_ERROR.lock().unwrap() = Some(Notice::WalletUnavailable(error.to_string()));
             None
         }
     };
@@ -76,7 +112,7 @@ pub fn poll_wallet() -> bool {
             let mut opened = BROWSER_OPENED.lock().unwrap();
             if opened.as_deref() != Some(verification_url.as_str()) {
                 if let Err(error) = crate::platform::open_external_url(&verification_url) {
-                    *WALLET_ERROR.lock().unwrap() = Some(error);
+                    *WALLET_ERROR.lock().unwrap() = Some(Notice::Text(error));
                 }
                 *opened = Some(verification_url);
             }
@@ -85,7 +121,7 @@ pub fn poll_wallet() -> bool {
         PairingState::Connected => {
             let connected = flow
                 .take_session()
-                .ok_or_else(|| "Wallet session was already collected".to_owned())
+                .ok_or_else(|| "Wallet session was already collected".to_owned()) // i18n-allow: never shown
                 .and_then(omoba_passport::accept_session)
                 .is_ok_and(|session| SESSION.set(session).is_ok());
             *pairing = None;
@@ -120,33 +156,27 @@ pub fn wallet_view() -> WalletView {
 
 /// One line for the menu, under "Choose Avatar".
 pub fn wallet_button_label() -> &'static str {
-    match wallet_view() {
-        WalletView::Starting => "Connecting wallet…",
-        WalletView::AwaitingApproval { .. } => "Open wallet approval",
-        WalletView::Connected => "Wallet connected",
-        _ => "Connect wallet (optional)",
-    }
+    tr(match wallet_view() {
+        WalletView::Starting => "account.wallet.button.connecting",
+        WalletView::AwaitingApproval { .. } => "account.wallet.button.approve",
+        WalletView::Connected => "account.wallet.button.connected",
+        _ => "account.wallet.button.connect",
+    })
 }
 
 pub fn wallet_status_line() -> String {
     if let Some(error) = WALLET_ERROR.lock().unwrap().as_ref() {
-        return error.clone();
+        return error.text();
     }
     match wallet_view() {
-        WalletView::Disconnected => {
-            "Optional wallet connection for owned avatars · no purchase is made here".into()
-        }
-        WalletView::Starting => "Contacting Ekza…".into(),
+        WalletView::Disconnected => tr("account.wallet.status.idle").into(),
+        WalletView::Starting => tr("account.status.contacting").into(),
         WalletView::AwaitingApproval {
             user_code,
             verification_url,
-        } => format!(
-            "{} · code {user_code} · {verification_url}",
-            crate::platform::browser_approval_hint()
-        ),
-        WalletView::Connected => {
-            "Wallet connected · your Ekza avatars are listed below the defaults".into()
-        }
+        } => approval_line(&user_code, &verification_url),
+        WalletView::Connected => tr("account.wallet.status.connected").into(),
+        // The SDK's own text.
         WalletView::Failed(error) => error,
     }
 }
@@ -284,7 +314,8 @@ pub fn ticket_for_slug(slug: Option<&str>, session_id: &str) -> TicketPoll {
         return TicketPoll::Free;
     }
     let Some(session) = SESSION.get() else {
-        return TicketPoll::Denied("Connect your wallet before choosing a purchased avatar".into());
+        // Logged only; the join screen shows `JoinRejection::AvatarNotAuthorized`.
+        return TicketPoll::Denied("Connect your wallet before choosing a purchased avatar".into()); // i18n-allow
     };
     let key = (avatar.slug.clone(), session_id.to_owned());
     let mut tickets = TICKETS.get_or_init(Default::default).lock().unwrap();
@@ -331,12 +362,12 @@ pub enum AvatarCatalogueSource {
 
 impl AvatarCatalogueSource {
     pub fn label(self) -> &'static str {
-        match self {
-            Self::Default => "Included",
-            Self::Library => "Your library",
-            Self::Purchased => "Owned",
-            Self::Community => "Free · Studio",
-        }
+        tr(match self {
+            Self::Default => "account.source.default",
+            Self::Library => "account.source.library",
+            Self::Purchased => "account.source.purchased",
+            Self::Community => "account.source.community",
+        })
     }
 }
 
@@ -438,7 +469,7 @@ pub fn avatar_account_status_line() -> String {
 /// Current menu copy without rewriting the immutable model/approval identity.
 pub fn avatar_display_name(slug: Option<&str>) -> String {
     let Some(slug) = slug else {
-        return "Default avatar".into();
+        return tr("account.avatar.default").into();
     };
     store::catalogue_definitions()
         .into_iter()
@@ -448,7 +479,7 @@ pub fn avatar_display_name(slug: Option<&str>) -> String {
             omoba_passport::avatars::avatar_definition(slug)
                 .map(|avatar| avatar.display_name.clone())
         })
-        .unwrap_or_else(|| "Default avatar".into())
+        .unwrap_or_else(|| tr("account.avatar.default").into())
 }
 
 #[cfg(test)]
@@ -476,7 +507,7 @@ mod catalogue_tests {
             source: AvatarCatalogueSource::Community,
         }];
         let before = catalogue_revision(&entries, &status);
-        entries[0].avatar.display_name.push_str(" revised");
+        entries[0].avatar.display_name.push_str(" revised"); // i18n-allow: test data
         assert_ne!(before, catalogue_revision(&entries, &status));
         let named = catalogue_revision(&entries, &status);
         entries[0].avatar.thumbnail = Some("changed.png".into());

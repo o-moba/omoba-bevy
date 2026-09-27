@@ -10,6 +10,7 @@
 //! (`ui::back`); this module only feeds them. It never sends a network
 //! command of its own kind: casts, attacks and upgrades are the ones mouse,
 //! keyboard and touch already send.
+// i18n-strict
 use bevy::{input::InputSystems, prelude::*, window::PrimaryWindow};
 
 pub(crate) mod gameplay;

@@ -1,3 +1,4 @@
+// i18n-strict
 use crate::camera::MainCamera;
 use crate::combat::{CombatStats, PendingCast, WorldPointerState};
 use crate::domain::{MovementRoute, MovementTarget, Player, PlayerBody};
@@ -368,7 +369,7 @@ pub(super) fn plan_movement_routes(
                     .remove::<(MovementTarget, MovementRoute, Jumping)>();
                 if result.is_none() {
                     if let Some(feedback) = feedback.as_deref_mut() {
-                        feedback.push_line("No walkable route to that point.");
+                        feedback.push_line(crate::i18n::tr("combat.feedback.no_route"));
                     }
                 }
             }

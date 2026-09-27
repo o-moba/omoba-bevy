@@ -5,6 +5,7 @@
 //! [`super::ios`] because gilrs has no iOS backend. Both produce the same
 //! [`PadSnapshot`]: a 16-bit held-button mask, dead-zoned sticks with +Y up,
 //! a process-local device identity and the controller family.
+// i18n-strict
 use bevy::prelude::*;
 
 pub(crate) const SOUTH: u32 = 1 << 0;

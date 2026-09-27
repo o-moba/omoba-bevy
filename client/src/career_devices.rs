@@ -1,4 +1,5 @@
 //! Account transfer uses a fresh local key and explicit activation after confirmation.
+// i18n-strict
 use super::*;
 use crate::career_identity::{CareerIdentity, hex, load_or_create_key};
 use ed25519_dalek::{Signer, SigningKey};
@@ -32,7 +33,7 @@ fn now() -> u64 {
 pub(super) fn append(code: &mut String, text: &str) -> Result<(), &'static str> {
     let normalized = text.trim().to_ascii_lowercase().replace([' ', '-'], "");
     if !normalized.bytes().all(|b| b.is_ascii_hexdigit()) || code.len() + normalized.len() > 64 {
-        return Err("Paste one complete 64-character recovery code.");
+        return Err(tr("devices.error.paste_full_code"));
     }
     code.push_str(&normalized);
     Ok(())
@@ -51,10 +52,7 @@ fn sign(
     target: Option<String>,
     code: Option<String>,
 ) -> Result<SignedDeviceEnrollment, String> {
-    let key = worker
-        .key
-        .as_ref()
-        .ok_or("Start a new device request first.")?;
+    let key = worker.key.as_ref().ok_or(tr("devices.error.start_first"))?;
     let api = DeviceAccountApi::from_env()?;
     e.validate(api.origin(), &hex(key.verifying_key().as_bytes()), now())
         .map_err(str::to_owned)?;
@@ -103,25 +101,26 @@ pub(super) fn act(
                     // An explicit restart creates a fresh key, retaining any old candidate
                     // (including a completed enrollment whose response was lost).
                     let mut suffix = [0; 16];
-                    getrandom::fill(&mut suffix).map_err(|_| "Secure randomness unavailable.")?;
+                    getrandom::fill(&mut suffix).map_err(|_| tr("devices.error.randomness"))?;
                     let preserved =
                         directory.with_file_name(format!("enrolled-device-{}", hex(&suffix)));
                     std::fs::rename(&directory, preserved)
-                        .map_err(|_| "Cannot preserve the previously linked device key.")?;
+                        .map_err(|_| tr("devices.error.preserve_key"))?;
                     key = load_or_create_key(&directory)?;
                 }
                 let mut id = [0; 32];
-                getrandom::fill(&mut id).map_err(|_| "Secure randomness unavailable.")?;
+                getrandom::fill(&mut id).map_err(|_| tr("devices.error.randomness"))?;
                 let enrollment = DeviceEnrollment {
                     enrollment_id: hex(&id),
                     public_key: hex(key.verifying_key().as_bytes()),
                     origin: api.origin().into(),
+                    // Sent to the account service and shown on the portal: not localized.
                     label: if cfg!(target_os = "ios") {
-                        "iPhone / iPad".into()
+                        "iPhone / iPad".into() // i18n-allow
                     } else if cfg!(target_os = "android") {
-                        "Android".into()
+                        "Android".into() // i18n-allow
                     } else {
-                        "Desktop".into()
+                        "Desktop".into() // i18n-allow
                     },
                     expires_at: (now() + 300).to_string(),
                 };
@@ -138,7 +137,7 @@ pub(super) fn act(
                     .devices
                     .enrollment
                     .as_ref()
-                    .ok_or("Start a new device request first.")?;
+                    .ok_or(tr("devices.error.start_first"))?;
                 let operation = match action {
                     Action::DevicesPoll => DeviceAction::Status,
                     Action::DevicesRecover => DeviceAction::Recover,
@@ -151,7 +150,7 @@ pub(super) fn act(
                             .status
                             .as_ref()
                             .and_then(|s| s.profile_id.clone())
-                            .ok_or("Approve this device on the portal first.")?,
+                            .ok_or(tr("devices.error.approve_first"))?,
                     )
                 } else {
                     None
@@ -165,12 +164,12 @@ pub(super) fn act(
                 {
                     identity.stage_enrolled_identity(&e.public_key)?;
                     career.devices.restart_required = true;
-                    career.devices.message=Some("Account saved. Restart the game to use it. Your previous account key is preserved on this device.".into());
+                    career.devices.message = Some(tr("devices.saved.preserved").into());
                     return Ok(());
                 }
                 let code = if operation == DeviceAction::Recover {
                     if career.devices.recovery_code.len() != 64 {
-                        return Err("Paste one complete recovery code.".into());
+                        return Err(tr("devices.error.paste_code").into());
                     }
                     Some(career.devices.recovery_code.clone())
                 } else {
@@ -203,9 +202,7 @@ pub(super) fn poll(
         .and_then(|r| r.lock().ok().map(|rx| rx.try_recv()));
     let value = match result {
         Some(Ok(r)) => r,
-        Some(Err(mpsc::TryRecvError::Disconnected)) => {
-            Err("Device request stopped. Retry safely.".into())
-        }
+        Some(Err(mpsc::TryRecvError::Disconnected)) => Err(tr("devices.error.stopped").into()),
         _ => return,
     };
     worker.pending = None;
@@ -221,12 +218,12 @@ pub(super) fn poll(
                     .devices
                     .enrollment
                     .as_ref()
-                    .ok_or_else(|| "Enrollment missing.".to_owned())
+                    .ok_or_else(|| tr("devices.error.enrollment_missing").to_owned())
                     .and_then(|e| identity.stage_enrolled_identity(&e.public_key));
                 match result {
                     Ok(()) => {
                         career.devices.restart_required = true;
-                        career.devices.message=Some("Account saved. Restart the game to use it. The previous account was preserved; progress was not merged.".into());
+                        career.devices.message = Some(tr("devices.saved.not_merged").into());
                     }
                     Err(e) => career.devices.message = Some(e),
                 }
@@ -238,16 +235,10 @@ pub(super) fn poll(
 }
 pub(super) fn body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
     let state = &career.devices;
+    label(parent, tr("devices.title"), 26., ui::GOLD, "DeviceTitle");
     label(
         parent,
-        "Use an existing account",
-        26.,
-        ui::GOLD,
-        "DeviceTitle",
-    );
-    label(
-        parent,
-        "Link this installation from your signed-in player portal, or use a saved recovery code. You will review the account before switching. Existing progress stays in its original account.",
+        tr("devices.instructions"),
         16.,
         ui::IVORY,
         "DeviceInstructions",
@@ -255,11 +246,13 @@ pub(super) fn body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
     if let Some(e) = &state.enrollment {
         label(
             parent,
-            format!(
-                "Trusted portal: {}\nNew device fingerprint: {}…{}",
-                e.origin,
-                &e.public_key[..8],
-                &e.public_key[56..]
+            trf(
+                "devices.fingerprint",
+                &[
+                    ("origin", &e.origin),
+                    ("start", &&e.public_key[..8]),
+                    ("end", &&e.public_key[56..]),
+                ],
             ),
             14.,
             ui::MUTED,
@@ -271,7 +264,7 @@ pub(super) fn body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
             if let Some(code) = &status.code {
                 label(
                     parent,
-                    format!("Device code: {code}"),
+                    trf("devices.code", &[("code", code)]),
                     28.,
                     ui::GOLD,
                     "DeviceCode",
@@ -279,13 +272,18 @@ pub(super) fn body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
             }
             label(
                 parent,
-                "On your existing account: Portal → Devices → Link device. Check that the fingerprints match. The request expires in five minutes.",
+                tr("devices.portal_instructions"),
                 15.,
                 ui::IVORY,
                 "DevicePortalInstructions",
             );
             if !state.busy {
-                button(parent, "Check approval", Action::DevicesPoll, "DevicePoll");
+                button(
+                    parent,
+                    tr("devices.button.poll"),
+                    Action::DevicesPoll,
+                    "DevicePoll",
+                );
             }
             button(
                 parent,
@@ -296,7 +294,7 @@ pub(super) fn body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
             if !state.busy {
                 button(
                     parent,
-                    "Recover with this code",
+                    tr("devices.button.recover"),
                     Action::DevicesRecover,
                     "DeviceRecover",
                 );
@@ -304,9 +302,15 @@ pub(super) fn body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
         } else if matches!(status.state.as_str(), "approved" | "consumed") {
             label(
                 parent,
-                format!(
-                    "Use account: {}",
-                    status.nickname.as_deref().unwrap_or("Confirmed account")
+                trf(
+                    "devices.use_account",
+                    &[(
+                        "name",
+                        &status
+                            .nickname
+                            .as_deref()
+                            .unwrap_or(tr("devices.confirmed_account")),
+                    )],
                 ),
                 22.,
                 ui::GOLD,
@@ -315,7 +319,7 @@ pub(super) fn body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
             if !state.busy && !state.restart_required {
                 button(
                     parent,
-                    "Use this account after restart",
+                    tr("devices.button.confirm"),
                     Action::DevicesConfirm,
                     "DeviceConfirm",
                 );
@@ -325,13 +329,13 @@ pub(super) fn body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
     if !state.busy && !state.restart_required {
         button(
             parent,
-            "Start new device request",
+            tr("devices.button.start"),
             Action::DevicesStart,
             "DeviceStart",
         );
     }
     if state.busy {
-        label(parent, "Connecting…", 15., ui::MUTED, "DeviceBusy");
+        label(parent, tr("devices.busy"), 15., ui::MUTED, "DeviceBusy");
     }
     label(
         parent,
@@ -349,13 +353,17 @@ pub(super) fn body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
     );
 }
 pub(super) fn recovery_field(state: &DeviceState) -> String {
+    let value = if state.recovery_code.is_empty() {
+        tr("devices.recovery.empty").to_owned()
+    } else {
+        trf(
+            "devices.recovery.count",
+            &[("count", &state.recovery_code.len())],
+        )
+    };
     format!(
-        "Recovery code: {}{}",
-        if state.recovery_code.is_empty() {
-            "paste your saved code".into()
-        } else {
-            format!("{} / 64 characters", state.recovery_code.len())
-        },
+        "{}{}",
+        trf("devices.recovery.field", &[("value", &value)]),
         if state.focused { " |" } else { "" }
     )
 }

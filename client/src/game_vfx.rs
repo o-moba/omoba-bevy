@@ -1,5 +1,6 @@
 //! Bounded combat particles and presentation of authoritative healing butterflies.
 //! Neither trails nor pickup presentation can award damage or healing.
+// i18n-strict
 use crate::{
     camera::MainCamera,
     maps::MapLayout,
@@ -1270,9 +1271,9 @@ fn pickup_feedback(
         });
         if pickup.last_collector_id == Some(game.your_id) {
             if let Some(feedback) = feedback.as_deref_mut() {
-                feedback.push_line(format!(
-                    "Forest butterfly · +{:.0} HP",
-                    pickup.healed_amount
+                feedback.push_line(crate::i18n::trf(
+                    "combat.feedback.butterfly",
+                    &[("hp", &format!("{:.0}", pickup.healed_amount))],
                 ));
             }
         }

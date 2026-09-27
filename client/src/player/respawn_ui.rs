@@ -1,3 +1,4 @@
+// i18n-strict
 use crate::combat::{CombatStats, MAX_HP};
 use crate::debug::DebugConsole;
 use crate::domain::{MovementTarget, Player, VerticalVelocity};
@@ -105,7 +106,7 @@ pub(super) fn respawn_countdown_system(
             velocity.0 = 0.0;
             commands.entity(entity).remove::<MovementTarget>();
             commands.entity(entity).remove::<Jumping>();
-            console.push_line("Respawned.");
+            console.push_line("Respawned."); // i18n-allow: debug console
             info!("Respawned.");
         }
         state.last_hp = stats.hp;
@@ -125,7 +126,7 @@ pub(super) fn respawn_countdown_system(
     if remaining != state.last_shown {
         state.last_shown = remaining;
         text.0 = remaining.to_string();
-        let message = format!("Respawn in {remaining}");
+        let message = format!("Respawn in {remaining}"); // i18n-allow: debug console/log
         console.push_line(message.clone());
         info!("{message}");
     }

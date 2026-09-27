@@ -1,4 +1,5 @@
 //! True-2D presentation proxies for non-player actors and bounded combat VFX.
+// i18n-strict
 
 use bevy::prelude::*;
 use serde::Deserialize;
@@ -140,11 +141,21 @@ enum TowerLane {
 }
 
 impl TowerLane {
-    const fn label(self) -> &'static str {
+    /// Dictionary key of the lane label.
+    const fn key(self) -> &'static str {
         match self {
-            Self::Top => "TOP",
-            Self::Mid => "MID",
-            Self::Bot => "BOT",
+            Self::Top => "lane.top",
+            Self::Mid => "lane.mid",
+            Self::Bot => "lane.bot",
+        }
+    }
+
+    /// Stable id in entity `Name`s; never translated.
+    const fn id(self) -> &'static str {
+        match self {
+            Self::Top => "TOP", // i18n-allow: stable id
+            Self::Mid => "MID", // i18n-allow: stable id
+            Self::Bot => "BOT", // i18n-allow: stable id
         }
     }
 }
@@ -339,11 +350,12 @@ fn spawn_structure_cues(
     let cue_y = world_height * 0.54;
     commands.entity(visual).with_children(|parent| {
         spawn_team_badge(parent, owner, team, Vec2::new(-1.15, cue_y), 0.82);
-        let (label, kind) = lane.map_or(("BASE", PresentationCueKind::BaseLabel), |lane| {
-            (lane.label(), PresentationCueKind::LaneLabel(lane))
-        });
+        let (key, id, kind) = lane.map_or(
+            ("lane.base", "BASE", PresentationCueKind::BaseLabel), // i18n-allow: stable id
+            |lane| (lane.key(), lane.id(), PresentationCueKind::LaneLabel(lane)),
+        );
         parent.spawn((
-            Text2d::new(label),
+            crate::i18n::Localized::new(key).text2d(),
             TextFont {
                 font_size: 16.0,
                 ..default()
@@ -351,7 +363,7 @@ fn spawn_structure_cues(
             TextColor(Color::WHITE),
             Transform::from_xyz(0.28, cue_y, 0.21).with_scale(Vec3::splat(0.105)),
             PresentationActorCue { owner, kind },
-            Name::new(format!("Presentation2d-StructureCue-{label}")),
+            Name::new(format!("Presentation2d-StructureCue-{id}")),
         ));
     });
 }
@@ -545,18 +557,19 @@ fn attach_actor(
                 pivot: definition.pivot,
                 previous_xy: xy,
             },
-            Name::new(format!("Presentation2d-{key}")),
+            Name::new(format!("Presentation2d-{key}")), // i18n-allow: entity name
         ))
         .id();
     if kind == PresentationActorKind::Boss {
-        let label = if key.starts_with("wendigo") {
-            "Wendigo"
+        let camp = if key.starts_with("wendigo") {
+            shared::wire::NeutralCampType::WendigoBoss
         } else {
-            "King Mutatio"
+            shared::wire::NeutralCampType::KingMutatioBoss
         };
+        let id = crate::bosses::boss_name_id(camp);
         commands.entity(visual_entity).with_children(|parent| {
             parent.spawn((
-                Text2d::new(label),
+                crate::i18n::Localized::new(crate::i18n::data::boss_key(camp)).text2d(),
                 TextFont {
                     font_size: 18.0,
                     ..default()
@@ -564,7 +577,7 @@ fn attach_actor(
                 TextColor(Color::srgb(1.0, 0.86, 0.45)),
                 Transform::from_xyz(0.0, definition.world_height * 0.62, 0.1)
                     .with_scale(Vec3::splat(0.15)),
-                Name::new(format!("BossNameplate2d-{label}")),
+                Name::new(format!("BossNameplate2d-{id}")),
             ));
         });
     }

@@ -5,6 +5,7 @@
 //! stone/crystal guardian. Both keep raid scale, floating names, and AI-driven
 //! motion. The HP bar comes for free via
 //! the shared `CombatStats`/`CombatBars` pipeline.
+// i18n-strict
 
 use bevy::gltf::Gltf;
 use bevy::prelude::*;
@@ -41,12 +42,14 @@ struct BossNameplate {
     boss: Entity,
 }
 
-/// Display name shown on the boss nameplate.
-pub fn boss_display_name(camp_type: NeutralCampType) -> &'static str {
+/// Stable identifier of a boss in entity `Name`s and QA lookups. It keeps
+/// the historical English spelling so existing names do not change, and it
+/// is never translated (the nameplate text is `i18n::data::boss`).
+pub(crate) fn boss_name_id(camp_type: NeutralCampType) -> &'static str {
     match camp_type {
-        NeutralCampType::WendigoBoss => "Wendigo",
-        NeutralCampType::KingMutatioBoss => "King Mutatio",
-        _ => "Neutral",
+        NeutralCampType::WendigoBoss => "Wendigo", // i18n-allow: stable id
+        NeutralCampType::KingMutatioBoss => "King Mutatio", // i18n-allow: stable id
+        _ => "Neutral",                            // i18n-allow: stable id
     }
 }
 
@@ -190,13 +193,13 @@ fn attach_boss_models(
             warn!("No staged model for boss {:?}", visual.camp_type);
         }
 
-        let display_name = boss_display_name(visual.camp_type);
         info!(
-            "Boss spawned on client: {display_name} ({:?})",
+            "Boss spawned on client: {} ({:?})",
+            boss_name_id(visual.camp_type),
             visual.camp_type
         );
         commands.spawn((
-            Text::new(display_name),
+            crate::i18n::Localized::new(crate::i18n::data::boss_key(visual.camp_type)).into_text(),
             TextFont {
                 font_size: 18.0,
                 ..default()
@@ -210,7 +213,8 @@ fn attach_boss_models(
             },
             ZIndex(9),
             BossNameplate { boss: boss_entity },
-            Name::new(format!("BossNameplate-{display_name}")),
+            // The Name is the stable boss id, never the (translatable) label.
+            Name::new(format!("BossNameplate-{}", boss_name_id(visual.camp_type))),
         ));
     }
 }

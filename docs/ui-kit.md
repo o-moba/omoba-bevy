@@ -23,7 +23,7 @@ buttons onto the kit. Every button the client draws is now a kit button (see
 | `ui/action.rs` | `UiAction<T>`, `Activated<T>`, `dispatch_actions::<T>`, `UiActionAppExt` |
 | `ui/back.rs` | `BackInput` (Esc plus `BackPress`), `BackPress`, `clear_back_press` |
 | `ui/focus.rs` | `UiFocus`, `FocusNav`, `navigate_focus`, `directional_neighbor`, `reveal_delta` |
-| `ui/widgets.rs` | `ButtonStyle`, `paint_pressables`, `paint_focus_ring` (`FocusRing`), `button`, `button_with_label`, `icon_button`, `adjust_row`, `toggle_row`, `value_label`; front-end `screen_button`, `screen_tile`, `compact_screen_tile`, `screen_label` and their phone metrics `MenuTypography`/`MenuControl` |
+| `ui/widgets.rs` | `ButtonStyle`, `paint_pressables`, `paint_focus_ring` (`FocusRing`), `button`, `button_with_label`, `icon_button`, `adjust_row`, `toggle_row`, `value_label`; front-end `screen_button`, `screen_tile`, `compact_screen_tile`, `screen_label` and their phone metrics `MenuTypography`/`MenuControl`; captions are `impl UiLabel` (see [Text and language](#text-and-language)) |
 | `ui/test_id.rs` | `TestId`, `NodeKey`/`node_key` (a node's `TestId`, else its `Name`), `harness::{TestIds, find, press, kit_app, spawn_ui, set_disabled, drain_actions}` (tests) |
 
 The `crate::ui_theme` shim, the `frontend::widgets` palette re-export,
@@ -289,6 +289,28 @@ choices, supporter buttons, Combat Test value fields and toggles) carries
 `toggle_row` names `{id}Button` and `{id}Value`; `button_with_label` gives the
 caption a marker and its own id (the mute toggle). The primary call to action
 is `ButtonKind::Primary` (the pause menu's Resume), not a name check.
+
+## Text and language
+
+Widget captions are `impl crate::i18n::UiLabel`: a literal (`&str`,
+`&String`, `String`) spawns a plain `Text`; a `Localized` key spawns
+`(Text, Localized)` filled in the active language, and the i18n relabel
+system rewrites it when Settings → Language changes. `button`,
+`button_with_label`, `adjust_row`, `toggle_row` (label), `screen_button`,
+`screen_tile`, `compact_screen_tile`, `screen_label` and
+`frontend::widgets::{heading, label}` take it:
+
+```rust
+widgets::button(main, Localized::new("pause.button.settings"), ButtonKind::Secondary,
+    PauseAction::OpenSettings, "SettingsButton");
+widgets::icon_button(header, "×", ButtonKind::Secondary, PauseAction::Close, "PauseMenuCloseButton");
+```
+
+A caption the owner rewrites from state (the mute toggle) stays a literal
+written with `tr`, re-run on a `Locale` change. `theme::apply_theme_font`
+runs in `PostUpdate` (`I18nSystems::Font`, before UI and `Text2d` layout)
+and picks the CJK font for UI and world text. `TestId`s and `Name`s are never
+translated. `docs/i18n.md` has the patterns and the glossary.
 
 ## TestId policy
 

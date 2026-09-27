@@ -1,4 +1,6 @@
 //! Local reaction images, independent from the server's pack entitlement policy.
+//! Reaction names are shown through `i18n::data::reaction`.
+// i18n-strict
 use bevy::{
     asset::{AssetLoader, LoadContext, io::Reader},
     prelude::*,
@@ -25,12 +27,12 @@ struct Manifest {
 impl Manifest {
     fn parse(json: &str) -> Result<Self, &'static str> {
         if json.len() > 64 * 1024 {
-            return Err("Reaction image manifest is too large.");
+            return Err("Reaction image manifest is too large."); // i18n-allow: loader diagnostic
         }
         let config: Self =
-            serde_json::from_str(json).map_err(|_| "Invalid reaction image manifest.")?;
+            serde_json::from_str(json).map_err(|_| "Invalid reaction image manifest.")?; // i18n-allow: loader diagnostic
         if config.schema_version != 1 || config.images.len() > 256 || config.images.is_empty() {
-            return Err("Unsupported reaction image manifest.");
+            return Err("Unsupported reaction image manifest."); // i18n-allow: loader diagnostic
         }
         for (id, image) in &config.images {
             if !shared::social::valid_reaction_id(id)
@@ -38,7 +40,7 @@ impl Manifest {
                 || image.grid.iter().any(|side| *side == 0 || *side > 16)
                 || image.index >= image.grid[0] * image.grid[1]
             {
-                return Err("Invalid reaction image entry.");
+                return Err("Invalid reaction image entry."); // i18n-allow: loader diagnostic
             }
         }
         if config
@@ -46,11 +48,11 @@ impl Manifest {
             .iter()
             .any(|id| !config.images.contains_key(id))
         {
-            return Err("Missing wheel image.");
+            return Err("Missing wheel image."); // i18n-allow: loader diagnostic
         }
         let unique: std::collections::HashSet<_> = config.wheel.iter().collect();
         if unique.len() != 4 {
-            return Err("Wheel entries must be distinct.");
+            return Err("Wheel entries must be distinct."); // i18n-allow: loader diagnostic
         }
         Ok(config)
     }
@@ -186,10 +188,6 @@ fn crop(spec: &ImageSpec, handle: &Handle<Image>, images: &Assets<Image>) -> Opt
     })
 }
 
-pub(crate) fn label(id: &str) -> String {
-    shared::social::reaction(id)
-        .map_or_else(|| "Reaction".into(), |reaction| reaction.label.clone())
-}
 #[cfg(test)]
 mod tests {
     use super::*;

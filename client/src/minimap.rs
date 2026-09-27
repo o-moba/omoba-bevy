@@ -1,5 +1,6 @@
 //! Tactical overlay. Current servers replicate only team-visible dynamic actors;
 //! legacy snapshots retain the local radial minimap fallback.
+// i18n-strict
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
@@ -170,8 +171,8 @@ impl MinimapQaScene<'_, '_> {
         }
         camera_edges.sort_by_key(|edge| edge["edge"].as_u64());
         serde_json::json!({
-            "source": "computed Bevy minimap UI nodes in logical pixels",
-            "visibility_policy": "authoritative team-visible snapshot; legacy radial fallback",
+            "source": "computed Bevy minimap UI nodes in logical pixels", // i18n-allow: QA report
+            "visibility_policy": "authoritative team-visible snapshot; legacy radial fallback", // i18n-allow: QA report
             "container_rect": self.state.container.and_then(rendered_rect).map(rect_json),
             "hero_markers": {"local": local, "allied": allied, "enemy": enemy},
             "marker_rects": markers,

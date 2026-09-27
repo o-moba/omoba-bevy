@@ -1,0 +1,16 @@
+{
+  "state.lobby": "等待玩家加入…",
+  "state.forming": "等待玩家加入 - {ready}/{needed}\n10 名玩家到齐后自动分队开始。",
+  "state.starting": "已找到对局！\n{seconds} 秒后开始…",
+  "state.team.green": "绿队",
+  "state.team.blue": "蓝队",
+  "state.result.victory": "胜利！",
+  "state.result.defeat": "失败",
+  "state.result.complete": "对局结束",
+  "state.finalizing": "对局结束\n{team}摧毁了敌方基地。\n正在结算对局结果…",
+  "state.next_round.preparing": "正在准备下一局…",
+  "state.next_round.countdown": "{seconds} 秒后开始下一局",
+  "state.exit_hint": "Esc：设置或退出游戏。",
+  "state.exit_hint_phone": "菜单：设置或退出游戏。",
+  "state.round_over": "{result}\n{team}摧毁了敌方基地。\n\n{next_round}\n保持连接，即可用你的英雄再战一局。\n{exit}"
+}

@@ -1,0 +1,14 @@
+{
+  "net.retry": "重试",
+  "net.status.connecting": "正在连接…（{addr}）",
+  "net.status.waiting": "正在等待服务器 {addr}。请启动服务器或检查 GAME_SERVER_ADDR。每 {retry} 秒重试一次（最长等待 {max_wait} 秒）。",
+  "net.status.joined": "已加入 - 已连接到对局。",
+  "net.status.joining": "正在加入对局… 第 {attempt}/{max} 次尝试。正在等待服务器准入。",
+  "net.status.connected": "已连接 - 选择英雄和队伍即可加入。",
+  "net.status.reconnecting": "连接已断开 - 正在重新连接（第 {attempt} 次尝试）…",
+  "net.status.disconnected": "已断开 - 连接丢失或超时。服务器恢复后请点击“重试”，然后重新选择队伍。",
+  "net.status.join_unconfirmed": "服务器未确认你的加入请求。请点击“重试”再试一次。",
+  "net.practice.banner": "离线练习 · {level} 级 · 无奖励",
+  "net.practice.you": "你",
+  "net.practice.bot": "电脑 {id}"
+}

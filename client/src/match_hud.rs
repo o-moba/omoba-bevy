@@ -1,6 +1,9 @@
 //! In-match HUD: progression, local HP/mana, target summary, objective hint, and key hints.
+// i18n-strict
 
 use bevy::prelude::*;
+
+use crate::i18n::{data, tr, trf};
 
 use crate::combat::{CombatStats, TargetState};
 #[cfg(test)]
@@ -97,7 +100,7 @@ fn setup_match_hud(mut commands: Commands) {
         ))
         .with_children(|panel| {
             panel.spawn((
-                Text::new("Lv\n1"),
+                Text::new(trf("hud.level", &[("level", &1)])),
                 ui::text(12.0),
                 TextColor(ui::GOLD),
                 MatchHudProgressionText,
@@ -121,8 +124,8 @@ fn setup_match_hud(mut commands: Commands) {
                     Name::new("MatchHudBars"),
                 ))
                 .with_children(|bars| {
-                    spawn_stat_bar(bars, "HP", hp_bar_color(1.0), HpBarFill);
-                    spawn_stat_bar(bars, "MP", MANA_BAR_COLOR, ManaBarFill);
+                    spawn_stat_bar(bars, HudResource::Health, hp_bar_color(1.0), HpBarFill);
+                    spawn_stat_bar(bars, HudResource::Mana, MANA_BAR_COLOR, ManaBarFill);
                 });
             panel.spawn((
                 Text::new(""),
@@ -235,8 +238,25 @@ fn adapt_desktop_dock(
 struct HudPortrait;
 #[derive(Component)]
 struct HudXpText;
+/// Which pool a HUD bar shows. Identity comes from this, never from text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HudResource {
+    Health,
+    Mana,
+}
+
+impl HudResource {
+    /// Stable id in the bar's `Name` (`MatchHudBar-HP`); never translated.
+    const fn id(self) -> &'static str {
+        match self {
+            Self::Health => "HP", // i18n-allow
+            Self::Mana => "MP",   // i18n-allow
+        }
+    }
+}
+
 #[derive(Component)]
-struct HudResourceText(&'static str);
+struct HudResourceText(HudResource);
 
 fn update_hero_details(
     mut commands: Commands,
@@ -258,7 +278,7 @@ fn update_hero_details(
         return;
     };
     for (label, mut text) in &mut labels {
-        text.0 = if label.0 == "HP" {
+        text.0 = if label.0 == HudResource::Health {
             format!("{:.0} / {:.0}", stats.hp.max(0.0), stats.max_hp)
         } else {
             format!("{:.0} / {:.0}", stats.mana.max(0.0), stats.max_mana)
@@ -266,11 +286,15 @@ fn update_hero_details(
     }
     for mut text in &mut xp {
         text.0 = if progression.next_level_xp == 0 {
-            "MAX LEVEL".into()
+            tr("hud.max_level").into()
         } else {
-            format!(
-                "XP {} / {} · {} +",
-                progression.xp, progression.next_level_xp, progression.skill_points
+            trf(
+                "hud.xp",
+                &[
+                    ("xp", &progression.xp),
+                    ("next", &progression.next_level_xp),
+                    ("points", &progression.skill_points),
+                ],
             )
         };
     }
@@ -368,7 +392,7 @@ fn sync_buff_row_visibility(mut rows: Query<(&Text, &mut Node), With<MatchHudBuf
 
 fn spawn_stat_bar<F: Component>(
     col: &mut ChildSpawnerCommands,
-    label: &'static str,
+    resource: HudResource,
     fill_color: Color,
     fill_marker: F,
 ) {
@@ -383,7 +407,7 @@ fn spawn_stat_bar<F: Component>(
             ..default()
         },
         BackgroundColor(BAR_TRACK_COLOR),
-        Name::new(format!("MatchHudBar-{label}")),
+        Name::new(format!("MatchHudBar-{}", resource.id())),
     ))
     .with_children(|track| {
         track.spawn((
@@ -402,7 +426,7 @@ fn spawn_stat_bar<F: Component>(
             Text::new("100 / 100"),
             crate::ui::theme::text(12.0),
             TextColor(Color::WHITE),
-            HudResourceText(label),
+            HudResourceText(resource),
             ZIndex(1),
         ));
     });
@@ -423,6 +447,7 @@ fn update_match_hud(
         With<NetworkStructure>,
     >,
     target_state: Res<TargetState>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     mut prog: Query<
         &mut Text,
         (
@@ -462,7 +487,7 @@ fn update_match_hud(
     };
 
     let Some((stats, progression, replicated_class)) = player.iter().next() else {
-        prog_text.0 = "Level --   XP --/--   Skill points --".into();
+        prog_text.0 = tr("hud.no_player").into();
         status_text.0.clear();
         if let Ok(mut v) = bars_root.single_mut() {
             *v = Visibility::Hidden;
@@ -511,27 +536,37 @@ fn update_match_hud(
         }
     }
 
-    prog_text.0 = format!("Lv\n{}", progression.level.max(1));
+    prog_text.0 = trf("hud.level", &[("level", &progression.level.max(1))]);
 
     if !running {
-        status_text.0 = format!(
-            "Press {} for controls help.\nClass: {}   Skills: {} - cast on target.",
-            help_key_display(),
-            hero_class.display_name(),
-            skill_keys_display()
+        status_text.0 = trf(
+            "hud.prematch",
+            &[
+                ("help_key", &help_key_display()),
+                ("class", &data::hero_name(hero_class)),
+                ("skills", &skill_keys_display()),
+            ],
         );
         return;
     }
 
     let objective_line = enemy_base_objective_line(&local_team, &enemy_bases);
-    let target = if !stats.is_alive() {
-        "Defeated - respawning soon"
-    } else if target_state.selected_target.is_some() {
-        "Target locked · Attack / Q W E R"
-    } else {
-        "Select a foe · P shop · F1 help"
-    };
-    status_text.0 = format!("{}\n{target}", objective_line.replace("Goal: ", ""));
+    // Phones name the touch controls instead of the keyboard shortcuts.
+    let phone = mobile.as_ref().is_some_and(|mobile| mobile.enabled);
+    let target = tr(
+        match (
+            stats.is_alive(),
+            target_state.selected_target.is_some(),
+            phone,
+        ) {
+            (false, _, _) => "hud.target.defeated",
+            (true, true, false) => "hud.target.locked",
+            (true, true, true) => "hud.target.locked_phone",
+            (true, false, false) => "hud.target.none",
+            (true, false, true) => "hud.target.none_phone",
+        },
+    );
+    status_text.0 = format!("{objective_line}\n{target}");
 }
 
 fn update_stat_bars(
@@ -575,56 +610,12 @@ pub(crate) fn team_buff_hud_text(buffs: &[TeamBuffState], local_team: Team) -> S
         .map(|buff| {
             let secs = buff.remaining_secs.max(0.0).ceil() as u32;
             match buff.kind {
-                TeamBuffKind::WendigoFavor => {
-                    format!("Wendigo's Favor: +15% ability damage - {secs}s")
-                }
-                TeamBuffKind::MutatioMight => {
-                    format!("Mutatio's Might: +25% ability damage, +2 HP/s - {secs}s")
-                }
+                TeamBuffKind::WendigoFavor => trf("hud.buff.wendigo", &[("secs", &secs)]),
+                TeamBuffKind::MutatioMight => trf("hud.buff.mutatio", &[("secs", &secs)]),
             }
         })
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-/// Short effect summary for an ability tooltip line (single effect per ability).
-#[cfg(test)]
-fn running_status_text(
-    stats: CombatStats,
-    hero_class: HeroClass,
-    selected_target: Option<TargetId>,
-    objective_line: &str,
-) -> String {
-    let target_line = match selected_target {
-        Some(t) => {
-            let kind = match t.kind {
-                TargetKind::Player => "Player",
-                TargetKind::Minion => "Minion",
-                TargetKind::Structure => "Structure",
-                TargetKind::Neutral => "Neutral",
-            };
-            format!("Target: enemy {kind} - locked")
-        }
-        None => "Target: none - click a foe or use Tab".to_string(),
-    };
-    let hp = stats.hp.max(0.0);
-    let max_hp = stats.max_hp.max(1.0);
-    let mana = stats.mana.max(0.0);
-    let max_mana = stats.max_mana.max(1.0);
-    format!(
-        "HP {:.0}/{:.0}   Mana {:.0}/{:.0}   Class: {}\n\
-{target_line}\n\
-{objective_line}\n\
-Keys: {} cast | {} upgrade | {} help",
-        hp,
-        max_hp,
-        mana,
-        max_mana,
-        hero_class.display_name(),
-        skill_keys_display(),
-        upgrade_key_display(),
-        help_key_display()
-    )
 }
 
 fn enemy_base_objective_line(
@@ -640,7 +631,7 @@ fn enemy_base_objective_line(
     >,
 ) -> String {
     let Ok(team) = local_team.single() else {
-        return "Goal: Destroy the enemy base.".to_string();
+        return tr("hud.goal.destroy_base").to_owned();
     };
     let mut hp_sum = 0.0f32;
     let mut max_sum = 0.0f32;
@@ -655,21 +646,62 @@ fn enemy_base_objective_line(
         }
     }
     if protected {
-        "Goal: Clear one lane to unlock the base.".to_string()
+        tr("hud.goal.unlock_base").to_owned()
     } else if any && max_sum > 0.0 {
-        format!(
-            "Goal: Enemy base · {:.0} / {:.0} HP",
-            hp_sum.min(max_sum),
-            max_sum
+        trf(
+            "hud.goal.base_hp",
+            &[
+                ("hp", &format!("{:.0}", hp_sum.min(max_sum))),
+                ("max", &format!("{max_sum:.0}")),
+            ],
         )
     } else {
-        "Goal: Destroy the enemy base.".to_string()
+        tr("hud.goal.destroy_base").to_owned()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Short effect summary for an ability tooltip line (single effect per ability).
+    fn running_status_text(
+        stats: CombatStats,
+        hero_class: HeroClass,
+        selected_target: Option<TargetId>,
+        objective_line: &str,
+    ) -> String {
+        let target_line = match selected_target {
+            Some(t) => {
+                let kind = match t.kind {
+                    TargetKind::Player => "Player",
+                    TargetKind::Minion => "Minion",
+                    TargetKind::Structure => "Structure",
+                    TargetKind::Neutral => "Neutral",
+                };
+                format!("Target: enemy {kind} - locked")
+            }
+            None => "Target: none - click a foe or use Tab".to_string(),
+        };
+        let hp = stats.hp.max(0.0);
+        let max_hp = stats.max_hp.max(1.0);
+        let mana = stats.mana.max(0.0);
+        let max_mana = stats.max_mana.max(1.0);
+        format!(
+            "HP {:.0}/{:.0}   Mana {:.0}/{:.0}   Class: {}\n\
+    {target_line}\n\
+    {objective_line}\n\
+    Keys: {} cast | {} upgrade | {} help",
+            hp,
+            max_hp,
+            mana,
+            max_mana,
+            hero_class.display_name(),
+            skill_keys_display(),
+            upgrade_key_display(),
+            help_key_display()
+        )
+    }
 
     #[test]
     fn running_status_text_shows_resources_objective_and_class_kit() {

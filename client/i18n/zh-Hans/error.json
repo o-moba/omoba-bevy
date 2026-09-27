@@ -1,0 +1,14 @@
+{
+  "error.join.match_full": "对局已满。有空位时请重试。",
+  "error.join.session_active": "此会话正在另一个客户端中使用。请先关闭它，然后重试。",
+  "error.join.protocol_mismatch": "客户端与服务器版本不一致。请使用相同的发行版本。",
+  "error.join.map_geometry_mismatch": "该服务器使用了不同的地图几何数据。请安装匹配的地图版本。",
+  "error.join.avatar_not_authorized": "已购买形象的授权失败。请重新连接钱包，或选择免费形象。",
+  "error.purchase.unavailable": "加入对局后才能使用商店。",
+  "error.purchase.dead": "请等待复活后再购买。",
+  "error.purchase.outside_base": "回到基地才能购买。",
+  "error.purchase.insufficient_gold": "金币不足。",
+  "error.purchase.already_owned": "你已拥有该装备。",
+  "error.purchase.inventory_full": "六个装备栏已满。",
+  "error.purchase.unknown_item": "当前目录中没有此装备。"
+}

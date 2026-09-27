@@ -11,6 +11,7 @@
 //! - R3 toggles the target lock (an edge).
 //! - East, or any frame where gameplay is not allowed, drops everything; the
 //!   gesture then rearms only after the pad has been neutral once.
+// i18n-strict
 use super::snapshot::{CHORD, EAST, L1, L2, NORTH, PadSnapshot, R1, R2, R3};
 
 /// Grace before a lone R2 counts as the basic attack.

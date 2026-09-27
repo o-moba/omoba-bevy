@@ -1,7 +1,9 @@
 //! Ephemeral server-confirmed match communication and exclusive gesture ownership.
+// i18n-strict
 use crate::{
     camera::MainCamera,
     combat::{CombatStats, PendingCast},
+    i18n::{Locale, Localized, data, tr, trf},
     input_context::InputContextSet,
     mobile_controls::{MobileControls, MobileControlsSet},
     net::{
@@ -145,6 +147,70 @@ pub(crate) fn choice_offset(index: usize, scale: f32) -> Vec2 {
 fn wheel_choice(center: Vec2, pointer: Vec2, scale: f32) -> Option<usize> {
     (0..4).find(|&i| (center + choice_offset(i, scale)).distance(pointer) <= 30.0 * scale)
 }
+/// The chat status line: client copy by key (shown in the active language, so
+/// a language change relabels it) or server prose, shown as sent.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) enum SocialStatus {
+    #[default]
+    None,
+    Key(&'static str),
+    Text(String),
+}
+impl SocialStatus {
+    /// Server or shared-validation text; the shared crate's fixed messages
+    /// (the server sends the same ones) are shown through their keys.
+    pub(crate) fn from_text(text: impl Into<String>) -> Self {
+        let text = text.into();
+        match shared_message_key(&text) {
+            Some(key) => Self::Key(key),
+            None => Self::Text(text),
+        }
+    }
+    fn is_empty(&self) -> bool {
+        match self {
+            Self::None => true,
+            Self::Key(_) => false,
+            Self::Text(text) => text.is_empty(),
+        }
+    }
+    fn text(&self) -> &str {
+        match self {
+            Self::None => "",
+            Self::Key(key) => tr(key),
+            Self::Text(text) => text,
+        }
+    }
+}
+/// `shared::social`'s fixed validation messages (the server sends the same
+/// text) and their keys.
+const SHARED_MESSAGES: [(&str, &str); 5] = [
+    (
+        "Chat must be one line without control characters, up to 160 characters.", // i18n-allow
+        "social.status.one_line",
+    ),
+    (
+        "Chat must contain between 1 and 160 characters.", // i18n-allow
+        "social.status.length",
+    ),
+    (
+        "This social request has an invalid match or request ID.", // i18n-allow
+        "social.status.invalid_request",
+    ),
+    (
+        "This social request has an invalid session.", // i18n-allow
+        "social.status.invalid_session",
+    ),
+    (
+        "This reaction is not in the server catalog.", // i18n-allow
+        "social.status.reaction_unknown",
+    ),
+];
+fn shared_message_key(text: &str) -> Option<&'static str> {
+    SHARED_MESSAGES
+        .iter()
+        .find(|(message, _)| *message == text)
+        .map(|(_, key)| *key)
+}
 #[derive(Clone)]
 struct PendingSend {
     id: u64,
@@ -173,7 +239,7 @@ pub(crate) struct SocialClient {
     pub(crate) events: VecDeque<SocialEvent>,
     pub(crate) reactions: Vec<(SocialEvent, Instant)>,
     allowed: Vec<String>,
-    status: String,
+    status: SocialStatus,
     wheel_ids: [String; 4],
     last_viewport: Option<Vec2>,
     mute_all: bool,
@@ -213,7 +279,7 @@ impl Default for SocialClient {
             events: VecDeque::new(),
             reactions: Vec::new(),
             allowed: Vec::new(),
-            status: String::new(),
+            status: SocialStatus::None,
             wheel_ids: reaction_visuals::FREE_IDS.map(str::to_owned),
             last_viewport: None,
             mute_all: false,
@@ -261,14 +327,14 @@ impl SocialClient {
             && view.request_id == Some(pending.id)
         {
             if let Some(error) = view.error {
-                self.status = error;
+                self.status = SocialStatus::from_text(error);
             } else {
                 if let SocialCommand::Chat { text, .. } = &pending.command
                     && self.draft.trim() == text
                 {
                     self.draft.clear();
                 }
-                self.status = "Delivered".into();
+                self.status = SocialStatus::Key("social.status.delivered");
             }
             self.pending = None;
         }
@@ -299,7 +365,7 @@ impl SocialClient {
             }
         }
     }
-    pub(crate) fn request_failed(&mut self, request_id: u64, error: String) {
+    pub(crate) fn request_failed(&mut self, request_id: u64, error: SocialStatus) {
         if self
             .pending
             .as_ref()
@@ -311,7 +377,7 @@ impl SocialClient {
     }
     fn send(&mut self, command: SocialCommand, out: &mut MessageWriter<NetworkCommand>) {
         if self.pending.is_some() {
-            self.status = "Wait for your previous message to finish.".into();
+            self.status = SocialStatus::Key("social.status.busy");
             return;
         }
         let Some(id) = self.request_sequence.checked_add(1) else {
@@ -325,7 +391,7 @@ impl SocialClient {
             started: now,
             next: now + Duration::from_secs(1),
         });
-        self.status = "Sending…".into();
+        self.status = SocialStatus::Key("social.status.sending");
         out.write(NetworkCommand::Social {
             request_id: id,
             command,
@@ -340,13 +406,13 @@ impl SocialClient {
                 },
                 out,
             ),
-            Err(error) => self.status = error.into(),
+            Err(error) => self.status = SocialStatus::from_text(error),
         }
     }
     fn send_reaction(&mut self, index: usize, out: &mut MessageWriter<NetworkCommand>) {
         let id = self.wheel_ids[index].clone();
         if !self.allowed.iter().any(|allowed| allowed == &id) {
-            self.status = "This reaction is not available on this server.".into();
+            self.status = SocialStatus::Key("social.status.reaction_unavailable");
             return;
         }
         self.send(SocialCommand::Reaction { reaction_id: id }, out);
@@ -372,7 +438,7 @@ impl SocialClient {
     pub(crate) fn qa_send_chat(&mut self, out: &mut MessageWriter<NetworkCommand>) {
         self.chat_open = true;
         self.opened_frame = true;
-        self.draft = "QA: Привет 小明 — ready for practice!".into();
+        self.draft = "QA: Привет 小明 — ready for practice!".into(); // i18n-allow: QA harness draft
         self.send_chat(out);
     }
     #[cfg(feature = "qa")]
@@ -400,7 +466,7 @@ impl SocialClient {
             "events": self.events.len(),
             "reactions": self.reactions.len(),
             "allowed_reactions": self.allowed,
-            "status": self.status,
+            "status": self.status.text(),
         })
     }
     fn visible_sender(&self, id: u64) -> bool {
@@ -735,7 +801,7 @@ fn input(
         let now = Instant::now();
         if now.duration_since(pending.started) >= Duration::from_secs(5) {
             social.pending = None;
-            social.status = "No confirmation. Your message was kept; try again.".into();
+            social.status = SocialStatus::Key("social.status.no_confirmation");
         } else if now >= pending.next {
             pending.next = now + Duration::from_secs(1);
             out.write(NetworkCommand::Social {
@@ -804,15 +870,16 @@ fn social_actions(
         }
     }
 }
+/// Appends `text` to the draft, or the `social.status.*` key of why not.
 fn append_chat(draft: &mut String, text: &str) -> Result<(), &'static str> {
     let next = format!("{draft}{text}");
     if next.chars().count() > shared::social::MAX_CHAT_CHARS
         || next.len() > shared::social::MAX_CHAT_BYTES
     {
-        return Err("Use up to 160 characters.");
+        return Err("social.status.too_long");
     }
     if text.chars().any(char::is_control) {
-        return Err("Chat cannot contain control characters.");
+        return Err("social.status.control_characters");
     }
     *draft = next;
     Ok(())
@@ -850,7 +917,7 @@ fn chat_keyboard(
                 if is_chat_submit_text(value) {
                     social.send_chat(&mut out);
                 } else if let Err(error) = append_chat(&mut social.draft, value) {
-                    social.status = error.into();
+                    social.status = SocialStatus::Key(error);
                 }
                 social.preedit.clear();
                 committed = true;
@@ -883,7 +950,7 @@ fn chat_keyboard(
                     .and_then(|text| append_chat(&mut social.draft, text.trim()))
                 {
                     Ok(()) => {}
-                    Err(error) => social.status = error.into(),
+                    Err(error) => social.status = SocialStatus::Key(error),
                 }
             }
             Key::Enter => social.send_chat(&mut out),
@@ -905,7 +972,7 @@ fn chat_keyboard(
                     _ => None,
                 }) {
                     if let Err(error) = append_chat(&mut social.draft, text) {
-                        social.status = error.into();
+                        social.status = SocialStatus::Key(error);
                     }
                 }
             }
@@ -1073,7 +1140,7 @@ fn composer_preview(draft: &str, preedit: &str, width: f32) -> String {
     let capacity = ((width / 16.0) as usize).max(1);
     let value = format!("{draft}{preedit}");
     if value.is_empty() {
-        return "Message your team…".into();
+        return tr("social.composer.placeholder").into();
     }
     let skip = value.chars().count().saturating_sub(capacity);
     format!(
@@ -1159,8 +1226,8 @@ fn render_phone_chat(
                             Name::new("SocialChatInput"),
                         ));
                     });
-                    button(p, "Send", SocialAction::Send, "SocialSend");
-                    button(p, "Close", SocialAction::Close, "SocialClose");
+                    button(p, tr("social.send"), SocialAction::Send, "SocialSend");
+                    button(p, tr("social.close"), SocialAction::Close, "SocialClose");
                 });
                 p.spawn(Node {
                     width: Val::Percent(100.0),
@@ -1173,31 +1240,27 @@ fn render_phone_chat(
                 .with_children(|p| {
                     button(
                         p,
-                        if social.channel == SocialChannel::Team {
-                            "Team"
-                        } else {
-                            "Match"
-                        },
+                        channel_label(social.channel),
                         SocialAction::Channel,
                         "SocialChannel",
                     );
                     button(
                         p,
-                        if social.keyboard_requested {
-                            "Hide keys"
+                        tr(if social.keyboard_requested {
+                            "social.keyboard.hide"
                         } else {
-                            "Keyboard"
-                        },
+                            "social.keyboard.show"
+                        }),
                         SocialAction::Keyboard,
                         "SocialKeyboard",
                     );
                     button(
                         p,
-                        if social.mute_all {
-                            "Unmute"
+                        tr(if social.mute_all {
+                            "social.mute.unmute_short"
                         } else {
-                            "Mute all"
-                        },
+                            "social.mute.all"
+                        }),
                         SocialAction::MuteAll,
                         "SocialMuteAll",
                     );
@@ -1205,7 +1268,7 @@ fn render_phone_chat(
                         Text::new(format!(
                             "{}/160 {}",
                             social.draft.chars().count(),
-                            social.status
+                            social.status.text()
                         )),
                         TextLayout::new_with_no_wrap(),
                         ui::text(12.0),
@@ -1243,13 +1306,7 @@ fn render_chat_log(
     ))
     .with_children(|p| {
         if social.events.is_empty() {
-            text(
-                p,
-                "No messages yet. Say hello to your team.",
-                14.0,
-                ui::MUTED,
-                "SocialEmpty",
-            );
+            text(p, tr("social.empty"), 14.0, ui::MUTED, "SocialEmpty");
         }
         for event in social
             .events
@@ -1264,15 +1321,13 @@ fn render_chat_log(
                 p.spawn(row()).with_children(|p| {
                     text(
                         p,
-                        format!(
-                            "{} · {}: {}",
-                            if *channel == SocialChannel::Team {
-                                "Team"
-                            } else {
-                                "Match"
-                            },
-                            event.nickname,
-                            message
+                        trf(
+                            "social.message",
+                            &[
+                                ("channel", &channel_label(*channel)),
+                                ("nickname", &event.nickname),
+                                ("message", message),
+                            ],
                         ),
                         14.0,
                         ui::IVORY,
@@ -1280,7 +1335,7 @@ fn render_chat_log(
                     );
                     button(
                         p,
-                        "Mute",
+                        tr("social.mute.sender"),
                         SocialAction::Mute(event.player_id),
                         "SocialMuteSender",
                     );
@@ -1288,11 +1343,11 @@ fn render_chat_log(
             }
         }
         if !social.muted.is_empty() {
-            text(p, "Muted players", 12.0, ui::MUTED, "SocialMuted");
+            text(p, tr("social.muted.title"), 12.0, ui::MUTED, "SocialMuted");
             for id in &social.muted {
                 button(
                     p,
-                    &format!("Unmute player {id}"),
+                    &trf("social.muted.unmute", &[("id", id)]),
                     SocialAction::Mute(*id),
                     "SocialUnmuteSender",
                 );
@@ -1310,12 +1365,13 @@ fn render(
     roots: Query<Entity, With<SocialRoot>>,
     mut previous: Local<String>,
     scrolls: Query<(&Name, &ScrollPosition)>,
+    locale: Option<Res<Locale>>,
 ) {
     let Ok((_, window)) = world.window.single() else {
         return;
     };
     let key = format!(
-        "{:?}{:?}{:?}{:?}{}{}{}{}{}{}{}{:?}{}{:?}{:?}",
+        "{:?}{:?}{:?}{:?}{}{}{:?}{}{}{}{}{:?}{}{:?}{:?}",
         social.chat_open,
         social.wheel,
         social.events,
@@ -1338,12 +1394,13 @@ fn render(
             .and_then(|assets| assets.image(&social.wheel_ids[index], &images))
     });
     let key = format!(
-        "{key}{}{:?}{}{}{:?}",
+        "{key}{}{:?}{}{}{:?}|{}",
         wheel_render_key(&social.wheel_ids, &wheel_images),
         world.mobile.safe,
         world.mobile.enabled,
         social.keyboard_requested,
         social.channel,
+        locale.as_ref().map_or(0, |locale| locale.generation()),
     );
     let old_scroll = scrolls
         .iter()
@@ -1387,9 +1444,19 @@ fn render(
                 Name::new("SocialEntry"),
             ))
             .with_children(|p| {
-                button(p, "Chat", SocialAction::Chat, "SocialOpenChat");
+                button(
+                    p,
+                    tr("social.entry.chat"),
+                    SocialAction::Chat,
+                    "SocialOpenChat",
+                );
                 if matches!(world.snapshot.state, GameState::Running) {
-                    button(p, "Reactions", SocialAction::Wheel, "SocialOpenWheel");
+                    button(
+                        p,
+                        tr("social.entry.reactions"),
+                        SocialAction::Wheel,
+                        "SocialOpenWheel",
+                    );
                 }
             });
         if !social.status.is_empty() {
@@ -1404,7 +1471,7 @@ fn render(
                     ..default()
                 },
                 BackgroundColor(ui::PANEL),
-                Text::new(&social.status),
+                Text::new(social.status.text()),
                 ui::text(12.0),
                 TextColor(ui::IVORY),
                 ZIndex(85),
@@ -1450,36 +1517,32 @@ fn render(
                 ))
                 .with_children(|p| {
                     p.spawn(row()).with_children(|p| {
-                        text(p, "Match chat", 22.0, ui::GOLD, "SocialChatTitle");
+                        text(p, tr("social.title"), 22.0, ui::GOLD, "SocialChatTitle");
                         button(
                             p,
-                            if social.channel == SocialChannel::Team {
-                                "Team"
-                            } else {
-                                "Match"
-                            },
+                            channel_label(social.channel),
                             SocialAction::Channel,
                             "SocialChannel",
                         );
                         button(
                             p,
-                            if social.mute_all {
-                                "Unmute all"
+                            tr(if social.mute_all {
+                                "social.mute.unmute_all"
                             } else {
-                                "Mute all"
-                            },
+                                "social.mute.all"
+                            }),
                             SocialAction::MuteAll,
                             "SocialMuteAll",
                         );
-                        button(p, "Close", SocialAction::Close, "SocialClose");
+                        button(p, tr("social.close"), SocialAction::Close, "SocialClose");
                     });
                     text(
                         p,
-                        if world.snapshot.match_mode == "practice" {
-                            "Practice · bots · no ranked or career rewards"
+                        tr(if world.snapshot.match_mode == "practice" {
+                            "social.mode.practice"
                         } else {
-                            "Messages last for this match"
-                        },
+                            "social.mode.match"
+                        }),
                         12.0,
                         ui::MUTED,
                         "SocialMode",
@@ -1493,10 +1556,14 @@ fn render(
                         "SocialChatInput",
                     );
                     p.spawn(row()).with_children(|p| {
-                        button(p, "Send", SocialAction::Send, "SocialSend");
+                        button(p, tr("social.send"), SocialAction::Send, "SocialSend");
                         text(
                             p,
-                            format!("{}/160  {}", social.draft.chars().count(), social.status),
+                            format!(
+                                "{}/160  {}",
+                                social.draft.chars().count(),
+                                social.status.text()
+                            ),
                             12.0,
                             ui::MUTED,
                             "SocialSendStatus",
@@ -1557,7 +1624,7 @@ fn render(
                         } else {
                             text(
                                 p,
-                                reaction_visuals::label(id),
+                                data::reaction(id),
                                 12.0,
                                 ui::IVORY,
                                 "SocialReactionFallback",
@@ -1571,7 +1638,14 @@ fn render(
                     top: Val::Px(center.y - 22.0),
                     ..default()
                 })
-                .with_children(|p| button(p, "Cancel", SocialAction::Close, "SocialWheelCancel"));
+                .with_children(|p| {
+                    button(
+                        p,
+                        tr("social.cancel"),
+                        SocialAction::Close,
+                        "SocialWheelCancel",
+                    )
+                });
             });
     }
 }
@@ -1727,7 +1801,7 @@ fn reconcile_bubbles(
         } else {
             commands
                 .spawn((
-                    Text::new("BOT"),
+                    Localized::new("social.bot").into_text(),
                     TextLayout::new_with_justify(Justify::Center),
                     ui::text(11.0),
                     TextColor(ui::GOLD),
@@ -1752,6 +1826,14 @@ fn reconcile_bubbles(
     }
 }
 
+fn channel_label(channel: SocialChannel) -> &'static str {
+    tr(if channel == SocialChannel::Team {
+        "social.channel.team"
+    } else {
+        "social.channel.match"
+    })
+}
+
 fn desktop_social_top() -> f32 {
     crate::minimap::DESKTOP_MINIMAP_INSET
 }
@@ -1759,6 +1841,55 @@ fn desktop_social_top() -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// The shared crate's fixed chat/request messages (also sent by the
+    /// server) are shown through their keys; unknown server prose as sent.
+    #[test]
+    fn shared_social_messages_are_shown_by_key_and_server_prose_as_sent() {
+        let errors = [
+            normalize_chat_text("line\nbreak").unwrap_err(),
+            normalize_chat_text("   ").unwrap_err(),
+            shared::social::validate_request(&shared::social::SocialRequest {
+                request_id: 0,
+                server_epoch: 0,
+                match_id: 0,
+                session_id: String::new(),
+                command: SocialCommand::Subscribe,
+            })
+            .unwrap_err(),
+        ];
+        for error in errors {
+            let status = SocialStatus::from_text(error);
+            assert!(matches!(status, SocialStatus::Key(_)), "{error}");
+            assert_eq!(status.text(), error, "English is unchanged");
+        }
+        for (message, key) in SHARED_MESSAGES {
+            assert_eq!(crate::i18n::tr(key), message);
+        }
+        let server = SocialStatus::from_text("Slow down.");
+        assert_eq!(server, SocialStatus::Text("Slow down.".into()));
+        assert_eq!(server.text(), "Slow down.");
+        assert!(SocialStatus::None.is_empty() && !server.is_empty());
+    }
+
+    /// A status shown in the chat follows a language change.
+    #[test]
+    fn chat_status_follows_the_language() {
+        if crate::i18n::testing::isolated("social::tests::chat_status_follows_the_language") {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, Locale, LocaleId};
+        let mut app = App::new();
+        app.add_plugins(I18nPlugin::default());
+        let status = SocialStatus::Key("social.status.delivered");
+        assert_eq!(status.text(), "Delivered");
+        assert_eq!(composer_preview("", "", 200.0), "Message your team…");
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(LocaleId::parse("zh-Hans").unwrap());
+        assert_eq!(status.text(), "已送达");
+        assert_eq!(channel_label(SocialChannel::Team), "队伍");
+        assert_eq!(composer_preview("", "", 200.0), "给队友发消息…");
+    }
     #[test]
     fn chat_log_scrolls_by_wheel_on_desktop_only() {
         use crate::platform::UiProfile;

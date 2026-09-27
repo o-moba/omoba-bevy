@@ -1,5 +1,10 @@
 //! Avatar collection: every avatar the player can look at, with a live 3D
 //! preview, animation switching and the showcase/loadout choices.
+//!
+//! Text comes from the `collection` dictionary: the header is `Localized`, the
+//! grid and the detail panel rebuild on a language change. Avatar names,
+//! collections, authors, licences and clip names are data and stay as authored.
+// i18n-strict
 
 use bevy::input::mouse::MouseMotion;
 use bevy::input::touch::{TouchInput, TouchPhase};
@@ -11,6 +16,7 @@ use super::AppScreen;
 use super::card::ProfileCard;
 use super::preview::{AvatarPreview, PreviewStatus};
 use super::widgets;
+use crate::i18n::{Locale, Localized, tr};
 use crate::team::{AvatarThumbnails, TeamSelection};
 use crate::ui::theme::{self, ButtonKind};
 use crate::ui::widgets::{ButtonStyle, compact_screen_tile, screen_button, screen_tile};
@@ -97,15 +103,19 @@ fn spawn_catalogue_grid(
     thumbnails: &AvatarThumbnails,
     phone: bool,
 ) {
-    grid.spawn(widgets::heading("Included heroes", 17.0));
-    for (defaults, title) in [(true, ""), (false, "Ekza Studio · Library")] {
+    grid.spawn(widgets::heading(tr("collection.included"), 17.0));
+    for (defaults, title) in [(true, ""), (false, tr("collection.studio"))] {
         if !defaults {
             grid.spawn((
                 widgets::heading(title, 17.0),
                 Name::new("CollectionStudioHeading"),
             ));
             grid.spawn((
-                widgets::label(catalogue.status.label(), 12.0, theme::MUTED),
+                widgets::label(
+                    crate::i18n::data::catalogue_status(&catalogue.status),
+                    12.0,
+                    theme::MUTED,
+                ),
                 Name::new("CollectionStudioStatus"),
             ));
             grid.spawn(Node {
@@ -117,7 +127,7 @@ fn spawn_catalogue_grid(
             .with_children(|row| {
                 screen_button(
                     row,
-                    "Refresh",
+                    tr("collection.button.refresh"),
                     ButtonKind::Secondary,
                     CollectionAction::Refresh,
                     "CollectionRefresh",
@@ -125,9 +135,9 @@ fn spawn_catalogue_grid(
                 screen_button(
                     row,
                     if crate::passport::account_connected() {
-                        "Sign out of Ekza"
+                        tr("collection.button.sign_out")
                     } else {
-                        "Connect Ekza"
+                        tr("collection.button.connect")
                     },
                     ButtonKind::Secondary,
                     CollectionAction::ConnectAccount,
@@ -170,7 +180,7 @@ fn spawn_catalogue_grid(
     {
         screen_button(
             grid,
-            "Connect wallet (optional)",
+            tr("collection.button.connect_wallet"),
             ButtonKind::Secondary,
             CollectionAction::ConnectWallet,
             "CollectionConnectWallet",
@@ -192,7 +202,7 @@ fn refresh_connection_labels(mut labels: Query<(&Name, &mut Text)>) {
         let value = match name.as_str() {
             "CollectionAccountStatus" => account.as_str(),
             "CollectionWalletStatus" => wallet.as_str(),
-            "CollectionStudioStatus" => catalogue.label(),
+            "CollectionStudioStatus" => crate::i18n::data::catalogue_status(&catalogue),
             "CollectionConnectAccountLabel" => account_button,
             "CollectionConnectWalletLabel" => wallet_button,
             _ => continue,
@@ -210,12 +220,18 @@ fn refresh_collection_catalogue(
     preview: Res<AvatarPreview>,
     mut grids: Query<(Entity, &mut CatalogueRevision), With<CollectionGrid>>,
     platform: Res<crate::ui::UiPlatform>,
+    locale: Option<Res<Locale>>,
+    mut language: Local<Option<u32>>,
 ) {
     crate::passport::poll_account();
     crate::passport::poll_wallet();
     let catalogue = crate::passport::avatar_catalogue();
+    // A language change rebuilds the grid like a new catalogue revision.
+    let generation = locale.as_ref().map(|locale| locale.generation());
+    let relocalize = language.is_some() && *language != generation;
+    *language = generation;
     for (grid, mut revision) in &mut grids {
-        if revision.0 == catalogue.revision {
+        if revision.0 == catalogue.revision && !relocalize {
             continue;
         }
         ensure_thumbnails(&asset_server, &mut thumbnails);
@@ -285,16 +301,16 @@ fn spawn_collection(
                         ..default()
                     })
                     .with_children(|title| {
-                        title.spawn(widgets::heading("Avatars", 30.0));
+                        title.spawn(widgets::heading(Localized::new("collection.title"), 30.0));
                         title.spawn(widgets::label(
-                            "Your heroes, your identity · Drag a model to inspect it",
+                            Localized::new("collection.subtitle"),
                             13.0,
                             theme::MUTED,
                         ));
                     });
                 screen_button(
                     header,
-                    "Back",
+                    Localized::new("common.back"),
                     ButtonKind::Secondary,
                     CollectionAction::Back,
                     "CollectionBack",
@@ -465,7 +481,7 @@ fn spawn_avatar_tile(
             if playable {
                 source.label()
             } else {
-                "View only"
+                tr("collection.view_only")
             },
             10.5,
             if playable { theme::MUTED } else { theme::GOLD },
@@ -699,6 +715,7 @@ fn refresh_collection_details(
     clip_row: Query<Entity, With<ClipRow>>,
     detail: Query<(Entity, Ref<DetailPanel>)>,
     platform: Res<crate::ui::UiPlatform>,
+    locale: Option<Res<Locale>>,
     mut last: Local<
         Option<(
             Option<String>,
@@ -710,6 +727,7 @@ fn refresh_collection_details(
             bool,
             bool,
             u64,
+            u32,
         )>,
     >,
 ) {
@@ -736,6 +754,7 @@ fn refresh_collection_details(
         selection.avatar == preview.slug,
         playable,
         catalogue.revision,
+        locale.as_ref().map_or(0, |locale| locale.generation()),
     );
     if last.as_ref() == Some(&current) && detail.iter().all(|(_, panel)| !panel.is_added()) {
         return;
@@ -748,7 +767,7 @@ fn refresh_collection_details(
             .clips
             .iter()
             .enumerate()
-            .map(|(index, clip)| (index, AvatarPreview::clip_label(&clip.name)))
+            .map(|(index, clip)| (index, clip_display(&clip.name)))
             .collect();
         let status = preview.status;
         let selected = preview.selected;
@@ -756,21 +775,29 @@ fn refresh_collection_details(
         commands.entity(row).with_children(|row| {
             match status {
                 PreviewStatus::Empty => {
-                    row.spawn(widgets::label("Pick an avatar", 13.0, theme::MUTED));
+                    row.spawn(widgets::label(
+                        tr("collection.preview.empty"),
+                        13.0,
+                        theme::MUTED,
+                    ));
                 }
                 PreviewStatus::Loading => {
-                    row.spawn(widgets::label("Loading model…", 13.0, theme::MUTED));
+                    row.spawn(widgets::label(
+                        tr("collection.preview.loading"),
+                        13.0,
+                        theme::MUTED,
+                    ));
                 }
                 PreviewStatus::Unavailable => {
                     row.spawn(widgets::label(
-                        "Model unavailable · refresh Studio to retry",
+                        tr("collection.preview.unavailable"),
                         13.0,
                         theme::GOLD,
                     ));
                 }
                 PreviewStatus::NoAnimations => {
                     row.spawn(widgets::label(
-                        "This avatar ships without animation clips",
+                        tr("collection.preview.no_animations"),
                         13.0,
                         theme::GOLD,
                     ));
@@ -790,7 +817,11 @@ fn refresh_collection_details(
             }
             compact_screen_tile(
                 row,
-                if spinning { "Stop spin" } else { "Auto spin" },
+                if spinning {
+                    tr("collection.button.stop_spin")
+                } else {
+                    tr("collection.button.auto_spin")
+                },
                 spinning,
                 CollectionAction::ToggleSpin,
                 "AvatarAutoSpin",
@@ -810,7 +841,10 @@ fn refresh_collection_details(
                     &format!(
                         "{} · {}",
                         definition.collection,
-                        definition.author.as_deref().unwrap_or("unknown author")
+                        definition
+                            .author
+                            .as_deref()
+                            .unwrap_or(tr("collection.unknown_author"))
                     ),
                     12.0,
                     theme::MUTED,
@@ -826,9 +860,9 @@ fn refresh_collection_details(
                     screen_tile(
                         row,
                         if is_showcase {
-                            "On your card"
+                            tr("collection.button.on_card")
                         } else {
-                            "Put on card"
+                            tr("collection.button.put_on_card")
                         },
                         is_showcase,
                         CollectionAction::Showcase,
@@ -838,9 +872,9 @@ fn refresh_collection_details(
                         screen_tile(
                             row,
                             if is_equipped {
-                                "Selected"
+                                tr("collection.button.selected")
                             } else {
-                                "Play as this"
+                                tr("collection.button.play_as")
                             },
                             is_equipped,
                             CollectionAction::Equip,
@@ -848,7 +882,7 @@ fn refresh_collection_details(
                         );
                     } else {
                         row.spawn(widgets::label(
-                            "Not unlocked for matches",
+                            tr("collection.not_unlocked"),
                             12.0,
                             theme::GOLD,
                         ));
@@ -858,9 +892,50 @@ fn refresh_collection_details(
     }
 }
 
+/// A preview clip's button label: the common clip names (`idle`, `walk`,
+/// `attack`, …) come from the dictionary (`collection.clip.<name>`); any other
+/// name the model ships is shown readable but as authored.
+fn clip_display(name: &str) -> String {
+    let key: String = name
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| if matches!(c, '-' | '.' | ' ') { '_' } else { c })
+        .collect();
+    crate::i18n::lookup(&format!("collection.clip.{key}"))
+        .map_or_else(|| AvatarPreview::clip_label(name), str::to_owned)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The per-frame connection refresh keeps the Studio line in the active
+    /// language instead of the passport crate's English label.
+    #[test]
+    fn studio_status_line_follows_the_language() {
+        if crate::i18n::testing::isolated(
+            "frontend::collection::tests::studio_status_line_follows_the_language",
+        ) {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, Locale, LocaleId};
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, I18nPlugin::default()))
+            .add_systems(Update, refresh_connection_labels);
+        let line = app
+            .world_mut()
+            .spawn((Name::new("CollectionStudioStatus"), Text::new("")))
+            .id();
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(LocaleId::parse("zh-Hans").unwrap());
+        app.update();
+        let status = omoba_passport::store::catalogue_status();
+        let shown = app.world().get::<Text>(line).unwrap().0.clone();
+        assert_eq!(shown, crate::i18n::data::catalogue_status(&status));
+        assert_ne!(shown, status.label());
+    }
 
     fn drag_app() -> (App, Entity) {
         let mut app = App::new();
@@ -1352,5 +1427,18 @@ mod tests {
             *app.world().resource::<NextState<AppScreen>>(),
             NextState::Unchanged
         ));
+    }
+    #[test]
+    fn common_clip_names_come_from_the_dictionary() {
+        assert_eq!(clip_display("idle"), "Idle");
+        assert_eq!(clip_display("Attack"), "Attack");
+        assert_eq!(
+            crate::i18n::lookup_in(
+                crate::i18n::LocaleId::parse("zh-Hans").unwrap(),
+                "collection.clip.walk"
+            ),
+            Some("行走")
+        );
+        assert_eq!(clip_display("walk_cycle"), "Walk Cycle");
     }
 }
