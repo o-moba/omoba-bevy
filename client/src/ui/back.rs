@@ -8,6 +8,7 @@
 //! press cannot also close the next overlay or open the pause menu. A source
 //! other than the keyboard writes [`BackPress`] for one frame (the gamepad
 //! does so in `PreUpdate`); it is cleared at the end of every frame.
+// i18n-strict
 use bevy::{ecs::system::SystemParam, prelude::*};
 
 /// A back press from a non-keyboard source (a gamepad's East), live for the

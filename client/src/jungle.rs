@@ -1,4 +1,5 @@
 //! Ordinary jungle presentation; authoritative entities own all health and life cycles.
+// i18n-strict
 use bevy::prelude::*;
 
 use crate::{

@@ -1,4 +1,5 @@
 //! Presentation-only art mapping. Ability IDs remain owned by shared gameplay data.
+// i18n-strict
 use bevy::prelude::*;
 
 pub(crate) const ATLAS_PATH: &str = "ui/skills/skills-atlas.png";

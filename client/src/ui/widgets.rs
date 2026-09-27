@@ -7,6 +7,7 @@
 //! Captions are `impl UiLabel`: a literal (`"×"`, a formatted `String`) or a
 //! `crate::i18n::Localized` key, which the widget spawns filled in the active
 //! language and which follows later language changes.
+// i18n-strict
 use bevy::prelude::*;
 
 use super::{

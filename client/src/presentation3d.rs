@@ -2,6 +2,7 @@
 //!
 //! Gizmos are rebuilt each frame: effects own no render entities or assets.
 //! Local = double circle, ally = square, enemy = triangle, in addition to color.
+// i18n-strict
 
 use bevy::prelude::*;
 use shared::PlayerActionKind;

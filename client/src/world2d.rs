@@ -3,6 +3,7 @@
 //! Gameplay and networking deliberately remain in Bevy's XZ plane.  This
 //! module is the only place that translates those coordinates into the XY
 //! render plane used by `Camera2d`.
+// i18n-strict
 
 use bevy::prelude::*;
 use serde::Deserialize;

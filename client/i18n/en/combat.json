@@ -33,5 +33,7 @@
   "combat.hotbar.select_target": "Select target",
   "combat.hotbar.out_of_range": "Out of range",
   "combat.hotbar.ready": "Ready",
-  "combat.hotbar.rank": "R{rank} · {cost} MP\n{status}"
+  "combat.hotbar.rank": "R{rank} · {cost} MP\n{status}",
+  "combat.feedback.butterfly": "Forest butterfly · +{hp} HP",
+  "combat.feedback.no_route": "No walkable route to that point."
 }

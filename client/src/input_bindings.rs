@@ -1,5 +1,6 @@
 //! Central keybinding labels for combat HUD and help copy.
 //! Keep cast handling in `combat.rs` in sync with `SKILL_CAST_KEYS`.
+// i18n-strict
 
 use bevy::prelude::KeyCode;
 

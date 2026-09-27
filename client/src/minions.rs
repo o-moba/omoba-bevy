@@ -1,4 +1,5 @@
 //! Original procedural lane sentinels with authoritative release poses.
+// i18n-strict
 
 use bevy::prelude::*;
 

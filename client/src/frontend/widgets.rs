@@ -4,6 +4,7 @@
 //! Buttons and tiles are kit widgets (`crate::ui::widgets::{screen_button,
 //! screen_tile}`) carrying a typed `UiAction`; the palette is
 //! `crate::ui::theme`.
+// i18n-strict
 
 use bevy::prelude::*;
 

@@ -1,4 +1,5 @@
 //! The client's team component and its bridges to `shared::map::Team`.
+// i18n-strict
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -43,8 +44,8 @@ impl PartialEq<Team> for shared::map::Team {
 impl Team {
     pub fn as_str(self) -> &'static str {
         match self {
-            Team::Green => "Green",
-            Team::Blue => "Blue",
+            Team::Green => "Green", // i18n-allow: Name/log id, never displayed
+            Team::Blue => "Blue",   // i18n-allow
         }
     }
 }

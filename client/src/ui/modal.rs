@@ -8,6 +8,7 @@
 //! same answer. The modal's root node carries [`ModalRoot`]; a `Pressable`
 //! or `ScrollArea` belongs to the nearest `ModalRoot` ancestor, and while any
 //! modal is open only the top modal's controls react.
+// i18n-strict
 use bevy::{ecs::system::SystemParam, prelude::*};
 
 /// Every registered modal. The stack is ordered by [`ModalId::layer`] (the

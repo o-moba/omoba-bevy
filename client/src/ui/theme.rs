@@ -2,6 +2,7 @@
 //!
 //! Every overlay and front-end screen reads its colours from here; the old
 //! `ui_theme` and `frontend::widgets` re-export shims are gone.
+// i18n-strict
 use bevy::prelude::*;
 
 /// Opaque menu backdrop. The gameplay world keeps rendering underneath, so the
@@ -47,14 +48,15 @@ pub const DEBUG_GOD_HOVER: Color = Color::srgba(0.88, 0.28, 0.30, 0.98);
 pub const DEBUG_SPEED: Color = Color::srgba(0.20, 0.44, 0.80, 0.96);
 pub const DEBUG_SPEED_HOVER: Color = Color::srgba(0.28, 0.52, 0.90, 0.98);
 
-/// Accent colours a player can put on their profile card.
+/// Accent colours a player can put on their profile card. The name is only the
+/// swatch `TestId` suffix (`CardAccent-<name>`); the card shows the colour.
 pub const ACCENTS: [(&str, Color); 6] = [
-    ("Verdant", Color::srgb(0.24, 0.79, 0.58)),
-    ("Ember", Color::srgb(0.90, 0.46, 0.22)),
-    ("Amethyst", Color::srgb(0.58, 0.42, 0.88)),
-    ("Tide", Color::srgb(0.24, 0.58, 0.88)),
-    ("Gold", Color::srgb(0.94, 0.77, 0.43)),
-    ("Rose", Color::srgb(0.88, 0.36, 0.52)),
+    ("Verdant", Color::srgb(0.24, 0.79, 0.58)),  // i18n-allow
+    ("Ember", Color::srgb(0.90, 0.46, 0.22)),    // i18n-allow
+    ("Amethyst", Color::srgb(0.58, 0.42, 0.88)), // i18n-allow
+    ("Tide", Color::srgb(0.24, 0.58, 0.88)),     // i18n-allow
+    ("Gold", Color::srgb(0.94, 0.77, 0.43)),     // i18n-allow
+    ("Rose", Color::srgb(0.88, 0.36, 0.52)),     // i18n-allow
 ];
 
 pub fn accent_color(index: usize) -> Color {
