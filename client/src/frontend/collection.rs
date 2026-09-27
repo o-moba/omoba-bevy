@@ -202,7 +202,7 @@ fn refresh_connection_labels(mut labels: Query<(&Name, &mut Text)>) {
         let value = match name.as_str() {
             "CollectionAccountStatus" => account.as_str(),
             "CollectionWalletStatus" => wallet.as_str(),
-            "CollectionStudioStatus" => catalogue.label(),
+            "CollectionStudioStatus" => crate::i18n::data::catalogue_status(&catalogue),
             "CollectionConnectAccountLabel" => account_button,
             "CollectionConnectWalletLabel" => wallet_button,
             _ => continue,
@@ -909,6 +909,33 @@ fn clip_display(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The per-frame connection refresh keeps the Studio line in the active
+    /// language instead of the passport crate's English label.
+    #[test]
+    fn studio_status_line_follows_the_language() {
+        if crate::i18n::testing::isolated(
+            "frontend::collection::tests::studio_status_line_follows_the_language",
+        ) {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, Locale, LocaleId};
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, I18nPlugin::default()))
+            .add_systems(Update, refresh_connection_labels);
+        let line = app
+            .world_mut()
+            .spawn((Name::new("CollectionStudioStatus"), Text::new("")))
+            .id();
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(LocaleId::parse("zh-Hans").unwrap());
+        app.update();
+        let status = omoba_passport::store::catalogue_status();
+        let shown = app.world().get::<Text>(line).unwrap().0.clone();
+        assert_eq!(shown, crate::i18n::data::catalogue_status(&status));
+        assert_ne!(shown, status.label());
+    }
 
     fn drag_app() -> (App, Entity) {
         let mut app = App::new();

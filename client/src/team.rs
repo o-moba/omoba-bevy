@@ -363,6 +363,8 @@ fn wallet_connect_ui_system(
     mut listed_revision: Local<Option<u64>>,
     mut listed_account: Local<Option<bool>>,
     grid_scroll: Query<&ScrollPosition, With<ModelAvatarGrid>>,
+    locale: Option<Res<crate::i18n::Locale>>,
+    mut listed_locale: Local<Option<u32>>,
 ) {
     if selection.team.is_some() || overlay_query.is_empty() {
         return;
@@ -391,7 +393,11 @@ fn wallet_connect_ui_system(
     );
     *listed_account = Some(connected);
     *listed_revision = Some(catalogue.revision);
-    if just_connected || account_just_connected || stale {
+    // The Studio hint and the avatar source suffixes are plain text built here.
+    let generation = locale.as_ref().map(|locale| locale.generation());
+    let relabel = listed_locale.is_some() && *listed_locale != generation;
+    *listed_locale = generation;
+    if just_connected || account_just_connected || stale || relabel {
         if let Ok(scroll) = grid_scroll.single() {
             commands.insert_resource(PickerScrollRestore(scroll.y));
         }

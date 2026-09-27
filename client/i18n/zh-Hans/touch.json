@@ -1,6 +1,6 @@
 {
   "touch.attack": "攻击",
-  "touch.ability.locked": "{level} 级",
+  "touch.ability.locked": "{level}级解锁",
   "touch.ability.no_mana": "法力",
   "touch.rank.back": "返回",
   "touch.rank.points": "+{points}\n加点",
