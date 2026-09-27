@@ -1,7 +1,9 @@
 //! Native two-thumb controls. Touch ownership is per finger and survives crossing
 //! another control; only a fresh Started event can capture an input.
+// i18n-strict
 use std::collections::HashMap;
 
+use crate::i18n::{data, tr, trf};
 use crate::net::TargetKind;
 use bevy::{
     input::touch::{TouchInput, TouchPhase},
@@ -1176,7 +1178,7 @@ fn draw_mobile_controls(
                 if attack_cooling {
                     format!("{attack_remaining:.1}")
                 } else {
-                    "ATK".into()
+                    tr("touch.attack").into()
                 },
                 visible,
                 if attack_cooling {
@@ -1243,11 +1245,14 @@ fn draw_mobile_controls(
                 let status = if mobile.upgrade_mode && mobile.upgrade_enabled[slot] {
                     format!("{} +", ["Q", "W", "E", "R"][slot])
                 } else if !unlocked {
-                    format!("Lv {}", shared::SLOT_UNLOCK_LEVELS[slot])
+                    trf(
+                        "touch.ability.locked",
+                        &[("level", &shared::SLOT_UNLOCK_LEVELS[slot])],
+                    )
                 } else if cooldown.remaining_secs[slot] > 0.0 {
                     format!("{:.1}", cooldown.remaining_secs[slot])
                 } else if !mana {
-                    "MANA".into()
+                    tr("touch.ability.no_mana").into()
                 } else {
                     ["Q", "W", "E", "R"][slot].into()
                 };
@@ -1282,9 +1287,9 @@ fn draw_mobile_controls(
                 layout.upgrade_center,
                 layout.upgrade_radius,
                 if mobile.upgrade_mode {
-                    "BACK".into()
+                    tr("touch.rank.back").into()
                 } else {
-                    format!("+{}\nRANK", prog.skill_points)
+                    trf("touch.rank.points", &[("points", &prog.skill_points)])
                 },
                 visible && mobile.upgrade_enabled.iter().any(|enabled| *enabled),
                 if mobile.upgrade_mode {
@@ -1297,7 +1302,7 @@ fn draw_mobile_controls(
             MobileVisual::CategoryAttack(index) => (
                 layout.category_centers[index],
                 layout.auxiliary_radius,
-                ["MIN", "TWR"][index].into(),
+                tr(["touch.target.minion", "touch.target.tower"][index]).into(),
                 visible,
                 crate::ui::theme::PANEL,
                 crate::ui::theme::GOLD,
@@ -1306,11 +1311,14 @@ fn draw_mobile_controls(
                 let remaining = [utility.dash_remaining_secs, utility.haste_remaining_secs][index];
                 let active = index == 1 && utility.haste_active_secs > 0.0;
                 let label = if active {
-                    format!("{:.1}\nFAST", utility.haste_active_secs)
+                    trf(
+                        "touch.haste.active",
+                        &[("seconds", &format!("{:.1}", utility.haste_active_secs))],
+                    )
                 } else if remaining > 0.0 {
                     format!("{remaining:.0}")
                 } else {
-                    ["DASH", "HASTE"][index].into()
+                    tr(["touch.dash", "touch.haste"][index]).into()
                 };
                 (
                     layout.utility_centers[index],
@@ -1336,11 +1344,11 @@ fn draw_mobile_controls(
                     .map(|c| {
                         if c.canceled || (c.control == Control::Attack && mobile.attack_cancelled())
                         {
-                            "CANCEL\nRelease to discard"
+                            tr("touch.aim.cancel")
                         } else if c.control == Control::Attack {
-                            "Point toward an enemy · release to lock\nMove to × to cancel"
+                            tr("touch.aim.attack")
                         } else {
-                            "Drag to aim · release to use\nMove to × to cancel"
+                            tr("touch.aim.skill")
                         }
                     })
                     .unwrap_or("");
@@ -1362,21 +1370,45 @@ fn draw_mobile_controls(
             }
             MobileVisual::SkillDescription => {
                 let slot = mobile.inspected_skill();
-                let label = slot.map(|slot| {
-                    let def = ability_for_class_slot(class, SkillSlot::from_index(slot as u8).unwrap());
-                    let rank = prog.ranks[slot].max(1);
-                    let duration = if sandbox.is_some_and(|s| s.config.player.no_cooldowns) {
-                        0.0
-                    } else {
-                        crate::combat::effective_cast_duration(class, prog.level, rank,
-                            SkillSlot::ALL[slot], bonuses, sandbox.is_some())
-                    };
-                    let availability = if prog.unlocked()[slot] {
-                        format!("Rank {rank}")
-                    } else { format!("Unlocks at level {}", shared::SLOT_UNLOCK_LEVELS[slot]) };
-                    format!("{}  ·  {}\n{}\n\n{:.0} mana  ·  {:.1}s cooldown\nRelease to close · tap or drag to cast", def.name, availability, def.description,
-                        scaled_mana_cost(def, rank), duration)
-                }).unwrap_or_default();
+                let label = slot
+                    .map(|slot| {
+                        let def = ability_for_class_slot(
+                            class,
+                            SkillSlot::from_index(slot as u8).unwrap(),
+                        );
+                        let rank = prog.ranks[slot].max(1);
+                        let duration = if sandbox.is_some_and(|s| s.config.player.no_cooldowns) {
+                            0.0
+                        } else {
+                            crate::combat::effective_cast_duration(
+                                class,
+                                prog.level,
+                                rank,
+                                SkillSlot::ALL[slot],
+                                bonuses,
+                                sandbox.is_some(),
+                            )
+                        };
+                        let availability = if prog.unlocked()[slot] {
+                            trf("touch.skill.rank", &[("rank", &rank)])
+                        } else {
+                            trf(
+                                "touch.skill.unlocks",
+                                &[("level", &shared::SLOT_UNLOCK_LEVELS[slot])],
+                            )
+                        };
+                        trf(
+                            "touch.skill.card",
+                            &[
+                                ("name", &data::ability_name(def)),
+                                ("availability", &availability),
+                                ("description", &data::ability_desc(def)),
+                                ("mana", &format!("{:.0}", scaled_mana_cost(def, rank))),
+                                ("cooldown", &format!("{duration:.1}")),
+                            ],
+                        )
+                    })
+                    .unwrap_or_default();
                 (
                     Vec2::new(mobile.viewport.x * 0.5, mobile.safe.top + 100.0 * s),
                     1.0,
@@ -1389,7 +1421,7 @@ fn draw_mobile_controls(
             MobileVisual::Rotate => (
                 mobile.viewport * 0.5,
                 1.0,
-                "Rotate your phone\nPlay Omoba in landscape".into(),
+                tr("touch.rotate").into(),
                 mobile.enabled && !mobile.landscape,
                 crate::ui::theme::PANEL,
                 crate::ui::theme::GOLD,

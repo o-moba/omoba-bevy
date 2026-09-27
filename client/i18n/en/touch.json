@@ -1,0 +1,19 @@
+{
+  "touch.attack": "ATK",
+  "touch.ability.locked": "Lv {level}",
+  "touch.ability.no_mana": "MANA",
+  "touch.rank.back": "BACK",
+  "touch.rank.points": "+{points}\nRANK",
+  "touch.target.minion": "MIN",
+  "touch.target.tower": "TWR",
+  "touch.dash": "DASH",
+  "touch.haste": "HASTE",
+  "touch.haste.active": "{seconds}\nFAST",
+  "touch.aim.cancel": "CANCEL\nRelease to discard",
+  "touch.aim.attack": "Point toward an enemy · release to lock\nMove to × to cancel",
+  "touch.aim.skill": "Drag to aim · release to use\nMove to × to cancel",
+  "touch.skill.rank": "Rank {rank}",
+  "touch.skill.unlocks": "Unlocks at level {level}",
+  "touch.skill.card": "{name}  ·  {availability}\n{description}\n\n{mana} mana  ·  {cooldown}s cooldown\nRelease to close · tap or drag to cast",
+  "touch.rotate": "Rotate your phone\nPlay Omoba in landscape"
+}
