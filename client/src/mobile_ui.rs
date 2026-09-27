@@ -511,7 +511,6 @@ fn phone_family(
                 "ShopSummary" => Some(PhoneText::ShopSummary),
                 "PauseMenuPanel" => Some(PhoneText::Pause),
                 "GameStateCard" => Some(PhoneText::Result),
-                "HelpPanel" => Some(PhoneText::Help),
                 "PhoneMenuBar" => Some(PhoneText::Bar),
                 _ => None,
             };
@@ -543,7 +542,7 @@ fn adapt_phone_layout(
     session: Res<ClientSession>,
     mut nodes: Query<(Entity, NodeKey, &mut Node, Option<&mut UiTransform>)>,
     mut fonts: Query<(Entity, &mut TextFont, Option<&PhoneFontSize>)>,
-    mut copy: Query<(NodeKey, &mut Text)>,
+    mut copy: Query<(NodeKey, &mut Text), Without<crate::i18n::Localized>>,
     hierarchy: Query<(Option<&ChildOf>, NodeKey)>,
     pause: Option<Res<crate::pause_menu::PauseMenuState>>,
     ui_scale: Option<Res<UiScale>>,
@@ -653,16 +652,10 @@ fn adapt_phone_layout(
                 node.padding = UiRect::all(Val::Px(10.0));
                 node.row_gap = Val::Px(6.0);
             }
-            "HelpPanel" => {
-                node.max_height = Val::Px(height);
-                node.width = Val::Px(width.min(metric::PHONE_HELP_W));
-                node.max_width = Val::Px(width);
-                node.padding = UiRect::all(Val::Px(14.0));
-                node.row_gap = Val::Px(10.0);
-            }
+            // The help panel places itself in the safe area (`help_overlay`,
+            // `hud-help.md`); its card list is a touch scroll area.
             "HelpBody" => {
-                // New combat actions remain discoverable without pushing the
-                // fixed 44px dismiss action below a landscape phone viewport.
+                // The fixed 44 px dismiss row stays above the scrolling cards.
                 node.max_height = Val::Px((height - 82.0).max(120.0));
                 node.min_height = Val::Px(0.0);
                 node.flex_shrink = 1.0;
@@ -769,12 +762,13 @@ fn adapt_phone_layout(
         }
         font.font_size = metric::phone_font(family, original, width, scale);
     }
-    // Phone copy of the help overlay. Other modules write their own phone
-    // wording (chosen by `MobileControls::enabled`); this pass only lays out.
+    // Phone copy of a help dismiss label spawned without its key (the guide
+    // spawns `help.phone.dismiss` itself on a phone and relabels it). Other
+    // modules write their own phone wording (chosen by
+    // `MobileControls::enabled`); this pass only lays out.
     for (name, mut text) in &mut copy {
         let key = match name.as_str() {
             "HelpDismissLabel" => "help.phone.dismiss",
-            "HelpBody" => "help.phone.body",
             _ => continue,
         };
         let copy = tr(key);
