@@ -16,14 +16,17 @@ buttons onto the kit. Every button the client draws is now a kit button (see
 | Module | Holds |
 | --- | --- |
 | `ui/mod.rs` | `UiKitPlugin`, `UiPlatform`, `UiSet` |
-| `ui/theme.rs` | palette, fonts, `metric` (sizes and the responsive policy: `Form`, `menu_font`, `menu_control_height`, `pause_panel_height`, `phone_class_column`, `phone_shop_card`, `phone_font`/`PhoneText`, phone panel widths), `ButtonKind` (`Primary`, `Secondary`, `Tile`, `Danger`, `Link`, `Team(Team)`, `Skill`, `SkillUpgrade`, `ShopItem`, `Debug(DebugToggle)`) and its idle/hover/pressed colours |
+| `ui/tokens.rs` | Verdant Crown design tokens, generated from `client/ui/tokens/verdant-crown.json` by `client/build.rs` (`color`, `space`, `radius`, `border`, `size`, `motion` modules; `Metric`, `FontFamily`, `TextRole`/`TypeStyle`, `CubicBezier`; round-trip tables) — see [Verdant Crown foundation](#verdant-crown-foundation-0270) |
+| `ui/kit_assets.rs` | the installed UI textures as types (`Icon`, `Frame`, `Sprite`, `Background`, generated from `client/assets/ui/verdant/manifest.json`), `KitImage` → `ImageNode` at the right density (`UiDensity`, 9-slice `slicer`), `CoverImage` |
+| `ui/font_cmap.rs` | a face's characters from its `cmap` (display-face fallback) |
+| `ui/theme.rs` | palette (legacy names as token aliases), fonts and text roles (`TextStyle`, `UiForm`, `apply_text_styles`, `perceptual`), `metric` (sizes and the responsive policy: `desktop_ui_scale`, `Form`, `menu_font`, `menu_control_height`, `pause_panel_height`, `phone_class_column`, `phone_shop_card`, `phone_font`/`PhoneText`, phone panel widths), `ButtonKind` (`Primary`, `Secondary`, `Tile`, `Danger`, `Link`, `Team(Team)`, `Skill`, `SkillUpgrade`, `ShopItem`, `Debug(DebugToggle)`) and its idle/hover/pressed colours |
 | `ui/gesture.rs` | `Pressable`, `TapTracker`, `TAP_SLOP`, `recognize_presses`, `GestureEpoch`, `SyntheticPress`, `logical_ui_rect` |
 | `ui/scroll.rs` | `ScrollArea` (`WheelScroll`, `DragScroll`, `ScrollPlatform`), `scroll_areas`, `max_offset`, `harness` (tests) |
 | `ui/modal.rs` | `ModalId`, `ModalStack`, `ModalRoot`, `ModalAppExt::register_modal`, `ModalSet`, `ModalGate` |
 | `ui/action.rs` | `UiAction<T>`, `Activated<T>`, `dispatch_actions::<T>`, `UiActionAppExt` |
 | `ui/back.rs` | `BackInput` (Esc plus `BackPress`), `BackPress`, `clear_back_press` |
-| `ui/focus.rs` | `UiFocus`, `FocusNav`, `navigate_focus`, `directional_neighbor`, `reveal_delta` |
-| `ui/widgets.rs` | `ButtonStyle`, `paint_pressables`, `paint_focus_ring` (`FocusRing`), `button`, `button_with_label`, `icon_button`, `adjust_row`, `toggle_row`, `value_label`; front-end `screen_button`, `screen_tile`, `compact_screen_tile`, `screen_label` and their phone metrics `MenuTypography`/`MenuControl`; captions are `impl UiLabel` (see [Text and language](#text-and-language)) |
+| `ui/focus.rs` | `UiFocus`, `FocusNav`, `navigate_focus`, `directional_neighbor`, `reveal_delta`, `FocusAdjustable`/`FocusAdjust` (Left/Right on a slider or cycle row), `FocusSkip` |
+| `ui/widgets/` | `mod.rs`: `ButtonStyle`, `KitSkin`, `KitParts`, `PreviewState`, `paint_pressables`, `paint_slabs`, `paint_kit`, `paint_focus_ring` (`FocusRing`, `FocusHalo`), `spawn_button`/`button_node`/`ButtonSize`, `button`, `button_with_label`, `icon_button`, `adjust_row`, `toggle_row`, `value_label`; front-end `screen_button`, `screen_tile`, `compact_screen_tile`, `screen_label` and their phone metrics `MenuTypography`/`MenuControl`; captions are `impl UiLabel` (see [Text and language](#text-and-language)). `controls.rs`: icon button, stepper buttons, tabs, toggle, slider, cycle row, text input. `surfaces.rs`: panels, modal, list row, badge, tooltip, toast. `game.rs`: bars, ability button, item slot, shop card, hero tile, portrait, scoreboard row, timer ring, HUD plates |
 | `ui/test_id.rs` | `TestId`, `NodeKey`/`node_key` (a node's `TestId`, else its `Name`), `harness::{TestIds, find, press, kit_app, spawn_ui, set_disabled, drain_actions}` (tests) |
 
 The `crate::ui_theme` shim, the `frontend::widgets` palette re-export,
@@ -401,6 +404,180 @@ except the shop cards and CLOSE (`ModalRoot(Shop)`), the scoreboard's Close
 and backdrop (`ModalRoot(Scoreboard)`) and the server-entry keys
 (`ModalRoot(ServerEntry)`), so with a modal open only the top modal's
 buttons react.
+
+## Verdant Crown foundation (0.27.0)
+
+The kit is restyled on the approved Verdant Crown handoff
+(`omoba-ui/handoff/`: `tokens.json`, `components/*.md|png`,
+`assets/manifest.json`). Screens were not redesigned; they pick up the new
+look where they use the kit. Screen steps (HUD, result, help, Home, …)
+compose these parts.
+
+### Tokens as data
+
+- `client/ui/tokens/verdant-crown.json` is a byte copy of
+  `omoba-ui/handoff/tokens.json`. `python3 scripts/sync_ui_tokens.py` copies
+  and validates it (colour format, type-style fields, font files installed)
+  and records its SHA-256 in `verdant-crown.lock.json`;
+  `--check` (run by `scripts/test_sync_ui.py`) fails on a hand edit and, when
+  the omoba-ui checkout sits next to the repo, on any drift from the handoff.
+- `client/build.rs` (`build/ui_tokens.rs`) generates `OUT_DIR/ui_tokens.rs`,
+  included by `ui::tokens`: `color::SURFACE_1`, `size::BUTTON_HEIGHT` (a
+  `Metric { desktop, phone }`, `.at(form)`), `space::S16`, `radius::MD`,
+  `border::FOCUS`, `motion::DURATION_PANEL_OPEN` (`Duration`),
+  `motion::EASING_ENTER` (`CubicBezier::ease`), `FontFamily`, `TextRole` and
+  `type_style::*`. A token the code names but the data lacks is a compile
+  error; a key the generator cannot type fails the build;
+  `generated_tokens_round_trip_the_json` checks every key against the tables.
+- Naming: group → module, rest → upper-case constant; a `.desktop`/`.phone`
+  pair → one `Metric`; a lone `.phone` keeps its suffix
+  (`size::ABILITY_ATTACK_PHONE`); `space.8` → `space::S8`.
+- Kit code (`ui/theme.rs`, `ui/widgets/`) names tokens only. Documented
+  literal exceptions: the `OMOBA_DEBUG_UI` toggle colours, the profile-card
+  accent swatches (player content), the legacy responsive screen policy in
+  `metric` (`MENU_W`, `PAUSE_PANEL`, `phone_font`, … until the screens are
+  redesigned) and component anatomy numbers the handoff states in px without
+  a token (e.g. the 22 px level-up disc, 36 px chevrons, 280 px cycle
+  control), each a named constant next to its component.
+- The legacy palette names (`BACKDROP`, `PANEL`, `TILE`, `GOLD`, `IVORY`, …)
+  are aliases of the tokens (mapping in `handoff/tokens.md`), so every
+  screen already draws Verdant colours.
+
+### Fonts and text roles
+
+- Installed with the other assets (`client/assets/ui/verdant/fonts/`, OFL
+  texts beside them): Cinzel SemiBold/Bold (display), Inter Regular/SemiBold
+  (body), Barlow Condensed SemiBold/Bold (numbers), Noto Serif SC SemiBold
+  (zh-Hans display subset). zh-Hans body text keeps the bundled Noto Sans CJK
+  SC; text without a role keeps `ui/Inter.ttf` (`apply_theme_font`).
+- `theme::TextStyle { role, keep_case, size }` on a `Text` picks family,
+  size, `LineHeight` and case from `type.<role>.*`
+  (`theme::role_text(TextRole::Button)`). `apply_text_styles` runs in
+  `I18nSystems::Font` (after the relabel and every writer, before layout):
+  - CJK text uses the role's CJK face when that face has every character
+    (the Serif SC subset only holds the dictionaries' characters, read from
+    its `cmap`), else Noto Sans CJK SC; number roles keep Barlow unless the
+    text has CJK.
+  - Latin text a display face cannot draw (a Cyrillic player tag in a
+    heading) uses `type.name_lg`'s face at the same size, as written.
+  - Upper case applies to the role's own Latin face only, never to CJK.
+    `keep_case` leaves text that a module rewrites itself as written (the kit
+    never fights an owner's writes; Cinzel draws lower case as small caps).
+  - Size: `size.phone` on a phone with the `menu_font` minimums; on desktop
+    never below `metric::DESKTOP_TEXT_FLOOR` (11) rendered px.
+  - `UiForm` (from `UiPlatform`) is the layout family roles and sizes resolve
+    for; the gallery switches it.
+- Guard: `the_display_subset_covers_every_zh_hans_dictionary_character`
+  fails when a zh-Hans string (outside the developer gallery's
+  `kit.gallery.*`) has a character missing from the subset; re-run the
+  handoff's `tools/fonts.py build` and `scripts/sync_ui_assets.py`.
+
+### Assets
+
+`python3 scripts/sync_ui_assets.py` installs every `ship: true` entry of the
+handoff manifest (1x and 2x) into `client/assets/ui/verdant/` with the
+licence texts and a trimmed `manifest.json`; `--check` verifies files, byte
+counts and the 2.3 MiB budget (2,308,179 bytes today, fonts 1.78 MB).
+`client/build.rs` (`build/ui_assets.rs`) turns that manifest into `Icon`,
+`Frame`, `Sprite` and `Background` enums (paths, insets, atlas grids).
+Widgets put `KitImage { source, tint, frame }` on a node;
+`resolve_kit_images` keeps its `ImageNode` in step, loading `@2x` from 1.5
+physical px per UI px (`UiDensity` = window scale × `UiScale`; the timer
+ring stays 1x, `LowDensity`) and scaling 9-slice insets so corners keep their
+logical size. `CoverImage` crops art like CSS `cover`. The game-icons.net
+CC BY 3.0 credit line (with Lucide ISC and the font licences) is in Settings
+(`pause.credits.icons`).
+
+### Painting and states
+
+- State model: idle · hover (pointer only) · pressed · focused · disabled
+  (`Pressable::disabled`, never focusable) · selected (`ButtonStyle::selected`).
+- `paint_pressables` owns the fill: from `ButtonKind` (legacy mapping), or
+  from the control's `KitSkin` when the skin has its own fill rule (tabs are
+  transparent until hovered, rows and fields keep their surface).
+- `paint_slabs` draws the 9-slice slab of every Primary, Secondary, Danger
+  and Team button (kit-spawned or screen-owned) per state
+  (`frames/button-*`, a selected secondary shows its hover slab), unless the
+  owner draws its own image (`NoSlab`, or a non-kit `ImageNode`). Team
+  buttons get their 4 px team bar.
+- `paint_kit` repaints kit-spawned controls' border, label, icon tint, press
+  scale (`motion.press.scale`; abilities 0.94) and parts (`KitParts`: tab
+  indicator, switch track/knob, slider thumb, cycle chevrons, ability rim).
+- Focus ring (`paint_focus_ring`): 2 px `color.focus.ring` at 3 px
+  (`FocusRingOffset` for the slider row: 6) with a `color.focus.halo` band
+  filling the 6 px around the control, following its corner radius.
+- `PreviewState { state, focused }` pins a control to a state (the gallery);
+  `paint_preview_rings` draws a static ring for `focused`.
+- `theme::perceptual(color)`: Bevy blends in linear light while the handoff
+  sheets are browser (sRGB) renders, so translucent tokens drew too light
+  (black veils) or too strong (light accents). The kit remaps their alpha with
+  the display gamma for scrims, veils, glass, hairlines, bar tracks, damage
+  trail and the focus halo. The token data is unchanged.
+
+### Components
+
+| Handoff sheet | Kit API |
+| --- | --- |
+| button | `button`, `button_with_label`, `screen_button`, `spawn_button(node, label, TextStyle, kind, icon, …)` with `button_node(ButtonSize::{Regular, Large, Hero}, kind, form)`; `ButtonKind::Link` is the tertiary text action (hover underline) |
+| icon-button | `controls::icon_button`, `sized_icon_button(icon, form, …)`; header `widgets::icon_button("×")` keeps the 44 px touch minimum |
+| stepper | `adjust_row` (`{id}-Down/-Value/-Up`), `controls::stepper_button` |
+| tab | `controls::tab(label, icon, TabPlacement::{Top, Rail}, form, selected, …)` |
+| toggle | `controls::toggle(label, on, action, id)` (row = hit target, `selected` = on, knob slides over `motion.duration.hover`); legacy `toggle_row` is a label/value slab button |
+| slider | `controls::slider(label, value, form, id)` → `Slider { value, step }` + `SliderChanged`; drag, tap, Left/Right 5 % with hold-to-repeat |
+| cycle-row | `controls::cycle_row(label, value, marker, previous, next, form, id)`: one focusable control, Left/Right or the chevrons |
+| text-input | `controls::text_input(placeholder, icon, marker, action, id)`; `selected` = editing (caret), `InputError(true)` = error border |
+| panel | `surfaces::plain_panel`, `framed_panel(form)` + `panel_header`, `ornament_frame`, `modal(title, close, form, id)` (opens with scale + scrim fade) |
+| list-row | `surfaces::list_row(RowLeading, title, subtitle, action, id, trailing)` |
+| badge | `surfaces::badge(text, BadgeKind, number)` |
+| tooltip | `surfaces::tooltip_panel`; `Tooltip { title, body }` on a control shows it on hover (400 ms) or focus |
+| toast | `surfaces::toast_panel`; `ToastRequest { kind, text }` shows a timed toast (max 3, in/hold/out) |
+| bars | `game::bar(BarKind, BarValue, width, form, show_value)`; damage trail, dead state |
+| ability-button | `game::ability_button(AbilityView, side, …)`, `ability_upgrade`; cooldown sweep and seconds, key, cost, pips, locked, no mana, ready flash, aiming glow |
+| item-slot | `game::item_slot` (HUD), `item_slot_button`, `shop_card(ShopCard, form, …)` |
+| hero-tile | `game::hero_tile(art, class, name, AvatarSource, form, …)`, `portrait` |
+| scoreboard-row | `game::scoreboard_row(ScoreRow, form)` |
+| timer-ring | `game::timer_ring(TimerRing, RingSize, time, caption)` |
+| hud-plate | `game::hud_plate`, `minimap_frame`, `player_status`, `score_strip`, `target_frame` |
+
+### UI scale and preview cameras
+
+- Desktop menus: `UiScale = clamp(min(w/1280, h/720), DESKTOP_SCALE_MIN, 2.0)`
+  (R2.3; 1920×1080 → 1.5). A 1024×640 capture at 0.8 put the screens' legacy
+  11–12 px labels at 9–10 px, so `DESKTOP_SCALE_MIN` is 1.0 until the
+  screens use text roles (which never render below 11 px); screen steps lower
+  it to 0.8. The desktop match keeps 1.0 until its world-anchored overlays
+  (nameplates, floating combat numbers, chat bubbles) divide by `UiScale`.
+  Phones keep `frontend::menu_scale` and the `metric` minimums.
+- The avatar preview and party stage cameras clear to transparent
+  (`frontend::PREVIEW_CLEAR`, R2.4), so the menu background shows behind the
+  models.
+
+### Kit gallery
+
+`OMOBA_UI_GALLERY=1 cargo run -p client` opens every component in every
+state over the shell: F2 switches desktop/phone, F3 the language,
+PageUp/PageDown or the tabs the page (buttons, controls, inputs, panels,
+feedback, abilities, heroes, HUD, type specimen + icon sheet, focus over the
+menu backgrounds). The first column of each row is live (hover, press,
+gamepad focus); the others are pinned with `PreviewState`.
+`OMOBA_UI_GALLERY_OUTPUT=<dir>` captures every page × profile × language at
+1280×720 plus buttons and type at 1920×1080 and 1024×640 and exits.
+
+### Known differences from the handoff sheets
+
+- **Letter spacing:** Bevy 0.18 text has no tracking, so `letter_spacing_em`
+  stays data; display text is set without the sheets' 0.06–0.18 em.
+- **Ellipsis:** Bevy text cannot ellipsize; single-line labels clip.
+- **Desaturation:** Bevy UI images cannot be desaturated; unaffordable or
+  locked art is dimmed (`color.text.secondary` / `.disabled` tint).
+- **Opacity:** nodes have no opacity; the unaffordable shop card dims its
+  text and icon instead of 55 % opacity, the modal fades its scrim only.
+- **Cycle row disabled** hides its chevrons (`cycle-row.md`); the sheet
+  still draws them.
+- **Toast icons** use the accent colour (`toast.md`); the sheet draws them
+  neutral.
+- **Header close button** keeps 44 px on desktop (pause menu contract); the
+  kit icon button is 40.
 
 ## Remaining migration
 

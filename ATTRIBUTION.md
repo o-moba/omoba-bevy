@@ -11,6 +11,25 @@ Font License 1.1. Copyright 2020 The Inter Project Authors
 `client/assets/ui/OFL-Inter.txt`; source URL and SHA-256 are in that directory's
 README. The native package includes these files alongside the font.
 
+## Verdant Crown UI (fonts, icons, frames)
+
+Installed from the Omoba UI design handoff into `client/assets/ui/verdant/`
+(`manifest.json` there lists every file with its source and licence):
+
+- Fonts, SIL Open Font License 1.1 (no Reserved Font Names; static
+  instances/subsets keep their names): Cinzel (The Cinzel Project Authors), Inter (The
+  Inter Project Authors), Barlow Condensed (The Barlow Project Authors), Noto
+  Serif SC (Google Inc.; subset to the zh-Hans dictionaries). Licence texts:
+  `client/assets/ui/verdant/fonts/OFL-*.txt`.
+- Icons (`icons/`): game-icons.net icons by Delapouite, Lorc, Sbed and
+  Zeromancer under CC BY 3.0 (Zeromancer's CC0), and Lucide icons under ISC
+  (Feather-derived ones MIT). Per-icon credits and the Lucide licence text:
+  `client/assets/ui/verdant/icons/LICENSES.md`. The game shows the credit
+  line in Settings: "Icons made by Delapouite, Lorc, Sbed, Zeromancer from
+  https://game-icons.net, CC BY 3.0."
+- Frames, sprites and menu backgrounds: original Omoba UI art (backgrounds
+  are in-game renders), CC-BY-4.0 like the other Verdant art.
+
 ## Original Omoba 2D assets
 
 The terrain/prop atlases in `client/assets/world2d/` were generated specifically

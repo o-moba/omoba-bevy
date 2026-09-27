@@ -1056,7 +1056,7 @@ pub(crate) fn shop_card<T: UiActionT>(
                         color::TEXT_DANGER,
                     ),
                     None => (
-                        crate::i18n::data::item_short(card.item).to_owned(),
+                        crate::i18n::data::item_desc(card.item).to_owned(),
                         color::TEXT_MUTED,
                     ),
                 };
