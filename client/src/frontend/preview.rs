@@ -4,6 +4,9 @@
 //! and draws into an image the UI displays. It never touches the match world:
 //! nothing here is a player, and the gameplay camera cannot see these
 //! entities.
+//!
+//! No dictionary text: clip labels come from the model's animation names.
+// i18n-strict
 
 use bevy::camera::{RenderTarget, visibility::RenderLayers};
 use bevy::prelude::*;

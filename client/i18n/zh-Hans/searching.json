@@ -1,0 +1,11 @@
+{
+  "searching.status.waiting": "等待玩家…",
+  "searching.status.forming": "等待玩家 · {ready}/{needed}\n人数满员后对局立即开始。",
+  "searching.status.starting": "已找到对局！\n{seconds} 秒后开始…",
+  "searching.status.joining": "正在加入对局…",
+  "searching.status.contacting": "正在联系服务器…",
+  "searching.hero": "{hero} · {avatar}",
+  "searching.default_avatar": "默认形象",
+  "searching.title": "匹配",
+  "searching.heading": "正在寻找对局"
+}

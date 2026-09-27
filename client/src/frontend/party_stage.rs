@@ -4,6 +4,8 @@
 //! Like the collection preview this owns its own camera, lights and render
 //! layer and draws into an image the lobby UI displays. It never touches the
 //! match world and only renders while the lobby is on screen.
+//! No player-facing text (the lobby labels the line-up).
+// i18n-strict
 use bevy::camera::{RenderTarget, visibility::RenderLayers};
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;

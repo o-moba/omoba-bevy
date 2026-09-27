@@ -1,4 +1,9 @@
 //! Shared pre-match choices. The server owns accepted selections and lock state.
+//!
+//! Text comes from the `draft` dictionary (hero, role and avatar names through
+//! `i18n::data`); the render key includes the locale generation. Server-authored
+//! draft errors stay English.
+// i18n-strict
 use bevy::{prelude::*, window::PrimaryWindow};
 use shared::{
     HeroClass,
@@ -7,6 +12,7 @@ use shared::{
 
 use super::{AppScreen, widgets};
 use crate::{
+    i18n::{Locale, data, tr, trf},
     net::{ClientSession, GameStateSnapshot, NetworkCommand, SessionUiCommand},
     passport::{AvatarCatalogueSource, TicketPoll},
     persistence::ClientSessionId,
@@ -225,13 +231,13 @@ fn draft_actions(
                 state.desired_lock = Some(!local.locked);
             }
             _ if draft.phase != PrematchPhase::Draft || local.locked => {
-                state.notice = Some("Unlock your choice before making changes.".into());
+                state.notice = Some(tr("draft.notice.unlock_first").into());
             }
             DraftAction::Avatar(slug) => {
                 if omoba_passport::avatars::avatar_definition(slug)
                     .is_none_or(|avatar| !crate::passport::can_select(avatar))
                 {
-                    state.notice = Some("This avatar is not available in your library.".into());
+                    state.notice = Some(tr("draft.notice.avatar_unavailable").into());
                     continue;
                 }
                 if let Some(choice) = &mut state.choice {
@@ -302,15 +308,13 @@ fn send_requests(
                 TicketPoll::Free => None,
                 TicketPoll::Ready(ticket) => Some(ticket),
                 TicketPoll::Pending => {
-                    state.notice = Some("Verifying your avatar…".into());
+                    state.notice = Some(tr("draft.notice.verifying").into());
                     return;
                 }
                 TicketPoll::Denied(_) => {
                     state.choice = Some(Choice::from(local));
                     state.desired_lock = None;
-                    state.notice = Some(
-                        "Avatar verification failed. Your accepted choice is unchanged.".into(),
-                    );
+                    state.notice = Some(tr("draft.notice.verification_failed").into());
                     return;
                 }
             };
@@ -349,19 +353,19 @@ pub(super) fn composition_warning(players: &[DraftPlayer], local_id: u64) -> Str
             .any(|p| p.player_id != local_id && p.avatar.as_ref() == Some(avatar))
     });
     if duplicate {
-        return "A teammate chose the same avatar · coordinate before locking.".into();
+        return tr("draft.warning.same_avatar").into();
     }
     let same_role = team.iter().filter(|p| p.role == local.role).count();
     if same_role > 1 {
-        return format!(
-            "{same_role} players intend {} · agree your lanes together.",
-            local.role.label()
+        return trf(
+            "draft.warning.same_role",
+            &[("count", &same_role), ("role", &data::role(local.role))],
         );
     }
     if team.len() >= 3 && team.iter().all(|p| p.hero_class == local.hero_class) {
-        return "One class across the team · consider a broader mix of kits.".into();
+        return tr("draft.warning.one_class").into();
     }
-    "Roles describe your plan; class determines your abilities.".into()
+    tr("draft.warning.default").into()
 }
 
 #[derive(Component)]
@@ -501,18 +505,24 @@ pub(super) fn roster_row(
                 let identity = format!(
                     "{}{}{}",
                     player.nickname,
-                    if mine { " · YOU" } else { "" },
-                    if player.is_bot { " · BOT" } else { "" }
+                    if mine { tr("draft.roster.you") } else { "" },
+                    if player.is_bot {
+                        tr("draft.roster.bot")
+                    } else {
+                        ""
+                    }
                 );
                 text.spawn((
                     widgets::label(&identity, 13.0, theme::IVORY),
                     TextLayout::new_with_justify(Justify::Left).with_linebreak(LineBreak::NoWrap),
                 ));
                 text.spawn(widgets::label(
-                    &format!(
-                        "{} · {}",
-                        player.hero_class.display_name(),
-                        player.role.label()
+                    &trf(
+                        "draft.roster.class_role",
+                        &[
+                            ("hero", &data::hero_name(player.hero_class)),
+                            ("role", &data::role(player.role)),
+                        ],
                     ),
                     12.0,
                     theme::GOLD,
@@ -524,11 +534,15 @@ pub(super) fn roster_row(
             });
             row.spawn(widgets::label(
                 if loading {
-                    if player.loaded { "READY" } else { "LOADING" }
+                    if player.loaded {
+                        tr("draft.roster.ready")
+                    } else {
+                        tr("draft.roster.loading")
+                    }
                 } else if player.locked {
-                    "LOCKED"
+                    tr("draft.roster.locked")
                 } else {
-                    "PICKING"
+                    tr("draft.roster.picking")
                 },
                 10.0,
                 if player.loaded || (!loading && player.locked) {
@@ -549,6 +563,7 @@ fn render_draft(
     mut thumbnails: ResMut<AvatarThumbnails>,
     assets: Res<AssetServer>,
     scroll: Res<DraftScrollMemory>,
+    locale: Option<Res<Locale>>,
     mut last: Local<String>,
 ) {
     let Ok(window) = windows.single() else {
@@ -568,7 +583,11 @@ fn render_draft(
         catalogue.revision,
         window.width()
     );
-    let key = format!("{key}:{}", window.height());
+    let key = format!(
+        "{key}:{}:{}",
+        window.height(),
+        locale.as_ref().map_or(0, |locale| locale.generation())
+    );
     if *last == key && !roots.is_empty() {
         return;
     }
@@ -640,14 +659,13 @@ fn render_draft(
                     })
                     .with_children(|title| {
                         title.spawn(widgets::heading(
-                            "Assemble your team",
+                            tr("draft.title"),
                             if compact { 20.0 } else { 28.0 },
                         ));
                         title.spawn(widgets::label(
-                            &format!(
-                                "{} / {} players · your side is assigned automatically",
-                                draft.players.len(),
-                                draft.needed
+                            &trf(
+                                "draft.subtitle",
+                                &[("count", &draft.players.len()), ("needed", &draft.needed)],
                             ),
                             12.0,
                             theme::MUTED,
@@ -655,7 +673,7 @@ fn render_draft(
                     });
                 action_button(
                     header,
-                    "Cancel",
+                    tr("common.cancel"),
                     DraftAction::Leave,
                     "DraftCancel",
                     86.0,
@@ -678,7 +696,7 @@ fn render_draft(
                     ..default()
                 })
                 .with_children(|roster| {
-                    roster.spawn(widgets::label("YOUR TEAM", 12.0, theme::GOLD));
+                    roster.spawn(widgets::label(tr("draft.your_team"), 12.0, theme::GOLD));
                     roster
                         .spawn((
                             Node {
@@ -716,7 +734,7 @@ fn render_draft(
                             for class in HeroClass::ALL {
                                 action_button(
                                     classes,
-                                    class.display_name(),
+                                    data::hero_name(class),
                                     DraftAction::Class(class),
                                     &format!("DraftClass-{}", class.id()),
                                     (picker_width - 16.0) / 5.0,
@@ -734,8 +752,9 @@ fn render_draft(
                             for role in Role::ALL {
                                 action_button(
                                     roles,
-                                    role.label(),
+                                    data::role(role),
                                     DraftAction::Role(role),
+                                    // The TestId keeps the English label: ids never translate.
                                     &format!("DraftRole-{}", role.label()),
                                     (picker_width - 16.0) / 5.0,
                                     false,
@@ -762,9 +781,9 @@ fn render_draft(
                                 avatars.spawn((
                                     widgets::label(
                                         if defaults {
-                                            "INCLUDED HEROES"
+                                            tr("draft.avatars.included")
                                         } else {
-                                            "EKZA STUDIO · LIBRARY"
+                                            tr("draft.avatars.studio")
                                         },
                                         12.0,
                                         theme::GOLD,
@@ -792,7 +811,7 @@ fn render_draft(
                                         .with_children(|actions| {
                                             action_button(
                                                 actions,
-                                                "Refresh",
+                                                tr("draft.button.refresh"),
                                                 DraftAction::Refresh,
                                                 "DraftStudioRefresh",
                                                 86.0,
@@ -802,7 +821,7 @@ fn render_draft(
                                             if !crate::passport::account_connected() {
                                                 action_button(
                                                     actions,
-                                                    "Connect Ekza",
+                                                    tr("draft.button.connect_ekza"),
                                                     DraftAction::Connect,
                                                     "DraftStudioConnect",
                                                     116.0,
@@ -927,11 +946,11 @@ fn render_draft(
                 action_button(
                     footer,
                     if state.pending.is_some() {
-                        "Syncing…"
+                        tr("draft.button.syncing")
                     } else if locked {
-                        "Unlock choice"
+                        tr("draft.button.unlock")
                     } else {
-                        "Lock in"
+                        tr("draft.button.lock_in")
                     },
                     DraftAction::Lock,
                     "DraftLock",
@@ -1292,6 +1311,93 @@ mod tests {
         assert!(composition_warning(&players, 1).contains("Jungle"));
         players[1].role = Role::Support;
         assert!(composition_warning(&players, 1).contains("class determines"));
+    }
+
+    /// The draft is a render-key screen: a language change redraws it in the
+    /// new language, while its TestIds keep their English ids.
+    #[test]
+    fn a_language_change_redraws_the_draft_and_keeps_its_ids() {
+        if crate::i18n::testing::isolated(
+            "frontend::draft::tests::a_language_change_redraws_the_draft_and_keeps_its_ids",
+        ) {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, LocaleId};
+        let mut game = GameStateSnapshot {
+            your_id: 7,
+            ..default()
+        };
+        game.prematch = Some(shared::prematch::PrematchSnapshot {
+            generation: 1,
+            phase: PrematchPhase::Draft,
+            remaining_ms: 0,
+            needed: 10,
+            last_request_id: 0,
+            error: None,
+            players: vec![DraftPlayer {
+                player_id: 7,
+                nickname: "Local".into(),
+                team: shared::map::Team::Green,
+                character: CharacterChoice::default(),
+                hero_class: HeroClass::Warrior,
+                avatar: None,
+                sprite_character: None,
+                role: Role::Mid,
+                is_bot: false,
+                locked: false,
+                loaded: false,
+            }],
+        });
+        let mut app = App::new();
+        app.add_plugins((
+            bevy::app::TaskPoolPlugin::default(),
+            bevy::asset::AssetPlugin::default(),
+            I18nPlugin::default(),
+        ))
+        .init_asset::<Image>()
+        .insert_resource(game)
+        .init_resource::<DraftClient>()
+        .init_resource::<DraftScrollMemory>()
+        .init_resource::<AvatarThumbnails>()
+        .add_systems(Update, render_draft);
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+        app.update();
+        let label = |app: &mut App, id: &str| {
+            let button = crate::ui::test_id::harness::find(app.world_mut(), id)
+                .unwrap_or_else(|| panic!("no {id}"));
+            let child = app.world().get::<Children>(button).unwrap()[0];
+            app.world().get::<Text>(child).unwrap().0.clone()
+        };
+        let texts = |app: &mut App| -> Vec<String> {
+            app.world_mut()
+                .query::<&Text>()
+                .iter(app.world())
+                .map(|text| text.0.clone())
+                .collect()
+        };
+        assert_eq!(label(&mut app, "DraftLock"), "Lock in");
+        assert_eq!(label(&mut app, "DraftRole-Mid"), "Mid");
+        assert!(
+            texts(&mut app)
+                .iter()
+                .any(|text| text == "Assemble your team")
+        );
+        assert!(texts(&mut app).iter().any(|text| text == "Warrior · Mid"));
+        app.world_mut()
+            .resource_mut::<crate::i18n::Locale>()
+            .set(LocaleId::parse("zh-Hans").unwrap());
+        app.update();
+        assert_eq!(label(&mut app, "DraftLock"), "锁定");
+        assert_eq!(label(&mut app, "DraftCancel"), "取消");
+        assert_eq!(label(&mut app, "DraftRole-Mid"), "中路");
+        assert_eq!(
+            label(&mut app, &format!("DraftClass-{}", HeroClass::Warrior.id())),
+            "战士"
+        );
+        let shown = texts(&mut app);
+        assert!(shown.iter().any(|text| text == "组建你的队伍"), "{shown:?}");
+        assert!(shown.iter().any(|text| text == "战士 · 中路"), "{shown:?}");
+        assert!(!shown.iter().any(|text| text == "Assemble your team"));
     }
 
     #[test]

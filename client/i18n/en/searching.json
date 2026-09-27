@@ -1,0 +1,11 @@
+{
+  "searching.status.waiting": "Waiting for players…",
+  "searching.status.forming": "Waiting for players · {ready}/{needed}\nThe match starts as soon as the roster is full.",
+  "searching.status.starting": "Match found!\nStarting in {seconds}…",
+  "searching.status.joining": "Joining the match…",
+  "searching.status.contacting": "Contacting the server…",
+  "searching.hero": "{hero} · {avatar}",
+  "searching.default_avatar": "default avatar",
+  "searching.title": "MATCHMAKING",
+  "searching.heading": "Finding a match"
+}

@@ -1,0 +1,23 @@
+{
+  "collection.included": "Included heroes",
+  "collection.studio": "Ekza Studio · Library",
+  "collection.button.refresh": "Refresh",
+  "collection.button.sign_out": "Sign out of Ekza",
+  "collection.button.connect": "Connect Ekza",
+  "collection.button.connect_wallet": "Connect wallet (optional)",
+  "collection.title": "Avatars",
+  "collection.subtitle": "Your heroes, your identity · Drag a model to inspect it",
+  "collection.view_only": "View only",
+  "collection.preview.empty": "Pick an avatar",
+  "collection.preview.loading": "Loading model…",
+  "collection.preview.unavailable": "Model unavailable · refresh Studio to retry",
+  "collection.preview.no_animations": "This avatar ships without animation clips",
+  "collection.button.stop_spin": "Stop spin",
+  "collection.button.auto_spin": "Auto spin",
+  "collection.unknown_author": "unknown author",
+  "collection.button.on_card": "On your card",
+  "collection.button.put_on_card": "Put on card",
+  "collection.button.selected": "Selected",
+  "collection.button.play_as": "Play as this",
+  "collection.not_unlocked": "Not unlocked for matches"
+}

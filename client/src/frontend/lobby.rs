@@ -4,6 +4,10 @@
 //! Everything shown comes from the server's [`shared::party::PartyView`]
 //! (`crate::party::PartyClient`); buttons only send `PartyCommand`s. The
 //! launch itself moves every member to hero select (`crate::party`).
+//!
+//! Text comes from the `lobby` dictionary; the render key includes the
+//! locale generation, so a language change rebuilds the screen.
+// i18n-strict
 
 use bevy::prelude::*;
 use shared::match_service::MatchPreference;
@@ -11,6 +15,7 @@ use shared::party::{MAX_PARTY_SIZE, OnlinePlayer, PartyCommand, PartyView};
 
 use super::party_stage::{PartyStage, STAGE_HEIGHT, STAGE_WIDTH, StageMember};
 use super::{AppScreen, automation_bypass, widgets};
+use crate::i18n::{Locale, tr, trf};
 use crate::net::{ClientSession, NetworkCommand};
 use crate::party::PartyClient;
 use crate::ui::theme::{self, ButtonKind};
@@ -93,11 +98,11 @@ pub(crate) fn stage_members(view: &PartyView, own_avatar: Option<String>) -> Vec
 
 fn member_status(member: &shared::party::PartyMember) -> (&'static str, Color) {
     if member.away {
-        ("Away", theme::MUTED)
+        (tr("lobby.status.away"), theme::MUTED)
     } else if member.in_match {
-        ("In match", theme::GOLD)
+        (tr("lobby.status.in_match"), theme::GOLD)
     } else {
-        ("Ready", theme::JADE)
+        (tr("lobby.status.ready"), theme::JADE)
     }
 }
 
@@ -109,6 +114,8 @@ struct LobbySignature {
     friends: bool,
     server: String,
     field: super::server_field::ServerField,
+    /// The locale generation: a language change rebuilds the screen.
+    locale: u32,
 }
 
 fn signature(
@@ -116,6 +123,7 @@ fn signature(
     career: &crate::career::CareerClient,
     session: &ClientSession,
     field: &super::server_field::ServerField,
+    locale: Option<&Locale>,
 ) -> LobbySignature {
     LobbySignature {
         view: party.view.clone(),
@@ -124,6 +132,7 @@ fn signature(
         friends: career.view.storage_enabled,
         server: session.server_addr().to_owned(),
         field: field.clone(),
+        locale: locale.map_or(0, Locale::generation),
     }
 }
 
@@ -138,12 +147,13 @@ fn spawn_lobby(
     mut stage: ResMut<PartyStage>,
     platform: Res<crate::ui::UiPlatform>,
     field: Res<super::server_field::ServerField>,
+    locale: Option<Res<Locale>>,
 ) {
     if automation_bypass() {
         return;
     }
     let phone = platform.is_mobile();
-    let sig = signature(&party, &career, &session, &field);
+    let sig = signature(&party, &career, &session, &field, locale.as_deref());
     let view = &sig.view;
     stage.members = stage_members(view, crate::party::presence_avatar(&card, &selection));
     let image = stage.image.clone();
@@ -171,12 +181,8 @@ fn spawn_lobby(
                         ..default()
                     })
                     .with_children(|title| {
-                        title.spawn(widgets::heading("PARTY", 32.0));
-                        title.spawn(widgets::label(
-                            "Group up · same team · play together",
-                            14.0,
-                            theme::MUTED,
-                        ));
+                        title.spawn(widgets::heading(tr("lobby.title"), 32.0));
+                        title.spawn(widgets::label(tr("lobby.subtitle"), 14.0, theme::MUTED));
                     });
                 header
                     .spawn(Node {
@@ -188,7 +194,7 @@ fn spawn_lobby(
                         if sig.friends {
                             screen_button(
                                 actions,
-                                "Friends list",
+                                tr("lobby.button.friends"),
                                 ButtonKind::Secondary,
                                 LobbyAction::Friends,
                                 "LobbyFriends",
@@ -197,7 +203,7 @@ fn spawn_lobby(
                         if view.party.is_some() {
                             screen_button(
                                 actions,
-                                "Leave party",
+                                tr("lobby.button.leave"),
                                 ButtonKind::Danger,
                                 LobbyAction::Leave,
                                 "LobbyLeave",
@@ -205,7 +211,7 @@ fn spawn_lobby(
                         }
                         screen_button(
                             actions,
-                            "Back",
+                            tr("common.back"),
                             ButtonKind::Secondary,
                             LobbyAction::Back,
                             "LobbyBack",
@@ -243,9 +249,9 @@ fn spawn_lobby(
                 ))
                 .with_children(|column| {
                     column.spawn(widgets::label(
-                        &format!(
-                            "YOUR PARTY · {}/{MAX_PARTY_SIZE}",
-                            view.member_count()
+                        &trf(
+                            "lobby.stage.count",
+                            &[("count", &view.member_count()), ("max", &MAX_PARTY_SIZE)],
                         ),
                         12.0,
                         theme::GOLD,
@@ -280,7 +286,7 @@ fn spawn_lobby(
                                     .with_children(|plate| {
                                         plate.spawn(widgets::label(&own_name, 16.0, theme::IVORY));
                                         plate.spawn(widgets::label(
-                                            "Solo · invite a friend to team up",
+                                            tr("lobby.solo_hint"),
                                             12.0,
                                             theme::MUTED,
                                         ));
@@ -298,7 +304,7 @@ fn spawn_lobby(
                             if view.can_launch() {
                                 screen_button(
                                     row,
-                                    "PLAY VS BOTS",
+                                    tr("lobby.button.play_bots"),
                                     ButtonKind::Primary,
                                     LobbyAction::Play(MatchPreference::BotPractice),
                                     "LobbyPlayBots",
@@ -306,30 +312,29 @@ fn spawn_lobby(
                                 if sig.public {
                                     screen_button(
                                         row,
-                                        "Quick match",
+                                        tr("lobby.button.quick_match"),
                                         ButtonKind::Secondary,
                                         LobbyAction::Play(MatchPreference::Quick),
                                         "LobbyQuickMatch",
                                     );
                                 }
                             } else {
-                                let leader = view
+                                let waiting = view
                                     .party
                                     .as_ref()
                                     .and_then(|p| p.members.iter().find(|m| m.leader))
-                                    .map_or("the leader", |m| m.nickname.as_str());
-                                row.spawn(widgets::label(
-                                    &format!("Waiting for {leader} to start the match…"),
-                                    15.0,
-                                    theme::GOLD,
-                                ));
+                                    .map_or_else(
+                                        || tr("lobby.waiting_for_leader").to_owned(),
+                                        |m| trf("lobby.waiting_for", &[("leader", &m.nickname)]),
+                                    );
+                                row.spawn(widgets::label(&waiting, 15.0, theme::GOLD));
                             }
                         });
                     column.spawn(widgets::label(
                         if view.party.is_some() {
-                            "The whole party joins one team. Bots take every empty seat."
+                            tr("lobby.hint.party")
                         } else {
-                            "Bots take every empty seat. Invite a friend to share your team."
+                            tr("lobby.hint.solo")
                         },
                         12.0,
                         theme::MUTED,
@@ -354,13 +359,16 @@ fn spawn_lobby(
                         super::server_field::spawn_server_field(column, &sig.field, &sig.server);
                     }
                     if !view.invites.is_empty() {
-                        column.spawn(widgets::label("INVITES", 12.0, theme::GOLD));
+                        column.spawn(widgets::label(tr("lobby.invites"), 12.0, theme::GOLD));
                         for invite in &view.invites {
                             column
                                 .spawn((widgets::panel_row(), Name::new("LobbyInvite")))
                                 .with_children(|panel| {
                                     panel.spawn(widgets::label(
-                                        &format!("{} invites you", invite.from_nickname),
+                                        &trf(
+                                            "lobby.invite_from",
+                                            &[("name", &invite.from_nickname)],
+                                        ),
                                         15.0,
                                         theme::IVORY,
                                     ));
@@ -373,14 +381,14 @@ fn spawn_lobby(
                                         .with_children(|row| {
                                             screen_button(
                                                 row,
-                                                "Accept",
+                                                tr("lobby.button.accept"),
                                                 ButtonKind::Secondary,
                                                 LobbyAction::Accept(invite.party_id),
                                                 format!("LobbyAccept{}", invite.party_id),
                                             );
                                             screen_button(
                                                 row,
-                                                "Decline",
+                                                tr("lobby.button.decline"),
                                                 ButtonKind::Secondary,
                                                 LobbyAction::Decline(invite.party_id),
                                                 format!("LobbyDecline{}", invite.party_id),
@@ -389,19 +397,16 @@ fn spawn_lobby(
                                 });
                         }
                     }
-                    column.spawn(widgets::label("ONLINE ON THIS SERVER", 12.0, theme::GOLD));
+                    column.spawn(widgets::label(tr("lobby.online.title"), 12.0, theme::GOLD));
                     if !sig.live {
                         column.spawn(widgets::label(
-                            "This server does not host parties (or is not answering). Update the server, or reconnect.",
+                            tr("lobby.online.unavailable"),
                             13.0,
                             theme::MUTED,
                         ));
                     } else if view.online.is_empty() {
                         column.spawn(widgets::label(
-                            &format!(
-                                "Nobody else is here yet. Ask your friend to connect to\n{}",
-                                sig.server
-                            ),
+                            &trf("lobby.online.empty", &[("addr", &sig.server)]),
                             13.0,
                             theme::MUTED,
                         ));
@@ -423,19 +428,15 @@ fn spawn_plate(
     parent
         .spawn((widgets::panel_row(), Name::new("LobbyPlate")))
         .with_children(|plate| {
-            let you = if member.player_id == view.you {
-                " (you)"
+            let name = if member.player_id == view.you {
+                trf("lobby.plate.you", &[("name", &member.nickname)])
             } else {
-                ""
+                member.nickname.clone()
             };
-            plate.spawn(widgets::label(
-                &format!("{}{you}", member.nickname),
-                16.0,
-                theme::IVORY,
-            ));
+            plate.spawn(widgets::label(&name, 16.0, theme::IVORY));
             plate.spawn(widgets::label(
                 &if member.leader {
-                    format!("★ Leader · {status}")
+                    trf("lobby.plate.leader", &[("status", &status)])
                 } else {
                     status.to_owned()
                 },
@@ -445,7 +446,7 @@ fn spawn_plate(
             if view.is_leader() && member.player_id != view.you {
                 screen_button(
                     plate,
-                    "Kick",
+                    tr("lobby.button.kick"),
                     ButtonKind::Danger,
                     LobbyAction::Kick(member.player_id),
                     format!("LobbyKick{}", member.player_id),
@@ -480,12 +481,12 @@ fn spawn_online_row(parent: &mut ChildSpawnerCommands, view: &PartyView, player:
                 name.spawn(widgets::label(&player.nickname, 15.0, theme::IVORY));
                 let mut tags = Vec::new();
                 if player.friend {
-                    tags.push("★ Friend");
+                    tags.push(tr("lobby.tag.friend"));
                 }
                 if player.in_match {
-                    tags.push("In match");
+                    tags.push(tr("lobby.status.in_match"));
                 } else if player.in_party {
-                    tags.push("In a party");
+                    tags.push(tr("lobby.tag.in_a_party"));
                 }
                 if !tags.is_empty() {
                     name.spawn(widgets::label(&tags.join(" · "), 11.0, theme::MUTED));
@@ -495,17 +496,17 @@ fn spawn_online_row(parent: &mut ChildSpawnerCommands, view: &PartyView, player:
                 InviteOffer::Invite => {
                     screen_button(
                         row,
-                        "Invite",
+                        tr("lobby.button.invite"),
                         ButtonKind::Secondary,
                         LobbyAction::Invite(player.player_id),
                         format!("LobbyInvite{}", player.player_id),
                     );
                 }
                 InviteOffer::Invited => {
-                    row.spawn(widgets::label("Invited", 13.0, theme::GOLD));
+                    row.spawn(widgets::label(tr("lobby.invited"), 13.0, theme::GOLD));
                 }
                 InviteOffer::Member => {
-                    row.spawn(widgets::label("In party", 13.0, theme::JADE));
+                    row.spawn(widgets::label(tr("lobby.in_party"), 13.0, theme::JADE));
                 }
                 InviteOffer::Unavailable => {}
             }
@@ -573,9 +574,10 @@ fn refresh_lobby(
     platform: Res<crate::ui::UiPlatform>,
     field: Res<super::server_field::ServerField>,
     roots: Query<Entity, With<LobbyRoot>>,
+    locale: Option<Res<Locale>>,
     mut last: Local<Option<LobbySignature>>,
 ) {
-    let mut current = signature(&party, &career, &session, &field);
+    let mut current = signature(&party, &career, &session, &field, locale.as_deref());
     // Invite countdowns tick every second; they are not worth a rebuild.
     for invite in &mut current.view.invites {
         invite.expires_in_secs = 0;
@@ -596,7 +598,7 @@ fn refresh_lobby(
         .despawn_related::<Children>()
         .despawn();
     spawn_lobby(
-        commands, party, career, session, card, selection, stage, platform, field,
+        commands, party, career, session, card, selection, stage, platform, field, locale,
     );
 }
 

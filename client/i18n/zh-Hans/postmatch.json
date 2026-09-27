@@ -1,0 +1,18 @@
+{
+  "postmatch.outcome.victory": "胜利",
+  "postmatch.outcome.defeat": "失败",
+  "postmatch.outcome.complete": "对局结束",
+  "postmatch.personal": "{kills}/{deaths}/{assists} · 等级 {level} · +{xp} 经验",
+  "postmatch.personal_rated": "{kills}/{deaths}/{assists} · 等级 {level} · +{xp} 经验 · 排位分 {delta}",
+  "postmatch.summary.green": "绿队摧毁了敌方基地 · {minutes} 分钟",
+  "postmatch.summary.blue": "蓝队摧毁了敌方基地 · {minutes} 分钟",
+  "postmatch.summary.nobody": "没有队伍摧毁敌方基地 · {minutes} 分钟",
+  "postmatch.summary.abandoned": "对局已放弃",
+  "postmatch.summary.interrupted": "对局已中断",
+  "postmatch.tagline": "翠绿竞技场",
+  "postmatch.saved": "进度已保存",
+  "postmatch.local_result": "本地练习结果",
+  "postmatch.saving": "正在保存对局结果…",
+  "postmatch.button.play_again": "再来一局",
+  "postmatch.button.back_to_menu": "返回主菜单"
+}
