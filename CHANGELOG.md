@@ -6,6 +6,11 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### UI screen map and capture
+- `scripts/ui_screen_map.json` lists every UI screen: how a player reaches it, the code that draws it, which harness run captures it (env, server mode), the frame and the profiles, plus the screens no harness reaches yet. `docs/ui-screens.md` is generated from it.
+- `scripts/capture_ui_audit.py` (`make ui-audit`) captures every mapped screen on desktop (1280×720) and phone (844×390), files frames by area with an index, and reports missing or unmapped frames. `--check` (and `scripts/test_ui_screen_map.py`) fails when a new `AppScreen`, harness frame or QA module is not in the map. Output defaults to the sibling `../omoba-ui` design workspace.
+- Found while mapping: the phone beta-ui edge pass stops on its radial-geometry check in 0.25.0, and draft/loading show every bot's role as "Mid".
+
 Workspace version 0.25.0.
 
 ### Controller support (desktop and iPhone)
