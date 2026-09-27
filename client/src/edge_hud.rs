@@ -1,6 +1,8 @@
 //! Compact match chrome, selected-target health and the live two-team scoreboard.
+// i18n-strict
 use crate::{
     combat::{CombatStats, TargetState},
+    i18n::{Locale, Localized, UiLabel, data, tr, trf},
     input_context::InputContextSet,
     mobile_controls::MobileControls,
     net::{
@@ -89,8 +91,8 @@ fn button_node(width: f32) -> Node {
         ..default()
     }
 }
-fn text(parent: &mut ChildSpawnerCommands, value: &str, size: f32, color: Color) {
-    parent.spawn((Text::new(value), ui::text(size), TextColor(color)));
+fn text(parent: &mut ChildSpawnerCommands, value: impl UiLabel, size: f32, color: Color) {
+    parent.spawn((value.into_text(), ui::text(size), TextColor(color)));
 }
 fn setup(mut commands: Commands) {
     commands
@@ -135,7 +137,7 @@ fn setup(mut commands: Commands) {
                 BackgroundColor(ui::PANEL),
             ))
             .with_children(|p| {
-                text(p, "K / D / A", 12.0, ui::MUTED);
+                text(p, Localized::new("edge.kda"), 12.0, ui::MUTED);
                 p.spawn((
                     Text::new("—/—/—"),
                     ui::text(14.0),
@@ -294,7 +296,7 @@ fn setup(mut commands: Commands) {
                             ..default()
                         },))
                         .with_children(|row| {
-                            text(row, "MATCH SCORE", 20.0, ui::GOLD);
+                            text(row, Localized::new("edge.scoreboard.title"), 20.0, ui::GOLD);
                             row.spawn((
                                 Button,
                                 button_node(64.0),
@@ -303,7 +305,9 @@ fn setup(mut commands: Commands) {
                                 UiAction(EdgeAction::Close),
                                 TestId::new("ScoreboardCloseButton"),
                             ))
-                            .with_children(|p| text(p, "Close", 14.0, ui::IVORY));
+                            .with_children(|p| {
+                                text(p, Localized::new("edge.scoreboard.close"), 14.0, ui::IVORY)
+                            });
                         });
                     panel
                         .spawn((Node {
@@ -323,11 +327,11 @@ fn setup(mut commands: Commands) {
                                     .with_children(|col| {
                                         text(
                                             col,
-                                            if team == Team::Green {
-                                                "GREEN TEAM"
+                                            Localized::new(if team == Team::Green {
+                                                "edge.team.green"
                                             } else {
-                                                "BLUE TEAM"
-                                            },
+                                                "edge.team.blue"
+                                            }),
                                             14.0,
                                             if team == Team::Green {
                                                 ui::JADE
@@ -336,7 +340,16 @@ fn setup(mut commands: Commands) {
                                             },
                                         );
                                         spawn_score_row(
-                                            col, "PLAYER", "K/D/A", "GOLD ↑", "LV", false, true,
+                                            col,
+                                            [
+                                                "edge.column.player",
+                                                "edge.column.kda",
+                                                "edge.column.gold",
+                                                "edge.column.level",
+                                            ]
+                                            .map(Localized::new),
+                                            false,
+                                            true,
                                         );
                                         col.spawn((
                                             Node {
@@ -515,10 +528,14 @@ fn update(
                     .as_ref()
                     .and_then(|s| s.players.iter().find(|p| p.player_id == id.id))
                     .map(|p| p.nickname.clone())
-                    .unwrap_or_else(|| class.map_or("Hero", |c| c.0.display_name()).into()),
-                TargetKind::Minion => "Minion".into(),
-                TargetKind::Structure => "Tower / base".into(),
-                TargetKind::Neutral => "Neutral monster".into(),
+                    .unwrap_or_else(|| {
+                        class
+                            .map_or(tr("edge.target.hero"), |c| data::hero_name(c.0))
+                            .into()
+                    }),
+                TargetKind::Minion => tr("edge.target.minion").into(),
+                TargetKind::Structure => tr("edge.target.structure").into(),
+                TargetKind::Neutral => tr("edge.target.neutral").into(),
             };
             Some((name, stats.hp.max(0.0), stats.max_hp))
         });
@@ -534,9 +551,9 @@ fn update(
         } else if value.is_some() {
             text.0 = details
                 .as_ref()
-                .map_or_else(String::new, |(_, hp, max)| format!("{hp:.0} / {max:.0}"));
+                .map_or_else(String::new, |(_, hp, max)| format!("{hp:.0} / {max:.0}")); // i18n-allow: numbers
         } else if detail.is_some() {
-            text.0="Gold ↑ is total income this round; starting gold excluded. Clear one lane to unlock the enemy base.".into();
+            text.0 = tr("edge.scoreboard.detail").into();
             let buffs = local_team
                 .single()
                 .map(|team| crate::match_hud::team_buff_hud_text(&game.team_buffs, *team))
@@ -580,12 +597,10 @@ fn short_name(value: &str, max: usize) -> String {
         head
     }
 }
-fn spawn_score_row(
+/// One scoreboard row: name, K/D/A, gold and level cells.
+fn spawn_score_row<L: UiLabel>(
     parent: &mut ChildSpawnerCommands,
-    name: &str,
-    kda: &str,
-    gold: &str,
-    level: &str,
+    cells: [L; 4],
     local: bool,
     header: bool,
 ) {
@@ -606,14 +621,13 @@ fn spawn_score_row(
             }),
         ))
         .with_children(|row| {
-            for (value, width, grow) in [
-                (name, 0.0, 1.0),
-                (kda, 61.0, 0.0),
-                (gold, 52.0, 0.0),
-                (level, 22.0, 0.0),
-            ] {
+            for (value, (width, grow)) in
+                cells
+                    .into_iter()
+                    .zip([(0.0, 1.0), (61.0, 0.0), (52.0, 0.0), (22.0, 0.0)])
+            {
                 row.spawn((
-                    Text::new(value),
+                    value.into_text(),
                     ui::text(12.0),
                     TextColor(if header {
                         ui::MUTED
@@ -643,10 +657,12 @@ fn render_rows(
     game: Res<GameStateSnapshot>,
     local: Query<&NetworkPlayerId, With<Player>>,
     rows: Query<(Entity, &ScoreRows)>,
-    mut previous: Local<Option<(Option<LiveScoreboard>, Option<u64>)>>,
+    locale: Option<Res<Locale>>,
+    mut previous: Local<Option<(Option<LiveScoreboard>, Option<u64>, u32)>>,
 ) {
     let id = local.single().ok().map(|p| p.0);
-    let next = (game.scoreboard.clone(), id);
+    let generation = locale.as_ref().map_or(0, |locale| locale.generation());
+    let next = (game.scoreboard.clone(), id, generation);
     if previous.as_ref() == Some(&next) {
         return;
     }
@@ -655,27 +671,32 @@ fn render_rows(
         commands.entity(entity).despawn_related::<Children>();
         commands.entity(entity).with_children(|parent| {
             let Some(board) = game.scoreboard.as_ref() else {
-                text(parent, "Waiting for live score…", 12.0, ui::MUTED);
+                text(parent, tr("edge.scoreboard.waiting"), 12.0, ui::MUTED);
                 return;
             };
             let mut players: Vec<&LiveScorePlayer> =
                 board.players.iter().filter(|p| p.team == team.0).collect();
             players.sort_by_key(|p| (std::cmp::Reverse(p.kills), p.player_id));
             if players.is_empty() {
-                text(parent, "No players", 12.0, ui::MUTED);
+                text(parent, tr("edge.scoreboard.empty"), 12.0, ui::MUTED);
             }
             for p in players {
                 let name = if p.connected {
                     short_name(&p.nickname, 12)
                 } else {
-                    format!("{} · off", short_name(&p.nickname, 7))
+                    trf(
+                        "edge.scoreboard.offline",
+                        &[("name", &short_name(&p.nickname, 7))],
+                    )
                 };
                 spawn_score_row(
                     parent,
-                    &name,
-                    &format!("{}/{}/{}", p.kills, p.deaths, p.assists),
-                    &p.earned_gold.to_string(),
-                    &p.level.to_string(),
+                    [
+                        name,
+                        format!("{}/{}/{}", p.kills, p.deaths, p.assists),
+                        p.earned_gold.to_string(),
+                        p.level.to_string(),
+                    ],
                     Some(p.player_id) == id,
                     false,
                 );
@@ -1109,5 +1130,27 @@ mod tests {
             scores(Some(&LiveScoreboard::default()), None),
             ("0 : 0".into(), "—/—/—".into())
         );
+    }
+
+    #[test]
+    fn scoreboard_headings_follow_the_language() {
+        use crate::i18n::{Locale, LocaleId, relabel_localized};
+        let mut app = app();
+        app.insert_resource(Locale::detached(LocaleId::parse("zh-Hans").unwrap()))
+            .add_systems(PostUpdate, relabel_localized);
+        app.update();
+        let texts: Vec<String> = app
+            .world_mut()
+            .query::<&Text>()
+            .iter(app.world())
+            .map(|text| text.0.clone())
+            .collect();
+        for expected in ["对局比分", "关闭", "绿队", "蓝队", "玩家", "KDA"] {
+            assert!(
+                texts.iter().any(|text| text == expected),
+                "{expected}: {texts:?}"
+            );
+        }
+        assert!(!texts.iter().any(|text| text == "MATCH SCORE"));
     }
 }

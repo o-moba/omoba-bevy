@@ -1,7 +1,9 @@
 //! Server-authoritative base shop. Browsing is always safe; a receipt confirms payment.
+// i18n-strict
 use crate::{
     combat::{ActionFeedback, CombatStats},
     help_overlay::HelpOverlayVisible,
+    i18n::{Locale, Localized, data, tr, trf},
     input_context::InputContextSet,
     net::{
         ClientSession, GameState, GameStateSnapshot, NetworkCommand, NetworkHeroClass,
@@ -86,6 +88,15 @@ enum EquipmentLayoutPart {
 }
 #[derive(Component)]
 struct InventoryLabel(usize);
+/// Shop text that depends on the language and on the UI platform (phone copy
+/// is shorter), rewritten by [`relabel_shop_text`].
+#[derive(Component, Clone, Copy)]
+enum ShopText {
+    ItemName(ItemId),
+    ItemDescription(ItemId),
+    CloseLabel,
+    Footer,
+}
 #[derive(Component)]
 struct InventoryIcon {
     index: usize,
@@ -97,7 +108,7 @@ impl Plugin for ShopPlugin {
         app.init_resource::<ShopState>()
             .add_ui_action::<ShopAction>()
             .add_systems(Startup, (setup_shop, setup_quick_buy))
-            .add_systems(Update, adapt_desktop_equipment_width)
+            .add_systems(Update, (adapt_desktop_equipment_width, relabel_shop_text))
             .add_systems(
                 Update,
                 (toggle_shop, sync_shop_visibility)
@@ -124,12 +135,12 @@ impl Plugin for ShopPlugin {
 
 pub(crate) fn item_code(id: ItemId) -> &'static str {
     match id {
-        ItemId::EmberBlade => "EB",
-        ItemId::SwiftGrip => "SG",
-        ItemId::TrailBoots => "TB",
-        ItemId::VitalityGem => "VG",
-        ItemId::FocusCharm => "FC",
-        ItemId::GuardianCrest => "GC",
+        ItemId::EmberBlade => "EB",    // i18n-allow
+        ItemId::SwiftGrip => "SG",     // i18n-allow
+        ItemId::TrailBoots => "TB",    // i18n-allow
+        ItemId::VitalityGem => "VG",   // i18n-allow
+        ItemId::FocusCharm => "FC",    // i18n-allow
+        ItemId::GuardianCrest => "GC", // i18n-allow
     }
 }
 
@@ -321,7 +332,60 @@ fn update_quick_buy(
     }
 }
 
-fn setup_shop(mut commands: Commands) {
+/// A phone shows the short shop copy (tap wording, shorter footer).
+fn phone_copy(mobile: Option<&crate::mobile_controls::MobileControls>) -> bool {
+    mobile.is_some_and(|mobile| mobile.enabled)
+}
+
+impl ShopText {
+    fn text(self, phone: bool) -> &'static str {
+        match self {
+            Self::ItemName(id) => data::item_name(id),
+            Self::ItemDescription(id) => item_description(id, phone),
+            Self::CloseLabel if phone => tr("shop.button.close_phone"),
+            Self::CloseLabel => tr("shop.button.close"),
+            Self::Footer if phone => tr("shop.footer_phone"),
+            Self::Footer => tr("shop.footer"),
+        }
+    }
+}
+
+/// An item's card description; phones use the short form where one exists.
+fn item_description(id: ItemId, phone: bool) -> &'static str {
+    match (phone, id) {
+        (true, ItemId::VitalityGem) => tr("shop.item_phone.vitality_gem"),
+        (true, ItemId::GuardianCrest) => tr("shop.item_phone.guardian_crest"),
+        _ => data::item_desc(id),
+    }
+}
+
+/// Rewrites the item cards, close label and footer when the language or the
+/// UI platform changes.
+fn relabel_shop_text(
+    locale: Option<Res<Locale>>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    mut last: Local<Option<(u32, bool)>>,
+    mut labels: Query<(&ShopText, &mut Text)>,
+) {
+    let phone = phone_copy(mobile.as_deref());
+    let key = (
+        locale.as_ref().map_or(0, |locale| locale.generation()),
+        phone,
+    );
+    if *last == Some(key) {
+        return;
+    }
+    *last = Some(key);
+    for (label, mut text) in &mut labels {
+        let next = label.text(phone);
+        if text.0 != next {
+            text.0 = next.to_owned();
+        }
+    }
+}
+
+fn setup_shop(mut commands: Commands, mobile: Option<Res<crate::mobile_controls::MobileControls>>) {
+    let phone = phone_copy(mobile.as_deref());
     commands
         .spawn((
             Button,
@@ -344,7 +408,7 @@ fn setup_shop(mut commands: Commands) {
         ))
         .with_children(|panel| {
             panel.spawn((
-                Text::new("80 gold   /   Equipment"),
+                Text::new(trf("shop.equipment_gold", &[("gold", &80)])),
                 ui::text(13.0),
                 TextColor(ui::GOLD),
                 EquipmentGold,
@@ -414,67 +478,228 @@ fn setup_shop(mut commands: Commands) {
                 ))
                 .with_children(|button| {
                     button.spawn((
-                        Text::new("P   OPEN SHOP"),
+                        Localized::new("shop.button.open").into_text(),
                         Name::new("ShopOpenLabel"),
                         ui::text(14.0),
                         TextColor(ui::GOLD),
                     ));
                 });
         });
-    commands.spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), right: Val::Px(0.0),
-        top: Val::Px(0.0), bottom: Val::Px(0.0), display: Display::None,
-        align_items: AlignItems::Center, justify_content: JustifyContent::Center, ..default() },
-        BackgroundColor(Color::srgba(0.005, 0.025, 0.025, 0.68)), Visibility::Hidden,
-        ZIndex(45), ShopRoot, ModalRoot(ModalId::Shop), Name::new("ShopRoot")))
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                display: Display::None,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.005, 0.025, 0.025, 0.68)),
+            Visibility::Hidden,
+            ZIndex(45),
+            ShopRoot,
+            ModalRoot(ModalId::Shop),
+            Name::new("ShopRoot"),
+        ))
         .with_children(|overlay| {
-            overlay.spawn((Node { width: Val::Px(864.0), max_width: Val::Percent(94.0), flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(12.0), padding: UiRect::all(Val::Px(22.0)), ..ui::panel_node() },
-                BackgroundColor(ui::PANEL.with_alpha(1.0)), BorderColor::all(ui::EDGE), Name::new("ShopPanel")))
+            overlay
+                .spawn((
+                    Node {
+                        width: Val::Px(864.0),
+                        max_width: Val::Percent(94.0),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(12.0),
+                        padding: UiRect::all(Val::Px(22.0)),
+                        ..ui::panel_node()
+                    },
+                    BackgroundColor(ui::PANEL.with_alpha(1.0)),
+                    BorderColor::all(ui::EDGE),
+                    Name::new("ShopPanel"),
+                ))
                 .with_children(|panel| {
-                    panel.spawn((Node { align_items: AlignItems::Center, justify_content: JustifyContent::SpaceBetween, ..default() },))
+                    panel
+                        .spawn((Node {
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::SpaceBetween,
+                            ..default()
+                        },))
                         .with_children(|row| {
-                            row.spawn((Text::new("Sanctuary shop"), ui::text(26.0), TextColor(ui::IVORY)));
-                            row.spawn((Button, Node { padding: UiRect::axes(Val::Px(12.0), Val::Px(7.0)), ..default() },
-                                BackgroundColor(ui::TILE), UiAction(ShopAction::Close), TestId::new("ShopCloseButton")))
-                                .with_children(|button| { button.spawn((Text::new("ESC  CLOSE"), Name::new("ShopCloseLabel"), ui::text(13.0), TextColor(ui::MUTED))); });
+                            row.spawn((
+                                Localized::new("shop.title").into_text(),
+                                ui::text(26.0),
+                                TextColor(ui::IVORY),
+                            ));
+                            row.spawn((
+                                Button,
+                                Node {
+                                    padding: UiRect::axes(Val::Px(12.0), Val::Px(7.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(ui::TILE),
+                                UiAction(ShopAction::Close),
+                                TestId::new("ShopCloseButton"),
+                            ))
+                            .with_children(|button| {
+                                button.spawn((
+                                    Text::new(ShopText::CloseLabel.text(phone)),
+                                    ShopText::CloseLabel,
+                                    Name::new("ShopCloseLabel"),
+                                    ui::text(13.0),
+                                    TextColor(ui::MUTED),
+                                ));
+                            });
                         });
-                    panel.spawn((Text::new(""), ui::text(16.0), TextColor(ui::GOLD), ShopSummary, Name::new("ShopSummary")));
-                    panel.spawn((Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(10.0), row_gap: Val::Px(10.0), ..default() }, Name::new("ShopCards")))
-                        .with_children(|cards| { for definition in shop::items() {
-                            cards.spawn((Button, Node { width: Val::Px(264.0), height: Val::Px(150.0),
-                                padding: UiRect::all(Val::Px(13.0)), flex_direction: FlexDirection::Column,
-                                row_gap: Val::Px(7.0), border: UiRect::all(Val::Px(1.0)),
-                                border_radius: BorderRadius::all(Val::Px(7.0)), ..default() },
-                                BackgroundColor(ui::TILE), BorderColor::all(ui::EDGE), ShopBuy(definition.id),
-                                ButtonStyle::new(ButtonKind::ShopItem), UiAction(ShopAction::Buy(definition.id)),
-                                TestId::new(format!("ShopBuy-{}", item_code(definition.id)))))
-                                .with_children(|card| {
-                                    card.spawn((Node { align_items: AlignItems::Center, column_gap: Val::Px(10.0), ..default() },)).with_children(|row| {
-                                        spawn_item_icon(row, definition.id, 36.0);
-                                        row.spawn((Text::new(definition.name), ui::text(18.0), TextColor(ui::IVORY)));
-                                    });
-                                    card.spawn((Text::new(definition.description), ui::text(14.0), TextColor(ui::MUTED),
-                                        Name::new(format!("ShopDescription-{}", item_code(definition.id))),
-                                        Node { flex_grow: 1.0, ..default() }));
-                                    card.spawn((Text::new(""), ui::text(14.0), TextColor(ui::GOLD), ShopCardLabel(definition.id),
-                                        Name::new(format!("ShopDetails-{}", item_code(definition.id)))));
-                                });
-                        }});
-                    panel.spawn((Node { column_gap: Val::Px(6.0), flex_wrap: FlexWrap::Wrap, ..default() }, Name::new("ShopInventory")))
-                        .with_children(|row| {
-                            for index in 0..shop::INVENTORY_CAPACITY {
-                                row.spawn((Node { width: Val::Px(74.0), height: Val::Px(28.0), align_items: AlignItems::Center,
-                                    column_gap: Val::Px(3.0), ..default() }, BackgroundColor(ui::TILE)))
-                                    .with_children(|slot| {
-                                        slot.spawn((Node { width: Val::Px(22.0), height: Val::Px(22.0), ..default() }, InventoryIcon { index, shown: None }));
-                                        slot.spawn((Text::new("-"), ui::text(12.0), TextColor(ui::MUTED), InventoryLabel(index)));
+                    panel.spawn((
+                        Text::new(""),
+                        ui::text(16.0),
+                        TextColor(ui::GOLD),
+                        ShopSummary,
+                        Name::new("ShopSummary"),
+                    ));
+                    panel
+                        .spawn((
+                            Node {
+                                flex_wrap: FlexWrap::Wrap,
+                                column_gap: Val::Px(10.0),
+                                row_gap: Val::Px(10.0),
+                                ..default()
+                            },
+                            Name::new("ShopCards"),
+                        ))
+                        .with_children(|cards| {
+                            for definition in shop::items() {
+                                cards
+                                    .spawn((
+                                        Button,
+                                        Node {
+                                            width: Val::Px(264.0),
+                                            height: Val::Px(150.0),
+                                            padding: UiRect::all(Val::Px(13.0)),
+                                            flex_direction: FlexDirection::Column,
+                                            row_gap: Val::Px(7.0),
+                                            border: UiRect::all(Val::Px(1.0)),
+                                            border_radius: BorderRadius::all(Val::Px(7.0)),
+                                            ..default()
+                                        },
+                                        BackgroundColor(ui::TILE),
+                                        BorderColor::all(ui::EDGE),
+                                        ShopBuy(definition.id),
+                                        ButtonStyle::new(ButtonKind::ShopItem),
+                                        UiAction(ShopAction::Buy(definition.id)),
+                                        TestId::new(format!(
+                                            "ShopBuy-{}",
+                                            item_code(definition.id)
+                                        )),
+                                    ))
+                                    .with_children(|card| {
+                                        card.spawn((Node {
+                                            align_items: AlignItems::Center,
+                                            column_gap: Val::Px(10.0),
+                                            ..default()
+                                        },))
+                                            .with_children(|row| {
+                                                spawn_item_icon(row, definition.id, 36.0);
+                                                row.spawn((
+                                                    Text::new(
+                                                        ShopText::ItemName(definition.id)
+                                                            .text(phone),
+                                                    ),
+                                                    ShopText::ItemName(definition.id),
+                                                    ui::text(18.0),
+                                                    TextColor(ui::IVORY),
+                                                ));
+                                            });
+                                        card.spawn((
+                                            Text::new(
+                                                ShopText::ItemDescription(definition.id)
+                                                    .text(phone),
+                                            ),
+                                            ShopText::ItemDescription(definition.id),
+                                            ui::text(14.0),
+                                            TextColor(ui::MUTED),
+                                            Name::new(format!(
+                                                "ShopDescription-{}",
+                                                item_code(definition.id)
+                                            )),
+                                            Node {
+                                                flex_grow: 1.0,
+                                                ..default()
+                                            },
+                                        ));
+                                        card.spawn((
+                                            Text::new(""),
+                                            ui::text(14.0),
+                                            TextColor(ui::GOLD),
+                                            ShopCardLabel(definition.id),
+                                            Name::new(format!(
+                                                "ShopDetails-{}",
+                                                item_code(definition.id)
+                                            )),
+                                        ));
                                     });
                             }
                         });
-                    panel.spawn((Text::new(""), ui::text(15.0), TextColor(ui::JADE), ShopFeedback,
-                        Node { min_height: Val::Px(21.0), ..default() }, Name::new("ShopFeedback")));
-                    panel.spawn((Text::new("Unique permanent items. Buy at your base; keep them through respawn.\nEarn 1 gold / second during the match, plus combat rewards. Equipment resets each new round."),
-                        ui::text(13.0), TextColor(ui::MUTED), Name::new("ShopFooter")));
+                    panel
+                        .spawn((
+                            Node {
+                                column_gap: Val::Px(6.0),
+                                flex_wrap: FlexWrap::Wrap,
+                                ..default()
+                            },
+                            Name::new("ShopInventory"),
+                        ))
+                        .with_children(|row| {
+                            for index in 0..shop::INVENTORY_CAPACITY {
+                                row.spawn((
+                                    Node {
+                                        width: Val::Px(74.0),
+                                        height: Val::Px(28.0),
+                                        align_items: AlignItems::Center,
+                                        column_gap: Val::Px(3.0),
+                                        ..default()
+                                    },
+                                    BackgroundColor(ui::TILE),
+                                ))
+                                .with_children(|slot| {
+                                    slot.spawn((
+                                        Node {
+                                            width: Val::Px(22.0),
+                                            height: Val::Px(22.0),
+                                            ..default()
+                                        },
+                                        InventoryIcon { index, shown: None },
+                                    ));
+                                    slot.spawn((
+                                        Text::new("-"),
+                                        ui::text(12.0),
+                                        TextColor(ui::MUTED),
+                                        InventoryLabel(index),
+                                    ));
+                                });
+                            }
+                        });
+                    panel.spawn((
+                        Text::new(""),
+                        ui::text(15.0),
+                        TextColor(ui::JADE),
+                        ShopFeedback,
+                        Node {
+                            min_height: Val::Px(21.0),
+                            ..default()
+                        },
+                        Name::new("ShopFeedback"),
+                    ));
+                    panel.spawn((
+                        Text::new(ShopText::Footer.text(phone)),
+                        ShopText::Footer,
+                        ui::text(13.0),
+                        TextColor(ui::MUTED),
+                        Name::new("ShopFooter"),
+                    ));
                 });
         });
 }
@@ -694,17 +919,17 @@ fn unavailable_reason(
     id: ItemId,
 ) -> Option<String> {
     if !stats.is_alive() {
-        Some("Wait for respawn".into())
+        Some(tr("shop.reason.respawn").into())
     } else if equipment.inventory.contains(&id) {
-        Some("Owned".into())
+        Some(tr("shop.reason.owned").into())
     } else if !equipment.shop_available {
-        Some("Return to your base".into())
+        Some(tr("shop.reason.return_base").into())
     } else if equipment.inventory.len() >= shop::INVENTORY_CAPACITY {
-        Some("Inventory full".into())
+        Some(tr("shop.reason.inventory_full").into())
     } else if equipment.gold < shop::item(id).cost {
-        Some(format!(
-            "Need {} more gold",
-            shop::item(id).cost - equipment.gold
+        Some(trf(
+            "shop.reason.need_gold",
+            &[("gold", &(shop::item(id).cost - equipment.gold))],
         ))
     } else {
         None
@@ -764,7 +989,10 @@ fn purchase_buttons(
             retry: 0.0,
         };
         send_purchase(&pending, &mut outgoing);
-        state.feedback = format!("Purchasing {}...", shop::item(item).name);
+        state.feedback = trf(
+            "shop.feedback.purchasing",
+            &[("item", &data::item_name(item))],
+        );
         state.pending = Some(pending);
         return;
     }
@@ -803,9 +1031,9 @@ fn reconcile_purchase(
             if receipt.request_id == pending.request && receipt.match_id == pending.round {
                 let message = receipt.error.map_or_else(
                     || {
-                        format!(
-                            "Purchased {}. Equipment updated.",
-                            shop::item(pending.item).name
+                        trf(
+                            "shop.feedback.purchased",
+                            &[("item", &data::item_name(pending.item))],
                         )
                     },
                     purchase_error_text,
@@ -839,17 +1067,15 @@ fn reconcile_purchase(
 
 fn purchase_error_text(error: PurchaseError) -> String {
     // Names come from the shared wire enum; no client-side success prediction.
-    match error {
-        PurchaseError::Dead => "Wait for respawn before purchasing.",
-        PurchaseError::OutsideBase => "Return to your own base to purchase.",
-        PurchaseError::InsufficientGold => {
-            "Not enough gold. Earn more through combat or passive income."
-        }
-        PurchaseError::AlreadyOwned => "You already own this item.",
-        PurchaseError::InventoryFull => "Your inventory is full.",
-        PurchaseError::UnknownItem => "This item is unavailable in the server catalog.",
-        _ => "Purchasing is unavailable right now. Try again in your base.",
-    }
+    tr(match error {
+        PurchaseError::Dead => "shop.error.dead",
+        PurchaseError::OutsideBase => "shop.error.outside_base",
+        PurchaseError::InsufficientGold => "shop.error.insufficient_gold",
+        PurchaseError::AlreadyOwned => "shop.error.already_owned",
+        PurchaseError::InventoryFull => "shop.error.inventory_full",
+        PurchaseError::UnknownItem => "shop.error.unknown_item",
+        _ => "shop.error.unavailable",
+    })
     .into()
 }
 
@@ -929,31 +1155,37 @@ fn update_shop(
         return;
     };
     for mut text in &mut labels.gold {
-        text.0 = format!("{} gold   /   Equipment", equipment.gold);
+        text.0 = trf("shop.equipment_gold", &[("gold", &equipment.gold)]);
     }
     for (slot, mut text, mut color) in &mut labels.inventory {
         text.0 = equipment
             .inventory
             .get(slot.0)
-            .map_or_else(|| "-".to_owned(), |id| short_item_name(*id).to_owned());
+            .map_or_else(|| "-".to_owned(), |id| data::item_short(*id).to_owned());
         *color = TextColor(if slot.0 < equipment.inventory.len() {
             ui::GOLD
         } else {
             ui::MUTED
         });
     }
+    let phone = phone_copy(mobile.as_deref());
     for mut text in &mut labels.summary {
-        text.0 = format!(
-            "{} gold  |  {} recommendations  |  {}",
-            equipment.gold,
-            class.0.display_name(),
-            if !stats.is_alive() {
-                "Wait for respawn"
-            } else if equipment.shop_available {
-                "In sanctuary: click an item to buy"
-            } else {
-                "Browse only: return to your base to buy"
-            }
+        let status = tr(if !stats.is_alive() {
+            "shop.reason.respawn"
+        } else if !equipment.shop_available {
+            "shop.status.browse"
+        } else if phone {
+            "shop.status.buy_tap"
+        } else {
+            "shop.status.buy_click"
+        });
+        text.0 = trf(
+            "shop.summary",
+            &[
+                ("gold", &equipment.gold),
+                ("class", &data::hero_name(class.0)),
+                ("status", &status),
+            ],
         );
     }
     for mut text in &mut labels.feedback {
@@ -963,19 +1195,30 @@ fn update_shop(
         let reason = unavailable_reason(equipment, stats, label.0);
         let recommended = shop::recommended_items(class.0)[..3].contains(&label.0);
         text.0 = if equipment.inventory.contains(&label.0) {
-            "OWNED".into()
+            tr("shop.card.owned").into()
         } else if state.pending.as_ref().is_some_and(|p| p.item == label.0) {
-            "AWAITING SERVER...".into()
+            tr("shop.card.awaiting").into()
         } else {
-            format!(
-                "{}g  {}\n{}",
-                shop::item(label.0).cost,
-                if recommended { "RECOMMENDED" } else { "" },
-                reason.unwrap_or_else(|| if mobile.as_ref().is_some_and(|m| m.enabled) {
-                    "TAP TO BUY".into()
+            let tag = if recommended {
+                tr("shop.card.recommended")
+            } else {
+                ""
+            };
+            let action = reason.unwrap_or_else(|| {
+                tr(if phone {
+                    "shop.card.tap_to_buy"
                 } else {
-                    "CLICK TO PURCHASE".into()
+                    "shop.card.click_to_buy"
                 })
+                .into()
+            });
+            trf(
+                "shop.card.details",
+                &[
+                    ("cost", &shop::item(label.0).cost),
+                    ("tag", &tag),
+                    ("action", &action),
+                ],
             )
         };
     }
@@ -990,16 +1233,6 @@ fn update_shop(
                 ui::EDGE
             },
         );
-    }
-}
-fn short_item_name(id: ItemId) -> &'static str {
-    match id {
-        ItemId::EmberBlade => "Blade",
-        ItemId::SwiftGrip => "Grip",
-        ItemId::TrailBoots => "Boots",
-        ItemId::VitalityGem => "Gem",
-        ItemId::FocusCharm => "Charm",
-        ItemId::GuardianCrest => "Crest",
     }
 }
 
@@ -1547,6 +1780,90 @@ mod tests {
             0
         );
         assert!(!app.world().resource::<ShopState>().purchase_pending());
+    }
+
+    /// The phone copy replaces the English patches `mobile_ui` used to apply
+    /// (`CLOSE`, the short footer, `max HP`, `tap an item`).
+    #[test]
+    fn phone_copy_reproduces_the_former_phone_wording() {
+        assert_eq!(ShopText::CloseLabel.text(false), "ESC  CLOSE");
+        assert_eq!(ShopText::CloseLabel.text(true), "CLOSE");
+        assert_eq!(
+            ShopText::Footer.text(true),
+            "Buy at your base. Items survive respawn and reset next round."
+        );
+        for id in ItemId::ALL {
+            assert_eq!(
+                ShopText::ItemDescription(id).text(true),
+                shop::item(id).description.replace("maximum HP", "max HP")
+            );
+            assert_eq!(
+                ShopText::ItemDescription(id).text(false),
+                shop::item(id).description
+            );
+            assert_eq!(ShopText::ItemName(id).text(true), shop::item(id).name);
+        }
+        assert_eq!(
+            tr("shop.status.buy_tap"),
+            tr("shop.status.buy_click").replace("click an item", "tap an item")
+        );
+    }
+
+    #[test]
+    fn shop_relabels_on_a_language_switch_and_on_a_phone() {
+        if crate::i18n::testing::isolated(
+            "shop::tests::shop_relabels_on_a_language_switch_and_on_a_phone",
+        ) {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, Locale, LocaleId};
+        let mut app = App::new();
+        app.add_plugins(I18nPlugin::default())
+            .add_systems(Startup, (setup_shop, setup_quick_buy))
+            .add_systems(Update, relabel_shop_text);
+        app.update();
+        let named = |app: &mut App, wanted: &str| {
+            app.world_mut()
+                .query::<(&Name, &Text)>()
+                .iter(app.world())
+                .find(|(name, _)| name.as_str() == wanted)
+                .map(|(_, text)| text.0.clone())
+                .unwrap()
+        };
+        let item_name = |app: &mut App| {
+            app.world_mut()
+                .query::<(&ShopText, &Text)>()
+                .iter(app.world())
+                .find(|(label, _)| matches!(label, ShopText::ItemName(ItemId::EmberBlade)))
+                .map(|(_, text)| text.0.clone())
+                .unwrap()
+        };
+        let keyed = |app: &mut App, key: &str| {
+            app.world_mut()
+                .query::<(&Localized, &Text)>()
+                .iter(app.world())
+                .find(|(label, _)| label.key == key)
+                .map(|(_, text)| text.0.clone())
+                .unwrap()
+        };
+        assert_eq!(named(&mut app, "ShopCloseLabel"), "ESC  CLOSE");
+        assert_eq!(item_name(&mut app), "Ember Blade");
+        assert_eq!(keyed(&mut app, "shop.title"), "Sanctuary shop");
+
+        let zh = LocaleId::parse("zh-Hans").unwrap();
+        app.world_mut().resource_mut::<Locale>().set(zh);
+        app.update();
+        assert_eq!(named(&mut app, "ShopCloseLabel"), "ESC  关闭");
+        assert_eq!(item_name(&mut app), "余烬之刃");
+        assert_eq!(keyed(&mut app, "shop.title"), "圣所商店");
+        assert!(named(&mut app, "ShopFooter").starts_with("独特的永久装备"));
+
+        let mut controls = crate::mobile_controls::MobileControls::default();
+        controls.enabled = true;
+        app.insert_resource(controls);
+        app.update();
+        assert_eq!(named(&mut app, "ShopCloseLabel"), "关闭");
+        assert!(named(&mut app, "ShopFooter").starts_with("在基地购买"));
     }
 
     #[test]

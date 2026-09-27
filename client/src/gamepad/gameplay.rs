@@ -8,6 +8,7 @@
 //! a chase) and upgrades to `NetworkCommand::UpgradeSkill`, exactly as mouse,
 //! keyboard and touch do. The hero's analog step is shared with touch
 //! (`player::input::move_player_analog`).
+// i18n-strict
 use bevy::prelude::*;
 use shared::{SkillSlot, TargetingMode, ability_for_class_slot, scaled_cast_range};
 
@@ -256,7 +257,7 @@ pub(crate) fn pad_combat(
             let Some((entity, id)) =
                 pick.filter(|(entity, id)| validity.valid(*entity, *id, *team))
             else {
-                feedback.push_line("No enemy in that direction and range.");
+                feedback.push_line(crate::i18n::tr("combat.attack.no_enemy_aimed"));
                 return;
             };
             let request_target = TargetState::for_request(entity, id);

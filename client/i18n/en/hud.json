@@ -1,0 +1,17 @@
+{
+  "hud.level": "Lv\n{level}",
+  "hud.max_level": "MAX LEVEL",
+  "hud.xp": "XP {xp} / {next} · {points} +",
+  "hud.no_player": "Level --   XP --/--   Skill points --",
+  "hud.prematch": "Press {help_key} for controls help.\nClass: {class}   Skills: {skills} - cast on target.",
+  "hud.target.defeated": "Defeated - respawning soon",
+  "hud.target.locked": "Target locked · Attack / Q W E R",
+  "hud.target.locked_phone": "Target locked · ATTACK / skills",
+  "hud.target.none": "Select a foe · P shop · F1 help",
+  "hud.target.none_phone": "Tap ATTACK · Drag to lock",
+  "hud.goal.destroy_base": "Destroy the enemy base.",
+  "hud.goal.unlock_base": "Clear one lane to unlock the base.",
+  "hud.goal.base_hp": "Enemy base · {hp} / {max} HP",
+  "hud.buff.wendigo": "Wendigo's Favor: +15% ability damage - {secs}s",
+  "hud.buff.mutatio": "Mutatio's Might: +25% ability damage, +2 HP/s - {secs}s"
+}

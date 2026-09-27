@@ -1,4 +1,5 @@
 //! True-2D presentation proxies for non-player actors and bounded combat VFX.
+// i18n-strict
 
 use bevy::prelude::*;
 use serde::Deserialize;
@@ -152,9 +153,9 @@ impl TowerLane {
     /// Stable id in entity `Name`s; never translated.
     const fn id(self) -> &'static str {
         match self {
-            Self::Top => "TOP",
-            Self::Mid => "MID",
-            Self::Bot => "BOT",
+            Self::Top => "TOP", // i18n-allow: stable id
+            Self::Mid => "MID", // i18n-allow: stable id
+            Self::Bot => "BOT", // i18n-allow: stable id
         }
     }
 }
@@ -350,7 +351,7 @@ fn spawn_structure_cues(
     commands.entity(visual).with_children(|parent| {
         spawn_team_badge(parent, owner, team, Vec2::new(-1.15, cue_y), 0.82);
         let (key, id, kind) = lane.map_or(
-            ("lane.base", "BASE", PresentationCueKind::BaseLabel),
+            ("lane.base", "BASE", PresentationCueKind::BaseLabel), // i18n-allow: stable id
             |lane| (lane.key(), lane.id(), PresentationCueKind::LaneLabel(lane)),
         );
         parent.spawn((
@@ -556,7 +557,7 @@ fn attach_actor(
                 pivot: definition.pivot,
                 previous_xy: xy,
             },
-            Name::new(format!("Presentation2d-{key}")),
+            Name::new(format!("Presentation2d-{key}")), // i18n-allow: entity name
         ))
         .id();
     if kind == PresentationActorKind::Boss {

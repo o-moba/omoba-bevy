@@ -1,0 +1,12 @@
+{
+  "gamepad.aim.release": "RELEASE TO CAST",
+  "gamepad.aim.locked": "TARGET LOCKED",
+  "gamepad.aim.idle_playstation": "R2 ATTACK · R3 LOCK",
+  "gamepad.aim.idle": "RT ATTACK · RS LOCK",
+  "gamepad.legend.menu_playstation": "D-pad / LS: navigate · Cross: select · Circle: back",
+  "gamepad.legend.menu": "D-pad / LS: navigate · A: select · B: back",
+  "gamepad.legend.phone_playstation": "LS move · RS aim · R3 lock · R2 attack · Circle cancel · Options menu\nHold skill: aim; release: cast · Triangle + skill: upgrade · D-pad right: shop; left: reactions",
+  "gamepad.legend.phone": "LS move · RS aim · RS click lock · RT attack · B cancel · Menu\nHold skill: aim; release: cast · Y + skill: upgrade · D-pad right: shop; left: reactions",
+  "gamepad.legend.match_playstation": "Left stick: move   Right stick: aim   R2: attack   R3: lock\nHold L1 / R1 / L2: aim skill, release: cast   L2+R2: ultimate\nCircle: cancel   Triangle + skill: upgrade   Options: menu   D-pad right: shop; left: reactions",
+  "gamepad.legend.match": "Left stick: move   Right stick: aim   RT: attack   RS click: lock\nHold LB / RB / LT: aim skill, release: cast   LT+RT: ultimate\nB: cancel   Y + skill: upgrade   Menu: menu   D-pad right: shop; left: reactions"
+}

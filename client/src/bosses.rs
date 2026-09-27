@@ -5,6 +5,7 @@
 //! stone/crystal guardian. Both keep raid scale, floating names, and AI-driven
 //! motion. The HP bar comes for free via
 //! the shared `CombatStats`/`CombatBars` pipeline.
+// i18n-strict
 
 use bevy::gltf::Gltf;
 use bevy::prelude::*;
@@ -51,9 +52,9 @@ pub fn boss_display_name(camp_type: NeutralCampType) -> &'static str {
 /// is never translated (the nameplate text is `boss_display_name`).
 pub(crate) fn boss_name_id(camp_type: NeutralCampType) -> &'static str {
     match camp_type {
-        NeutralCampType::WendigoBoss => "Wendigo",
-        NeutralCampType::KingMutatioBoss => "King Mutatio",
-        _ => "Neutral",
+        NeutralCampType::WendigoBoss => "Wendigo", // i18n-allow: stable id
+        NeutralCampType::KingMutatioBoss => "King Mutatio", // i18n-allow: stable id
+        _ => "Neutral",                            // i18n-allow: stable id
     }
 }
 

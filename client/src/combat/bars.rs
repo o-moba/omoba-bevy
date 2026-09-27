@@ -1,3 +1,4 @@
+// i18n-strict
 use crate::camera::MainCamera;
 use crate::domain::CombatStats;
 use crate::model_scale::NormalizeModelScale;
