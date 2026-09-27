@@ -42,6 +42,24 @@ impl FocusNav {
     }
 }
 
+/// A focusable control that takes Left/Right itself (slider, cycle row):
+/// while it is focused those steps become [`FocusAdjust`] instead of moving
+/// the focus.
+#[derive(Component, Clone, Copy, Default)]
+pub(crate) struct FocusAdjustable;
+
+/// A pressable that pointer and touch can hit but focus skips (a cycle
+/// row's chevrons: the row itself is the one focusable control).
+#[derive(Component, Clone, Copy, Default)]
+pub(crate) struct FocusSkip;
+
+/// Left (-1) or Right (+1) on a focused [`FocusAdjustable`].
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FocusAdjust {
+    pub entity: Entity,
+    pub step: i8,
+}
+
 /// The focused kit button, if a focus driver is active.
 #[derive(Resource, Default, Debug)]
 pub(crate) struct UiFocus {
@@ -244,8 +262,28 @@ pub(crate) fn navigate_focus(
     nodes: Query<Hierarchy>,
     mut areas: Query<(&ComputedNode, &UiGlobalTransform, &mut ScrollPosition), With<ScrollArea>>,
     mut presses: MessageWriter<SyntheticPress>,
+    adjustable: Query<(), With<FocusAdjustable>>,
+    skipped: Query<(), With<FocusSkip>>,
+    mut adjust: MessageWriter<FocusAdjust>,
 ) {
-    let steps: Vec<FocusNav> = nav.read().copied().collect();
+    let mut steps: Vec<FocusNav> = nav.read().copied().collect();
+    if let Some(focused) = focus
+        .focused()
+        .filter(|entity| adjustable.contains(*entity))
+    {
+        steps.retain(|step| {
+            let horizontal = match step {
+                FocusNav::Left => -1,
+                FocusNav::Right => 1,
+                _ => return true,
+            };
+            adjust.write(FocusAdjust {
+                entity: focused,
+                step: horizontal,
+            });
+            false
+        });
+    }
     if !focus.enabled {
         if focus.focused.is_some() || !focus.surface.is_empty() {
             focus.clear();
@@ -266,6 +304,7 @@ pub(crate) fn navigate_focus(
         .iter()
         .filter(|(entity, pressable, node, ..)| {
             !pressable.disabled
+                && !skipped.contains(*entity)
                 && gate.allows(*entity)
                 && node.size().min_element() > 0.0
                 && visible_in_hierarchy(*entity, &nodes)
@@ -431,6 +470,7 @@ mod tests {
             .init_resource::<GestureEpoch>()
             .init_resource::<ModalFlag>()
             .add_message::<FocusNav>()
+            .add_message::<FocusAdjust>()
             .add_ui_action::<Probe>()
             .configure_sets(Update, UiSet::Focus.before(UiSet::Gesture))
             .add_systems(Update, navigate_focus.in_set(UiSet::Focus))

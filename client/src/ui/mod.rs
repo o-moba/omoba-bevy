@@ -69,6 +69,7 @@ impl Plugin for UiKitPlugin {
             .init_resource::<UiFocus>()
             .add_message::<SyntheticPress>()
             .add_message::<FocusNav>()
+            .add_message::<focus::FocusAdjust>()
             .add_systems(Last, back::clear_back_press)
             .configure_sets(
                 Update,
@@ -97,15 +98,21 @@ impl Plugin for UiKitPlugin {
                 PostUpdate,
                 kit_assets::fit_cover_images.after(bevy::ui::UiSystems::Layout),
             )
-            .add_systems(PreUpdate, kit_assets::update_ui_density)
-            .add_systems(Update, gesture::recognize_presses.in_set(UiSet::Gesture))
+            .add_systems(PreUpdate, kit_assets::update_ui_density);
+        widgets::controls::add_systems(app);
+        widgets::surfaces::add_systems(app);
+        widgets::game::add_systems(app);
+        app.add_systems(Update, gesture::recognize_presses.in_set(UiSet::Gesture))
             .add_systems(Update, scroll::scroll_areas.in_set(UiSet::Scroll))
             .add_systems(Update, focus::navigate_focus.in_set(UiSet::Focus))
             .add_systems(
                 Update,
                 (
                     widgets::paint_pressables,
+                    widgets::paint_slabs,
+                    widgets::paint_kit,
                     widgets::paint_focus_ring,
+                    widgets::paint_preview_rings,
                     kit_assets::resolve_kit_images,
                 )
                     .chain()

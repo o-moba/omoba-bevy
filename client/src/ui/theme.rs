@@ -105,12 +105,6 @@ pub mod metric {
     pub const ADJUST_BTN: f32 = size::TOUCH_MIN;
     /// Menu button width (legacy pause/sandbox column).
     pub const MENU_W: f32 = 320.0;
-    /// The one call to action on a front-end screen
-    /// (`size.button_lg.min_width.desktop` × `size.button_lg.height.desktop`).
-    pub const PRIMARY: (f32, f32) = (
-        size::BUTTON_LG_MIN_WIDTH.desktop,
-        size::BUTTON_LG_HEIGHT.desktop,
-    );
 
     // The responsive policy: every phone/desktop size decision the overlays
     // make is answered here, so `adapt_phone_menu_readability`,

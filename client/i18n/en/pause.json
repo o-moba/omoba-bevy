@@ -26,5 +26,6 @@
   "pause.settings.camera": "Camera",
   "pause.camera.distance": "Distance",
   "pause.settings.model": "Model",
-  "pause.model.scale": "Scale"
+  "pause.model.scale": "Scale",
+  "pause.credits.icons": "Icons made by Delapouite, Lorc, Sbed, Zeromancer from https://game-icons.net, CC BY 3.0. Interface icons: Lucide (ISC). Fonts: Cinzel, Inter, Barlow Condensed, Noto Serif SC, Noto Sans CJK SC (SIL OFL 1.1)."
 }
