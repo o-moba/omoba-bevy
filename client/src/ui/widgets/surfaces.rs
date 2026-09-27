@@ -59,7 +59,7 @@ pub(crate) fn panel_header(
             border: UiRect::bottom(Val::Px(border::HAIRLINE)),
             ..default()
         })
-        .insert(BorderColor::all(color::BORDER_HAIRLINE))
+        .insert(BorderColor::all(theme::perceptual(color::BORDER_HAIRLINE)))
         .with_children(|header| {
             if let Some(eyebrow) = eyebrow {
                 header.spawn((
@@ -129,7 +129,7 @@ pub(crate) fn modal<T: UiActionT>(
                 align_items: AlignItems::Center,
                 ..default()
             },
-            BackgroundColor(color::SCRIM),
+            BackgroundColor(theme::perceptual(color::SCRIM)),
             ModalScrim,
             id.clone(),
         ))
@@ -198,7 +198,7 @@ pub(crate) fn animate_panels(
         let from = motion::PANEL_OPEN_SCALE_FROM;
         transform.scale = Vec2::splat(from + (1.0 - from) * t);
         if let Some(mut scrim) = parent.and_then(|parent| scrims.get_mut(parent.parent()).ok()) {
-            scrim.0 = color::SCRIM.with_alpha(color::SCRIM.alpha() * t);
+            scrim.0 = theme::perceptual(color::SCRIM.with_alpha(color::SCRIM.alpha() * t));
         }
     }
 }
@@ -383,8 +383,8 @@ fn tooltip_bundle() -> impl Bundle {
             border_radius: BorderRadius::all(Val::Px(radius::MD)),
             ..default()
         },
-        BackgroundColor(color::SURFACE_GLASS_STRONG),
-        BorderColor::all(color::BORDER_HAIRLINE),
+        BackgroundColor(theme::perceptual(color::SURFACE_GLASS_STRONG)),
+        BorderColor::all(theme::perceptual(color::BORDER_HAIRLINE)),
         Pickable::IGNORE,
     )
 }
@@ -603,8 +603,8 @@ fn toast_bundle() -> impl Bundle {
             overflow: Overflow::clip(),
             ..default()
         },
-        BackgroundColor(color::SURFACE_GLASS_STRONG),
-        BorderColor::all(color::BORDER_HAIRLINE),
+        BackgroundColor(theme::perceptual(color::SURFACE_GLASS_STRONG)),
+        BorderColor::all(theme::perceptual(color::BORDER_HAIRLINE)),
         Pickable::IGNORE,
     )
 }

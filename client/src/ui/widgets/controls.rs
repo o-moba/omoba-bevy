@@ -500,7 +500,7 @@ pub(crate) fn slider(
                     border_radius: BorderRadius::all(Val::Px(size::SLIDER_TRACK / 2.0)),
                     ..default()
                 },
-                BackgroundColor(color::BAR_TRACK),
+                BackgroundColor(theme::perceptual(color::BAR_TRACK)),
                 Pickable::IGNORE,
             ))
             .with_children(|track| {

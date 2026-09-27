@@ -136,17 +136,21 @@ pub mod metric {
 
     /// The reference resolution every Verdant layout is authored at.
     pub const REFERENCE: (f32, f32) = (1280.0, 720.0);
-    /// Desktop `UiScale` bounds (DECISIONS R2.3). The floor was checked on a
-    /// 1024×640 capture (`docs/ui-kit.md`, UI scale).
-    pub const DESKTOP_SCALE_MIN: f32 = 0.8;
+    /// Desktop `UiScale` bounds (DECISIONS R2.3: `clamp(min(w/1280, h/720),
+    /// 0.8, 2.0)`, "adjust the floor if text < ~11 px"). A 1024×640 capture at
+    /// 0.8 put the screens' legacy 11–12 px labels at 9–10 px, so the floor
+    /// is 1.0 until the screens use text roles (which keep
+    /// [`DESKTOP_TEXT_FLOOR`] at any scale); screen steps lower it to 0.8.
+    /// Details in `docs/ui-kit.md` (UI scale).
+    pub const DESKTOP_SCALE_MIN: f32 = 1.0;
     pub const DESKTOP_SCALE_MAX: f32 = 2.0;
     /// Smallest rendered (physical-looking) size of kit role text on
     /// desktop; a role below it at a small `UiScale` is raised.
     pub const DESKTOP_TEXT_FLOOR: f32 = 11.0;
 
     /// Desktop `UiScale` for a logical window size:
-    /// `clamp(min(w / 1280, h / 720), 0.8, 2.0)` (1920×1080 → 1.5,
-    /// 1024×640 → 0.8). Phones keep `frontend::menu_scale`.
+    /// `clamp(min(w / 1280, h / 720), DESKTOP_SCALE_MIN, 2.0)` (1920×1080 →
+    /// 1.5, 1280×720 and smaller → 1.0). Phones keep `frontend::menu_scale`.
     pub fn desktop_ui_scale(width: f32, height: f32) -> f32 {
         if width <= 0.0 || height <= 0.0 {
             return 1.0;
@@ -419,6 +423,32 @@ pub fn native_border_color(selected: bool, state: ButtonState) -> Color {
         (ButtonState::Hover, false) => color::GOLD_600,
         _ => color::BORDER_SUBTLE,
     }
+}
+
+/// A translucent token as Bevy should draw it to look like the handoff.
+///
+/// The handoff sheets are rendered by a browser, which blends in sRGB; Bevy
+/// blends in linear light, so a translucent colour reads lighter over dark
+/// content (a 65 % black cooldown veil darkens by only ~38 %) and a light
+/// accent reads stronger (the 25 % focus halo looks like ~50 %). The alpha
+/// is remapped with the display gamma (2.2) for the colour's side: dark
+/// colours `1 − (1 − a)^2.2` (exact for black over any content), light ones
+/// `a^2.2` (exact over black, close over the kit's dark surfaces). Opaque
+/// colours are unchanged. The token data stays as designed.
+pub fn perceptual(color: Color) -> Color {
+    const GAMMA: f32 = 2.2;
+    let srgba = color.to_srgba();
+    let alpha = srgba.alpha;
+    if alpha <= 0.0 || alpha >= 1.0 {
+        return color;
+    }
+    let luminance = 0.2126 * srgba.red + 0.7152 * srgba.green + 0.0722 * srgba.blue;
+    let alpha = if luminance < 0.5 {
+        1.0 - (1.0 - alpha).powf(GAMMA)
+    } else {
+        alpha.powf(GAMMA)
+    };
+    color.with_alpha(alpha)
 }
 
 /// The packaged fonts: the legacy default (Inter variable, for text without
@@ -1062,13 +1092,21 @@ mod tests {
     }
 
     /// R2.3: the desktop scale follows the smaller axis of the 1280×720
-    /// reference, 0.8 to 2.0.
+    /// reference, up to 2.0.
     #[test]
     fn desktop_ui_scale_follows_the_reference_resolution() {
         assert_eq!(metric::desktop_ui_scale(1280.0, 720.0), 1.0);
         assert_eq!(metric::desktop_ui_scale(1920.0, 1080.0), 1.5);
-        assert_eq!(metric::desktop_ui_scale(1024.0, 640.0), 0.8);
-        assert_eq!(metric::desktop_ui_scale(800.0, 600.0), 0.8);
+        // The floor (1.0 until the screens use text roles, see DESKTOP_SCALE_MIN).
+        assert_eq!(
+            metric::desktop_ui_scale(1024.0, 640.0),
+            metric::DESKTOP_SCALE_MIN
+        );
+        assert_eq!(
+            metric::desktop_ui_scale(800.0, 600.0),
+            metric::DESKTOP_SCALE_MIN
+        );
+        assert!(metric::DESKTOP_SCALE_MIN >= 0.8);
         assert_eq!(metric::desktop_ui_scale(3840.0, 2160.0), 2.0);
         // Ultra-wide: the height decides.
         assert_eq!(metric::desktop_ui_scale(2560.0, 1080.0), 1.5);
@@ -1148,6 +1186,28 @@ mod tests {
         );
         assert_eq!(Tile.slab(), None);
         assert_eq!(Link.slab(), None);
+    }
+
+    #[test]
+    fn perceptual_alpha_matches_srgb_compositing() {
+        // Black veils: 65 % → ~90 %; light accents: 25 % → ~4.7 %.
+        let veil = perceptual(color::COOLDOWN_OVERLAY).alpha();
+        assert!((veil - (1.0 - 0.35_f32.powf(2.2))).abs() < 1e-3, "{veil}");
+        let halo = perceptual(color::FOCUS_HALO).alpha();
+        assert!(
+            (halo - (0x40 as f32 / 255.0).powf(2.2)).abs() < 1e-3,
+            "{halo}"
+        );
+        assert_eq!(perceptual(color::TEXT_GOLD), color::TEXT_GOLD);
+        assert_eq!(perceptual(Color::NONE), Color::NONE);
+        // Over black, the linear blend of the remapped light accent equals the
+        // sRGB blend of the original (the browser's).
+        let accent = color::FOCUS_HALO.to_srgba();
+        let srgb_result = accent.red * accent.alpha;
+        let linear = bevy::color::LinearRgba::from(color::FOCUS_HALO.with_alpha(1.0)).red
+            * perceptual(color::FOCUS_HALO).alpha();
+        let back = Color::linear_rgb(linear, 0.0, 0.0).to_srgba().red;
+        assert!((back - srgb_result).abs() < 0.01, "{back} vs {srgb_result}");
     }
 
     #[test]

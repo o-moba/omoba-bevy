@@ -593,7 +593,7 @@ fn ring_bundle(offset: f32, corner: f32) -> impl Bundle {
             Outline::new(
                 Val::Px(FOCUS_HALO + offset - border::FOCUS_OFFSET),
                 Val::Px(0.0),
-                color::FOCUS_HALO,
+                theme::perceptual(color::FOCUS_HALO),
             ),
             Pickable::IGNORE,
             FocusHalo,
@@ -667,7 +667,7 @@ pub(crate) fn paint_focus_ring(
                 let next = Outline::new(
                     Val::Px(FOCUS_HALO + offset - border::FOCUS_OFFSET),
                     Val::Px(0.0),
-                    color::FOCUS_HALO,
+                    theme::perceptual(color::FOCUS_HALO),
                 );
                 if *glow != next {
                     *glow = next;

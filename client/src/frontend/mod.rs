@@ -523,14 +523,15 @@ mod tests {
         assert_eq!(*visibility, Visibility::Hidden);
     }
 
-    /// R2.3: desktop menus follow the 1280×720 reference, clamped to
-    /// 0.8–2.0; the desktop match keeps 1.0 (world-anchored overlays).
+    /// R2.3: desktop menus follow the 1280×720 reference up to 2.0 (floor
+    /// `DESKTOP_SCALE_MIN`); the desktop match keeps 1.0 (world-anchored
+    /// overlays).
     #[test]
     fn desktop_menus_scale_to_the_reference_and_the_match_does_not() {
         for ((width, height), expected) in [
             ((1280, 720), 1.0),
             ((1920, 1080), 1.5),
-            ((1024, 640), 0.8),
+            ((1024, 640), crate::ui::theme::metric::DESKTOP_SCALE_MIN),
             ((3840, 2160), 2.0),
         ] {
             let mut app = App::new();

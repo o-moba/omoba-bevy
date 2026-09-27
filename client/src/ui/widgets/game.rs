@@ -159,7 +159,7 @@ pub(crate) fn bar(
                     overflow: Overflow::clip(),
                     ..default()
                 },
-                BackgroundColor(color::BAR_TRACK),
+                BackgroundColor(theme::perceptual(color::BAR_TRACK)),
                 BorderColor::all(color::SCRIM.with_alpha(1.0)),
                 Pickable::IGNORE,
             ))
@@ -177,7 +177,7 @@ pub(crate) fn bar(
                         track
                             .spawn((
                                 fill_node(value.fraction()),
-                                BackgroundColor(color::BAR_DAMAGE_TRAIL),
+                                BackgroundColor(theme::perceptual(color::BAR_DAMAGE_TRAIL)),
                                 DamageTrail {
                                     shown: value.fraction(),
                                     from: value.fraction(),
@@ -445,7 +445,7 @@ pub(crate) fn ability_button<T: UiActionT>(
                 },
                 KitImage::atlas(
                     Sprite::CooldownSweepAtlas,
-                    color::COOLDOWN_OVERLAY,
+                    theme::perceptual(color::COOLDOWN_OVERLAY),
                     view.cooldown
                         .map_or(0, |(remaining, total)| cooldown_frame(remaining, total)),
                 ),
@@ -456,7 +456,7 @@ pub(crate) fn ability_button<T: UiActionT>(
         let veil = button
             .spawn((
                 inset(ABILITY_ART_INSET),
-                BackgroundColor(color::LOCKED_OVERLAY),
+                BackgroundColor(theme::perceptual(color::LOCKED_OVERLAY)),
                 Visibility::Hidden,
                 Pickable::IGNORE,
                 children![icon_node(Icon::NavLock, size::ICON_MD, color::TEXT_MUTED)],
@@ -1745,11 +1745,11 @@ pub(crate) fn hud_plate(strong: bool) -> impl Bundle {
             ..default()
         },
         BackgroundColor(if strong {
-            color::SURFACE_GLASS_STRONG
+            theme::perceptual(color::SURFACE_GLASS_STRONG)
         } else {
-            color::SURFACE_GLASS
+            theme::perceptual(color::SURFACE_GLASS)
         }),
-        BorderColor::all(color::BORDER_HAIRLINE),
+        BorderColor::all(theme::perceptual(color::BORDER_HAIRLINE)),
     )
 }
 

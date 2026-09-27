@@ -406,7 +406,7 @@ fn header(root: &mut ChildSpawnerCommands, page: usize, form: Form) {
         border: UiRect::bottom(Val::Px(1.0)),
         ..default()
     })
-    .insert(BorderColor::all(color::BORDER_HAIRLINE))
+    .insert(BorderColor::all(theme::perceptual(color::BORDER_HAIRLINE)))
     .with_children(|tabs| {
         for (index, (_, key)) in PAGES.iter().enumerate() {
             controls::tab(
