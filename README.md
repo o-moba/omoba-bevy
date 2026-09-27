@@ -208,11 +208,14 @@ playable in every game, hot-load unknown avatars during a match or establish
 mobile Passport readiness. A compatible file format alone does not establish
 permission to redistribute the artwork.
 
-**SDK reuse status:** the Bevy SDK revision pinned above has no declared license
-grant yet, as recorded in the [licensing audit](docs/progress/2026-09-12-open-source-licensing.md).
-That needs to be resolved for third-party adoption; Open Moba's licenses do not
-license a separate SDK. The TypeScript link points to source, not a verified npm
-package installation workflow.
+**SDK license:** the [Ekza Bevy SDK](https://github.com/ekza-space/ekza-bevy-sdk)
+is dual licensed `MIT OR Apache-2.0`, the usual Bevy ecosystem terms, and the
+grant covers every published revision, including the one pinned above. It is a
+separate project: Open Moba's own licenses do not cover it, and neither license
+grants rights to avatars served by an Ekza registry. This resolves the open
+point in the [licensing audit](docs/progress/2026-09-12-open-source-licensing.md).
+The TypeScript link points to source, not a verified npm package installation
+workflow.
 
 ## Create with us
 
