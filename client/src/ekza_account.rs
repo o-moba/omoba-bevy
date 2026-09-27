@@ -1,4 +1,7 @@
 //! Persistent, project-scoped Ekza connection. All HTTP uses the Ekza SDK.
+// i18n-strict
+use super::{Notice, approval_line};
+use crate::i18n::{tr, trf};
 use omoba_passport::{
     PairingState,
     account::{self, AccountCredential, AccountError, AccountFlow, AccountSession},
@@ -18,7 +21,7 @@ struct State {
     worker: bool,
     last: Option<Instant>,
     opened: Option<String>,
-    error: Option<String>,
+    error: Option<Notice>,
 }
 impl State {
     const fn new() -> Self {
@@ -37,7 +40,7 @@ impl State {
     fn accept_session(&mut self, session: AccountSession) {
         self.error = match &self.path {
             Some(path) if session.credential().save(path).is_ok() => None,
-            _ => Some("Connected for this run; could not save the connection.".into()),
+            _ => Some(Notice::Key("account.error.not_saved")),
         };
         self.session = Some(session);
         self.last = Some(Instant::now());
@@ -47,8 +50,7 @@ impl State {
         if let Some(path) = &self.path {
             if let Err(error) = std::fs::remove_file(path) {
                 if error.kind() != std::io::ErrorKind::NotFound {
-                    self.error =
-                        Some("Could not remove the saved connection. Retry sign out.".into());
+                    self.error = Some(Notice::Key("account.error.not_removed"));
                     return;
                 }
             }
@@ -84,19 +86,17 @@ impl State {
                 if let Some(path) = &self.path {
                     let _ = std::fs::remove_file(path);
                 }
-                self.error = Some("Ekza connection expired or was revoked. Connect again.".into());
+                self.error = Some(Notice::Key("account.error.expired"));
                 true
             }
             Err(AccountError::InvalidCredential) => {
                 // Preserve the file for its own configured server/project.
-                self.error =
-                    Some("Saved Ekza connection belongs to another server or game.".into());
+                self.error = Some(Notice::Key("account.error.other_server"));
                 false
             }
             Err(_) => {
                 // SDK diagnostics are not needed in a public-facing menu.
-                self.error =
-                    Some("Ekza is temporarily unavailable. Your connection is retained.".into());
+                self.error = Some(Notice::Key("account.error.unavailable_retained"));
                 false
             }
         }
@@ -126,7 +126,9 @@ pub fn connect_account() {
             verification_url, ..
         } = flow.state()
         {
-            state.error = crate::platform::open_external_url(&verification_url).err();
+            state.error = crate::platform::open_external_url(&verification_url)
+                .err()
+                .map(Notice::Text);
         }
         return;
     }
@@ -136,7 +138,7 @@ pub fn connect_account() {
     state.error = None;
     match account::start() {
         Ok(flow) => state.flow = Some(flow),
-        Err(_) => state.error = Some("Ekza account is unavailable. Connect again to retry.".into()),
+        Err(_) => state.error = Some(Notice::Key("account.error.unavailable")),
     }
 }
 
@@ -150,7 +152,8 @@ fn refresh_session(
         return Ok(Some(session));
     }
     let saved = AccountCredential::load(path)
-        .map_err(|_| AccountError::Unavailable("Could not read the saved connection.".into()))?;
+        // A diagnostic: `finish_refresh` shows its own line for it.
+        .map_err(|_| AccountError::Unavailable("Could not read the saved connection.".into()))?; // i18n-allow
     let Some(saved) = saved else {
         return Ok(None);
     };
@@ -165,7 +168,9 @@ pub fn poll_account() -> bool {
             verification_url, ..
         }) => {
             if state.opened.as_ref() != Some(&verification_url) {
-                state.error = crate::platform::open_external_url(&verification_url).err();
+                state.error = crate::platform::open_external_url(&verification_url)
+                    .err()
+                    .map(Notice::Text);
                 state.opened = Some(verification_url);
             }
         }
@@ -204,39 +209,37 @@ pub fn poll_account() -> bool {
 pub fn account_button_label() -> &'static str {
     let state = STATE.lock().unwrap();
     if state.session.is_some() {
-        return "Sign out of Ekza";
+        return tr("account.button.sign_out");
     }
-    match state.flow.as_ref().map(AccountFlow::state) {
-        Some(PairingState::Starting) => "Connecting Ekza…",
-        Some(PairingState::AwaitingApproval { .. }) => "Open Ekza approval",
-        _ => "Connect Ekza",
-    }
+    tr(match state.flow.as_ref().map(AccountFlow::state) {
+        Some(PairingState::Starting) => "account.button.connecting",
+        Some(PairingState::AwaitingApproval { .. }) => "account.button.approve",
+        _ => "account.button.connect",
+    })
 }
 
 pub fn account_status_line() -> String {
     let state = STATE.lock().unwrap();
     if let Some(error) = &state.error {
-        return error.clone();
+        return error.text();
     }
     if let Some(session) = &state.session {
-        return format!(
-            "Ekza account {} · connected on this device",
-            session.username
+        return trf(
+            "account.status.connected",
+            &[("username", &session.username)],
         );
     }
     match state.flow.as_ref().map(AccountFlow::state) {
-        Some(PairingState::Starting) => "Contacting Ekza…".into(),
+        Some(PairingState::Starting) => tr("account.status.contacting").into(),
         Some(PairingState::AwaitingApproval {
             user_code,
             verification_url,
             ..
-        }) => format!(
-            "{} · code {user_code} · {verification_url}",
-            crate::platform::browser_approval_hint()
-        ),
-        Some(PairingState::Failed(error)) => format!("{error} · connect again to retry"),
-        _ if state.worker => "Restoring Ekza connection…".into(),
-        _ => "Connect your Ekza account to see your own library · no wallet needed".into(),
+        }) => approval_line(&user_code, &verification_url),
+        // The SDK's reason, then the client's advice.
+        Some(PairingState::Failed(error)) => trf("account.status.failed", &[("error", &error)]),
+        _ if state.worker => tr("account.status.restoring").into(),
+        _ => tr("account.status.idle").into(),
     }
 }
 
