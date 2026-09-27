@@ -27,6 +27,7 @@ ANDROID_OUTPUT ?= target/mobile/android
 ANDROID_SERVER ?=
 SHOWCASE_OUTPUT ?= builds/showcase
 DEMO_OUTPUT ?= builds/demo
+UI_AUDIT_OUTPUT ?= ../omoba-ui/captures/$(shell date +%F)
 
 # Bare make is discovery only; game and toolchain processes start explicitly.
 help: ## Show commands, common overrides and documentation
@@ -229,3 +230,8 @@ showcase: ## Capture staged desktop/phone screenshots into SHOWCASE_OUTPUT (defa
 # drawtext (brew install ffmpeg-full). Clips live in scripts/record_demo.py.
 demo-video: ## Record the gameplay demo video into DEMO_OUTPUT (default builds/demo)
 	python3 scripts/record_demo.py --build --output $(DEMO_OUTPUT)
+
+# Every reachable UI screen on desktop and phone, filed by area for the
+# omoba-ui design workspace (next to this repo). Needs a GPU window ~30 min.
+ui-audit: ## Capture all UI screens (desktop + phone) into UI_AUDIT_OUTPUT (default ../omoba-ui/captures/<date>)
+	python3 scripts/capture_ui_audit.py --build --output $(UI_AUDIT_OUTPUT)

@@ -1,0 +1,900 @@
+{
+  "schema_version": 1,
+  "about": "Every UI screen Omoba has, how a player reaches it and how scripts/capture_ui_audit.py captures it. Add a screen here when you add one to the game; `capture_ui_audit.py --check` and scripts/test_ui_screen_map.py flag screens and harness frames that are not mapped.",
+  "profiles": {
+    "desktop": [
+      1280,
+      720
+    ],
+    "phone": [
+      844,
+      390
+    ]
+  },
+  "runs": {
+    "shell": {
+      "area": "01-menus",
+      "harness": "client/src/qa/frontend_qa.rs",
+      "server": "dev",
+      "env": {
+        "OMOBA_FRONTEND_QA_OUTPUT": "{out}",
+        "OMOBA_QA_CLEAN_FRAME": "1"
+      },
+      "note": "Front-end shell screens driven directly; searching/loading/post-match have no real match behind them.",
+      "sources": [
+        "client/src/qa/frontend_qa.rs"
+      ]
+    },
+    "flow": {
+      "area": "02-matchmaking",
+      "harness": "client/src/qa/frontend_flow_qa.rs",
+      "server": "practice",
+      "env": {
+        "OMOBA_FRONTEND_QA_OUTPUT": "{out}",
+        "OMOBA_FRONTEND_QA_FLOW": "1"
+      },
+      "note": "Real button flow into a practice match: draft, countdown, loading, first in-match frame.",
+      "sources": [
+        "client/src/qa/frontend_flow_qa.rs"
+      ]
+    },
+    "match": {
+      "area": "03-in-match-hud",
+      "harness": "client/src/qa/beta_ui_qa.rs",
+      "server": "dev",
+      "env": {
+        "OMOBA_VISUAL_QA_DIR": "{out}",
+        "OMOBA_VISUAL_QA_SCENARIO": "beta-ui",
+        "OMOBA_BETA_UI_EDGE": "1",
+        "OMOBA_BETA_UI_CLASS": "mage",
+        "OMOBA_QA_TEAM": "green",
+        "OMOBA_VISUAL_QA_TIMEOUT": "220"
+      },
+      "phone_env": {
+        "OMOBA_BETA_UI_EDGE": "0"
+      },
+      "note": "HUD, help, shop and a real purchase; result, target frames and scoreboard use labelled fixtures. Phones run without the edge pass: in 0.25.0 it stops on its radial-geometry check.",
+      "sources": [
+        "client/src/qa/beta_ui_qa.rs",
+        "client/src/qa/edge_hud_qa.rs"
+      ],
+      "ignore": {
+        "14-utilities-acknowledged-{h}p.png": "phone-only edge frame; the phone edge pass is off (see gap phone-target-scoreboard)"
+      }
+    },
+    "social": {
+      "area": "04-social-in-match",
+      "harness": "client/src/qa/social_qa.rs",
+      "server": "practice",
+      "env": {
+        "OMOBA_SOCIAL_QA_OUTPUT": "{out}"
+      },
+      "phone_env": {
+        "OMOBA_SOCIAL_QA_SKILL_HELP": "1"
+      },
+      "note": "Chat, reaction wheel, confirmed reaction; phone adds the skill description on hold.",
+      "sources": [
+        "client/src/qa/social_qa.rs"
+      ]
+    },
+    "career": {
+      "area": "05-career",
+      "harness": "client/src/qa/career_visual_qa.rs",
+      "server": null,
+      "env": {
+        "OMOBA_CAREER_QA_OUTPUT": "{out}"
+      },
+      "note": "Profile, friends, history, match detail, account and devices with labelled fixture data.",
+      "sources": [
+        "client/src/qa/career_visual_qa.rs"
+      ]
+    },
+    "supporter": {
+      "area": "06-supporter",
+      "harness": "client/src/qa/supporter.rs",
+      "server": null,
+      "env": {
+        "OMOBA_SUPPORTER_QA_DIR": "{out}"
+      },
+      "note": "Supporter aura panel; the harness uses its own fixed viewport sizes.",
+      "sources": [
+        "client/src/qa/supporter.rs"
+      ]
+    },
+    "offline": {
+      "area": "07-offline-practice",
+      "harness": "client/src/qa/offline_qa.rs",
+      "server": null,
+      "env": {
+        "OMOBA_OFFLINE_SMOKE_DIR": "{out}"
+      },
+      "note": "Offline practice from Home: hero picker, match, target, game menu, settings. Logical size without a scale override, so HiDPI displays give 2x frames; its pass flag also checks the saved server endpoint.",
+      "sources": [
+        "client/src/qa/offline_qa.rs"
+      ]
+    }
+  },
+  "screens": [
+    {
+      "id": "home",
+      "title": "Home",
+      "run": "shell",
+      "frame": "01-home.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Launch the game",
+      "source": "client/src/frontend/home.rs",
+      "app_screen": "Home"
+    },
+    {
+      "id": "profile-card",
+      "title": "Profile card",
+      "run": "shell",
+      "frame": "02-profile-card.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Home → Customize card",
+      "source": "client/src/frontend/card.rs",
+      "app_screen": "Card"
+    },
+    {
+      "id": "collection",
+      "title": "Avatar collection",
+      "run": "shell",
+      "frame": "03-collection.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Home → Avatars",
+      "source": "client/src/frontend/collection.rs",
+      "app_screen": "Collection"
+    },
+    {
+      "id": "hero-select",
+      "title": "Hero select",
+      "run": "shell",
+      "frame": "04-hero-select.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Home → PLAY",
+      "source": "client/src/team.rs",
+      "app_screen": "HeroSelect"
+    },
+    {
+      "id": "searching",
+      "title": "Searching",
+      "run": "shell",
+      "frame": "05-searching.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Hero select → Find match",
+      "source": "client/src/frontend/searching.rs",
+      "app_screen": "Searching",
+      "fixture": "layout only, no queue behind it"
+    },
+    {
+      "id": "loading-shell",
+      "title": "Loading (connecting)",
+      "run": "shell",
+      "frame": "06-loading.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Match found",
+      "source": "client/src/frontend/loading.rs",
+      "app_screen": "Loading",
+      "fixture": "layout only"
+    },
+    {
+      "id": "post-match",
+      "title": "Post-match",
+      "run": "shell",
+      "frame": "07-post-match.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "End of a match",
+      "source": "client/src/frontend/postmatch.rs",
+      "app_screen": "PostMatch",
+      "fixture": "layout only, no result data"
+    },
+    {
+      "id": "game-menu",
+      "title": "Game menu",
+      "run": "shell",
+      "frame": "08-menu.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Escape / MENU",
+      "source": "client/src/pause_menu.rs"
+    },
+    {
+      "id": "settings-sound",
+      "title": "Settings · sound",
+      "run": "shell",
+      "frame": "09-settings-sound.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Game menu → Settings",
+      "source": "client/src/pause_menu.rs"
+    },
+    {
+      "id": "settings-graphics",
+      "title": "Settings · graphics (bottom)",
+      "run": "shell",
+      "frame": "10-settings-graphics.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Game menu → Settings, scrolled down",
+      "source": "client/src/pause_menu.rs"
+    },
+    {
+      "id": "server-entry",
+      "title": "Server entry",
+      "run": "shell",
+      "frame": "11-server.png",
+      "profiles": [
+        "phone"
+      ],
+      "route": "Home → SERVER (phone)",
+      "source": "client/src/frontend/server_field.rs"
+    },
+    {
+      "id": "home-help",
+      "title": "Home help",
+      "run": "shell",
+      "frame": "12-home-help.png",
+      "profiles": [
+        "phone"
+      ],
+      "route": "Home → ? (phone)",
+      "source": "client/src/help_overlay.rs"
+    },
+    {
+      "id": "home-help-closed",
+      "title": "Home after help",
+      "run": "shell",
+      "frame": "13-home-help-closed.png",
+      "profiles": [
+        "phone"
+      ],
+      "route": "Home → ? → close (phone)",
+      "source": "client/src/frontend/home.rs"
+    },
+    {
+      "id": "party-lobby",
+      "title": "Party lobby (solo)",
+      "run": "shell",
+      "frame": "14-party-lobby.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Home → Party & friends",
+      "source": "client/src/frontend/lobby.rs",
+      "app_screen": "Lobby"
+    },
+    {
+      "id": "draft",
+      "title": "Team draft",
+      "run": "flow",
+      "frame": "04-team-draft.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "PLAY → Find match (practice)",
+      "source": "client/src/frontend/draft.rs",
+      "app_screen": "Draft"
+    },
+    {
+      "id": "prematch-countdown",
+      "title": "Pre-match countdown",
+      "run": "flow",
+      "frame": "05-team-countdown.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Draft → all locked",
+      "source": "client/src/frontend/loading.rs",
+      "app_screen": "Loading"
+    },
+    {
+      "id": "loading-teams",
+      "title": "Loading (5v5 roster)",
+      "run": "flow",
+      "frame": "06-team-loading.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Countdown → map load",
+      "source": "client/src/frontend/loading.rs",
+      "app_screen": "Loading"
+    },
+    {
+      "id": "in-match-first",
+      "title": "First in-match frame",
+      "run": "flow",
+      "frame": "07-in-match.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Loading → match",
+      "source": "client/src/match_hud.rs",
+      "app_screen": "InMatch"
+    },
+    {
+      "id": "hud-entry",
+      "title": "In-match hero select (legacy)",
+      "run": "match",
+      "frame": "01-entry-{h}p.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Join a running match",
+      "source": "client/src/team.rs"
+    },
+    {
+      "id": "hud-help",
+      "title": "In-match help",
+      "run": "match",
+      "frame": "02-help-{h}p.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "First join / F1",
+      "source": "client/src/help_overlay.rs"
+    },
+    {
+      "id": "hud",
+      "title": "HUD",
+      "run": "match",
+      "frame": "03-gameplay-{h}p.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "In match",
+      "source": "client/src/match_hud.rs"
+    },
+    {
+      "id": "shop",
+      "title": "Shop",
+      "run": "match",
+      "frame": "04-shop-{h}p.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "In match at base → gold / P",
+      "source": "client/src/shop.rs"
+    },
+    {
+      "id": "shop-purchase",
+      "title": "Shop after purchase",
+      "run": "match",
+      "frame": "05-purchase-{h}p.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Shop → buy Ember Blade",
+      "source": "client/src/shop.rs"
+    },
+    {
+      "id": "hud-shop-closed",
+      "title": "HUD after shopping",
+      "run": "match",
+      "frame": "06-shop-closed-{h}p.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Shop → close",
+      "source": "client/src/match_hud.rs"
+    },
+    {
+      "id": "result",
+      "title": "In-match result overlay",
+      "run": "match",
+      "frame": "07-result-fixture-{h}p.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Base destroyed",
+      "source": "client/src/game_state.rs",
+      "fixture": "synthetic Victory, labelled on frame"
+    },
+    {
+      "id": "target-hero",
+      "title": "Target frame · hero",
+      "run": "match",
+      "frame": "08-target-hero-fixture-{h}p.png",
+      "profiles": [
+        "desktop"
+      ],
+      "route": "Select an enemy hero",
+      "source": "client/src/edge_hud.rs",
+      "fixture": "synthetic target, labelled"
+    },
+    {
+      "id": "target-minion",
+      "title": "Target frame · minion",
+      "run": "match",
+      "frame": "09-target-minion-fixture-{h}p.png",
+      "profiles": [
+        "desktop"
+      ],
+      "route": "Select a minion",
+      "source": "client/src/edge_hud.rs",
+      "fixture": "synthetic target, labelled"
+    },
+    {
+      "id": "target-structure",
+      "title": "Target frame · structure",
+      "run": "match",
+      "frame": "10-target-structure-fixture-{h}p.png",
+      "profiles": [
+        "desktop"
+      ],
+      "route": "Select a tower",
+      "source": "client/src/edge_hud.rs",
+      "fixture": "synthetic target, labelled"
+    },
+    {
+      "id": "target-neutral",
+      "title": "Target frame · neutral",
+      "run": "match",
+      "frame": "11-target-neutral-fixture-{h}p.png",
+      "profiles": [
+        "desktop"
+      ],
+      "route": "Select a jungle creature",
+      "source": "client/src/edge_hud.rs",
+      "fixture": "synthetic target, labelled"
+    },
+    {
+      "id": "scoreboard",
+      "title": "Scoreboard",
+      "run": "match",
+      "frame": "12-scoreboard-fixture-{h}p.png",
+      "profiles": [
+        "desktop"
+      ],
+      "route": "Tab / score strip",
+      "source": "client/src/edge_hud.rs",
+      "fixture": "synthetic roster, labelled"
+    },
+    {
+      "id": "scoreboard-closed",
+      "title": "HUD after scoreboard",
+      "run": "match",
+      "frame": "13-scoreboard-closed-{h}p.png",
+      "profiles": [
+        "desktop"
+      ],
+      "route": "Scoreboard → close",
+      "source": "client/src/edge_hud.rs"
+    },
+    {
+      "id": "chat",
+      "title": "Match chat",
+      "run": "social",
+      "frame": "01-chat.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "In match → chat button",
+      "source": "client/src/social.rs"
+    },
+    {
+      "id": "reaction-wheel",
+      "title": "Reaction wheel",
+      "run": "social",
+      "frame": "02-reaction-wheel.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "In match → reaction button / T",
+      "source": "client/src/social.rs"
+    },
+    {
+      "id": "reaction-bubble",
+      "title": "Reaction over hero",
+      "run": "social",
+      "frame": "03-confirmed-reaction.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Reaction wheel → pick",
+      "source": "client/src/social.rs"
+    },
+    {
+      "id": "skill-description",
+      "title": "Skill description (hold)",
+      "run": "social",
+      "frame": "04-skill-description.png",
+      "profiles": [
+        "phone"
+      ],
+      "route": "Hold an ability button (phone)",
+      "source": "client/src/mobile_controls.rs"
+    },
+    {
+      "id": "career-profile",
+      "title": "Career · profile",
+      "run": "career",
+      "frame": "01-profile.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Profile button",
+      "source": "client/src/career.rs",
+      "fixture": "fixture data, labelled"
+    },
+    {
+      "id": "career-friends-code",
+      "title": "Career · friend code",
+      "run": "career",
+      "frame": "02-friends-code.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Friends tab",
+      "source": "client/src/career.rs",
+      "fixture": "fixture data, labelled"
+    },
+    {
+      "id": "career-friends-list",
+      "title": "Career · friends list",
+      "run": "career",
+      "frame": "03-friends-list.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Friends tab, scrolled",
+      "source": "client/src/career.rs",
+      "fixture": "fixture data, labelled"
+    },
+    {
+      "id": "career-history",
+      "title": "Career · match history",
+      "run": "career",
+      "frame": "04-history.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "History tab",
+      "source": "client/src/career.rs",
+      "fixture": "fixture data, labelled"
+    },
+    {
+      "id": "career-result",
+      "title": "Career · match detail",
+      "run": "career",
+      "frame": "05-result.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "History → Details / Last match",
+      "source": "client/src/career.rs",
+      "fixture": "fixture data, labelled"
+    },
+    {
+      "id": "career-friend-profile",
+      "title": "Career · friend profile",
+      "run": "career",
+      "frame": "06-friend-profile.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Friends → a friend",
+      "source": "client/src/career.rs",
+      "fixture": "fixture data, labelled"
+    },
+    {
+      "id": "career-website",
+      "title": "Career · website account",
+      "run": "career",
+      "frame": "07-website-account.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Profile → Player website",
+      "source": "client/src/career_web.rs",
+      "fixture": "fixture data, labelled"
+    },
+    {
+      "id": "career-devices",
+      "title": "Career · devices",
+      "run": "career",
+      "frame": "08-devices.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Profile → Link or recover account",
+      "source": "client/src/career_devices.rs",
+      "fixture": "fixture data, labelled"
+    },
+    {
+      "id": "career-result-bottom",
+      "title": "Career · match detail (bottom)",
+      "run": "career",
+      "frame": "09-result-bottom.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Match detail, scrolled",
+      "source": "client/src/career.rs",
+      "fixture": "fixture data, labelled"
+    },
+    {
+      "id": "supporter-solar",
+      "title": "Supporter · Solar aura",
+      "run": "supporter",
+      "frame": "solar-desktop.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Profile → Support OMOBA",
+      "source": "client/src/supporter.rs"
+    },
+    {
+      "id": "supporter-lunar",
+      "title": "Supporter · Lunar aura",
+      "run": "supporter",
+      "frame": "lunar-phone.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Supporter → Lunar",
+      "source": "client/src/supporter.rs"
+    },
+    {
+      "id": "supporter-verdant",
+      "title": "Supporter · Verdant aura",
+      "run": "supporter",
+      "frame": "verdant-phone.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Supporter → Verdant",
+      "source": "client/src/supporter.rs"
+    },
+    {
+      "id": "offline-home",
+      "title": "Offline · home",
+      "run": "offline",
+      "frame": "01-home.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Launch without a server",
+      "source": "client/src/frontend/home.rs"
+    },
+    {
+      "id": "offline-hero-picker",
+      "title": "Offline · hero picker",
+      "run": "offline",
+      "frame": "02-hero-picker.png",
+      "profiles": [
+        "desktop"
+      ],
+      "route": "Home → Offline practice",
+      "source": "client/src/team.rs"
+    },
+    {
+      "id": "offline-practice",
+      "title": "Offline · practice match",
+      "run": "offline",
+      "frame": "03-practice.png",
+      "profiles": [
+        "desktop"
+      ],
+      "route": "Offline practice → start",
+      "source": "client/src/match_hud.rs"
+    },
+    {
+      "id": "offline-target",
+      "title": "Offline · attacked target",
+      "run": "offline",
+      "frame": "04-attacked-target.png",
+      "profiles": [
+        "desktop"
+      ],
+      "route": "Attack the practice dummy",
+      "source": "client/src/edge_hud.rs"
+    },
+    {
+      "id": "offline-game-menu",
+      "title": "Offline · game menu",
+      "run": "offline",
+      "frame": "05-game-menu.png",
+      "profiles": [
+        "desktop"
+      ],
+      "route": "Escape in practice",
+      "source": "client/src/pause_menu.rs"
+    },
+    {
+      "id": "offline-settings-top",
+      "title": "Offline · settings (top)",
+      "run": "offline",
+      "frame": "06-settings-top.png",
+      "profiles": [
+        "desktop"
+      ],
+      "route": "Game menu → Settings",
+      "source": "client/src/pause_menu.rs"
+    },
+    {
+      "id": "offline-settings-bottom",
+      "title": "Offline · settings (bottom)",
+      "run": "offline",
+      "frame": "07-settings-bottom.png",
+      "profiles": [
+        "desktop"
+      ],
+      "route": "Settings, scrolled",
+      "source": "client/src/pause_menu.rs"
+    },
+    {
+      "id": "offline-return-home",
+      "title": "Offline · back home",
+      "run": "offline",
+      "frame": "08-return-home.png",
+      "profiles": [
+        "desktop"
+      ],
+      "route": "Game menu → Exit to home",
+      "source": "client/src/frontend/home.rs"
+    }
+  ],
+  "gaps": [
+    {
+      "id": "settings-language",
+      "title": "Settings · Language (English / 简体中文)",
+      "route": "Game menu → Settings → Language",
+      "source": "client/src/pause_menu.rs",
+      "needs": "PR #62 (i18n, 0.26.0) merged; then map it under the shell run and capture with OMOBA_LANGUAGE for each locale"
+    },
+    {
+      "id": "party-lobby-members",
+      "title": "Party lobby with members and invites",
+      "route": "Party → invite a friend",
+      "source": "client/src/frontend/lobby.rs",
+      "needs": "a scripted friend peer for OMOBA_FRONTEND_QA_ACCEPT_PARTY"
+    },
+    {
+      "id": "searching-real",
+      "title": "Searching with a real queue",
+      "route": "PLAY → Find match (release mode)",
+      "source": "client/src/frontend/searching.rs",
+      "needs": "a release-mode server and queue peers"
+    },
+    {
+      "id": "post-match-real",
+      "title": "Post-match with a real result",
+      "route": "Finish a match",
+      "source": "client/src/frontend/postmatch.rs",
+      "needs": "a harness that plays a short match to the end"
+    },
+    {
+      "id": "debug-tools",
+      "title": "Game menu debug tools page, debug console, debug HUD",
+      "route": "Game menu → Practice tools; OMOBA_DEBUG_UI=1",
+      "source": "client/src/debug/tools_page.rs",
+      "needs": "a harness run with OMOBA_DEBUG_UI=1 that opens the page"
+    },
+    {
+      "id": "gamepad",
+      "title": "Gamepad focus ring and controller legend",
+      "route": "Connect a controller",
+      "source": "client/src/gamepad/legend.rs",
+      "needs": "synthetic gamepad input in a harness"
+    },
+    {
+      "id": "respawn-defeat",
+      "title": "Respawn countdown, defeat and rematch",
+      "route": "Die / lose a match",
+      "source": "client/src/player/respawn_ui.rs",
+      "needs": "a scripted death and a real defeat"
+    },
+    {
+      "id": "connection-states",
+      "title": "Reconnecting and offline connection status",
+      "route": "Lose the server",
+      "source": "client/src/frontend/mod.rs",
+      "needs": "a harness that stops the server mid-session"
+    },
+    {
+      "id": "hero-select-rejection",
+      "title": "Hero select join rejection and wallet/account flows",
+      "route": "Join a full server; Connect wallet/account",
+      "source": "client/src/team.rs",
+      "needs": "a rejecting server and wallet/account fixtures"
+    },
+    {
+      "id": "avatar-studio",
+      "title": "Avatar collection with a live Studio registry",
+      "route": "Avatars with Studio avatars",
+      "source": "client/src/qa/frontend_qa/avatar.rs",
+      "needs": "OMOBA_AVATAR_QA with an SDK fixture service"
+    },
+    {
+      "id": "combat-test",
+      "title": "Combat Test sandbox panel",
+      "route": "Developer: OMOBA_COMBAT_SANDBOX=1",
+      "source": "client/src/sandbox/ui.rs",
+      "needs": "sandbox launch arguments; harness OMOBA_SANDBOX_QA_OUTPUT exists"
+    },
+    {
+      "id": "hud-lane-fight",
+      "title": "HUD during a lane fight",
+      "route": "Walk to mid in a practice match",
+      "source": "client/src/match_hud.rs",
+      "needs": "scripts/capture_showcase.py lane scenes (flaky when the hero is blocked)"
+    },
+    {
+      "id": "phone-target-scoreboard",
+      "title": "Phone target frames, scoreboard and utilities",
+      "route": "Phone: select a target, open the score strip",
+      "source": "client/src/edge_hud.rs",
+      "needs": "the phone edge pass (stops on its radial-geometry check in 0.25.0)"
+    }
+  ],
+  "other_harnesses": {
+    "client/src/qa/frontend_qa/avatar.rs": "avatar collection with a Studio registry (gap avatar-studio)",
+    "client/src/sandbox/ui/qa.rs": "Combat Test panel (gap combat-test)",
+    "client/src/qa/audio_qa.rs": "audio settings duplicate of settings-sound; needs OMOBA_AUTOJOIN",
+    "client/src/qa/visual_qa.rs": "world render checks (Verdant, jungle, forest VFX), not UI",
+    "client/src/qa/map_qa.rs": "map prop swaps, not UI",
+    "client/src/qa/team_vision_qa.rs": "brush visibility, not UI",
+    "client/src/qa/targeting_qa.rs": "targeting proof (in-world markers), not UI screens",
+    "client/src/qa/combat_qa.rs": "projectile/impact proof, not UI",
+    "client/src/qa/forest_pickup_qa.rs": "forest pickups, not UI",
+    "client/src/qa/navigation_qa.rs": "minimap routing proof, not UI screens",
+    "client/src/qa/demo_qa.rs": "demo video director, not screenshots",
+    "client/src/qa/record_qa.rs": "demo video recorder, not screenshots",
+    "client/src/qa/animation_qa.rs": "animation helper, no frames"
+  }
+}
