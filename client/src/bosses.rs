@@ -42,14 +42,9 @@ struct BossNameplate {
     boss: Entity,
 }
 
-/// Display name shown on the boss nameplate, in the active language.
-pub fn boss_display_name(camp_type: NeutralCampType) -> &'static str {
-    crate::i18n::data::boss(camp_type)
-}
-
 /// Stable identifier of a boss in entity `Name`s and QA lookups. It keeps
 /// the historical English spelling so existing names do not change, and it
-/// is never translated (the nameplate text is `boss_display_name`).
+/// is never translated (the nameplate text is `i18n::data::boss`).
 pub(crate) fn boss_name_id(camp_type: NeutralCampType) -> &'static str {
     match camp_type {
         NeutralCampType::WendigoBoss => "Wendigo", // i18n-allow: stable id

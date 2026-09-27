@@ -1,8 +1,10 @@
 //! Server-authorized cosmetics. Preview has a separate camera and never equips a
 //! world actor; all live aura components come only from the server snapshot.
+// i18n-strict
 use crate::{
     career::{CareerClient, CareerModal},
     combat::CombatStats,
+    i18n::{Locale, data, tr, trf},
     input_context::InputContextSet,
     net::{NetworkCommand, RemotePlayer},
     player::Player,
@@ -66,7 +68,23 @@ pub(crate) struct SupporterPlatformState {
     pub available: bool,
     pub busy: bool,
     pub price_label: Option<String>,
-    pub message: Option<String>,
+    pub message: Option<PlatformMessage>,
+}
+/// A store line: client copy by key (shown in the active language) or text
+/// from StoreKit / the account service, shown as sent.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+pub(crate) enum PlatformMessage {
+    Key(&'static str),
+    Text(String),
+}
+impl PlatformMessage {
+    pub(crate) fn text(&self) -> &str {
+        match self {
+            Self::Key(key) => tr(key),
+            Self::Text(text) => text,
+        }
+    }
 }
 #[derive(Resource, Default)]
 struct AuraRegistry(HashMap<Entity, (Entity, AuraStyle, PlayerVisualMode)>);
@@ -765,10 +783,10 @@ fn purchase_allowed_at(career: &CareerClient, now: i64) -> bool {
 
 fn status_label(status: Option<&SupporterStatus>) -> String {
     let Some(status) = status else {
-        return "Connect your saved account to view membership.".into();
+        return tr("supporter.status.no_account").into();
     };
     if !status.active {
-        return "No active membership. Preview is free and only visible here.".into();
+        return tr("supporter.status.inactive").into();
     }
     let source = status
         .grants
@@ -777,13 +795,13 @@ fn status_label(status: Option<&SupporterStatus>) -> String {
         .map(|g| g.provider.as_str())
         .collect::<Vec<_>>()
         .join(", ");
-    format!(
-        "Supporter active · {}\nAccess until {} UTC",
-        source,
-        status
-            .active_until
-            .map(utc_timestamp)
-            .unwrap_or_else(|| "—".into())
+    let until = status
+        .active_until
+        .map(utc_timestamp)
+        .unwrap_or_else(|| "—".into());
+    trf(
+        "supporter.status.active",
+        &[("source", &source), ("until", &until)],
     )
 }
 /// Gregorian civil date from an epoch day; avoids a platform locale dependency.
@@ -800,7 +818,7 @@ fn utc_timestamp(seconds: i64) -> String {
     let month = mp + if mp < 10 { 3 } else { -9 };
     year += i64::from(month <= 2);
     format!(
-        "{year:04}-{month:02}-{day:02} {:02}:{:02}",
+        "{year:04}-{month:02}-{day:02} {:02}:{:02}", // i18n-allow: date format
         seconds.rem_euclid(86400) / 3600,
         seconds.rem_euclid(3600) / 60
     )
@@ -814,13 +832,21 @@ fn render_panel(
     assets: Res<AuraAssets>,
     roots: Query<Entity, With<SupporterRoot>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    locale: Option<Res<Locale>>,
     mut prior: Local<String>,
 ) {
     let compact = windows.single().is_ok_and(|w| w.height() < 540.);
     let summary = status_label(career.view.supporter.as_ref());
     let key = format!(
-        "{}|{:?}|{}|{:?}|{}|{:?}|{}",
-        state.open, state.selected, summary, *platform, career.nickname, career.view.error, compact
+        "{}|{:?}|{}|{:?}|{}|{:?}|{}|{}",
+        state.open,
+        state.selected,
+        summary,
+        *platform,
+        career.nickname,
+        career.view.error,
+        compact,
+        locale.as_ref().map_or(0, |locale| locale.generation())
     );
     if *prior == key {
         return;
@@ -832,31 +858,174 @@ fn render_panel(
     if !state.open {
         return;
     }
-    commands.spawn((SupporterRoot,ModalRoot(ModalId::Supporter),Node{position_type:PositionType::Absolute,width:Val::Percent(100.),height:Val::Percent(100.),align_items:AlignItems::Center,justify_content:JustifyContent::Center,padding:UiRect::all(Val::Px(10.)),..default()},BackgroundColor(Color::srgba(0.,0.,0.,0.72)),GlobalZIndex(1300))).with_children(|root| {
-        root.spawn((Node{position_type:PositionType::Absolute,top:Val::Px(8.),right:Val::Px(8.),..default()},GlobalZIndex(1301))).with_children(|corner|{button(corner,"Close".into(),Action::Close,true);});
-        root.spawn((SupporterScroll,panel_scroll(),Node{width:Val::Px(660.),max_width:Val::Percent(100.),max_height:Val::Percent(96.),flex_direction:FlexDirection::Column,row_gap:Val::Px(if compact{5.}else{9.}),padding:UiRect::all(Val::Px(if compact{8.}else{12.})),overflow:Overflow::scroll_y(),..ui::panel_node()},BackgroundColor(ui::PANEL.with_alpha(1.0)),BorderColor::all(ui::EDGE))).with_children(|panel| {
-            panel.spawn((Text::new(format!("Open Moba Supporter · {}",career.nickname)),ui::text(if compact{16.}else{20.}),TextColor(ui::GOLD)));
-            panel.spawn((Text::new(summary),ui::text(if compact{12.}else{14.}),TextColor(ui::IVORY)));
-            panel.spawn((Node{flex_direction:FlexDirection::Row,column_gap:Val::Px(12.),flex_wrap:FlexWrap::Wrap,..default()},)).with_children(|row| {
-                row.spawn((ImageNode::new(assets.preview.clone()),PreviewImage,Node{width:Val::Px(if compact{170.}else{240.}),height:Val::Px(if compact{119.}else{168.}),..default()}));
-                row.spawn((Node{width:Val::Px(330.),flex_direction:FlexDirection::Row,flex_wrap:FlexWrap::Wrap,align_content:AlignContent::Center,column_gap:Val::Px(6.),row_gap:Val::Px(7.),..default()},)).with_children(|choices| {
-                    for style in AuraStyle::ALL {button(choices,if state.selected==style{format!("{} · Preview",style.label())}else{style.label().into()},Action::Select(style),true);}
-                    let active=career.view.supporter.as_ref().is_some_and(|s|s.active);
-                    button(choices,"Equip selected aura".into(),Action::Equip,active);
-                    button(choices,"Hide my aura".into(),Action::Disable,active);
-                });
+    commands
+        .spawn((
+            SupporterRoot,
+            ModalRoot(ModalId::Supporter),
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(100.),
+                height: Val::Percent(100.),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                padding: UiRect::all(Val::Px(10.)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0., 0., 0., 0.72)),
+            GlobalZIndex(1300),
+        ))
+        .with_children(|root| {
+            root.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(8.),
+                    right: Val::Px(8.),
+                    ..default()
+                },
+                GlobalZIndex(1301),
+            ))
+            .with_children(|corner| {
+                button(corner, tr("supporter.close").into(), Action::Close, true);
             });
-            panel.spawn((Text::new("LOCAL PREVIEW · Cosmetic only. No combat or progression benefits.\nBefore purchasing, link another device or save a recovery code in Account devices."),ui::text(if compact{10.}else{12.}),TextColor(ui::MUTED)));
-            if let Some(error)=platform.message.as_ref().or(career.view.error.as_ref()) {panel.spawn((Text::new(error),ui::text(13.),TextColor(ui::GOLD)));}
-            panel.spawn((Node{flex_direction:FlexDirection::Row,flex_wrap:FlexWrap::Wrap,column_gap:Val::Px(8.),row_gap:Val::Px(6.),..default()},)).with_children(|row| {
-                if platform.available {
-                    button(row,platform.price_label.clone().map(|p|format!("Support · {p}")).unwrap_or_else(||"Support with Apple".into()),Action::Purchase,platform.price_label.is_some()&&!platform.busy&&purchase_allowed(&career));
-                    button(row,"Restore purchases".into(),Action::Restore,!platform.busy);
-                } else {row.spawn((Text::new("Purchases are not configured on this client."),ui::text(if compact{10.}else{12.}),TextColor(ui::MUTED)));}
-                button(row,"Refresh".into(),Action::Refresh,true);
+            root.spawn((
+                SupporterScroll,
+                panel_scroll(),
+                Node {
+                    width: Val::Px(660.),
+                    max_width: Val::Percent(100.),
+                    max_height: Val::Percent(96.),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(if compact { 5. } else { 9. }),
+                    padding: UiRect::all(Val::Px(if compact { 8. } else { 12. })),
+                    overflow: Overflow::scroll_y(),
+                    ..ui::panel_node()
+                },
+                BackgroundColor(ui::PANEL.with_alpha(1.0)),
+                BorderColor::all(ui::EDGE),
+            ))
+            .with_children(|panel| {
+                panel.spawn((
+                    Text::new(trf("supporter.title", &[("nickname", &career.nickname)])),
+                    ui::text(if compact { 16. } else { 20. }),
+                    TextColor(ui::GOLD),
+                ));
+                panel.spawn((
+                    Text::new(summary),
+                    ui::text(if compact { 12. } else { 14. }),
+                    TextColor(ui::IVORY),
+                ));
+                panel
+                    .spawn((Node {
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(12.),
+                        flex_wrap: FlexWrap::Wrap,
+                        ..default()
+                    },))
+                    .with_children(|row| {
+                        row.spawn((
+                            ImageNode::new(assets.preview.clone()),
+                            PreviewImage,
+                            Node {
+                                width: Val::Px(if compact { 170. } else { 240. }),
+                                height: Val::Px(if compact { 119. } else { 168. }),
+                                ..default()
+                            },
+                        ));
+                        row.spawn((Node {
+                            width: Val::Px(330.),
+                            flex_direction: FlexDirection::Row,
+                            flex_wrap: FlexWrap::Wrap,
+                            align_content: AlignContent::Center,
+                            column_gap: Val::Px(6.),
+                            row_gap: Val::Px(7.),
+                            ..default()
+                        },))
+                            .with_children(|choices| {
+                                for style in AuraStyle::ALL {
+                                    button(
+                                        choices,
+                                        if state.selected == style {
+                                            trf(
+                                                "supporter.aura.preview",
+                                                &[("aura", &data::aura(style))],
+                                            )
+                                        } else {
+                                            data::aura(style).into()
+                                        },
+                                        Action::Select(style),
+                                        true,
+                                    );
+                                }
+                                let active =
+                                    career.view.supporter.as_ref().is_some_and(|s| s.active);
+                                button(
+                                    choices,
+                                    tr("supporter.equip").into(),
+                                    Action::Equip,
+                                    active,
+                                );
+                                button(
+                                    choices,
+                                    tr("supporter.hide").into(),
+                                    Action::Disable,
+                                    active,
+                                );
+                            });
+                    });
+                panel.spawn((
+                    Text::new(tr("supporter.notice")),
+                    ui::text(if compact { 10. } else { 12. }),
+                    TextColor(ui::MUTED),
+                ));
+                if let Some(error) = platform
+                    .message
+                    .as_ref()
+                    .map(PlatformMessage::text)
+                    .or(career.view.error.as_deref())
+                {
+                    panel.spawn((Text::new(error), ui::text(13.), TextColor(ui::GOLD)));
+                }
+                panel
+                    .spawn((Node {
+                        flex_direction: FlexDirection::Row,
+                        flex_wrap: FlexWrap::Wrap,
+                        column_gap: Val::Px(8.),
+                        row_gap: Val::Px(6.),
+                        ..default()
+                    },))
+                    .with_children(|row| {
+                        if platform.available {
+                            button(
+                                row,
+                                platform
+                                    .price_label
+                                    .as_ref()
+                                    .map(|price| {
+                                        trf("supporter.purchase.price", &[("price", price)])
+                                    })
+                                    .unwrap_or_else(|| tr("supporter.purchase.apple").into()),
+                                Action::Purchase,
+                                platform.price_label.is_some()
+                                    && !platform.busy
+                                    && purchase_allowed(&career),
+                            );
+                            button(
+                                row,
+                                tr("supporter.purchase.restore").into(),
+                                Action::Restore,
+                                !platform.busy,
+                            );
+                        } else {
+                            row.spawn((
+                                Text::new(tr("supporter.purchase.unconfigured")),
+                                ui::text(if compact { 10. } else { 12. }),
+                                TextColor(ui::MUTED),
+                            ));
+                        }
+                        button(row, tr("supporter.refresh").into(), Action::Refresh, true);
+                    });
             });
         });
-    });
 }
 /// The supporter panel body: 24 px per wheel notch on every build, touch drag
 /// from the first pixel.
@@ -1247,6 +1416,41 @@ mod tests {
         assert_eq!(utc_timestamp(1789516800), "2026-09-16 00:00");
         assert!(status_label(Some(&SupporterStatus::default())).contains("only visible here"));
     }
+    /// Client copy (status line, store messages, aura names) follows the
+    /// language; StoreKit's own text is shown as sent.
+    #[test]
+    fn supporter_copy_follows_the_language() {
+        if crate::i18n::testing::isolated("supporter::tests::supporter_copy_follows_the_language") {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, Locale, LocaleId};
+        let mut app = App::new();
+        app.add_plugins(I18nPlugin::default());
+        let loading = PlatformMessage::Key("supporter.store.loading");
+        let native = PlatformMessage::Text("Purchase pending.".into());
+        assert_eq!(loading.text(), "Loading App Store pricing…");
+        assert_eq!(
+            status_label(None),
+            "Connect your saved account to view membership."
+        );
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(LocaleId::parse("zh-Hans").unwrap());
+        assert_eq!(loading.text(), "正在加载 App Store 价格…");
+        assert_eq!(native.text(), "Purchase pending.");
+        assert_eq!(status_label(None), "连接已保存的账号即可查看会员状态。");
+        let active = SupporterStatus {
+            active: true,
+            active_until: Some(0),
+            ..default()
+        };
+        assert_eq!(
+            status_label(Some(&active)),
+            "支持者已激活 · \n有效期至 1970-01-01 00:00 UTC"
+        );
+        assert_ne!(data::aura(AuraStyle::Solar), AuraStyle::Solar.label());
+    }
+
     #[test]
     fn preview_cannot_grant_aura_or_change_combat_stats() {
         let mut app = App::new();

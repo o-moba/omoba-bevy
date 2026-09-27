@@ -1,4 +1,5 @@
 //! Phone layouts and a shell-free address entry for controlled native playtests.
+// i18n-strict
 use bevy::{
     input::keyboard::{Key, KeyboardInput},
     prelude::*,
@@ -6,6 +7,7 @@ use bevy::{
 };
 
 use crate::{
+    i18n::{Localized, UiLabel, tr},
     mobile_controls::{MobileControls, MobileControlsSet},
     net::{ClientSession, SessionUiCommand},
     ui::{
@@ -53,9 +55,11 @@ impl Plugin for MobileUiPlugin {
             )
             .add_systems(
                 PostUpdate,
-                // It rewrites phone copy, so the font pass must see it.
+                // It rewrites phone copy, so the font pass must see it, and a
+                // language change must not relabel over it.
                 adapt_phone_layout
                     .before(bevy::ui::UiSystems::Layout)
+                    .after(crate::i18n::I18nSystems::Relabel)
                     .before(crate::i18n::I18nSystems::Font),
             );
     }
@@ -65,7 +69,8 @@ impl Plugin for MobileUiPlugin {
 pub(crate) struct ServerEntry {
     pub open: bool,
     address: String,
-    error: String,
+    /// The entry's error, a `phone.*` key (shown in the active language).
+    error: Option<&'static str>,
     initialized: bool,
     keyboard: bool,
 }
@@ -92,7 +97,12 @@ struct ServerAddressLabel;
 #[derive(Component)]
 struct ServerErrorLabel;
 
-fn phone_button(parent: &mut ChildSpawnerCommands, label: &str, name: &str, action: PhoneAction) {
+fn phone_button(
+    parent: &mut ChildSpawnerCommands,
+    label: impl UiLabel,
+    name: &str,
+    action: PhoneAction,
+) {
     parent
         .spawn((
             Button,
@@ -111,7 +121,7 @@ fn phone_button(parent: &mut ChildSpawnerCommands, label: &str, name: &str, acti
             TestId::new(name.to_owned()),
         ))
         .with_children(|button| {
-            button.spawn((Text::new(label), ui::text(14.0), TextColor(ui::IVORY)));
+            button.spawn((label.into_text(), ui::text(14.0), TextColor(ui::IVORY)));
         });
 }
 
@@ -132,8 +142,18 @@ fn setup_phone_ui(mut commands: Commands) {
         ))
         .with_children(|bar| {
             phone_button(bar, "?", "PhoneHelpButton", PhoneAction::Help);
-            phone_button(bar, "MENU", "PhoneMenuButton", PhoneAction::Menu);
-            phone_button(bar, "SERVER", "PhoneServerButton", PhoneAction::Server);
+            phone_button(
+                bar,
+                Localized::new("phone.bar.menu"),
+                "PhoneMenuButton",
+                PhoneAction::Menu,
+            );
+            phone_button(
+                bar,
+                Localized::new("phone.bar.server"),
+                "PhoneServerButton",
+                PhoneAction::Server,
+            );
         });
     commands
         .spawn((
@@ -171,14 +191,12 @@ fn setup_phone_ui(mut commands: Commands) {
                 ))
                 .with_children(|panel| {
                     panel.spawn((
-                        Text::new("Join a hosted game"),
+                        Localized::new("phone.server.title").into_text(),
                         ui::text(24.0),
                         TextColor(ui::IVORY),
                     ));
                     panel.spawn((
-                        Text::new(
-                            "Enter the address your host shared, for example 192.168.1.20:4000",
-                        ),
+                        Localized::new("phone.server.hint").into_text(),
                         ui::text(14.0),
                         TextColor(ui::MUTED),
                     ));
@@ -210,12 +228,17 @@ fn setup_phone_ui(mut commands: Commands) {
                             for key in "1234567890.:".chars() {
                                 phone_button(
                                     keys,
-                                    &key.to_string(),
+                                    key.to_string(),
                                     &format!("ServerKey-{key}"),
                                     PhoneAction::Key(key),
                                 );
                             }
-                            phone_button(keys, "DELETE", "ServerBackspace", PhoneAction::Backspace);
+                            phone_button(
+                                keys,
+                                Localized::new("phone.server.delete"),
+                                "ServerBackspace",
+                                PhoneAction::Backspace,
+                            );
                         });
                     panel.spawn((
                         Text::new(""),
@@ -231,14 +254,19 @@ fn setup_phone_ui(mut commands: Commands) {
                         .with_children(|row| {
                             phone_button(
                                 row,
-                                "CONNECT",
+                                Localized::new("phone.server.connect"),
                                 "ServerConnectButton",
                                 PhoneAction::Connect,
                             );
-                            phone_button(row, "CLOSE", "ServerCloseButton", PhoneAction::Close);
                             phone_button(
                                 row,
-                                "KEYBOARD",
+                                Localized::new("phone.server.close"),
+                                "ServerCloseButton",
+                                PhoneAction::Close,
+                            );
+                            phone_button(
+                                row,
+                                Localized::new("phone.server.keyboard"),
                                 "ServerKeyboardButton",
                                 PhoneAction::Keyboard,
                             );
@@ -282,7 +310,7 @@ fn phone_menu_actions(
                 } else {
                     session.server_addr().to_owned()
                 };
-                entry.error.clear();
+                entry.error = None;
             }
             PhoneAction::Close => {
                 entry.open = false;
@@ -298,10 +326,9 @@ fn phone_menu_actions(
                 {
                     requests.write(SessionUiCommand::ConnectTo(address));
                     entry.open = false;
-                    entry.error.clear();
+                    entry.error = None;
                 } else {
-                    entry.error =
-                        "Use a host address and port, for example 192.168.1.20:4000".into();
+                    entry.error = Some("phone.server.invalid");
                 }
             }
             _ => {}
@@ -454,8 +481,12 @@ fn sync_phone_ui(
     for mut text in &mut address {
         text.0 = format!("{}|", entry.address);
     }
+    // Every frame, so a language change reaches a visible error at once.
+    let error = entry.error.map_or("", tr);
     for mut text in &mut errors {
-        text.0.clone_from(&entry.error);
+        if text.0 != error {
+            text.0 = error.to_owned();
+        }
     }
 }
 
@@ -736,47 +767,17 @@ fn adapt_phone_layout(
         }
         font.font_size = metric::phone_font(family, original, width, scale);
     }
+    // Phone copy of the help overlay. Other modules write their own phone
+    // wording (chosen by `MobileControls::enabled`); this pass only lays out.
     for (name, mut text) in &mut copy {
-        match name.as_str() {
-            "RendererStatus" => text.0 = "Swipe to choose your hero".into(),
-            "ClassSelectTitle" => text.0 = "01  CLASS".into(),
-            "AvatarSelectTitle" => text.0 = "02  HERO".into(),
-            "TeamSelectTitle" => text.0 = "03  MATCH".into(),
-            "TeamSelectHint" => text.0 = "Your team and side are assigned automatically.".into(),
-
-            "ShopCloseLabel" => text.0 = "CLOSE".into(),
-            "ShopSummary" => text.0 = text.0.replace("click an item", "tap an item"),
-            "HelpDismissLabel" => text.0 = crate::i18n::tr("help.phone.dismiss").into(),
-            "MatchStatusText" => {
-                text.0 = text
-                    .0
-                    .replace(
-                        "clear all towers in one lane to expose the enemy base.",
-                        "Clear a lane's towers to unlock the base.",
-                    )
-                    .replace(
-                        "Select a foe · P shop · F1 help",
-                        "Tap ATTACK · Drag to lock",
-                    )
-                    .replace(
-                        "Target locked · Attack / Q W E R",
-                        "Target locked · ATTACK / skills",
-                    )
-            }
-            "ShopFooter" => {
-                text.0 = "Buy at your base. Items survive respawn and reset next round.".into()
-            }
-            name if name.starts_with("ShopDescription-") => {
-                text.0 = text.0.replace("maximum HP", "max HP")
-            }
-            "HelpBody" => text.0 = crate::i18n::tr("help.phone.body").into(),
-            "GameStateLabel" => {
-                text.0 = text.0.replace(
-                    "Escape: settings or exit game.",
-                    "MENU: settings or exit game.",
-                )
-            }
-            _ => {}
+        let key = match name.as_str() {
+            "HelpDismissLabel" => "help.phone.dismiss",
+            "HelpBody" => "help.phone.body",
+            _ => continue,
+        };
+        let copy = tr(key);
+        if text.0 != copy {
+            text.0 = copy.to_owned();
         }
     }
 }
@@ -1080,6 +1081,87 @@ mod tests {
                     Display::None
                 }
             );
+        }
+    }
+
+    /// Phone copy is dictionary text: a language switch relabels the phone
+    /// bar, the entry's error and the help overlay's phone copy, while text
+    /// owned by other modules (they write their own phone wording) is left
+    /// untouched.
+    #[test]
+    fn phone_copy_follows_the_language_and_leaves_other_modules_text_alone() {
+        if crate::i18n::testing::isolated(
+            "mobile_ui::tests::phone_copy_follows_the_language_and_leaves_other_modules_text_alone",
+        ) {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, Locale, LocaleId, Localized};
+        let mut app = App::new();
+        let mut mobile = MobileControls::default();
+        mobile.enabled = true;
+        mobile.landscape = true;
+        mobile.viewport = Vec2::new(844.0, 390.0);
+        app.add_plugins(I18nPlugin::default())
+            .insert_resource(mobile)
+            .init_resource::<ClientSession>()
+            .init_resource::<ServerEntry>()
+            .add_systems(Startup, setup_phone_ui)
+            .add_systems(Update, sync_phone_ui)
+            .add_systems(PostUpdate, adapt_phone_layout);
+        let world = app.world_mut();
+        let dismiss = world
+            .spawn((Text::new("Enter the arena"), Name::new("HelpDismissLabel")))
+            .id();
+        let others: Vec<(Entity, &str)> = [
+            ("ClassSelectTitle", "01  Class"),
+            ("ShopSummary", "Gold 40 · click an item to buy"),
+            ("MatchStatusText", "Select a foe · P shop · F1 help"),
+            ("GameStateLabel", "Escape: settings or exit game."),
+            ("ShopDescription-vitality_gem", "+120 maximum HP"),
+        ]
+        .into_iter()
+        .map(|(name, text)| (world.spawn((Text::new(text), Name::new(name))).id(), text))
+        .collect();
+        world.resource_mut::<ServerEntry>().error = Some("phone.server.invalid");
+        let read =
+            |app: &mut App, entity: Entity| app.world().get::<Text>(entity).unwrap().0.clone();
+        let label = |app: &mut App, key: &str| {
+            let mut labels = app.world_mut().query::<(&Localized, &Text)>();
+            labels
+                .iter(app.world())
+                .find(|(label, _)| label.key == key)
+                .map(|(_, text)| text.0.clone())
+                .unwrap()
+        };
+        let error = |app: &mut App| {
+            let mut errors = app
+                .world_mut()
+                .query_filtered::<&Text, With<ServerErrorLabel>>();
+            errors.single(app.world()).unwrap().0.clone()
+        };
+        app.update();
+        assert_eq!(
+            read(&mut app, dismiss),
+            crate::i18n::tr("help.phone.dismiss")
+        );
+        assert_eq!(label(&mut app, "phone.bar.menu"), "MENU");
+        assert_eq!(
+            error(&mut app),
+            "Use a host address and port, for example 192.168.1.20:4000"
+        );
+        let zh = LocaleId::parse("zh-Hans").unwrap();
+        app.world_mut().resource_mut::<Locale>().set(zh);
+        app.update();
+        assert_eq!(read(&mut app, dismiss), "知道了，开始游戏");
+        assert_eq!(label(&mut app, "phone.bar.menu"), "菜单");
+        assert_eq!(label(&mut app, "phone.bar.server"), "服务器");
+        assert_eq!(label(&mut app, "phone.server.connect"), "连接");
+        assert_eq!(
+            error(&mut app),
+            "请输入主机地址和端口，例如 192.168.1.20:4000"
+        );
+        for (entity, text) in others {
+            assert_eq!(read(&mut app, entity), text);
         }
     }
 
