@@ -361,11 +361,19 @@ fn scale_menus_to_the_window(
         // match stays at 1.0 until its world-anchored overlays (nameplates,
         // floating combat numbers, chat bubbles), which place nodes at
         // logical viewport coordinates, divide by `UiScale` (HUD step P0-A).
-        if screen.get().is_menu() {
-            crate::ui::theme::metric::desktop_ui_scale(
+        // Draft/loading size themselves from the real window width, so they
+        // stay at 1.0. Below the reference size the legacy height shrink
+        // still applies, so short windows keep fitting the menus.
+        if screen.get().is_menu() && !shared_prematch {
+            let up = crate::ui::theme::metric::desktop_ui_scale(
                 window.resolution.width(),
                 window.resolution.height(),
-            )
+            );
+            if up > 1.0 {
+                up
+            } else {
+                menu_scale(window.resolution.height())
+            }
         } else {
             1.0
         }
@@ -531,7 +539,9 @@ mod tests {
         for ((width, height), expected) in [
             ((1280, 720), 1.0),
             ((1920, 1080), 1.5),
-            ((1024, 640), crate::ui::theme::metric::DESKTOP_SCALE_MIN),
+            // Below the reference the legacy height shrink keeps menus fitting.
+            ((1024, 640), menu_scale(640.0)),
+            ((1280, 480), menu_scale(480.0)),
             ((3840, 2160), 2.0),
         ] {
             let mut app = App::new();
@@ -559,6 +569,19 @@ mod tests {
             app.update();
             app.update();
             assert_eq!(app.world().resource::<UiScale>().0, 1.0, "in match");
+            // Draft and loading lay out from the real window width.
+            for prematch in [AppScreen::Draft, AppScreen::Loading] {
+                app.world_mut()
+                    .resource_mut::<NextState<AppScreen>>()
+                    .set(prematch);
+                app.update();
+                app.update();
+                assert_eq!(
+                    app.world().resource::<UiScale>().0,
+                    1.0,
+                    "{width}x{height} {prematch:?}"
+                );
+            }
         }
     }
 

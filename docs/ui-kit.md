@@ -544,9 +544,14 @@ CC BY 3.0 credit line (with Lucide ISC and the font licences) is in Settings
   (R2.3; 1920×1080 → 1.5). A 1024×640 capture at 0.8 put the screens' legacy
   11–12 px labels at 9–10 px, so `DESKTOP_SCALE_MIN` is 1.0 until the
   screens use text roles (which never render below 11 px); screen steps lower
-  it to 0.8. The desktop match keeps 1.0 until its world-anchored overlays
-  (nameplates, floating combat numbers, chat bubbles) divide by `UiScale`.
-  Phones keep `frontend::menu_scale` and the `metric` minimums.
+  it to 0.8. Windows smaller than the reference keep the legacy height shrink
+  (`frontend::menu_scale`, down to `MIN_MENU_SCALE`) so short windows still
+  fit the menus. Draft and loading stay at 1.0 on desktop: they lay out from
+  the real window width. The desktop match keeps 1.0 until its world-anchored
+  overlays (nameplates, floating combat numbers, chat bubbles) divide by
+  `UiScale`. Phones keep `frontend::menu_scale` and the `metric` minimums.
+- Touch has no hover: in touch mode a held finger paints the pressed look
+  (activation still happens on release) and a hovering pointer paints idle.
 - The avatar preview and party stage cameras clear to transparent
   (`frontend::PREVIEW_CLEAR`, R2.4), so the menu background shows behind the
   models.

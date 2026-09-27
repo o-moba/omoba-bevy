@@ -139,6 +139,18 @@ pub(crate) fn kit_state(
     if pressable.disabled {
         return ButtonState::Disabled;
     }
+    if pressable.touch_mode {
+        // Touch has no hover: a held finger shows the pressed look, even
+        // though the press only activates on release.
+        if pressable.effective(interaction) == Interaction::None {
+            return ButtonState::Idle;
+        }
+        return if pressable.activated || interaction == Interaction::Pressed {
+            ButtonState::Pressed
+        } else {
+            ButtonState::Idle
+        };
+    }
     match pressable.effective(interaction) {
         Interaction::Pressed => ButtonState::Pressed,
         Interaction::Hovered => ButtonState::Hover,
@@ -1238,6 +1250,49 @@ mod tests {
     }
     #[derive(Component)]
     struct Value;
+
+    /// Touch has no hover: a held finger paints pressed, a hovering pointer
+    /// in touch mode paints idle; a blocked button paints idle.
+    #[test]
+    fn touch_mode_never_paints_hover() {
+        let touch = Pressable {
+            touch_mode: true,
+            ..Pressable::default()
+        };
+        assert_eq!(
+            kit_state(Interaction::Pressed, &touch, None),
+            ButtonState::Pressed
+        );
+        assert_eq!(
+            kit_state(Interaction::Hovered, &touch, None),
+            ButtonState::Idle
+        );
+        assert_eq!(
+            kit_state(Interaction::None, &touch, None),
+            ButtonState::Idle
+        );
+        let tapped = Pressable {
+            activated: true,
+            ..touch
+        };
+        assert_eq!(
+            kit_state(Interaction::None, &tapped, None),
+            ButtonState::Pressed
+        );
+        let blocked = Pressable {
+            blocked: true,
+            ..touch
+        };
+        assert_eq!(
+            kit_state(Interaction::Pressed, &blocked, None),
+            ButtonState::Idle
+        );
+        let mouse = Pressable::default();
+        assert_eq!(
+            kit_state(Interaction::Hovered, &mouse, None),
+            ButtonState::Hover
+        );
+    }
 
     #[test]
     fn widgets_name_their_controls_and_paint_from_the_effective_interaction() {
