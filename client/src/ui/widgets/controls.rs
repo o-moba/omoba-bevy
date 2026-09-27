@@ -1212,6 +1212,11 @@ mod tests {
         app.world_mut().flush();
         app.update();
         let row = find(app.world_mut(), "Mute").unwrap();
+        assert_eq!(
+            app.world().get::<BackgroundColor>(row).unwrap().0,
+            Color::NONE,
+            "a toggle row has no fill"
+        );
         let parts = *app.world().get::<KitParts>(row).unwrap();
         let knob = parts.knob.unwrap();
         let track = parts.track.unwrap();

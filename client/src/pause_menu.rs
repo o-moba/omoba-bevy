@@ -473,6 +473,11 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                 Text::new(""),
                                 theme::text(14.0),
                                 TextColor(theme::MUTED),
+                                // Text in a scrolling column keeps its height.
+                                Node {
+                                    flex_shrink: 0.0,
+                                    ..default()
+                                },
                                 SettingsServerAddrLabel,
                                 Name::new("PauseMenuServerAddrHint"),
                             ));

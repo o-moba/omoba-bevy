@@ -403,11 +403,11 @@ pub(crate) fn ability_button<T: UiActionT>(
                         ..full()
                     },
                     BoxShadow::new(
-                        color::GOLD_400.with_alpha(0.6),
+                        color::GOLD_400.with_alpha(0.45),
                         Val::Px(0.0),
                         Val::Px(0.0),
-                        Val::Px(space::S4),
-                        Val::Px(space::S12),
+                        Val::Px(space::S2),
+                        Val::Px(space::S8),
                     ),
                     Pickable::IGNORE,
                 ))
@@ -426,11 +426,30 @@ pub(crate) fn ability_button<T: UiActionT>(
                 }
             })
             .id();
+        let cooling = view.cooldown.is_some_and(|(remaining, _)| remaining > 0.0);
+        let initially = |visible: bool| {
+            if visible {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            }
+        };
         let sweep = button
             .spawn((
-                inset(ABILITY_ART_INSET),
-                KitImage::atlas(Sprite::CooldownSweepAtlas, color::COOLDOWN_OVERLAY, 0),
-                Visibility::Hidden,
+                // No corner radius: Bevy clips an atlas cell's rounded rect
+                // against the atlas offset, which hides it; the sprite is a
+                // disc already.
+                Node {
+                    border_radius: BorderRadius::ZERO,
+                    ..inset(ABILITY_ART_INSET)
+                },
+                KitImage::atlas(
+                    Sprite::CooldownSweepAtlas,
+                    color::COOLDOWN_OVERLAY,
+                    view.cooldown
+                        .map_or(0, |(remaining, total)| cooldown_frame(remaining, total)),
+                ),
+                initially(cooling),
                 Pickable::IGNORE,
             ))
             .id();
@@ -467,19 +486,24 @@ pub(crate) fn ability_button<T: UiActionT>(
             BorderColor::all(color::GOLD_700),
             Pickable::IGNORE,
         ));
-        let seconds = button
-            .spawn((
-                Text::new(""),
-                theme::styled_text(TextStyle::new(TextRole::NumberLg).sized(COOLDOWN_TEXT)),
-                TextColor(color::TEXT_PRIMARY),
-                TextShadow::default(),
-                Node {
-                    position_type: PositionType::Absolute,
-                    ..default()
-                },
-                Visibility::Hidden,
-            ))
-            .id();
+        let mut seconds = Entity::PLACEHOLDER;
+        button
+            .spawn((full(), Pickable::IGNORE))
+            .with_children(|centre| {
+                seconds = centre
+                    .spawn((
+                        Text::new(
+                            view.cooldown.map_or_else(String::new, |(remaining, _)| {
+                                cooldown_text(remaining)
+                            }),
+                        ),
+                        theme::styled_text(TextStyle::new(TextRole::NumberLg).sized(COOLDOWN_TEXT)),
+                        TextColor(color::TEXT_PRIMARY),
+                        TextShadow::default(),
+                        initially(cooling),
+                    ))
+                    .id();
+            });
         if let Some(key) = view.key {
             button
                 .spawn((
@@ -502,7 +526,12 @@ pub(crate) fn ability_button<T: UiActionT>(
                 ))
                 .with_child((
                     Text::new(key),
-                    theme::role_text(TextRole::NumberSm),
+                    // `type.number_sm` size in the semibold body face: key
+                    // letters (Q W E R) read as letters, not Barlow digits.
+                    theme::styled_text(
+                        TextStyle::keep_case(TextRole::Label)
+                            .sized(TextRole::NumberSm.style().size),
+                    ),
                     TextColor(color::TEXT_GOLD),
                 ));
         }
@@ -1226,35 +1255,29 @@ pub(crate) fn paint_hero_tile(
 }
 
 /// Border width, glow and art tint of hero tiles (the parts the generic
-/// painter does not reach: `Node::border` and the art `ImageNode`).
+/// painter does not reach: `Node::border`, `BoxShadow` and the art
+/// `ImageNode`, which arrives once the art loads). Runs every frame; it only
+/// writes on a difference.
 #[allow(clippy::type_complexity)]
 pub(crate) fn paint_hero_tile_frames(
     mut commands: Commands,
-    mut tiles: Query<
-        (
-            Entity,
-            &ButtonStyle,
-            &KitParts,
-            &Interaction,
-            &crate::ui::Pressable,
-            Option<&super::PreviewState>,
-            &mut Node,
-        ),
-        (
-            With<KitSkin>,
-            Or<(
-                Changed<ButtonStyle>,
-                Changed<crate::ui::Pressable>,
-                Changed<Interaction>,
-                Changed<super::PreviewState>,
-            )>,
-        ),
-    >,
-    skins: Query<&KitSkin>,
+    mut tiles: Query<(
+        Entity,
+        &KitSkin,
+        &ButtonStyle,
+        &KitParts,
+        &Interaction,
+        &crate::ui::Pressable,
+        Option<&super::PreviewState>,
+        &mut Node,
+        Has<BoxShadow>,
+    )>,
     mut art: Query<&mut ImageNode>,
 ) {
-    for (entity, style, parts, interaction, pressable, preview, mut node) in &mut tiles {
-        if skins.get(entity) != Ok(&KitSkin::HeroTile) {
+    for (entity, skin, style, parts, interaction, pressable, preview, mut node, glowing) in
+        &mut tiles
+    {
+        if *skin != KitSkin::HeroTile {
             continue;
         }
         let state = super::kit_state(*interaction, pressable, preview);
@@ -1267,7 +1290,7 @@ pub(crate) fn paint_hero_tile_frames(
         if node.border != next {
             node.border = next;
         }
-        if style.selected {
+        if style.selected && !glowing {
             commands.entity(entity).insert(BoxShadow::new(
                 color::GOLD_400.with_alpha(0.35),
                 Val::Px(0.0),
@@ -1275,7 +1298,7 @@ pub(crate) fn paint_hero_tile_frames(
                 Val::Px(0.0),
                 Val::Px(space::S8),
             ));
-        } else {
+        } else if !style.selected && glowing {
             commands.entity(entity).remove::<BoxShadow>();
         }
         if let Some(mut image) = parts

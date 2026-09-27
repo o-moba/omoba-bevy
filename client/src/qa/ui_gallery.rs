@@ -35,7 +35,7 @@ use crate::ui::{
     },
 };
 
-const PAGES: [(&str, &str); 9] = [
+const PAGES: [(&str, &str); 10] = [
     ("buttons", "kit.gallery.page.buttons"),
     ("controls", "kit.gallery.page.controls"),
     ("inputs", "kit.gallery.page.inputs"),
@@ -43,6 +43,7 @@ const PAGES: [(&str, &str); 9] = [
     ("feedback", "kit.gallery.page.feedback"),
     ("abilities", "kit.gallery.page.abilities"),
     ("heroes", "kit.gallery.page.heroes"),
+    ("hud", "kit.gallery.page.hud"),
     ("type", "kit.gallery.page.type"),
     ("backgrounds", "kit.gallery.page.backgrounds"),
 ];
@@ -66,8 +67,10 @@ const STATES: [(Option<ButtonState>, bool, &str); 6] = [
 ];
 
 /// Row label column and state column widths.
-const LABEL_W: f32 = 150.0;
-const CELL_W: f32 = 176.0;
+const LABEL_W: f32 = 120.0;
+const CELL_W: f32 = 160.0;
+/// A slider row: label, 280 track, value.
+const SLIDER_CELL_W: f32 = 480.0;
 /// Z above the shell, under the focus ring (5000) and preview rings.
 const GALLERY_Z: i32 = 4000;
 
@@ -178,7 +181,7 @@ fn shots() -> Vec<Shot> {
         }
     }
     for pixels in [UVec2::new(1920, 1080), UVec2::new(1024, 640)] {
-        for (page, name) in [(0, "buttons"), (7, "type")] {
+        for (page, name) in [(0, "buttons"), (8, "type")] {
             shots.push(Shot {
                 page,
                 form: Form::Desktop,
@@ -322,18 +325,23 @@ fn rebuild(
                 ScrollArea::wheel(48.0),
                 Name::new("UiGalleryPage"),
             ))
-            .with_children(|body| match page {
-                0 => buttons_page(body, form),
-                1 => controls_page(body, form),
-                2 => inputs_page(body, form),
-                3 => panels_page(body, form),
-                4 => feedback_page(body, form),
-                5 => abilities_page(body, form),
-                6 => heroes_page(body, form),
-                7 => type_page(body),
-                _ => backgrounds_page(body, form),
-            });
+            .with_children(|body| spawn_page(body, page, form));
         });
+}
+
+fn spawn_page(body: &mut ChildSpawnerCommands, page: usize, form: Form) {
+    match page {
+        0 => buttons_page(body, form),
+        1 => controls_page(body, form),
+        2 => inputs_page(body, form),
+        3 => panels_page(body, form),
+        4 => feedback_page(body, form),
+        5 => abilities_page(body, form),
+        6 => heroes_page(body, form),
+        7 => hud_page(body, form),
+        8 => type_page(body),
+        _ => backgrounds_page(body, form),
+    }
 }
 
 fn header(root: &mut ChildSpawnerCommands, page: usize, form: Form) {
@@ -447,42 +455,36 @@ fn row(
     });
 }
 
-/// A fixed-width cell holding one component.
+/// A fixed-width cell holding one component, captioned with its state
+/// (`label` is an i18n key; empty for none).
 fn cell(
     line: &mut ChildSpawnerCommands,
     width: f32,
+    label: &'static str,
     content: impl FnOnce(&mut ChildSpawnerCommands),
 ) {
     line.spawn(Node {
         width: Val::Px(width),
-        justify_content: JustifyContent::Center,
+        flex_direction: FlexDirection::Column,
         align_items: AlignItems::Center,
+        row_gap: Val::Px(space::S8),
         flex_shrink: 0.0,
         ..default()
     })
-    .with_children(content);
-}
-
-fn state_header(body: &mut ChildSpawnerCommands, labels: &[&'static str], width: f32) {
-    body.spawn(Node {
-        column_gap: Val::Px(space::S16),
-        flex_shrink: 0.0,
-        padding: UiRect::left(Val::Px(LABEL_W + space::S16)),
-        ..default()
-    })
-    .with_children(|line| {
-        for label in labels {
-            line.spawn((
+    .with_children(|cell| {
+        if !label.is_empty() {
+            cell.spawn((
                 Localized::new(label).into_text(),
                 theme::role_text(TextRole::Caption),
                 TextColor(color::TEXT_MUTED),
-                Node {
-                    width: Val::Px(width),
-                    ..default()
-                },
-                TextLayout::new_with_justify(Justify::Center),
             ));
         }
+        cell.spawn(Node {
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(content);
     });
 }
 
@@ -521,7 +523,6 @@ fn state_labels(count: usize) -> Vec<&'static str> {
 }
 
 fn buttons_page(body: &mut ChildSpawnerCommands, form: Form) {
-    state_header(body, &state_labels(6), CELL_W + space::S48);
     let rows: [(&str, ButtonSize, ButtonKind, &str, usize); 7] = [
         (
             "kit.gallery.row.primary_lg",
@@ -576,15 +577,24 @@ fn buttons_page(body: &mut ChildSpawnerCommands, form: Form) {
     for (label, size, kind, key, columns) in rows {
         row(body, label, |line| {
             for index in 0..columns {
-                cell(line, CELL_W + space::S48, |cell| {
-                    let entity = kit_button(cell, size, kind, key, None, form);
-                    pin(&mut cell.commands(), entity, index);
-                });
+                cell(
+                    line,
+                    if size == ButtonSize::Large {
+                        size::BUTTON_LG_MIN_WIDTH.at(form)
+                    } else {
+                        CELL_W
+                    },
+                    STATES[index].2,
+                    |cell| {
+                        let entity = kit_button(cell, size, kind, key, None, form);
+                        pin(&mut cell.commands(), entity, index);
+                    },
+                );
             }
         });
     }
     row(body, "kit.gallery.row.hero", |line| {
-        cell(line, size::BUTTON_HERO_WIDTH.at(form), |cell| {
+        cell(line, size::BUTTON_HERO_WIDTH.at(form), "", |cell| {
             kit_button(
                 cell,
                 ButtonSize::Hero,
@@ -594,7 +604,7 @@ fn buttons_page(body: &mut ChildSpawnerCommands, form: Form) {
                 form,
             );
         });
-        cell(line, CELL_W + space::S48, |cell| {
+        cell(line, CELL_W + space::S48, "", |cell| {
             kit_button(
                 cell,
                 ButtonSize::Regular,
@@ -604,7 +614,7 @@ fn buttons_page(body: &mut ChildSpawnerCommands, form: Form) {
                 form,
             );
         });
-        cell(line, CELL_W, |cell| {
+        cell(line, CELL_W, "", |cell| {
             kit_button(
                 cell,
                 ButtonSize::Regular,
@@ -646,10 +656,9 @@ fn kit_button(
 }
 
 fn controls_page(body: &mut ChildSpawnerCommands, form: Form) {
-    state_header(body, &state_labels(6), CELL_W);
     row(body, "kit.gallery.row.icon_button", |line| {
         for index in 0..6 {
-            cell(line, CELL_W, |cell| {
+            cell(line, CELL_W, STATES[index].2, |cell| {
                 let entity = controls::sized_icon_button(
                     cell,
                     if index == 5 {
@@ -686,7 +695,7 @@ fn controls_page(body: &mut ChildSpawnerCommands, form: Form) {
     });
     row(body, "kit.gallery.row.stepper", |line| {
         for index in 0..5 {
-            cell(line, CELL_W, |cell| {
+            cell(line, CELL_W, STATES[index].2, |cell| {
                 cell.spawn(Node {
                     column_gap: Val::Px(space::S8),
                     align_items: AlignItems::Center,
@@ -735,7 +744,7 @@ fn controls_page(body: &mut ChildSpawnerCommands, form: Form) {
                 } else {
                     CELL_W
                 };
-                cell(line, width, |cell| {
+                cell(line, width, STATES[index].2, |cell| {
                     let entity = controls::tab(
                         cell,
                         Localized::new(key),
@@ -779,10 +788,9 @@ fn inputs_page(body: &mut ChildSpawnerCommands, form: Form) {
             "kit.gallery.state.disabled",
         ),
     ];
-    state_header(body, &toggle_states.map(|(_, _, _, label)| label), CELL_W);
     row(body, "kit.gallery.row.toggle", |line| {
-        for (state, focused, on, _) in toggle_states {
-            cell(line, CELL_W, |cell| {
+        for (state, focused, on, label) in toggle_states {
+            cell(line, CELL_W, label, |cell| {
                 let entity = controls::toggle(
                     cell,
                     Localized::new("pause.audio.mute"),
@@ -806,7 +814,6 @@ fn inputs_page(body: &mut ChildSpawnerCommands, form: Form) {
             });
         }
     });
-    state_header(body, &state_labels(5), CELL_W * 2.0 + space::S24);
     for (label, spawn) in [
         ("kit.gallery.row.slider", 0),
         ("kit.gallery.row.cycle", 1),
@@ -814,58 +821,67 @@ fn inputs_page(body: &mut ChildSpawnerCommands, form: Form) {
     ] {
         row(body, label, |line| {
             for index in 0..5 {
-                cell(line, CELL_W * 2.0 + space::S24, |cell| {
-                    let entity = match spawn {
-                        0 => controls::slider(
-                            cell,
-                            Localized::new("pause.audio.master"),
-                            0.7,
-                            form,
-                            "GallerySlider",
-                        ),
-                        1 => {
-                            let row = controls::cycle_row(
+                cell(
+                    line,
+                    if spawn == 0 {
+                        SLIDER_CELL_W
+                    } else {
+                        CELL_W * 2.0 + space::S24
+                    },
+                    STATES[index].2,
+                    |cell| {
+                        let entity = match spawn {
+                            0 => controls::slider(
                                 cell,
-                                Localized::new("pause.settings.language"),
-                                if index == 1 {
-                                    "简体中文"
+                                Localized::new("pause.audio.master"),
+                                0.7,
+                                form,
+                                "GallerySlider",
+                            ),
+                            1 => {
+                                let row = controls::cycle_row(
+                                    cell,
+                                    Localized::new("pause.settings.language"),
+                                    if index == 1 {
+                                        "简体中文"
+                                    } else {
+                                        "English"
+                                    }, // i18n-allow
+                                    GalleryValue,
+                                    GalleryAction::Noop,
+                                    GalleryAction::Noop,
+                                    form,
+                                    "GalleryCycle",
+                                );
+                                // Pin the control (the row's second child).
+                                cell.commands().queue(move |world: &mut World| {
+                                    let control = world
+                                        .get::<Children>(row)
+                                        .and_then(|children| children.get(1).copied());
+                                    if let Some(control) = control {
+                                        pin_world(world, control, index);
+                                    }
+                                });
+                                Entity::PLACEHOLDER
+                            }
+                            _ => controls::text_input(
+                                cell,
+                                Localized::new(if index == 3 {
+                                    "kit.gallery.sample.server"
                                 } else {
-                                    "English"
-                                }, // i18n-allow
+                                    "career.friends.find_prompt"
+                                }),
+                                (index != 3).then_some(Icon::NavSearch),
                                 GalleryValue,
                                 GalleryAction::Noop,
-                                GalleryAction::Noop,
-                                form,
-                                "GalleryCycle",
-                            );
-                            // Pin the control (the row's second child).
-                            cell.commands().queue(move |world: &mut World| {
-                                let control = world
-                                    .get::<Children>(row)
-                                    .and_then(|children| children.get(1).copied());
-                                if let Some(control) = control {
-                                    pin_world(world, control, index);
-                                }
-                            });
-                            Entity::PLACEHOLDER
+                                "GalleryInput",
+                            ),
+                        };
+                        if entity != Entity::PLACEHOLDER {
+                            pin(&mut cell.commands(), entity, index);
                         }
-                        _ => controls::text_input(
-                            cell,
-                            Localized::new(if index == 3 {
-                                "kit.gallery.sample.server"
-                            } else {
-                                "career.friends.find_prompt"
-                            }),
-                            (index != 3).then_some(Icon::NavSearch),
-                            GalleryValue,
-                            GalleryAction::Noop,
-                            "GalleryInput",
-                        ),
-                    };
-                    if entity != Entity::PLACEHOLDER {
-                        pin(&mut cell.commands(), entity, index);
-                    }
-                });
+                    },
+                );
             }
         });
     }
@@ -875,7 +891,7 @@ fn inputs_page(body: &mut ChildSpawnerCommands, form: Form) {
             (true, false, "kit.gallery.state.editing"),
             (false, true, "kit.gallery.state.error"),
         ] {
-            cell(line, CELL_W * 2.0 + space::S24, |cell| {
+            cell(line, CELL_W * 2.0 + space::S24, "", |cell| {
                 cell.spawn(Node {
                     flex_direction: FlexDirection::Column,
                     width: Val::Percent(100.0),
@@ -944,28 +960,26 @@ fn panels_page(body: &mut ChildSpawnerCommands, form: Form) {
             ..default()
         })
         .with_child(surfaces::ornament_frame());
-        line.spawn((
-            surfaces::plain_panel(),
-            Node {
+        line.spawn(surfaces::plain_panel())
+            .insert(Node {
                 width: Val::Px(200.0),
                 height: Val::Px(180.0),
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(space::S8),
                 ..theme::panel_node()
-            },
-        ))
-        .with_children(|panel| {
-            panel.spawn((
-                Localized::new("career.friends.title").into_text(),
-                theme::role_text(TextRole::Heading),
-                TextColor(color::TEXT_GOLD),
-            ));
-            panel.spawn((
-                Localized::new("kit.gallery.sample.body").into_text(),
-                theme::role_text(TextRole::Body),
-                TextColor(color::TEXT_SECONDARY),
-            ));
-        });
+            })
+            .with_children(|panel| {
+                panel.spawn((
+                    Localized::new("career.friends.title").into_text(),
+                    theme::role_text(TextRole::Heading),
+                    TextColor(color::TEXT_GOLD),
+                ));
+                panel.spawn((
+                    Localized::new("kit.gallery.sample.body").into_text(),
+                    theme::role_text(TextRole::Body),
+                    TextColor(color::TEXT_SECONDARY),
+                ));
+            });
         line.spawn(surfaces::framed_panel(form))
             .insert(Node {
                 width: Val::Px(240.0),
@@ -1039,10 +1053,9 @@ fn panels_page(body: &mut ChildSpawnerCommands, form: Form) {
         );
         surfaces::badge(line, "3", BadgeKind::Gold, true);
     });
-    state_header(body, &state_labels(6), 360.0);
     row(body, "kit.gallery.row.list_row", |line| {
         for index in 0..6 {
-            cell(line, 360.0, |cell| {
+            cell(line, 360.0, STATES[index].2, |cell| {
                 let entity = surfaces::list_row(
                     cell,
                     RowLeading::Portrait(ART[0].into()),
@@ -1073,7 +1086,7 @@ fn panels_page(body: &mut ChildSpawnerCommands, form: Form) {
     });
     row(body, "kit.gallery.row.list_row", |line| {
         for leading in [RowLeading::Icon(Icon::NavHistory), RowLeading::None] {
-            cell(line, 360.0, |cell| {
+            cell(line, 360.0, "", |cell| {
                 surfaces::list_row(
                     cell,
                     leading,
@@ -1135,7 +1148,7 @@ fn feedback_page(body: &mut ChildSpawnerCommands, form: Form) {
             (BarKind::Loading, 72.0, 100.0, None, false),
             (BarKind::HpSelf, 0.0, 203.0, Some(8), true),
         ] {
-            cell(line, 260.0, |cell| {
+            cell(line, 260.0, "", |cell| {
                 game::bar(
                     cell,
                     kind,
@@ -1179,10 +1192,9 @@ fn abilities_page(body: &mut ChildSpawnerCommands, form: Form) {
         "kit.gallery.state.level_up",
         "kit.gallery.state.aiming",
     ];
-    state_header(body, &labels, 96.0);
     row(body, "kit.gallery.row.ability", |line| {
         for (index, _) in labels.iter().enumerate() {
-            cell(line, 96.0, |cell| {
+            cell(line, 96.0, labels[index], |cell| {
                 cell.spawn(Node {
                     width: Val::Px(size::ABILITY.at(form)),
                     height: Val::Px(size::ABILITY.at(form) + space::S24),
@@ -1261,10 +1273,9 @@ fn abilities_page(body: &mut ChildSpawnerCommands, form: Form) {
             game::ability_button(line, view, side, GalleryAction::Noop, "GalleryPhoneControl");
         }
     });
-    state_header(body, &state_labels(6), 64.0);
     row(body, "kit.gallery.row.item_slot", |line| {
         for index in 0..6 {
-            cell(line, 64.0, |cell| {
+            cell(line, 64.0, STATES[index].2, |cell| {
                 let entity = game::item_slot_button(
                     cell,
                     Icon::ItemEmberBlade32,
@@ -1277,10 +1288,9 @@ fn abilities_page(body: &mut ChildSpawnerCommands, form: Form) {
         }
         game::item_slot(line, Some(Icon::ItemVitalityGem32), Some(2), form);
     });
-    state_header(body, &state_labels(6), game::SHOP_CARD_W.at(form));
     row(body, "kit.gallery.row.shop_card", |line| {
         for index in 0..6 {
-            cell(line, game::SHOP_CARD_W.at(form), |cell| {
+            cell(line, game::SHOP_CARD_W.at(form), STATES[index].2, |cell| {
                 let entity = game::shop_card(
                     cell,
                     ShopCard {
@@ -1305,29 +1315,33 @@ fn abilities_page(body: &mut ChildSpawnerCommands, form: Form) {
 fn heroes_page(body: &mut ChildSpawnerCommands, form: Form) {
     let mut labels = state_labels(6);
     labels.push("kit.gallery.state.studio");
-    state_header(body, &labels, size::HERO_TILE.at(form) + space::S16);
     row(body, "kit.gallery.row.hero_tile", |line| {
         for index in 0..7 {
-            cell(line, size::HERO_TILE.at(form) + space::S16, |cell| {
-                let studio = index == 6;
-                let entity = game::hero_tile(
-                    cell,
-                    Some(ART[if studio { 1 } else { 0 }].into()),
-                    shared::HeroClass::Mage,
-                    if studio { "Crowley" } else { "Agnes" }, // i18n-allow
-                    if studio {
-                        AvatarSource::Studio
-                    } else {
-                        AvatarSource::Included
-                    },
-                    form,
-                    GalleryAction::Noop,
-                    "GalleryHeroTile",
-                );
-                if !studio {
-                    pin(&mut cell.commands(), entity, index);
-                }
-            });
+            cell(
+                line,
+                size::HERO_TILE.at(form) + space::S16,
+                labels[index],
+                |cell| {
+                    let studio = index == 6;
+                    let entity = game::hero_tile(
+                        cell,
+                        Some(ART[if studio { 1 } else { 0 }].into()),
+                        shared::HeroClass::Mage,
+                        if studio { "Crowley" } else { "Agnes" }, // i18n-allow
+                        if studio {
+                            AvatarSource::Studio
+                        } else {
+                            AvatarSource::Included
+                        },
+                        form,
+                        GalleryAction::Noop,
+                        "GalleryHeroTile",
+                    );
+                    if !studio {
+                        pin(&mut cell.commands(), entity, index);
+                    }
+                },
+            );
         }
         game::hero_tile(
             line,
@@ -1387,6 +1401,9 @@ fn heroes_page(body: &mut ChildSpawnerCommands, form: Form) {
             }
         });
     });
+}
+
+fn hud_page(body: &mut ChildSpawnerCommands, form: Form) {
     row(body, "kit.gallery.row.timer", |line| {
         game::timer_ring(
             line,
@@ -1685,6 +1702,46 @@ fn observe_capture(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every page spawns on both profiles (no duplicate components, no
+    /// missing keys) with the kit painters running over it.
+    #[test]
+    fn every_page_spawns_on_both_profiles() {
+        for form in [Form::Desktop, Form::Phone] {
+            for page in 0..PAGES.len() {
+                let mut app = App::new();
+                app.add_plugins(bevy::time::TimePlugin)
+                    .insert_resource(UiForm(form))
+                    .init_resource::<crate::ui::kit_assets::UiDensity>()
+                    .init_resource::<crate::ui::kit_assets::KitAtlasLayouts>()
+                    .add_message::<crate::ui::focus::FocusAdjust>()
+                    .add_message::<crate::ui::SyntheticPress>()
+                    .add_systems(
+                        Update,
+                        (
+                            widgets::paint_pressables,
+                            widgets::paint_slabs,
+                            widgets::paint_kit,
+                            widgets::paint_preview_rings,
+                        )
+                            .chain(),
+                    );
+                let root = app.world_mut().spawn(Node::default()).id();
+                app.world_mut()
+                    .commands()
+                    .entity(root)
+                    .with_children(|body| {
+                        header(body, page, form);
+                        spawn_page(body, page, form);
+                    });
+                app.world_mut().flush();
+                app.update();
+                app.update();
+                let nodes = app.world_mut().query::<&Node>().iter(app.world()).count();
+                assert!(nodes > 20, "page {page} {form:?}: {nodes} nodes");
+            }
+        }
+    }
 
     #[test]
     fn capture_plan_covers_every_page_profile_and_language_once() {

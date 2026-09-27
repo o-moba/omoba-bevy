@@ -156,6 +156,7 @@ pub(crate) fn paint_pressables(
             &ButtonStyle,
             &mut BackgroundColor,
             Option<&PreviewState>,
+            Option<&KitSkin>,
         ),
         Or<(
             Changed<Interaction>,
@@ -165,7 +166,16 @@ pub(crate) fn paint_pressables(
         )>,
     >,
 ) {
-    for (interaction, pressable, style, mut color, preview) in &mut buttons {
+    for (interaction, pressable, style, mut color, preview, skin) in &mut buttons {
+        // A kit skin with its own fill rule owns the fill.
+        if let Some(next) = skin
+            .and_then(|skin| skin_fill(*skin, style, kit_state(*interaction, pressable, preview)))
+        {
+            if color.0 != next {
+                color.0 = next;
+            }
+            continue;
+        }
         let next = match preview.map(|preview| preview.state) {
             Some(ButtonState::Pressed) => style.pressed_color(),
             Some(ButtonState::Hover) => style.hover_color(),
@@ -399,7 +409,6 @@ type SkinItem<'a> = (
     &'a Interaction,
     &'a Pressable,
     Option<&'a PreviewState>,
-    &'a mut BackgroundColor,
     &'a mut BorderColor,
     Option<&'a mut UiTransform>,
 );
@@ -418,7 +427,7 @@ type SkinChanged = Or<(
 #[allow(clippy::type_complexity)]
 pub(crate) fn paint_kit(
     mut controls: Query<SkinItem, SkinChanged>,
-    mut labels: Query<(&mut TextColor, Option<&mut BorderColor>), Without<KitSkin>>,
+    mut labels: Query<(&mut TextColor, Option<&mut bevy::text::UnderlineColor>), Without<KitSkin>>,
     mut images: Query<&mut KitImage, Without<KitSkin>>,
     mut nodes: Query<
         (
@@ -430,15 +439,9 @@ pub(crate) fn paint_kit(
         (Without<KitSkin>, Without<TextColor>),
     >,
 ) {
-    for (style, skin, parts, interaction, pressable, preview, mut fill, mut edge, transform) in
-        &mut controls
+    for (style, skin, parts, interaction, pressable, preview, mut edge, transform) in &mut controls
     {
         let state = kit_state(*interaction, pressable, preview);
-        if let Some(next) = skin_fill(*skin, style, state) {
-            if fill.0 != next {
-                fill.0 = next;
-            }
-        }
         if let Some(next) = skin_border(*skin, style, state) {
             let next = BorderColor::all(next);
             if *edge != next {
@@ -470,13 +473,13 @@ pub(crate) fn paint_kit(
                 text.0 = label_color;
             }
             if let (KitSkin::Tertiary, Some(mut underline)) = (skin, underline) {
-                let next = BorderColor::all(if state == ButtonState::Hover {
+                let next = if state == ButtonState::Hover {
                     color::GOLD_600
                 } else {
                     Color::NONE
-                });
-                if *underline != next {
-                    *underline = next;
+                };
+                if underline.0 != next {
+                    underline.0 = next;
                 }
             }
         }
@@ -572,7 +575,7 @@ pub(crate) struct FocusRingOffset(pub f32);
 pub(crate) const FOCUS_HALO: f32 = space::S4 + border::FOCUS;
 
 /// The ring (and halo) bundle for a node covering the focused control.
-fn ring_bundle(offset: f32) -> impl Bundle {
+fn ring_bundle(offset: f32, corner: f32) -> impl Bundle {
     (
         Outline::new(Val::Px(border::FOCUS), Val::Px(offset), color::FOCUS_RING),
         bevy::ui::FocusPolicy::Pass,
@@ -584,6 +587,7 @@ fn ring_bundle(offset: f32) -> impl Bundle {
                 right: Val::Px(0.0),
                 top: Val::Px(0.0),
                 bottom: Val::Px(0.0),
+                border_radius: BorderRadius::all(Val::Px(corner)),
                 ..default()
             },
             Outline::new(
@@ -611,6 +615,7 @@ pub(crate) fn paint_focus_ring(
         Option<&FocusRingOffset>,
     )>,
     mut rings: Query<(&mut Node, &mut Outline), With<FocusRing>>,
+    mut halos: Query<(&mut Node, &mut Outline), (With<FocusHalo>, Without<FocusRing>)>,
 ) {
     let placed = focus
         .as_ref()
@@ -640,7 +645,7 @@ pub(crate) fn paint_focus_ring(
                     display: Display::None,
                     ..default()
                 },
-                ring_bundle(border::FOCUS_OFFSET),
+                ring_bundle(border::FOCUS_OFFSET, radius::MD),
                 GlobalZIndex(5000),
                 FocusRing,
                 Name::new("UiFocusRing"),
@@ -653,6 +658,20 @@ pub(crate) fn paint_focus_ring(
             let next = Outline::new(Val::Px(border::FOCUS), Val::Px(offset), color::FOCUS_RING);
             if *outline != next {
                 *outline = next;
+            }
+            for (mut halo, mut glow) in &mut halos {
+                let radius = BorderRadius::all(Val::Px(corner));
+                if halo.border_radius != radius {
+                    halo.border_radius = radius;
+                }
+                let next = Outline::new(
+                    Val::Px(FOCUS_HALO + offset - border::FOCUS_OFFSET),
+                    Val::Px(0.0),
+                    color::FOCUS_HALO,
+                );
+                if *glow != next {
+                    *glow = next;
+                }
             }
             Node {
                 position_type: PositionType::Absolute,
@@ -682,12 +701,7 @@ pub(crate) struct PreviewRing;
 pub(crate) fn paint_preview_rings(
     mut commands: Commands,
     previews: Query<
-        (
-            Entity,
-            &PreviewState,
-            Option<&FocusRingOffset>,
-            Option<&ComputedNode>,
-        ),
+        (Entity, &PreviewState, Option<&FocusRingOffset>, &Node),
         Changed<PreviewState>,
     >,
 ) {
@@ -695,9 +709,12 @@ pub(crate) fn paint_preview_rings(
         if !preview.focused {
             continue;
         }
-        let corner = node.map_or(radius::MD, |node| {
-            node.border_radius().top_left * node.inverse_scale_factor()
-        });
+        let offset = offset.map_or(border::FOCUS_OFFSET, |offset| offset.0);
+        // The control's own corner (pills stay round); `radius.md` otherwise.
+        let corner = match node.border_radius.top_left {
+            Val::Px(corner) if corner > 0.0 => corner,
+            _ => radius::MD,
+        };
         commands.entity(entity).with_child((
             Node {
                 position_type: PositionType::Absolute,
@@ -708,19 +725,14 @@ pub(crate) fn paint_preview_rings(
                 border_radius: BorderRadius::all(Val::Px(corner)),
                 ..default()
             },
-            ring_bundle(offset.map_or(border::FOCUS_OFFSET, |offset| offset.0)),
+            ring_bundle(offset, corner),
             GlobalZIndex(4900),
             PreviewRing,
         ));
     }
 }
 
-pub(crate) fn button_bundle<T: UiActionT>(
-    node: Node,
-    kind: ButtonKind,
-    action: T,
-    id: TestId,
-) -> impl Bundle {
+fn button_bundle<T: UiActionT>(node: Node, kind: ButtonKind, action: T, id: TestId) -> impl Bundle {
     let style = ButtonStyle::new(kind);
     (
         Button,
@@ -836,27 +848,26 @@ pub(crate) fn spawn_button<T: UiActionT>(
                     .id(),
             );
         }
-        let underline = if kind == ButtonKind::Link {
-            UiRect::bottom(Val::Px(border::HAIRLINE))
-        } else {
-            UiRect::ZERO
-        };
         parts.label = Some(
             button
                 .spawn((
                     label.into_text(),
                     theme::styled_text(style),
                     TextColor(theme::button_label_color(kind, false, ButtonState::Idle)),
-                    Node {
-                        border: underline,
-                        ..default()
-                    },
-                    BorderColor::all(Color::NONE),
                     TextLayout::new_with_justify(Justify::Center),
                     label_extra,
                 ))
                 .id(),
         );
+        if kind == ButtonKind::Link {
+            // The tertiary hover underline (1 px `gold.600`), hidden until hover.
+            if let Some(label) = parts.label {
+                button.commands().entity(label).insert((
+                    bevy::text::Underline,
+                    bevy::text::UnderlineColor(Color::NONE),
+                ));
+            }
+        }
     });
     button.insert(parts).id()
 }
