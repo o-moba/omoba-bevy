@@ -1106,7 +1106,7 @@ mod tests {
             metric::desktop_ui_scale(800.0, 600.0),
             metric::DESKTOP_SCALE_MIN
         );
-        assert!(metric::DESKTOP_SCALE_MIN >= 0.8);
+        const { assert!(metric::DESKTOP_SCALE_MIN >= 0.8) };
         assert_eq!(metric::desktop_ui_scale(3840.0, 2160.0), 2.0);
         // Ultra-wide: the height decides.
         assert_eq!(metric::desktop_ui_scale(2560.0, 1080.0), 1.5);
