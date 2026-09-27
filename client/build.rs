@@ -3,6 +3,12 @@
 //! - every target: generate the i18n dictionary registry
 //!   (`OUT_DIR/i18n_bundles.rs`) from the folders under `client/i18n/`, so a
 //!   language is added by adding a folder (see `docs/i18n.md`);
+//! - every target: generate the typed Verdant Crown design tokens
+//!   (`OUT_DIR/ui_tokens.rs`) from `client/ui/tokens/verdant-crown.json`
+//!   (see `build/ui_tokens.rs` and `docs/ui-kit.md`);
+//! - every target: generate the typed Verdant UI asset table
+//!   (`OUT_DIR/ui_assets.rs`) from `client/assets/ui/verdant/manifest.json`
+//!   (see `build/ui_assets.rs`);
 //! - iOS: compile the platform-owned Swift bridges (StoreKit, browser,
 //!   GameController).
 use std::{
@@ -10,6 +16,11 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
 };
+
+#[path = "build/ui_assets.rs"]
+mod ui_assets;
+#[path = "build/ui_tokens.rs"]
+mod ui_tokens;
 
 fn output(args: &[&str]) -> String {
     let result = Command::new("xcrun")
@@ -30,6 +41,8 @@ fn output(args: &[&str]) -> String {
 
 fn main() {
     generate_i18n_registry();
+    generate_ui_tokens();
+    generate_ui_assets();
     println!("cargo:rerun-if-changed=../mobile/ios/SupporterStoreKit.swift");
     println!("cargo:rerun-if-changed=../mobile/ios/BrowserBridge.swift");
     println!("cargo:rerun-if-changed=../mobile/ios/OmobaGameController.swift");
@@ -135,6 +148,47 @@ fn generate_i18n_registry() {
     let target =
         PathBuf::from(env::var_os("OUT_DIR").expect("Cargo output")).join("i18n_bundles.rs");
     fs::write(&target, out).expect("write i18n registry");
+}
+
+/// The Verdant Crown token copy (see `scripts/sync_ui_tokens.py`).
+const UI_TOKENS: &str = "ui/tokens/verdant-crown.json";
+
+/// Writes `OUT_DIR/ui_tokens.rs` from [`UI_TOKENS`].
+fn generate_ui_tokens() {
+    let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("Cargo manifest dir"));
+    println!("cargo:rerun-if-changed={UI_TOKENS}");
+    println!("cargo:rerun-if-changed=build/ui_tokens.rs");
+    let source = fs::read_to_string(manifest.join(UI_TOKENS))
+        .unwrap_or_else(|error| panic!("cannot read {UI_TOKENS}: {error}"));
+    let tokens: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&source)
+        .unwrap_or_else(|error| panic!("{UI_TOKENS} is not a JSON object: {error}"));
+    assert_eq!(
+        tokens
+            .get("$schema_version")
+            .and_then(serde_json::Value::as_u64),
+        Some(1),
+        "{UI_TOKENS}: unsupported $schema_version"
+    );
+    let code = ui_tokens::render(&tokens, &manifest.join("assets"));
+    let target = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo output")).join("ui_tokens.rs");
+    fs::write(&target, code).expect("write ui tokens");
+}
+
+/// The installed Verdant UI asset manifest (see `scripts/sync_ui_assets.py`).
+const UI_ASSETS: &str = "assets/ui/verdant/manifest.json";
+
+/// Writes `OUT_DIR/ui_assets.rs` from [`UI_ASSETS`].
+fn generate_ui_assets() {
+    let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("Cargo manifest dir"));
+    println!("cargo:rerun-if-changed={UI_ASSETS}");
+    println!("cargo:rerun-if-changed=build/ui_assets.rs");
+    let source = fs::read_to_string(manifest.join(UI_ASSETS))
+        .unwrap_or_else(|error| panic!("cannot read {UI_ASSETS}: {error}"));
+    let data: serde_json::Value = serde_json::from_str(&source)
+        .unwrap_or_else(|error| panic!("{UI_ASSETS} is not JSON: {error}"));
+    let code = ui_assets::render(&data, &manifest.join("assets"));
+    let target = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo output")).join("ui_assets.rs");
+    fs::write(&target, code).expect("write ui assets");
 }
 
 fn build_ios_bridges() {

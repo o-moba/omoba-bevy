@@ -39,5 +39,10 @@ bevy = { version = "0.18.0", default-features = false, features = [
 # is provided locally on Android, avoiding the SDK's desktop-only download stack.
 ekza-bevy-sdk = { workspace = true }
 
+# The build script reads the i18n folders and the UI token JSON (already a
+# dependency of the client, so no new crate).
+[build-dependencies]
+serde_json.workspace = true
+
 [lints]
 workspace = true
