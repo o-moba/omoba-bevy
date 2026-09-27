@@ -9,6 +9,8 @@
 //!   language at 1280×720, plus the buttons page at 1920×1080 and 1024×640,
 //!   into `<dir>` (`gallery-<page>-<profile>-<lang>-<w>x<h>.png`,
 //!   `gallery-summary.json`) and exits.
+// Columns index `STATES` and are passed on to `pin`, so range loops read best.
+#![allow(clippy::needless_range_loop)]
 use std::path::PathBuf;
 
 use bevy::{
