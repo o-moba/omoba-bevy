@@ -1,7 +1,9 @@
 //! Floating connection status panel and its Retry button.
+// i18n-strict
 
 use bevy::prelude::*;
 
+use crate::i18n::{Localized, data, tr, trf};
 use crate::session_config::{T_RETRY, T_WAIT_MAX};
 use crate::ui::{Activated, TestId, UiAction};
 
@@ -71,7 +73,7 @@ pub(in crate::net) fn setup_connection_status_ui(mut commands: Commands) {
                 ))
                 .with_children(|button| {
                     button.spawn((
-                        Text::new("Retry"),
+                        Localized::new("net.retry").into_text(),
                         TextFont {
                             font_size: 16.0,
                             ..default()
@@ -126,46 +128,16 @@ pub(in crate::net) fn sync_connection_status_ui(
     let Ok(mut text) = label_q.single_mut() else {
         return;
     };
-    match client_session.state {
-        ClientConnectionState::Connecting => {
-            text.0 = format!("Connecting… ({})", client_session.server_addr_display);
-        }
-        ClientConnectionState::WaitingForServer => {
-            text.0 = format!(
-                "Waiting for server at {}. Start the server or check GAME_SERVER_ADDR. Retries every {}s (max wait {}s).",
-                client_session.server_addr_display,
-                T_RETRY.as_secs(),
-                T_WAIT_MAX.as_secs()
-            );
-        }
-        ClientConnectionState::Connected => {
-            text.0 = if client_session.join_confirmed() {
-                "Joined - connected to match.".to_owned()
-            } else if client_session.last_join.is_some() {
-                format!(
-                    "Joining match… attempt {}/{}. Waiting for server admission.",
-                    client_session.join_attempts, MAX_JOIN_ATTEMPTS
-                )
-            } else {
-                "Connected - choose a hero and team to join.".to_owned()
-            };
-        }
-        ClientConnectionState::Disconnected if client_session.reconnect.active => {
-            text.0 = format!(
-                "Connection lost - reconnecting (attempt {})...",
-                client_session.reconnect.attempts.max(1)
-            );
-        }
-        ClientConnectionState::Disconnected => {
-            text.0 = "Disconnected - connection lost or timed out. Use Retry when the server is back, then choose your team again."
-                .to_string();
-        }
-    }
-
-    if let Some(reason) = client_session.join_error {
-        text.0 = reason.message().to_owned();
+    // Written every frame, so a language change shows at once.
+    let status = if let Some(reason) = client_session.join_error {
+        data::join_rejection(reason).to_owned()
     } else if client_session.join_exhausted {
-        text.0 = "The server did not confirm your Join. Use Retry to try again.".to_owned();
+        tr("net.status.join_unconfirmed").to_owned()
+    } else {
+        connection_line(&client_session)
+    };
+    if text.0 != status {
+        text.0 = status;
     }
 
     if let Ok((mut visibility, mut node)) = retry.single_mut() {
@@ -185,9 +157,85 @@ pub(in crate::net) fn sync_connection_status_ui(
     }
 }
 
+fn connection_line(client_session: &ClientSession) -> String {
+    let addr = &client_session.server_addr_display;
+    match client_session.state {
+        ClientConnectionState::Connecting => trf("net.status.connecting", &[("addr", addr)]),
+        ClientConnectionState::WaitingForServer => trf(
+            "net.status.waiting",
+            &[
+                ("addr", addr),
+                ("retry", &T_RETRY.as_secs()),
+                ("max_wait", &T_WAIT_MAX.as_secs()),
+            ],
+        ),
+        ClientConnectionState::Connected if client_session.join_confirmed() => {
+            tr("net.status.joined").to_owned()
+        }
+        ClientConnectionState::Connected if client_session.last_join.is_some() => trf(
+            "net.status.joining",
+            &[
+                ("attempt", &client_session.join_attempts),
+                ("max", &MAX_JOIN_ATTEMPTS),
+            ],
+        ),
+        ClientConnectionState::Connected => tr("net.status.connected").to_owned(),
+        ClientConnectionState::Disconnected if client_session.reconnect.active => trf(
+            "net.status.reconnecting",
+            &[("attempt", &client_session.reconnect.attempts.max(1))],
+        ),
+        ClientConnectionState::Disconnected => tr("net.status.disconnected").to_owned(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The status line and the Retry label follow a language change.
+    #[test]
+    fn connection_status_follows_the_language() {
+        if crate::i18n::testing::isolated(
+            "net::status_ui::tests::connection_status_follows_the_language",
+        ) {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, Locale, LocaleId};
+        let mut app = App::new();
+        app.add_plugins(I18nPlugin::default())
+            .init_resource::<ClientSession>()
+            .add_systems(Startup, setup_connection_status_ui)
+            .add_systems(Update, sync_connection_status_ui);
+        app.world_mut().resource_mut::<ClientSession>().state = ClientConnectionState::Disconnected;
+        let texts = |app: &mut App| {
+            let mut label = app
+                .world_mut()
+                .query_filtered::<&Text, With<ConnectionStatusLabel>>();
+            let label = label.single(app.world()).unwrap().0.clone();
+            let mut retry = app.world_mut().query::<(&crate::i18n::Localized, &Text)>();
+            let (_, retry) = retry.single(app.world()).unwrap();
+            (label, retry.0.clone())
+        };
+        app.update();
+        let (label, retry) = texts(&mut app);
+        assert!(label.starts_with("Disconnected - connection lost"));
+        assert_eq!(retry, "Retry");
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(LocaleId::parse("zh-Hans").unwrap());
+        app.update();
+        let (label, retry) = texts(&mut app);
+        assert!(label.starts_with("已断开"), "{label}");
+        assert_eq!(retry, "重试");
+        app.world_mut()
+            .resource_mut::<ClientSession>()
+            .join_exhausted = true;
+        app.update();
+        assert_eq!(
+            texts(&mut app).0,
+            "服务器未确认你的加入请求。请点击“重试”再试一次。"
+        );
+    }
 
     #[test]
     fn admission_hides_status_and_disconnection_exposes_working_retry_without_empty_layout() {

@@ -779,10 +779,11 @@ impl Simulation {
                         let (kills, deaths) = self.stats.get(&p.id).copied().unwrap_or_default();
                         shared::live_score::LiveScorePlayer {
                             player_id: p.id,
+                            // Practice-only names, in the active language.
                             nickname: if p.id == LOCAL_ID {
-                                "You".into()
+                                crate::i18n::tr("net.practice.you").into()
                             } else {
-                                format!("Bot {}", p.id)
+                                crate::i18n::trf("net.practice.bot", &[("id", &p.id)])
                             },
                             team: p.team,
                             hero_class: p.hero_class,
@@ -810,7 +811,7 @@ impl Simulation {
 pub(super) struct PracticeBanner;
 pub(super) fn setup_banner(mut commands: Commands) {
     commands.spawn((
-        Text::new("OFFLINE PRACTICE · Level 6 · No rewards"),
+        crate::i18n::Localized::with_args("net.practice.banner", [("level", &LEVEL)]).into_text(),
         TextFont {
             font_size: 13.0,
             ..default()
