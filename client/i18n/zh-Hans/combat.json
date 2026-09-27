@@ -25,7 +25,7 @@
   "combat.aim.move_closer": "已锁定 · 请靠近",
   "combat.aim.none": "瞄准一个目标",
   "combat.hotbar.upgrade": "+  加点",
-  "combat.hotbar.level": "等级 {level}",
+  "combat.hotbar.level": "{level} 级",
   "combat.hotbar.locked": "{level} 级解锁",
   "combat.hotbar.cooldown": "{seconds} 秒",
   "combat.hotbar.need_mana": "法力不足",

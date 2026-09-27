@@ -5,7 +5,7 @@
   "home.last_match.line": "{outcome} · {kills}/{deaths}/{assists} · {hero} · {minutes} 分钟",
   "home.last_match.short": "{outcome} · {minutes} 分钟",
   "home.connection.online": "在线 · 准备就绪",
-  "home.connection.connecting": "连接中…",
+  "home.connection.connecting": "正在连接…",
   "home.connection.offline": "离线 · 正在重新连接…",
   "home.tagline": "翠绿竞技场",
   "home.profile": "玩家资料",

@@ -8,7 +8,7 @@
   "error.purchase.dead": "请等待复活后再购买。",
   "error.purchase.outside_base": "回到基地才能购买。",
   "error.purchase.insufficient_gold": "金币不足。",
-  "error.purchase.already_owned": "你已拥有此装备。",
+  "error.purchase.already_owned": "你已拥有该装备。",
   "error.purchase.inventory_full": "六个装备栏已满。",
   "error.purchase.unknown_item": "当前目录中没有此装备。"
 }

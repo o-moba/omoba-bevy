@@ -12,7 +12,7 @@
   "social.status.invalid_session": "此聊天请求的会话无效。",
   "social.status.reaction_unknown": "服务器表情目录中没有该表情。",
   "social.status.join_first": "请先加入对局再发送消息。",
-  "social.status.no_profile": "你的档案未连接。",
+  "social.status.no_profile": "你的资料未连接。",
   "social.status.connection_lost": "连接已断开。",
   "social.status.not_ready": "对局尚未就绪。",
   "social.composer.placeholder": "给队友发消息…",
