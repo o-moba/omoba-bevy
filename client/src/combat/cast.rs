@@ -1,4 +1,6 @@
+// i18n-strict
 use crate::domain::CombatStats;
+use crate::i18n::{LocaleId, data, tr, tr_in, trf, trf_in};
 use crate::input_bindings::SKILL_CAST_KEYS;
 use crate::input_context::GameplayInputContext;
 use crate::net::{
@@ -9,9 +11,10 @@ use crate::player::{MovementTarget, Player};
 use crate::team::{Team, TeamSelection};
 use bevy::prelude::*;
 use shared::{
-    HeroClass, SkillSlot, TargetingMode, ability_for_class_slot, scaled_cast_range,
-    scaled_cooldown, scaled_mana_cost,
+    AbilityDefinition, HeroClass, SkillSlot, TargetingMode, ability_for_class_slot,
+    scaled_cast_range, scaled_cooldown, scaled_mana_cost,
 };
+use std::fmt::Display;
 
 use super::cooldown::{LocalCastCooldown, effective_cast_duration, local_hero_class};
 use super::feedback::ActionFeedback;
@@ -57,6 +60,39 @@ impl PendingCast {
     }
 }
 
+/// A cast message about `ability` for the player, in the active language; the
+/// log keeps English. `{ability}` is filled from the ability, `args` fill the rest.
+fn ability_message(
+    key: &'static str,
+    ability: &AbilityDefinition,
+    args: &[(&str, &dyn Display)],
+) -> (String, String) {
+    let shown = data::ability_name(ability);
+    let mut display: Vec<(&str, &dyn Display)> = vec![("ability", &shown)];
+    display.extend_from_slice(args);
+    let mut english: Vec<(&str, &dyn Display)> = vec![("ability", &ability.name)];
+    english.extend_from_slice(args);
+    (trf(key, &display), trf_in(key, LocaleId::ENGLISH, &english))
+}
+
+/// Shows `key` about `ability` and logs it in English.
+fn report(
+    feedback: &mut ActionFeedback,
+    key: &'static str,
+    ability: &AbilityDefinition,
+    args: &[(&str, &dyn Display)],
+) {
+    let (shown, english) = ability_message(key, ability, args);
+    feedback.push_line(shown);
+    info!("{english}");
+}
+
+/// Shows a fixed message and logs it in English.
+fn report_plain(feedback: &mut ActionFeedback, key: &'static str) {
+    feedback.push_line(tr(key));
+    info!("{}", tr_in(key, LocaleId::ENGLISH));
+}
+
 /// Resolves the target and sends a slot cast for the local player's class kit.
 /// Client-side checks (unlock level, local cooldown, target presence) exist for
 /// responsive UX only; the server re-validates everything authoritatively.
@@ -78,26 +114,25 @@ fn try_cast_slot(
     }
     let def = ability_for_class_slot(class, slot);
     if !prog.unlocked()[slot.index()] {
-        let message = format!(
-            "{} is locked until level {}.",
-            def.name,
-            shared::SLOT_UNLOCK_LEVELS[slot.index()]
+        report(
+            feedback,
+            "combat.cast.locked",
+            def,
+            &[("level", &shared::SLOT_UNLOCK_LEVELS[slot.index()])],
         );
-        feedback.push_line(message.clone());
-        info!("{message}");
         return false;
     }
     if cast_cd.recovery_secs > 0.0 {
         return false;
     }
     if cast_cd.remaining_secs[slot.index()] > 0.0 {
-        let message = format!(
-            "{} is cooling down for {:.1}s.",
-            def.name,
-            cast_cd.remaining_secs[slot.index()]
+        let seconds = format!("{:.1}", cast_cd.remaining_secs[slot.index()]);
+        report(
+            feedback,
+            "combat.cast.cooling_down",
+            def,
+            &[("seconds", &seconds)],
         );
-        feedback.push_line(message.clone());
-        info!("{message}");
         return false;
     }
 
@@ -109,26 +144,26 @@ fn try_cast_slot(
         TargetingMode::UnitTarget => selected_target,
     };
     let Some(target) = target else {
-        let message = match def.targeting {
-            TargetingMode::UnitTarget => {
-                "No target available. Click or tap an enemy, or use Tab to select."
-            }
-            TargetingMode::SelfTarget => "Not connected yet; self-cast unavailable.",
-        };
-        feedback.push_line(message);
-        info!("{message}");
+        report_plain(
+            feedback,
+            match def.targeting {
+                TargetingMode::UnitTarget => "combat.cast.no_target",
+                TargetingMode::SelfTarget => "combat.cast.not_connected",
+            },
+        );
         return false;
     };
 
     let rank = prog.ranks[slot.index()].clamp(1, def.max_rank);
     let mana_cost = scaled_mana_cost(def, rank);
     if stats.mana < mana_cost {
-        let message = format!(
-            "Not enough mana for {} ({:.0}/{:.0}).",
-            def.name, stats.mana, mana_cost
+        let (mana, cost) = (format!("{:.0}", stats.mana), format!("{mana_cost:.0}"));
+        report(
+            feedback,
+            "combat.cast.no_mana",
+            def,
+            &[("mana", &mana), ("cost", &cost)],
         );
-        feedback.push_line(message.clone());
-        info!("{message}");
         return false;
     }
     cast_cd.remaining_secs[slot.index()] = scaled_cooldown(def, rank).as_secs_f32();
@@ -137,9 +172,7 @@ fn try_cast_slot(
         target,
         slot: slot.index() as u8,
     });
-    let message = format!("Casting {}.", def.name);
-    feedback.push_line(message.clone());
-    info!("{message}");
+    report(feedback, "combat.cast.casting", def, &[]);
     true
 }
 
@@ -160,9 +193,7 @@ pub(crate) fn queue_cast_request(
             let (Some(entity), Some(target)) =
                 (target_state.selected_entity, target_state.selected_target)
             else {
-                let message = "No target available. Click or tap an enemy, or use Tab to select.";
-                feedback.push_line(message);
-                info!("{message}");
+                report_plain(feedback, "combat.cast.no_target");
                 return;
             };
             (Some(entity), Some(target))
@@ -279,39 +310,43 @@ pub(super) fn resolve_pending_cast_system(
     let prog = progression.copied().unwrap_or_default();
     let rank = prog.ranks[slot.index()].clamp(1, definition.max_rank);
     let rejection = if !stats.is_alive() {
-        Some("Wait for respawn.".to_string())
+        Some(tr("combat.cast.wait_respawn").to_string())
     } else if !prog.unlocked()[slot.index()] {
-        Some(format!(
-            "{} unlocks at level {}.",
-            definition.name,
-            shared::SLOT_UNLOCK_LEVELS[slot.index()]
-        ))
+        Some(
+            ability_message(
+                "combat.cast.unlocks_at",
+                definition,
+                &[("level", &shared::SLOT_UNLOCK_LEVELS[slot.index()])],
+            )
+            .0,
+        )
     } else if cast_cd.remaining_secs[slot.index()] > 0.0 {
-        Some(format!(
-            "{} ready in {:.1}s.",
-            definition.name,
-            cast_cd.remaining_secs[slot.index()]
-        ))
+        let seconds = format!("{:.1}", cast_cd.remaining_secs[slot.index()]);
+        Some(ability_message("combat.cast.ready_in", definition, &[("seconds", &seconds)]).0)
     } else if stats.mana < scaled_mana_cost(definition, rank) {
-        Some(format!(
-            "Not enough mana for {} ({:.0}/{:.0}).",
-            definition.name,
-            stats.mana,
-            scaled_mana_cost(definition, rank)
-        ))
+        let mana = format!("{:.0}", stats.mana);
+        let cost = format!("{:.0}", scaled_mana_cost(definition, rank));
+        Some(
+            ability_message(
+                "combat.cast.no_mana",
+                definition,
+                &[("mana", &mana), ("cost", &cost)],
+            )
+            .0,
+        )
     } else if request
         .target_entity
         .and_then(|entity| protection.get(entity).ok())
         .is_some_and(|protected| protected.0)
     {
-        Some("Structure protected — destroy the preceding lane towers first.".to_string())
+        Some(tr("combat.cast.protected").to_string())
     } else if definition.targeting == TargetingMode::UnitTarget
         && request
             .target_entity
             .zip(request.target)
             .is_none_or(|(entity, id)| !validity.valid(entity, id, *team))
     {
-        Some("Target is no longer a visible hostile unit.".to_string())
+        Some(tr("combat.cast.target_gone").to_string())
     } else {
         None
     };
@@ -353,7 +388,7 @@ pub(super) fn resolve_pending_cast_system(
             cast_range,
         ) {
             if touch_mode {
-                feedback.push_line("Target out of range — move closer.");
+                feedback.push_line(tr("combat.cast.out_of_range"));
                 pending_cast.cancel();
                 return;
             }
@@ -361,9 +396,7 @@ pub(super) fn resolve_pending_cast_system(
                 target: target_transform.translation,
             });
             if !request.approach_announced {
-                let message = format!("Approaching target for {}.", definition.name);
-                feedback.push_line(message.clone());
-                info!("{message}");
+                report(&mut feedback, "combat.cast.approaching", definition, &[]);
                 if let Some(request) = pending_cast.request.as_mut() {
                     request.approach_announced = true;
                 }

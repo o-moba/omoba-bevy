@@ -1,3 +1,4 @@
+// i18n-strict
 use crate::net::{GameStateSnapshot, NetworkHeroClass, PlayerProgression};
 use crate::player::Player;
 use crate::team::TeamSelection;

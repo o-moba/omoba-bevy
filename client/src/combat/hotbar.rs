@@ -1,4 +1,6 @@
+// i18n-strict
 use crate::domain::CombatStats;
+use crate::i18n::{Localized, data, tr, trf};
 use crate::input_bindings::SKILL_UPGRADE_KEY;
 use crate::input_context::GameplayInputContext;
 use crate::net::{
@@ -126,7 +128,7 @@ pub(super) fn setup_combat_ui(mut commands: Commands, asset_server: Option<Res<A
                     ))
                     .with_children(|arrow| {
                         arrow.spawn((
-                            Text::new("+  UPGRADE"),
+                            Localized::new("combat.hotbar.upgrade").into_text(),
                             TextFont {
                                 font_size: 11.0,
                                 ..default()
@@ -212,7 +214,7 @@ pub(super) fn setup_combat_ui(mut commands: Commands, asset_server: Option<Res<A
                             Name::new(format!("SkillName-{label}")),
                         ));
                         slot.spawn((
-                            Text::new("Lv 1"),
+                            Text::new(trf("combat.hotbar.level", &[("level", &1)])),
                             TextFont {
                                 font_size: 11.0,
                                 ..default()
@@ -291,7 +293,7 @@ pub(super) fn update_skill_bar_system(
         let Some(slot) = SkillSlot::from_index(label.slot as u8) else {
             continue;
         };
-        let next = ability_for_class_slot(class, slot).name;
+        let next = data::ability_name(ability_for_class_slot(class, slot));
         if text.0 != next {
             text.0 = next.to_string();
         }
@@ -303,20 +305,29 @@ pub(super) fn update_skill_bar_system(
         let definition = ability_for_class_slot(class, slot);
         let cost = scaled_mana_cost(definition, rank);
         let status = if !prog.unlocked()[label.slot] {
-            format!("Locked Lv {}", shared::SLOT_UNLOCK_LEVELS[label.slot])
+            trf(
+                "combat.hotbar.locked",
+                &[("level", &shared::SLOT_UNLOCK_LEVELS[label.slot])],
+            )
         } else if cooldowns.remaining_secs[label.slot] > 0.0 {
-            format!("{:.1}s", cooldowns.remaining_secs[label.slot])
+            trf(
+                "combat.hotbar.cooldown",
+                &[(
+                    "seconds",
+                    &format!("{:.1}", cooldowns.remaining_secs[label.slot]),
+                )],
+            )
         } else if local.is_some_and(|(_, _, stats, _)| stats.mana < cost) {
-            "Need mana".to_string()
+            tr("combat.hotbar.need_mana").to_string()
         } else if pending
             .request
             .is_some_and(|request| request.slot == label.slot && request.approach_announced)
         {
-            "Approaching".to_string()
+            tr("combat.hotbar.approaching").to_string()
         } else if definition.targeting == TargetingMode::UnitTarget
             && target.selected_entity.is_none()
         {
-            "Select target".to_string()
+            tr("combat.hotbar.select_target").to_string()
         } else if definition.targeting == TargetingMode::UnitTarget
             && local
                 .zip(
@@ -332,11 +343,18 @@ pub(super) fn update_skill_bar_system(
                     )
                 })
         {
-            "Out of range".to_string()
+            tr("combat.hotbar.out_of_range").to_string()
         } else {
-            "Ready".to_string()
+            tr("combat.hotbar.ready").to_string()
         };
-        let next = format!("R{rank} · {cost:.0} MP\n{status}");
+        let next = trf(
+            "combat.hotbar.rank",
+            &[
+                ("rank", &rank),
+                ("cost", &format!("{cost:.0}")),
+                ("status", &status),
+            ],
+        );
         if text.0 != next {
             text.0 = next;
         }

@@ -1,5 +1,7 @@
+// i18n-strict
 use crate::camera::MainCamera;
 use crate::domain::CombatStats;
+use crate::i18n::tr;
 use crate::input_context::GameplayInputContext;
 use crate::net::{NetworkCommand, NetworkHeroClass, PlayerProgression, TargetId, TargetKind};
 use crate::player::Player;
@@ -147,7 +149,7 @@ pub(super) fn mobile_cast_system(
             )
         };
         let Some((entity, id)) = pick else {
-            feedback.push_line("No enemy in that direction and range.");
+            feedback.push_line(tr("combat.attack.no_enemy_aimed"));
             return;
         };
         let request_target = TargetState {
