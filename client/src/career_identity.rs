@@ -1,5 +1,6 @@
 //! Device-held signing key and a server/session-bound career handshake.
 //! The signing key is never a packet, log field, UI value or public profile ID.
+// i18n-strict
 use std::{
     fs::{self, OpenOptions},
     io::{self, Write},
@@ -14,6 +15,7 @@ use shared::career::{AuthChallenge, CareerRequest, authorized_signing_bytes, nor
 
 use crate::{
     career::{CareerClient, CareerUiSet, NicknameChanged},
+    i18n::tr,
     net::{ClientNetPipeline, ClientSession, GameStateSnapshot, NetworkCommand},
     persistence::ClientSessionId,
 };
@@ -52,25 +54,24 @@ fn decode_key(raw: &str) -> Option<[u8; 32]> {
 }
 
 fn read_key(path: &Path) -> Result<SigningKey, String> {
-    let metadata = fs::symlink_metadata(path).map_err(|_| "Cannot read the saved profile key.")?;
+    let metadata = fs::symlink_metadata(path).map_err(|_| tr("identity.key.read_failed"))?;
     if !metadata.is_file() || metadata.len() > 1024 {
-        return Err("The saved profile key is invalid; it has been preserved.".into());
+        return Err(tr("identity.key.invalid").into());
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         if metadata.permissions().mode() & 0o077 != 0 {
-            return Err("The saved profile key needs private file permissions (0600).".into());
+            return Err(tr("identity.key.permissions").into());
         }
     }
-    let bytes = fs::read(path).map_err(|_| "Cannot read the saved profile key.")?;
-    let saved: IdentityFile = serde_json::from_slice(&bytes)
-        .map_err(|_| "The saved profile key is damaged; it has been preserved.")?;
-    let seed = decode_key(&saved.seed)
-        .ok_or("The saved profile key is damaged; it has been preserved.")?;
+    let bytes = fs::read(path).map_err(|_| tr("identity.key.read_failed"))?;
+    let saved: IdentityFile =
+        serde_json::from_slice(&bytes).map_err(|_| tr("identity.key.damaged"))?;
+    let seed = decode_key(&saved.seed).ok_or(tr("identity.key.damaged"))?;
     let key = SigningKey::from_bytes(&seed);
     if saved.version != 1 || saved.public_key != hex(key.verifying_key().as_bytes()) {
-        return Err("The saved profile key is damaged; it has been preserved.".into());
+        return Err(tr("identity.key.damaged").into());
     }
     Ok(key)
 }
@@ -93,38 +94,38 @@ pub(super) fn load_or_create_key(directory: &Path) -> Result<SigningKey, String>
     match fs::symlink_metadata(&path) {
         Ok(_) => return read_key(&path),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(_) => return Err("Cannot access the saved profile key.".into()),
+        Err(_) => return Err(tr("identity.key.access_failed").into()),
     }
-    fs::create_dir_all(directory).map_err(|_| "Cannot create private profile storage.")?;
+    fs::create_dir_all(directory).map_err(|_| tr("identity.storage.create_failed"))?;
     let mut seed = [0; 32];
-    getrandom::fill(&mut seed).map_err(|_| "Secure randomness is unavailable.")?;
+    getrandom::fill(&mut seed).map_err(|_| tr("identity.random_unavailable"))?;
     let key = SigningKey::from_bytes(&seed);
     let mut suffix = [0; 16];
-    getrandom::fill(&mut suffix).map_err(|_| "Secure randomness is unavailable.")?;
+    getrandom::fill(&mut suffix).map_err(|_| tr("identity.random_unavailable"))?;
     let temporary = directory.join(format!(".career-key-{}.tmp", hex(&suffix)));
     let mut created = false;
     let result = (|| {
-        let mut file = private_create(&temporary).map_err(|_| "Cannot create the profile key.")?;
+        let mut file = private_create(&temporary).map_err(|_| tr("identity.key.create_failed"))?;
         created = true;
         let saved = IdentityFile {
             version: 1,
             seed: hex(&seed),
             public_key: hex(key.verifying_key().as_bytes()),
         };
-        let encoded = serde_json::to_vec(&saved).map_err(|_| "Cannot encode the profile key.")?;
+        let encoded = serde_json::to_vec(&saved).map_err(|_| tr("identity.key.encode_failed"))?;
         file.write_all(&encoded)
             .and_then(|_| file.sync_all())
-            .map_err(|_| "Cannot save the profile key.")?;
+            .map_err(|_| tr("identity.key.save_failed"))?;
         match fs::hard_link(&temporary, &path) {
             Ok(()) => {
                 #[cfg(unix)]
                 fs::File::open(directory)
                     .and_then(|directory| directory.sync_all())
-                    .map_err(|_| "Cannot confirm profile key storage.")?;
+                    .map_err(|_| tr("identity.key.confirm_failed"))?;
                 Ok(key)
             }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => read_key(&path),
-            Err(_) => Err("Cannot publish the profile key safely on this filesystem.".into()),
+            Err(_) => Err(tr("identity.key.publish_failed").into()),
         }
     })();
     // Only this invocation's random temporary file can be removed here.
@@ -146,18 +147,20 @@ fn identity_directory() -> Option<PathBuf> {
 fn save_nickname(directory: &Path, nickname: &str) -> Result<(), String> {
     let nickname = normalize_nickname(nickname).map_err(str::to_owned)?;
     let mut suffix = [0; 16];
-    getrandom::fill(&mut suffix).map_err(|_| "Cannot prepare nickname storage.")?;
+    getrandom::fill(&mut suffix).map_err(|_| tr("identity.nickname.prepare_failed"))?;
     let temporary = directory.join(format!(".career-name-{}.tmp", hex(&suffix)));
     let mut created = false;
     let result = (|| {
-        let mut file = private_create(&temporary).map_err(|_| "Cannot save the nickname.")?;
+        let mut file =
+            private_create(&temporary).map_err(|_| tr("identity.nickname.save_failed"))?;
         created = true;
-        let bytes = serde_json::to_vec(&nickname).map_err(|_| "Cannot save the nickname.")?;
+        let bytes =
+            serde_json::to_vec(&nickname).map_err(|_| tr("identity.nickname.save_failed"))?;
         file.write_all(&bytes)
             .and_then(|_| file.sync_all())
-            .map_err(|_| "Cannot save the nickname.")?;
+            .map_err(|_| tr("identity.nickname.save_failed"))?;
         fs::rename(&temporary, directory.join(NAME_FILE))
-            .map_err(|_| "Cannot save the nickname.")?;
+            .map_err(|_| tr("identity.nickname.save_failed"))?;
         Ok(())
     })();
     if created {
@@ -220,12 +223,13 @@ impl CareerIdentity {
         {
             return;
         }
+        // The server's English error text is the wire contract here; never localized.
         if matches!(
             view.error.as_deref(),
             Some(
-                "Sign in before using your profile."
-                    | "Account authorization could not be refreshed. Reconnect when the account service is available."
-                    | "This device was revoked. Authorize this device again from your account."
+                "Sign in before using your profile." // i18n-allow
+                    | "Account authorization could not be refreshed. Reconnect when the account service is available." // i18n-allow
+                    | "This device was revoked. Authorize this device again from your account." // i18n-allow
             )
         ) {
             // Reusing the saved key is safe: the new Authenticate still needs
@@ -261,7 +265,7 @@ impl CareerIdentity {
         self.key
             .as_ref()
             .map(|key| hex(key.verifying_key().as_bytes()))
-            .ok_or_else(|| "The saved game identity is not ready.".into())
+            .ok_or_else(|| tr("identity.not_ready").into())
     }
 
     /// This entry point signs only typed Supporter operations, never arbitrary bytes.
@@ -272,12 +276,9 @@ impl CareerIdentity {
         trusted_origin: &str,
         now_secs: u64,
     ) -> Result<shared::supporter::SignedNativeSupporterRequest, String> {
-        let key = self
-            .key
-            .as_ref()
-            .ok_or("The saved game identity is not ready.")?;
+        let key = self.key.as_ref().ok_or(tr("identity.not_ready"))?;
         let mut nonce = [0; 32];
-        getrandom::fill(&mut nonce).map_err(|_| "Secure randomness is unavailable.")?;
+        getrandom::fill(&mut nonce).map_err(|_| tr("identity.random_unavailable"))?;
         let request = shared::supporter::NativeSupporterRequest {
             origin: trusted_origin.into(),
             public_key: self.public_key()?,
@@ -296,7 +297,7 @@ impl CareerIdentity {
         self.directory
             .as_ref()
             .map(|d| d.join("device-enrollment"))
-            .ok_or_else(|| "Private profile storage is unavailable.".into())
+            .ok_or_else(|| tr("identity.storage.unavailable").into())
     }
 
     /// Activate on the next launch only. Preserve the current key before replacing
@@ -305,54 +306,52 @@ impl CareerIdentity {
         let directory = self
             .directory
             .as_ref()
-            .ok_or("Private profile storage is unavailable.")?;
+            .ok_or(tr("identity.storage.unavailable"))?;
         let candidate = read_key(&directory.join("device-enrollment").join(KEY_FILE))?;
         if hex(candidate.verifying_key().as_bytes()) != public_key {
-            return Err("The enrollment key changed. Start the device request again.".into());
+            return Err(tr("identity.switch.key_changed").into());
         }
         let existing = read_key(&directory.join(KEY_FILE))?;
         let old_public = hex(existing.verifying_key().as_bytes());
         let backup = directory.join("saved-devices");
-        fs::create_dir_all(&backup).map_err(|_| "Cannot preserve the previous device key.")?;
+        fs::create_dir_all(&backup).map_err(|_| tr("identity.switch.preserve_failed"))?;
         let backup_path = backup.join(format!("{old_public}.json"));
         match fs::hard_link(directory.join(KEY_FILE), &backup_path) {
             Ok(()) => {}
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
                 if read_key(&backup_path)?.verifying_key() != existing.verifying_key() {
-                    return Err(
-                        "Previous identity backup does not match; no key was replaced.".into(),
-                    );
+                    return Err(tr("identity.switch.backup_mismatch").into());
                 }
             }
             Err(_) => {
-                return Err("Cannot preserve the previous device key; no key was replaced.".into());
+                return Err(tr("identity.switch.preserve_failed_unchanged").into());
             }
         }
         #[cfg(unix)]
         fs::File::open(&backup)
             .and_then(|f| f.sync_all())
-            .map_err(|_| "Cannot confirm the previous account backup; no key was replaced.")?;
+            .map_err(|_| tr("identity.switch.backup_confirm_failed"))?;
         let mut suffix = [0; 16];
-        getrandom::fill(&mut suffix).map_err(|_| "Secure randomness is unavailable.")?;
+        getrandom::fill(&mut suffix).map_err(|_| tr("identity.random_unavailable"))?;
         let temporary = directory.join(format!(".career-switch-{}.tmp", hex(&suffix)));
         let result = (|| {
             let mut file =
-                private_create(&temporary).map_err(|_| "Cannot stage the account switch.")?;
+                private_create(&temporary).map_err(|_| tr("identity.switch.stage_failed"))?;
             let bytes = serde_json::to_vec(&IdentityFile {
                 version: 1,
                 seed: hex(&candidate.to_bytes()),
                 public_key: public_key.into(),
             })
-            .map_err(|_| "Cannot encode account switch.")?;
+            .map_err(|_| tr("identity.switch.encode_failed"))?;
             file.write_all(&bytes)
                 .and_then(|_| file.sync_all())
-                .map_err(|_| "Cannot save account switch.")?;
+                .map_err(|_| tr("identity.switch.save_failed"))?;
             fs::rename(&temporary, directory.join(KEY_FILE))
-                .map_err(|_| "Cannot activate account switch.")?;
+                .map_err(|_| tr("identity.switch.activate_failed"))?;
             #[cfg(unix)]
             fs::File::open(directory)
                 .and_then(|f| f.sync_all())
-                .map_err(|_| "Cannot confirm account switch storage.")?;
+                .map_err(|_| tr("identity.switch.confirm_failed"))?;
             Ok(())
         })();
         let _ = fs::remove_file(temporary);
@@ -371,10 +370,7 @@ impl CareerIdentity {
         challenge
             .validate(trusted_origin, &public_key, now_secs)
             .map_err(str::to_owned)?;
-        let key = self
-            .key
-            .as_ref()
-            .ok_or("The saved game identity is not ready.")?;
+        let key = self.key.as_ref().ok_or(tr("identity.not_ready"))?;
         let signature = hex(&key.sign(&challenge.signing_bytes(decision)).to_bytes());
         Ok(shared::web_account::SignedWebPair {
             challenge,
@@ -431,14 +427,14 @@ impl CareerIdentity {
         let key = self.key.as_ref().ok_or_else(|| {
             self.error
                 .clone()
-                .unwrap_or_else(|| "Profile identity is unavailable.".into())
+                .unwrap_or_else(|| tr("identity.unavailable").into())
         })?;
         if !self.scope.as_ref().is_some_and(|scope| {
             scope.server_addr == server_addr
                 && scope.server_epoch == server_epoch
                 && scope.session_id == session_id
         }) {
-            return Err("The profile connection is not ready. Try again shortly.".into());
+            return Err(tr("identity.request.not_ready").into());
         }
         match request {
             CareerRequest::Challenge {
@@ -470,21 +466,21 @@ impl CareerIdentity {
             CareerRequest::Challenge { .. }
             | CareerRequest::Authenticate { .. }
             | CareerRequest::Authorized { .. } => {
-                return Err("Unexpected profile authentication request.".into());
+                return Err(tr("identity.request.unexpected_auth").into());
             }
             _ => {}
         }
         let nonce = self
             .auth_nonce
             .as_ref()
-            .ok_or("Your profile is still connecting. Try again shortly.")?;
+            .ok_or(tr("identity.request.connecting"))?;
         let action = request
             .account_action()
-            .ok_or("Unexpected profile request.")?;
+            .ok_or(tr("identity.request.unexpected"))?;
         self.sequence = self
             .sequence
             .checked_add(1)
-            .ok_or("Reconnect to refresh your profile session.")?;
+            .ok_or(tr("identity.request.reconnect"))?;
         let signature = hex(&key
             .sign(&authorized_signing_bytes(
                 server_epoch,
@@ -533,7 +529,7 @@ fn load_identity(mut identity: ResMut<CareerIdentity>, mut career: ResMut<Career
         return;
     }
     let Some(directory) = identity_directory() else {
-        let message = "Private profile storage is unavailable on this device.".to_owned();
+        let message = tr("identity.storage.unavailable_device").to_owned();
         identity.error = Some(message.clone());
         career.request_failed(message);
         return;
@@ -599,7 +595,8 @@ fn identity_driver(
         identity.invalidate();
         identity.scope = Some(scope);
         identity.requested_nickname =
-            normalize_nickname(&career.nickname).unwrap_or_else(|_| "Player".into());
+            // A protocol default nickname, not display text.
+            normalize_nickname(&career.nickname).unwrap_or_else(|_| "Player".into()); // i18n-allow
         identity.started = Some(Instant::now());
     }
     if let Some(challenge) = career.view.challenge.as_ref()
@@ -651,7 +648,7 @@ fn identity_driver(
         .is_some_and(|started| now.duration_since(started) >= AUTH_TIMEOUT)
     {
         if identity.next_retry.is_some() {
-            career.request_failed("Profile sign-in timed out. Reconnect to try again.".into());
+            career.request_failed(tr("identity.sign_in_timeout").into());
             identity.next_retry = None;
         }
         return;
