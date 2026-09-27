@@ -1,0 +1,17 @@
+{
+  "hud.level": "等级\n{level}",
+  "hud.max_level": "满级",
+  "hud.xp": "经验 {xp} / {next} · {points} +",
+  "hud.no_player": "等级 --   经验 --/--   技能点 --",
+  "hud.prematch": "按 {help_key} 查看操作说明。\n职业：{class}   技能：{skills}，对目标释放。",
+  "hud.target.defeated": "已阵亡，即将复活",
+  "hud.target.locked": "已锁定目标 · 攻击 / Q W E R",
+  "hud.target.locked_phone": "已锁定目标 · 攻击 / 技能",
+  "hud.target.none": "选择敌人 · P 商店 · F1 帮助",
+  "hud.target.none_phone": "轻触攻击 · 拖动锁定",
+  "hud.goal.destroy_base": "摧毁敌方基地。",
+  "hud.goal.unlock_base": "清空一条兵线即可解锁基地。",
+  "hud.goal.base_hp": "敌方基地 · {hp} / {max} 生命值",
+  "hud.buff.wendigo": "温迪戈之恩：技能伤害 +15% - {secs} 秒",
+  "hud.buff.mutatio": "变异之力：技能伤害 +25%，生命回复 +2/秒 - {secs} 秒"
+}

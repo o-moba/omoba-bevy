@@ -1,0 +1,19 @@
+{
+  "edge.kda": "KDA",
+  "edge.scoreboard.title": "对局比分",
+  "edge.scoreboard.close": "关闭",
+  "edge.team.green": "绿队",
+  "edge.team.blue": "蓝队",
+  "edge.column.player": "玩家",
+  "edge.column.kda": "KDA",
+  "edge.column.gold": "金币 ↑",
+  "edge.column.level": "Lv",
+  "edge.target.hero": "英雄",
+  "edge.target.minion": "小兵",
+  "edge.target.structure": "防御塔 / 基地",
+  "edge.target.neutral": "野怪",
+  "edge.scoreboard.detail": "金币 ↑ 为本局总收入，不含初始金币。清空一条兵线即可解锁敌方基地。",
+  "edge.scoreboard.waiting": "等待实时比分…",
+  "edge.scoreboard.empty": "暂无玩家",
+  "edge.scoreboard.offline": "{name} · 离线"
+}
