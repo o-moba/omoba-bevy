@@ -19,5 +19,18 @@
   "collection.button.put_on_card": "Put on card",
   "collection.button.selected": "Selected",
   "collection.button.play_as": "Play as this",
-  "collection.not_unlocked": "Not unlocked for matches"
+  "collection.not_unlocked": "Not unlocked for matches",
+  "collection.clip.idle": "Idle",
+  "collection.clip.walk": "Walk",
+  "collection.clip.run": "Run",
+  "collection.clip.attack": "Attack",
+  "collection.clip.cast": "Cast",
+  "collection.clip.hit": "Hit",
+  "collection.clip.death": "Death",
+  "collection.clip.jump": "Jump",
+  "collection.catalogue.loading": "Loading approved Studio avatars…",
+  "collection.catalogue.empty": "No Studio avatars approved for OMOBA yet",
+  "collection.catalogue.ready": "Approved free avatars and your saved or purchased library",
+  "collection.catalogue.unavailable": "Studio is unavailable · refresh to try again",
+  "collection.catalogue.unavailable_cached": "Studio is unavailable · showing the saved catalogue"
 }

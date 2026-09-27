@@ -17,7 +17,7 @@
   "lobby.button.decline": "拒绝",
   "lobby.online.title": "本服务器在线玩家",
   "lobby.online.unavailable": "此服务器不支持组队（或无响应）。请更新服务器或重新连接。",
-  "lobby.online.empty": "这里还没有其他人。请好友连接到\n{addr}",
+  "lobby.online.empty": "这里还没有其他人。\n请好友连接到：\n{addr}",
   "lobby.plate.you": "{name}（你）",
   "lobby.plate.leader": "★ 队长 · {status}",
   "lobby.status.away": "离开",

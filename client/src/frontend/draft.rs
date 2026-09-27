@@ -797,7 +797,7 @@ fn render_draft(
                                 if !defaults {
                                     avatars.spawn((
                                         widgets::label(
-                                            catalogue.status.label(),
+                                            crate::i18n::data::catalogue_status(&catalogue.status),
                                             12.0,
                                             theme::MUTED,
                                         ),

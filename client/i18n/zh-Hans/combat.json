@@ -33,7 +33,7 @@
   "combat.hotbar.select_target": "选择目标",
   "combat.hotbar.out_of_range": "超出范围",
   "combat.hotbar.ready": "就绪",
-  "combat.hotbar.rank": "{rank} 级 · {cost} 法力\n{status}",
+  "combat.hotbar.rank": "{rank}级 {cost}法力\n{status}",
   "combat.feedback.butterfly": "森林蝴蝶 · +{hp} 生命值",
   "combat.feedback.no_route": "无法步行到达该位置。"
 }

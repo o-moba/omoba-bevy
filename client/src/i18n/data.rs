@@ -19,10 +19,7 @@
 //! | lane label | `lane.top`, `lane.mid`, `lane.bot`, `lane.base` |
 //! | profile card title | `title.<slug>` (by index into `frontend::card::TITLES`) |
 //! | join rejection / purchase error | `error.join.<code>`, `error.purchase.<code>` |
-// Phase B of the i18n migration wires each helper into the screen that shows
-// the text; until every helper has a caller outside tests, an unused one must
-// not fail `clippy -D warnings`. Remove this allow once all are wired.
-#![cfg_attr(not(test), allow(dead_code))]
+//! | Studio catalogue status | `collection.catalogue.<state>` |
 use std::fmt::Write as _;
 
 use shared::map::Lane;
@@ -130,6 +127,7 @@ pub(crate) fn reaction(id: &str) -> &'static str {
 }
 
 /// A reaction pack by id, falling back to its catalog label (or the id).
+#[cfg_attr(not(test), allow(dead_code))] // spec helper; no screen shows it yet (tests pin it)
 pub(crate) fn reaction_pack(id: &str) -> String {
     lookup_composed("reaction.pack.", id, "").map_or_else(
         || {
@@ -153,11 +151,13 @@ pub(crate) fn boss_key(camp: NeutralCampType) -> &'static str {
 }
 
 /// A boss's display name (`Wendigo`).
+#[cfg_attr(not(test), allow(dead_code))] // spec helper; no screen shows it yet (tests pin it)
 pub(crate) fn boss(camp: NeutralCampType) -> &'static str {
     tr(boss_key(camp))
 }
 
 /// The key of a lane's short label, for a `Localized` label.
+#[cfg_attr(not(test), allow(dead_code))] // spec helper; no screen shows it yet (tests pin it)
 pub(crate) fn lane_key(lane: Lane) -> &'static str {
     match lane {
         Lane::Top => "lane.top",
@@ -167,11 +167,13 @@ pub(crate) fn lane_key(lane: Lane) -> &'static str {
 }
 
 /// A lane's short label (`TOP`).
+#[cfg_attr(not(test), allow(dead_code))] // spec helper; no screen shows it yet (tests pin it)
 pub(crate) fn lane(lane: Lane) -> &'static str {
     tr(lane_key(lane))
 }
 
 /// The label of a base structure (`BASE`).
+#[cfg_attr(not(test), allow(dead_code))] // spec helper; no screen shows it yet (tests pin it)
 pub(crate) fn lane_base() -> &'static str {
     tr("lane.base")
 }
@@ -205,6 +207,7 @@ pub(crate) fn join_rejection(rejection: JoinRejection) -> &'static str {
 }
 
 /// Why a shop purchase failed.
+#[cfg_attr(not(test), allow(dead_code))] // spec helper; no screen shows it yet (tests pin it)
 pub(crate) fn purchase_error(error: PurchaseError) -> &'static str {
     tr(match error {
         PurchaseError::Unavailable => "error.purchase.unavailable",
@@ -214,6 +217,19 @@ pub(crate) fn purchase_error(error: PurchaseError) -> &'static str {
         PurchaseError::AlreadyOwned => "error.purchase.already_owned",
         PurchaseError::InventoryFull => "error.purchase.inventory_full",
         PurchaseError::UnknownItem => "error.purchase.unknown_item",
+    })
+}
+
+/// The Studio catalogue line shown by every avatar picker. The passport
+/// crate's `CatalogueStatus::label` stays the English source text.
+pub(crate) fn catalogue_status(status: &omoba_passport::store::CatalogueStatus) -> &'static str {
+    use omoba_passport::store::CatalogueStatus;
+    tr(match status {
+        CatalogueStatus::Loading { .. } => "collection.catalogue.loading",
+        CatalogueStatus::Empty => "collection.catalogue.empty",
+        CatalogueStatus::Ready { .. } => "collection.catalogue.ready",
+        CatalogueStatus::Unavailable { cached: 0 } => "collection.catalogue.unavailable",
+        CatalogueStatus::Unavailable { .. } => "collection.catalogue.unavailable_cached",
     })
 }
 
@@ -328,6 +344,23 @@ mod tests {
         assert_eq!(
             lookup_composed("ability.", "shield_bash", ".name"),
             Some("Shield Bash")
+        );
+    }
+    #[test]
+    fn catalogue_status_matches_the_passport_labels() {
+        use omoba_passport::store::CatalogueStatus;
+        for status in [
+            CatalogueStatus::Loading { cached: 2 },
+            CatalogueStatus::Empty,
+            CatalogueStatus::Ready { count: 3 },
+            CatalogueStatus::Unavailable { cached: 0 },
+            CatalogueStatus::Unavailable { cached: 4 },
+        ] {
+            assert_eq!(catalogue_status(&status), status.label());
+        }
+        assert_eq!(
+            chinese("collection.catalogue.loading"),
+            "正在加载已审核的 Studio 形象…"
         );
     }
 }

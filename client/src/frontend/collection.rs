@@ -111,7 +111,11 @@ fn spawn_catalogue_grid(
                 Name::new("CollectionStudioHeading"),
             ));
             grid.spawn((
-                widgets::label(catalogue.status.label(), 12.0, theme::MUTED),
+                widgets::label(
+                    crate::i18n::data::catalogue_status(&catalogue.status),
+                    12.0,
+                    theme::MUTED,
+                ),
                 Name::new("CollectionStudioStatus"),
             ));
             grid.spawn(Node {
@@ -763,7 +767,7 @@ fn refresh_collection_details(
             .clips
             .iter()
             .enumerate()
-            .map(|(index, clip)| (index, AvatarPreview::clip_label(&clip.name)))
+            .map(|(index, clip)| (index, clip_display(&clip.name)))
             .collect();
         let status = preview.status;
         let selected = preview.selected;
@@ -886,6 +890,20 @@ fn refresh_collection_details(
                 });
         });
     }
+}
+
+/// A preview clip's button label: the common clip names (`idle`, `walk`,
+/// `attack`, …) come from the dictionary (`collection.clip.<name>`); any other
+/// name the model ships is shown readable but as authored.
+fn clip_display(name: &str) -> String {
+    let key: String = name
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| if matches!(c, '-' | '.' | ' ') { '_' } else { c })
+        .collect();
+    crate::i18n::lookup(&format!("collection.clip.{key}"))
+        .map_or_else(|| AvatarPreview::clip_label(name), str::to_owned)
 }
 
 #[cfg(test)]
@@ -1382,5 +1400,18 @@ mod tests {
             *app.world().resource::<NextState<AppScreen>>(),
             NextState::Unchanged
         ));
+    }
+    #[test]
+    fn common_clip_names_come_from_the_dictionary() {
+        assert_eq!(clip_display("idle"), "Idle");
+        assert_eq!(clip_display("Attack"), "Attack");
+        assert_eq!(
+            crate::i18n::lookup_in(
+                crate::i18n::LocaleId::parse("zh-Hans").unwrap(),
+                "collection.clip.walk"
+            ),
+            Some("行走")
+        );
+        assert_eq!(clip_display("walk_cycle"), "Walk Cycle");
     }
 }

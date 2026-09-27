@@ -643,7 +643,10 @@ pub fn spawn_team_select_ui(
                         );
                     }
                     spawn_avatar_group_label(grid, "team.group.studio", "StudioAvatarsLabel");
-                    spawn_avatar_group_hint(grid, catalogue.status.label());
+                    spawn_avatar_group_hint(
+                        grid,
+                        crate::i18n::data::catalogue_status(&catalogue.status),
+                    );
                     grid.spawn((
                         Button,
                         Node {

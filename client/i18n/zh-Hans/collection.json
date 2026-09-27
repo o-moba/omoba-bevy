@@ -19,5 +19,18 @@
   "collection.button.put_on_card": "放到名片上",
   "collection.button.selected": "已选择",
   "collection.button.play_as": "使用此形象",
-  "collection.not_unlocked": "尚未解锁对局使用"
+  "collection.not_unlocked": "尚未解锁对局使用",
+  "collection.clip.idle": "待机",
+  "collection.clip.walk": "行走",
+  "collection.clip.run": "奔跑",
+  "collection.clip.attack": "攻击",
+  "collection.clip.cast": "施法",
+  "collection.clip.hit": "受击",
+  "collection.clip.death": "阵亡",
+  "collection.clip.jump": "跳跃",
+  "collection.catalogue.loading": "正在加载已审核的 Studio 形象…",
+  "collection.catalogue.empty": "暂无为 OMOBA 审核通过的 Studio 形象",
+  "collection.catalogue.ready": "已审核的免费形象，以及你保存或购买的收藏",
+  "collection.catalogue.unavailable": "Studio 暂不可用 · 请刷新重试",
+  "collection.catalogue.unavailable_cached": "Studio 暂不可用 · 正在显示已保存的目录"
 }

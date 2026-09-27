@@ -8,7 +8,7 @@
   "touch.target.tower": "塔",
   "touch.dash": "冲刺",
   "touch.haste": "疾行",
-  "touch.haste.active": "{seconds}\n疾行中",
+  "touch.haste.active": "{seconds}\n加速",
   "touch.aim.cancel": "取消\n松开即放弃",
   "touch.aim.attack": "指向敌人 · 松开即锁定\n移到 × 取消",
   "touch.aim.skill": "拖动瞄准 · 松开施放\n移到 × 取消",
