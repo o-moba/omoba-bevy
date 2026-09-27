@@ -1,0 +1,2139 @@
+{
+ "about": "Installed by scripts/sync_ui_assets.py from omoba-ui/handoff/assets/manifest.json. Paths are relative to client/assets/ui/verdant; see that manifest for purpose/source.",
+ "credits_required": "CC BY 3.0 icons (game-icons.net) need an in-game Credits line — text in assets/icons/LICENSES.md. OFL fonts need their licence texts shipped (assets/fonts/OFL-*.txt).",
+ "package_bytes": {
+  "frames": 72679,
+  "icons": 127618,
+  "sprites": 190206,
+  "backgrounds": 139636,
+  "fonts": 1778040,
+  "total": 2308179
+ },
+ "assets": [
+  {
+   "path": "frames/ornament@1x.png",
+   "path_2x": "frames/ornament@2x.png",
+   "bytes": 26572,
+   "size_1x": [
+    256,
+    256
+   ],
+   "size_2x": [
+    512,
+    512
+   ],
+   "nine_slice": {
+    "left": 56,
+    "top": 56,
+    "right": 56,
+    "bottom": 56,
+    "center": "stretch",
+    "sides": "stretch",
+    "insets_2x": [
+     112,
+     112,
+     112,
+     112
+    ]
+   },
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba original UI art)",
+   "attribution": "Omoba contributors"
+  },
+  {
+   "path": "frames/panel@1x.png",
+   "path_2x": "frames/panel@2x.png",
+   "bytes": 7144,
+   "size_1x": [
+    96,
+    96
+   ],
+   "size_2x": [
+    192,
+    192
+   ],
+   "nine_slice": {
+    "left": 20,
+    "top": 20,
+    "right": 20,
+    "bottom": 20,
+    "center": "stretch",
+    "sides": "stretch",
+    "insets_2x": [
+     40,
+     40,
+     40,
+     40
+    ]
+   },
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba original UI art)",
+   "attribution": "Omoba contributors"
+  },
+  {
+   "path": "frames/tile@1x.png",
+   "path_2x": "frames/tile@2x.png",
+   "bytes": 3757,
+   "size_1x": [
+    64,
+    64
+   ],
+   "size_2x": [
+    128,
+    128
+   ],
+   "nine_slice": {
+    "left": 12,
+    "top": 12,
+    "right": 12,
+    "bottom": 12,
+    "center": "stretch",
+    "sides": "stretch",
+    "insets_2x": [
+     24,
+     24,
+     24,
+     24
+    ]
+   },
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba original UI art)",
+   "attribution": "Omoba contributors"
+  },
+  {
+   "path": "frames/button-primary@1x.png",
+   "path_2x": "frames/button-primary@2x.png",
+   "bytes": 3700,
+   "size_1x": [
+    64,
+    48
+   ],
+   "size_2x": [
+    128,
+    96
+   ],
+   "nine_slice": {
+    "left": 16,
+    "top": 14,
+    "right": 16,
+    "bottom": 14,
+    "center": "stretch",
+    "sides": "stretch",
+    "insets_2x": [
+     32,
+     28,
+     32,
+     28
+    ]
+   },
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba original UI art)",
+   "attribution": "Omoba contributors"
+  },
+  {
+   "path": "frames/button-primary-hover@1x.png",
+   "path_2x": "frames/button-primary-hover@2x.png",
+   "bytes": 3725,
+   "size_1x": [
+    64,
+    48
+   ],
+   "size_2x": [
+    128,
+    96
+   ],
+   "nine_slice": {
+    "left": 16,
+    "top": 14,
+    "right": 16,
+    "bottom": 14,
+    "center": "stretch",
+    "sides": "stretch",
+    "insets_2x": [
+     32,
+     28,
+     32,
+     28
+    ]
+   },
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba original UI art)",
+   "attribution": "Omoba contributors"
+  },
+  {
+   "path": "frames/button-primary-pressed@1x.png",
+   "path_2x": "frames/button-primary-pressed@2x.png",
+   "bytes": 2687,
+   "size_1x": [
+    64,
+    48
+   ],
+   "size_2x": [
+    128,
+    96
+   ],
+   "nine_slice": {
+    "left": 16,
+    "top": 14,
+    "right": 16,
+    "bottom": 14,
+    "center": "stretch",
+    "sides": "stretch",
+    "insets_2x": [
+     32,
+     28,
+     32,
+     28
+    ]
+   },
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba original UI art)",
+   "attribution": "Omoba contributors"
+  },
+  {
+   "path": "frames/button-primary-disabled@1x.png",
+   "path_2x": "frames/button-primary-disabled@2x.png",
+   "bytes": 2001,
+   "size_1x": [
+    64,
+    48
+   ],
+   "size_2x": [
+    128,
+    96
+   ],
+   "nine_slice": {
+    "left": 16,
+    "top": 14,
+    "right": 16,
+    "bottom": 14,
+    "center": "stretch",
+    "sides": "stretch",
+    "insets_2x": [
+     32,
+     28,
+     32,
+     28
+    ]
+   },
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba original UI art)",
+   "attribution": "Omoba contributors"
+  },
+  {
+   "path": "frames/button-secondary@1x.png",
+   "path_2x": "frames/button-secondary@2x.png",
+   "bytes": 3429,
+   "size_1x": [
+    64,
+    48
+   ],
+   "size_2x": [
+    128,
+    96
+   ],
+   "nine_slice": {
+    "left": 16,
+    "top": 14,
+    "right": 16,
+    "bottom": 14,
+    "center": "stretch",
+    "sides": "stretch",
+    "insets_2x": [
+     32,
+     28,
+     32,
+     28
+    ]
+   },
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba original UI art)",
+   "attribution": "Omoba contributors"
+  },
+  {
+   "path": "frames/button-secondary-hover@1x.png",
+   "path_2x": "frames/button-secondary-hover@2x.png",
+   "bytes": 3535,
+   "size_1x": [
+    64,
+    48
+   ],
+   "size_2x": [
+    128,
+    96
+   ],
+   "nine_slice": {
+    "left": 16,
+    "top": 14,
+    "right": 16,
+    "bottom": 14,
+    "center": "stretch",
+    "sides": "stretch",
+    "insets_2x": [
+     32,
+     28,
+     32,
+     28
+    ]
+   },
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba original UI art)",
+   "attribution": "Omoba contributors"
+  },
+  {
+   "path": "frames/button-secondary-pressed@1x.png",
+   "path_2x": "frames/button-secondary-pressed@2x.png",
+   "bytes": 2739,
+   "size_1x": [
+    64,
+    48
+   ],
+   "size_2x": [
+    128,
+    96
+   ],
+   "nine_slice": {
+    "left": 16,
+    "top": 14,
+    "right": 16,
+    "bottom": 14,
+    "center": "stretch",
+    "sides": "stretch",
+    "insets_2x": [
+     32,
+     28,
+     32,
+     28
+    ]
+   },
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba original UI art)",
+   "attribution": "Omoba contributors"
+  },
+  {
+   "path": "frames/button-secondary-disabled@1x.png",
+   "path_2x": "frames/button-secondary-disabled@2x.png",
+   "bytes": 2138,
+   "size_1x": [
+    64,
+    48
+   ],
+   "size_2x": [
+    128,
+    96
+   ],
+   "nine_slice": {
+    "left": 16,
+    "top": 14,
+    "right": 16,
+    "bottom": 14,
+    "center": "stretch",
+    "sides": "stretch",
+    "insets_2x": [
+     32,
+     28,
+     32,
+     28
+    ]
+   },
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba original UI art)",
+   "attribution": "Omoba contributors"
+  },
+  {
+   "path": "frames/button-danger@1x.png",
+   "path_2x": "frames/button-danger@2x.png",
+   "bytes": 3425,
+   "size_1x": [
+    64,
+    48
+   ],
+   "size_2x": [
+    128,
+    96
+   ],
+   "nine_slice": {
+    "left": 16,
+    "top": 14,
+    "right": 16,
+    "bottom": 14,
+    "center": "stretch",
+    "sides": "stretch",
+    "insets_2x": [
+     32,
+     28,
+     32,
+     28
+    ]
+   },
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba original UI art)",
+   "attribution": "Omoba contributors"
+  },
+  {
+   "path": "frames/button-danger-hover@1x.png",
+   "path_2x": "frames/button-danger-hover@2x.png",
+   "bytes": 3291,
+   "size_1x": [
+    64,
+    48
+   ],
+   "size_2x": [
+    128,
+    96
+   ],
+   "nine_slice": {
+    "left": 16,
+    "top": 14,
+    "right": 16,
+    "bottom": 14,
+    "center": "stretch",
+    "sides": "stretch",
+    "insets_2x": [
+     32,
+     28,
+     32,
+     28
+    ]
+   },
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba original UI art)",
+   "attribution": "Omoba contributors"
+  },
+  {
+   "path": "frames/button-danger-pressed@1x.png",
+   "path_2x": "frames/button-danger-pressed@2x.png",
+   "bytes": 2486,
+   "size_1x": [
+    64,
+    48
+   ],
+   "size_2x": [
+    128,
+    96
+   ],
+   "nine_slice": {
+    "left": 16,
+    "top": 14,
+    "right": 16,
+    "bottom": 14,
+    "center": "stretch",
+    "sides": "stretch",
+    "insets_2x": [
+     32,
+     28,
+     32,
+     28
+    ]
+   },
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba original UI art)",
+   "attribution": "Omoba contributors"
+  },
+  {
+   "path": "frames/button-danger-disabled@1x.png",
+   "path_2x": "frames/button-danger-disabled@2x.png",
+   "bytes": 2050,
+   "size_1x": [
+    64,
+    48
+   ],
+   "size_2x": [
+    128,
+    96
+   ],
+   "nine_slice": {
+    "left": 16,
+    "top": 14,
+    "right": 16,
+    "bottom": 14,
+    "center": "stretch",
+    "sides": "stretch",
+    "insets_2x": [
+     32,
+     28,
+     32,
+     28
+    ]
+   },
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba original UI art)",
+   "attribution": "Omoba contributors"
+  },
+  {
+   "path": "icons/class/warrior@1x.png",
+   "path_2x": "icons/class/warrior@2x.png",
+   "bytes": 1134,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon broadsword by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/class/warrior-32@1x.png",
+   "path_2x": "icons/class/warrior-32@2x.png",
+   "bytes": 1540,
+   "size_1x": [
+    32,
+    32
+   ],
+   "size_2x": [
+    64,
+    64
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon broadsword by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/class/mage@1x.png",
+   "path_2x": "icons/class/mage@2x.png",
+   "bytes": 1719,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon wizard-staff by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/class/mage-32@1x.png",
+   "path_2x": "icons/class/mage-32@2x.png",
+   "bytes": 2481,
+   "size_1x": [
+    32,
+    32
+   ],
+   "size_2x": [
+    64,
+    64
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon wizard-staff by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/class/ranger@1x.png",
+   "path_2x": "icons/class/ranger@2x.png",
+   "bytes": 1875,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon high-shot by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/class/ranger-32@1x.png",
+   "path_2x": "icons/class/ranger-32@2x.png",
+   "bytes": 2612,
+   "size_1x": [
+    32,
+    32
+   ],
+   "size_2x": [
+    64,
+    64
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon high-shot by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/class/cleric@1x.png",
+   "path_2x": "icons/class/cleric@2x.png",
+   "bytes": 1464,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon holy-symbol by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/class/cleric-32@1x.png",
+   "path_2x": "icons/class/cleric-32@2x.png",
+   "bytes": 1996,
+   "size_1x": [
+    32,
+    32
+   ],
+   "size_2x": [
+    64,
+    64
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon holy-symbol by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/class/warden@1x.png",
+   "path_2x": "icons/class/warden@2x.png",
+   "bytes": 1763,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon oak-leaf by Delapouite under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/class/warden-32@1x.png",
+   "path_2x": "icons/class/warden-32@2x.png",
+   "bytes": 2364,
+   "size_1x": [
+    32,
+    32
+   ],
+   "size_2x": [
+    64,
+    64
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon oak-leaf by Delapouite under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/role/solo@1x.png",
+   "path_2x": "icons/role/solo@2x.png",
+   "bytes": 873,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon shield by Sbed under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/role/solo-32@1x.png",
+   "path_2x": "icons/role/solo-32@2x.png",
+   "bytes": 1183,
+   "size_1x": [
+    32,
+    32
+   ],
+   "size_2x": [
+    64,
+    64
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon shield by Sbed under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/role/jungle@1x.png",
+   "path_2x": "icons/role/jungle@2x.png",
+   "bytes": 1844,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon paw by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/role/jungle-32@1x.png",
+   "path_2x": "icons/role/jungle-32@2x.png",
+   "bytes": 2448,
+   "size_1x": [
+    32,
+    32
+   ],
+   "size_2x": [
+    64,
+    64
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon paw by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/role/mid@1x.png",
+   "path_2x": "icons/role/mid@2x.png",
+   "bytes": 1278,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon crosshair by Delapouite under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/role/mid-32@1x.png",
+   "path_2x": "icons/role/mid-32@2x.png",
+   "bytes": 1923,
+   "size_1x": [
+    32,
+    32
+   ],
+   "size_2x": [
+    64,
+    64
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon crosshair by Delapouite under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/role/carry@1x.png",
+   "path_2x": "icons/role/carry@2x.png",
+   "bytes": 2082,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon arrow-scope by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/role/carry-32@1x.png",
+   "path_2x": "icons/role/carry-32@2x.png",
+   "bytes": 2932,
+   "size_1x": [
+    32,
+    32
+   ],
+   "size_2x": [
+    64,
+    64
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon arrow-scope by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/role/support@1x.png",
+   "path_2x": "icons/role/support@2x.png",
+   "bytes": 1220,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC0",
+   "attribution": "Icon heart-plus by Zeromancer under CC0, https://game-icons.net"
+  },
+  {
+   "path": "icons/role/support-32@1x.png",
+   "path_2x": "icons/role/support-32@2x.png",
+   "bytes": 1602,
+   "size_1x": [
+    32,
+    32
+   ],
+   "size_2x": [
+    64,
+    64
+   ],
+   "tintable": true,
+   "licence": "CC0",
+   "attribution": "Icon heart-plus by Zeromancer under CC0, https://game-icons.net"
+  },
+  {
+   "path": "icons/item/ember-blade@1x.png",
+   "path_2x": "icons/item/ember-blade@2x.png",
+   "bytes": 1876,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon pointy-sword by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/item/ember-blade-32@1x.png",
+   "path_2x": "icons/item/ember-blade-32@2x.png",
+   "bytes": 2625,
+   "size_1x": [
+    32,
+    32
+   ],
+   "size_2x": [
+    64,
+    64
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon pointy-sword by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/item/swift-grip@1x.png",
+   "path_2x": "icons/item/swift-grip@2x.png",
+   "bytes": 1637,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon gauntlet by Delapouite under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/item/swift-grip-32@1x.png",
+   "path_2x": "icons/item/swift-grip-32@2x.png",
+   "bytes": 2369,
+   "size_1x": [
+    32,
+    32
+   ],
+   "size_2x": [
+    64,
+    64
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon gauntlet by Delapouite under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/item/trail-boots@1x.png",
+   "path_2x": "icons/item/trail-boots@2x.png",
+   "bytes": 1272,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon leather-boot by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/item/trail-boots-32@1x.png",
+   "path_2x": "icons/item/trail-boots-32@2x.png",
+   "bytes": 1774,
+   "size_1x": [
+    32,
+    32
+   ],
+   "size_2x": [
+    64,
+    64
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon leather-boot by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/item/vitality-gem@1x.png",
+   "path_2x": "icons/item/vitality-gem@2x.png",
+   "bytes": 2275,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon emerald by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/item/vitality-gem-32@1x.png",
+   "path_2x": "icons/item/vitality-gem-32@2x.png",
+   "bytes": 3248,
+   "size_1x": [
+    32,
+    32
+   ],
+   "size_2x": [
+    64,
+    64
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon emerald by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/item/focus-charm@1x.png",
+   "path_2x": "icons/item/focus-charm@2x.png",
+   "bytes": 1739,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon gem-pendant by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/item/focus-charm-32@1x.png",
+   "path_2x": "icons/item/focus-charm-32@2x.png",
+   "bytes": 2428,
+   "size_1x": [
+    32,
+    32
+   ],
+   "size_2x": [
+    64,
+    64
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon gem-pendant by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/item/guardian-crest@1x.png",
+   "path_2x": "icons/item/guardian-crest@2x.png",
+   "bytes": 1806,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon cross-shield by Delapouite under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/item/guardian-crest-32@1x.png",
+   "path_2x": "icons/item/guardian-crest-32@2x.png",
+   "bytes": 2476,
+   "size_1x": [
+    32,
+    32
+   ],
+   "size_2x": [
+    64,
+    64
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon cross-shield by Delapouite under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/nav/home@1x.png",
+   "path_2x": "icons/nav/home@2x.png",
+   "bytes": 1009,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon house, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/users@1x.png",
+   "path_2x": "icons/nav/users@2x.png",
+   "bytes": 1152,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon users, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/history@1x.png",
+   "path_2x": "icons/nav/history@2x.png",
+   "bytes": 1467,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon rotate-ccw-clock, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/user@1x.png",
+   "path_2x": "icons/nav/user@2x.png",
+   "bytes": 914,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon user, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/settings@1x.png",
+   "path_2x": "icons/nav/settings@2x.png",
+   "bytes": 1778,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon settings, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/help-circle@1x.png",
+   "path_2x": "icons/nav/help-circle@2x.png",
+   "bytes": 1759,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon circle-question-mark, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/x@1x.png",
+   "path_2x": "icons/nav/x@2x.png",
+   "bytes": 621,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon x, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/chevron-left@1x.png",
+   "path_2x": "icons/nav/chevron-left@2x.png",
+   "bytes": 522,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon chevron-left, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/chevron-right@1x.png",
+   "path_2x": "icons/nav/chevron-right@2x.png",
+   "bytes": 522,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon chevron-right, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/chevron-down@1x.png",
+   "path_2x": "icons/nav/chevron-down@2x.png",
+   "bytes": 494,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon chevron-down, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/search@1x.png",
+   "path_2x": "icons/nav/search@2x.png",
+   "bytes": 1300,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon search, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/menu@1x.png",
+   "path_2x": "icons/nav/menu@2x.png",
+   "bytes": 291,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon menu, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/message-circle@1x.png",
+   "path_2x": "icons/nav/message-circle@2x.png",
+   "bytes": 1575,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon message-circle, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/smile@1x.png",
+   "path_2x": "icons/nav/smile@2x.png",
+   "bytes": 1601,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon face-slightly-smiling, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/play@1x.png",
+   "path_2x": "icons/nav/play@2x.png",
+   "bytes": 869,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon play, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/bot@1x.png",
+   "path_2x": "icons/nav/bot@2x.png",
+   "bytes": 726,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon bot, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/trophy@1x.png",
+   "path_2x": "icons/nav/trophy@2x.png",
+   "bytes": 1159,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon trophy, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/crown@1x.png",
+   "path_2x": "icons/nav/crown@2x.png",
+   "bytes": 1358,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon crown, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/star@1x.png",
+   "path_2x": "icons/nav/star@2x.png",
+   "bytes": 1560,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon star, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/lock@1x.png",
+   "path_2x": "icons/nav/lock@2x.png",
+   "bytes": 902,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon lock, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/check@1x.png",
+   "path_2x": "icons/nav/check@2x.png",
+   "bytes": 546,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon check, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/plus@1x.png",
+   "path_2x": "icons/nav/plus@2x.png",
+   "bytes": 343,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon plus, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/minus@1x.png",
+   "path_2x": "icons/nav/minus@2x.png",
+   "bytes": 283,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon minus, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/refresh-cw@1x.png",
+   "path_2x": "icons/nav/refresh-cw@2x.png",
+   "bytes": 1359,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon refresh-cw, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/link@1x.png",
+   "path_2x": "icons/nav/link@2x.png",
+   "bytes": 1554,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon link, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/log-out@1x.png",
+   "path_2x": "icons/nav/log-out@2x.png",
+   "bytes": 718,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon log-out, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/eye@1x.png",
+   "path_2x": "icons/nav/eye@2x.png",
+   "bytes": 1420,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon eye, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/eye-off@1x.png",
+   "path_2x": "icons/nav/eye-off@2x.png",
+   "bytes": 1577,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon eye-off, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/wifi-off@1x.png",
+   "path_2x": "icons/nav/wifi-off@2x.png",
+   "bytes": 1361,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon wifi-off, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/alert-triangle@1x.png",
+   "path_2x": "icons/nav/alert-triangle@2x.png",
+   "bytes": 1054,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon triangle-alert, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/info@1x.png",
+   "path_2x": "icons/nav/info@2x.png",
+   "bytes": 1467,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon info, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/shopping-bag@1x.png",
+   "path_2x": "icons/nav/shopping-bag@2x.png",
+   "bytes": 1061,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon shopping-bag, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/nav/timer@1x.png",
+   "path_2x": "icons/nav/timer@2x.png",
+   "bytes": 1366,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon timer, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/settings/volume-2@1x.png",
+   "path_2x": "icons/settings/volume-2@2x.png",
+   "bytes": 1095,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon volume-2, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/settings/volume-x@1x.png",
+   "path_2x": "icons/settings/volume-x@2x.png",
+   "bytes": 836,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon volume-x, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/settings/monitor@1x.png",
+   "path_2x": "icons/settings/monitor@2x.png",
+   "bytes": 623,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon monitor, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/settings/gamepad-2@1x.png",
+   "path_2x": "icons/settings/gamepad-2@2x.png",
+   "bytes": 1299,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon gamepad-2, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/settings/camera@1x.png",
+   "path_2x": "icons/settings/camera@2x.png",
+   "bytes": 1060,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon camera, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/settings/layout-dashboard@1x.png",
+   "path_2x": "icons/settings/layout-dashboard@2x.png",
+   "bytes": 578,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon layout-dashboard, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/settings/languages@1x.png",
+   "path_2x": "icons/settings/languages@2x.png",
+   "bytes": 992,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon languages, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/settings/user-cog@1x.png",
+   "path_2x": "icons/settings/user-cog@2x.png",
+   "bytes": 1235,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon user-cog, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/hud/gold@1x.png",
+   "path_2x": "icons/hud/gold@2x.png",
+   "bytes": 1386,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon two-coins by Delapouite under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/hud/dash@1x.png",
+   "path_2x": "icons/hud/dash@2x.png",
+   "bytes": 1452,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon sprint by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/hud/haste@1x.png",
+   "path_2x": "icons/hud/haste@2x.png",
+   "bytes": 1459,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon run by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/hud/recall@1x.png",
+   "path_2x": "icons/hud/recall@2x.png",
+   "bytes": 1500,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon return-arrow by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/hud/tower@1x.png",
+   "path_2x": "icons/hud/tower@2x.png",
+   "bytes": 1443,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon watchtower by Delapouite under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/hud/minion@1x.png",
+   "path_2x": "icons/hud/minion@2x.png",
+   "bytes": 1782,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon goblin-head by Delapouite under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/hud/attack@1x.png",
+   "path_2x": "icons/hud/attack@2x.png",
+   "bytes": 1647,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon crossed-swords by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/hud/level-up@1x.png",
+   "path_2x": "icons/hud/level-up@2x.png",
+   "bytes": 485,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "ISC",
+   "attribution": "Lucide icon chevrons-up, (c) Lucide Icons and Contributors, ISC licence, https://lucide.dev"
+  },
+  {
+   "path": "icons/hud/skull@1x.png",
+   "path_2x": "icons/hud/skull@2x.png",
+   "bytes": 1217,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon death-skull by Sbed under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/hud/kill@1x.png",
+   "path_2x": "icons/hud/kill@2x.png",
+   "bytes": 1647,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon crossed-swords by Lorc under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/hud/assist@1x.png",
+   "path_2x": "icons/hud/assist@2x.png",
+   "bytes": 1627,
+   "size_1x": [
+    24,
+    24
+   ],
+   "size_2x": [
+    48,
+    48
+   ],
+   "tintable": true,
+   "licence": "CC BY 3.0",
+   "attribution": "Icon shaking-hands by Delapouite under CC BY 3.0, https://game-icons.net"
+  },
+  {
+   "path": "icons/LICENSES.md",
+   "bytes": 6709,
+   "tintable": false,
+   "licence": "CC BY 3.0 / CC0 / ISC / MIT",
+   "attribution": "see file"
+  },
+  {
+   "path": "sprites/cooldown-sweep-atlas@1x.png",
+   "path_2x": "sprites/cooldown-sweep-atlas@2x.png",
+   "bytes": 50149,
+   "size_1x": [
+    658,
+    394
+   ],
+   "size_2x": [
+    1316,
+    788
+   ],
+   "atlas": {
+    "order": "row-major (left→right, top→bottom); frame 0 = full disc (100 % cooldown remaining), frame 59 = empty; the covered pie wedge's leading edge sweeps clockwise from 12 o'clock. index = round((1 - remaining_fraction) * 59)",
+    "at_1x": {
+     "frame_w": 64,
+     "frame_h": 64,
+     "columns": 10,
+     "rows": 6,
+     "frames": 60,
+     "padding": [
+      2,
+      2
+     ],
+     "offset": [
+      0,
+      0
+     ],
+     "image_size": [
+      658,
+      394
+     ]
+    },
+    "at_2x": {
+     "frame_w": 128,
+     "frame_h": 128,
+     "columns": 10,
+     "rows": 6,
+     "frames": 60,
+     "padding": [
+      4,
+      4
+     ],
+     "offset": [
+      0,
+      0
+     ],
+     "image_size": [
+      1316,
+      788
+     ]
+    },
+    "bevy": "TextureAtlasLayout::from_grid(UVec2::splat(64*scale), 10, 6, Some(UVec2::splat(2*scale)), None)"
+   },
+   "tintable": true,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — programmatic, drawn for this handoff"
+  },
+  {
+   "path": "sprites/timer-ring-atlas@1x.png",
+   "path_2x": "sprites/timer-ring-atlas@2x.png",
+   "bytes": 130438,
+   "size_1x": [
+    1618,
+    970
+   ],
+   "size_2x": [
+    3236,
+    1940
+   ],
+   "atlas": {
+    "order": "row-major; frame 0 = empty, frame 59 = full ring; filled arc grows clockwise from 12 o'clock with flat (butt) ends. index = round(progress * 59). Use frame 59 tinted dim (e.g. color.bar.track) as the track under the live frame.",
+    "at_1x": {
+     "frame_w": 160,
+     "frame_h": 160,
+     "columns": 10,
+     "rows": 6,
+     "frames": 60,
+     "padding": [
+      2,
+      2
+     ],
+     "offset": [
+      0,
+      0
+     ],
+     "image_size": [
+      1618,
+      970
+     ]
+    },
+    "at_2x": {
+     "frame_w": 320,
+     "frame_h": 320,
+     "columns": 10,
+     "rows": 6,
+     "frames": 60,
+     "padding": [
+      4,
+      4
+     ],
+     "offset": [
+      0,
+      0
+     ],
+     "image_size": [
+      3236,
+      1940
+     ]
+    },
+    "bevy": "TextureAtlasLayout::from_grid(UVec2::splat(160*scale), 10, 6, Some(UVec2::splat(2*scale)), None)"
+   },
+   "tintable": true,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — programmatic, drawn for this handoff"
+  },
+  {
+   "path": "sprites/ring-circle@1x.png",
+   "path_2x": "sprites/ring-circle@2x.png",
+   "bytes": 3631,
+   "size_1x": [
+    64,
+    64
+   ],
+   "size_2x": [
+    128,
+    128
+   ],
+   "tintable": true,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — programmatic, drawn for this handoff"
+  },
+  {
+   "path": "sprites/disc-soft@1x.png",
+   "path_2x": "sprites/disc-soft@2x.png",
+   "bytes": 5539,
+   "size_1x": [
+    64,
+    64
+   ],
+   "size_2x": [
+    128,
+    128
+   ],
+   "tintable": true,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — programmatic, drawn for this handoff"
+  },
+  {
+   "path": "sprites/pip@1x.png",
+   "path_2x": "sprites/pip@2x.png",
+   "bytes": 269,
+   "size_1x": [
+    6,
+    6
+   ],
+   "size_2x": [
+    12,
+    12
+   ],
+   "tintable": true,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — programmatic, drawn for this handoff"
+  },
+  {
+   "path": "sprites/bar-fill@1x.png",
+   "path_2x": "sprites/bar-fill@2x.png",
+   "bytes": 180,
+   "size_1x": [
+    8,
+    8
+   ],
+   "size_2x": [
+    16,
+    16
+   ],
+   "nine_slice": {
+    "left": 2,
+    "right": 2,
+    "top": 2,
+    "bottom": 2,
+    "at_2x": {
+     "left": 4,
+     "right": 4,
+     "top": 4,
+     "bottom": 4
+    },
+    "bevy": "ImageNode::with_mode(NodeImageMode::Sliced(TextureSlicer{border: BorderRect::all(2.0), center_scale_mode: SliceScaleMode::Stretch, sides_scale_mode: SliceScaleMode::Stretch, max_corner_scale: 1.0}))"
+   },
+   "tintable": true,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — programmatic, drawn for this handoff"
+  },
+  {
+   "path": "backgrounds/menu-arena-1080.jpg",
+   "bytes": 22075,
+   "size_1x": [
+    1920,
+    1080
+   ],
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — see omoba-bevy LICENSING.md",
+   "attribution": "Omoba (Ekza) in-game render"
+  },
+  {
+   "path": "backgrounds/menu-arena-720.jpg",
+   "bytes": 12711,
+   "size_1x": [
+    1280,
+    720
+   ],
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — see omoba-bevy LICENSING.md",
+   "attribution": "Omoba (Ekza) in-game render"
+  },
+  {
+   "path": "backgrounds/menu-stage-1080.jpg",
+   "bytes": 25818,
+   "size_1x": [
+    1920,
+    1080
+   ],
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — see omoba-bevy LICENSING.md",
+   "attribution": "Omoba (Ekza) in-game render"
+  },
+  {
+   "path": "backgrounds/menu-stage-720.jpg",
+   "bytes": 15104,
+   "size_1x": [
+    1280,
+    720
+   ],
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — see omoba-bevy LICENSING.md",
+   "attribution": "Omoba (Ekza) in-game render"
+  },
+  {
+   "path": "backgrounds/result-victory-1080.jpg",
+   "bytes": 21382,
+   "size_1x": [
+    1920,
+    1080
+   ],
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — see omoba-bevy LICENSING.md",
+   "attribution": "Omoba (Ekza) in-game render"
+  },
+  {
+   "path": "backgrounds/result-victory-720.jpg",
+   "bytes": 12963,
+   "size_1x": [
+    1280,
+    720
+   ],
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — see omoba-bevy LICENSING.md",
+   "attribution": "Omoba (Ekza) in-game render"
+  },
+  {
+   "path": "backgrounds/result-defeat-1080.jpg",
+   "bytes": 18982,
+   "size_1x": [
+    1920,
+    1080
+   ],
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — see omoba-bevy LICENSING.md",
+   "attribution": "Omoba (Ekza) in-game render"
+  },
+  {
+   "path": "backgrounds/result-defeat-720.jpg",
+   "bytes": 10601,
+   "size_1x": [
+    1280,
+    720
+   ],
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — see omoba-bevy LICENSING.md",
+   "attribution": "Omoba (Ekza) in-game render"
+  },
+  {
+   "path": "fonts/Cinzel-SemiBold.ttf",
+   "bytes": 77164,
+   "tintable": true,
+   "licence": "SIL Open Font License 1.1 (no Reserved Font Name)",
+   "attribution": "Cinzel © 2020 The Cinzel Project Authors (Natanael Gama)"
+  },
+  {
+   "path": "fonts/Cinzel-Bold.ttf",
+   "bytes": 77260,
+   "tintable": true,
+   "licence": "SIL Open Font License 1.1 (no Reserved Font Name)",
+   "attribution": "Cinzel © 2020 The Cinzel Project Authors (Natanael Gama)"
+  },
+  {
+   "path": "fonts/Inter-Regular.ttf",
+   "bytes": 509636,
+   "tintable": true,
+   "licence": "SIL Open Font License 1.1 (no Reserved Font Name)",
+   "attribution": "Inter © 2020 The Inter Project Authors (Rasmus Andersson)"
+  },
+  {
+   "path": "fonts/Inter-SemiBold.ttf",
+   "bytes": 510836,
+   "tintable": true,
+   "licence": "SIL Open Font License 1.1 (no Reserved Font Name)",
+   "attribution": "Inter © 2020 The Inter Project Authors (Rasmus Andersson)"
+  },
+  {
+   "path": "fonts/BarlowCondensed-SemiBold.ttf",
+   "bytes": 109428,
+   "tintable": true,
+   "licence": "SIL Open Font License 1.1 (no Reserved Font Name)",
+   "attribution": "Barlow © 2017 The Barlow Project Authors (Jeremy Tribby)"
+  },
+  {
+   "path": "fonts/BarlowCondensed-Bold.ttf",
+   "bytes": 109912,
+   "tintable": true,
+   "licence": "SIL Open Font License 1.1 (no Reserved Font Name)",
+   "attribution": "Barlow © 2017 The Barlow Project Authors (Jeremy Tribby)"
+  },
+  {
+   "path": "fonts/NotoSerifSC-SemiBold-subset.ttf",
+   "bytes": 383804,
+   "tintable": true,
+   "licence": "SIL Open Font License 1.1 (no Reserved Font Name)",
+   "attribution": "Noto Serif SC © 2017 Google Inc. / Adobe"
+  }
+ ]
+}

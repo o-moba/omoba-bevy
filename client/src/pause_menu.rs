@@ -473,8 +473,26 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                 Text::new(""),
                                 theme::text(14.0),
                                 TextColor(theme::MUTED),
+                                // Text in a scrolling column keeps its height.
+                                Node {
+                                    flex_shrink: 0.0,
+                                    ..default()
+                                },
                                 SettingsServerAddrLabel,
                                 Name::new("PauseMenuServerAddrHint"),
+                            ));
+                            // Third-party art credits (game-icons.net CC BY 3.0
+                            // requires an in-game line).
+                            settings.spawn((
+                                Localized::new("pause.credits.icons").into_text(),
+                                crate::ui::theme::role_text(crate::ui::tokens::TextRole::Caption),
+                                TextColor(theme::MUTED),
+                                Node {
+                                    max_width: Val::Px(metric::MENU_W),
+                                    flex_shrink: 0.0,
+                                    ..default()
+                                },
+                                Name::new("PauseMenuCredits"),
                             ));
 
                             section_title(

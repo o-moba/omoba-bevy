@@ -29,6 +29,7 @@ mod social_qa;
 mod supporter;
 mod targeting_qa;
 mod team_vision_qa;
+mod ui_gallery;
 mod visual_qa;
 
 /// The env-triggered QA plugins, in the order `main` added them before the
@@ -53,6 +54,7 @@ impl PluginGroup for QaPlugins {
             .add(targeting_qa::TargetingQaPlugin)
             .add(record_qa::RecordQaPlugin)
             .add(demo_qa::DemoQaPlugin)
+            .add(ui_gallery::UiGalleryPlugin)
     }
 }
 

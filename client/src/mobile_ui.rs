@@ -763,7 +763,9 @@ fn adapt_phone_layout(
         };
         let original = base.map_or(font.font_size, |base| base.0);
         if base.is_none() {
-            commands.entity(entity).insert(PhoneFontSize(original));
+            commands
+                .entity(entity)
+                .insert((PhoneFontSize(original), crate::ui::theme::PhoneSized));
         }
         font.font_size = metric::phone_font(family, original, width, scale);
     }

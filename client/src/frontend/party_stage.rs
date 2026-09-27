@@ -90,13 +90,13 @@ impl Plugin for PartyStagePlugin {
 #[derive(Component)]
 pub struct StageCamera;
 
-fn setup_stage(mut commands: Commands, stage: Res<PartyStage>) {
+pub(super) fn setup_stage(mut commands: Commands, stage: Res<PartyStage>) {
     commands.spawn((
         Camera3d::default(),
         Camera {
             order: -3,
             is_active: false,
-            clear_color: Color::srgb(0.035, 0.085, 0.092).into(),
+            clear_color: super::PREVIEW_CLEAR,
             ..default()
         },
         RenderTarget::Image(stage.image.clone().into()),
