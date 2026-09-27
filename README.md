@@ -209,8 +209,9 @@ mobile Passport readiness. A compatible file format alone does not establish
 permission to redistribute the artwork.
 
 **SDK license:** the [Ekza Bevy SDK](https://github.com/ekza-space/ekza-bevy-sdk)
-is dual licensed `MIT OR Apache-2.0`, the usual Bevy ecosystem terms, and the
-grant covers every published revision, including the one pinned above. It is a
+is dual licensed `MIT OR Apache-2.0`, the usual Bevy ecosystem terms; its
+copyright holder also offers earlier revisions, including the one pinned above,
+under the same terms. It is a
 separate project: Open Moba's own licenses do not cover it, and neither license
 grants rights to avatars served by an Ekza registry. This resolves the open
 point in the [licensing audit](docs/progress/2026-09-12-open-source-licensing.md).
