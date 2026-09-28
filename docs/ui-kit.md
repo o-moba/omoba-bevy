@@ -540,7 +540,7 @@ CC BY 3.0 credit line (with Lucide ISC and the font licences) is in Settings
 | hero-tile | `game::hero_tile(art, class, name, AvatarSource, form, …)`, `portrait` |
 | scoreboard-row | `game::scoreboard_row(ScoreRow, form)` |
 | timer-ring | `game::timer_ring(TimerRing, RingSize, time, caption)`; `RingSize::{Large, Medium, Small}` (160 / 96 / 44); status variant below |
-| hud-plate | `game::hud_plate`, `minimap_frame`, `player_status`, `score_strip`, `target_frame` |
+| hud-plate | `game::hud_plate`, `plate_button` (`KitSkin::Plate`), `live_portrait`, `minimap_frame`, `player_status`, `score_strip`, `target_frame` (gallery composites; the live HUD composes the parts, see [In-match HUD](#in-match-hud-p0-a)) |
 | help card (`hud-help.md`, P0) | `surfaces::info_card(node, icon, title, body, form) -> InfoCard { card, title, body }`: plain panel in `color.surface.2`, icon disc (32/24, `color.surface.3`, gold hairline) with a gold icon (20/16), `type.heading` gold title (16 px on a phone, `PhoneSized`), `type.body` secondary body; the caller sizes it and may add a legend row of `keycap`s and muted `badge`s |
 
 ### UI scale and preview cameras
@@ -552,9 +552,11 @@ CC BY 3.0 credit line (with Lucide ISC and the font licences) is in Settings
   it to 0.8. Windows smaller than the reference keep the legacy height shrink
   (`frontend::menu_scale`, down to `MIN_MENU_SCALE`) so short windows still
   fit the menus. Draft and loading stay at 1.0 on desktop: they lay out from
-  the real window width. The desktop match keeps 1.0 until its world-anchored
-  overlays (nameplates, floating combat numbers, chat bubbles) divide by
-  `UiScale`. Phones keep `frontend::menu_scale` and the `metric` minimums.
+  the real window width. The desktop match follows the reference too (F8.1,
+  see [In-match HUD](#in-match-hud-p0-a)): every world-anchored overlay
+  divides its viewport point by `UiScale` (`hud_layout::world_to_ui`); below
+  the reference it stays 1.0. Phones keep `frontend::menu_scale` and the
+  `metric` minimums (the phone match is 1.0).
 - The result screen (`AppScreen::PostMatch`, text roles only) takes the full
   R2.3 range on desktop, `clamp(min(w/1280, h/720), 0.8, 2.0)`
   (`postmatch::result_ui_scale`; 1024×640 → 0.8), except while the game
@@ -611,6 +613,66 @@ gamepad focus); the others are pinned with `PreviewState`.
 `OMOBA_UI_GALLERY_OUTPUT=<dir>` captures every page × profile × language at
 1280×720 plus buttons and type at 1920×1080 and 1024×640 and exits.
 
+### In-match HUD (P0-A)
+
+The match HUD is built from `omoba-ui/handoff/screens/hud.md` (+ the
+`target-*` and `skill-description` specs) with the parts above.
+
+- **Layout** (`client/src/hud_layout.rs`): `HudLayout::desktop(viewport, pad)`
+  / `HudLayout::phone(&MobileControls)` hold every region of the redlines in
+  logical UI px (desktop edges anchored, phone on `MobileControls.safe`,
+  top row 12 px from the screen top). An owner tags its root with
+  `HudRegion::*` and `place_hud_regions` (PostUpdate, before layout) places
+  it: `Box` (rect), `TopLeft`, `TopRight`, `TopCentre`, `BottomCentre`
+  (grows upward). `hud_layout::tests` pin the redline coordinates;
+  `ui_viewport(window, UiScale)` is the logical viewport and
+  `world_to_ui(point, UiScale)` converts a camera projection (window px) to
+  UI px for world-anchored nodes (boss plates, combat numbers, chat
+  bubbles, the reaction wheel centre, the lock frame, the aim preview; the
+  minimap converts its rect back for cursor hits).
+- **Owners**: `match_hud` (status plate `MatchHudColumn`, buff chips
+  `MatchBuffChips`, visibility), `edge_hud` (score strip `MatchScoreStrip` /
+  `MatchScoreButton`, menu `MatchMenuButton`, target plate
+  `TargetHealthRoot`), `combat::hotbar` (`SkillBarRoot`, `SkillUpgradeChip`,
+  `ActionFeedback`, `SkillTooltip`), `combat::skill_card` (the shared
+  desktop tooltip / phone hold card, `SkillCardView`), `shop` (desktop gold
+  row `GoldShopButton` and `EquipmentHud`; phone `QuickBuyHud`), `social`
+  (`SocialEntry`, `SocialStatus`), `minimap`, `team_vision`
+  (`BrushStatus`), `net::offline` (practice badge / toast),
+  `mobile_controls` (phone combat group).
+- **Kit additions**: `KitSkin::Plate` + `plate_button` (a HUD plate that is
+  a button: glass kept, border `gold.500` on hover), `live_portrait` /
+  `PortraitView` / `paint_portraits` (art or icon, XP ring, level disc,
+  dimmed when dead or offline, strong rim for bosses and the base),
+  `ability_face` / `AbilityFace` (the ability face without a button, for the
+  touch layer), `AbilityView::unlock_level` (the locked veil's `Lv N`; a
+  veil without one is the dead state), `AbilityView::ring` (the phone's
+  segmented rank ring, DECISIONS R10: the rim split into `MAX_ABILITY_RANK`
+  arcs with 9 % gaps on the outer 11 % of the radius, learned `gold.400`,
+  unlearned `border.subtle`, over the art and the cooldown sweep, empty when
+  locked; masks from `rank_ring_pixels`, `RankRingMasks`), a hugging cost pill
+  and pips 18 px under the circle, `bar_parts` / `BarKindTag` (low-HP colours on the
+  player's bar, `hud.target.defeated` for `respawn: Some(0)`, mana value
+  `{mana}/{max}`), `TooltipText` (owner-written tooltip title/body), and
+  `AbilityParts::key` (the key badge text; pad glyphs are written into it).
+- **Target plate** (`edge_hud::target_details`): hero (nickname or class
+  name, avatar or class icon, level disc from the live score, class icon,
+  mana line on desktop, `edge.scoreboard.offline` muted when disconnected),
+  minion (`edge.target.minion_melee|caster`), neutral (camp:
+  `edge.target.neutral` + skull; boss: `boss.*` + crown, strong rim,
+  `edge.target.boss` badge), structure (`edge.target.tower|base`, lane badge
+  `lane.*`, lock and 55 % bar while protected). R7.1: a protected enemy
+  structure is selectable for inspection (`TargetValidity::inspectable`;
+  `valid` stays the attack rule): a click with nothing attackable under the
+  pointer selects it, a right-click is refused with `combat.cast.protected`,
+  and `clear_invalid_selection` keeps it while dropping any attack order.
+- **Phone combat group** (`MobileControls::layout`): ATK 96 at safe
+  right/bottom − 76, abilities 64 on R 104 (162°, 204°, 246°, 288°),
+  DASH/HASTE/CANCEL/RANK/MIN/TWR 48 on R 168 (166° … 276°), joystick r 52 at
+  safe left + 68 / bottom − 65; all × `combat_scale()`. Each ability shows
+  its rank as the segmented ring on its rim (R10); `MobileRankRing-N` is the
+  overlay with the + badge (hint) and, in rank mode, a gold rim.
+
 ### Known differences from the handoff sheets
 
 - **Letter spacing:** Bevy 0.18 text has no tracking, so `letter_spacing_em`
@@ -626,6 +688,12 @@ gamepad focus); the others are pinned with `PreviewState`.
   neutral.
 - **Header close button** keeps 44 px on desktop (pause menu contract); the
   kit icon button is 40.
+- **HUD motion** (hud.md, target-hero.md): the target plate appears and
+  leaves at once (no fade: nodes have no opacity), and a defeated target is
+  cleared in the frame it dies (no drain + greyscale hold); the damage trail
+  on its HP bar and the cooldown ready flash are drawn.
+- **Dashed CANCEL rim** (phone) is solid `color.state.danger` (Bevy borders
+  are solid).
 
 ## Controls guide (P0-C)
 
@@ -641,9 +709,9 @@ at its authored size (desktop 1280×720, phone 844×390):
   strip (`HelpField`, `HelpCamera`: an inline `type.eyebrow` label and a
   `type.caption` span), the 360-wide primary large dismiss
   (`HelpDismissButton`, `help.dismiss.button`) and the reopen hint
-  (`HelpReopenHint`, `help.reopen`). A menu scales it through `UiScale`; the
-  desktop match stays at 1.0, where a window below the reference scales the
-  panel down (`UiTransform`) so the whole guide stays on screen.
+  (`HelpReopenHint`, `help.reopen`). A menu and the desktop match (F8.1)
+  scale it through `UiScale`; a window below the reference (`UiScale` 1.0)
+  scales the panel down (`UiTransform`) so the whole guide stays on screen.
 - **Phone:** a plain panel in the safe area (`MobileControls.safe` +
   `space.screen_margin.phone`, 12 from the top and the safe bottom) with a
   title row (`help.phone.title` and the 240-wide dismiss) over a touch scroll

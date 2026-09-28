@@ -3,6 +3,7 @@
 use crate::{
     combat::{ActionFeedback, CombatStats},
     help_overlay::HelpOverlayVisible,
+    hud_layout::HudRegion,
     i18n::{Locale, Localized, data, tr, trf},
     input_context::InputContextSet,
     net::{
@@ -13,8 +14,13 @@ use crate::{
     player::{MovementTarget, Player},
     ui::{
         Activated, ModalId, ModalRoot, TestId, UiAction, UiActionAppExt,
-        theme::{self as ui, ButtonKind},
-        widgets::ButtonStyle,
+        kit_assets::{Icon, KitImage},
+        theme::{self as ui, ButtonKind, Form},
+        tokens::{TextRole, border, color, radius, size, space},
+        widgets::{
+            ButtonStyle, KitParts, KitSkin, game, icon_node,
+            surfaces::{Tooltip, TooltipText},
+        },
     },
 };
 use bevy::prelude::*;
@@ -69,8 +75,6 @@ struct ShopSummary;
 #[derive(Component)]
 struct ShopFeedback;
 #[derive(Component)]
-struct EquipmentGold;
-#[derive(Component)]
 struct QuickBuySlot(usize);
 #[derive(Component)]
 struct QuickBuyPrice(usize);
@@ -81,11 +85,11 @@ struct QuickBuyIcon {
 }
 #[derive(Component)]
 struct QuickGold;
+/// An inventory slot of the equipment plate and its glyph.
 #[derive(Component)]
-enum EquipmentLayoutPart {
-    Panel,
-    Slot,
-}
+struct EquipmentSlot(usize);
+#[derive(Component)]
+struct EquipmentSlotIcon(usize);
 #[derive(Component)]
 struct InventoryLabel(usize);
 /// Shop text that depends on the language and on the UI platform (phone copy
@@ -108,7 +112,7 @@ impl Plugin for ShopPlugin {
         app.init_resource::<ShopState>()
             .add_ui_action::<ShopAction>()
             .add_systems(Startup, (setup_shop, setup_quick_buy))
-            .add_systems(Update, (adapt_desktop_equipment_width, relabel_shop_text))
+            .add_systems(Update, relabel_shop_text)
             .add_systems(
                 Update,
                 (toggle_shop, sync_shop_visibility)
@@ -126,6 +130,7 @@ impl Plugin for ShopPlugin {
                     update_shop,
                     update_inventory_icons,
                     update_quick_buy,
+                    update_equipment_slots,
                 )
                     .chain()
                     .in_set(InputContextSet::Actions),
@@ -160,141 +165,295 @@ fn compact_gold(gold: u32) -> String {
         format!("{:.1}m", gold as f32 / 1_000_000.0)
     }
 }
-fn setup_quick_buy(mut commands: Commands) {
+/// Quick-buy and inventory slot anatomy (`hud.md`: slots `size.item_slot.*`,
+/// equipment 3 × 2 with gap 6, price `type.number_sm` bottom-right).
+const SLOT_GAP: f32 = 6.0;
+const EQUIPMENT_PADDING: f32 = space::S8;
+/// Gold row (desktop status plate): 104 × 24 with a keycap.
+const GOLD_ROW: Vec2 = Vec2::new(104.0, 24.0);
+
+/// The desktop gold row of the player status plate (`hud.md`
+/// `player-status`): a plate button (`ShopAction::Toggle`) with `hud/gold`,
+/// the gold (`type.number` gold, compact from 10 000) and the `P` keycap.
+pub(crate) fn spawn_gold_row(parent: &mut ChildSpawnerCommands) {
+    let mut parts = KitParts::default();
+    let mut row = parent.spawn(crate::ui::widgets::plate_button(
+        Node {
+            width: Val::Px(GOLD_ROW.x),
+            height: Val::Px(GOLD_ROW.y),
+            padding: UiRect::horizontal(Val::Px(space::S4 + border::FRAME)),
+            column_gap: Val::Px(space::S4),
+            align_items: AlignItems::Center,
+            ..default()
+        },
+        ShopAction::Toggle,
+        "GoldShopButton",
+        KitParts::default(),
+    ));
+    row.insert((
+        Tooltip {
+            title: None,
+            body: "shop.button.open",
+        },
+        ZIndex(1),
+    ));
+    row.with_children(|row| {
+        parts.icon = Some(
+            row.spawn(icon_node(Icon::HudGold, size::ICON_SM, color::TEXT_GOLD))
+                .id(),
+        );
+        row.spawn((
+            Text::new("0"),
+            ui::role_text(TextRole::Number),
+            TextColor(color::TEXT_GOLD),
+            Node {
+                flex_grow: 1.0,
+                ..default()
+            },
+            QuickGold,
+            Name::new("QuickGoldText"),
+        ));
+        crate::ui::widgets::surfaces::keycap(row, crate::input_bindings::shop_key_display());
+    });
+    row.insert(parts);
+}
+
+/// An item slot button (`item-slot.md` look: `color.surface.0`, subtle
+/// border, radius 6) whose icon and price the owner paints: quick-buy
+/// offers keep their availability colours, which the kit would repaint.
+fn slot_button(parent: &mut ChildSpawnerCommands, form: Form, slot: usize) -> Entity {
+    let side = size::ITEM_SLOT.at(form);
+    let mut button = parent.spawn((
+        crate::ui::widgets::button_bundle(
+            Node {
+                width: Val::Px(side),
+                height: Val::Px(side),
+                flex_shrink: 0.0,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                border: UiRect::all(Val::Px(border::HAIRLINE)),
+                border_radius: BorderRadius::all(Val::Px(game::ITEM_SLOT_RADIUS)),
+                ..default()
+            },
+            ButtonKind::ShopItem,
+            ShopAction::QuickBuy(slot),
+            TestId::new(format!("QuickBuy-{slot}")),
+        ),
+        KitSkin::ShopCard,
+        KitParts::default(),
+        UiTransform::IDENTITY,
+        QuickBuySlot(slot),
+        Tooltip {
+            title: None,
+            body: "shop.button.open",
+        },
+        TooltipText::default(),
+    ));
+    button.with_children(|slot_node| {
+        slot_node.spawn((
+            icon_node(
+                Icon::NavShoppingBag,
+                game::ITEM_ICON.min(side - space::S8),
+                color::GOLD_400,
+            ),
+            Visibility::Hidden,
+            QuickBuyIcon { slot, shown: None },
+        ));
+        slot_node.spawn((
+            Text::new("—"),
+            ui::role_text(TextRole::NumberSm),
+            TextColor(color::TEXT_MUTED),
+            TextShadow::default(),
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(space::S2),
+                bottom: Val::Px(0.0),
+                ..default()
+            },
+            QuickBuyPrice(slot),
+            Name::new(format!("QuickBuyPrice-{slot}")),
+        ));
+    });
+    button.id()
+}
+
+/// Phone: the quick-buy row under the status plate (`hud.md` phone
+/// `quick-buy`): gold button + two offers, 44 each, gap `space.8`. Desktop
+/// has the gold row in the status plate and the offers in the equipment
+/// plate, so nothing is spawned here.
+fn setup_quick_buy(
+    mut commands: Commands,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+) {
+    if !phone_copy(mobile.as_deref()) {
+        return;
+    }
+    let form = Form::Phone;
+    let side = size::ITEM_SLOT.at(form);
     commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(16.0),
-                top: Val::Px(168.0),
-                column_gap: Val::Px(6.0),
+                column_gap: Val::Px(space::S8),
                 ..default()
             },
+            HudRegion::QuickBuy,
             ZIndex(12),
             Name::new("QuickBuyHud"),
         ))
         .with_children(|row| {
-            row.spawn((
-                Button,
-                Node {
-                    width: Val::Px(44.0),
-                    height: Val::Px(44.0),
-                    flex_shrink: 0.0,
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    border: UiRect::all(Val::Px(1.0)),
-                    border_radius: BorderRadius::all(Val::Px(5.0)),
-                    ..default()
-                },
-                BackgroundColor(ui::PANEL),
-                BorderColor::all(ui::GOLD),
-                UiAction(ShopAction::Toggle),
-                TestId::new("GoldShopButton"),
-            ))
-            .with_children(|button| {
-                button.spawn((
+            let mut parts = KitParts::default();
+            let mut gold = row.spawn((
+                crate::ui::widgets::button_bundle(
                     Node {
-                        width: Val::Px(17.0),
-                        height: Val::Px(9.0),
-                        border: UiRect::all(Val::Px(2.0)),
-                        border_radius: BorderRadius::all(Val::Percent(50.0)),
+                        width: Val::Px(side),
+                        height: Val::Px(side),
+                        flex_shrink: 0.0,
+                        flex_direction: FlexDirection::Column,
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        border: UiRect::all(Val::Px(border::HAIRLINE)),
+                        border_radius: BorderRadius::all(Val::Px(game::ITEM_SLOT_RADIUS)),
                         ..default()
                     },
-                    BorderColor::all(ui::GOLD),
-                    BackgroundColor(ui::TILE),
-                ));
+                    ButtonKind::ShopItem,
+                    ShopAction::Toggle,
+                    TestId::new("GoldShopButton"),
+                ),
+                KitSkin::ShopCard,
+                UiTransform::IDENTITY,
+            ));
+            gold.with_children(|button| {
+                parts.icon = Some(
+                    button
+                        .spawn(icon_node(Icon::HudGold, size::ICON_MD, color::GOLD_400))
+                        .id(),
+                );
                 button.spawn((
-                    Text::new("80"),
-                    ui::text(12.0),
-                    TextColor(ui::GOLD),
+                    Text::new("0"),
+                    ui::role_text(TextRole::NumberSm),
+                    TextColor(color::TEXT_GOLD),
                     QuickGold,
                     Name::new("QuickGoldText"),
                 ));
             });
+            gold.insert(parts);
             for slot in 0..2 {
-                row.spawn((
-                    Button,
-                    Node {
-                        width: Val::Px(44.0),
-                        height: Val::Px(44.0),
-                        flex_shrink: 0.0,
-                        flex_direction: FlexDirection::Column,
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
-                        border: UiRect::all(Val::Px(1.0)),
-                        border_radius: BorderRadius::all(Val::Px(5.0)),
-                        ..default()
-                    },
-                    BackgroundColor(ui::PANEL),
-                    BorderColor::all(ui::EDGE),
-                    QuickBuySlot(slot),
-                    UiAction(ShopAction::QuickBuy(slot)),
-                    TestId::new(format!("QuickBuy-{slot}")),
-                ))
-                .with_children(|button| {
-                    button.spawn((
-                        Node {
-                            width: Val::Px(25.0),
-                            height: Val::Px(25.0),
-                            ..default()
-                        },
-                        QuickBuyIcon { slot, shown: None },
-                    ));
-                    button.spawn((
-                        Text::new("—"),
-                        ui::text(12.0),
-                        TextColor(ui::MUTED),
-                        QuickBuyPrice(slot),
-                        Name::new(format!("QuickBuyPrice-{slot}")),
-                    ));
-                });
+                slot_button(row, form, slot);
             }
         });
 }
+
+/// Desktop equipment plate (`hud.md` `equipment`, 200 × 102): six inventory
+/// slots 3 × 2 (gap 6), a divider, and the two quick-buy offers.
+fn spawn_equipment_plate(commands: &mut Commands) {
+    let form = Form::Desktop;
+    let side = size::ITEM_SLOT.at(form);
+    commands
+        .spawn((
+            // A Button keeps world clicks off the plate.
+            Button,
+            game::hud_plate(false),
+            HudRegion::Equipment,
+            ZIndex(12),
+            Name::new("EquipmentHud"),
+        ))
+        .insert(Node {
+            position_type: PositionType::Absolute,
+            padding: UiRect::all(Val::Px(EQUIPMENT_PADDING)),
+            column_gap: Val::Px(space::S4 + border::HAIRLINE),
+            align_items: AlignItems::Stretch,
+            border: UiRect::all(Val::Px(border::HAIRLINE)),
+            border_radius: BorderRadius::all(Val::Px(radius::MD)),
+            ..default()
+        })
+        .with_children(|plate| {
+            plate
+                .spawn((
+                    Node {
+                        width: Val::Px(3.0 * side + 2.0 * SLOT_GAP),
+                        flex_shrink: 0.0,
+                        align_content: AlignContent::FlexStart,
+                        flex_wrap: FlexWrap::Wrap,
+                        column_gap: Val::Px(SLOT_GAP),
+                        row_gap: Val::Px(SLOT_GAP),
+                        ..default()
+                    },
+                    Name::new("InventorySlots"),
+                ))
+                .with_children(|slots| {
+                    for index in 0..shop::INVENTORY_CAPACITY {
+                        let slot = game::item_slot(slots, None, None, form);
+                        slots.commands().entity(slot).insert((
+                            // Hover shows the item tooltip.
+                            Button,
+                            EquipmentSlot(index),
+                            Name::new(format!("InventorySlot-{index}")),
+                        ));
+                        slots.commands().entity(slot).with_children(|slot| {
+                            slot.spawn((
+                                icon_node(
+                                    Icon::NavShoppingBag,
+                                    game::ITEM_ICON.min(side - space::S4),
+                                    color::GOLD_400,
+                                ),
+                                Visibility::Hidden,
+                                EquipmentSlotIcon(index),
+                            ));
+                        });
+                    }
+                });
+            plate.spawn((
+                Node {
+                    width: Val::Px(border::HAIRLINE),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+                BackgroundColor(color::BORDER_SUBTLE),
+                Pickable::IGNORE,
+            ));
+            plate
+                .spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    flex_shrink: 0.0,
+                    row_gap: Val::Px(SLOT_GAP),
+                    ..default()
+                })
+                .with_children(|column| {
+                    for slot in 0..2 {
+                        slot_button(column, form, slot);
+                    }
+                });
+        });
+}
+
+/// Gold, the two quick-buy offers (icon, price, availability, tooltip).
+#[allow(clippy::type_complexity)]
 fn update_quick_buy(
-    mut commands: Commands,
     state: Res<ShopState>,
-    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    locale: Option<Res<Locale>>,
     player: Query<(&PlayerEquipment, &CombatStats, &NetworkHeroClass), With<Player>>,
-    mut roots: Query<(&Name, &mut Node)>,
     mut gold: Query<&mut Text, (With<QuickGold>, Without<QuickBuyPrice>)>,
     mut prices: Query<(&QuickBuyPrice, &mut Text, &mut TextColor), Without<QuickGold>>,
-    mut icons: Query<(Entity, &mut QuickBuyIcon)>,
-    mut buttons: Query<(&QuickBuySlot, &mut BorderColor, &mut BackgroundColor)>,
+    mut icons: Query<(&mut QuickBuyIcon, &mut KitImage, &mut Visibility)>,
+    mut slots: Query<(&QuickBuySlot, &mut TooltipText)>,
+    mut last: Local<Option<(Vec<ItemId>, u32, bool, u32)>>,
 ) {
-    for (name, mut node) in &mut roots {
-        if name.as_str() == "QuickBuyHud" {
-            let (left, top, gap) =
-                mobile
-                    .as_ref()
-                    .filter(|m| m.enabled)
-                    .map_or((16.0, 168.0, 6.0), |m| {
-                        (
-                            m.safe.left,
-                            m.safe.top
-                                + if m.viewport.y <= 340.0 {
-                                    102.0
-                                } else {
-                                    122.0 * m.scale()
-                                },
-                            4.0,
-                        )
-                    });
-            node.left = Val::Px(left);
-            node.top = Val::Px(top);
-            node.column_gap = Val::Px(gap);
-        }
-    }
     let Ok((equipment, stats, class)) = player.single() else {
         return;
     };
     let offers = quick_offers(class.0, &equipment.inventory);
     for mut text in &mut gold {
-        text.0 = compact_gold(equipment.gold);
+        let next = compact_gold(equipment.gold);
+        if text.0 != next {
+            text.0 = next;
+        }
     }
+    let available = |slot: usize| {
+        offers[slot].is_some_and(|id| unavailable_reason(equipment, stats, id).is_none())
+    };
     for (slot, mut text, mut color) in &mut prices {
-        text.0 = offers[slot.0].map_or_else(
+        let next = offers[slot.0].map_or_else(
             || "—".into(),
             |id| {
                 if state.pending.as_ref().is_some_and(|p| p.item == id) {
@@ -304,31 +463,113 @@ fn update_quick_buy(
                 }
             },
         );
-        *color = TextColor(
-            if offers[slot.0].is_some_and(|id| unavailable_reason(equipment, stats, id).is_none()) {
-                ui::GOLD
-            } else {
-                ui::MUTED
-            },
-        );
+        if text.0 != next {
+            text.0 = next;
+        }
+        let ink = if available(slot.0) {
+            color::TEXT_GOLD
+        } else {
+            color::TEXT_MUTED
+        };
+        if color.0 != ink {
+            color.0 = ink;
+        }
     }
-    for (entity, mut icon) in &mut icons {
+    for (mut icon, mut image, mut visibility) in &mut icons {
         let next = offers[icon.slot];
         if icon.shown != next {
             icon.shown = next;
-            commands.entity(entity).despawn_related::<Children>();
-            if let Some(id) = next {
-                commands
-                    .entity(entity)
-                    .with_children(|p| spawn_item_icon(p, id, 25.0));
-            }
+            *visibility = if next.is_some() {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+        }
+        // Unavailable offers dim their glyph (Bevy nodes have no opacity).
+        let tint = if available(icon.slot) {
+            color::GOLD_400
+        } else {
+            color::TEXT_DISABLED
+        };
+        let source = KitImage::icon(next.map_or(Icon::NavShoppingBag, game::item_icon), tint);
+        if *image != source {
+            *image = source;
         }
     }
-    for (slot, mut border, mut background) in &mut buttons {
-        let available =
-            offers[slot.0].is_some_and(|id| unavailable_reason(equipment, stats, id).is_none());
-        *border = BorderColor::all(if available { ui::GOLD } else { ui::EDGE });
-        *background = BackgroundColor(if available { ui::TILE } else { ui::PANEL });
+    // Tooltips: item name + description (+ the unavailable reason).
+    let key = (
+        equipment.inventory.clone(),
+        equipment.gold,
+        stats.is_alive() && equipment.shop_available,
+        locale.as_ref().map_or(0, |locale| locale.generation()),
+    );
+    if last.as_ref() == Some(&key) {
+        return;
+    }
+    *last = Some(key);
+    for (slot, mut tooltip) in &mut slots {
+        let next = offers[slot.0].map_or_else(TooltipText::default, |id| TooltipText {
+            title: Some(data::item_name(id).to_owned()),
+            body: match unavailable_reason(equipment, stats, id) {
+                Some(reason) => format!("{}\n{reason}", data::item_desc(id)),
+                None => data::item_desc(id).to_owned(),
+            },
+        });
+        if *tooltip != next {
+            *tooltip = next;
+        }
+    }
+}
+
+/// The equipment plate's inventory glyphs and item tooltips.
+fn update_equipment_slots(
+    mut commands: Commands,
+    player: Query<&PlayerEquipment, With<Player>>,
+    locale: Option<Res<Locale>>,
+    slots: Query<(Entity, &EquipmentSlot)>,
+    mut icons: Query<(&EquipmentSlotIcon, &mut KitImage, &mut Visibility)>,
+    mut last: Local<Option<(Vec<ItemId>, u32)>>,
+) {
+    let Ok(equipment) = player.single() else {
+        return;
+    };
+    let key = (
+        equipment.inventory.clone(),
+        locale.as_ref().map_or(0, |locale| locale.generation()),
+    );
+    if last.as_ref() == Some(&key) {
+        return;
+    }
+    *last = Some(key);
+    for (icon, mut image, mut visibility) in &mut icons {
+        let item = equipment.inventory.get(icon.0).copied();
+        *visibility = if item.is_some() {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if let Some(item) = item {
+            *image = KitImage::icon(game::item_icon(item), color::GOLD_400);
+        }
+    }
+    for (entity, slot) in &slots {
+        match equipment.inventory.get(slot.0) {
+            Some(item) => {
+                commands.entity(entity).insert((
+                    Tooltip {
+                        title: None,
+                        body: "shop.button.open",
+                    },
+                    TooltipText {
+                        title: Some(data::item_name(*item).to_owned()),
+                        body: data::item_desc(*item).to_owned(),
+                    },
+                ));
+            }
+            None => {
+                commands.entity(entity).remove::<(Tooltip, TooltipText)>();
+            }
+        }
     }
 }
 
@@ -386,105 +627,9 @@ fn relabel_shop_text(
 
 fn setup_shop(mut commands: Commands, mobile: Option<Res<crate::mobile_controls::MobileControls>>) {
     let phone = phone_copy(mobile.as_deref());
-    commands
-        .spawn((
-            Button,
-            Node {
-                position_type: PositionType::Absolute,
-                right: Val::Px(16.0),
-                bottom: Val::Px(16.0),
-                width: Val::Px(224.0),
-                height: Val::Px(136.0),
-                padding: UiRect::all(Val::Px(10.0)),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(5.0),
-                ..ui::panel_node()
-            },
-            BackgroundColor(ui::PANEL),
-            BorderColor::all(ui::EDGE),
-            ZIndex(12),
-            EquipmentLayoutPart::Panel,
-            Name::new("EquipmentHud"),
-        ))
-        .with_children(|panel| {
-            panel.spawn((
-                Text::new(trf("shop.equipment_gold", &[("gold", &80)])),
-                ui::text(13.0),
-                TextColor(ui::GOLD),
-                EquipmentGold,
-                Name::new("EquipmentGold"),
-            ));
-            panel
-                .spawn((
-                    Node {
-                        flex_wrap: FlexWrap::Wrap,
-                        column_gap: Val::Px(5.0),
-                        row_gap: Val::Px(5.0),
-                        ..default()
-                    },
-                    Name::new("InventorySlots"),
-                ))
-                .with_children(|slots| {
-                    for index in 0..shop::INVENTORY_CAPACITY {
-                        slots
-                            .spawn((
-                                Node {
-                                    width: Val::Px(64.0),
-                                    height: Val::Px(27.0),
-                                    justify_content: JustifyContent::Center,
-                                    align_items: AlignItems::Center,
-                                    column_gap: Val::Px(3.0),
-                                    border: UiRect::all(Val::Px(1.0)),
-                                    border_radius: BorderRadius::all(Val::Px(4.0)),
-                                    ..default()
-                                },
-                                BackgroundColor(ui::TILE),
-                                BorderColor::all(ui::EDGE),
-                                EquipmentLayoutPart::Slot,
-                                Name::new(format!("InventorySlot-{index}")),
-                            ))
-                            .with_children(|slot| {
-                                slot.spawn((
-                                    Node {
-                                        width: Val::Px(22.0),
-                                        height: Val::Px(22.0),
-                                        flex_shrink: 0.0,
-                                        ..default()
-                                    },
-                                    InventoryIcon { index, shown: None },
-                                ));
-                                slot.spawn((
-                                    Text::new("-"),
-                                    ui::text(11.0),
-                                    TextColor(ui::MUTED),
-                                    InventoryLabel(index),
-                                ));
-                            });
-                    }
-                });
-            panel
-                .spawn((
-                    Button,
-                    Node {
-                        height: Val::Px(29.0),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        border_radius: BorderRadius::all(Val::Px(5.0)),
-                        ..default()
-                    },
-                    BackgroundColor(ui::HOVER),
-                    UiAction(ShopAction::Toggle),
-                    TestId::new("ShopOpenButton"),
-                ))
-                .with_children(|button| {
-                    button.spawn((
-                        Localized::new("shop.button.open").into_text(),
-                        Name::new("ShopOpenLabel"),
-                        ui::text(14.0),
-                        TextColor(ui::GOLD),
-                    ));
-                });
-        });
+    if !phone {
+        spawn_equipment_plate(&mut commands);
+    }
     commands
         .spawn((
             Node {
@@ -702,27 +847,6 @@ fn setup_shop(mut commands: Commands, mobile: Option<Res<crate::mobile_controls:
                     ));
                 });
         });
-}
-
-fn adapt_desktop_equipment_width(
-    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
-    mut nodes: Query<(&EquipmentLayoutPart, &mut Node)>,
-) {
-    if mobile.is_some_and(|mobile| mobile.enabled) {
-        return;
-    }
-    let Ok(window) = windows.single() else { return };
-    let width = (window.width() - 32.0).clamp(0.0, 224.0);
-    // Keep all six slots in two rows as the panel approaches the right edge.
-    // The panel has 10px padding + 1px border, and two 5px column gaps.
-    let slot_width = ((width - 22.0 - 10.0) / 3.0).clamp(0.0, 64.0);
-    for (part, mut node) in &mut nodes {
-        node.width = Val::Px(match part {
-            EquipmentLayoutPart::Panel => width,
-            EquipmentLayoutPart::Slot => slot_width,
-        });
-    }
 }
 
 /// Small original silhouettes built from UI geometry, shared by shop and
@@ -1090,7 +1214,6 @@ struct ShopLabels<'w, 's> {
             Without<ShopFeedback>,
             Without<ShopCardLabel>,
             Without<InventoryLabel>,
-            Without<EquipmentGold>,
         ),
     >,
     feedback: Query<
@@ -1102,7 +1225,6 @@ struct ShopLabels<'w, 's> {
             Without<ShopSummary>,
             Without<ShopCardLabel>,
             Without<InventoryLabel>,
-            Without<EquipmentGold>,
         ),
     >,
     cards: Query<
@@ -1113,7 +1235,6 @@ struct ShopLabels<'w, 's> {
             Without<ShopSummary>,
             Without<ShopFeedback>,
             Without<InventoryLabel>,
-            Without<EquipmentGold>,
         ),
     >,
     inventory: Query<
@@ -1128,19 +1249,6 @@ struct ShopLabels<'w, 's> {
             Without<ShopSummary>,
             Without<ShopFeedback>,
             Without<ShopCardLabel>,
-            Without<EquipmentGold>,
-        ),
-    >,
-    gold: Query<
-        'w,
-        's,
-        &'static mut Text,
-        (
-            With<EquipmentGold>,
-            Without<ShopSummary>,
-            Without<ShopFeedback>,
-            Without<ShopCardLabel>,
-            Without<InventoryLabel>,
         ),
     >,
 }
@@ -1154,9 +1262,6 @@ fn update_shop(
     let Ok((equipment, stats, class)) = player.single() else {
         return;
     };
-    for mut text in &mut labels.gold {
-        text.0 = trf("shop.equipment_gold", &[("gold", &equipment.gold)]);
-    }
     for (slot, mut text, mut color) in &mut labels.inventory {
         text.0 = equipment
             .inventory
@@ -1240,65 +1345,55 @@ fn update_shop(
 mod tests {
     use super::*;
 
+    /// hud.md `equipment` (replaces the hidden 224 px panel this test used
+    /// to size): desktop spawns the 200 × 102 plate with six 40 px slots in
+    /// rows of three and the two quick-buy offers; a phone spawns the
+    /// quick-buy row instead, and each TestId exists once.
     #[test]
-    fn equipment_resizes_in_logical_pixels_and_keeps_three_slots_per_row() {
-        let mut app = App::new();
-        app.add_systems(Startup, (setup_shop, setup_quick_buy))
-            .add_systems(Update, adapt_desktop_equipment_width);
-        let window = app
-            .world_mut()
-            .spawn((Window::default(), bevy::window::PrimaryWindow))
-            .id();
-        for (width, height, scale) in [
-            (960, 540, 1.0),
-            (1280, 720, 1.0),
-            (1600, 1000, 1.0),
-            (1920, 1080, 2.0),
-        ] {
-            app.world_mut()
-                .get_mut::<Window>(window)
-                .unwrap()
-                .resolution = bevy::window::WindowResolution::new(width, height)
-                .with_scale_factor_override(scale);
+    fn equipment_plate_is_the_redline_grid_and_each_profile_spawns_its_own_shop_shortcuts() {
+        for phone in [false, true] {
+            let mut app = App::new();
+            let mut controls = crate::mobile_controls::MobileControls::default();
+            controls.enabled = phone;
+            app.insert_resource(controls)
+                .add_systems(Startup, (setup_shop, setup_quick_buy));
             app.update();
-            let mut parts = app.world_mut().query::<(&EquipmentLayoutPart, &Node)>();
-            let mut panel_width = 0.0;
-            let mut slot_widths = Vec::new();
-            for (part, node) in parts.iter(app.world()) {
-                let Val::Px(value) = node.width else {
-                    panic!("equipment uses logical pixels")
-                };
-                match part {
-                    EquipmentLayoutPart::Panel => panel_width = value,
-                    EquipmentLayoutPart::Slot => slot_widths.push(value),
-                }
+            let mut ids = app.world_mut().query::<&TestId>();
+            let ids: Vec<String> = ids.iter(app.world()).map(|id| id.0.to_string()).collect();
+            for id in ["QuickBuy-0", "QuickBuy-1"] {
+                assert_eq!(ids.iter().filter(|name| *name == id).count(), 1, "{id}");
             }
-            assert_eq!(slot_widths.len(), 6);
-            assert!(panel_width + 32.0 <= width as f32 / scale + 0.01);
-            assert!(slot_widths[0] * 3.0 + 10.0 <= panel_width - 22.0 + 0.01);
-            assert!(slot_widths[0] >= 64.0);
-            if scale == 1.0 && width >= 1280 {
-                assert_eq!(panel_width, 224.0);
-                assert_eq!(slot_widths[0], 64.0);
+            // Desktop's gold row lives in the status plate (match_hud).
+            assert_eq!(
+                ids.iter().filter(|name| *name == "GoldShopButton").count(),
+                usize::from(phone)
+            );
+            let mut names = app.world_mut().query::<(&Name, &Node)>();
+            let mut find = |app: &mut App, wanted: &str| {
+                names
+                    .iter(app.world())
+                    .find(|(name, _)| name.as_str() == wanted)
+                    .map(|(_, node)| node.clone())
+            };
+            let equipment = find(&mut app, "EquipmentHud");
+            let row = find(&mut app, "QuickBuyHud");
+            assert_eq!(equipment.is_some(), !phone);
+            assert_eq!(row.is_some(), phone);
+            if !phone {
+                let mut slots = app.world_mut().query::<(&EquipmentSlot, &Node)>();
+                let slots: Vec<_> = slots
+                    .iter(app.world())
+                    .map(|(_, node)| node.width)
+                    .collect();
+                assert_eq!(slots.len(), shop::INVENTORY_CAPACITY);
+                assert!(slots.iter().all(|width| *width == Val::Px(40.0)));
+                let grid = find(&mut app, "InventorySlots").unwrap();
+                assert_eq!(grid.width, Val::Px(3.0 * 40.0 + 2.0 * SLOT_GAP));
+                // 8 + 132 + 5 + 1 + 5 + 40 + 8 = 199 ≤ 200: the plate fits.
+                let inner = 2.0 * EQUIPMENT_PADDING + 4.0 * 40.0 + 2.0 * SLOT_GAP;
+                assert!(inner + 2.0 * (space::S4 + border::HAIRLINE) + border::HAIRLINE <= 200.0);
             }
         }
-        // Mobile's separate layout must retain its own width after this system runs.
-        let mut controls = crate::mobile_controls::MobileControls::default();
-        controls.enabled = true;
-        app.insert_resource(controls);
-        let panel = app
-            .world_mut()
-            .query::<(Entity, &EquipmentLayoutPart)>()
-            .iter(app.world())
-            .find(|(_, part)| matches!(part, EquipmentLayoutPart::Panel))
-            .unwrap()
-            .0;
-        app.world_mut().get_mut::<Node>(panel).unwrap().width = Val::Px(132.0);
-        app.update();
-        assert_eq!(
-            app.world().get::<Node>(panel).unwrap().width,
-            Val::Px(132.0)
-        );
     }
 
     #[test]

@@ -35,5 +35,8 @@
   "combat.hotbar.ready": "Ready",
   "combat.hotbar.rank": "R{rank} · {cost} MP\n{status}",
   "combat.feedback.butterfly": "Forest butterfly · +{hp} HP",
-  "combat.feedback.no_route": "No walkable route to that point."
+  "combat.feedback.no_route": "No walkable route to that point.",
+  "combat.skill.mana": "{mana} mana",
+  "combat.skill.cooldown": "{seconds}s cooldown",
+  "combat.skill.hint_touch": "Release to close · tap or drag to cast"
 }

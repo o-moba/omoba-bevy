@@ -20,6 +20,7 @@ mod game_state;
 mod game_vfx;
 mod gamepad;
 mod help_overlay;
+mod hud_layout;
 mod humanoid;
 mod i18n;
 mod input_bindings;

@@ -8,6 +8,7 @@ mod marker;
 mod mobile;
 mod round_reset;
 mod selection;
+pub(crate) mod skill_card;
 pub(crate) mod targeting;
 
 pub use crate::domain::{CombatStats, MAX_HP};
@@ -35,10 +36,10 @@ use bars::{
 };
 use cast::{cast_spell_system, resolve_pending_cast_system};
 use cooldown::{sync_authoritative_cooldown_durations, tick_local_cast_cooldown};
-use feedback::{adapt_mobile_combat_feedback, update_action_feedback};
+use feedback::update_action_feedback;
 use hotbar::{
     setup_combat_ui, skill_button_system, skill_upgrade_input_system, sync_skill_key_labels,
-    update_skill_bar_system,
+    update_skill_bar_system, update_skill_tooltip,
 };
 use marker::update_target_marker_system;
 use mobile::{mobile_cast_system, mobile_utility_system};
@@ -93,14 +94,18 @@ impl Plugin for CombatPlugin {
                     resolve_pending_cast_system,
                     skill_upgrade_input_system,
                     update_skill_bar_system,
+                    update_skill_tooltip,
                     sync_skill_key_labels,
-                    adapt_mobile_combat_feedback,
                     crate::targeting::draw_targeting_ui,
                 )
                     .chain()
                     .after(WorldMovementInputSet)
                     .in_set(InputContextSet::Actions),
             );
+        app.add_systems(
+            Update,
+            skill_card::paint_skill_card.in_set(crate::ui::UiSet::Paint),
+        );
         configure_target_presentation(app);
         app.add_systems(
             PostUpdate,

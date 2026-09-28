@@ -456,19 +456,32 @@ struct SkillUpgradeFixtureState {
 #[derive(Component)]
 struct SkillUpgradeFixtureLabel;
 
+/// Fixture ranks: 1, 2, 3, 1 show every lit state of the phone rank ring
+/// (R10) and the desktop pips; a locked slot (rank 0) shows in the fixture-free
+/// stages.
+const FIXTURE_RANKS: [u8; 4] = [1, 2, 3, 1];
+
 fn has_fixture_progression(progression: &crate::net::PlayerProgression) -> bool {
-    progression.level == 6 && progression.skill_points == 4 && progression.ranks == [1; 4]
+    progression.level == 6 && progression.skill_points == 4 && progression.ranks == FIXTURE_RANKS
 }
 
 fn prepare_skill_upgrade_fixture(
     mut commands: Commands,
     qa: Res<BetaUiQa>,
     mut fixture: ResMut<SkillUpgradeFixtureState>,
-    mut player: Query<(Entity, &mut crate::net::PlayerProgression), With<crate::player::Player>>,
+    mut player: Query<
+        (
+            Entity,
+            &mut crate::net::PlayerProgression,
+            &mut crate::combat::CombatStats,
+        ),
+        With<crate::player::Player>,
+    >,
     mut labels: Query<&mut Node, With<SkillUpgradeFixtureLabel>>,
+    mut cooldowns: ResMut<crate::combat::LocalCastCooldown>,
 ) {
     let active = qa.skill_upgrades && matches!(qa.stage, 2 | 5);
-    if let Ok((entity, mut progression)) = player.single_mut() {
+    if let Ok((entity, mut progression, mut stats)) = player.single_mut() {
         if active {
             // Refresh the saved value whenever a real snapshot replaced our local
             // fixture. Never send a rank-up command or mutate authoritative actors.
@@ -479,7 +492,12 @@ fn prepare_skill_upgrade_fixture(
             }
             progression.level = 6;
             progression.skill_points = 4;
-            progression.ranks = [1; 4];
+            progression.ranks = FIXTURE_RANKS;
+            // hud.md ability states in one frame: slot 2 cooling (sweep and
+            // seconds), and mana under the other costs (red cost pills).
+            // Client-only; the next snapshot restores the real values.
+            cooldowns.set_for_qa(1, 3.2, 8.0);
+            stats.mana = stats.mana.min(20.0);
             fixture.applied = true;
         } else {
             // Do not let the fixture leak into the shop/result stages when a
@@ -609,7 +627,7 @@ fn capture(
                     "real_purchase_verified":true,
                     "full_match_proof":false, "result_snapshot":"synthetic presentation fixture only",
                     "synthetic_progression":qa.skill_upgrades,
-                    "progression_fixture":"opt-in local level 6, four skill points and rank 1 abilities during stages 2/5 only; server unchanged"});
+                    "progression_fixture":"opt-in local level 6, four skill points and ranks 1/2/3/1 during stages 2/5 only; server unchanged"});
                 let saved = std::fs::write(
                     qa.directory.join("qa-summary.json"),
                     serde_json::to_vec_pretty(&summary).unwrap(),
@@ -742,8 +760,7 @@ fn capture(
         return;
     }
     let primary_nodes: Vec<_> = scene.nodes.iter().filter(|(name, _, _, _)| edge::tracked(name.as_str()) || matches!(name.as_str(),
-        "FindMatchButton" | "AvatarGrid" | "HelpDismissButton" | "HelpOverlayRoot" | "GameStateLabel" | "ConnectionStatusPanel" | "MinimapRoot" | "MatchObjectivePanel" | "MatchHudColumn" | "SkillBarRoot" | "SkillSlot-Q" | "SkillSlot-R" | "EquipmentHud" | "ShopOpenButton" | "ShopPanel" | "ShopCloseButton" | "ShopBuy-EB" | "ShopBuy-GC" | "ShopSummary" | "ShopFeedback" | "MobileJoystick" | "MobileAttack" | "MobileAbility-0" | "MobileAbility-1" | "MobileAbility-2" | "MobileAbility-3" | "MobileUpgrade-0" | "MobileUpgrade-1" | "MobileUpgrade-2" | "MobileUpgrade-3" | "PhoneMenuBar" | "QaSkillUpgradeFixtureLabel" | "SocialEntry" | "SocialStatus" | "CareerEntryActions" | "HudProgressionText" | "HudXpText" | "MatchStatusText" | "MatchBuffText" | "EquipmentGold"
-            | "PostMatchScreen" | "PostMatchPlayAgain" | "PostMatchBackToMenu")
+        "FindMatchButton" | "AvatarGrid" | "HelpDismissButton" | "HelpOverlayRoot" | "GameStateLabel" | "ConnectionStatusPanel" | "MinimapRoot" | "MatchObjectivePanel" | "MatchHudColumn" | "SkillBarRoot" | "SkillSlot-Q" | "SkillSlot-R" | "EquipmentHud" | "ShopOpenButton" | "ShopPanel" | "ShopCloseButton" | "ShopBuy-EB" | "ShopBuy-GC" | "ShopSummary" | "ShopFeedback" | "MobileJoystick" | "MobileAttack" | "MobileAbility-0" | "MobileAbility-1" | "MobileAbility-2" | "MobileAbility-3" | "MobileUpgrade-0" | "MobileUpgrade-1" | "MobileUpgrade-2" | "MobileUpgrade-3" | "PhoneMenuBar" | "QaSkillUpgradeFixtureLabel" | "SocialEntry" | "SocialStatus" | "CareerEntryActions" | "HudProgressionText" | "HudXpText" | "MatchStatusText" | "MatchBuffText" | "EquipmentGold" | "PostMatchScreen" | "PostMatchPlayAgain" | "PostMatchBackToMenu" | "SkillUpgradeChip" | "MatchBuffChips" | "BrushStatus" | "OfflinePracticeBanner")
             || name.as_str().starts_with("ShopBuy-") || name.as_str().starts_with("ShopDescription-") || name.as_str().starts_with("ShopDetails-") || name.as_str().starts_with("SkillName-") || name.as_str().starts_with("SkillRank-") || name.as_str().starts_with("SkillSlot-") || name.as_str().starts_with("SkillIcon-"))
         .map(|(name, node, transform, visible)| {
             let center = transform.translation;
@@ -786,29 +803,23 @@ fn capture(
             let Some(rect) = measured_logical_rect(node) else {
                 return false;
             };
+            // hud.md `minimap`: desktop 176 at (16, 16); phone 120 at
+            // safe left + 16, safe top + 12.
             let expected = if phone {
-                if qa.height <= 340 {
-                    96.0
-                } else {
-                    116.0 * mobile.as_ref().unwrap().scale()
-                }
+                crate::hud_layout::HudLayout::phone(mobile.as_ref().unwrap()).minimap
             } else {
-                144.0
+                Rect::from_corners(
+                    Vec2::splat(crate::minimap::DESKTOP_MINIMAP_INSET),
+                    Vec2::splat(
+                        crate::minimap::DESKTOP_MINIMAP_INSET
+                            + crate::minimap::DESKTOP_MINIMAP_SIZE,
+                    ),
+                )
             };
-            let inset = if phone {
-                mobile.as_ref().unwrap().safe.left
-            } else {
-                16.0
-            };
-            let top = if phone {
-                mobile.as_ref().unwrap().safe.top
-            } else {
-                16.0
-            };
-            (rect.width() - expected).abs() <= 1.0
-                && (rect.height() - expected).abs() <= 1.0
-                && (rect.min.x - inset).abs() <= 1.0
-                && (rect.min.y - top).abs() <= 1.0
+            (rect.width() - expected.width()).abs() <= 1.0
+                && (rect.height() - expected.height()).abs() <= 1.0
+                && (rect.min.x - expected.min.x).abs() <= 1.0
+                && (rect.min.y - expected.min.y).abs() <= 1.0
         });
     let playfield_clear = !resting
         || primary_nodes
@@ -839,9 +850,7 @@ fn capture(
                 return true;
             };
             let parent = match name {
-                "HudProgressionText" | "HudXpText" => Some("MatchHudColumn".to_owned()),
-                "MatchStatusText" | "MatchBuffText" => Some("MatchObjectivePanel".to_owned()),
-                "EquipmentGold" => Some("EquipmentHud".to_owned()),
+                "MatchStatusText" => Some("MatchObjectivePanel".to_owned()),
                 "TargetHealthName" | "TargetHealthValue" => Some("TargetHealthRoot".to_owned()),
                 "QuickBuyPrice-0" => Some("QuickBuy-0".to_owned()),
                 "QuickBuyPrice-1" => Some("QuickBuy-1".to_owned()),
@@ -979,10 +988,12 @@ fn capture(
             "MobileDash",
             "MobileHaste",
         ],
+        // Desktop: the gold row is in the status plate, the quick-buy
+        // offers in the equipment plate (hud.md).
         _ if resting => &[
             "MinimapRoot",
             "MatchHudColumn",
-            "QuickBuyHud",
+            "EquipmentHud",
             "GoldShopButton",
             "QuickBuy-0",
             "QuickBuy-1",
@@ -999,11 +1010,12 @@ fn capture(
         .is_some_and(|fixture| fixture.applied);
     let upgrade_required: &[&str] =
         if synthetic_progression && mobile.as_ref().is_some_and(|mobile| mobile.enabled) {
+            // The + badge (`MobileRankRing-N`) marks each slot that can still
+            // rank up: the fixture's rank-3 slot (index 2) has none.
             &[
                 "MobileRankMode",
                 "MobileRankRing-0",
                 "MobileRankRing-1",
-                "MobileRankRing-2",
                 "MobileRankRing-3",
                 "QaSkillUpgradeFixtureLabel",
             ]
@@ -1024,8 +1036,10 @@ fn capture(
         "MatchObjectivePanel",
         "MatchHudColumn",
         "SkillBarRoot",
+        "SkillUpgradeChip",
         "EquipmentHud",
         "QuickBuyHud",
+        "MatchBuffChips",
         "MatchScoreStrip",
         "MatchMenuButton",
         "TargetHealthRoot",
@@ -1094,7 +1108,7 @@ fn capture(
         "requested_class":qa.hero_class.map(|class|class.id()), "selected_class":scene.selection.hero_class.id(),
         "authoritative_class":scene.hero_classes.single().ok().map(|class|class.0.id()), "skill_art_clear":skill_art_clear, "shop_close_clear":shop_close_clear, "server_epoch":game.meta.server_epoch, "snapshot_tick":game.meta.snapshot_tick,
         "synthetic_result":stage == 6, "synthetic_progression":synthetic_progression,
-        "progression_fixture":synthetic_progression.then(||serde_json::json!({"level":6,"skill_points":4,"ranks":[1,1,1,1],"server_unchanged":true})),
+        "progression_fixture":synthetic_progression.then(||serde_json::json!({"level":6,"skill_points":4,"ranks":FIXTURE_RANKS,"server_unchanged":true})),
         "minimap":minimap.diagnostics(), "minimap_top_left":minimap_top_left, "playfield_clear":playfield_clear, "radial_geometry_valid":radial_geometry_valid, "hud_text_fits":hud_text_fits, "shop_modal":shop.open, "gameplay_allowed":context.gameplay_allowed(), "pause_open":pause.open,
         "edge":edge::record(stage, scene.edge.as_deref(), &game, scene.utility.single().ok(), &scene.texts),
         "equipment":equipment.single().ok().map(|e|serde_json::json!({"gold":e.gold,"inventory":e.inventory,"bonuses":e.item_bonuses,"receipt":e.last_purchase})), "primary_controls_fit":controls_fit, "shop_text_fits":shop_text_fits, "primary_nodes":primary_nodes});
@@ -1155,6 +1169,8 @@ fn persistent_hud_panel(name: &str) -> bool {
             | "CareerEntryActions"
             | "ConnectionStatusPanel"
             | "QuickBuyHud"
+            | "MatchBuffChips"
+            | "SkillUpgradeChip"
             | "MatchScoreStrip"
             | "MatchMenuButton"
             | "TargetHealthRoot"

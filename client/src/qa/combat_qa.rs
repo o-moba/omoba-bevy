@@ -399,7 +399,7 @@ fn observe(
         .collect();
     let numbers: Vec<_> = scene.numbers.iter().filter(|(number, _, node, _, visible)| visible.get() && node.size().min_element() > 0.0 && events.iter().any(|event| event.id == number.event_id))
         .map(|(number, text, node, transform, _)| serde_json::json!({"event_id":number.event_id,"text":text.0,"size":node.size().to_array(),"center":transform.translation.to_array(),"visible":true})).collect();
-    let nodes: Vec<_> = scene.nodes.iter().filter(|(name,_,_)| matches!(name.as_str(),"MobileJoystick"|"MobileAttack"|"MobileAbility-0"|"MobileAbility-1"|"MobileAbility-2"|"MobileAbility-3"|"ShopOpenButton"))
+    let nodes: Vec<_> = scene.nodes.iter().filter(|(name,_,_)| matches!(name.as_str(),"MobileJoystick"|"MobileAttack"|"MobileAbility-0"|"MobileAbility-1"|"MobileAbility-2"|"MobileAbility-3"|"GoldShopButton"))
         .map(|(name,node,visible)| serde_json::json!({"name":name.as_str(),"size":node.size().to_array(),"visible":visible.get()})).collect();
     let particles: Vec<_> = scene
         .particles

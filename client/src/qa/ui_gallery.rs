@@ -1177,8 +1177,10 @@ fn ability(ability: &'static str, key: &'static str) -> AbilityView {
         rank: 2,
         cooldown: None,
         locked: false,
+        unlock_level: Some(6),
         no_mana: false,
         pips: true,
+        ring: false,
     }
 }
 
@@ -1204,10 +1206,18 @@ fn abilities_page(body: &mut ChildSpawnerCommands, form: Form) {
                 })
                 .with_children(|slot| {
                     let mut view = ability("arc_bolt", "Q"); // i18n-allow
+                    // Phone: rank is the segmented ring on the rim (R10).
+                    view.ring = form == Form::Phone;
+                    view.pips = form == Form::Desktop;
                     match index {
                         4 => view.cooldown = Some((3.0, 8.0)),
                         5 => view.no_mana = true,
-                        6 => view.locked = true,
+                        6 => {
+                            view.locked = true;
+                            if view.ring {
+                                view.rank = 0;
+                            }
+                        }
                         _ => {}
                     }
                     let entity = game::ability_button(
@@ -1258,6 +1268,32 @@ fn abilities_page(body: &mut ChildSpawnerCommands, form: Form) {
             });
         }
     });
+    if form == Form::Phone {
+        // R10: the ring at every rank, and over a cooldown sweep.
+        row(body, "kit.gallery.row.rank_ring", |line| {
+            for (rank, cooldown) in [
+                (0, None),
+                (1, None),
+                (2, None),
+                (3, None),
+                (2, Some((3.0, 8.0))),
+            ] {
+                let mut view = ability("arc_bolt", "Q"); // i18n-allow
+                view.key = None;
+                view.pips = false;
+                view.ring = true;
+                view.rank = rank;
+                view.cooldown = cooldown;
+                game::ability_button(
+                    line,
+                    view,
+                    size::ABILITY.phone,
+                    GalleryAction::Noop,
+                    "GalleryRankRing",
+                );
+            }
+        });
+    }
     row(body, "kit.gallery.row.phone_controls", |line| {
         for (side, icon) in [
             (size::ABILITY_ATTACK_PHONE, Icon::HudAttack),
@@ -1268,6 +1304,7 @@ fn abilities_page(body: &mut ChildSpawnerCommands, form: Form) {
             view.key = None;
             view.cost = None;
             view.pips = false;
+            view.ring = side == size::ABILITY.phone;
             if side != size::ABILITY.phone {
                 view.ability = None;
                 view.icon = icon;
@@ -1483,7 +1520,7 @@ fn hud_page(body: &mut ChildSpawnerCommands, form: Form) {
             125,
             form,
         );
-        game::score_strip(line, 12, 9, "18:04".into(), (7, 2, 11));
+        game::score_strip(line, 12, 9, (7, 2, 11));
         game::target_frame(
             line,
             ART[3].into(),
@@ -1498,6 +1535,57 @@ fn hud_page(body: &mut ChildSpawnerCommands, form: Form) {
             form,
         );
     });
+    row(body, "kit.gallery.row.skill_card", |line| {
+        skill_cards(
+            line,
+            &crate::net::PlayerProgression {
+                level: 4,
+                ranks: [1, 1, 1, 0],
+                ..default()
+            },
+        );
+    });
+}
+
+/// The HUD's skill card (`skill-description.md`): the desktop tooltip with
+/// its keycap and live status, and the phone hold card with the touch hint.
+fn skill_cards(line: &mut ChildSpawnerCommands, progression: &crate::net::PlayerProgression) {
+    let parent = line.target_entity();
+    let mut commands = line.commands();
+    for (form, key) in [(Form::Desktop, Some("E")), (Form::Phone, None)] {
+        let card = crate::combat::skill_card::spawn_skill_card(&mut commands, form, ());
+        let mut view = crate::combat::skill_card::SkillCardView::of(
+            shared::HeroClass::Warden,
+            progression,
+            2,
+            100.0,
+            4.0,
+        );
+        view.key = key.map(str::to_owned);
+        if form == Form::Desktop {
+            view.status = Some((
+                crate::i18n::tr("combat.hotbar.ready").to_owned(),
+                crate::combat::skill_card::StatusTone::Ready,
+            ));
+        } else {
+            view.hint = true;
+        }
+        commands.entity(card).insert((
+            view,
+            Node {
+                width: Val::Px(crate::combat::skill_card::CARD.x),
+                height: Val::Px(crate::combat::skill_card::CARD.y),
+                padding: UiRect::axes(Val::Px(space::S12), Val::Px(space::S8 + 2.0)),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(space::S4),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(8.0)),
+                ..default()
+            },
+        ));
+        commands.entity(card).remove::<GlobalZIndex>();
+        commands.entity(parent).add_child(card);
+    }
 }
 
 fn type_page(body: &mut ChildSpawnerCommands) {

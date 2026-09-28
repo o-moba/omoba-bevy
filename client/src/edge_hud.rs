@@ -2,17 +2,29 @@
 // i18n-strict
 use crate::{
     combat::{CombatStats, TargetState},
+    hud_layout::HudRegion,
     i18n::{Locale, Localized, UiLabel, data, tr, trf},
     input_context::InputContextSet,
     mobile_controls::MobileControls,
     net::{
-        ClientSession, GameState, GameStateSnapshot, NetworkHeroClass, NetworkMinionId,
-        NetworkNeutralId, NetworkPlayerId, NetworkStructureId, TargetKind,
+        ClientSession, GameState, GameStateSnapshot, NetworkAvatar, NetworkHeroClass,
+        NetworkMapStructure, NetworkMinionId, NetworkMinionKind, NetworkNeutralCampType,
+        NetworkNeutralId, NetworkPlayerId, NetworkStructureId, NetworkStructureProtected,
+        StructureKind, TargetKind,
     },
     player::Player,
     ui::{
         Activated, ModalId, ModalRoot, ScrollArea, TestId, UiAction, UiActionAppExt,
-        test_id::node_key, theme as ui,
+        kit_assets::{Icon, KitImage},
+        test_id::node_key,
+        theme::{self as ui, ButtonKind, Form, TextStyle},
+        tokens::{TextRole, border, color, radius, size, space},
+        widgets::{
+            KitParts, controls,
+            game::{self, BarKind, BarValue, PortraitSpec, PortraitView},
+            icon_node,
+            surfaces::Tooltip,
+        },
     },
 };
 use bevy::{prelude::*, window::PrimaryWindow};
@@ -40,8 +52,12 @@ enum EdgeAction {
 }
 #[derive(Component)]
 struct EdgePart;
-#[derive(Component)]
-struct ScoreLabel;
+/// The team kill totals of the score strip.
+#[derive(Component, Clone, Copy)]
+enum ScoreLabel {
+    Green,
+    Blue,
+}
 #[derive(Component)]
 struct KdaLabel;
 #[derive(Component)]
@@ -50,6 +66,26 @@ struct TargetLabel;
 struct TargetValue;
 #[derive(Component)]
 struct TargetFill;
+/// The target plate's parts (`target-*.md` § Plate anatomy).
+#[derive(Component)]
+struct TargetPortrait;
+#[derive(Component)]
+struct TargetNameRow;
+#[derive(Component)]
+struct TargetKindIcon;
+#[derive(Component)]
+struct TargetBadge;
+#[derive(Component)]
+struct TargetBadgeText;
+#[derive(Component)]
+struct TargetHpBar;
+/// The kit bar inside [`TargetHpBar`] (its `BarValue` drives the trail).
+#[derive(Component)]
+struct TargetBar;
+#[derive(Component)]
+struct TargetManaLine;
+#[derive(Component)]
+struct TargetManaFill;
 #[derive(Component)]
 struct ScoreRows(Team);
 #[derive(Component)]
@@ -94,154 +130,188 @@ fn button_node(width: f32) -> Node {
 fn text(parent: &mut ChildSpawnerCommands, value: impl UiLabel, size: f32, color: Color) {
     parent.spawn((value.into_text(), ui::text(size), TextColor(color)));
 }
-fn setup(mut commands: Commands) {
+/// Target plate anatomy (`target-hero.md` § Plate anatomy): portrait at
+/// (8, 8) desktop / (4, 4) phone, text column from x 56 / 48, name row
+/// ending at plate x 270 / 212, HP bar 214 / 164 wide.
+struct TargetAnatomy {
+    portrait: PortraitSpec,
+    portrait_at: f32,
+    column_x: f32,
+    column_w: f32,
+    name_top_hero: f32,
+    name_top: f32,
+    name_h: f32,
+    hp_top_hero: f32,
+    hp_top: f32,
+    mana_top: f32,
+    badge_h: f32,
+}
+
+impl TargetAnatomy {
+    fn of(form: Form) -> Self {
+        match form {
+            Form::Desktop => Self {
+                portrait: PortraitSpec {
+                    side: size::PORTRAIT_SM,
+                    ring: false,
+                    disc: TARGET_LEVEL_DISC.desktop,
+                    disc_at: Vec2::new(-8.0, -6.0),
+                    icon: size::ICON_MD,
+                },
+                portrait_at: space::S8,
+                column_x: 56.0,
+                column_w: 214.0,
+                name_top_hero: 4.0,
+                name_top: 6.0,
+                name_h: 20.0,
+                hp_top_hero: 28.0,
+                hp_top: 32.0,
+                mana_top: 44.0,
+                badge_h: 16.0,
+            },
+            Form::Phone => Self {
+                portrait: PortraitSpec {
+                    side: 36.0,
+                    ring: false,
+                    disc: TARGET_LEVEL_DISC.phone,
+                    disc_at: Vec2::new(-4.0, -4.0),
+                    icon: size::ICON_SM,
+                },
+                portrait_at: space::S4,
+                column_x: 48.0,
+                column_w: 164.0,
+                name_top_hero: 3.0,
+                name_top: 3.0,
+                name_h: 18.0,
+                hp_top_hero: 23.0,
+                hp_top: 23.0,
+                mana_top: 0.0,
+                badge_h: 16.0,
+            },
+        }
+    }
+}
+
+/// Target level disc (`target-hero.md`: 20 desktop, 18 phone).
+const TARGET_LEVEL_DISC: crate::ui::tokens::Metric = crate::ui::tokens::Metric::new(20.0, 18.0);
+/// Protected structure: the bar at 55 % opacity (`target-structure.md`).
+const PROTECTED_ALPHA: f32 = 0.55;
+
+fn setup(mut commands: Commands, mobile: Option<Res<MobileControls>>) {
+    let form = Form::from_mobile(mobile.as_deref());
     commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                right: Val::Px(166.0),
-                top: Val::Px(16.0),
-                column_gap: Val::Px(6.0),
                 ..default()
             },
+            HudRegion::ScoreStrip,
             EdgePart,
             ZIndex(14),
             Name::new("MatchScoreStrip"),
         ))
-        .with_children(|row| {
-            row.spawn((
-                Button,
-                button_node(68.0),
-                BackgroundColor(ui::PANEL),
-                BorderColor::all(ui::EDGE),
-                UiAction(EdgeAction::Score),
-                TestId::new("MatchScoreButton"),
-            ))
-            .with_children(|p| {
-                p.spawn((
-                    Text::new("— : —"),
-                    ui::text(16.0),
-                    TextColor(ui::GOLD),
-                    ScoreLabel,
-                ));
-            });
-            row.spawn((
-                Node {
-                    width: Val::Px(76.0),
-                    height: Val::Px(44.0),
-                    flex_direction: FlexDirection::Column,
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                BackgroundColor(ui::PANEL),
-            ))
-            .with_children(|p| {
-                text(p, Localized::new("edge.kda"), 12.0, ui::MUTED);
-                p.spawn((
-                    Text::new("—/—/—"),
-                    ui::text(14.0),
-                    TextColor(ui::IVORY),
-                    KdaLabel,
-                    Name::new("MatchKdaText"),
-                ));
-            });
-        });
-    commands
-        .spawn((
-            Button,
-            Node {
-                position_type: PositionType::Absolute,
-                right: Val::Px(16.0),
-                top: Val::Px(16.0),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(4.0),
-                ..button_node(44.0)
-            },
-            BackgroundColor(ui::PANEL),
-            BorderColor::all(ui::EDGE),
-            ZIndex(14),
-            EdgePart,
-            UiAction(EdgeAction::Menu),
-            TestId::new("MatchMenuButton"),
-        ))
-        .with_children(|p| {
-            for _ in 0..3 {
-                p.spawn((
+        .with_children(|strip| {
+            strip
+                .spawn(crate::ui::widgets::plate_button(
                     Node {
-                        width: Val::Px(20.0),
-                        height: Val::Px(2.0),
-                        ..default()
-                    },
-                    BackgroundColor(ui::GOLD),
-                ));
-            }
-        });
-    commands
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                top: Val::Px(16.0),
-                width: Val::Px(224.0),
-                height: Val::Px(34.0),
-                padding: UiRect::all(Val::Px(2.0)),
-                flex_direction: FlexDirection::Column,
-                ..ui::panel_node()
-            },
-            BackgroundColor(ui::PANEL),
-            BorderColor::all(ui::EDGE),
-            EdgePart,
-            ZIndex(14),
-            Name::new("TargetHealthRoot"),
-        ))
-        .with_children(|p| {
-            p.spawn((
-                Text::new(""),
-                ui::text(12.0),
-                TextColor(ui::IVORY),
-                TargetLabel,
-                Name::new("TargetHealthName"),
-                Node {
-                    height: Val::Px(14.0),
-                    overflow: Overflow::clip(),
-                    ..default()
-                },
-            ));
-            p.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(14.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    overflow: Overflow::clip(),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.12, 0.04, 0.04)),
-            ))
-            .with_children(|bar| {
-                bar.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(0.0),
-                        top: Val::Px(0.0),
                         width: Val::Percent(100.0),
                         height: Val::Percent(100.0),
+                        padding: UiRect::horizontal(Val::Px(space::S8 + border::FRAME)),
+                        column_gap: Val::Px(space::S8),
+                        justify_content: JustifyContent::SpaceBetween,
+                        align_items: AlignItems::Center,
                         ..default()
                     },
-                    BackgroundColor(Color::srgb(0.70, 0.16, 0.12)),
-                    TargetFill,
-                    Name::new("TargetHealthFill"),
-                ));
-                bar.spawn((
-                    Text::new(""),
-                    ui::text(12.0),
-                    TextColor(ui::IVORY),
-                    TargetValue,
-                    ZIndex(1),
-                    Name::new("TargetHealthValue"),
-                ));
-            });
+                    EdgeAction::Score,
+                    "MatchScoreButton",
+                    KitParts::default(),
+                ))
+                .with_children(|button| {
+                    button
+                        .spawn(Node {
+                            column_gap: Val::Px(space::S4),
+                            align_items: AlignItems::Center,
+                            flex_shrink: 0.0,
+                            ..default()
+                        })
+                        .with_children(|scores| {
+                            for (label, ink) in [
+                                (Some(ScoreLabel::Green), color::TEAM_GREEN),
+                                (None, color::TEXT_MUTED),
+                                (Some(ScoreLabel::Blue), color::TEAM_BLUE),
+                            ] {
+                                let mut text = scores.spawn((
+                                    Text::new(if label.is_some() { "—" } else { ":" }),
+                                    ui::role_text(TextRole::NumberLg),
+                                    TextColor(ink),
+                                    TextLayout::new_with_no_wrap(),
+                                ));
+                                if let Some(label) = label {
+                                    text.insert(label);
+                                }
+                            }
+                        });
+                    button.spawn((
+                        Node {
+                            width: Val::Px(border::HAIRLINE),
+                            height: Val::Px(space::S24),
+                            ..default()
+                        },
+                        BackgroundColor(color::BORDER_SUBTLE),
+                    ));
+                    button
+                        .spawn(Node {
+                            flex_direction: FlexDirection::Column,
+                            align_items: AlignItems::Center,
+                            flex_grow: 1.0,
+                            ..default()
+                        })
+                        .with_children(|column| {
+                            column.spawn((
+                                Localized::new("edge.kda").into_text(),
+                                ui::role_text(TextRole::Eyebrow),
+                                TextColor(color::TEXT_MUTED),
+                                TextLayout::new_with_no_wrap(),
+                            ));
+                            column.spawn((
+                                Text::new("—/—/—"),
+                                ui::role_text(TextRole::NumberSm),
+                                TextColor(color::TEXT_PRIMARY),
+                                TextLayout::new_with_no_wrap(),
+                                KdaLabel,
+                                Name::new("MatchKdaText"),
+                            ));
+                        });
+                });
         });
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                ..default()
+            },
+            HudRegion::MenuButton,
+            ZIndex(14),
+            Name::new("MatchMenuRoot"),
+        ))
+        .with_children(|root| {
+            let menu = controls::sized_icon_button(
+                root,
+                Icon::NavMenu,
+                form,
+                ButtonKind::Secondary,
+                EdgeAction::Menu,
+                "MatchMenuButton",
+            );
+            root.commands().entity(menu).insert((
+                EdgePart,
+                Tooltip {
+                    title: None,
+                    body: "pause.title",
+                },
+            ));
+        });
+    spawn_target_frame(&mut commands, form);
     commands
         .spawn((
             Node {
@@ -382,6 +452,188 @@ fn setup(mut commands: Commands) {
                 });
         });
 }
+/// The target plate (`target-hero|minion|neutral|structure.md`): plate
+/// `color.surface.glass.strong`, portrait disc (avatar or kind icon, level
+/// disc), name row (name, class / lock icon, BOSS or lane badge), HP bar with
+/// value and, for heroes on desktop, the mana line. Not interactive.
+fn spawn_target_frame(commands: &mut Commands, form: Form) {
+    let anatomy = TargetAnatomy::of(form);
+    let absolute = |left: f32, top: f32| Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px(left),
+        top: Val::Px(top),
+        ..default()
+    };
+    commands
+        .spawn((
+            game::hud_plate(true),
+            HudRegion::TargetFrame,
+            EdgePart,
+            ZIndex(14),
+            Pickable::IGNORE,
+            Name::new("TargetHealthRoot"),
+        ))
+        .insert(Node {
+            position_type: PositionType::Absolute,
+            display: Display::None,
+            border: UiRect::all(Val::Px(border::HAIRLINE)),
+            border_radius: BorderRadius::all(Val::Px(radius::MD)),
+            ..default()
+        })
+        .with_children(|plate| {
+            plate
+                .spawn((
+                    absolute(anatomy.portrait_at, anatomy.portrait_at),
+                    Pickable::IGNORE,
+                ))
+                .with_children(|slot| {
+                    game::live_portrait(
+                        slot,
+                        PortraitView {
+                            art: None,
+                            fallback: Icon::HudMinion,
+                            level: None,
+                            xp: 0.0,
+                            grey: false,
+                            strong_rim: false,
+                        },
+                        anatomy.portrait,
+                        TargetPortrait,
+                    );
+                });
+            plate
+                .spawn((
+                    Node {
+                        width: Val::Px(anatomy.column_w),
+                        height: Val::Px(anatomy.name_h),
+                        column_gap: Val::Px(space::S4),
+                        align_items: AlignItems::Center,
+                        ..absolute(anatomy.column_x, anatomy.name_top)
+                    },
+                    TargetNameRow,
+                    Pickable::IGNORE,
+                ))
+                .with_children(|row| {
+                    row.spawn((
+                        Node {
+                            max_width: Val::Px(anatomy.column_w),
+                            min_width: Val::Px(0.0),
+                            flex_shrink: 1.0,
+                            overflow: Overflow::clip(),
+                            ..default()
+                        },
+                        Pickable::IGNORE,
+                    ))
+                    .with_children(|clip| {
+                        clip.spawn((
+                            Text::new(""),
+                            ui::styled_text(TextStyle::keep_case(TextRole::Label)),
+                            TextColor(color::TEXT_PRIMARY),
+                            TextLayout::new_with_no_wrap(),
+                            TargetLabel,
+                            Name::new("TargetHealthName"),
+                        ));
+                    });
+                    row.spawn((
+                        icon_node(Icon::NavLock, size::ICON_SM, color::TEXT_MUTED),
+                        TargetKindIcon,
+                    ));
+                    row.spawn((
+                        Node {
+                            flex_grow: 1.0,
+                            ..default()
+                        },
+                        Pickable::IGNORE,
+                    ));
+                    row.spawn((
+                        Node {
+                            height: Val::Px(anatomy.badge_h),
+                            padding: UiRect::horizontal(Val::Px(space::S4 + border::FRAME)),
+                            flex_shrink: 0.0,
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border_radius: BorderRadius::all(Val::Px(radius::PILL)),
+                            display: Display::None,
+                            ..default()
+                        },
+                        BackgroundColor(color::SURFACE_3),
+                        TargetBadge,
+                        Pickable::IGNORE,
+                    ))
+                    .with_children(|badge| {
+                        badge.spawn((
+                            Text::new(""),
+                            ui::styled_text(
+                                TextStyle::keep_case(TextRole::Label).sized(TARGET_BADGE_TEXT),
+                            ),
+                            TextColor(color::TEXT_SECONDARY),
+                            TargetBadgeText,
+                        ));
+                    });
+                });
+            let hp_value = BarValue {
+                current: 1.0,
+                max: 1.0,
+                respawn: None,
+            };
+            plate
+                .spawn((
+                    absolute(anatomy.column_x, anatomy.hp_top),
+                    TargetHpBar,
+                    Pickable::IGNORE,
+                ))
+                .with_children(|slot| {
+                    let (bar, parts) = game::bar_parts(
+                        slot,
+                        BarKind::HpEnemy,
+                        hp_value,
+                        Val::Px(anatomy.column_w),
+                        form,
+                        true,
+                    );
+                    let mut commands = slot.commands();
+                    commands.entity(bar).insert(TargetBar);
+                    if let Some(fill) = parts.fill {
+                        commands
+                            .entity(fill)
+                            .insert((TargetFill, Name::new("TargetHealthFill")));
+                    }
+                    if let Some(label) = parts.label {
+                        commands
+                            .entity(label)
+                            .insert((TargetValue, Name::new("TargetHealthValue")));
+                    }
+                });
+            if form == Form::Desktop {
+                plate
+                    .spawn((
+                        Node {
+                            width: Val::Px(anatomy.column_w),
+                            height: Val::Px(size::BAR_XP),
+                            border_radius: BorderRadius::all(Val::Px(radius::SM)),
+                            overflow: Overflow::clip(),
+                            ..absolute(anatomy.column_x, anatomy.mana_top)
+                        },
+                        BackgroundColor(ui::perceptual(color::BAR_TRACK)),
+                        TargetManaLine,
+                        Pickable::IGNORE,
+                    ))
+                    .with_child((
+                        Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
+                            ..default()
+                        },
+                        BackgroundColor(color::BAR_MANA),
+                        TargetManaFill,
+                    ));
+            }
+        });
+}
+
+/// Target badge text: `type.caption` semibold at 11 (`target-neutral.md`).
+const TARGET_BADGE_TEXT: crate::ui::tokens::Metric = crate::ui::tokens::Metric::new(11.0, 11.0);
+
 fn actions(
     mut back: crate::ui::BackInput,
     session: Res<ClientSession>,
@@ -460,10 +712,9 @@ fn actions(
         }
     }
 }
-fn scores(board: Option<&LiveScoreboard>, local: Option<u64>) -> (String, String) {
-    let Some(board) = board else {
-        return ("— : —".into(), "—/—/—".into());
-    };
+/// Team kill totals (sum of `LiveScorePlayer.kills`), `None` before data.
+fn team_kills(board: Option<&LiveScoreboard>) -> Option<(u32, u32)> {
+    let board = board?;
     let sum = |team| {
         board
             .players
@@ -471,97 +722,358 @@ fn scores(board: Option<&LiveScoreboard>, local: Option<u64>) -> (String, String
             .filter(|p| p.team == team)
             .fold(0u32, |n, p| n.saturating_add(p.kills))
     };
+    Some((sum(Team::Green), sum(Team::Blue)))
+}
+fn scores(board: Option<&LiveScoreboard>, local: Option<u64>) -> (String, String) {
+    let Some((green, blue)) = team_kills(board) else {
+        return ("— : —".into(), "—/—/—".into());
+    };
     let kda = board
-        .players
-        .iter()
+        .into_iter()
+        .flat_map(|board| board.players.iter())
         .find(|p| Some(p.player_id) == local)
         .map_or_else(
             || "—/—/—".into(),
             |p| format!("{}/{}/{}", p.kills, p.deaths, p.assists),
         );
-    (format!("{} : {}", sum(Team::Green), sum(Team::Blue)), kda)
+    (format!("{green} : {blue}"), kda) // i18n-allow: numbers
 }
+
+/// What the target plate shows for the selected entity.
+#[derive(Clone, PartialEq, Debug)]
+struct TargetDetails {
+    kind: TargetKind,
+    name: String,
+    /// Disconnected enemy: the name is muted.
+    muted: bool,
+    hp: f32,
+    max: f32,
+    /// Heroes: `mana / max_mana` for the mana line.
+    mana: Option<f32>,
+    portrait: PortraitView,
+    /// Class icon (hero) or lock (protected structure) after the name.
+    icon: Option<(Icon, Color)>,
+    /// BOSS (gold) or lane (muted) badge.
+    badge: Option<(String, bool)>,
+    protected: bool,
+}
+
+type TargetItem<'a> = (
+    &'a CombatStats,
+    Option<&'a NetworkPlayerId>,
+    Option<&'a NetworkMinionId>,
+    Option<&'a NetworkStructureId>,
+    Option<&'a NetworkNeutralId>,
+    Option<&'a NetworkHeroClass>,
+    Option<&'a NetworkAvatar>,
+    Option<&'a NetworkMinionKind>,
+    Option<&'a NetworkNeutralCampType>,
+    Option<&'a StructureKind>,
+    Option<&'a NetworkMapStructure>,
+    Option<&'a NetworkStructureProtected>,
+);
+
+/// The plate content for a target, or `None` when nothing may show (wrong
+/// identity, dead, invalid HP).
+fn target_details(
+    id: crate::net::TargetId,
+    item: TargetItem<'_>,
+    board: Option<&LiveScoreboard>,
+) -> Option<TargetDetails> {
+    let (
+        stats,
+        player,
+        minion,
+        structure,
+        neutral,
+        class,
+        avatar,
+        minion_kind,
+        camp,
+        structure_kind,
+        map_structure,
+        protected,
+    ) = item;
+    let matches = match id.kind {
+        TargetKind::Player => player.map(|p| p.0) == Some(id.id),
+        TargetKind::Minion => minion.map(|p| p.0) == Some(id.id),
+        TargetKind::Structure => structure.map(|p| p.0) == Some(id.id),
+        TargetKind::Neutral => neutral.map(|p| p.0) == Some(id.id),
+    };
+    if !matches || !stats.is_alive() || !stats.max_hp.is_finite() || stats.max_hp <= 0.0 {
+        return None;
+    }
+    let disc = |icon: Icon, strong: bool| PortraitView {
+        art: None,
+        fallback: icon,
+        level: None,
+        xp: 0.0,
+        grey: false,
+        strong_rim: strong,
+    };
+    let protected = id.kind == TargetKind::Structure && protected.is_some_and(|p| p.0);
+    let mut muted = false;
+    let (name, portrait, icon, badge) = match id.kind {
+        TargetKind::Player => {
+            let row = board.and_then(|s| s.players.iter().find(|p| p.player_id == id.id));
+            let class = class.map(|class| class.0);
+            // Fallback: the class name, `edge.target.hero` only without one.
+            let fallback = class.map_or(tr("edge.target.hero"), data::hero_name);
+            let name = match row {
+                Some(row) if !row.connected => {
+                    muted = true;
+                    trf("edge.scoreboard.offline", &[("name", &row.nickname)])
+                }
+                Some(row) => row.nickname.clone(),
+                None => fallback.to_owned(),
+            };
+            let art = avatar
+                .and_then(|avatar| avatar.0.as_deref())
+                .and_then(omoba_passport::avatars::avatar_definition)
+                .and_then(crate::passport::thumbnail_asset_path);
+            let icon = class.map(game::class_icon).unwrap_or(Icon::NavUser);
+            (
+                name,
+                PortraitView {
+                    art,
+                    fallback: icon,
+                    level: row.map(|row| row.level),
+                    xp: 0.0,
+                    grey: muted,
+                    strong_rim: false,
+                },
+                class.map(|class| (game::class_icon(class), color::TEXT_MUTED)),
+                None,
+            )
+        }
+        TargetKind::Minion => (
+            tr(match minion_kind.map(|kind| kind.0) {
+                Some(shared::combat::MinionKind::Melee) => "edge.target.minion_melee",
+                Some(shared::combat::MinionKind::Caster) => "edge.target.minion_caster",
+                None => "edge.target.minion",
+            })
+            .to_owned(),
+            disc(Icon::HudMinion, false),
+            None,
+            None,
+        ),
+        TargetKind::Neutral => {
+            let boss = camp.map(|camp| camp.0).filter(|camp| camp.is_boss());
+            match boss {
+                Some(camp) => (
+                    tr(data::boss_key(camp)).to_owned(),
+                    disc(Icon::NavCrown, true),
+                    None,
+                    Some((tr("edge.target.boss").to_owned(), true)),
+                ),
+                None => (
+                    tr("edge.target.neutral").to_owned(),
+                    disc(Icon::HudSkull, false),
+                    None,
+                    None,
+                ),
+            }
+        }
+        TargetKind::Structure => {
+            let base = structure_kind == Some(&StructureKind::BaseTower);
+            let name = tr(match structure_kind {
+                Some(StructureKind::Tower) => "edge.target.tower",
+                Some(StructureKind::BaseTower) => "edge.target.base",
+                None => "edge.target.structure",
+            });
+            let lane = (!base)
+                .then(|| map_structure.and_then(|structure| structure.lane))
+                .flatten()
+                .map(|lane| (tr(data::lane_key(lane)).to_owned(), false));
+            (
+                name.to_owned(),
+                disc(Icon::HudTower, base),
+                protected.then_some((Icon::NavLock, color::TEXT_MUTED)),
+                lane,
+            )
+        }
+    };
+    Some(TargetDetails {
+        kind: id.kind,
+        name,
+        muted,
+        hp: stats.hp.max(0.0),
+        max: stats.max_hp,
+        mana: (id.kind == TargetKind::Player && stats.max_mana > 0.0)
+            .then(|| (stats.mana / stats.max_mana).clamp(0.0, 1.0)),
+        portrait,
+        icon,
+        badge,
+        protected,
+    })
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct TargetParts<'w, 's> {
+    portraits: Query<'w, 's, &'static mut PortraitView, With<TargetPortrait>>,
+    icons: Query<'w, 's, (&'static mut KitImage, &'static mut Node), With<TargetKindIcon>>,
+    badges: Query<
+        'w,
+        's,
+        (&'static mut Node, &'static mut BackgroundColor),
+        (With<TargetBadge>, Without<TargetKindIcon>),
+    >,
+    badge_texts: Query<
+        'w,
+        's,
+        (&'static mut Text, &'static mut TextColor),
+        (
+            With<TargetBadgeText>,
+            Without<TargetLabel>,
+            Without<TargetValue>,
+        ),
+    >,
+    rows: Query<
+        'w,
+        's,
+        (
+            &'static mut Node,
+            Has<TargetNameRow>,
+            Has<TargetHpBar>,
+            Has<TargetManaLine>,
+        ),
+        (
+            Or<(With<TargetNameRow>, With<TargetHpBar>, With<TargetManaLine>)>,
+            Without<TargetKindIcon>,
+            Without<TargetBadge>,
+            Without<TargetBar>,
+        ),
+    >,
+    bars: Query<'w, 's, &'static mut BarValue, With<TargetBar>>,
+    fills: Query<
+        'w,
+        's,
+        (&'static mut Node, &'static mut BackgroundColor),
+        (
+            With<TargetFill>,
+            Without<TargetKindIcon>,
+            Without<TargetBadge>,
+            Without<TargetNameRow>,
+            Without<TargetHpBar>,
+            Without<TargetManaLine>,
+        ),
+    >,
+    mana: Query<
+        'w,
+        's,
+        &'static mut Node,
+        (
+            With<TargetManaFill>,
+            Without<TargetFill>,
+            Without<TargetKindIcon>,
+            Without<TargetBadge>,
+            Without<TargetNameRow>,
+            Without<TargetHpBar>,
+            Without<TargetManaLine>,
+        ),
+    >,
+}
+
+#[allow(clippy::too_many_arguments)]
 fn update(
     state: Res<ScoreboardState>,
     game: Res<GameStateSnapshot>,
     session: Res<ClientSession>,
     context: Res<crate::input_context::GameplayInputContext>,
+    mobile: Option<Res<MobileControls>>,
     target: Res<TargetState>,
     local: Query<&NetworkPlayerId, With<Player>>,
     local_team: Query<&crate::team::Team, With<Player>>,
-    targets: Query<(
-        &CombatStats,
-        Option<&NetworkPlayerId>,
-        Option<&NetworkMinionId>,
-        Option<&NetworkStructureId>,
-        Option<&NetworkNeutralId>,
-        Option<&NetworkHeroClass>,
-    )>,
-    mut labels: Query<(
-        &mut Text,
-        Option<&ScoreLabel>,
-        Option<&KdaLabel>,
-        Option<&TargetLabel>,
-        Option<&TargetValue>,
-        Option<&ScoreDetail>,
-    )>,
-    mut nodes: Query<(Option<&Name>, Option<&TestId>, &mut Node)>,
+    targets: Query<TargetItem>,
+    mut labels: Query<
+        (
+            &mut Text,
+            &mut TextColor,
+            Option<&ScoreLabel>,
+            Option<&KdaLabel>,
+            Option<&TargetLabel>,
+            Option<&TargetValue>,
+            Option<&ScoreDetail>,
+        ),
+        Without<TargetBadgeText>,
+    >,
+    mut nodes: Query<
+        (Option<&Name>, Option<&TestId>, &mut Node),
+        (
+            Without<TargetFill>,
+            Without<TargetKindIcon>,
+            Without<TargetBadge>,
+            Without<TargetNameRow>,
+            Without<TargetHpBar>,
+            Without<TargetManaLine>,
+            Without<TargetManaFill>,
+        ),
+    >,
+    mut parts: TargetParts,
 ) {
-    let (score, kda) = scores(game.scoreboard.as_ref(), local.single().ok().map(|id| id.0));
+    let form = Form::from_mobile(mobile.as_deref());
+    let anatomy = TargetAnatomy::of(form);
+    let (_, kda) = scores(game.scoreboard.as_ref(), local.single().ok().map(|id| id.0));
+    let kills = team_kills(game.scoreboard.as_ref());
     let details = target
         .selected_entity
         .zip(target.selected_target)
         .and_then(|(entity, id)| {
-            let (stats, player, minion, structure, neutral, class) = targets.get(entity).ok()?;
-            let matches = match id.kind {
-                TargetKind::Player => player.map(|p| p.0) == Some(id.id),
-                TargetKind::Minion => minion.map(|p| p.0) == Some(id.id),
-                TargetKind::Structure => structure.map(|p| p.0) == Some(id.id),
-                TargetKind::Neutral => neutral.map(|p| p.0) == Some(id.id),
-            };
-            if !matches || !stats.is_alive() || !stats.max_hp.is_finite() || stats.max_hp <= 0.0 {
-                return None;
-            }
-            let name = match id.kind {
-                TargetKind::Player => game
-                    .scoreboard
-                    .as_ref()
-                    .and_then(|s| s.players.iter().find(|p| p.player_id == id.id))
-                    .map(|p| p.nickname.clone())
-                    .unwrap_or_else(|| {
-                        class
-                            .map_or(tr("edge.target.hero"), |c| data::hero_name(c.0))
-                            .into()
-                    }),
-                TargetKind::Minion => tr("edge.target.minion").into(),
-                TargetKind::Structure => tr("edge.target.structure").into(),
-                TargetKind::Neutral => tr("edge.target.neutral").into(),
-            };
-            Some((name, stats.hp.max(0.0), stats.max_hp))
+            target_details(id, targets.get(entity).ok()?, game.scoreboard.as_ref())
         });
-    for (mut text, score_label, kda_label, target_label, value, detail) in &mut labels {
-        if score_label.is_some() {
-            text.0.clone_from(&score);
+    for (mut text, mut ink, score_label, kda_label, target_label, value, detail) in &mut labels {
+        let next = if let Some(label) = score_label {
+            kills.map_or_else(
+                || "—".to_owned(),
+                |(green, blue)| match label {
+                    ScoreLabel::Green => green.to_string(),
+                    ScoreLabel::Blue => blue.to_string(),
+                },
+            )
         } else if kda_label.is_some() {
-            text.0.clone_from(&kda);
+            kda.clone()
         } else if target_label.is_some() {
-            text.0 = details
+            let muted = details.as_ref().is_some_and(|d| d.muted);
+            let next_ink = if muted {
+                color::TEXT_MUTED
+            } else {
+                color::TEXT_PRIMARY
+            };
+            if ink.0 != next_ink {
+                ink.0 = next_ink;
+            }
+            details
                 .as_ref()
-                .map_or_else(String::new, |(n, _, _)| short_name(n, 24));
+                .map_or_else(String::new, |details| details.name.clone())
         } else if value.is_some() {
-            text.0 = details
-                .as_ref()
-                .map_or_else(String::new, |(_, hp, max)| format!("{hp:.0} / {max:.0}")); // i18n-allow: numbers
+            let alpha = if details.as_ref().is_some_and(|d| d.protected) {
+                PROTECTED_ALPHA
+            } else {
+                1.0
+            };
+            let next_ink = color::TEXT_PRIMARY.with_alpha(alpha);
+            if ink.0 != next_ink {
+                ink.0 = next_ink;
+            }
+            details.as_ref().map_or_else(String::new, |d| {
+                format!("{:.0} / {:.0}", d.hp, d.max) // i18n-allow: numbers
+            })
         } else if detail.is_some() {
-            text.0 = tr("edge.scoreboard.detail").into();
+            let mut line = tr("edge.scoreboard.detail").to_owned();
             let buffs = local_team
                 .single()
                 .map(|team| crate::match_hud::team_buff_hud_text(&game.team_buffs, *team))
                 .unwrap_or_default();
             if !buffs.is_empty() {
-                text.0.push('\n');
-                text.0.push_str(&buffs);
+                line.push('\n');
+                line.push_str(&buffs);
             }
+            line
+        } else {
+            continue;
+        };
+        if text.0 != next {
+            text.0 = next;
         }
     }
     let resting =
@@ -577,14 +1089,134 @@ fn update(
             _ => None,
         };
         if let Some(show) = show {
-            node.display = if show { Display::Flex } else { Display::None };
+            let display = if show { Display::Flex } else { Display::None };
+            if node.display != display {
+                node.display = display;
+            }
         }
-        if name == "TargetHealthFill" {
-            node.width = Val::Percent(
-                details
-                    .as_ref()
-                    .map_or(0.0, |(_, hp, max)| (hp / max).clamp(0.0, 1.0) * 100.0),
-            );
+    }
+    let Some(details) = details else {
+        return;
+    };
+    // HP: the kit bar owns the trail; the fill and value are also written
+    // here so the plate is right in the frame the target changes.
+    let fraction = (details.hp / details.max).clamp(0.0, 1.0);
+    for mut value in &mut parts.bars {
+        let next = BarValue {
+            current: details.hp,
+            max: details.max,
+            respawn: None,
+        };
+        if *value != next {
+            *value = next;
+        }
+    }
+    let alpha = if details.protected {
+        PROTECTED_ALPHA
+    } else {
+        1.0
+    };
+    for (mut node, mut fill) in &mut parts.fills {
+        let width = Val::Percent(fraction * 100.0);
+        if node.width != width {
+            node.width = width;
+        }
+        let next = color::BAR_HP_ENEMY.with_alpha(alpha);
+        if fill.0 != next {
+            fill.0 = next;
+        }
+    }
+    for mut view in &mut parts.portraits {
+        if *view != details.portrait {
+            *view = details.portrait.clone();
+        }
+    }
+    for (mut image, mut node) in &mut parts.icons {
+        let display = if details.icon.is_some() {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        if node.display != display {
+            node.display = display;
+        }
+        if let Some((icon, tint)) = details.icon {
+            let next = KitImage::icon(icon, tint);
+            if *image != next {
+                *image = next;
+            }
+        }
+    }
+    for (mut node, mut fill) in &mut parts.badges {
+        let display = if details.badge.is_some() {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        if node.display != display {
+            node.display = display;
+        }
+        let next = if details.badge.as_ref().is_some_and(|(_, gold)| *gold) {
+            color::GOLD_500
+        } else {
+            color::SURFACE_3
+        };
+        if fill.0 != next {
+            fill.0 = next;
+        }
+    }
+    for (mut text, mut ink) in &mut parts.badge_texts {
+        let (label, gold) = details.badge.clone().unwrap_or_default();
+        if text.0 != label {
+            text.0 = label;
+        }
+        let next = if gold {
+            color::TEXT_ON_GOLD
+        } else {
+            color::TEXT_SECONDARY
+        };
+        if ink.0 != next {
+            ink.0 = next;
+        }
+    }
+    // Heroes carry the mana line under a raised HP bar; other kinds centre
+    // name and bar in the plate (`target-*.md` § Plate anatomy).
+    let hero = details.kind == TargetKind::Player;
+    let mana_shown = hero && details.mana.is_some() && form == Form::Desktop;
+    for (mut node, name_row, hp_bar, mana_line) in &mut parts.rows {
+        if name_row {
+            let top = Val::Px(if hero {
+                anatomy.name_top_hero
+            } else {
+                anatomy.name_top
+            });
+            if node.top != top {
+                node.top = top;
+            }
+        } else if hp_bar {
+            let top = Val::Px(if hero {
+                anatomy.hp_top_hero
+            } else {
+                anatomy.hp_top
+            });
+            if node.top != top {
+                node.top = top;
+            }
+        } else if mana_line {
+            let display = if mana_shown {
+                Display::Flex
+            } else {
+                Display::None
+            };
+            if node.display != display {
+                node.display = display;
+            }
+        }
+    }
+    for mut node in &mut parts.mana {
+        let width = Val::Percent(details.mana.unwrap_or(0.0) * 100.0);
+        if node.width != width {
+            node.width = width;
         }
     }
 }
@@ -713,30 +1345,8 @@ fn layout(
         return;
     };
     let phone = mobile.enabled;
-    let right = if phone { mobile.safe.right } else { 16.0 };
-    let top = if phone { mobile.safe.top } else { 16.0 };
     for (name, id, mut node) in &mut nodes {
         match node_key(name, id).unwrap_or_default() {
-            "MatchScoreStrip" => {
-                node.right = Val::Px(right + 150.0);
-                node.top = Val::Px(top);
-            }
-            "MatchMenuButton" => {
-                node.right = Val::Px(right);
-                node.top = Val::Px(top);
-            }
-            "TargetHealthRoot" => {
-                let width = if phone { 160.0 } else { 224.0 };
-                node.left = Val::Px((window.width() - width) * 0.5);
-                node.top = Val::Px(
-                    top + if phone && window.width() < 800.0 {
-                        48.0
-                    } else {
-                        0.0
-                    },
-                );
-                node.width = Val::Px(width);
-            }
             "ScoreboardRoot" => {
                 node.padding = if phone {
                     UiRect {
@@ -1100,6 +1710,221 @@ mod tests {
             app.world_mut().despawn(entity);
         }
     }
+    /// target-hero|minion|neutral|structure.md: every kind names itself,
+    /// carries its portrait disc, badge, lock and (hero, desktop) level disc
+    /// and mana line; a protected structure dims its bar to 55 %.
+    #[test]
+    fn target_plate_names_each_kind_with_its_badge_lock_level_and_mana() {
+        use crate::net::{
+            NetworkMapStructure, NetworkMinionKind, NetworkNeutralCampType,
+            NetworkStructureProtected, NeutralCampType, StructureKind,
+        };
+        let mut app = app();
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .scoreboard = Some(LiveScoreboard {
+            players: vec![LiveScorePlayer {
+                player_id: 7,
+                nickname: "DarkSentinel".into(),
+                team: Team::Blue,
+                hero_class: shared::HeroClass::Warden,
+                kills: 0,
+                deaths: 0,
+                assists: 0,
+                earned_gold: 0,
+                level: 5,
+                connected: true,
+            }],
+        });
+        app.update();
+        let stats = CombatStats {
+            hp: 130.0,
+            max_hp: 180.0,
+            mana: 30.0,
+            max_mana: 60.0,
+        };
+        struct Expect {
+            name: &'static str,
+            badge: Option<&'static str>,
+            icon: Option<Icon>,
+            level: Option<u32>,
+            mana: bool,
+            portrait: Icon,
+            strong: bool,
+            alpha: f32,
+        }
+        let cases: Vec<(TargetKind, Box<dyn Fn(&mut EntityWorldMut)>, Expect)> = vec![
+            (
+                TargetKind::Player,
+                Box::new(|e: &mut EntityWorldMut| {
+                    e.insert((
+                        NetworkPlayerId(7),
+                        NetworkHeroClass(shared::HeroClass::Warden),
+                    ));
+                }),
+                Expect {
+                    name: "DarkSentinel",
+                    badge: None,
+                    icon: Some(Icon::ClassWarden),
+                    level: Some(5),
+                    mana: true,
+                    portrait: Icon::ClassWarden,
+                    strong: false,
+                    alpha: 1.0,
+                },
+            ),
+            (
+                TargetKind::Minion,
+                Box::new(|e: &mut EntityWorldMut| {
+                    e.insert((
+                        NetworkMinionId(7),
+                        NetworkMinionKind(shared::combat::MinionKind::Caster),
+                    ));
+                }),
+                Expect {
+                    name: "Caster minion",
+                    badge: None,
+                    icon: None,
+                    level: None,
+                    mana: false,
+                    portrait: Icon::HudMinion,
+                    strong: false,
+                    alpha: 1.0,
+                },
+            ),
+            (
+                TargetKind::Neutral,
+                Box::new(|e: &mut EntityWorldMut| {
+                    e.insert((
+                        NetworkNeutralId(7),
+                        NetworkNeutralCampType(NeutralCampType::KingMutatioBoss),
+                    ));
+                }),
+                Expect {
+                    name: "King Mutatio",
+                    badge: Some("BOSS"),
+                    icon: None,
+                    level: None,
+                    mana: false,
+                    portrait: Icon::NavCrown,
+                    strong: true,
+                    alpha: 1.0,
+                },
+            ),
+            (
+                TargetKind::Structure,
+                Box::new(|e: &mut EntityWorldMut| {
+                    e.insert((
+                        NetworkStructureId(7),
+                        StructureKind::Tower,
+                        NetworkMapStructure {
+                            lane: Some(shared::map::Lane::Mid),
+                            ..default()
+                        },
+                        NetworkStructureProtected(true),
+                    ));
+                }),
+                Expect {
+                    name: "Tower",
+                    badge: Some("MID"),
+                    icon: Some(Icon::NavLock),
+                    level: None,
+                    mana: false,
+                    portrait: Icon::HudTower,
+                    strong: false,
+                    alpha: PROTECTED_ALPHA,
+                },
+            ),
+            (
+                TargetKind::Structure,
+                Box::new(|e: &mut EntityWorldMut| {
+                    e.insert((NetworkStructureId(7), StructureKind::BaseTower));
+                }),
+                Expect {
+                    name: "Base",
+                    badge: None,
+                    icon: None,
+                    level: None,
+                    mana: false,
+                    portrait: Icon::HudTower,
+                    strong: true,
+                    alpha: 1.0,
+                },
+            ),
+        ];
+        for (kind, insert, expect) in cases {
+            let mut entity = app.world_mut().spawn(stats);
+            insert(&mut entity);
+            let entity = entity.id();
+            {
+                let mut target = app.world_mut().resource_mut::<TargetState>();
+                target.selected_entity = Some(entity);
+                target.selected_target = Some(crate::net::TargetId { kind, id: 7 });
+            }
+            app.update();
+            let world = app.world_mut();
+            let name = world
+                .query_filtered::<&Text, With<TargetLabel>>()
+                .single(world)
+                .unwrap()
+                .0
+                .clone();
+            assert_eq!(name, expect.name);
+            let (badge_node, badge_text) = (
+                world
+                    .query_filtered::<&Node, With<TargetBadge>>()
+                    .single(world)
+                    .unwrap()
+                    .display,
+                world
+                    .query_filtered::<&Text, With<TargetBadgeText>>()
+                    .single(world)
+                    .unwrap()
+                    .0
+                    .clone(),
+            );
+            match expect.badge {
+                Some(badge) => {
+                    assert_eq!(badge_node, Display::Flex, "{}", expect.name);
+                    assert_eq!(badge_text, badge);
+                }
+                None => assert_eq!(badge_node, Display::None, "{}", expect.name),
+            }
+            let (icon, icon_node) = world
+                .query_filtered::<(&KitImage, &Node), With<TargetKindIcon>>()
+                .single(world)
+                .unwrap();
+            match expect.icon {
+                Some(expected) => {
+                    assert_eq!(icon_node.display, Display::Flex, "{}", expect.name);
+                    assert_eq!(*icon, KitImage::icon(expected, color::TEXT_MUTED));
+                }
+                None => assert_eq!(icon_node.display, Display::None, "{}", expect.name),
+            }
+            let portrait = world
+                .query_filtered::<&PortraitView, With<TargetPortrait>>()
+                .single(world)
+                .unwrap()
+                .clone();
+            assert_eq!(portrait.fallback, expect.portrait, "{}", expect.name);
+            assert_eq!(portrait.level, expect.level, "{}", expect.name);
+            assert_eq!(portrait.strong_rim, expect.strong, "{}", expect.name);
+            let mana = world
+                .query_filtered::<&Node, With<TargetManaLine>>()
+                .single(world)
+                .unwrap()
+                .display;
+            assert_eq!(mana == Display::Flex, expect.mana, "{}", expect.name);
+            let fill = world
+                .query_filtered::<&BackgroundColor, With<TargetFill>>()
+                .single(world)
+                .unwrap()
+                .0;
+            assert_eq!(fill, color::BAR_HP_ENEMY.with_alpha(expect.alpha));
+            app.world_mut().despawn(entity);
+        }
+    }
+
     #[test]
     fn live_score_totals_use_both_teams_and_distinguish_missing_data() {
         let player = |id, team, kills| LiveScorePlayer {

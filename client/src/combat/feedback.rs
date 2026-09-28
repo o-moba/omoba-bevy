@@ -36,19 +36,3 @@ pub(super) fn update_action_feedback(
         };
     }
 }
-
-pub(super) fn adapt_mobile_combat_feedback(
-    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
-    mut feedback: Query<(&mut Node, &mut TextFont), With<ActionFeedbackText>>,
-) {
-    let Some(mobile) = mobile.filter(|mobile| mobile.enabled) else {
-        return;
-    };
-    for (mut node, mut font) in &mut feedback {
-        let width = (mobile.viewport.x * 0.38).min(340.0);
-        node.left = Val::Px((mobile.viewport.x - width) * 0.5);
-        node.bottom = Val::Px(mobile.safe.bottom + 84.0 * mobile.scale());
-        node.max_width = Val::Px(width);
-        font.font_size = 13.0 * mobile.scale();
-    }
-}

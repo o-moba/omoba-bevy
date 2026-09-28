@@ -117,10 +117,14 @@ pub(super) fn select_target_system(
     ui_interactions: Query<&Interaction, With<Button>>,
     context: Res<GameplayInputContext>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
-    mut basic: ResMut<BasicAttackState>,
+    orders: (
+        ResMut<BasicAttackState>,
+        Option<ResMut<super::feedback::ActionFeedback>>,
+    ),
     validity: crate::targeting::TargetValidity,
 ) {
     let (keyboard, mouse) = input;
+    let (mut basic, mut feedback) = orders;
     *pointer_state = default();
     if mobile.as_ref().is_some_and(|m| m.enabled)
         || !context.gameplay_allowed()
@@ -179,14 +183,35 @@ pub(super) fn select_target_system(
             &candidates.minions,
             &candidates.neutrals,
             &candidates.structures,
-        );
+        )
+        // R7.1: with nothing attackable under the pointer, a protected
+        // enemy structure is selected for inspection (never over a target
+        // that can be hit).
+        .or_else(|| {
+            find_protected_structure_near_screen(
+                position,
+                camera,
+                transform,
+                *visual_mode,
+                *local_team,
+                &validity,
+                &candidates.structures,
+            )
+        });
     }
-    picked = picked.filter(|(entity, id)| validity.valid(*entity, *id, *local_team));
+    picked = picked.filter(|(entity, id)| validity.inspectable(*entity, *id, *local_team));
     if let Some((entity, id)) = picked {
         target_state.selected_entity = Some(entity);
         target_state.selected_target = Some(id);
         pending_cast.cancel();
-        if secondary {
+        if secondary && validity.protected(entity, id) {
+            // Inspection only: the attack is refused with the reason.
+            pointer_state.consumed_secondary_press = true;
+            basic.cancel();
+            if let Some(feedback) = feedback.as_mut() {
+                feedback.push_line(crate::i18n::tr("combat.cast.protected"));
+            }
+        } else if secondary {
             pointer_state.consumed_secondary_press = true;
             basic.start(entity, id, true);
         } else {
@@ -520,6 +545,57 @@ pub(super) fn find_target_near_screen(
         );
     }
 
+    best.map(|(entity, target, _)| (entity, target))
+}
+
+/// The protected enemy structure nearest the pointer within its pick radius
+/// (R7.1 inspection; `find_target_near_screen` never returns one).
+#[allow(clippy::too_many_arguments)]
+fn find_protected_structure_near_screen(
+    pointer_position: Vec2,
+    camera: &Camera,
+    camera_transform: &GlobalTransform,
+    visual_mode: PlayerVisualMode,
+    local_team: Team,
+    validity: &crate::targeting::TargetValidity,
+    structure_candidates: &Query<
+        (
+            Entity,
+            &Transform,
+            &NetworkStructureId,
+            &CombatStats,
+            &Team,
+            &StructureKind,
+        ),
+        With<NetworkStructure>,
+    >,
+) -> Option<(Entity, TargetId)> {
+    let mut best: Option<(Entity, TargetId, f32)> = None;
+    for (entity, transform, id, _, _, kind) in structure_candidates.iter() {
+        let target = TargetId {
+            kind: TargetKind::Structure,
+            id: id.0,
+        };
+        if !validity.inspectable(entity, target, local_team) || !validity.protected(entity, target)
+        {
+            continue;
+        }
+        let radius = match kind {
+            StructureKind::Tower => TOWER_PICK_RADIUS_PX,
+            StructureKind::BaseTower => BASE_TOWER_PICK_RADIUS_PX,
+        };
+        consider_screen_target(
+            &mut best,
+            pointer_position,
+            camera,
+            camera_transform,
+            visual_mode,
+            transform.translation,
+            radius,
+            entity,
+            target,
+        );
+    }
     best.map(|(entity, target, _)| (entity, target))
 }
 

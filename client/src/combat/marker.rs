@@ -43,7 +43,7 @@ pub(super) fn update_target_marker_system(
         .filter(|(entity, id)| {
             local
                 .single()
-                .is_ok_and(|team| poses.p1().valid(*entity, *id, *team))
+                .is_ok_and(|team| poses.p1().inspectable(*entity, *id, *team))
         });
     let anchor = selected.and_then(|(entity, _)| {
         poses

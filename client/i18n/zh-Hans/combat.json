@@ -35,5 +35,8 @@
   "combat.hotbar.ready": "就绪",
   "combat.hotbar.rank": "{rank}级 {cost}法力\n{status}",
   "combat.feedback.butterfly": "森林蝴蝶 · +{hp} 生命值",
-  "combat.feedback.no_route": "无法步行到达该位置。"
+  "combat.feedback.no_route": "无法步行到达该位置。",
+  "combat.skill.mana": "{mana} 法力",
+  "combat.skill.cooldown": "冷却 {seconds} 秒",
+  "combat.skill.hint_touch": "松开关闭 · 轻触或拖动施放"
 }

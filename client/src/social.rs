@@ -1366,12 +1366,14 @@ fn render(
     mut previous: Local<String>,
     scrolls: Query<(&Name, &ScrollPosition)>,
     locale: Option<Res<Locale>>,
+    ui_scale: Option<Res<UiScale>>,
 ) {
     let Ok((_, window)) = world.window.single() else {
         return;
     };
+    let ui_scale_value = ui_scale.as_ref().map_or(1.0, |scale| scale.0);
     let key = format!(
-        "{:?}{:?}{:?}{:?}{}{}{:?}{}{}{}{}{:?}{}{:?}{:?}",
+        "{ui_scale_value}{:?}{:?}{:?}{:?}{}{}{:?}{}{}{}{}{:?}{}{:?}{:?}",
         social.chat_open,
         social.wheel,
         social.events,
@@ -1420,60 +1422,86 @@ fn render(
     let phone = world.mobile.enabled;
     let viewport = Vec2::new(window.width(), window.height());
     let scale = world.mobile.scale();
-    let edge_right = if phone { world.mobile.safe.right } else { 16.0 };
-    let edge_top = if phone {
-        world.mobile.safe.top
-    } else {
-        desktop_social_top()
-    };
     if !social.chat_open && social.wheel.center.is_none() {
+        // hud.md `icon-buttons`: chat and reactions are the first two round
+        // icon buttons of the top-right row (the menu `≡` is the third);
+        // their names are tooltips. `social-status` is a glass chip under it.
+        let form = crate::ui::theme::Form::of(phone);
         commands
             .spawn((
                 Node {
                     position_type: PositionType::Absolute,
-                    right: Val::Px(edge_right + 50.0),
-                    top: Val::Px(edge_top),
-                    width: Val::Px(94.0),
-                    flex_direction: FlexDirection::Row,
-                    flex_wrap: FlexWrap::NoWrap,
+                    column_gap: Val::Px(crate::ui::tokens::space::S8),
                     align_items: AlignItems::Center,
-                    ..row()
+                    ..default()
                 },
+                crate::hud_layout::HudRegion::SocialEntry,
                 ZIndex(85),
                 SocialRoot,
                 Name::new("SocialEntry"),
             ))
             .with_children(|p| {
-                button(
+                let chat = crate::ui::widgets::controls::sized_icon_button(
                     p,
-                    tr("social.entry.chat"),
+                    crate::ui::kit_assets::Icon::NavMessageCircle,
+                    form,
+                    ButtonKind::Secondary,
                     SocialAction::Chat,
                     "SocialOpenChat",
                 );
+                p.commands()
+                    .entity(chat)
+                    .insert(crate::ui::widgets::surfaces::Tooltip {
+                        title: None,
+                        body: "social.entry.chat",
+                    });
                 if matches!(world.snapshot.state, GameState::Running) {
-                    button(
+                    let wheel = crate::ui::widgets::controls::sized_icon_button(
                         p,
-                        tr("social.entry.reactions"),
+                        crate::ui::kit_assets::Icon::NavSmile,
+                        form,
+                        ButtonKind::Secondary,
                         SocialAction::Wheel,
                         "SocialOpenWheel",
                     );
+                    p.commands()
+                        .entity(wheel)
+                        .insert(crate::ui::widgets::surfaces::Tooltip {
+                            title: None,
+                            body: "social.entry.reactions",
+                        });
                 }
             });
         if !social.status.is_empty() {
+            let status_w = if phone {
+                crate::hud_layout::icon_row_width(form)
+            } else {
+                crate::hud_layout::plate::SOCIAL_STATUS_DESKTOP.x
+            };
             commands.spawn((
                 Node {
                     position_type: PositionType::Absolute,
-                    right: Val::Px(edge_right + 50.0),
-                    top: Val::Px(edge_top + 50.0),
-                    max_width: Val::Px(180.0),
-                    padding: UiRect::all(Val::Px(4.0)),
-                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                    max_width: Val::Px(status_w),
+                    min_height: Val::Px(crate::hud_layout::plate::BRUSH_CHIP.y),
+                    padding: UiRect::axes(
+                        Val::Px(crate::ui::tokens::space::S8),
+                        Val::Px(crate::ui::tokens::space::S4),
+                    ),
+                    border: UiRect::all(Val::Px(crate::ui::tokens::border::HAIRLINE)),
+                    border_radius: BorderRadius::all(Val::Px(crate::ui::tokens::radius::MD)),
                     ..default()
                 },
-                BackgroundColor(ui::PANEL),
+                BackgroundColor(ui::perceptual(
+                    crate::ui::tokens::color::SURFACE_GLASS_STRONG,
+                )),
+                BorderColor::all(ui::perceptual(crate::ui::tokens::color::BORDER_HAIRLINE)),
                 Text::new(social.status.text()),
-                ui::text(12.0),
-                TextColor(ui::IVORY),
+                ui::styled_text(ui::TextStyle::keep_case(
+                    crate::ui::tokens::TextRole::Caption,
+                )),
+                TextColor(crate::ui::tokens::color::TEXT_PRIMARY),
+                TextLayout::new_with_justify(Justify::Right),
+                crate::hud_layout::HudRegion::SocialStatus,
                 ZIndex(85),
                 FocusPolicy::Pass,
                 SocialRoot,
@@ -1572,6 +1600,8 @@ fn render(
                 });
             });
     } else if let Some(center) = social.wheel.center {
+        // The wheel opens at a viewport point; its nodes are in UI pixels.
+        let center = crate::hud_layout::world_to_ui(center, ui_scale.as_deref());
         commands
             .spawn((
                 Node {
@@ -1666,6 +1696,7 @@ fn render_bubbles(
         Option<&crate::net::NetworkSpriteCharacter>,
     )>,
     bubbles: Query<(Entity, &SocialBubble)>,
+    ui_scale: Option<Res<UiScale>>,
 ) {
     let current: Vec<_> = bubbles.iter().map(|(entity, key)| (entity, *key)).collect();
     let mut desired = Vec::new();
@@ -1701,6 +1732,8 @@ fn render_bubbles(
         {
             continue;
         }
+        // Logical window pixels → logical UI pixels (F8.1).
+        let point = crate::hud_layout::world_to_ui(point, ui_scale.as_deref());
         if bot.is_some_and(|bot| bot.0) {
             desired.push(BubbleDraw {
                 node: Node {
@@ -1832,10 +1865,6 @@ fn channel_label(channel: SocialChannel) -> &'static str {
     } else {
         "social.channel.match"
     })
-}
-
-fn desktop_social_top() -> f32 {
-    crate::minimap::DESKTOP_MINIMAP_INSET
 }
 
 #[cfg(test)]

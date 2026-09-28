@@ -3,7 +3,7 @@
 // i18n-strict
 use std::collections::HashMap;
 
-use crate::i18n::{data, tr, trf};
+use crate::i18n::{tr, trf};
 use crate::net::TargetKind;
 use bevy::{
     input::touch::{TouchInput, TouchPhase},
@@ -20,6 +20,7 @@ use crate::{
     net::{NetworkHeroClass, PlayerProgression, SessionEvent},
     player::Player,
     team::TeamSelection,
+    ui::kit_assets::{Icon, KitImage, Sprite},
 };
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -81,8 +82,38 @@ const ATTACK_DRAG_DEAD_ZONE: f32 = 12.0;
 const ATTACK_DRAG_REACH: f32 = 96.0;
 const SKILL_DESCRIPTION_SECONDS: f32 = 0.45;
 const SKILL_DRAG_DEAD_ZONE: f32 = 20.0;
-const COMBAT_ORBIT_RADIUS: f32 = 92.0;
-const SKILL_ORBIT_ANGLES: [f32; 4] = [150.0, 200.0, 250.0, 310.0];
+/// The combat group of `hud.md` (phone): ATK 96 anchored 76 px inside the
+/// safe bottom-right corner, the four abilities (64) on an inner arc and the
+/// utilities (48) on an outer arc, both centred on ATK. Angles are clockwise
+/// from +x with y down (screen axes).
+const ATTACK_INSET: f32 = 76.0;
+const ATTACK_RADIUS: f32 = crate::ui::tokens::size::ABILITY_ATTACK_PHONE * 0.5;
+const ABILITY_RADIUS: f32 = crate::ui::tokens::size::ABILITY.phone * 0.5;
+const UTILITY_RADIUS: f32 = crate::ui::tokens::size::ABILITY_UTILITY_PHONE * 0.5;
+const ABILITY_ORBIT: f32 = crate::ui::tokens::size::COMBAT_ORBIT_ABILITY_PHONE;
+const UTILITY_ORBIT: f32 = crate::ui::tokens::size::COMBAT_ORBIT_UTILITY_PHONE;
+/// Q W E R, 42° apart (≥ 10 px between rims).
+const SKILL_ORBIT_ANGLES: [f32; 4] = [162.0, 204.0, 246.0, 288.0];
+/// DASH, HASTE, CANCEL (aiming only), RANK (skill points), MIN, TWR — 22° apart.
+const DASH_ANGLE: f32 = 166.0;
+const HASTE_ANGLE: f32 = 188.0;
+const CANCEL_ANGLE: f32 = 210.0;
+const RANK_ANGLE: f32 = 232.0;
+const MINION_ANGLE: f32 = 254.0;
+const TOWER_ANGLE: f32 = 276.0;
+/// Joystick centre: safe left + 68, safe bottom − 65; base r 52, knob r 24;
+/// the capture circle is 1.3 × r.
+const JOYSTICK_INSET: Vec2 = Vec2::new(68.0, 65.0);
+const JOYSTICK_RADIUS: f32 = crate::ui::tokens::size::JOYSTICK_PHONE * 0.5;
+const JOYSTICK_CAPTURE: f32 = 1.3;
+pub(crate) const KNOB_RADIUS: f32 = crate::ui::tokens::size::JOYSTICK_KNOB_PHONE * 0.5;
+/// Width the group needs at scale 1: the joystick capture circle from the
+/// safe left edge to DASH's left rim from the safe right edge.
+fn combat_group_span() -> f32 {
+    JOYSTICK_INSET.x + JOYSTICK_RADIUS * JOYSTICK_CAPTURE + ATTACK_INSET
+        - UTILITY_ORBIT * DASH_ANGLE.to_radians().cos()
+        + UTILITY_RADIUS
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Control {
@@ -175,43 +206,53 @@ impl MobileControls {
         (self.viewport.y / 390.0).clamp(0.85, 1.25)
     }
 
-    /// Scale the complete combat group without shrinking its 44px touch targets.
-    /// Keep this separate from frontend scale: small phones still need full-size
-    /// controls, while menu typography and panels may use the smaller UI scale.
+    /// Scale the complete combat group without shrinking its touch targets
+    /// (today's rule, ≥ 1). Keep this separate from frontend scale: small
+    /// phones still need full-size controls, while menu typography and panels
+    /// may use the smaller UI scale.
     pub(crate) fn combat_scale(&self) -> f32 {
         let usable_width = self.viewport.x - self.safe.left - self.safe.right;
-        // 443.6 covers the joystick's expanded hit circle and leftmost utility.
-        // Preserve at least 48px between them on narrow landscape viewports.
-        self.scale().min((usable_width - 48.0) / 443.6).max(1.0)
+        // Preserve at least 48px between the joystick's expanded hit circle
+        // and the leftmost utility on narrow landscape viewports.
+        self.scale()
+            .min((usable_width - 48.0) / combat_group_span())
+            .max(1.0)
     }
 
     pub fn layout(&self) -> MobileLayout {
-        // All six satellites share one circle centered exactly on basic attack.
-        // Anchor and scale the group together; clamping individual controls to
-        // viewport edges would break both the orbit and the thumb's muscle memory.
+        // Two concentric arcs centred exactly on basic attack (hud.md phone
+        // redline). Anchor and scale the group together; clamping individual
+        // controls to viewport edges would break the arcs and the thumb's
+        // muscle memory.
         let s = self.combat_scale();
         let right = self.viewport.x - self.safe.right;
         let bottom = self.viewport.y - self.safe.bottom;
-        let attack_center = Vec2::new(right - 114.0 * s, bottom - 114.0 * s);
-        let orbit = |angle: f32| {
-            let (sin, cos) = angle.to_radians().sin_cos();
-            attack_center + Vec2::new(cos, sin) * COMBAT_ORBIT_RADIUS * s
+        let attack_center = Vec2::new(right - ATTACK_INSET * s, bottom - ATTACK_INSET * s);
+        let arc = |radius: f32| {
+            move |angle: f32| {
+                let (sin, cos) = angle.to_radians().sin_cos();
+                attack_center + Vec2::new(cos, sin) * radius * s
+            }
         };
-        let outside = |x: f32, y: f32| attack_center + Vec2::new(x, y) * s;
+        let inner = arc(ABILITY_ORBIT);
+        let outer = arc(UTILITY_ORBIT);
         MobileLayout {
-            joystick_center: Vec2::new(self.safe.left + 72.0 * s, bottom - 70.0 * s),
-            joystick_radius: 52.0 * s,
+            joystick_center: Vec2::new(
+                self.safe.left + JOYSTICK_INSET.x * s,
+                bottom - JOYSTICK_INSET.y * s,
+            ),
+            joystick_radius: JOYSTICK_RADIUS * s,
             attack_center,
-            attack_radius: 38.0 * s,
-            cancel_center: outside(-156.0, -92.0),
-            cancel_radius: 22.0 * s,
-            ability_centers: SKILL_ORBIT_ANGLES.map(orbit),
-            ability_radii: [25.0 * s; 4],
-            category_centers: [orbit(90.0), orbit(0.0)],
-            utility_centers: [outside(-168.0, 92.0), outside(-118.0, 92.0)],
-            auxiliary_radius: 22.0 * s,
-            upgrade_center: outside(-150.0, -34.0),
-            upgrade_radius: 22.0 * s,
+            attack_radius: ATTACK_RADIUS * s,
+            cancel_center: outer(CANCEL_ANGLE),
+            cancel_radius: UTILITY_RADIUS * s,
+            ability_centers: SKILL_ORBIT_ANGLES.map(inner),
+            ability_radii: [ABILITY_RADIUS * s; 4],
+            category_centers: [outer(MINION_ANGLE), outer(TOWER_ANGLE)],
+            utility_centers: [outer(DASH_ANGLE), outer(HASTE_ANGLE)],
+            auxiliary_radius: UTILITY_RADIUS * s,
+            upgrade_center: outer(RANK_ANGLE),
+            upgrade_radius: UTILITY_RADIUS * s,
         }
     }
 
@@ -269,7 +310,7 @@ impl MobileControls {
             }
         }
         // Fixed anchor avoids moving the joystick under minimap/menu touches.
-        (point.distance(l.joystick_center) <= l.joystick_radius * 1.3)
+        (point.distance(l.joystick_center) <= l.joystick_radius * JOYSTICK_CAPTURE)
             .then_some((Control::Joystick, l.joystick_center))
     }
 
@@ -730,324 +771,375 @@ enum MobileVisual {
     UpgradeMode,
     CategoryAttack(usize),
     Utility(usize),
+    /// Rank mode: the + badge (and, in rank mode, the gold rim) over an
+    /// upgradable ability.
     RankRing(usize),
     AimHint,
     SkillDescription,
     Rotate,
 }
 
-#[derive(Component)]
-struct SkillIcon(usize);
-
-#[derive(Resource)]
-struct SkillRingTextures {
-    ranks: Vec<Handle<Image>>,
-    cooldowns: Vec<Handle<Image>>,
-    glyphs: Vec<Handle<Image>>,
+/// Parts of a touch disc (`hud.md` phone combat group).
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+enum DiscPart {
+    Sweep,
+    Seconds,
+    Icon,
+    Label,
+    /// The rank ring's + badge.
+    Plus,
 }
 
-#[derive(Component)]
-enum SkillOverlay {
-    Rank(usize),
-    Cooldown(usize),
+/// How a touch disc is drawn at rest (`hud.md` phone § combat-cluster,
+/// attack): fill, rim width and colour, icon.
+struct DiscLook {
+    fill: Color,
+    rim: f32,
+    edge: Color,
+    icon: Option<Icon>,
+    icon_size: f32,
 }
 
-// Each actual rank occupies one arc, separated by a visible gap. The transparent
-// center preserves the skill artwork; cooldown sectors are a separate layer.
-fn skill_overlay_pixels(rank: u8, capacity: u8, cooldown: Option<f32>) -> Vec<u8> {
-    const SIZE: usize = 112;
-    let mut pixels = vec![0; SIZE * SIZE * 4];
-    for y in 0..SIZE {
-        for x in 0..SIZE {
-            let delta = Vec2::new(x as f32 + 0.5, y as f32 + 0.5) - Vec2::splat(SIZE as f32 * 0.5);
-            let radius = delta.length() / (SIZE as f32 * 0.5);
-            let turn = (delta.y.atan2(delta.x) + std::f32::consts::FRAC_PI_2)
-                .rem_euclid(std::f32::consts::TAU)
-                / std::f32::consts::TAU;
-            let rgba = if let Some(fraction) = cooldown {
-                if radius <= 0.98 && turn <= fraction {
-                    [1, 9, 14, 185]
-                } else {
-                    [0; 4]
-                }
-            } else {
-                let segment = turn * f32::from(capacity.max(1));
-                if (0.87..=0.98).contains(&radius) && (0.045..0.955).contains(&segment.fract()) {
-                    if (segment.floor() as u8) < rank {
-                        [123, 228, 192, 255]
-                    } else {
-                        [63, 85, 83, 240]
-                    }
-                } else {
-                    [0; 4]
-                }
-            };
-            pixels[(y * SIZE + x) * 4..(y * SIZE + x) * 4 + 4].copy_from_slice(&rgba);
+fn disc_look(visual: &MobileVisual) -> Option<DiscLook> {
+    use crate::ui::tokens::{border, color, size};
+    let utility = |icon| DiscLook {
+        fill: color::EMERALD_800,
+        rim: border::HAIRLINE,
+        edge: color::GOLD_600,
+        icon: Some(icon),
+        icon_size: size::ICON_MD,
+    };
+    Some(match visual {
+        MobileVisual::Attack => DiscLook {
+            fill: color::EMERALD_700,
+            rim: border::FRAME,
+            edge: color::GOLD_500,
+            icon: Some(Icon::HudAttack),
+            icon_size: size::ICON_XL,
+        },
+        MobileVisual::Utility(0) => utility(Icon::HudDash),
+        MobileVisual::Utility(_) => utility(Icon::HudHaste),
+        MobileVisual::CategoryAttack(0) => utility(Icon::HudMinion),
+        MobileVisual::CategoryAttack(_) => utility(Icon::HudTower),
+        MobileVisual::UpgradeMode => DiscLook {
+            fill: color::EMERALD_400,
+            rim: border::FRAME,
+            edge: color::GOLD_400,
+            icon: None,
+            icon_size: 0.0,
+        },
+        // Dashed in the redline; Bevy borders are solid.
+        MobileVisual::Cancel => DiscLook {
+            fill: crate::ui::theme::perceptual(color::SURFACE_GLASS_STRONG),
+            rim: border::FRAME,
+            edge: color::STATE_DANGER,
+            icon: Some(Icon::NavX),
+            icon_size: size::ICON_MD,
+        },
+        _ => return None,
+    })
+}
+
+fn visual_name(visual: &MobileVisual) -> String {
+    match visual {
+        MobileVisual::Joystick => "MobileJoystick".to_owned(),
+        MobileVisual::Thumb => "MobileThumb".to_owned(),
+        MobileVisual::Attack => "MobileAttack".to_owned(),
+        MobileVisual::AttackVector => "MobileAttackVector".to_owned(),
+        MobileVisual::AttackThumb => "MobileAttackThumb".to_owned(),
+        MobileVisual::Cancel => "MobileAttackCancel".to_owned(),
+        MobileVisual::Ability(slot) => format!("MobileAbility-{slot}"),
+        MobileVisual::UpgradeMode => "MobileRankMode".to_owned(),
+        MobileVisual::CategoryAttack(index) => {
+            ["MobileMinionAttack", "MobileTowerAttack"][*index].to_owned()
         }
+        MobileVisual::Utility(index) => ["MobileDash", "MobileHaste"][*index].to_owned(),
+        MobileVisual::RankRing(slot) => format!("MobileRankRing-{slot}"),
+        MobileVisual::AimHint => "MobileAimHint".to_owned(),
+        MobileVisual::SkillDescription => "MobileSkillDescription".to_owned(),
+        MobileVisual::Rotate => "MobileRotatePrompt".to_owned(),
     }
-    pixels
 }
 
-fn combat_glyph_pixels(kind: usize) -> Vec<u8> {
-    // Small original geometric symbols: minion helmet, tower, dash arrow,
-    // haste chevrons, and crossed swords. They do not depend on platform Unicode coverage.
-    let mut pixels = vec![0; 112 * 112 * 4];
-    for y in 0..112 {
-        for x in 0..112 {
-            let p = Vec2::new(x as f32 / 112.0, y as f32 / 112.0);
-            let line = |a: Vec2, b: Vec2| {
-                let t = ((p - a).dot(b - a) / (b - a).length_squared()).clamp(0.0, 1.0);
-                p.distance(a + (b - a) * t) < 0.055
-            };
-            let solid = match kind {
-                0 => {
-                    let d = p - Vec2::new(0.5, 0.48);
-                    (d.length() < 0.34
-                        && p.y < 0.72
-                        && !(p.y > 0.39 && p.y < 0.51 && p.x > 0.26 && p.x < 0.74))
-                        || (p.x > 0.46 && p.x < 0.54 && p.y > 0.14 && p.y < 0.83)
-                }
-                1 => {
-                    (p.x > 0.25 && p.x < 0.75 && p.y > 0.22 && p.y < 0.83)
-                        && !(p.y < 0.38
-                            && ((p.x > 0.35 && p.x < 0.43) || (p.x > 0.57 && p.x < 0.65)))
-                        && !(p.y > 0.59 && p.x > 0.43 && p.x < 0.57)
-                }
-                2 => {
-                    line(Vec2::new(0.12, 0.50), Vec2::new(0.85, 0.50))
-                        || line(Vec2::new(0.56, 0.22), Vec2::new(0.85, 0.50))
-                        || line(Vec2::new(0.56, 0.78), Vec2::new(0.85, 0.50))
-                }
-                3 => [0.27, 0.56].into_iter().any(|offset| {
-                    line(Vec2::new(offset, 0.22), Vec2::new(offset + 0.23, 0.5))
-                        || line(Vec2::new(offset + 0.23, 0.5), Vec2::new(offset, 0.78))
-                }),
-                _ => {
-                    line(Vec2::new(0.25, 0.82), Vec2::new(0.78, 0.18))
-                        || line(Vec2::new(0.75, 0.82), Vec2::new(0.22, 0.18))
-                        || line(Vec2::new(0.17, 0.64), Vec2::new(0.42, 0.84))
-                        || line(Vec2::new(0.58, 0.84), Vec2::new(0.83, 0.64))
-                }
-            };
-            if solid {
-                pixels[(y * 112 + x) * 4..(y * 112 + x) * 4 + 4]
-                    .copy_from_slice(&[214, 196, 143, 255]);
-            }
-        }
-    }
-    pixels
-}
-
-fn setup_mobile_controls(
-    mut commands: Commands,
-    assets: Option<Res<AssetServer>>,
-    mut images: Option<ResMut<Assets<Image>>>,
-) {
-    let textures = images.as_mut().map(|images| {
-        let mut add = |pixels| {
-            images.add(Image::new(
-                bevy::render::render_resource::Extent3d {
-                    width: 112,
-                    height: 112,
-                    depth_or_array_layers: 1,
-                },
-                bevy::render::render_resource::TextureDimension::D2,
-                pixels,
-                bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
-                bevy::asset::RenderAssetUsages::default(),
-            ))
-        };
-        SkillRingTextures {
-            glyphs: (0..5).map(|kind| add(combat_glyph_pixels(kind))).collect(),
-            ranks: (0..=shared::MAX_ABILITY_RANK)
-                .map(|rank| add(skill_overlay_pixels(rank, shared::MAX_ABILITY_RANK, None)))
-                .collect(),
-            cooldowns: (0..=32)
-                .map(|step| add(skill_overlay_pixels(0, 0, Some(step as f32 / 32.0))))
-                .collect(),
-        }
-    });
+fn setup_mobile_controls(mut commands: Commands) {
+    use crate::ui::{
+        theme::{self, TextStyle},
+        tokens::{TextRole, border, color, radius, size, space},
+        widgets::{game, icon_node},
+    };
+    let hidden = || Node {
+        position_type: PositionType::Absolute,
+        display: Display::None,
+        justify_content: JustifyContent::Center,
+        align_items: AlignItems::Center,
+        ..default()
+    };
     for visual in [
         MobileVisual::Joystick,
         MobileVisual::Thumb,
-        MobileVisual::Attack,
         MobileVisual::AttackVector,
         MobileVisual::AttackThumb,
+        MobileVisual::Attack,
         MobileVisual::Cancel,
-        MobileVisual::Ability(0),
-        MobileVisual::Ability(1),
-        MobileVisual::Ability(2),
-        MobileVisual::Ability(3),
         MobileVisual::UpgradeMode,
         MobileVisual::CategoryAttack(0),
         MobileVisual::CategoryAttack(1),
         MobileVisual::Utility(0),
         MobileVisual::Utility(1),
-        MobileVisual::RankRing(0),
-        MobileVisual::RankRing(1),
-        MobileVisual::RankRing(2),
-        MobileVisual::RankRing(3),
         MobileVisual::AimHint,
-        MobileVisual::SkillDescription,
         MobileVisual::Rotate,
     ] {
-        let rank_slot = if let MobileVisual::RankRing(slot) = visual {
-            Some(slot)
+        let name = visual_name(&visual);
+        let z = ZIndex(match visual {
+            MobileVisual::Rotate => 250,
+            _ => 30,
+        });
+        let policy = if matches!(visual, MobileVisual::Rotate) {
+            FocusPolicy::Block
         } else {
-            None
+            FocusPolicy::Pass
         };
-        let is_rotate = matches!(visual, MobileVisual::Rotate);
-        let is_description = matches!(visual, MobileVisual::SkillDescription);
-        let icon_slot = if let MobileVisual::Ability(slot) = visual {
-            Some(slot)
-        } else {
-            None
-        };
-        let attack_icon = matches!(visual, MobileVisual::Attack);
-        let glyph = match visual {
-            MobileVisual::CategoryAttack(index) => Some(index),
-            MobileVisual::Utility(index) => Some(index + 2),
-            MobileVisual::Attack => Some(4),
-            _ => None,
+        let mut root = commands.spawn((
+            hidden(),
+            UiTransform::default(),
+            BackgroundColor(Color::NONE),
+            BorderColor::all(Color::NONE),
+            z,
+            policy,
+            Name::new(name),
+        ));
+        match &visual {
+            // hud.md phone `joystick`: base glass + hairline, knob
+            // `color.emerald.600` with a 2 px `color.gold.500` rim.
+            MobileVisual::Joystick => {
+                root.insert((
+                    Node {
+                        border: UiRect::all(Val::Px(border::HAIRLINE)),
+                        ..hidden()
+                    },
+                    BackgroundColor(theme::perceptual(color::SURFACE_GLASS)),
+                    BorderColor::all(theme::perceptual(color::BORDER_HAIRLINE)),
+                ));
+            }
+            MobileVisual::Thumb => {
+                root.insert((
+                    Node {
+                        border: UiRect::all(Val::Px(border::FRAME)),
+                        ..hidden()
+                    },
+                    BackgroundColor(color::EMERALD_600),
+                    BorderColor::all(color::GOLD_500),
+                ));
+            }
+            MobileVisual::AttackVector | MobileVisual::AttackThumb => {
+                root.insert((
+                    BackgroundColor(color::EMERALD_400),
+                    BorderColor::all(color::GOLD_400),
+                ));
+            }
+            MobileVisual::AimHint => {
+                root.insert((
+                    BackgroundColor(theme::perceptual(color::SURFACE_GLASS_STRONG)),
+                    BorderColor::all(theme::perceptual(color::BORDER_HAIRLINE)),
+                ))
+                .with_child((
+                    Text::new(""),
+                    theme::styled_text(TextStyle::keep_case(TextRole::Caption)),
+                    TextColor(color::TEXT_PRIMARY),
+                    TextLayout::new_with_justify(Justify::Center),
+                    DiscPart::Label,
+                ));
+            }
+            MobileVisual::Rotate => {
+                root.insert((
+                    BackgroundColor(color::SURFACE_1_OPAQUE),
+                    BorderColor::all(color::GOLD_500),
+                ))
+                .with_child((
+                    Text::new(""),
+                    theme::role_text(TextRole::Heading),
+                    TextColor(color::TEXT_PRIMARY),
+                    TextLayout::new_with_justify(Justify::Center),
+                    DiscPart::Label,
+                ));
+            }
+            other => {
+                let Some(look) = disc_look(other) else {
+                    continue;
+                };
+                let attack = matches!(other, MobileVisual::Attack);
+                root.insert((
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(0.0),
+                        border: UiRect::all(Val::Px(look.rim)),
+                        border_radius: BorderRadius::all(Val::Px(radius::PILL)),
+                        overflow: Overflow::clip(),
+                        ..hidden()
+                    },
+                    BackgroundColor(look.fill),
+                    BorderColor::all(look.edge),
+                ))
+                .with_children(|disc| {
+                    disc.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(0.0),
+                            right: Val::Px(0.0),
+                            top: Val::Px(0.0),
+                            bottom: Val::Px(0.0),
+                            ..default()
+                        },
+                        KitImage::atlas(
+                            Sprite::CooldownSweepAtlas,
+                            theme::perceptual(color::COOLDOWN_OVERLAY),
+                            0,
+                        ),
+                        Visibility::Hidden,
+                        DiscPart::Sweep,
+                    ));
+                    if let Some(icon) = look.icon {
+                        disc.spawn((
+                            icon_node(icon, look.icon_size, color::TEXT_GOLD),
+                            DiscPart::Icon,
+                        ));
+                    }
+                    disc.spawn((
+                        Text::new(""),
+                        if attack {
+                            theme::role_text(TextRole::Button)
+                        } else {
+                            theme::styled_text(
+                                TextStyle::keep_case(TextRole::Label)
+                                    .sized(TextRole::Caption.style().size),
+                            )
+                        },
+                        TextColor(if matches!(other, MobileVisual::UpgradeMode) {
+                            color::TEXT_ON_PRIMARY
+                        } else {
+                            color::TEXT_GOLD
+                        }),
+                        TextLayout::new_with_justify(Justify::Center),
+                        bevy::text::LineHeight::RelativeToFont(1.0),
+                        DiscPart::Label,
+                    ));
+                    disc.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(0.0),
+                            right: Val::Px(0.0),
+                            top: Val::Px(0.0),
+                            bottom: Val::Px(0.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        Visibility::Hidden,
+                        DiscPart::Seconds,
+                        children![(
+                            Text::new(""),
+                            theme::styled_text(
+                                TextStyle::new(TextRole::NumberLg)
+                                    .sized(crate::ui::tokens::Metric::new(20.0, 20.0)),
+                            ),
+                            TextColor(color::TEXT_PRIMARY),
+                            TextShadow::default(),
+                        )],
+                    ));
+                });
+            }
+        }
+        root.insert(visual);
+    }
+    // Abilities: the kit face (cost pill kept, key and pips hidden), with
+    // the rank ring (+ badge, gold rim in rank mode) over each.
+    for slot in 0..4 {
+        let view = game::AbilityView {
+            ability: None,
+            icon: Icon::HudAttack,
+            key: None,
+            cost: Some(0),
+            rank: 1,
+            cooldown: None,
+            locked: false,
+            unlock_level: Some(shared::SLOT_UNLOCK_LEVELS[slot] as u8),
+            no_mana: false,
+            pips: false,
+            // hud.md phone: rank is the segmented ring on the rim (R10).
+            ring: true,
         };
         commands
             .spawn((
-                Node {
-                    position_type: PositionType::Absolute,
-                    display: Display::None,
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    border: UiRect::all(Val::Px(2.0)),
-                    border_radius: BorderRadius::all(Val::Percent(50.0)),
-                    padding: UiRect::all(Val::Px(4.0)),
-                    overflow: Overflow::clip(),
-                    ..default()
-                },
-                BackgroundColor(crate::ui::theme::PANEL),
+                hidden(),
                 UiTransform::default(),
-                BorderColor::all(crate::ui::theme::EDGE),
-                ZIndex(if is_rotate {
-                    250
-                } else if is_description {
-                    180
-                } else {
-                    30
-                }),
-                if is_rotate {
-                    FocusPolicy::Block
-                } else {
-                    FocusPolicy::Pass
-                },
-                Name::new(match &visual {
-                    MobileVisual::Joystick => "MobileJoystick".to_owned(),
-                    MobileVisual::Thumb => "MobileThumb".to_owned(),
-                    MobileVisual::Attack => "MobileAttack".to_owned(),
-                    MobileVisual::AttackVector => "MobileAttackVector".to_owned(),
-                    MobileVisual::AttackThumb => "MobileAttackThumb".to_owned(),
-                    MobileVisual::Cancel => "MobileAttackCancel".to_owned(),
-                    MobileVisual::Ability(slot) => format!("MobileAbility-{slot}"),
-                    MobileVisual::UpgradeMode => "MobileRankMode".to_owned(),
-                    MobileVisual::CategoryAttack(index) => {
-                        ["MobileMinionAttack", "MobileTowerAttack"][*index].to_owned()
-                    }
-                    MobileVisual::Utility(index) => {
-                        ["MobileDash", "MobileHaste"][*index].to_owned()
-                    }
-                    MobileVisual::RankRing(slot) => format!("MobileRankRing-{slot}"),
-                    MobileVisual::AimHint => "MobileAimHint".to_owned(),
-                    MobileVisual::SkillDescription => "MobileSkillDescription".to_owned(),
-                    MobileVisual::Rotate => "MobileRotatePrompt".to_owned(),
-                }),
-                visual,
+                ZIndex(30),
+                FocusPolicy::Pass,
+                MobileVisual::Ability(slot),
+                Name::new(visual_name(&MobileVisual::Ability(slot))),
             ))
-            .with_children(|parent| {
-                if let (Some(glyph), Some(textures)) = (glyph, textures.as_ref()) {
-                    parent.spawn((
-                        ImageNode::new(textures.glyphs[glyph].clone()),
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Percent(if attack_icon { 17.0 } else { 22.0 }),
-                            top: Val::Percent(if attack_icon { 10.0 } else { 1.0 }),
-                            width: Val::Percent(if attack_icon { 66.0 } else { 56.0 }),
-                            height: Val::Percent(if attack_icon { 66.0 } else { 56.0 }),
-                            ..default()
-                        },
-                        FocusPolicy::Pass,
-                    ));
-                }
-                if let (Some(slot), Some(textures)) = (rank_slot, textures.as_ref()) {
-                    parent.spawn((
-                        SkillOverlay::Rank(slot),
-                        ImageNode::new(textures.ranks[0].clone()),
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            ..default()
-                        },
-                        FocusPolicy::Pass,
-                    ));
-                }
-                if let (Some(slot), Some(assets)) = (icon_slot, assets.as_ref()) {
-                    parent.spawn((
-                        SkillIcon(slot),
-                        ImageNode::new(assets.load(crate::skill_icons::ATLAS_PATH)),
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Px(0.0),
-                            top: Val::Px(0.0),
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            border_radius: BorderRadius::all(Val::Percent(50.0)),
-                            ..default()
-                        },
-                        FocusPolicy::Pass,
-                    ));
-                }
-                if let (Some(slot), Some(textures)) = (icon_slot, textures.as_ref()) {
-                    parent.spawn((
-                        SkillOverlay::Cooldown(slot),
-                        ImageNode::new(textures.cooldowns[0].clone()),
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Px(0.0),
-                            top: Val::Px(0.0),
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            ..default()
-                        },
-                        FocusPolicy::Pass,
-                    ));
-                }
-                parent.spawn((
-                    Text::new(""),
-                    TextFont {
-                        font_size: 15.0,
-                        ..default()
-                    },
-                    TextColor(crate::ui::theme::IVORY),
-                    TextLayout::new_with_justify(Justify::Center),
+            .with_children(|root| {
+                game::ability_face(
+                    root,
+                    view,
+                    size::ABILITY.phone,
+                    game::AbilityFace::default(),
+                );
+            });
+        commands
+            .spawn((
+                Node {
+                    border: UiRect::all(Val::Px(border::FRAME)),
+                    border_radius: BorderRadius::all(Val::Px(radius::PILL)),
+                    ..hidden()
+                },
+                UiTransform::default(),
+                BackgroundColor(Color::NONE),
+                BorderColor::all(Color::NONE),
+                ZIndex(31),
+                FocusPolicy::Pass,
+                Pickable::IGNORE,
+                MobileVisual::RankRing(slot),
+                Name::new(visual_name(&MobileVisual::RankRing(slot))),
+            ))
+            .with_children(|ring| {
+                // The + badge: 22 px, top-right (−4/−6), emerald.400 with a
+                // 2 px gold.400 rim (a hint; tapping it needs rank mode).
+                ring.spawn((
                     Node {
-                        align_self: if icon_slot.is_some() || attack_icon || glyph.is_some() {
-                            AlignSelf::End
-                        } else {
-                            AlignSelf::Center
-                        },
+                        position_type: PositionType::Absolute,
+                        right: Val::Px(-(space::S4 + border::FRAME)),
+                        top: Val::Px(-(space::S4 + border::FRAME)),
+                        width: Val::Px(game::ABILITY_UPGRADE),
+                        height: Val::Px(game::ABILITY_UPGRADE),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        border: UiRect::all(Val::Px(border::FRAME)),
+                        border_radius: BorderRadius::all(Val::Px(radius::PILL)),
                         ..default()
                     },
-                    BackgroundColor(if icon_slot.is_some() || attack_icon {
-                        Color::srgba(0.01, 0.025, 0.04, 0.84)
-                    } else {
-                        Color::NONE
-                    }),
-                    ZIndex(1),
+                    BackgroundColor(color::EMERALD_400),
+                    BorderColor::all(color::GOLD_400),
+                    DiscPart::Plus,
+                    children![icon_node(
+                        Icon::NavPlus,
+                        game::ABILITY_UPGRADE_GLYPH,
+                        color::TEXT_ON_PRIMARY,
+                    )],
                 ));
             });
     }
-    if let Some(textures) = textures {
-        commands.insert_resource(textures);
-    }
+    // The hold card (`skill-description.md`, phone): the shared tooltip.
+    crate::combat::skill_card::spawn_skill_card(
+        &mut commands,
+        crate::ui::theme::Form::Phone,
+        (
+            MobileVisual::SkillDescription,
+            Name::new(visual_name(&MobileVisual::SkillDescription)),
+        ),
+    );
 }
 
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn draw_mobile_controls(
     mobile: Res<MobileControls>,
     game: Option<Res<crate::net::GameStateSnapshot>>,
@@ -1065,21 +1157,33 @@ fn draw_mobile_controls(
     cooldown: Res<LocalCastCooldown>,
     basic_attack: Option<Res<crate::targeting::BasicAttackState>>,
     gamepad: Option<Res<crate::gamepad::GamepadControls>>,
-    images: Option<Res<Assets<Image>>>,
-    mut icons: Query<(&SkillIcon, &mut ImageNode), Without<SkillOverlay>>,
-    textures: Option<Res<SkillRingTextures>>,
-    mut overlays: Query<(&SkillOverlay, &mut ImageNode), Without<SkillIcon>>,
     utilities: Query<&crate::net::PlayerUtility, With<Player>>,
     mut visuals: Query<(
         &MobileVisual,
         &mut Node,
-        &mut BackgroundColor,
-        &mut BorderColor,
         &mut UiTransform,
-        &Children,
+        Option<&mut BackgroundColor>,
+        Option<&mut BorderColor>,
+        Option<&Children>,
+        Option<&mut crate::combat::skill_card::SkillCardView>,
     )>,
-    mut texts: Query<(&mut Text, &mut TextFont)>,
+    mut faces: Query<(
+        &mut crate::ui::widgets::game::AbilityView,
+        &mut crate::ui::widgets::game::AbilityFace,
+    )>,
+    mut parts: Query<
+        (
+            &DiscPart,
+            &mut Visibility,
+            Option<&mut KitImage>,
+            Option<&Children>,
+            Option<&mut Node>,
+        ),
+        Without<MobileVisual>,
+    >,
+    mut texts: Query<(&mut Text, &mut TextColor), Without<MobileVisual>>,
 ) {
+    use crate::ui::tokens::color;
     let layout = mobile.layout();
     let s = mobile.combat_scale();
     let local = local.single().ok();
@@ -1095,11 +1199,15 @@ fn draw_mobile_controls(
         .and_then(|(_, _, _, equipment)| equipment)
         .map_or_else(Default::default, |equipment| equipment.item_bonuses);
     let sandbox = game.as_ref().and_then(|g| g.sandbox.as_ref());
+    let mana = local.map_or(0.0, |(stats, _, _, _)| stats.mana);
+    // hud.md § States, Dead: the combat group stays drawn but veiled (input
+    // is off: `read_mobile_controls` clears every finger while dead).
+    let dead = local.is_some_and(|(stats, _, _, _)| !stats.is_alive());
     let visible = mobile.enabled
         && !gamepad.as_ref().is_some_and(|pad| pad.active)
         && mobile.landscape
         && context.gameplay_allowed()
-        && local.is_some_and(|(stats, _, _, _)| stats.is_alive());
+        && local.is_some();
     let aiming = mobile
         .captures
         .values()
@@ -1114,233 +1222,232 @@ fn draw_mobile_controls(
         .captures
         .values()
         .find(|c| c.control == Control::Attack);
-    let attack_remaining = basic_attack.map_or(0.0, |state| state.remaining_secs);
-    let attack_cooling = attack_remaining > 0.0;
+    let attack_remaining = basic_attack
+        .as_ref()
+        .map_or(0.0, |state| state.remaining_secs);
+    let attack_total = basic_attack
+        .as_ref()
+        .map_or(0.0, |state| state.duration_secs)
+        .max(attack_remaining);
     let attack_held = mobile.held_basic_attack();
     let drag = attack
         .filter(|capture| capture.dragged)
         .map(|capture| (capture.position - capture.origin).clamp_length_max(ATTACK_DRAG_REACH * s));
-    let canceled_color = Color::srgb(0.90, 0.28, 0.24);
-    for (SkillIcon(slot), mut icon) in &mut icons {
-        let def = ability_for_class_slot(class, SkillSlot::from_index(*slot as u8).unwrap());
-        if let Some(image) = images.as_ref().and_then(|images| images.get(&icon.image)) {
-            icon.rect = crate::skill_icons::icon_rect(def.id, image.size().as_vec2());
-        }
-        let ready = prog.unlocked()[*slot]
-            && cooldown.remaining_secs[*slot] <= 0.0
-            && local.is_some_and(|(stats, _, _, _)| {
-                stats.mana >= scaled_mana_cost(def, prog.ranks[*slot].max(1))
-            });
-        icon.color = if ready {
-            Color::WHITE
-        } else {
-            Color::srgb(0.38, 0.42, 0.48)
-        };
-    }
-    if let Some(textures) = textures {
-        for (overlay, mut image) in &mut overlays {
-            image.image = match *overlay {
-                SkillOverlay::Rank(slot) => textures.ranks
-                    [usize::from(prog.ranks[slot].min(shared::MAX_ABILITY_RANK))]
-                .clone(),
-                SkillOverlay::Cooldown(slot) => {
-                    let fraction = cooldown.remaining_fraction(slot);
-                    textures.cooldowns[(fraction.clamp(0.0, 1.0) * 32.0).ceil() as usize].clone()
-                }
-            };
-        }
-    }
+    let inspected = mobile.inspected_skill();
     let utility = utilities
         .single()
         .map(|utility| utility.state)
         .unwrap_or_default();
-    for (visual, mut node, mut color, mut border, mut ui_transform, children) in &mut visuals {
-        let (center, radius, label, show, fill, edge) = match *visual {
+    let place = |node: &mut Node, center: Vec2, size: Vec2| {
+        let (left, top) = (
+            Val::Px(center.x - size.x * 0.5),
+            Val::Px(center.y - size.y * 0.5),
+        );
+        if node.left != left || node.top != top {
+            node.left = left;
+            node.top = top;
+        }
+        if node.width != Val::Px(size.x) || node.height != Val::Px(size.y) {
+            node.width = Val::Px(size.x);
+            node.height = Val::Px(size.y);
+        }
+    };
+    for (visual, mut node, mut transform, fill, edge, children, card) in &mut visuals {
+        // (centre, diameter, label, shown, cooldown (remaining, total), fill, edge)
+        let mut cooldown_state: Option<(f32, f32)> = None;
+        let mut label = String::new();
+        let mut look_fill = None;
+        let mut look_edge = None;
+        let (center, size, show) = match *visual {
             MobileVisual::Joystick => (
                 layout.joystick_center,
-                layout.joystick_radius,
-                String::new(),
+                Vec2::splat(layout.joystick_radius * 2.0),
                 visible,
-                Color::srgba(0.02, 0.08, 0.08, 0.45),
-                crate::ui::theme::MUTED,
             ),
             MobileVisual::Thumb => (
                 layout.joystick_center + mobile.movement * layout.joystick_radius * 0.7,
-                22.0 * s,
-                String::new(),
+                Vec2::splat(KNOB_RADIUS * 2.0 * s),
                 visible,
-                Color::srgba(0.43, 0.7, 0.62, 0.72),
-                crate::ui::theme::JADE,
             ),
-            MobileVisual::Attack => (
-                layout.attack_center,
-                layout.attack_radius,
-                if attack_cooling {
-                    format!("{attack_remaining:.1}")
+            MobileVisual::Attack => {
+                label = tr("touch.attack").into();
+                if attack_remaining > 0.0 {
+                    cooldown_state = Some((attack_remaining, attack_total));
+                }
+                look_fill = Some(if attack.is_some() {
+                    color::EMERALD_600
                 } else {
-                    tr("touch.attack").into()
-                },
-                visible,
-                if attack_cooling {
-                    if attack_held {
-                        crate::ui::theme::TILE
-                    } else {
-                        crate::ui::theme::PANEL
-                    }
-                } else if attack.is_some() {
-                    crate::ui::theme::HOVER
-                } else {
-                    crate::ui::theme::TILE
-                },
-                if mobile.attack_cancelled() {
-                    canceled_color
-                } else if attack_cooling {
-                    crate::ui::theme::EDGE
-                } else if attack_held {
-                    crate::ui::theme::JADE
-                } else {
-                    crate::ui::theme::GOLD
-                },
-            ),
-            MobileVisual::AttackVector | MobileVisual::AttackThumb => (
-                layout.attack_center
-                    + drag.unwrap_or_default()
-                        * if matches!(visual, MobileVisual::AttackVector) {
-                            0.5
-                        } else {
-                            1.0
-                        },
-                16.0 * s,
-                String::new(),
-                visible && drag.is_some() && !mobile.skill_aiming(),
-                if mobile.attack_cancelled() {
-                    canceled_color
-                } else {
-                    crate::ui::theme::JADE
-                },
-                crate::ui::theme::IVORY,
-            ),
-            MobileVisual::Cancel => (
-                layout.cancel_center,
-                layout.cancel_radius,
-                "×".into(),
-                visible && aiming.is_some() && mobile.inspected_skill().is_none(),
-                if aiming.is_some_and(|capture| capture.canceled) {
-                    canceled_color
-                } else {
-                    crate::ui::theme::PANEL
-                },
-                canceled_color,
-            ),
-            MobileVisual::Ability(slot) => {
-                let def = ability_for_class_slot(class, SkillSlot::from_index(slot as u8).unwrap());
-                let unlocked = prog.unlocked()[slot];
-                let mana = local.is_some_and(|(stats, _, _, _)| {
-                    stats.mana >= scaled_mana_cost(def, prog.ranks[slot].max(1))
+                    color::EMERALD_700
                 });
-                let active = mobile
-                    .captures
-                    .values()
-                    .any(|c| c.control == Control::Ability(slot) && !c.canceled);
-                let status = if mobile.upgrade_mode && mobile.upgrade_enabled[slot] {
-                    format!("{} +", ["Q", "W", "E", "R"][slot])
-                } else if !unlocked {
-                    trf(
-                        "touch.ability.locked",
-                        &[("level", &shared::SLOT_UNLOCK_LEVELS[slot])],
-                    )
-                } else if cooldown.remaining_secs[slot] > 0.0 {
-                    format!("{:.1}", cooldown.remaining_secs[slot])
-                } else if !mana {
-                    tr("touch.ability.no_mana").into()
+                look_edge = Some(if mobile.attack_cancelled() {
+                    color::STATE_DANGER
+                } else if attack_held {
+                    color::GOLD_300
                 } else {
-                    ["Q", "W", "E", "R"][slot].into()
-                };
+                    color::GOLD_500
+                });
                 (
-                    layout.ability_centers[slot],
-                    layout.ability_radii[slot],
-                    status,
+                    layout.attack_center,
+                    Vec2::splat(layout.attack_radius * 2.0),
                     visible,
-                    if active {
-                        crate::ui::theme::HOVER
-                    } else {
-                        crate::ui::theme::PANEL
-                    },
-                    if mobile.upgrade_enabled[slot] {
-                        crate::ui::theme::GOLD
-                    } else if !unlocked || !mana || cooldown.remaining_secs[slot] > 0.0 {
-                        crate::ui::theme::EDGE
-                    } else {
-                        crate::ui::theme::JADE
-                    },
                 )
             }
-            MobileVisual::RankRing(slot) => (
-                layout.ability_centers[slot],
-                layout.ability_radii[slot] + 3.0 * s,
-                String::new(),
-                visible,
-                Color::NONE,
-                Color::NONE,
-            ),
-            MobileVisual::UpgradeMode => (
-                layout.upgrade_center,
-                layout.upgrade_radius,
-                if mobile.upgrade_mode {
+            MobileVisual::AttackVector | MobileVisual::AttackThumb => {
+                let vector = matches!(visual, MobileVisual::AttackVector);
+                let reach = drag.unwrap_or_default();
+                let center = layout.attack_center + reach * if vector { 0.5 } else { 1.0 };
+                let size = if vector {
+                    Vec2::new(reach.length(), 3.0 * s)
+                } else {
+                    Vec2::splat(32.0 * s)
+                };
+                look_fill = Some(if mobile.attack_cancelled() {
+                    color::STATE_DANGER
+                } else {
+                    color::EMERALD_400
+                });
+                (
+                    center,
+                    size,
+                    visible && drag.is_some() && !mobile.skill_aiming(),
+                )
+            }
+            MobileVisual::Cancel => {
+                look_fill = Some(if aiming.is_some_and(|capture| capture.canceled) {
+                    color::STATE_DANGER
+                } else {
+                    crate::ui::theme::perceptual(color::SURFACE_GLASS_STRONG)
+                });
+                (
+                    layout.cancel_center,
+                    Vec2::splat(layout.cancel_radius * 2.0),
+                    visible && aiming.is_some() && inspected.is_none(),
+                )
+            }
+            MobileVisual::Ability(slot) => {
+                let def = ability_for_class_slot(class, SkillSlot::from_index(slot as u8).unwrap());
+                let rank = prog.ranks[slot].max(1);
+                let cost = scaled_mana_cost(def, rank);
+                let remaining = cooldown.remaining_secs[slot];
+                let fraction = cooldown.remaining_fraction(slot);
+                if let Some(children) = children {
+                    for child in children.iter() {
+                        if let Ok((mut view, mut face)) = faces.get_mut(child) {
+                            let unlocked = prog.unlocked()[slot];
+                            let next = crate::ui::widgets::game::AbilityView {
+                                ability: Some(def.id),
+                                cost: Some(cost.round() as u32),
+                                // A locked ability shows the ring empty.
+                                rank: if unlocked { prog.ranks[slot] } else { 0 },
+                                cooldown: (remaining > 0.0).then(|| {
+                                    (
+                                        remaining,
+                                        if fraction > 0.0 {
+                                            remaining / fraction
+                                        } else {
+                                            remaining
+                                        },
+                                    )
+                                }),
+                                locked: !unlocked || dead,
+                                unlock_level: (!unlocked && !dead)
+                                    .then_some(shared::SLOT_UNLOCK_LEVELS[slot] as u8),
+                                no_mana: mana < cost,
+                                ..view.clone()
+                            };
+                            if *view != next {
+                                *view = next;
+                            }
+                            let active = mobile
+                                .captures
+                                .values()
+                                .any(|c| c.control == Control::Ability(slot) && !c.canceled);
+                            let next_face = crate::ui::widgets::game::AbilityFace {
+                                glow: active && inspected != Some(slot),
+                                held: inspected == Some(slot),
+                            };
+                            if *face != next_face {
+                                *face = next_face;
+                            }
+                        }
+                    }
+                }
+                (
+                    layout.ability_centers[slot],
+                    Vec2::splat(layout.ability_radii[slot] * 2.0),
+                    visible,
+                )
+            }
+            MobileVisual::RankRing(slot) => {
+                look_edge = Some(if mobile.upgrade_mode && mobile.upgrade_enabled[slot] {
+                    color::GOLD_400
+                } else {
+                    Color::NONE
+                });
+                (
+                    layout.ability_centers[slot],
+                    Vec2::splat(layout.ability_radii[slot] * 2.0),
+                    visible && mobile.upgrade_enabled[slot],
+                )
+            }
+            MobileVisual::UpgradeMode => {
+                label = if mobile.upgrade_mode {
                     tr("touch.rank.back").into()
                 } else {
                     trf("touch.rank.points", &[("points", &prog.skill_points)])
-                },
-                visible && mobile.upgrade_enabled.iter().any(|enabled| *enabled),
-                if mobile.upgrade_mode {
-                    crate::ui::theme::HOVER
+                };
+                look_fill = Some(if mobile.upgrade_mode {
+                    color::EMERALD_300
                 } else {
-                    crate::ui::theme::PANEL
-                },
-                crate::ui::theme::GOLD,
-            ),
-            MobileVisual::CategoryAttack(index) => (
-                layout.category_centers[index],
-                layout.auxiliary_radius,
-                tr(["touch.target.minion", "touch.target.tower"][index]).into(),
-                visible,
-                crate::ui::theme::PANEL,
-                crate::ui::theme::GOLD,
-            ),
+                    color::EMERALD_400
+                });
+                (
+                    layout.upgrade_center,
+                    Vec2::splat(layout.upgrade_radius * 2.0),
+                    visible && mobile.upgrade_enabled.iter().any(|enabled| *enabled),
+                )
+            }
+            MobileVisual::CategoryAttack(index) => {
+                label = tr(["touch.target.minion", "touch.target.tower"][index]).into();
+                (
+                    layout.category_centers[index],
+                    Vec2::splat(layout.auxiliary_radius * 2.0),
+                    visible,
+                )
+            }
             MobileVisual::Utility(index) => {
                 let remaining = [utility.dash_remaining_secs, utility.haste_remaining_secs][index];
+                let total = [
+                    shared::utility::DASH_COOLDOWN_SECS,
+                    shared::utility::HASTE_COOLDOWN_SECS,
+                ][index];
                 let active = index == 1 && utility.haste_active_secs > 0.0;
-                let label = if active {
+                label = if active {
                     trf(
                         "touch.haste.active",
                         &[("seconds", &format!("{:.1}", utility.haste_active_secs))],
                     )
-                } else if remaining > 0.0 {
-                    format!("{remaining:.0}")
                 } else {
                     tr(["touch.dash", "touch.haste"][index]).into()
                 };
+                if remaining > 0.0 && !active {
+                    cooldown_state = Some((remaining, total.max(remaining)));
+                }
+                look_fill = Some(if active {
+                    color::EMERALD_600
+                } else {
+                    color::EMERALD_800
+                });
                 (
                     layout.utility_centers[index],
-                    layout.auxiliary_radius,
-                    label,
+                    Vec2::splat(layout.auxiliary_radius * 2.0),
                     visible,
-                    if active {
-                        crate::ui::theme::HOVER
-                    } else {
-                        crate::ui::theme::PANEL
-                    },
-                    if active {
-                        crate::ui::theme::JADE
-                    } else if remaining > 0.0 {
-                        crate::ui::theme::EDGE
-                    } else {
-                        crate::ui::theme::GOLD
-                    },
                 )
             }
             MobileVisual::AimHint => {
-                let message = aiming
+                // hud.md § States, Aiming: the hint sits in the
+                // action-feedback slot under the target frame.
+                label = aiming
                     .map(|c| {
                         if c.canceled || (c.control == Control::Attack && mobile.attack_cancelled())
                         {
@@ -1351,147 +1458,203 @@ fn draw_mobile_controls(
                             tr("touch.aim.skill")
                         }
                     })
-                    .unwrap_or("");
+                    .unwrap_or("")
+                    .into();
+                let slot = crate::hud_layout::HudLayout::phone(&mobile).action_feedback;
+                node.max_width = Val::Px(slot.width());
+                node.padding = UiRect::axes(
+                    Val::Px(crate::ui::tokens::space::S12),
+                    Val::Px(crate::ui::tokens::space::S8),
+                );
+                node.border = UiRect::all(Val::Px(crate::ui::tokens::border::HAIRLINE));
+                node.border_radius = BorderRadius::all(Val::Px(crate::ui::tokens::radius::MD));
                 (
-                    Vec2::new(
-                        (layout.joystick_center.x
-                            + layout.joystick_radius
-                            + layout.utility_centers[0].x
-                            - layout.upgrade_radius)
-                            * 0.5,
-                        mobile.viewport.y - mobile.safe.bottom - 36.0 * s,
-                    ),
-                    1.0,
-                    message.into(),
-                    visible && aiming.is_some() && mobile.inspected_skill().is_none(),
-                    crate::ui::theme::PANEL,
-                    crate::ui::theme::EDGE,
+                    Vec2::new(slot.center().x, slot.min.y),
+                    Vec2::ZERO,
+                    visible && aiming.is_some() && inspected.is_none(),
                 )
             }
             MobileVisual::SkillDescription => {
-                let slot = mobile.inspected_skill();
-                let label = slot
-                    .map(|slot| {
-                        let def = ability_for_class_slot(
+                let slot = inspected;
+                let Some(mut card) = card else { continue };
+                if let Some(slot) = slot {
+                    let rank = prog.ranks[slot].max(1);
+                    let duration = if sandbox.is_some_and(|s| s.config.player.no_cooldowns) {
+                        0.0
+                    } else {
+                        crate::combat::effective_cast_duration(
                             class,
-                            SkillSlot::from_index(slot as u8).unwrap(),
-                        );
-                        let rank = prog.ranks[slot].max(1);
-                        let duration = if sandbox.is_some_and(|s| s.config.player.no_cooldowns) {
-                            0.0
-                        } else {
-                            crate::combat::effective_cast_duration(
-                                class,
-                                prog.level,
-                                rank,
-                                SkillSlot::ALL[slot],
-                                bonuses,
-                                sandbox.is_some(),
-                            )
-                        };
-                        let availability = if prog.unlocked()[slot] {
-                            trf("touch.skill.rank", &[("rank", &rank)])
-                        } else {
-                            trf(
-                                "touch.skill.unlocks",
-                                &[("level", &shared::SLOT_UNLOCK_LEVELS[slot])],
-                            )
-                        };
-                        trf(
-                            "touch.skill.card",
-                            &[
-                                ("name", &data::ability_name(def)),
-                                ("availability", &availability),
-                                ("description", &data::ability_desc(def)),
-                                ("mana", &format!("{:.0}", scaled_mana_cost(def, rank))),
-                                ("cooldown", &format!("{duration:.1}")),
-                            ],
+                            prog.level,
+                            rank,
+                            SkillSlot::ALL[slot],
+                            bonuses,
+                            sandbox.is_some(),
                         )
-                    })
-                    .unwrap_or_default();
+                    };
+                    let mut next = crate::combat::skill_card::SkillCardView::of(
+                        class, &prog, slot, mana, duration,
+                    );
+                    next.hint = true;
+                    next.visible = visible;
+                    if *card != next {
+                        *card = next;
+                    }
+                } else if card.visible {
+                    card.visible = false;
+                }
+                let rect = crate::hud_layout::HudLayout::phone(&mobile).skill_card;
+                // The card owns its size and display (`paint_skill_card`).
+                let left = Val::Px(rect.min.x);
+                let top = Val::Px(rect.min.y);
+                if node.left != left || node.top != top {
+                    node.left = left;
+                    node.top = top;
+                }
+                continue;
+            }
+            MobileVisual::Rotate => {
+                label = tr("touch.rotate").into();
                 (
-                    Vec2::new(mobile.viewport.x * 0.5, mobile.safe.top + 100.0 * s),
-                    1.0,
-                    label,
-                    visible && slot.is_some(),
-                    Color::srgb(0.025, 0.055, 0.065),
-                    crate::ui::theme::GOLD,
+                    mobile.viewport * 0.5,
+                    mobile.viewport,
+                    mobile.enabled && !mobile.landscape,
                 )
             }
-            MobileVisual::Rotate => (
-                mobile.viewport * 0.5,
-                1.0,
-                tr("touch.rotate").into(),
-                mobile.enabled && !mobile.landscape,
-                crate::ui::theme::PANEL,
-                crate::ui::theme::GOLD,
-            ),
         };
-        node.display = if show { Display::Flex } else { Display::None };
-        let is_ring = matches!(visual, MobileVisual::RankRing(_));
-        let rectangular = matches!(
-            visual,
-            MobileVisual::AimHint | MobileVisual::Rotate | MobileVisual::SkillDescription
-        );
-        let is_vector = matches!(visual, MobileVisual::AttackVector);
-        let size = if is_vector {
-            Vec2::new(drag.unwrap_or_default().length(), 3.0 * s)
-        } else if matches!(visual, MobileVisual::Rotate) {
-            mobile.viewport
-        } else if matches!(visual, MobileVisual::SkillDescription) {
-            Vec2::new(
-                (330.0 * s).min(mobile.viewport.x - mobile.safe.left - mobile.safe.right),
-                172.0 * s,
-            )
-        } else if rectangular {
-            let available = layout.utility_centers[0].x
-                - layout.upgrade_radius
-                - layout.joystick_center.x
-                - layout.joystick_radius
-                - 24.0 * s;
-            Vec2::new(available.clamp(120.0 * s, 260.0 * s), 60.0 * s)
-        } else {
-            Vec2::splat(radius * 2.0)
-        };
-        node.left = Val::Px(center.x - size.x * 0.5);
-        node.top = Val::Px(center.y - size.y * 0.5);
-        node.width = Val::Px(size.x);
-        node.height = Val::Px(size.y);
-        node.padding = UiRect::all(Val::Px(if is_vector || is_ring { 0.0 } else { 3.0 }));
-        node.border = UiRect::all(Val::Px(if is_vector || is_ring { 0.0 } else { 1.0 }));
-        ui_transform.rotation = if is_vector {
+        let display = if show { Display::Flex } else { Display::None };
+        if node.display != display {
+            node.display = display;
+        }
+        if !show {
+            continue;
+        }
+        match visual {
+            // The aim hint hugs its text, centred on the slot's top edge.
+            MobileVisual::AimHint => {
+                let left = Val::Px(center.x);
+                let top = Val::Px(center.y);
+                if node.left != left || node.top != top {
+                    node.left = left;
+                    node.top = top;
+                }
+                let shift = Val2::new(Val::Percent(-50.0), Val::Px(0.0));
+                if transform.translation != shift {
+                    transform.translation = shift;
+                }
+            }
+            _ => place(&mut node, center, size),
+        }
+        let rotation = if matches!(visual, MobileVisual::AttackVector) {
             let delta = drag.unwrap_or_default();
             Rot2::radians(delta.y.atan2(delta.x))
         } else {
             Rot2::IDENTITY
         };
-        node.border_radius = BorderRadius::all(if rectangular {
-            Val::Px(8.0)
+        if transform.rotation != rotation {
+            transform.rotation = rotation;
+        }
+        let round = !matches!(
+            visual,
+            MobileVisual::AimHint | MobileVisual::Rotate | MobileVisual::AttackVector
+        );
+        if round {
+            let corner = BorderRadius::all(Val::Percent(50.0));
+            if node.border_radius != corner {
+                node.border_radius = corner;
+            }
+        }
+        // Dead: ATK and the utilities are veiled like the abilities.
+        let veiled = dead && disc_look(visual).is_some();
+        let look_fill = if veiled {
+            Some(color::SURFACE_3)
         } else {
-            Val::Percent(50.0)
-        });
-        *color = fill.into();
-        *border = BorderColor::all(edge);
+            look_fill
+        };
+        let look_edge = if veiled {
+            Some(color::BORDER_DISABLED)
+        } else {
+            look_edge
+        };
+        if let (Some(next), Some(mut fill)) = (look_fill, fill) {
+            if fill.0 != next {
+                fill.0 = next;
+            }
+        }
+        if let (Some(next), Some(mut edge)) = (look_edge, edge) {
+            let next = BorderColor::all(next);
+            if *edge != next {
+                *edge = next;
+            }
+        }
+        let Some(children) = children else { continue };
         for child in children.iter() {
-            if let Ok((mut text, mut font)) = texts.get_mut(child) {
-                text.0.clone_from(&label);
-                font.font_size = if matches!(visual, MobileVisual::Rotate) {
-                    24.0 * s
-                } else if matches!(visual, MobileVisual::Cancel) {
-                    28.0 * s
-                } else if matches!(
-                    visual,
-                    MobileVisual::AimHint
-                        | MobileVisual::SkillDescription
-                        | MobileVisual::Ability(_)
-                        | MobileVisual::Utility(_)
-                        | MobileVisual::CategoryAttack(_)
-                        | MobileVisual::UpgradeMode
-                ) {
-                    12.0 * s
-                } else {
-                    14.0 * s
-                };
+            let Ok((part, mut visibility, image, grandchildren, _)) = parts.get_mut(child) else {
+                if let Ok((mut text, _)) = texts.get_mut(child) {
+                    if text.0 != label {
+                        text.0.clone_from(&label);
+                    }
+                }
+                continue;
+            };
+            let part = *part;
+            match part {
+                DiscPart::Sweep => {
+                    let next = if cooldown_state.is_some() {
+                        Visibility::Inherited
+                    } else {
+                        Visibility::Hidden
+                    };
+                    if *visibility != next {
+                        *visibility = next;
+                    }
+                    if let (Some(mut image), Some((remaining, total))) = (image, cooldown_state) {
+                        let frame =
+                            Some(crate::ui::widgets::game::cooldown_frame(remaining, total));
+                        if image.frame != frame {
+                            image.frame = frame;
+                        }
+                    }
+                }
+                DiscPart::Seconds => {
+                    let next = if cooldown_state.is_some() {
+                        Visibility::Inherited
+                    } else {
+                        Visibility::Hidden
+                    };
+                    if *visibility != next {
+                        *visibility = next;
+                    }
+                    if let (Some(grandchildren), Some((remaining, _))) =
+                        (grandchildren, cooldown_state)
+                    {
+                        for text_entity in grandchildren.iter() {
+                            if let Ok((mut text, _)) = texts.get_mut(text_entity) {
+                                let next = crate::ui::widgets::game::cooldown_text(remaining);
+                                if text.0 != next {
+                                    text.0 = next;
+                                }
+                            }
+                        }
+                    }
+                }
+                DiscPart::Icon | DiscPart::Label | DiscPart::Plus => {
+                    // Icon and label step aside while the sweep shows seconds.
+                    let next = if cooldown_state.is_some() && part != DiscPart::Plus {
+                        Visibility::Hidden
+                    } else {
+                        Visibility::Inherited
+                    };
+                    if *visibility != next {
+                        *visibility = next;
+                    }
+                }
+            }
+            if part == DiscPart::Label {
+                if let Ok((mut text, _)) = texts.get_mut(child) {
+                    if text.0 != label {
+                        text.0.clone_from(&label);
+                    }
+                }
             }
         }
     }
@@ -1500,6 +1663,9 @@ fn draw_mobile_controls(
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// The hold card is the shared skill card (`skill-description.md`;
+    /// `touch.skill.card` was one composed string): its cooldown follows
+    /// level, items and the sandbox exactly as before.
     #[test]
     fn skill_description_shows_level_item_and_sandbox_cooldowns() {
         for (slot, slow_sandbox, no_cooldowns, expected) in [
@@ -1553,21 +1719,23 @@ mod tests {
                     ..default()
                 },
             ));
-            let label = app
+            let card = app
                 .world_mut()
-                .spawn((Text::default(), TextFont::default()))
-                .id();
-            app.world_mut()
                 .spawn((
                     MobileVisual::SkillDescription,
                     Node::default(),
-                    BackgroundColor::default(),
-                    BorderColor::default(),
                     UiTransform::default(),
+                    crate::combat::skill_card::SkillCardView::default(),
                 ))
-                .add_child(label);
+                .id();
             app.update();
-            let text = &app.world().get::<Text>(label).unwrap().0;
+            let view = app
+                .world()
+                .get::<crate::combat::skill_card::SkillCardView>(card)
+                .unwrap();
+            assert!(view.visible && view.hint && view.status.is_none());
+            assert_eq!(view.slot, slot);
+            let text = crate::combat::skill_card::cooldown_line(view.cooldown);
             assert!(text.contains(expected), "expected {expected}, got {text}");
         }
     }
@@ -2107,13 +2275,34 @@ mod tests {
                 .collect();
             for (i, (center, radius)) in circles.iter().enumerate() {
                 assert!(*radius * 2.0 >= 44.0);
+                // hud.md places the joystick at safe bottom − 65 with a
+                // 1.3 × r capture circle, 2.6 px past the safe bottom: the
+                // visible base stays inside the safe area, the capture
+                // circle inside the viewport.
+                let visible = if *center == l.joystick_center {
+                    l.joystick_radius
+                } else {
+                    *radius
+                };
+                let within = |r: f32, left: f32, top: f32, right: f32, bottom: f32| {
+                    center.x - r >= left - 0.01
+                        && center.y - r >= top - 0.01
+                        && center.x + r <= right + 0.01
+                        && center.y + r <= bottom + 0.01
+                };
                 assert!(
-                    center.x - radius >= m.safe.left
-                        && center.x + radius <= viewport.x - m.safe.right + 0.01
+                    within(*radius, 0.0, 0.0, viewport.x, viewport.y),
+                    "{viewport:?}: {center:?} leaves the viewport"
                 );
                 assert!(
-                    center.y - radius >= m.safe.top
-                        && center.y + radius <= viewport.y - m.safe.bottom + 0.01
+                    within(
+                        visible,
+                        m.safe.left,
+                        m.safe.top,
+                        viewport.x - m.safe.right,
+                        viewport.y - m.safe.bottom
+                    ),
+                    "{viewport:?}: {center:?} leaves the safe area"
                 );
                 for (other, other_radius) in &circles[i + 1..] {
                     assert!(
@@ -2123,17 +2312,50 @@ mod tests {
                 }
             }
         }
+        // hud.md at the runtime insets 32/32/12/20 (844 × 390): joystick at
+        // safe left + 68, safe bottom − 65; ATK 76 inside the corner.
         let l = controls().layout();
-        assert_eq!(l.joystick_center, Vec2::new(104.0, 300.0));
-        assert_eq!(l.attack_center, Vec2::new(698.0, 256.0));
-        assert_eq!(
-            l.utility_centers,
-            [Vec2::new(530.0, 348.0), Vec2::new(580.0, 348.0)]
-        );
+        assert!(l.joystick_center.distance(Vec2::new(100.0, 305.0)) < 0.01);
+        assert!(l.attack_center.distance(Vec2::new(736.0, 294.0)) < 0.01);
+        let dash = Vec2::new(736.0, 294.0) + 168.0 * Vec2::from_angle(166f32.to_radians());
+        assert!(l.utility_centers[0].distance(dash) < 0.01);
     }
 
+    /// hud-phone redline at the reference safe area (47/47/0/21, 844 × 390):
+    /// every centre within ±2 px, ATK 96 / abilities 64 / utilities 48,
+    /// abilities on the inner arc (R 104) and utilities on the outer (R 168)
+    /// around ATK, and at least 8 px between neighbouring rims.
     #[test]
-    fn all_six_satellites_share_the_attack_center_and_one_uniform_orbit() {
+    fn combat_group_matches_the_phone_redline_on_two_arcs() {
+        let mut m = controls();
+        m.safe = MobileSafeInsets {
+            left: 47.0,
+            right: 47.0,
+            top: 0.0,
+            bottom: 21.0,
+        };
+        let l = m.layout();
+        let near = |a: Vec2, x: f32, y: f32| a.distance(Vec2::new(x, y)) <= 2.0;
+        assert!(near(l.attack_center, 721.0, 293.0));
+        assert!(near(l.joystick_center, 115.0, 304.0));
+        for (center, (x, y)) in l.ability_centers.into_iter().zip([
+            (622.0, 325.0),
+            (626.0, 251.0),
+            (679.0, 198.0),
+            (753.0, 194.0),
+        ]) {
+            assert!(near(center, x, y), "{center:?} vs ({x}, {y})");
+        }
+        assert!(near(l.utility_centers[0], 558.0, 334.0), "DASH");
+        assert!(near(l.utility_centers[1], 555.0, 270.0), "HASTE");
+        assert!(near(l.cancel_center, 576.0, 209.0), "CANCEL");
+        assert!(near(l.upgrade_center, 618.0, 161.0), "RANK");
+        assert!(near(l.category_centers[0], 675.0, 132.0), "MIN");
+        assert!(near(l.category_centers[1], 739.0, 126.0), "TWR");
+        assert_eq!(l.attack_radius * 2.0, 96.0);
+        assert_eq!(l.ability_radii, [32.0; 4]);
+        assert_eq!(l.auxiliary_radius * 2.0, 48.0);
+        assert_eq!(l.joystick_radius * 2.0, 104.0);
         for viewport in [
             Vec2::new(693.0, 320.0),
             Vec2::new(844.0, 390.0),
@@ -2146,24 +2368,34 @@ mod tests {
             };
             let l = m.layout();
             let s = m.combat_scale();
-            let centers = l.ability_centers.into_iter().chain(l.category_centers);
-            for (center, angle) in centers.zip([150.0_f32, 200.0, 250.0, 310.0, 90.0, 0.0]) {
-                let delta = center - l.attack_center;
-                assert!((delta.length() - 92.0 * s).abs() < 0.001);
-                let expected_direction =
-                    Vec2::new(angle.to_radians().cos(), angle.to_radians().sin());
-                assert!(delta.normalize().distance(expected_direction) < 0.0001);
+            for center in l.ability_centers {
+                assert!((center.distance(l.attack_center) - 104.0 * s).abs() < 0.01);
             }
-            assert!((l.attack_center.x + 114.0 * s - (viewport.x - m.safe.right)).abs() < 0.001);
-            assert!((l.attack_center.y + 114.0 * s - (viewport.y - m.safe.bottom)).abs() < 0.001);
-            for center in l
+            let outer: Vec<Vec2> = l
                 .utility_centers
                 .into_iter()
+                .chain(l.category_centers)
                 .chain([l.upgrade_center, l.cancel_center])
-            {
-                assert!(center.distance(l.attack_center) > 92.0 * s + l.auxiliary_radius);
+                .collect();
+            for center in &outer {
+                assert!((center.distance(l.attack_center) - 168.0 * s).abs() < 0.01);
             }
-            // Geometry used by drawing and input must remain the same at every size.
+            let discs: Vec<(Vec2, f32)> = l
+                .ability_centers
+                .into_iter()
+                .zip(l.ability_radii)
+                .chain(outer.iter().map(|center| (*center, l.auxiliary_radius)))
+                .chain([(l.attack_center, l.attack_radius)])
+                .collect();
+            for (i, (a, ra)) in discs.iter().enumerate() {
+                for (b, rb) in &discs[i + 1..] {
+                    assert!(
+                        a.distance(*b) - ra - rb >= 8.0 * s - 0.01,
+                        "rims closer than 8 px at {viewport:?}: {a:?} {b:?}"
+                    );
+                }
+            }
+            // Geometry used by drawing and input is the same at every size.
             assert!(matches!(
                 m.hit_control(l.attack_center),
                 Some((Control::Attack, _))
@@ -2192,7 +2424,8 @@ mod tests {
         };
         assert_eq!(m.scale(), 0.85);
         assert_eq!(m.combat_scale(), 1.0);
-        assert_eq!(m.layout().auxiliary_radius * 2.0, 44.0);
+        // `size.ability.utility.phone` (44 before the hud.md sizes).
+        assert_eq!(m.layout().auxiliary_radius * 2.0, 48.0);
         let narrow = MobileControls {
             viewport: Vec2::new(568.0, 430.0),
             ..controls()
@@ -2309,28 +2542,48 @@ mod tests {
         assert!(m.upgrade_mode);
     }
 
+    /// hud.md phone § Level-up: the + badge sits on every upgradable
+    /// ability (a hint outside rank mode) and the gold rim only in rank mode
+    /// (the procedural rank-capacity ring of 0.26 is gone: no pips on phone).
     #[test]
-    fn rank_ring_has_distinct_capacity_segments_and_learned_rank_pixels() {
-        let count = |rank| {
-            let pixels = skill_overlay_pixels(rank, 3, None);
-            assert_eq!(
-                &pixels[(56 * 112 + 56) * 4..(56 * 112 + 56) * 4 + 4],
-                &[0, 0, 0, 0]
-            );
-            pixels
-                .chunks_exact(4)
-                .filter(|pixel| pixel[0] == 123)
-                .count()
+    fn rank_rings_badge_upgradable_abilities_and_rim_them_in_rank_mode() {
+        let mut app = App::new();
+        let mut mobile = controls();
+        mobile.upgrade_enabled = [true, false, true, false];
+        app.insert_resource(mobile)
+            .init_resource::<GameplayInputContext>()
+            .init_resource::<TeamSelection>()
+            .init_resource::<LocalCastCooldown>()
+            .add_systems(Update, draw_mobile_controls);
+        app.world_mut()
+            .spawn((Player, CombatStats::default(), PlayerProgression::default()));
+        let rings: Vec<Entity> = (0..4)
+            .map(|slot| {
+                app.world_mut()
+                    .spawn((
+                        MobileVisual::RankRing(slot),
+                        Node::default(),
+                        UiTransform::default(),
+                        BackgroundColor::default(),
+                        BorderColor::default(),
+                    ))
+                    .id()
+            })
+            .collect();
+        app.update();
+        let shown = |app: &App, slot: usize| {
+            app.world().get::<Node>(rings[slot]).unwrap().display != Display::None
         };
-        assert_eq!(count(0), 0);
-        assert!(count(1) > 500);
-        assert!((count(2) as i32 - 2 * count(1) as i32).abs() < 10);
-        assert!((count(3) as i32 - 3 * count(1) as i32).abs() < 10);
-        let dark = skill_overlay_pixels(0, 3, None);
-        assert!(dark.chunks_exact(4).any(|pixel| pixel == [63, 85, 83, 240]));
-        assert_ne!(
-            skill_overlay_pixels(0, 0, Some(0.25)),
-            skill_overlay_pixels(0, 0, Some(0.75))
-        );
+        let rim = |app: &App, slot: usize| app.world().get::<BorderColor>(rings[slot]).unwrap().top;
+        assert!(shown(&app, 0) && !shown(&app, 1) && shown(&app, 2) && !shown(&app, 3));
+        assert_eq!(rim(&app, 0), Color::NONE, "a hint outside rank mode");
+        app.world_mut()
+            .resource_mut::<MobileControls>()
+            .upgrade_mode = true;
+        app.update();
+        assert_eq!(rim(&app, 0), crate::ui::tokens::color::GOLD_400);
+        let layout = app.world().resource::<MobileControls>().layout();
+        let node = app.world().get::<Node>(rings[2]).unwrap();
+        assert_eq!(node.width, Val::Px(layout.ability_radii[2] * 2.0));
     }
 }

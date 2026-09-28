@@ -117,7 +117,30 @@ impl TargetValidity<'_, '_> {
         self.positions.get(entity).ok().map(|t| t.translation)
     }
     pub fn valid(&self, entity: Entity, id: TargetId, team: Team) -> bool {
-        let Ok((stats, other, visible, protected, player, minion, neutral, structure)) =
+        self.selectable(entity, id, team) && !self.shielded(entity)
+    }
+
+    /// DECISIONS R7.1: a protected enemy structure may be selected for
+    /// inspection (the target plate shows it with a lock) but never attacked:
+    /// `valid` stays the attack/cast rule.
+    pub fn inspectable(&self, entity: Entity, id: TargetId, team: Team) -> bool {
+        self.selectable(entity, id, team)
+            && (!self.shielded(entity) || id.kind == TargetKind::Structure)
+    }
+
+    /// A selected structure that is protected (inspection only).
+    pub fn protected(&self, entity: Entity, id: TargetId) -> bool {
+        id.kind == TargetKind::Structure && self.shielded(entity)
+    }
+
+    fn shielded(&self, entity: Entity) -> bool {
+        self.units
+            .get(entity)
+            .is_ok_and(|(_, _, _, protected, ..)| protected.is_some_and(|p| p.0))
+    }
+
+    fn selectable(&self, entity: Entity, id: TargetId, team: Team) -> bool {
+        let Ok((stats, other, visible, _, player, minion, neutral, structure)) =
             self.units.get(entity)
         else {
             return false;
@@ -136,7 +159,6 @@ impl TargetValidity<'_, '_> {
                 other.is_some_and(|other| *other != team)
             })
             && visible.is_none_or(|v| v.get())
-            && !protected.is_some_and(|p| p.0)
     }
 }
 
@@ -195,8 +217,19 @@ pub(crate) fn clear_invalid_selection(
         .selected_entity
         .zip(target.selected_target)
         .is_some_and(|(entity, id)| {
-            local.is_none_or(|(_, team, _)| !validity.valid(entity, id, *team))
+            local.is_none_or(|(_, team, _)| !validity.inspectable(entity, id, *team))
         });
+    // R7.1: a protected structure stays selected for inspection, but no
+    // attack order may target it (a cast on it is refused with
+    // `combat.cast.protected` by the pending-cast resolver).
+    let inspect_only = !invalid
+        && target
+            .selected_entity
+            .zip(target.selected_target)
+            .is_some_and(|(entity, id)| validity.protected(entity, id));
+    if inspect_only && !blocked && basic.order.is_some() {
+        basic.cancel();
+    }
     if blocked
         || invalid
         || keys.just_pressed(KeyCode::Backspace)
@@ -776,6 +809,7 @@ pub(crate) fn draw_locked_target(
     settings: Option<Res<crate::model_scale::ModelScaleSettings>>,
     mut indicator: Query<&mut Node, With<LockedTargetIndicator>>,
     mut label: Query<&mut Text, With<LockedTargetLabel>>,
+    ui_scale: Option<Res<UiScale>>,
 ) {
     let Ok(mut node) = indicator.single_mut() else {
         return;
@@ -796,7 +830,7 @@ pub(crate) fn draw_locked_target(
     };
     let transform = &camera_pose;
     let position = target_pose.translation();
-    if !validity.valid(entity, id, *team) {
+    if !validity.inspectable(entity, id, *team) {
         return;
     }
     let Some(foot) = screen_position(camera, transform, *mode, position) else {
@@ -820,6 +854,11 @@ pub(crate) fn draw_locked_target(
         TargetKind::Structure => 72.0,
         _ => 34.0,
     };
+    // Viewport pixels → UI pixels (F8.1): the frame hugs the model at any
+    // `UiScale`.
+    let scale = ui_scale.as_ref().map_or(1.0, |scale| scale.0).max(0.1);
+    let foot = foot / scale;
+    let height = height / scale;
     *node = Node {
         position_type: PositionType::Absolute,
         left: Val::Px(foot.x - width / 2.0),
@@ -919,6 +958,7 @@ pub(crate) fn setup_targeting_ui(mut commands: Commands) {
 pub(crate) fn draw_targeting_ui(
     preview: Res<TargetAimPreview>,
     gamepad: Option<Res<crate::gamepad::GamepadControls>>,
+    ui_scale: Option<Res<UiScale>>,
     mut nodes: Query<(
         &AimVisual,
         &mut Node,
@@ -928,6 +968,9 @@ pub(crate) fn draw_targeting_ui(
         &mut BorderColor,
     )>,
 ) {
+    // The preview is in viewport pixels; nodes are placed in UI pixels.
+    let to_ui = |point: Vec2| crate::hud_layout::world_to_ui(point, ui_scale.as_deref());
+    let (origin, cursor) = (to_ui(preview.origin), to_ui(preview.cursor));
     for (part, mut node, mut transform, mut color, label, mut border) in &mut nodes {
         node.display = Display::None;
         if !preview.active {
@@ -944,8 +987,8 @@ pub(crate) fn draw_targeting_ui(
             AimVisual::Label => {
                 *node = Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px((preview.cursor.x - 65.0).max(8.0)),
-                    top: Val::Px((preview.cursor.y - 42.0).max(8.0)),
+                    left: Val::Px((cursor.x - 65.0).max(8.0)),
+                    top: Val::Px((cursor.y - 42.0).max(8.0)),
                     width: Val::Px(160.0),
                     ..default()
                 };
@@ -968,8 +1011,7 @@ pub(crate) fn draw_targeting_ui(
                 *color = BackgroundColor(Color::srgba(0.01, 0.04, 0.05, 0.78));
             }
             AimVisual::Vector => {
-                let (line, rotation) =
-                    crate::minimap::line_node(preview.origin, preview.cursor, 3.0);
+                let (line, rotation) = crate::minimap::line_node(origin, cursor, 3.0);
                 *node = line;
                 *transform = rotation;
                 *color = BackgroundColor(tint);
@@ -979,9 +1021,9 @@ pub(crate) fn draw_targeting_ui(
                     let Some(p) = preview.candidate_screen else {
                         continue;
                     };
-                    p
+                    to_ui(p)
                 } else {
-                    preview.cursor
+                    cursor
                 };
                 let size = if matches!(part, AimVisual::Candidate) {
                     48.0

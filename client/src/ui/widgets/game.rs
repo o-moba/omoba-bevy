@@ -99,7 +99,9 @@ impl BarKind {
     }
 }
 
-/// A bar's value; `respawn` (seconds) marks the dead state.
+/// A bar's value; `respawn` marks the dead state: `Some(seconds)` shows the
+/// countdown (`kit.bar.respawn`), `Some(0)` a dead bar without one
+/// (`hud.target.defeated`: the match does not replicate respawn seconds).
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
 pub(crate) struct BarValue {
     pub current: f32,
@@ -116,6 +118,25 @@ impl BarValue {
         }
     }
 }
+
+/// Which bar a [`bar`] root is (its fill rule and value format).
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct BarKindTag(pub BarKind);
+
+/// The fill of a bar at a fraction: the player's own HP turns
+/// `color.state.warning` at ≤ 50 % and `color.bar.hp.enemy` at ≤ 25 %
+/// (hud.md § States, Low HP); every other bar keeps its token.
+pub(crate) fn bar_fill_at(kind: BarKind, fraction: f32) -> Color {
+    match kind {
+        BarKind::HpSelf if fraction <= LOW_HP_DANGER => color::BAR_HP_ENEMY,
+        BarKind::HpSelf if fraction <= LOW_HP_WARNING => color::STATE_WARNING,
+        kind => kind.fill(),
+    }
+}
+
+/// Low-HP thresholds of the player's HP bar.
+pub(crate) const LOW_HP_WARNING: f32 = 0.5;
+pub(crate) const LOW_HP_DANGER: f32 = 0.25;
 
 /// The damage trail: the fraction it shows now and where it started.
 #[derive(Component, Clone, Copy, Default)]
@@ -136,6 +157,19 @@ pub(crate) fn bar(
     form: Form,
     show_value: bool,
 ) -> Entity {
+    bar_parts(parent, kind, value, width, form, show_value).0
+}
+
+/// [`bar`] and its parts (`fill`, `label`, `knob` = damage trail), for an
+/// owner that names or recolours them.
+pub(crate) fn bar_parts(
+    parent: &mut ChildSpawnerCommands,
+    kind: BarKind,
+    value: BarValue,
+    width: Val,
+    form: Form,
+    show_value: bool,
+) -> (Entity, KitParts) {
     let mut parts = KitParts::default();
     let mut root = parent.spawn((
         Node {
@@ -145,6 +179,7 @@ pub(crate) fn bar(
             ..default()
         },
         value,
+        BarKindTag(kind),
     ));
     root.with_children(|root| {
         parts.track = Some(
@@ -189,14 +224,17 @@ pub(crate) fn bar(
                 }
                 parts.fill = Some(
                     track
-                        .spawn((fill_node(value.fraction()), BackgroundColor(kind.fill())))
+                        .spawn((
+                            fill_node(value.fraction()),
+                            BackgroundColor(bar_fill_at(kind, value.fraction())),
+                        ))
                         .id(),
                 );
                 if show_value && kind.is_hp() {
                     parts.label = Some(
                         track
                             .spawn((
-                                Text::new(bar_text(&value)),
+                                Text::new(bar_text(kind, &value)),
                                 theme::role_text(TextRole::NumberSm),
                                 TextColor(color::TEXT_PRIMARY),
                                 TextShadow::default(),
@@ -210,7 +248,7 @@ pub(crate) fn bar(
         if show_value && kind == BarKind::Mana && form == Form::Desktop {
             parts.label = Some(
                 root.spawn((
-                    Text::new(bar_text(&value)),
+                    Text::new(bar_text(kind, &value)),
                     theme::role_text(TextRole::NumberSm),
                     TextColor(color::TEXT_SECONDARY),
                 ))
@@ -218,12 +256,16 @@ pub(crate) fn bar(
             );
         }
     });
-    root.insert(parts).id()
+    (root.insert(parts).id(), parts)
 }
 
-fn bar_text(value: &BarValue) -> String {
+fn bar_text(kind: BarKind, value: &BarValue) -> String {
     match value.respawn {
+        Some(0) if kind == BarKind::Mana => String::new(),
+        Some(0) => crate::i18n::tr("hud.target.defeated").to_owned(),
         Some(seconds) => crate::i18n::trf("kit.bar.respawn", &[("seconds", &seconds)]),
+        // hud.md: HP `{hp} / {max}`, mana `{mana}/{max}` (numbers only).
+        None if kind == BarKind::Mana => format!("{:.0}/{:.0}", value.current, value.max),
         None => format!("{:.0} / {:.0}", value.current, value.max),
     }
 }
@@ -232,28 +274,35 @@ fn bar_text(value: &BarValue) -> String {
 /// to the fill over `motion.duration.bar_trail`.
 pub(crate) fn paint_bars(
     time: Res<Time>,
-    bars: Query<(Ref<BarValue>, &KitParts)>,
+    bars: Query<(Ref<BarValue>, &KitParts, Option<&BarKindTag>)>,
     mut fills: Query<(&mut Node, Option<&mut DamageTrail>, &mut BackgroundColor)>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
     let duration = motion::DURATION_BAR_TRAIL.as_secs_f32();
-    for (value, parts) in &bars {
+    for (value, parts, kind) in &bars {
+        let kind = kind.map_or(BarKind::HpSelf, |kind| kind.0);
         let fraction = if value.respawn.is_some() {
             0.0
         } else {
             value.fraction()
         };
         if value.is_changed() {
-            if let Some((mut node, ..)) = parts.fill.and_then(|fill| fills.get_mut(fill).ok()) {
+            if let Some((mut node, _, mut fill)) =
+                parts.fill.and_then(|fill| fills.get_mut(fill).ok())
+            {
                 let width = Val::Percent(fraction * 100.0);
                 if node.width != width {
                     node.width = width;
+                }
+                let next = bar_fill_at(kind, fraction);
+                if fill.0 != next {
+                    fill.0 = next;
                 }
             }
             if let Some((mut text, mut ink)) =
                 parts.label.and_then(|label| texts.get_mut(label).ok())
             {
-                let next = bar_text(&value);
+                let next = bar_text(kind, &value);
                 if text.0 != next {
                     text.0 = next;
                 }
@@ -308,10 +357,16 @@ pub(crate) struct AbilityView {
     pub rank: u8,
     /// `(remaining, total)` seconds.
     pub cooldown: Option<(f32, f32)>,
+    /// Veiled (`color.locked.overlay`): a slot below its unlock level, or
+    /// every slot while the hero is dead (then without a lock or level).
     pub locked: bool,
+    /// The level the slot unlocks at, shown on the locked veil (`Lv 6`).
+    pub unlock_level: Option<u8>,
     pub no_mana: bool,
     /// Show the rank pips (desktop only).
     pub pips: bool,
+    /// Show the segmented rank ring on the rim (phone, DECISIONS R10).
+    pub ring: bool,
 }
 
 /// Maximum ability rank (`MAX_ABILITY_RANK`).
@@ -322,6 +377,11 @@ pub(crate) const ABILITY_BADGE: f32 = 20.0;
 pub(crate) const ABILITY_COST: f32 = 18.0;
 pub(crate) const ABILITY_PIP: f32 = 6.0;
 pub(crate) const ABILITY_PIP_GAP: f32 = 3.0;
+/// Pips sit under the cost pill: their top is 18 px below the circle
+/// (hud-desktop redline: slot top 610, pips 692).
+pub(crate) const ABILITY_PIP_TOP: f32 = ABILITY_COST;
+/// Locked veil caption (`touch.ability.locked`): `type.caption` semibold.
+pub(crate) const LOCKED_LABEL: Metric = Metric::new(12.0, 12.0);
 pub(crate) const ABILITY_UPGRADE: f32 = 22.0;
 pub(crate) const ABILITY_UPGRADE_GLYPH: f32 = 14.0;
 /// Cooldown seconds: `type.number_lg` at 26 px.
@@ -334,8 +394,13 @@ pub(crate) struct AbilityParts {
     sweep: Entity,
     seconds: Entity,
     veil: Entity,
+    veil_label: Entity,
+    /// The key badge's text (the HUD writes pad glyphs into it).
+    pub(crate) key: Option<Entity>,
     cost: Option<Entity>,
     pips: Option<Entity>,
+    /// Rank ring layers: all arcs (unlearned tint) and the learned arcs.
+    ring: Option<(Entity, Entity)>,
     flash: Entity,
 }
 
@@ -357,25 +422,60 @@ pub(crate) fn ability_button<T: UiActionT>(
     action: T,
     id: impl Into<TestId>,
 ) -> Entity {
+    let root = parent
+        .spawn((
+            button_bundle(ability_node(side), ButtonKind::Skill, action, id.into()),
+            KitSkin::Ability,
+            NoSlab,
+        ))
+        .id();
+    fill_ability(parent, root, view, side)
+}
+
+/// The same face without a button: the phone combat group, whose input is
+/// the touch layer's (`mobile_controls`), not the kit recognizer's. The owner
+/// shows the aiming glow and the held rim through [`AbilityFace`].
+pub(crate) fn ability_face(
+    parent: &mut ChildSpawnerCommands,
+    view: AbilityView,
+    side: f32,
+    bundle: impl Bundle,
+) -> Entity {
+    let root = parent
+        .spawn((ability_node(side), Pickable::IGNORE, bundle))
+        .id();
+    fill_ability(parent, root, view, side)
+}
+
+fn ability_node(side: f32) -> Node {
+    Node {
+        width: Val::Px(side),
+        height: Val::Px(side),
+        flex_shrink: 0.0,
+        border_radius: BorderRadius::all(Val::Px(radius::PILL)),
+        ..default()
+    }
+}
+
+/// Aiming glow and held rim of an [`ability_face`] (a kit button paints
+/// both from its interaction and `ButtonStyle::selected` instead).
+#[derive(Component, Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub(crate) struct AbilityFace {
+    pub glow: bool,
+    pub held: bool,
+}
+
+fn fill_ability(
+    parent: &mut ChildSpawnerCommands,
+    root: Entity,
+    view: AbilityView,
+    side: f32,
+) -> Entity {
     let mut parts = KitParts::default();
     let mut ability = None;
-    let mut button = parent.spawn((
-        button_bundle(
-            Node {
-                width: Val::Px(side),
-                height: Val::Px(side),
-                flex_shrink: 0.0,
-                border_radius: BorderRadius::all(Val::Px(radius::PILL)),
-                ..default()
-            },
-            ButtonKind::Skill,
-            action,
-            id.into(),
-        ),
-        KitSkin::Ability,
-        NoSlab,
-        ReadyFlash::default(),
-    ));
+    let mut commands = parent.commands();
+    let mut button = commands.entity(root);
+    button.insert(ReadyFlash::default());
     button.with_children(|button| {
         let full = || Node {
             position_type: PositionType::Absolute,
@@ -453,14 +553,31 @@ pub(crate) fn ability_button<T: UiActionT>(
                 Pickable::IGNORE,
             ))
             .id();
+        let mut veil_label = Entity::PLACEHOLDER;
         let veil = button
             .spawn((
-                inset(ABILITY_ART_INSET),
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(space::S2),
+                    ..inset(ABILITY_ART_INSET)
+                },
                 BackgroundColor(theme::perceptual(color::LOCKED_OVERLAY)),
                 Visibility::Hidden,
                 Pickable::IGNORE,
-                children![icon_node(Icon::NavLock, size::ICON_MD, color::TEXT_MUTED)],
             ))
+            .with_children(|veil| {
+                veil.spawn(icon_node(Icon::NavLock, size::ICON_MD, color::TEXT_MUTED));
+                veil_label = veil
+                    .spawn((
+                        Text::new(locked_label(view.unlock_level)),
+                        theme::styled_text(
+                            TextStyle::keep_case(TextRole::Label).sized(LOCKED_LABEL),
+                        ),
+                        TextColor(color::TEXT_SECONDARY),
+                        TextLayout::new_with_no_wrap(),
+                    ))
+                    .id();
+            })
             .id();
         let flash = button
             .spawn((
@@ -469,11 +586,19 @@ pub(crate) fn ability_button<T: UiActionT>(
                 Pickable::IGNORE,
             ))
             .id();
+        // The phone's segmented rank ring replaces the plain rim (R10): it
+        // is the rim, split into `MAX_RANK` arcs, over the art and sweep.
+        let rim = if view.ring {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
         parts.track = Some(
             button
                 .spawn((
                     full(),
                     KitImage::sprite(Sprite::RingCircle, color::GOLD_500),
+                    rim,
                     Pickable::IGNORE,
                 ))
                 .id(),
@@ -484,8 +609,30 @@ pub(crate) fn ability_button<T: UiActionT>(
                 ..inset(border::FRAME)
             },
             BorderColor::all(color::GOLD_700),
+            rim,
             Pickable::IGNORE,
         ));
+        let ring = view.ring.then(|| {
+            let mut layer = |tint: Color| {
+                button
+                    .spawn((
+                        Node {
+                            border_radius: BorderRadius::ZERO,
+                            ..full()
+                        },
+                        ImageNode {
+                            color: tint,
+                            ..default()
+                        },
+                        // Shown once the masks exist (`paint_abilities`).
+                        Visibility::Hidden,
+                        RankRingLayer,
+                        Pickable::IGNORE,
+                    ))
+                    .id()
+            };
+            (layer(RANK_RING_UNLEARNED), layer(RANK_RING_LEARNED))
+        });
         let mut seconds = Entity::PLACEHOLDER;
         button
             .spawn((full(), Pickable::IGNORE))
@@ -504,7 +651,8 @@ pub(crate) fn ability_button<T: UiActionT>(
                     ))
                     .id();
             });
-        if let Some(key) = view.key {
+        let key = view.key.map(|key| {
+            let mut text = Entity::PLACEHOLDER;
             button
                 .spawn((
                     Node {
@@ -524,26 +672,48 @@ pub(crate) fn ability_button<T: UiActionT>(
                     BorderColor::all(color::GOLD_600),
                     Pickable::IGNORE,
                 ))
-                .with_child((
-                    Text::new(key),
-                    // `type.number_sm` size in the semibold body face: key
-                    // letters (Q W E R) read as letters, not Barlow digits.
-                    theme::styled_text(
-                        TextStyle::keep_case(TextRole::Label)
-                            .sized(TextRole::NumberSm.style().size),
-                    ),
-                    TextColor(color::TEXT_GOLD),
-                ));
-        }
+                .with_children(|badge| {
+                    text = badge
+                        .spawn((
+                            Text::new(key),
+                            // `type.number_sm` size in the semibold body
+                            // face: key letters (Q W E R) read as letters,
+                            // not Barlow digits.
+                            theme::styled_text(
+                                TextStyle::keep_case(TextRole::Label)
+                                    .sized(TextRole::NumberSm.style().size),
+                            ),
+                            TextColor(color::TEXT_GOLD),
+                            AbilityKey,
+                        ))
+                        .id();
+                });
+            text
+        });
         let cost = view.cost.map(|cost| {
+            // A full-width row centres the pill, which hugs its number.
             button
                 .spawn((
                     Node {
                         position_type: PositionType::Absolute,
                         bottom: Val::Px(-(ABILITY_COST / 2.0)),
-                        left: Val::Px(side / 2.0 - ABILITY_COST),
-                        min_width: Val::Px(ABILITY_COST * 2.0),
+                        left: Val::Px(0.0),
+                        right: Val::Px(0.0),
+                        justify_content: JustifyContent::Center,
+                        display: if view.locked {
+                            Display::None
+                        } else {
+                            Display::Flex
+                        },
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ))
+                .with_child((
+                    Node {
+                        min_width: Val::Px(ABILITY_COST),
                         height: Val::Px(ABILITY_COST),
+                        padding: UiRect::horizontal(Val::Px(space::S4)),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
                         border: UiRect::all(Val::Px(border::HAIRLINE)),
@@ -553,11 +723,12 @@ pub(crate) fn ability_button<T: UiActionT>(
                     BackgroundColor(color::SURFACE_1_OPAQUE),
                     BorderColor::all(color::BORDER_SUBTLE),
                     Pickable::IGNORE,
-                ))
-                .with_child((
-                    Text::new(cost.to_string()),
-                    theme::role_text(TextRole::NumberSm),
-                    TextColor(color::BAR_MANA),
+                    children![(
+                        Text::new(cost.to_string()),
+                        theme::role_text(TextRole::NumberSm),
+                        TextColor(color::BAR_MANA),
+                        AbilityCost,
+                    )],
                 ))
                 .id()
         });
@@ -566,7 +737,7 @@ pub(crate) fn ability_button<T: UiActionT>(
                 .spawn((
                     Node {
                         position_type: PositionType::Absolute,
-                        top: Val::Px(side + ABILITY_COST / 2.0 + ABILITY_PIP_GAP),
+                        top: Val::Px(side + ABILITY_PIP_TOP),
                         left: Val::Px(0.0),
                         right: Val::Px(0.0),
                         column_gap: Val::Px(ABILITY_PIP_GAP),
@@ -595,18 +766,102 @@ pub(crate) fn ability_button<T: UiActionT>(
             sweep,
             seconds,
             veil,
+            veil_label,
+            key,
             cost,
             pips,
+            ring,
             flash,
         });
     });
-    let entity = button.id();
     button.insert((parts, view));
     if let Some(ability) = ability {
-        parent.commands().entity(entity).insert(ability);
+        button.insert(ability);
     }
-    entity
+    root
 }
+
+/// Segmented rank ring (`ability-button.md` § Rank ring, R10): learned
+/// ranks `color.gold.400`, not yet learned `color.border.subtle`.
+pub(crate) const RANK_RING_LEARNED: Color = color::GOLD_400;
+pub(crate) const RANK_RING_UNLEARNED: Color = color::BORDER_SUBTLE;
+/// Mask size and band: the outer 11 % of the radius (0.87–0.98), each arc
+/// with a 9 % gap (4.5 % at either end), as the 0.26 phone ring.
+pub(crate) const RANK_RING_MASK: usize = 112;
+const RANK_RING_BAND: (f32, f32) = (0.87, 0.98);
+const RANK_RING_GAP: f32 = 0.045;
+
+/// A rank ring layer of an ability button.
+#[derive(Component)]
+pub(crate) struct RankRingLayer;
+
+/// A white mask of the first `lit` of `capacity` arcs, clockwise from 12
+/// o'clock (RGBA, `RANK_RING_MASK` square); the layer's colour tints it.
+pub(crate) fn rank_ring_pixels(lit: u8, capacity: u8) -> Vec<u8> {
+    let size = RANK_RING_MASK;
+    let mut pixels = vec![0; size * size * 4];
+    for y in 0..size {
+        for x in 0..size {
+            let delta = Vec2::new(x as f32 + 0.5, y as f32 + 0.5) - Vec2::splat(size as f32 * 0.5);
+            let radius = delta.length() / (size as f32 * 0.5);
+            let turn = (delta.y.atan2(delta.x) + std::f32::consts::FRAC_PI_2)
+                .rem_euclid(std::f32::consts::TAU)
+                / std::f32::consts::TAU;
+            let segment = turn * f32::from(capacity.max(1));
+            let on_arc = (RANK_RING_BAND.0..=RANK_RING_BAND.1).contains(&radius)
+                && (RANK_RING_GAP..1.0 - RANK_RING_GAP).contains(&segment.fract());
+            if on_arc && (segment.floor() as u8) < lit {
+                pixels[(y * size + x) * 4..(y * size + x) * 4 + 4]
+                    .copy_from_slice(&[255, 255, 255, 255]);
+            }
+        }
+    }
+    pixels
+}
+
+/// The ring masks for 0..=`MAX_RANK` lit arcs, made once.
+#[derive(Resource)]
+pub(crate) struct RankRingMasks(pub [Handle<Image>; MAX_RANK as usize + 1]);
+
+pub(crate) fn make_rank_ring_masks(
+    mut commands: Commands,
+    masks: Option<Res<RankRingMasks>>,
+    images: Option<ResMut<Assets<Image>>>,
+) {
+    let (None, Some(mut images)) = (masks, images) else {
+        return;
+    };
+    let side = RANK_RING_MASK as u32;
+    let handles = std::array::from_fn(|lit| {
+        images.add(Image::new(
+            bevy::render::render_resource::Extent3d {
+                width: side,
+                height: side,
+                depth_or_array_layers: 1,
+            },
+            bevy::render::render_resource::TextureDimension::D2,
+            rank_ring_pixels(lit as u8, MAX_RANK),
+            bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+            bevy::asset::RenderAssetUsages::default(),
+        ))
+    });
+    commands.insert_resource(RankRingMasks(handles));
+}
+
+/// The locked veil's caption: `touch.ability.locked` (`Lv {level}`).
+fn locked_label(level: Option<u8>) -> String {
+    level.map_or_else(String::new, |level| {
+        crate::i18n::trf("touch.ability.locked", &[("level", &level)])
+    })
+}
+
+/// The key letter of an ability's badge (the HUD rewrites it to pad glyphs).
+#[derive(Component)]
+pub(crate) struct AbilityKey;
+
+/// The number in an ability's cost pill.
+#[derive(Component)]
+pub(crate) struct AbilityCost;
 
 /// The level-up "+" disc (`ButtonKind::SkillUpgrade`): 22 px, top-right of
 /// an ability (−4/−6), `color.emerald.400` with a 2 px `gold.400` rim.
@@ -654,7 +909,7 @@ pub(crate) fn ability_upgrade<T: UiActionT>(
 
 /// The skill atlas art of an ability button, cropped to its cell.
 #[derive(Component, Clone, Copy)]
-pub(crate) struct AbilityArt(Option<&'static str>);
+pub(crate) struct AbilityArt(pub(crate) Option<&'static str>);
 
 pub(crate) fn resolve_ability_art(
     mut commands: Commands,
@@ -682,19 +937,73 @@ pub(crate) fn resolve_ability_art(
     }
 }
 
-/// Cooldown sweep and seconds, locked veil, cost colour, art dimming, rank
-/// pips and the ready flash of every ability button.
-#[allow(clippy::type_complexity)]
+/// Cooldown sweep and seconds, locked veil and its level, cost colour, art
+/// dimming, rank pips, the ready flash of every ability button, and the
+/// aiming glow / held rim of an [`ability_face`].
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(crate) fn paint_abilities(
     time: Res<Time>,
-    mut abilities: Query<(&AbilityView, &AbilityParts, &mut ReadyFlash)>,
+    locale: Option<Res<crate::i18n::Locale>>,
+    mut abilities: Query<(
+        Ref<AbilityView>,
+        &AbilityParts,
+        &mut ReadyFlash,
+        Option<&AbilityFace>,
+        Option<&KitParts>,
+    )>,
     mut images: Query<&mut KitImage>,
     mut visibility: Query<&mut Visibility>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
-    mut art: Query<&mut ImageNode, With<AbilityArt>>,
+    mut art: Query<(&mut AbilityArt, Option<&mut ImageNode>)>,
+    mut nodes: Query<&mut Node>,
     children: Query<&Children>,
+    ring_masks: Option<Res<RankRingMasks>>,
+    mut ring_layers: Query<&mut ImageNode, (With<RankRingLayer>, Without<AbilityArt>)>,
 ) {
-    for (view, parts, mut flash) in &mut abilities {
+    let relabel = crate::i18n::locale_changed(&locale);
+    for (view, parts, mut flash, face, kit) in &mut abilities {
+        // The rank ring: every arc dim, the learned ones lit (R10).
+        if let (Some((track, lit)), Some(masks)) = (parts.ring, ring_masks.as_ref()) {
+            let learned = view.rank.min(MAX_RANK) as usize;
+            for (layer, mask) in [(track, MAX_RANK as usize), (lit, learned)] {
+                if let Ok(mut image) = ring_layers.get_mut(layer) {
+                    if image.image != masks.0[mask] {
+                        image.image = masks.0[mask].clone();
+                    }
+                }
+                if let Ok(mut shown) = visibility.get_mut(layer) {
+                    if *shown != Visibility::Inherited {
+                        *shown = Visibility::Inherited;
+                    }
+                }
+            }
+        }
+        // The art follows the view's ability (a class change, or a view
+        // spawned before the class was known); the fallback glyph hides.
+        if view.is_changed() {
+            if let Ok((mut ability, image)) = art.get_mut(parts.art) {
+                if ability.0 != view.ability {
+                    ability.0 = view.ability;
+                    if let Some(mut image) = image {
+                        image.rect = None;
+                    }
+                }
+            }
+            if let Ok(glyphs) = children.get(parts.art) {
+                for glyph in glyphs.iter() {
+                    if let Ok(mut current) = visibility.get_mut(glyph) {
+                        let next = if view.ability.is_some() {
+                            Visibility::Hidden
+                        } else {
+                            Visibility::Inherited
+                        };
+                        if *current != next {
+                            *current = next;
+                        }
+                    }
+                }
+            }
+        }
         let cooling = view.cooldown.is_some_and(|(remaining, _)| remaining > 0.0);
         let show = |visible: bool| {
             if visible {
@@ -731,21 +1040,65 @@ pub(crate) fn paint_abilities(
                 text.0 = next;
             }
         }
-        if let Some(cost) = parts.cost.and_then(|cost| children.get(cost).ok()) {
-            for child in cost.iter() {
-                if let Ok((_, mut ink)) = texts.get_mut(child) {
-                    let next = if view.no_mana {
-                        color::TEXT_DANGER
+        if view.is_changed() || relabel {
+            if let Ok((mut text, _)) = texts.get_mut(parts.veil_label) {
+                let next = locked_label(view.unlock_level);
+                if text.0 != next {
+                    text.0 = next;
+                }
+            }
+            // A veil without an unlock level (the dead state) has no lock.
+            if let Some(lock) = children
+                .get(parts.veil)
+                .ok()
+                .and_then(|veil| veil.first().copied())
+            {
+                if let Ok(mut current) = visibility.get_mut(lock) {
+                    let next = if view.unlock_level.is_some() {
+                        Visibility::Inherited
                     } else {
-                        color::BAR_MANA
+                        Visibility::Hidden
                     };
-                    if ink.0 != next {
-                        ink.0 = next;
+                    if *current != next {
+                        *current = next;
                     }
                 }
             }
         }
-        if let Ok(mut image) = art.get_mut(parts.art) {
+        if let Some(cost) = parts.cost {
+            if let Ok(mut node) = nodes.get_mut(cost) {
+                // A locked slot has no price yet (hud.md: `Lv 6` only).
+                let display = if view.locked {
+                    Display::None
+                } else {
+                    Display::Flex
+                };
+                if node.display != display {
+                    node.display = display;
+                }
+            }
+            let pill = children.get(cost).ok().and_then(|row| row.first().copied());
+            let number = pill
+                .and_then(|pill| children.get(pill).ok())
+                .and_then(|pill| pill.first().copied());
+            if let Some(Ok((mut text, mut ink))) = number.map(|number| texts.get_mut(number)) {
+                let next = if view.no_mana {
+                    color::TEXT_DANGER
+                } else {
+                    color::BAR_MANA
+                };
+                if ink.0 != next {
+                    ink.0 = next;
+                }
+                if let Some(value) = view.cost {
+                    let value = value.to_string();
+                    if text.0 != value {
+                        text.0 = value;
+                    }
+                }
+            }
+        }
+        if let Ok((_, Some(mut image))) = art.get_mut(parts.art) {
             // Bevy UI has no desaturation; unaffordable art is dimmed.
             let next = if view.no_mana || view.locked {
                 color::TEXT_SECONDARY
@@ -767,6 +1120,28 @@ pub(crate) fn paint_abilities(
                     if image.tint != next {
                         image.tint = next;
                     }
+                }
+            }
+        }
+        if let (Some(face), Some(kit)) = (face, kit) {
+            if let Some(mut rim) = kit.track.and_then(|rim| images.get_mut(rim).ok()) {
+                let tint = if face.held {
+                    color::GOLD_300
+                } else {
+                    color::GOLD_500
+                };
+                if rim.tint != tint {
+                    rim.tint = tint;
+                }
+            }
+            if let Some(mut glow) = kit.fill.and_then(|glow| nodes.get_mut(glow).ok()) {
+                let display = if face.glow || face.held {
+                    Display::Flex
+                } else {
+                    Display::None
+                };
+                if glow.display != display {
+                    glow.display = display;
                 }
             }
         }
@@ -1376,6 +1751,258 @@ pub(crate) fn portrait(
         .id()
 }
 
+/// Anatomy of a live portrait (`hud.md`, `target-hero.md`): circle `side`,
+/// XP ring (player status) or a rim, level disc `disc` at `disc_at` (left,
+/// bottom offsets from the circle), fallback icon size.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) struct PortraitSpec {
+    pub side: f32,
+    pub ring: bool,
+    pub disc: f32,
+    pub disc_at: Vec2,
+    pub icon: f32,
+}
+
+/// What a live portrait shows; the HUD owns it and [`paint_portraits`]
+/// follows every change.
+#[derive(Component, Clone, PartialEq, Debug)]
+pub(crate) struct PortraitView {
+    /// Avatar thumbnail path; `None` shows `fallback` on `color.surface.3`.
+    pub art: Option<String>,
+    pub fallback: Icon,
+    /// Level disc; hidden when `None`.
+    pub level: Option<u32>,
+    /// XP ring progress `0..=1` (portraits spawned with a ring).
+    pub xp: f32,
+    /// Dead / disconnected: art and icon dimmed (Bevy UI cannot desaturate).
+    pub grey: bool,
+    /// Boss or base: `border.frame` `color.gold.500` rim instead of the
+    /// hairline `color.gold.600`.
+    pub strong_rim: bool,
+}
+
+/// The parts [`paint_portraits`] repaints.
+#[derive(Component, Clone, Copy)]
+pub(crate) struct PortraitParts {
+    art: Entity,
+    icon: Entity,
+    disc: Entity,
+    level: Entity,
+    ring: bool,
+}
+
+/// A portrait that follows a [`PortraitView`]: the art (or class / kind
+/// icon), an optional XP ring, a level disc.
+pub(crate) fn live_portrait(
+    parent: &mut ChildSpawnerCommands,
+    view: PortraitView,
+    spec: PortraitSpec,
+    bundle: impl Bundle,
+) -> Entity {
+    let mut parts = None;
+    let mut root = parent.spawn((
+        Node {
+            width: Val::Px(spec.side),
+            height: Val::Px(spec.side),
+            flex_shrink: 0.0,
+            ..default()
+        },
+        Pickable::IGNORE,
+        bundle,
+    ));
+    root.with_children(|portrait| {
+        if spec.ring {
+            timer_ring_layers(portrait, view.xp, color::SURFACE_3, color::BAR_XP);
+        }
+        let inset = if spec.ring { XP_RING } else { 0.0 };
+        let mut icon = Entity::PLACEHOLDER;
+        let art = portrait
+            .spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(inset),
+                    top: Val::Px(inset),
+                    width: Val::Px(spec.side - 2.0 * inset),
+                    height: Val::Px(spec.side - 2.0 * inset),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    border: UiRect::all(Val::Px(if spec.ring { 0.0 } else { border::HAIRLINE })),
+                    border_radius: BorderRadius::all(Val::Px(radius::PILL)),
+                    overflow: Overflow::clip(),
+                    ..default()
+                },
+                BackgroundColor(color::SURFACE_3),
+                BorderColor::all(color::GOLD_600),
+                Pickable::IGNORE,
+            ))
+            .with_children(|art| {
+                icon = art
+                    .spawn(icon_node(view.fallback, spec.icon, color::TEXT_GOLD))
+                    .id();
+            })
+            .id();
+        let mut level = Entity::PLACEHOLDER;
+        let disc = portrait
+            .spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(spec.disc_at.x),
+                    bottom: Val::Px(spec.disc_at.y),
+                    width: Val::Px(spec.disc),
+                    height: Val::Px(spec.disc),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    border: UiRect::all(Val::Px(border::HAIRLINE)),
+                    border_radius: BorderRadius::all(Val::Px(radius::PILL)),
+                    display: Display::None,
+                    ..default()
+                },
+                BackgroundColor(color::SURFACE_1_OPAQUE),
+                BorderColor::all(color::GOLD_500),
+                Pickable::IGNORE,
+            ))
+            .with_children(|disc| {
+                level = disc
+                    .spawn((
+                        Text::new(""),
+                        theme::role_text(TextRole::NumberSm),
+                        TextColor(color::TEXT_GOLD),
+                    ))
+                    .id();
+            })
+            .id();
+        parts = Some(PortraitParts {
+            art,
+            icon,
+            disc,
+            level,
+            ring: spec.ring,
+        });
+    });
+    root.insert(view);
+    if let Some(parts) = parts {
+        root.insert(parts);
+    }
+    root.id()
+}
+
+/// Art, fallback icon, level disc, XP arc, dimming and rim of every live
+/// portrait (every frame, writing only differences: the thumbnail's
+/// `ImageNode` arrives after the art loads).
+#[allow(clippy::type_complexity)]
+pub(crate) fn paint_portraits(
+    mut commands: Commands,
+    portraits: Query<(Ref<PortraitView>, &PortraitParts, &Children)>,
+    arts: Query<Option<&Art>>,
+    mut images: Query<&mut ImageNode>,
+    mut kit_images: Query<&mut KitImage>,
+    mut nodes: Query<(&mut Node, Option<&mut BorderColor>)>,
+    mut texts: Query<&mut Text>,
+    arcs: Query<(), With<RingArc>>,
+) {
+    for (view, parts, children) in &portraits {
+        if view.is_changed() {
+            let wanted = view.art.as_ref();
+            let current = arts.get(parts.art).ok().flatten().map(|art| &art.path);
+            if wanted != current {
+                match wanted {
+                    Some(path) => {
+                        commands
+                            .entity(parts.art)
+                            .insert(Art { path: path.clone() });
+                    }
+                    None => {
+                        commands
+                            .entity(parts.art)
+                            .remove::<(Art, ImageNode, CoverImage)>();
+                    }
+                }
+            }
+            if let Ok(mut text) = texts.get_mut(parts.level) {
+                let next = view
+                    .level
+                    .map_or_else(String::new, |level| level.to_string());
+                if text.0 != next {
+                    text.0 = next;
+                }
+            }
+            if let Ok((mut node, _)) = nodes.get_mut(parts.disc) {
+                let display = if view.level.is_some() {
+                    Display::Flex
+                } else {
+                    Display::None
+                };
+                if node.display != display {
+                    node.display = display;
+                }
+            }
+            if let Ok((mut node, border)) = nodes.get_mut(parts.art) {
+                if !parts.ring {
+                    let (width, rim) = if view.strong_rim {
+                        (border::FRAME, color::GOLD_500)
+                    } else {
+                        (border::HAIRLINE, color::GOLD_600)
+                    };
+                    let next = UiRect::all(Val::Px(width));
+                    if node.border != next {
+                        node.border = next;
+                    }
+                    if let Some(mut border) = border {
+                        let next = BorderColor::all(rim);
+                        if *border != next {
+                            *border = next;
+                        }
+                    }
+                }
+            }
+            if parts.ring {
+                for child in children.iter() {
+                    if arcs.contains(child) {
+                        if let Ok(mut arc) = kit_images.get_mut(child) {
+                            let frame = Some(ring_frame(view.xp));
+                            if arc.frame != frame {
+                                arc.frame = frame;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let has_art = view.art.is_some();
+        if let Ok((mut node, _)) = nodes.get_mut(parts.icon) {
+            let display = if has_art {
+                Display::None
+            } else {
+                Display::Flex
+            };
+            if node.display != display {
+                node.display = display;
+            }
+        }
+        if let Ok(mut icon) = kit_images.get_mut(parts.icon) {
+            let tint = if view.grey {
+                color::TEXT_DISABLED
+            } else {
+                color::TEXT_GOLD
+            };
+            let source = KitImage::icon(view.fallback, tint);
+            if *icon != source {
+                *icon = source;
+            }
+        }
+        if let Ok(mut image) = images.get_mut(parts.art) {
+            let next = if view.grey {
+                color::TEXT_DISABLED
+            } else {
+                Color::WHITE
+            };
+            if image.color != next {
+                image.color = next;
+            }
+        }
+    }
+}
+
 // --- Timer ring ---
 
 /// A timer ring's progress (`0..=1`, from 12 o'clock clockwise) and
@@ -1863,30 +2490,56 @@ pub(crate) fn player_status(
         .id()
 }
 
-/// Score strip: team scores (`type.number_lg` in team colours), the match
-/// timer (`type.number`) between, own K/D/A (`type.number_sm`).
+/// Score strip (hud.md `score-strip`): team kills `type.number_lg` in team
+/// colours around a muted colon, a divider, and `edge.kda` (`type.eyebrow`
+/// muted) over the own K/D/A (`type.number_sm`). The match has no clock
+/// (hud.md § Out of scope), so there is no timer.
 pub(crate) fn score_strip(
     parent: &mut ChildSpawnerCommands,
     green: u32,
     blue: u32,
-    timer: String,
     kda: (u32, u32, u32),
 ) -> Entity {
     parent
         .spawn(hud_plate(true))
         .with_children(|plate| {
-            for (text, role, ink) in [
-                (green.to_string(), TextRole::NumberLg, color::TEAM_GREEN),
-                (timer, TextRole::Number, color::TEXT_PRIMARY),
-                (blue.to_string(), TextRole::NumberLg, color::TEAM_BLUE),
-                (
-                    format!("{}/{}/{}", kda.0, kda.1, kda.2),
-                    TextRole::NumberSm,
-                    color::TEXT_SECONDARY,
-                ),
+            for (text, ink) in [
+                (green.to_string(), color::TEAM_GREEN),
+                (":".to_owned(), color::TEXT_MUTED),
+                (blue.to_string(), color::TEAM_BLUE),
             ] {
-                plate.spawn((Text::new(text), theme::role_text(role), TextColor(ink)));
+                plate.spawn((
+                    Text::new(text),
+                    theme::role_text(TextRole::NumberLg),
+                    TextColor(ink),
+                ));
             }
+            plate.spawn((
+                Node {
+                    width: Val::Px(border::HAIRLINE),
+                    height: Val::Px(space::S24),
+                    ..default()
+                },
+                BackgroundColor(color::BORDER_SUBTLE),
+            ));
+            plate
+                .spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    ..default()
+                })
+                .with_children(|column| {
+                    column.spawn((
+                        crate::i18n::Localized::new("edge.kda").into_text(),
+                        theme::role_text(TextRole::Eyebrow),
+                        TextColor(color::TEXT_MUTED),
+                    ));
+                    column.spawn((
+                        Text::new(format!("{}/{}/{}", kda.0, kda.1, kda.2)),
+                        theme::role_text(TextRole::NumberSm),
+                        TextColor(color::TEXT_PRIMARY),
+                    ));
+                });
         })
         .id()
 }
@@ -1969,7 +2622,9 @@ pub(crate) fn add_systems(app: &mut App) {
             resolve_art,
             resolve_ability_art,
             paint_bars,
-            paint_abilities,
+            paint_abilities.after(make_rank_ring_masks),
+            make_rank_ring_masks,
+            paint_portraits.before(resolve_art),
             paint_timer_rings,
             paint_hero_tile_frames.after(super::paint_kit),
         )
@@ -1994,6 +2649,209 @@ mod tests {
         assert_eq!(group_digits(7401), "7 401");
         assert_eq!(group_digits(120), "120");
         assert_eq!(group_digits(1_234_567), "1 234 567");
+    }
+
+    /// hud.md ability states on one kit button: cooldown sweep + seconds,
+    /// the ready flash when it ends, a red cost without mana, the locked
+    /// veil with its level, the dead veil without a lock, rank pips.
+    #[test]
+    fn ability_states_paint_sweep_flash_cost_veil_and_pips() {
+        #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+        enum Noop {
+            Press,
+        }
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .add_systems(Update, paint_abilities);
+        let root = app.world_mut().spawn(Node::default()).id();
+        let view = AbilityView {
+            ability: None,
+            icon: Icon::HudAttack,
+            key: Some("Q"),
+            cost: Some(22),
+            rank: 2,
+            cooldown: Some((3.2, 8.0)),
+            locked: false,
+            unlock_level: None,
+            no_mana: false,
+            pips: true,
+            ring: false,
+        };
+        app.world_mut()
+            .commands()
+            .entity(root)
+            .with_children(|parent| {
+                ability_button(parent, view, 64.0, Noop::Press, "QaAbility");
+            });
+        app.world_mut().flush();
+        app.update();
+        let (entity, parts) = app
+            .world_mut()
+            .query::<(Entity, &AbilityParts)>()
+            .single(app.world())
+            .map(|(entity, parts)| (entity, *parts))
+            .unwrap();
+        let visible = |app: &App, part: Entity| {
+            *app.world().get::<Visibility>(part).unwrap() != Visibility::Hidden
+        };
+        assert!(visible(&app, parts.sweep) && visible(&app, parts.seconds));
+        assert_eq!(app.world().get::<Text>(parts.seconds).unwrap().0, "4");
+        let pips: Vec<Color> = app
+            .world()
+            .get::<Children>(parts.pips.unwrap())
+            .unwrap()
+            .iter()
+            .map(|pip| app.world().get::<KitImage>(pip).unwrap().tint)
+            .collect();
+        assert_eq!(pips, [color::GOLD_400, color::GOLD_400, color::SURFACE_3]);
+        // Cooldown ends: the flash rises from 0 while the sweep hides.
+        app.world_mut()
+            .get_mut::<AbilityView>(entity)
+            .unwrap()
+            .cooldown = None;
+        app.update();
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_millis(60));
+        app.update();
+        app.update();
+        assert!(!visible(&app, parts.sweep));
+        let glow = app
+            .world()
+            .get::<KitImage>(parts.flash)
+            .unwrap()
+            .tint
+            .alpha();
+        assert!(glow > 0.0 && glow <= READY_FLASH_ALPHA, "flash {glow}");
+        // No mana: the cost number turns danger.
+        app.world_mut()
+            .get_mut::<AbilityView>(entity)
+            .unwrap()
+            .no_mana = true;
+        app.update();
+        let pill = app.world().get::<Children>(parts.cost.unwrap()).unwrap()[0];
+        let number = app.world().get::<Children>(pill).unwrap()[0];
+        assert_eq!(
+            app.world().get::<TextColor>(number).unwrap().0,
+            color::TEXT_DANGER
+        );
+        // Locked: veil with `Lv 6`; dead: veil without a lock or level.
+        {
+            let mut view = app.world_mut().get_mut::<AbilityView>(entity).unwrap();
+            view.locked = true;
+            view.unlock_level = Some(6);
+        }
+        app.update();
+        assert!(visible(&app, parts.veil));
+        assert_eq!(app.world().get::<Text>(parts.veil_label).unwrap().0, "Lv 6");
+        app.world_mut()
+            .get_mut::<AbilityView>(entity)
+            .unwrap()
+            .unlock_level = None;
+        app.update();
+        let lock = app.world().get::<Children>(parts.veil).unwrap()[0];
+        assert_eq!(
+            *app.world().get::<Visibility>(lock).unwrap(),
+            Visibility::Hidden
+        );
+        assert_eq!(app.world().get::<Text>(parts.veil_label).unwrap().0, "");
+    }
+
+    /// R10 (`ability-button.md` § Rank ring): three arcs with 9 % gaps on
+    /// the outer band, lit in order; the centre (artwork) stays clear.
+    #[test]
+    fn rank_ring_has_three_arcs_with_gaps_and_lights_learned_ranks() {
+        let lit = |pixels: &[u8]| pixels.chunks_exact(4).filter(|p| p[3] == 255).count();
+        let count = |rank| lit(&rank_ring_pixels(rank, MAX_RANK));
+        assert_eq!(count(0), 0);
+        assert!(count(1) > 500);
+        assert!((count(2) as i32 - 2 * count(1) as i32).abs() < 10);
+        assert!((count(3) as i32 - 3 * count(1) as i32).abs() < 10);
+        let full = rank_ring_pixels(MAX_RANK, MAX_RANK);
+        let at = |x: usize, y: usize| {
+            &full[(y * RANK_RING_MASK + x) * 4..(y * RANK_RING_MASK + x) * 4 + 4]
+        };
+        let half = RANK_RING_MASK / 2;
+        assert_eq!(at(half, half), [0, 0, 0, 0], "artwork stays clear");
+        // On the band: 12 o'clock is a gap between arcs 3 and 1; a sixth of
+        // a turn (the middle of arc 1) is lit.
+        let band = (half as f32 * 0.925) as usize;
+        assert_eq!(at(half, half - band), [0, 0, 0, 0]);
+        let middle = (std::f32::consts::TAU / 6.0 - std::f32::consts::FRAC_PI_2).sin_cos();
+        let (x, y) = (
+            (half as f32 + middle.1 * band as f32) as usize,
+            (half as f32 + middle.0 * band as f32) as usize,
+        );
+        assert_eq!(at(x, y)[3], 255);
+    }
+
+    /// The ring replaces the rim on a phone face: the learned layer shows
+    /// the rank's mask, a locked (rank 0) ring is empty, the rim is hidden.
+    #[test]
+    fn ability_rank_ring_paints_the_learned_arcs_over_the_rim() {
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<Assets<Image>>()
+            .add_systems(
+                Update,
+                (
+                    make_rank_ring_masks,
+                    paint_abilities.after(make_rank_ring_masks),
+                ),
+            );
+        let root = app.world_mut().spawn(Node::default()).id();
+        let view = AbilityView {
+            ability: None,
+            icon: Icon::HudAttack,
+            key: None,
+            cost: Some(14),
+            rank: 2,
+            cooldown: Some((2.0, 4.0)),
+            locked: false,
+            unlock_level: None,
+            no_mana: false,
+            pips: false,
+            ring: true,
+        };
+        app.world_mut()
+            .commands()
+            .entity(root)
+            .with_children(|parent| {
+                ability_face(parent, view, 64.0, AbilityFace::default());
+            });
+        app.world_mut().flush();
+        app.update();
+        app.update();
+        let (entity, parts, kit) = app
+            .world_mut()
+            .query::<(Entity, &AbilityParts, &KitParts)>()
+            .single(app.world())
+            .map(|(entity, parts, kit)| (entity, *parts, *kit))
+            .unwrap();
+        let masks = app.world().resource::<RankRingMasks>().0.clone();
+        let (track, lit) = parts.ring.unwrap();
+        let image = |app: &App, layer: Entity| app.world().get::<ImageNode>(layer).unwrap().clone();
+        assert_eq!(image(&app, track).image, masks[MAX_RANK as usize]);
+        assert_eq!(image(&app, track).color, RANK_RING_UNLEARNED);
+        assert_eq!(image(&app, lit).image, masks[2]);
+        assert_eq!(image(&app, lit).color, RANK_RING_LEARNED);
+        assert_eq!(
+            *app.world().get::<Visibility>(lit).unwrap(),
+            Visibility::Inherited,
+            "the ring stays over the cooldown sweep"
+        );
+        assert_eq!(
+            *app.world().get::<Visibility>(kit.track.unwrap()).unwrap(),
+            Visibility::Hidden,
+            "the ring is the rim"
+        );
+        {
+            let mut view = app.world_mut().get_mut::<AbilityView>(entity).unwrap();
+            view.locked = true;
+            view.rank = 0;
+        }
+        app.update();
+        assert_eq!(image(&app, lit).image, masks[0], "locked: empty ring");
     }
 
     #[test]

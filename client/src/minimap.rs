@@ -19,8 +19,9 @@ use crate::ui::theme as ui_theme;
 
 pub(crate) const MINIMAP_SIZE: f32 = 252.0;
 pub(crate) const DESKTOP_MINIMAP_INSET: f32 = 16.0;
-/// Render the shared map coordinate space as a compact upper-left module.
-pub(crate) const DESKTOP_MINIMAP_SIZE: f32 = 144.0;
+/// Render the shared map coordinate space as a compact upper-left module
+/// (`size.minimap.desktop`, hud.md `minimap`).
+pub(crate) const DESKTOP_MINIMAP_SIZE: f32 = crate::ui::tokens::size::MINIMAP.desktop;
 pub(crate) const MINIMAP_INNER_SIZE: f32 = 232.0;
 use shared::vision::{
     BASE_SIGHT_RADIUS as BASE_SIGHT, HERO_SIGHT_RADIUS as HERO_SIGHT,
@@ -197,10 +198,20 @@ impl MinimapQaScene<'_, '_> {
     }
 }
 
+/// The minimap frame (hud-plate.md): a 2 px `color.gold.500` rim with a
+/// 1 px `color.gold.700` inner line, `radius.sm`, glass fill. The root is
+/// drawn at 252 and scaled, so the rim widths are divided by the scale to
+/// render at their token sizes.
+#[derive(Component)]
+struct MinimapInnerRim;
+
 fn adapt_minimap_edge(
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
-    mut roots: Query<(&mut Node, &mut UiTransform), With<MinimapRoot>>,
+    mut roots: Query<(&mut Node, &mut UiTransform), (With<MinimapRoot>, Without<MinimapInnerRim>)>,
+    mut rims: Query<&mut Node, With<MinimapInnerRim>>,
 ) {
+    use crate::ui::tokens::{border, radius};
+    // hud.md: desktop 176 at (16, 16); phone 120 at safe left + 16, top + 12.
     let (left, top, size) = mobile.as_ref().filter(|m| m.enabled).map_or(
         (
             DESKTOP_MINIMAP_INSET,
@@ -208,22 +219,23 @@ fn adapt_minimap_edge(
             DESKTOP_MINIMAP_SIZE,
         ),
         |m| {
-            (
-                m.safe.left,
-                m.safe.top,
-                if m.viewport.y <= 340.0 {
-                    96.0
-                } else {
-                    116.0 * m.scale()
-                },
-            )
+            let rect = crate::hud_layout::HudLayout::phone(m).minimap;
+            (rect.min.x, rect.min.y, rect.width())
         },
     );
+    let scale = size / MINIMAP_SIZE;
     for (mut node, mut transform) in &mut roots {
         node.left = Val::Px(left + (size - MINIMAP_SIZE) * 0.5);
         node.top = Val::Px(top + (size - MINIMAP_SIZE) * 0.5);
         node.bottom = Val::Auto;
-        transform.scale = Vec2::splat(size / MINIMAP_SIZE);
+        node.border = UiRect::all(Val::Px(border::FRAME / scale));
+        node.border_radius = BorderRadius::all(Val::Px(radius::SM / scale));
+        transform.scale = Vec2::splat(scale);
+    }
+    for mut rim in &mut rims {
+        rim.border = UiRect::all(Val::Px(border::HAIRLINE / scale));
+        rim.border_radius =
+            BorderRadius::all(Val::Px((radius::SM - border::FRAME).max(0.0) / scale));
     }
 }
 
@@ -247,14 +259,31 @@ fn setup_minimap_ui(
                 border_radius: BorderRadius::all(Val::Px(10.0)),
                 ..default()
             },
-            BackgroundColor(ui_theme::PANEL),
-            BorderColor::all(ui_theme::EDGE),
+            BackgroundColor(ui_theme::perceptual(
+                crate::ui::tokens::color::SURFACE_GLASS,
+            )),
+            BorderColor::all(crate::ui::tokens::color::GOLD_500),
             ZIndex(8),
             MinimapRoot,
             UiTransform::from_scale(Vec2::splat(DESKTOP_MINIMAP_SIZE / MINIMAP_SIZE)),
             Name::new("MinimapRoot"),
         ))
         .with_children(|parent| {
+            parent.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
+                    border: UiRect::all(Val::Px(1.0)),
+                    ..default()
+                },
+                BorderColor::all(crate::ui::tokens::color::GOLD_700),
+                ZIndex(6),
+                Pickable::IGNORE,
+                MinimapInnerRim,
+            ));
             let mut map = parent.spawn((
                 Node {
                     width: Val::Px(MINIMAP_INNER_SIZE),
@@ -354,6 +383,7 @@ fn marker_node(point: Vec2, size: f32) -> Node {
 
 fn handle_minimap_navigation_system(
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    ui_scale: Option<Res<UiScale>>,
     containers: Query<(&ComputedNode, &UiGlobalTransform), With<MinimapContainer>>,
     mouse: Res<ButtonInput<MouseButton>>,
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -375,6 +405,8 @@ fn handle_minimap_navigation_system(
     let Some(rect) = container_rect(node, transform) else {
         return;
     };
+    // UI logical pixels → window logical pixels (the cursor's), F8.1.
+    let rect = ui_to_window(rect, ui_scale.as_deref());
     if let Some(cursor) = window.cursor_position() {
         let target = minimap_cursor_to_world(*layout, rect, cursor);
         if mouse.just_pressed(MouseButton::Right)
@@ -413,6 +445,12 @@ fn handle_minimap_navigation_system(
         }
     }
 }
+/// A rect in UI logical pixels as window logical pixels (× `UiScale`).
+fn ui_to_window(rect: Rect, ui_scale: Option<&UiScale>) -> Rect {
+    let scale = ui_scale.map_or(1.0, |scale| scale.0);
+    Rect::from_corners(rect.min * scale, rect.max * scale)
+}
+
 fn container_rect(node: &ComputedNode, transform: &UiGlobalTransform) -> Option<Rect> {
     // Computed UI positions are physical pixels; input cursors are logical.
     let scale = node.inverse_scale_factor();

@@ -1,5 +1,5 @@
 use super::cast::{PendingCastRequest, queue_cast_request, within_cast_range};
-use super::hotbar::{DesktopSkillIcon, SKILL_SLOT_SIZE, SkillRankLabel};
+use super::hotbar::{DesktopSkillIcon, SKILL_SLOT_SIZE, SkillRankLabel, update_skill_tooltip};
 use super::mobile::{mobile_assisted_target, mobile_target_score};
 use super::selection::{
     BASE_TOWER_PICK_RADIUS_PX, MINION_PICK_RADIUS_PX, NEUTRAL_PICK_RADIUS_PX,
@@ -1406,4 +1406,157 @@ fn buying_haste_adjusts_active_deadlines_without_rescaling_elapsed_time() {
         app.world().resource::<LocalCastCooldown>().remaining_secs,
         once
     );
+}
+
+/// DECISIONS R7.1: a protected enemy structure stays selected for inspection
+/// (the target plate shows it with a lock) while every attack order on it is
+/// dropped; a dead or unprotected-but-invalid target still clears.
+#[test]
+fn protected_structures_stay_selected_for_inspection_but_never_keep_an_attack_order() {
+    let mut app = App::new();
+    app.init_resource::<ButtonInput<KeyCode>>()
+        .init_resource::<GameplayInputContext>()
+        .init_resource::<TargetState>()
+        .init_resource::<BasicAttackState>()
+        .init_resource::<PendingCast>()
+        .init_resource::<TargetAimPreview>()
+        .add_systems(Update, crate::targeting::clear_invalid_selection);
+    app.world_mut().spawn((
+        Player,
+        Transform::default(),
+        Team::Green,
+        CombatStats::default(),
+    ));
+    let tower = app
+        .world_mut()
+        .spawn((
+            NetworkStructure,
+            NetworkStructureId(3),
+            StructureKind::Tower,
+            Team::Blue,
+            Transform::from_xyz(2.0, 0.0, 0.0),
+            CombatStats::default(),
+            crate::net::NetworkStructureProtected(true),
+        ))
+        .id();
+    let id = TargetId {
+        kind: TargetKind::Structure,
+        id: 3,
+    };
+    {
+        let mut target = app.world_mut().resource_mut::<TargetState>();
+        target.selected_entity = Some(tower);
+        target.selected_target = Some(id);
+    }
+    app.world_mut()
+        .resource_mut::<BasicAttackState>()
+        .start(tower, id, true);
+    app.update();
+    let target = app.world().resource::<TargetState>();
+    assert_eq!(target.selected_entity, Some(tower), "kept for inspection");
+    assert!(app.world().resource::<BasicAttackState>().order.is_none());
+    // Protection drops: the selection is an ordinary target again.
+    app.world_mut()
+        .get_mut::<crate::net::NetworkStructureProtected>(tower)
+        .unwrap()
+        .0 = false;
+    app.update();
+    assert_eq!(
+        app.world().resource::<TargetState>().selected_entity,
+        Some(tower)
+    );
+    // Destroyed: cleared like any dead target.
+    app.world_mut().get_mut::<CombatStats>(tower).unwrap().hp = 0.0;
+    app.update();
+    assert!(
+        app.world()
+            .resource::<TargetState>()
+            .selected_entity
+            .is_none()
+    );
+}
+
+/// skill-description.md (desktop): hovering a slot for the tooltip delay
+/// shows the card above that slot (centred, bottom `space.8` above the
+/// upgrade chip row) with the slot's name, rank, cost, key and live status;
+/// leaving the slot hides it at once, and a controller never shows it.
+#[test]
+fn hovering_an_ability_slot_shows_its_skill_card_above_it() {
+    use super::skill_card::SkillCardView;
+    let mut app = App::new();
+    app.init_resource::<Time>()
+        .init_resource::<TeamSelection>()
+        .init_resource::<LocalCastCooldown>()
+        .init_resource::<TargetState>()
+        .init_resource::<PendingCast>()
+        .init_resource::<GameplayInputContext>()
+        .init_resource::<crate::gamepad::GamepadControls>()
+        .add_systems(Startup, setup_combat_ui)
+        .add_systems(Update, update_skill_tooltip);
+    app.world_mut().spawn((Window::default(), PrimaryWindow));
+    app.world_mut().spawn((
+        Player,
+        Transform::default(),
+        CombatStats::default(),
+        PlayerProgression {
+            level: 4,
+            ranks: [1, 1, 2, 0],
+            ..default()
+        },
+        NetworkHeroClass(HeroClass::Warden),
+    ));
+    app.update();
+    // Slot E (index 2) laid out at the redline: 648..712 × 610..674.
+    let slot = app
+        .world_mut()
+        .query::<(Entity, &crate::ui::TestId)>()
+        .iter(app.world())
+        .find(|(_, id)| id.0 == "SkillSlot-E")
+        .map(|(entity, _)| entity)
+        .unwrap();
+    app.world_mut().entity_mut(slot).insert((
+        ComputedNode {
+            size: Vec2::splat(64.0),
+            inverse_scale_factor: 1.0,
+            ..default()
+        },
+        UiGlobalTransform::from_translation(Vec2::new(680.0, 642.0)),
+        Interaction::Hovered,
+    ));
+    let card = |app: &mut App| {
+        app.world_mut()
+            .query_filtered::<(&SkillCardView, &Node), With<super::hotbar::SkillTooltip>>()
+            .single(app.world())
+            .map(|(view, node)| (view.clone(), node.left, node.top))
+            .unwrap()
+    };
+    app.update();
+    assert!(!card(&mut app).0.visible, "not before the delay");
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(std::time::Duration::from_millis(450));
+    app.update();
+    let (view, left, top) = card(&mut app);
+    assert!(view.visible);
+    assert_eq!((view.slot, view.rank, view.locked), (2, 2, false));
+    assert_eq!(view.key.as_deref(), Some("E"));
+    assert!(view.status.is_some(), "live status on desktop");
+    // Centred on the slot (680 − 140) and bottom at 720 − 124 − 8 = 588
+    // without the upgrade chip (no skill point).
+    assert_eq!(left, Val::Px(540.0));
+    assert_eq!(top, Val::Px(588.0 - super::skill_card::CARD.y));
+    // A controller never shows it; leaving the slot hides it at once.
+    app.world_mut()
+        .resource_mut::<crate::gamepad::GamepadControls>()
+        .active = true;
+    app.update();
+    assert!(!card(&mut app).0.visible);
+    app.world_mut()
+        .resource_mut::<crate::gamepad::GamepadControls>()
+        .active = false;
+    app.update();
+    assert!(card(&mut app).0.visible);
+    app.world_mut().entity_mut(slot).insert(Interaction::None);
+    app.update();
+    assert!(!card(&mut app).0.visible);
 }

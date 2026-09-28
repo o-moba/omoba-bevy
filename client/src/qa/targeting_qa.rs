@@ -883,7 +883,7 @@ fn observe_targeting(
             let Some((_, node, transform, visible)) = scene
                 .nodes
                 .iter()
-                .find(|(name, _, _, _)| name.as_str() == "ShopOpenButton")
+                .find(|(name, _, _, _)| name.as_str() == "GoldShopButton")
             else {
                 return;
             };
@@ -902,7 +902,7 @@ fn observe_targeting(
                 qa,
                 "ui_click_blocked",
                 tick,
-                serde_json::json!({"button":"ShopOpenButton","order_absent":true,"movement_absent":true})
+                serde_json::json!({"button":"GoldShopButton","order_absent":true,"movement_absent":true})
             );
             qa.advance(15);
         }

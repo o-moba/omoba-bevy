@@ -162,6 +162,21 @@ fn drive(world: &mut World) {
             {
                 qa.moved = t.translation.distance(qa.origin);
             }
+            // Select the bot like a click would, so the hero target plate
+            // shows it (VARIANTS.md `offline-target`).
+            let bot = world
+                .query::<(Entity, &NetworkPlayerId)>()
+                .iter(world)
+                .find(|(_, id)| id.0 == 2)
+                .map(|(entity, _)| entity);
+            if let Some(bot) = bot {
+                let mut target = world.resource_mut::<crate::combat::TargetState>();
+                target.selected_entity = Some(bot);
+                target.selected_target = Some(TargetId {
+                    kind: TargetKind::Player,
+                    id: 2,
+                });
+            }
             world.write_message(NetworkCommand::BasicAttack {
                 target: TargetId {
                     kind: TargetKind::Player,

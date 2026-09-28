@@ -226,6 +226,7 @@ fn update_boss_nameplates(
     camera_query: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
     bosses: Query<(&GlobalTransform, &NormalizeModelScale), With<BossVisual>>,
     mut nameplates: Query<(Entity, &BossNameplate, &mut Node, &mut Visibility)>,
+    ui_scale: Option<Res<UiScale>>,
 ) {
     let camera = camera_query.single().ok();
     for (plate_entity, plate, mut node, mut visibility) in &mut nameplates {
@@ -243,6 +244,7 @@ fn update_boss_nameplates(
         let anchor = boss_transform.translation() + Vec3::Y * (head_height + NAMEPLATE_CLEARANCE);
         match camera.world_to_viewport(camera_transform, anchor) {
             Ok(screen) => {
+                let screen = crate::hud_layout::world_to_ui(screen, ui_scale.as_deref());
                 node.left = Val::Px(screen.x - NAMEPLATE_HALF_WIDTH);
                 node.top = Val::Px(screen.y);
                 *visibility = Visibility::Visible;

@@ -29,6 +29,12 @@ pub fn help_key_display() -> &'static str {
     "F1"
 }
 
+/// The shop toggle (`shop::toggle_shop` reads `KeyCode::KeyP`), as the gold
+/// row's keycap shows it.
+pub fn shop_key_display() -> &'static str {
+    "P"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
