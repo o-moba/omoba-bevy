@@ -25,6 +25,7 @@ mod map_qa;
 mod navigation_qa;
 mod offline_qa;
 mod record_qa;
+mod result_qa;
 mod social_qa;
 mod supporter;
 mod targeting_qa;
@@ -54,6 +55,7 @@ impl PluginGroup for QaPlugins {
             .add(targeting_qa::TargetingQaPlugin)
             .add(record_qa::RecordQaPlugin)
             .add(demo_qa::DemoQaPlugin)
+            .add(result_qa::ResultQaPlugin)
             .add(ui_gallery::UiGalleryPlugin)
     }
 }

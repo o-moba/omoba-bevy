@@ -417,7 +417,7 @@
     },
     {
       "id": "result",
-      "title": "In-match result overlay",
+      "title": "Result (Victory / Defeat)",
       "run": "match",
       "frame": "07-result-fixture-{h}p.png",
       "profiles": [
@@ -425,8 +425,8 @@
         "phone"
       ],
       "route": "Base destroyed",
-      "source": "client/src/game_state.rs",
-      "fixture": "synthetic Victory, labelled on frame"
+      "source": "client/src/frontend/postmatch.rs",
+      "fixture": "synthetic Victory over a live match (real live score), labelled on frame; the result screen of post-match (DECISIONS R2.2)"
     },
     {
       "id": "target-hero",
@@ -896,6 +896,7 @@
     "client/src/qa/demo_qa.rs": "demo video director, not screenshots",
     "client/src/qa/record_qa.rs": "demo video recorder, not screenshots",
     "client/src/qa/animation_qa.rs": "animation helper, no frames",
-    "client/src/qa/ui_gallery.rs": "UI kit gallery (developer screen, OMOBA_UI_GALLERY=1 / OMOBA_UI_GALLERY_OUTPUT): every kit component and state, not a player screen"
+    "client/src/qa/ui_gallery.rs": "UI kit gallery (developer screen, OMOBA_UI_GALLERY=1 / OMOBA_UI_GALLERY_OUTPUT): every kit component and state, not a player screen",
+    "client/src/qa/result_qa.rs": "result screen states (finalizing, saved, defeat on a rematch server, abandoned) as labelled fixtures and the loading shell failure, OMOBA_RESULT_QA_OUTPUT; no server (gap post-match-real stays open)"
   }
 }

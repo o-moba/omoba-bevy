@@ -53,7 +53,7 @@ Harness: `client/src/qa/beta_ui_qa.rs`; server: dev; env: `OMOBA_VISUAL_QA_DIR={
 | Shop | `04-shop-{h}p.png` | desktop, phone | In match at base → gold / P | `client/src/shop.rs` |  |
 | Shop after purchase | `05-purchase-{h}p.png` | desktop, phone | Shop → buy Ember Blade | `client/src/shop.rs` |  |
 | HUD after shopping | `06-shop-closed-{h}p.png` | desktop, phone | Shop → close | `client/src/match_hud.rs` |  |
-| In-match result overlay | `07-result-fixture-{h}p.png` | desktop, phone | Base destroyed | `client/src/game_state.rs` | synthetic Victory, labelled on frame |
+| Result (Victory / Defeat) | `07-result-fixture-{h}p.png` | desktop, phone | Base destroyed | `client/src/frontend/postmatch.rs` | synthetic Victory over a live match (real live score), labelled on frame; the result screen of post-match (DECISIONS R2.2) |
 | Target frame · hero | `08-target-hero-fixture-{h}p.png` | desktop | Select an enemy hero | `client/src/edge_hud.rs` | synthetic target, labelled |
 | Target frame · minion | `09-target-minion-fixture-{h}p.png` | desktop | Select a minion | `client/src/edge_hud.rs` | synthetic target, labelled |
 | Target frame · structure | `10-target-structure-fixture-{h}p.png` | desktop | Select a tower | `client/src/edge_hud.rs` | synthetic target, labelled |
@@ -155,3 +155,4 @@ Harness: `client/src/qa/offline_qa.rs`; server: none; env: `OMOBA_OFFLINE_SMOKE_
 - `client/src/qa/record_qa.rs`: demo video recorder, not screenshots
 - `client/src/qa/animation_qa.rs`: animation helper, no frames
 - `client/src/qa/ui_gallery.rs`: UI kit gallery (developer screen, OMOBA_UI_GALLERY=1 / OMOBA_UI_GALLERY_OUTPUT): every kit component and state, not a player screen
+- `client/src/qa/result_qa.rs`: result screen states (finalizing, saved, defeat on a rematch server, abandoned) as labelled fixtures and the loading shell failure, OMOBA_RESULT_QA_OUTPUT; no server (gap post-match-real stays open)

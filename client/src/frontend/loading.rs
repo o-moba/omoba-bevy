@@ -93,9 +93,10 @@ impl Plugin for LoadingScreenPlugin {
 }
 
 /// The kit textures the loading and result screens draw on their first
-/// frame (frames, slabs, the ring atlas, their icons): kept loaded so a
-/// 3 s countdown never shows a frame without its ring or frame. The
-/// full-screen backgrounds are not kept (they fade in).
+/// frame (frames, slabs, the ring atlas, their icons, the loading
+/// background): kept loaded so a 3 s countdown never shows a frame without
+/// its ring, frame or background. The result backgrounds are not kept (the
+/// screen fades them in).
 fn preload_screen_art(app: &mut App) {
     use crate::ui::kit_assets::{KitPreload, KitSource, Sprite};
     let frames = [
@@ -128,7 +129,10 @@ fn preload_screen_art(app: &mut App) {
     };
     preload.add(frames.map(|frame| (KitSource::Frame(frame), false)));
     preload.add(icons.map(|icon| (KitSource::Icon(icon), false)));
-    preload.add([(KitSource::Sprite(Sprite::TimerRingAtlas), true)]);
+    preload.add([
+        (KitSource::Sprite(Sprite::TimerRingAtlas), true),
+        (KitSource::Background(Background::MenuArena), false),
+    ]);
 }
 
 #[derive(Component)]
