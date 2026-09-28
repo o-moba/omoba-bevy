@@ -507,7 +507,10 @@ fn sync_gameplay_hud_visibility(
                     node.display = display;
                 }
             }
-            let next = if show {
+            // The upgrade chip belongs to the ability bar: a phone without
+            // a controller uses the RANK disc instead.
+            let shown = show && !(name == "SkillUpgradeChip" && touch_hud);
+            let next = if shown {
                 Visibility::Inherited
             } else {
                 Visibility::Hidden

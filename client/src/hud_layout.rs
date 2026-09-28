@@ -246,6 +246,19 @@ impl HudLayout {
         let slot = size::ITEM_SLOT.phone;
         let safe_centre = (safe.left + viewport.x - safe.right) * 0.5;
         let card = plate::SKILL_CARD;
+        // A controller hides the touch combat group and shows the desktop
+        // ability bar (hud.md § States): bottom-centre in the safe area,
+        // the upgrade chip above it.
+        let bar = rect(
+            safe_centre - plate::ABILITY_BAR.x * 0.5,
+            viewport.y - safe.bottom - plate::ABILITY_BAR.y,
+            plate::ABILITY_BAR,
+        );
+        let chip = rect(
+            safe_centre - plate::UPGRADE_CHIP.x * 0.5,
+            bar.min.y - space::S8 - plate::UPGRADE_CHIP.y,
+            plate::UPGRADE_CHIP,
+        );
         Self {
             form,
             viewport,
@@ -269,8 +282,8 @@ impl HudLayout {
                 top + PHONE_FEEDBACK_TOP,
                 plate::FEEDBACK_PHONE,
             ),
-            upgrade_chip: Rect::default(),
-            ability_bar: Rect::default(),
+            upgrade_chip: chip,
+            ability_bar: bar,
             player_status: rect(left, top + PHONE_STATUS_TOP, plate::PLAYER_STATUS_PHONE),
             equipment: Rect::default(),
             quick_buy: rect(
