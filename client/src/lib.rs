@@ -3,6 +3,7 @@ use bevy::{asset::AssetPlugin, prelude::*};
 mod audio_settings;
 mod battlefield_atmosphere;
 mod bosses;
+mod build_info;
 mod camera;
 mod career;
 mod career_identity;

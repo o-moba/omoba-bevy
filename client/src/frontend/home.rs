@@ -577,6 +577,24 @@ fn spawn_home(
             if let Some((party_id, from)) = &party_line.invite {
                 spawn_invite_banner(root, *party_id, from);
             }
+            // Build metadata is deliberately smaller than interactive labels;
+            // keep it below the navigation strip on mobile and footer on desktop.
+            root.spawn((
+                Text::new(crate::build_info::label()),
+                TextFont {
+                    font_size: 12.0 * unit,
+                    ..default()
+                },
+                TextColor(theme::MUTED),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(if phone { 63.0 * unit } else { 40.0 }),
+                    bottom: Val::Px(if phone { 4.0 * unit } else { 6.0 }),
+                    ..default()
+                },
+                bevy::ui::FocusPolicy::Pass,
+                Name::new("HomeBuildInfo"),
+            ));
             if !phone {
                 root.spawn((
                     widgets::label(tr("home.footer"), 12.0, theme::MUTED),

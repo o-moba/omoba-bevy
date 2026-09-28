@@ -843,3 +843,7 @@ for two seconds within enemy radial sight. Soft fog follows the team sources on 
 battlefield and minimap, and an in-brush label reports concealed/revealed status.
 See [team vision rules and verification](team-vision.md). Terrain line of sight,
 wards and true invisibility are outside this iteration; 2D presentation is paused.
+
+### Visible build identification
+
+Home shows a compact, noninteractive build label at the lower-left on desktop/mobile: `v0.28.1 (14) · 52bf02d · Debug`, for example. Version and Debug/Release come from the executable; Xcode build number and source commit come from its bundled `assets/legal/XCODE-BUILD.json`. `*` marks a build with modified tracked sources. A desktop/unpackaged build or unavailable/mismatched receipt shows version and mode only. The label is available without connecting to a server. Existing installed builds need an app update to gain the label.

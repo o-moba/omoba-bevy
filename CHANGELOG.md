@@ -4,6 +4,11 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [0.28.1] - 2026-09-28
+
+- Show the compiled app version and Debug/Release mode at the lower-left of Home on desktop and mobile. Xcode packages also show their build number, short source revision and `*` when built from modified sources.
+- Build identification uses the bundled Xcode receipt with a compiled-version fallback, independent of the current checkout or development asset override.
+
 ## [Unreleased]
 
 Workspace version 0.28.0.
