@@ -155,3 +155,4 @@ Harness: `client/src/qa/offline_qa.rs`; server: none; env: `OMOBA_OFFLINE_SMOKE_
 - `client/src/qa/record_qa.rs`: demo video recorder, not screenshots
 - `client/src/qa/animation_qa.rs`: animation helper, no frames
 - `client/src/qa/ui_gallery.rs`: UI kit gallery (developer screen, OMOBA_UI_GALLERY=1 / OMOBA_UI_GALLERY_OUTPUT): every kit component and state, not a player screen
+- `client/src/qa/help_qa.rs`: controls guide controller focus and Settings → Controls return (OMOBA_HELP_QA_SHOTS); frames duplicate hud-help/home-help/settings, not new screens

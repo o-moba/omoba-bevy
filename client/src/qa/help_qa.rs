@@ -1,10 +1,11 @@
 //! Opt-in native QA for the controls guide's controller path and the Settings
 //! return (R6.5), which the match and shell runs do not reach: with
-//! `OMOBA_HELP_QA_OUTPUT=<dir>` the client opens the guide over Home with the
+//! `OMOBA_HELP_QA_SHOTS=<dir>` the client opens the guide over Home with the
 //! kit focus driven as a controller would, closes it with a gamepad back
 //! press, then opens it from Settings → Controls and closes it again. It
 //! writes one frame per step and `result.json`, and exits non-zero when a
-//! check fails. No server is needed. Window size from `OMOBA_QA_WIDTH` /
+//! check fails. No server is needed. (The name avoids the `_QA_OUTPUT` /
+//! `_QA_DIR` suffixes, which send the shell straight into a match.) Window size from `OMOBA_QA_WIDTH` /
 //! `OMOBA_QA_HEIGHT` (phone: add `OMOBA_TOUCH_CONTROLS=1`).
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -25,7 +26,7 @@ pub(crate) struct HelpQaPlugin;
 
 impl Plugin for HelpQaPlugin {
     fn build(&self, app: &mut App) {
-        let Some(directory) = std::env::var_os("OMOBA_HELP_QA_OUTPUT")
+        let Some(directory) = std::env::var_os("OMOBA_HELP_QA_SHOTS")
             .filter(|path| !path.is_empty())
             .map(PathBuf::from)
         else {
@@ -84,6 +85,8 @@ enum QaAction {
     Back,
     OpenSettings,
     PressControls,
+    /// Scrolls the phone card list to its end (the closing line).
+    ScrollToEnd,
 }
 
 /// Drives the kit focus as a connected controller does and runs the step's
@@ -97,6 +100,7 @@ fn drive_focus(
     mut back: ResMut<BackPress>,
     ids: Query<(Entity, &crate::ui::TestId)>,
     mut presses: MessageWriter<crate::ui::SyntheticPress>,
+    mut lists: Query<(&Name, &ComputedNode, &mut ScrollPosition)>,
 ) {
     focus.set_enabled(true);
     match qa.action.take() {
@@ -116,6 +120,13 @@ fn drive_focus(
                     presses.write(crate::ui::SyntheticPress(button));
                 }
                 None => qa.checks.push(("Settings has Controls".into(), false)),
+            }
+        }
+        Some(QaAction::ScrollToEnd) => {
+            for (name, node, mut scroll) in &mut lists {
+                if name.as_str() == "HelpBody" {
+                    scroll.y = crate::ui::scroll::max_offset(node);
+                }
             }
         }
         None => {}
@@ -170,24 +181,28 @@ fn step(
             ));
             (
                 Some(format!("01-help-focus-{h}p.png")),
-                Some(QaAction::Back),
+                Some(QaAction::ScrollToEnd),
             )
         }
-        2 => {
+        2 => (
+            Some(format!("02-help-scrolled-{h}p.png")),
+            Some(QaAction::Back),
+        ),
+        3 => {
             qa.checks.push((
                 "gamepad back closed the guide".into(),
                 !help.0 && !menu.open,
             ));
             (
-                Some(format!("02-help-closed-{h}p.png")),
+                Some(format!("03-help-closed-{h}p.png")),
                 Some(QaAction::OpenSettings),
             )
         }
-        3 => (
-            Some(format!("03-settings-{h}p.png")),
+        4 => (
+            Some(format!("04-settings-{h}p.png")),
             Some(QaAction::PressControls),
         ),
-        4 => {
+        5 => {
             qa.checks.push((
                 "Controls opened the guide over the closed menu".into(),
                 help.0 && !menu.open,
@@ -197,16 +212,16 @@ fn step(
                 dismiss.is_some() && focus.focused() == dismiss,
             ));
             (
-                Some(format!("04-settings-controls-{h}p.png")),
+                Some(format!("05-settings-controls-{h}p.png")),
                 Some(QaAction::Back),
             )
         }
-        5 => {
+        6 => {
             qa.checks.push((
                 "closing the guide returned to Settings (R6.5)".into(),
                 !help.0 && menu.open && menu.in_settings,
             ));
-            (Some(format!("05-settings-return-{h}p.png")), None)
+            (Some(format!("06-settings-return-{h}p.png")), None)
         }
         _ => {
             let pass = qa.checks.iter().all(|(_, ok)| *ok);
