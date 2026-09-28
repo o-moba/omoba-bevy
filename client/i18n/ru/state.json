@@ -1,0 +1,8 @@
+{
+  "state.lobby": "Ожидание игроков…",
+  "state.forming": "Ожидание игроков — {ready}/{needed}\nИгра начнётся автоматически, когда подключатся все 10 игроков.",
+  "state.starting": "Матч найден! \nНачало через {seconds}...",
+  "state.next_round.preparing": "Подготовка к следующему раунду...",
+  "state.next_round.countdown": "Следующий раунд через {seconds}с",
+  "state.exit_hint": "Escape: настройки или выход из игры."
+}

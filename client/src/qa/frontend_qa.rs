@@ -505,6 +505,11 @@ fn observe(
         3 => &["HeroSelectBack", "FindMatchButton"],
         4 => &["SearchingCancel"],
         6 => &["PostMatchPlayAgain", "PostMatchBackToMenu"],
+        7 if mobile.enabled => &[
+            "PauseMenuResumeButton",
+            "SettingsButton",
+            "PauseMenuHelpButton",
+        ],
         7 => &[
             "PauseMenuResumeButton",
             "SettingsButton",

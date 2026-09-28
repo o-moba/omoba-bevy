@@ -1,0 +1,17 @@
+{
+  "touch.attack": "АТК",
+  "touch.ability.locked": "Ур. {level}",
+  "touch.rank.back": "НАЗАД",
+  "touch.rank.points": "+{points}\nРАНГ",
+  "touch.target.minion": "МИН",
+  "touch.target.tower": "БАШ",
+  "touch.dash": "РЫВОК",
+  "touch.haste": "РАЗГОН",
+  "touch.haste.active": "{seconds}\nБЫСТРО",
+  "touch.aim.cancel": "ОТМЕНА\nОтпустите для отмены",
+  "touch.aim.attack": "Наведите на врага и отпустите, чтобы закрепить цель\nДля отмены переместите к ×",
+  "touch.aim.skill": "Потяните для прицеливания, отпустите для применения\nДля отмены переместите к ×",
+  "touch.skill.rank": "Ранг {rank}",
+  "touch.skill.unlocks": "Открывается на уровне {level}",
+  "touch.rotate": "Поверните телефон\nИграйте в Omoba в альбомной ориентации"
+}

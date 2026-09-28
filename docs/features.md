@@ -1,5 +1,11 @@
 # Feature Inventory
 
+## Tablet menus, Russian and offline lane practice (0.28.3)
+
+Home's decorative frame uses equal viewport insets on tablets and desktops; its character and controls retain their fitted composition. The top shading fades from the screen edge, and tablets use a single Help/Menu/Server bar. Graphics settings share aligned label and control columns with fixed close/back navigation. Mobile menus leave matches without quitting the application; desktop retains Exit. Settings also includes Русский alongside English and 简体中文, with the choice saved locally.
+
+Offline practice now spawns the authored towers/bases and minions on all three lanes for both teams. Minions march and fight, towers shoot, and player attacks/skills can damage valid enemy minions and unprotected structures. Waves and projectiles are bounded. Destroying a base stops its team's waves; practice remains open until Leave practice, and rejoining resets structures. This is local training, without career rewards or ranked settlement. The new build still requires compilation and device playtesting; only the prior build was captured on the connected iPad during this change.
+
 ## Tablet UI and interactive previews (0.28.1)
 
 Touch input no longer implies phone-sized Home/Collection/picker/scoreboard layouts. Home centers its composition on tablets and preserves the living backdrop during data refreshes; touch drives subtle parallax and automatic detail reduction crossfades. The Home hero uses the painted platform, supports drag rotation and plays an available expressive animation on double tap, returning to idle. No new wave animation asset is shipped.
@@ -34,7 +40,7 @@ A fifth class, **Warden**, completes one class per draft duty: Warrior → Solo 
 
 ## Offline character practice (0.23.0-rc.5)
 
-Home → Offline practice → choose a bundled avatar/class → Start practice. The 3D client runs a small in-process practice simulation through its normal snapshot/render/input pipeline, with no socket listener or external server. Level six unlocks every skill; four enemy practice heroes include a stationary melee target and moving animation examples, and defeated targets recover after three seconds. Mana regenerates for repeated tests. Basic attacks, class skills and dash/haste use shared definitions. Practice is not full bot matchmaking: there are no lane waves, ranked results, inventory purchases or progression rewards. Leave practice in Game menu restores the saved online server; bundled characters work without Ekza login. Game menu has a fixed × header and fixed navigation footer, with independently scrollable content.
+Home → Offline practice → choose a bundled avatar/class → Start practice. The 3D client runs a small in-process practice simulation through its normal snapshot/render/input pipeline, with no socket listener or external server. Level six unlocks every skill; four enemy practice heroes include a stationary melee target and moving animation examples, and defeated targets recover after three seconds. Mana regenerates for repeated tests. Basic attacks, class skills and dash/haste use shared definitions. Practice is not full bot matchmaking: ranked results, inventory purchases and progression rewards remain unavailable; lane waves and structures were added in 0.28.3. Leave practice in Game menu restores the saved online server; bundled characters work without Ekza login. Game menu has a fixed × header and fixed navigation footer, with independently scrollable content.
 
 ## Combat particles and healing butterflies (0.23.0-rc.3)
 

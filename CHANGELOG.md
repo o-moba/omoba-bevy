@@ -4,6 +4,17 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [0.28.3] - 2026-09-28
+
+### Tablet composition and offline lanes
+- Anchor the Home ornament frame and a fading header scrim to the full viewport; keep the character/content composition fitted separately. Remove duplicate tablet utility controls and desktop keyboard hints on touch devices.
+- Align Graphics labels, steppers, motion toggle and reset action in one bounded column; preserve independent scrolling and fixed close/back controls.
+- Offline practice includes shared-map towers/bases and three-lane minion waves for both teams, movement/combat, tower fire, typed player targeting, structure protection and bounded/resettable state. Practice stays open after base destruction, without career rewards or ranked settlement.
+- Add Russian to the embedded language catalogue and live settings cycle, using existing Cyrillic font fallback and preference persistence.
+- Hide application Exit on iOS/Android and reject termination actions there; mobile online sessions have Leave match, while offline sessions retain Leave practice. Desktop Exit is unchanged.
+
+Verification: physical iPad capture confirmed the previous 0.28.2 defects. New Rust regression coverage is added, but compilation, tests and new-build device captures remain pending under the repository's low-disk build stop.
+
 ## [0.28.2] - 2026-09-28
 
 - Integrate the pending iPad layout fixes into main, preserving the visible build label. Tablet Home uses a fitted, centered spacious composition instead of fixed phone coordinates.

@@ -115,7 +115,7 @@ struct ClientPreferencesFile {
     /// Accessibility: disable decorative parallax and particles.
     #[serde(default)]
     reduce_motion: bool,
-    /// Interface language code (`en`, `zh-Hans`); absent before 0.26 means
+    /// Interface language code (`en`, `ru`, `zh-Hans`); absent before 0.26 means
     /// English. An unknown code reads as English.
     #[serde(default)]
     language: Option<String>,
@@ -705,6 +705,11 @@ mod tests {
         let restored: ClientPreferencesFile = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(restored.schema_version, SCHEMA_VERSION);
         assert_eq!(stored_language(restored.language.as_deref()), Some(zh));
+        let ru = LocaleId::parse("ru").expect("Russian ships");
+        file.language = Some(ru.code().to_owned());
+        let restored: ClientPreferencesFile =
+            serde_json::from_slice(&serde_json::to_vec(&file).unwrap()).unwrap();
+        assert_eq!(stored_language(restored.language.as_deref()), Some(ru));
         let unknown: ClientPreferencesFile =
             serde_json::from_str(r#"{"schema_version":5,"language":"xx-Klingon"}"#).unwrap();
         assert_eq!(stored_language(unknown.language.as_deref()), None);

@@ -1,0 +1,19 @@
+{
+  "hud.level": "Ур.\n{level}",
+  "hud.max_level": "МАКС. УРОВЕНЬ",
+  "hud.xp": "Опыт {xp} / {next} · {points} +",
+  "hud.no_player": "Уровень --   Опыт --/--   Очки способностей --",
+  "hud.prematch": "Нажмите {help_key} для справки по управлению.\nКласс: {class} Способности: {skills} - использовать на цели.",
+  "hud.target.defeated": "Герой погиб — скоро возрождение",
+  "hud.target.locked": "Цель захвачена · Атака / Q W E R",
+  "hud.target.locked_phone": "Цель захвачена · АТАКА / способности",
+  "hud.target.none": "Выберите противника · P магазин · F1 справка",
+  "hud.target.none_phone": "Коснитесь АТАКИ · Перетащите для захвата",
+  "hud.goal.destroy_base": "Уничтожьте базу противника.",
+  "hud.goal.unlock_base": "Разрушьте башни одной линии, чтобы открыть базу.",
+  "hud.goal.base_hp": "База противника · {hp} / {max} ОЗ",
+  "hud.buff.wendigo": "Благосклонность Вендиго: +15% урона способностей — {secs} с",
+  "hud.buff.mutatio": "Мощь Мутацио: +25% урона способностей, +2 ОЗ/с — {secs} с",
+  "hud.brush.concealed": "КУСТЫ · ВЫ СКРЫТЫ",
+  "hud.brush.revealed": "КУСТЫ · ВЫ ОБНАРУЖЕНЫ"
+}

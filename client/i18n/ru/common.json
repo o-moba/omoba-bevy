@@ -1,0 +1,16 @@
+{
+  "common.ok": "ОК",
+  "common.cancel": "Отмена",
+  "common.back": "Назад",
+  "common.close": "Закрыть",
+  "common.retry": "Повторить",
+  "common.continue": "Продолжить",
+  "common.confirm": "Подтвердить",
+  "common.save": "Сохранить",
+  "common.done": "Готово",
+  "common.yes": "Да",
+  "common.no": "Нет",
+  "common.on": "Вкл.",
+  "common.off": "Выкл.",
+  "common.loading": "Загрузка…"
+}

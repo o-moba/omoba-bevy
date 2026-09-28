@@ -34,6 +34,10 @@ fn namespace_entries(raw: &RawLocale) -> BTreeMap<&'static str, Vec<(&'static st
         .collect()
 }
 
+fn ru() -> LocaleId {
+    LocaleId::parse("ru").expect("Russian ships")
+}
+
 fn zh() -> LocaleId {
     LocaleId::parse("zh-Hans").expect("zh-Hans ships")
 }
@@ -117,6 +121,7 @@ fn namespaces_prefix_their_keys_and_meta_files_are_valid() {
     assert_eq!(LocaleId::ENGLISH.code(), "en");
     assert_eq!(LocaleId::ENGLISH.native_name(), "English");
     assert_eq!(zh().native_name(), "简体中文");
+    assert_eq!(ru().native_name(), "Русский");
     // A malformed file is refused with its path and key.
     assert!(parse_namespace("xx", "pause", r#"{"help.title": "x"}"#).is_err());
     assert!(parse_namespace("xx", "pause", r#"{"pause.title": 1}"#).is_err());
@@ -171,6 +176,8 @@ fn the_registry_is_exactly_the_locale_folders_on_disk() {
     // A locale is found by its code in any case or separator style, and
     // `next` cycles through every locale.
     assert_eq!(LocaleId::parse("ZH_hans"), Some(zh()));
+    assert_eq!(LocaleId::parse("RU"), Some(ru()));
+    assert!(codes.contains(&"ru"));
     assert_eq!(LocaleId::parse("xx"), None);
     let mut cycle = LocaleId::ENGLISH;
     for _ in 0..LOCALES.len() {
@@ -205,6 +212,11 @@ fn lookups_fall_back_to_english_then_to_the_key() {
     assert_eq!(tr_in(MISSING, zh()), MISSING);
     assert_eq!(tr_in("pause.title", LocaleId::ENGLISH), "Game menu");
     assert_eq!(tr_in("pause.title", zh()), "游戏菜单");
+    assert_eq!(tr_in("pause.title", ru()), "Игровое меню");
+    assert_eq!(
+        tr_in("home.button.offline_practice", ru()),
+        "Офлайн-тренировка"
+    );
     // The process-wide locale of an in-process test is English.
     assert_eq!(active(), LocaleId::ENGLISH);
     assert_eq!(tr("common.back"), "Back");
@@ -237,6 +249,10 @@ fn templates_fill_named_arguments_and_keep_escaped_braces() {
     assert_eq!(
         trf_in("pause.settings.server_hint", zh(), &[("addr", &42)]),
         "服务器：42\n设置会自动保存。"
+    );
+    assert_eq!(
+        trf_in("pause.settings.server_hint", ru(), &[("addr", &"a:1")]),
+        "Сервер: a:1\nНастройки сохраняются автоматически."
     );
     let label = Localized::with_args("pause.settings.server_hint", [("addr", &"a:1")]);
     assert_eq!(label.text_in(zh()), "服务器：a:1\n设置会自动保存。");

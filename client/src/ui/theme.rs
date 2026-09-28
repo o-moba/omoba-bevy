@@ -592,13 +592,14 @@ impl FontCoverage {
     }
 }
 
-/// Faces whose coverage decides a fallback: Latin display (Cinzel) and the
-/// zh-Hans display subset. Barlow, Inter and Noto Sans CJK are complete for
-/// what they are used for.
-const LIMITED_FACES: [FontFamily; 3] = [
+/// Display and condensed number faces need a fallback for unsupported scripts.
+/// Russian duration/value labels can mix digits with Cyrillic, which Barlow lacks.
+const LIMITED_FACES: [FontFamily; 5] = [
     FontFamily::Display,
     FontFamily::DisplayBold,
     FontFamily::CjkDisplay,
+    FontFamily::Number,
+    FontFamily::NumberBold,
 ];
 
 pub(super) fn index_font_coverage(
@@ -944,6 +945,15 @@ mod tests {
         assert_eq!(
             resolve(TextRole::Number, "3 秒", Form::Desktop, 1.0).family,
             FontFamily::CjkBody
+        );
+        assert_eq!(
+            resolve(TextRole::Number, "3 с", Form::Desktop, 1.0).family,
+            FontFamily::BodySemibold,
+            "Russian units must not disappear in the condensed number font"
+        );
+        assert_eq!(
+            resolve(TextRole::NumberXl, "3 с", Form::Desktop, 1.0).family,
+            FontFamily::BodySemibold
         );
         // A Cyrillic tag in a display role uses name_lg's face, as written.
         let tag = resolve(TextRole::Title, "Дмитрий", Form::Desktop, 1.0);

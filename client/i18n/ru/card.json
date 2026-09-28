@@ -1,0 +1,13 @@
+{
+  "card.level_class": "Уровень {level} · {hero}",
+  "card.stats": "Рейтинг {rating} · Матчей: {matches} · {wins} побед / {losses} поражений",
+  "card.not_loaded": "Профиль карьеры еще не загружен",
+  "card.newcomer_placement": "Новичкам подбираются другие начинающие игроки",
+  "card.title": "Карточка профиля",
+  "card.button.avatars": "Аватары",
+  "card.main_hero": "Основной герой",
+  "card.accent": "Акцент",
+  "card.title_heading": "Звание",
+  "card.title_locked": "{title} · {wins} побед",
+  "card.showcase_hint": "Аватар для главного экрана выбирается в коллекции."
+}

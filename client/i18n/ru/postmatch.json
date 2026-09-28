@@ -1,0 +1,17 @@
+{
+  "postmatch.outcome.victory": "Победа",
+  "postmatch.outcome.defeat": "Поражение",
+  "postmatch.outcome.complete": "Матч завершен",
+  "postmatch.summary.green": "Зелёная команда разрушила базу противника · {minutes} мин",
+  "postmatch.summary.blue": "Синяя команда разрушила базу противника · {minutes} мин",
+  "postmatch.summary.nobody": "Никто не уничтожил базу противника · {minutes} мин",
+  "postmatch.summary.green_short": "Зелёная команда разрушила базу противника",
+  "postmatch.summary.blue_short": "Синяя команда разрушила базу противника",
+  "postmatch.summary.abandoned": "Матч прерван",
+  "postmatch.summary.interrupted": "Матч прерван",
+  "postmatch.saved": "Прогресс сохранен",
+  "postmatch.local_result": "Результат офлайн-тренировки",
+  "postmatch.saving": "Сохранение результатов матча…",
+  "postmatch.button.play_again": "Сыграть ещё раз",
+  "postmatch.button.back_to_menu": "В меню"
+}

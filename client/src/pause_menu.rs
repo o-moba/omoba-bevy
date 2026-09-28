@@ -150,12 +150,12 @@ fn settings_group(
         .spawn((
             Node {
                 width: Val::Percent(100.0),
-                max_width: Val::Px(760.0),
+                max_width: Val::Px(560.0),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Stretch,
                 row_gap: Val::Px(12.0),
                 flex_shrink: 0.0,
-                padding: UiRect::all(Val::Px(16.0)),
+                padding: UiRect::axes(Val::Px(16.0), Val::Px(12.0)),
                 border_radius: BorderRadius::all(Val::Px(12.0)),
                 ..default()
             },
@@ -269,6 +269,7 @@ pub(crate) enum PauseAction {
     Help,
     Exit,
     LeavePractice,
+    LeaveMatch,
     ResetGraphics,
     /// One step of a setting; the sign is the direction.
     Step(Setting, i8),
@@ -411,15 +412,54 @@ fn setting_row(
     setting: Setting,
     id: &str,
 ) {
-    widgets::adjust_row(
-        parent,
-        label,
-        value,
-        SettingLabel(setting),
-        PauseAction::Step(setting, -1),
-        PauseAction::Step(setting, 1),
-        id,
-    );
+    let id = crate::ui::TestId::from(id);
+    parent
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                min_height: Val::Px(44.0),
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(16.0),
+                flex_shrink: 0.0,
+                ..default()
+            },
+            id.clone(),
+        ))
+        .with_children(|row| {
+            row.spawn((
+                label.into_text(),
+                theme::role_text(crate::ui::tokens::TextRole::Label),
+                TextColor(theme::IVORY),
+                Node {
+                    flex_grow: 1.0,
+                    flex_basis: Val::Px(0.0),
+                    min_width: Val::Px(0.0),
+                    ..default()
+                },
+            ));
+            row.spawn(Node {
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(8.0),
+                flex_shrink: 0.0,
+                ..default()
+            })
+            .with_children(|controls| {
+                widgets::controls::stepper_button(
+                    controls,
+                    crate::ui::kit_assets::Icon::NavMinus,
+                    PauseAction::Step(setting, -1),
+                    id.child("-Down"),
+                );
+                widgets::value_label(controls, value, SettingLabel(setting), id.child("-Value"));
+                widgets::controls::stepper_button(
+                    controls,
+                    crate::ui::kit_assets::Icon::NavPlus,
+                    PauseAction::Step(setting, 1),
+                    id.child("-Up"),
+                );
+            });
+        });
 }
 
 fn setup_pause_menu_ui(mut commands: Commands) {
@@ -615,6 +655,13 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                             );
                             widgets::button(
                                 main,
+                                Localized::new("pause.button.leave_match"),
+                                ButtonKind::Secondary,
+                                PauseAction::LeaveMatch,
+                                "PauseMenuLeaveMatchButton",
+                            );
+                            widgets::button(
+                                main,
                                 Localized::new("pause.button.leave_practice"),
                                 ButtonKind::Secondary,
                                 PauseAction::LeavePractice,
@@ -712,7 +759,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                     "pause.settings.motion",
                                     "PauseMenuMotionTitle",
                                 );
-                                widgets::toggle_row(
+                                let motion_row = widgets::toggle_row(
                                     settings,
                                     Localized::new("pause.motion.reduce"),
                                     tr("kit.gallery.state.off"),
@@ -720,6 +767,15 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                     PauseAction::ToggleReduceMotion,
                                     "PauseMenuReduceMotion",
                                 );
+                                settings.commands().entity(motion_row).insert(Node {
+                                    width: Val::Percent(100.0),
+                                    min_height: Val::Px(46.0),
+                                    padding: UiRect::horizontal(Val::Px(16.0)),
+                                    align_items: AlignItems::Center,
+                                    justify_content: JustifyContent::SpaceBetween,
+                                    flex_shrink: 0.0,
+                                    ..default()
+                                });
                                 settings.spawn((
                                     Localized::new("pause.motion.reduce_hint").into_text(),
                                     crate::ui::theme::role_text(
@@ -727,7 +783,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                     ),
                                     TextColor(theme::MUTED),
                                     Node {
-                                        max_width: Val::Px(metric::MENU_W),
+                                        width: Val::Percent(100.0),
                                         flex_shrink: 0.0,
                                         ..default()
                                     },
@@ -828,13 +884,21 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                     "PauseMenuScaleControls",
                                 );
 
-                                widgets::button(
+                                let reset = widgets::button(
                                     settings,
                                     Localized::new("pause.button.reset_graphics"),
                                     ButtonKind::Secondary,
                                     PauseAction::ResetGraphics,
                                     "PauseMenuResetGraphicsButton",
                                 );
+                                settings.commands().entity(reset).insert(Node {
+                                    width: Val::Percent(100.0),
+                                    height: Val::Px(46.0),
+                                    align_items: AlignItems::Center,
+                                    justify_content: JustifyContent::Center,
+                                    flex_shrink: 0.0,
+                                    ..default()
+                                });
                             });
                         });
                     panel
@@ -1191,8 +1255,16 @@ fn apply_pause_audio(
     }
 }
 
-/// Leaving: quit the application or leave an offline practice match.
+fn mobile_pause(platform: Option<&crate::ui::UiPlatform>) -> bool {
+    platform.map_or_else(
+        || crate::platform::ui_profile() == crate::platform::UiProfile::Mobile,
+        crate::ui::UiPlatform::is_mobile,
+    )
+}
+
+/// Leave a session on mobile; application termination is desktop-only.
 fn apply_pause_session(
+    platform: Option<Res<crate::ui::UiPlatform>>,
     mut activated: MessageReader<Activated<PauseAction>>,
     mut commands: Commands,
     session: Res<ClientSession>,
@@ -1204,7 +1276,7 @@ fn apply_pause_session(
 ) {
     for Activated { action, .. } in activated.read() {
         match action {
-            PauseAction::Exit => {
+            PauseAction::Exit if !mobile_pause(platform.as_deref()) => {
                 info!("Exit selected from pause menu.");
                 if let Ok(mut cursor) = cursor_query.single_mut() {
                     cursor.grab_mode = CursorGrabMode::None;
@@ -1214,6 +1286,15 @@ fn apply_pause_session(
                     commands.entity(primary_window).despawn();
                 }
                 app_exit_writer.write(AppExit::Success);
+            }
+            PauseAction::LeaveMatch
+                if mobile_pause(platform.as_deref())
+                    && !session.is_offline()
+                    && session.has_committed_join() =>
+            {
+                session_commands.write(crate::net::SessionUiCommand::LeaveMatch);
+                menu.open = false;
+                menu.in_settings = false;
             }
             PauseAction::LeavePractice if session.is_offline() => {
                 session_commands.write(crate::net::SessionUiCommand::LeaveMatch);
@@ -1359,20 +1440,24 @@ fn sync_settings_server_addr_label(
     }
 }
 
-/// "Exit game" belongs to online matches, "Leave practice" to offline ones.
+/// Mobile platforms leave sessions without terminating the application.
 fn sync_practice_actions(
+    platform: Option<Res<crate::ui::UiPlatform>>,
     session: Res<ClientSession>,
     mut buttons: Query<(&mut Node, &UiAction<PauseAction>)>,
     mut hints: Query<(&Name, &mut Text)>,
 ) {
     let offline = session.is_offline();
     for (mut node, action) in &mut buttons {
-        let leave_practice = match action.0 {
-            PauseAction::Exit => false,
-            PauseAction::LeavePractice => true,
+        let visible = match action.0 {
+            PauseAction::Exit => !offline && !mobile_pause(platform.as_deref()),
+            PauseAction::LeaveMatch => {
+                !offline && session.has_committed_join() && mobile_pause(platform.as_deref())
+            }
+            PauseAction::LeavePractice => offline,
             _ => continue,
         };
-        let display = if offline == leave_practice {
+        let display = if visible {
             Display::Flex
         } else {
             Display::None
@@ -1522,6 +1607,82 @@ mod tests {
     }
 
     #[test]
+    fn tablet_graphics_rows_share_label_and_stepper_columns() {
+        let (mut app, _) = layout_app(Vec2::new(1180.0, 820.0), 2.0, true);
+        app.insert_resource(SettingsTab::Graphics)
+            .add_systems(Update, settings_tabs);
+        app.update();
+        app.update();
+        let ids = [
+            "PauseMenuMainLightControls",
+            "PauseMenuAmbientControls",
+            "PauseMenuPitchControls",
+            "PauseMenuYawControls",
+        ];
+        let mut label_x: Option<f32> = None;
+        let mut button_x: Option<f32> = None;
+        for id in ids {
+            let row = named(&mut app, id);
+            let label = app.world().get::<Children>(row).unwrap()[0];
+            let label_rect = rect(&app, label, 2.0);
+            let minus = named(&mut app, &format!("{id}-Down"));
+            let minus_rect = rect(&app, minus, 2.0);
+            if let Some(x) = label_x {
+                assert!((label_rect.min.x - x).abs() < 1.0);
+            }
+            if let Some(x) = button_x {
+                assert!((minus_rect.min.x - x).abs() < 1.0);
+            }
+            assert!(label_rect.max.x <= minus_rect.min.x);
+            assert!(minus_rect.width() >= 44.0);
+            label_x = Some(label_rect.min.x);
+            button_x = Some(minus_rect.min.x);
+        }
+    }
+
+    #[test]
+    fn mobile_hides_exit_and_leaves_online_session_without_app_exit() {
+        for mobile in [false, true] {
+            let mut app = App::new();
+            app.insert_resource(crate::ui::UiPlatform(if mobile {
+                crate::platform::UiProfile::Mobile
+            } else {
+                crate::platform::UiProfile::Desktop
+            }))
+            .insert_resource(ClientSession::admitted_for_test())
+            .init_resource::<PauseMenuState>()
+            .add_message::<Activated<PauseAction>>()
+            .add_message::<crate::net::SessionUiCommand>()
+            .add_message::<AppExit>()
+            .add_systems(Startup, setup_pause_menu_ui)
+            .add_systems(Update, (apply_pause_session, sync_practice_actions).chain());
+            app.update();
+            let exit = named(&mut app, "PauseMenuExitButton");
+            let leave = named(&mut app, "PauseMenuLeaveMatchButton");
+            assert_eq!(
+                app.world().get::<Node>(exit).unwrap().display,
+                if mobile { Display::None } else { Display::Flex }
+            );
+            assert_eq!(
+                app.world().get::<Node>(leave).unwrap().display,
+                if mobile { Display::Flex } else { Display::None }
+            );
+            app.world_mut().write_message(Activated {
+                entity: leave,
+                action: PauseAction::LeaveMatch,
+            });
+            app.update();
+            assert_eq!(
+                app.world()
+                    .resource::<Messages<crate::net::SessionUiCommand>>()
+                    .len(),
+                usize::from(mobile)
+            );
+            assert!(app.world().resource::<Messages<AppExit>>().is_empty());
+        }
+    }
+
+    #[test]
     fn real_layout_keeps_close_and_footer_reachable_and_touch_scrolls_settings() {
         for (size, dpi) in [
             (Vec2::new(568.0, 320.0), 2.0),
@@ -1530,6 +1691,9 @@ mod tests {
             (Vec2::new(1180.0, 820.0), 2.0),
         ] {
             let (mut app, window) = layout_app(size, dpi, true);
+            app.insert_resource(ClientSession::admitted_for_test());
+            app.update();
+            app.update();
             let close = named(&mut app, "PauseMenuCloseButton");
             let footer = named(&mut app, "BackButton");
             let body = named(&mut app, "PauseMenuSettingsSection");
@@ -1609,8 +1773,8 @@ mod tests {
                     if size.y <= 320.0 {
                         assert!(app.world().get::<ScrollPosition>(main).unwrap().y > 0.0);
                     }
-                    let exit = named(&mut app, "PauseMenuExitButton");
-                    assert!(rect(&app, exit, dpi).height() >= 44.0);
+                    let leave = named(&mut app, "PauseMenuLeaveMatchButton");
+                    assert!(rect(&app, leave, dpi).height() >= 44.0);
                 }
                 let r = rect(&app, close, dpi);
                 assert!(viewport.contains(r.min) && viewport.contains(r.max));
@@ -2127,7 +2291,7 @@ mod tests {
     }
 
     #[test]
-    fn mobile_exit_requires_release_and_focus_loss_cancels_the_pending_tap() {
+    fn mobile_taps_cannot_terminate_the_application() {
         let mut app = App::new();
         let mut mobile = crate::mobile_controls::MobileControls::default();
         mobile.enabled = true;
@@ -2228,7 +2392,8 @@ mod tests {
         app.world_mut()
             .write_message(event(4, TouchPhase::Ended, center + Vec2::X * 3.0));
         app.update();
-        assert_eq!(app.world().resource::<Messages<AppExit>>().len(), 1);
+        assert!(app.world().resource::<Messages<AppExit>>().is_empty());
+        assert!(app.world().get_entity(window).is_ok());
     }
 
     #[test]
@@ -2290,7 +2455,8 @@ mod tests {
     #[test]
     fn exit_button_emits_clean_application_exit() {
         let mut app = App::new();
-        app.init_resource::<ClientSession>()
+        app.insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
+            .init_resource::<ClientSession>()
             .init_resource::<PauseMenuState>()
             .add_message::<AppExit>()
             .add_message::<crate::net::SessionUiCommand>()
@@ -2378,9 +2544,21 @@ mod tests {
         app.update();
         app.world_mut().entity_mut(button).insert(Interaction::None);
         app.update();
+        assert_eq!(
+            app.world().resource::<Locale>().id(),
+            LocaleId::parse("ru").unwrap()
+        );
+        assert_eq!(text(&mut app, "PauseMenuLanguageValue"), "Русский");
+        assert_eq!(child_text(&mut app, "SettingsButton"), "Настройки");
+        app.world_mut()
+            .entity_mut(button)
+            .insert(Interaction::Pressed);
+        app.update();
+        app.world_mut().entity_mut(button).insert(Interaction::None);
+        app.update();
         let zh = LocaleId::parse("zh-Hans").unwrap();
         assert_eq!(app.world().resource::<Locale>().id(), zh);
-        assert_eq!(app.world().resource::<Locale>().generation(), 1);
+        assert_eq!(app.world().resource::<Locale>().generation(), 2);
         assert_eq!(text(&mut app, "PauseMenuLanguageValue"), "简体中文");
         assert_eq!(text(&mut app, "PauseMenuTitle"), "游戏菜单");
         assert_eq!(child_text(&mut app, "SettingsButton"), "设置");

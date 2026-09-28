@@ -32,5 +32,6 @@
   "pause.camera.distance": "距离",
   "pause.settings.model": "模型",
   "pause.model.scale": "缩放",
-  "pause.credits.icons": "图标由 Delapouite、Lorc、Sbed、Zeromancer 制作，来自 https://game-icons.net（CC BY 3.0）。界面图标：Lucide（ISC）。字体：Cinzel、Inter、Barlow Condensed、Noto Serif SC、Noto Sans CJK SC（SIL OFL 1.1）。"
+  "pause.credits.icons": "图标由 Delapouite、Lorc、Sbed、Zeromancer 制作，来自 https://game-icons.net（CC BY 3.0）。界面图标：Lucide（ISC）。字体：Cinzel、Inter、Barlow Condensed、Noto Serif SC、Noto Sans CJK SC（SIL OFL 1.1）。",
+  "pause.button.leave_match": "离开对局"
 }

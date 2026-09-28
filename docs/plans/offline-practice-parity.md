@@ -24,4 +24,15 @@ the only/default experience presented as a normal match.
 - [ ] Verify tower destruction, minion progression, skills and full reset in headless
       simulation, then test touch controls and performance on iPad.
 
-No gameplay expansion is implemented by the accompanying UI feedback task.
+## Source implementation in 0.28.3
+
+The follow-up TASK-IPAD-FRAME-OFFLINE-LANES-2026-09-28 adds authored structures,
+protection ordering, both-team three-lane waves, autonomous minion/tower combat,
+and player targeting of those entities. It uses shared structure stats and lane
+routes; offline minion tuning currently mirrors server constants locally.
+Character testing remains available alongside the lane simulation.
+
+This is not yet full match parity: practice stays open after base destruction,
+there are no career rewards, and rejoining is still the full reset path. The
+regression tests were written but not executed under the low-disk build stop.
+The unchecked verification and broader preset/economy tasks above remain open.

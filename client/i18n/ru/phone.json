@@ -1,0 +1,11 @@
+{
+  "phone.bar.menu": "МЕНЮ",
+  "phone.bar.server": "СЕРВЕР",
+  "phone.server.title": "Подключение к игре",
+  "phone.server.hint": "Введите адрес, которым поделился организатор, например 192.168.1.20:4000",
+  "phone.server.delete": "УДАЛИТЬ",
+  "phone.server.connect": "ПОДКЛЮЧИТЬСЯ",
+  "phone.server.close": "ЗАКРЫТЬ",
+  "phone.server.keyboard": "КЛАВИАТУРА",
+  "phone.server.invalid": "Укажите адрес сервера и порт, например 192.168.1.20:4000"
+}

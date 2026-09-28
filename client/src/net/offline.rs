@@ -21,6 +21,8 @@ use super::session::ClientSession;
 use super::transport::NetThreadSignal;
 use shared::{SkillSlot, TargetingMode, hero_balance as balance, shop::ItemBonuses, utility::*};
 
+mod lanes;
+
 pub(super) const ADDRESS: &str = "offline-practice";
 const LOCAL_ID: u64 = 1;
 const LEVEL: u32 = 6; // Every class slot is available for character testing.
@@ -75,6 +77,7 @@ struct Shot {
     state: ProjectileState,
     target: TargetId,
     damage: f32,
+    remaining: f32,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum BotKind {
@@ -94,6 +97,7 @@ struct Bot {
 #[derive(Default)]
 struct Simulation {
     players: Vec<PlayerState>,
+    lanes: lanes::LaneWorld,
     bots: HashMap<u64, Bot>,
     shots: Vec<Shot>,
     events: VecDeque<CombatEvent>,
@@ -154,15 +158,14 @@ impl Simulation {
                 self.players.push(local);
                 self.next_id = LOCAL_ID + 1;
                 self.spawn_ring();
+                self.lanes = lanes::LaneWorld::new();
             }
             ClientPacket::Leave => {
-                self.players.clear();
-                self.bots.clear();
-                self.shots.clear();
-                self.events.clear();
-                self.respawn.clear();
-                self.stats.clear();
-                self.god_mode = false;
+                // Keep wire ordering monotonic if this local transport is reused.
+                let (tick, sequence) = (self.tick, self.sequence);
+                *self = Self::default();
+                self.tick = tick;
+                self.sequence = sequence;
             }
             ClientPacket::Transform {
                 x,
@@ -172,7 +175,8 @@ impl Simulation {
                 dash_sequence,
             } => {
                 if let Some(p) = self.players.first_mut() {
-                    if [x, y, z, yaw].iter().all(|v| v.is_finite())
+                    if p.hp > 0.0
+                        && [x, y, z, yaw].iter().all(|v| v.is_finite())
                         && dash_sequence == p.utility.dash_sequence
                     {
                         p.x = x;
@@ -192,7 +196,7 @@ impl Simulation {
                     return;
                 }
                 p.basic_attack_request_id = request_id;
-                if p.basic_attack_remaining_secs > 0.0 {
+                if p.hp <= 0.0 || p.basic_attack_remaining_secs > 0.0 {
                     return;
                 }
                 let def = shared::basic_attack_for_class(p.hero_class);
@@ -221,7 +225,7 @@ impl Simulation {
                     return;
                 }
                 if def.targeting == TargetingMode::UnitTarget
-                    && !self.valid_target(target, def.cast_range)
+                    && !self.valid_target(target, shared::scaled_cast_range(def, rank))
                 {
                     return;
                 }
@@ -241,7 +245,9 @@ impl Simulation {
                 p.action_kind = PlayerActionKind::for_cast(index);
                 p.action_slot = slot;
                 if let Some(damage) = def.projectile_damage {
-                    self.attack(target, damage * effect_scale, Some(slot));
+                    if self.valid_target(target, shared::scaled_cast_range(def, rank)) {
+                        self.attack(target, damage * effect_scale, Some(slot));
+                    }
                 }
             }
             ClientPacket::Utility {
@@ -253,7 +259,7 @@ impl Simulation {
                 let Some(p) = self.players.first_mut() else {
                     return;
                 };
-                if request_id <= p.utility.last_request_id {
+                if p.hp <= 0.0 || request_id <= p.utility.last_request_id {
                     return;
                 }
                 p.utility.last_request_id = request_id;
@@ -307,14 +313,15 @@ impl Simulation {
         }
     }
     fn valid_target(&self, target: TargetId, range: f32) -> bool {
-        target.kind == TargetKind::Player
-            && self.players.iter().any(|p| {
-                p.id == target.id
-                    && p.id != LOCAL_ID
-                    && p.hp > 0.0
-                    && Vec2::new(p.x - self.players[0].x, p.z - self.players[0].z).length()
-                        <= range + shared::PLAYER_TARGET_RADIUS
-            })
+        let Some(owner) = self.players.first().filter(|p| p.hp > 0.0) else {
+            return false;
+        };
+        self.target_info(target).is_some_and(|target| {
+            target.team != owner.team
+                && target.vulnerable
+                && Vec2::new(target.position.x - owner.x, target.position.z - owner.z).length()
+                    <= range + target.radius
+        })
     }
     fn attack(&mut self, target: TargetId, damage: f32, slot: Option<u8>) {
         self.shoot(0, target, damage, slot);
@@ -322,6 +329,9 @@ impl Simulation {
     /// A homing shot from `players[owner]`; the cosmetic action sequence
     /// advances for basic strikes (casts advance it where mana is paid).
     fn shoot(&mut self, owner: usize, target: TargetId, damage: f32, slot: Option<u8>) {
+        if self.shots.len() >= lanes::MAX_SHOTS {
+            return;
+        }
         let p = &mut self.players[owner];
         if slot.is_none() {
             p.action_sequence += 1;
@@ -344,6 +354,7 @@ impl Simulation {
             },
             target,
             damage,
+            remaining: 3.0,
         });
     }
     fn alloc_id(&mut self) -> u64 {
@@ -382,7 +393,10 @@ impl Simulation {
         self.players.retain(|p| p.id == LOCAL_ID);
         self.bots.clear();
         self.respawn.retain(|id, _| *id == LOCAL_ID);
-        self.shots.retain(|s| s.state.owner_id == LOCAL_ID);
+        self.shots.retain(|s| {
+            (s.state.source_kind != CombatEntityKind::Player || s.state.owner_id == LOCAL_ID)
+                && (s.target.kind != TargetKind::Player || s.target.id == LOCAL_ID)
+        });
     }
     fn remove_bot(&mut self, id: u64) {
         self.players.retain(|p| p.id != id);
@@ -688,66 +702,10 @@ impl Simulation {
         for index in duelists {
             self.drive_duelist(index, dt);
         }
-        let shots = std::mem::take(&mut self.shots);
-        for mut shot in shots {
-            let Some(p) = self
-                .players
-                .iter_mut()
-                .find(|p| p.id == shot.target.id && p.hp > 0.0)
-            else {
-                continue;
-            };
-            let position = Vec3::new(shot.state.x, shot.state.y, shot.state.z);
-            let target = Vec3::new(p.x, p.y + 0.8, p.z);
-            let delta = target - position;
-            if delta.length() <= PROJECTILE_SPEED * dt + 0.3 {
-                if p.id == LOCAL_ID && self.god_mode {
-                    continue;
-                }
-                let amount = shot.damage.min(p.hp);
-                p.hp -= amount;
-                let killed = p.hp <= 0.0;
-                let (victim, owner) = (p.id, shot.state.owner_id);
-                if killed {
-                    self.stats.entry(victim).or_default().1 += 1;
-                    if owner != victim {
-                        self.stats.entry(owner).or_default().0 += 1;
-                    }
-                }
-                let p = &self.players[self.players.iter().position(|q| q.id == victim).unwrap()];
-                self.sequence += 1;
-                self.events.push_back(CombatEvent {
-                    id: self.sequence,
-                    source: shared::combat::CombatEntity {
-                        kind: CombatEntityKind::Player,
-                        id: owner,
-                    },
-                    target: shared::combat::CombatEntity {
-                        kind: CombatEntityKind::Player,
-                        id: victim,
-                    },
-                    amount,
-                    x: p.x,
-                    y: p.y + 0.8,
-                    z: p.z,
-                    style: shot.state.style,
-                    action_slot: shot.state.action_slot,
-                    killed,
-                });
-                if self.events.len() > 32 {
-                    self.events.pop_front();
-                }
-            } else {
-                let direction = delta.normalize();
-                let next = position + direction * PROJECTILE_SPEED * dt;
-                shot.state.x = next.x;
-                shot.state.y = next.y;
-                shot.state.z = next.z;
-                shot.state.direction = direction.to_array();
-                self.shots.push(shot);
-            }
-        }
+        self.advance_lanes(dt);
+        self.advance_shots(dt);
     }
+
     fn snapshot(&mut self) -> ServerPacket {
         self.tick += 1;
         ServerPacket::Snapshot {
@@ -798,8 +756,13 @@ impl Simulation {
                     .collect(),
             }),
             prematch: None,
-            structures: vec![],
-            minions: vec![],
+            structures: self
+                .lanes
+                .structures
+                .iter()
+                .map(|s| s.state.clone())
+                .collect(),
+            minions: self.lanes.minions.iter().map(|m| m.state.clone()).collect(),
             neutrals: vec![],
             team_buffs: vec![],
             rematch_in_secs: None,

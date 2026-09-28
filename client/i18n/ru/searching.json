@@ -1,0 +1,21 @@
+{
+  "searching.status.waiting": "Ожидание игроков…",
+  "searching.status.forming": "Ожидание игроков · {ready}/{needed}\nМатч начнется, как только будет сформирован состав.",
+  "searching.status.starting": "Матч найден!\nСтарт через {seconds}…",
+  "searching.status.joining": "Подключение к матчу…",
+  "searching.status.contacting": "Подключение к серверу…",
+  "searching.hero": "{hero} · {avatar}",
+  "searching.default_avatar": "аватар по умолчанию",
+  "searching.title": "ПОИСК МАТЧА",
+  "searching.heading": "Поиск матча",
+  "searching.match.connecting": "Подключение вашего профиля к поиску матча…",
+  "searching.match.capacity": "Все арены заняты. Ваше место в очереди зарезервировано.",
+  "searching.match.preparing": "Подготовка к матчу…",
+  "searching.match.bot_fill": "Боты займут свободные места через {seconds} с",
+  "searching.match.humans_only": "Ожидание полного состава из игроков · без ботов",
+  "searching.match.bot_practice": "Подготовка к матчу с ботами…",
+  "searching.match.waiting": "Игроки найдены · {humans}/{needed}\n{policy} · ожидание {elapsed}с",
+  "searching.match.allocating": "Матч найден · подготовка арены…",
+  "searching.match.assigned": "Матч найден · подключение к команде…",
+  "searching.match.failed": "Не удалось начать матч: {code}\nОтмените поиск и попробуйте снова."
+}

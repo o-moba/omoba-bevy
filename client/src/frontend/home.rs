@@ -27,6 +27,7 @@ impl Plugin for HomeScreenPlugin {
     fn build(&self, app: &mut App) {
         app.add_ui_action::<HomeAction>()
             .add_systems(OnEnter(AppScreen::Home), (spawn_home_backdrop, spawn_home))
+            .add_systems(Update, layout_home_chrome.run_if(in_state(AppScreen::Home)))
             .add_systems(
                 Update,
                 (home_actions, refresh_home)
@@ -56,6 +57,54 @@ enum HomeAction {
 #[derive(Component)]
 struct HomeRoot;
 
+#[derive(Component)]
+enum HomeChrome {
+    Frame,
+    Scrim,
+}
+
+// Chrome belongs to the physical viewport, not the centered 16:9 content canvas.
+fn layout_home_chrome(
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    platform: Res<crate::ui::UiPlatform>,
+    scale: Res<UiScale>,
+    mut chrome: Query<(&HomeChrome, &mut Node)>,
+) {
+    let Ok(window) = windows.single() else { return };
+    let scale = scale.0.max(0.1);
+    let compact = platform.is_mobile() && window.height() < 600.0;
+    for (kind, mut node) in &mut chrome {
+        match kind {
+            HomeChrome::Frame => {
+                let display = if compact {
+                    Display::None
+                } else {
+                    Display::Flex
+                };
+                if node.display != display {
+                    node.display = display;
+                }
+                let inset = Val::Px(12.0 / scale);
+                if [node.left, node.right, node.top, node.bottom]
+                    .iter()
+                    .any(|edge| *edge != inset)
+                {
+                    node.left = inset;
+                    node.right = inset;
+                    node.top = inset;
+                    node.bottom = inset;
+                }
+            }
+            HomeChrome::Scrim => {
+                let height = Val::Px(if compact { 96.0 / scale } else { 160.0 / scale });
+                if node.height != height {
+                    node.height = height;
+                }
+            }
+        }
+    }
+}
+
 fn spawn_home_backdrop(mut commands: Commands, platform: Res<crate::ui::UiPlatform>) {
     commands
         .spawn(widgets::screen_root(AppScreen::Home, "HomeBackdrop"))
@@ -67,6 +116,40 @@ fn spawn_home_backdrop(mut commands: Commands, platform: Res<crate::ui::UiPlatfo
                 LivingBands::default(),
                 theme::Form::of(platform.is_mobile()),
             );
+            root.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    height: Val::Px(160.0),
+                    ..default()
+                },
+                BackgroundGradient::from(LinearGradient::to_bottom(vec![
+                    ColorStop::percent(
+                        theme::perceptual(color::SCRIM_LIVING).with_alpha(0.65),
+                        0.0,
+                    ),
+                    ColorStop::percent(Color::NONE, 100.0),
+                ])),
+                Pickable::IGNORE,
+                HomeChrome::Scrim,
+                Name::new("HomeHeaderScrim"),
+            ));
+            root.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(12.0),
+                    right: Val::Px(12.0),
+                    top: Val::Px(12.0),
+                    bottom: Val::Px(12.0),
+                    ..default()
+                },
+                crate::ui::kit_assets::KitImage::frame(crate::ui::kit_assets::Frame::Ornament),
+                Pickable::IGNORE,
+                HomeChrome::Frame,
+                Name::new("HomeOrnamentFrame"),
+            ));
         });
 }
 
@@ -248,6 +331,7 @@ fn spawn_home(
         Vec2::new(1280.0, 720.0)
     };
     let fit = (viewport.x / reference.x).min(viewport.y / reference.y);
+    let outer_y = (viewport.y / fit - reference.y) * 0.5;
     // The plate is cover-cropped, while controls are contain-fitted. Locate
     // its painted platform (640, 500 in the 1280x720 painting) in the canvas.
     let cover = (viewport.x / 1280.0).max(viewport.y / 720.0);
@@ -280,46 +364,12 @@ fn spawn_home(
         ))
         .insert((canvas, transform, BackgroundColor(Color::NONE)))
         .with_children(|root| {
-            // Legibility belongs to the fitted canvas, not the full-bleed
-            // painting: it stays behind the title after a viewport resize.
-            let scrim = theme::perceptual(color::SCRIM_LIVING);
-            let solid = if phone { 40.0 } else { 80.0 };
-            root.spawn((
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(0.0),
-                    right: Val::Px(0.0),
-                    top: Val::Px(0.0),
-                    height: Val::Px(solid + 40.0),
-                    ..default()
-                },
-                BackgroundGradient::from(LinearGradient::to_bottom(vec![
-                    ColorStop::px(scrim, 0.0),
-                    ColorStop::px(scrim, solid),
-                    ColorStop::px(scrim.with_alpha(0.0), solid + 40.0),
-                ])),
-                Pickable::IGNORE,
-                Name::new("HomeHeaderScrim"),
-            ));
             if !phone {
                 root.spawn((
                     Node {
                         position_type: PositionType::Absolute,
-                        left: Val::Px(8.0),
-                        right: Val::Px(8.0),
-                        top: Val::Px(8.0),
-                        bottom: Val::Px(8.0),
-                        ..default()
-                    },
-                    crate::ui::kit_assets::KitImage::frame(crate::ui::kit_assets::Frame::Ornament),
-                    Pickable::IGNORE,
-                    Name::new("HomeOrnamentFrame"),
-                ));
-                root.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
                         left: Val::Px(40.0),
-                        top: Val::Px(28.0),
+                        top: Val::Px(64.0 / fit - outer_y),
                         flex_direction: FlexDirection::Column,
                         row_gap: Val::Px(2.0),
                         ..default()
@@ -334,40 +384,43 @@ fn spawn_home(
                     widgets::label(&status, 15.0, status_color),
                     Node {
                         position_type: PositionType::Absolute,
-                        right: Val::Px(140.0),
-                        top: Val::Px(36.0),
+                        right: Val::Px(if platform.is_mobile() { 40.0 } else { 140.0 }),
+                        top: Val::Px(76.0 / fit - outer_y),
                         ..default()
                     },
                     Name::new("HomeConnectionStatus"),
                 ));
-                root.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        right: Val::Px(40.0),
-                        top: Val::Px(28.0),
-                        column_gap: Val::Px(space::S8),
-                        ..default()
-                    },
-                    Name::new("HomeUtilityButtons"),
-                ))
-                .with_children(|buttons| {
-                    kit::controls::sized_icon_button(
-                        buttons,
-                        Icon::NavHelpCircle,
-                        form,
-                        ButtonKind::Secondary,
-                        HomeAction::Help,
-                        "HomeHelp",
-                    );
-                    kit::controls::sized_icon_button(
-                        buttons,
-                        Icon::NavSettings,
-                        form,
-                        ButtonKind::Secondary,
-                        HomeAction::Settings,
-                        "HomeSettings",
-                    );
-                });
+                // Touch Home already has Help/Menu/Server in its native utility bar.
+                if !platform.is_mobile() {
+                    root.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            right: Val::Px(40.0),
+                            top: Val::Px(64.0 / fit - outer_y),
+                            column_gap: Val::Px(space::S8),
+                            ..default()
+                        },
+                        Name::new("HomeUtilityButtons"),
+                    ))
+                    .with_children(|buttons| {
+                        kit::controls::sized_icon_button(
+                            buttons,
+                            Icon::NavHelpCircle,
+                            form,
+                            ButtonKind::Secondary,
+                            HomeAction::Help,
+                            "HomeHelp",
+                        );
+                        kit::controls::sized_icon_button(
+                            buttons,
+                            Icon::NavSettings,
+                            form,
+                            ButtonKind::Secondary,
+                            HomeAction::Settings,
+                            "HomeSettings",
+                        );
+                    });
+                }
             } else {
                 // The phone utility bar owns the top-right corner. Keep the
                 // status in the accessibility tree while avoiding a visual
@@ -648,19 +701,19 @@ fn spawn_home(
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px(if phone { 63.0 * unit } else { 40.0 }),
-                    bottom: Val::Px(if phone { 4.0 * unit } else { 6.0 }),
+                    bottom: Val::Px(if phone { 4.0 } else { 6.0 } - outer_y),
                     ..default()
                 },
                 bevy::ui::FocusPolicy::Pass,
                 Name::new("HomeBuildInfo"),
             ));
-            if !phone {
+            if !platform.is_mobile() {
                 root.spawn((
                     widgets::label(tr("home.footer"), 12.0, theme::MUTED),
                     Node {
                         position_type: PositionType::Absolute,
                         left: Val::Px(40.0),
-                        bottom: Val::Px(24.0),
+                        bottom: Val::Px(24.0 - outer_y),
                         ..default()
                     },
                 ));
@@ -1077,6 +1130,52 @@ mod tests {
             assert!((extent.x - viewport.x).abs() < 0.01);
         }
         assert!(home_canvas(true, Vec2::new(844.0, 390.0), 1.0).0);
+    }
+
+    #[test]
+    fn viewport_chrome_keeps_equal_insets_across_tablet_sizes_and_ui_scales() {
+        for (size, scale) in [
+            (Vec2::new(1180.0, 820.0), 1.0),
+            (Vec2::new(1024.0, 768.0), 0.8),
+            (Vec2::new(1366.0, 1024.0), 1.5),
+            (Vec2::new(844.0, 390.0), 1.0),
+        ] {
+            let mut app = App::new();
+            app.insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Mobile))
+                .insert_resource(UiScale(scale))
+                .add_systems(Update, layout_home_chrome);
+            let mut window = Window::default();
+            window.resolution.set(size.x, size.y);
+            app.world_mut().spawn((window, bevy::window::PrimaryWindow));
+            let frame = app
+                .world_mut()
+                .spawn((Node::default(), HomeChrome::Frame))
+                .id();
+            let scrim = app
+                .world_mut()
+                .spawn((Node::default(), HomeChrome::Scrim))
+                .id();
+            app.update();
+            let node = app.world().get::<Node>(frame).unwrap();
+            for edge in [node.left, node.right, node.top, node.bottom] {
+                let Val::Px(edge) = edge else {
+                    panic!("viewport inset must use pixels")
+                };
+                assert!((edge * scale - 12.0).abs() < 0.01);
+            }
+            assert_eq!(
+                node.display,
+                if size.y < 600.0 {
+                    Display::None
+                } else {
+                    Display::Flex
+                }
+            );
+            assert_eq!(
+                app.world().get::<Node>(scrim).unwrap().height,
+                Val::Px(if size.y < 600.0 { 96.0 } else { 160.0 } / scale)
+            );
+        }
     }
 
     #[test]

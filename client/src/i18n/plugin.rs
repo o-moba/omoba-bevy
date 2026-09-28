@@ -209,6 +209,10 @@ mod tests {
     #[test]
     fn startup_language_prefers_the_environment_then_the_saved_choice() {
         assert_eq!(startup_locale(None, || None), LocaleId::ENGLISH);
+        let russian = LocaleId::parse("ru").expect("Russian ships");
+        assert_eq!(startup_locale(None, || Some(russian)), russian);
+        assert_eq!(startup_locale(Some("RU"), || None), russian);
+        assert_eq!(startup_locale(Some("unknown"), || Some(russian)), russian);
         assert_eq!(startup_locale(None, || Some(zh())), zh());
         assert_eq!(startup_locale(Some("zh-hans"), || None), zh());
         assert_eq!(startup_locale(Some("en"), || Some(zh())), LocaleId::ENGLISH);
