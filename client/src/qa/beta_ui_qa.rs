@@ -330,6 +330,9 @@ fn prepare_controls(
     }
     let wanted = if qa.stage == 0 {
         Some(AppScreen::HeroSelect)
+    } else if qa.stage == 6 {
+        // The result stage shows the result screen (`prepare_result_fixture`).
+        None
     } else if session.join_confirmed() {
         Some(AppScreen::InMatch)
     } else {
@@ -688,7 +691,11 @@ fn capture(
                     }
             }
             5 => !shop.open && !pause.open && context.gameplay_allowed(),
-            6 => session.join_confirmed() && matches!(game.state, GameState::Victory { .. }),
+            6 => {
+                session.join_confirmed()
+                    && matches!(game.state, GameState::Victory { .. })
+                    && *scene.screen.get() == crate::frontend::AppScreen::PostMatch
+            }
             7..=13 => {
                 qa.edge
                     && edge::ready(
@@ -735,7 +742,8 @@ fn capture(
         return;
     }
     let primary_nodes: Vec<_> = scene.nodes.iter().filter(|(name, _, _, _)| edge::tracked(name.as_str()) || matches!(name.as_str(),
-        "FindMatchButton" | "AvatarGrid" | "HelpDismissButton" | "HelpOverlayRoot" | "GameStateLabel" | "ConnectionStatusPanel" | "MinimapRoot" | "MatchObjectivePanel" | "MatchHudColumn" | "SkillBarRoot" | "SkillSlot-Q" | "SkillSlot-R" | "EquipmentHud" | "ShopOpenButton" | "ShopPanel" | "ShopCloseButton" | "ShopBuy-EB" | "ShopBuy-GC" | "ShopSummary" | "ShopFeedback" | "MobileJoystick" | "MobileAttack" | "MobileAbility-0" | "MobileAbility-1" | "MobileAbility-2" | "MobileAbility-3" | "MobileUpgrade-0" | "MobileUpgrade-1" | "MobileUpgrade-2" | "MobileUpgrade-3" | "PhoneMenuBar" | "QaSkillUpgradeFixtureLabel" | "SocialEntry" | "SocialStatus" | "CareerEntryActions" | "HudProgressionText" | "HudXpText" | "MatchStatusText" | "MatchBuffText" | "EquipmentGold")
+        "FindMatchButton" | "AvatarGrid" | "HelpDismissButton" | "HelpOverlayRoot" | "GameStateLabel" | "ConnectionStatusPanel" | "MinimapRoot" | "MatchObjectivePanel" | "MatchHudColumn" | "SkillBarRoot" | "SkillSlot-Q" | "SkillSlot-R" | "EquipmentHud" | "ShopOpenButton" | "ShopPanel" | "ShopCloseButton" | "ShopBuy-EB" | "ShopBuy-GC" | "ShopSummary" | "ShopFeedback" | "MobileJoystick" | "MobileAttack" | "MobileAbility-0" | "MobileAbility-1" | "MobileAbility-2" | "MobileAbility-3" | "MobileUpgrade-0" | "MobileUpgrade-1" | "MobileUpgrade-2" | "MobileUpgrade-3" | "PhoneMenuBar" | "QaSkillUpgradeFixtureLabel" | "SocialEntry" | "SocialStatus" | "CareerEntryActions" | "HudProgressionText" | "HudXpText" | "MatchStatusText" | "MatchBuffText" | "EquipmentGold"
+            | "PostMatchScreen" | "PostMatchPlayAgain" | "PostMatchBackToMenu")
             || name.as_str().starts_with("ShopBuy-") || name.as_str().starts_with("ShopDescription-") || name.as_str().starts_with("ShopDetails-") || name.as_str().starts_with("SkillName-") || name.as_str().starts_with("SkillRank-") || name.as_str().starts_with("SkillSlot-") || name.as_str().starts_with("SkillIcon-"))
         .map(|(name, node, transform, visible)| {
             let center = transform.translation;
@@ -939,7 +947,12 @@ fn capture(
             "ShopBuy-GC",
             "ShopSummary",
         ],
-        6 => &["GameStateLabel"],
+        // The result screen (DECISIONS R2.2) replaced the round-over card.
+        6 => &[
+            "PostMatchScreen",
+            "PostMatchPlayAgain",
+            "PostMatchBackToMenu",
+        ],
         11 => &[
             "ScoreboardPanel",
             "ScoreboardCloseButton",

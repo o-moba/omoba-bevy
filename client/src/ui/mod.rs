@@ -64,6 +64,7 @@ impl Plugin for UiKitPlugin {
             .init_resource::<theme::FontCoverage>()
             .init_resource::<kit_assets::UiDensity>()
             .init_resource::<kit_assets::KitAtlasLayouts>()
+            .init_resource::<kit_assets::KitPreload>()
             .init_resource::<GestureEpoch>()
             .init_resource::<BackPress>()
             .init_resource::<UiFocus>()
@@ -98,7 +99,13 @@ impl Plugin for UiKitPlugin {
                 PostUpdate,
                 kit_assets::fit_cover_images.after(bevy::ui::UiSystems::Layout),
             )
-            .add_systems(PreUpdate, kit_assets::update_ui_density);
+            .add_systems(
+                PreUpdate,
+                (
+                    kit_assets::update_ui_density,
+                    kit_assets::keep_preloaded.after(kit_assets::update_ui_density),
+                ),
+            );
         widgets::controls::add_systems(app);
         widgets::surfaces::add_systems(app);
         widgets::game::add_systems(app);

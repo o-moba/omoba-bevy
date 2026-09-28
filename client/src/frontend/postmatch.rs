@@ -1545,7 +1545,9 @@ fn refresh_post_match(
 #[allow(clippy::too_many_arguments)]
 fn sync_post_match(
     mut commands: Commands,
-    inputs: ScreenInputs,
+    game: Res<GameStateSnapshot>,
+    career: Res<CareerClient>,
+    mobile: Option<Res<MobileControls>>,
     session: Option<Res<crate::net::ClientSession>>,
     flow: Option<Res<crate::match_service::MatchServiceClient>>,
     mut latch: Option<ResMut<PostMatchLatch>>,
@@ -1560,14 +1562,14 @@ fn sync_post_match(
         return;
     };
     if let Some(latch) = latch.as_mut()
-        && inputs.game.rematch_in_secs.is_some()
+        && game.rematch_in_secs.is_some()
         && !latch.rematch_seen
     {
         latch.rematch_seen = true;
     }
     let latch = latch.as_deref().cloned().unwrap_or_default();
-    let form = inputs.form();
-    let expects = expects_result(&latch, &inputs.career);
+    let form = Form::from_mobile(mobile.as_deref());
+    let expects = expects_result(&latch, &career);
     // The receipt this screen shows (kept through a worker retirement).
     let result = root.0.as_ref();
     let saved = result.is_some_and(|result| result.saved);
@@ -1575,7 +1577,7 @@ fn sync_post_match(
         .as_deref()
         .map_or(LinkStatus::Connected, crate::net::link_status);
     let next_round = latch.rematch_seen.then(|| {
-        inputs.game.rematch_in_secs.map_or_else(
+        game.rematch_in_secs.map_or_else(
             || tr("state.next_round.preparing").to_owned(),
             |seconds| trf("state.next_round.countdown", &[("seconds", &seconds)]),
         )
@@ -1778,6 +1780,259 @@ mod tests {
             "unrated_reason":"allocated_bots","participants":[],"saved":true
         }))
         .unwrap()
+    }
+
+    fn screen_app() -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .init_state::<AppScreen>()
+            .init_resource::<CareerClient>()
+            .init_resource::<GameStateSnapshot>()
+            .add_message::<NetworkCommand>()
+            .add_message::<SessionUiCommand>()
+            .add_plugins(PostMatchScreenPlugin);
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            game.meta = shared::protocol::SnapshotMeta::new(7, 2, 20);
+            game.your_id = 11;
+            game.state = GameState::Victory {
+                winner: shared::map::Team::Green,
+            };
+            game.scoreboard = Some(shared::live_score::LiveScoreboard {
+                players: vec![LiveScorePlayer {
+                    player_id: 11,
+                    nickname: "Guest".into(),
+                    team: shared::map::Team::Blue,
+                    hero_class: shared::HeroClass::Mage,
+                    kills: 4,
+                    deaths: 3,
+                    assists: 6,
+                    earned_gold: 6210,
+                    level: 9,
+                    connected: true,
+                }],
+            });
+        }
+        app.world_mut().spawn((crate::player::Player, Team::Blue));
+        app
+    }
+
+    fn enter(app: &mut App) {
+        app.world_mut()
+            .resource_mut::<NextState<AppScreen>>()
+            .set(AppScreen::PostMatch);
+        for _ in 0..3 {
+            app.update();
+        }
+    }
+
+    fn text_of(app: &mut App, name: &str) -> Option<String> {
+        let mut query = app.world_mut().query::<(&Name, &Text)>();
+        query
+            .iter(app.world())
+            .find(|(node, _)| node.as_str() == name)
+            .map(|(_, text)| text.0.clone())
+    }
+
+    fn named(app: &mut App, name: &str) -> Option<Entity> {
+        let mut query = app.world_mut().query::<(Entity, &Name)>();
+        query
+            .iter(app.world())
+            .find(|(_, node)| node.as_str() == name)
+            .map(|(entity, _)| entity)
+    }
+
+    fn by_id(app: &mut App, id: &str) -> Entity {
+        let mut query = app.world_mut().query::<(Entity, &TestId)>();
+        query
+            .iter(app.world())
+            .find(|(_, test_id)| test_id.as_str() == id)
+            .map(|(entity, _)| entity)
+            .unwrap()
+    }
+
+    /// A guest on a rematch server: live numbers, no damage, no progress,
+    /// nothing waits; Play again rematches at once; the badge counts.
+    #[test]
+    fn a_guest_sees_live_numbers_and_the_next_round_without_waiting() {
+        let mut app = screen_app();
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .rematch_in_secs = Some(10);
+        enter(&mut app);
+        assert_eq!(
+            text_of(&mut app, "PostMatchOutcome").as_deref(),
+            Some("Defeat")
+        );
+        assert_eq!(
+            text_of(&mut app, "PostMatchSummaryText").as_deref(),
+            Some("Green destroyed the enemy base")
+        );
+        assert_eq!(
+            text_of(&mut app, "PostMatchKdaValue").as_deref(),
+            Some("4 / 3 / 6")
+        );
+        assert_eq!(
+            text_of(&mut app, "PostMatchGoldValue").as_deref(),
+            Some("6210")
+        );
+        assert!(
+            named(&mut app, "PostMatchDamage").is_none(),
+            "no result will come"
+        );
+        assert!(named(&mut app, "PostMatchProgress").is_none());
+        assert_eq!(
+            text_of(&mut app, "PostMatchStatusText").as_deref(),
+            Some("Local practice result")
+        );
+        let details = by_id(&mut app, "PostMatchDetails");
+        assert_eq!(
+            app.world().get::<Visibility>(details),
+            Some(&Visibility::Hidden)
+        );
+        let play = by_id(&mut app, "PostMatchPlayAgain");
+        assert!(!app.world().get::<Pressable>(play).unwrap().disabled);
+        let timer = named(&mut app, "PostMatchRoundTimer").unwrap();
+        assert_eq!(
+            app.world().get::<Visibility>(timer),
+            Some(&Visibility::Inherited)
+        );
+    }
+
+    /// A career profile: finalizing skeletons, Play again and Details wait;
+    /// the saved result fills the same boxes without replacing the buttons.
+    #[test]
+    fn the_career_result_fills_the_finalizing_screen_in_place() {
+        let mut app = screen_app();
+        {
+            let mut career = app.world_mut().resource_mut::<CareerClient>();
+            career.view.storage_enabled = true;
+            career.view.profile = Some(shared::career::ProfileSummary {
+                progression_xp: 2450,
+                ..shared::career::ProfileSummary::new("p-1".into(), "Guest".into())
+            });
+            career.public_profile_id = Some("p-1".into());
+        }
+        enter(&mut app);
+        assert!(app.world().resource::<CareerClient>().hold_result_modal);
+        assert!(named(&mut app, "PostMatchDamage").is_some());
+        assert!(
+            text_of(&mut app, "PostMatchDamageValue").is_none(),
+            "skeleton"
+        );
+        assert!(named(&mut app, "PostMatchProgress").is_some());
+        assert!(
+            text_of(&mut app, "PostMatchCareerLine").is_none(),
+            "skeleton"
+        );
+        assert_eq!(
+            text_of(&mut app, "PostMatchStatusText").as_deref(),
+            Some("Saving match results…")
+        );
+        let play = by_id(&mut app, "PostMatchPlayAgain");
+        let details = by_id(&mut app, "PostMatchDetails");
+        assert!(app.world().get::<Pressable>(play).unwrap().disabled);
+        assert!(app.world().get::<Pressable>(details).unwrap().disabled);
+        assert_eq!(
+            app.world().get::<Visibility>(details),
+            Some(&Visibility::Inherited)
+        );
+
+        let mut result = saved_receipt();
+        result.match_id = 2;
+        result.duration_ms = 12 * 60_000;
+        result.unrated_reason = None;
+        result.participants = vec![
+            serde_json::from_value(serde_json::json!({
+                "player_id": 11, "profile_id": "p-1", "nickname": "Guest", "team": "blue",
+                "hero_class": "mage", "character": "cube", "avatar": null,
+                "sprite_character": null,
+                "stats": {"kills":4,"deaths":3,"assists":6,"damage_to_heroes":38762.4,
+                    "damage_to_structures":0.0,"damage_to_creeps":0.0,"damage_taken":0.0,
+                    "minion_last_hits":0,"jungle_last_hits":0,"structures_destroyed":0,
+                    "final_level":9},
+                "disconnected": false,
+                "rating": {"before": 1200, "after": 1216, "delta": 16},
+                "progression_xp_gained": 150
+            }))
+            .unwrap(),
+        ];
+        app.world_mut()
+            .resource_mut::<CareerClient>()
+            .view
+            .last_result = Some(result);
+        for _ in 0..2 {
+            app.update();
+        }
+        assert_eq!(
+            text_of(&mut app, "PostMatchSummaryText").as_deref(),
+            Some("Green destroyed the enemy base · 12 min")
+        );
+        assert_eq!(
+            text_of(&mut app, "PostMatchDamageValue").as_deref(),
+            Some("38762")
+        );
+        assert_eq!(
+            text_of(&mut app, "PostMatchCareerLine").as_deref(),
+            Some("Your rating: 1216 (+16)  ·  +150 career XP")
+        );
+        assert_eq!(
+            text_of(&mut app, "PostMatchStatusText").as_deref(),
+            Some("Progress saved")
+        );
+        assert_eq!(by_id(&mut app, "PostMatchPlayAgain"), play, "not rebuilt");
+        assert!(!app.world().get::<Pressable>(play).unwrap().disabled);
+        assert!(!app.world().get::<Pressable>(details).unwrap().disabled);
+        assert!(
+            app.world().resource::<CareerClient>().modal == crate::career::CareerModal::Closed,
+            "the result does not open the career page over this screen"
+        );
+    }
+
+    /// No match behind it (the layout fixture): "Match complete", no
+    /// summary, no stats, local result.
+    #[test]
+    fn the_layout_fixture_is_a_neutral_complete_screen() {
+        let mut app = screen_app();
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            game.state = GameState::Running;
+            game.scoreboard = None;
+        }
+        let players: Vec<Entity> = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::player::Player>>()
+            .iter(app.world())
+            .collect();
+        for player in players {
+            app.world_mut().despawn(player);
+        }
+        enter(&mut app);
+        assert_eq!(
+            text_of(&mut app, "PostMatchOutcome").as_deref(),
+            Some("Match complete")
+        );
+        assert!(text_of(&mut app, "PostMatchSummaryText").is_none());
+        assert!(named(&mut app, "PostMatchStats").is_none());
+        assert_eq!(
+            text_of(&mut app, "PostMatchStatusText").as_deref(),
+            Some("Local practice result")
+        );
+    }
+
+    #[test]
+    fn play_again_waits_for_the_saved_result_where_it_would_do_nothing() {
+        // Rematch server: at once.
+        assert!(play_again_enabled(false, false, false, false));
+        // Allocated or career flow: only once saved.
+        assert!(!play_again_enabled(true, true, false, false));
+        assert!(!play_again_enabled(false, true, false, false));
+        assert!(play_again_enabled(true, true, true, false));
+        // Pressed: waits for the screen to leave.
+        assert!(!play_again_enabled(false, false, false, true));
+        assert_eq!(result_ui_scale(1280.0, 720.0), 1.0);
+        assert_eq!(result_ui_scale(1920.0, 1080.0), 1.5);
+        assert_eq!(result_ui_scale(1024.0, 640.0), 0.8);
     }
 
     #[test]

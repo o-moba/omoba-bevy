@@ -242,6 +242,51 @@ pub(crate) fn resolve_kit_images(
     }
 }
 
+/// Kit textures a screen needs on its first frame, kept loaded for the
+/// session at the current density: Bevy drops a texture with its last
+/// handle, so a screen built from scratch (loading, result) would otherwise
+/// show a frame or two without its ring, frame or icons while they reload.
+/// `(source, low)`: `low` = always 1x (the [`LowDensity`] timer ring).
+#[derive(Resource, Default)]
+pub(crate) struct KitPreload {
+    sources: Vec<(KitSource, bool)>,
+    handles: Vec<Handle<Image>>,
+    loaded_hi: Option<bool>,
+}
+
+impl KitPreload {
+    /// Keeps `sources` loaded (duplicates are ignored).
+    pub(crate) fn add(&mut self, sources: impl IntoIterator<Item = (KitSource, bool)>) {
+        for source in sources {
+            if !self.sources.contains(&source) {
+                self.sources.push(source);
+                self.loaded_hi = None;
+            }
+        }
+    }
+}
+
+/// Loads the preloaded sources at the current density (again when it
+/// changes, dropping the other density).
+pub(crate) fn keep_preloaded(
+    assets: Option<Res<AssetServer>>,
+    density: Res<UiDensity>,
+    mut preload: ResMut<KitPreload>,
+) {
+    let Some(assets) = assets else { return };
+    let hi = density.hi();
+    if preload.loaded_hi == Some(hi) {
+        return;
+    }
+    let handles = preload
+        .sources
+        .iter()
+        .map(|(source, low)| assets.load(source.path(hi && !low)))
+        .collect();
+    preload.handles = handles;
+    preload.loaded_hi = Some(hi);
+}
+
 /// Crops an image to cover its node like CSS `object-fit: cover` (menu
 /// backgrounds, hero tile art): sets `ImageNode::rect` once the texture and
 /// the node size are known, and again when either changes.

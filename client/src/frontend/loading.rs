@@ -70,6 +70,7 @@ pub fn tip_for(index: usize) -> &'static str {
 pub struct LoadingScreenPlugin;
 impl Plugin for LoadingScreenPlugin {
     fn build(&self, app: &mut App) {
+        preload_screen_art(app);
         app.add_ui_action::<LoadingAction>()
             .init_resource::<LoadingLatch>()
             .add_systems(OnEnter(AppScreen::Loading), enter_loading)
@@ -89,6 +90,45 @@ impl Plugin for LoadingScreenPlugin {
                     .run_if(in_state(AppScreen::Loading)),
             );
     }
+}
+
+/// The kit textures the loading and result screens draw on their first
+/// frame (frames, slabs, the ring atlas, their icons): kept loaded so a
+/// 3 s countdown never shows a frame without its ring or frame. The
+/// full-screen backgrounds are not kept (they fade in).
+fn preload_screen_art(app: &mut App) {
+    use crate::ui::kit_assets::{KitPreload, KitSource, Sprite};
+    let frames = [
+        Frame::Ornament,
+        Frame::Panel,
+        Frame::ButtonPrimary,
+        Frame::ButtonPrimaryHover,
+        Frame::ButtonPrimaryPressed,
+        Frame::ButtonPrimaryDisabled,
+        Frame::ButtonSecondary,
+        Frame::ButtonSecondaryHover,
+        Frame::ButtonSecondaryPressed,
+        Frame::ButtonSecondaryDisabled,
+    ];
+    let icons = [
+        Icon::NavLock,
+        Icon::NavInfo,
+        Icon::NavAlertTriangle,
+        Icon::NavWifiOff,
+        Icon::NavRefreshCw,
+        Icon::NavCrown,
+        Icon::NavCheck,
+        Icon::NavTimer,
+        Icon::HudKill,
+        Icon::HudAttack,
+        Icon::HudGold,
+    ];
+    let Some(mut preload) = app.world_mut().get_resource_mut::<KitPreload>() else {
+        return;
+    };
+    preload.add(frames.map(|frame| (KitSource::Frame(frame), false)));
+    preload.add(icons.map(|icon| (KitSource::Icon(icon), false)));
+    preload.add([(KitSource::Sprite(Sprite::TimerRingAtlas), true)]);
 }
 
 #[derive(Component)]
@@ -889,10 +929,13 @@ fn spawn_roster(
     scroll: &DraftScrollMemory,
 ) {
     let compact = !shell.desktop();
+    // Desktop: x 40–1092, y 104 to the footer (the right gutter holds the
+    // countdown ring). Phone: 50 below the header line (y 62 at the
+    // reference safe top 0), 64 above the bottom edge (the footer line).
     let (left, right, top, bottom) = if shell.desktop() {
         (shell.left, 188.0, 104.0, 112.0)
     } else {
-        (shell.left, shell.right, 62.0, 390.0 - 326.0)
+        (shell.left, shell.right, shell.top + 50.0, 64.0)
     };
     root.spawn((
         Node {
@@ -971,10 +1014,13 @@ struct ShellParts {
 fn spawn_connecting_body(root: &mut ChildSpawnerCommands, shell: &Shell) -> ShellParts {
     let desktop = shell.desktop();
     let mut parts = ShellParts::default();
+    // Desktop: centred between the header (ends y 92) and the footer (starts
+    // 104 above the bottom). Phone: from 52 below the header line (y 64 at
+    // the reference safe top 0).
     let (top, bottom, width) = if desktop {
         (92.0, 104.0, 560.0)
     } else {
-        (64.0 - shell.top, 0.0, 500.0)
+        (shell.top + 52.0, 0.0, 500.0)
     };
     let mut body = root.spawn((
         Node {
@@ -985,12 +1031,7 @@ fn spawn_connecting_body(root: &mut ChildSpawnerCommands, shell: &Shell) -> Shel
             } else {
                 JustifyContent::FlexStart
             },
-            ..absolute(
-                Val::Px(0.0),
-                Val::Px(0.0),
-                Val::Px(if desktop { top } else { shell.top + top }),
-                Val::Px(bottom),
-            )
+            ..absolute(Val::Px(0.0), Val::Px(0.0), Val::Px(top), Val::Px(bottom))
         },
         Name::new("LoadingBody"),
     ));
@@ -1135,17 +1176,21 @@ fn spawn_footer(
                 ..default()
             })
             .with_children(|line| {
+                // Shown only for an unavailable Studio hero (then it takes
+                // its room; otherwise it takes none).
                 *icon = line
-                    .spawn((
-                        icon_node(Icon::NavAlertTriangle, size::ICON_SM, color::TEXT_DANGER),
-                        Node {
-                            width: Val::Px(size::ICON_SM),
-                            height: Val::Px(size::ICON_SM),
-                            flex_shrink: 0.0,
-                            display: Display::None,
-                            ..default()
-                        },
+                    .spawn(icon_node(
+                        Icon::NavAlertTriangle,
+                        size::ICON_SM,
+                        color::TEXT_DANGER,
                     ))
+                    .insert(Node {
+                        width: Val::Px(size::ICON_SM),
+                        height: Val::Px(size::ICON_SM),
+                        flex_shrink: 0.0,
+                        display: Display::None,
+                        ..default()
+                    })
                     .id();
                 *text = line
                     .spawn((
@@ -1444,6 +1489,104 @@ fn sync_loading(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn the_connecting_body_follows_the_status_priority() {
+        let idle = GameState::Lobby;
+        // 1–2, 4: failures show the track only, the reason and Retry.
+        for link in [
+            LinkStatus::Rejected(shared::protocol::JoinRejection::ProtocolMismatch),
+            LinkStatus::Unconfirmed,
+            LinkStatus::Disconnected,
+        ] {
+            let status = shell_status(link, &idle, None, None, false);
+            assert_eq!(status.ring, RingMode::Error);
+            assert_eq!(status.headline.text, "Connection problem");
+            let detail = status.detail.unwrap();
+            assert!(detail.alert && detail.ink == color::TEXT_DANGER);
+            assert!(status.retry);
+        }
+        let disconnected = shell_status(LinkStatus::Disconnected, &idle, None, None, false);
+        assert!(
+            !disconnected
+                .detail
+                .unwrap()
+                .text
+                .contains("choose your team"),
+            "R7.4: teams are assigned now"
+        );
+        // 3: reconnecting turns, warns, never offers Retry.
+        let reconnecting = shell_status(
+            LinkStatus::Reconnecting { attempt: 2 },
+            &idle,
+            None,
+            None,
+            true,
+        );
+        assert_eq!(reconnecting.ring, RingMode::Indeterminate);
+        assert!(reconnecting.headline.wifi);
+        assert_eq!(reconnecting.headline.ink, color::STATE_WARNING);
+        assert!(reconnecting.detail.unwrap().text.contains("attempt 2"));
+        assert!(!reconnecting.retry);
+        // 5–6: connecting / joining.
+        assert_eq!(
+            shell_status(LinkStatus::Connecting, &idle, None, None, false).detail,
+            None
+        );
+        let joining = shell_status(
+            LinkStatus::Joining {
+                attempt: 2,
+                max: 15,
+            },
+            &idle,
+            None,
+            None,
+            false,
+        );
+        assert!(joining.detail.unwrap().text.contains("attempt 2/15"));
+        // 7: a server without a draft counts down, forms, or waits for a round.
+        let starting = shell_status(
+            LinkStatus::Connected,
+            &GameState::Starting { countdown_ms: 1500 },
+            None,
+            Some(3000),
+            false,
+        );
+        assert_eq!(
+            starting.ring,
+            RingMode::Countdown {
+                progress: 0.5,
+                number: 2
+            }
+        );
+        let forming = shell_status(
+            LinkStatus::Connected,
+            &GameState::Forming {
+                ready: 7,
+                needed: 10,
+            },
+            None,
+            None,
+            false,
+        );
+        assert_eq!(forming.stage.as_deref(), Some("7 / 10 players ready"));
+        let victory = shell_status(
+            LinkStatus::Connected,
+            &GameState::Victory {
+                winner: shared::map::Team::Blue,
+            },
+            Some(6),
+            None,
+            false,
+        );
+        assert_eq!(victory.detail.unwrap().text, "Next round in 6s");
+        // 8: slow, only where nothing else is said.
+        let slow = shell_status(LinkStatus::Connected, &GameState::Running, None, None, true);
+        assert_eq!(
+            slow.detail.unwrap().text,
+            "This is taking longer than usual. Cancel to return to the menu."
+        );
+    }
+
     #[test]
     fn tips_wrap_around() {
         assert_eq!(tip_for(0), TIPS[0]);
