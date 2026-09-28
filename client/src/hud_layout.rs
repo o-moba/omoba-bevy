@@ -217,14 +217,19 @@ impl HudLayout {
             }
     }
 
-    /// Phone, anchored to `MobileControls.safe` (reference insets 47/47/0/21).
+    /// Phone, anchored to `MobileControls.safe` (reference insets 47/47/0/21):
+    /// safe left / right + 16, top 12.
     pub(crate) fn phone(mobile: &MobileControls) -> Self {
         let form = Form::Phone;
         let viewport = mobile.viewport;
         let safe = mobile.safe;
         let left = safe.left + space::S16;
         let right = viewport.x - safe.right - space::S16;
-        let top = safe.top + space::S12;
+        // hud-phone: the top row sits 12 px from the screen top (the
+        // reference inset is 0) and never inside a top inset; with the
+        // runtime's conservative 12 px inset that is the same 12, so the
+        // quick-buy row still ends above the protected passage (y 242).
+        let top = safe.top.max(space::S12);
         let minimap = rect(left, top, Vec2::splat(size::MINIMAP.phone));
         let icons = icon_row_width(form);
         let icon_row_x = right - icons;
@@ -577,8 +582,11 @@ mod tests {
         assert_eq!(at(l.icon_buttons), (633.0, 12.0, 148.0, 44.0));
         assert_eq!(at(l.social_status), (633.0, 60.0, 148.0, 24.0));
         assert_eq!(at(l.skill_card), (282.0, 64.0, 280.0, 148.0));
-        // Quick-buy ends above the protected passage (y 242).
+        // Quick-buy ends above the protected passage (y 242), also at the
+        // runtime's conservative insets (32/32/12/20).
         assert!(l.quick_buy.max.y < 242.0);
+        mobile.safe.top = 12.0;
+        assert!(HudLayout::phone(&mobile).quick_buy.max.y < 242.0);
     }
 
     #[test]

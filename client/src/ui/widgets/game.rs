@@ -357,6 +357,8 @@ pub(crate) struct AbilityView {
     pub rank: u8,
     /// `(remaining, total)` seconds.
     pub cooldown: Option<(f32, f32)>,
+    /// Veiled (`color.locked.overlay`): a slot below its unlock level, or
+    /// every slot while the hero is dead (then without a lock or level).
     pub locked: bool,
     /// The level the slot unlocks at, shown on the locked veil (`Lv 6`).
     pub unlock_level: Option<u8>,
@@ -923,6 +925,23 @@ pub(crate) fn paint_abilities(
                 let next = locked_label(view.unlock_level);
                 if text.0 != next {
                     text.0 = next;
+                }
+            }
+            // A veil without an unlock level (the dead state) has no lock.
+            if let Some(lock) = children
+                .get(parts.veil)
+                .ok()
+                .and_then(|veil| veil.first().copied())
+            {
+                if let Ok(mut current) = visibility.get_mut(lock) {
+                    let next = if view.unlock_level.is_some() {
+                        Visibility::Inherited
+                    } else {
+                        Visibility::Hidden
+                    };
+                    if *current != next {
+                        *current = next;
+                    }
                 }
             }
         }

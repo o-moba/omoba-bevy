@@ -400,6 +400,8 @@ fn spawn_equipment_plate(commands: &mut Commands) {
                 .spawn((
                     Node {
                         width: Val::Px(3.0 * side + 2.0 * SLOT_GAP),
+                        flex_shrink: 0.0,
+                        align_content: AlignContent::FlexStart,
                         flex_wrap: FlexWrap::Wrap,
                         column_gap: Val::Px(SLOT_GAP),
                         row_gap: Val::Px(SLOT_GAP),
@@ -432,6 +434,7 @@ fn spawn_equipment_plate(commands: &mut Commands) {
             plate.spawn((
                 Node {
                     width: Val::Px(border::HAIRLINE),
+                    flex_shrink: 0.0,
                     ..default()
                 },
                 BackgroundColor(color::BORDER_SUBTLE),
@@ -440,6 +443,7 @@ fn spawn_equipment_plate(commands: &mut Commands) {
             plate
                 .spawn(Node {
                     flex_direction: FlexDirection::Column,
+                    flex_shrink: 0.0,
                     row_gap: Val::Px(SLOT_GAP),
                     ..default()
                 })

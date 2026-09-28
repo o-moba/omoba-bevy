@@ -909,14 +909,24 @@ fn setup_mobile_controls(mut commands: Commands) {
             Name::new(name),
         ));
         match &visual {
+            // hud.md phone `joystick`: base glass + hairline, knob
+            // `color.emerald.600` with a 2 px `color.gold.500` rim.
             MobileVisual::Joystick => {
                 root.insert((
+                    Node {
+                        border: UiRect::all(Val::Px(border::HAIRLINE)),
+                        ..hidden()
+                    },
                     BackgroundColor(theme::perceptual(color::SURFACE_GLASS)),
                     BorderColor::all(theme::perceptual(color::BORDER_HAIRLINE)),
                 ));
             }
             MobileVisual::Thumb => {
                 root.insert((
+                    Node {
+                        border: UiRect::all(Val::Px(border::FRAME)),
+                        ..hidden()
+                    },
                     BackgroundColor(color::EMERALD_600),
                     BorderColor::all(color::GOLD_500),
                 ));
@@ -1188,11 +1198,14 @@ fn draw_mobile_controls(
         .map_or_else(Default::default, |equipment| equipment.item_bonuses);
     let sandbox = game.as_ref().and_then(|g| g.sandbox.as_ref());
     let mana = local.map_or(0.0, |(stats, _, _, _)| stats.mana);
+    // hud.md § States, Dead: the combat group stays drawn but veiled (input
+    // is off: `read_mobile_controls` clears every finger while dead).
+    let dead = local.is_some_and(|(stats, _, _, _)| !stats.is_alive());
     let visible = mobile.enabled
         && !gamepad.as_ref().is_some_and(|pad| pad.active)
         && mobile.landscape
         && context.gameplay_allowed()
-        && local.is_some_and(|(stats, _, _, _)| stats.is_alive());
+        && local.is_some();
     let aiming = mobile
         .captures
         .values()
@@ -1318,6 +1331,7 @@ fn draw_mobile_controls(
                 if let Some(children) = children {
                     for child in children.iter() {
                         if let Ok((mut view, mut face)) = faces.get_mut(child) {
+                            let unlocked = prog.unlocked()[slot];
                             let next = crate::ui::widgets::game::AbilityView {
                                 ability: Some(def.id),
                                 cost: Some(cost.round() as u32),
@@ -1332,7 +1346,9 @@ fn draw_mobile_controls(
                                         },
                                     )
                                 }),
-                                locked: !prog.unlocked()[slot],
+                                locked: !unlocked || dead,
+                                unlock_level: (!unlocked && !dead)
+                                    .then_some(shared::SLOT_UNLOCK_LEVELS[slot] as u8),
                                 no_mana: mana < cost,
                                 ..view.clone()
                             };
@@ -1544,6 +1560,18 @@ fn draw_mobile_controls(
                 node.border_radius = corner;
             }
         }
+        // Dead: ATK and the utilities are veiled like the abilities.
+        let veiled = dead && disc_look(visual).is_some();
+        let look_fill = if veiled {
+            Some(color::SURFACE_3)
+        } else {
+            look_fill
+        };
+        let look_edge = if veiled {
+            Some(color::BORDER_DISABLED)
+        } else {
+            look_edge
+        };
         if let (Some(next), Some(mut fill)) = (look_fill, fill) {
             if fill.0 != next {
                 fill.0 = next;

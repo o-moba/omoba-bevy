@@ -1407,3 +1407,71 @@ fn buying_haste_adjusts_active_deadlines_without_rescaling_elapsed_time() {
         once
     );
 }
+
+/// DECISIONS R7.1: a protected enemy structure stays selected for inspection
+/// (the target plate shows it with a lock) while every attack order on it is
+/// dropped; a dead or unprotected-but-invalid target still clears.
+#[test]
+fn protected_structures_stay_selected_for_inspection_but_never_keep_an_attack_order() {
+    let mut app = App::new();
+    app.init_resource::<ButtonInput<KeyCode>>()
+        .init_resource::<GameplayInputContext>()
+        .init_resource::<TargetState>()
+        .init_resource::<BasicAttackState>()
+        .init_resource::<PendingCast>()
+        .init_resource::<TargetAimPreview>()
+        .add_systems(Update, crate::targeting::clear_invalid_selection);
+    app.world_mut().spawn((
+        Player,
+        Transform::default(),
+        Team::Green,
+        CombatStats::default(),
+    ));
+    let tower = app
+        .world_mut()
+        .spawn((
+            NetworkStructure,
+            NetworkStructureId(3),
+            StructureKind::Tower,
+            Team::Blue,
+            Transform::from_xyz(2.0, 0.0, 0.0),
+            CombatStats::default(),
+            crate::net::NetworkStructureProtected(true),
+        ))
+        .id();
+    let id = TargetId {
+        kind: TargetKind::Structure,
+        id: 3,
+    };
+    {
+        let mut target = app.world_mut().resource_mut::<TargetState>();
+        target.selected_entity = Some(tower);
+        target.selected_target = Some(id);
+    }
+    app.world_mut()
+        .resource_mut::<BasicAttackState>()
+        .start(tower, id, true);
+    app.update();
+    let target = app.world().resource::<TargetState>();
+    assert_eq!(target.selected_entity, Some(tower), "kept for inspection");
+    assert!(app.world().resource::<BasicAttackState>().order.is_none());
+    // Protection drops: the selection is an ordinary target again.
+    app.world_mut()
+        .get_mut::<crate::net::NetworkStructureProtected>(tower)
+        .unwrap()
+        .0 = false;
+    app.update();
+    assert_eq!(
+        app.world().resource::<TargetState>().selected_entity,
+        Some(tower)
+    );
+    // Destroyed: cleared like any dead target.
+    app.world_mut().get_mut::<CombatStats>(tower).unwrap().hp = 0.0;
+    app.update();
+    assert!(
+        app.world()
+            .resource::<TargetState>()
+            .selected_entity
+            .is_none()
+    );
+}

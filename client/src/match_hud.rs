@@ -463,6 +463,7 @@ fn sync_gameplay_hud_visibility(
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     mut roots: Query<(&Name, &mut Node, &mut Visibility), Without<ChildOf>>,
     gamepad: Option<Res<crate::gamepad::GamepadControls>>,
+    scoreboard: Option<Res<crate::edge_hud::ScoreboardState>>,
 ) {
     let phone = phone_hud(mobile.as_deref());
     // The touch skill buttons hide while a controller owns input; the
@@ -472,7 +473,10 @@ fn sync_gameplay_hud_visibility(
         && matches!(game.state, GameState::Running)
         && !help.is_some_and(|help| help.0)
         && !pause.is_some_and(|pause| pause.open)
-        && !shop.is_some_and(|shop| shop.open);
+        && !shop.is_some_and(|shop| shop.open)
+        // hud.md § States: the scoreboard hides the controls too (chat
+        // keeps them, DECISIONS R7.2).
+        && !scoreboard.is_some_and(|board| board.open);
     for (name, mut node, mut visibility) in &mut roots {
         let name = name.as_str();
         if matches!(

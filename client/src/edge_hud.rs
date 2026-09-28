@@ -216,8 +216,8 @@ fn setup(mut commands: Commands, mobile: Option<Res<MobileControls>>) {
                     Node {
                         width: Val::Percent(100.0),
                         height: Val::Percent(100.0),
-                        padding: UiRect::horizontal(Val::Px(space::S12)),
-                        column_gap: Val::Px(space::S12),
+                        padding: UiRect::horizontal(Val::Px(space::S8 + border::FRAME)),
+                        column_gap: Val::Px(space::S8),
                         justify_content: JustifyContent::SpaceBetween,
                         align_items: AlignItems::Center,
                         ..default()
@@ -231,6 +231,7 @@ fn setup(mut commands: Commands, mobile: Option<Res<MobileControls>>) {
                         .spawn(Node {
                             column_gap: Val::Px(space::S4),
                             align_items: AlignItems::Center,
+                            flex_shrink: 0.0,
                             ..default()
                         })
                         .with_children(|scores| {
@@ -243,6 +244,7 @@ fn setup(mut commands: Commands, mobile: Option<Res<MobileControls>>) {
                                     Text::new(if label.is_some() { "—" } else { ":" }),
                                     ui::role_text(TextRole::NumberLg),
                                     TextColor(ink),
+                                    TextLayout::new_with_no_wrap(),
                                 ));
                                 if let Some(label) = label {
                                     text.insert(label);
@@ -269,11 +271,13 @@ fn setup(mut commands: Commands, mobile: Option<Res<MobileControls>>) {
                                 Localized::new("edge.kda").into_text(),
                                 ui::role_text(TextRole::Eyebrow),
                                 TextColor(color::TEXT_MUTED),
+                                TextLayout::new_with_no_wrap(),
                             ));
                             column.spawn((
                                 Text::new("—/—/—"),
                                 ui::role_text(TextRole::NumberSm),
                                 TextColor(color::TEXT_PRIMARY),
+                                TextLayout::new_with_no_wrap(),
                                 KdaLabel,
                                 Name::new("MatchKdaText"),
                             ));
@@ -1706,6 +1710,221 @@ mod tests {
             app.world_mut().despawn(entity);
         }
     }
+    /// target-hero|minion|neutral|structure.md: every kind names itself,
+    /// carries its portrait disc, badge, lock and (hero, desktop) level disc
+    /// and mana line; a protected structure dims its bar to 55 %.
+    #[test]
+    fn target_plate_names_each_kind_with_its_badge_lock_level_and_mana() {
+        use crate::net::{
+            NetworkMapStructure, NetworkMinionKind, NetworkNeutralCampType,
+            NetworkStructureProtected, NeutralCampType, StructureKind,
+        };
+        let mut app = app();
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .scoreboard = Some(LiveScoreboard {
+            players: vec![LiveScorePlayer {
+                player_id: 7,
+                nickname: "DarkSentinel".into(),
+                team: Team::Blue,
+                hero_class: shared::HeroClass::Warden,
+                kills: 0,
+                deaths: 0,
+                assists: 0,
+                earned_gold: 0,
+                level: 5,
+                connected: true,
+            }],
+        });
+        app.update();
+        let stats = CombatStats {
+            hp: 130.0,
+            max_hp: 180.0,
+            mana: 30.0,
+            max_mana: 60.0,
+        };
+        struct Expect {
+            name: &'static str,
+            badge: Option<&'static str>,
+            icon: Option<Icon>,
+            level: Option<u32>,
+            mana: bool,
+            portrait: Icon,
+            strong: bool,
+            alpha: f32,
+        }
+        let cases: Vec<(TargetKind, Box<dyn Fn(&mut EntityWorldMut)>, Expect)> = vec![
+            (
+                TargetKind::Player,
+                Box::new(|e: &mut EntityWorldMut| {
+                    e.insert((
+                        NetworkPlayerId(7),
+                        NetworkHeroClass(shared::HeroClass::Warden),
+                    ));
+                }),
+                Expect {
+                    name: "DarkSentinel",
+                    badge: None,
+                    icon: Some(Icon::ClassWarden),
+                    level: Some(5),
+                    mana: true,
+                    portrait: Icon::ClassWarden,
+                    strong: false,
+                    alpha: 1.0,
+                },
+            ),
+            (
+                TargetKind::Minion,
+                Box::new(|e: &mut EntityWorldMut| {
+                    e.insert((
+                        NetworkMinionId(7),
+                        NetworkMinionKind(shared::combat::MinionKind::Caster),
+                    ));
+                }),
+                Expect {
+                    name: "Caster minion",
+                    badge: None,
+                    icon: None,
+                    level: None,
+                    mana: false,
+                    portrait: Icon::HudMinion,
+                    strong: false,
+                    alpha: 1.0,
+                },
+            ),
+            (
+                TargetKind::Neutral,
+                Box::new(|e: &mut EntityWorldMut| {
+                    e.insert((
+                        NetworkNeutralId(7),
+                        NetworkNeutralCampType(NeutralCampType::KingMutatioBoss),
+                    ));
+                }),
+                Expect {
+                    name: "King Mutatio",
+                    badge: Some("BOSS"),
+                    icon: None,
+                    level: None,
+                    mana: false,
+                    portrait: Icon::NavCrown,
+                    strong: true,
+                    alpha: 1.0,
+                },
+            ),
+            (
+                TargetKind::Structure,
+                Box::new(|e: &mut EntityWorldMut| {
+                    e.insert((
+                        NetworkStructureId(7),
+                        StructureKind::Tower,
+                        NetworkMapStructure {
+                            lane: Some(shared::map::Lane::Mid),
+                            ..default()
+                        },
+                        NetworkStructureProtected(true),
+                    ));
+                }),
+                Expect {
+                    name: "Tower",
+                    badge: Some("MID"),
+                    icon: Some(Icon::NavLock),
+                    level: None,
+                    mana: false,
+                    portrait: Icon::HudTower,
+                    strong: false,
+                    alpha: PROTECTED_ALPHA,
+                },
+            ),
+            (
+                TargetKind::Structure,
+                Box::new(|e: &mut EntityWorldMut| {
+                    e.insert((NetworkStructureId(7), StructureKind::BaseTower));
+                }),
+                Expect {
+                    name: "Base",
+                    badge: None,
+                    icon: None,
+                    level: None,
+                    mana: false,
+                    portrait: Icon::HudTower,
+                    strong: true,
+                    alpha: 1.0,
+                },
+            ),
+        ];
+        for (kind, insert, expect) in cases {
+            let mut entity = app.world_mut().spawn(stats);
+            insert(&mut entity);
+            let entity = entity.id();
+            {
+                let mut target = app.world_mut().resource_mut::<TargetState>();
+                target.selected_entity = Some(entity);
+                target.selected_target = Some(crate::net::TargetId { kind, id: 7 });
+            }
+            app.update();
+            let world = app.world_mut();
+            let name = world
+                .query_filtered::<&Text, With<TargetLabel>>()
+                .single(world)
+                .unwrap()
+                .0
+                .clone();
+            assert_eq!(name, expect.name);
+            let (badge_node, badge_text) = (
+                world
+                    .query_filtered::<&Node, With<TargetBadge>>()
+                    .single(world)
+                    .unwrap()
+                    .display,
+                world
+                    .query_filtered::<&Text, With<TargetBadgeText>>()
+                    .single(world)
+                    .unwrap()
+                    .0
+                    .clone(),
+            );
+            match expect.badge {
+                Some(badge) => {
+                    assert_eq!(badge_node, Display::Flex, "{}", expect.name);
+                    assert_eq!(badge_text, badge);
+                }
+                None => assert_eq!(badge_node, Display::None, "{}", expect.name),
+            }
+            let (icon, icon_node) = world
+                .query_filtered::<(&KitImage, &Node), With<TargetKindIcon>>()
+                .single(world)
+                .unwrap();
+            match expect.icon {
+                Some(expected) => {
+                    assert_eq!(icon_node.display, Display::Flex, "{}", expect.name);
+                    assert_eq!(*icon, KitImage::icon(expected, color::TEXT_MUTED));
+                }
+                None => assert_eq!(icon_node.display, Display::None, "{}", expect.name),
+            }
+            let portrait = world
+                .query_filtered::<&PortraitView, With<TargetPortrait>>()
+                .single(world)
+                .unwrap()
+                .clone();
+            assert_eq!(portrait.fallback, expect.portrait, "{}", expect.name);
+            assert_eq!(portrait.level, expect.level, "{}", expect.name);
+            assert_eq!(portrait.strong_rim, expect.strong, "{}", expect.name);
+            let mana = world
+                .query_filtered::<&Node, With<TargetManaLine>>()
+                .single(world)
+                .unwrap()
+                .display;
+            assert_eq!(mana == Display::Flex, expect.mana, "{}", expect.name);
+            let fill = world
+                .query_filtered::<&BackgroundColor, With<TargetFill>>()
+                .single(world)
+                .unwrap()
+                .0;
+            assert_eq!(fill, color::BAR_HP_ENEMY.with_alpha(expect.alpha));
+            app.world_mut().despawn(entity);
+        }
+    }
+
     #[test]
     fn live_score_totals_use_both_teams_and_distinguish_missing_data() {
         let player = |id, team, kills| LiveScorePlayer {

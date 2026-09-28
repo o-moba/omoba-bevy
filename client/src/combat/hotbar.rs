@@ -467,14 +467,19 @@ pub(super) fn update_skill_bar_system(
         let definition = ability_for_class_slot(class, SkillSlot::ALL[button.slot]);
         let cost = scaled_mana_cost(definition, rank);
         let remaining = cooldowns.remaining_secs[button.slot];
+        let unlocked = prog.unlocked()[button.slot];
+        // hud.md § States, Dead: every ability is veiled (no lock, no level).
+        let dead = stats.is_some_and(|stats| !stats.is_alive());
         let next = AbilityView {
             ability: Some(definition.id),
             cost: Some(cost.round() as u32),
-            rank: prog.ranks[button.slot],
+            // A locked slot has learned nothing yet (the redline's empty pips).
+            rank: if unlocked { prog.ranks[button.slot] } else { 0 },
             cooldown: (remaining > 0.0)
                 .then(|| (remaining, cooldowns.total_secs[button.slot].max(remaining))),
-            locked: !prog.unlocked()[button.slot],
-            unlock_level: Some(shared::SLOT_UNLOCK_LEVELS[button.slot] as u8),
+            locked: !unlocked || dead,
+            unlock_level: (!unlocked && !dead)
+                .then_some(shared::SLOT_UNLOCK_LEVELS[button.slot] as u8),
             no_mana: stats.is_some_and(|stats| stats.mana < cost),
             ..view.clone()
         };

@@ -227,14 +227,21 @@ fn fixture(
         .filter(|index| *index < TARGETS.len())
     {
         let (kind, hp, max_hp) = TARGETS[index];
-        let id = FIXTURE_ID + 50 + index as u64;
+        // The hero target is a Blue row of the scoreboard fixture, so the
+        // plate shows its nickname and level (target-hero.md default).
+        let id = if kind == TargetKind::Player {
+            FIXTURE_ID + 7
+        } else {
+            FIXTURE_ID + 50 + index as u64
+        };
         let entity = *state.entities[index].get_or_insert_with(|| {
+            let hero = kind == TargetKind::Player;
             let mut entity = commands.spawn((
                 CombatStats {
                     hp,
                     max_hp,
-                    mana: 0.0,
-                    max_mana: 0.0,
+                    mana: if hero { 62.0 } else { 0.0 },
+                    max_mana: if hero { 100.0 } else { 0.0 },
                 },
                 Team::Blue,
                 Transform::from_xyz(0.0, 0.0, 0.0),
@@ -247,14 +254,29 @@ fn fixture(
                         NetworkHeroClass(shared::HeroClass::Cleric),
                     ));
                 }
+                // Kind data the target-* plates name (melee minion, MID
+                // tower, camp creature).
                 TargetKind::Minion => {
-                    entity.insert(NetworkMinionId(id));
+                    entity.insert((
+                        NetworkMinionId(id),
+                        crate::net::NetworkMinionKind(shared::combat::MinionKind::Melee),
+                    ));
                 }
                 TargetKind::Structure => {
-                    entity.insert(NetworkStructureId(id));
+                    entity.insert((
+                        NetworkStructureId(id),
+                        crate::net::StructureKind::Tower,
+                        crate::net::NetworkMapStructure {
+                            lane: Some(shared::map::Lane::Mid),
+                            ..default()
+                        },
+                    ));
                 }
                 TargetKind::Neutral => {
-                    entity.insert(NetworkNeutralId(id));
+                    entity.insert((
+                        NetworkNeutralId(id),
+                        crate::net::NetworkNeutralCampType(crate::net::NeutralCampType::Skirmisher),
+                    ));
                 }
             }
             entity.id()
