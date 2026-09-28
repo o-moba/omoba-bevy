@@ -21,6 +21,7 @@ mod demo_qa;
 mod forest_pickup_qa;
 mod frontend_flow_qa;
 mod frontend_qa;
+mod help_qa;
 mod map_qa;
 mod navigation_qa;
 mod offline_qa;
@@ -57,6 +58,7 @@ impl PluginGroup for QaPlugins {
             .add(demo_qa::DemoQaPlugin)
             .add(result_qa::ResultQaPlugin)
             .add(ui_gallery::UiGalleryPlugin)
+            .add(help_qa::HelpQaPlugin)
     }
 }
 

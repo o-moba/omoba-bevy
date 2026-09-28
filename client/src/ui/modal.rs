@@ -22,6 +22,8 @@ pub(crate) enum ModalId {
     Scoreboard,
     /// The phone server-address overlay (`mobile_ui::ServerEntry`).
     ServerEntry,
+    /// The controls guide while it is shown (`help_overlay::HelpOverlayShown`).
+    Help,
 }
 
 impl ModalId {
@@ -35,6 +37,8 @@ impl ModalId {
             ModalId::Shop => 45,
             ModalId::Scoreboard => 90,
             ModalId::Pause => 100,
+            // `SCREEN_Z + 50`: over the pause menu and the HUD modals.
+            ModalId::Help => 110,
             ModalId::Career => 120,
             ModalId::ServerEntry => 150,
             // `GlobalZIndex(1300)`: above every local z-index.

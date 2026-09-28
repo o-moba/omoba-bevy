@@ -149,7 +149,8 @@ A tap and a scroll never share a gesture on phone menus: their threshold is
 | --- | --- | --- | --- | --- |
 | `PauseMenuMainSection`, `PauseMenuSettingsSection` | `pause_menu` | 32/line, desktop | – | `TAP_SLOP`, phone |
 | `CareerBody` | `career` | 28/line, desktop | – | `TAP_SLOP`, phone |
-| `HelpBody`, `ShopCards` | `mobile_ui` (inserted by `adapt_phone_layout`) | – | – | `TAP_SLOP`, phone |
+| `HelpBody` (phone help cards) | `help_overlay` (also kept by `adapt_phone_layout`) | – | – | `TAP_SLOP`, phone |
+| `ShopCards` | `mobile_ui` (inserted by `adapt_phone_layout`) | – | – | `TAP_SLOP`, phone |
 | `SocialChatLog` | `social` | 28/line, desktop | – | – |
 | `CombatTestBody` | `sandbox::ui` | 32/line, all | – | – |
 | `DraftTeamRoster`, `DraftAvatarCatalogue`, `LoadingTeam-*` | `frontend::draft`, `loading` (`draft_pane`) | 24 per notch in either unit, under the cursor | – | from 0 px, keyed by pane |
@@ -171,16 +172,19 @@ lines or a drag.
 `ModalStack` is the list of open modals, bottom first: `push`, `pop` (from
 anywhere), `set`, `is_open`, `contains`, `top`. It is ordered by
 `ModalId::layer`, the z-index the modal's root is drawn at (shop 45,
-scoreboard 90, pause 100, career 120, server entry 150, supporter
+scoreboard 90, pause 100, help 110, career 120, server entry 150, supporter
 `GlobalZIndex` 1300), then by opening order, so `top()` is the modal in
 front. `app.register_modal::<R>(id, |r| r.open)` adds a system that keeps
 `id` in the stack while resource `R` exists and says open; it runs twice a
 frame, in `ModalSet::Early` (before `UiSet::Focus`) and in `ModalSet::Late`
 (the start of `InputContextSet::Resolve`). `InputContextPlugin` registers
-all six in one list (`register_modals`): `PauseMenuState.open`,
+all seven in one list (`register_modals`): `PauseMenuState.open`,
 `CareerClient::modal_open`, `ShopState.open`, `SupporterUiState.open`,
-`ScoreboardState.open`, `ServerEntry.open` (absent on desktop, so closed).
-Each root carries `ModalRoot(id)`.
+`ScoreboardState.open`, `ServerEntry.open` (absent on desktop, so closed)
+and `HelpOverlayShown` (the controls guide while it is on screen, over a
+running match or a menu: its dismiss button is then the only focus
+candidate and the HUD or Home under it waits). Each root carries
+`ModalRoot(id)`.
 
 `ModalGate` (a `SystemParam`) answers `owner(entity)` (the nearest
 `ModalRoot` ancestor) and `allows(entity)`: everything while no modal is
@@ -351,7 +355,7 @@ system ordered `.after(UiSet::Dispatch)`:
 | `social.rs` | `SocialAction` | `social_actions` in `Modal` after `Dispatch`, before `CareerUiSet` | `input` (in `Social`, before the kit) leaves a `ButtonFrame`; a gated frame has none and the presses are dropped |
 | `supporter.rs` | `supporter::Action` | `actions` | disabled buttons are `Pressable::disabled` |
 | `sandbox/ui.rs` | `sandbox::ui::Action` | `actions` (panel chain, now after `Dispatch`) | a closed panel clears the presses; ids `CombatTest…` |
-| `help_overlay.rs` | `HelpAction` | `dismiss_help_button` | needed to retire `MenuButton` |
+| `help_overlay.rs` | `HelpAction` | `dismiss_help_button` | the controls guide (`hud-help.md`): desktop cards + strip + dismiss, phone card list; see [Controls guide](#controls-guide-p0-c) |
 
 QA harnesses press by `TestId` through `crate::qa::TestIdPresses` (and the
 same lookup in `offline_qa`; `sandbox/ui/qa.rs` presses by action): every
@@ -375,8 +379,8 @@ inline, unchanged:
 | `pause_panel_height(form, in_settings, available)` | 560 settings / 380 main (`PAUSE_PANEL` 480×560 as spawned) | safe-area height / `min(height, 360)` | `pause_menu::size_desktop_pause_panel`, `mobile_ui::adapt_phone_layout` |
 | `phone_class_column(width)` | – | `0.26 × width` in 150..=210 | `adapt_phone_layout` (hero select) |
 | `phone_shop_card(width)` | – | `((width − 36) / 3, 103)` | `adapt_phone_layout` |
-| `phone_font(PhoneText, original, width, ui_scale)` | – | the per-panel font table (bar ÷ `UiScale`, entry 11..=16, shop cards 12/15 below 650 px, shop 12..=18, summary 14, result 20, help 15, pause 14..=22) | `adapt_phone_layout` |
-| `PHONE_PAUSE_W`, `PHONE_HELP_W`, `PHONE_SERVER_W`, `PHONE_RESULT_W` | – | 650, 740, 860, 640 caps | `adapt_phone_layout` |
+| `phone_font(PhoneText, original, width, ui_scale)` | – | the per-panel font table (bar ÷ `UiScale`, entry 11..=16, shop cards 12/15 below 650 px, shop 12..=18, summary 14, result 20, pause 14..=22) | `adapt_phone_layout` |
+| `PHONE_PAUSE_W`, `PHONE_SERVER_W`, `PHONE_RESULT_W` | – | 650, 860, 640 caps | `adapt_phone_layout` |
 | `PHONE_BAR_{HELP,MENU,SERVER,MIN}_W`, `TOUCH_MIN` | – | 48, 64, 88, 48 wide × 44 ÷ `UiScale` | `mobile_ui::sync_phone_ui` |
 
 `theme::tests::metric_policy_keeps_the_phone_and_desktop_sizes` pins them.
@@ -527,7 +531,7 @@ CC BY 3.0 credit line (with Lucide ISC and the font licences) is in Settings
 | text-input | `controls::text_input(placeholder, icon, marker, action, id)`; `selected` = editing (caret), `InputError(true)` = error border |
 | panel | `surfaces::plain_panel`, `framed_panel(form)` + `panel_header`, `ornament_frame`, `modal(title, close, form, id)` (opens with scale + scrim fade) |
 | list-row | `surfaces::list_row(RowLeading, title, subtitle, action, id, trailing)` |
-| badge | `surfaces::badge(text, BadgeKind, number)` |
+| badge | `surfaces::badge(text, BadgeKind, number)`; `surfaces::keycap(key)` is the ability key badge as an inline control legend |
 | tooltip | `surfaces::tooltip_panel`; `Tooltip { title, body }` on a control shows it on hover (400 ms) or focus |
 | toast | `surfaces::toast_panel`; `ToastRequest { kind, text }` shows a timed toast (max 3, in/hold/out) |
 | bars | `game::bar(BarKind, BarValue, width, form, show_value)`; damage trail, dead state |
@@ -537,6 +541,7 @@ CC BY 3.0 credit line (with Lucide ISC and the font licences) is in Settings
 | scoreboard-row | `game::scoreboard_row(ScoreRow, form)` |
 | timer-ring | `game::timer_ring(TimerRing, RingSize, time, caption)` |
 | hud-plate | `game::hud_plate`, `minimap_frame`, `player_status`, `score_strip`, `target_frame` |
+| help card (`hud-help.md`, P0) | `surfaces::info_card(node, icon, title, body, form) -> InfoCard { card, title, body }`: plain panel in `color.surface.2`, icon disc (32/24, `color.surface.3`, gold hairline) with a gold icon (20/16), `type.heading` gold title (16 px on a phone, `PhoneSized`), `type.body` secondary body; the caller sizes it and may add a legend row of `keycap`s and muted `badge`s |
 
 ### UI scale and preview cameras
 
@@ -582,6 +587,37 @@ gamepad focus); the others are pinned with `PreviewState`.
   neutral.
 - **Header close button** keeps 44 px on desktop (pause menu contract); the
   kit icon button is 40.
+
+## Controls guide (P0-C)
+
+`help_overlay.rs` builds the guide from `omoba-ui/handoff/screens/hud-help.md`
+at its authored size (desktop 1280×720, phone 844×390):
+
+- **Desktop:** a framed panel 1088×672 (`HelpPanel`) with the eyebrow and
+  title rows, a grid of six `info_card`s 336×192 (`HelpCard-move|attack|
+  target|abilities|shop|objective`, grid `HelpBody`) whose legend row
+  (`HelpCardInputs`) holds muted badges for mouse inputs
+  (`help.input.left_click|right_click`) and keycaps for keys (the ability
+  keys from `SKILL_SLOT_KEY_LABELS` and the upgrade key), the field/camera
+  strip (`HelpField`, `HelpCamera`: an inline `type.eyebrow` label and a
+  `type.caption` span), the 360-wide primary large dismiss
+  (`HelpDismissButton`, `help.dismiss.button`) and the reopen hint
+  (`HelpReopenHint`, `help.reopen`). A menu scales it through `UiScale`; the
+  desktop match stays at 1.0, where a window below the reference scales the
+  panel down (`UiTransform`) so the whole guide stays on screen.
+- **Phone:** a plain panel in the safe area (`MobileControls.safe` +
+  `space.screen_margin.phone`, 12 from the top and the safe bottom) with a
+  title row (`help.phone.title` and the 240-wide dismiss) over a touch scroll
+  list (`HelpBody`) of ten cards 96 high in two columns and the closing line
+  (`help.phone.footer`); a 4 px gold thumb shows the scroll position.
+- It opens with `motion.duration.panel_open` (scale in, scrim fade), is a
+  modal (`ModalId::Help`) while shown, and closes with its button, Esc, a
+  gamepad East or F1. From Settings → Controls (`pause.settings.controls`)
+  closing it reopens Settings (DECISIONS R6.5, `SettingsHelpReturn`); from the
+  Game menu it returns to the game.
+- `OMOBA_HELP_QA_SHOTS=<dir>` (with `OMOBA_QA_WIDTH/HEIGHT`, `OMOBA_LANGUAGE`,
+  `OMOBA_TOUCH_CONTROLS`) captures the controller focus on the dismiss
+  button, the scrolled list, the close, and the Settings round trip.
 
 ## Remaining migration
 

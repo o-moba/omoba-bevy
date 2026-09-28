@@ -209,8 +209,8 @@ pub mod metric {
         }
     }
 
-    /// Widest phone help panel, server-entry panel and match result card.
-    pub const PHONE_HELP_W: f32 = 740.0;
+    /// Widest phone server-entry panel and match result card (the help
+    /// guide places itself in the safe area, `hud-help.md`).
     pub const PHONE_SERVER_W: f32 = 860.0;
     pub const PHONE_RESULT_W: f32 = 640.0;
 
@@ -242,7 +242,6 @@ pub mod metric {
         Shop,
         ShopSummary,
         Result,
-        Help,
         Pause,
     }
 
@@ -262,7 +261,6 @@ pub mod metric {
             PhoneText::ShopCard | PhoneText::Shop => original.clamp(12.0, 18.0),
             PhoneText::ShopSummary => 14.0,
             PhoneText::Result => 20.0,
-            PhoneText::Help => 15.0,
             PhoneText::Pause => original.clamp(14.0, 22.0),
         }
     }
@@ -1085,7 +1083,6 @@ mod tests {
             metric::phone_font(PhoneText::Result, 30.0, 700.0, 1.0),
             20.0
         );
-        assert_eq!(metric::phone_font(PhoneText::Help, 30.0, 700.0, 1.0), 15.0);
         assert_eq!(metric::phone_font(PhoneText::Pause, 30.0, 700.0, 1.0), 22.0);
         assert_eq!(metric::phone_font(PhoneText::Pause, 10.0, 700.0, 1.0), 14.0);
     }
