@@ -72,6 +72,7 @@ pub(crate) fn draw_legend(
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mut strips: Query<(&mut Node, &mut Text, &mut TextFont), With<ControllerLegend>>,
+    help: Option<Res<crate::help_overlay::HelpOverlayShown>>,
 ) {
     let focused = windows.single().is_ok_and(|window| window.focused);
     let visible = controls.active && controls.connected && focused;
@@ -89,8 +90,16 @@ pub(crate) fn draw_legend(
         if !visible {
             continue;
         }
+        // Over the help guide the strip hugs the top edge so it clears the
+        // guide's frame and the phone dismiss button.
+        let help_open = help.as_ref().is_some_and(|help| help.0);
         let (top, bottom, size) = if menu {
-            let top = phone.map_or(12.0, |mobile| mobile.safe.top + 8.0);
+            let top = match (phone, help_open) {
+                (Some(mobile), true) => mobile.safe.top,
+                (Some(mobile), false) => mobile.safe.top + 8.0,
+                (None, true) => 0.0,
+                (None, false) => 12.0,
+            };
             (Val::Px(top), Val::Auto, 10.0)
         } else if let Some(mobile) = phone {
             (Val::Auto, Val::Px(mobile.safe.bottom), 10.0)

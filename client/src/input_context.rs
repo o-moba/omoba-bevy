@@ -86,7 +86,8 @@ fn register_modals(app: &mut App) {
             state.open
         })
         .register_modal::<crate::edge_hud::ScoreboardState>(ModalId::Scoreboard, |state| state.open)
-        .register_modal::<crate::mobile_ui::ServerEntry>(ModalId::ServerEntry, |entry| entry.open);
+        .register_modal::<crate::mobile_ui::ServerEntry>(ModalId::ServerEntry, |entry| entry.open)
+        .register_modal::<crate::help_overlay::HelpOverlayShown>(ModalId::Help, |shown| shown.0);
 }
 
 /// Gameplay is blocked while any registered modal is open (`ModalStack`:

@@ -8,6 +8,12 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 Workspace version 0.27.0.
 
+### Verdant Crown help / field guide (P0)
+- **Client:** the in-match help is now the field guide from the design handoff: six illustrated control cards (desktop) or ten compact cards with a scroll thumb (phone) instead of a text wall, with keyboard, controller and touch legends from their own i18n keys (en + zh-Hans). It auto-shows once on the first match, opens on F1 and over Home, and closes with its button, Esc, controller East or F1. Help is a registered modal (`ModalId::Help`), so controller focus starts on its dismiss button.
+- **Settings → Controls:** a new Controls entry in Settings opens the guide and returns to Settings when it closes (help opened from the game menu still returns to the game).
+- The controller hint strip moves to the top edge while the guide is open so it never covers the guide's frame.
+- QA: `qa/help_qa.rs` captures the guide on both profiles and languages.
+
 ### Verdant Crown UI foundation (0.27.0)
 - **Client look:** the UI kit is restyled on the approved Verdant Crown design (`omoba-ui/handoff/`). Primary, secondary, danger and team buttons draw 9-slice slabs per state (idle, hover, pressed, disabled; a selected secondary shows its hover slab; team buttons get a 4 px team bar), `ButtonKind::Link` is the tertiary text action with a hover underline, tiles and rows use the Verdant surfaces, the gamepad focus ring is 2 px at 3 px with a halo that follows the control's corners, and every existing screen draws the Verdant colours (legacy palette names are token aliases). Kit labels use Cinzel (display, upper case), Inter (body) and Barlow Condensed (numbers); Chinese uses a Noto Serif SC display subset and Noto Sans CJK SC. Screens are not redesigned in this step; their layouts are unchanged.
 - **Tokens as data (DECISIONS R4):** `client/ui/tokens/verdant-crown.json` is a hash-locked byte copy of the handoff tokens (`scripts/sync_ui_tokens.py`, `--check`); `client/build.rs` generates typed constants (`ui::tokens`: colours, desktop/phone `Metric` sizes, spacing, radii, borders, motion durations and easings, font families, the 14 text roles), so a missing token is a compile error. `TextStyle` roles pick face, size per profile, line height and case, pair CJK faces by glyph coverage and keep owner-written labels as written.
