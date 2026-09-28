@@ -372,6 +372,12 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                     },
                     BackgroundColor(theme::PANEL.with_alpha(1.0)),
                     BorderColor::all(theme::EDGE),
+                    // The front-end Settings painting is inserted lazily as a
+                    // sibling after this panel. Keep the controls in an
+                    // explicit foreground layer instead of relying on child
+                    // insertion order (which made the painting cover the
+                    // whole settings UI).
+                    ZIndex(1),
                     PauseMenuPanel,
                     Name::new("PauseMenuPanel"),
                 ))

@@ -865,7 +865,11 @@ mod tests {
             LivingVisual::Mote(mote(0, (0.03, 0.08))),
             LivingVisual::Flake(flake(0)),
         ];
-        assert!(layers.iter().all(|visual| visual_is_shown(visual, false, false)));
+        assert!(
+            layers
+                .iter()
+                .all(|visual| visual_is_shown(visual, false, false))
+        );
         assert_eq!(
             layers
                 .iter()

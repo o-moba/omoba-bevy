@@ -132,5 +132,10 @@ pub fn main() {
     ));
     #[cfg(feature = "qa")]
     app.add_plugins(qa::QaPlugins);
-    app.run();
+    if let bevy::app::AppExit::Error(code) = app.run() {
+        // Native QA harnesses deliberately return AppExit::Error when a
+        // visual or interaction assertion fails. Propagate that result to
+        // the invoking script instead of turning a failed capture green.
+        std::process::exit(i32::from(code.get()));
+    }
 }

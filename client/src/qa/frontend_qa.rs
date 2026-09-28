@@ -465,9 +465,15 @@ fn observe(
         }
     }
     let required: &[&str] = match qa.stage {
+        0 if mobile.enabled => &[
+            "HomePlay",
+            "HomeAccount",
+            "HomeCollection",
+            "HomeHistory",
+            "HomeParty",
+        ],
         0 if std::env::var("OMOBA_PUBLIC_MVP_QA").as_deref() == Ok("1") => &[
             "HomePlay",
-            "HomeHumansOnly",
             "HomeBotPractice",
             "HomeCustomizeCard",
             "HomeAccount",
@@ -514,6 +520,13 @@ fn observe(
             "ServerKeyboardButton",
         ],
         11 => &["HelpDismissButton"],
+        12 if mobile.enabled => &[
+            "HomePlay",
+            "HomeAccount",
+            "HomeCollection",
+            "HomeHistory",
+            "HomeParty",
+        ],
         12 => &[
             "HomePlay",
             "HomeCustomizeCard",

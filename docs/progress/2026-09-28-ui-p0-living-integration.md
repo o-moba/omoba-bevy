@@ -44,3 +44,23 @@ the optional `reduce_motion` boolean.
 
 The remaining release-candidate checks are physical iPhone/Android performance
 and a physical gamepad focus pass; neither is certified by desktop preview.
+
+## Home and settings release polish
+
+The follow-up replaces Home's interim full-width opaque panel with the P1-A
+Stage composition. Desktop now uses the ornament frame, separate identity,
+showcase, hero plate, hero-sized PLAY control and four icon navigation tiles.
+Phone owns its 844×390 safe-area layout and rebuilds once the menu `UiScale`
+settles, so the identity chip, hero, actions and bottom navigation render in
+physical-looking redline pixels instead of shrinking a second time.
+
+The same native shell pass exposed a stacking regression in Settings: the
+Arena background was inserted after the existing panel and covered it. The
+panel now has an explicit foreground z-layer. `App::run()` errors are also
+propagated to the process, making harness failures non-zero.
+
+Verification after the polish: `cargo test -p client --lib --locked` — 764
+passed, 0 failed, 1 ignored; native shell QA — 11 desktop and 14 phone frames.
+The exact Settings tab-rail redesign, Draft/Loading redline migration and the
+remaining P2 screens stay on the tracked roadmap rather than being claimed by
+this release-polish commit.
