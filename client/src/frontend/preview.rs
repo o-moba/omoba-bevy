@@ -16,6 +16,8 @@ use super::AppScreen;
 use crate::model_scale::{ModelScaleSource, NormalizeModelScale, model_scale_key};
 use crate::world::PlayerModelResolver;
 
+pub(crate) use super::preview_interaction::InteractivePreview;
+
 /// Render layer reserved for the avatar preview (the supporter aura preview
 /// owns 29).
 pub const PREVIEW_LAYER: usize = 28;
@@ -76,6 +78,8 @@ pub struct AvatarPreview {
     /// Set by the `SceneInstanceReady` observer of the current model.
     scene_ready: bool,
     tag_frames: u8,
+    gesture: Option<usize>,
+    gesture_serial: u64,
 }
 
 impl AvatarPreview {
@@ -98,6 +102,33 @@ impl AvatarPreview {
 
     pub fn selected_clip(&self) -> Option<&PreviewClip> {
         self.clips.get(self.selected)
+    }
+
+    /// Use expressive clips actually shipped with this model. VRM alone does
+    /// not guarantee a wave/cheer animation; never substitute a death pose.
+    pub(super) fn greet(&mut self, seed: u64) {
+        let choices: Vec<_> = self
+            .clips
+            .iter()
+            .enumerate()
+            .filter(|(_, clip)| {
+                let name = clip.name.to_ascii_lowercase();
+                [
+                    "wave", "hello", "greet", "cheer", "victory", "taunt", "attack", "cast",
+                    "dance",
+                ]
+                .iter()
+                .any(|word| name.contains(word))
+            })
+            .map(|(index, _)| index)
+            .collect();
+        if !choices.is_empty() {
+            let mixed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(self.gesture_serial);
+            self.gesture = Some(choices[(mixed as usize) % choices.len()]);
+            self.gesture_serial = self.gesture_serial.wrapping_add(1);
+        }
     }
 
     /// Human-readable clip label ("Walk Cycle" from "walkcycle").
@@ -152,6 +183,8 @@ impl FromWorld for AvatarPreview {
             bound: false,
             scene_ready: false,
             tag_frames: 0,
+            gesture: None,
+            gesture_serial: 0,
         }
     }
 }
@@ -169,6 +202,7 @@ impl Plugin for AvatarPreviewPlugin {
                     sync_preview_model,
                     tag_preview_layers,
                     bind_preview_animations,
+                    super::preview_interaction::interact,
                     apply_clip_selection,
                     spin_preview,
                     toggle_preview_camera,
@@ -264,6 +298,7 @@ fn sync_preview_model(
     preview.gltf = None;
     preview.graph = None;
     preview.clips.clear();
+    preview.gesture = None;
     preview.selected = 0;
     preview.bound = false;
     preview.scene_ready = false;
@@ -333,6 +368,7 @@ fn sync_preview_model(
             Transform::from_xyz(0.0, -0.03, 0.0),
             RenderLayers::layer(PREVIEW_LAYER),
             Name::new("AvatarPreviewPedestal"),
+            PreviewPedestal,
         ))
         .id();
     // The scene reports when every one of its entities exists. Until then the
@@ -483,23 +519,54 @@ fn bind_preview_animations(
 }
 
 fn apply_clip_selection(
-    preview: Res<AvatarPreview>,
+    mut preview: ResMut<AvatarPreview>,
     mut players: Query<&mut AnimationPlayer>,
-    mut playing: Local<Option<(Entity, AnimationNodeIndex)>>,
+    mut playing: Local<Option<(Entity, AnimationNodeIndex, u64)>>,
 ) {
-    let (Some(entity), Some(clip)) = (preview.player, preview.selected_clip()) else {
+    let Some(entity) = preview.player else {
         *playing = None;
         return;
     };
-    if *playing == Some((entity, clip.node)) {
-        return;
-    }
     let Ok(mut player) = players.get_mut(entity) else {
         return;
     };
+    if let Some(index) = preview.gesture {
+        if let Some(clip) = preview.clips.get(index) {
+            if *playing == Some((entity, clip.node, preview.gesture_serial))
+                && player
+                    .animation(clip.node)
+                    .is_some_and(|animation| animation.is_finished())
+            {
+                preview.gesture = None;
+                if let Some(idle) = preview
+                    .clips
+                    .iter()
+                    .position(|clip| clip.name.eq_ignore_ascii_case("idle"))
+                {
+                    preview.selected = idle;
+                }
+                *playing = None;
+            }
+        }
+    }
+    let Some(clip) = preview
+        .gesture
+        .and_then(|i| preview.clips.get(i))
+        .or_else(|| preview.selected_clip())
+    else {
+        *playing = None;
+        return;
+    };
+    let key = (entity, clip.node, preview.gesture_serial);
+    if *playing == Some(key) {
+        return;
+    }
     player.stop_all();
-    player.play(clip.node).repeat();
-    *playing = Some((entity, clip.node));
+    let animation = player.play(clip.node);
+    if preview.gesture.is_none() {
+        animation.repeat();
+    }
+    *playing = Some(key);
 }
 
 fn spin_preview(
@@ -524,7 +591,15 @@ fn toggle_preview_camera(
     screen: Res<State<AppScreen>>,
     preview: Res<AvatarPreview>,
     mut cameras: Query<&mut Camera, With<PreviewCamera>>,
+    mut pedestals: Query<&mut Visibility, With<PreviewPedestal>>,
 ) {
+    for mut visibility in &mut pedestals {
+        *visibility = if *screen.get() == AppScreen::Home {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
+    }
     // Home, the collection and the picker all show the live model.
     let wanted = preview.slug.is_some()
         && matches!(
@@ -537,6 +612,9 @@ fn toggle_preview_camera(
         }
     }
 }
+
+#[derive(Component)]
+struct PreviewPedestal;
 
 /// The model only exists while a screen shows it. A match never carries a
 /// preview avatar along, and the card editor does not pay for one either.
@@ -556,6 +634,34 @@ fn release_preview_off_screen(screen: Res<State<AppScreen>>, mut preview: ResMut
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn greeting_selects_real_expressive_clips_and_can_replay() {
+        let mut world = World::new();
+        world.init_resource::<Assets<Image>>();
+        let mut preview = AvatarPreview::from_world(&mut world);
+        preview.clips = ["idle", "walk", "death", "attack", "cast"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, name)| PreviewClip {
+                name: name.into(),
+                node: AnimationNodeIndex::new(index),
+            })
+            .collect();
+        let mut selected = std::collections::HashSet::new();
+        for _ in 0..16 {
+            preview.greet(123);
+            let index = preview.gesture.unwrap();
+            assert!(index == 3 || index == 4);
+            selected.insert(index);
+        }
+        assert_eq!(selected.len(), 2);
+        assert_eq!(preview.gesture_serial, 16);
+        preview.clips.truncate(3);
+        preview.gesture = None;
+        preview.greet(123);
+        assert_eq!(preview.gesture, None);
+    }
 
     #[test]
     fn sdk_preview_refreshes_without_consuming_match_change_queue() {

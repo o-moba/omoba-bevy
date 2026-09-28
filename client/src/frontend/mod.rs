@@ -26,6 +26,7 @@ pub mod lobby;
 pub mod party_stage;
 pub mod postmatch;
 pub mod preview;
+mod preview_interaction;
 pub mod searching;
 pub mod server_field;
 pub mod widgets;
@@ -354,7 +355,10 @@ fn scale_menus_to_the_window(
             || server.as_ref().is_some_and(|state| state.open)
             || help.as_ref().is_some_and(|state| state.0));
     // Draft/loading have their own real-pixel compact layout and 44px controls.
-    let shared_prematch = matches!(screen.get(), AppScreen::Draft | AppScreen::Loading);
+    let shared_prematch = matches!(
+        screen.get(),
+        AppScreen::Draft | AppScreen::Loading | AppScreen::Collection
+    );
     let unscaled_pause = pause.as_ref().is_some_and(|state| state.open);
     let wanted = if !phone {
         // Desktop menus follow the 1280×720 reference (DECISIONS R2.3). The
@@ -394,7 +398,12 @@ fn scale_menus_to_the_window(
         } else {
             1.0
         }
-    } else if screen.get().is_menu() && !phone_picker && !shared_prematch && !unscaled_pause {
+    } else if screen.get().is_menu()
+        && *screen.get() != AppScreen::Home
+        && !phone_picker
+        && !shared_prematch
+        && !unscaled_pause
+    {
         menu_scale(window.resolution.height())
     } else {
         1.0
@@ -514,7 +523,10 @@ mod tests {
         ));
         app.update();
         let shell_scale = app.world().resource::<UiScale>().0;
-        assert!(shell_scale < 0.7);
+        assert_eq!(
+            shell_scale, 1.0,
+            "Home owns its fitted canvas; touch coordinates stay unscaled"
+        );
         app.world_mut()
             .resource_mut::<crate::pause_menu::PauseMenuState>()
             .open = true;

@@ -106,7 +106,8 @@
       "harness": "client/src/qa/offline_qa.rs",
       "server": null,
       "env": {
-        "OMOBA_OFFLINE_SMOKE_DIR": "{out}"
+        "OMOBA_OFFLINE_SMOKE_DIR": "{out}",
+        "GAME_SERVER_ADDR": "127.0.0.1:49999"
       },
       "note": "Offline practice from Home: hero picker, match, target, game menu, settings. Logical size without a scale override, so HiDPI displays give 2x frames; its pass flag also checks the saved server endpoint.",
       "sources": [
@@ -717,7 +718,8 @@
       "run": "offline",
       "frame": "02-hero-picker.png",
       "profiles": [
-        "desktop"
+        "desktop",
+        "phone"
       ],
       "route": "Home → Offline practice",
       "source": "client/src/team.rs"
@@ -728,7 +730,8 @@
       "run": "offline",
       "frame": "03-practice.png",
       "profiles": [
-        "desktop"
+        "desktop",
+        "phone"
       ],
       "route": "Offline practice → start",
       "source": "client/src/match_hud.rs"
@@ -739,7 +742,8 @@
       "run": "offline",
       "frame": "04-attacked-target.png",
       "profiles": [
-        "desktop"
+        "desktop",
+        "phone"
       ],
       "route": "Attack the practice dummy",
       "source": "client/src/edge_hud.rs"
@@ -750,7 +754,8 @@
       "run": "offline",
       "frame": "05-game-menu.png",
       "profiles": [
-        "desktop"
+        "desktop",
+        "phone"
       ],
       "route": "Escape in practice",
       "source": "client/src/pause_menu.rs"
@@ -761,7 +766,8 @@
       "run": "offline",
       "frame": "06-settings-top.png",
       "profiles": [
-        "desktop"
+        "desktop",
+        "phone"
       ],
       "route": "Game menu → Settings",
       "source": "client/src/pause_menu.rs"
@@ -772,7 +778,8 @@
       "run": "offline",
       "frame": "07-settings-bottom.png",
       "profiles": [
-        "desktop"
+        "desktop",
+        "phone"
       ],
       "route": "Settings, scrolled",
       "source": "client/src/pause_menu.rs"
@@ -783,7 +790,8 @@
       "run": "offline",
       "frame": "08-return-home.png",
       "profiles": [
-        "desktop"
+        "desktop",
+        "phone"
       ],
       "route": "Game menu → Exit to home",
       "source": "client/src/frontend/home.rs"

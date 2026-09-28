@@ -229,6 +229,7 @@ fn drive(
     mut next: ResMut<NextState<AppScreen>>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
     mut pause: ResMut<crate::pause_menu::PauseMenuState>,
+    mut settings_tab: ResMut<crate::pause_menu::SettingsTab>,
     server: Option<ResMut<crate::mobile_ui::ServerEntry>>,
     mut scrolls: Query<(crate::qa::QaName, &ComputedNode, &mut ScrollPosition)>,
     mut career: ResMut<crate::career::CareerClient>,
@@ -266,6 +267,11 @@ fn drive(
     // The production modal visibility, scrolling and input gates still render it.
     pause.open = (7..=9).contains(&qa.stage);
     pause.in_settings = (8..=9).contains(&qa.stage);
+    *settings_tab = if qa.stage == 9 {
+        crate::pause_menu::SettingsTab::Graphics
+    } else {
+        crate::pause_menu::SettingsTab::Sound
+    };
     if let Some(mut server) = server {
         server.open = qa.stage == 10;
     }
@@ -465,7 +471,7 @@ fn observe(
         }
     }
     let required: &[&str] = match qa.stage {
-        0 if mobile.enabled => &[
+        0 if mobile.enabled && viewport.y < 600.0 => &[
             "HomePlay",
             "HomeAccount",
             "HomeCollection",
@@ -520,7 +526,7 @@ fn observe(
             "ServerKeyboardButton",
         ],
         11 => &["HelpDismissButton"],
-        12 if mobile.enabled => &[
+        12 if mobile.enabled && viewport.y < 600.0 => &[
             "HomePlay",
             "HomeAccount",
             "HomeCollection",
@@ -582,7 +588,7 @@ fn observe(
         .collect();
     let help_transition_scale_correct = match qa.stage {
         11 => (ui_scale.0 - 1.0).abs() < 0.001,
-        12 => (ui_scale.0 - crate::frontend::menu_scale(window.height())).abs() < 0.001,
+        12 => (ui_scale.0 - 1.0).abs() < 0.001,
         _ => true,
     };
     let help_above_shell = qa.stage != 11

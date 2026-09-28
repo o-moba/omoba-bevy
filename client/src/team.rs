@@ -135,6 +135,13 @@ impl Plugin for TeamSelectPlugin {
                     .run_if(in_state(AppScreen::HeroSelect)),
             )
             .add_systems(Update, (autojoin_from_env, sync_practice_picker));
+        app.add_systems(
+            PostUpdate,
+            layout_spacious_picker
+                .after(crate::mobile_ui::MobileUiLayout)
+                .before(bevy::ui::UiSystems::Layout)
+                .run_if(in_state(AppScreen::HeroSelect)),
+        );
     }
 }
 
@@ -489,6 +496,15 @@ pub fn spawn_team_select_ui(
             Name::new("TeamSelectOverlay"),
         ))
         .with_children(|parent| {
+            crate::ui::living_background::spawn(
+                parent,
+                crate::ui::living_background::LivingScene::Arena,
+                crate::ui::living_background::LivingBands {
+                    header: Some(76.0),
+                    footer: Some(52.0),
+                },
+                crate::ui::theme::Form::of(compact),
+            );
             parent
                 .spawn((
                     Node {
@@ -627,6 +643,9 @@ pub fn spawn_team_select_ui(
                     },
                     roster_scroll(),
                     ModelAvatarGrid,
+                    BackgroundColor(crate::ui::theme::perceptual(
+                        crate::ui::tokens::color::SURFACE_1,
+                    )),
                     Name::new("AvatarGrid"),
                 ))
                 .with_children(|grid| {
@@ -851,6 +870,7 @@ fn spawn_hero_panel(
                     ..default()
                 },
                 Name::new("HeroSelectPreview"),
+                crate::frontend::preview::InteractivePreview,
             ));
             panel.spawn((
                 Text::new(avatar_name.to_owned()),
@@ -908,8 +928,12 @@ fn sync_hero_select_status(
     let (line, color) = match notice.as_ref().and_then(|notice| notice.0.clone()) {
         Some(reason) => (reason, crate::ui::theme::GOLD),
         None => {
-            let (line, _) = crate::frontend::home::connection_line(&session);
-            (line, crate::ui::theme::MUTED)
+            if session.is_offline() {
+                (tr("home.offline_hint").to_owned(), crate::ui::theme::GOLD)
+            } else {
+                let (line, _) = crate::frontend::home::connection_line(&session);
+                (line, crate::ui::theme::MUTED)
+            }
         }
     };
     for (mut text, mut text_color) in &mut status {
@@ -1315,6 +1339,7 @@ fn spawn_avatar_button(
                 AvatarThumbnailSlot {
                     slug: slug.to_owned(),
                 },
+                Name::new("PickerAvatarThumbnail"),
             ))
             .with_children(|portrait| {
                 if omoba_passport::avatars::avatar_definition(slug)
@@ -1698,6 +1723,122 @@ fn sync_practice_picker(
     for mut text in &mut labels {
         if text.0 != label {
             text.0 = label.into();
+        }
+    }
+}
+
+/// Tablet touch input keeps the spacious picker, including its live hero.
+/// Online account controls are not useful in the bundled offline arena.
+fn layout_spacious_picker(
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    scale: Res<UiScale>,
+    session: Res<ClientSession>,
+    mut nodes: Query<(
+        Option<&Name>,
+        Option<&TestId>,
+        Option<&ClassSelectButton>,
+        Option<&UiAction<HeroSelectAction>>,
+        &mut Node,
+    )>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let spacious = window.height() >= 600.0;
+    let w = window.width() / scale.0.max(0.1);
+    let h = window.height() / scale.0.max(0.1);
+    let left_w = w * 0.70 - 64.0;
+    let stage_x = w * 0.70;
+    let stage_w = w * 0.30 - 32.0;
+    let absolute = |node: &mut Node, x, y, width, height| {
+        node.position_type = PositionType::Absolute;
+        node.left = Val::Px(x);
+        node.top = Val::Px(y);
+        node.right = Val::Auto;
+        node.bottom = Val::Auto;
+        node.width = Val::Px(width);
+        node.height = Val::Px(height);
+        node.max_width = Val::Auto;
+        node.max_height = Val::Auto;
+    };
+    for (name, id, class, action, mut node) in &mut nodes {
+        let key = crate::ui::test_id::node_key(name, id).unwrap_or_default();
+        if session.is_offline() && (matches!(key, "EkzaConnectRow" | "StudioAvatarsLabel" | "PurchasedAvatarsHint" | "PickerRefreshStudio")
+            || action.is_some_and(|a| matches!(&a.0, HeroSelectAction::Avatar(slug) if omoba_passport::avatars::avatar_definition(slug).is_none()))) {
+            node.display = Display::None; continue;
+        }
+        if !spacious {
+            continue;
+        }
+        if class.is_some() {
+            node.width = Val::Px((left_w - 48.0) / 5.0);
+            node.height = Val::Px(64.0);
+        }
+        if action.is_some_and(|a| matches!(a.0, HeroSelectAction::Avatar(_))) {
+            node.width = Val::Px(112.0);
+            node.height = Val::Px(128.0);
+        }
+        match key {
+            "PickerAvatarThumbnail" => {
+                node.width = Val::Px(84.0);
+                node.height = Val::Px(84.0);
+            }
+            "TeamSelectOverlay" => {
+                node.padding = UiRect::ZERO;
+            }
+            "HeroSelectHeader" => {
+                absolute(&mut node, 32.0, 24.0, left_w, 48.0);
+                node.flex_direction = FlexDirection::Row;
+            }
+            "HeroSelectTitle" | "HeroSelectStatus" => node.display = Display::Flex,
+            "HeroSelectBack" => {
+                node.width = Val::Auto;
+                node.height = Val::Px(44.0);
+            }
+            "ClassSelectTitle" => absolute(&mut node, 32.0, 92.0, left_w, 24.0),
+            "ClassButtonsRow" => {
+                absolute(&mut node, 32.0, 124.0, left_w, 64.0);
+                node.flex_direction = FlexDirection::Row;
+                node.column_gap = Val::Px(12.0);
+                node.flex_wrap = FlexWrap::NoWrap;
+            }
+            "AvatarSelectTitle" => absolute(&mut node, 32.0, 208.0, left_w, 24.0),
+            "RendererStatus" => node.display = Display::None,
+            "AvatarGrid" => {
+                absolute(
+                    &mut node,
+                    32.0,
+                    244.0,
+                    left_w,
+                    (h - if session.is_offline() { 292.0 } else { 370.0 }).max(160.0),
+                );
+                node.padding = UiRect::all(Val::Px(12.0));
+                node.row_gap = Val::Px(12.0);
+                node.column_gap = Val::Px(12.0);
+                node.align_content = AlignContent::FlexStart;
+                node.justify_content = JustifyContent::FlexStart;
+                node.border_radius = BorderRadius::all(Val::Px(12.0));
+            }
+            "HeroSelectPanel" => {
+                node.display = Display::Flex;
+                absolute(&mut node, stage_x, 92.0, stage_w, h - 244.0);
+            }
+            "HeroSelectPreview" => {
+                node.width = Val::Auto;
+                node.height = Val::Px((h - 454.0).max(156.0));
+                node.flex_shrink = 0.0;
+            }
+            "TeamSelectTitle" => absolute(&mut node, stage_x, h - 128.0, stage_w, 24.0),
+            "TeamButtonsRow" => {
+                absolute(&mut node, stage_x, h - 96.0, stage_w, 56.0);
+                node.justify_content = JustifyContent::Center;
+            }
+            "TeamSelectHint" => node.display = Display::None,
+            "EkzaConnectRow" => {
+                node.display = Display::Flex;
+                absolute(&mut node, 32.0, h - 108.0, left_w, 80.0);
+            }
+            _ => {}
         }
     }
 }

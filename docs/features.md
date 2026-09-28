@@ -1,5 +1,11 @@
 # Feature Inventory
 
+## Tablet UI and interactive previews (0.28.1)
+
+Touch input no longer implies phone-sized Home/Collection/picker/scoreboard layouts. Home centers its composition on tablets and preserves the living backdrop during data refreshes; touch drives subtle parallax and automatic detail reduction crossfades. The Home hero uses the painted platform, supports drag rotation and plays an available expressive animation on double tap, returning to idle. No new wave animation asset is shipped.
+
+Avatars has a larger framed preview and All / Included / Studio filters. Settings separates Sound, Graphics, Camera and Language, keeping Controls and navigation reachable. The spacious offline picker keeps the live hero preview and omits online library/account controls. Match Score has framed team tables, avatar/class identity, portrait levels and local-player emphasis. Offline gameplay remains the existing skill sandbox; [tower/minion parity and richer practice tools](plans/offline-practice-parity.md) are a separate planned track.
+
 ## Verdant Crown release interface (0.28.0)
 
 The critical player loop now uses the approved handoff rather than the foundation placeholders. The desktop and phone match HUD have compact framed vitals, abilities, inventory/quick-buy, target, score and minimap surfaces; loading and post-match have dedicated responsive layouts and controller focus; victory and defeat select their own painted scene.

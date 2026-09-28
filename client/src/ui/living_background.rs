@@ -206,6 +206,7 @@ impl Default for LivingQuality {
 struct LivingClock {
     elapsed: f32,
     drift: Vec2,
+    detail: f32,
 }
 
 pub(crate) struct LivingBackgroundPlugin;
@@ -610,6 +611,7 @@ fn animate_living_backgrounds(
     time: Res<Time>,
     windows: Query<&Window, With<PrimaryWindow>>,
     platform: Res<super::UiPlatform>,
+    touches: Option<Res<Touches>>,
     settings: Res<MotionSettings>,
     quality: Res<LivingQuality>,
     mut clock: ResMut<LivingClock>,
@@ -625,7 +627,7 @@ fn animate_living_backgrounds(
 ) {
     let Ok(window) = windows.single() else { return };
     let delta = if window.focused {
-        time.delta_secs()
+        time.delta_secs().min(0.05)
     } else {
         0.0
     };
@@ -638,6 +640,9 @@ fn animate_living_backgrounds(
     if root_state.is_empty() {
         return;
     }
+    let target_detail = if quality.low_end { 0.0 } else { 1.0 };
+    let blend = (delta * 3.0).min(1.0);
+    clock.detail += (target_detail - clock.detail) * blend;
 
     if delta > 0.0 && !settings.reduce {
         clock.elapsed += delta;
@@ -649,16 +654,21 @@ fn animate_living_backgrounds(
                     + motion::LIVING_DRIFT_PHASE_Y)
                     .sin(),
         );
-        let pointer = if !platform.is_mobile() {
-            window.cursor_position().map_or(Vec2::ZERO, |cursor| {
-                Vec2::new(
-                    cursor.x / window.width() * 2.0 - 1.0,
-                    cursor.y / window.height() * 2.0 - 1.0,
-                ) * motion::LIVING_INPUT_GAIN
-            })
+        let position = if platform.is_mobile() {
+            touches
+                .as_ref()
+                .and_then(|touches| touches.iter().next().map(|touch| touch.position()))
         } else {
-            Vec2::ZERO
+            window.cursor_position()
         };
+        let pointer = position.map_or(Vec2::ZERO, |cursor| {
+            Vec2::new(
+                cursor.x / window.width() * 2.0 - 1.0,
+                cursor.y / window.height() * 2.0 - 1.0,
+            )
+            .clamp(Vec2::splat(-1.0), Vec2::ONE)
+                * motion::LIVING_INPUT_GAIN
+        });
         let blend = 1.0 - (1.0 - motion::LIVING_LERP).powf(60.0 * delta);
         let previous = clock.drift;
         clock.drift += (pointer + idle - previous) * blend;
@@ -670,7 +680,9 @@ fn animate_living_backgrounds(
         else {
             continue;
         };
-        let shown = visual_is_shown(visual, settings.reduce, quality.low_end);
+        let detailed = !visual_is_shown(visual, false, true);
+        let shown =
+            visual_is_shown(visual, settings.reduce, false) && (!detailed || clock.detail > 0.005);
         *visibility = if shown {
             Visibility::Inherited
         } else {
@@ -681,6 +693,9 @@ fn animate_living_backgrounds(
         }
 
         let mut alpha_factor = *fade;
+        if detailed {
+            alpha_factor *= clock.detail;
+        }
         let t = clock.elapsed;
         match *visual {
             LivingVisual::Plate => {
