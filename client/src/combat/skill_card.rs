@@ -265,7 +265,14 @@ pub(crate) fn spawn_skill_card(commands: &mut Commands, form: Form, bundle: impl
                 },
                 Part::Description,
             ));
-            card.spawn(line(LINE_H)).with_children(|stats| {
+            // The template words carry their own spaces (`{mana} mana`,
+            // `{seconds}s cooldown`, `冷却 {seconds} 秒`): no gap.
+            card.spawn(Node {
+                column_gap: Val::Px(0.0),
+                align_items: AlignItems::Baseline,
+                ..line(LINE_H)
+            })
+            .with_children(|stats| {
                 stats.spawn((
                     Text::new(""),
                     caption(),

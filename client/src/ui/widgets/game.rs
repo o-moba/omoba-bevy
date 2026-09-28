@@ -2348,30 +2348,56 @@ pub(crate) fn player_status(
         .id()
 }
 
-/// Score strip: team scores (`type.number_lg` in team colours), the match
-/// timer (`type.number`) between, own K/D/A (`type.number_sm`).
+/// Score strip (hud.md `score-strip`): team kills `type.number_lg` in team
+/// colours around a muted colon, a divider, and `edge.kda` (`type.eyebrow`
+/// muted) over the own K/D/A (`type.number_sm`). The match has no clock
+/// (hud.md § Out of scope), so there is no timer.
 pub(crate) fn score_strip(
     parent: &mut ChildSpawnerCommands,
     green: u32,
     blue: u32,
-    timer: String,
     kda: (u32, u32, u32),
 ) -> Entity {
     parent
         .spawn(hud_plate(true))
         .with_children(|plate| {
-            for (text, role, ink) in [
-                (green.to_string(), TextRole::NumberLg, color::TEAM_GREEN),
-                (timer, TextRole::Number, color::TEXT_PRIMARY),
-                (blue.to_string(), TextRole::NumberLg, color::TEAM_BLUE),
-                (
-                    format!("{}/{}/{}", kda.0, kda.1, kda.2),
-                    TextRole::NumberSm,
-                    color::TEXT_SECONDARY,
-                ),
+            for (text, ink) in [
+                (green.to_string(), color::TEAM_GREEN),
+                (":".to_owned(), color::TEXT_MUTED),
+                (blue.to_string(), color::TEAM_BLUE),
             ] {
-                plate.spawn((Text::new(text), theme::role_text(role), TextColor(ink)));
+                plate.spawn((
+                    Text::new(text),
+                    theme::role_text(TextRole::NumberLg),
+                    TextColor(ink),
+                ));
             }
+            plate.spawn((
+                Node {
+                    width: Val::Px(border::HAIRLINE),
+                    height: Val::Px(space::S24),
+                    ..default()
+                },
+                BackgroundColor(color::BORDER_SUBTLE),
+            ));
+            plate
+                .spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    ..default()
+                })
+                .with_children(|column| {
+                    column.spawn((
+                        crate::i18n::Localized::new("edge.kda").into_text(),
+                        theme::role_text(TextRole::Eyebrow),
+                        TextColor(color::TEXT_MUTED),
+                    ));
+                    column.spawn((
+                        Text::new(format!("{}/{}/{}", kda.0, kda.1, kda.2)),
+                        theme::role_text(TextRole::NumberSm),
+                        TextColor(color::TEXT_PRIMARY),
+                    ));
+                });
         })
         .id()
 }
@@ -2480,6 +2506,111 @@ mod tests {
         assert_eq!(group_digits(7401), "7 401");
         assert_eq!(group_digits(120), "120");
         assert_eq!(group_digits(1_234_567), "1 234 567");
+    }
+
+    /// hud.md ability states on one kit button: cooldown sweep + seconds,
+    /// the ready flash when it ends, a red cost without mana, the locked
+    /// veil with its level, the dead veil without a lock, rank pips.
+    #[test]
+    fn ability_states_paint_sweep_flash_cost_veil_and_pips() {
+        #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+        enum Noop {
+            Press,
+        }
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .add_systems(Update, paint_abilities);
+        let root = app.world_mut().spawn(Node::default()).id();
+        let view = AbilityView {
+            ability: None,
+            icon: Icon::HudAttack,
+            key: Some("Q"),
+            cost: Some(22),
+            rank: 2,
+            cooldown: Some((3.2, 8.0)),
+            locked: false,
+            unlock_level: None,
+            no_mana: false,
+            pips: true,
+        };
+        app.world_mut()
+            .commands()
+            .entity(root)
+            .with_children(|parent| {
+                ability_button(parent, view, 64.0, Noop::Press, "QaAbility");
+            });
+        app.world_mut().flush();
+        app.update();
+        let (entity, parts) = app
+            .world_mut()
+            .query::<(Entity, &AbilityParts)>()
+            .single(app.world())
+            .map(|(entity, parts)| (entity, *parts))
+            .unwrap();
+        let visible = |app: &App, part: Entity| {
+            *app.world().get::<Visibility>(part).unwrap() != Visibility::Hidden
+        };
+        assert!(visible(&app, parts.sweep) && visible(&app, parts.seconds));
+        assert_eq!(app.world().get::<Text>(parts.seconds).unwrap().0, "4");
+        let pips: Vec<Color> = app
+            .world()
+            .get::<Children>(parts.pips.unwrap())
+            .unwrap()
+            .iter()
+            .map(|pip| app.world().get::<KitImage>(pip).unwrap().tint)
+            .collect();
+        assert_eq!(pips, [color::GOLD_400, color::GOLD_400, color::SURFACE_3]);
+        // Cooldown ends: the flash rises from 0 while the sweep hides.
+        app.world_mut()
+            .get_mut::<AbilityView>(entity)
+            .unwrap()
+            .cooldown = None;
+        app.update();
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_millis(60));
+        app.update();
+        app.update();
+        assert!(!visible(&app, parts.sweep));
+        let glow = app
+            .world()
+            .get::<KitImage>(parts.flash)
+            .unwrap()
+            .tint
+            .alpha();
+        assert!(glow > 0.0 && glow <= READY_FLASH_ALPHA, "flash {glow}");
+        // No mana: the cost number turns danger.
+        app.world_mut()
+            .get_mut::<AbilityView>(entity)
+            .unwrap()
+            .no_mana = true;
+        app.update();
+        let pill = app.world().get::<Children>(parts.cost.unwrap()).unwrap()[0];
+        let number = app.world().get::<Children>(pill).unwrap()[0];
+        assert_eq!(
+            app.world().get::<TextColor>(number).unwrap().0,
+            color::TEXT_DANGER
+        );
+        // Locked: veil with `Lv 6`; dead: veil without a lock or level.
+        {
+            let mut view = app.world_mut().get_mut::<AbilityView>(entity).unwrap();
+            view.locked = true;
+            view.unlock_level = Some(6);
+        }
+        app.update();
+        assert!(visible(&app, parts.veil));
+        assert_eq!(app.world().get::<Text>(parts.veil_label).unwrap().0, "Lv 6");
+        app.world_mut()
+            .get_mut::<AbilityView>(entity)
+            .unwrap()
+            .unlock_level = None;
+        app.update();
+        let lock = app.world().get::<Children>(parts.veil).unwrap()[0];
+        assert_eq!(
+            *app.world().get::<Visibility>(lock).unwrap(),
+            Visibility::Hidden
+        );
+        assert_eq!(app.world().get::<Text>(parts.veil_label).unwrap().0, "");
     }
 
     #[test]

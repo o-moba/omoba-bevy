@@ -446,11 +446,19 @@ fn prepare_skill_upgrade_fixture(
     mut commands: Commands,
     qa: Res<BetaUiQa>,
     mut fixture: ResMut<SkillUpgradeFixtureState>,
-    mut player: Query<(Entity, &mut crate::net::PlayerProgression), With<crate::player::Player>>,
+    mut player: Query<
+        (
+            Entity,
+            &mut crate::net::PlayerProgression,
+            &mut crate::combat::CombatStats,
+        ),
+        With<crate::player::Player>,
+    >,
     mut labels: Query<&mut Node, With<SkillUpgradeFixtureLabel>>,
+    mut cooldowns: ResMut<crate::combat::LocalCastCooldown>,
 ) {
     let active = qa.skill_upgrades && matches!(qa.stage, 2 | 5);
-    if let Ok((entity, mut progression)) = player.single_mut() {
+    if let Ok((entity, mut progression, mut stats)) = player.single_mut() {
         if active {
             // Refresh the saved value whenever a real snapshot replaced our local
             // fixture. Never send a rank-up command or mutate authoritative actors.
@@ -462,6 +470,11 @@ fn prepare_skill_upgrade_fixture(
             progression.level = 6;
             progression.skill_points = 4;
             progression.ranks = [1; 4];
+            // hud.md ability states in one frame: slot 2 cooling (sweep and
+            // seconds), and mana under the other costs (red cost pills).
+            // Client-only; the next snapshot restores the real values.
+            cooldowns.set_for_qa(1, 3.2, 8.0);
+            stats.mana = stats.mana.min(20.0);
             fixture.applied = true;
         } else {
             // Do not let the fixture leak into the shop/result stages when a

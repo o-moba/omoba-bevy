@@ -19,6 +19,13 @@ pub struct LocalCastCooldown {
 }
 
 impl LocalCastCooldown {
+    /// A client-only cooldown for a QA layout fixture (the HUD's sweep).
+    #[cfg(feature = "qa")]
+    pub(crate) fn set_for_qa(&mut self, slot: usize, remaining: f32, total: f32) {
+        self.remaining_secs[slot] = remaining;
+        self.total_secs[slot] = total;
+    }
+
     pub(crate) fn remaining_fraction(&self, slot: usize) -> f32 {
         if self.total_secs[slot] > 0.0 {
             (self.remaining_secs[slot] / self.total_secs[slot]).clamp(0.0, 1.0)
