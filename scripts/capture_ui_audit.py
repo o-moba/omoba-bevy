@@ -174,6 +174,10 @@ def capture(run_name, run, profile, binaries, assets, raw, timeout, screen_map):
     record["missing"] = sorted(set(expected) - set(written))
     record["unmapped"] = sorted(set(written) - set(expected))
     record["pass"] = (record.get("client_exit_code") == 0 and "error" not in record and not record["missing"])
+    if run_name == "offline":
+        result = raw / "result.json"
+        record["harness_pass"] = result.exists() and json.loads(result.read_text()).get("pass") is True
+        record["pass"] = record["pass"] and record["harness_pass"]
     return record, {name: (written[name], expected[name]) for name in expected if name in written}
 
 
@@ -182,6 +186,7 @@ def main():
     parser.add_argument("--output", type=Path)
     parser.add_argument("--run", action="append", help="repeatable; default: every run in the map")
     parser.add_argument("--profile", action="append", choices=["desktop", "phone"], help="repeatable; default: both")
+    parser.add_argument("--viewport", help="Override capture viewport, e.g. 1180x820 with --profile phone for iPad touch UI")
     parser.add_argument("--build", action="store_true", help="cargo build the dev workspace first")
     parser.add_argument("--client-bin", type=Path)
     parser.add_argument("--server-bin", type=Path)
@@ -191,6 +196,14 @@ def main():
     parser.add_argument("--write-doc", action="store_true", help=f"regenerate {DOC_PATH.relative_to(ROOT)}")
     args = parser.parse_args()
     screen_map = load_map()
+    if args.viewport:
+        if not re.fullmatch(r"[0-9]+x[0-9]+", args.viewport):
+            parser.error("--viewport must be WIDTHxHEIGHT")
+        size = [int(part) for part in args.viewport.split("x")]
+        if not all(200 <= dimension <= 3840 for dimension in size):
+            parser.error("viewport dimensions must be between 200 and 3840")
+        for profile in args.profile or list(screen_map["profiles"]):
+            screen_map["profiles"][profile] = size
     if args.check or args.write_doc:
         if args.write_doc:
             DOC_PATH.write_text(render_doc(screen_map))
@@ -253,7 +266,7 @@ def main():
     failed = [f"{r['profile']}/{r['run']}" for r in index["runs"] if not r["pass"]]
     print(f"[ui-audit] {len(index['frames'])} frames -> {output}"
           + (f"; incomplete: {', '.join(failed)} (see raw/<profile>/<run>/client.log)" if failed else ""))
-    return 0
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

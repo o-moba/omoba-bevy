@@ -60,6 +60,7 @@ pub(crate) enum PauseMenuSet {
 impl Plugin for PauseMenuPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PauseMenuState>()
+            .init_resource::<SettingsTab>()
             .init_resource::<AudioSettings>()
             .init_resource::<crate::help_overlay::HelpOverlayVisible>()
             .init_resource::<SettingsHelpReturn>()
@@ -111,6 +112,7 @@ impl Plugin for PauseMenuPlugin {
                     reset_pause_scroll_on_navigation.after(apply_pause_navigation),
                     sync_practice_actions,
                     sync_settings_server_addr_label,
+                    settings_tabs,
                 )
                     .in_set(PauseMenuSet::Visuals),
             )
@@ -125,6 +127,85 @@ impl Plugin for PauseMenuPlugin {
 pub(crate) struct PauseMenuState {
     pub(crate) open: bool,
     pub(crate) in_settings: bool,
+}
+
+#[derive(Resource, Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SettingsTab {
+    #[default]
+    Sound,
+    Graphics,
+    Camera,
+    Language,
+}
+
+#[derive(Component)]
+struct SettingsRail;
+
+fn settings_group(
+    parent: &mut ChildSpawnerCommands,
+    tab: SettingsTab,
+    build: impl FnOnce(&mut ChildSpawnerCommands),
+) {
+    parent
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                max_width: Val::Px(760.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Stretch,
+                row_gap: Val::Px(12.0),
+                flex_shrink: 0.0,
+                padding: UiRect::all(Val::Px(16.0)),
+                border_radius: BorderRadius::all(Val::Px(12.0)),
+                ..default()
+            },
+            BackgroundColor(theme::PANEL),
+            tab,
+        ))
+        .with_children(build);
+}
+
+fn settings_tabs(
+    mut selected: ResMut<SettingsTab>,
+    mut events: MessageReader<Activated<PauseAction>>,
+    mut groups: Query<(&SettingsTab, &mut Node)>,
+    mut buttons: Query<(&UiAction<PauseAction>, &mut widgets::ButtonStyle)>,
+    mut scroll: Query<&mut ScrollPosition, With<SettingsSection>>,
+    menu: Res<PauseMenuState>,
+    mut titles: Query<(&Name, &mut Localized)>,
+) {
+    for event in events.read() {
+        if let PauseAction::SettingsTab(tab) = event.action {
+            *selected = tab;
+            for mut position in &mut scroll {
+                position.y = 0.0;
+            }
+        }
+    }
+    for (tab, mut node) in &mut groups {
+        node.display = if *tab == *selected {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
+    for (action, mut style) in &mut buttons {
+        if let PauseAction::SettingsTab(tab) = action.0 {
+            widgets::ButtonStyle::set_selected(&mut style, tab == *selected);
+        }
+    }
+    for (name, mut text) in &mut titles {
+        if name.as_str() == "PauseMenuTitle" {
+            let key = if menu.in_settings {
+                "pause.settings.title"
+            } else {
+                "pause.title"
+            };
+            if text.key != key {
+                text.key = key;
+            }
+        }
+    }
 }
 
 /// The controls guide was opened from Settings (DECISIONS R6.5): closing it
@@ -196,6 +277,7 @@ pub(crate) enum PauseAction {
     /// Switch to the next shipped language.
     CycleLanguage,
     ToggleReduceMotion,
+    SettingsTab(SettingsTab),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -248,8 +330,17 @@ fn size_desktop_pause_panel(
     if form == metric::Form::Phone {
         return;
     }
-    let height = Val::Px(metric::pause_panel_height(form, menu.in_settings, 0.0));
+    let height = if menu.in_settings {
+        Val::Percent(92.0)
+    } else {
+        Val::Px(metric::pause_panel_height(form, false, 0.0))
+    };
     for mut panel in &mut panels {
+        panel.width = if menu.in_settings {
+            Val::Percent(94.0)
+        } else {
+            Val::Px(metric::PAUSE_PANEL.0)
+        };
         if panel.height != height {
             panel.height = height;
         }
@@ -385,6 +476,70 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                     panel
                         .spawn((
                             Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Px(20.0),
+                                top: Val::Px(84.0),
+                                width: Val::Px(168.0),
+                                display: Display::None,
+                                flex_direction: FlexDirection::Column,
+                                row_gap: Val::Px(8.0),
+                                flex_shrink: 0.0,
+                                ..default()
+                            },
+                            Visibility::Hidden,
+                            SettingsRail,
+                        ))
+                        .with_children(|rail| {
+                            for (tab, key, id) in [
+                                (
+                                    SettingsTab::Sound,
+                                    "pause.settings.sound",
+                                    "SettingsTabSound",
+                                ),
+                                (
+                                    SettingsTab::Graphics,
+                                    "pause.settings.graphics",
+                                    "SettingsTabGraphics",
+                                ),
+                                (
+                                    SettingsTab::Camera,
+                                    "pause.settings.camera",
+                                    "SettingsTabCamera",
+                                ),
+                                (
+                                    SettingsTab::Language,
+                                    "pause.settings.language",
+                                    "SettingsTabLanguage",
+                                ),
+                            ] {
+                                let button = widgets::compact_screen_tile(
+                                    rail,
+                                    Localized::new(key),
+                                    tab == SettingsTab::Sound,
+                                    PauseAction::SettingsTab(tab),
+                                    id,
+                                    true,
+                                );
+                                rail.commands().entity(button).insert(Node {
+                                    width: Val::Percent(100.0),
+                                    height: Val::Px(44.0),
+                                    align_items: AlignItems::Center,
+                                    justify_content: JustifyContent::Center,
+                                    ..default()
+                                });
+                            }
+                            widgets::compact_screen_tile(
+                                rail,
+                                Localized::new("pause.settings.controls"),
+                                false,
+                                PauseAction::Help,
+                                "PauseMenuSettingsControlsButton",
+                                true,
+                            );
+                        });
+                    panel
+                        .spawn((
+                            Node {
                                 width: Val::Percent(100.0),
                                 min_height: Val::Px(metric::BUTTON_H),
                                 flex_shrink: 0.0,
@@ -472,6 +627,11 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                             Node {
                                 flex_direction: FlexDirection::Column,
                                 row_gap: Val::Px(8.0),
+                                position_type: PositionType::Absolute,
+                                left: Val::Px(204.0),
+                                right: Val::Px(20.0),
+                                top: Val::Px(84.0),
+                                bottom: Val::Px(72.0),
                                 display: Display::None,
                                 align_items: AlignItems::Center,
                                 justify_content: JustifyContent::FlexStart,
@@ -488,185 +648,194 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                             Name::new("PauseMenuSettingsSection"),
                         ))
                         .with_children(|settings| {
-                            settings.spawn((
-                                Localized::new("pause.settings.title").into_text(),
-                                theme::text(22.0),
-                                TextColor(theme::IVORY),
-                                Name::new("PauseMenuSettingsTitle"),
-                            ));
-                            widgets::toggle_row(
-                                settings,
-                                Localized::new("pause.settings.language"),
-                                crate::i18n::active().native_name(),
-                                LanguageValue,
-                                PauseAction::CycleLanguage,
-                                "PauseMenuLanguage",
-                            );
-                            // Opens the controls guide; closing it returns here (R6.5).
-                            widgets::button(
-                                settings,
-                                Localized::new("pause.settings.controls"),
-                                ButtonKind::Secondary,
-                                PauseAction::Help,
-                                "PauseMenuSettingsControlsButton",
-                            );
-
-                            section_title(settings, "pause.settings.sound", "PauseMenuAudioTitle");
-                            for (bus, key, name) in [
-                                (
-                                    AudioBus::Master,
-                                    "pause.audio.master",
-                                    "PauseMenuAudioMasterControls",
-                                ),
-                                (
-                                    AudioBus::Music,
-                                    "pause.audio.music",
-                                    "PauseMenuAudioMusicControls",
-                                ),
-                                (
-                                    AudioBus::Effects,
-                                    "pause.audio.effects",
-                                    "PauseMenuAudioEffectsControls",
-                                ),
-                                (AudioBus::Ui, "pause.audio.ui", "PauseMenuAudioUiControls"),
-                            ] {
-                                widgets::adjust_row(
+                            settings_group(settings, SettingsTab::Language, |settings| {
+                                widgets::toggle_row(
                                     settings,
-                                    Localized::new(key),
-                                    format!("{:.0}%", bus.value(AudioSettings::default()) * 100.0),
-                                    AudioLabel::Bus(bus),
-                                    PauseAction::Audio(AudioButton::Adjust(bus, -AUDIO_STEP)),
-                                    PauseAction::Audio(AudioButton::Adjust(bus, AUDIO_STEP)),
-                                    name,
+                                    Localized::new("pause.settings.language"),
+                                    crate::i18n::active().native_name(),
+                                    LanguageValue,
+                                    PauseAction::CycleLanguage,
+                                    "PauseMenuLanguage",
                                 );
-                            }
-                            // Mute/unmute is state-dependent: `update_audio_labels` owns it.
-                            widgets::button_with_label(
-                                settings,
-                                tr("pause.audio.mute"),
-                                ButtonKind::Secondary,
-                                PauseAction::Audio(AudioButton::Mute),
-                                "PauseMenuAudioMuteButton",
-                                AudioLabel::Mute,
-                                "PauseMenuAudioMuteLabel",
-                            );
+                            });
+                            settings_group(settings, SettingsTab::Sound, |settings| {
+                                section_title(
+                                    settings,
+                                    "pause.settings.sound",
+                                    "PauseMenuAudioTitle",
+                                );
+                                for (bus, key, name) in [
+                                    (
+                                        AudioBus::Master,
+                                        "pause.audio.master",
+                                        "PauseMenuAudioMasterControls",
+                                    ),
+                                    (
+                                        AudioBus::Music,
+                                        "pause.audio.music",
+                                        "PauseMenuAudioMusicControls",
+                                    ),
+                                    (
+                                        AudioBus::Effects,
+                                        "pause.audio.effects",
+                                        "PauseMenuAudioEffectsControls",
+                                    ),
+                                    (AudioBus::Ui, "pause.audio.ui", "PauseMenuAudioUiControls"),
+                                ] {
+                                    widgets::adjust_row(
+                                        settings,
+                                        Localized::new(key),
+                                        format!(
+                                            "{:.0}%",
+                                            bus.value(AudioSettings::default()) * 100.0
+                                        ),
+                                        AudioLabel::Bus(bus),
+                                        PauseAction::Audio(AudioButton::Adjust(bus, -AUDIO_STEP)),
+                                        PauseAction::Audio(AudioButton::Adjust(bus, AUDIO_STEP)),
+                                        name,
+                                    );
+                                }
+                                // Mute/unmute is state-dependent: `update_audio_labels` owns it.
+                                widgets::button_with_label(
+                                    settings,
+                                    tr("pause.audio.mute"),
+                                    ButtonKind::Secondary,
+                                    PauseAction::Audio(AudioButton::Mute),
+                                    "PauseMenuAudioMuteButton",
+                                    AudioLabel::Mute,
+                                    "PauseMenuAudioMuteLabel",
+                                );
+                            });
+                            settings_group(settings, SettingsTab::Graphics, |settings| {
+                                section_title(
+                                    settings,
+                                    "pause.settings.motion",
+                                    "PauseMenuMotionTitle",
+                                );
+                                widgets::toggle_row(
+                                    settings,
+                                    Localized::new("pause.motion.reduce"),
+                                    tr("kit.gallery.state.off"),
+                                    MotionValue,
+                                    PauseAction::ToggleReduceMotion,
+                                    "PauseMenuReduceMotion",
+                                );
+                                settings.spawn((
+                                    Localized::new("pause.motion.reduce_hint").into_text(),
+                                    crate::ui::theme::role_text(
+                                        crate::ui::tokens::TextRole::Caption,
+                                    ),
+                                    TextColor(theme::MUTED),
+                                    Node {
+                                        max_width: Val::Px(metric::MENU_W),
+                                        flex_shrink: 0.0,
+                                        ..default()
+                                    },
+                                    Name::new("PauseMenuReduceMotionHint"),
+                                ));
+                            });
+                            settings_group(settings, SettingsTab::Language, |settings| {
+                                settings.spawn((
+                                    Text::new(""),
+                                    theme::text(14.0),
+                                    TextColor(theme::MUTED),
+                                    // Text in a scrolling column keeps its height.
+                                    Node {
+                                        flex_shrink: 0.0,
+                                        ..default()
+                                    },
+                                    SettingsServerAddrLabel,
+                                    Name::new("PauseMenuServerAddrHint"),
+                                ));
+                                // Third-party art credits (game-icons.net CC BY 3.0
+                                // requires an in-game line).
+                                settings.spawn((
+                                    Localized::new("pause.credits.icons").into_text(),
+                                    crate::ui::theme::role_text(
+                                        crate::ui::tokens::TextRole::Caption,
+                                    ),
+                                    TextColor(theme::MUTED),
+                                    Node {
+                                        max_width: Val::Px(metric::MENU_W),
+                                        flex_shrink: 0.0,
+                                        ..default()
+                                    },
+                                    Name::new("PauseMenuCredits"),
+                                ));
+                            });
+                            settings_group(settings, SettingsTab::Graphics, |settings| {
+                                section_title(
+                                    settings,
+                                    "pause.settings.lighting",
+                                    "PauseMenuLightingTitle",
+                                );
+                                setting_row(
+                                    settings,
+                                    Localized::new("pause.light.main"),
+                                    format!("{:.0}", DEFAULT_LIGHT_ILLUMINANCE),
+                                    Setting::Light,
+                                    "PauseMenuMainLightControls",
+                                );
+                                setting_row(
+                                    settings,
+                                    Localized::new("pause.light.ambient"),
+                                    format!("{:.0}", DEFAULT_AMBIENT_BRIGHTNESS),
+                                    Setting::Ambient,
+                                    "PauseMenuAmbientControls",
+                                );
+                                setting_row(
+                                    settings,
+                                    Localized::new("pause.light.pitch"),
+                                    format!("{:.0}°", DEFAULT_LIGHT_PITCH_DEG),
+                                    Setting::Pitch,
+                                    "PauseMenuPitchControls",
+                                );
+                                setting_row(
+                                    settings,
+                                    Localized::new("pause.light.yaw"),
+                                    format!("{:.0}°", DEFAULT_LIGHT_YAW_DEG),
+                                    Setting::Yaw,
+                                    "PauseMenuYawControls",
+                                );
+                            });
+                            settings_group(settings, SettingsTab::Camera, |settings| {
+                                section_title(
+                                    settings,
+                                    "pause.settings.camera",
+                                    "PauseMenuCameraTitle",
+                                );
+                                // 100% is the default follow view; lower values bring
+                                // the camera closer so hero silhouettes read larger.
+                                setting_row(
+                                    settings,
+                                    Localized::new("pause.camera.distance"),
+                                    CameraSettings::default().percent_label(),
+                                    Setting::CameraZoom,
+                                    "PauseMenuCameraZoomControls",
+                                );
+                            });
+                            settings_group(settings, SettingsTab::Graphics, |settings| {
+                                section_title(
+                                    settings,
+                                    "pause.settings.model",
+                                    "PauseMenuModelTitle",
+                                );
+                                setting_row(
+                                    settings,
+                                    Localized::new("pause.model.scale"),
+                                    format!("{:.2}", DEFAULT_MODEL_TARGET_HEIGHT),
+                                    Setting::ModelScale,
+                                    "PauseMenuScaleControls",
+                                );
 
-                            section_title(
-                                settings,
-                                "pause.settings.motion",
-                                "PauseMenuMotionTitle",
-                            );
-                            widgets::toggle_row(
-                                settings,
-                                Localized::new("pause.motion.reduce"),
-                                tr("kit.gallery.state.off"),
-                                MotionValue,
-                                PauseAction::ToggleReduceMotion,
-                                "PauseMenuReduceMotion",
-                            );
-                            settings.spawn((
-                                Localized::new("pause.motion.reduce_hint").into_text(),
-                                crate::ui::theme::role_text(crate::ui::tokens::TextRole::Caption),
-                                TextColor(theme::MUTED),
-                                Node {
-                                    max_width: Val::Px(metric::MENU_W),
-                                    flex_shrink: 0.0,
-                                    ..default()
-                                },
-                                Name::new("PauseMenuReduceMotionHint"),
-                            ));
-
-                            settings.spawn((
-                                Text::new(""),
-                                theme::text(14.0),
-                                TextColor(theme::MUTED),
-                                // Text in a scrolling column keeps its height.
-                                Node {
-                                    flex_shrink: 0.0,
-                                    ..default()
-                                },
-                                SettingsServerAddrLabel,
-                                Name::new("PauseMenuServerAddrHint"),
-                            ));
-                            // Third-party art credits (game-icons.net CC BY 3.0
-                            // requires an in-game line).
-                            settings.spawn((
-                                Localized::new("pause.credits.icons").into_text(),
-                                crate::ui::theme::role_text(crate::ui::tokens::TextRole::Caption),
-                                TextColor(theme::MUTED),
-                                Node {
-                                    max_width: Val::Px(metric::MENU_W),
-                                    flex_shrink: 0.0,
-                                    ..default()
-                                },
-                                Name::new("PauseMenuCredits"),
-                            ));
-
-                            section_title(
-                                settings,
-                                "pause.settings.lighting",
-                                "PauseMenuLightingTitle",
-                            );
-                            setting_row(
-                                settings,
-                                Localized::new("pause.light.main"),
-                                format!("{:.0}", DEFAULT_LIGHT_ILLUMINANCE),
-                                Setting::Light,
-                                "PauseMenuMainLightControls",
-                            );
-                            setting_row(
-                                settings,
-                                Localized::new("pause.light.ambient"),
-                                format!("{:.0}", DEFAULT_AMBIENT_BRIGHTNESS),
-                                Setting::Ambient,
-                                "PauseMenuAmbientControls",
-                            );
-                            setting_row(
-                                settings,
-                                Localized::new("pause.light.pitch"),
-                                format!("{:.0}°", DEFAULT_LIGHT_PITCH_DEG),
-                                Setting::Pitch,
-                                "PauseMenuPitchControls",
-                            );
-                            setting_row(
-                                settings,
-                                Localized::new("pause.light.yaw"),
-                                format!("{:.0}°", DEFAULT_LIGHT_YAW_DEG),
-                                Setting::Yaw,
-                                "PauseMenuYawControls",
-                            );
-
-                            section_title(
-                                settings,
-                                "pause.settings.camera",
-                                "PauseMenuCameraTitle",
-                            );
-                            // 100% is the default follow view; lower values bring
-                            // the camera closer so hero silhouettes read larger.
-                            setting_row(
-                                settings,
-                                Localized::new("pause.camera.distance"),
-                                CameraSettings::default().percent_label(),
-                                Setting::CameraZoom,
-                                "PauseMenuCameraZoomControls",
-                            );
-
-                            section_title(settings, "pause.settings.model", "PauseMenuModelTitle");
-                            setting_row(
-                                settings,
-                                Localized::new("pause.model.scale"),
-                                format!("{:.2}", DEFAULT_MODEL_TARGET_HEIGHT),
-                                Setting::ModelScale,
-                                "PauseMenuScaleControls",
-                            );
-
-                            widgets::button(
-                                settings,
-                                Localized::new("pause.button.reset_graphics"),
-                                ButtonKind::Secondary,
-                                PauseAction::ResetGraphics,
-                                "PauseMenuResetGraphicsButton",
-                            );
+                                widgets::button(
+                                    settings,
+                                    Localized::new("pause.button.reset_graphics"),
+                                    ButtonKind::Secondary,
+                                    PauseAction::ResetGraphics,
+                                    "PauseMenuResetGraphicsButton",
+                                );
+                            });
                         });
                     panel
                         .spawn((
@@ -695,6 +864,10 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                 flex_shrink: 0.0,
                                 min_height: Val::Px(metric::BUTTON_H),
                                 justify_content: JustifyContent::Center,
+                                position_type: PositionType::Absolute,
+                                left: Val::Px(204.0),
+                                right: Val::Px(20.0),
+                                bottom: Val::Px(16.0),
                                 ..default()
                             },
                             Visibility::Hidden,
@@ -811,7 +984,14 @@ fn sync_pause_menu_sections(
     practice: Option<Res<crate::debug::tools_page::PracticeSandboxState>>,
     mut section_queries: ParamSet<(
         Query<(&mut Visibility, &mut Node), Or<(With<MainMenuSection>, With<MainMenuFooter>)>>,
-        Query<(&mut Visibility, &mut Node), Or<(With<SettingsSection>, With<SettingsFooter>)>>,
+        Query<
+            (&mut Visibility, &mut Node),
+            Or<(
+                With<SettingsSection>,
+                With<SettingsFooter>,
+                With<SettingsRail>,
+            )>,
+        >,
     )>,
 ) {
     let practice_open = practice.as_ref().is_some_and(|p| p.open);
@@ -1449,6 +1629,51 @@ mod tests {
                     "close must work from settings={settings}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn tablet_sound_fits_without_scrolling_and_tabs_keep_their_controls_separate() {
+        let (mut app, _) = layout_app(Vec2::new(1180.0, 820.0), 2.0, true);
+        app.init_resource::<SettingsTab>()
+            .add_systems(Update, settings_tabs.after(apply_pause_navigation));
+        app.update();
+        app.update();
+        let body = named(&mut app, "PauseMenuSettingsSection");
+        let bounds = rect(&app, body, 2.0);
+        for id in [
+            "PauseMenuAudioMasterControls",
+            "PauseMenuAudioMusicControls",
+            "PauseMenuAudioEffectsControls",
+            "PauseMenuAudioUiControls",
+        ] {
+            let entity = named(&mut app, id);
+            let row = rect(&app, entity, 2.0);
+            assert!(
+                bounds.contains(row.min) && bounds.contains(row.max),
+                "{id}: {row:?} outside {bounds:?}"
+            );
+        }
+        assert_eq!(app.world().get::<ScrollPosition>(body).unwrap().y, 0.0);
+        app.world_mut().write_message(Activated {
+            action: PauseAction::SettingsTab(SettingsTab::Language),
+            source: Entity::PLACEHOLDER,
+        });
+        app.update();
+        app.update();
+        for (tab, node) in app
+            .world_mut()
+            .query::<(&SettingsTab, &Node)>()
+            .iter(app.world())
+        {
+            assert_eq!(
+                node.display,
+                if *tab == SettingsTab::Language {
+                    Display::Flex
+                } else {
+                    Display::None
+                }
+            );
         }
     }
 
@@ -2199,7 +2424,12 @@ mod tests {
             PauseAction::ToggleReduceMotion
         );
         let section = app.world().get::<ChildOf>(button).unwrap().parent();
-        assert!(app.world().get::<SettingsSection>(section).is_some());
+        assert_eq!(
+            app.world().get::<SettingsTab>(section),
+            Some(&SettingsTab::Language)
+        );
+        let body = app.world().get::<ChildOf>(section).unwrap().parent();
+        assert!(app.world().get::<SettingsSection>(body).is_some());
     }
 
     #[test]

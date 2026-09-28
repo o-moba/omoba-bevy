@@ -18,6 +18,7 @@ use super::preview::{AvatarPreview, PreviewStatus};
 use super::widgets;
 use crate::i18n::{Locale, Localized, tr};
 use crate::team::{AvatarThumbnails, TeamSelection};
+use crate::ui::kit_assets::{Frame, Icon, KitImage};
 use crate::ui::living_background::{self, LivingBands, LivingScene};
 use crate::ui::theme::{self, ButtonKind};
 use crate::ui::widgets::{ButtonStyle, compact_screen_tile, screen_button, screen_tile};
@@ -30,9 +31,16 @@ pub struct CollectionScreenPlugin;
 impl Plugin for CollectionScreenPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CollectionDrag>()
+            .init_resource::<CollectionFilter>()
             .add_ui_action::<CollectionAction>()
             .add_systems(OnEnter(AppScreen::Collection), spawn_collection)
             .add_systems(OnExit(AppScreen::Collection), clear_collection_drag)
+            .add_systems(
+                PostUpdate,
+                layout_collection
+                    .before(bevy::ui::UiSystems::Layout)
+                    .run_if(in_state(AppScreen::Collection)),
+            )
             .add_systems(
                 Update,
                 (
@@ -60,6 +68,15 @@ enum CollectionAction {
     Refresh,
     ConnectAccount,
     ConnectWallet,
+    Filter(CollectionFilter),
+}
+
+#[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
+enum CollectionFilter {
+    #[default]
+    All,
+    Included,
+    Studio,
 }
 
 #[derive(Component)]
@@ -77,6 +94,54 @@ struct ClipRow;
 
 #[derive(Component)]
 struct DetailPanel;
+
+fn layout_collection(
+    windows: Query<&Window, With<PrimaryWindow>>,
+    scale: Res<UiScale>,
+    mut nodes: Query<(&Name, &mut Node)>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let compact = window.height() < 600.0;
+    let height = window.height() / scale.0.max(0.1);
+    for (name, mut node) in &mut nodes {
+        match name.as_str() {
+            "CollectionScreen" => {
+                node.padding = UiRect::axes(
+                    Val::Px(if compact { 48.0 } else { 32.0 }),
+                    Val::Px(if compact { 12.0 } else { 28.0 }),
+                );
+                node.row_gap = Val::Px(if compact { 8.0 } else { 20.0 });
+            }
+            "AvatarPreviewSurface" => {
+                node.height = Val::Px(
+                    (height - if compact { 300.0 } else { 410.0 }).max(if compact {
+                        50.0
+                    } else {
+                        100.0
+                    }),
+                );
+                node.max_height = Val::Px(580.0);
+                node.flex_shrink = 0.0;
+            }
+            "AvatarClipRow" => {
+                node.max_height = Val::Px(if compact { 44.0 } else { 88.0 });
+                node.flex_shrink = 0.0;
+                node.overflow = Overflow::scroll_y();
+            }
+            "CollectionPreview" => {
+                node.padding = UiRect::all(Val::Px(if compact { 8.0 } else { 20.0 }));
+            }
+            "CollectionAvatarTile" => {
+                node.width = Val::Px(if compact { 96.0 } else { 124.0 });
+                node.height = Val::Px(if compact { 120.0 } else { 150.0 });
+                node.flex_shrink = 0.0;
+            }
+            _ => {}
+        }
+    }
+}
 
 /// Same ordering and approved membership as the pre-match picker.
 pub fn collection_entries() -> Vec<(AvatarDefinition, AvatarSource)> {
@@ -103,9 +168,48 @@ fn spawn_catalogue_grid(
     selected: Option<&str>,
     thumbnails: &AvatarThumbnails,
     phone: bool,
+    filter: CollectionFilter,
 ) {
-    grid.spawn(widgets::heading(tr("collection.included"), 17.0));
+    grid.spawn(Node {
+        flex_wrap: FlexWrap::Wrap,
+        column_gap: Val::Px(8.0),
+        row_gap: Val::Px(8.0),
+        flex_shrink: 0.0,
+        ..default()
+    })
+    .with_children(|tabs| {
+        for (value, label, id) in [
+            (CollectionFilter::All, "collection.all", "CollectionAll"),
+            (
+                CollectionFilter::Included,
+                "collection.included",
+                "CollectionIncluded",
+            ),
+            (
+                CollectionFilter::Studio,
+                "collection.studio",
+                "CollectionStudio",
+            ),
+        ] {
+            compact_screen_tile(
+                tabs,
+                Localized::new(label),
+                filter == value,
+                CollectionAction::Filter(value),
+                id,
+                phone,
+            );
+        }
+    });
+    if filter != CollectionFilter::Studio {
+        grid.spawn(widgets::heading(tr("collection.included"), 17.0));
+    }
     for (defaults, title) in [(true, ""), (false, tr("collection.studio"))] {
+        if (filter == CollectionFilter::Included && !defaults)
+            || (filter == CollectionFilter::Studio && defaults)
+        {
+            continue;
+        }
         if !defaults {
             grid.spawn((
                 widgets::heading(title, 17.0),
@@ -223,6 +327,7 @@ fn refresh_collection_catalogue(
     platform: Res<crate::ui::UiPlatform>,
     locale: Option<Res<Locale>>,
     mut language: Local<Option<u32>>,
+    filter: Res<CollectionFilter>,
 ) {
     crate::passport::poll_account();
     crate::passport::poll_wallet();
@@ -232,7 +337,7 @@ fn refresh_collection_catalogue(
     let relocalize = language.is_some() && *language != generation;
     *language = generation;
     for (grid, mut revision) in &mut grids {
-        if revision.0 == catalogue.revision && !relocalize {
+        if revision.0 == catalogue.revision && !relocalize && !filter.is_changed() {
             continue;
         }
         ensure_thumbnails(&asset_server, &mut thumbnails);
@@ -249,6 +354,7 @@ fn refresh_collection_catalogue(
                     preview.slug.as_deref(),
                     &thumbnails,
                     platform.is_mobile(),
+                    *filter,
                 );
             });
     }
@@ -262,6 +368,7 @@ fn spawn_collection(
     mut thumbnails: ResMut<AvatarThumbnails>,
     asset_server: Res<AssetServer>,
     platform: Res<crate::ui::UiPlatform>,
+    filter: Res<CollectionFilter>,
 ) {
     ensure_thumbnails(&asset_server, &mut thumbnails);
     let catalogue = crate::passport::avatar_catalogue();
@@ -299,11 +406,16 @@ fn spawn_collection(
                 },
                 form,
             );
-            root.spawn(Node {
-                justify_content: JustifyContent::SpaceBetween,
-                align_items: AlignItems::Center,
-                ..default()
-            })
+            root.spawn(crate::ui::widgets::surfaces::ornament_frame());
+            root.spawn((
+                Node {
+                    justify_content: JustifyContent::SpaceBetween,
+                    align_items: AlignItems::Center,
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+                ZIndex(1),
+            ))
             .with_children(|header| {
                 header
                     .spawn(Node {
@@ -328,18 +440,21 @@ fn spawn_collection(
                 );
             });
 
-            root.spawn(Node {
-                flex_grow: 1.0,
-                column_gap: Val::Px(20.0),
-                min_height: Val::Px(0.0),
-                ..default()
-            })
+            root.spawn((
+                Node {
+                    flex_grow: 1.0,
+                    column_gap: Val::Px(20.0),
+                    min_height: Val::Px(0.0),
+                    ..default()
+                },
+                ZIndex(1),
+            ))
             .with_children(|body| {
                 // Grid of avatars.
                 body.spawn((
                     Node {
-                        width: Val::Percent(50.0),
-                        padding: UiRect::all(Val::Px(12.0)),
+                        width: Val::Percent(49.0),
+                        padding: UiRect::all(Val::Px(20.0)),
                         border: UiRect::all(Val::Px(1.0)),
                         border_radius: BorderRadius::all(Val::Px(12.0)),
                         flex_direction: FlexDirection::Column,
@@ -350,7 +465,7 @@ fn spawn_collection(
                         overflow: Overflow::scroll_y(),
                         ..default()
                     },
-                    BackgroundColor(theme::PANEL_OPAQUE),
+                    KitImage::frame(Frame::Panel),
                     BorderColor::all(theme::PANEL_EDGE),
                     CollectionGrid,
                     grid_scroll(),
@@ -358,7 +473,14 @@ fn spawn_collection(
                     Name::new("CollectionGrid"),
                 ))
                 .with_children(|grid| {
-                    spawn_catalogue_grid(grid, &catalogue, initial.as_deref(), &thumbnails, phone);
+                    spawn_catalogue_grid(
+                        grid,
+                        &catalogue,
+                        initial.as_deref(),
+                        &thumbnails,
+                        phone,
+                        *filter,
+                    );
                 });
 
                 // Preview column.
@@ -374,7 +496,7 @@ fn spawn_collection(
                         min_width: Val::Px(0.0),
                         ..default()
                     },
-                    BackgroundColor(theme::PANEL_OPAQUE),
+                    KitImage::frame(Frame::Panel),
                     BorderColor::all(theme::PANEL_EDGE),
                     Name::new("CollectionPreview"),
                 ))
@@ -388,8 +510,6 @@ fn spawn_collection(
                             height: Val::Vh(if phone { 28.0 } else { 43.0 }),
                             max_height: Val::Px(420.0),
                             aspect_ratio: Some(0.742),
-                            border: UiRect::all(Val::Px(1.0)),
-                            border_radius: BorderRadius::all(Val::Px(12.0)),
                             ..default()
                         },
                         BorderColor::all(theme::PANEL_EDGE),
@@ -406,6 +526,7 @@ fn spawn_collection(
                             ..default()
                         },
                         ClipRow,
+                        crate::ui::ScrollArea::menu(28.0),
                         Name::new("AvatarClipRow"),
                     ));
                     column.spawn((
@@ -439,8 +560,8 @@ fn spawn_avatar_tile(
     grid.spawn((
         Button,
         Node {
-            width: Val::Px(if phone { 136.0 } else { 112.0 }),
-            height: Val::Px(if phone { 180.0 } else { 146.0 }),
+            width: Val::Px(if phone { 96.0 } else { 124.0 }),
+            height: Val::Px(if phone { 116.0 } else { 146.0 }),
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
             justify_content: JustifyContent::FlexStart,
@@ -453,6 +574,7 @@ fn spawn_avatar_tile(
         style,
         UiAction(CollectionAction::Select(avatar.slug.clone())),
         TestId::new(format!("CollectionTile-{}", avatar.slug)),
+        Name::new("CollectionAvatarTile"),
     ))
     .with_children(|tile| {
         let mut thumb = tile.spawn((
@@ -477,14 +599,11 @@ fn spawn_avatar_tile(
                     ..default()
                 })
                 .with_children(|portrait| {
-                    let initials: String = avatar
-                        .slug
-                        .split('-')
-                        .filter_map(|part| part.chars().next())
-                        .take(2)
-                        .flat_map(char::to_uppercase)
-                        .collect();
-                    portrait.spawn(widgets::heading(&initials, 24.0));
+                    portrait.spawn(crate::ui::widgets::icon_node(
+                        Icon::ClassWarrior,
+                        32.0,
+                        theme::GOLD,
+                    ));
                 });
         }
         tile.spawn(widgets::label(&avatar.display_name, 12.0, theme::IVORY));
@@ -508,7 +627,9 @@ fn collection_actions(
     drag: Res<CollectionDrag>,
     mut activated: MessageReader<Activated<CollectionAction>>,
     mut tiles: Query<(&UiAction<CollectionAction>, &mut ButtonStyle)>,
+    filter: Option<ResMut<CollectionFilter>>,
 ) {
+    let mut filter = filter;
     if drag.block_actions {
         // A press made while the preview owns the pointer is dropped, not
         // replayed later.
@@ -518,6 +639,11 @@ fn collection_actions(
     let mut picked: Option<String> = None;
     for Activated { action, .. } in activated.read() {
         match action {
+            CollectionAction::Filter(value) => {
+                if let Some(filter) = filter.as_mut() {
+                    **filter = *value;
+                }
+            }
             CollectionAction::Back => next.set(AppScreen::Home),
             CollectionAction::Refresh => crate::passport::refresh_avatar_catalogue(),
             CollectionAction::ConnectAccount => crate::passport::connect_account(),
@@ -1167,6 +1293,7 @@ mod tests {
     #[test]
     fn catalogue_rebuild_preserves_selection_scroll_and_loads_direct_entry_thumbnails() {
         let mut app = App::new();
+        app.init_resource::<CollectionFilter>();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
             .init_asset::<Image>()
             .init_resource::<AvatarPreview>()
@@ -1212,6 +1339,7 @@ mod tests {
     #[test]
     fn connection_status_changes_do_not_replace_pressed_controls_or_scroll() {
         let mut app = App::new();
+        app.init_resource::<CollectionFilter>();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
             .init_asset::<Image>()
             .init_resource::<AvatarPreview>()

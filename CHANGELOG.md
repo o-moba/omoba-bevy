@@ -6,7 +6,16 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
-Workspace version 0.28.0.
+Workspace version 0.28.1.
+
+### iPad UI feedback (0.28.1)
+- Home distinguishes compact phones from spacious touch devices, fits and centers its authored canvas, and anchors the hero to the painted platform. The competing 3D pedestal is hidden on Home.
+- Home's living background survives foreground/session refreshes. Touch input drives gentle parallax; frame stalls are capped and automatic low-detail transitions fade instead of blinking.
+- Drag the Home/picker hero to rotate it; double tap/click plays a random supported expressive clip once, then returns to idle. A wave is available only when the model contains one (bundled Agnes currently offers Attack and Cast).
+- Avatars uses framed collection/preview panels, larger tablet artwork and working All / Included / Studio filters. Settings uses Sound, Graphics, Camera and Language sections with a persistent Controls entry and fixed navigation.
+- The spacious hero picker keeps a live preview, a readable roster surface and a dedicated launch area. Offline mode hides online account/library controls. Match Score gains framed team columns, portraits with levels, class/name identity, local-player emphasis and aligned statistics.
+- Offline towers/minions, match parity and optional moving targets/debug tools are a separate [gameplay track](docs/plans/offline-practice-parity.md), not part of this UI patch. Physical iPad validation remains an owner playtest gate.
+- Capture tooling accepts `--viewport 1180x820` for tablet touch previews and rejects a missing/failed offline harness result.
 
 ### Verdant Crown HUD, result and living scenes (0.28.0)
 - **Home:** rebuilt on the final Stage composition for desktop and phone: an open hero showcase on the painted pedestal, compact profile identity, one dominant PLAY action, bot/offline practice and four icon navigation tiles. Help and Settings are directly reachable on desktop; phone geometry cancels the shell scale so every control follows the 844×390 safe-area redline.

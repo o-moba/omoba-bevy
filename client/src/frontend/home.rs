@@ -26,7 +26,7 @@ pub struct HomeScreenPlugin;
 impl Plugin for HomeScreenPlugin {
     fn build(&self, app: &mut App) {
         app.add_ui_action::<HomeAction>()
-            .add_systems(OnEnter(AppScreen::Home), spawn_home)
+            .add_systems(OnEnter(AppScreen::Home), (spawn_home_backdrop, spawn_home))
             .add_systems(
                 Update,
                 (home_actions, refresh_home)
@@ -56,6 +56,45 @@ enum HomeAction {
 #[derive(Component)]
 struct HomeRoot;
 
+fn spawn_home_backdrop(mut commands: Commands, platform: Res<crate::ui::UiPlatform>) {
+    commands
+        .spawn(widgets::screen_root(AppScreen::Home, "HomeBackdrop"))
+        .insert(ZIndex(theme::SCREEN_Z - 1))
+        .with_children(|root| {
+            living_background::spawn(
+                root,
+                LivingScene::Stage,
+                LivingBands::default(),
+                theme::Form::of(platform.is_mobile()),
+            );
+        });
+}
+
+/// Input family does not determine layout: an iPad has touch input and a
+/// spacious layout. The authored canvas is fitted and centered in the window.
+fn home_canvas(mobile: bool, viewport: Vec2, ui_scale: f32) -> (bool, Node, UiTransform) {
+    let phone = mobile && viewport.y < 600.0;
+    let reference = if phone {
+        Vec2::new(844.0, 390.0)
+    } else {
+        Vec2::new(1280.0, 720.0)
+    };
+    let scale = ui_scale.max(0.1);
+    let fit = (viewport.x / reference.x).min(viewport.y / reference.y);
+    (
+        phone,
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px((viewport.x / scale - reference.x) * 0.5),
+            top: Val::Px((viewport.y / scale - reference.y) * 0.5),
+            width: Val::Px(reference.x),
+            height: Val::Px(reference.y),
+            ..default()
+        },
+        UiTransform::from_scale(Vec2::splat(fit / scale)),
+    )
+}
+
 /// What the home screen renders from. When it changes, the screen is rebuilt.
 #[derive(PartialEq, Clone)]
 struct HomeSignature {
@@ -77,6 +116,7 @@ struct HomeSignature {
     /// Phone menu scaling settles after the window exists; rebuild once it
     /// does so screen-owned redline geometry uses the final scale.
     ui_scale_bits: u32,
+    viewport_bits: (u32, u32),
 }
 
 fn signature(
@@ -86,11 +126,13 @@ fn signature(
     party: &crate::party::PartyClient,
     locale: Option<&Locale>,
     ui_scale: f32,
+    viewport: Vec2,
 ) -> HomeSignature {
     let profile = career.view.profile.as_ref();
     HomeSignature {
         locale: locale.map_or(0, Locale::generation),
         ui_scale_bits: ui_scale.to_bits(),
+        viewport_bits: (viewport.x.to_bits(), viewport.y.to_bits()),
         invite: party
             .view
             .invites
@@ -183,23 +225,38 @@ fn spawn_home(
     ui_scale: Option<Res<UiScale>>,
     party: Res<crate::party::PartyClient>,
     locale: Option<Res<Locale>>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
 ) {
     if automation_bypass() {
         return;
     }
     // The home screen shows the card's hero in 3D.
     if let Some(slug) = card.showcase_avatar.as_deref() {
-        preview.show_portrait(slug);
+        preview.show(slug);
     }
     let preview_image = preview.image.clone();
-    let phone = platform.is_mobile();
-    let form = theme::Form::of(phone);
     let ui_scale_value = ui_scale.as_ref().map_or(1.0, |scale| scale.0);
-    let unit = if phone {
-        1.0 / ui_scale_value.max(0.1)
+    let viewport = windows.single().map_or(Vec2::new(1280.0, 720.0), |w| {
+        Vec2::new(w.width(), w.height())
+    });
+    let (phone, canvas, transform) = home_canvas(platform.is_mobile(), viewport, ui_scale_value);
+    let form = theme::Form::of(phone);
+    let unit = 1.0;
+    let reference = if phone {
+        Vec2::new(844.0, 390.0)
     } else {
-        1.0
+        Vec2::new(1280.0, 720.0)
     };
+    let fit = (viewport.x / reference.x).min(viewport.y / reference.y);
+    // The plate is cover-cropped, while controls are contain-fitted. Locate
+    // its painted platform (640, 500 in the 1280x720 painting) in the canvas.
+    let cover = (viewport.x / 1280.0).max(viewport.y / 720.0);
+    let stage_y = (viewport.y * 0.5
+        + 140.0 * cover * crate::ui::tokens::motion::LIVING_SCALE_PLATE
+        - (viewport.y - reference.y * fit) * 0.5)
+        / fit;
+    let hero_height = if phone { 250.0 } else { 440.0 };
+    let hero_top = stage_y - hero_height * 0.87;
     let party_line = signature(
         &career,
         &session,
@@ -207,6 +264,7 @@ fn spawn_home(
         &party,
         locale.as_deref(),
         ui_scale_value,
+        viewport,
     );
     let (status, status_color) = connection_line(&session);
     let profile = career.view.profile.clone();
@@ -220,29 +278,29 @@ fn spawn_home(
             widgets::screen_root(AppScreen::Home, "HomeScreen"),
             HomeRoot,
         ))
-        .insert(Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(0.0),
-            right: Val::Px(0.0),
-            top: Val::Px(0.0),
-            bottom: Val::Px(0.0),
-            overflow: Overflow::clip(),
-            ..default()
-        })
+        .insert((canvas, transform, BackgroundColor(Color::NONE)))
         .with_children(|root| {
-            living_background::spawn(
-                root,
-                LivingScene::Stage,
-                if phone {
-                    LivingBands::default()
-                } else {
-                    LivingBands {
-                        header: Some(104.0),
-                        footer: Some(56.0),
-                    }
+            // Legibility belongs to the fitted canvas, not the full-bleed
+            // painting: it stays behind the title after a viewport resize.
+            let scrim = theme::perceptual(color::SCRIM_LIVING);
+            let solid = if phone { 40.0 } else { 80.0 };
+            root.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    height: Val::Px(solid + 40.0),
+                    ..default()
                 },
-                form,
-            );
+                BackgroundGradient::from(LinearGradient::to_bottom(vec![
+                    ColorStop::px(scrim, 0.0),
+                    ColorStop::px(scrim, solid),
+                    ColorStop::px(scrim.with_alpha(0.0), solid + 40.0),
+                ])),
+                Pickable::IGNORE,
+                Name::new("HomeHeaderScrim"),
+            ));
             if !phone {
                 root.spawn((
                     Node {
@@ -346,7 +404,7 @@ fn spawn_home(
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px(if phone { 300.0 * unit } else { 470.0 }),
-                    top: Val::Px(if phone { 40.0 * unit } else { 96.0 }),
+                    top: Val::Px(hero_top),
                     width: Val::Px(if phone { 240.0 * unit } else { 340.0 }),
                     height: Val::Px(if phone { 250.0 * unit } else { 440.0 }),
                     flex_direction: FlexDirection::Column,
@@ -367,13 +425,14 @@ fn spawn_home(
                         ..default()
                     },
                     Name::new("HomeShowcaseImage"),
+                    super::preview::InteractivePreview,
                 ));
             });
             root.spawn((
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(if phone { 330.0 * unit } else { 520.0 }),
-                    top: Val::Px(if phone { 276.0 * unit } else { 540.0 }),
+                    left: Val::Px(if phone { 63.0 * unit } else { 520.0 }),
+                    top: Val::Px(if phone { 260.0 * unit } else { stage_y + 28.0 }),
                     width: Val::Px(if phone { 180.0 * unit } else { 240.0 }),
                     height: Val::Px(if phone { 36.0 * unit } else { 64.0 }),
                     padding: UiRect::axes(Val::Px(space::S12), Val::Px(space::S4)),
@@ -893,6 +952,7 @@ fn refresh_home(
     roots: Query<Entity, With<HomeRoot>>,
     locale: Option<Res<Locale>>,
     mut last: Local<Option<HomeSignature>>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
 ) {
     let current = signature(
         &career,
@@ -901,6 +961,9 @@ fn refresh_home(
         &party,
         locale.as_deref(),
         ui_scale.as_ref().map_or(1.0, |scale| scale.0),
+        windows.single().map_or(Vec2::new(1280.0, 720.0), |w| {
+            Vec2::new(w.width(), w.height())
+        }),
     );
     if last.as_ref() == Some(&current) {
         return;
@@ -915,6 +978,7 @@ fn refresh_home(
         .despawn();
     spawn_home(
         commands, career, session, card, thumbnails, preview, platform, ui_scale, party, locale,
+        windows,
     );
 }
 
@@ -977,6 +1041,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn tablet_uses_the_spacious_canvas_centered_in_its_viewport() {
+        for viewport in [
+            Vec2::new(1024.0, 768.0),
+            Vec2::new(1180.0, 820.0),
+            Vec2::new(1366.0, 1024.0),
+        ] {
+            let (phone, node, transform) = home_canvas(true, viewport, 1.0);
+            assert!(!phone, "tablet must not use the fixed phone composition");
+            let (Val::Px(left), Val::Px(top)) = (node.left, node.top) else {
+                panic!()
+            };
+            let center = Vec2::new(left, top) + Vec2::new(640.0, 360.0);
+            assert!(center.abs_diff_eq(viewport * 0.5, 0.01));
+            let extent = Vec2::new(1280.0, 720.0) * transform.scale;
+            assert!(extent.x <= viewport.x + 0.01 && extent.y <= viewport.y + 0.01);
+            assert!((extent.x - viewport.x).abs() < 0.01);
+        }
+        assert!(home_canvas(true, Vec2::new(844.0, 390.0), 1.0).0);
+    }
+
+    #[test]
     fn connection_line_reports_every_session_state() {
         for state in [
             ClientConnectionState::Connected,
@@ -1013,9 +1098,24 @@ mod tests {
             .init_resource::<AvatarThumbnails>()
             .init_resource::<crate::party::PartyClient>()
             .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
-            .add_systems(Startup, spawn_home)
+            .add_systems(Startup, (spawn_home_backdrop, spawn_home))
             .add_systems(Update, refresh_home);
         app.update();
+        let backdrop = app
+            .world_mut()
+            .query::<(Entity, &Name)>()
+            .iter(app.world())
+            .find(|(_, name)| name.as_str() == "HomeBackdrop")
+            .unwrap()
+            .0;
+        app.world_mut()
+            .resource_mut::<ClientSession>()
+            .set_state_for_test(ClientConnectionState::Connecting);
+        app.update();
+        assert!(
+            app.world().get_entity(backdrop).is_ok(),
+            "status refresh must preserve the painting and its fade"
+        );
         let label = |app: &mut App, id: &str| {
             let button = harness::find(app.world_mut(), id).unwrap();
             app.world()
@@ -1050,7 +1150,7 @@ mod tests {
         assert_ne!(status(&mut app), english_status);
         assert_eq!(
             status(&mut app),
-            connection_line(&ClientSession::default()).0
+            connection_line(app.world().resource::<ClientSession>()).0
         );
     }
 

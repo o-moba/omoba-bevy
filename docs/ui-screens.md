@@ -108,18 +108,18 @@ Harness: `client/src/qa/supporter.rs`; server: none; env: `OMOBA_SUPPORTER_QA_DI
 
 Offline practice from Home: hero picker, match, target, game menu, settings. Logical size without a scale override, so HiDPI displays give 2x frames; its pass flag also checks the saved server endpoint.
 
-Harness: `client/src/qa/offline_qa.rs`; server: none; env: `OMOBA_OFFLINE_SMOKE_DIR={out}`
+Harness: `client/src/qa/offline_qa.rs`; server: none; env: `OMOBA_OFFLINE_SMOKE_DIR={out} GAME_SERVER_ADDR=127.0.0.1:49999`
 
 | Screen | Frame | Profiles | How a player gets there | Code | Note |
 | --- | --- | --- | --- | --- | --- |
 | Offline · home | `01-home.png` | desktop, phone | Launch without a server | `client/src/frontend/home.rs` |  |
-| Offline · hero picker | `02-hero-picker.png` | desktop | Home → Offline practice | `client/src/team.rs` |  |
-| Offline · practice match | `03-practice.png` | desktop | Offline practice → start | `client/src/match_hud.rs` |  |
-| Offline · attacked target | `04-attacked-target.png` | desktop | Attack the practice dummy | `client/src/edge_hud.rs` |  |
-| Offline · game menu | `05-game-menu.png` | desktop | Escape in practice | `client/src/pause_menu.rs` |  |
-| Offline · settings (top) | `06-settings-top.png` | desktop | Game menu → Settings | `client/src/pause_menu.rs` |  |
-| Offline · settings (bottom) | `07-settings-bottom.png` | desktop | Settings, scrolled | `client/src/pause_menu.rs` |  |
-| Offline · back home | `08-return-home.png` | desktop | Game menu → Exit to home | `client/src/frontend/home.rs` |  |
+| Offline · hero picker | `02-hero-picker.png` | desktop, phone | Home → Offline practice | `client/src/team.rs` |  |
+| Offline · practice match | `03-practice.png` | desktop, phone | Offline practice → start | `client/src/match_hud.rs` |  |
+| Offline · attacked target | `04-attacked-target.png` | desktop, phone | Attack the practice dummy | `client/src/edge_hud.rs` |  |
+| Offline · game menu | `05-game-menu.png` | desktop, phone | Escape in practice | `client/src/pause_menu.rs` |  |
+| Offline · settings (top) | `06-settings-top.png` | desktop, phone | Game menu → Settings | `client/src/pause_menu.rs` |  |
+| Offline · settings (bottom) | `07-settings-bottom.png` | desktop, phone | Settings, scrolled | `client/src/pause_menu.rs` |  |
+| Offline · back home | `08-return-home.png` | desktop, phone | Game menu → Exit to home | `client/src/frontend/home.rs` |  |
 
 ## Not captured yet
 

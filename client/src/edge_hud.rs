@@ -345,7 +345,7 @@ fn setup(mut commands: Commands, mobile: Option<Res<MobileControls>>) {
             overlay
                 .spawn((
                     Node {
-                        width: Val::Px(760.0),
+                        width: Val::Px(1088.0),
                         max_width: Val::Percent(94.0),
                         max_height: Val::Percent(92.0),
                         padding: UiRect::all(Val::Px(14.0)),
@@ -353,7 +353,7 @@ fn setup(mut commands: Commands, mobile: Option<Res<MobileControls>>) {
                         row_gap: Val::Px(8.0),
                         ..ui::panel_node()
                     },
-                    BackgroundColor(ui::PANEL.with_alpha(1.0)),
+                    KitImage::frame(crate::ui::kit_assets::Frame::Panel),
                     BorderColor::all(ui::EDGE),
                     ZIndex(1),
                     Name::new("ScoreboardPanel"),
@@ -366,7 +366,28 @@ fn setup(mut commands: Commands, mobile: Option<Res<MobileControls>>) {
                             ..default()
                         },))
                         .with_children(|row| {
-                            text(row, Localized::new("edge.scoreboard.title"), 20.0, ui::GOLD);
+                            text(row, Localized::new("edge.scoreboard.title"), 24.0, ui::GOLD);
+                            row.spawn(Node {
+                                column_gap: Val::Px(12.0),
+                                align_items: AlignItems::Center,
+                                ..default()
+                            })
+                            .with_children(|score| {
+                                for (label, ink) in [
+                                    (ScoreLabel::Green, color::TEAM_GREEN),
+                                    (ScoreLabel::Blue, color::TEAM_BLUE),
+                                ] {
+                                    if matches!(label, ScoreLabel::Blue) {
+                                        text(score, ":", 24.0, ui::GOLD);
+                                    }
+                                    score.spawn((
+                                        Text::new("—"),
+                                        ui::role_text(TextRole::NumberLg),
+                                        TextColor(ink),
+                                        label,
+                                    ));
+                                }
+                            });
                             row.spawn((
                                 Button,
                                 button_node(64.0),
@@ -402,7 +423,7 @@ fn setup(mut commands: Commands, mobile: Option<Res<MobileControls>>) {
                                             } else {
                                                 "edge.team.blue"
                                             }),
-                                            14.0,
+                                            20.0,
                                             if team == Team::Green {
                                                 ui::JADE
                                             } else {
@@ -415,11 +436,8 @@ fn setup(mut commands: Commands, mobile: Option<Res<MobileControls>>) {
                                                 "edge.column.player",
                                                 "edge.column.kda",
                                                 "edge.column.gold",
-                                                "edge.column.level",
                                             ]
                                             .map(Localized::new),
-                                            false,
-                                            true,
                                         );
                                         col.spawn((
                                             Node {
@@ -1220,53 +1238,31 @@ fn update(
         }
     }
 }
-fn short_name(value: &str, max: usize) -> String {
-    let mut chars = value.chars();
-    let head: String = chars.by_ref().take(max).collect();
-    if chars.next().is_some() {
-        format!("{head}…")
-    } else {
-        head
-    }
-}
-/// One scoreboard row: name, K/D/A, gold and level cells.
-fn spawn_score_row<L: UiLabel>(
-    parent: &mut ChildSpawnerCommands,
-    cells: [L; 4],
-    local: bool,
-    header: bool,
-) {
+/// Header aligned with the identity, K/D/A and gold cells. Level is on the portrait.
+fn spawn_score_row<L: UiLabel>(parent: &mut ChildSpawnerCommands, cells: [L; 3]) {
     parent
-        .spawn((
-            Node {
-                height: Val::Px(29.0),
-                min_height: Val::Px(29.0),
-                column_gap: Val::Px(4.0),
-                padding: UiRect::horizontal(Val::Px(3.0)),
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            BackgroundColor(if local {
-                Color::srgb(0.055, 0.20, 0.16)
-            } else {
-                Color::NONE
-            }),
-        ))
+        .spawn((Node {
+            height: Val::Px(29.0),
+            min_height: Val::Px(29.0),
+            column_gap: Val::Px(8.0),
+            padding: UiRect::horizontal(Val::Px(8.0)).with_left(Val::Px(11.0)),
+            align_items: AlignItems::Center,
+            ..default()
+        },))
         .with_children(|row| {
             for (value, (width, grow)) in
                 cells
                     .into_iter()
-                    .zip([(0.0, 1.0), (61.0, 0.0), (52.0, 0.0), (22.0, 0.0)])
+                    .zip([(0.0, 1.0), (64.0, 0.0), (52.0, 0.0)])
             {
                 row.spawn((
                     value.into_text(),
                     ui::text(12.0),
-                    TextColor(if header {
-                        ui::MUTED
-                    } else if local {
-                        ui::JADE
+                    TextColor(ui::MUTED),
+                    TextLayout::new_with_justify(if grow > 0.0 {
+                        Justify::Left
                     } else {
-                        ui::IVORY
+                        Justify::Right
                     }),
                     Node {
                         width: if grow > 0.0 {
@@ -1284,6 +1280,131 @@ fn spawn_score_row<L: UiLabel>(
             }
         });
 }
+fn spawn_live_score_row(
+    parent: &mut ChildSpawnerCommands,
+    player: &LiveScorePlayer,
+    name: String,
+    own: bool,
+    art: Option<Handle<Image>>,
+) {
+    let team = if player.team == Team::Green {
+        color::TEAM_GREEN
+    } else {
+        color::TEAM_BLUE
+    };
+    let ink = if player.connected {
+        color::TEXT_PRIMARY
+    } else {
+        color::TEXT_DISABLED
+    };
+    parent
+        .spawn((
+            Node {
+                height: Val::Px(48.0),
+                min_height: Val::Px(48.0),
+                flex_shrink: 0.0,
+                width: Val::Percent(100.0),
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(8.0),
+                padding: UiRect::axes(Val::Px(8.0), Val::Px(2.0)),
+                border: UiRect::left(Val::Px(3.0)),
+                border_radius: BorderRadius::all(Val::Px(6.0)),
+                ..default()
+            },
+            BackgroundColor(if own {
+                color::SURFACE_SELECTED
+            } else {
+                color::SURFACE_2
+            }),
+            BorderColor::all(if own { color::GOLD_500 } else { team }),
+        ))
+        .with_children(|row| {
+            row.spawn((
+                Node {
+                    width: Val::Px(36.0),
+                    height: Val::Px(36.0),
+                    flex_shrink: 0.0,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                BackgroundColor(color::SURFACE_3),
+            ))
+            .with_children(|portrait| {
+                if let Some(art) = art {
+                    portrait.spawn((
+                        ImageNode::new(art),
+                        Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
+                            ..default()
+                        },
+                    ));
+                } else {
+                    portrait.spawn(icon_node(
+                        game::class_icon(player.hero_class),
+                        24.0,
+                        color::TEXT_GOLD,
+                    ));
+                }
+                portrait.spawn((
+                    Text::new(player.level.to_string()),
+                    ui::role_text(TextRole::Caption),
+                    TextColor(color::TEXT_GOLD),
+                    BackgroundColor(color::SURFACE_0),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        right: Val::Px(-2.0),
+                        bottom: Val::Px(-2.0),
+                        ..default()
+                    },
+                ));
+            });
+            row.spawn(Node {
+                flex_grow: 1.0,
+                min_width: Val::Px(0.0),
+                flex_basis: Val::Px(0.0),
+                flex_direction: FlexDirection::Column,
+                overflow: Overflow::clip_x(),
+                ..default()
+            })
+            .with_children(|identity| {
+                identity.spawn((
+                    Text::new(name),
+                    ui::role_text(TextRole::Label),
+                    TextColor(ink),
+                    TextLayout::new_with_no_wrap(),
+                ));
+                identity.spawn((
+                    Text::new(data::hero_name(player.hero_class)),
+                    ui::role_text(TextRole::Caption),
+                    TextColor(color::TEXT_MUTED),
+                    TextLayout::new_with_no_wrap(),
+                ));
+            });
+            for (value, width, ink) in [
+                (
+                    format!("{}/{}/{}", player.kills, player.deaths, player.assists),
+                    64.0,
+                    ink,
+                ),
+                (player.earned_gold.to_string(), 52.0, color::TEXT_GOLD),
+            ] {
+                row.spawn((
+                    Text::new(value),
+                    ui::role_text(TextRole::Number),
+                    TextColor(ink),
+                    Node {
+                        width: Val::Px(width),
+                        flex_shrink: 0.0,
+                        ..default()
+                    },
+                    TextLayout::new_with_justify(Justify::Right),
+                ));
+            }
+        });
+}
+
 fn render_rows(
     mut commands: Commands,
     game: Res<GameStateSnapshot>,
@@ -1291,6 +1412,8 @@ fn render_rows(
     rows: Query<(Entity, &ScoreRows)>,
     locale: Option<Res<Locale>>,
     mut previous: Local<Option<(Option<LiveScoreboard>, Option<u64>, u32)>>,
+    avatars: Query<(&NetworkPlayerId, &NetworkAvatar)>,
+    thumbnails: Option<Res<crate::team::AvatarThumbnails>>,
 ) {
     let id = local.single().ok().map(|p| p.0);
     let generation = locale.as_ref().map_or(0, |locale| locale.generation());
@@ -1314,24 +1437,17 @@ fn render_rows(
             }
             for p in players {
                 let name = if p.connected {
-                    short_name(&p.nickname, 12)
+                    p.nickname.clone()
                 } else {
-                    trf(
-                        "edge.scoreboard.offline",
-                        &[("name", &short_name(&p.nickname, 7))],
-                    )
+                    trf("edge.scoreboard.offline", &[("name", &p.nickname)])
                 };
-                spawn_score_row(
-                    parent,
-                    [
-                        name,
-                        format!("{}/{}/{}", p.kills, p.deaths, p.assists),
-                        p.earned_gold.to_string(),
-                        p.level.to_string(),
-                    ],
-                    Some(p.player_id) == id,
-                    false,
-                );
+                let art = avatars
+                    .iter()
+                    .find(|(id, _)| id.0 == p.player_id)
+                    .and_then(|(_, avatar)| avatar.0.as_ref())
+                    .and_then(|slug| thumbnails.as_ref().and_then(|thumbs| thumbs.0.get(slug)))
+                    .cloned();
+                spawn_live_score_row(parent, p, name, Some(p.player_id) == id, art);
             }
         });
     }
@@ -1344,7 +1460,7 @@ fn layout(
     let Ok(window) = windows.single() else {
         return;
     };
-    let phone = mobile.enabled;
+    let phone = mobile.enabled && window.height() < 600.0;
     for (name, id, mut node) in &mut nodes {
         match node_key(name, id).unwrap_or_default() {
             "ScoreboardRoot" => {
@@ -1362,7 +1478,11 @@ fn layout(
             "ScoreboardPanel" => {
                 node.max_width = Val::Percent(if phone { 100.0 } else { 94.0 });
                 node.max_height = Val::Percent(if phone { 100.0 } else { 92.0 });
-                node.width = Val::Px(if phone { 620.0 } else { 760.0 });
+                node.width = Val::Px(if phone {
+                    window.width() - mobile.safe.left - mobile.safe.right - 32.0
+                } else {
+                    1088.0
+                });
                 node.padding = UiRect::all(Val::Px(if phone { 12.0 } else { 16.0 }));
             }
             "ScoreboardGreenRows" | "ScoreboardBlueRows" => {
@@ -1370,10 +1490,10 @@ fn layout(
                     if window.height() <= 340.0 {
                         135.0
                     } else {
-                        145.0
+                        220.0
                     }
                 } else {
-                    190.0
+                    280.0
                 });
             }
             _ => {}

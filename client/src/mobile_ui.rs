@@ -22,6 +22,9 @@ use crate::{
 
 pub(crate) struct MobileUiPlugin;
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct MobileUiLayout;
+
 impl Plugin for MobileUiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MobileControls>();
@@ -58,6 +61,7 @@ impl Plugin for MobileUiPlugin {
                 // It rewrites phone copy, so the font pass must see it, and a
                 // language change must not relabel over it.
                 adapt_phone_layout
+                    .in_set(MobileUiLayout)
                     .before(bevy::ui::UiSystems::Layout)
                     .after(crate::i18n::I18nSystems::Relabel)
                     .before(crate::i18n::I18nSystems::Font),
@@ -695,15 +699,24 @@ fn adapt_phone_layout(
                 node.padding = UiRect::axes(Val::Px(10.0), Val::Px(5.0));
             }
             "PauseMenuPanel" => {
+                let settings = pause.as_ref().is_some_and(|pause| pause.in_settings);
                 node.top = Val::Px((top - bottom) * 0.5);
-                node.width = Val::Px(width.min(metric::PHONE_PAUSE_W));
+                node.width = Val::Px(if settings {
+                    width - 24.0
+                } else {
+                    width.min(metric::PHONE_PAUSE_W)
+                });
                 // Bound both bodies so short windows scroll between the fixed
                 // header/close control and footer.
-                node.height = Val::Px(metric::pause_panel_height(
-                    metric::Form::Phone,
-                    pause.as_ref().is_some_and(|pause| pause.in_settings),
-                    height,
-                ));
+                node.height = Val::Px(if settings {
+                    height - 16.0
+                } else {
+                    metric::pause_panel_height(
+                        metric::Form::Phone,
+                        pause.as_ref().is_some_and(|pause| pause.in_settings),
+                        height,
+                    )
+                });
                 node.max_height = Val::Px(height);
                 node.padding = UiRect::all(Val::Px(10.0));
                 node.row_gap = Val::Px(6.0);
