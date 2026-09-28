@@ -301,6 +301,144 @@ mod tests {
         assert!(!flow.is_searching());
         assert!(flow.lobby_addr.is_none());
     }
+    fn allocation() -> MatchAllocation {
+        MatchAllocation {
+            allocation_id: "allocated".into(),
+            endpoint: "127.0.0.1:4001".into(),
+            preference: MatchPreference::Quick,
+            team: shared::map::Team::Green,
+            human_count: 1,
+            bot_count: 9,
+            rated: false,
+            join_deadline_ms: 0,
+        }
+    }
+
+    fn lock_in() -> NetworkCommand {
+        NetworkCommand::JoinPrematch {
+            character: crate::team::CharacterChoice::default(),
+            hero_class: shared::HeroClass::Mage,
+            avatar: Some("agnes".into()),
+            sprite_character: None,
+        }
+    }
+
+    /// DECISIONS R7.4: Play again after an allocated match remembers the
+    /// lobby and the same lock-in, survives the return to the lobby, and is
+    /// sent once that lobby offers matchmaking again on Home.
+    #[test]
+    fn play_again_after_an_allocated_match_queues_the_same_lock_in_on_the_lobby() {
+        use crate::frontend::AppScreen;
+        let view = CareerView {
+            match_service: Some(MatchServiceView::Idle),
+            ..default()
+        };
+        let mut flow = MatchServiceClient::default();
+        assert!(!flow.request_requeue(), "nothing to repeat without a queue");
+        assert!(flow.intercept_join(&view, "127.0.0.1:4000", &lock_in()));
+        flow.allocation = Some(allocation());
+        flow.pending_join = None;
+        assert!(flow.request_requeue());
+        // LeaveMatch returns to the lobby and ends the old search …
+        assert_eq!(
+            flow.take_return_to_lobby().as_deref(),
+            Some("127.0.0.1:4000")
+        );
+        // … but not the Play again.
+        let requeue = flow.requeue.clone().expect("kept across the return");
+        assert!(matches!(requeue.join, NetworkCommand::JoinPrematch { .. }));
+        let mut session = ClientSession::default();
+        session.set_state_for_test(crate::net::ClientConnectionState::Connected);
+        let ready =
+            |flow: &MatchServiceClient, view: &CareerView, session: &ClientSession, screen| {
+                requeue_ready(flow.requeue.as_ref().unwrap(), flow, view, session, screen)
+            };
+        // Still on the result screen, or on the worker, or before the lobby's
+        // career view: wait.
+        assert!(!ready(&flow, &view, &session, AppScreen::PostMatch));
+        assert!(
+            !ready(&flow, &view, &session, AppScreen::Home),
+            "other address"
+        );
+        session.set_server_addr_for_test("127.0.0.1:4000");
+        assert!(!ready(
+            &flow,
+            &CareerView::default(),
+            &session,
+            AppScreen::Home
+        ));
+        assert!(ready(&flow, &view, &session, AppScreen::Home));
+    }
+
+    #[test]
+    fn play_again_follows_the_lobby_into_the_search_and_gives_up_elsewhere() {
+        use crate::frontend::AppScreen;
+        let mut app = App::new();
+        app.add_plugins(bevy::state::app::StatesPlugin)
+            .init_state::<AppScreen>()
+            .init_resource::<CareerClient>()
+            .add_message::<NetworkCommand>()
+            .add_systems(Update, resume_requeue);
+        let mut session = ClientSession::default();
+        session.set_state_for_test(crate::net::ClientConnectionState::Connected);
+        session.set_server_addr_for_test("127.0.0.1:4000");
+        app.insert_resource(session);
+        app.world_mut()
+            .resource_mut::<CareerClient>()
+            .view
+            .match_service = Some(MatchServiceView::Idle);
+        let mut flow = MatchServiceClient {
+            requeue: Some(Requeue {
+                lobby: "127.0.0.1:4000".into(),
+                join: lock_in(),
+                since: Instant::now(),
+            }),
+            ..default()
+        };
+        app.insert_resource(flow);
+        app.update();
+        app.update();
+        assert_eq!(
+            *app.world().resource::<State<AppScreen>>().get(),
+            AppScreen::Searching
+        );
+        let sent = app
+            .world_mut()
+            .resource_mut::<Messages<NetworkCommand>>()
+            .drain()
+            .filter(|command| matches!(command, NetworkCommand::JoinPrematch { .. }))
+            .count();
+        assert_eq!(sent, 1, "the same lock-in, once");
+        assert!(
+            app.world()
+                .resource::<MatchServiceClient>()
+                .requeue
+                .is_none()
+        );
+
+        // Leaving Home for another screen drops it.
+        flow = MatchServiceClient {
+            requeue: Some(Requeue {
+                lobby: "127.0.0.1:4000".into(),
+                join: lock_in(),
+                since: Instant::now(),
+            }),
+            ..default()
+        };
+        app.insert_resource(flow);
+        app.world_mut()
+            .resource_mut::<NextState<AppScreen>>()
+            .set(AppScreen::Collection);
+        app.update();
+        app.update();
+        assert!(
+            app.world()
+                .resource::<MatchServiceClient>()
+                .requeue
+                .is_none()
+        );
+    }
+
     #[test]
     fn human_only_copy_never_promises_bot_fallback() {
         let text = status_text(&MatchServiceView::Waiting {

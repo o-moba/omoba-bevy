@@ -348,8 +348,8 @@ system ordered `.after(UiSet::Dispatch)`:
 | `frontend/collection.rs` | `CollectionAction` | `collection_actions` (in the drag chain) | a preview drag (`block_actions`) clears the presses |
 | `frontend/searching.rs` | `SearchingAction` | `searching_actions` | |
 | `frontend/draft.rs` | `DraftAction` | `draft_actions` in `DraftSet::Input` (now after `Dispatch`) | `action_button<T>` is shared with loading |
-| `frontend/loading.rs` | `LoadingAction` | `loading_actions` in `DraftSet::Input` | |
-| `frontend/postmatch.rs` | `PostMatchAction` | `post_match_actions` | |
+| `frontend/loading.rs` | `LoadingAction` (`Cancel`, `Retry`) | `loading_actions` in `DraftSet::Input` | Retry = `SessionUiCommand::Retry` |
+| `frontend/postmatch.rs` | `PostMatchAction` (`PlayAgain`, `Details`, `BackToMenu`) | `post_match_actions` | no press counts for the first `motion.duration.screen_fade` |
 | `team.rs` (hero select) | `HeroSelectAction` | `team_select_ui_system`, before `SendCommands` | `LockIn(team)` calls `team::lock_in`; tiles `Tile`, Ekza buttons `Link`, lock-in `Team(team)` |
 | `career.rs` | `career::Action` | `actions` (career chain, now after `Dispatch`) | social gating clears the presses |
 | `social.rs` | `SocialAction` | `social_actions` in `Modal` after `Dispatch`, before `CareerUiSet` | `input` (in `Social`, before the kit) leaves a `ButtonFrame`; a gated frame has none and the presses are dropped |
@@ -539,7 +539,7 @@ CC BY 3.0 credit line (with Lucide ISC and the font licences) is in Settings
 | item-slot | `game::item_slot` (HUD), `item_slot_button`, `shop_card(ShopCard, form, …)` |
 | hero-tile | `game::hero_tile(art, class, name, AvatarSource, form, …)`, `portrait` |
 | scoreboard-row | `game::scoreboard_row(ScoreRow, form)` |
-| timer-ring | `game::timer_ring(TimerRing, RingSize, time, caption)` |
+| timer-ring | `game::timer_ring(TimerRing, RingSize, time, caption)`; `RingSize::{Large, Medium, Small}` (160 / 96 / 44); status variant below |
 | hud-plate | `game::hud_plate`, `minimap_frame`, `player_status`, `score_strip`, `target_frame` |
 | help card (`hud-help.md`, P0) | `surfaces::info_card(node, icon, title, body, form) -> InfoCard { card, title, body }`: plain panel in `color.surface.2`, icon disc (32/24, `color.surface.3`, gold hairline) with a gold icon (20/16), `type.heading` gold title (16 px on a phone, `PhoneSized`), `type.body` secondary body; the caller sizes it and may add a legend row of `keycap`s and muted `badge`s |
 
@@ -555,11 +555,50 @@ CC BY 3.0 credit line (with Lucide ISC and the font licences) is in Settings
   the real window width. The desktop match keeps 1.0 until its world-anchored
   overlays (nameplates, floating combat numbers, chat bubbles) divide by
   `UiScale`. Phones keep `frontend::menu_scale` and the `metric` minimums.
+- The result screen (`AppScreen::PostMatch`, text roles only) takes the full
+  R2.3 range on desktop, `clamp(min(w/1280, h/720), 0.8, 2.0)`
+  (`postmatch::result_ui_scale`; 1024×640 → 0.8), except while the game
+  menu, the career page or help is open over it (those keep 1.0). On phone
+  it lays out in real pixels inside `MobileControls.safe`.
 - Touch has no hover: in touch mode a held finger paints the pressed look
   (activation still happens on release) and a hovering pointer paints idle.
 - The avatar preview and party stage cameras clear to transparent
   (`frontend::PREVIEW_CLEAR`, R2.4), so the menu background shows behind the
   models.
+
+### Status, waiting and focus entry (P0-B)
+
+Added with the result and loading screens (`ui/widgets/status.rs`,
+`omoba-ui/handoff/screens/{loading-shell,prematch-countdown,result,post-match}.md`):
+
+- **Status ring:** `status::status_ring(parent, RingMode, RingSize)`. The
+  owner writes only `RingMode`: `Countdown { progress, number }` (arc
+  `color.gold.400` draining, number in the size's role; never the ≤ 5 s
+  warning colour, the screens that use it count 3 s), `Indeterminate` (a 90°
+  arc turning once per 1200 ms, linear, rotated with `UiTransform`),
+  `Error` (track only, `nav/alert-triangle` `color.text.danger`).
+  `paint_status_rings` and `spin_arcs` do the rest.
+- **Small ring:** `RingSize::Small` = `size.timer_ring.sm` (44, ring 4,
+  `type.number`), the phone header countdown.
+- **Spinner:** `status::spinner(parent, side)` (`SPINNER_SM` 12 in a caption
+  line, `SPINNER_MD` 16 in a button): track `color.surface.3`, turning arc.
+- **Skeletons:** `status::skeleton(width, height)` (a `color.surface.3` bar)
+  and `skeleton_ring(side)` (outline) pulse over 900 ms
+  (`pulse_skeletons`) where a value has not arrived yet.
+- **Focus entry:** `ui::FocusEntry` on a control changes how a new surface
+  takes the focus: `Preferred` is focused first (a Retry that just
+  appeared), `Deferred` is never focused by the surface appearing and waits
+  for the first direction (a Cancel on a shared countdown, where a stray
+  confirm must not press it). `UiFocus::step_with` reads it; without the
+  component nothing changes (first candidate top-to-bottom).
+- **Preload:** `kit_assets::KitPreload` keeps a set of kit textures loaded at
+  the current density (`keep_preloaded`, reloaded when the density changes).
+  Bevy drops a texture with its last handle, so a screen built from scratch
+  showed a frame or two without its ring, frame or icons while they
+  reloaded. The loading plugin registers the frames, slabs, ring atlas,
+  icons and the loading background that the loading and result screens
+  draw on their first frame; the result backgrounds are not kept (the
+  screen fades them in).
 
 ### Kit gallery
 

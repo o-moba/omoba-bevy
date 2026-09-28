@@ -1437,6 +1437,31 @@ fn hud_page(body: &mut ChildSpawnerCommands, form: Form) {
             "4".into(),
             None,
         );
+        // Status rings (loading shell, prematch countdown): indeterminate,
+        // error, the 44 px phone header countdown.
+        crate::ui::widgets::status::status_ring(
+            line,
+            crate::ui::widgets::status::RingMode::Indeterminate,
+            RingSize::Medium,
+        );
+        crate::ui::widgets::status::status_ring(
+            line,
+            crate::ui::widgets::status::RingMode::Error,
+            RingSize::Medium,
+        );
+        crate::ui::widgets::status::status_ring(
+            line,
+            crate::ui::widgets::status::RingMode::Countdown {
+                progress: 2.0 / 3.0,
+                number: 2,
+            },
+            RingSize::Small,
+        );
+        crate::ui::widgets::status::spinner(line, crate::ui::widgets::status::SPINNER_MD);
+        line.spawn(crate::ui::widgets::status::skeleton(
+            Val::Px(120.0),
+            Val::Px(40.0),
+        ));
     });
     row(body, "kit.gallery.row.hud", |line| {
         game::minimap_frame(line, form);

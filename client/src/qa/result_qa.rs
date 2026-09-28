@@ -45,16 +45,33 @@ enum Fixture {
     Abandoned,
     LoadingConnecting,
     LoadingFailed,
+    /// Saved, with a controller: Right from Play again focuses Details.
+    FocusDetails,
+    /// The failure with a controller: Retry appears and takes the focus.
+    FocusRetry,
 }
 
-const STAGES: [(&str, Fixture); 6] = [
+const STAGES: [(&str, Fixture); 8] = [
     ("r1-result-finalizing.png", Fixture::Finalizing),
     ("r2-result-saved.png", Fixture::Saved),
     ("r3-result-defeat-guest.png", Fixture::DefeatGuest),
     ("r4-result-abandoned.png", Fixture::Abandoned),
     ("l1-loading-connecting.png", Fixture::LoadingConnecting),
     ("l2-loading-failed.png", Fixture::LoadingFailed),
+    ("f1-result-focus-details.png", Fixture::FocusDetails),
+    ("f2-loading-focus-retry.png", Fixture::FocusRetry),
 ];
+
+impl Fixture {
+    fn screen(self) -> AppScreen {
+        match self {
+            Fixture::LoadingConnecting | Fixture::LoadingFailed | Fixture::FocusRetry => {
+                AppScreen::Loading
+            }
+            _ => AppScreen::PostMatch,
+        }
+    }
+}
 
 pub(crate) struct ResultQaPlugin;
 
@@ -93,6 +110,12 @@ impl Plugin for ResultQaPlugin {
             drive
                 .after(crate::net::ClientNetPipeline::ApplySnapshot)
                 .before(crate::frontend::FrontendSet),
+        )
+        .add_systems(
+            Update,
+            drive_focus
+                .before(crate::ui::UiSet::Focus)
+                .in_set(crate::input_context::InputContextSet::Modal),
         )
         .add_systems(PostUpdate, shoot.after(bevy::ui::UiSystems::Layout));
     }
@@ -202,8 +225,13 @@ fn apply_fixture(
     career.public_profile_id = Some("qa-profile".into());
     career.view.last_result = None;
     match fixture {
-        Fixture::Finalizing | Fixture::LoadingConnecting | Fixture::LoadingFailed => {}
-        Fixture::Saved => career.view.last_result = Some(receipt(MatchOutcome::Completed, true)),
+        Fixture::Finalizing
+        | Fixture::LoadingConnecting
+        | Fixture::LoadingFailed
+        | Fixture::FocusRetry => {}
+        Fixture::Saved | Fixture::FocusDetails => {
+            career.view.last_result = Some(receipt(MatchOutcome::Completed, true));
+        }
         Fixture::Abandoned => {
             career.view.last_result = Some(receipt(MatchOutcome::Abandoned, false));
         }
@@ -215,7 +243,7 @@ fn apply_fixture(
             career.public_profile_id = None;
         }
     }
-    if matches!(fixture, Fixture::LoadingConnecting | Fixture::LoadingFailed) {
+    if fixture.screen() == AppScreen::Loading {
         // No roster, no round: the connecting body.
         game.state = GameState::Lobby;
         game.prematch = None;
@@ -261,10 +289,7 @@ fn drive(
         ));
         return;
     }
-    let wanted = match fixture {
-        Fixture::LoadingConnecting | Fixture::LoadingFailed => AppScreen::Loading,
-        _ => AppScreen::PostMatch,
-    };
+    let wanted = fixture.screen();
     if !qa.entered {
         if *screen.get() == wanted {
             // Leave first, so the next state enters (and latches) afresh.
@@ -281,7 +306,7 @@ fn drive(
         return;
     }
     // Keep the fixture in place (nothing else writes it without a server).
-    if fixture == Fixture::LoadingFailed
+    if matches!(fixture, Fixture::LoadingFailed | Fixture::FocusRetry)
         && session.state() != crate::net::ClientConnectionState::Disconnected
     {
         qa.settled = 0;
@@ -292,7 +317,7 @@ fn shoot(
     mut commands: Commands,
     mut qa: ResMut<ResultQa>,
     screen: Res<State<AppScreen>>,
-    windows: Query<&Window, With<PrimaryWindow>>,
+    windows: Query<(Entity, &Window), With<PrimaryWindow>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let Some(&(file, fixture)) = STAGES.get(qa.stage) else {
@@ -312,16 +337,18 @@ fn shoot(
             qa.stage += 1;
             if qa.stage == STAGES.len() {
                 info!("RESULT_QA completed");
+                // Close the window first, as the real Exit button does: the
+                // runner can hang on a live surface otherwise.
+                if let Ok((window, _)) = windows.single() {
+                    commands.entity(window).despawn();
+                }
                 exit.write(AppExit::Success);
             }
         }
         return;
     }
-    let on_screen = match fixture {
-        Fixture::LoadingConnecting | Fixture::LoadingFailed => AppScreen::Loading,
-        _ => AppScreen::PostMatch,
-    };
-    let sized = windows.single().is_ok_and(|window| {
+    let on_screen = fixture.screen();
+    let sized = windows.single().is_ok_and(|(_, window)| {
         window.resolution.physical_width() == qa.pixels.x
             && window.resolution.physical_height() == qa.pixels.y
     });
@@ -344,6 +371,30 @@ fn shoot(
         .observe(save_to_disk(qa.directory.join(file)))
         .observe(readback);
     qa.in_flight = true;
+}
+
+/// Drives the kit focus as a connected controller does on the focus stages
+/// (before `UiSet::Focus`, after the gamepad's own sampling).
+fn drive_focus(
+    qa: Res<ResultQa>,
+    mut focus: ResMut<crate::ui::UiFocus>,
+    mut nav: MessageWriter<crate::ui::FocusNav>,
+    mut moved: Local<Option<usize>>,
+) {
+    let Some(&(_, fixture)) = STAGES.get(qa.stage) else {
+        return;
+    };
+    if !matches!(fixture, Fixture::FocusDetails | Fixture::FocusRetry) {
+        return;
+    }
+    focus.set_enabled(true);
+    if fixture == Fixture::FocusDetails
+        && qa.settled == SETTLE_FRAMES / 2
+        && *moved != Some(qa.stage)
+    {
+        *moved = Some(qa.stage);
+        nav.write(crate::ui::FocusNav::Right);
+    }
 }
 
 #[derive(Component)]
