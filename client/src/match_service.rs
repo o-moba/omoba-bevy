@@ -28,7 +28,25 @@ pub(crate) struct MatchServiceClient {
     pub active: bool,
     request_id: u64,
     last_request: Option<Instant>,
+    /// The lock-in that started the current search: Play again queues it
+    /// again after an allocated match (DECISIONS R7.4).
+    last_queue_join: Option<NetworkCommand>,
+    /// Play again was pressed after an allocated match: queue again once the
+    /// client is back on this lobby.
+    requeue: Option<Requeue>,
 }
+
+/// A queued "Play again": the lobby to return to and the lock-in to send.
+#[derive(Clone, Debug)]
+pub(crate) struct Requeue {
+    lobby: String,
+    join: NetworkCommand,
+    since: Instant,
+}
+
+/// How long a Play again waits for the lobby (reconnect + career view)
+/// before it gives up and leaves the player on Home.
+pub(crate) const REQUEUE_TIMEOUT: Duration = Duration::from_secs(20);
 
 impl MatchServiceClient {
     pub fn intercept_join(
@@ -49,7 +67,28 @@ impl MatchServiceClient {
         }
         self.active = true;
         self.pending_join = Some(command.clone());
+        self.last_queue_join = Some(command.clone());
         self.lobby_addr = Some(address.to_owned());
+        true
+    }
+
+    /// Play again after an allocated match: remember to queue the same
+    /// lock-in (same hero, same preference) once the client is back on the
+    /// lobby. `false` when this is not an allocated match started from the
+    /// queue (nothing to repeat).
+    pub fn request_requeue(&mut self) -> bool {
+        let (Some(_), Some(lobby), Some(join)) = (
+            self.allocation.as_ref(),
+            self.lobby_addr.clone(),
+            self.last_queue_join.clone(),
+        ) else {
+            return false;
+        };
+        self.requeue = Some(Requeue {
+            lobby,
+            join,
+            since: Instant::now(),
+        });
         true
     }
 
@@ -72,7 +111,12 @@ impl Plugin for MatchServicePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MatchServiceClient>().add_systems(
             Update,
-            update_match_service.after(crate::net::ClientNetPipeline::ApplySnapshot),
+            (
+                update_match_service.after(crate::net::ClientNetPipeline::ApplySnapshot),
+                resume_requeue
+                    .after(crate::net::ClientNetPipeline::ApplySnapshot)
+                    .before(crate::frontend::FrontendSet),
+            ),
         );
     }
 }
@@ -143,6 +187,60 @@ fn update_match_service(
             },
         ));
     }
+}
+
+/// Sends the remembered lock-in once the client is back on the lobby after a
+/// Play again: connected to that address with a career view that offers
+/// matchmaking. The join is intercepted like a fresh lock-in (a new search),
+/// and the shell shows the search screen. Leaving Home for another screen,
+/// or waiting longer than [`REQUEUE_TIMEOUT`], drops it.
+fn resume_requeue(
+    mut flow: ResMut<MatchServiceClient>,
+    career: Res<CareerClient>,
+    session: Res<ClientSession>,
+    screen: Option<Res<State<crate::frontend::AppScreen>>>,
+    mut next: Option<ResMut<NextState<crate::frontend::AppScreen>>>,
+    mut requests: MessageWriter<NetworkCommand>,
+) {
+    use crate::frontend::AppScreen;
+    let Some(requeue) = flow.requeue.as_ref() else {
+        return;
+    };
+    let screen = screen.map_or(AppScreen::Home, |screen| *screen.get());
+    if requeue.since.elapsed() > REQUEUE_TIMEOUT
+        || !matches!(screen, AppScreen::PostMatch | AppScreen::Home)
+    {
+        flow.requeue = None;
+        return;
+    }
+    if !requeue_ready(requeue, &flow, &career.view, &session, screen) {
+        return;
+    }
+    let Some(requeue) = flow.requeue.take() else {
+        return;
+    };
+    requests.write(requeue.join);
+    if let Some(next) = next.as_mut() {
+        next.set(AppScreen::Searching);
+    }
+}
+
+/// The lobby is back: Home, the session connected to the remembered lobby,
+/// no search or allocation left over, and matchmaking offered.
+fn requeue_ready(
+    requeue: &Requeue,
+    flow: &MatchServiceClient,
+    view: &CareerView,
+    session: &ClientSession,
+    screen: crate::frontend::AppScreen,
+) -> bool {
+    screen == crate::frontend::AppScreen::Home
+        && !flow.active
+        && flow.allocation.is_none()
+        && session.state() == crate::net::ClientConnectionState::Connected
+        && session.server_addr() == requeue.lobby
+        && !session.has_committed_join()
+        && view.match_service.is_some()
 }
 
 /// The matchmaking status line for the searching screen, in the active language.

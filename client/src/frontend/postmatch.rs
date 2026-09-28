@@ -1,83 +1,326 @@
-//! Result screen. The match is over, the world is still on screen behind it,
-//! and the player decides what happens next.
+//! Result screen: the one screen shown when a base falls (DECISIONS R2.2 —
+//! it replaced the in-match round-over card and the old post-match panel).
+//! The layout is `omoba-ui/handoff/screens/result.md`; when each region can
+//! fill, how the player leaves and what the overlays do is `post-match.md`.
 //!
-//! Text comes from the `postmatch` dictionary; the panel is rebuilt on a
-//! language change.
+//! What the screen knows on the Victory frame (winner, the local team, the
+//! local live score row, the avatar) is latched on entry
+//! ([`PostMatchLatch`]): a transport teardown resets the snapshot, the numbers
+//! must stay. The career `MatchResult` fills the rest when it arrives (the
+//! body is rebuilt; the buttons and the focus stay). Where no result will ever
+//! come (guest, storage off, rematch server) nothing waits for one.
+//!
+//! Text comes from the `postmatch` dictionary plus the career, edge and state
+//! keys it shares; the screen is rebuilt on a language change.
 // i18n-strict
 
 use bevy::prelude::*;
-use shared::career::{MatchOutcome, MatchResult};
+use shared::career::{MatchOutcome, MatchResult, ParticipantResult};
+use shared::live_score::LiveScorePlayer;
 
 use super::AppScreen;
-use super::widgets;
 use crate::career::CareerClient;
 use crate::i18n::{Locale, locale_changed, tr, trf};
-use crate::net::{GameState, GameStateSnapshot, NetworkCommand, SessionUiCommand};
+use crate::mobile_controls::MobileControls;
+use crate::net::{
+    GameState, GameStateSnapshot, LinkStatus, NetworkAvatar, NetworkCommand, SessionUiCommand,
+};
 use crate::team::Team;
-use crate::ui::theme::{self, ButtonKind};
-use crate::ui::widgets::screen_button;
-use crate::ui::{Activated, UiActionAppExt, UiSet};
+use crate::ui::kit_assets::{Background, CoverImage, Frame, Icon, KitImage};
+use crate::ui::theme::{self, ButtonKind, Form, TextStyle};
+use crate::ui::tokens::{TextRole, border, color, motion, radius, size, space};
+use crate::ui::widgets::{
+    ButtonSize, KitParts, button_node, game, icon_node, spawn_button,
+    status::{self, skeleton, skeleton_ring, spinner},
+    surfaces,
+};
+use crate::ui::{Activated, Pressable, TestId, UiActionAppExt, UiSet};
 
 pub struct PostMatchScreenPlugin;
 
 impl Plugin for PostMatchScreenPlugin {
     fn build(&self, app: &mut App) {
         app.add_ui_action::<PostMatchAction>()
-            .add_systems(OnEnter(AppScreen::PostMatch), spawn_post_match)
+            .init_resource::<PostMatchLatch>()
+            .add_systems(
+                OnEnter(AppScreen::PostMatch),
+                (latch_post_match, spawn_post_match).chain(),
+            )
+            .add_systems(OnExit(AppScreen::PostMatch), release_post_match)
             .add_systems(
                 Update,
                 (
                     post_match_actions.after(UiSet::Dispatch),
                     refresh_post_match,
+                    (sync_post_match, animate_post_match)
+                        .after(refresh_post_match)
+                        .before(UiSet::Paint),
                 )
                     .run_if(in_state(AppScreen::PostMatch)),
             );
     }
 }
 
+/// The rendered result (`None` before it arrives) and whether career storage
+/// was on when the screen was built.
 #[derive(Component)]
 struct PostMatchRoot(Option<MatchResult>, bool);
+
+/// What else decides the body's regions: a change rebuilds the body.
+#[derive(Component, Clone, PartialEq, Debug)]
+struct PostMatchShape {
+    expects_result: bool,
+    profile_xp: Option<u64>,
+    has_live_row: bool,
+}
+
+/// The screen's long-lived parts (the body is rebuilt, these are not).
+#[derive(Component, Clone, Copy)]
+struct PostMatchParts {
+    background: Entity,
+    banner: Entity,
+    body: Entity,
+    status: Entity,
+    play_again: Entity,
+    play_again_spinner: Entity,
+    details: Entity,
+    timer: Option<Entity>,
+    timer_text: Option<Entity>,
+}
+
+/// The status line and the key of what it shows now.
+#[derive(Component, Default)]
+struct StatusLine(Option<StatusSpec>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PostMatchAction {
     PlayAgain,
+    Details,
     BackToMenu,
+}
+
+/// What the screen latched on entry: a teardown resets the snapshot, these
+/// stay (post-match.md, Entry and timing).
+#[derive(Resource, Clone, Default, Debug)]
+pub(crate) struct PostMatchLatch {
+    winner: Option<Team>,
+    local_team: Option<Team>,
+    live: Option<LiveScorePlayer>,
+    avatar: Option<String>,
+    /// The server sent `rematch_in_secs`: a rematch server (no career flow).
+    rematch_seen: bool,
+    /// `Time::elapsed_secs` on entry (input lock and entry motion).
+    entered_at: f32,
+    /// Play again was pressed; it stays disabled with a spinner until the
+    /// screen leaves.
+    play_again_pressed: bool,
+}
+
+/// Title of the banner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Outcome {
+    Victory,
+    Defeat,
+    Complete,
+}
+
+impl Outcome {
+    fn of(winner: Option<Team>, local_team: Option<Team>) -> Self {
+        match (winner, local_team) {
+            (Some(winner), Some(local)) if winner == local => Outcome::Victory,
+            (Some(_), Some(_)) => Outcome::Defeat,
+            _ => Outcome::Complete,
+        }
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            Outcome::Victory => "postmatch.outcome.victory",
+            Outcome::Defeat => "postmatch.outcome.defeat",
+            Outcome::Complete => "postmatch.outcome.complete",
+        }
+    }
 }
 
 /// Headline for the result, from the player's point of view.
 pub fn outcome_headline(winner: Option<Team>, local_team: Option<Team>) -> &'static str {
-    match (winner, local_team) {
-        (Some(winner), Some(local)) if winner == local => tr("postmatch.outcome.victory"),
-        (Some(_), Some(_)) => tr("postmatch.outcome.defeat"),
-        _ => tr("postmatch.outcome.complete"),
+    tr(Outcome::of(winner, local_team).key())
+}
+
+/// A cell that may still be waiting for the career result.
+#[derive(Clone, Debug, PartialEq)]
+enum Cell<T> {
+    Hidden,
+    Pending,
+    Value(T),
+}
+
+/// The player's numbers (stats panel / strip).
+#[derive(Clone, Debug, PartialEq)]
+struct StatsModel {
+    art: Option<String>,
+    class: shared::HeroClass,
+    level: u32,
+    kda: (u32, u32, u32),
+    damage: Cell<String>,
+    gold: Option<u32>,
+}
+
+/// The career progress strip once the result is in.
+#[derive(Clone, Debug, PartialEq)]
+struct ProgressModel {
+    level: u64,
+    line: String,
+    /// XP inside the current level (`progression_xp % 1000`).
+    in_level: u32,
+    /// XP this match added inside the current level (the gained segment).
+    gained_in_level: u32,
+    level_up: bool,
+}
+
+/// Everything the body shows, decided from the latch, the result and the
+/// career view (pure: see the tests).
+#[derive(Clone, Debug, PartialEq)]
+struct ResultModel {
+    outcome: Outcome,
+    /// The banner title (`outcome_headline`, or "Match complete" for an
+    /// abandoned or interrupted match).
+    title: &'static str,
+    summary: String,
+    stats: Option<StatsModel>,
+    progress: Cell<ProgressModel>,
+    details: Cell<()>,
+    expects_result: bool,
+}
+
+/// XP per career level (`ProfileSummary::level`).
+const LEVEL_XP: u64 = 1000;
+
+/// A career result will come for this match: a career profile, storage on
+/// and not a rematch server (which never runs the career flow).
+fn expects_result(latch: &PostMatchLatch, career: &CareerClient) -> bool {
+    career.view.profile.is_some() && career.view.storage_enabled && !latch.rematch_seen
+}
+
+fn result_model(
+    latch: &PostMatchLatch,
+    result: Option<&MatchResult>,
+    career: &CareerClient,
+) -> ResultModel {
+    let expects = expects_result(latch, career);
+    let participant = result.and_then(|result| crate::career::local_participant(result, career));
+    let local_team = latch
+        .local_team
+        .or_else(|| participant.map(|p| p.team.into()));
+    let (winner, summary) = match result {
+        Some(result) => match result.outcome {
+            MatchOutcome::Completed => (
+                result.winner.map(Into::into),
+                trf(
+                    match result.winner {
+                        Some(shared::map::Team::Green) => "postmatch.summary.green",
+                        Some(shared::map::Team::Blue) => "postmatch.summary.blue",
+                        None => "postmatch.summary.nobody",
+                    },
+                    &[("minutes", &(result.duration_ms / 60_000))],
+                ),
+            ),
+            MatchOutcome::Abandoned => (None, tr("postmatch.summary.abandoned").to_owned()),
+            MatchOutcome::Interrupted => (None, tr("postmatch.summary.interrupted").to_owned()),
+        },
+        None => (
+            latch.winner,
+            match latch.winner {
+                Some(Team::Green) => tr("postmatch.summary.green_short").to_owned(),
+                Some(Team::Blue) => tr("postmatch.summary.blue_short").to_owned(),
+                None => String::new(),
+            },
+        ),
+    };
+    let stats = stats_model(latch, result, participant, expects);
+    let progress = match (result, career.view.profile.as_ref()) {
+        (Some(_), Some(profile)) => Cell::Value(progress_model(profile, participant)),
+        (None, Some(_)) if expects => Cell::Pending,
+        _ => Cell::Hidden,
+    };
+    let details = match result {
+        Some(_) if career.view.profile.is_some() => Cell::Value(()),
+        None if expects => Cell::Pending,
+        _ => Cell::Hidden,
+    };
+    ResultModel {
+        outcome: Outcome::of(winner, local_team),
+        title: outcome_headline(winner, local_team),
+        summary,
+        stats,
+        progress,
+        details,
+        expects_result: expects,
     }
 }
 
-/// One line of personal numbers for the result panel.
-pub fn personal_line(result: &MatchResult, profile_id: Option<&str>) -> Option<String> {
-    let profile_id = profile_id?;
-    let participant = result
-        .participants
-        .iter()
-        .find(|entry| entry.profile_id.as_deref() == Some(profile_id))?;
-    let stats = &participant.stats;
-    let delta = participant
-        .rating
-        .as_ref()
-        .map(|change| format!("{:+}", change.delta));
-    let args: [(&str, &dyn std::fmt::Display); 6] = [
-        ("kills", &stats.kills),
-        ("deaths", &stats.deaths),
-        ("assists", &stats.assists),
-        ("level", &stats.final_level),
-        ("xp", &participant.progression_xp_gained),
-        ("delta", &delta.as_deref().unwrap_or_default()),
-    ];
-    Some(if delta.is_some() {
-        trf("postmatch.personal_rated", &args)
-    } else {
-        trf("postmatch.personal", &args)
+fn stats_model(
+    latch: &PostMatchLatch,
+    result: Option<&MatchResult>,
+    participant: Option<&ParticipantResult>,
+    expects: bool,
+) -> Option<StatsModel> {
+    let live = latch.live.as_ref();
+    let (class, level, kda) = match (participant, live) {
+        (Some(p), _) => (
+            p.hero_class,
+            p.stats.final_level,
+            (p.stats.kills, p.stats.deaths, p.stats.assists),
+        ),
+        (None, Some(live)) => (
+            live.hero_class,
+            live.level,
+            (live.kills, live.deaths, live.assists),
+        ),
+        (None, None) => return None,
+    };
+    let avatar = participant
+        .and_then(|p| p.avatar.clone())
+        .or_else(|| latch.avatar.clone());
+    let art = avatar.as_deref().and_then(|slug| {
+        omoba_passport::avatars::avatar_definition(slug)
+            .and_then(crate::passport::thumbnail_asset_path)
+    });
+    let damage = match (result, participant) {
+        (Some(_), Some(p)) => Cell::Value(crate::career::number(p.stats.damage_to_heroes)),
+        (None, _) if expects => Cell::Pending,
+        _ => Cell::Hidden,
+    };
+    Some(StatsModel {
+        art,
+        class,
+        level,
+        kda,
+        damage,
+        gold: live.map(|live| live.earned_gold),
     })
+}
+
+fn progress_model(
+    profile: &shared::career::ProfileSummary,
+    participant: Option<&ParticipantResult>,
+) -> ProgressModel {
+    let gained = participant.map_or(0, |p| p.progression_xp_gained);
+    let in_level = (profile.progression_xp % LEVEL_XP) as u32;
+    let rating = participant.and_then(|p| p.rating.as_ref()).map_or_else(
+        || tr("career.rating.unrated").to_owned(),
+        |change| format!("{} ({:+})", change.after, change.delta),
+    );
+    ProgressModel {
+        level: profile.level(),
+        line: trf(
+            "career.result.my_progress",
+            &[("rating", &rating), ("xp", &gained)],
+        ),
+        in_level,
+        gained_in_level: gained.min(in_level),
+        level_up: gained > in_level,
+    }
 }
 
 fn current_result<'a>(
@@ -89,33 +332,169 @@ fn current_result<'a>(
     })
 }
 
-fn spawn_post_match(
-    mut commands: Commands,
-    game: Res<GameStateSnapshot>,
-    career: Res<CareerClient>,
-    local_team: Query<&Team, With<crate::player::Player>>,
-) {
-    let winner = match game.state {
-        GameState::Victory { winner } => Some(winner.into()),
-        _ => None,
+/// Play again does something now: on a rematch server at once; on an
+/// allocated match or a career-flow server only once the result is saved
+/// (before that the press was ignored or refused). Pressed = waiting to leave.
+fn play_again_enabled(allocated: bool, career_flow: bool, saved: bool, pressed: bool) -> bool {
+    !pressed && (saved || !(allocated || career_flow))
+}
+
+// --- Status line ---
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StatusIcon {
+    None,
+    Saved,
+    Saving,
+    Reconnecting,
+    Failed,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct StatusSpec {
+    icon: StatusIcon,
+    text: String,
+    ink: Color,
+    /// Phone: the next-round countdown after a separator.
+    timer: Option<String>,
+}
+
+fn status_spec(
+    expects: bool,
+    result: Option<&MatchResult>,
+    link: LinkStatus,
+    next_round: Option<String>,
+    phone: bool,
+) -> StatusSpec {
+    let reason = result
+        .and_then(|result| result.unrated_reason.as_deref())
+        .map(crate::career::unrated_reason);
+    let with_reason = |text: &str| match reason {
+        Some(reason) => format!("{text} · {reason}"), // i18n-allow: joins two dictionary lines
+        None => text.to_owned(),
     };
-    let headline = outcome_headline(winner, local_team.iter().next().copied());
-    let result = current_result(&career, &game).cloned();
-    let summary = result.as_ref().map(|result| match result.outcome {
-        MatchOutcome::Completed => trf(
-            match result.winner {
-                Some(shared::map::Team::Green) => "postmatch.summary.green",
-                Some(shared::map::Team::Blue) => "postmatch.summary.blue",
-                None => "postmatch.summary.nobody",
+    let muted = |icon, text| StatusSpec {
+        icon,
+        text,
+        ink: color::TEXT_MUTED,
+        timer: None,
+    };
+    if result.is_some_and(|result| result.saved) {
+        return muted(StatusIcon::Saved, with_reason(tr("postmatch.saved")));
+    }
+    if expects || result.is_some() {
+        return match link {
+            LinkStatus::Reconnecting { .. } => StatusSpec {
+                icon: StatusIcon::Reconnecting,
+                text: link.detail().unwrap_or_default(),
+                ink: color::STATE_WARNING,
+                timer: None,
             },
-            &[("minutes", &(result.duration_ms / 60_000))],
-        ),
-        MatchOutcome::Abandoned => tr("postmatch.summary.abandoned").to_owned(),
-        MatchOutcome::Interrupted => tr("postmatch.summary.interrupted").to_owned(),
-    });
-    let personal = result
-        .as_ref()
-        .and_then(|result| personal_line(result, career.public_profile_id.as_deref()));
+            LinkStatus::Disconnected | LinkStatus::Rejected(_) | LinkStatus::Unconfirmed => {
+                StatusSpec {
+                    icon: StatusIcon::Failed,
+                    text: link.detail().unwrap_or_default(),
+                    ink: color::TEXT_DANGER,
+                    timer: None,
+                }
+            }
+            _ => muted(StatusIcon::Saving, with_reason(tr("postmatch.saving"))),
+        };
+    }
+    StatusSpec {
+        timer: next_round.filter(|_| phone),
+        ..muted(StatusIcon::None, tr("postmatch.local_result").to_owned())
+    }
+}
+
+// --- Systems ---
+
+/// Latches what the Victory frame knows and holds the career page back.
+fn latch_post_match(
+    mut latch: ResMut<PostMatchLatch>,
+    game: Res<GameStateSnapshot>,
+    time: Option<Res<Time>>,
+    mut career: Option<ResMut<CareerClient>>,
+    local: Query<(&Team, Option<&NetworkAvatar>), With<crate::player::Player>>,
+) {
+    let local = local.iter().next();
+    *latch = PostMatchLatch {
+        winner: match game.state {
+            GameState::Victory { winner } => Some(winner.into()),
+            _ => None,
+        },
+        local_team: local.map(|(team, _)| *team),
+        live: game.scoreboard.as_ref().and_then(|board| {
+            board
+                .players
+                .iter()
+                .find(|player| player.player_id == game.your_id)
+                .cloned()
+        }),
+        avatar: local.and_then(|(_, avatar)| avatar.and_then(|avatar| avatar.0.clone())),
+        rematch_seen: game.rematch_in_secs.is_some(),
+        entered_at: time.map_or(0.0, |time| time.elapsed_secs()),
+        play_again_pressed: false,
+    };
+    if let Some(career) = career.as_mut() {
+        career.hold_result_modal = true;
+    }
+}
+
+fn release_post_match(mut career: Option<ResMut<CareerClient>>) {
+    if let Some(career) = career.as_mut() {
+        career.hold_result_modal = false;
+    }
+}
+
+/// What the screen reads to draw itself.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ScreenInputs<'w> {
+    game: Res<'w, GameStateSnapshot>,
+    career: Res<'w, CareerClient>,
+    latch: Option<Res<'w, PostMatchLatch>>,
+    mobile: Option<Res<'w, MobileControls>>,
+}
+
+impl ScreenInputs<'_> {
+    fn latch(&self) -> PostMatchLatch {
+        self.latch.as_deref().cloned().unwrap_or_default()
+    }
+
+    fn form(&self) -> Form {
+        Form::from_mobile(self.mobile.as_deref())
+    }
+
+    fn shape(&self) -> PostMatchShape {
+        let latch = self.latch();
+        PostMatchShape {
+            expects_result: expects_result(&latch, &self.career),
+            profile_xp: self
+                .career
+                .view
+                .profile
+                .as_ref()
+                .map(|profile| profile.progression_xp),
+            has_live_row: latch.live.is_some(),
+        }
+    }
+}
+
+fn spawn_post_match(mut commands: Commands, inputs: ScreenInputs) {
+    build_screen(&mut commands, &inputs);
+}
+
+fn build_screen(commands: &mut Commands, inputs: &ScreenInputs) {
+    let latch = inputs.latch();
+    let result = current_result(&inputs.career, &inputs.game).cloned();
+    let model = result_model(&latch, result.as_ref(), &inputs.career);
+    let form = inputs.form();
+    let safe = inputs.mobile.as_deref().map(|mobile| mobile.safe);
+    let background = match model.outcome {
+        Outcome::Defeat => Background::ResultDefeat,
+        Outcome::Victory | Outcome::Complete => Background::ResultVictory,
+    };
+    let mut parts = None;
     commands
         .spawn((
             Node {
@@ -124,90 +503,998 @@ fn spawn_post_match(
                 right: Val::Px(0.0),
                 top: Val::Px(0.0),
                 bottom: Val::Px(0.0),
+                ..default()
+            },
+            ZIndex(theme::SCREEN_Z),
+            bevy::state::state_scoped::DespawnOnExit(AppScreen::PostMatch),
+            Name::new("PostMatchScreen"),
+            PostMatchRoot(result.clone(), inputs.career.view.storage_enabled),
+            inputs.shape(),
+        ))
+        .with_children(|root| {
+            // The background crossfades over the live world
+            // (`animate_post_match`); it starts clear.
+            let background = root
+                .spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(0.0),
+                        right: Val::Px(0.0),
+                        top: Val::Px(0.0),
+                        bottom: Val::Px(0.0),
+                        ..default()
+                    },
+                    KitImage {
+                        tint: Color::WHITE.with_alpha(0.0),
+                        ..KitImage::background(background)
+                    },
+                    CoverImage { anchor_y: 0.5 },
+                    Pickable::IGNORE,
+                    Name::new("PostMatchBackground"),
+                ))
+                .id();
+            parts = Some(match form {
+                Form::Desktop => {
+                    root.spawn(surfaces::ornament_frame());
+                    desktop_layout(root, &model, background)
+                }
+                Form::Phone => phone_layout(root, &model, background, safe),
+            });
+        })
+        .insert(parts.expect("layout spawned"));
+}
+
+/// Desktop (result.md): a 1280×720 stage centred in the window (the screen
+/// scales with R2.3 around it), one column from y 48.
+fn desktop_layout(
+    root: &mut ChildSpawnerCommands,
+    model: &ResultModel,
+    background: Entity,
+) -> PostMatchParts {
+    let form = Form::Desktop;
+    let mut parts = PostMatchParts {
+        background,
+        banner: Entity::PLACEHOLDER,
+        body: Entity::PLACEHOLDER,
+        status: Entity::PLACEHOLDER,
+        play_again: Entity::PLACEHOLDER,
+        play_again_spinner: Entity::PLACEHOLDER,
+        details: Entity::PLACEHOLDER,
+        timer: None,
+        timer_text: None,
+    };
+    root.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Percent(50.0),
+            top: Val::Percent(50.0),
+            width: Val::Px(REFERENCE.x),
+            height: Val::Px(REFERENCE.y),
+            margin: UiRect {
+                left: Val::Px(-REFERENCE.x / 2.0),
+                top: Val::Px(-REFERENCE.y / 2.0),
+                ..default()
+            },
+            ..default()
+        },
+        Name::new("PostMatchStage"),
+    ))
+    .with_children(|stage| {
+        stage
+            .spawn(Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(48.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|column| {
+                parts.body = column
+                    .spawn((
+                        Node {
+                            flex_direction: FlexDirection::Column,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        Name::new("PostMatchBody"),
+                    ))
+                    .with_children(|body| parts.banner = spawn_body(body, model, form))
+                    .id();
+                parts.status = spawn_status_line(column, form, 760.0, 12.0);
+                column
+                    .spawn((
+                        Node {
+                            height: Val::Px(size::BUTTON_LG_HEIGHT.desktop),
+                            margin: UiRect::top(Val::Px(20.0)),
+                            column_gap: Val::Px(space::S16),
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        Name::new("PostMatchActions"),
+                    ))
+                    .with_children(|row| {
+                        (parts.play_again, parts.play_again_spinner) =
+                            spawn_play_again(row, form, 260.0);
+                        parts.details = spawn_details(row, form, 200.0, model);
+                    });
+                column
+                    .spawn(Node {
+                        margin: UiRect::top(Val::Px(space::S12)),
+                        ..default()
+                    })
+                    .with_children(|row| spawn_back(row, form, 200.0));
+                let (timer, text) = spawn_round_timer(column);
+                parts.timer = Some(timer);
+                parts.timer_text = Some(text);
+            });
+        stage.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(40.0),
+                top: Val::Px(668.0),
+                width: Val::Px(360.0),
+                height: Val::Px(20.0),
+                ..default()
+            },
+            Text::new(tr("state.exit_hint")),
+            theme::role_text(TextRole::Caption),
+            TextColor(color::TEXT_MUTED),
+            Name::new("PostMatchExitHint"),
+        ));
+    });
+    parts
+}
+
+/// The reference the desktop layout is drawn on (result.md).
+const REFERENCE: Vec2 = Vec2::new(1280.0, 720.0);
+/// The R2.3 floor this screen may go down to (it uses text roles only).
+const RESULT_SCALE_MIN: f32 = 0.8;
+
+/// Desktop `UiScale` on the result screen: `clamp(min(w/1280, h/720), 0.8,
+/// 2.0)` (DECISIONS R2.3; the 1.0 floor of R2.3a is for screens that still
+/// have legacy text).
+pub(crate) fn result_ui_scale(width: f32, height: f32) -> f32 {
+    if width <= 0.0 || height <= 0.0 {
+        return 1.0;
+    }
+    (width / REFERENCE.x)
+        .min(height / REFERENCE.y)
+        .clamp(RESULT_SCALE_MIN, theme::metric::DESKTOP_SCALE_MAX)
+}
+
+/// Phone (result.md phone): banner, summary, strips and status from the top
+/// inside the safe area; the action row on the safe bottom.
+fn phone_layout(
+    root: &mut ChildSpawnerCommands,
+    model: &ResultModel,
+    background: Entity,
+    safe: Option<crate::mobile_controls::MobileSafeInsets>,
+) -> PostMatchParts {
+    let form = Form::Phone;
+    let margin = space::SCREEN_MARGIN.phone;
+    let (left, right, top, bottom) = safe.map_or((32.0, 32.0, 0.0, 20.0), |safe| {
+        (safe.left, safe.right, safe.top, safe.bottom)
+    });
+    let mut parts = PostMatchParts {
+        background,
+        banner: Entity::PLACEHOLDER,
+        body: Entity::PLACEHOLDER,
+        status: Entity::PLACEHOLDER,
+        play_again: Entity::PLACEHOLDER,
+        play_again_spinner: Entity::PLACEHOLDER,
+        details: Entity::PLACEHOLDER,
+        timer: None,
+        timer_text: None,
+    };
+    root.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(left + margin),
+            right: Val::Px(right + margin),
+            top: Val::Px(top + space::S8),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            ..default()
+        },
+        Name::new("PostMatchStage"),
+    ))
+    .with_children(|column| {
+        parts.body = column
+            .spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                Name::new("PostMatchBody"),
+            ))
+            .with_children(|body| parts.banner = spawn_body(body, model, form))
+            .id();
+        parts.status = spawn_status_line(column, form, 0.0, 6.0);
+    });
+    root.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(left + margin),
+            right: Val::Px(right + margin),
+            bottom: Val::Px(bottom + space::S8),
+            height: Val::Px(size::BUTTON_LG_HEIGHT.phone),
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(space::S16),
+            ..default()
+        },
+        Name::new("PostMatchActions"),
+    ))
+    .with_children(|row| {
+        spawn_back(row, form, 150.0);
+        row.spawn(Node {
+            flex_grow: 1.0,
+            ..default()
+        });
+        parts.details = spawn_details(row, form, 160.0, model);
+        (parts.play_again, parts.play_again_spinner) = spawn_play_again(row, form, 200.0);
+    });
+    parts
+}
+
+/// Banner, summary, stats and progress (the part rebuilt when the result
+/// arrives). Returns the banner.
+fn spawn_body(body: &mut ChildSpawnerCommands, model: &ResultModel, form: Form) -> Entity {
+    let banner = spawn_banner(body, model.outcome, model.title, form);
+    spawn_summary(body, &model.summary, form);
+    if let Some(stats) = &model.stats {
+        spawn_stats(body, stats, form);
+    }
+    if !matches!(model.progress, Cell::Hidden) {
+        spawn_progress(body, &model.progress, form);
+    }
+    banner
+}
+
+fn spawn_banner(
+    body: &mut ChildSpawnerCommands,
+    outcome: Outcome,
+    title: &str,
+    form: Form,
+) -> Entity {
+    let (width, height) = match form {
+        Form::Desktop => (640.0, 112.0),
+        Form::Phone => (420.0, 64.0),
+    };
+    let title_ink = if outcome == Outcome::Victory {
+        color::TEXT_GOLD
+    } else {
+        color::TEXT_PRIMARY
+    };
+    body.spawn((
+        Node {
+            width: Val::Px(width),
+            height: Val::Px(height),
+            flex_shrink: 0.0,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            // The title sits 14 px below the panel centre under the crest.
+            padding: UiRect::top(Val::Px(if form == Form::Desktop { 28.0 } else { 0.0 })),
+            ..default()
+        },
+        KitImage::frame(Frame::Panel),
+        UiTransform::IDENTITY,
+        Name::new("PostMatchBanner"),
+    ))
+    .with_children(|banner| {
+        banner.spawn((
+            Text::new(title),
+            theme::role_text(TextRole::TitleXl),
+            TextColor(title_ink),
+            TextLayout::new(Justify::Center, LineBreak::NoWrap),
+            Name::new("PostMatchOutcome"),
+        ));
+        if form == Form::Desktop {
+            let crest = if outcome == Outcome::Defeat {
+                color::TEXT_MUTED
+            } else {
+                color::TEXT_GOLD
+            };
+            banner.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(-(size::ICON_XL / 2.0) + border::FRAME),
+                    left: Val::Percent(50.0),
+                    margin: UiRect::left(Val::Px(-size::ICON_XL / 2.0)),
+                    ..default()
+                },
+                children![icon_node(Icon::NavCrown, size::ICON_XL, crest)],
+            ));
+        }
+        if outcome == Outcome::Defeat {
+            banner.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(space::S24),
+                    right: Val::Px(space::S24),
+                    bottom: Val::Px(-(space::S4 + border::FRAME)),
+                    height: Val::Px(border::FRAME),
+                    ..default()
+                },
+                BackgroundColor(color::STATE_DANGER),
+            ));
+        }
+    })
+    .id()
+}
+
+fn spawn_summary(body: &mut ChildSpawnerCommands, summary: &str, form: Form) {
+    let (width, height, gap, role) = match form {
+        Form::Desktop => (Val::Px(800.0), 28.0, space::S16, TextRole::Heading),
+        Form::Phone => (Val::Px(600.0), 20.0, 6.0, TextRole::Label),
+    };
+    body.spawn((
+        Node {
+            width,
+            max_width: Val::Percent(100.0),
+            height: Val::Px(height),
+            margin: UiRect::top(Val::Px(gap)),
+            column_gap: Val::Px(space::S16),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+        Name::new("PostMatchSummary"),
+    ))
+    .with_children(|row| {
+        if summary.is_empty() {
+            return;
+        }
+        let rule = || {
+            (
+                Node {
+                    flex_grow: 1.0,
+                    height: Val::Px(border::HAIRLINE),
+                    ..default()
+                },
+                BackgroundColor(theme::perceptual(color::BORDER_HAIRLINE)),
+            )
+        };
+        if form == Form::Desktop {
+            row.spawn(rule());
+        }
+        row.spawn((
+            Text::new(summary),
+            theme::role_text(role),
+            TextColor(color::TEXT_PRIMARY),
+            TextLayout::new(Justify::Center, LineBreak::NoWrap),
+            Name::new("PostMatchSummaryText"),
+        ));
+        if form == Form::Desktop {
+            row.spawn(rule());
+        }
+    });
+}
+
+fn spawn_stats(body: &mut ChildSpawnerCommands, stats: &StatsModel, form: Form) {
+    let desktop = form == Form::Desktop;
+    let mut panel = body.spawn((
+        Node {
+            width: if desktop {
+                Val::Px(760.0)
+            } else {
+                Val::Percent(100.0)
+            },
+            max_width: Val::Percent(100.0),
+            height: Val::Px(if desktop { 136.0 } else { 88.0 }),
+            margin: UiRect::top(Val::Px(if desktop { space::S16 } else { 6.0 })),
+            padding: if desktop {
+                UiRect::new(
+                    Val::Px(space::S24),
+                    Val::Px(space::S16),
+                    Val::Px(space::S16),
+                    Val::Px(space::S16),
+                )
+            } else {
+                UiRect::all(Val::Px(space::S12))
+            },
+            column_gap: Val::Px(if desktop { space::S24 } else { space::S12 }),
+            align_items: AlignItems::Center,
+            flex_shrink: 0.0,
+            border: UiRect::all(Val::Px(if desktop { 0.0 } else { border::HAIRLINE })),
+            border_radius: BorderRadius::all(Val::Px(if desktop { 0.0 } else { radius::LG })),
+            ..default()
+        },
+        Name::new("PostMatchStats"),
+    ));
+    if desktop {
+        panel.insert(KitImage::frame(Frame::Panel));
+    } else {
+        // The phone strip is glass (result.md phone), not a framed panel.
+        panel.insert((
+            BackgroundColor(theme::perceptual(color::SURFACE_GLASS_STRONG)),
+            BorderColor::all(theme::perceptual(color::BORDER_HAIRLINE)),
+        ));
+    }
+    panel.with_children(|panel| {
+        spawn_portrait(
+            panel,
+            stats,
+            if desktop {
+                size::PORTRAIT_LG
+            } else {
+                size::PORTRAIT_MD
+            },
+        );
+        panel
+            .spawn(Node {
+                flex_grow: 1.0,
+                height: Val::Percent(100.0),
+                column_gap: Val::Px(space::S8),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|columns| {
+                let (kills, deaths, assists) = stats.kda;
+                let kda = format!("{kills} / {deaths} / {assists}"); // i18n-allow: numbers only
+                stat_column(
+                    columns,
+                    form,
+                    232.0,
+                    Icon::HudKill,
+                    tr("edge.kda"),
+                    StatValue::Text(kda, color::TEXT_PRIMARY),
+                    "PostMatchKda",
+                );
+                match &stats.damage {
+                    Cell::Hidden => {}
+                    Cell::Pending => stat_column(
+                        columns,
+                        form,
+                        188.0,
+                        Icon::HudAttack,
+                        tr("career.table.hero_damage"),
+                        StatValue::Pending,
+                        "PostMatchDamage",
+                    ),
+                    Cell::Value(damage) => stat_column(
+                        columns,
+                        form,
+                        188.0,
+                        Icon::HudAttack,
+                        tr("career.table.hero_damage"),
+                        StatValue::Text(damage.clone(), color::TEXT_PRIMARY),
+                        "PostMatchDamage",
+                    ),
+                }
+                if let Some(gold) = stats.gold {
+                    stat_column(
+                        columns,
+                        form,
+                        180.0,
+                        Icon::HudGold,
+                        tr("edge.column.gold"),
+                        StatValue::Text(gold.to_string(), color::TEXT_GOLD),
+                        "PostMatchGold",
+                    );
+                }
+            });
+    });
+}
+
+/// The portrait: roster art in a 2 px `color.gold.500` rim (the class icon on
+/// `color.surface.3` without art, never initials) and the level disc.
+fn spawn_portrait(parent: &mut ChildSpawnerCommands, stats: &StatsModel, side: f32) {
+    parent
+        .spawn((
+            Node {
+                width: Val::Px(side),
+                height: Val::Px(side),
+                flex_shrink: 0.0,
+                border: UiRect::all(Val::Px(border::FRAME)),
+                border_radius: BorderRadius::all(Val::Px(radius::PILL)),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.01, 0.03, 0.035, 0.72)),
-            ZIndex(theme::SCREEN_Z),
-            bevy::state::state_scoped::DespawnOnExit(AppScreen::PostMatch),
-            Name::new("PostMatchScreen"),
-            PostMatchRoot(result.clone(), career.view.storage_enabled),
+            BorderColor::all(color::GOLD_500),
+            BackgroundColor(color::SURFACE_3),
+            Name::new("PostMatchPortrait"),
         ))
-        .with_children(|root| {
-            root.spawn((
-                Node {
-                    width: Val::Px(600.0),
-                    max_width: Val::Percent(92.0),
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    padding: UiRect::all(Val::Px(32.0)),
-                    row_gap: Val::Px(12.0),
-                    border: UiRect::all(Val::Px(1.0)),
-                    border_radius: BorderRadius::all(Val::Px(12.0)),
-                    ..default()
-                },
-                BackgroundColor(theme::PANEL_OPAQUE),
-                BorderColor::all(theme::GOLD),
-                Name::new("PostMatchPanel"),
-            ))
-            .with_children(|panel| {
-                panel.spawn(widgets::label(tr("postmatch.tagline"), 12.0, theme::GOLD));
-                panel.spawn(widgets::heading(headline, 42.0));
-                if let Some(summary) = summary.as_deref() {
-                    panel.spawn(widgets::label(summary, 15.0, theme::IVORY));
+        .with_children(|portrait| {
+            match &stats.art {
+                Some(path) => {
+                    portrait.spawn(game::round_art(path.clone(), side - 2.0 * border::FRAME));
                 }
-                if let Some(personal) = personal.as_deref() {
-                    panel.spawn(widgets::label(personal, 14.0, theme::GOLD));
+                None => {
+                    portrait.spawn(icon_node(
+                        game::class_icon(stats.class),
+                        size::ICON_XL,
+                        color::TEXT_MUTED,
+                    ));
                 }
-                panel.spawn(widgets::label(
-                    if result.as_ref().is_some_and(|result| result.saved) {
-                        tr("postmatch.saved")
-                    } else if !career.view.storage_enabled {
-                        tr("postmatch.local_result")
-                    } else {
-                        tr("postmatch.saving")
-                    },
-                    13.0,
-                    theme::MUTED,
-                ));
-                panel
-                    .spawn(Node {
-                        column_gap: Val::Px(12.0),
+            }
+            portrait
+                .spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(-space::S4),
+                        bottom: Val::Px(-space::S4),
+                        width: Val::Px(game::LEVEL_DISC),
+                        height: Val::Px(game::LEVEL_DISC),
+                        justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
+                        border: UiRect::all(Val::Px(border::HAIRLINE)),
+                        border_radius: BorderRadius::all(Val::Px(radius::PILL)),
                         ..default()
-                    })
-                    .with_children(|row| {
-                        screen_button(
-                            row,
-                            tr("postmatch.button.play_again"),
-                            ButtonKind::Primary,
-                            PostMatchAction::PlayAgain,
-                            "PostMatchPlayAgain",
-                        );
-                        screen_button(
-                            row,
-                            tr("postmatch.button.back_to_menu"),
-                            ButtonKind::Secondary,
-                            PostMatchAction::BackToMenu,
-                            "PostMatchBackToMenu",
-                        );
-                    });
-            });
+                    },
+                    BackgroundColor(color::SURFACE_1_OPAQUE),
+                    BorderColor::all(color::GOLD_500),
+                ))
+                .with_child((
+                    Text::new(stats.level.to_string()),
+                    theme::role_text(TextRole::NumberSm),
+                    TextColor(color::TEXT_GOLD),
+                ));
         });
 }
 
+enum StatValue {
+    Text(String, Color),
+    Pending,
+}
+
+/// One stats column: icon (desktop), eyebrow label, big number (or a
+/// skeleton while the result is on its way).
+fn stat_column(
+    columns: &mut ChildSpawnerCommands,
+    form: Form,
+    width: f32,
+    icon: Icon,
+    label: &str,
+    value: StatValue,
+    name: &'static str,
+) {
+    let desktop = form == Form::Desktop;
+    columns
+        .spawn((
+            Node {
+                width: if desktop { Val::Px(width) } else { Val::Auto },
+                flex_grow: if desktop { 0.0 } else { 1.0 },
+                flex_basis: if desktop { Val::Auto } else { Val::Px(0.0) },
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                row_gap: Val::Px(space::S4),
+                ..default()
+            },
+            Name::new(name),
+        ))
+        .with_children(|column| {
+            if desktop {
+                column.spawn(icon_node(icon, size::ICON_LG, color::TEXT_GOLD));
+            }
+            column.spawn((
+                Text::new(label),
+                theme::role_text(TextRole::Eyebrow),
+                TextColor(color::TEXT_MUTED),
+                TextLayout::new(Justify::Center, LineBreak::NoWrap),
+            ));
+            match value {
+                StatValue::Text(text, ink) => {
+                    column.spawn((
+                        Text::new(text),
+                        theme::role_text(if desktop {
+                            TextRole::NumberXl
+                        } else {
+                            TextRole::NumberLg
+                        }),
+                        TextColor(ink),
+                        TextLayout::new(Justify::Center, LineBreak::NoWrap),
+                        Name::new(format!("{name}Value")), // i18n-allow: node identity
+                    ));
+                }
+                StatValue::Pending => {
+                    let (w, h) = if desktop { (120.0, 40.0) } else { (96.0, 26.0) };
+                    column.spawn(skeleton(Val::Px(w), Val::Px(h)));
+                }
+            }
+        });
+}
+
+/// The gained part of the XP bar grows over `motion.duration.bar_trail`
+/// once the strip shows the result.
+#[derive(Component, Clone, Copy)]
+struct GainedSegment {
+    from: f32,
+    to: f32,
+    started: Option<f32>,
+}
+
+/// The level badge flashes once on a level-up.
+#[derive(Component, Clone, Copy)]
+struct LevelFlash {
+    started: Option<f32>,
+}
+
+fn spawn_progress(body: &mut ChildSpawnerCommands, progress: &Cell<ProgressModel>, form: Form) {
+    let desktop = form == Form::Desktop;
+    let badge = if desktop { 48.0 } else { 40.0 };
+    body.spawn((
+        Node {
+            width: if desktop {
+                Val::Px(760.0)
+            } else {
+                Val::Percent(100.0)
+            },
+            max_width: Val::Percent(100.0),
+            height: Val::Px(if desktop { 72.0 } else { 48.0 }),
+            margin: UiRect::top(Val::Px(if desktop { space::S12 } else { space::S8 })),
+            padding: UiRect::axes(
+                Val::Px(if desktop { space::S16 } else { space::S12 }),
+                Val::Px(if desktop { space::S12 } else { space::S4 }),
+            ),
+            column_gap: Val::Px(space::S16),
+            align_items: AlignItems::Center,
+            flex_shrink: 0.0,
+            border: UiRect::all(Val::Px(border::HAIRLINE)),
+            border_radius: BorderRadius::all(Val::Px(radius::LG)),
+            ..default()
+        },
+        BackgroundColor(color::SURFACE_1),
+        BorderColor::all(color::BORDER_SUBTLE),
+        Name::new("PostMatchProgress"),
+    ))
+    .with_children(|strip| {
+        let Cell::Value(model) = progress else {
+            strip.spawn(skeleton_ring(badge));
+            strip
+                .spawn(Node {
+                    flex_grow: 1.0,
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(space::S8),
+                    ..default()
+                })
+                .with_children(|column| {
+                    column.spawn(skeleton(Val::Px(300.0), Val::Px(14.0)));
+                    column.spawn(xp_track());
+                });
+            return;
+        };
+        strip
+            .spawn((
+                Node {
+                    width: Val::Px(badge),
+                    height: Val::Px(badge),
+                    flex_shrink: 0.0,
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    border: UiRect::all(Val::Px(border::FRAME)),
+                    border_radius: BorderRadius::all(Val::Px(radius::PILL)),
+                    ..default()
+                },
+                BackgroundColor(color::SURFACE_2),
+                BorderColor::all(color::GOLD_500),
+                LevelFlash {
+                    started: (!model.level_up).then_some(f32::NEG_INFINITY),
+                },
+                Name::new("PostMatchCareerLevel"),
+            ))
+            .with_child((
+                Text::new(model.level.to_string()),
+                theme::role_text(TextRole::NumberLg),
+                TextColor(color::TEXT_GOLD),
+            ));
+        strip
+            .spawn(Node {
+                flex_grow: 1.0,
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(if desktop { space::S8 } else { space::S4 }),
+                ..default()
+            })
+            .with_children(|column| {
+                column
+                    .spawn(Node {
+                        column_gap: Val::Px(space::S12),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    })
+                    .with_children(|line| {
+                        line.spawn((
+                            Text::new(&model.line),
+                            theme::role_text(TextRole::Label),
+                            TextColor(color::TEXT_ACCENT),
+                            TextLayout::new(Justify::Left, LineBreak::NoWrap),
+                            Node {
+                                flex_grow: 1.0,
+                                ..default()
+                            },
+                            Name::new("PostMatchCareerLine"),
+                        ));
+                        line.spawn((
+                            Text::new(format!("{} / {LEVEL_XP}", model.in_level)), // i18n-allow: numbers only
+                            theme::role_text(TextRole::NumberSm),
+                            TextColor(color::TEXT_SECONDARY),
+                        ));
+                    });
+                let total = LEVEL_XP as f32;
+                let before = (model.in_level - model.gained_in_level) as f32 / total;
+                let now = model.in_level as f32 / total;
+                column.spawn(xp_track()).with_children(|track| {
+                    track.spawn((xp_fill(0.0, before), BackgroundColor(color::BAR_XP)));
+                    track.spawn((
+                        xp_fill(before, 0.0),
+                        BackgroundColor(color::GOLD_300),
+                        GainedSegment {
+                            from: before,
+                            to: now,
+                            started: None,
+                        },
+                    ));
+                });
+            });
+    });
+}
+
+fn xp_track() -> impl Bundle {
+    (
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Px(size::BAR_XP),
+            border: UiRect::all(Val::Px(border::HAIRLINE)),
+            border_radius: BorderRadius::all(Val::Px(radius::SM)),
+            overflow: Overflow::clip(),
+            ..default()
+        },
+        BackgroundColor(theme::perceptual(color::BAR_TRACK)),
+        BorderColor::all(color::SCRIM.with_alpha(1.0)),
+    )
+}
+
+fn xp_fill(left: f32, width: f32) -> Node {
+    Node {
+        position_type: PositionType::Absolute,
+        left: Val::Percent(left * 100.0),
+        top: Val::Px(0.0),
+        bottom: Val::Px(0.0),
+        width: Val::Percent(width * 100.0),
+        ..default()
+    }
+}
+
+fn spawn_status_line(
+    column: &mut ChildSpawnerCommands,
+    form: Form,
+    width: f32,
+    gap: f32,
+) -> Entity {
+    column
+        .spawn((
+            Node {
+                width: if form == Form::Desktop {
+                    Val::Px(width)
+                } else {
+                    Val::Percent(100.0)
+                },
+                height: Val::Px(20.0),
+                margin: UiRect::top(Val::Px(gap)),
+                column_gap: Val::Px(space::S8),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            StatusLine::default(),
+            Name::new("PostMatchStatus"),
+        ))
+        .id()
+}
+
+fn fill_status_line(line: &mut ChildSpawnerCommands, spec: &StatusSpec) {
+    match spec.icon {
+        StatusIcon::None => {}
+        StatusIcon::Saved => {
+            line.spawn(icon_node(
+                Icon::NavCheck,
+                size::ICON_SM,
+                color::STATE_SUCCESS,
+            ));
+        }
+        StatusIcon::Saving => {
+            spinner(line, status::SPINNER_SM);
+        }
+        StatusIcon::Reconnecting => {
+            line.spawn(icon_node(
+                Icon::NavWifiOff,
+                size::ICON_SM,
+                color::STATE_WARNING,
+            ));
+        }
+        StatusIcon::Failed => {
+            line.spawn(icon_node(
+                Icon::NavAlertTriangle,
+                size::ICON_SM,
+                color::TEXT_DANGER,
+            ));
+        }
+    }
+    line.spawn((
+        Text::new(&spec.text),
+        theme::role_text(TextRole::Caption),
+        TextColor(spec.ink),
+        TextLayout::new(Justify::Center, LineBreak::NoWrap),
+        Name::new("PostMatchStatusText"),
+    ));
+    if let Some(timer) = &spec.timer {
+        line.spawn((
+            Text::new("·"),
+            theme::role_text(TextRole::Caption),
+            TextColor(color::TEXT_DISABLED),
+        ));
+        line.spawn(icon_node(Icon::NavTimer, size::ICON_SM, color::TEXT_MUTED));
+        line.spawn((
+            Text::new(timer),
+            theme::role_text(TextRole::Caption),
+            TextColor(color::TEXT_MUTED),
+            Name::new("PostMatchNextRound"),
+        ));
+    }
+}
+
+/// Play again (primary large, the default focus) with a hidden spinner that
+/// replaces the label once pressed.
+fn spawn_play_again(row: &mut ChildSpawnerCommands, form: Form, width: f32) -> (Entity, Entity) {
+    let button = spawn_button(
+        row,
+        Node {
+            width: Val::Px(width),
+            ..button_node(ButtonSize::Large, ButtonKind::Primary, form)
+        },
+        tr("postmatch.button.play_again"),
+        TextStyle::new(TextRole::ButtonLg),
+        ButtonKind::Primary,
+        None,
+        PostMatchAction::PlayAgain,
+        TestId::new("PostMatchPlayAgain"),
+        (),
+    );
+    let mut spinner_entity = Entity::PLACEHOLDER;
+    row.commands().entity(button).with_children(|button| {
+        spinner_entity = spinner(button, status::SPINNER_MD);
+        button.commands().entity(spinner_entity).insert(Node {
+            width: Val::Px(status::SPINNER_MD),
+            height: Val::Px(status::SPINNER_MD),
+            flex_shrink: 0.0,
+            display: Display::None,
+            ..default()
+        });
+    });
+    (button, spinner_entity)
+}
+
+fn spawn_details(
+    row: &mut ChildSpawnerCommands,
+    form: Form,
+    width: f32,
+    model: &ResultModel,
+) -> Entity {
+    let button = spawn_button(
+        row,
+        Node {
+            width: Val::Px(width),
+            ..button_node(ButtonSize::Regular, ButtonKind::Secondary, form)
+        },
+        tr("career.button.details"),
+        TextStyle::new(TextRole::Button),
+        ButtonKind::Secondary,
+        None,
+        PostMatchAction::Details,
+        TestId::new("PostMatchDetails"),
+        (),
+    );
+    let (visibility, disabled) = details_state(&model.details);
+    row.commands()
+        .entity(button)
+        .insert(visibility)
+        .insert(Pressable {
+            disabled,
+            ..default()
+        });
+    button
+}
+
+/// Hidden (the gap stays), disabled until the result, enabled with it.
+fn details_state(details: &Cell<()>) -> (Visibility, bool) {
+    match details {
+        Cell::Hidden => (Visibility::Hidden, true),
+        Cell::Pending => (Visibility::Inherited, true),
+        Cell::Value(()) => (Visibility::Inherited, false),
+    }
+}
+
+fn spawn_back(row: &mut ChildSpawnerCommands, form: Form, width: f32) {
+    spawn_button(
+        row,
+        Node {
+            width: Val::Px(width),
+            ..button_node(ButtonSize::Regular, ButtonKind::Link, form)
+        },
+        tr("postmatch.button.back_to_menu"),
+        TextStyle::new(TextRole::Button).sized(crate::ui::widgets::TERTIARY_LABEL),
+        ButtonKind::Link,
+        None,
+        PostMatchAction::BackToMenu,
+        TestId::new("PostMatchBackToMenu"),
+        (),
+    );
+}
+
+/// The next-round badge (desktop; rematch servers only): muted, 28 high,
+/// `nav/timer` + `type.caption` semibold.
+fn spawn_round_timer(column: &mut ChildSpawnerCommands) -> (Entity, Entity) {
+    let mut text = Entity::PLACEHOLDER;
+    let timer = column
+        .spawn((
+            Node {
+                width: Val::Px(300.0),
+                height: Val::Px(28.0),
+                margin: UiRect::top(Val::Px(space::S16)),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            Visibility::Hidden,
+            Name::new("PostMatchRoundTimer"),
+        ))
+        .with_children(|slot| {
+            slot.spawn((
+                Node {
+                    height: Val::Px(28.0),
+                    padding: UiRect::horizontal(Val::Px(space::S12)),
+                    column_gap: Val::Px(space::S8),
+                    align_items: AlignItems::Center,
+                    border_radius: BorderRadius::all(Val::Px(radius::PILL)),
+                    ..default()
+                },
+                BackgroundColor(color::SURFACE_3),
+            ))
+            .with_children(|badge| {
+                badge.spawn(icon_node(
+                    Icon::NavTimer,
+                    size::ICON_SM,
+                    color::TEXT_SECONDARY,
+                ));
+                text = badge
+                    .spawn((
+                        Text::new(""),
+                        theme::styled_text(
+                            TextStyle::keep_case(TextRole::Label)
+                                .sized(TextRole::Caption.style().size),
+                        ),
+                        TextColor(color::TEXT_SECONDARY),
+                    ))
+                    .id();
+            });
+        })
+        .id();
+    (timer, text)
+}
+
+/// Rebuilds the screen on a language change and the body when the result,
+/// storage or the career profile changes; a teardown leaves it as it is.
 fn refresh_post_match(
     mut commands: Commands,
-    game: Res<GameStateSnapshot>,
-    career: Res<CareerClient>,
-    local_team: Query<&Team, With<crate::player::Player>>,
-    roots: Query<(Entity, &PostMatchRoot)>,
+    inputs: ScreenInputs,
+    roots: Query<(
+        Entity,
+        &PostMatchRoot,
+        Option<&PostMatchShape>,
+        Option<&PostMatchParts>,
+    )>,
     locale: Option<Res<Locale>>,
 ) {
-    let Ok((entity, root)) = roots.single() else {
+    let Ok((entity, root, shape, parts)) = roots.single() else {
         return;
     };
+    let game = &inputs.game;
     // A retired worker clears transport state. Keep the already validated
     // terminal receipt and its Victory/Defeat presentation until the player leaves.
     if game.meta.server_epoch == 0
@@ -217,26 +1504,223 @@ fn refresh_post_match(
     {
         return;
     }
-    if root.0.as_ref() != current_result(&career, &game)
-        || root.1 != career.view.storage_enabled
-        || locale_changed(&locale)
-    {
-        commands
-            .entity(entity)
-            .despawn_related::<Children>()
-            .despawn();
-        spawn_post_match(commands, game, career, local_team);
+    let result = current_result(&inputs.career, game);
+    let new_shape = inputs.shape();
+    let body_changed = root.0.as_ref() != result
+        || root.1 != inputs.career.view.storage_enabled
+        || shape.is_some_and(|shape| *shape != new_shape);
+    match parts {
+        Some(parts) if body_changed && !locale_changed(&locale) => {
+            let model = result_model(&inputs.latch(), result, &inputs.career);
+            let form = inputs.form();
+            commands.entity(parts.body).despawn_related::<Children>();
+            let mut banner = Entity::PLACEHOLDER;
+            commands
+                .entity(parts.body)
+                .with_children(|body| banner = spawn_body(body, &model, form));
+            commands.entity(entity).insert((
+                PostMatchRoot(result.cloned(), inputs.career.view.storage_enabled),
+                new_shape,
+                PostMatchParts { banner, ..*parts },
+            ));
+            let (visibility, disabled) = details_state(&model.details);
+            let details = parts.details;
+            commands.entity(details).insert(visibility);
+            commands.queue(move |world: &mut World| {
+                if let Some(mut pressable) = world.get_mut::<Pressable>(details) {
+                    pressable.disabled = disabled;
+                }
+            });
+        }
+        _ if body_changed || locale_changed(&locale) => {
+            commands.entity(entity).despawn();
+            build_screen(&mut commands, &inputs);
+        }
+        _ => {}
     }
 }
 
+/// Per-frame state that does not move a box: the status line, Play again,
+/// Details, the next-round badge.
+#[allow(clippy::too_many_arguments)]
+fn sync_post_match(
+    mut commands: Commands,
+    inputs: ScreenInputs,
+    session: Option<Res<crate::net::ClientSession>>,
+    flow: Option<Res<crate::match_service::MatchServiceClient>>,
+    mut latch: Option<ResMut<PostMatchLatch>>,
+    roots: Query<(&PostMatchRoot, &PostMatchParts)>,
+    mut lines: Query<&mut StatusLine>,
+    mut pressables: Query<&mut Pressable>,
+    mut nodes: Query<(&mut Node, Option<&KitParts>)>,
+    mut visibility: Query<&mut Visibility>,
+    mut texts: Query<&mut Text>,
+) {
+    let Ok((root, parts)) = roots.single() else {
+        return;
+    };
+    if let Some(latch) = latch.as_mut()
+        && inputs.game.rematch_in_secs.is_some()
+        && !latch.rematch_seen
+    {
+        latch.rematch_seen = true;
+    }
+    let latch = latch.as_deref().cloned().unwrap_or_default();
+    let form = inputs.form();
+    let expects = expects_result(&latch, &inputs.career);
+    // The receipt this screen shows (kept through a worker retirement).
+    let result = root.0.as_ref();
+    let saved = result.is_some_and(|result| result.saved);
+    let link = session
+        .as_deref()
+        .map_or(LinkStatus::Connected, crate::net::link_status);
+    let next_round = latch.rematch_seen.then(|| {
+        inputs.game.rematch_in_secs.map_or_else(
+            || tr("state.next_round.preparing").to_owned(),
+            |seconds| trf("state.next_round.countdown", &[("seconds", &seconds)]),
+        )
+    });
+    let spec = status_spec(
+        expects,
+        result,
+        link,
+        next_round.clone(),
+        form == Form::Phone,
+    );
+    if let Ok(mut line) = lines.get_mut(parts.status)
+        && line.0.as_ref() != Some(&spec)
+    {
+        commands.entity(parts.status).despawn_related::<Children>();
+        commands
+            .entity(parts.status)
+            .with_children(|line| fill_status_line(line, &spec));
+        line.0 = Some(spec);
+    }
+    let allocated = flow.as_ref().is_some_and(|flow| flow.allocation.is_some());
+    let enabled = play_again_enabled(allocated, expects, saved, latch.play_again_pressed);
+    if let Ok(mut pressable) = pressables.get_mut(parts.play_again)
+        && pressable.disabled == enabled
+    {
+        pressable.disabled = !enabled;
+    }
+    let label = nodes
+        .get(parts.play_again)
+        .ok()
+        .and_then(|(_, kit)| kit.and_then(|kit| kit.label));
+    let pressed = latch.play_again_pressed;
+    for (entity, shown) in [(label, !pressed), (Some(parts.play_again_spinner), pressed)] {
+        if let Some((mut node, _)) = entity.and_then(|entity| nodes.get_mut(entity).ok()) {
+            let display = if shown { Display::Flex } else { Display::None };
+            if node.display != display {
+                node.display = display;
+            }
+        }
+    }
+    if let (Some(timer), Some(text)) = (parts.timer, parts.timer_text) {
+        let shown = next_round.is_some();
+        if let Ok(mut timer) = visibility.get_mut(timer) {
+            let next = if shown {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+            if *timer != next {
+                *timer = next;
+            }
+        }
+        if let (Some(line), Ok(mut text)) = (next_round, texts.get_mut(text))
+            && text.0 != line
+        {
+            text.0 = line;
+        }
+    }
+}
+
+/// Entry motion: the background crossfades in over
+/// `motion.duration.screen_fade`, the banner opens (scale from
+/// `motion.panel_open.scale_from`) over `motion.duration.panel_open`; the
+/// gained XP grows over `motion.duration.bar_trail`; a level-up flashes the
+/// badge for `motion.duration.cooldown_ready_flash`.
+#[allow(clippy::type_complexity)]
+fn animate_post_match(
+    time: Option<Res<Time>>,
+    latch: Option<Res<PostMatchLatch>>,
+    roots: Query<&PostMatchParts>,
+    mut images: Query<&mut KitImage>,
+    mut transforms: Query<&mut UiTransform>,
+    mut segments: Query<(&mut Node, &mut GainedSegment)>,
+    mut flashes: Query<(&mut BorderColor, &mut LevelFlash)>,
+) {
+    let (Some(time), Ok(parts)) = (time, roots.single()) else {
+        return;
+    };
+    let now = time.elapsed_secs();
+    let since = now - latch.as_ref().map_or(now, |latch| latch.entered_at);
+    let fade = (since / motion::DURATION_SCREEN_FADE.as_secs_f32()).clamp(0.0, 1.0);
+    if let Ok(mut image) = images.get_mut(parts.background) {
+        let tint = Color::WHITE.with_alpha(motion::EASING_STANDARD.ease(fade));
+        if image.tint != tint {
+            image.tint = tint;
+        }
+    }
+    let open = (since / motion::DURATION_PANEL_OPEN.as_secs_f32()).clamp(0.0, 1.0);
+    if let Ok(mut transform) = transforms.get_mut(parts.banner) {
+        let from = motion::PANEL_OPEN_SCALE_FROM;
+        let scale = Vec2::splat(from + (1.0 - from) * motion::EASING_ENTER.ease(open));
+        if transform.scale != scale {
+            transform.scale = scale;
+        }
+    }
+    let trail = motion::DURATION_BAR_TRAIL.as_secs_f32();
+    for (mut node, mut segment) in &mut segments {
+        let started = *segment.started.get_or_insert(now);
+        let t = ((now - started) / trail).clamp(0.0, 1.0);
+        let width =
+            Val::Percent((segment.to - segment.from) * motion::EASING_STANDARD.ease(t) * 100.0);
+        if node.width != width {
+            node.width = width;
+        }
+    }
+    let flash = motion::DURATION_COOLDOWN_READY_FLASH.as_secs_f32();
+    for (mut border, mut level) in &mut flashes {
+        let started = *level.started.get_or_insert(now);
+        let lit = now - started < flash;
+        let ink = if lit {
+            color::GOLD_300
+        } else {
+            color::GOLD_500
+        };
+        if border.top != ink {
+            *border = BorderColor::all(ink);
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn post_match_actions(
     mut commands: MessageWriter<NetworkCommand>,
     mut session_ui: MessageWriter<SessionUiCommand>,
     mut activated: MessageReader<Activated<PostMatchAction>>,
-    flow: Option<Res<crate::match_service::MatchServiceClient>>,
+    mut flow: Option<ResMut<crate::match_service::MatchServiceClient>>,
+    mut career: Option<ResMut<CareerClient>>,
+    mut latch: Option<ResMut<PostMatchLatch>>,
+    party: Option<Res<crate::party::PartyClient>>,
+    time: Option<Res<Time>>,
     roots: Query<&PostMatchRoot>,
 ) {
+    // No press counts for the first screen fade: a held attack or confirm
+    // from the match must not press Play again (post-match.md).
+    let locked = match (latch.as_ref(), time.as_ref()) {
+        (Some(latch), Some(time)) => {
+            time.elapsed_secs() - latch.entered_at < motion::DURATION_SCREEN_FADE.as_secs_f32()
+                && roots.iter().next().is_some()
+        }
+        _ => false,
+    };
     for Activated { action, .. } in activated.read() {
+        if locked {
+            continue;
+        }
         match action {
             PostMatchAction::PlayAgain => {
                 if flow.as_ref().is_some_and(|flow| flow.allocation.is_some()) {
@@ -246,10 +1730,25 @@ fn post_match_actions(
                         .and_then(|root| root.0.as_ref())
                         .is_some_and(|result| result.saved)
                     {
+                        // DECISIONS R7.4: back on the lobby, queue again
+                        // with the same hero and preference. A party plays
+                        // together, so a member returns to Home and the
+                        // party.
+                        let solo = !party.as_ref().is_some_and(|party| party.in_party());
+                        if solo && let Some(flow) = flow.as_mut() {
+                            flow.request_requeue();
+                        }
                         session_ui.write(SessionUiCommand::LeaveMatch);
+                        pressed(&mut latch);
                     }
                 } else {
                     commands.write(NetworkCommand::RequestRematch);
+                    pressed(&mut latch);
+                }
+            }
+            PostMatchAction::Details => {
+                if let Some(career) = career.as_mut() {
+                    career.open_last_result_modal();
                 }
             }
             PostMatchAction::BackToMenu => {
@@ -259,9 +1758,16 @@ fn post_match_actions(
     }
 }
 
+fn pressed(latch: &mut Option<ResMut<PostMatchLatch>>) {
+    if let Some(latch) = latch.as_mut() {
+        latch.play_again_pressed = true;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::widgets::screen_button;
 
     fn saved_receipt() -> MatchResult {
         serde_json::from_value(serde_json::json!({

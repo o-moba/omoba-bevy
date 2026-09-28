@@ -59,6 +59,10 @@ pub(crate) struct CareerClient {
     pub nickname: String,
     pub local_player_id: Option<u64>,
     pub modal: CareerModal,
+    /// Set while the result screen is up: a new match result is recorded
+    /// (Details opens it) but does not open the career page over the screen
+    /// that already shows it (post-match.md).
+    pub hold_result_modal: bool,
     draft: String,
     preedit: String,
     form_error: Option<String>,
@@ -88,6 +92,7 @@ impl Default for CareerClient {
             nickname: "Player".into(), // i18n-allow: protocol default nickname
             local_player_id: None,
             modal: CareerModal::Closed,
+            hold_result_modal: false,
             draft: String::new(),
             preedit: String::new(),
             form_error: None,
@@ -345,9 +350,11 @@ impl CareerClient {
             self.announced_result = Some(result.result_id.clone());
             self.announced_player_id = self.local_player_id;
             self.selected_result = Some(result.result_id.clone());
-            self.modal = CareerModal::Result;
-            self.nickname_focused = false;
-            self.friend_code_focused = false;
+            if !self.hold_result_modal {
+                self.modal = CareerModal::Result;
+                self.nickname_focused = false;
+                self.friend_code_focused = false;
+            }
             self.expanded_player = None;
         }
         if self.view != next {
@@ -374,6 +381,15 @@ impl CareerClient {
         self.form_error = None;
         self.nickname_focused = true;
         self.friend_code_focused = false;
+    }
+    /// Opens the match detail of the last result from outside the career UI
+    /// (the result screen's Details). Does nothing without a result.
+    pub(crate) fn open_last_result_modal(&mut self) {
+        if let Some(id) = self.view.last_result.as_ref().map(|r| r.result_id.clone()) {
+            self.selected_result = Some(id);
+            self.expanded_player = None;
+            self.modal = CareerModal::Result;
+        }
     }
     /// Opens the profile modal from outside the career UI (front-end shell).
     pub(crate) fn open_profile_modal(&mut self) {
@@ -1081,7 +1097,7 @@ fn timestamp(ms: u64) -> String {
         (seconds % 3600) / 60
     )
 }
-fn number(value: f64) -> String {
+pub(crate) fn number(value: f64) -> String {
     if value.is_finite() && value >= 0.0 {
         format!("{value:.0}")
     } else {
@@ -1128,7 +1144,7 @@ fn profile_progress(profile: &ProfileSummary) -> String {
 }
 /// A server reason code (`allocated_bots`) shows its dictionary text; any
 /// other reason is server-authored prose and stays as sent.
-fn unrated_reason(reason: &str) -> &str {
+pub(crate) fn unrated_reason(reason: &str) -> &str {
     let code = !reason.is_empty()
         && reason
             .bytes()
@@ -1137,7 +1153,9 @@ fn unrated_reason(reason: &str) -> &str {
         .flatten()
         .unwrap_or(reason)
 }
-fn local_participant<'a>(
+/// The local player's row in a result: by career profile, else the player
+/// id recorded when the result was announced (guests).
+pub(crate) fn local_participant<'a>(
     result: &'a MatchResult,
     career: &CareerClient,
 ) -> Option<&'a ParticipantResult> {
@@ -2245,8 +2263,11 @@ fn render(
             .as_ref()
             .is_some_and(|session| session.join_in_flight() && !session.join_confirmed());
     // The front end has its own navigation; the in-match career bar would
-    // otherwise float over the menus.
-    let front_end_menu = screen.as_ref().is_some_and(|screen| screen.get().is_menu());
+    // otherwise float over the menus. The result screen reaches the career
+    // through Details (post-match.md: the bar covered its footer hint).
+    let front_end_menu = screen.as_ref().is_some_and(|screen| {
+        screen.get().is_menu() || *screen.get() == crate::frontend::AppScreen::PostMatch
+    });
     let show_entry = !front_end_menu
         && (selection_recovery
             || queue_text(&career.view.queue).is_some()

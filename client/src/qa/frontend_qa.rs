@@ -101,7 +101,7 @@ impl Plugin for FrontendQaPlugin {
         // The capture drives the screens itself; the session must not pull a
         // screen away (the search screen has no real queue entry behind it).
         .insert_resource(ScreenDriverPaused(true))
-        .add_systems(Startup, watermark)
+        .add_systems(Startup, (watermark, result_fixture_label))
         .add_systems(
             PreUpdate,
             prepare_help_buttons.after(bevy::ui::UiSystems::Focus),
@@ -194,6 +194,35 @@ fn watermark(mut commands: Commands) {
     ));
 }
 
+/// Marks the result screen capture as a layout fixture (post-match.md: no
+/// match, no Victory, no result behind it), also in clean frames.
+#[derive(Component)]
+struct ResultFixtureLabel;
+
+fn result_fixture_label(mut commands: Commands) {
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(12.0),
+            right: Val::Px(12.0),
+            padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+            display: Display::None,
+            ..default()
+        },
+        Text::new("07-result-fixture · layout only"),
+        TextFont {
+            font_size: 11.0,
+            ..default()
+        },
+        TextColor(Color::srgb(1.0, 0.8, 0.3)),
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)),
+        FocusPolicy::Pass,
+        ZIndex(300),
+        ResultFixtureLabel,
+        Name::new("FrontendQaResultFixture"),
+    ));
+}
+
 fn drive(
     mut qa: ResMut<FrontendQa>,
     screen: Res<State<AppScreen>>,
@@ -203,7 +232,21 @@ fn drive(
     server: Option<ResMut<crate::mobile_ui::ServerEntry>>,
     mut scrolls: Query<(crate::qa::QaName, &ComputedNode, &mut ScrollPosition)>,
     mut career: ResMut<crate::career::CareerClient>,
+    mut fixture_labels: Query<&mut Node, With<ResultFixtureLabel>>,
 ) {
+    for mut node in &mut fixture_labels {
+        let display = if VIEWS
+            .get(qa.stage)
+            .is_some_and(|view| view.1 == AppScreen::PostMatch)
+        {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        if node.display != display {
+            node.display = display;
+        }
+    }
     if qa.finished || qa.stage >= VIEWS.len() {
         return;
     }

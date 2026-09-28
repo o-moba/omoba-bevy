@@ -374,6 +374,16 @@ fn scale_menus_to_the_window(
             } else {
                 menu_scale(window.resolution.height())
             }
+        } else if *screen.get() == AppScreen::PostMatch
+            && !pause.as_ref().is_some_and(|state| state.open)
+            && !career.as_ref().is_some_and(|state| state.modal_open())
+            && !help.as_ref().is_some_and(|state| state.0)
+        {
+            // The result screen is laid out on the reference in text roles
+            // only (never below 11 rendered px), so it takes the full R2.3
+            // range down to 0.8. The legacy pages opened over it (game menu,
+            // career detail, help) keep 1.0.
+            postmatch::result_ui_scale(window.resolution.width(), window.resolution.height())
         } else {
             1.0
         }

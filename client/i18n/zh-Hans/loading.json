@@ -16,13 +16,15 @@
   "loading.assets.animations": "正在加载英雄材质和动画…",
   "loading.assets.ready": "战场和所有已选英雄均已就绪。",
   "loading.assets.preparing": "正在准备战场…",
-  "loading.title.countdown": "队伍就绪 · {seconds}",
   "loading.title.entering": "正在进入翠绿之地",
+  "loading.title.team_ready": "队伍就绪",
   "loading.subtitle.countdown": "所有人共享此倒计时 · 选择已锁定",
   "loading.subtitle.loading": "所有玩家就绪后对局开始",
   "loading.your_team": "你的队伍",
   "loading.opponents": "对手",
   "loading.ready_count": "{ready} / {total} 名玩家已就绪",
   "loading.ready_count_timed": "{ready} / {total} 名玩家已就绪 · 最多剩余 {seconds} 秒",
-  "loading.connecting": "正在连接战场…"
+  "loading.connecting": "正在连接战场…",
+  "loading.shell.failed": "连接失败",
+  "loading.shell.slow": "耗时比平常更久。可以取消并返回主菜单。"
 }

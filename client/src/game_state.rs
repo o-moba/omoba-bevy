@@ -1,15 +1,13 @@
-//! Full-screen game state card: matchmaking progress and the round result.
+//! Full-screen game state card: matchmaking progress (lobby, forming,
+//! starting) and the career queue. The round result is the result screen's
+//! (`frontend/postmatch.rs`, DECISIONS R2.2).
 // i18n-strict
 use bevy::prelude::*;
 
 use crate::i18n::{tr, trf};
 use crate::net::{ClientSession, GameState, GameStateSnapshot};
-use crate::player::Player;
-use crate::team::Team;
 
 const OVERLAY_ALPHA: f32 = 0.55;
-const WIN_COLOR: Color = Color::srgba(0.12, 0.55, 0.22, OVERLAY_ALPHA);
-const LOSE_COLOR: Color = Color::srgba(0.55, 0.12, 0.12, OVERLAY_ALPHA);
 const LOBBY_COLOR: Color = Color::srgba(0.10, 0.10, 0.35, OVERLAY_ALPHA);
 
 pub struct GameStateUiPlugin;
@@ -108,20 +106,11 @@ fn matchmaking_status_text(state: &GameState, join_committed: bool) -> Option<St
     }
 }
 
-/// A team's name in the result text.
-fn team_name(team: Team) -> &'static str {
-    tr(match team {
-        Team::Green => "state.team.green",
-        Team::Blue => "state.team.blue",
-    })
-}
-
 fn update_game_state_ui(
     game_state: Res<GameStateSnapshot>,
-    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     client_session: Res<ClientSession>,
-    local_team: Query<&Team, With<Player>>,
     career: Option<Res<crate::career::CareerClient>>,
+    screen: Option<Res<State<crate::frontend::AppScreen>>>,
     mut overlay_query: Query<(&mut Visibility, &mut BackgroundColor), With<GameStateOverlay>>,
     mut text_query: Query<&mut Text, With<GameStateLabel>>,
 ) {
@@ -132,10 +121,16 @@ fn update_game_state_ui(
         return;
     };
 
-    if career.as_ref().is_some_and(|career| career.modal_open()) || !client_session.is_connected() {
-        *visibility = Visibility::Hidden;
-        *background = BackgroundColor(Color::NONE);
-        label.0.clear();
+    // The result screen owns the end of a round (DECISIONS R2.2): the card
+    // keeps only the lobby and queue texts and never sits under it.
+    let result_screen = screen
+        .as_ref()
+        .is_some_and(|screen| *screen.get() == crate::frontend::AppScreen::PostMatch);
+    if career.as_ref().is_some_and(|career| career.modal_open())
+        || result_screen
+        || !client_session.is_connected()
+    {
+        hide(&mut visibility, &mut background, &mut label);
         return;
     }
 
@@ -148,83 +143,23 @@ fn update_game_state_ui(
         label.0 = status;
         return;
     }
-    if career.as_ref().is_some_and(|career| {
-        career.view.last_result.as_ref().is_some_and(|result| {
-            result.server_epoch == game_state.meta.server_epoch
-                && result.match_id == game_state.meta.match_id
-        })
-    }) && matches!(game_state.state, GameState::Victory { .. })
-    {
-        *visibility = Visibility::Hidden;
-        label.0.clear();
-        return;
-    }
-    match game_state.state {
-        GameState::Lobby | GameState::Forming { .. } | GameState::Starting { .. } => {
-            // Before the local join is committed the select screen is up;
-            // keep the lobby overlay hidden so it never obscures that flow.
-            match matchmaking_status_text(&game_state.state, client_session.join_in_flight()) {
-                Some(text) => {
-                    *visibility = Visibility::Visible;
-                    *background = BackgroundColor(LOBBY_COLOR);
-                    label.0 = text;
-                }
-                None => {
-                    *visibility = Visibility::Hidden;
-                    *background = BackgroundColor(Color::NONE);
-                    label.0.clear();
-                }
-            }
-        }
-        GameState::Running => {
-            *visibility = Visibility::Hidden;
-            *background = BackgroundColor(Color::NONE);
-            label.0.clear();
-        }
-        GameState::Victory { winner } => {
+    // Before the local join is committed the select screen is up; keep the
+    // lobby overlay hidden so it never obscures that flow. A running or
+    // finished round shows nothing here.
+    match matchmaking_status_text(&game_state.state, client_session.join_in_flight()) {
+        Some(text) => {
             *visibility = Visibility::Visible;
-            let local_won = local_team.iter().next().map(|team| *team == winner);
-            *background = BackgroundColor(match local_won {
-                Some(true) => WIN_COLOR,
-                Some(false) => LOSE_COLOR,
-                None => LOBBY_COLOR,
-            });
-            let result = tr(match local_won {
-                Some(true) => "state.result.victory",
-                Some(false) => "state.result.defeat",
-                None => "state.result.complete",
-            });
-            if career
-                .as_ref()
-                .is_some_and(|career| career.view.profile.is_some())
-            {
-                label.0 = trf(
-                    "state.finalizing",
-                    &[("team", &team_name(Team::from(winner)))],
-                );
-                return;
-            }
-            let next_round = game_state.rematch_in_secs.map_or_else(
-                || tr("state.next_round.preparing").to_owned(),
-                |secs| trf("state.next_round.countdown", &[("seconds", &secs)]),
-            );
-            // Phones open the menu with the MENU button, not Escape.
-            let exit = tr(if mobile.as_ref().is_some_and(|mobile| mobile.enabled) {
-                "state.exit_hint_phone"
-            } else {
-                "state.exit_hint"
-            });
-            label.0 = trf(
-                "state.round_over",
-                &[
-                    ("result", &result),
-                    ("team", &team_name(Team::from(winner))),
-                    ("next_round", &next_round),
-                    ("exit", &exit),
-                ],
-            );
+            *background = BackgroundColor(LOBBY_COLOR);
+            label.0 = text;
         }
+        None => hide(&mut visibility, &mut background, &mut label),
     }
+}
+
+fn hide(visibility: &mut Visibility, background: &mut BackgroundColor, label: &mut Text) {
+    *visibility = Visibility::Hidden;
+    *background = BackgroundColor(Color::NONE);
+    label.0.clear();
 }
 
 #[cfg(test)]
@@ -345,8 +280,11 @@ mod tests {
         // In-match states render no matchmaking overlay.
         assert_eq!(matchmaking_status_text(&GameState::Running, true), None);
     }
+    /// DECISIONS R2.2: the round result is the result screen's; the card
+    /// never shows it (it replaced "Victory! … Stay connected …") and comes
+    /// back for the next round's countdown on its own.
     #[test]
-    fn victory_is_bounded_and_automatically_returns_to_countdown_then_gameplay() {
+    fn victory_is_left_to_the_result_screen_and_the_countdown_returns() {
         let mut app = spawn_ui_app();
         app.world_mut()
             .resource_mut::<ClientSession>()
@@ -354,7 +292,6 @@ mod tests {
         app.world_mut()
             .resource_mut::<ClientSession>()
             .set_join_in_flight_for_test(true);
-        app.world_mut().spawn((Player, Team::Green));
         app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Victory {
             winner: shared::map::Team::Green,
         };
@@ -362,22 +299,17 @@ mod tests {
             .resource_mut::<GameStateSnapshot>()
             .rematch_in_secs = Some(10);
         app.update();
+        let overlay = overlay_entity(&mut app);
         let label = app
             .world_mut()
             .query_filtered::<Entity, With<GameStateLabel>>()
             .single(app.world())
             .unwrap();
-        let text = &app.world().get::<Text>(label).unwrap().0;
-        assert!(text.starts_with("Victory!"));
-        assert!(text.contains("Next round in 10s"));
-        assert!(text.contains("Stay connected"));
-        assert!(!text.contains("restart"));
-        assert!(text.len() < 240);
-        let card = app.world().get::<ChildOf>(label).unwrap().parent();
         assert_eq!(
-            app.world().get::<Node>(card).unwrap().max_width,
-            Val::Px(660.0)
+            *app.world().get::<Visibility>(overlay).unwrap(),
+            Visibility::Hidden
         );
+        assert!(app.world().get::<Text>(label).unwrap().0.is_empty());
         app.world_mut().resource_mut::<GameStateSnapshot>().state =
             GameState::Starting { countdown_ms: 3000 };
         app.update();
@@ -390,58 +322,48 @@ mod tests {
         );
         app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Running;
         app.update();
-        let overlay = overlay_entity(&mut app);
         assert_eq!(
             *app.world().get::<Visibility>(overlay).unwrap(),
             Visibility::Hidden
         );
     }
+
+    /// The card also stays out from under the result screen, whatever it
+    /// would print (a queue line from the career view).
     #[test]
-    fn prior_result_does_not_hide_a_new_victory_and_missing_player_is_neutral() {
+    fn the_result_screen_hides_the_card() {
+        use crate::frontend::AppScreen;
         let mut app = spawn_ui_app();
+        app.add_plugins(bevy::state::app::StatesPlugin)
+            .init_state::<AppScreen>();
         app.world_mut()
             .resource_mut::<ClientSession>()
             .set_state_for_test(ClientConnectionState::Connected);
-        {
-            let mut state = app.world_mut().resource_mut::<GameStateSnapshot>();
-            state.state = GameState::Victory {
-                winner: shared::map::Team::Green,
-            };
-            state.meta = shared::protocol::SnapshotMeta::new(9, 2, 20);
-        }
         let mut career = crate::career::CareerClient::default();
-        career.view.last_result = Some(shared::career::MatchResult {
-            result_id: "old".into(),
-            server_epoch: 9,
-            match_id: 1,
-            started_at_ms: 0,
-            ended_at_ms: 1,
-            duration_ms: 1,
-            map_profile: "default".into(),
-            ruleset: "default".into(),
-            outcome: shared::career::MatchOutcome::Completed,
-            winner: Some(shared::map::Team::Green),
-            rated: false,
-            unrated_reason: None,
-            participants: Vec::new(),
-            saved: true,
-        });
+        career.view.queue = shared::career::QueueView::Waiting {
+            compatible: 3,
+            needed: 10,
+            elapsed_secs: 12,
+            newcomer: false,
+        };
         app.insert_resource(career);
         app.update();
-        let entity = overlay_entity(&mut app);
+        let overlay = overlay_entity(&mut app);
         assert_eq!(
-            app.world().get::<Visibility>(entity),
-            Some(&Visibility::Visible)
+            *app.world().get::<Visibility>(overlay).unwrap(),
+            Visibility::Visible
         );
-        assert!(
-            app.world_mut()
-                .query_filtered::<&Text, With<GameStateLabel>>()
-                .single(app.world())
-                .unwrap()
-                .0
-                .starts_with("Match complete")
+        app.world_mut()
+            .resource_mut::<NextState<AppScreen>>()
+            .set(AppScreen::PostMatch);
+        app.update();
+        app.update();
+        assert_eq!(
+            *app.world().get::<Visibility>(overlay).unwrap(),
+            Visibility::Hidden
         );
     }
+
     #[test]
     fn authoritative_queue_wait_is_visible_while_another_match_is_running() {
         let mut app = spawn_ui_app();
@@ -469,25 +391,19 @@ mod tests {
     }
 
     #[test]
-    fn round_result_names_the_phone_menu_and_follows_the_language() {
-        if crate::i18n::testing::isolated(
-            "game_state::tests::round_result_names_the_phone_menu_and_follows_the_language",
-        ) {
+    fn lobby_text_follows_the_language() {
+        if crate::i18n::testing::isolated("game_state::tests::lobby_text_follows_the_language") {
             return;
         }
         use crate::i18n::{I18nPlugin, Locale, LocaleId};
         let mut app = spawn_ui_app();
-        let mut controls = crate::mobile_controls::MobileControls::default();
-        controls.enabled = true;
-        app.add_plugins(I18nPlugin::default())
-            .insert_resource(controls);
+        app.add_plugins(I18nPlugin::default());
         app.world_mut()
             .resource_mut::<ClientSession>()
             .set_state_for_test(ClientConnectionState::Connected);
-        app.world_mut().spawn((Player, Team::Blue));
-        app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Victory {
-            winner: shared::map::Team::Green,
-        };
+        app.world_mut()
+            .resource_mut::<ClientSession>()
+            .set_join_in_flight_for_test(true);
         app.update();
         let label = app
             .world_mut()
@@ -495,18 +411,12 @@ mod tests {
             .single(app.world())
             .unwrap();
         let text = |app: &App| app.world().get::<Text>(label).unwrap().0.clone();
-        assert!(text(&app).starts_with("Defeat\nGreen destroyed the enemy base."));
-        assert!(text(&app).ends_with("MENU: settings or exit game."));
+        assert_eq!(text(&app), "Waiting for players...");
         app.world_mut()
             .resource_mut::<Locale>()
             .set(LocaleId::parse("zh-Hans").unwrap());
         app.update();
-        assert!(
-            text(&app).starts_with("失败\n绿队摧毁了敌方基地。"),
-            "{}",
-            text(&app)
-        );
-        assert!(text(&app).ends_with("菜单：设置或退出游戏。"));
+        assert_eq!(text(&app), "等待玩家加入…");
         assert_eq!(
             matchmaking_status_text(&GameState::Lobby, true).as_deref(),
             Some("等待玩家加入…")

@@ -107,8 +107,12 @@ pub(in crate::net) fn sync_connection_status_ui(
     >,
 ) {
     // Front-end screens print their own status line (home header, picker
-    // header, search screen), so the floating panel belongs to the match only.
-    let owned_by_screen = screen.as_ref().is_some_and(|screen| screen.get().is_menu());
+    // header, search screen, the loading body), so the floating panel belongs
+    // to the match only. The result screen prints a lost connection in its
+    // status line (post-match.md).
+    let owned_by_screen = screen.as_ref().is_some_and(|screen| {
+        screen.get().is_menu() || *screen.get() == crate::frontend::AppScreen::PostMatch
+    });
     let healthy_admission = owned_by_screen
         || (client_session.join_confirmed()
             && client_session.join_error.is_none()
@@ -154,6 +158,84 @@ pub(in crate::net) fn sync_connection_status_ui(
         } else {
             Display::None
         };
+    }
+}
+
+/// The connection as a screen reports it (`loading-shell.md` status
+/// priority, rows 1–6): the same inputs as the floating panel, without its
+/// developer lines (server address, `GAME_SERVER_ADDR`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LinkStatus {
+    /// The server refused the join (after a reconnect, or a protocol mismatch).
+    Rejected(shared::protocol::JoinRejection),
+    /// The server never confirmed the join.
+    Unconfirmed,
+    /// The transport dropped; the auto-reconnect is on its `attempt`.
+    Reconnecting { attempt: u32 },
+    /// The transport dropped and nothing retries by itself.
+    Disconnected,
+    /// Connecting or waiting for the server (after a Retry).
+    Connecting,
+    /// Connected with a committed join the server has not admitted yet.
+    Joining { attempt: u32, max: u32 },
+    /// Connected (admitted, or nothing to admit).
+    Connected,
+}
+
+impl LinkStatus {
+    /// A Retry press would do something nothing else is already doing.
+    pub(crate) fn can_retry(self) -> bool {
+        matches!(
+            self,
+            LinkStatus::Rejected(_) | LinkStatus::Unconfirmed | LinkStatus::Disconnected
+        )
+    }
+
+    /// The line a screen prints for it (`None` = nothing to say).
+    pub(crate) fn detail(self) -> Option<String> {
+        match self {
+            LinkStatus::Rejected(reason) => Some(data::join_rejection(reason).to_owned()),
+            LinkStatus::Unconfirmed => Some(tr("net.status.join_unconfirmed").to_owned()),
+            LinkStatus::Reconnecting { attempt } => {
+                Some(trf("net.status.reconnecting", &[("attempt", &attempt)]))
+            }
+            LinkStatus::Disconnected => Some(tr("net.status.disconnected").to_owned()),
+            LinkStatus::Joining { attempt, max } => Some(trf(
+                "net.status.joining",
+                &[("attempt", &attempt), ("max", &max)],
+            )),
+            LinkStatus::Connecting | LinkStatus::Connected => None,
+        }
+    }
+}
+
+/// Where the session stands, first match wins (`loading-shell.md`).
+pub(crate) fn link_status(session: &ClientSession) -> LinkStatus {
+    if let Some(reason) = session.join_error {
+        return LinkStatus::Rejected(reason);
+    }
+    if session.join_exhausted {
+        return LinkStatus::Unconfirmed;
+    }
+    match session.state {
+        ClientConnectionState::Disconnected if session.reconnect.active => {
+            LinkStatus::Reconnecting {
+                attempt: session.reconnect.attempts.max(1),
+            }
+        }
+        ClientConnectionState::Disconnected => LinkStatus::Disconnected,
+        ClientConnectionState::Connecting | ClientConnectionState::WaitingForServer => {
+            LinkStatus::Connecting
+        }
+        ClientConnectionState::Connected
+            if session.last_join.is_some() && !session.join_confirmed() =>
+        {
+            LinkStatus::Joining {
+                attempt: session.join_attempts,
+                max: MAX_JOIN_ATTEMPTS,
+            }
+        }
+        ClientConnectionState::Connected => LinkStatus::Connected,
     }
 }
 

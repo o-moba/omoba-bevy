@@ -388,6 +388,8 @@ fn prepare_result_fixture(
     mut qa: ResMut<BetaUiQa>,
     mut game: ResMut<GameStateSnapshot>,
     mut labels: Query<&mut Node, With<ResultFixtureLabel>>,
+    screen: Option<Res<State<crate::frontend::AppScreen>>>,
+    next: Option<ResMut<NextState<crate::frontend::AppScreen>>>,
 ) {
     for mut node in &mut labels {
         node.display = if qa.stage == 6 {
@@ -395,6 +397,19 @@ fn prepare_result_fixture(
         } else {
             Display::None
         };
+    }
+    // The result is the result screen (DECISIONS R2.2). This harness
+    // bypasses the shell driver, so it shows the screen itself over the live
+    // match (real live score, synthetic Victory) and returns to the match
+    // for the stages after it.
+    let current = screen.map(|screen| *screen.get());
+    if let Some(mut next) = next {
+        use crate::frontend::AppScreen;
+        if qa.stage == 6 && current != Some(AppScreen::PostMatch) {
+            next.set(AppScreen::PostMatch);
+        } else if qa.stage != 6 && current == Some(AppScreen::PostMatch) {
+            next.set(AppScreen::InMatch);
+        }
     }
     if qa.stage != 6 {
         return;

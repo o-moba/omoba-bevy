@@ -16,13 +16,15 @@
   "loading.assets.animations": "Loading hero materials and animations…",
   "loading.assets.ready": "Your battlefield and all selected heroes are ready.",
   "loading.assets.preparing": "Preparing the battlefield…",
-  "loading.title.countdown": "Team ready · {seconds}",
   "loading.title.entering": "Entering the Verdant",
+  "loading.title.team_ready": "Team ready",
   "loading.subtitle.countdown": "Everyone shares this countdown · choices are locked",
   "loading.subtitle.loading": "The match starts when every player is ready",
   "loading.your_team": "YOUR TEAM",
   "loading.opponents": "OPPONENTS",
   "loading.ready_count": "{ready} / {total} players ready",
   "loading.ready_count_timed": "{ready} / {total} players ready · up to {seconds}s remaining",
-  "loading.connecting": "Connecting to the battlefield…"
+  "loading.connecting": "Connecting to the battlefield…",
+  "loading.shell.failed": "Connection problem",
+  "loading.shell.slow": "This is taking longer than usual. Cancel to return to the menu."
 }

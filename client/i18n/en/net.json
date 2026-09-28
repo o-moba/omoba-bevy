@@ -6,7 +6,7 @@
   "net.status.joining": "Joining match… attempt {attempt}/{max}. Waiting for server admission.",
   "net.status.connected": "Connected - choose a hero and team to join.",
   "net.status.reconnecting": "Connection lost - reconnecting (attempt {attempt})...",
-  "net.status.disconnected": "Disconnected - connection lost or timed out. Use Retry when the server is back, then choose your team again.",
+  "net.status.disconnected": "Disconnected - connection lost or timed out. Use Retry when the server is back, then play again.",
   "net.status.join_unconfirmed": "The server did not confirm your Join. Use Retry to try again.",
   "net.practice.banner": "OFFLINE PRACTICE · Level {level} · No rewards",
   "net.practice.you": "You",
