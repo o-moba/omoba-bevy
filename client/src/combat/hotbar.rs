@@ -169,6 +169,7 @@ pub(super) fn setup_combat_ui(
                         unlock_level: Some(shared::SLOT_UNLOCK_LEVELS[i] as u8),
                         no_mana: false,
                         pips: true,
+                        ring: false,
                     };
                     let slot = game::ability_button(
                         col,

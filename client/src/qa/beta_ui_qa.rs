@@ -438,8 +438,13 @@ struct SkillUpgradeFixtureState {
 #[derive(Component)]
 struct SkillUpgradeFixtureLabel;
 
+/// Fixture ranks: 1, 2, 3, 1 show every lit state of the phone rank ring
+/// (R10) and the desktop pips; a locked slot (rank 0) shows in the fixture-free
+/// stages.
+const FIXTURE_RANKS: [u8; 4] = [1, 2, 3, 1];
+
 fn has_fixture_progression(progression: &crate::net::PlayerProgression) -> bool {
-    progression.level == 6 && progression.skill_points == 4 && progression.ranks == [1; 4]
+    progression.level == 6 && progression.skill_points == 4 && progression.ranks == FIXTURE_RANKS
 }
 
 fn prepare_skill_upgrade_fixture(
@@ -469,7 +474,7 @@ fn prepare_skill_upgrade_fixture(
             }
             progression.level = 6;
             progression.skill_points = 4;
-            progression.ranks = [1; 4];
+            progression.ranks = FIXTURE_RANKS;
             // hud.md ability states in one frame: slot 2 cooling (sweep and
             // seconds), and mana under the other costs (red cost pills).
             // Client-only; the next snapshot restores the real values.
@@ -604,7 +609,7 @@ fn capture(
                     "real_purchase_verified":true,
                     "full_match_proof":false, "result_snapshot":"synthetic presentation fixture only",
                     "synthetic_progression":qa.skill_upgrades,
-                    "progression_fixture":"opt-in local level 6, four skill points and rank 1 abilities during stages 2/5 only; server unchanged"});
+                    "progression_fixture":"opt-in local level 6, four skill points and ranks 1/2/3/1 during stages 2/5 only; server unchanged"});
                 let saved = std::fs::write(
                     qa.directory.join("qa-summary.json"),
                     serde_json::to_vec_pretty(&summary).unwrap(),
@@ -978,11 +983,12 @@ fn capture(
         .is_some_and(|fixture| fixture.applied);
     let upgrade_required: &[&str] =
         if synthetic_progression && mobile.as_ref().is_some_and(|mobile| mobile.enabled) {
+            // The + badge (`MobileRankRing-N`) marks each slot that can still
+            // rank up: the fixture's rank-3 slot (index 2) has none.
             &[
                 "MobileRankMode",
                 "MobileRankRing-0",
                 "MobileRankRing-1",
-                "MobileRankRing-2",
                 "MobileRankRing-3",
                 "QaSkillUpgradeFixtureLabel",
             ]
@@ -1075,7 +1081,7 @@ fn capture(
         "requested_class":qa.hero_class.map(|class|class.id()), "selected_class":scene.selection.hero_class.id(),
         "authoritative_class":scene.hero_classes.single().ok().map(|class|class.0.id()), "skill_art_clear":skill_art_clear, "shop_close_clear":shop_close_clear, "server_epoch":game.meta.server_epoch, "snapshot_tick":game.meta.snapshot_tick,
         "synthetic_result":stage == 6, "synthetic_progression":synthetic_progression,
-        "progression_fixture":synthetic_progression.then(||serde_json::json!({"level":6,"skill_points":4,"ranks":[1,1,1,1],"server_unchanged":true})),
+        "progression_fixture":synthetic_progression.then(||serde_json::json!({"level":6,"skill_points":4,"ranks":FIXTURE_RANKS,"server_unchanged":true})),
         "minimap":minimap.diagnostics(), "minimap_top_left":minimap_top_left, "playfield_clear":playfield_clear, "radial_geometry_valid":radial_geometry_valid, "hud_text_fits":hud_text_fits, "shop_modal":shop.open, "gameplay_allowed":context.gameplay_allowed(), "pause_open":pause.open,
         "edge":edge::record(stage, scene.edge.as_deref(), &game, scene.utility.single().ok(), &scene.texts),
         "equipment":equipment.single().ok().map(|e|serde_json::json!({"gold":e.gold,"inventory":e.inventory,"bonuses":e.item_bonuses,"receipt":e.last_purchase})), "primary_controls_fit":controls_fit, "shop_text_fits":shop_text_fits, "primary_nodes":primary_nodes});

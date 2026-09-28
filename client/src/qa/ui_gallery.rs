@@ -1180,6 +1180,7 @@ fn ability(ability: &'static str, key: &'static str) -> AbilityView {
         unlock_level: Some(6),
         no_mana: false,
         pips: true,
+        ring: false,
     }
 }
 
@@ -1205,10 +1206,18 @@ fn abilities_page(body: &mut ChildSpawnerCommands, form: Form) {
                 })
                 .with_children(|slot| {
                     let mut view = ability("arc_bolt", "Q"); // i18n-allow
+                    // Phone: rank is the segmented ring on the rim (R10).
+                    view.ring = form == Form::Phone;
+                    view.pips = form == Form::Desktop;
                     match index {
                         4 => view.cooldown = Some((3.0, 8.0)),
                         5 => view.no_mana = true,
-                        6 => view.locked = true,
+                        6 => {
+                            view.locked = true;
+                            if view.ring {
+                                view.rank = 0;
+                            }
+                        }
                         _ => {}
                     }
                     let entity = game::ability_button(
@@ -1259,6 +1268,32 @@ fn abilities_page(body: &mut ChildSpawnerCommands, form: Form) {
             });
         }
     });
+    if form == Form::Phone {
+        // R10: the ring at every rank, and over a cooldown sweep.
+        row(body, "kit.gallery.row.rank_ring", |line| {
+            for (rank, cooldown) in [
+                (0, None),
+                (1, None),
+                (2, None),
+                (3, None),
+                (2, Some((3.0, 8.0))),
+            ] {
+                let mut view = ability("arc_bolt", "Q"); // i18n-allow
+                view.key = None;
+                view.pips = false;
+                view.ring = true;
+                view.rank = rank;
+                view.cooldown = cooldown;
+                game::ability_button(
+                    line,
+                    view,
+                    size::ABILITY.phone,
+                    GalleryAction::Noop,
+                    "GalleryRankRing",
+                );
+            }
+        });
+    }
     row(body, "kit.gallery.row.phone_controls", |line| {
         for (side, icon) in [
             (size::ABILITY_ATTACK_PHONE, Icon::HudAttack),
@@ -1269,6 +1304,7 @@ fn abilities_page(body: &mut ChildSpawnerCommands, form: Form) {
             view.key = None;
             view.cost = None;
             view.pips = false;
+            view.ring = side == size::ABILITY.phone;
             if side != size::ABILITY.phone {
                 view.ability = None;
                 view.icon = icon;

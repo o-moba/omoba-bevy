@@ -365,6 +365,8 @@ pub(crate) struct AbilityView {
     pub no_mana: bool,
     /// Show the rank pips (desktop only).
     pub pips: bool,
+    /// Show the segmented rank ring on the rim (phone, DECISIONS R10).
+    pub ring: bool,
 }
 
 /// Maximum ability rank (`MAX_ABILITY_RANK`).
@@ -397,6 +399,8 @@ pub(crate) struct AbilityParts {
     pub(crate) key: Option<Entity>,
     cost: Option<Entity>,
     pips: Option<Entity>,
+    /// Rank ring layers: all arcs (unlearned tint) and the learned arcs.
+    ring: Option<(Entity, Entity)>,
     flash: Entity,
 }
 
@@ -582,11 +586,19 @@ fn fill_ability(
                 Pickable::IGNORE,
             ))
             .id();
+        // The phone's segmented rank ring replaces the plain rim (R10): it
+        // is the rim, split into `MAX_RANK` arcs, over the art and sweep.
+        let rim = if view.ring {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
         parts.track = Some(
             button
                 .spawn((
                     full(),
                     KitImage::sprite(Sprite::RingCircle, color::GOLD_500),
+                    rim,
                     Pickable::IGNORE,
                 ))
                 .id(),
@@ -597,8 +609,30 @@ fn fill_ability(
                 ..inset(border::FRAME)
             },
             BorderColor::all(color::GOLD_700),
+            rim,
             Pickable::IGNORE,
         ));
+        let ring = view.ring.then(|| {
+            let mut layer = |tint: Color| {
+                button
+                    .spawn((
+                        Node {
+                            border_radius: BorderRadius::ZERO,
+                            ..full()
+                        },
+                        ImageNode {
+                            color: tint,
+                            ..default()
+                        },
+                        // Shown once the masks exist (`paint_abilities`).
+                        Visibility::Hidden,
+                        RankRingLayer,
+                        Pickable::IGNORE,
+                    ))
+                    .id()
+            };
+            (layer(RANK_RING_UNLEARNED), layer(RANK_RING_LEARNED))
+        });
         let mut seconds = Entity::PLACEHOLDER;
         button
             .spawn((full(), Pickable::IGNORE))
@@ -736,6 +770,7 @@ fn fill_ability(
             key,
             cost,
             pips,
+            ring,
             flash,
         });
     });
@@ -744,6 +779,73 @@ fn fill_ability(
         button.insert(ability);
     }
     root
+}
+
+/// Segmented rank ring (`ability-button.md` § Rank ring, R10): learned
+/// ranks `color.gold.400`, not yet learned `color.border.subtle`.
+pub(crate) const RANK_RING_LEARNED: Color = color::GOLD_400;
+pub(crate) const RANK_RING_UNLEARNED: Color = color::BORDER_SUBTLE;
+/// Mask size and band: the outer 11 % of the radius (0.87–0.98), each arc
+/// with a 9 % gap (4.5 % at either end), as the 0.26 phone ring.
+pub(crate) const RANK_RING_MASK: usize = 112;
+const RANK_RING_BAND: (f32, f32) = (0.87, 0.98);
+const RANK_RING_GAP: f32 = 0.045;
+
+/// A rank ring layer of an ability button.
+#[derive(Component)]
+pub(crate) struct RankRingLayer;
+
+/// A white mask of the first `lit` of `capacity` arcs, clockwise from 12
+/// o'clock (RGBA, `RANK_RING_MASK` square); the layer's colour tints it.
+pub(crate) fn rank_ring_pixels(lit: u8, capacity: u8) -> Vec<u8> {
+    let size = RANK_RING_MASK;
+    let mut pixels = vec![0; size * size * 4];
+    for y in 0..size {
+        for x in 0..size {
+            let delta = Vec2::new(x as f32 + 0.5, y as f32 + 0.5) - Vec2::splat(size as f32 * 0.5);
+            let radius = delta.length() / (size as f32 * 0.5);
+            let turn = (delta.y.atan2(delta.x) + std::f32::consts::FRAC_PI_2)
+                .rem_euclid(std::f32::consts::TAU)
+                / std::f32::consts::TAU;
+            let segment = turn * f32::from(capacity.max(1));
+            let on_arc = (RANK_RING_BAND.0..=RANK_RING_BAND.1).contains(&radius)
+                && (RANK_RING_GAP..1.0 - RANK_RING_GAP).contains(&segment.fract());
+            if on_arc && (segment.floor() as u8) < lit {
+                pixels[(y * size + x) * 4..(y * size + x) * 4 + 4]
+                    .copy_from_slice(&[255, 255, 255, 255]);
+            }
+        }
+    }
+    pixels
+}
+
+/// The ring masks for 0..=`MAX_RANK` lit arcs, made once.
+#[derive(Resource)]
+pub(crate) struct RankRingMasks(pub [Handle<Image>; MAX_RANK as usize + 1]);
+
+pub(crate) fn make_rank_ring_masks(
+    mut commands: Commands,
+    masks: Option<Res<RankRingMasks>>,
+    images: Option<ResMut<Assets<Image>>>,
+) {
+    let (None, Some(mut images)) = (masks, images) else {
+        return;
+    };
+    let side = RANK_RING_MASK as u32;
+    let handles = std::array::from_fn(|lit| {
+        images.add(Image::new(
+            bevy::render::render_resource::Extent3d {
+                width: side,
+                height: side,
+                depth_or_array_layers: 1,
+            },
+            bevy::render::render_resource::TextureDimension::D2,
+            rank_ring_pixels(lit as u8, MAX_RANK),
+            bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+            bevy::asset::RenderAssetUsages::default(),
+        ))
+    });
+    commands.insert_resource(RankRingMasks(handles));
 }
 
 /// The locked veil's caption: `touch.ability.locked` (`Lv {level}`).
@@ -855,9 +957,27 @@ pub(crate) fn paint_abilities(
     mut art: Query<(&mut AbilityArt, Option<&mut ImageNode>)>,
     mut nodes: Query<&mut Node>,
     children: Query<&Children>,
+    ring_masks: Option<Res<RankRingMasks>>,
+    mut ring_layers: Query<&mut ImageNode, (With<RankRingLayer>, Without<AbilityArt>)>,
 ) {
     let relabel = crate::i18n::locale_changed(&locale);
     for (view, parts, mut flash, face, kit) in &mut abilities {
+        // The rank ring: every arc dim, the learned ones lit (R10).
+        if let (Some((track, lit)), Some(masks)) = (parts.ring, ring_masks.as_ref()) {
+            let learned = view.rank.min(MAX_RANK) as usize;
+            for (layer, mask) in [(track, MAX_RANK as usize), (lit, learned)] {
+                if let Ok(mut image) = ring_layers.get_mut(layer) {
+                    if image.image != masks.0[mask] {
+                        image.image = masks.0[mask].clone();
+                    }
+                }
+                if let Ok(mut shown) = visibility.get_mut(layer) {
+                    if *shown != Visibility::Inherited {
+                        *shown = Visibility::Inherited;
+                    }
+                }
+            }
+        }
         // The art follows the view's ability (a class change, or a view
         // spawned before the class was known); the fallback glyph hides.
         if view.is_changed() {
@@ -2480,7 +2600,8 @@ pub(crate) fn add_systems(app: &mut App) {
             resolve_art,
             resolve_ability_art,
             paint_bars,
-            paint_abilities,
+            paint_abilities.after(make_rank_ring_masks),
+            make_rank_ring_masks,
             paint_portraits.before(resolve_art),
             paint_timer_rings,
             paint_hero_tile_frames.after(super::paint_kit),
@@ -2532,6 +2653,7 @@ mod tests {
             unlock_level: None,
             no_mana: false,
             pips: true,
+            ring: false,
         };
         app.world_mut()
             .commands()
@@ -2611,6 +2733,103 @@ mod tests {
             Visibility::Hidden
         );
         assert_eq!(app.world().get::<Text>(parts.veil_label).unwrap().0, "");
+    }
+
+    /// R10 (`ability-button.md` § Rank ring): three arcs with 9 % gaps on
+    /// the outer band, lit in order; the centre (artwork) stays clear.
+    #[test]
+    fn rank_ring_has_three_arcs_with_gaps_and_lights_learned_ranks() {
+        let lit = |pixels: &[u8]| pixels.chunks_exact(4).filter(|p| p[3] == 255).count();
+        let count = |rank| lit(&rank_ring_pixels(rank, MAX_RANK));
+        assert_eq!(count(0), 0);
+        assert!(count(1) > 500);
+        assert!((count(2) as i32 - 2 * count(1) as i32).abs() < 10);
+        assert!((count(3) as i32 - 3 * count(1) as i32).abs() < 10);
+        let full = rank_ring_pixels(MAX_RANK, MAX_RANK);
+        let at = |x: usize, y: usize| {
+            &full[(y * RANK_RING_MASK + x) * 4..(y * RANK_RING_MASK + x) * 4 + 4]
+        };
+        let half = RANK_RING_MASK / 2;
+        assert_eq!(at(half, half), [0, 0, 0, 0], "artwork stays clear");
+        // On the band: 12 o'clock is a gap between arcs 3 and 1; a sixth of
+        // a turn (the middle of arc 1) is lit.
+        let band = (half as f32 * 0.925) as usize;
+        assert_eq!(at(half, half - band), [0, 0, 0, 0]);
+        let middle = (std::f32::consts::TAU / 6.0 - std::f32::consts::FRAC_PI_2).sin_cos();
+        let (x, y) = (
+            (half as f32 + middle.1 * band as f32) as usize,
+            (half as f32 + middle.0 * band as f32) as usize,
+        );
+        assert_eq!(at(x, y)[3], 255);
+    }
+
+    /// The ring replaces the rim on a phone face: the learned layer shows
+    /// the rank's mask, a locked (rank 0) ring is empty, the rim is hidden.
+    #[test]
+    fn ability_rank_ring_paints_the_learned_arcs_over_the_rim() {
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<Assets<Image>>()
+            .add_systems(
+                Update,
+                (
+                    make_rank_ring_masks,
+                    paint_abilities.after(make_rank_ring_masks),
+                ),
+            );
+        let root = app.world_mut().spawn(Node::default()).id();
+        let view = AbilityView {
+            ability: None,
+            icon: Icon::HudAttack,
+            key: None,
+            cost: Some(14),
+            rank: 2,
+            cooldown: Some((2.0, 4.0)),
+            locked: false,
+            unlock_level: None,
+            no_mana: false,
+            pips: false,
+            ring: true,
+        };
+        app.world_mut()
+            .commands()
+            .entity(root)
+            .with_children(|parent| {
+                ability_face(parent, view, 64.0, AbilityFace::default());
+            });
+        app.world_mut().flush();
+        app.update();
+        app.update();
+        let (entity, parts, kit) = app
+            .world_mut()
+            .query::<(Entity, &AbilityParts, &KitParts)>()
+            .single(app.world())
+            .map(|(entity, parts, kit)| (entity, *parts, *kit))
+            .unwrap();
+        let masks = app.world().resource::<RankRingMasks>().0.clone();
+        let (track, lit) = parts.ring.unwrap();
+        let image = |app: &App, layer: Entity| app.world().get::<ImageNode>(layer).unwrap().clone();
+        assert_eq!(image(&app, track).image, masks[MAX_RANK as usize]);
+        assert_eq!(image(&app, track).color, RANK_RING_UNLEARNED);
+        assert_eq!(image(&app, lit).image, masks[2]);
+        assert_eq!(image(&app, lit).color, RANK_RING_LEARNED);
+        assert_eq!(
+            *app.world().get::<Visibility>(lit).unwrap(),
+            Visibility::Inherited,
+            "the ring stays over the cooldown sweep"
+        );
+        assert_eq!(
+            *app.world().get::<Visibility>(kit.track.unwrap()).unwrap(),
+            Visibility::Hidden,
+            "the ring is the rim"
+        );
+        {
+            let mut view = app.world_mut().get_mut::<AbilityView>(entity).unwrap();
+            view.locked = true;
+            view.rank = 0;
+        }
+        app.update();
+        assert_eq!(image(&app, lit).image, masks[0], "locked: empty ring");
     }
 
     #[test]

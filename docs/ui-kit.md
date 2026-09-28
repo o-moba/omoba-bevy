@@ -607,8 +607,12 @@ The match HUD is built from `omoba-ui/handoff/screens/hud.md` (+ the
   dimmed when dead or offline, strong rim for bosses and the base),
   `ability_face` / `AbilityFace` (the ability face without a button, for the
   touch layer), `AbilityView::unlock_level` (the locked veil's `Lv N`; a
-  veil without one is the dead state), a hugging cost pill and pips 18 px
-  under the circle, `bar_parts` / `BarKindTag` (low-HP colours on the
+  veil without one is the dead state), `AbilityView::ring` (the phone's
+  segmented rank ring, DECISIONS R10: the rim split into `MAX_ABILITY_RANK`
+  arcs with 9 % gaps on the outer 11 % of the radius, learned `gold.400`,
+  unlearned `border.subtle`, over the art and the cooldown sweep, empty when
+  locked; masks from `rank_ring_pixels`, `RankRingMasks`), a hugging cost pill
+  and pips 18 px under the circle, `bar_parts` / `BarKindTag` (low-HP colours on the
   player's bar, `hud.target.defeated` for `respawn: Some(0)`, mana value
   `{mana}/{max}`), `TooltipText` (owner-written tooltip title/body), and
   `AbilityParts::key` (the key badge text; pad glyphs are written into it).
@@ -626,8 +630,9 @@ The match HUD is built from `omoba-ui/handoff/screens/hud.md` (+ the
 - **Phone combat group** (`MobileControls::layout`): ATK 96 at safe
   right/bottom − 76, abilities 64 on R 104 (162°, 204°, 246°, 288°),
   DASH/HASTE/CANCEL/RANK/MIN/TWR 48 on R 168 (166° … 276°), joystick r 52 at
-  safe left + 68 / bottom − 65; all × `combat_scale()`. The rank ring is the
-  ability's disc with the + badge (hint) and, in rank mode, a gold rim.
+  safe left + 68 / bottom − 65; all × `combat_scale()`. Each ability shows
+  its rank as the segmented ring on its rim (R10); `MobileRankRing-N` is the
+  overlay with the + badge (hint) and, in rank mode, a gold rim.
 
 ### Known differences from the handoff sheets
 

@@ -1065,6 +1065,8 @@ fn setup_mobile_controls(mut commands: Commands) {
             unlock_level: Some(shared::SLOT_UNLOCK_LEVELS[slot] as u8),
             no_mana: false,
             pips: false,
+            // hud.md phone: rank is the segmented ring on the rim (R10).
+            ring: true,
         };
         commands
             .spawn((
@@ -1335,7 +1337,8 @@ fn draw_mobile_controls(
                             let next = crate::ui::widgets::game::AbilityView {
                                 ability: Some(def.id),
                                 cost: Some(cost.round() as u32),
-                                rank: prog.ranks[slot],
+                                // A locked ability shows the ring empty.
+                                rank: if unlocked { prog.ranks[slot] } else { 0 },
                                 cooldown: (remaining > 0.0).then(|| {
                                     (
                                         remaining,
